@@ -47,6 +47,7 @@ describe('SocketManager cancel_invocation', () => {
     queueProcessor = {
       clearPause: mock.fn(),
       releaseSlot: mock.fn(),
+      suppressAutoResume: mock.fn(),
       processNext: mock.fn(async () => ({ started: false })),
     };
     socketManager = new SocketManager(httpServer, invocationTracker);
@@ -94,9 +95,17 @@ describe('SocketManager cancel_invocation', () => {
         ['thread-1', 'codex'],
       ],
     );
+    // cancelAll must suppress auto-resume for each cancelled cat (covers direct invocations)
+    assert.deepEqual(
+      queueProcessor.suppressAutoResume.mock.calls.map((call) => call.arguments),
+      [
+        ['thread-1', 'opus'],
+        ['thread-1', 'codex'],
+      ],
+    );
     assert.deepEqual(
       invocationTracker.cancelAll.mock.calls.map((call) => call.arguments),
-      [['thread-1', 'default-user', 'user_cancel']],
+      [['thread-1', 'default-user', 'cancel_all']],
     );
     assert.equal(received.filter((msg) => msg.type === 'system_info').length, 1);
     assert.deepEqual(

@@ -43,7 +43,7 @@ export function BrakeSettingsPanel() {
         <p className="text-sm text-cafe-secondary mt-1">三猫会在你连续工作一段时间后提醒你休息</p>
       </div>
 
-      <div className="console-list-card rounded-xl bg-[var(--console-card-bg)] p-4 space-y-4 shadow-[0_8px_22px_rgba(43,33,26,0.04)]">
+      <div className="console-list-card rounded-xl bg-[var(--console-card-bg)] p-4 space-y-4 shadow-[var(--shadow-elevation-2)]">
         {/* Toggle */}
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium text-cafe-secondary">启用健康守护</span>
@@ -53,7 +53,7 @@ export function BrakeSettingsPanel() {
             aria-checked={settingsEnabled}
             onClick={handleToggle}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-              settingsEnabled ? 'bg-cafe-accent' : 'bg-gray-200'
+              settingsEnabled ? 'bg-cafe-accent' : 'bg-cafe-surface'
             }`}
           >
             <span

@@ -77,7 +77,7 @@ export function BrowserToolbar({
       <button
         type="button"
         onClick={onNavigate}
-        className="px-2.5 py-1 text-xs rounded bg-[var(--ws-accent)] text-white hover:bg-[var(--ws-accent-hover)] transition-colors"
+        className="px-2.5 py-1 text-xs rounded bg-[var(--ws-accent)] text-[var(--cafe-surface)] hover:bg-[var(--ws-accent-hover)] transition-colors"
       >
         Go
       </button>

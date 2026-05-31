@@ -1,13 +1,22 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_FSEVENTSD_RSS_MAX_KB = 4 * 1024 * 1024;
-const PROTECTED_REDIS_PORTS = new Set([6398, 6399]);
+// 6398=worktree dev / 6399=runtime sanctuary / 6401=user-redis persistent user data.
+// 6401 must be protected too — flagging it as a killable orphan led to it being murdered
+// alongside 6399 (CAFE-INCIDENT-20260527).
+const PROTECTED_REDIS_PORTS = new Set([6398, 6399, 6401]);
 const ALLOWED_LOCAL_REDIS_PORTS = new Set([6379, ...PROTECTED_REDIS_PORTS]);
-// Hard block — another gate / pre-merge-check is already running; data conflict.
-const HARD_BLOCK_PATTERNS = [/pnpm\s+gate\b/, /pre-merge-check\.sh\b/];
+// Concurrent-gate detection — another gate / pre-merge-check is already running.
+// Downgraded from hard-block to soft-warning (#1912 added this hard-block): gates run in
+// parallel safely — no shared writable state (git objects immutable, pnpm store
+// writes are atomic hard-links, node_modules/dist/.next are per-worktree), and
+// resource pressure has its own independent valves (fseventsd RSS + redis orphan
+// checks below). The old hard-block was incident-era over-defense that mis-killed
+// legitimate multi-cat concurrency with zero independent protection value.
+const CONCURRENT_GATE_PATTERNS = [/pnpm\s+gate\b/, /pre-merge-check\.sh\b/];
 
 // Soft warning — resource-intensive but no data conflict with gate.
 // Printed as warning but does NOT block gate from starting.
@@ -107,13 +116,34 @@ function readRedisListeners() {
     .map((line) => line.trim())
     .filter((line) => /^redis/.test(line))
     .map((line) => {
-      const match = line.match(/(?:127\.0\.0\.1|\*):(\d+)\s+\(LISTEN\)/);
-      if (!match) {
+      const portMatch = line.match(/(?:127\.0\.0\.1|\*):(\d+)\s+\(LISTEN\)/);
+      if (!portMatch) {
         return null;
       }
-      return { port: Number(match[1]), line };
+      // lsof format: COMMAND PID USER ...
+      const pidMatch = line.match(/^redis\S*\s+(\d+)/);
+      return { port: Number(portMatch[1]), pid: pidMatch ? Number(pidMatch[1]) : null, line };
     })
     .filter(Boolean);
+}
+
+// True ownership proof: query Redis-owned filesystem paths via CONFIG GET.
+// Redis 8 can report an empty `dir` while still exposing absolute pidfile/logfile
+// paths, so check the whole read-only CONFIG response for known Cat Cafe test
+// tempdir prefixes.
+function isOwnedTestRedis(port) {
+  const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE', 'redis-cli', [
+    '-h',
+    '127.0.0.1',
+    '-p',
+    String(port),
+    'CONFIG',
+    'GET',
+    'dir',
+    'pidfile',
+    'logfile',
+  ]);
+  return /cat-cafe-(?:redis-test\.|rdb-first-start-)/.test(text);
 }
 
 function findRedisOrphans() {
@@ -152,12 +182,46 @@ function runPressureChecks(holderPid) {
     );
   }
 
-  for (const orphan of findRedisOrphans()) {
-    failures.push(`unmanaged redis-server listener on port ${orphan.port}; clean stale isolated Redis before gate`);
+  // Phase 1: clean orphan Redis with TRUE ownership proof.
+  // Step 1: find candidates (ppid=1 + redis-server proctitle + non-sanctuary port).
+  // Step 2: for each candidate, query read-only CONFIG paths. If dir/pidfile/logfile
+  //   matches a known Cat Cafe test tmpdir prefix, it's ours.
+  // Step 3: port-based shutdown on OWNED instances only.
+  // Non-owned Redis (different datadir) is never touched — fails to manual guidance.
+  const orphanRedisPattern = /(?:^|\/)redis-server\s+\S*:(\d{2,5})\b/;
+  for (const row of rows) {
+    if (row.ppid !== 1) continue;
+    const m = row.command.match(orphanRedisPattern);
+    if (!m) continue;
+    const port = Number(m[1]);
+    if (ALLOWED_LOCAL_REDIS_PORTS.has(port) || port < 6300 || port > 65535) continue;
+    if (!isOwnedTestRedis(port)) continue;
+    spawnSync('redis-cli', ['-h', '127.0.0.1', '-p', String(port), 'shutdown', 'nosave'], {
+      timeout: 3000,
+      stdio: 'ignore',
+    });
   }
 
-  for (const row of findMatchingProcesses(rows, holderPid, HARD_BLOCK_PATTERNS)) {
-    failures.push(`conflicting gate process already running: pid ${row.pid} ${row.command}`);
+  // Phase 2: wait briefly for transient orphans (trap fired, Redis still exiting).
+  let orphans = findRedisOrphans();
+  if (orphans.length > 0) {
+    spawnSync('sleep', ['3'], { stdio: 'ignore' });
+    orphans = findRedisOrphans();
+  }
+  for (const orphan of orphans) {
+    failures.push(
+      `unmanaged redis-server listener on port ${orphan.port}; ` +
+        `clean stale isolated Redis before gate. ` +
+        `Use 'kill <PID>' after confirming non-sanctuary, or 'pnpm process:cleanup'. ` +
+        `NEVER 'lsof -ti tcp:<range> | kill' — CAFE-INCIDENT-20260527.`,
+    );
+  }
+
+  for (const row of findMatchingProcesses(rows, holderPid, CONCURRENT_GATE_PATTERNS)) {
+    warnings.push(
+      `concurrent gate detected: pid ${row.pid} ${row.command}. Gates run in parallel safely ` +
+        `(no shared writable state); if gate feels slow, concurrent gates are a likely cause.`,
+    );
   }
 
   for (const row of findMatchingProcesses(rows, holderPid, SOFT_WARNING_PATTERNS)) {

@@ -3,6 +3,8 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
+import { catColorVar } from '@/lib/cat-slug';
+import { CAT_COLORS } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 
@@ -23,11 +25,11 @@ const VARIANT_BASE_FALLBACK: Record<string, string> = {
 };
 
 const FALLBACK_CAT_META: Record<string, { label: string; color: string }> = {
-  opus: { label: '布偶猫', color: '#9B7EBD' },
-  codex: { label: '缅因猫', color: '#5B8C5A' },
-  gemini: { label: '暹罗猫', color: '#5B9BD5' },
-  kimi: { label: '梵花猫', color: '#4B5563' },
-  dare: { label: '狸花猫', color: '#D4A76A' },
+  opus: { label: '布偶猫', color: CAT_COLORS.opus.primary },
+  codex: { label: '缅因猫', color: CAT_COLORS.codex.primary },
+  gemini: { label: '暹罗猫', color: CAT_COLORS.gemini.primary },
+  kimi: { label: '梵花猫', color: CAT_COLORS.kimi.primary },
+  dare: { label: '狸花猫', color: CAT_COLORS.dare.primary },
 };
 
 function resolveFallbackCatMeta(catId: string): { baseId: string; label: string; color: string } | undefined {
@@ -160,7 +162,7 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
           const style = isOwner
             ? undefined
             : cat
-              ? { backgroundColor: cat.color.primary }
+              ? { backgroundColor: catColorVar(cat.id, 'primary') }
               : fallback
                 ? { backgroundColor: fallback.color }
                 : undefined;
@@ -209,7 +211,7 @@ function NavTooltip({
 
   return (
     <div
-      className="absolute right-full mr-2 -translate-y-1/2 bg-gray-900/90 text-white text-xs rounded-lg px-2.5 py-1.5 max-w-[200px] pointer-events-none whitespace-nowrap z-50"
+      className="absolute right-full mr-2 -translate-y-1/2 bg-cafe-surface-sunken text-cafe text-xs rounded-lg px-2.5 py-1.5 max-w-[200px] pointer-events-none whitespace-nowrap z-50"
       style={{ top: `${topPercent}%` }}
     >
       <div className="font-medium">

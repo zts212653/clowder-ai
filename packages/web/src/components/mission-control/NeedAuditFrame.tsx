@@ -85,7 +85,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
         ))}
       </div>
       {error && (
-        <div className="mt-2 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-1.5 text-xs text-red-700">
+        <div className="mt-2 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-1.5 text-xs text-conn-red-text">
           {error}
         </div>
       )}
@@ -93,7 +93,7 @@ export function NeedAuditFrame({ projectId, frame, onSaved }: NeedAuditFrameProp
         type="button"
         onClick={() => void handleSave()}
         disabled={submitting}
-        className="mt-3 w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+        className="mt-3 w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
       >
         {submitting ? '保存中...' : frame ? '更新 Frame' : '保存 Frame'}
       </button>

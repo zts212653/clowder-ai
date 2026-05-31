@@ -837,6 +837,51 @@ export class RedisMessageStore {
     return msg;
   }
 
+  /**
+   * Atomic content-dedup claim via SET NX PX. Returns true on first claim within the window,
+   * false if an identical claim is still live (concurrent or recent byte-identical post). This
+   * is the race-safe gate for the callback exact-duplicate scan.
+   */
+  async claimContentDedupKey(key: string, ttlMs: number): Promise<boolean> {
+    const claimed = await this.redis.set(
+      MessageKeys.contentDedup(key),
+      '1',
+      'PX',
+      Math.max(1, Math.floor(ttlMs)),
+      'NX',
+    );
+    return claimed === 'OK';
+  }
+
+  /**
+   * #697: Scan for message IDs matching a given deliveryStatus.
+   * Uses SCAN + pipeline HGET pattern (same as InvocationRecordStore.scanByStatus).
+   * Called by StartupReconciler to find orphaned queued messages after restart.
+   */
+  async scanByDeliveryStatus(status: string): Promise<string[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const ids: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hget(this.stripPrefix(key), 'deliveryStatus');
+        }
+        const results = await pipeline.exec();
+        for (let i = 0; i < keys.length; i++) {
+          const [err, val] = results?.[i] ?? [null, null];
+          if (!err && val === status) {
+            ids.push(this.stripPrefix(keys[i]!).replace(/^msg:/, ''));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return ids;
+  }
+
   /** Hydrate message IDs into full StoredMessage objects */
   private async hydrateMessages(ids: string[], options?: { includeDeleted?: boolean }): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();

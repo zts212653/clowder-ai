@@ -109,7 +109,7 @@ export function QuickCreateForm({ disabled, onCreate }: QuickCreateFormProps) {
       <button
         type="submit"
         disabled={disabled}
-        className="col-span-1 rounded-lg bg-cafe-accent px-2 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-cafe-interactive disabled:cursor-not-allowed disabled:opacity-40"
+        className="col-span-1 rounded-lg bg-cafe-accent px-2 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition-colors hover:bg-cafe-interactive disabled:cursor-not-allowed disabled:opacity-40"
         data-testid="mc-create-submit"
       >
         创建

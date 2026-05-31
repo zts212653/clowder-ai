@@ -31,6 +31,12 @@ const log = createModuleLogger('antigravity-bridge');
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 const RUN_COMMAND_RPC_TIMEOUT_BUFFER_MS = 5_000;
+// getOrCreateSession's reuse path waits for an owed in-flight tool result before sending the follow-up
+// (so it cannot slip ahead of that result). The wait must cover the LONGEST a native tool can run —
+// RunCommandExecutor permits up to MAX_RUN_COMMAND_TIMEOUT_MS — or long builds/tests would be abandoned
+// mid-flight and corrupt turn order (cloud P1 #9). +60s is a leaked-counter backstop, not the expected
+// exit: the executor aborts at its own max and the in-flight count clears first.
+export const IN_FLIGHT_WAIT_TIMEOUT_MS = MAX_RUN_COMMAND_TIMEOUT_MS + 60_000;
 // Antigravity 2.x rejects the proto default 0 (UNSPECIFIED) for StartCascade.
 // The IDE client defaults regular conversations to CASCADE_CLIENT.
 const CORTEX_TRAJECTORY_SOURCE_CASCADE_CLIENT = 1;
@@ -171,6 +177,9 @@ export interface AntigravityDrainOptions {
   quietWindowMs?: number;
   timeoutMs?: number;
   pollIntervalMs?: number;
+  /** When provided, the drain bails (best_effort) as soon as the signal aborts, so a cancelled
+   *  invocation does not block on the quiet-window wait (cloud P2). */
+  signal?: AbortSignal;
 }
 
 export type AntigravityDrainResult =
@@ -634,13 +643,23 @@ export class AntigravityBridge {
     log.debug(`cascade created: ${resp.cascadeId}`);
     return resp.cascadeId;
   }
-  async sendMessage(cascadeId: string, text: string, modelName?: string): Promise<number> {
+  async sendMessage(
+    cascadeId: string,
+    text: string,
+    modelName?: string,
+    media?: ReadonlyArray<{ mimeType: string; inlineData: string }>,
+  ): Promise<number> {
     const traj = await this.getTrajectory(cascadeId);
     const stepsBefore = traj.numTotalSteps ?? 0;
     const modelId = modelName ? this.modelMap[modelName] : undefined;
     const payload: Record<string, unknown> = {
       cascadeId,
       items: [{ text }],
+      // F211 REG3 Layer C: `media` is a TOP-LEVEL field of SendUserCascadeMessage (sibling to
+      // `items`, reverse-engineered from the Antigravity IDE). Each item is the flat Connect-JSON
+      // wire shape `{ mimeType, inlineData: <base64> }` — NOT the protobuf-es runtime
+      // `{ payload: { case: 'inlineData', value } }`. This lets a dispatched cascade SEE images.
+      ...(media && media.length > 0 ? { media } : {}),
       cascadeConfig: {
         plannerConfig: {
           plannerTypeConfig: { conversational: {} },
@@ -670,6 +689,16 @@ export class AntigravityBridge {
     let quietSince: number | undefined;
 
     while (true) {
+      // Bail promptly if the invocation was cancelled mid-drain, so getOrCreateSession's reuse path
+      // does not block on the quiet-window wait before the service's pre-send abort check (cloud P2).
+      if (options.signal?.aborted) {
+        return {
+          ok: false,
+          drainResult: 'best_effort_quiet_window',
+          reason: 'drain aborted by signal',
+          ...(lastObservedStepCount === undefined ? {} : { lastObservedStepCount }),
+        };
+      }
       const inFlightCount = this.getInFlightCount(cascadeId);
       if (inFlightCount > 0) {
         return {
@@ -692,8 +721,15 @@ export class AntigravityBridge {
           };
         }
         const trajectoryReadController = new AbortController();
+        // Abort the in-progress read on EITHER our drain deadline OR the caller's signal, so a cancel
+        // landing mid-getTrajectory returns promptly instead of waiting out the deadline (cloud P2). The
+        // caller (settle) re-checks signal.aborted right after the drain and bails, so the resulting
+        // rejection's classification does not matter.
+        const readSignal = options.signal
+          ? AbortSignal.any([trajectoryReadController.signal, options.signal])
+          : trajectoryReadController.signal;
         trajectory = await withDrainDeadline(
-          this.getTrajectory(cascadeId, { signal: trajectoryReadController.signal }),
+          this.getTrajectory(cascadeId, { signal: readSignal }),
           remainingMs,
           (error) => trajectoryReadController.abort(error),
         );
@@ -942,7 +978,47 @@ export class AntigravityBridge {
     }
   }
 
-  async getOrCreateSession(threadId: string, catId?: string): Promise<string> {
+  /**
+   * Wait for a responsive RUNNING cascade to settle to a clean next-turn boundary with NO owed
+   * in-flight tool result, draining for the polling baseline. Returns true → reuse (settled clean);
+   * false → replace (it became unreachable, or never settled before deadlineMs). In-flight work can
+   * re-appear between the wait and the drain (a new tool result), so it loops until nothing is owed.
+   */
+  private async settleRunningCascadeForReuse(
+    cascadeId: string,
+    deadlineMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    while (Date.now() < deadlineMs) {
+      // Honor a user cancel that arrives mid-wait: stop blocking immediately and reuse the existing
+      // cascade (don't spin a wasteful replacement) — the caller re-checks the signal before any
+      // sendMessage, so nothing is sent for an aborted request (cloud P1, line 1029).
+      if (signal?.aborted) return true;
+      // (a) Wait for any owed in-flight tool result to clear (P1 #7/#9) — its owed pushToolResult /
+      //     SendUserCascadeMessage must land before the caller's follow-up, or turn order corrupts.
+      while (this.getInFlightCount(cascadeId) > 0 && Date.now() < deadlineMs && !signal?.aborted) {
+        await sleep(100);
+      }
+      if (signal?.aborted) return true;
+      // Deadline reached with work still in flight → replace rather than burn a guaranteed-useless drain
+      // (it would just early-return on the in-flight count, cloud P3). NOTE: only when the DEADLINE passed
+      // — a non-zero count before the deadline means a NEW tool result appeared and we must loop/re-wait
+      // (handled below), so do not short-circuit that case.
+      if (Date.now() >= deadlineMs && this.getInFlightCount(cascadeId) > 0) return false;
+      // (b) Drain to a quiet next-turn boundary so the caller's sendMessage sets a correct baseline (P1 #1).
+      //     Pass the signal so the drain itself bails promptly if the invocation is cancelled mid-drain
+      //     (cloud P2) — otherwise it could block on the quiet-window wait for up to its timeout.
+      const drain = await this.drainCascade(cascadeId, { timeoutMs: 120_000, signal });
+      if (signal?.aborted) return true; // cancelled during the drain → bail; the invoke aborts before send
+      if (drain.drainResult === 'skipped_runtime_unreachable') return false; // vanished mid-drain → replace (P2)
+      // A new tool result may have started during the drain (drainCascade early-returns while any work is
+      // in flight). Reuse only once nothing is owed; otherwise loop and wait again (cloud P1, line 1015).
+      if (this.getInFlightCount(cascadeId) === 0) return true;
+    }
+    return false; // never settled before the deadline → replace, do not risk ordering corruption
+  }
+
+  async getOrCreateSession(threadId: string, catId?: string, signal?: AbortSignal): Promise<string> {
     const key = catId ? `${threadId}:${catId}` : threadId;
     let runtimeStoreReplacementTarget: RuntimeSessionMetadata | null = null;
     if (this.runtimeSessionStore && catId) {
@@ -954,14 +1030,69 @@ export class AntigravityBridge {
       if (active) {
         try {
           const traj = await this.getTrajectory(active.runtimeSessionId);
-          if (traj.status === 'CASCADE_RUN_STATUS_IDLE') {
-            log.debug(`reusing runtime-store cascade ${active.runtimeSessionId} for ${key}`);
-            return active.runtimeSessionId;
+          // F211-REG5 (final). Reuse only a cascade that is a valid CONTINUATION target, so Bengal's
+          // follow-up queues into the SAME cascade (memory preserved); everything else REPLACES so REG2's
+          // fresh-cascade + continuity-bootstrap path re-injects his context (replace is NOT bare amnesia).
+          // The 'user_cancel' that triggers this re-summon is a spurious internal abort (the server turn
+          // keeps running), so we never trust it; and step progress is NOT a liveness signal (a constant
+          // step count means "thinking", not "dead"; cloud P1 #2-#6). Continuable (reuse) states:
+          //   • IDLE — turn finished → reuse, no drain.
+          //   • RUNNING + awaitingUserInput — paused for an approval / the next user message → reuse, NO
+          //     drain: it never returns to IDLE (it waits for the very message we are about to send), so
+          //     draining would block the follow-up for the whole timeout (cloud P1 #8).
+          //   • RUNNING, no native tool in flight (model-only thinking/research) — reuse now, no drain
+          //     (cloud line 984); only an owed in-flight tool result needs ordering.
+          //   • RUNNING with a native tool in flight — settle (wait for the owed result + drain) first.
+          // Everything else REPLACES: a reachable but TERMINAL/non-runnable status (ERROR / CANCELLED /
+          // DONE, or any unrecognized status) is NOT continuable — reusing it would pin the follow-up to
+          // a dead cascade (cloud P1 #10) — as does an unreachable cascade (getTrajectory throws, below).
+          let reuseCascadeId: string | undefined;
+          const continuable = traj.status === 'CASCADE_RUN_STATUS_IDLE' || traj.status === 'CASCADE_RUN_STATUS_RUNNING';
+          if (continuable) {
+            if (this.getInFlightCount(active.runtimeSessionId) > 0) {
+              // A native tool result is in flight for ANY continuable state — IDLE (a pushToolResult
+              // still delivering while the trajectory already reads back IDLE), RUNNING mid-turn, OR
+              // awaitingUserInput (Antigravity reads RUNNING/awaiting precisely BECAUSE it is waiting on
+              // that owed tool result). Reusing now would let the follow-up jump ahead of the owed
+              // pushToolResult / synthetic message → turn-order corruption (cloud P1 #7/#9 + the IDLE and
+              // awaiting same-class edges). So this counter gate MUST come BEFORE the awaitingUserInput
+              // shortcut: settle (wait for it to clear + drain) first. settleRunningCascadeForReuse is
+              // abort-aware (line 1029) and returns false → REPLACE if the cascade vanished mid-drain (P2)
+              // or never settled within IN_FLIGHT_WAIT_TIMEOUT_MS.
+              const settled = await this.settleRunningCascadeForReuse(
+                active.runtimeSessionId,
+                Date.now() + IN_FLIGHT_WAIT_TIMEOUT_MS,
+                signal,
+              );
+              if (settled) {
+                reuseCascadeId = active.runtimeSessionId;
+              }
+            } else if (traj.status === 'CASCADE_RUN_STATUS_RUNNING' && traj.awaitingUserInput === true) {
+              // Paused for an approval / the next user message with NOTHING in flight → reuse, NO drain:
+              // it never returns to IDLE (it waits for the very message we are about to send), so draining
+              // would block the follow-up for the whole timeout (cloud P1 #8).
+              reuseCascadeId = active.runtimeSessionId;
+            } else {
+              // IDLE (turn done) or RUNNING with no native tool in flight (model-only thinking/research):
+              // nothing owed → reuse now, no drain, letting Antigravity natively queue the follow-up. The
+              // ordering guard only waits when getInFlightCount > 0 — draining every running cascade would
+              // recreate REG5 as a multi-minute silent delay on the busy path (cloud line 984).
+              reuseCascadeId = active.runtimeSessionId;
+            }
           }
-          log.info(`runtime-store cascade ${active.runtimeSessionId} stuck in ${traj.status} for ${key}, creating new`);
+          if (reuseCascadeId) {
+            log.debug(`reusing continuable runtime-store cascade ${reuseCascadeId} (${traj.status}) for ${key}`);
+            return reuseCascadeId;
+          }
+          // Not a valid continuation target — a reachable but terminal/unknown status (cloud P1 #10) or a
+          // cascade that became unreachable during the drain (cloud P2) → replace (REG2 fresh + bootstrap).
+          log.info(
+            `runtime-store cascade ${active.runtimeSessionId} not continuable (status ${traj.status}) for ${key}, creating new`,
+          );
           runtimeStoreReplacementTarget = active;
         } catch {
-          log.info(`runtime-store cascade ${active.runtimeSessionId} dead for ${key}, creating new`);
+          // getTrajectory threw → the cascade is unreachable / gone → replace (REG2 fresh + bootstrap).
+          log.info(`runtime-store cascade ${active.runtimeSessionId} unreachable for ${key}, creating new`);
           runtimeStoreReplacementTarget = active;
         }
       }

@@ -565,8 +565,8 @@ export function ChatInput({
       {/* F39: Queue status bar — visible when cat is running */}
       {hasActiveInvocation && (
         <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-[#9B7EBD] animate-pulse" />
-          <span className="text-xs text-[#9B7EBD] font-medium">猫猫正在回复中...</span>
+          <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
+          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">猫猫正在回复中...</span>
           <span className="text-xs text-cafe-muted flex-1">继续输入，消息会排队</span>
           {onStop && (
             <button
@@ -631,7 +631,7 @@ export function ChatInput({
         </div>
       )}
       {imageLifecycleStatus === 'uploading' && (
-        <div className="px-4 pt-2 text-xs text-indigo-500" role="status">
+        <div className="px-4 pt-2 text-xs text-[var(--semantic-info)]" role="status">
           图片上传中，请稍候...
         </div>
       )}
@@ -705,8 +705,8 @@ export function ChatInput({
           disabled={disabled || sendTemporarilyDisabled}
           className={`hidden md:block p-3 rounded-xl transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
             whisperMode
-              ? 'text-conn-amber-text bg-conn-amber-bg ring-1 ring-conn-amber-ring'
-              : 'text-cafe-muted hover:text-conn-amber-text hover:bg-cafe-surface'
+              ? 'text-cafe-accent bg-accent-50 ring-1 ring-cafe-accent'
+              : 'text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface'
           }`}
           aria-label="Whisper mode"
           title="悄悄话模式"
@@ -724,7 +724,7 @@ export function ChatInput({
           ref={gameBtnRef}
           onClick={handleGameClick}
           disabled={disabled || sendTemporarilyDisabled}
-          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-conn-indigo-text hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="hidden md:block p-3 rounded-xl text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           aria-label="Game mode"
           title="游戏模式"
         >
@@ -749,9 +749,9 @@ export function ChatInput({
                   ? '继续输入，消息会排队...'
                   : '输入消息... (@ 召唤猫猫)'
             }
-            className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-gray-400 ${
+            className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
               whisperMode
-                ? 'border-conn-amber-text/30 bg-conn-amber-bg/50 focus:ring-conn-amber-text'
+                ? 'border-cafe-accent/30 bg-accent-50/50 focus:ring-cafe-accent'
                 : 'border-[var(--console-border-soft)] bg-transparent focus:bg-[var(--console-card-bg)] focus:ring-[var(--console-input-stroke)]'
             }`}
             rows={1}

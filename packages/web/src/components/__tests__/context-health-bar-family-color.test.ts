@@ -25,12 +25,12 @@ function render(catId: string, health: Partial<React.ComponentProps<typeof Conte
 describe('ContextHealthBar family variant colors', () => {
   it('uses maine-coon green shade for gpt52', () => {
     const html = render('gpt52');
-    expect(html).toContain('background-color:#66BB6A');
+    expect(html).toContain('var(--color-gpt52-primary)');
   });
 
   it('uses ragdoll purple shade for sonnet', () => {
     const html = render('sonnet');
-    expect(html).toContain('background-color:#B39DDB');
+    expect(html).toContain('var(--color-sonnet-primary)');
   });
 
   it('labels last-turn context health as current context fill', () => {

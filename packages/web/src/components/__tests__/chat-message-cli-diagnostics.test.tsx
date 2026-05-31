@@ -76,7 +76,12 @@ function makeErrorMessage(extra: ChatMessageType['extra'] = {}): ChatMessageType
 describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
+  let ChatMessage: React.FC<{
+    message: ChatMessageType;
+    getCatById: (id: string) => CatData | undefined;
+    hideDiagnosticsPanel?: boolean;
+    dedupCount?: number;
+  }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -227,5 +232,50 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
     expect(container.querySelector('[data-testid="timeout-diagnostics"]')).toBeNull();
     expect(container.textContent).toContain('Error: CLI 异常退出 (code: 1)');
+  });
+
+  // F212 follow-up — codex review P2 (PR #1967): hideDiagnosticsPanel=true must NOT drop
+  // the entire ChatMessage. data-message-id anchor MUST stay in DOM so MessageNavigator
+  // dots + ReplyPill jumps + scrollToMessage continue to resolve. Both classified and
+  // unclassified routing paths in ChatMessage.tsx need the same anchor preservation.
+  function renderWithDedup(message: ChatMessageType, hide: boolean): void {
+    act(() => {
+      root.render(
+        React.createElement(ChatMessage, {
+          message,
+          getCatById: (id: string) => (id === 'opus' ? opusCat() : undefined),
+          hideDiagnosticsPanel: hide,
+        }),
+      );
+    });
+  }
+
+  it('classified cliDiagnostics + hideDiagnosticsPanel=true → panel hidden BUT data-message-id anchor preserved', () => {
+    const diag: CliDiagnostics = {
+      reasonCode: 'quota_exceeded',
+      publicSummary: 'API 配额超限',
+      publicHint: '请检查 quota',
+      debugRef: { command: 'codex', exitCode: 1, signal: null },
+    };
+    const msg = { ...makeErrorMessage({ cliDiagnostics: diag }), id: 'dup-msg-classified' };
+    renderWithDedup(msg, true);
+
+    // Panel collapsed — group head already rendered it with ×N badge
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+    // Anchor preserved — MessageNavigator/ReplyPill scrollToMessage still resolves
+    expect(container.querySelector('[data-message-id="dup-msg-classified"]')).toBeTruthy();
+  });
+
+  it('unclassified cliDiagnostics + hideDiagnosticsPanel=true → panel hidden BUT data-message-id anchor preserved', () => {
+    const diag: CliDiagnostics = {
+      publicSummary: 'Claude Code 报告：xxx',
+      publicHint: '看日志',
+      debugRef: { command: 'codex', exitCode: 1, signal: null },
+    };
+    const msg = { ...makeErrorMessage({ cliDiagnostics: diag }), id: 'dup-msg-unclassified' };
+    renderWithDedup(msg, true);
+
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+    expect(container.querySelector('[data-message-id="dup-msg-unclassified"]')).toBeTruthy();
   });
 });

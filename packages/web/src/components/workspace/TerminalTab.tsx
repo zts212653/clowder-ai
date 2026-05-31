@@ -8,6 +8,7 @@ import { API_URL, apiFetch } from '@/utils/api-client';
 
 import { AgentPaneList } from './AgentPaneList';
 import { AgentPaneViewer } from './AgentPaneViewer';
+import { TERMINAL_THEME } from './terminal-theme';
 
 interface TerminalTabProps {
   worktreeId: string;
@@ -49,12 +50,7 @@ export function TerminalTab({ worktreeId }: TerminalTabProps) {
         cursorBlink: true,
         fontSize: typographyTokens.fontSizePx.compact,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, monospace',
-        /* xterm.js canvas renderer exempt: requires resolved color values, cannot use CSS vars */
-        theme: {
-          background: '#1a1b26',
-          foreground: '#a9b1d6',
-          cursor: '#c0caf5',
-        },
+        theme: TERMINAL_THEME,
       });
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);

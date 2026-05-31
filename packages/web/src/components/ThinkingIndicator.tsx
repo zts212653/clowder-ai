@@ -103,8 +103,17 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
     return (
       <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
         <div className="flex items-center gap-2">
-          <span className="text-sm leading-none animate-pulse">🐾</span>
-          <span className="text-sm text-cafe-secondary">{name} 启动中...</span>
+          <span className="text-sm leading-none animate-bounce">🐾</span>
+          <span className="text-sm text-cafe-secondary">{name} 启动中</span>
+          <span className="flex items-center gap-0.5">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+                style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+              />
+            ))}
+          </span>
         </div>
       </div>
     );
@@ -117,16 +126,19 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
       <div
         data-testid="liveness-warning"
         className="px-5 py-3 border-b"
-        style={{ backgroundColor: '#FFF8E7', borderColor: '#D4A64A33' }}
+        style={{
+          backgroundColor: 'var(--semantic-warning-surface)',
+          borderColor: 'color-mix(in srgb, var(--semantic-warning) 20%, transparent)',
+        }}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <TimerIcon className="w-4 h-4 animate-pulse flex-shrink-0" style={{ color: '#D4A64A' }} />
+            <TimerIcon className="w-4 h-4 animate-pulse flex-shrink-0" style={{ color: 'var(--semantic-warning)' }} />
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-sm font-semibold" style={{ color: '#1A1918' }}>
+              <span className="text-sm font-semibold" style={{ color: 'var(--cafe-text)' }}>
                 {name} 静默等待中… {elapsed}
               </span>
-              <span className="text-xs" style={{ color: '#6D6C6A' }}>
+              <span className="text-xs" style={{ color: 'var(--cafe-text-secondary)' }}>
                 {warning.state === 'busy-silent'
                   ? '进程存活且 CPU 活跃，可能正在执行工具或等待 API 响应'
                   : '进程存活，等待响应中'}
@@ -138,8 +150,8 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
               type="button"
               data-testid="cancel-btn"
               onClick={() => onCancel(effectiveThreadId, catId)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: '#D4A64A' }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[var(--cafe-surface)] flex-shrink-0 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--semantic-warning)' }}
             >
               <SquareIcon className="w-3.5 h-3.5" />
               取消
@@ -157,16 +169,19 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
       <div
         data-testid="liveness-warning"
         className="px-5 py-3 border-b"
-        style={{ backgroundColor: '#FFF0ED', borderColor: '#D0806833' }}
+        style={{
+          backgroundColor: 'var(--semantic-critical-surface)',
+          borderColor: 'color-mix(in srgb, var(--semantic-critical) 20%, transparent)',
+        }}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <TriangleAlertIcon className="w-4 h-4 flex-shrink-0" style={{ color: '#D08068' }} />
+            <TriangleAlertIcon className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--semantic-critical)' }} />
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-sm font-semibold" style={{ color: '#1A1918' }}>
+              <span className="text-sm font-semibold" style={{ color: 'var(--cafe-text)' }}>
                 {name} 可能卡住了 — {elapsed} 无输出
               </span>
-              <span className="text-xs" style={{ color: '#6D6C6A' }}>
+              <span className="text-xs" style={{ color: 'var(--cafe-text-secondary)' }}>
                 {warning.state === 'idle-silent'
                   ? '进程存活但 CPU 平坦，未检测到工具执行或 API 活动'
                   : '进程可能无响应'}
@@ -178,8 +193,8 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
               type="button"
               data-testid="cancel-btn"
               onClick={() => onCancel(effectiveThreadId, catId)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
-              style={{ backgroundColor: '#D08068' }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-[var(--cafe-surface)] flex-shrink-0 transition-opacity hover:opacity-90"
+              style={{ backgroundColor: 'var(--semantic-critical)' }}
             >
               <SquareIcon className="w-3.5 h-3.5" />
               取消
@@ -194,10 +209,20 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
   return (
     <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
       <div className="flex items-center gap-2">
-        <span className="text-sm leading-none animate-pulse">🐾</span>
+        <span className="text-sm leading-none animate-bounce">🐾</span>
         <span className="text-sm text-cafe-secondary">
           {name}
-          {status === 'streaming' ? '回复中...' : '思考中...'}
+          {status === 'streaming' ? '回复中' : '思考中'}
+        </span>
+        {/* #738: animated typing dots */}
+        <span className="flex items-center gap-0.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+              style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+            />
+          ))}
         </span>
       </div>
     </div>

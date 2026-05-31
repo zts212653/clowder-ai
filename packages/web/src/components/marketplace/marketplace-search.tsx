@@ -99,7 +99,7 @@ export function MarketplaceSearch() {
           onClick={() => setEcosystemFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isAll
-              ? 'border-transparent bg-cafe-accent text-white'
+              ? 'border-transparent bg-cafe-accent text-[var(--cafe-surface)]'
               : 'border-transparent bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
           }`}
         >
@@ -113,7 +113,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleEcosystem(eco)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-accent text-white'
+                  ? 'border-transparent bg-cafe-accent text-[var(--cafe-surface)]'
                   : 'border-transparent bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
             >
@@ -129,7 +129,7 @@ export function MarketplaceSearch() {
           onClick={() => setTrustFilter([])}
           className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
             isTrustAll
-              ? 'border-transparent bg-cafe-accent text-white'
+              ? 'border-transparent bg-cafe-accent text-[var(--cafe-surface)]'
               : 'border-transparent bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
           }`}
         >
@@ -143,7 +143,7 @@ export function MarketplaceSearch() {
               onClick={() => toggleTrust(level)}
               className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
                 active
-                  ? 'border-transparent bg-cafe-accent text-white'
+                  ? 'border-transparent bg-cafe-accent text-[var(--cafe-surface)]'
                   : 'border-transparent bg-[var(--console-field-bg)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
             >

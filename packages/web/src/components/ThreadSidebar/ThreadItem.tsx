@@ -1,9 +1,10 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { catColorVar } from '@/lib/cat-slug';
 import type { ThreadState } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
-import { API_URL } from '@/utils/api-client';
+import { API_URL, apiFetch } from '@/utils/api-client';
 // F174 D2b-2 (rev): per-cat callback-auth dot was rejected (铲屎官 alpha 反馈
 // "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
 // surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
@@ -151,7 +152,21 @@ export function ThreadItem({
 
   const exportThread = useCallback(() => {
     setIsMoreOpen(false);
-    window.open(`${API_URL}/api/export/thread/${id}?format=md`);
+    // #580: fetch+blob instead of window.open to carry auth headers
+    void apiFetch(`/api/export/thread/${id}?format=md`)
+      .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('export failed'))))
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `thread-${id}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {
+        // Fallback: window.open if fetch fails
+        window.open(`${API_URL}/api/export/thread/${id}?format=md`);
+      });
   }, [id]);
 
   const toggleFavorite = useCallback(() => {
@@ -334,7 +349,7 @@ export function ThreadItem({
                 <span
                   key={catId}
                   className="inline-block w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: getCatById(catId)?.color.primary ?? '#9CA3AF' }}
+                  style={{ backgroundColor: catColorVar(catId, 'primary') }}
                 />
               ))}
             </div>

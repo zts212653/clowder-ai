@@ -117,6 +117,52 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
     assert.equal(record.status, 'succeeded');
   });
 
+  it('cloud-#7: retry passes signalForCat (startAll caller parity — per-cat cancel observable)', async () => {
+    // After the batchController split, controller.signal is the batch gate; a single-cat cancel
+    // aborts only that cat's slot controller. The retry path must pass signalForCat so the route
+    // observes per-cat signals (mirrors messages.ts / QueueProcessor), else a Stop on one cat of a
+    // retried multi-cat invocation is ignored until cancel-all.
+    let capturedOpts = null;
+    const router = createMockRouter();
+    const origRoute = router.routeExecution;
+    router.routeExecution = async function* (...args) {
+      capturedOpts = args[6]; // 7th positional arg = route options
+      yield* origRoute(...args);
+    };
+    const { app, invocationId } = await setupRetryScenario(router);
+
+    const res = await app.inject({ method: 'POST', url: `/api/invocations/${invocationId}/retry` });
+    assert.equal(res.statusCode, 202);
+    await new Promise((r) => setTimeout(r, 100));
+
+    assert.ok(capturedOpts, 'routeExecution was invoked');
+    assert.equal(typeof capturedOpts.signalForCat, 'function', 'retry path passes signalForCat (cloud #7)');
+  });
+
+  it('cloud-#7: retry resolves canceled (not succeeded) when the target cat is cancelled mid-run', async () => {
+    // A single-cat cancel no longer aborts the batch gate, so the retry path must use the aggregate
+    // resolveFinalStatus (per-cat tombstones) — otherwise a user_cancel is wrongly marked succeeded.
+    const tracker = new InvocationTracker();
+    const router = createMockRouter();
+    router.routeExecution = async function* (_userId, _msg, threadId, _userMsgId, _cats, _intent, _opts) {
+      // simulate user clicking Stop on opus mid-run (single-cat cancel, NOT cancelAll)
+      tracker.cancel(threadId, 'opus', undefined, 'user_cancel');
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    };
+    const { app, invocationRecordStore, invocationId } = await setupRetryScenario(router, tracker);
+
+    const res = await app.inject({ method: 'POST', url: `/api/invocations/${invocationId}/retry` });
+    assert.equal(res.statusCode, 202);
+    await new Promise((r) => setTimeout(r, 100));
+
+    const record = invocationRecordStore.get(invocationId);
+    assert.equal(
+      record.status,
+      'canceled',
+      'single-cat cancel → canceled via resolveFinalStatus, not succeeded (cloud #7)',
+    );
+  });
+
   it('retry queued → 202 + normal execution', async () => {
     const invocationRecordStore = new InvocationRecordStore();
     const messageStore = new MessageStore();

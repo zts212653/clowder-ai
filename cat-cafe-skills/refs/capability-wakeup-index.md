@@ -12,6 +12,38 @@ related_features: [F128, F192, F201, F210, F211, F212, F186, F188]
 > **本文档** = Tier 1 完整 fallback + Tier 2（场景专项，低频但 trigger 明确）
 > **数据驱动 iterate**: F192 Phase F `eval:capability-wakeup` per-cat per-scenario miss rate verdict → L0 §8 v2
 
+## 分类轴：先过 reachability gate，再分 enforcement tier
+
+L0 §8 trigger 写了 ≠ 猫真用。判断"为什么 miss + 怎么修"必须两层筛，不能跳：
+
+**筛子 0 — Reachability（这能力当前 context 调得到吗？怎么调？）**
+- ❌ 调不到 / trigger 没写"怎么调" → 猫误判"这是别人的工具"，100% miss。**修法 = 补"怎么调"一行，不是 hook**。
+- 教训（2026-05-27）：opus-47 断言"terminal 调不了 workspace-navigator"——纯脑补没 verify（「我能猜出来」病）。实际 SKILL.md Step 3 = `curl localhost:${API_SERVER_PORT}/api/workspace/navigate`，Bash 直接调；opus-48 + opus-47 各实测 `{"ok":true}`。**一个你以为够不着的能力，miss 不是因为懒，是从没进考虑**——独立于"偷懒"的失败域，药方相反（补可达性 ≠ 上 forcing function）。
+
+**筛子 1 — Enforcement Tier（过了筛子 0 才分）**
+- **Tier A · episodic**：需要时自然想起，无零摩擦偷懒竞品。L0 advisory 够。例：`start_vote` / `expert-panel` / `deep-research`
+- **Tier B · habit-resistant**：有零摩擦默认（纯文字 / 报路径）抢活，赶活时偷懒默认必赢。L0 advisory 必输，需 forcing function（hook：偷懒瞬间主动拦）。例：`rich-messaging` / `browser-preview` / `workspace-navigator`（补完可达性后仍是 B）
+  - hook 守 KD-8：只给数据（"你提了 3 个路径 workspace 开了 0"），不替猫判断开哪个
+
+> **为什么先 reachability**：把 reachability 误判当 Tier B 去开 hook = 开错药——给一个"以为自己没这工具"的猫弹"要不要打开？"，他回"我没这工具"。hook 治不了误判。F192 Phase F eval 只测**过了筛子 0 的真 Tier B**。
+
+### 实战：原"一刀切 Tier B"三能力过筛后分化（opus-48 catch，每条带实测凭证）
+
+opus-47 原把 `workspace-navigator` / `rich-messaging` / `browser-preview` 一起归 Tier B。过 reachability 筛子后**分化成三种，修法不同**——证据级别标清，不脑补：
+
+| 能力 | reachability（实测凭证） | 过筛归类 | 修法 |
+|---|---|---|---|
+| `workspace-navigator` | ✅ 直接可调 `/api/workspace/navigate`（action `reveal\|open`）；curl `{"ok":true}` 实测（opus-47 + opus-48 各开过文件） | 真 Tier B | 已补 curl 调用方式（上文）；reachability 修完后才轮到 hook |
+| `rich-messaging` | ✅ `cat_cafe_create_rich_block` MCP，同 `cat_cafe_post_message` callback 路径（本 session post_message 多次 routed ok）；未单独直调（避免 thread 噪声） | 真 Tier B（纯文字零摩擦抢活） | 候选 forcing-function（hook：长纯文字回复 + 无 rich block → 提醒） |
+| `browser-preview` | ✅ 可达——cat POST `/api/preview/auto-open`（`preview.ts:92`，源码注释 "Cat-initiated auto-open — skips toast, directly opens browser panel" + `socketEmit('preview:auto-open')`）；同文件共 6 个 cat-callable POST（`/validate-port` `/open` `/close` `/navigate` `/auto-open` `/screenshot`，全是 `app.post<{...}>(...)` 泛型签名）。与 workspace-navigator `/api/workspace/navigate` **完全平行**，唯一区别多一个前提（dev server 先跑，cat 起） | 真 Tier B | 跟另两个一致：补可达性认知（cat 主动 POST auto-open，不是"等 Hub 检测/等铲屎官点"）+ 候选 hook |
+
+**这张表本身就是 reachability 前置筛的价值**：三个"看着该 Tier B"的，过筛后**全是可达的真 Tier B**——workspace / rich-messaging / browser-preview 各有 cat 可调路径（`/api/workspace/navigate` / `cat_cafe_create_rich_block` / `/api/preview/auto-open`）。筛子的价值是**逼出每个的实测调用方式**，把"以为够不着"的误判挡在 hook 决策之外，不是脑补"哪个无 API"。
+
+> **本表自身的事故（meta，opus-48 连环 catch，第三+第四层）**：
+> - **第三层**：browser-preview 这格初稿被 opus-47 写成"无 push API、机制不同"。根因**不是"多行"**——是 grep 模式 `app.post('/api/preview` 假设 `app.post` 直接跟 `(`，但 `preview.ts` 全部 6 个 POST 都是泛型签名 `app.post<{ Body... }>('/...'`，`<{...}>` 把 `app.post` 和 `(` 隔开 → 对 6 个**全部**零命中（auto-open 恰好也多行，但那是次要），只匹配到 2 个 GET，下了否定结论。
+> - **第四层（更狠）**：这条复盘 note 初稿自己把 POST 数成"4 个"、根因写成"多行格式"——**连"我没 verify"的复盘都没 verify**。opus-48 亲读 `preview.ts` 数出 6 个 POST + 泛型签名才拦下。
+> 教训终态：**否定/数字结论（含复盘叙述里的数字、根因）必须读源文件确认，grep 命中为空 ≠ 不存在**（grep 漏泛型 `<{...}>` / 多行 / 别名）；**verify 不是一次性动作，是每个事实声明都要过的尺**。这证明脑补/reachability 病靠写 doc 治不好（doc 自己中招 4 层），只有 reviewer 亲验否定+数字结论的纪律能拦——见 `feedback_verify_reachability_before_classifying`。
+
 ## Tier 1（已在 L0 §8）— 详细 fallback / 边界
 
 ### 1. `rich-messaging` — 富媒体回复
@@ -51,13 +83,21 @@ related_features: [F128, F192, F201, F210, F211, F212, F186, F188]
 
 ### 4. `workspace-navigator` — 程式打开文件到 Workspace panel
 
-**坏直觉**：报文件路径 "见 `packages/web/foo.tsx`"
+**坏直觉**：报文件路径 "见 `packages/web/foo.tsx`"（+ 误判"这是 Hub 专属、terminal 调不了"）
 **场景 trigger**：
 - 铲屎官说"打开 X" / "看看那个文件"
 - 想让铲屎官直接看到目标文件
 - 文档 / 代码 / 设计图
 
-**用法**：F148 navigation 系统，自动定位 + 高亮 + 上下文展开
+**用法（reachability — 别误判成 Hub 专属！terminal/Bash 直接调 localhost HTTP，不走 MCP）**：
+```bash
+API_PORT="${API_SERVER_PORT:-3004}"   # 运行态 env 优先；验证：curl localhost:$API_PORT/api/workspace/worktrees 返回 JSON
+curl -X POST http://localhost:$API_PORT/api/workspace/navigate \
+  -H "Content-Type: application/json" \
+  -d '{"path": "相对路径", "action": "open", "worktreeId": "cat-cafe"}'
+```
+完整：`workspace-navigator/SKILL.md` Step 3。F148 navigation 系统底层。
+**分类**：reachability ✅（curl 实测 `{"ok":true}`）；enforcement = Tier B（零摩擦"报路径"抢活）——但**先补可达性认知（本条），再考虑 hook**，不是上来就 hook。
 
 ### 5. `pencil-design` — .pen 设计文件 + React 代码导出
 
@@ -227,6 +267,22 @@ related_features: [F128, F192, F201, F210, F211, F212, F186, F188]
 - 一句话生成完整工作流
 
 **Pipeline**：`lark-*` skill 家族（lark-doc / lark-base / lark-task / lark-calendar / etc.）
+
+---
+
+## MCP capability 快扫（underused cat_cafe_* 工具）
+
+> 铲屎官 2026-05-27 提醒："盘点 skills + features 还不够，MCP 也得盘"。~75 个 `cat_cafe_*` 里大多数是 plumbing（`ack_mentions` / `get_thread_cats` / `list_*` / `update_task` 等机制类，不算 capability-wakeup）；下面是"做了但猫忘了用"的**能力类** MCP，按坏直觉列：
+
+| 坏直觉 | 该用的 MCP | 说明 |
+|---|---|---|
+| 多猫意见不一就无限互 @ 辩论 | `cat_cafe_start_vote` | 结构化表决，N 票收敛，不靠口头来回（v1.1 已进 L0 §8） |
+| 一个个 @ 召集猫开会 | `cat_cafe_multi_mention` | 一次性 @ 多猫进同 thread（L0 §7 quick index 有，但 trigger 易忘） |
+| expert-panel / review 报告只发聊天 | `cat_cafe_generate_document` | 生成正式 DOCX/PDF 文档（凭证不过期、可存档、可对外） |
+| 想重开一条已知调查路线 | `cat_cafe_run_perspective` | git-backed Perspective live query 计划重放（advanced/niche，返回 route hints + anchors，仍需 typed reader 取证据） |
+| review 后 lesson 散在脑子里 | `cat_cafe_review_distillation` | 蒸馏 review 结论沉淀（配合 mark_generalizable） |
+
+> **MCP 完整速查**：L0 §7 是 quick index（记忆 / 协作 / 任务 / Rich block / Drill-down 5 类）；本表补"能力类但易忘"的。完整工具集 `tool_search` 精确搜或读 `packages/mcp-server/src/tools/`。
 
 ---
 

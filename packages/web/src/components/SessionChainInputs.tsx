@@ -7,8 +7,6 @@
 import React, { useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { apiFetch } from '@/utils/api-client';
-import { truncateId } from './status-helpers';
-
 export function BindSessionInput({
   threadId,
   catId,
@@ -90,7 +88,7 @@ export function BindSessionInput({
         type="button"
         onClick={() => void handleBind()}
         disabled={status === 'saving' || !value.trim() || disabled}
-        className="text-xs px-1.5 py-0.5 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
+        className="text-xs px-1.5 py-0.5 rounded bg-cafe-surface hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
       >
         {status === 'saving' ? '...' : status === 'ok' ? 'ok' : status === 'error' ? 'err' : 'bind'}
       </button>
@@ -118,11 +116,11 @@ export function SessionIdTag({ id }: { id: string }) {
   return (
     <button
       type="button"
-      className="text-xs font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors"
+      className="min-w-0 flex-1 truncate text-left text-xs font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors whitespace-nowrap"
       title={`点击复制: ${id}`}
       onClick={handleCopy}
     >
-      {copied ? 'copied!' : truncateId(id, 10)}
+      {copied ? 'copied!' : id}
     </button>
   );
 }

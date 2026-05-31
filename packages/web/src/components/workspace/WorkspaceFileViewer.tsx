@@ -146,7 +146,7 @@ export function WorkspaceFileViewer({
               onClick={() => setOpenFile(tab)}
               className={`group flex items-center gap-1.5 px-3 py-1.5 text-xs font-mono border-r border-[var(--ws-editor-surface)] flex-shrink-0 transition-colors ${
                 tab === openFilePath
-                  ? 'bg-[var(--ws-editor-surface)] text-gray-200'
+                  ? 'bg-[var(--ws-editor-surface)] text-cafe-muted'
                   : 'text-cafe-secondary hover:text-cafe-muted hover:bg-[var(--ws-editor-hover)]'
               }`}
               title={tab}
@@ -209,7 +209,7 @@ export function WorkspaceFileViewer({
               active={jsxPreview}
               onClick={onToggleJsxPreview}
               title={jsxPreview ? '\u5207\u6362\u5230\u6E90\u7801' : '\u9884\u89C8 JSX/TSX'}
-              activeClass="bg-blue-600/80 text-white hover:bg-conn-blue-text"
+              activeClass="bg-blue-600/80 text-[var(--cafe-surface)] hover:bg-conn-blue-text"
             >
               {jsxPreview ? 'Preview' : 'Code'}
             </ToolbarBtn>
@@ -247,7 +247,7 @@ export function WorkspaceFileViewer({
               active={editMode}
               onClick={onToggleEdit}
               title={editMode ? '\u9000\u51FA\u7F16\u8F91' : '\u7F16\u8F91\u6587\u4EF6'}
-              activeClass="bg-green-600/80 text-white hover:bg-conn-green-text"
+              activeClass="bg-green-600/80 text-[var(--cafe-surface)] hover:bg-conn-green-text"
             >
               {editMode ? '\u7F16\u8F91\u4E2D' : '\u7F16\u8F91'}
             </ToolbarBtn>
@@ -269,19 +269,19 @@ export function WorkspaceFileViewer({
       </div>
 
       {saveError && (
-        <div className="px-3 py-1.5 text-micro text-conn-red-text bg-red-900/20 border-b border-red-900/30">
+        <div className="px-3 py-1.5 text-micro text-conn-red-text bg-[var(--semantic-critical-surface)] border-b border-[var(--semantic-critical)]">
           {saveError}
         </div>
       )}
 
       {pendingExternalSha && (
-        <div className="px-3 py-1.5 text-micro text-amber-300 bg-amber-900/20 border-b border-amber-900/30 flex items-center justify-between">
+        <div className="px-3 py-1.5 text-micro text-conn-amber-text bg-[var(--semantic-warning-surface)] border-b border-[var(--semantic-warning)] flex items-center justify-between">
           <span>文件已被外部修改</span>
           <span className="flex gap-2">
-            <button type="button" onClick={onApplyExternalChange} className="underline hover:text-amber-200">
+            <button type="button" onClick={onApplyExternalChange} className="underline hover:text-conn-amber-text">
               重新加载
             </button>
-            <button type="button" onClick={onDismissExternalChange} className="underline hover:text-amber-200">
+            <button type="button" onClick={onDismissExternalChange} className="underline hover:text-conn-amber-text">
               忽略
             </button>
           </span>
@@ -315,7 +315,7 @@ export function WorkspaceFileViewer({
       />
 
       {file.truncated && (
-        <div className="px-3 py-1.5 text-micro text-amber-400 bg-[var(--ws-editor-bg)] border-t border-amber-900/30">
+        <div className="px-3 py-1.5 text-micro text-conn-amber-text bg-[var(--ws-editor-bg)] border-t border-[var(--semantic-warning)]">
           \u6587\u4EF6\u5DF2\u622A\u65AD (超过 1MB)
         </div>
       )}
@@ -339,7 +339,7 @@ function ToolbarBtn({
   onClick: () => void;
   title: string;
 }) {
-  const ac = activeClass ?? 'bg-cafe-accent/80 text-white hover:bg-cafe-accent';
+  const ac = activeClass ?? 'bg-cafe-accent/80 text-[var(--cafe-surface)] hover:bg-cafe-accent';
   return (
     <button
       type="button"

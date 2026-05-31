@@ -66,6 +66,25 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msg.userId, 'user1');
   });
 
+  it('claimContentDedupKey() is atomic: first wins, live duplicate loses, distinct keys independent', async () => {
+    const first = await store.claimContentDedupKey('fp-abc', 5000);
+    assert.equal(first, true, 'first claim of a fingerprint succeeds');
+    const second = await store.claimContentDedupKey('fp-abc', 5000);
+    assert.equal(second, false, 'a still-live claim of the same fingerprint is reported as duplicate');
+    const other = await store.claimContentDedupKey('fp-xyz', 5000);
+    assert.equal(other, true, 'a different fingerprint is independent');
+  });
+
+  it('claimContentDedupKey() re-allows a fingerprint after the PX window expires', async () => {
+    const first = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(first, true);
+    const immediate = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(immediate, false, 'within window → duplicate');
+    await new Promise((resolve) => setTimeout(resolve, 90)); // wait past the PX TTL
+    const afterExpiry = await store.claimContentDedupKey('fp-ttl', 40);
+    assert.equal(afterExpiry, true, 'after Redis PX expiry the fingerprint can be claimed again');
+  });
+
   it('getRecent() returns messages in chronological order', async () => {
     const now = Date.now();
     await store.append({ userId: 'u', catId: null, content: 'first', mentions: [], timestamp: now });
@@ -461,5 +480,107 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msgs.length, 2);
     assert.equal(msgs[0].origin, 'briefing', 'briefing message must keep origin via hydrateMessages');
     assert.equal(msgs[1].origin, undefined, 'normal message should have no origin');
+  });
+
+  // ── #697 + #805 review: scanByDeliveryStatus ──
+
+  it('scanByDeliveryStatus returns IDs matching target status', async () => {
+    const now = Date.now();
+    // Create messages with different delivery statuses
+    const m1 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued msg 1',
+      mentions: [],
+      timestamp: now,
+      threadId: 'thread-scan-1',
+      deliveryStatus: 'queued',
+    });
+    const m2 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'delivered msg',
+      mentions: [],
+      timestamp: now + 1,
+      threadId: 'thread-scan-1',
+    });
+    const m3 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'queued msg 2',
+      mentions: [],
+      timestamp: now + 2,
+      threadId: 'thread-scan-2',
+      deliveryStatus: 'queued',
+    });
+
+    const queuedIds = await store.scanByDeliveryStatus('queued');
+
+    // Should find both queued messages
+    assert.equal(queuedIds.length, 2, 'should find exactly 2 queued messages');
+    assert.ok(queuedIds.includes(m1.id), 'should include first queued message');
+    assert.ok(queuedIds.includes(m3.id), 'should include second queued message');
+    // Should NOT include delivered message
+    assert.ok(!queuedIds.includes(m2.id), 'should not include delivered message');
+  });
+
+  it('scanByDeliveryStatus returns empty array when no matches', async () => {
+    const now = Date.now();
+    await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'normal msg',
+      mentions: [],
+      timestamp: now,
+      threadId: 'thread-scan-empty',
+    });
+
+    const queuedIds = await store.scanByDeliveryStatus('queued');
+    assert.equal(queuedIds.length, 0);
+  });
+
+  it('scanByDeliveryStatus result order is independent of insertion order (SCAN non-deterministic)', async () => {
+    const now = Date.now();
+    const created = [];
+    for (let i = 0; i < 5; i++) {
+      const msg = await store.append({
+        userId: 'u1',
+        catId: null,
+        content: `queued ${i}`,
+        mentions: [],
+        timestamp: now + i,
+        threadId: 'thread-scan-order',
+        deliveryStatus: 'queued',
+      });
+      created.push(msg.id);
+    }
+
+    const queuedIds = await store.scanByDeliveryStatus('queued');
+
+    // All 5 should be found regardless of SCAN order
+    assert.equal(queuedIds.length, 5);
+    for (const id of created) {
+      assert.ok(queuedIds.includes(id), `should include ${id}`);
+    }
+  });
+
+  it('scanByDeliveryStatus finds canceled messages', async () => {
+    const now = Date.now();
+    const m1 = await store.append({
+      userId: 'u1',
+      catId: null,
+      content: 'will be canceled',
+      mentions: [],
+      timestamp: now,
+      threadId: 'thread-scan-cancel',
+      deliveryStatus: 'queued',
+    });
+    await store.markCanceled(m1.id);
+
+    const canceledIds = await store.scanByDeliveryStatus('canceled');
+    assert.ok(canceledIds.includes(m1.id), 'should find canceled message');
+
+    const queuedIds = await store.scanByDeliveryStatus('queued');
+    assert.ok(!queuedIds.includes(m1.id), 'should not find canceled message in queued scan');
   });
 });

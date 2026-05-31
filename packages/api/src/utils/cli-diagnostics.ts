@@ -73,6 +73,23 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     summary: '对话上下文超长',
     hint: '开新 thread，或先精简 thread 历史再试。',
   },
+  tool_call_parse_failed: {
+    summary: '模型工具调用解析失败',
+    hint: 'Claude Code 报告：模型输出的 tool call 无法解析（已重试仍失败）——这是模型 / CC 侧问题，非猫咖配置。换一只猫或刷新对话重试；频繁出现可换 model。',
+  },
+  server_overloaded: {
+    // F212 Phase E — cloud codex R2 P2 fix (2026-05-30 on adf26db37): summary/hint MUST be
+    // provider-neutral. The classifier is shared by spawnCli for all CLI providers (claude /
+    // codex / gemini / antigravity — see SERVICE_MANIFESTS), and the broad regex matches
+    // generic 529 Overloaded / "Server is busy" patterns from any upstream. Hard-coding
+    // "Anthropic" misdiagnoses non-Claude provider failures + sends users to the wrong
+    // status page. Keep regex broad (correct cross-provider coverage), make text neutral.
+    summary: '上游 CLI provider 服务临时限流',
+    // Plain text only — CliDiagnosticsPanel renders publicHint inside a <span> verbatim
+    // (no markdown parser). @gpt52 R1 BLOCKED + cloud codex R1 P2 both caught the earlier
+    // Markdown version. Provider-neutral phrasing per cloud codex R2 P2.
+    hint: '不是你的额度问题——是 CLI 上游 provider 服务器侧临时限流（provider 错误里通常会明示如 "not your usage limit" / "529 Overloaded"）。等 30-60 秒重试或换一只猫（不同 provider）；反复出现去你用的 provider 状态页（Anthropic / OpenAI / Google / DeepSeek 各有 status 页）。',
+  },
 };
 
 const UNKNOWN_TEXT = {
@@ -165,24 +182,63 @@ export function formatCliStderrForLog(stderrBuffer: string, env: NodeJS.ProcessE
   return sanitizeCliStderr(stderrBuffer).slice(-1000);
 }
 
-export function buildCliDiagnostics(args: { rawText: string; debugRef: CliDiagnostics['debugRef'] }): CliDiagnostics {
+export function buildCliDiagnostics(args: {
+  rawText: string;
+  debugRef: CliDiagnostics['debugRef'];
+  /** F212 Phase D (AC-D3): CC structured result error message (errors[] / result fields from a
+   *  Claude CLI result error event). Safe to surface even when reasonCode is unknown — it is
+   *  CC's own standard wording, NOT raw stderr. */
+  structuredErrorText?: string;
+}): CliDiagnostics {
   const reasonCode = classifyCliError(args.rawText);
-  const baseText = reasonCode ? REASON_TEXT[reasonCode] : UNKNOWN_TEXT;
 
   // AC-A6: panic headline takes precedence in summary (still keep reasonCode hint if known)
   const panicHeadline = extractPanicHeadline(args.rawText);
-  const publicSummary = panicHeadline ? `CLI panic — ${panicHeadline}` : baseText.summary;
 
-  const diagnostics: CliDiagnostics = {
-    publicSummary,
-    publicHint: baseText.hint,
-    debugRef: args.debugRef,
-  };
-
+  // Known reasonCode → humanized text + whitelisted safeExcerpt (Phase A behavior).
+  // Phase D P2 fix (cloud codex 2026-05-29): tag excerptSource='classifier' so the frontend
+  // membership check (KNOWN_EXCERPT_SOURCES) admits this excerpt for disclosure rendering.
   if (reasonCode) {
-    diagnostics.reasonCode = reasonCode;
-    diagnostics.safeExcerpt = extractSafeExcerpt(args.rawText, reasonCode);
+    const baseText = REASON_TEXT[reasonCode];
+    return {
+      publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : baseText.summary,
+      publicHint: baseText.hint,
+      debugRef: args.debugRef,
+      reasonCode,
+      safeExcerpt: extractSafeExcerpt(args.rawText, reasonCode),
+      excerptSource: 'classifier',
+    };
   }
 
-  return diagnostics;
+  // AC-D3: unknown reasonCode, but CC emitted a structured result error → surface it so the user
+  // sees "this is a Claude Code / model error" instead of the misleading "未识别" (which reads as
+  // a Clowder AI bug). CC structured error is a safe source, so KD-1 admits its safeExcerpt even
+  // without a classified reasonCode (whitelist via excerptSource channel, not reasonCode).
+  // Phase D P2 fix (cloud codex 2026-05-29): tag excerptSource='cc_structured' so the frontend
+  // KNOWN_EXCERPT_SOURCES membership check admits this for disclosure — previously the frontend's
+  // reasonCode-only guard hid this excerpt and users only saw the 200-char publicSummary.
+  if (args.structuredErrorText) {
+    const sanitized = sanitizeCliStderr(args.structuredErrorText).trim();
+    if (sanitized) {
+      const headline =
+        sanitized
+          .split('\n')
+          .find((l) => l.trim().length > 0)
+          ?.slice(0, 200) ?? '';
+      return {
+        publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : `Claude Code 报告：${headline}`,
+        publicHint: '这是 Claude Code / 模型侧报告的错误，不是猫咖问题。展开看完整原因；可换一只猫或刷新对话重试。',
+        debugRef: args.debugRef,
+        safeExcerpt: sanitized.slice(0, MAX_CHARS),
+        excerptSource: 'cc_structured',
+      };
+    }
+  }
+
+  // Truly unknown (no structured CC error) — keep KD-1: no safeExcerpt.
+  return {
+    publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : UNKNOWN_TEXT.summary,
+    publicHint: UNKNOWN_TEXT.hint,
+    debugRef: args.debugRef,
+  };
 }

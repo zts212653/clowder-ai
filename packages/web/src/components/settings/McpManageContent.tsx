@@ -11,8 +11,8 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
-import { PerCatToggles, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
-import { SettingsEmptyState, SettingsPrimaryButton, SettingsText } from './primitives';
+import { PerCatToggles, PluginManagedLink, ProjectSelector, ToggleSwitch } from './capability-settings-ui';
+import { SettingsBadge, SettingsEmptyState, SettingsPrimaryButton, SettingsText } from './primitives';
 import { useCapabilityState } from './useCapabilityState';
 
 interface ModalState {
@@ -55,7 +55,7 @@ export function McpManageContent() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const handleCardClick = useCallback((item: CapabilityBoardItem) => {
-    const readOnly = item.source !== 'external';
+    const readOnly = item.source !== 'external' || !!item.pluginId;
     setModal({
       editId: item.id,
       readOnly,
@@ -115,7 +115,9 @@ export function McpManageContent() {
 
       <div className="space-y-2">
         {cap.items.map((item) => {
-          const editable = item.source === 'external';
+          const pluginId = item.pluginId;
+          const pluginManaged = !!pluginId;
+          const editable = item.source === 'external' && !pluginManaged;
           const busy = cap.toggling === item.id;
           const removing = cap.disabling === item.id;
           const expanded = expandedId === item.id;
@@ -146,15 +148,27 @@ export function McpManageContent() {
                   </div>
                 </button>
                 <div className={settingsResourceActionGroupClass}>
+                  {pluginManaged && (
+                    <SettingsBadge
+                      tone="blue"
+                      size="xxs"
+                      className="inline-block max-w-[9rem] truncate align-middle sm:max-w-[12rem]"
+                    >
+                      由插件 {pluginId} 管理
+                    </SettingsBadge>
+                  )}
                   <ToggleSwitch
                     enabled={item.enabled}
                     busy={busy}
+                    disabled={pluginManaged}
+                    title={pluginManaged ? `由插件 ${pluginId} 管理` : item.enabled ? '禁用' : '启用'}
                     onClick={(event) => {
                       event.stopPropagation();
                       cap.handleToggle(item, !item.enabled);
                     }}
                   />
-                  {cap.catFamilies.length > 0 && (
+                  {pluginId && <PluginManagedLink pluginId={pluginId} />}
+                  {!pluginManaged && cap.catFamilies.length > 0 && (
                     <SettingsResourceIconButton
                       onClick={() => setExpandedId(expanded ? null : item.id)}
                       title="按猫开关"
@@ -182,7 +196,7 @@ export function McpManageContent() {
                   )}
                 </div>
               </div>
-              {expanded && (
+              {expanded && !pluginManaged && (
                 <PerCatToggles
                   item={item}
                   catFamilies={cap.catFamilies}

@@ -1,0 +1,63 @@
+/*
+ * F056 Phase E — Cat Persona Tokens (stub)
+ *
+ * Post-Option B: all per-cat hue/chroma anchors + light/dark derivation rules
+ * are generated dynamically by CatHueInjector.tsx from the cat catalog.
+ * No static per-cat CSS rules needed — new cats get tokens automatically.
+ *
+ * This file is kept as an import anchor in the CSS cascade. The comment below
+ * documents the token formula for reference:
+ *
+ * 单 hue 派生：每只猫一个 hue + chroma 锚点 → bubble / surface / text / ring 四档自动算。
+ * 正文文字 text 走中性 --cafe-text（不带猫色相）—— 彩色正文会显得"像注释"、
+ * 削弱可读性；猫味落在气泡背景 surface 即可（KD-28）。
+ *
+ * 公式（L 档位 / chroma 乘数）：
+ *   light: bubble L=0.62 C×1.0 / surface L=0.85 C×0.45 / ring L=0.55 C×1.1
+ *   dark:  bubble L=0.68 C×0.85 / surface L=0.28 C×0.25 / ring L=0.70 C×1.0
+ *   text 走中性 --cafe-text（不带猫色相）
+ *
+ * Runtime catId is the resolved name (e.g. "opus", "codex"), NOT the template
+ * variant id ("opus-default"). Resolution: variant.catId ?? breed.catId.
+ *
+ * Truth source (KD-25): cat-template.json (seed) + .cat-cafe/cat-catalog.json
+ * (overlay), via /api/cats → useCatData hook → CatHueInjector.
+ *
+ * Exception: cocreator (铲屎官) is NOT a cat in the catalog — it's the human
+ * user. Cocreator tokens are static here (default hue=40 warm amber) because
+ * CatHueInjector only handles catalog cats. ChatMessage inlines --msg-hue/
+ * --msg-chroma from the live cocreator config for bubble derivation.
+ */
+
+/* ── cocreator (铲屎官) static fallback tokens ── */
+:root {
+  --cocreator-hue: 40;
+  --cocreator-chroma: 0.13;
+  --color-cocreator-bubble: oklch(
+    var(--cat-bubble-l, 0.62) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 1)) var(--cocreator-hue)
+  );
+  --color-cocreator-surface: oklch(
+    var(--cat-surface-l, 0.85) calc(var(--cocreator-chroma) * var(--cat-surface-cmul, 0.45)) var(--cocreator-hue)
+  );
+  --color-cocreator-text: oklch(var(--cat-name-l, 0.24) var(--cat-name-c, 0.005) var(--cat-name-h, 139));
+  --color-cocreator-ring: oklch(
+    var(--cat-ring-l, 0.55) calc(var(--cocreator-chroma) * var(--cat-ring-cmul, 1.1)) var(--cocreator-hue)
+  );
+  --color-cocreator-primary: var(--color-cocreator-bubble);
+  --color-cocreator-light: var(--color-cocreator-surface);
+  --color-cocreator-dark: var(--color-cocreator-text);
+  --color-cocreator-bg: var(--color-cocreator-surface);
+}
+
+[data-theme="dark"] {
+  --color-cocreator-bubble: oklch(
+    var(--cat-bubble-l, 0.68) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 0.85)) var(--cocreator-hue)
+  );
+  --color-cocreator-surface: oklch(
+    var(--cat-surface-l, 0.28) calc(var(--cocreator-chroma) * var(--cat-surface-cmul, 0.25)) var(--cocreator-hue)
+  );
+  --color-cocreator-text: oklch(var(--cat-name-l, 0.88) var(--cat-name-c, 0.005) var(--cat-name-h, 139));
+  --color-cocreator-ring: oklch(
+    var(--cat-ring-l, 0.7) calc(var(--cocreator-chroma) * var(--cat-ring-cmul, 1)) var(--cocreator-hue)
+  );
+}

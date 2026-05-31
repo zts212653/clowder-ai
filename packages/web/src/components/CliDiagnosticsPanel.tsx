@@ -8,12 +8,14 @@ import {
   CloudOffIcon,
   FileXIcon,
   GaugeIcon,
+  HourglassIcon,
   KeyRoundIcon,
   PackageXIcon,
   SettingsXIcon,
   TerminalIcon,
   TextQuoteIcon,
   UnknownReasonIcon,
+  WrenchIcon,
 } from './cli-reason-icons';
 
 /**
@@ -46,30 +48,31 @@ interface Palette {
   Icon: IconComponent;
 }
 
-// Tailwind 500/100/300 hex (KD-5: author 自决, picked for at-a-glance severity scanning).
+// Severity palette via CSS tokens (console-tokens.css --cli-sev-*).
+// KD-5: author 自决 severity grouping; tokens derive from semantic / neutral / chart primitives.
 const PALETTE_USER_FIX: Omit<Palette, 'Icon'> = {
-  bg: '#FEE2E2', // red-100
-  border: '#FCA5A5', // red-300
-  accent: '#DC2626', // red-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-error-bg)',
+  border: 'var(--cli-sev-error-border)',
+  accent: 'var(--cli-sev-error-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_TRANSIENT: Omit<Palette, 'Icon'> = {
-  bg: '#FEF3C7', // amber-100
-  border: '#FCD34D', // amber-300
-  accent: '#D97706', // amber-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-warning-bg)',
+  border: 'var(--cli-sev-warning-border)',
+  accent: 'var(--cli-sev-warning-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_SYSTEM: Omit<Palette, 'Icon'> = {
-  bg: '#F1F5F9', // slate-100
-  border: '#CBD5E1', // slate-300
-  accent: '#475569', // slate-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-info-bg)',
+  border: 'var(--cli-sev-info-border)',
+  accent: 'var(--cli-sev-info-accent)',
+  text: 'var(--cli-sev-text)',
 };
 const PALETTE_COGNITIVE: Omit<Palette, 'Icon'> = {
-  bg: '#EDE9FE', // violet-100
-  border: '#C4B5FD', // violet-300
-  accent: '#7C3AED', // violet-600
-  text: '#1A1918',
+  bg: 'var(--cli-sev-cognitive-bg)',
+  border: 'var(--cli-sev-cognitive-border)',
+  accent: 'var(--cli-sev-cognitive-accent)',
+  text: 'var(--cli-sev-text)',
 };
 
 const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
@@ -80,15 +83,33 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // Tier 2 — transient, retry later
   quota_exceeded: { ...PALETTE_TRANSIENT, Icon: GaugeIcon },
   network_error: { ...PALETTE_TRANSIENT, Icon: CloudOffIcon },
+  // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): Anthropic server-side
+  // temporary throttling — NOT user quota. Same transient tier (retry 30-60s) but distinct
+  // hourglass icon to differentiate from gauge (quota) at-a-glance.
+  server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
   // Tier 4 — cognitive / context limit
   context_window_exceeded: { ...PALETTE_COGNITIVE, Icon: TextQuoteIcon },
   invalid_thinking_signature: { ...PALETTE_COGNITIVE, Icon: BrainIcon },
+  // F212 Phase D: model emitted an unparseable tool call (opus-4.8 decoder drift) — CC/model-side,
+  // not a Clowder AI config issue. Cognitive tier (violet), same family as thinking-signature.
+  tool_call_parse_failed: { ...PALETTE_COGNITIVE, Icon: WrenchIcon },
 };
 
 const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };
+
+/**
+ * F212 Phase D — Cloud codex P2 fix (2026-05-29, on a429aada3):
+ * KD-1 white-list moved from reasonCode-only to excerptSource-based. The backend tags
+ * safeExcerpt with the safe source channel ('classifier' = known reasonCode hit,
+ * 'cc_structured' = unknown reasonCode + CC structured result error per AC-D3). Frontend
+ * gates disclosure on membership — fails closed for (a) malformed/persisted payloads with
+ * no excerptSource and (b) forward-compat: any future api source value the current web
+ * doesn't recognize yet (e.g. a hypothetical 'pii_redacted') is treated as untrusted.
+ */
+const KNOWN_EXCERPT_SOURCES: ReadonlySet<string> = new Set(['classifier', 'cc_structured']);
 
 /**
  * 云端 codex P2 (2026-05-27): persisted/hydrated `cliDiagnostics.reasonCode` may carry
@@ -98,9 +119,13 @@ const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };
  * non-member string as unknown so we fall through to UNKNOWN_PALETTE safely.
  */
 export function isKnownReason(code: unknown): code is CliErrorReasonCode {
-  // 云端 codex P2-7 (2026-05-27): `Object.hasOwn` is ES2022 (Safari 15.4+, Chrome 93+).
-  // Use Object.prototype.hasOwnProperty.call for broader client compat (Next.js's
-  // browserslist default supports older Safari that predates ES2022).
+  // 云端 codex P2-7 (2026-05-27) + R3 regression (2026-05-30, b304a27d2 → revert):
+  // `Object.hasOwn` is ES2022 (Safari 15.4+, Chrome 93+). tsconfig target = ES2017,
+  // so use Object.prototype.hasOwnProperty.call for broader client compat (Next.js's
+  // browserslist default supports older Safari that predates ES2022). biome-ignore
+  // below is mechanical defense: `biome check --write --unsafe` rewrites this back
+  // to Object.hasOwn via lint/suspicious/noPrototypeBuiltins; the ignore freezes it.
+  // biome-ignore lint/suspicious/noPrototypeBuiltins: ES2017 target requires hasOwnProperty.call
   return typeof code === 'string' && Object.prototype.hasOwnProperty.call(REASON_PALETTE, code);
 }
 
@@ -131,9 +156,16 @@ interface CliDiagnosticsPanelProps {
   /** The bubble's display content (`Error: ...`). Falls back if publicSummary missing. */
   errorMessage: string;
   diagnostics: CliDiagnostics;
+  /** F212 follow-up — when this is the head of a deduped group of identical adjacent
+   *  diagnostics (same reasonCode + publicSummary within window), show a "×N" badge so the
+   *  user sees that the same error fired N times. Group dedup is computed at the message
+   *  list level (see `utils/cli-diagnostics-dedup`); subsequent group members hide their
+   *  panel entirely via ChatMessage's hideDiagnosticsPanel prop, so this Panel only needs
+   *  to render the count badge for the head. */
+  dedupCount?: number;
 }
 
-export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnosticsPanelProps) {
+export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: CliDiagnosticsPanelProps) {
   const [expanded, setExpanded] = useState(false);
 
   // 云端 codex P2 (2026-05-27): membership check before indexing — stale/newer/malformed
@@ -143,11 +175,18 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnostic
   const { Icon, bg, border, accent, text } = palette;
   // publicSummary is always present per Phase A contract; keep errorMessage as a safety net.
   const summary = diagnostics.publicSummary || errorMessage;
-  // KD-1 white-list admission (砚砚 review P1-2 + 云端 codex P2, 2026-05-27): excerpt
-  // disclosure requires (known reasonCode) AND (non-empty safeExcerpt). Defends against:
-  //   - malformed/persisted payloads with safeExcerpt but no reasonCode (砚砚)
-  //   - unknown reasonCode strings (e.g. newer api → older web) leaking unsanitized text (云端)
-  const hasExcerpt = Boolean(knownReason && diagnostics.safeExcerpt && diagnostics.safeExcerpt.trim().length > 0);
+  // KD-1 white-list admission (砚砚 review P1-2 / 2026-05-27 → cloud codex P2 / 2026-05-29):
+  // disclosure requires (a) non-empty safeExcerpt AND (b) excerptSource in KNOWN_EXCERPT_SOURCES.
+  // Migrated from reasonCode-only gate to excerptSource-based for AC-D3 path (unknown reasonCode
+  // but CC emitted a structured result error that's safe to surface). Defends against:
+  //   - malformed/persisted payloads with safeExcerpt but no excerptSource (砚砚)
+  //   - newer api → older web: future excerptSource values are rejected by membership check (云端)
+  //   - AC-D3 unknown fallback now CAN show excerpt via excerptSource='cc_structured'
+  const hasExcerpt = Boolean(
+    diagnostics.safeExcerpt?.trim() &&
+      diagnostics.excerptSource &&
+      KNOWN_EXCERPT_SOURCES.has(diagnostics.excerptSource),
+  );
 
   return (
     <div data-testid="cli-diagnostics" className="flex flex-col gap-2.5">
@@ -163,11 +202,22 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnostic
           ariaLabel={knownReason ?? 'cli-error-unknown'}
         />
         <div className="flex flex-col gap-1 min-w-0">
-          <span className="text-sm font-semibold" style={{ color: text }}>
-            {summary}
+          <span className="text-sm font-semibold flex items-center gap-2 flex-wrap" style={{ color: text }}>
+            <span>{summary}</span>
+            {dedupCount !== undefined && dedupCount > 1 && (
+              <span
+                data-testid="cli-diagnostics-dedup-badge"
+                role="img"
+                aria-label={`Same error occurred ${dedupCount} times`}
+                className="text-xs font-normal px-1.5 py-0.5 rounded"
+                style={{ backgroundColor: accent, color: bg }}
+              >
+                ×{dedupCount}
+              </span>
+            )}
           </span>
           {diagnostics.publicHint && (
-            <span className="text-xs" style={{ color: '#6D6C6A', lineHeight: 1.5 }}>
+            <span className="text-xs" style={{ color: 'var(--cli-diag-hint)', lineHeight: 1.5 }}>
               {diagnostics.publicHint}
             </span>
           )}
@@ -185,9 +235,9 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnostic
           >
             <ChevronDownIcon
               className="w-3.5 h-3.5 transition-transform"
-              style={{ color: '#9C9B99', transform: expanded ? 'rotate(180deg)' : undefined }}
+              style={{ color: 'var(--cli-diag-meta)', transform: expanded ? 'rotate(180deg)' : undefined }}
             />
-            <span className="text-xs font-semibold" style={{ color: '#9C9B99' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--cli-diag-meta)' }}>
               查看详细错误
             </span>
           </button>
@@ -196,8 +246,8 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnostic
               data-testid="cli-diagnostics-excerpt"
               className="rounded-lg overflow-x-auto whitespace-pre-wrap break-words text-xs font-mono m-0"
               style={{
-                backgroundColor: '#1E1D1C',
-                color: '#D89575',
+                backgroundColor: 'var(--cli-diag-excerpt-bg)',
+                color: 'var(--cli-diag-excerpt-text)',
                 padding: '12px 14px',
                 lineHeight: 1.5,
               }}
@@ -212,7 +262,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics }: CliDiagnostic
       <div
         data-testid="cli-diagnostics-debug-ref"
         className="flex flex-wrap gap-x-3 gap-y-1 text-xs"
-        style={{ color: '#9C9B99' }}
+        style={{ color: 'var(--cli-diag-meta)' }}
       >
         <span>
           <span className="font-medium">command:</span>{' '}

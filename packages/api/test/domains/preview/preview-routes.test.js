@@ -4,15 +4,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { EventAuditLog } from '../../../dist/domains/cats/services/orchestration/EventAuditLog.js';
 import { PortDiscoveryService } from '../../../dist/domains/preview/port-discovery.js';
 import { previewRoutes } from '../../../dist/routes/preview.js';
 
 describe('preview routes', () => {
   const app = Fastify();
   const portDiscovery = new PortDiscoveryService();
+  const appendedAuditEvents = [];
 
   before(async () => {
-    await app.register(previewRoutes, { portDiscovery, gatewayPort: 4100 });
+    const auditLog = new EventAuditLog({ auditDir: '/tmp/cat-cafe-preview-audit-test' });
+    auditLog.append = async (input) => {
+      appendedAuditEvents.push(input);
+      return { id: 'audit-1', timestamp: Date.now(), ...input };
+    };
+    await app.register(previewRoutes, { portDiscovery, gatewayPort: 4100, auditLog });
     await app.ready();
   });
 
@@ -84,37 +91,43 @@ describe('preview routes', () => {
 
   // P1-3: Audit endpoints for open/close/navigate
   it('POST /api/preview/open records audit event and returns gateway URL', async () => {
+    appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/preview/open',
-      payload: { port: 5173, threadId: 'test-thread' },
+      payload: { port: 5173, threadId: 'test-thread', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.allowed, true);
     assert.ok(body.gatewayUrl);
+    assert.equal(appendedAuditEvents[0].data.catId, 'gpt52');
   });
 
   it('POST /api/preview/close records audit event', async () => {
+    appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/preview/close',
-      payload: { port: 5173, threadId: 'test-thread' },
+      payload: { port: 5173, threadId: 'test-thread', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
+    assert.equal(appendedAuditEvents[0].data.catId, 'gpt52');
   });
 
   it('POST /api/preview/navigate records audit event', async () => {
+    appendedAuditEvents.length = 0;
     const res = await app.inject({
       method: 'POST',
       url: '/api/preview/navigate',
-      payload: { port: 5173, url: '/dashboard', threadId: 'test-thread' },
+      payload: { port: 5173, url: '/dashboard', threadId: 'test-thread', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, true);
+    assert.equal(appendedAuditEvents[0].data.catId, 'gpt52');
   });
 });
 
@@ -176,7 +189,7 @@ describe('POST /api/preview/auto-open', () => {
     const res = await app2.inject({
       method: 'POST',
       url: '/api/preview/auto-open',
-      payload: { port: 5173, path: '/dashboard' },
+      payload: { port: 5173, path: '/dashboard', catId: 'gpt52' },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);

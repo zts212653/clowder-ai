@@ -148,6 +148,7 @@ test('preinstall node runtime check fails fast on Node 26 with install guidance'
     env: {
       ...process.env,
       CAT_CAFE_TEST_NODE_VERSION: '26.0.0',
+      NODE_ENV: undefined, // clear so production-install guard doesn't fire first
     },
   });
 
@@ -163,6 +164,52 @@ test('preinstall node runtime check accepts Node 24', () => {
     env: {
       ...process.env,
       CAT_CAFE_TEST_NODE_VERSION: '24.16.0',
+      NODE_ENV: undefined, // clear so production-install guard doesn't fire first
+    },
+  });
+
+  assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+});
+
+// -- NODE_ENV / production-install guard (check-node-runtime.mjs) --
+
+test('preinstall guard rejects NODE_ENV=production with fix instructions', () => {
+  const result = spawnSync(process.execPath, ['scripts/check-node-runtime.mjs'], {
+    cwd: resolve(import.meta.dirname, '..'),
+    encoding: 'utf8',
+    env: {
+      CAT_CAFE_TEST_NODE_VERSION: '24.16.0',
+      NODE_ENV: 'production',
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /NODE_ENV=production detected/);
+  assert.match(result.stderr, /env -u NODE_ENV/);
+});
+
+test('preinstall guard rejects npm_config_production=true', () => {
+  const result = spawnSync(process.execPath, ['scripts/check-node-runtime.mjs'], {
+    cwd: resolve(import.meta.dirname, '..'),
+    encoding: 'utf8',
+    env: {
+      CAT_CAFE_TEST_NODE_VERSION: '24.16.0',
+      npm_config_production: 'true',
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /npm_config_production=true detected/);
+});
+
+test('preinstall guard allows NODE_ENV=production when SKIP guard is set', () => {
+  const result = spawnSync(process.execPath, ['scripts/check-node-runtime.mjs'], {
+    cwd: resolve(import.meta.dirname, '..'),
+    encoding: 'utf8',
+    env: {
+      CAT_CAFE_TEST_NODE_VERSION: '24.16.0',
+      NODE_ENV: 'production',
+      CAT_CAFE_SKIP_NODE_RUNTIME_GUARD: '1',
     },
   });
 

@@ -104,6 +104,23 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'REDIS_PORT',
+    defaultValue: '6399',
+    description: 'Redis 端口（governance pack 用于生成外部项目规则）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+    exampleRecommended: true,
+  },
+  {
+    name: 'REDIS_DEV_PORT',
+    defaultValue: '6398',
+    description: 'Redis 开发/测试端口（governance pack 用于生成外部项目规则）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'API_SERVER_HOST',
     defaultValue: '127.0.0.1',
     description: 'API 监听地址（改为 0.0.0.0 可让手机/平板通过局域网或 Tailscale 访问）',
@@ -324,6 +341,13 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'PREVIEW_GATEWAY_ENABLED',
     defaultValue: '1（启用）',
     description: '设为 0 禁用 Preview Gateway（F120）',
+    category: 'server',
+    sensitive: false,
+  },
+  {
+    name: 'CHROME_EXECUTABLE_PATH',
+    defaultValue: '(未设置 → 自动检测系统 Chrome/Edge/Chromium)',
+    description: '对话导出截图使用的 Chromium 系浏览器路径。未设置时按 Chrome > Edge > Chromium 优先级自动检测',
     category: 'server',
     sensitive: false,
   },
@@ -1232,6 +1256,15 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'frontend',
     sensitive: false,
     runtimeEditable: false,
+  },
+
+  {
+    name: 'THEME_CONFIG',
+    defaultValue: '(未设置)',
+    description: 'OKLCH 主题配置 JSON（清浏览器缓存后可从此恢复）',
+    category: 'frontend',
+    sensitive: false,
+    runtimeEditable: true,
   },
 
   // --- push ---

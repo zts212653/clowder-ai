@@ -202,4 +202,41 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.frequency, 'weekly');
     assert.equal(entry.sla.reevalWithinHours, 336);
   });
+
+  it('validates a valid eval:capability-wakeup registry entry', () => {
+    const capabilityEntry = {
+      domainId: 'eval:capability-wakeup',
+      displayName: 'Capability Wakeup Eval',
+      systemThreadId: 'thread_eval_capability_wakeup',
+      evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
+      frequency: 'weekly',
+      sourceAdapter: 'capability-wakeup-eval',
+      threadPolicy: {
+        role: 'working-home',
+        stateSot: 'registry',
+        allowedContent: ['longitudinal-analysis', 'verdict-discussion', 'handoff-drafts'],
+      },
+      legacyScheduledTaskIds: [],
+      handoffTargetResolver: { featureId: 'F203', ownerCatId: 'opus47', threadLookup: 'feature-thread' },
+      sla: { acknowledgeHours: 48, reevalWithinHours: 168 },
+    };
+    const entry = parseEvalDomainRegistryEntry(capabilityEntry);
+    assert.equal(entry.domainId, 'eval:capability-wakeup');
+    assert.equal(entry.sourceAdapter, 'capability-wakeup-eval');
+    assert.equal(entry.frequency, 'weekly');
+  });
+
+  it('loads the docs-backed eval:capability-wakeup registry fixture', async () => {
+    const raw = await readFile(
+      new URL('../../../../docs/harness-feedback/eval-domains/eval-capability-wakeup.yaml', import.meta.url),
+      'utf8',
+    );
+    const parsed = parse(raw);
+    const entry = parseEvalDomainRegistryFile(parsed);
+
+    assert.equal(entry.domainId, 'eval:capability-wakeup');
+    assert.equal(entry.sourceAdapter, 'capability-wakeup-eval');
+    assert.equal(entry.frequency, 'weekly');
+    assert.equal(entry.handoffTargetResolver.featureId, 'F203');
+  });
 });

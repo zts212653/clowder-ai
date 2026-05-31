@@ -94,10 +94,10 @@ describe('ChatMessage Postmark v2 source pill', () => {
     // sender label: variantLabel is 'GPT-5.2', so catStyle.label = '缅因猫（GPT-5.2）'
     expect(pill?.textContent).toContain('缅因猫（GPT-5.2）');
     expect(pill?.getAttribute('title')).toBe(sourceThreadId);
-    expect(pill?.className).toContain('bg-[#FDF6ED]');
-    expect(pill?.className).toContain('border-[#E8DCCF]');
-    expect(pill?.className).toContain('text-[#8D6E63]');
-    expect(pill?.className).toContain('hover:bg-[#F5EDE0]');
+    expect(pill?.className).toContain('bg-cafe-surface');
+    expect(pill?.className).toContain('border-cafe');
+    expect(pill?.className).toContain('text-cafe');
+    expect(pill?.className).toContain('hover:bg-cafe-surface-sunken');
 
     const pushStateSpy = vi.spyOn(window.history, 'pushState');
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent');

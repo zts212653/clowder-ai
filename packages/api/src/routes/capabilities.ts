@@ -52,6 +52,8 @@ import {
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
+import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
+import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -62,6 +64,9 @@ import {
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
 
 // ────────── Helpers ──────────
+
+const MODULE_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
+const CANONICAL_PLUGINS_DIR = join(MODULE_REPO_ROOT, 'plugins');
 
 /**
  * Returns subdirectory names.
@@ -100,6 +105,70 @@ async function listSkillSubdirs(dir: string, exclude?: string[]): Promise<string
     }
   }
   return names;
+}
+
+async function collectDeclaredPluginSkillIds(
+  pluginsDir: string,
+  declaredSkillIds: Map<string, Set<string>>,
+): Promise<boolean> {
+  const pluginDirs = await listSubdirs(pluginsDir);
+  if (pluginDirs === null) return false;
+
+  for (const dirName of pluginDirs) {
+    const manifestPath = join(pluginsDir, dirName, 'plugin.yaml');
+    if (!existsSync(manifestPath)) continue;
+
+    try {
+      const manifest = parsePluginManifest(manifestPath);
+      if (manifest.id !== dirName) continue;
+      const skillIds = new Set(
+        manifest.resources
+          .filter((resource) => resource.type === 'skill')
+          .map((resource) => resourceCapId(manifest.id, resource)),
+      );
+      declaredSkillIds.set(manifest.id, skillIds);
+    } catch {}
+  }
+
+  return true;
+}
+
+async function readDeclaredPluginSkillIds(projectRoot: string): Promise<Map<string, Set<string>> | null> {
+  const declaredSkillIds = new Map<string, Set<string>>();
+  const pluginsDirs = [CANONICAL_PLUGINS_DIR];
+  const projectPluginsDir = join(projectRoot, 'plugins');
+  if (resolve(projectPluginsDir) !== resolve(CANONICAL_PLUGINS_DIR)) {
+    pluginsDirs.push(projectPluginsDir);
+  }
+
+  for (const pluginsDir of pluginsDirs) {
+    const ok = await collectDeclaredPluginSkillIds(pluginsDir, declaredSkillIds);
+    if (!ok) return null;
+  }
+
+  return declaredSkillIds;
+}
+
+function isDeclaredPluginSkill(
+  cap: CapabilityEntry,
+  allSkillNames: Set<string>,
+  declaredPluginSkillIds: Map<string, Set<string>> | null,
+): boolean {
+  if (!cap.pluginId) return false;
+  if (declaredPluginSkillIds === null) return true;
+  const declaredIds = declaredPluginSkillIds.get(cap.pluginId);
+  if (!declaredIds) return allSkillNames.has(cap.id);
+  return declaredIds.has(cap.id);
+}
+
+function shouldKeepSkillCapability(
+  cap: CapabilityEntry,
+  allSkillNames: Set<string>,
+  declaredPluginSkillIds: Map<string, Set<string>> | null,
+): boolean {
+  if (cap.type !== 'skill') return true;
+  if (cap.pluginId) return isDeclaredPluginSkill(cap, allSkillNames, declaredPluginSkillIds);
+  return allSkillNames.has(cap.id);
 }
 
 /** Walk up from CWD to find pnpm-workspace.yaml — the monorepo root. */
@@ -585,8 +654,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Prune stale skills no longer on filesystem.
     // Guard: only prune when ALL provider scans succeeded (no null returns).
     if (allScansOk) {
+      const declaredPluginSkillIds = await readDeclaredPluginSkillIds(projectRoot);
       const before = config.capabilities.length;
-      config.capabilities = config.capabilities.filter((c) => c.type !== 'skill' || allSkillNames.has(c.id));
+      config.capabilities = config.capabilities.filter((c) =>
+        shouldKeepSkillCapability(c, allSkillNames, declaredPluginSkillIds),
+      );
       if (config.capabilities.length !== before) configDirty = true;
     }
 
@@ -687,6 +759,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         cats,
         mcpServer: buildBoardMcpServer(cap, { includeLaunchFields: includeMcpLaunchFields }),
         layer: 'L1',
+        pluginId: cap.pluginId,
         ...(cap.ecosystem && { ecosystem: cap.ecosystem }),
         ...(cap.lockVersion && { lockVersion: cap.lockVersion }),
       };
@@ -715,6 +788,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         enabled: cap.enabled,
         cats,
         layer: cap.source === 'external' ? 'L3' : 'L2',
+        pluginId: cap.pluginId,
       };
       const meta =
         cap.source === 'cat-cafe'
@@ -772,7 +846,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const mountSourceNames = new Set(
       mountSkillsSrc === catCafeSkillsDir ? (catCafeOwnSkills ?? []) : ((await listSkillSubdirs(mountSkillsSrc)) ?? []),
     );
-    const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe');
+    const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !i.pluginId);
     const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
@@ -895,6 +969,16 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const cap = config.capabilities[capIndex]!;
+
+      // Plugin-owned capabilities must be toggled through /api/plugins/:id/enable|disable
+      // to keep lifecycle state (symlinks, limb nodes, CLI configs) consistent.
+      if (cap.pluginId) {
+        reply.status(409);
+        return {
+          error: `Capability "${body.capabilityId}" is managed by plugin "${cap.pluginId}". Use /api/plugins/${cap.pluginId}/enable or /disable instead.`,
+        };
+      }
+
       const beforeSnapshot = structuredClone(cap);
 
       if (body.scope === 'global') {

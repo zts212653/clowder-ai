@@ -94,6 +94,7 @@ export interface ServiceState {
 
 export const MODEL_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_MODEL',
+  'qwen3-asr': 'QWEN3_ASR_MODEL',
   'mlx-tts': 'TTS_MODEL',
   'embedding-model': 'EMBED_MODEL',
   'llm-postprocess': 'LLM_POSTPROCESS_MODEL',
@@ -102,6 +103,7 @@ export const MODEL_ENV_VARS: Record<string, string> = {
 /** Env var each server script reads to bind its listening port. */
 export const PORT_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_PORT',
+  'qwen3-asr': 'WHISPER_PORT',
   'mlx-tts': 'TTS_PORT',
   'embedding-model': 'EMBED_PORT',
   'llm-postprocess': 'LLM_POSTPROCESS_PORT',
@@ -110,6 +112,7 @@ export const PORT_ENV_VARS: Record<string, string> = {
 
 export const LEGACY_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'ASR_ENABLED',
+  'qwen3-asr': 'QWEN3_ASR_ENABLED',
   'mlx-tts': 'TTS_ENABLED',
   'embedding-model': 'EMBED_ENABLED',
   'llm-postprocess': 'LLM_POSTPROCESS_ENABLED',
@@ -118,6 +121,7 @@ export const LEGACY_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
 
 export const API_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'CAT_CAFE_SERVICE_ASR_ENABLED',
+  'qwen3-asr': 'CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED',
   'mlx-tts': 'CAT_CAFE_SERVICE_TTS_ENABLED',
   'embedding-model': 'CAT_CAFE_SERVICE_EMBED_ENABLED',
   'llm-postprocess': 'CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED',
@@ -160,6 +164,34 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       install: 'scripts/services/whisper-install.sh',
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
+    },
+  },
+  {
+    id: 'qwen3-asr',
+    name: 'Qwen3 ASR',
+    description: 'Local speech-to-text endpoint (Qwen3-ASR, drop-in whisper replacement)',
+    category: 'voice',
+    type: 'python',
+    port: 9876,
+    features: ['voice-input', 'connector-stt'],
+    envVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
+    endpointEnvVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
+    defaultEndpoint: 'http://localhost:9876',
+    healthPath: '/health',
+    prerequisites: {
+      runtime: 'python3.10+',
+      venvPath: '~/.cat-cafe/asr-venv',
+      packages: ['mlx-audio', 'fastapi', 'uvicorn', 'python-multipart'],
+      models: [
+        serviceModel('mlx-community/Qwen3-ASR-1.7B-8bit', '~2.5GB', 'High-quality Qwen3 ASR (default)', true),
+        serviceModel('mlx-community/Qwen3-ASR-1.7B-4bit', '~1.5GB', 'Smaller quantization, lower memory'),
+      ],
+      estimatedMinutes: 5,
+    },
+    scripts: {
+      install: 'scripts/services/qwen3-asr-install.sh',
+      start: 'scripts/services/qwen3-asr-server.sh',
+      uninstall: 'scripts/services/qwen3-asr-uninstall.sh',
     },
   },
   {
@@ -323,7 +355,17 @@ export function deriveLegacyServiceConfig(
   const config: ServiceConfig = { installed: true, enabled: true };
   const modelKey = MODEL_ENV_VARS[service.id];
   const model = modelKey ? env[modelKey]?.trim() : undefined;
-  if (model) config.selectedModel = model;
+  if (model) {
+    config.selectedModel = model;
+  } else {
+    // Fall back to manifest's recommended default model so that legacy
+    // env bridge users (ENABLED=1 without MODEL) get a working service
+    // instead of a "MODEL required" startup failure.  The manifest's
+    // isDefault model is the single source of truth for defaults (see
+    // b29c04d05 — hardcoded script defaults were removed intentionally).
+    const defaultModel = service.prerequisites?.models?.find((m) => m.isDefault) ?? service.prerequisites?.models?.[0];
+    if (defaultModel) config.selectedModel = defaultModel.name;
+  }
   const portKey = PORT_ENV_VARS[service.id];
   const port = parseServicePort(portKey ? env[portKey]?.trim() : undefined);
   if (port) config.port = port;

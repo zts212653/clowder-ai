@@ -42,6 +42,64 @@ interface TurnResult {
   hadStreamError: boolean;
 }
 
+/**
+ * F153 Phase J AC-J2 (R1 P2 fix): structured tool execution outcome.
+ * `status` is set from the execution-edge branch, NOT from content-string
+ * heuristics — so a successful tool legitimately returning "Error: 200 OK"
+ * style content does not get mis-marked as `error` (KD-38 honesty).
+ */
+export interface CatAgentToolExecResult {
+  id: string;
+  name: string;
+  content: string;
+  status: 'ok' | 'error';
+}
+
+/**
+ * Execute Anthropic tool_use blocks against the local tool registry.
+ * Exported (vs the previous private method) so unit tests can verify the
+ * status mapping without standing up the full streaming HTTP pipeline.
+ *
+ * Branches:
+ * - unknown tool → `status: 'error'`, content prefixed with "Error: unknown tool"
+ * - successful execution → `status: 'ok'` regardless of returned text content
+ * - thrown error (schema validation, tool.execute reject) → `status: 'error'`
+ */
+export async function executeCatAgentTools(
+  blocks: AnthropicToolUseBlock[],
+  tools: CatAgentTool[],
+): Promise<CatAgentToolExecResult[]> {
+  const results: CatAgentToolExecResult[] = [];
+  for (const block of blocks) {
+    const tool = findTool(tools, block.name);
+    if (!tool) {
+      results.push({
+        id: block.id,
+        name: block.name,
+        content: `Error: unknown tool "${block.name}"`,
+        status: 'error',
+      });
+      continue;
+    }
+    try {
+      validateToolInput(tool.schema, block.input);
+      const output = await tool.execute(block.input);
+      // Status comes from the execution edge (no exception thrown), not from
+      // content inspection — a tool may legitimately return text starting
+      // with "Error:" (e.g. log/file content).
+      results.push({ id: block.id, name: block.name, content: output, status: 'ok' });
+    } catch (err: unknown) {
+      results.push({
+        id: block.id,
+        name: block.name,
+        content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+        status: 'error',
+      });
+    }
+  }
+  return results;
+}
+
 export class CatAgentService implements AgentService {
   readonly catId: CatId;
   private readonly projectRoot: string;
@@ -102,11 +160,14 @@ export class CatAgentService implements AgentService {
       if (result.hadStreamError) {
         const orphanTools = result.contentBlocks.filter((b): b is AnthropicToolUseBlock => b.type === 'tool_use');
         for (const t of orphanTools) {
+          // F153 Phase J AC-J2: carry native tool_use_id + structured error status.
           yield {
             type: 'tool_result',
             catId: this.catId,
             content: 'Error: stream interrupted before tool execution',
             toolName: t.name,
+            toolUseId: t.id,
+            toolResultStatus: 'error',
             metadata,
             timestamp: Date.now(),
           };
@@ -139,11 +200,16 @@ export class CatAgentService implements AgentService {
       // Execute tools and build next turn
       const toolResults = await this.executeTools(toolBlocks, tools, metadata);
       for (const r of toolResults) {
+        // F153 Phase J AC-J2 (R1 P2 fix): status comes from executeTools execution
+        // edge — not from content inspection. A tool legitimately returning text
+        // starting with "Error:" is still `ok` per KD-38 honesty.
         yield {
           type: 'tool_result',
           catId: this.catId,
           content: r.content.slice(0, TOOL_RESULT_DIGEST_LIMIT),
           toolName: r.name,
+          toolUseId: r.id,
+          toolResultStatus: r.status,
           metadata,
           timestamp: Date.now(),
         };
@@ -216,11 +282,13 @@ export class CatAgentService implements AgentService {
     } else if (evt.type === 'content_block_complete') {
       blocksByIndex.set(evt.blockIndex, evt.block);
       if (evt.block.type === 'tool_use') {
+        // F153 Phase J AC-J2: carry native Anthropic tool_use.id (from stream parser).
         yield {
           type: 'tool_use',
           catId: this.catId,
           toolName: evt.block.name,
           toolInput: evt.block.input,
+          toolUseId: evt.block.id,
           metadata,
           timestamp: Date.now(),
         };
@@ -260,31 +328,12 @@ export class CatAgentService implements AgentService {
     return resp;
   }
 
-  private async executeTools(
+  private executeTools(
     blocks: AnthropicToolUseBlock[],
     tools: CatAgentTool[],
     _metadata: MessageMetadata,
-  ): Promise<Array<{ id: string; name: string; content: string }>> {
-    const results: Array<{ id: string; name: string; content: string }> = [];
-    for (const block of blocks) {
-      const tool = findTool(tools, block.name);
-      if (!tool) {
-        results.push({ id: block.id, name: block.name, content: `Error: unknown tool "${block.name}"` });
-        continue;
-      }
-      try {
-        validateToolInput(tool.schema, block.input);
-        const output = await tool.execute(block.input);
-        results.push({ id: block.id, name: block.name, content: output });
-      } catch (err: unknown) {
-        results.push({
-          id: block.id,
-          name: block.name,
-          content: `Error: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-    }
-    return results;
+  ): Promise<CatAgentToolExecResult[]> {
+    return executeCatAgentTools(blocks, tools);
   }
 
   private *handleFetchError(

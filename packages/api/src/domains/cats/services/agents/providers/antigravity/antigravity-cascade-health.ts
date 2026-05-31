@@ -17,6 +17,10 @@ export interface AntigravityCascadeHealthSnapshot {
   cascadeId: string;
   checkedAt: number;
   level: AntigravityCascadeHealthLevel;
+  /** The cascade's run status at assessment time (e.g. CASCADE_RUN_STATUS_IDLE / _RUNNING). Callers use
+   *  this to avoid retiring a cascade mid-turn — rotating a RUNNING cascade loses its in-progress work
+   *  (F211-REG5: the busy-cascade reuse the rotation would undo). */
+  cascadeStatus: string;
   stepCount: number;
   approximateTrajectoryBytes: number;
   thresholds: AntigravityCascadeHealthThresholds;
@@ -153,6 +157,7 @@ export function assessAntigravityCascadeHealth(input: {
     cascadeId: input.cascadeId,
     checkedAt,
     level,
+    cascadeStatus: input.trajectory.status,
     stepCount,
     approximateTrajectoryBytes,
     thresholds,

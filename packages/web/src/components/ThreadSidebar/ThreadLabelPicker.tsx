@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
+import { DEFAULT_LABEL_COLOR } from '@/lib/color-defaults';
 import { type ThreadLabel, useLabelStore } from '@/stores/label-store';
 
 interface ThreadLabelPickerProps {
@@ -29,7 +30,7 @@ export function ThreadLabelPicker({
   const [isSaving, setIsSaving] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState('#5B8C5A');
+  const [newColor, setNewColor] = useState(DEFAULT_LABEL_COLOR);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const ime = useIMEGuard();
@@ -195,7 +196,7 @@ export function ThreadLabelPicker({
                   <button
                     onClick={() => void handleCreate()}
                     disabled={!newName.trim()}
-                    className="text-micro px-1.5 py-0.5 rounded bg-cafe-accent text-white disabled:opacity-40"
+                    className="text-micro px-1.5 py-0.5 rounded bg-cafe-accent text-[var(--cafe-surface)] disabled:opacity-40"
                   >
                     创建
                   </button>
@@ -231,7 +232,7 @@ export function ThreadLabelPicker({
               <button
                 onClick={() => void handleSave()}
                 disabled={!hasChanged || isSaving}
-                className="text-xs px-2 py-0.5 rounded bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40"
+                className="text-xs px-2 py-0.5 rounded bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40"
               >
                 {isSaving ? '...' : '保存'}
               </button>

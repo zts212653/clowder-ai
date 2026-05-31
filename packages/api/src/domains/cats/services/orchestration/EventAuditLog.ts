@@ -254,6 +254,8 @@ export const AuditEventTypes = {
   BROWSER_PREVIEW_CLOSE: 'browser_preview_close',
   /** 浏览器预览导航 */
   BROWSER_PREVIEW_NAVIGATE: 'browser_preview_navigate',
+  /** Workspace 面板导航 */
+  WORKSPACE_NAVIGATE: 'workspace_navigate',
 
   // === Session Sealing (F118) ===
 

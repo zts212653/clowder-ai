@@ -20,7 +20,7 @@ function StoryBubble({ msg }: { msg: StoryMessage }) {
   const [thinkingExpanded, setThinkingExpanded] = useState(true); // default expanded for export
 
   const bubbleClasses = isUser
-    ? `rounded-2xl rounded-br-sm ${msg.isWhisper ? 'bg-conn-amber-bg text-conn-amber-text border border-dashed border-conn-amber-ring' : 'bg-[#FEF3C7] text-conn-amber-text'}`
+    ? `rounded-2xl rounded-br-sm ${msg.isWhisper ? 'bg-conn-amber-bg text-conn-amber-text border border-dashed border-conn-amber-ring' : 'bg-[var(--semantic-warning-surface)] text-conn-amber-text'}`
     : `${style.bubbleRadius} ${style.font ?? ''} border`;
 
   const bubbleStyle = isUser
@@ -109,7 +109,7 @@ function BadgeTag({ badge }: { badge: NonNullable<StoryMessage['badge']> }) {
   const colorMap = {
     red: 'bg-conn-red-bg text-conn-red-text',
     green: 'bg-conn-green-bg text-conn-green-text',
-    amber: 'bg-amber-100 text-conn-amber-text',
+    amber: 'bg-[var(--semantic-warning-surface)] text-conn-amber-text',
     blue: 'bg-conn-blue-bg text-conn-blue-text',
   };
   return <span className={`text-micro px-1.5 py-0.5 rounded font-medium ${colorMap[badge.color]}`}>{badge.text}</span>;
@@ -123,7 +123,7 @@ function StoryCardView({ card, index }: { card: StoryCardType; index: number }) 
         <div className="text-xs text-cafe-muted mb-1">#{index + 1}</div>
         <h2 className="text-xl font-bold text-cafe">{card.title}</h2>
         {card.subtitle && <p className="text-sm text-cafe-secondary mt-1">{card.subtitle}</p>}
-        <div className="mt-3 mx-auto w-16 h-0.5 bg-gray-200 rounded-full" />
+        <div className="mt-3 mx-auto w-16 h-0.5 bg-cafe-surface rounded-full" />
       </div>
 
       {/* Messages */}

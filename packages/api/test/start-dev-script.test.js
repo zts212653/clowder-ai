@@ -59,6 +59,15 @@ function listenOnLoopback() {
   });
 }
 
+async function stopRedis(redisCli, mode = 'nosave', attempts = 50) {
+  for (let i = 0; i < attempts; i++) {
+    if (redisCli('ping').status !== 0) return;
+    redisCli('shutdown', mode);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  assert.notEqual(redisCli('ping').status, 0, 'test Redis must stop during cleanup');
+}
+
 test('source-only exposes helper functions for testing seams', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const output = runSourceOnlySnippet(
@@ -283,7 +292,7 @@ test(
       }
       assert.equal(redisCli('set', 'cat-cafe:rdb-first-probe', 'survived').status, 0);
       assert.equal(redisCli('save').status, 0);
-      redisCli('shutdown', 'save');
+      await stopRedis(redisCli, 'save');
       rmSync(join(redisDir, 'appendonlydir'), { recursive: true, force: true });
 
       const result = spawnSync(
@@ -320,7 +329,7 @@ redis-cli -p "${port}" shutdown nosave >/dev/null 2>&1 || true
       const output = result.stdout.trim().split('\n').slice(-3);
       assert.deepEqual(output, ['1', 'survived', 'yes']);
     } finally {
-      redisCli('shutdown', 'nosave');
+      await stopRedis(redisCli, 'nosave');
       rmSync(tempRoot, { recursive: true, force: true });
     }
   },

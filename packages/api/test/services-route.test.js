@@ -119,7 +119,7 @@ describe('services routes', () => {
 
       assert.equal(res.statusCode, 200, res.payload);
       const payload = JSON.parse(res.payload);
-      assert.equal(Object.keys(payload.endpoints).length, 5);
+      assert.equal(Object.keys(payload.endpoints).length, 6);
       assert.equal(payload.endpoints['whisper-stt'], 'http://127.0.0.1:19999/healthy');
       assert.equal(payload.endpoints['mlx-tts'], 'http://127.0.0.1:19998/unhealthy');
     } finally {
@@ -297,6 +297,7 @@ describe('services routes', () => {
       assert.equal(res.statusCode, 200, res.payload);
       assert.deepEqual(JSON.parse(res.payload).endpoints, {
         'whisper-stt': 'http://127.0.0.1:19981',
+        'qwen3-asr': 'http://127.0.0.1:19981',
         'mlx-tts': 'http://127.0.0.1:19982',
         'embedding-model': 'http://127.0.0.1:19983',
         'llm-postprocess': 'http://127.0.0.1:19984',

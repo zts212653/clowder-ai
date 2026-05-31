@@ -4,7 +4,7 @@
  */
 
 import { join } from 'node:path';
-import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry } from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, type ILimbNode } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -513,11 +513,13 @@ async function main(): Promise<void> {
     messageStore instanceof RedisMessageStore &&
     invocationRecordStore instanceof RedisInvocationRecordStore
   ) {
+    const { getOwnerUserId } = await import('./config/cat-config-loader.js');
     const backfillResult = await runSchedulerReplyUserIdBackfill({
       redis,
       messageStore,
       invocationRecordStore,
       threadStore,
+      defaultUserId: getOwnerUserId(),
     });
     if (!backfillResult.skipped && (backfillResult.repairedMessages > 0 || backfillResult.repairedInvocations > 0)) {
       app.log.info(
@@ -1584,6 +1586,69 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
+  // F202: Plugin framework — discovery + config + resource activation
+  {
+    const { join } = await import('node:path');
+    const { PluginRegistry } = await import('./domains/plugin/PluginRegistry.js');
+    const { PluginResourceActivator, rehydrateEnabledPluginLimbs } = await import(
+      './domains/plugin/PluginResourceActivator.js'
+    );
+    const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
+    const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
+      './config/capabilities/capability-orchestrator.js'
+    );
+    const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
+    const { resolveActiveProjectRoot } = await import('./utils/active-project-root.js');
+
+    const monorepoRoot = findMonorepoRoot(process.cwd());
+    const pluginsDir = join(monorepoRoot, 'plugins');
+    const { loadAllPluginConfigs } = await import('./domains/plugin/plugin-config-store.js');
+    const pluginRegistry = new PluginRegistry(pluginsDir);
+    pluginRegistry.scan();
+    const scannedManifests = pluginRegistry.getAllManifests();
+    const loadedEnvKeys = loadAllPluginConfigs(resolveActiveProjectRoot(), scannedManifests);
+    app.log.info(
+      `[api] F202: PluginRegistry scanned ${scannedManifests.length} plugin(s), loaded ${loadedEnvKeys} config key(s)`,
+    );
+
+    const limbAdapterRegistry = new Map<string, (yamlPath: string) => Promise<ILimbNode>>();
+
+    const pluginActivator = new PluginResourceActivator({
+      resolveProjectRoot: () => resolveActiveProjectRoot(),
+      pluginsDir,
+      limbRegistry,
+      readCapabilities: () => readCapabilitiesConfig(resolveActiveProjectRoot()),
+      writeCapabilities: async (config) => {
+        const root = resolveActiveProjectRoot();
+        await writeCapabilitiesConfig(root, config);
+        const { paths } = resolveStartupCliConfigContext(root);
+        await generateCliConfigs(config, paths);
+      },
+      withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
+      limbAdapterFactory: async (pluginId, limbYamlPath) => {
+        const factory = limbAdapterRegistry.get(pluginId);
+        if (!factory) {
+          throw new Error(
+            `No platform-specific limb adapter registered for plugin '${pluginId}'. ` +
+              `Limb resources require a concrete adapter (see Phase 2 for examples).`,
+          );
+        }
+        return factory(limbYamlPath);
+      },
+    });
+
+    const startupCaps = await readCapabilitiesConfig(resolveActiveProjectRoot());
+    await rehydrateEnabledPluginLimbs({
+      capabilities: startupCaps,
+      pluginRegistry,
+      pluginsDir,
+      limbAdapterRegistry,
+      limbRegistry,
+      log: app.log,
+    });
+
+    registerPluginRoutes(app, { pluginRegistry, pluginActivator, limbRegistry, pluginsDir });
+  }
   // F174 D2b-1 — single notifier instance shared between callback auth preHandler
   // (posts in-context surface on 401) and the hide-similar debug endpoint
   // (lets the user 24h-suppress a (reason, tool, catId) tuple).
@@ -2564,19 +2629,9 @@ async function main(): Promise<void> {
     // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
-    const fetchPaginated = async (endpoint: string) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
-        timeout: 30_000,
-      });
-      if (!stdout.trim()) return [];
-      return stdout
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
-    };
+    // #798: fetchPaginated extracted to infrastructure/github/fetch-paginated.ts for testability
+    const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
+    const fetchPaginated = (endpoint: string, sinceId?: number) => fetchPaginatedFn(endpoint, { sinceId });
 
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({
@@ -2603,10 +2658,10 @@ async function main(): Promise<void> {
             return null;
           }
         },
-        fetchComments: async (repo, pr) => {
+        fetchComments: async (repo, pr, sinceId) => {
           const [reviewComments, issueComments] = await Promise.all([
-            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
-            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`),
+            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
+            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
           ]);
           return [...reviewComments, ...issueComments].map(
             (c: {
@@ -2630,8 +2685,8 @@ async function main(): Promise<void> {
             }),
           );
         },
-        fetchReviews: async (repo, pr) => {
-          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
+        fetchReviews: async (repo, pr, sinceId) => {
+          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
           return reviews.map(
             (r: {
               id: number;

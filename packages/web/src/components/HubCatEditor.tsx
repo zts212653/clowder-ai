@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
@@ -534,7 +535,7 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
       onClick={requestClose}
@@ -655,6 +656,7 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

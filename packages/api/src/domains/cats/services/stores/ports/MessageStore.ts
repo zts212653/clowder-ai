@@ -274,6 +274,18 @@ export interface IMessageStore {
   markDelivered(id: string, deliveredAt: number): StoredMessage | null | Promise<StoredMessage | null>;
   /** F117: Mark a queued message as canceled (withdraw/clear). Returns null if not found. */
   markCanceled(id: string): StoredMessage | null | Promise<StoredMessage | null>;
+  /**
+   * Atomic content-dedup claim. Returns true if this fingerprint was newly claimed
+   * (caller should proceed to append) or false if an identical claim is still live within
+   * the window (caller must treat the post as a duplicate). Closes the check-then-act race
+   * in the callback exact-duplicate scan: two concurrent byte-identical posts can both pass
+   * the recent-message read before either appends, so the append decision needs an atomic
+   * gate. In-memory: synchronous Map check+set (atomic within the event loop). Redis: SET NX PX.
+   */
+  claimContentDedupKey(key: string, ttlMs: number): boolean | Promise<boolean>;
+  /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
+   *  to recover orphaned queued messages after process restart. */
+  scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
 }
 
 /** Max messages to keep in memory */
@@ -301,6 +313,8 @@ export class MessageStore {
   private messages: StoredMessage[] = [];
   private readonly maxMessages: number;
   private readonly idempotencyIndex = new Map<string, string>();
+  /** Content-dedup claims: fingerprint key → expiry timestamp (ms). Bounds the callback exact-duplicate race. */
+  private readonly contentDedupIndex = new Map<string, number>();
   /** F102 KD-34: Listener called after every successful append (fire-and-forget) */
   onAppend?: (msg: Pick<StoredMessage, 'id' | 'threadId' | 'timestamp' | 'content'>) => void;
 
@@ -683,6 +697,32 @@ export class MessageStore {
     if (!msg) return null;
     msg.deliveryStatus = 'canceled';
     return msg;
+  }
+
+  // #697: scanByDeliveryStatus intentionally NOT implemented for in-memory store.
+  // In-memory store uses a bounded sliding window (MAX_MESSAGES) — messages
+  // beyond the window would be silently ignored, masking real orphans visible
+  // in production Redis. StartupReconciler's guard `if (!messageStore?.scanByDeliveryStatus)`
+  // gracefully skips orphan recovery for in-memory mode. (LL-048 / PR #805 P2-2)
+
+  /**
+   * Atomic content-dedup claim (synchronous — atomic within the single-threaded event loop).
+   * Returns true on first claim within the window, false if an identical claim is still live.
+   */
+  claimContentDedupKey(key: string, ttlMs: number): boolean {
+    const now = Date.now();
+    const existing = this.contentDedupIndex.get(key);
+    if (existing !== undefined && existing > now) {
+      return false;
+    }
+    this.contentDedupIndex.set(key, now + ttlMs);
+    // Opportunistic prune so the index stays bounded under sustained traffic.
+    if (this.contentDedupIndex.size > 2048) {
+      for (const [k, exp] of this.contentDedupIndex) {
+        if (exp <= now) this.contentDedupIndex.delete(k);
+      }
+    }
+    return true;
   }
 
   /**

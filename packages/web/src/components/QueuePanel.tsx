@@ -176,12 +176,25 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   return (
     <div
       className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
-        queuePaused ? 'border-conn-amber-ring bg-conn-amber-bg/50' : 'border-[#9B7EBD]/20 bg-[#9B7EBD]/5'
+        queuePaused ? 'border-conn-amber-ring bg-conn-amber-bg/50' : ''
       }`}
+      style={
+        queuePaused
+          ? undefined
+          : {
+              borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
+              backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
+            }
+      }
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-conn-amber-bg/60' : 'bg-[#9B7EBD]/10'}`}
+        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-conn-amber-bg/60' : ''}`}
+        style={
+          queuePaused
+            ? undefined
+            : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }
+        }
       >
         <div className="flex items-center gap-2">
           <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
@@ -190,8 +203,15 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '排队中'}</span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-              queuePaused ? 'bg-amber-200 text-conn-amber-text' : 'bg-[#9B7EBD]/20 text-[#9B7EBD]'
+              queuePaused
+                ? 'bg-[var(--semantic-warning-surface)] text-conn-amber-text'
+                : 'text-[var(--color-cocreator-primary)]'
             }`}
+            style={
+              queuePaused
+                ? undefined
+                : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }
+            }
           >
             {visibleEntries.length}
           </span>
@@ -200,7 +220,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           {queuePaused && (
             <button
               onClick={handleContinue}
-              className="text-xs px-2 py-1 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+              className="text-xs px-2 py-1 rounded-md bg-[var(--semantic-success)] text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
             >
               继续
             </button>

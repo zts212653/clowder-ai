@@ -405,7 +405,7 @@ export function DirectoryPickerModal({
               onClick={() => setShowBrowser((v) => !v)}
               className={`flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
                 showBrowser
-                  ? 'bg-cafe-accent text-white'
+                  ? 'bg-cafe-accent text-[var(--cafe-surface)]'
                   : 'bg-cafe-surface-elevated hover:bg-[var(--console-hover-bg)] text-cafe-secondary'
               }`}
             >
@@ -460,7 +460,7 @@ export function DirectoryPickerModal({
               type="button"
               onClick={confirmCreate}
               disabled={selectedPath === null}
-              className="ml-auto px-5 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="ml-auto px-5 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-[var(--cafe-surface)] text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               创建对话
             </button>

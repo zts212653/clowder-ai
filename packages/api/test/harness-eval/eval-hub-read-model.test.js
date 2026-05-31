@@ -312,8 +312,12 @@ Evidence:
     });
 
     assert.ok(summary.domains, 'domains field must exist');
-    assert.equal(summary.domains.length, 3, 'should have 3 registered domains (eval:a2a + eval:memory + eval:sop)');
-    assert.equal(summary.counts.registeredDomains, 3);
+    assert.equal(
+      summary.domains.length,
+      4,
+      'should have 4 registered domains (eval:a2a + eval:memory + eval:sop + eval:capability-wakeup)',
+    );
+    assert.equal(summary.counts.registeredDomains, 4);
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
     assert.ok(a2aDomain, 'eval:a2a must appear in domains');
@@ -331,6 +335,11 @@ Evidence:
     assert.ok(sopDomain, 'eval:sop must appear in domains (weekly domain)');
     assert.equal(sopDomain.hasVerdict, false);
     assert.equal(sopDomain.evalCatHandle, '@opus47');
+
+    const capabilityWakeupDomain = summary.domains.find((d) => d.domainId === 'eval:capability-wakeup');
+    assert.ok(capabilityWakeupDomain, 'eval:capability-wakeup must appear in domains');
+    assert.equal(capabilityWakeupDomain.hasVerdict, false);
+    assert.equal(capabilityWakeupDomain.evalCatHandle, '@opus47');
   });
 
   it('fails closed when a live verdict points at a missing evidence bundle', () => {

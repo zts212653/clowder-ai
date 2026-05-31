@@ -7,10 +7,10 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 
 const TONE_STYLES: Record<string, string> = {
-  info: 'border-l-conn-blue-ring bg-conn-blue-bg dark:bg-blue-950/30',
-  success: 'border-l-conn-green-ring bg-conn-green-bg dark:bg-green-950/30',
-  warning: 'border-l-yellow-400 bg-yellow-50 dark:bg-yellow-950/30',
-  danger: 'border-l-conn-red-ring bg-conn-red-bg dark:bg-red-950/30',
+  info: 'border-l-conn-blue-ring bg-conn-blue-bg ',
+  success: 'border-l-conn-green-ring bg-conn-green-bg ',
+  warning: 'border-l-yellow-400 bg-[var(--semantic-warning-surface)] ',
+  danger: 'border-l-conn-red-ring bg-conn-red-bg ',
 };
 
 export function CardBlock({ block, messageId }: { block: RichCardBlock; messageId?: string }) {
@@ -125,7 +125,7 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
               type="button"
               disabled={loading}
               onClick={() => handleAction(a.action, a.payload)}
-              className="text-xs px-2 py-1 rounded bg-yellow-100 dark:bg-yellow-900/40 hover:bg-yellow-200 dark:hover:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200 border border-yellow-300 dark:border-yellow-700 disabled:opacity-50 transition-colors"
+              className="text-xs px-2 py-1 rounded bg-[var(--semantic-warning-surface)] hover:bg-[var(--semantic-warning-surface)] text-conn-amber-text border border-conn-amber-ring disabled:opacity-50 transition-colors"
             >
               {loading
                 ? a.action === 'tts-resynthesize'

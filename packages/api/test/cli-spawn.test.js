@@ -65,6 +65,7 @@ function createMockProcess(opts = {}) {
   const proc = {
     stdout,
     stderr,
+    stdin: null,
     pid,
     exitCode: null,
     kill: mock.fn((signal) => {
@@ -119,6 +120,45 @@ test('spawnCli yields parsed JSON events from stdout', async () => {
   assert.deepEqual(spawnFn.mock.calls[0].arguments[1], ['--json']);
 });
 
+test('spawnCli: stdinInput 经 stdin 传入 (stdio[0]=pipe + 写入 child.stdin, 不进 argv)', async () => {
+  // Incident 2026-05-29 (cross-thread-context-contamination): prompt 走 stdin 防 ps 泄露。
+  let stdinData = '';
+  const proc = createMockProcess();
+  proc.stdin = {
+    write: (c) => {
+      stdinData += typeof c === 'string' ? c : c.toString('utf8');
+      return true;
+    },
+    end: () => {},
+    on: () => proc.stdin,
+  };
+  const spawnFn = createMockSpawnFn(proc);
+
+  const SECRET = 'SECRET-prompt-body-披着专业外衣';
+  const promise = collect(
+    spawnCli({ command: 'test-cli', args: ['exec', '--', '-'], stdinInput: SECRET }, { spawnFn }),
+  );
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(spawnOpts.stdio[0], 'pipe', 'stdinInput 设置时 stdio[0] 必须是 pipe');
+  assert.equal(stdinData, SECRET, 'stdinInput 必须写入 child.stdin');
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(!args.some((a) => a.includes(SECRET)), 'stdinInput 内容不得出现在 argv');
+});
+
+test('spawnCli: 无 stdinInput 时 stdio[0]=ignore (向后兼容，不影响其它 carrier)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const promise = collect(spawnCli({ command: 'test-cli', args: ['--json'] }, { spawnFn }));
+  proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+  await promise;
+  assert.equal(spawnFn.mock.calls[0].arguments[2].stdio[0], 'ignore');
+});
+
 test(
   'spawnCli default spawn supervisors Unix CLI children with parent pid',
   { skip: process.platform === 'win32' && 'Unix supervisor is not used on Windows' },
@@ -136,6 +176,32 @@ test(
 
     const event = results.find((item) => item?.type === 'env');
     assert.equal(event?.parentPid, String(process.pid));
+  },
+);
+
+test(
+  'spawnCli: stdinInput reaches the supervised child through cli-supervisor (P1 regression)',
+  { skip: process.platform === 'win32' && 'cli-supervisor only wraps on Unix' },
+  async () => {
+    // Incident 2026-05-29 P1 (cloud codex review): production codex runs through
+    // cli-supervisor, which MUST forward stdin to the supervised child. Mock-based
+    // tests bypass the supervisor (fake spawnFn = child directly), so this real-path
+    // test guards the production path — without forwarding, the child gets EOF.
+    const SECRET = 'STDIN-VIA-SUPERVISOR-披着专业外衣-R8';
+    const results = await collect(
+      spawnCli({
+        command: process.execPath,
+        args: [
+          '-e',
+          'let d="";process.stdin.on("data",c=>{d+=c});process.stdin.on("end",()=>{process.stdout.write(JSON.stringify({type:"stdin-echo",got:d})+"\\n")})',
+        ],
+        stdinInput: SECRET,
+        timeoutMs: 8000,
+      }),
+    );
+    const echo = results.find((item) => item?.type === 'stdin-echo');
+    assert.ok(echo, 'supervised child should emit stdin-echo');
+    assert.equal(echo.got, SECRET, 'stdinInput must reach the supervised child through cli-supervisor');
   },
 );
 

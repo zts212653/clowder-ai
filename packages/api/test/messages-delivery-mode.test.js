@@ -50,6 +50,8 @@ function buildDeps(overrides = {}) {
       completeAll: mock.fn(),
       has: mock.fn(() => false),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
+      cancelAll: mock.fn(() => ['opus']),
+      cancelInvocation: mock.fn(() => ['opus']),
       isDeleting: mock.fn(() => false),
     },
     invocationRecordStore: {
@@ -263,8 +265,12 @@ describe('POST /api/messages deliveryMode', () => {
       payload: { content: '强制发送', threadId: 'thread-1', deliveryMode: 'force' },
     });
 
-    // Should have called cancel
-    assert.ok(deps.invocationTracker.cancel.mock.calls.length > 0, 'should cancel active invocation');
+    // F-parallel-cancel (cloud #6): force = scoped preempt of the TARGET invocation → cancelInvocation
+    // (not cancelAll, which would also abort an unrelated side-dispatch in the same thread).
+    assert.ok(
+      deps.invocationTracker.cancelInvocation.mock.calls.length > 0,
+      'force should cancelInvocation (scoped preempt) the active invocation',
+    );
 
     // Should have broadcast cancel messages
     const broadcastCalls = deps.socketManager.broadcastAgentMessage.mock.calls;
@@ -613,8 +619,8 @@ describe('POST /api/messages deliveryMode', () => {
 
     // Should cancel active invocation (force mode)
     assert.ok(
-      deps.invocationTracker.cancel.mock.calls.length > 0,
-      'multipart deliveryMode=force should cancel active invocation',
+      deps.invocationTracker.cancelInvocation.mock.calls.length > 0,
+      'multipart deliveryMode=force should cancelInvocation (scoped preempt) the active invocation',
     );
 
     // Should NOT queue — should proceed to immediate execution

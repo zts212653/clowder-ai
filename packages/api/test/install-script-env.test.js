@@ -495,7 +495,7 @@ test('install script retries with PUPPETEER_SKIP_DOWNLOAD only for Puppeteer bro
   assert.match(installScriptText, /warn "Bundled Chrome download failed — skipped"/);
   assert.match(
     installScriptText,
-    /warn "Thread export \/ screenshot may be unavailable\. To install later: npx puppeteer browsers install chrome"/,
+    /warn "Thread export \/ screenshot may be unavailable\. Install Chrome\/Chromium or set CHROME_EXECUTABLE_PATH in \.env"/,
   );
   assert.match(installScriptText, /env PUPPETEER_SKIP_DOWNLOAD=1 pnpm install --frozen-lockfile/);
 });

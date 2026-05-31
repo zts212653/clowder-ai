@@ -468,7 +468,7 @@ describe('quota-cards — pool grouping and row rendering', () => {
         item: { label: 'test', usedPercent: 97, percentKind: 'remaining' },
       }),
     );
-    expect(healthyHtml).toContain('bg-emerald-500');
+    expect(healthyHtml).toContain('bg-[var(--semantic-success)]');
     expect(healthyHtml).not.toContain('bg-rose-500');
 
     // 10% remaining = 90% used = danger → should be red
@@ -478,7 +478,7 @@ describe('quota-cards — pool grouping and row rendering', () => {
       }),
     );
     expect(dangerHtml).toContain('bg-rose-500');
-    expect(dangerHtml).not.toContain('bg-emerald-500');
+    expect(dangerHtml).not.toContain('bg-[var(--semantic-success)]');
   });
 
   it('renders resetsAt as formatted time when resetsText is absent', async () => {

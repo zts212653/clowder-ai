@@ -38,6 +38,8 @@ interface MessageAppender {
   append(msg: AppendMessageInput): unknown;
   /** Mark a queued message as delivered (make visible in timeline). */
   markDelivered?(id: string, deliveredAt: number): unknown;
+  /** #697: Scan for message IDs with a given deliveryStatus. */
+  scanByDeliveryStatus?(status: string): string[] | Promise<string[]>;
 }
 
 interface ConnectorMessageBroadcaster {
@@ -97,12 +99,18 @@ export class StartupReconciler {
     const runResult = await this.sweepRunning(scanStore, this.deps.processStartAt, affectedThreads);
     const queueResult = await this.sweepStaleQueued(scanStore, affectedThreads);
 
+    // #697: Recover orphaned queued messages that have no matching InvocationRecord.
+    // These were persisted to MessageStore with deliveryStatus='queued' but the
+    // in-memory InvocationQueue entry was lost on restart. Without this, they stay
+    // invisible in timeline forever.
+    const orphanedMessageRecovery = await this.recoverOrphanedQueuedMessages(affectedThreads);
+
     const notifiedThreads = await this.notifyAffectedThreads(affectedThreads);
 
     const running = runResult.running;
     const queued = queueResult.queued;
     const taskProgressCleared = runResult.taskProgressCleared;
-    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered;
+    const messagesRecovered = runResult.messagesRecovered + queueResult.messagesRecovered + orphanedMessageRecovery;
     const swept = running + queued;
     const durationMs = Date.now() - start;
     this.deps.log.info(
@@ -196,7 +204,7 @@ export class StartupReconciler {
 
     let notified = 0;
     for (const [threadId, { catIds, userId }] of affectedThreads) {
-      const catLabel = catIds.length === 1 ? catIds[0] : `${catIds.length} cats`;
+      const catLabel = catIds.length === 0 ? '部分' : catIds.length === 1 ? catIds[0] : `${catIds.length} 只猫`;
       const content = `服务刚重启，${catLabel} 的进行中请求已中断，请重新发送。`;
       const fallbackId = `startup-reconciler-${threadId}-${randomUUID().slice(0, 8)}`;
       let messageId = fallbackId;
@@ -264,6 +272,105 @@ export class StartupReconciler {
       }
     }
     return cleared;
+  }
+
+  /**
+   * #697: Find messages still stuck as deliveryStatus='queued' in MessageStore
+   * that have no corresponding InvocationRecord (the in-memory queue entry was
+   * lost on restart). Mark them as delivered so they appear in the timeline.
+   *
+   * P2-1 (#805): Also mark any corresponding queued InvocationRecords as failed
+   * to maintain the InvocationRecord single-truth-source invariant. Without this,
+   * a fresh queued record (age < 5min, not caught by sweepStaleQueued) would
+   * remain in Redis as dirty residue — message delivered but record still queued.
+   */
+  private async recoverOrphanedQueuedMessages(
+    affectedThreads: Map<string, { catIds: CatId[]; userId: string }>,
+  ): Promise<number> {
+    const { messageStore } = this.deps;
+    if (!messageStore?.scanByDeliveryStatus || !messageStore.markDelivered) return 0;
+
+    let recovered = 0;
+    try {
+      const queuedIds = await messageStore.scanByDeliveryStatus('queued');
+      if (queuedIds.length === 0) return 0;
+
+      this.deps.log.info(`[startup-reconciler] Found ${queuedIds.length} orphaned queued message(s) — recovering`);
+      const now = Date.now();
+      const recoveredMessageIds = new Set<string>();
+
+      for (const id of queuedIds) {
+        try {
+          const result = await messageStore.markDelivered(id, now);
+          if (result != null) {
+            recovered++;
+            recoveredMessageIds.add(id);
+            // Track thread for notification (user should know their queued message wasn't executed)
+            const msg = result as { threadId?: string; userId?: string; mentions?: CatId[] };
+            if (msg.threadId) {
+              const existing = affectedThreads.get(msg.threadId) ?? {
+                catIds: [],
+                userId: (msg.userId as string) ?? 'unknown',
+              };
+              // Populate catIds from message mentions so notification isn't "0 cats"
+              if (msg.mentions) {
+                for (const catId of msg.mentions) {
+                  if (!existing.catIds.includes(catId)) existing.catIds.push(catId);
+                }
+              }
+              if (existing.catIds.length === 0) {
+                this.deps.log.warn(
+                  `[startup-reconciler] unusual: queued message ${id} has no mentions — broadcast or system message in invocation queue`,
+                );
+              }
+              affectedThreads.set(msg.threadId, existing);
+            }
+          }
+        } catch (err) {
+          this.deps.log.warn(`[startup-reconciler] Failed to recover queued message ${id}: ${String(err)}`);
+        }
+      }
+
+      // P2-1: Clean up corresponding InvocationRecords to prevent dirty residue.
+      // Scan all queued records and mark any whose userMessageId was just recovered.
+      await this.cleanupMatchingInvocationRecords(recoveredMessageIds);
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to scan for orphaned queued messages: ${String(err)}`);
+    }
+    return recovered;
+  }
+
+  /**
+   * P2-1 (#805): After recovering orphaned queued messages, clean up any
+   * InvocationRecords that reference those messages. Aligns record state with
+   * message state (both converge to terminal) so InvocationRecord remains the
+   * single truth source for invocation lifecycle.
+   */
+  private async cleanupMatchingInvocationRecords(recoveredMessageIds: Set<string>): Promise<void> {
+    if (recoveredMessageIds.size === 0) return;
+    const store = this.deps.invocationRecordStore;
+    // biome-ignore lint/complexity/useLiteralKeys: TS index signature requires bracket access
+    if (!('scanByStatus' in store) || typeof (store as Record<string, unknown>)['scanByStatus'] !== 'function') return;
+    const scanStore = store as ScanStore;
+
+    try {
+      const queuedRecordIds = await scanStore.scanByStatus('queued');
+      for (const recordId of queuedRecordIds) {
+        const record = await store.get(recordId);
+        if (record?.userMessageId && recoveredMessageIds.has(record.userMessageId)) {
+          await store.update(recordId, {
+            status: 'failed',
+            expectedStatus: 'queued',
+            error: 'process_restart',
+          });
+          this.deps.log.info(
+            `[startup-reconciler] Marked InvocationRecord ${recordId} as failed (message ${record.userMessageId} recovered)`,
+          );
+        }
+      }
+    } catch (err) {
+      this.deps.log.warn(`[startup-reconciler] Failed to clean up InvocationRecords: ${String(err)}`);
+    }
   }
 
   /**

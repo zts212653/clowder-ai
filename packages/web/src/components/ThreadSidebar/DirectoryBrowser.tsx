@@ -237,13 +237,13 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
                   }
                 }}
                 placeholder="文件夹名称..."
-                className="flex-1 text-sm px-2 py-1 rounded border border-cafe-accent/30 bg-white focus:outline-none focus:ring-1 focus:ring-cafe-accent"
+                className="flex-1 text-sm px-2 py-1 rounded border border-cafe-accent/30 bg-cafe-surface-canvas focus:outline-none focus:ring-1 focus:ring-cafe-accent"
               />
               <button
                 type="button"
                 onClick={handleCreateDir}
                 disabled={!newDirName.trim()}
-                className="text-xs px-2.5 py-1 rounded bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40 transition-colors"
+                className="text-xs px-2.5 py-1 rounded bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40 transition-colors"
               >
                 创建
               </button>
@@ -371,7 +371,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
             type="button"
             onClick={() => browseResult && onSelect(browseResult.current)}
             disabled={!browseResult}
-            className="px-5 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-white text-sm font-medium transition-colors disabled:opacity-40"
+            className="px-5 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-[var(--cafe-surface)] text-sm font-medium transition-colors disabled:opacity-40"
           >
             选择此目录
           </button>

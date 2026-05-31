@@ -151,7 +151,7 @@ export function ChatInputMenus({
             ))}
           </div>
           {canScrollDown && (
-            <div className="px-4 py-1 text-micro text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-white shrink-0">
+            <div className="px-4 py-1 text-micro text-cafe-muted text-center border-t border-cafe-subtle bg-gradient-to-t from-[var(--cafe-surface)] shrink-0">
               ↓ 还有更多猫猫
             </div>
           )}
@@ -172,14 +172,14 @@ export function ChatInputMenus({
             <button
               key={game.id}
               data-testid={`game-item-${game.id}`}
-              className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-indigo-50' : 'hover:bg-cafe-surface-elevated'}`}
+              className={`w-full text-left px-4 py-3 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-[var(--semantic-info-surface)]' : 'hover:bg-cafe-surface-elevated'}`}
               onMouseEnter={() => onSelectIdx(i)}
               onMouseDown={(e) => {
                 e.preventDefault();
                 handleGameDrillIn();
               }}
             >
-              <WolfIcon className="w-6 h-6 text-indigo-500" />
+              <WolfIcon className="w-6 h-6 text-[var(--semantic-info)]" />
               <div>
                 <div className="text-sm font-semibold text-cafe-secondary">{game.label}</div>
                 <div className="text-xs text-cafe-muted">{game.desc}</div>
@@ -203,7 +203,7 @@ export function ChatInputMenus({
           className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-cafe overflow-hidden w-72 z-10"
         >
           <button
-            className="w-full text-left px-4 py-2 text-xs text-indigo-500 font-medium border-b border-cafe-subtle hover:bg-indigo-50 transition-colors flex items-center gap-1"
+            className="w-full text-left px-4 py-2 text-xs text-[var(--semantic-info)] font-medium border-b border-cafe-subtle hover:bg-[var(--semantic-info-surface)] transition-colors flex items-center gap-1"
             onMouseDown={(e) => {
               e.preventDefault();
               onGameStepChange('list');
@@ -225,14 +225,14 @@ export function ChatInputMenus({
               <button
                 key={mode.id}
                 data-testid={`game-mode-${mode.id}`}
-                className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-indigo-50' : 'hover:bg-cafe-surface-elevated'}`}
+                className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${i === selectedIdx ? 'bg-[var(--semantic-info-surface)]' : 'hover:bg-cafe-surface-elevated'}`}
                 onMouseEnter={() => onSelectIdx(i)}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   onSendCommand(mode.command);
                 }}
               >
-                <IconComponent className="w-5 h-5 text-indigo-400" />
+                <IconComponent className="w-5 h-5 text-[var(--semantic-info)]" />
                 <div>
                   <div className="text-sm font-semibold text-cafe-secondary">{mode.label}</div>
                   <div className="text-xs text-cafe-muted">{mode.desc}</div>

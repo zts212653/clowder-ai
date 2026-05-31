@@ -24,6 +24,11 @@ import { promisify } from 'node:util';
 import { isAbsoluteFilesystemPath, normalizeWorkspaceRelativePath } from '@cat-cafe/shared/utils';
 import type { FastifyPluginAsync } from 'fastify';
 import {
+  AuditEventTypes,
+  type EventAuditLog,
+  getEventAuditLog,
+} from '../domains/cats/services/orchestration/EventAuditLog.js';
+import {
   addLinkedRoot,
   getLinkedRootsAsync,
   getWorktreeRoot,
@@ -274,9 +279,11 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
 
 interface WorkspaceRouteOpts {
   socketEmit?: (event: string, data: unknown, room: string) => void;
+  auditLog?: EventAuditLog;
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
+  const auditLog = opts.auditLog ?? getEventAuditLog();
   // GET /api/workspace/worktrees (includes linked roots)
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
@@ -750,9 +757,10 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       action?: 'reveal' | 'open' | 'knowledge-feed';
       line?: number;
       threadId?: string;
+      catId?: string;
     };
   }>('/api/workspace/navigate', async (request, reply) => {
-    const { worktreeId, path: filePath, action = 'reveal', line, threadId } = request.body ?? {};
+    const { worktreeId, path: filePath, action = 'reveal', line, threadId, catId } = request.body ?? {};
 
     // Phase H: knowledge-feed action switches workspace mode without requiring a file path
     // threadId is required to avoid broadcasting mode switch to all sessions
@@ -763,6 +771,19 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       }
       const eventData = { path: '', worktreeId: worktreeId ?? '', action, threadId, eventId: randomUUID() };
       opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
+      auditLog
+        .append({
+          type: AuditEventTypes.WORKSPACE_NAVIGATE,
+          threadId,
+          data: {
+            worktreeId,
+            path: '',
+            action,
+            line: undefined,
+            catId,
+          },
+        })
+        .catch(() => {});
       return { ok: true, action };
     }
 
@@ -795,6 +816,20 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     } else {
       opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
     }
+
+    auditLog
+      .append({
+        type: AuditEventTypes.WORKSPACE_NAVIGATE,
+        threadId,
+        data: {
+          worktreeId,
+          path: filePath,
+          action,
+          line,
+          catId,
+        },
+      })
+      .catch(() => {});
 
     return { ok: true, path: filePath, action };
   });

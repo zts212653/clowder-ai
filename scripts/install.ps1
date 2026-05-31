@@ -45,7 +45,7 @@ function Test-PuppeteerBrowserDownloadFailure {
 }
 function Write-PuppeteerSkipWarning {
     Write-Warn "Bundled Chrome download failed - skipped"
-    Write-Warn "Thread export / screenshot may be unavailable. To install later: npx puppeteer browsers install chrome"
+    Write-Warn "Thread export / screenshot may be unavailable. Install Chrome/Chromium or set CHROME_EXECUTABLE_PATH in .env"
 }
 function Test-LockfileMismatchFailure {
     param([string]$OutputText)

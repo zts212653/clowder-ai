@@ -17,7 +17,7 @@ export function SillyCatsList({ entries }: { entries: SillyCatEntry[] }) {
       {entries.slice(0, 5).map((e) => (
         <li key={e.catId} className="flex items-center gap-2">
           <CatAvatar catId={e.catId} size={24} />
-          <span className="text-compact font-semibold" style={{ color: 'var(--cafe-text-primary)' }}>
+          <span className="text-compact font-semibold" style={{ color: 'var(--cafe-text)' }}>
             {e.displayName}
           </span>
           <span className="text-label ml-auto font-medium" style={{ color: 'var(--cafe-accent)' }}>
@@ -83,7 +83,7 @@ export function AchievementWall({ achievements }: { achievements: Achievement[] 
         <div
           key={a.id}
           className="flex items-center gap-2 rounded-lg px-3 py-2"
-          style={{ background: 'rgba(139,111,71,0.08)' }}
+          style={{ background: 'color-mix(in srgb, var(--cafe-accent) 8%, transparent)' }}
           title={a.description}
         >
           <span className="text-conn-amber-text" aria-hidden="true">
@@ -113,14 +113,17 @@ export function CvoLevelCard({ level }: { level: CvoLevel }) {
         <span className="text-3xl font-medium" style={{ fontFamily: 'Fraunces, serif', color: 'var(--cafe-accent)' }}>
           Lv.{level.level}
         </span>
-        <span className="text-sm font-semibold" style={{ color: 'var(--cafe-text-primary)' }}>
+        <span className="text-sm font-semibold" style={{ color: 'var(--cafe-text)' }}>
           {level.title}
         </span>
       </div>
       <p className="text-label" style={{ color: 'var(--cafe-text-muted)' }}>
         {level.description}
       </p>
-      <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(139,111,71,0.1)' }}>
+      <div
+        className="h-2 rounded-full overflow-hidden"
+        style={{ background: 'color-mix(in srgb, var(--cafe-accent) 10%, transparent)' }}
+      >
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--cafe-accent)' }} />
       </div>
       {level.nextTitle && (

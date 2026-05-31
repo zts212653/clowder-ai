@@ -78,7 +78,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
         </div>
         <div className="mt-1 h-1.5 rounded-full bg-[var(--console-card-bg)]">
           <div
-            className="h-full rounded-full bg-[var(--memory-progress-fill)] transition-all"
+            className="h-full rounded-full bg-[var(--cafe-accent)] transition-all"
             style={{ width: `${job.percent}%` }}
           />
         </div>
@@ -96,7 +96,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
           type="button"
           disabled={starting}
           onClick={handleStart}
-          className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
+          className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-sm transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
         >
           重建索引
         </button>
@@ -107,7 +107,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
   if (job?.status === 'error') {
     return (
       <div data-testid="rebuild-error" className="flex items-center gap-2">
-        <span className="rounded bg-conn-red-bg px-2 py-1 text-micro text-red-700">{job.error}</span>
+        <span className="rounded bg-conn-red-bg px-2 py-1 text-micro text-conn-red-text">{job.error}</span>
         <button
           type="button"
           disabled={starting}
@@ -126,7 +126,7 @@ export function RebuildButton({ onComplete }: { onComplete: () => void }) {
       disabled={starting}
       onClick={handleStart}
       data-testid="rebuild-button"
-      className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-[0_1px_3px_rgba(43,33,26,0.06)] transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
+      className={`rounded-lg bg-[var(--console-card-bg)] px-3 py-1.5 text-xs text-cafe-secondary shadow-sm transition-colors hover:bg-[var(--console-hover-bg)] ${starting ? 'opacity-50' : ''}`}
     >
       重建索引
     </button>

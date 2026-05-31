@@ -67,8 +67,12 @@ export function SettingsResourceToggleSwitch({
       title={title ?? (enabled ? '禁用' : '启用')}
       className={joinClasses(
         'settings-resource-toggle relative inline-flex h-[22px] w-10 shrink-0 rounded-full transition-colors disabled:cursor-default',
-        busy ? 'opacity-50' : 'cursor-pointer',
-        enabled ? 'bg-[var(--cafe-accent,#c96442)]' : 'bg-[var(--console-border-soft)]',
+        disabled || busy ? 'cursor-default opacity-50' : 'cursor-pointer',
+        disabled
+          ? 'bg-[var(--console-border-soft)]'
+          : enabled
+            ? 'bg-[var(--cafe-accent,#c96442)]'
+            : 'bg-[var(--console-border-soft)]',
       )}
     >
       <span

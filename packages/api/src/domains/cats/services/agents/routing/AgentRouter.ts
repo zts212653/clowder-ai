@@ -569,6 +569,24 @@ export class AgentRouter {
       }
     }
 
+    // P2 (codex review 6949db49): a line-start @handle that matched NO registered cat is an
+    // unknown handle (e.g. @kimi). Without this, parseAllMentions returns empty mentions + empty
+    // warnings, so the caller silently falls back to the default cat with zero user feedback.
+    // Scoped to line-start handles (F046: a leading @ is a routing intent) and excludes spans
+    // already consumed by a registered-cat match — avoids flagging mid-line @ (emails, code refs).
+    const lineStartHandleRe = /(?:^|\n)[ \t]*(?:[>*+-]+[ \t]*)?@([a-z0-9_.-]+)/gi;
+    for (const m of lowerMessage.matchAll(lineStartHandleRe)) {
+      const handle = m[1];
+      if (!handle) continue;
+      const atPos = (m.index ?? 0) + m[0].lastIndexOf('@');
+      if (consumed.some(([s, e]) => atPos >= s && atPos < e)) continue;
+      const resolved = resolveCatTarget(handle);
+      if ('error' in resolved && !seenCats.has(`@unknown:${handle}`)) {
+        seenCats.add(`@unknown:${handle}`);
+        routing_warnings.push(resolved.error);
+      }
+    }
+
     mentions.sort((a, b) => a.position - b.position);
     return { mentions, routing_warnings };
   }
@@ -907,14 +925,19 @@ export class AgentRouter {
     message: string,
     threadId?: string,
     options?: { persist?: boolean },
-  ): Promise<{ targetCats: CatId[]; intent: IntentResult; hasMentions: boolean }> {
+  ): Promise<{ targetCats: CatId[]; intent: IntentResult; hasMentions: boolean; routing_warnings: CatRoutingError[] }> {
     const resolvedThreadId = threadId ?? DEFAULT_THREAD_ID;
-    const hasMentions = (await this.parseAllMentions(message, resolvedThreadId)).mentions.length > 0;
+    // Capture both valid mentions AND routing_warnings (for disabled/not-found cats).
+    // routing_warnings lets callers (e.g. messages.ts) surface explicit feedback when
+    // a user's @mention silently fell back to a different cat (Thread 1 bug: @kimi→opus).
+    const allMentions = await this.parseAllMentions(message, resolvedThreadId);
+    const hasMentions = allMentions.mentions.length > 0;
+    const routing_warnings = allMentions.routing_warnings;
     const targetCats = options?.persist
       ? await this.resolveTargets(message, resolvedThreadId)
       : await this.peekTargets(message, resolvedThreadId);
     const intent = parseIntent(message, targetCats.length);
-    return { targetCats, intent, hasMentions };
+    return { targetCats, intent, hasMentions, routing_warnings };
   }
 
   /**
@@ -1010,6 +1033,9 @@ export class AgentRouter {
       contentBlocks?: readonly MessageContent[];
       uploadDir?: string;
       signal?: AbortSignal;
+      /** F-parallel-cancel: per-cat signal resolver — route-parallel gives each concurrent
+       *  cat its own slot signal so canceling one cat does not abort its siblings. */
+      signalForCat?: (catId: CatId) => AbortSignal | undefined;
       queueHasQueuedMessages?: (threadId: string) => boolean;
       hasQueuedOrActiveAgentForCat?: (threadId: string, catId: string) => boolean;
       /** F185 Phase B: deferred A2A enqueue when fairness gate blocks text-scan expansion */
@@ -1071,6 +1097,7 @@ export class AgentRouter {
       contentBlocks: options?.contentBlocks,
       uploadDir: options?.uploadDir,
       signal: options?.signal,
+      signalForCat: options?.signalForCat,
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
       deferA2AEnqueue: options?.deferA2AEnqueue,

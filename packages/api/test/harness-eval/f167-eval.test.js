@@ -320,4 +320,30 @@ describe('F167 Runtime Eval Snapshot', () => {
     assert.ok(c2.frictionCounts['c2.verdict_without_pass_count'] >= 3, 'verdict_without_pass must be friction');
     assert.ok(c2.frictionCounts['c2.void_hold_hint_emitted'] >= 3, 'void_hold must be friction');
   });
+
+  it('exposes both C2 denominators (c2.checked + c2.void_hold_checked) from counters (PR #1941)', () => {
+    const snapshot = generateF167Snapshot({
+      ...emptyInput,
+      metrics: {
+        cat_cafe_a2a_c2_verdict_hint_emitted: 9,
+        cat_cafe_a2a_c2_verdict_without_pass_count: 9,
+        cat_cafe_a2a_c2_exit_checked: 200,
+        cat_cafe_a2a_c2_void_hold_hint_emitted: 4,
+        cat_cafe_a2a_c2_void_hold_checked: 25,
+      },
+      traceStats: {
+        spanCount: 100,
+        maxSpans: 10000,
+        maxAgeMs: 86400000,
+        oldestStoredAt: Date.now() - 3600000,
+        newestStoredAt: Date.now(),
+      },
+    });
+    const c2 = snapshot.components.find((c) => c.componentId === 'C2');
+    // Two distinct denominators so attribution grades each friction against the right base.
+    assert.equal(c2.activationCounts['c2.checked'], 200);
+    assert.equal(c2.activationCounts['c2.void_hold_checked'], 25);
+    assert.equal(c2.frictionCounts['c2.verdict_without_pass_count'], 9);
+    assert.equal(c2.frictionCounts['c2.void_hold_hint_emitted'], 4);
+  });
 });

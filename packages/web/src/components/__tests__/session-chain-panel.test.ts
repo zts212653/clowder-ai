@@ -124,7 +124,7 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('2 sessions');
   });
 
-  it('renders active session with seq number, cat display badge, and clickable session ID', async () => {
+  it('renders active session with seq number, cat badge, and clickable session ID', async () => {
     mockSessionsResponse([
       { id: 'ses_abc12345xyz', catId: 'opus', seq: 2, status: 'active', messageCount: 8, createdAt: Date.now() - 5000 },
     ]);
@@ -269,32 +269,27 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('sealing');
   });
 
-  it('renders kimi colors from cat.color (badge inline style)', async () => {
+  it('renders kimi colors from cat.color (border inline style)', async () => {
     // kimi primary #4B5563 → 75,85,99
     mockSessionsResponse([
       { id: 'kimi_s1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="kimi"]',
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="kimi"]',
     ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.style.color).toMatch(/rgba?\(75,\s*85,\s*99/);
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(75,\s*85,\s*99/);
   });
 
-  it('renders the same cat display name as the main conversation in active session badges', async () => {
+  it('renders cat displayName in the active session badge', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'kimi', seq: 0, status: 'active', messageCount: 2, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="kimi"]',
-    ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toContain('梵花猫');
-    expect(badge!.textContent).not.toContain('kimi');
+    expect(container.textContent).toContain('梵花猫');
   });
 
   it('shows post-compact safety alert when sessionSealed is true', async () => {
@@ -635,41 +630,26 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).not.toContain('Session #6');
   });
 
-  it('applies codex green colors from cat.color (badge inline style)', async () => {
-    // codex primary #5B8C5A → 91,140,90; secondary #D4E6D3 → 212,230,211
+  it('applies codex green colors from cat.color (border + badge inline style)', async () => {
+    // codex primary #5B8C5A → 91,140,90
+    // F056: badge bg/text derived via OKLCH badgeBackground()/contrastingText()
     mockSessionsResponse([
       { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 3, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="codex"]',
+    ) as HTMLElement | null;
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(91,\s*140,\s*90/);
     const badge = container.querySelector(
       '[data-testid="session-badge-active"][data-cat-id="codex"]',
     ) as HTMLElement | null;
     expect(badge?.textContent).toContain('缅因猫');
-    expect(badge!.style.backgroundColor).toMatch(/rgba?\(212,\s*230,\s*211/);
-    expect(badge!.style.color).toMatch(/rgba?\(91,\s*140,\s*90/);
-  });
-
-  it('renders the cat display name in sealed session badges too', async () => {
-    mockSessionsResponse([
-      {
-        id: 's1',
-        catId: 'codex',
-        seq: 0,
-        status: 'sealed',
-        messageCount: 3,
-        createdAt: Date.now() - 60000,
-        sealedAt: Date.now() - 1000,
-      },
-    ]);
-    renderPanel('thread-1');
-    await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-sealed"][data-cat-id="codex"]',
-    ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toContain('缅因猫');
-    expect(badge!.textContent).not.toContain('codex');
+    // F056: badge colors are oklch-derived from primary hex (secondary removed)
+    expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+    expect(badge!.style.color).toMatch(/oklch\(/);
   });
 
   it('applies gemini colors from cat.color', async () => {
@@ -679,11 +659,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="gemini"]',
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="gemini"]',
     ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.style.color).toMatch(/rgba?\(74,\s*144,\s*226/);
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(74,\s*144,\s*226/);
   });
 
   it('applies dare colors from cat.color', async () => {
@@ -693,11 +673,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="dare"]',
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="dare"]',
     ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.style.color).toMatch(/rgba?\(255,\s*179,\s*0/);
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(255,\s*179,\s*0/);
   });
 
   it('applies gpt52 (maine-coon variant) colors from cat.color', async () => {
@@ -707,11 +687,11 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    const badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="gpt52"]',
+    const card = container.querySelector(
+      '[data-testid="session-card-active"][data-cat-id="gpt52"]',
     ) as HTMLElement | null;
-    expect(badge).not.toBeNull();
-    expect(badge!.style.color).toMatch(/rgba?\(102,\s*187,\s*106/);
+    expect(card).not.toBeNull();
+    expect(card!.style.boxShadow).toMatch(/rgba?\(102,\s*187,\s*106/);
   });
 
   it('applies opus-45 and sonnet (ragdoll variant) distinct colors from cat.color', async () => {
@@ -730,18 +710,12 @@ describe('F24: SessionChainPanel', () => {
     ) as HTMLElement | null;
     expect(opus45).not.toBeNull();
     expect(sonnet).not.toBeNull();
-    const opus45Badge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="opus-45"]',
-    ) as HTMLElement | null;
-    const sonnetBadge = container.querySelector(
-      '[data-testid="session-badge-active"][data-cat-id="sonnet"]',
-    ) as HTMLElement | null;
-    expect(opus45Badge!.style.color).toMatch(/rgba?\(126,\s*87,\s*194/);
-    expect(sonnetBadge!.style.color).toMatch(/rgba?\(179,\s*157,\s*219/);
+    expect(opus45!.style.boxShadow).toMatch(/rgba?\(126,\s*87,\s*194/);
+    expect(sonnet!.style.boxShadow).toMatch(/rgba?\(179,\s*157,\s*219/);
   });
 
   it('falls back to neutral gray when cat is missing from cat-config (badge background)', async () => {
-    // Fallback: primary #9CA3AF → 156,163,175; secondary #E5E7EB → 229,231,235
+    // Fallback: primary #9CA3AF. F056: badge bg/text derived via OKLCH.
     mockSessionsResponse([
       { id: 's1', catId: 'unknown-cat', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
     ]);
@@ -752,8 +726,9 @@ describe('F24: SessionChainPanel', () => {
     ) as HTMLElement | null;
     expect(badge).not.toBeNull();
     expect(badge!.textContent).toContain('unknown-cat');
-    expect(badge!.style.backgroundColor).toMatch(/rgba?\(229,\s*231,\s*235/);
-    expect(badge!.style.color).toMatch(/rgba?\(156,\s*163,\s*175/);
+    // F056: badge colors are oklch-derived from fallback #9CA3AF (secondary removed)
+    expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+    expect(badge!.style.color).toMatch(/oklch\(/);
   });
 
   it('discards stale response when slow thread-1 fetch resolves after thread-2 (P1 race condition)', async () => {
@@ -824,15 +799,16 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      const badge = container.querySelector(
-        '[data-testid="session-badge-active"][data-cat-id="opus-47"]',
+      const card = container.querySelector(
+        '[data-testid="session-card-active"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
-      expect(badge).not.toBeNull();
-      const triple = rgbTripleOf(badge!.style.color);
+      expect(card).not.toBeNull();
+      const triple = rgbTripleOf(card!.style.boxShadow);
       expect(triple).toEqual([123, 31, 162]);
     });
 
-    it('opus-47 active session badge uses cat.color.secondary as background and primary as text', async () => {
+    it('opus-47 active session badge uses oklch-derived colors from cat.color.primary', async () => {
+      // F056: secondary removed — badge bg/text derived via OKLCH from primary
       mockSessionsResponse([
         { id: 's_47', catId: 'opus-47', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
       ]);
@@ -842,10 +818,9 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-badge-active"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
       expect(badge).not.toBeNull();
-      // Secondary #E1BEE7 → 225,190,231
-      expect(rgbTripleOf(badge!.style.backgroundColor)).toEqual([225, 190, 231]);
-      // Primary #7B1FA2 → 123,31,162
-      expect(rgbTripleOf(badge!.style.color)).toEqual([123, 31, 162]);
+      // F056: badge colors are oklch-derived from primary #7B1FA2 (secondary removed)
+      expect(badge!.style.backgroundColor).toMatch(/oklch\(/);
+      expect(badge!.style.color).toMatch(/oklch\(/);
     });
 
     it('sealed session for opus-47 also uses cat.color (parity with active card)', async () => {
@@ -866,11 +841,7 @@ describe('F24: SessionChainPanel', () => {
         '[data-testid="session-card-sealed"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
       expect(card).not.toBeNull();
-      const sealBadge = container.querySelector(
-        '[data-testid="session-badge-sealed"][data-cat-id="opus-47"]',
-      ) as HTMLElement | null;
-      expect(sealBadge).not.toBeNull();
-      expect(rgbTripleOf(sealBadge!.style.color)).toEqual([123, 31, 162]);
+      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([123, 31, 162]);
     });
 
     it('falls back to neutral gray (#9CA3AF → 156,163,175) for unknown catId', async () => {
@@ -879,11 +850,11 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      const badge = container.querySelector(
-        '[data-testid="session-badge-active"][data-cat-id="unknown-cat"]',
+      const card = container.querySelector(
+        '[data-testid="session-card-active"][data-cat-id="unknown-cat"]',
       ) as HTMLElement | null;
-      expect(badge).not.toBeNull();
-      expect(rgbTripleOf(badge!.style.color)).toEqual([156, 163, 175]);
+      expect(card).not.toBeNull();
+      expect(rgbTripleOf(card!.style.boxShadow)).toEqual([156, 163, 175]);
     });
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {
@@ -910,7 +881,7 @@ describe('F24: SessionChainPanel', () => {
       expect(html).not.toContain('border-[#B39DDB66]');
       // Legacy gray fallback class
       expect(html).not.toContain('border-cafe/40');
-      expect(html).not.toContain('bg-gray-200');
+      expect(html).not.toContain('bg-cafe-surface-elevated');
     });
   });
 

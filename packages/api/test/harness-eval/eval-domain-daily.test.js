@@ -89,8 +89,11 @@ describe('eval-domain-daily task spec', () => {
     assert.equal(result.reason, 'no registered eval domains');
   });
 
-  it('execute delivers message to system thread and triggers eval cat', async () => {
-    const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+  it('execute delivers message to system thread and triggers eval cat as the thread owner (#796)', async () => {
+    const spec = createEvalDomainDailySpec({
+      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      defaultUserId: 'default-user',
+    });
 
     // Get a real domain signal from gate
     const gateResult = await spec.admission.gate();
@@ -125,7 +128,7 @@ describe('eval-domain-daily task spec', () => {
     const triggerArgs = triggerMock.mock.calls[0].arguments;
     assert.equal(triggerArgs[0], 'thread_eval_a2a'); // threadId
     assert.ok(triggerArgs[1], 'should have catId'); // catId
-    assert.equal(triggerArgs[2], 'scheduler'); // userId
+    assert.equal(triggerArgs[2], 'default-user'); // owner userId, so stream replies are visible after refresh
     assert.ok(triggerArgs[3].includes('eval:a2a'), 'reason should mention domain');
     assert.equal(triggerArgs[4], 'msg_123'); // messageId
   });

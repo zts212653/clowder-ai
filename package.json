@@ -80,7 +80,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
-    "@types/better-sqlite3": "7.6.13",
     "@types/node": "^20.11.0",
     "dependency-cruiser": "^17.3.8",
     "typescript": "^5.3.3",

@@ -3,21 +3,34 @@
 import type { MouseEvent } from 'react';
 import { useMemo } from 'react';
 import type { CapabilityBoardItem, CatFamily } from '../capability-board-ui';
+import { HubIcon } from '../hub-icons';
 import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
 import { projectDisplayName } from './useCapabilityState';
+
+const AVATAR_COLORS = ['#C65F3D', '#8B6E5A', '#A0522D', '#7B6B63', '#9B7653', '#6F5946'];
+
+export function avatarColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
 
 export function ToggleSwitch({
   enabled,
   busy,
   onClick,
   title,
+  disabled,
 }: {
   enabled: boolean;
   busy: boolean;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
   title?: string;
+  disabled?: boolean;
 }) {
-  return <SettingsResourceToggleSwitch enabled={enabled} busy={busy} onClick={onClick} title={title} />;
+  return (
+    <SettingsResourceToggleSwitch enabled={enabled} busy={busy} onClick={onClick} title={title} disabled={disabled} />
+  );
 }
 
 export function ProjectSelector({
@@ -64,16 +77,32 @@ export function ProjectSelector({
   );
 }
 
+export function PluginManagedLink({ pluginId }: { pluginId: string }) {
+  return (
+    <a
+      href="/settings?s=plugins"
+      onClick={(event) => event.stopPropagation()}
+      title={`由插件 ${pluginId} 管理，前往插件集成`}
+      className="inline-flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+    >
+      <HubIcon name="puzzle" className="h-3.5 w-3.5" />
+      <span className="hidden sm:inline">插件管理</span>
+    </a>
+  );
+}
+
 export function PerCatToggles({
   item,
   catFamilies,
   toggling,
   onToggle,
+  disabled,
 }: {
   item: CapabilityBoardItem;
   catFamilies: CatFamily[];
   toggling: string | null;
   onToggle: (item: CapabilityBoardItem, enabled: boolean, catId?: string) => void;
+  disabled?: boolean;
 }) {
   if (catFamilies.length === 0 || !item.cats) return null;
   const catEntries = Object.entries(item.cats);
@@ -98,6 +127,7 @@ export function PerCatToggles({
                     <ToggleSwitch
                       enabled={enabled}
                       busy={busy}
+                      disabled={disabled}
                       onClick={(event) => {
                         event.stopPropagation();
                         onToggle(item, !enabled, catId);

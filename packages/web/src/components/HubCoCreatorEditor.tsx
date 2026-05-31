@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { primeCoCreatorConfigCache } from '@/hooks/useCoCreatorConfig';
+import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { apiFetch } from '@/utils/api-client';
 import type { CoCreatorConfig } from './config-viewer-types';
 import { uploadAvatarAsset } from './hub-cat-editor.client';
@@ -13,10 +15,7 @@ const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   aliases: [],
   mentionPatterns: ['@co-creator'],
   avatar: '',
-  color: {
-    primary: '#D4A76A',
-    secondary: '#FFF8F0',
-  },
+  color: { ...CO_CREATOR_COLOR },
 };
 
 function normalizeMentionTag(value: string): string {
@@ -128,7 +127,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
       onClick={onClose}
@@ -273,6 +272,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

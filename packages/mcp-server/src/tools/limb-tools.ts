@@ -132,8 +132,8 @@ export const limbTools = [
     name: 'limb_list_available',
     description:
       'List currently online limb nodes and their capabilities. Optionally filter by capability category. ' +
-      'Limbs are external devices/nodes (iPhone, Windows PC, Mac Mini, etc.) — NOT cats. ' +
-      'Use when you need to discover what physical devices are available for tasks like camera capture, GPU rendering, etc. ' +
+      'Limbs are external devices or plugin-backed service nodes (iPhone, Windows PC, Mac Mini, publishing services, etc.) — NOT cats. ' +
+      'Use when you need to discover available node IDs, capability categories, command names, and authorization levels before invoking a device or service capability. ' +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbListAvailableInputSchema,
     handler: handleLimbListAvailable,
@@ -142,8 +142,8 @@ export const limbTools = [
     name: 'limb_invoke',
     description:
       'Invoke a capability on a specific limb node. Requires nodeId and command. ' +
-      'Example: limb_invoke(nodeId="iphone-1", command="camera.snap") ' +
-      'GOTCHA: Get the nodeId from limb_list_available first — do not guess node IDs. ' +
+      'Examples: limb_invoke(nodeId="iphone-1", command="camera.snap") or invoke a plugin service command listed by limb_list_available. ' +
+      'GOTCHA: Get the nodeId and command from limb_list_available first — do not guess node IDs or commands. ' +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbInvokeInputSchema,
     handler: handleLimbInvoke,

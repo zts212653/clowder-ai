@@ -33,7 +33,7 @@ fi
 
 REGISTRY_DIR="${CAT_CAFE_REDIS_TEST_REGISTRY_DIR:-${TMPDIR:-/tmp}/cat-cafe-redis-tests}"
 REGISTRY_FILE="${REGISTRY_DIR}/registry.tsv"
-PROTECTED_REDIS_TEST_PORTS_REGEX='^(6398|6399)$'
+PROTECTED_REDIS_TEST_PORTS_REGEX='^(6398|6399|6401)$'
 
 is_protected_port() {
   [[ "$1" =~ $PROTECTED_REDIS_TEST_PORTS_REGEX ]]
@@ -82,6 +82,17 @@ stop_instance() {
 
   if [[ -n "$pid" ]] && pid_alive "$pid"; then
     wait_for_pid_exit "$pid" 20 || true
+  fi
+  # Guard against PID reuse: verify the PID is still a redis-server on the
+  # expected port before escalating to SIGTERM/SIGKILL.  Checks both process
+  # name (redis-server) AND port in proctitle (:PORT), so a PID reused by
+  # a different redis-server on a different port is also skipped.
+  if [[ -n "$pid" ]] && pid_alive "$pid"; then
+    local cmd_check
+    cmd_check="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    if [[ "$cmd_check" != *redis-server* ]] || { [[ -n "$port" ]] && [[ "$cmd_check" != *":${port}"* ]]; }; then
+      pid=""  # PID reused or wrong port — skip signal escalation
+    fi
   fi
   if [[ -n "$pid" ]] && pid_alive "$pid"; then
     kill -s SIGTERM "$pid" 2>/dev/null || true
@@ -166,7 +177,14 @@ cleanup() {
   fi
   if [[ -n "${PORT:-}" ]]; then
     stop_instance "$PORT" "$pid" "$DATADIR"
-    remove_current_registry_entry
+    # Only remove registry entry if the port is confirmed dead.
+    # If Redis is still dying (race window), keep the entry so the next run's
+    # cleanup_registry() can finish the job via port-based shutdown.
+    if command -v redis-cli >/dev/null 2>&1 \
+       && ! redis-cli -h 127.0.0.1 -p "$PORT" ping >/dev/null 2>&1; then
+      remove_current_registry_entry
+    fi
+    # else: port still responding → leave entry for next cleanup_registry()
   else
     /bin/rm -rf "$DATADIR"
   fi

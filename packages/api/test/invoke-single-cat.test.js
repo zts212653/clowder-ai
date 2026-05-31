@@ -205,6 +205,36 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(catError[0].data.error.includes('CLI'), 'cat_error should contain error message');
   });
 
+  it('injects per-cat GIT_AUTHOR_NAME/GIT_COMMITTER_NAME into callbackEnv (email inherited)', async () => {
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'codex',
+        service,
+        prompt: 'test',
+        userId: 'user-git-attr',
+        threadId: 'thread-git-attr',
+        isLastCat: true,
+      }),
+    );
+
+    const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+    // codex = maine-coon breed; model comes from getCatModel('codex') (gpt-5.x family).
+    // Proves the wiring: breed + the REAL model (not the catId) land in the spawn env author name.
+    assert.match(callbackEnv.GIT_AUTHOR_NAME, /^MaineCoon-GPT-/);
+    assert.equal(callbackEnv.GIT_COMMITTER_NAME, callbackEnv.GIT_AUTHOR_NAME);
+    // Email is intentionally NOT set — it inherits git config (contribution graph stays on one account).
+    assert.equal('GIT_AUTHOR_EMAIL' in callbackEnv, false);
+    assert.equal('GIT_COMMITTER_EMAIL' in callbackEnv, false);
+  });
+
   it('persists task progress snapshot with completed status on done', async () => {
     const { MemoryTaskProgressStore } = await import(
       '../dist/domains/cats/services/agents/invocation/MemoryTaskProgressStore.js'

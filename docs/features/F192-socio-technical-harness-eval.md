@@ -217,21 +217,19 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 **Path C double-track**（Tier 1 ship + eval parallel）：L0 §8 v1（13 条 educated guess）已 ship 不阻塞；Phase F eval 收集 N 周 miss rate 数据 → L0 §8 v2 数据驱动调 Tier 1 排序 / 加新条目 / 移到 Tier 2。
 
-- [ ] AC-F1: Architecture Decision——`eval:capability-wakeup` 是 F192 内 domain 扩展（同 E-sop/E-scale，不是新 F 号；reopen 由 CVO 2026-05-27 sign-off）；复用 Verdict Handoff / re-eval closure pattern；明确"capability-wakeup eval ≠ SOP compliance eval"边界（软提示发现率 vs 硬规则合规）
 - [ ] AC-F2: Capability Trace Adapter——从 F153 telemetry / session events / Skill loading events / MCP tool call invocations / diff context 抽 capability invocation traces + scenario detection signals（如 diff 含 `packages/web/*` 文件、回复含特定 trigger phrase、文件路径 reference）
 - [ ] AC-F3: Scenario→Capability Predicate Evaluator——扩展 E-sop predicate type 集，加 capability-wakeup 专属 type：`scenario_then_capability_predicate`（场景 hit 但 capability invocation 缺失）/ `text_pattern_then_capability`（特定 trigger phrase 出现但没调相应 skill）/ `multi_msg_text_volume_threshold`（纯文字回复超 N tokens 没用 rich_block）/ `file_change_then_capability`（特定文件路径改了但 capability 没触发）
 - [ ] AC-F4: `eval:capability-wakeup` domain registry + system thread bootstrap：复用 AC-E2/E4 pattern；first scope = L0 §8 v1 的 13 条 Tier 1 trigger reflex（每条至少一个 predicate）
-- [ ] AC-F5: Eval cat invocation：周度 scheduled task 唤醒 eval 猫，per-cat / per-scenario / per-capability 出 miss rate verdict；区分 false-positive（不在该场景）vs true-miss（场景对了但没用 capability）vs negative（场景对了用了 capability）
+- [ ] AC-F5: Eval cat invocation：周度 scheduled task 唤醒 eval 猫，per-cat / per-scenario / per-capability 出 miss rate verdict；区分 false-positive（不在该场景）vs true-miss（场景对了但没用 capability）vs negative（场景对了用了 capability）。**CVO 2026-05-28 决策 #1：miss 全记（含 threadId + sessionId 全 provenance），记录与归因解耦——3-way 根因分类（认知/行为/注意力稀释）是 analysis 层、不烤进记录，跨 session "会用" 是分析时可回溯的问题不预设记录规则（memo §3）。第三根因「注意力稀释」来自 ADR-030 §9.5 + team lead观察 CC 动态提醒机制**
 - [ ] AC-F6: Verdict Handoff target resolver：capability owner = F203 owner（@opus47 Ragdoll）/ skill 维护者（按 capability 归属解析）；handoff packet 含 miss rate trend + 排序建议（promote / demote / drop）+ scenario fixture 证据
 - [ ] AC-F7: First batch predicates 覆盖 L0 §8 v1 的 13 条 Tier 1（`rich-messaging` / `browser-preview` / `image-generation` / `workspace-navigator` / `pencil-design` / `guide-interaction` / `expert-panel` / `propose_thread` / `external_runtime_sessions` / `cliDiagnostics` / `eval verdict` / `search_evidence drilldown` / `update_workflow`）每条至少一个 machine-checkable predicate
 - [ ] AC-F8: Cross-cat scope validation——predicate 应能跨 cat family 分别检测（Ragdoll / Maine Coon / Siamese 各自典型掉球模式不同；e.g., 开发系猫常忘 `rich-messaging` + `propose_thread`，视觉系猫常忘 `update_workflow`）；verdict bundle 含 per-family 拆分
-- [ ] AC-F9: Re-eval closure——与 E-pilot 同 pattern（F203 owner 处理 handoff → L0 §8 v2 update → 复验 verdict miss rate 下降 → verdict close）；连续 4 周某条 Tier 1 miss rate < 5% → demote 候选 → 写入 `capability-wakeup-index.md` Tier 2
+- [ ] AC-F9: Re-eval closure——与 E-pilot 同 pattern（F203 owner 处理 handoff → L0 §8 v2 update → 复验 verdict miss rate 下降 → verdict close）；连续 4 周某条 Tier 1 miss rate < 5% → demote 候选 → 写入 `capability-wakeup-index.md` Tier 2。**CVO 2026-05-28 决策 #2 治理权重：新 forcing-function hook = 行为改动 → 走 Design Gate / CVO accept（继承 verdict-handoff cvoAcceptRequired gate）；纯 demote/promote（Tier 1↔Tier 2 排序）= eval-owner + feature-owner 轻量闭环、无 CVO gate（memo §4）**
 
 依赖：F203 PR（L0 §8 v1 ship）merged 后 register `eval:capability-wakeup` domain；F209 telemetry / Skill load tracking / MCP call tracking 提供 trace source；与 E-pilot/E-hub/E-scale/E-sop/E-community 共享 evaluator infra（extend predicate type 集 + 复用 verdict handoff schema）。
 
 **Build sequence**（Path C double-track）：
 1. F203 PR ship L0 §8 v1 + ref doc（本 PR）→ trigger 名单稳定
-2. Phase F design memo 写 capability predicate type 集（沿用 E-sop 7 type 集 + 加 capability-specific 4 type）
 3. Implementation：trace adapter + evaluator + domain registry + scheduled invocation
 4. First weekly verdict cycle（real data 第一刀）
 5. L0 §8 v2 数据驱动 iterate（去掉低 miss-rate 条目 / 加新发现的高 miss-rate 场景）
@@ -412,6 +410,7 @@ Based on the first micro fit digest (2026-05-11):
 | domain thread 变成新垃圾桶 | AC-E4 限定 thread 只按域承载长期分析；工作状态 / verdict SOT 在 registry + Eval Hub |
 | IM Hub 老系统 thread 与 Eval domain thread 割裂成两套前端模型 | KD-15 明确 System Thread / System Workspace 归一：统一 system kind / linked surface / actions；IM Hub kind=`connector_hub`，Eval kind=`eval_domain`，互用系统分区与删除保护 |
 | eval 猫武断给 delete/sunset verdict | AC-E3 要 counterarguments；高影响 delete/sunset 需 CVO accept 或 Design Gate 签字 |
+| **`harness-eval/` 目录 dir-size 超限债** — Phase F capability-wakeup 一批 `eval-capability-wakeup-*.ts` 加入，使 `packages/api/src/infrastructure/harness-eval/` 达 29 .ts（> error=25），2026-05-30 全量 sync 时被 clowder-ai Directory Size Guard 抓出 | `.dir-exceptions.json` 已登记 time-bound 豁免（expiresAt 2026-06-15，ticket F192）；**后续按 capability-wakeup / a2a / domain / hub 子域拆分**（GitHub issue 跟踪）。根因：`check:dir-size` 此前不在 pnpm gate，本次已补入堵住下次 |
 
 ## Key Decisions
 

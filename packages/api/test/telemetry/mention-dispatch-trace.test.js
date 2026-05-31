@@ -542,8 +542,8 @@ test('F153 Phase I (F185 deferred): route-serial creates mention_dispatch span i
     resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
     'utf8',
   );
-  // The deferred branch is the `else if (... && deferA2AEnqueue && !signal?.aborted)` block.
-  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  // The deferred branch is the `else if (... && deferA2AEnqueue && !catSignal?.aborted)` block.
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !catSignal?.aborted');
   assert.ok(deferredIdx > 0, 'Should find the deferred branch guard');
   // After the deferred guard, the same block should create a mention_dispatch span tagged as deferred.
   const dispatchSpanIdx = src.indexOf("'cat_cafe.mention_dispatch'", deferredIdx);
@@ -560,7 +560,7 @@ test('F153 Phase I (F185 deferred): deferred path increments a2aDispatchCount', 
     resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
     'utf8',
   );
-  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !catSignal?.aborted');
   const counterIdx = src.indexOf('a2aDispatchCount.add', deferredIdx);
   assert.ok(
     counterIdx > deferredIdx,
@@ -573,7 +573,7 @@ test('F153 Phase I (F185 deferred): deferA2AEnqueue entry carries callerTraceCon
     resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
     'utf8',
   );
-  const deferredIdx = src.indexOf('deferA2AEnqueue && !signal?.aborted');
+  const deferredIdx = src.indexOf('deferA2AEnqueue && !catSignal?.aborted');
   // After the deferred guard, the enqueue invocation should include callerTraceContext
   // so QueueProcessor reuses it as the parent for the dispatched route.
   const enqueueCallIdx = src.indexOf('deferA2AEnqueue({', deferredIdx);

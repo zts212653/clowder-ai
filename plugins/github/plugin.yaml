@@ -1,0 +1,15 @@
+id: github
+name: GitHub
+version: "1.0.0"
+description: PR 追踪、Review 投递、CI/CD 监控与 Token 配置
+icon: key
+iconBg: "#24292e"
+
+docsUrl: https://github.com/settings/tokens
+setupSteps:
+  - 在 GitHub 创建 Personal Access Token，需要 repo 权限
+  - Token 用于 PR 追踪、Review 路由、CI/CD 状态同步
+
+config: []
+
+resources: []

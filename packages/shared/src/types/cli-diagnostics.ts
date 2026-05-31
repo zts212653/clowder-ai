@@ -19,7 +19,9 @@ export type CliErrorReasonCode =
   | 'network_error'
   | 'invalid_config'
   | 'spawn_failed'
-  | 'context_window_exceeded';
+  | 'context_window_exceeded'
+  | 'tool_call_parse_failed'
+  | 'server_overloaded';
 
 /**
  * Structured CLI error payload (Phase A KD-1 white-list admission).
@@ -36,8 +38,20 @@ export interface CliDiagnostics {
   publicSummary: string;
   /** Always present; humanized hint for next action */
   publicHint: string;
-  /** Only present when reasonCode !== undefined (AC-A5); sanitized + length-capped */
+  /** Sanitized + length-capped CC error excerpt. KD-1 white-list: only filled from a
+   *  whitelisted safe source (see `excerptSource`). When reasonCode is known, source =
+   *  'classifier'; when reasonCode is unknown but CC emitted a structured result error,
+   *  source = 'cc_structured' (Phase D AC-D3). When source is undefined, the excerpt
+   *  MUST NOT be rendered — frontend treats missing source as a malformed/persisted
+   *  payload and fails closed (defense-in-depth alongside backend admission). */
   safeExcerpt?: string;
+  /** F212 Phase D (P2 fix per cloud codex review on a429aada3): safe-source whitelist for
+   *  `safeExcerpt`. 'classifier' = known reasonCode classifier hit; 'cc_structured' = CC
+   *  result event with structured error message (AC-D3 unknown fallback). Frontend gates
+   *  excerpt rendering on `KNOWN_EXCERPT_SOURCES.has(excerptSource)` — both protects
+   *  malformed payloads (no source) AND fails closed when older clients see a future
+   *  source value they don't recognize (e.g. a hypothetical 'pii_redacted'). */
+  excerptSource?: 'classifier' | 'cc_structured';
   /** Debug correlation metadata — safe to expose */
   debugRef: {
     command: string;

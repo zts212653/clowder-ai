@@ -727,7 +727,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             <button
               type="button"
               onClick={() => setShowBootcampList(true)}
-              className="p-1.5 rounded-lg text-conn-amber-text hover:bg-conn-amber-bg transition-colors"
+              className="p-1.5 rounded-lg text-cafe-accent hover:bg-accent-50 transition-colors"
               title="猫猫训练营"
               data-testid="sidebar-bootcamp"
               data-guide-id="sidebar.bootcamp"
@@ -1152,7 +1152,7 @@ function DeleteConfirmDialog({
           <button
             onClick={onConfirm}
             disabled={!confirmed}
-            className={`px-3 py-1.5 text-sm rounded-lg text-white transition-colors ${
+            className={`px-3 py-1.5 text-sm rounded-lg text-[var(--cafe-surface)] transition-colors ${
               isSystem
                 ? 'bg-conn-red-text hover:bg-conn-red-hover disabled:bg-conn-red-ring disabled:cursor-not-allowed'
                 : 'bg-conn-amber-text hover:bg-conn-amber-hover'

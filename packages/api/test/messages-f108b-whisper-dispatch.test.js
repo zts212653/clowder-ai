@@ -57,6 +57,8 @@ function buildDeps(overrides = {}) {
         return !catId ? true : false;
       }),
       cancel: mock.fn(() => ({ cancelled: true, catIds: ['opus'] })),
+      cancelAll: mock.fn(() => ['opus']),
+      cancelInvocation: mock.fn(() => ['opus']),
       isDeleting: mock.fn(() => false),
       getActiveSlots: mock.fn(() => [{ catId: 'opus', startedAt: Date.now() }]),
     },
@@ -335,8 +337,12 @@ describe('F108B: whisper slot-aware delivery mode', () => {
       },
     });
 
-    // Force should cancel and execute immediately
-    assert.ok(deps.invocationTracker.cancel.mock.calls.length > 0, 'force mode should cancel active invocation');
+    // F-parallel-cancel (cloud #6): force = scoped preempt of the TARGET invocation → cancelInvocation
+    // (not cancelAll, which would also abort an unrelated side-dispatch in the same thread).
+    assert.ok(
+      deps.invocationTracker.cancelInvocation.mock.calls.length > 0,
+      'force mode should cancelInvocation (scoped preempt) the active invocation',
+    );
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0, 'force mode should not enqueue');
   });
 });

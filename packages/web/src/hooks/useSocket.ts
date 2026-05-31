@@ -19,6 +19,7 @@ import { getUserId } from '@/utils/userId';
 import { reconnectGame } from './useGameReconnect';
 // F173 Phase E (KD-1): bg refs + background message processing moved into
 // useAgentMessages — useSocket no longer dispatches active vs background.
+import { type AgentMessageCoalescer, createAgentMessageCoalescer } from './useSocket-message-coalescer';
 import { loadJoinedRoomsFromSession, saveJoinedRoomsToSession } from './useSocket-persistence';
 import { handleVoiceChunk, handleVoiceStreamEnd, handleVoiceStreamStart } from './useVoiceStream';
 
@@ -405,6 +406,16 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
 
+  // clowder-ai#789: coalesce synchronous agent_message bursts into one microtask flush.
+  // callbacksRef.current is always live (updated above on every render), so the closure
+  // never goes stale. One coalescer per socket mount — reset only when the component unmounts.
+  const agentMessageCoalescerRef = useRef<AgentMessageCoalescer | null>(null);
+  if (agentMessageCoalescerRef.current === null) {
+    agentMessageCoalescerRef.current = createAgentMessageCoalescer((msg) =>
+      callbacksRef.current.onMessage(msg as AgentMessage),
+    );
+  }
+
   const persistJoinedRooms = useCallback(() => {
     saveJoinedRoomsToSession(userIdRef.current, joinedRoomsRef.current);
   }, []);
@@ -562,7 +573,9 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
       // F173 Phase E (KD-1 handler unification): single dispatch.
       // useAgentMessages.handleAgentMessage 现在自己路由 active vs background，并管 bg refs。
       // useSocket 只做 socket-event-level 概念（recordInvocationEvent + 转发 callback）。
-      callbacksRef.current.onMessage(msg);
+      // clowder-ai#789: buffer into microtask coalescer — prevents React "Maximum update
+      // depth exceeded" when 200+ events arrive synchronously in one macrotask.
+      agentMessageCoalescerRef.current?.push(msg);
     });
 
     socket.on(

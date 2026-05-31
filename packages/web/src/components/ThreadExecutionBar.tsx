@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import { catColorVar } from '@/lib/cat-slug';
 import type { CatInvocationInfo } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
@@ -44,7 +45,7 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
       if (cat) {
         map.set(catId, {
           label: formatCatName(cat),
-          color: cat.color.primary,
+          color: catColorVar(cat.id, 'primary'),
         });
       } else {
         map.set(catId, { label: catId, color: 'var(--cafe-accent)' });

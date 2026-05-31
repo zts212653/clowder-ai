@@ -9,8 +9,8 @@ interface FlagState {
 
 const MODE_LABELS: Record<string, { label: string; color: string }> = {
   off: { label: '关闭', color: 'bg-zinc-600' },
-  shadow: { label: '影子模式', color: 'bg-amber-600' },
-  on: { label: '开启', color: 'bg-emerald-600' },
+  shadow: { label: '影子模式', color: 'bg-[var(--semantic-warning)]' },
+  on: { label: '开启', color: 'bg-[var(--semantic-success)]' },
 };
 
 export function MemoryFlagPanel() {
@@ -35,7 +35,7 @@ export function MemoryFlagPanel() {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-800/40 bg-red-950/20 p-4">
+      <div className="rounded-lg border border-[var(--semantic-critical)] bg-[var(--semantic-critical-surface)] p-4">
         <p className="text-sm text-conn-red-text">{error}</p>
       </div>
     );
@@ -52,7 +52,7 @@ export function MemoryFlagPanel() {
       <div className="flex items-center gap-3">
         <span className="text-xs text-cafe-muted">F200 消费重排序</span>
         <span
-          className={`rounded px-2 py-0.5 text-xs font-medium text-white ${badge.color}`}
+          className={`rounded px-2 py-0.5 text-xs font-medium text-[var(--cafe-surface)] ${badge.color}`}
           data-testid="f200-rerank-badge"
         >
           {badge.label}

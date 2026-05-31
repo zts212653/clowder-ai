@@ -486,7 +486,11 @@ export class CodexAgentService implements AgentService {
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
     // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
     // 这是预期行为——新建会话即可获得 .git 写入权限。
-    const promptArgs = ['--', effectivePrompt];
+    // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
+    // 传入（见下方 cliOpts.stdinInput），绝不进 argv —— 否则 `ps -o command=` /
+    // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
+    // 并发进程。'--' 结束选项解析，'-' 让 codex 从 stdin 读取 PROMPT。
+    const promptArgs = ['--', '-'];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
@@ -617,6 +621,9 @@ export class CodexAgentService implements AgentService {
       const cliOpts = {
         command: codexCommand,
         args,
+        // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
+        // 传入，不进 argv —— 防 `ps -o command=` / /proc/<pid>/cmdline 跨进程泄露。
+        stdinInput: effectivePrompt,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: codexEnv,
         ...(options?.signal ? { signal: options.signal } : {}),

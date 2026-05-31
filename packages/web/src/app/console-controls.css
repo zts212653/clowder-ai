@@ -1,3 +1,10 @@
+/*
+ * F056 Phase E — console-controls.css 走 design system token
+ *
+ * 零 dark override：颜色全走 cafe-* / accent-* token（token 自身 mode-aware）。
+ * light/dark 100% 靠 theme-tokens.css 的 [data-theme] 切换，无逐处定制。
+ */
+
 .console-form-label {
   color: var(--cafe-text-secondary);
   font-size: var(--console-font-label);
@@ -23,14 +30,12 @@ select.console-form-input {
   max-width: 14rem;
   padding-right: 2rem;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238A776B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  /* chevron stroke：中性暖灰 ≈neutral-500（light/dark 同 L≈0.57）。
+   * SVG data-URI 不支持 var()，单色在两种 mode 都清晰，无需 dark override。 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23958475' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   cursor: pointer;
-}
-
-[data-theme="dark"] select.console-form-input {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A0907F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
 }
 
 .console-form-input::placeholder {
@@ -69,16 +74,8 @@ select.console-form-input {
   color: var(--cafe-accent-foreground);
 }
 
-[data-theme="dark"] .console-button-primary {
-  background: color-mix(in srgb, var(--cafe-accent) 72%, var(--console-card-bg) 28%);
-}
-
 .console-button-primary:hover {
   background: var(--cafe-accent-hover);
-}
-
-[data-theme="dark"] .console-button-primary:hover {
-  background: color-mix(in srgb, var(--cafe-accent) 85%, var(--console-card-bg) 15%);
 }
 
 .console-button-secondary {

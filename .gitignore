@@ -197,6 +197,7 @@ docs/content/drafts/exports/*.print.html
 docs/harness-feedback/snapshots/
 docs/harness-feedback/attributions/
 docs/harness-feedback/digests/
+generated/capability-wakeup/
 packages/api/test/__b1_parent_a__/
 .claude/skills/organize-threads
 .claude/skills/thread-orchestration

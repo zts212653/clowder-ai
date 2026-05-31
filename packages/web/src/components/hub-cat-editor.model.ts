@@ -6,6 +6,7 @@ import {
   builtinAccountIdForClient as sharedBuiltinAccountIdForClient,
 } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
@@ -351,8 +352,8 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     variantLabel: cat?.variantLabel ?? '',
     nickname: cat?.nickname ?? createDraft?.templateNickname ?? '',
     avatar: cat?.avatar ?? createDraft?.templateAvatar ?? '',
-    colorPrimary: cat?.color.primary ?? createDraft?.templateColorPrimary ?? '#9B7EBD',
-    colorSecondary: cat?.color.secondary ?? createDraft?.templateColorSecondary ?? '#E8DFF5',
+    colorPrimary: cat?.color.primary ?? createDraft?.templateColorPrimary ?? UNKNOWN_CAT_COLOR.primary,
+    colorSecondary: cat?.color.secondary ?? createDraft?.templateColorSecondary ?? UNKNOWN_CAT_COLOR.secondary,
     mentionPatterns: joinTags(mentionPatterns),
     roleDescription: cat?.roleDescription ?? createDraft?.templateRoleDescription ?? '',
     personality: cat?.personality ?? createDraft?.templatePersonality ?? '',

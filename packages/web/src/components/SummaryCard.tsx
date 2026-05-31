@@ -52,7 +52,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="h-3 w-3 text-green-500 flex-shrink-0"
+                    className="h-3 w-3 text-conn-emerald-text flex-shrink-0"
                   >
                     <path d="M20 6L9 17l-5-5" />
                   </svg>
@@ -70,7 +70,7 @@ export function SummaryCard({ topic, conclusions, openQuestions, createdBy, time
             <ul className="space-y-1">
               {openQuestions.map((q, i) => (
                 <li key={i} className="text-xs text-cafe-secondary flex gap-1.5">
-                  <span className="text-amber-400 flex-shrink-0">?</span>
+                  <span className="text-conn-amber-text flex-shrink-0">?</span>
                   <span>{q}</span>
                 </li>
               ))}

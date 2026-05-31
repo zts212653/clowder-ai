@@ -209,7 +209,10 @@ runtime_quick_mode() {
 
 install_runtime_dependencies() {
   info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
-  pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
+  # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
+  # which causes pnpm to skip devDependencies and break builds.
+  env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+    pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
 }
 
 seed_runtime_config_from_project() {
@@ -361,7 +364,8 @@ init_runtime_worktree() {
 
   if [ "$RUN_INSTALL" = "true" ]; then
     info "installing dependencies in runtime worktree"
-    pnpm -C "$RUNTIME_DIR" install
+    env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+      pnpm -C "$RUNTIME_DIR" install
   fi
 
   seed_runtime_config_from_project
@@ -394,7 +398,8 @@ sync_runtime_worktree() {
 
   if [ "$RUN_INSTALL" = "true" ]; then
     info "refreshing dependencies in runtime worktree"
-    pnpm -C "$RUNTIME_DIR" install
+    env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+      pnpm -C "$RUNTIME_DIR" install
 
     # pnpm install can legitimately fix an incomplete lock file (e.g. a PR
     # added a dep to package.json but forgot to commit the lock update).

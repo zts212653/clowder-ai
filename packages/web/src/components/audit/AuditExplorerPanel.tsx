@@ -78,7 +78,7 @@ export function AuditExplorerPanel({
                 key={t}
                 onClick={() => setTab(t)}
                 className={`flex-1 py-1 text-micro font-semibold transition-colors
-                  ${tab === t ? 'text-blue-600 border-b-2 border-blue-600' : 'text-cafe-muted hover:text-cafe-secondary'}`}
+                  ${tab === t ? 'text-[var(--semantic-info)] border-b-2 border-[var(--semantic-info)]' : 'text-cafe-muted hover:text-cafe-secondary'}`}
               >
                 {TAB_LABELS[t]}
               </button>

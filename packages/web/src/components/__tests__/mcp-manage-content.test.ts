@@ -243,6 +243,49 @@ describe('McpManageContent', () => {
     confirmSpy.mockRestore();
   });
 
+  it('renders plugin-owned MCP resources as readonly and routes management to plugins', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            ...MOCK_ITEMS[1],
+            id: 'plugin:weixin-mp:mcp',
+            source: 'external',
+            pluginId: 'weixin-mp',
+            description: 'Plugin owned MCP',
+          },
+        ],
+        catFamilies: [{ id: 'ragdoll', name: 'Ragdoll', catIds: ['opus'] }],
+        projectPath: '/test/project',
+        skillHealth: null,
+      }),
+    });
+
+    await renderContent();
+
+    const card = container.querySelector('.settings-resource-card');
+    expect(card?.textContent).toContain('Plugin owned MCP');
+    expect(card?.textContent).toContain('由插件 weixin-mp 管理');
+    expect(card?.querySelector('a[href="/settings?s=plugins"]')).toBeTruthy();
+
+    const toggle = card?.querySelector('.settings-resource-toggle') as HTMLButtonElement | null;
+    expect(toggle?.disabled).toBe(true);
+    expect(card?.querySelector('button[title="卸载此 MCP"]')).toBeFalsy();
+    expect(card?.querySelector('button[title="按猫开关"]')).toBeFalsy();
+
+    mockFetch.mockClear();
+    await act(async () => {
+      toggle?.click();
+    });
+
+    expect(
+      mockFetch.mock.calls.some(
+        (args: unknown[]) => args[0] === '/api/capabilities' && (args[1] as { method?: string })?.method === 'PATCH',
+      ),
+    ).toBe(false);
+  });
+
   it('ignores stale project-switch responses when a newer selection resolves first', async () => {
     mockThreads = [
       { id: 'slow-thread', projectPath: '/tmp/slow-project', lastActiveAt: 2 },

@@ -1,8 +1,8 @@
 'use client';
 
-import type { ConnectorTailwindTheme } from '@cat-cafe/shared';
 import { getConnectorDefinition } from '@cat-cafe/shared';
 import { useCallback, useState } from 'react';
+import { tintedLight } from '@/lib/color-utils';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { ConnectorImage, GitHubIcon, SchedulerIcon, SettingsIcon, UsersIcon } from './icons/ConnectorIcons';
@@ -41,14 +41,6 @@ function renderContentBlocks(blocks: MessageContent[]) {
 interface ConnectorBubbleProps {
   message: ChatMessageType;
 }
-
-/** Default theme for connectors without a registered tailwindTheme. */
-const DEFAULT_CONNECTOR_THEME: ConnectorTailwindTheme = {
-  avatar: 'bg-conn-blue-bg ring-2 ring-conn-blue-ring',
-  label: 'text-conn-blue-text',
-  labelLink: 'text-conn-blue-text hover:text-conn-blue-hover',
-  bubble: 'border border-conn-blue-bubble-border bg-conn-blue-bubble-bg',
-};
 
 /** F056: Designed icon per connector — replaces emoji with SVG/PNG icons.
  *  Thread-local system notices are filtered earlier in ChatMessage and do not render here. */
@@ -94,16 +86,6 @@ function ConnectorIcon({ connector, fallbackIcon }: { connector: string; fallbac
   }
 }
 
-/**
- * F098-B5: Registry-driven connector theme lookup.
- * New connectors only need an entry in CONNECTOR_DEFINITIONS (shared package).
- */
-function getConnectorTheme(connector: string | undefined): ConnectorTailwindTheme {
-  if (!connector) return DEFAULT_CONNECTOR_THEME;
-  const def = getConnectorDefinition(connector);
-  return def?.tailwindTheme ?? DEFAULT_CONNECTOR_THEME;
-}
-
 function HoldBallCancelButton({ taskId }: { taskId: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
 
@@ -139,7 +121,11 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
   if (!source) return null;
   if (message.extra?.scheduler?.hiddenTrigger) return null;
 
-  const theme = getConnectorTheme(source.connector);
+  const connId = source.connector;
+  /* Avatar uses fixed hex from connector definition — same pattern as CatAvatar
+   * (cat.color.primary). Only the message bubble bg is OKLCH-derived. */
+  const connDef = getConnectorDefinition(connId);
+  const themeHex = connDef?.color?.secondary ?? connDef?.color?.primary;
   const hasBlocks = message.contentBlocks && message.contentBlocks.length > 0;
   const richBlocks = message.extra?.rich?.blocks;
   // P3 fix (砚砚 R1): protocol whitelist — only render safe URLs as clickable links
@@ -148,8 +134,15 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
 
   return (
     <div data-message-id={message.id} className="flex gap-2 mb-4 items-start">
-      {/* Connector icon avatar */}
-      <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-base ${theme.avatar}`}>
+      {/* Connector icon avatar — fixed hex like CatAvatar (ring = theme color,
+       * bg = 50% tint toward white). NOT OKLCH-derived. */}
+      <div
+        className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-base"
+        style={{
+          backgroundColor: themeHex ? tintedLight(themeHex, 0.5) : 'var(--cafe-surface)',
+          boxShadow: themeHex ? `0 0 0 2px ${themeHex}` : '0 0 0 2px var(--cafe-border)',
+        }}
+      >
         <ConnectorIcon connector={source.connector} fallbackIcon={source.icon} />
       </div>
       <div className="max-w-[85%] md:max-w-[75%] min-w-0">
@@ -159,12 +152,18 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
               href={srcUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className={`text-xs font-semibold hover:underline ${theme.labelLink}`}
+              className="text-xs font-semibold hover:underline"
+              style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}
             >
               {source.label}
             </a>
           ) : (
-            <span className={`text-xs font-semibold ${theme.label}`}>{source.label}</span>
+            <span
+              className="text-xs font-semibold"
+              style={{ color: `var(--color-${connId}-bubble, var(--cafe-text))` }}
+            >
+              {source.label}
+            </span>
           )}
           {source.sender && (
             <span className="text-xs text-cafe-secondary">{source.sender.name || source.sender.id} 说</span>
@@ -172,7 +171,11 @@ export function ConnectorBubble({ message }: ConnectorBubbleProps) {
           <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
         </div>
         <div
-          className={`${theme.bubble} rounded-2xl rounded-bl-sm px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden`}
+          className="rounded-2xl px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden"
+          style={{
+            backgroundColor: `var(--color-${connId}-surface, var(--cafe-surface))`,
+            color: 'var(--cat-msg-text, var(--cafe-text))',
+          }}
         >
           {hasBlocks ? renderContentBlocks(message.contentBlocks!) : <MarkdownContent content={message.content} />}
           {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}

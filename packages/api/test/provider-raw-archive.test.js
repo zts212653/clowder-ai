@@ -11,10 +11,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
-import { describe, mock, test } from 'node:test';
+import { describe, test } from 'node:test';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
+import {
+  buildFakeL0Compiler,
+  collect,
+  createMockArchive,
+  createMockProcess,
+  createMockSpawnFn,
+  emitEvents,
+} from './helpers/provider-archive-test-helpers.js';
 
 ensureFakeCliOnPath('claude');
 ensureFakeCliOnPath('opencode');
@@ -23,82 +29,6 @@ ensureFakeCliOnPath('kimi');
 const { ClaudeAgentService } = await import('../dist/domains/cats/services/agents/providers/ClaudeAgentService.js');
 const { OpenCodeAgentService } = await import('../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js');
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
-
-// ── Helpers ──
-
-async function collect(iterable) {
-  const items = [];
-  for await (const item of iterable) items.push(item);
-  return items;
-}
-
-function createMockProcess() {
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const emitter = new EventEmitter();
-  const originalEmit = emitter.emit.bind(emitter);
-  emitter.emit = (event, ...args) => {
-    const emitted = originalEmit(event, ...args);
-    if (event === 'exit') {
-      process.nextTick(() => originalEmit('close', ...args));
-    }
-    return emitted;
-  };
-  const proc = {
-    stdout,
-    stderr,
-    pid: 99999,
-    exitCode: null,
-    kill: mock.fn(() => {
-      process.nextTick(() => {
-        if (!stdout.destroyed) stdout.end();
-        emitter.emit('exit', null, 'SIGTERM');
-      });
-      return true;
-    }),
-    on: (event, listener) => {
-      emitter.on(event, listener);
-      return proc;
-    },
-    once: (event, listener) => {
-      emitter.once(event, listener);
-      return proc;
-    },
-    _emitter: emitter,
-  };
-  return proc;
-}
-
-function createMockSpawnFn(proc) {
-  return mock.fn(() => proc);
-}
-
-function emitEvents(proc, events) {
-  for (const event of events) {
-    proc.stdout.write(`${JSON.stringify(event)}\n`);
-  }
-  proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
-}
-
-function createMockArchive() {
-  return {
-    append: mock.fn(async () => {}),
-    getPath: (id) => `/tmp/test-archive/${id}.ndjson`,
-  };
-}
-
-/** Fake L0 compiler for Claude (required since F203) */
-function buildFakeL0Compiler(content = 'COMPILED-L0') {
-  const fn = async ({ outPath }) => {
-    if (outPath) {
-      const { writeFileSync } = await import('node:fs');
-      writeFileSync(outPath, content, 'utf8');
-    }
-    return content;
-  };
-  return fn;
-}
 
 // ── Claude raw archive tests ──
 

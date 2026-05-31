@@ -86,11 +86,11 @@ export function ChatInputActionButton({
       {voice.state === 'recording' && (
         <div className="absolute top-0 right-4 -mt-6 flex items-center gap-2">
           {voice.partialTranscript && (
-            <div className="px-2 py-0.5 bg-gray-800 text-white text-xs rounded-lg max-w-[240px] truncate opacity-80">
+            <div className="px-2 py-0.5 bg-cafe-surface-sunken text-cafe text-xs rounded-lg max-w-[240px] truncate opacity-80">
               {voice.partialTranscript}
             </div>
           )}
-          <div className="px-2 py-0.5 bg-conn-red-text text-white text-xs rounded-full animate-pulse whitespace-nowrap">
+          <div className="px-2 py-0.5 bg-conn-red-text text-[var(--cafe-accent-foreground)] text-xs rounded-full animate-pulse whitespace-nowrap">
             REC {Math.floor(voice.duration / 60)}:{String(voice.duration % 60).padStart(2, '0')}
           </div>
         </div>
@@ -105,7 +105,7 @@ export function ChatInputActionButton({
       {hasActiveInvocation && !disabled && onStop && (
         <button
           onClick={() => onStop()}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-white transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-conn-red-text text-[var(--cafe-surface)] transition-colors hover:bg-conn-red-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-conn-red-text/40"
           title="停止生成"
           aria-label="Stop generation"
         >
@@ -120,7 +120,7 @@ export function ChatInputActionButton({
         /* Backward compat: when explicitly disabled during active invocation, Stop is the only primary action */
         <button
           onClick={() => onStop()}
-          className="p-3 rounded-xl bg-conn-red-text text-white hover:bg-conn-red-hover transition-colors"
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors"
           title="停止生成"
           aria-label="Stop generation"
         >
@@ -131,7 +131,7 @@ export function ChatInputActionButton({
       ) : voice.state === 'recording' ? (
         <button
           onClick={voice.stopRecording}
-          className="p-3 rounded-xl bg-conn-red-text text-white hover:bg-conn-red-hover transition-colors animate-pulse"
+          className="p-3 rounded-xl bg-conn-red-text text-[var(--cafe-surface)] hover:bg-conn-red-hover transition-colors animate-pulse"
           title="停止录音"
           aria-label="Stop recording"
         >
@@ -140,7 +140,7 @@ export function ChatInputActionButton({
       ) : voice.state === 'transcribing' ? (
         <button
           disabled
-          className="p-3 rounded-xl bg-gray-300 text-white cursor-wait"
+          className="p-3 rounded-xl bg-cafe-surface-sunken text-cafe-muted cursor-wait"
           title="转写中"
           aria-label="Transcribing"
         >
@@ -152,7 +152,7 @@ export function ChatInputActionButton({
           <button
             onClick={onQueueSend}
             disabled={isSendDisabled}
-            className="p-3 rounded-xl bg-[#9B7EBD] text-white hover:bg-[#8A6DAC] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="p-3 rounded-xl bg-[var(--color-cocreator-primary)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             aria-label="排队发送"
             title="排队发送 — 猫猫忙完后处理"
           >
@@ -180,7 +180,7 @@ export function ChatInputActionButton({
         <button
           onClick={onSend}
           disabled={isSendDisabled}
-          className="p-3 rounded-xl bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="p-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           title="发送消息"
           aria-label="Send message"
         >

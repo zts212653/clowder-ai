@@ -55,6 +55,21 @@ describe('buildCancelMessages (production function)', () => {
     assert.ok(dones.every((d) => d.isFinal === true));
   });
 
+  // F-parallel-cancel: when SocketManager / queue.ts scope the broadcast to the requested cat,
+  // a single-cat Stop on a multi-cat batch must clear ONLY that cat — not its siblings. This is
+  // the most direct cause of "取消一只两只一起取消" from the real Stop button.
+  test('scoped single-cat cancel from multi-cat batch: only the requested cat gets a done', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('t1', ['opus', 'codex', 'gemini'], 'user1');
+    const result = tracker.cancel('t1', 'codex', 'user1');
+    // result.catIds carries the whole batch [opus,codex,gemini]; SocketManager scopes to [codex].
+    const scopedResult = { ...result, catIds: ['codex'] };
+    const messages = buildCancelMessages(scopedResult);
+    const dones = messages.filter((m) => m.type === 'done');
+    assert.equal(dones.length, 1, 'only the cancelled cat gets a done — siblings stay alive in UI');
+    assert.equal(dones[0].catId, 'codex');
+  });
+
   test('empty catIds fallback: defaults to opus', () => {
     const tracker = new InvocationTracker();
     // start(threadId, catId, userId) — no catIds

@@ -253,7 +253,7 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
             type="button"
             onClick={handleInstall}
             disabled={installing}
-            className="mt-1 px-3 py-1.5 text-xs rounded-lg bg-cafe-accent text-white hover:bg-cafe-interactive disabled:opacity-50"
+            className="mt-1 px-3 py-1.5 text-xs rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-50"
           >
             {installing ? '安装中...' : '确认安装'}
           </button>

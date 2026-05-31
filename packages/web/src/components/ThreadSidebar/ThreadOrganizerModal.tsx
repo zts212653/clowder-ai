@@ -197,7 +197,7 @@ export function ThreadOrganizerModal({
               type="button"
               onClick={handleApply}
               disabled={assignedCount === 0 || applying}
-              className="text-xs px-3 py-1.5 rounded-md bg-cafe-accent text-white disabled:opacity-40 transition-opacity"
+              className="text-xs px-3 py-1.5 rounded-md bg-cafe-accent text-[var(--cafe-surface)] disabled:opacity-40 transition-opacity"
             >
               {applying ? '应用中...' : `批量应用 (${assignedCount})`}
             </button>
