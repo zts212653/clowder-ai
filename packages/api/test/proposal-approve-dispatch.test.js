@@ -247,14 +247,8 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // F128 chain protocol injection (砚砚 PR #809 review P1):
     // single-cat preferredCats still gets the chain section so the cat knows
     // "you are the only invited member; report back when done".
-    assert.ok(
-      enqueued.includes('接力链路'),
-      'chain protocol section must be injected when preferredCats provided',
-    );
-    assert.ok(
-      enqueued.includes('Server 只 wake 了'),
-      'chain protocol must explain that only the first cat was woken',
-    );
+    assert.ok(enqueued.includes('接力链路'), 'chain protocol section must be injected when preferredCats provided');
+    assert.ok(enqueued.includes('Server 只 wake 了'), 'chain protocol must explain that only the first cat was woken');
   });
 
   test('approve always picks preferredCats[0] as first cat (card order is ground truth, message @s are narrative)', async () => {

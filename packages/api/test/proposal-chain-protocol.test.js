@@ -62,10 +62,7 @@ describe('F128 chain protocol injection', () => {
     assert.ok(kimiIdx >= 0 && geminiIdx > kimiIdx && codexIdx > geminiIdx, 'order must follow preferredCats');
     assert.ok(orderLine.includes('回到主 Thread'), 'order must end at 主 Thread');
 
-    assert.ok(
-      enqueued.includes('行首独立一行'),
-      'must instruct cats to use line-start @-mention for handoff',
-    );
+    assert.ok(enqueued.includes('行首独立一行'), 'must instruct cats to use line-start @-mention for handoff');
     assert.ok(
       enqueued.includes('cat_cafe_cross_post_message'),
       'must mention cross_post_message for final report-back',
