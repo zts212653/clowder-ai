@@ -345,6 +345,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CHROME_EXECUTABLE_PATH',
+    defaultValue: '(未设置 → 自动检测系统 Chrome/Edge/Chromium)',
+    description: '对话导出截图使用的 Chromium 系浏览器路径。未设置时按 Chrome > Edge > Chromium 优先级自动检测',
+    category: 'server',
+    sensitive: false,
+  },
+  {
     name: 'GAME_NARRATOR_ENABLED',
     defaultValue: '(未设置 → 不启用)',
     description: '设为 true 启用游戏叙述者模式',
