@@ -215,7 +215,7 @@ export function VoteConfigModal({
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-cafe-accent text-white hover:bg-cafe-interactive transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             开始投票
           </button>

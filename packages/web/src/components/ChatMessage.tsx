@@ -1,9 +1,12 @@
 'use client';
 
+import type { CSSProperties } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useTts } from '@/hooks/useTts';
-import { hexToRgba, tintedLight } from '@/lib/color-utils';
+import { catColorVar, catSlug } from '@/lib/cat-slug';
+import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
+import { hexToOklch } from '@/lib/color-utils';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
@@ -36,10 +39,10 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   'dragon-li': { radius: 'rounded-lg rounded-tl-sm', font: 'font-mono' },
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
+
+/* catSlug helper moved to '@/lib/cat-slug' so other components can share it. */
 const SCHEDULER_ACCENT_BADGE_CLASS =
   'inline-flex w-fit items-center gap-1.5 rounded-full border border-conn-amber-ring bg-conn-amber-bg px-2.5 py-1 text-xs font-semibold text-conn-amber-text shadow-sm';
-const SCHEDULER_ACCENT_BUBBLE_CLASS =
-  'border-conn-amber-ring bg-conn-amber-bg/70 ring-1 ring-amber-200 shadow-[0_10px_24px_rgba(217,119,6,0.16)] bg-gradient-to-b from-amber-50/60 to-transparent';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -100,12 +103,48 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
         const breed = BREED_STYLES[catData.breedId ?? ''] ?? DEFAULT_BREED_STYLE;
         const label = formatCatName(catData);
         const isCallback = message.origin === 'callback';
+        /* F056: Route bubble background through CSS vars so the OKLCH Tuner
+         * (which writes --color-{slug}-surface) actually controls bubble color.
+         * Previously bgColor was catData.color.secondary (raw catalog hex),
+         * which bypassed the F056 token system entirely. */
+        const slug = catSlug(catData.id);
+        /* F056: Compute msg-hue/-chroma for .cat-persona-derived class so the
+         * outer message wrapper provides --cat-msg-{bubble,surface,inset,...}
+         * tokens used by nested ThinkingContent/CliOutputBlock. Without this,
+         * those nested blocks render with --cat-msg-inset undefined → transparent. */
+        let msgHue = 297; // fallback
+        let msgChroma = 0.1;
+        try {
+          const oklch = hexToOklch(catData.color.primary);
+          if (Number.isFinite(oklch.h) && Number.isFinite(oklch.c)) {
+            msgHue = oklch.h;
+            msgChroma = oklch.c;
+          }
+        } catch {
+          /* fallback values already set */
+        }
         return {
           label,
           radius: breed.radius,
           font: breed.font,
-          bgColor: isCallback ? tintedLight(catData.color.primary, 0.08) : catData.color.secondary,
-          borderColor: isCallback ? hexToRgba(catData.color.primary, 0.12) : hexToRgba(catData.color.primary, 0.3),
+          /* F056 (铲屎官 2026-05-28): post_message callback bubbles use the
+           * SAME --color-{slug}-surface as normal bubbles. Previously isCallback
+           * branched to tintedLight(hex, 0.08) — a hex-derived value that
+           * bypassed the F056 token chain, so callback bubbles didn't follow
+           * Tuner. Unified now: per-cat slug-keyed token drives both kinds. */
+          bgColor: `var(--color-${slug}-surface)`,
+          /* F056: cat name text color driven by Tuner's catText H/L/C slider.
+           * This goes on the name span; message body text uses --cat-msg-text
+           * (the msgText slider) via inline style on the bubble div instead. */
+          textColor: catColorVar(catData.id, 'text'),
+          /* F056: borderColor also routed through token via color-mix so Tuner
+           * gradient propagates to bubble outline as well. Uses --color-{slug}-
+           * ring (the existing ring tier already follows --cat-ring-l/cmul). */
+          borderColor: isCallback
+            ? `color-mix(in srgb, ${catColorVar(catData.id, 'ring')} 12%, transparent)`
+            : `color-mix(in srgb, ${catColorVar(catData.id, 'ring')} 30%, transparent)`,
+          msgHue,
+          msgChroma,
         };
       })()
     : null;
@@ -251,16 +290,20 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
     const toneClass = isTool
       ? 'text-cafe-muted bg-cafe-surface-elevated/50 font-mono text-xs py-1'
       : isFollowup
-        ? 'text-purple-700 bg-purple-50 border border-purple-200'
+        ? 'text-[var(--color-cafe-accent)] bg-[var(--accent-50)] border border-purple-200'
         : isError
           ? 'text-conn-red-text bg-conn-red-bg rounded-full'
-          : 'text-blue-700 bg-conn-blue-bg';
+          : 'text-[var(--semantic-info)] bg-conn-blue-bg';
     return (
       <div data-message-id={message.id} className={`flex justify-center ${isTool ? 'mb-1' : 'mb-3'}`}>
         <div className={`text-sm px-4 py-2 rounded-lg whitespace-pre-wrap text-left max-w-[85%] ${toneClass}`}>
           {isFollowup && <span className="mr-1">🔗</span>}
           {message.content}
-          {isFollowup && <span className="block mt-1 text-xs text-purple-500">输入 @猫名 跟进 来发起 follow-up</span>}
+          {isFollowup && (
+            <span className="block mt-1 text-xs text-[var(--color-cocreator-primary)]">
+              输入 @猫名 跟进 来发起 follow-up
+            </span>
+          )}
         </div>
       </div>
     );
@@ -274,15 +317,41 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
   }
 
   if (isUser) {
-    const coCreatorPrimary = coCreator.color?.primary ?? '#815b5b';
-    const coCreatorSecondary = coCreator.color?.secondary ?? '#FFDDD2';
+    const coCreatorPrimary = coCreator.color?.primary ?? CO_CREATOR_COLOR.primary;
+    /* F056: cocreator slug-keyed (cocreator is in SLUGS, has its own per-cat
+     * --color-cocreator-surface in cat-persona-tokens.css that follows the
+     * shared --cat-surface-l/cmul gradient — same Tuner control surface as
+     * other cats, but cocreator keeps its own hue/chroma). */
+    const coCreatorBubbleBg = 'var(--color-cocreator-surface)';
+    /* F056: cocreator bubble text uses the same --cat-msg-text as cat bubbles,
+     * so the "消息文字" Tuner slider controls ALL message body text uniformly.
+     * --color-cocreator-text (from catTxt/catText slider) is reserved for the
+     * cocreator name span, not the message body. */
+    const coCreatorBubbleText = 'var(--cat-msg-text)';
+    /* F056: also wire cocreator hue/chroma to --msg-* so .cat-persona-derived
+     * provides --cat-msg-{inset,inset-text} for nested ThinkingContent etc. */
+    let coCreatorMsgHue = 40;
+    let coCreatorMsgChroma = 0.13;
+    try {
+      const oklch = hexToOklch(coCreatorPrimary);
+      if (Number.isFinite(oklch.h) && Number.isFinite(oklch.c)) {
+        coCreatorMsgHue = oklch.h;
+        coCreatorMsgChroma = oklch.c;
+      }
+    } catch {
+      /* fallback values already set */
+    }
     return (
-      <div data-message-id={message.id} className="group flex justify-end gap-2 mb-4 items-start">
+      <div
+        data-message-id={message.id}
+        className="group flex justify-end gap-2 mb-4 items-start cat-persona-derived"
+        style={{ '--msg-hue': coCreatorMsgHue, '--msg-chroma': coCreatorMsgChroma } as CSSProperties}
+      >
         <div className="max-w-[75%]">
           <div className="flex justify-end items-center gap-2 mb-1">
             {isWhisper && (
               <span
-                className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+                className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
               >
                 {isRevealed ? '已揭秘' : `悄悄话 → ${message.whisperTo?.join(', ') ?? ''}`}
               </span>
@@ -292,21 +361,21 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
             )}
             <span className="text-xs text-cafe-muted">{formatDualTime(message.timestamp, message.deliveredAt)}</span>
             <CopyIdButton messageId={message.id} />
-            <span className="text-xs font-semibold" style={{ color: coCreatorPrimary }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-cocreator-primary)' }}>
               {coCreator.name}
             </span>
           </div>
           <div
             className={`rounded-2xl rounded-br-sm px-4 py-3 transition-transform hover:-translate-y-0.5 ${
               isWhisper && !isRevealed
-                ? 'bg-conn-amber-bg text-conn-amber-text border border-dashed border-conn-amber-ring'
+                ? 'bg-semantic-warning-surface text-semantic-warning border border-dashed border-semantic-warning'
                 : ''
             }`}
             style={
               !isWhisper || isRevealed
                 ? {
-                    backgroundColor: coCreatorSecondary,
-                    color: coCreatorPrimary,
+                    backgroundColor: coCreatorBubbleBg,
+                    color: coCreatorBubbleText,
                   }
                 : undefined
             }
@@ -319,8 +388,11 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
           </div>
         </div>
         <div
-          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-xs font-bold text-white"
-          style={{ backgroundColor: coCreatorPrimary, boxShadow: `0 0 0 2px ${coCreatorSecondary}` }}
+          className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-2 flex items-center justify-center text-xs font-bold text-[var(--cafe-surface)]"
+          style={{
+            backgroundColor: 'var(--color-cocreator-primary)',
+            boxShadow: '0 0 0 2px var(--color-cocreator-surface)',
+          }}
         >
           {coCreator.avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -358,7 +430,17 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
   }
 
   return (
-    <div data-message-id={message.id} className="group flex gap-2 mb-4 items-start">
+    <div
+      data-message-id={message.id}
+      /* F056: always add cat-persona-derived so nested ThinkingContent/CliOutputBlock
+       * have valid --cat-msg-{inset,inset-text,...} tokens even when catData is
+       * undefined (e.g. stream messages without resolved catId). Fallback msg-hue/
+       * msg-chroma come from the CSS var defaults in cat-persona-tokens.css. */
+      className="group flex gap-2 mb-4 items-start cat-persona-derived"
+      style={
+        catStyle ? ({ '--msg-hue': catStyle.msgHue, '--msg-chroma': catStyle.msgChroma } as CSSProperties) : undefined
+      }
+    >
       {catData && (
         <CatAvatar
           catId={message.catId!}
@@ -371,14 +453,14 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
         {catStyle && (
           <div className="mb-1 flex flex-col gap-1 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-xs font-semibold" style={{ opacity: 0.8 }}>
+              <span className="text-xs font-semibold" style={{ color: catStyle.textColor, opacity: 0.8 }}>
                 {catStyle.label}
               </span>
               <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
               <CopyIdButton messageId={message.id} />
               {isWhisper && (
                 <span
-                  className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-conn-amber-bg text-conn-amber-text'}`}
+                  className={`text-xs px-1.5 py-0.5 rounded ${isRevealed ? 'bg-cafe-surface-elevated text-cafe-secondary' : 'bg-semantic-warning-surface text-semantic-warning'}`}
                 >
                   {isRevealed
                     ? '已揭秘'
@@ -427,7 +509,7 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
                       e.stopPropagation();
                       pushThreadRouteWithHistory(sourceId, typeof window !== 'undefined' ? window : undefined);
                     }}
-                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-[#FDF6ED] border-[#E8DCCF] text-[#8D6E63] hover:bg-[#F5EDE0] transition-colors cursor-pointer w-fit max-w-full"
+                    className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-cafe-surface border-cafe text-cafe hover:bg-cafe-surface-sunken transition-colors cursor-pointer w-fit max-w-full"
                     title={sourceId}
                     aria-label={`跳转到来源 thread ${sourceId}`}
                   >
@@ -446,8 +528,12 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
         <div
           className={`px-4 py-3 transition-transform hover:-translate-y-0.5 overflow-hidden ${
             catStyle ? `${catStyle.radius} ${catStyle.font ?? ''}` : 'bg-cafe-surface rounded-2xl'
-          } ${showSchedulerAccent ? SCHEDULER_ACCENT_BUBBLE_CLASS : ''}`}
-          style={catStyle ? { backgroundColor: catStyle.bgColor } : undefined}
+          }`}
+          style={
+            catStyle
+              ? { backgroundColor: catStyle.bgColor, color: 'var(--cat-msg-text)' }
+              : { color: 'var(--cat-msg-text)' }
+          }
         >
           {hasCliBlock && isStreamOrigin ? null : !isStreamOrigin && hasBlocks ? (
             <ContentBlocks blocks={message.contentBlocks!} />

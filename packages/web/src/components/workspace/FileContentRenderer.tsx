@@ -166,7 +166,7 @@ export function FileContentRenderer({
           <button
             type="button"
             onClick={onMdAddToChat}
-            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-white text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
+            className="absolute top-2 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cafe-accent text-[var(--cafe-surface)] text-xs font-medium shadow-lg hover:bg-cafe-interactive transition-colors z-10 animate-fade-in"
             title="引用到聊天"
           >
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -182,7 +182,7 @@ export function FileContentRenderer({
   if (isHtml && htmlPreview && !editMode)
     return (
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="px-2 py-1 bg-amber-900/20 text-amber-400 text-micro border-b border-amber-900/30 flex-shrink-0">
+        <div className="px-2 py-1 bg-[var(--semantic-warning-surface)] text-conn-amber-text text-micro border-b border-[var(--semantic-warning)] flex-shrink-0">
           预览模式 — 相对资源路径（图片/CSS/JS）可能无法加载
         </div>
         <div className="flex-1 min-h-0 bg-cafe-surface">

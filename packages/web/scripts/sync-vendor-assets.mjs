@@ -12,9 +12,13 @@ const webRoot = resolve(scriptDir, '..');
 const vendorRoot = resolve(webRoot, 'public', 'vendor');
 const appGlobalCssFiles = [
   'theme-tokens.css',
+  'cat-persona-tokens.css',
+  'cat-persona-derived.css',
   'console-shell.css',
   'console-controls.css',
+  'console-tokens.css',
   'connector-tokens.css',
+  'theme-extras.css',
   'werewolf-theme.css',
 ];
 

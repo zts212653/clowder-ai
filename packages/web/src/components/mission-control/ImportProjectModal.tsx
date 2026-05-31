@@ -99,7 +99,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
         </div>
 
         {error && (
-          <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-red-700">
+          <div className="mt-3 rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
             {error}
           </div>
         )}
@@ -116,7 +116,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
             type="button"
             onClick={() => void handleSubmit()}
             disabled={submitting}
-            className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+            className="rounded-lg bg-[var(--mc-accent)] px-4 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
           >
             {submitting ? '导入中...' : '导入'}
           </button>

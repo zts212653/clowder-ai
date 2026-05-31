@@ -128,11 +128,11 @@ function MiniThreadRow({
   const status = getCatStatusType(ts.catStatuses);
   const dotColor =
     status === 'error'
-      ? 'bg-red-400'
+      ? 'bg-[var(--semantic-critical)]'
       : status === 'working'
-        ? 'bg-amber-400 animate-pulse'
+        ? 'bg-[var(--semantic-warning)] animate-pulse'
         : status === 'done'
-          ? 'bg-green-400'
+          ? 'bg-[var(--semantic-success)]'
           : '';
 
   const firstCat = thread.participants[0];
@@ -157,7 +157,7 @@ function MiniThreadRow({
       {!isCollapsed && <span className="text-xs text-cafe-secondary truncate flex-1 min-w-0">{title}</span>}
       {ts.unreadCount > 0 && (
         <span
-          className={`text-micro ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-amber-500'} text-white rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
+          className={`text-micro ${ts.hasUserMention ? 'bg-conn-red-text' : 'bg-[var(--semantic-warning)]'} text-[var(--cafe-surface)] rounded-full min-w-[14px] px-0.5 text-center leading-3 flex-shrink-0`}
         >
           {ts.unreadCount > 9 ? '9+' : ts.unreadCount}
         </span>

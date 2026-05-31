@@ -5,9 +5,9 @@ import { useCallback, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
-  open: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
-  answered: { bg: 'bg-conn-green-bg', text: 'text-green-800' },
-  escalated: { bg: 'bg-conn-red-bg', text: 'text-red-800' },
+  open: { bg: 'bg-[var(--semantic-warning-surface)]', text: 'text-conn-amber-text' },
+  answered: { bg: 'bg-conn-green-bg', text: 'text-conn-emerald-text' },
+  escalated: { bg: 'bg-conn-red-bg', text: 'text-conn-red-text' },
 };
 
 type NonNullPath = 'confirmation' | 'evidence' | 'artifact' | 'prototype' | 'escalation';
@@ -84,7 +84,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
         <button
           type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)]"
+          className="rounded-lg bg-[var(--mc-accent)] px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)]"
         >
           {showForm ? '取消' : 'Add Question'}
         </button>
@@ -134,7 +134,7 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
             type="button"
             onClick={() => void handleCreate()}
             disabled={submitting || !cardId || !question.trim()}
-            className="w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-white hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
+            className="w-full rounded-lg bg-[var(--mc-accent)] py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-[var(--mc-accent-hover)] disabled:opacity-40"
           >
             {submitting ? '提交中...' : '提交'}
           </button>
@@ -180,14 +180,14 @@ export function ResolutionQueue({ projectId, resolutions, cards, onUpdate }: Res
                     <button
                       type="button"
                       onClick={() => void handleAnswer(item.id)}
-                      className="rounded bg-green-600 px-2 py-1 text-micro font-medium text-white hover:bg-green-700"
+                      className="rounded bg-[var(--semantic-success)] px-2 py-1 text-micro font-medium text-[var(--cafe-surface)] hover:opacity-90"
                     >
                       Answer
                     </button>
                     <button
                       type="button"
                       onClick={() => void handleEscalate(item.id)}
-                      className="rounded bg-red-600 px-2 py-1 text-micro font-medium text-white hover:bg-red-700"
+                      className="rounded bg-[var(--semantic-critical)] px-2 py-1 text-micro font-medium text-[var(--cafe-surface)] hover:opacity-90"
                     >
                       Escalate
                     </button>

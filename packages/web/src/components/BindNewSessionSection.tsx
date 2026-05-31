@@ -113,7 +113,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
           type="button"
           onClick={() => void handleBind()}
           disabled={status === 'saving' || !sessionId.trim() || !selectedCat || disabled}
-          className="w-full text-micro px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40 transition-colors"
+          className="w-full text-micro px-2 py-1 rounded bg-cafe-surface hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
         >
           {status === 'saving'
             ? '绑定中...'

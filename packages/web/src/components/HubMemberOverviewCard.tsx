@@ -1,5 +1,6 @@
 import type { DragEvent as ReactDragEvent } from 'react';
 import type { CatData } from '@/hooks/useCatData';
+import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { CatConfig, CoCreatorConfig } from './config-viewer-types';
 import { HubIcon } from './hub-icons';
@@ -76,7 +77,7 @@ function getStatusBadge(cat: CatData): { enabled: boolean; label: string; tone: 
 function formatMentionPreview(patterns: string[], max = 3) {
   const visible = patterns.slice(0, max);
   const rest = patterns.length - visible.length;
-  return rest > 0 ? `${visible.join('  ')}  +${rest}` : visible.join('  ');
+  return rest > 0 ? `${visible.join('')}  +${rest}` : visible.join('');
 }
 
 function OwnerBadge() {
@@ -96,12 +97,12 @@ function OwnerBadge() {
 
 // F206 exempt: coCreator config default colors — data-driven, not UI theme
 function OwnerAvatar({ coCreator }: { coCreator: CoCreatorConfig }) {
-  const primary = coCreator.color?.primary ?? '#D4A76A';
+  const primary = coCreator.color?.primary ?? CO_CREATOR_COLOR.primary;
   const avatarSrc = safeAvatarSrc(coCreator.avatar);
   return (
     <div
       className="flex h-8 w-8 items-center justify-center overflow-hidden text-xs font-bold"
-      style={{ backgroundColor: primary, color: '#fff', borderRadius: '9999px' }}
+      style={{ backgroundColor: primary, color: 'var(--cafe-surface)', borderRadius: '9999px' }}
     >
       {avatarSrc ? (
         <AvatarImageWithFallback
@@ -117,7 +118,7 @@ function OwnerAvatar({ coCreator }: { coCreator: CoCreatorConfig }) {
 }
 
 export function HubCoCreatorOverviewCard({ coCreator, onEdit }: { coCreator: CoCreatorConfig; onEdit?: () => void }) {
-  const primary = coCreator.color?.primary ?? '#D4A76A';
+  const primary = coCreator.color?.primary ?? CO_CREATOR_COLOR.primary;
   return (
     <SettingsRow
       icon={<OwnerAvatar coCreator={coCreator} />}

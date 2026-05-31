@@ -14,6 +14,19 @@ import {
 
 const DIMMED_SENSITIVITIES = new Set(['private', 'restricted']);
 
+/* data-viz palette exempt: SVG graph node colors — self-contained visualization */
+// eslint-disable-next-line cafe/no-hardcoded-colors -- graph viz palette, see above
+const GRAPH_NODE_PALETTE = {
+  textDark: '#1f2937',
+  textMedium: '#374151',
+  textMuted: '#6b7280',
+  centerBg: '#eff6ff',
+  centerBorder: '#2563eb',
+  normalBg: '#fffdf8',
+  normalBorder: '#d6cabc',
+  unresolvedBg: '#f3f4f6',
+} as const;
+
 function labelWidth(anchor: string, title: string, isCenter: boolean): number {
   const anchorWidth = [...anchor].length * 8;
   const titleWidth =
@@ -63,21 +76,27 @@ export function GraphNodeGlyph({ centerAnchor, node, onHover, onNodeClick, pos }
           x={glyph.x + 16}
           y={pos.y + 4}
           fontSize={typographyTokens.fontSizePx.compact}
-          fill="#374151"
+          fill={GRAPH_NODE_PALETTE.textMedium}
           fontWeight="700"
         >
           🔒 Redacted
         </text>
       ) : (
         <>
-          <text x={glyph.x + 16} y={glyph.anchorY} fontSize={glyph.anchorSize} fill="#1f2937" fontWeight="800">
+          <text
+            x={glyph.x + 16}
+            y={glyph.anchorY}
+            fontSize={glyph.anchorSize}
+            fill={GRAPH_NODE_PALETTE.textDark}
+            fontWeight="800"
+          >
             {glyph.anchorLabel}
           </text>
           <text
             x={glyph.x + 16}
             y={glyph.titleY}
             fontSize={glyph.titleSize}
-            fill="#6b7280"
+            fill={GRAPH_NODE_PALETTE.textMuted}
             fontWeight="600"
             data-testid={`graph-node-title-${node.anchor}`}
           >
@@ -120,8 +139,12 @@ function glyphViewModel(node: GraphNode, centerAnchor: string | undefined, pos: 
     anchorSize: isCenter ? typographyTokens.fontSizePx.compact : typographyTokens.fontSizePx.label,
     anchorY: isCenter ? y + 21 : y + 19,
     // data-viz palette exempt: node background/border colors are graph-specific
-    background: isCenter ? '#eff6ff' : node.kind === 'unresolved' ? '#f3f4f6' : '#fffdf8',
-    border: isCenter ? '#2563eb' : '#d6cabc',
+    background: isCenter
+      ? GRAPH_NODE_PALETTE.centerBg
+      : node.kind === 'unresolved'
+        ? GRAPH_NODE_PALETTE.unresolvedBg
+        : GRAPH_NODE_PALETTE.normalBg,
+    border: isCenter ? GRAPH_NODE_PALETTE.centerBorder : GRAPH_NODE_PALETTE.normalBorder,
     dimmed,
     fill: kindFill(node.kind),
     height,

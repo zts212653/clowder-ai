@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { ClientStep, type DetectedClient } from './first-run-quest/ClientStep';
@@ -160,7 +161,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
     else if (step === 'client') setStep('template');
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
       onClick={onClose}
@@ -170,19 +171,19 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-amber-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-[var(--semantic-warning-surface)] px-6 py-4">
           <div className="flex items-center gap-3">
             {canGoBack && (
-              <button type="button" onClick={handleBack} className="text-sm text-gray-400 hover:text-gray-600">
+              <button type="button" onClick={handleBack} className="text-sm text-cafe-muted hover:text-cafe-secondary">
                 ← 上一步
               </button>
             )}
-            <h3 className="text-base font-semibold text-gray-900">{STEP_TITLES[step]}</h3>
+            <h3 className="text-base font-semibold text-cafe">{STEP_TITLES[step]}</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-xl leading-none text-gray-400 hover:text-gray-600"
+            className="text-xl leading-none text-cafe-muted hover:text-cafe-secondary"
             aria-label="关闭"
           >
             ×
@@ -209,18 +210,19 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           {step === 'creating' && (
             <div className="flex flex-col items-center py-12">
               <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-conn-amber-ring border-t-amber-600" />
-              <p className="text-sm text-gray-500">正在创建你的第一只猫猫...</p>
+              <p className="text-sm text-cafe-muted">正在创建你的第一只猫猫...</p>
             </div>
           )}
           {step === 'done' && (
             <div className="flex flex-col items-center py-12">
               <div className="mb-3 text-4xl">🎉</div>
-              <p className="text-base font-semibold text-gray-900">猫猫已就位！</p>
-              <p className="mt-1 text-sm text-gray-500">正在跳转到教程线程...</p>
+              <p className="text-base font-semibold text-cafe">猫猫已就位！</p>
+              <p className="mt-1 text-sm text-cafe-muted">正在跳转到教程线程...</p>
             </div>
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

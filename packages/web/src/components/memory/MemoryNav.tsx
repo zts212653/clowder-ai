@@ -115,7 +115,7 @@ export function MemoryNav({ active, initialReferrerThread = null }: MemoryNavPro
             {item.badge != null && item.badge > 0 && (
               <span
                 data-testid="health-badge"
-                className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-micro font-bold leading-none text-white"
+                className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--semantic-warning)] px-1 text-micro font-bold leading-none text-[var(--cafe-surface)]"
               >
                 {item.badge > 99 ? '99+' : item.badge}
               </span>

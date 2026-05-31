@@ -20,7 +20,9 @@ function CommandGroup({ category, label }: { category: CommandCategory; label: s
       <div className="space-y-1">
         {cmds.map((cmd) => (
           <div key={cmd.name + cmd.usage} className="flex items-baseline gap-3 text-xs">
-            <code className="font-mono text-blue-600 bg-conn-blue-bg px-1.5 py-0.5 rounded shrink-0">{cmd.usage}</code>
+            <code className="font-mono text-[var(--semantic-info)] bg-conn-blue-bg px-1.5 py-0.5 rounded shrink-0">
+              {cmd.usage}
+            </code>
             <span className="text-cafe-secondary">{cmd.description}</span>
           </div>
         ))}
@@ -44,7 +46,9 @@ export function HubCommandsTab() {
         <div className="space-y-1.5">
           {SHORTCUTS.map((s) => (
             <div key={s.keys} className="flex items-baseline gap-3 text-xs">
-              <kbd className="font-mono text-cafe-secondary bg-gray-200 px-1.5 py-0.5 rounded shrink-0">{s.keys}</kbd>
+              <kbd className="font-mono text-cafe-secondary bg-cafe-surface px-1.5 py-0.5 rounded shrink-0">
+                {s.keys}
+              </kbd>
               <span className="text-cafe-secondary">{s.description}</span>
               {s.context !== '全局' && <span className="text-micro text-cafe-muted ml-auto">({s.context})</span>}
             </div>

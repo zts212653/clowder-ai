@@ -7,6 +7,7 @@
 
 import { escapeRegExp } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { CO_CREATOR_MENTION_COLOR as CO_CREATOR_MENTION } from '@/lib/color-defaults';
 
 // ── Internal builders ───────────────────────────────────
 
@@ -30,7 +31,7 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
 
 // ── Co-Creator (铲屎官) ───────────────────────────────────
 const CO_CREATOR_ID = '__co-creator__';
-const CO_CREATOR_COLOR = '#F5A623'; // warm gold
+const CO_CREATOR_COLOR = CO_CREATOR_MENTION; // warm gold — centralized in color-defaults.ts
 const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
 
 // ── Module-level cache (populated by refreshMentionData after /api/cats fetch) ─

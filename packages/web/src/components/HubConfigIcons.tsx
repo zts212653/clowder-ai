@@ -19,45 +19,45 @@ const SVG_PROPS = {
 
 export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
   feishu: {
-    iconBg: '#DBEAFE',
-    iconColor: '#2563EB',
+    iconBg: 'var(--conn-blue-bg)',
+    iconColor: 'var(--conn-blue-text)',
     icon: <Image src="/images/connectors/feishu.png" alt="Feishu" width={18} height={18} />,
   },
   telegram: {
-    iconBg: '#E0F2FE',
-    iconColor: '#0284C7',
+    iconBg: 'var(--conn-sky-bg)',
+    iconColor: 'var(--conn-sky-text)',
     icon: <Image src="/images/connectors/telegram.png" alt="Telegram" width={18} height={18} />,
   },
   weixin: {
-    iconBg: '#D1FAE5',
-    iconColor: '#07C160',
+    iconBg: 'var(--conn-emerald-bg)',
+    iconColor: 'var(--conn-weixin-bg)',
     icon: <Image src="/images/connectors/weixin.png" alt="WeChat" width={18} height={18} />,
   },
   dingtalk: {
-    iconBg: '#CFFAFE',
-    iconColor: '#3296FA',
+    iconBg: 'var(--conn-cyan-bg)',
+    iconColor: 'var(--conn-dingtalk-fg)',
     icon: <Image src="/images/connectors/dingtalk.png" alt="DingTalk" width={18} height={18} />,
   },
   'wecom-bot': {
-    iconBg: '#E0E7FF',
-    iconColor: '#4F46E5',
+    iconBg: 'var(--conn-indigo-bg)',
+    iconColor: 'var(--conn-indigo-text)',
     icon: <Image src="/images/connectors/wecom-bot.png" alt="WeCom" width={18} height={18} />,
   },
   'wecom-agent': {
-    iconBg: '#EDE9FE',
-    iconColor: '#7C3AED',
+    iconBg: 'var(--conn-violet-bg)',
+    iconColor: 'var(--conn-violet-text)',
     icon: <Image src="/images/connectors/wecom-agent.png" alt="WeCom Agent" width={18} height={18} />,
   },
   xiaoyi: {
-    iconBg: '#FEE2E2',
-    iconColor: '#E11D48',
+    iconBg: 'var(--conn-red-bg)',
+    iconColor: 'var(--conn-xiaoyi-fg)',
     icon: <Image src="/images/connectors/xiaoyi.png" alt="XiaoYi" width={18} height={18} />,
   },
 };
 
 export const DEFAULT_VISUAL: PlatformVisual = {
-  iconBg: '#F3F4F6',
-  iconColor: '#6B7280',
+  iconBg: 'var(--conn-gray-bg)',
+  iconColor: 'var(--conn-icon-default)',
   icon: (
     <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
       <path d="M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0" />
@@ -67,7 +67,7 @@ export const DEFAULT_VISUAL: PlatformVisual = {
 
 export function StepBadge({ num }: { num: number }) {
   return (
-    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-conn-blue-text text-white text-xs font-bold flex-shrink-0">
+    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-conn-blue-text text-[var(--cafe-surface)] text-xs font-bold flex-shrink-0">
       {num}
     </span>
   );
@@ -129,7 +129,7 @@ export function TriangleAlertIcon() {
 export function StatusDotConnected() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="5" fill="#16A34A" />
+      <circle cx="5" cy="5" r="5" fill="var(--semantic-success)" />
     </svg>
   );
 }
@@ -138,7 +138,7 @@ export function StatusDotConnected() {
 export function StatusDotIdle() {
   return (
     <svg className="w-2.5 h-2.5 flex-shrink-0" viewBox="0 0 10 10">
-      <circle cx="5" cy="5" r="4" fill="none" stroke="#9CA3AF" strokeWidth="2" />
+      <circle cx="5" cy="5" r="4" fill="none" stroke="var(--neutral-400)" strokeWidth="2" />
     </svg>
   );
 }

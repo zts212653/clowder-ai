@@ -117,7 +117,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
   }, [allSelected, submitted, blocks, selections, customTexts, messageId]);
 
   return (
-    <div className="space-y-3 rounded-2xl border-2 border-dashed border-conn-amber-ring dark:border-amber-800/50 p-3">
+    <div className="space-y-3 rounded-2xl border-2 border-dashed border-conn-amber-ring p-3">
       {blocks.map((block) => (
         <InteractiveBlock
           key={block.id}
@@ -138,16 +138,14 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
           className={`w-full py-2.5 rounded-full text-sm font-semibold transition-all flex items-center justify-center gap-2
             ${
               allSelected
-                ? 'bg-amber-600 text-white hover:bg-amber-700 cursor-pointer'
+                ? 'bg-[var(--semantic-warning)] text-[var(--cafe-surface)] hover:opacity-90 cursor-pointer'
                 : 'bg-cafe-surface-elevated text-cafe-muted cursor-not-allowed'
             }`}
         >
           全部提交
           <span
             className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-              allSelected
-                ? 'bg-cafe-surface/20 text-white'
-                : 'bg-conn-amber-bg dark:bg-amber-900/50 text-conn-amber-text dark:text-amber-400'
+              allSelected ? 'bg-cafe-surface/20 text-[var(--cafe-surface)]' : 'bg-conn-amber-bg text-conn-amber-text '
             }`}
           >
             {selections.size}/{blocks.length}

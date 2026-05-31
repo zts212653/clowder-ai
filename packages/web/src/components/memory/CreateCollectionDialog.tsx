@@ -89,7 +89,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-[var(--console-overlay-light)] flex items-center justify-center z-50"
       data-testid="create-collection-dialog"
     >
       <form
@@ -195,7 +195,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
           <button
             type="submit"
             disabled={submitting || !name || !displayName || (canDryRun && !confirmed)}
-            className="px-3 py-1.5 text-xs text-white bg-cafe-accent rounded-lg hover:bg-cafe-interactive disabled:opacity-50"
+            className="px-3 py-1.5 text-xs text-[var(--cafe-surface)] bg-cafe-accent rounded-lg hover:bg-cafe-interactive disabled:opacity-50"
           >
             {submitting ? '创建中...' : confirmed ? '创建' : '预览并创建'}
           </button>

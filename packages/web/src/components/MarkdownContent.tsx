@@ -4,6 +4,7 @@ import { Children, isValidElement, type ReactNode, useCallback, useRef, useState
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { MermaidDiagram } from './MermaidDiagram';
@@ -24,7 +25,7 @@ function highlightMentions(text: string): ReactNode[] {
   while ((m = re.exec(text)) !== null) {
     if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
     const catId = toCat[m[1].toLowerCase()] ?? 'opus';
-    const catColor = colorMap[catId] ?? '#9B7EBD';
+    const catColor = colorMap[catId] ?? UNKNOWN_CAT_COLOR.primary;
     const r = Number.parseInt(catColor.slice(1, 3), 16);
     const g = Number.parseInt(catColor.slice(3, 5), 16);
     const b = Number.parseInt(catColor.slice(5, 7), 16);
@@ -71,13 +72,13 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <div className="relative group my-2">
       <button
         onClick={handleCopy}
-        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-micro bg-gray-700 text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-gray-600 transition-opacity"
+        className="absolute top-2 right-2 z-10 px-1.5 py-0.5 rounded text-micro bg-cafe-surface-sunken text-cafe-muted md:opacity-0 md:group-hover:opacity-100 hover:bg-[var(--console-hover-bg)] transition-opacity"
       >
         {copied ? '已复制' : '复制'}
       </button>
       <pre
         ref={preRef}
-        className="bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
+        className="bg-cafe-surface-sunken text-cafe rounded-lg p-3 overflow-x-auto text-xs leading-5 font-mono [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-inherit [&>code]:text-xs"
       >
         {children}
       </pre>
@@ -131,7 +132,7 @@ function linkifyFilePaths(text: string): ReactNode[] {
           worktreeId={worktreeId}
         />
       ) : (
-        <span key={`fp${m.index}`} className="text-blue-400 font-mono text-[0.85em]">
+        <span key={`fp${m.index}`} className="text-[var(--semantic-info)] font-mono text-[0.85em]">
           {display}
         </span>
       ),
@@ -179,7 +180,7 @@ function FilePathLink({
     <a
       href={href}
       onClick={handleClick}
-      className="text-blue-400 hover:text-blue-300 hover:underline font-mono text-[0.85em] cursor-pointer"
+      className="text-[var(--semantic-info)] hover:text-[var(--semantic-info)] hover:underline font-mono text-[0.85em] cursor-pointer"
       title={`点击在工作区中查看 · Cmd+Click 打开 VSCode\n${display}`}
     >
       {display}
@@ -225,7 +226,7 @@ function isMermaidPre(children: ReactNode): boolean {
 }
 
 function inlineCodeClassName(className = ''): string {
-  return `${className} bg-gray-200/50 rounded px-1 py-0.5 text-[0.85em] font-mono`;
+  return `${className} bg-[var(--code-bg)] text-[var(--code-text)] rounded px-1 py-0.5 text-[0.85em] font-mono`;
 }
 
 /* ── Markdown component overrides ──────────────────────────── */
@@ -243,7 +244,7 @@ const mdComponents: Components = {
     <h5 className="text-xs font-semibold mb-1 mt-1.5 first:mt-0 uppercase tracking-wide">{withMentions(children)}</h5>
   ),
   h6: ({ children }) => (
-    <h6 className="text-xs font-medium mb-1 mt-1.5 first:mt-0 text-gray-500">{withMentions(children)}</h6>
+    <h6 className="text-xs font-medium mb-1 mt-1.5 first:mt-0 text-cafe-muted">{withMentions(children)}</h6>
   ),
 
   ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
@@ -259,7 +260,7 @@ const mdComponents: Components = {
         type="checkbox"
         checked={checked}
         readOnly
-        className="mt-1 h-3.5 w-3.5 rounded border-gray-300 text-conn-blue-text pointer-events-none"
+        className="mt-1 h-3.5 w-3.5 rounded border-[var(--console-border-soft)] text-conn-blue-text pointer-events-none"
       />
     ) : (
       <input type={type} />
@@ -343,7 +344,7 @@ export function MarkdownContent({ content, className, disableCommandPrefix, base
 
   return (
     <div className={`markdown-content text-sm break-words ${className ?? ''}`}>
-      {cmdMatch && <span className="font-semibold text-indigo-500">{cmdMatch[1]}</span>}
+      {cmdMatch && <span className="font-semibold text-[var(--semantic-info)]">{cmdMatch[1]}</span>}
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={components}>
         {md}
       </ReactMarkdown>

@@ -264,7 +264,7 @@ export function SuggestionDrawer({
           {item.dispatchedThreadId && (
             <Link
               href={`/thread/${item.dispatchedThreadId}`}
-              className="mt-2 inline-flex rounded bg-[var(--cafe-text)] px-2 py-1 text-xs font-semibold text-white"
+              className="mt-2 inline-flex rounded bg-[var(--cafe-text)] px-2 py-1 text-xs font-semibold text-[var(--cafe-surface)]"
               data-testid="mc-open-thread-link"
             >
               打开执行 Thread

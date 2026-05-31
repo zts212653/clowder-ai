@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { useSendMessage } from '@/hooks/useSendMessage';
+import { NEUTRAL_DOT_COLOR } from '@/lib/color-defaults';
 import type { CatInvocationInfo } from '@/stores/chatStore';
 import { buildContinueMessage } from '@/utils/taskProgressContinue';
 import { useConfirm } from './useConfirm';
@@ -60,7 +61,7 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
   const { getCatById } = useCatData();
   const { handleSend } = useSendMessage(threadId);
   const cat = getCatById(catId);
-  const dotColor = cat?.color.primary ?? '#9CA3AF';
+  const dotColor = cat?.color.primary ?? NEUTRAL_DOT_COLOR;
   const tp = inv.taskProgress!;
   const { tasks } = tp;
   const completed = tasks.filter((t) => t.status === 'completed').length;

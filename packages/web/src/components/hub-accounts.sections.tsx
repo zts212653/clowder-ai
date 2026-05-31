@@ -103,7 +103,7 @@ export function CreateApiKeyAccountSection({
             type="button"
             onClick={onCreate}
             disabled={busy || !canCreate}
-            className="rounded bg-cafe-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-cafe-accent-hover disabled:opacity-50"
+            className="rounded bg-cafe-accent px-3 py-1.5 text-xs font-medium text-[var(--cafe-surface)] hover:bg-cafe-accent-hover disabled:opacity-50"
             data-guide-id="accounts.create-submit"
           >
             {busy ? '创建中...' : '创建'}

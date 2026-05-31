@@ -132,13 +132,13 @@ export function HubClaudeRescueSection() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-red-700">
+        <div className="rounded-lg border border-conn-red-ring bg-conn-red-bg px-3 py-2 text-xs text-conn-red-text">
           {error}
         </div>
       )}
 
       {lastRun && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 space-y-1">
+        <div className="rounded-lg border border-[var(--semantic-success)] bg-[var(--semantic-success-surface)] px-3 py-2 text-xs text-conn-emerald-text space-y-1">
           <p className="font-medium">刚刚救活 {lastRun.rescuedCount} 只布偶猫</p>
           <p>
             跳过 {lastRun.skippedCount} 只，处理 {lastRun.results.length} 个 session。
@@ -190,7 +190,7 @@ export function HubClaudeRescueSection() {
               void rescueSelected();
             }}
             disabled={rescuing || selectedTargets.length === 0}
-            className="px-3 py-1.5 rounded bg-amber-600 text-white text-xs hover:bg-amber-700 disabled:opacity-50"
+            className="px-3 py-1.5 rounded bg-[var(--semantic-warning)] text-[var(--cafe-surface)] text-xs hover:opacity-90 disabled:opacity-50"
           >
             {rescuing ? '救援中...' : `一键救活 ${selectedTargets.length} 只布偶猫`}
           </button>

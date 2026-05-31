@@ -209,7 +209,7 @@ export function HubQuotaBoardTab() {
             type="button"
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-full bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cafe-interactive disabled:opacity-50"
+            className="rounded-full bg-cafe-accent px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] transition hover:bg-cafe-interactive disabled:opacity-50"
           >
             {refreshing ? '刷新中...' : '刷新全部'}
           </button>

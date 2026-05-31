@@ -12,9 +12,9 @@ interface PodcastPlayerProps {
 
 const SPEAKER_COLORS: Record<string, string> = {
   宪宪: 'text-opus-dark bg-opus-bg',
-  砚砚: 'text-emerald-700 bg-emerald-50',
+  砚砚: 'text-conn-emerald-text bg-[var(--semantic-success-surface)]',
   host: 'text-opus-dark bg-opus-bg',
-  guest: 'text-emerald-700 bg-emerald-50',
+  guest: 'text-conn-emerald-text bg-[var(--semantic-success-surface)]',
 };
 
 function speakerStyle(speaker: string): string {
@@ -255,7 +255,7 @@ export function PodcastPlayer({ articleId, podcasts, onArtifactCreated }: Podcas
               onClick={() => void loadScript(p.id)}
               className={`rounded px-2 py-0.5 text-micro ${
                 selectedId === p.id
-                  ? 'bg-opus-primary text-white'
+                  ? 'bg-opus-primary text-[var(--cafe-surface)]'
                   : 'border border-[var(--console-border-soft)] text-cafe-secondary hover:bg-[var(--console-hover-bg)]'
               }`}
             >

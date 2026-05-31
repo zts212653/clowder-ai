@@ -118,14 +118,14 @@ const lineStyles: Record<DiffLine['type'], string> = {
   add: 'bg-green-900/30 text-green-300',
   remove: 'bg-red-900/30 text-red-300',
   context: 'text-cafe-muted',
-  header: 'bg-blue-900/20 text-blue-400 italic',
+  header: 'bg-[var(--semantic-info-surface)] text-[var(--semantic-info)] italic',
 };
 
 const gutterStyles: Record<DiffLine['type'], string> = {
-  add: 'bg-green-900/40 text-green-500',
+  add: 'bg-green-900/40 text-conn-emerald-text',
   remove: 'bg-red-900/40 text-conn-red-text',
   context: 'text-cafe-secondary',
-  header: 'bg-blue-900/20 text-conn-blue-text',
+  header: 'bg-[var(--semantic-info-surface)] text-conn-blue-text',
 };
 
 const prefixMap: Record<DiffLine['type'], string> = {
@@ -172,23 +172,23 @@ function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
           <tr key={i}>
             {/* Left (old) */}
             <td
-              className={`w-8 text-right px-1 select-none console-divider-r ${pair.left ? gutterStyles[pair.left.type] : 'bg-gray-900/50'}`}
+              className={`w-8 text-right px-1 select-none console-divider-r ${pair.left ? gutterStyles[pair.left.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.left?.oldLine ?? ''}
             </td>
             <td
-              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.left ? lineStyles[pair.left.type] : 'bg-gray-900/50'}`}
+              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.left ? lineStyles[pair.left.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.left?.content ?? ''}
             </td>
             {/* Right (new) */}
             <td
-              className={`w-8 text-right px-1 select-none console-divider-l console-divider-r ${pair.right ? gutterStyles[pair.right.type] : 'bg-gray-900/50'}`}
+              className={`w-8 text-right px-1 select-none console-divider-l console-divider-r ${pair.right ? gutterStyles[pair.right.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.right?.newLine ?? ''}
             </td>
             <td
-              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.right ? lineStyles[pair.right.type] : 'bg-gray-900/50'}`}
+              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.right ? lineStyles[pair.right.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.right?.content ?? ''}
             </td>
@@ -233,7 +233,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
             onClick={() => setMode('unified')}
             className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'unified'
-                ? 'bg-cafe-accent/80 text-white'
+                ? 'bg-cafe-accent/80 text-[var(--cafe-surface)]'
                 : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
             }`}
           >
@@ -244,7 +244,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
             onClick={() => setMode('split')}
             className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'split'
-                ? 'bg-cafe-accent/80 text-white'
+                ? 'bg-cafe-accent/80 text-[var(--cafe-surface)]'
                 : 'text-cafe-secondary hover:text-cafe-muted hover:bg-cafe-surface/10'
             }`}
           >

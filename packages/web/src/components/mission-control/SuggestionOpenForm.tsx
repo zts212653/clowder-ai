@@ -91,7 +91,7 @@ export function SuggestionOpenForm({
       <button
         type="submit"
         disabled={submitting || catOptions.length === 0}
-        className="w-full rounded-lg bg-[var(--cafe-text)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+        className="w-full rounded-lg bg-[var(--cafe-text)] px-3 py-2 text-xs font-semibold text-[var(--cafe-surface)] disabled:opacity-40"
         data-testid="mc-suggest-submit"
       >
         提交建议领取

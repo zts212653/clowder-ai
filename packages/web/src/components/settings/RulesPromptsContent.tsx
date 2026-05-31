@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import { SettingsBadge, SettingsSection, SettingsText } from './primitives';
 import {
@@ -128,7 +129,7 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
 
   const lineCount = file.content.split('\n').length;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center backdrop-blur-sm"
       style={{ backgroundColor: 'var(--console-overlay-backdrop)', padding: '1rem' }}
@@ -198,6 +199,7 @@ function RulePreviewModal({ label, file, onClose }: { label: string; file: RuleF
           </pre>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

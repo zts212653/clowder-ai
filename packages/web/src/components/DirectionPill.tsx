@@ -1,4 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
+import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { DirectionInfo } from '@/lib/parse-direction';
 
 interface DirectionPillProps {
@@ -20,7 +21,7 @@ export function DirectionPill({ direction, getCatById }: DirectionPillProps) {
 
   // Breed color from first target cat (fallback to ragdoll purple)
   const firstCat = direction.type !== 'crossPost' ? getCatById(direction.targets[0]) : undefined;
-  const color = firstCat?.color.primary ?? '#9B7EBD';
+  const color = firstCat?.color.primary ?? UNKNOWN_CAT_COLOR.primary;
 
   return (
     <span

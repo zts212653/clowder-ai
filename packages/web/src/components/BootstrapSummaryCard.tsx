@@ -12,7 +12,7 @@ const TIER_LABELS: Record<string, string> = {
 
 const TIER_COLORS: Record<string, string> = {
   authoritative: 'bg-cafe-accent/10 text-cafe-interactive',
-  derived: 'bg-blue-100 text-blue-700',
+  derived: 'bg-[var(--semantic-info-surface)] text-[var(--semantic-info)]',
   soft_clue: 'bg-conn-green-bg text-conn-green-text',
 };
 
@@ -94,23 +94,23 @@ export function BootstrapSummaryCard({
             <CheckCircleIcon className="w-6 h-6 text-conn-green-text" />
           </div>
           <div>
-            <p className="text-sm font-medium text-green-800">记忆索引构建完成</p>
+            <p className="text-sm font-medium text-conn-emerald-text">记忆索引构建完成</p>
             <p className="text-xs text-conn-green-text mt-0.5">猫猫现在可以搜索这个项目的历史知识了</p>
           </div>
         </div>
 
-        <div className="ml-16 space-y-1.5 text-xs text-gray-600">
+        <div className="ml-16 space-y-1.5 text-xs text-cafe-secondary">
           <p className="inline-flex items-center gap-1.5">
-            <HubIcon name="folder" className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <HubIcon name="folder" className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
             项目 &nbsp;<strong>{summary.projectName}</strong>
           </p>
           <p className="inline-flex items-center gap-1.5">
-            <FileTextIcon className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+            <FileTextIcon className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
             已索引 {docsIndexed} 个文档
           </p>
           {durationSec !== null && (
             <p className="inline-flex items-center gap-1.5">
-              <HubIcon name="timer" className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+              <HubIcon name="timer" className="w-3.5 h-3.5 text-cafe-muted flex-shrink-0" />
               耗时 {durationSec} 秒
             </p>
           )}
@@ -118,12 +118,12 @@ export function BootstrapSummaryCard({
 
         {summary.kindCoverage && Object.keys(summary.kindCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-micro text-gray-400 mb-1.5">知识覆盖</p>
+            <p className="text-micro text-cafe-muted mb-1.5">知识覆盖</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.kindCoverage).map(([kind, count]) => (
                 <span
                   key={kind}
-                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${SOURCE_TYPE_COLORS[kind] ?? 'bg-cafe-surface-elevated text-cafe-secondary'}`}
                 >
                   {SOURCE_TYPE_LABELS[kind] ?? kind} · {count}
                 </span>
@@ -132,12 +132,12 @@ export function BootstrapSummaryCard({
           </div>
         ) : Object.keys(summary.tierCoverage).length > 0 ? (
           <div className="ml-16 mt-3">
-            <p className="text-micro text-gray-400 mb-1.5">覆盖分层</p>
+            <p className="text-micro text-cafe-muted mb-1.5">覆盖分层</p>
             <div className="flex flex-wrap gap-1.5">
               {Object.entries(summary.tierCoverage).map(([tier, count]) => (
                 <span
                   key={tier}
-                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${TIER_COLORS[tier] ?? 'bg-gray-100 text-gray-600'}`}
+                  className={`px-2 py-0.5 rounded-full text-micro font-medium ${TIER_COLORS[tier] ?? 'bg-cafe-surface-elevated text-cafe-secondary'}`}
                 >
                   {TIER_LABELS[tier] ?? tier} · {count}
                 </span>
@@ -151,7 +151,7 @@ export function BootstrapSummaryCard({
             <button
               type="button"
               onClick={onDismiss}
-              className="px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              className="px-3 py-1.5 rounded-lg text-xs text-cafe-muted hover:text-cafe-secondary hover:bg-[var(--console-hover-bg)] transition-colors"
             >
               关闭
             </button>
@@ -162,8 +162,8 @@ export function BootstrapSummaryCard({
             onClick={onSearchKnowledge}
             className={
               onSearchKnowledge
-                ? 'px-3 py-1.5 rounded-lg text-xs text-gray-600 hover:text-gray-800 hover:bg-gray-100 transition-colors inline-flex items-center gap-1'
-                : 'px-3 py-1.5 rounded-lg text-xs text-gray-400 cursor-not-allowed inline-flex items-center gap-1'
+                ? 'px-3 py-1.5 rounded-lg text-xs text-cafe-secondary hover:text-cafe hover:bg-[var(--console-hover-bg)] transition-colors inline-flex items-center gap-1'
+                : 'px-3 py-1.5 rounded-lg text-xs text-cafe-muted cursor-not-allowed inline-flex items-center gap-1'
             }
           >
             <SearchIcon className="w-3.5 h-3.5" />
@@ -175,8 +175,8 @@ export function BootstrapSummaryCard({
             onClick={onGoToMemoryHub}
             className={
               onGoToMemoryHub
-                ? 'px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-medium transition-colors inline-flex items-center gap-1'
-                : 'px-3 py-1.5 rounded-lg bg-green-600/50 text-white/70 text-xs font-medium cursor-not-allowed inline-flex items-center gap-1'
+                ? 'px-3 py-1.5 rounded-lg bg-[var(--semantic-success)] hover:opacity-90 text-[var(--cafe-surface)] text-xs font-medium transition-colors inline-flex items-center gap-1'
+                : 'px-3 py-1.5 rounded-lg bg-[var(--semantic-success)] text-[var(--cafe-surface)] text-xs font-medium cursor-not-allowed opacity-50 inline-flex items-center gap-1'
             }
           >
             <MemoryIcon className="w-3.5 h-3.5" />

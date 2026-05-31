@@ -115,7 +115,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
 
     const dot = container.querySelector('.animate-pulse') as HTMLElement;
     expect(dot).toBeTruthy();
-    expect(dot.style.backgroundColor).toBe('rgb(76, 175, 80)'); // #4CAF50
+    expect(dot.style.backgroundColor).toBe('var(--color-codex-primary)');
   });
 
   it('deduplicates same cat from multiple invocations', async () => {

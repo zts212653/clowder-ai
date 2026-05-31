@@ -75,7 +75,7 @@ export function LinkedRootsManager({ onRootsChanged }: LinkedRootsManagerProps) 
           type="button"
           onClick={handleAdd}
           disabled={submitting || !name.trim() || !path.trim()}
-          className="px-2 py-0.5 rounded text-micro font-medium bg-cafe-accent text-white hover:bg-cafe-accent/80 disabled:opacity-50 transition-colors"
+          className="px-2 py-0.5 rounded text-micro font-medium bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-accent/80 disabled:opacity-50 transition-colors"
         >
           {submitting ? 'Adding...' : 'Add'}
         </button>

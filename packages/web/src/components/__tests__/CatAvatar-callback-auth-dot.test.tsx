@@ -37,25 +37,25 @@ describe('CatAvatar callback-auth status dot (F174 D2b-2)', () => {
     const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} callbackAuthStatus="healthy" />);
     expect(html).toContain('data-testid="callback-auth-dot"');
     expect(html).toContain('data-callback-auth-status="healthy"');
-    expect(html.toUpperCase()).toContain('#22C55E'); // Emerald
+    expect(html).toContain('var(--semantic-success)');
   });
 
   it('renders amber dot for degraded', () => {
     const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} callbackAuthStatus="degraded" />);
     expect(html).toContain('data-callback-auth-status="degraded"');
-    expect(html.toUpperCase()).toContain('#F59E0B'); // Amber
+    expect(html).toContain('var(--semantic-warning)');
   });
 
   it('renders red dot for broken', () => {
     const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} callbackAuthStatus="broken" />);
     expect(html).toContain('data-callback-auth-status="broken"');
-    expect(html.toUpperCase()).toContain('#EF4444'); // Red
+    expect(html).toContain('var(--semantic-critical)');
   });
 
   it('renders muted dot for unknown', () => {
     const html = renderToStaticMarkup(<CatAvatar catId="opus" size={48} callbackAuthStatus="unknown" />);
     expect(html).toContain('data-callback-auth-status="unknown"');
-    expect(html.toUpperCase()).toContain('#A89386'); // Cafe-Muted
+    expect(html).toContain('var(--neutral-400)');
   });
 
   it('uses provided callbackAuthLabel as title/aria-label', () => {

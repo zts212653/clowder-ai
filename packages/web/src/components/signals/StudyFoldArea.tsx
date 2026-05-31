@@ -143,7 +143,7 @@ export function StudyFoldArea({
             <button
               type="button"
               onClick={onStartStudy}
-              className="rounded-md bg-opus-primary px-3 py-1.5 text-xs font-semibold text-white hover:bg-opus-dark"
+              className="rounded-md bg-opus-primary px-3 py-1.5 text-xs font-semibold text-[var(--cafe-surface)] hover:bg-opus-dark"
             >
               开始学习
             </button>
@@ -158,7 +158,7 @@ export function StudyFoldArea({
             {/* AC-6: 多猫研究派发 — signal param binds article context via activeSignals */}
             <a
               href={`${discussLink}&research=multi`}
-              className="rounded-md border border-emerald-300 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-50"
+              className="rounded-md border border-[var(--semantic-success)] px-3 py-1.5 text-xs text-conn-emerald-text hover:bg-[var(--console-hover-bg)]"
             >
               多猫研究
             </a>
