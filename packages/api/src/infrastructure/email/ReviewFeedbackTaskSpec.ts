@@ -33,8 +33,10 @@ export interface ReviewFeedbackTaskSpecOptions {
   readonly taskStore: ITaskStore;
   /** Return null when PR metadata is temporarily unavailable; gate will continue without head/state filtering. */
   readonly fetchPrMetadata?: (repoFullName: string, prNumber: number) => Promise<ReviewFeedbackPrMetadata | null>;
-  readonly fetchComments: (repoFullName: string, prNumber: number) => Promise<PrFeedbackComment[]>;
-  readonly fetchReviews: (repoFullName: string, prNumber: number) => Promise<PrReviewDecision[]>;
+  /** @param sinceId — when provided, only fetch items with id > sinceId (enables per-page early termination). */
+  readonly fetchComments: (repoFullName: string, prNumber: number, sinceId?: number) => Promise<PrFeedbackComment[]>;
+  /** @param sinceId — when provided, only fetch items with id > sinceId (enables per-page early termination). */
+  readonly fetchReviews: (repoFullName: string, prNumber: number, sinceId?: number) => Promise<PrReviewDecision[]>;
   readonly reviewFeedbackRouter: ReviewFeedbackRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly log: {
@@ -128,14 +130,15 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               continue;
             }
 
-            const [comments, reviews] = await Promise.all([
-              opts.fetchComments(repoFullName, prNumber),
-              opts.fetchReviews(repoFullName, prNumber),
-            ]);
-
             // #406: Seed from persisted automationState.review on first access (survives restart)
             const commentCursor = commentCursors.get(prKey) ?? task.automationState?.review?.lastCommentCursor ?? 0;
             const reviewCursor = reviewCursors.get(prKey) ?? task.automationState?.review?.lastDecisionCursor ?? 0;
+
+            // #798: Pass cursor to fetch for per-page client-side filtering (eliminates maxBuffer crash)
+            const [comments, reviews] = await Promise.all([
+              opts.fetchComments(repoFullName, prNumber, commentCursor),
+              opts.fetchReviews(repoFullName, prNumber, reviewCursor),
+            ]);
 
             const allNewComments = comments.filter((c) => c.id > commentCursor);
             const allNewReviews = reviews.filter((r) => r.id > reviewCursor);

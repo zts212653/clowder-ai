@@ -163,6 +163,39 @@ body {
   }
 }
 
+/* #738: Voice message sound bar animation */
+@keyframes sound-bar {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 14px;
+  }
+}
+.animate-sound-bar {
+  animation: sound-bar 0.6s ease-in-out infinite;
+}
+
+/* #738: Slow ping for speaker icon waves */
+@keyframes ping-slow {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+.animate-ping-slow {
+  animation: ping-slow 1.2s ease-in-out infinite;
+}
+.animation-delay-200 {
+  animation-delay: 200ms;
+}
+
 /* Werewolf Cute Theme → werewolf-theme.css */
 
 /* F097/F056: CLI/Thinking table overrides — inherit cat-msg-inset-text

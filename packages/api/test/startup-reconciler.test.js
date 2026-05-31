@@ -822,6 +822,173 @@ describe('StartupReconciler', () => {
     assert.equal(result.running, 1);
   });
 
+  // ── #697 + #805 review: recoverOrphanedQueuedMessages ──
+
+  test('#697: recovers orphaned queued messages when no InvocationRecord exists', async () => {
+    // No InvocationRecords — message is purely orphaned
+    const scannedIds = [];
+    const deliveredIds = [];
+    const messageStore = {
+      append(msg) {
+        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
+      },
+      scanByDeliveryStatus(status) {
+        if (status === 'queued') return ['orphan-msg-1', 'orphan-msg-2'];
+        return [];
+      },
+      markDelivered(id, deliveredAt) {
+        deliveredIds.push(id);
+        return {
+          id,
+          threadId: 'thread-orphan',
+          userId: 'user-1',
+          mentions: ['opus'],
+          deliveryStatus: 'delivered',
+          deliveredAt,
+        };
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(deliveredIds.length, 2, 'both orphaned messages should be recovered');
+    assert.ok(deliveredIds.includes('orphan-msg-1'));
+    assert.ok(deliveredIds.includes('orphan-msg-2'));
+    assert.equal(result.messagesRecovered, 2);
+  });
+
+  test('#805 P2-1: InvocationRecord cleanup — queued record with matching userMessageId is marked failed', async () => {
+    // Fresh queued InvocationRecord (< 5min, NOT caught by sweepStaleQueued)
+    const freshRecord = makeRecord({
+      id: 'fresh-inv-1',
+      status: 'queued',
+      userMessageId: 'orphan-msg-1',
+      targetCats: ['opus'],
+      createdAt: Date.now() - 60_000, // 1 min ago (< 5min threshold)
+    });
+    store.seed(freshRecord);
+
+    const messageStore = {
+      append(msg) {
+        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
+      },
+      scanByDeliveryStatus(status) {
+        if (status === 'queued') return ['orphan-msg-1'];
+        return [];
+      },
+      markDelivered(id) {
+        return {
+          id,
+          threadId: 'thread-p2-1',
+          userId: 'user-1',
+          mentions: ['opus'],
+          deliveryStatus: 'delivered',
+          deliveredAt: Date.now(),
+        };
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    // Message recovered
+    assert.equal(result.messagesRecovered, 1);
+    // InvocationRecord should now be 'failed' (not left as 'queued' residue)
+    const record = await store.get('fresh-inv-1');
+    assert.equal(record.status, 'failed', 'InvocationRecord should be marked failed after message recovery');
+    assert.equal(record.error, 'process_restart');
+  });
+
+  test('#805 P2-1: InvocationRecord cleanup — unrelated queued records are NOT touched', async () => {
+    // Queued record whose userMessageId does NOT match any recovered message
+    const unrelatedRecord = makeRecord({
+      id: 'unrelated-inv',
+      status: 'queued',
+      userMessageId: 'different-msg',
+      targetCats: ['codex'],
+      createdAt: Date.now() - 60_000,
+    });
+    store.seed(unrelatedRecord);
+
+    const messageStore = {
+      append(msg) {
+        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
+      },
+      scanByDeliveryStatus(status) {
+        if (status === 'queued') return ['orphan-msg-1'];
+        return [];
+      },
+      markDelivered(id) {
+        return {
+          id,
+          threadId: 'thread-keep',
+          userId: 'user-1',
+          mentions: ['opus'],
+        };
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+    });
+
+    await reconciler.reconcileOrphans();
+
+    // Unrelated record should still be queued (not swept — only 1 min old)
+    const record = await store.get('unrelated-inv');
+    assert.equal(record.status, 'queued', 'unrelated queued record should NOT be touched');
+  });
+
+  test('#805 P3-2: log.warn emitted when recovered message has no mentions', async () => {
+    const messageStore = {
+      append(msg) {
+        return { ...msg, id: 'msg-x', threadId: msg.threadId ?? 'default' };
+      },
+      scanByDeliveryStatus(status) {
+        if (status === 'queued') return ['no-mention-msg'];
+        return [];
+      },
+      markDelivered(id) {
+        return {
+          id,
+          threadId: 'thread-no-mention',
+          userId: 'user-1',
+          // No mentions field
+        };
+      },
+    };
+
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      messageStore,
+    });
+
+    await reconciler.reconcileOrphans();
+
+    assert.ok(
+      log.messages.some((m) => m.level === 'warn' && m.msg.includes('unusual') && m.msg.includes('no mentions')),
+      'should log warning about message without mentions',
+    );
+  });
+
   // ── Phase A (original) tests continue ──
 
   test('does not sweep running records created after processStartAt', async () => {

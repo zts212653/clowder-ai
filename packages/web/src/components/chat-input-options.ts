@@ -89,7 +89,10 @@ export function buildCatOptions(cats: CatData[]): CatOption[] {
       color: catColorVar(cat.id, 'primary'),
       avatar: cat.avatar,
     }));
-  return [...STATIC_GROUP_MENTIONS, ...breedGroups, ...individuals];
+  // Group mentions (@thread, @all, @全体xx猫) are low-frequency — put them
+  // at the bottom so individual cats occupy the prime visible slots.
+  // Users can still reach groups via arrow-up or by typing the filter text.
+  return [...individuals, ...STATIC_GROUP_MENTIONS, ...breedGroups];
 }
 
 /** Build whisper target options from dynamic cat data.

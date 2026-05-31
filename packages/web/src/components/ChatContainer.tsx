@@ -94,7 +94,28 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   // component's `threadId` prop, not the flat current-thread mirror. Closes
   // AC-C6 race window for the entire ChatContainer surface (Task 2 only
   // covered hasActiveInvocation; this finishes the job).
-  const messages = useThreadMessages(threadId);
+  const allMessages = useThreadMessages(threadId);
+
+  // #697: Filter out messages that are still queued (not yet delivered).
+  // Without this, queued messages render in the chat stream AND in QueuePanel,
+  // causing visual duplication until the queue processor dequeues them.
+  const queueRaw = useChatStore((s) => s.queue);
+  const queuedMessageIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!queueRaw || queueRaw.length === 0) return ids;
+    for (const entry of queueRaw) {
+      if (entry.status !== 'queued') continue;
+      if (entry.messageId) ids.add(entry.messageId);
+      if (entry.mergedMessageIds) {
+        for (const mid of entry.mergedMessageIds) ids.add(mid);
+      }
+    }
+    return ids;
+  }, [queueRaw]);
+  const messages = useMemo(
+    () => (queuedMessageIds.size === 0 ? allMessages : allMessages.filter((m) => !queuedMessageIds.has(m.id))),
+    [allMessages, queuedMessageIds],
+  );
   const {
     hasActive: hasActiveInvocation,
     activeInvocations,
@@ -299,7 +320,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const storeThreads = useChatStore((s) => s.threads);
   const setThreads = useChatStore((s) => s.setThreads);
   const handleSkipFirstRunQuest = useCallback(() => {
-    // Session-only skip — next refresh will re-check backend state
+    // #707: Persist skip to localStorage so refreshing doesn't re-trigger
+    try {
+      localStorage.setItem('cat-cafe:first-run-quest-skipped', '1');
+    } catch {
+      /* localStorage may be unavailable in some contexts */
+    }
     setShowFirstRunQuestPrompt(false);
   }, []);
   const handleStartFirstRunQuest = useCallback(() => {
@@ -374,6 +400,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     // Only show first-run prompt after a successful cat fetch — prevents false
     // positives when /api/cats fails transiently (returns [] on network error).
     if (!hasFetched) return;
+    // #707: Don't re-show if user previously skipped
+    try {
+      if (localStorage.getItem('cat-cafe:first-run-quest-skipped') === '1') return;
+    } catch {
+      /* localStorage unavailable */
+    }
     setShowFirstRunQuestPrompt(true);
   }, [cats.length, isLoading, hasFetched, storeThreads, threadId]);
 

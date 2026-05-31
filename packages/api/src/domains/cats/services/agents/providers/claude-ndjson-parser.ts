@@ -206,6 +206,25 @@ export function transformClaudeEvent(
     if (messageId && skipFinalText) {
       streamState.partialTextMessageIds.delete(messageId);
     }
+    // #778: thinking-only final message — emit thinking as system_info so the
+    // frontend can attach it to a message bubble. Streaming thinking_delta
+    // normally captures content; this is a safety net for edge cases
+    // (network loss, non-streaming mode, lost deltas).
+    if (messages.length === 0) {
+      const thinkingBlock = content.find(
+        (b) => typeof b === 'object' && b !== null && (b as Record<string, unknown>).type === 'thinking',
+      ) as { thinking?: string; text?: string } | undefined;
+      if (thinkingBlock) {
+        // Claude thinking blocks use `thinking` field; fall back to `text` for safety
+        const thinkingText = thinkingBlock.thinking ?? thinkingBlock.text ?? '';
+        return {
+          type: 'system_info' as AgentMessage['type'],
+          catId,
+          content: JSON.stringify({ type: 'thinking', catId, text: thinkingText }),
+          timestamp: Date.now(),
+        };
+      }
+    }
     return messages.length > 0 ? messages : null;
   }
 

@@ -283,6 +283,9 @@ export interface IMessageStore {
    * gate. In-memory: synchronous Map check+set (atomic within the event loop). Redis: SET NX PX.
    */
   claimContentDedupKey(key: string, ttlMs: number): boolean | Promise<boolean>;
+  /** #697: Find message IDs with a given deliveryStatus. Used by StartupReconciler
+   *  to recover orphaned queued messages after process restart. */
+  scanByDeliveryStatus?(status: NonNullable<StoredMessage['deliveryStatus']>): string[] | Promise<string[]>;
 }
 
 /** Max messages to keep in memory */
@@ -695,6 +698,12 @@ export class MessageStore {
     msg.deliveryStatus = 'canceled';
     return msg;
   }
+
+  // #697: scanByDeliveryStatus intentionally NOT implemented for in-memory store.
+  // In-memory store uses a bounded sliding window (MAX_MESSAGES) — messages
+  // beyond the window would be silently ignored, masking real orphans visible
+  // in production Redis. StartupReconciler's guard `if (!messageStore?.scanByDeliveryStatus)`
+  // gracefully skips orphan recovery for in-memory mode. (LL-048 / PR #805 P2-2)
 
   /**
    * Atomic content-dedup claim (synchronous — atomic within the single-threaded event loop).
