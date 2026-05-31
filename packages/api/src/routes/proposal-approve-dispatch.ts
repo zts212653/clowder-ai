@@ -57,11 +57,21 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
    */
   rawContent?: string;
   /**
-   * Proposed chain participants in user-intended order. Dispatch wakes ONLY
-   * `preferredCats[0]` (the chain starter); subsequent cats are driven by the
-   * cat-side @-mention chain in their own replies — "他们自己决定下一个要
-   * 把谁叫出来" (owner spec 2026-05-27). Explicit `#ideate` tag in the
-   * initialMessage opts into "wake all preferredCats parallel" instead.
+   * Proposed chain participants in user-intended order.
+   *
+   * Default behaviour: dispatch wakes ONLY `preferredCats[0]` (the chain
+   * starter); subsequent cats are driven by the cat-side @-mention chain in
+   * their own replies — "他们自己决定下一个要把谁叫出来" (owner spec
+   * 2026-05-27).
+   *
+   * Explicit-intent overrides (read from raw initialMessage, NOT enriched):
+   *   - `#ideate` tag → wake all `preferredCats` (or `resolved.targetCats` if
+   *     `preferredCats` empty) in parallel; chain protocol injection is
+   *     suppressed by `enrichWithParentThreadHeader` so cats are not told to
+   *     hand off serially while they were woken parallel (砚砚 round-5 P1).
+   *   - `#execute` tag with `preferredCats=[]` and multiple `resolved.targetCats`
+   *     → preserve all router-resolved targets (砚砚 round-5 P2: silently
+   *     collapsing to the first target would discard explicit user intent).
    */
   preferredCats?: readonly CatId[];
   messageStore: IMessageStore;
@@ -92,6 +102,7 @@ export function enrichWithParentThreadHeader(
   sourceThreadId: string,
   sourceThreadTitle?: string | null,
   preferredCats?: readonly CatId[],
+  rawInitialMessage?: string,
   resolveHandle: (token: string) => string | null = primaryMentionHandleForCatId,
 ): string {
   const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
@@ -109,24 +120,42 @@ export function enrichWithParentThreadHeader(
   // — server only woke the first cat, subsequent cats are driven by line-start
   // @-mentions in cat replies. Without this, the server knows the workflow is
   // cat-driven but the cat doesn't, and the chain stalls after one step.
+  //
+  // 砚砚 round-5 P1: must be MODE-AWARE. dispatch's explicit `#ideate` branch
+  // wakes all preferredCats in parallel, so injecting "Server 只 wake 了第一棒
+  // ... 在你回复行首 @ 下一棒" would directly contradict the runtime — every
+  // parallel cat would emit unnecessary handoffs / duplicate report-back.
+  // Detect explicit `#ideate` from the raw user-typed initialMessage (never
+  // from `content`, which is enriched with server-injected text — see jsdoc
+  // on AppendApprovedInitialMessageInput.rawContent for that footgun) and
+  // suppress the chain section in parallel mode. Cats woken parallel only
+  // see the main thread header — they think + report back independently,
+  // no handoff instructions.
   if (preferredCats && preferredCats.length > 0) {
-    const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
-    const chainOrder = handles.join(' → ');
-    headerLines.push(
-      '',
-      '## 接力链路（cat-driven @-chain）',
-      `顺序: ${chainOrder} → 回到主 Thread`,
-      'Server 只 wake 了**第一棒**。你接到这条消息后:',
-      '  - 完成你的回合',
-      '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
-      '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
-      '',
-      // NOTE: do NOT write the literal "#ideate" string here — parseIntent
-      // would otherwise read this server-injected explanation as an explicit
-      // user tag and force parallel mode. Refer to the tool description for
-      // the actual opt-in syntax.
-      '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
-    );
+    let isExplicitIdeate = false;
+    if (rawInitialMessage) {
+      const parsed = parseIntent(rawInitialMessage, preferredCats.length);
+      isExplicitIdeate = parsed.explicit && parsed.intent === 'ideate';
+    }
+    if (!isExplicitIdeate) {
+      const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
+      const chainOrder = handles.join(' → ');
+      headerLines.push(
+        '',
+        '## 接力链路（cat-driven @-chain）',
+        `顺序: ${chainOrder} → 回到主 Thread`,
+        'Server 只 wake 了**第一棒**。你接到这条消息后:',
+        '  - 完成你的回合',
+        '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
+        '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
+        '',
+        // NOTE: do NOT write the literal "#ideate" string here — parseIntent
+        // would otherwise read this server-injected explanation as an explicit
+        // user tag and force parallel mode. Refer to the tool description for
+        // the actual opt-in syntax.
+        '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
+      );
+    }
   }
 
   return `${content}\n\n${headerLines.join('\n')}`;
@@ -190,11 +219,27 @@ export async function appendApprovedInitialMessage({
   // Explicit #ideate escape hatch: if the user really wants parallel
   // ideation (everyone replies independently at once), they tag #ideate in
   // the initialMessage. That brings back the legacy "wake all" behaviour.
+  //
+  // 砚砚 round-5 P2 escape hatch: explicit #execute + no preferredCats +
+  // raw text @-mentions multiple cats means the user is asking for serial
+  // multi-cat execution (the F088 router contract for #execute outside
+  // F128). Silently collapsing to the first target would discard explicit
+  // user intent. preferredCats non-empty still wins (card order is ground
+  // truth — first-cat chain starter), but preferredCats=[] + explicit
+  // #execute should preserve all router-resolved targets.
   let targetCats: readonly CatId[];
   let intentName: string;
   if (parsed.explicit && parsed.intent === 'ideate') {
     targetCats = preferredCats && preferredCats.length > 0 ? preferredCats : resolved.targetCats;
     intentName = 'ideate';
+  } else if (
+    parsed.explicit &&
+    parsed.intent === 'execute' &&
+    (!preferredCats || preferredCats.length === 0) &&
+    resolved.targetCats.length > 0
+  ) {
+    targetCats = resolved.targetCats;
+    intentName = 'execute';
   } else {
     const firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0];
     targetCats = firstCandidate ? [firstCandidate] : [];

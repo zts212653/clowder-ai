@@ -60,12 +60,23 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.warnings, undefined);
     assert.equal(resolveCalls.length, 1);
-    // Server now injects "## 主 Thread" header (skill Step 5c fork-and-return),
-    // so router sees enriched content. The header is additive — user-typed
-    // content still appears at the start.
+    // 砚砚 PR #809 round-3 P2: router receives the RAW user-typed
+    // initialMessage, NOT the enriched "## 主 Thread" header content. The
+    // header is injected only into what gets enqueued + stored (so cats see
+    // parent-thread pointer + chain protocol), but server-injected text must
+    // never leak into router's @mention parser / persist boundary (that
+    // would let parent thread title `@cat` mentions silently wake / persist).
+    // P3 round-5: pin this contract with equality, not startsWith, so a
+    // future regression can't accidentally re-enrich router's input without
+    // tripping the test.
+    assert.equal(
+      resolveCalls[0].content,
+      'Kick this off',
+      'router input must equal raw initialMessage exactly — no server-injected header',
+    );
     assert.ok(
-      resolveCalls[0].content.startsWith('Kick this off'),
-      'router input should start with user-typed initialMessage',
+      !resolveCalls[0].content.includes('## 主 Thread'),
+      'router input must NOT contain server-injected "## 主 Thread" header',
     );
     assert.equal(resolveCalls[0].threadId, body.threadId);
     assert.equal(resolveCalls[0].options.persist, true);

@@ -203,6 +203,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           proposal.sourceThreadId,
           sourceThread?.title,
           finalPreferredCats,
+          finalInitialMessage, // 砚砚 round-5 P1: raw for explicit-#ideate mode detection
         );
 
         const result = await appendApprovedInitialMessage({
