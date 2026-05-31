@@ -853,6 +853,35 @@ export class RedisMessageStore {
     return claimed === 'OK';
   }
 
+  /**
+   * #697: Scan for message IDs matching a given deliveryStatus.
+   * Uses SCAN + pipeline HGET pattern (same as InvocationRecordStore.scanByStatus).
+   * Called by StartupReconciler to find orphaned queued messages after restart.
+   */
+  async scanByDeliveryStatus(status: string): Promise<string[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const ids: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.hget(this.stripPrefix(key), 'deliveryStatus');
+        }
+        const results = await pipeline.exec();
+        for (let i = 0; i < keys.length; i++) {
+          const [err, val] = results?.[i] ?? [null, null];
+          if (!err && val === status) {
+            ids.push(this.stripPrefix(keys[i]!).replace(/^msg:/, ''));
+          }
+        }
+      }
+    } while (cursor !== '0');
+    return ids;
+  }
+
   /** Hydrate message IDs into full StoredMessage objects */
   private async hydrateMessages(ids: string[], options?: { includeDeleted?: boolean }): Promise<StoredMessage[]> {
     const pipeline = this.redis.multi();

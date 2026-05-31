@@ -80,16 +80,16 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(options.map((option) => option.id)).not.toContain('spark');
   });
 
-  it('buildCatOptions includes static group mentions (@thread, @all) at the top', () => {
+  it('buildCatOptions places group mentions (@thread, @all) after individual cats', () => {
     const options = buildCatOptions(FAKE_CATS);
     const groups = options.filter((opt) => opt.isGroup);
     expect(groups.length).toBeGreaterThanOrEqual(2);
     expect(groups.find((g) => g.insert === '@thread ')).toBeDefined();
     expect(groups.find((g) => g.insert === '@all ')).toBeDefined();
-    // Group mentions come before individual cats
-    const firstIndividualIdx = options.findIndex((opt) => !opt.isGroup);
-    const lastGroupIdx = options.reduce((max, opt, i) => (opt.isGroup ? i : max), -1);
-    expect(lastGroupIdx).toBeLessThan(firstIndividualIdx);
+    // Individual cats come before group mentions (groups are low-frequency)
+    const lastIndividualIdx = options.reduce((max, opt, i) => (!opt.isGroup ? i : max), -1);
+    const firstGroupIdx = options.findIndex((opt) => opt.isGroup);
+    expect(lastIndividualIdx).toBeLessThan(firstGroupIdx);
   });
 
   it('buildWhisperOptions includes cats with empty mentionPatterns', () => {

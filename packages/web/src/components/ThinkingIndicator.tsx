@@ -103,8 +103,17 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
     return (
       <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
         <div className="flex items-center gap-2">
-          <span className="text-sm leading-none animate-pulse">🐾</span>
-          <span className="text-sm text-cafe-secondary">{name} 启动中...</span>
+          <span className="text-sm leading-none animate-bounce">🐾</span>
+          <span className="text-sm text-cafe-secondary">{name} 启动中</span>
+          <span className="flex items-center gap-0.5">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+                style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+              />
+            ))}
+          </span>
         </div>
       </div>
     );
@@ -200,10 +209,20 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
   return (
     <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
       <div className="flex items-center gap-2">
-        <span className="text-sm leading-none animate-pulse">🐾</span>
+        <span className="text-sm leading-none animate-bounce">🐾</span>
         <span className="text-sm text-cafe-secondary">
           {name}
-          {status === 'streaming' ? '回复中...' : '思考中...'}
+          {status === 'streaming' ? '回复中' : '思考中'}
+        </span>
+        {/* #738: animated typing dots */}
+        <span className="flex items-center gap-0.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="inline-block w-1 h-1 rounded-full bg-cafe-secondary animate-bounce"
+              style={{ animationDelay: `${i * 150}ms`, animationDuration: '0.8s' }}
+            />
+          ))}
         </span>
       </div>
     </div>

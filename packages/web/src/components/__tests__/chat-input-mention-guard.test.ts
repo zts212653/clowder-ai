@@ -175,8 +175,8 @@ describe('ChatInput mention menu guards', () => {
   });
 
   it('ArrowDown past last item wraps to 0 and Enter still works', () => {
-    // 4 options: @thread, @all (groups), 布偶猫, 缅因猫 (individuals).
-    // Default selectedIdx = 2 (first individual, skipping groups).
+    // 4 options: 布偶猫, 缅因猫 (individuals), @thread, @all (groups).
+    // Default selectedIdx = 0 (first individual, groups are at bottom).
     render();
 
     typeInTextarea('@');

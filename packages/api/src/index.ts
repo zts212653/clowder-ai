@@ -2566,19 +2566,9 @@ async function main(): Promise<void> {
     // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
     // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
 
-    const fetchPaginated = async (endpoint: string) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const { stdout } = await execFileAsync('gh', ['api', endpoint, '--paginate', '--jq', '.[]'], {
-        timeout: 30_000,
-      });
-      if (!stdout.trim()) return [];
-      return stdout
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
-    };
+    // #798: fetchPaginated extracted to infrastructure/github/fetch-paginated.ts for testability
+    const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
+    const fetchPaginated = (endpoint: string, sinceId?: number) => fetchPaginatedFn(endpoint, { sinceId });
 
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({
@@ -2605,10 +2595,10 @@ async function main(): Promise<void> {
             return null;
           }
         },
-        fetchComments: async (repo, pr) => {
+        fetchComments: async (repo, pr, sinceId) => {
           const [reviewComments, issueComments] = await Promise.all([
-            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`),
-            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`),
+            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
+            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
           ]);
           return [...reviewComments, ...issueComments].map(
             (c: {
@@ -2632,8 +2622,8 @@ async function main(): Promise<void> {
             }),
           );
         },
-        fetchReviews: async (repo, pr) => {
-          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`);
+        fetchReviews: async (repo, pr, sinceId) => {
+          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
           return reviews.map(
             (r: {
               id: number;
