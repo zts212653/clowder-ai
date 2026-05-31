@@ -57,6 +57,8 @@ export function transformDareEvent(event: unknown, catId: CatId | string): Agent
       };
 
     case 'tool.invoke': {
+      // F153 Phase J AC-J2: lift native tool_call_id to top-level toolUseId for
+      // ToolSpanTracker pairing with tool.result/tool.error.
       const msg: AgentMessage = {
         type: 'tool_use',
         catId: catId as CatId,
@@ -64,28 +66,38 @@ export function transformDareEvent(event: unknown, catId: CatId | string): Agent
         timestamp: ts,
       };
       if (typeof data.tool_call_id === 'string') {
-        msg.toolInput = { tool_call_id: data.tool_call_id };
+        msg.toolUseId = data.tool_call_id;
       }
       return msg;
     }
 
-    case 'tool.result':
-      return {
+    case 'tool.result': {
+      // F153 Phase J AC-J2: carry toolUseId + structured status (ok).
+      const msg: AgentMessage = {
         type: 'tool_result',
         catId: catId as CatId,
         toolName: str(data.tool_name),
         content: `${str(data.tool_name)} completed`,
+        toolResultStatus: 'ok',
         timestamp: ts,
       };
+      if (typeof data.tool_call_id === 'string') msg.toolUseId = data.tool_call_id;
+      return msg;
+    }
 
-    case 'tool.error':
-      return {
+    case 'tool.error': {
+      // F153 Phase J AC-J2: carry toolUseId + structured status (error).
+      const msg: AgentMessage = {
         type: 'tool_result',
         catId: catId as CatId,
         toolName: str(data.tool_name),
         content: `Error: ${str(data.error, 'tool execution failed')}`,
+        toolResultStatus: 'error',
         timestamp: ts,
       };
+      if (typeof data.tool_call_id === 'string') msg.toolUseId = data.tool_call_id;
+      return msg;
+    }
 
     case 'task.completed':
       return {
