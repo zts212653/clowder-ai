@@ -124,39 +124,48 @@ export async function hydrateTraceStoreFromRedis(
       const [err, fields] = result as [Error | null, (string | null)[] | null];
       if (err || !fields) continue;
       const [extraStr, timestampStr, catIdStr, metadataStr, toolEventsStr] = fields;
-      if (!extraStr) continue;
-
-      const extra = safeParseExtra(extraStr);
-      if (!extra?.tracing) continue;
 
       const ts = Number.parseInt(timestampStr ?? '0', 10);
       if (!ts) continue;
 
-      const durationMs = parseDurationMs(metadataStr);
-      const startTimeMs = durationMs > 0 ? ts - durationMs : ts;
+      // Parse extra opportunistically: msg-level tracing only gates the
+      // `invocation.restored` DTO. toolEvents are processed independently below
+      // (maintainer R3 P2 fix): error/tool-only message records persisted via
+      // route fallback paths carry `extra.stream` (invocation correlation) but
+      // no `extra.tracing` (no done event arrived). Their toolEvents already
+      // carry per-event tracing pointers, so cold-start hydrate must still
+      // restore tool spans for those records — gating on msg-level tracing
+      // would silently drop exactly the recover-on-refresh case the records
+      // were persisted for.
+      const extra = extraStr ? safeParseExtra(extraStr) : undefined;
 
-      const attributes: Record<string, unknown> = {};
-      if (catIdStr) attributes['agent.id'] = catIdStr;
-      if (extra.stream?.invocationId) attributes.invocationId = extra.stream.invocationId;
+      if (extra?.tracing) {
+        const durationMs = parseDurationMs(metadataStr);
+        const startTimeMs = durationMs > 0 ? ts - durationMs : ts;
 
-      dtos.push({
-        traceId: extra.tracing.traceId,
-        spanId: extra.tracing.spanId,
-        parentSpanId: extra.tracing.parentSpanId,
-        name: 'cat_cafe.invocation.restored',
-        kind: 0,
-        startTimeMs,
-        endTimeMs: ts,
-        durationMs: durationMs > 0 ? durationMs : ts - startTimeMs,
-        status: { code: 0 },
-        attributes,
-        events: [],
-        storedAt: ts,
-      });
+        const attributes: Record<string, unknown> = {};
+        if (catIdStr) attributes['agent.id'] = catIdStr;
+        if (extra.stream?.invocationId) attributes.invocationId = extra.stream.invocationId;
 
-      // F153 Phase J Slice J-B AC-J8: synthesize tool spans for events that carry
-      // the four-piece set (toolUseId + tracing + start/end timestamps). Skips
-      // gracefully when fields are absent (legacy data / unwired providers).
+        dtos.push({
+          traceId: extra.tracing.traceId,
+          spanId: extra.tracing.spanId,
+          parentSpanId: extra.tracing.parentSpanId,
+          name: 'cat_cafe.invocation.restored',
+          kind: 0,
+          startTimeMs,
+          endTimeMs: ts,
+          durationMs: durationMs > 0 ? durationMs : ts - startTimeMs,
+          status: { code: 0 },
+          attributes,
+          events: [],
+          storedAt: ts,
+        });
+      }
+
+      // F153 Phase J Slice J-B AC-J8: synthesize tool spans whenever the
+      // four-piece set is present at event level (independent of message-level
+      // tracing — see comment above).
       const toolEvents = safeParseToolEvents(toolEventsStr ?? undefined);
       if (toolEvents && toolEvents.length > 0) {
         const toolDtos = synthesizeToolSpansFromEvents(toolEvents, catIdStr ?? undefined, ts);

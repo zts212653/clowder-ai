@@ -343,3 +343,155 @@ test('F153 Phase J AC-J7 schema: StoredToolEvent backward compat — old events 
   const dtos = synthesizeToolSpansFromEvents(events, 'opus', 700);
   assert.equal(dtos.length, 0, 'legacy events without new fields are silently no-op');
 });
+
+// ── maintainer R3 P2 regression: tool span synthesis must NOT be gated by msg-level tracing ──
+
+const { hydrateTraceStoreFromRedis } = await import('../../dist/infrastructure/telemetry/hydrate-traces.js');
+const { LocalTraceStore } = await import('../../dist/infrastructure/telemetry/local-trace-store.js');
+
+/**
+ * Minimal RedisClient mock for hydrate tests. Implements the two methods
+ * used by hydrateTraceStoreFromRedis: zrevrangebyscore + pipeline+hmget+exec.
+ */
+function makeMockRedis(messages) {
+  const ids = messages.map((m) => m.id);
+  return {
+    zrevrangebyscore: async () => ids,
+    pipeline: () => {
+      const calls = [];
+      return {
+        hmget(_key, ..._fields) {
+          // We always pull (extra, timestamp, catId, metadata, toolEvents) per hydrate's contract.
+          calls.push(_key);
+          return this;
+        },
+        async exec() {
+          return messages.map((m) => [
+            null,
+            [m.extra ?? null, String(m.timestamp), m.catId ?? null, m.metadata ?? null, m.toolEvents ?? null],
+          ]);
+        },
+      };
+    },
+  };
+}
+
+test('F153 Phase J AC-J8 (maintainer R3 P2 fix): error/tool-only record (no extra.tracing) still synthesizes tool spans', async () => {
+  // Use recent timestamps so LocalTraceStore.hydrate (24h cutoff) keeps them.
+  const now = Date.now();
+  const start = now - 5_000;
+  const end = start + 120;
+
+  const toolEvents = JSON.stringify([
+    {
+      id: 'tool-1',
+      type: 'tool_use',
+      label: 'opus → mcp__cat-cafe__cat_cafe_post_message',
+      toolUseId: 'use-err-1',
+      tracing: { traceId: 't-err', spanId: 's-err', parentSpanId: 'p-inv' },
+      startTimeMs: start,
+      timestamp: start,
+    },
+    {
+      id: 'toolr-1',
+      type: 'tool_result',
+      label: 'opus ← result',
+      toolUseId: 'use-err-1',
+      status: 'error',
+      tracing: { traceId: 't-err', spanId: 's-err', parentSpanId: 'p-inv' },
+      endTimeMs: end,
+      timestamp: end,
+    },
+  ]);
+
+  // Simulate the route-fallback persistence: extra.stream present (invocation
+  // correlation) but extra.tracing ABSENT (no done event arrived because of
+  // hadError && empty text). Per maintainer R3: these are exactly the records
+  // that need their toolEvents recovered on refresh; the old guard would drop
+  // them silently.
+  const extraNoTracing = JSON.stringify({ stream: { invocationId: 'inv-err-1' } });
+
+  const redis = makeMockRedis([
+    {
+      id: 'msg-error-tool-only',
+      extra: extraNoTracing,
+      timestamp: now - 100,
+      catId: 'opus',
+      metadata: null,
+      toolEvents,
+    },
+  ]);
+
+  const store = new LocalTraceStore();
+  await hydrateTraceStoreFromRedis(store, redis);
+
+  assert.equal(store.stats().spanCount, 1, 'one tool span synthesized even without msg-level extra.tracing');
+  const spans = store.query({});
+  assert.equal(spans[0].name, 'cat_cafe.tool_use mcp__cat-cafe__cat_cafe_post_message');
+  assert.equal(spans[0].durationMs, 120, 'real duration 120ms');
+  assert.equal(spans[0].status.code, 2, 'error → OTel ERROR=2');
+});
+
+test('F153 Phase J AC-J8: record WITH msg-level tracing produces invocation.restored + tool spans', async () => {
+  const now = Date.now();
+  const ts = now - 100;
+  const extraWithTracing = JSON.stringify({
+    tracing: { traceId: 't-inv', spanId: 's-inv', parentSpanId: 'p-route' },
+    stream: { invocationId: 'inv-1' },
+  });
+  const toolEvents = JSON.stringify([
+    {
+      id: 'tool-x',
+      type: 'tool_use',
+      label: 'opus → mcp:cat-cafe/list_threads',
+      toolUseId: 'use-x',
+      tracing: { traceId: 't-inv', spanId: 's-tool', parentSpanId: 's-inv' },
+      startTimeMs: ts - 300,
+      timestamp: ts - 300,
+    },
+    {
+      id: 'toolr-x',
+      type: 'tool_result',
+      label: 'opus ← result',
+      toolUseId: 'use-x',
+      status: 'ok',
+      tracing: { traceId: 't-inv', spanId: 's-tool', parentSpanId: 's-inv' },
+      endTimeMs: ts - 200,
+      timestamp: ts - 200,
+    },
+  ]);
+  const redis = makeMockRedis([
+    {
+      id: 'msg-with-tracing',
+      extra: extraWithTracing,
+      timestamp: ts,
+      catId: 'opus',
+      metadata: JSON.stringify({ usage: { durationMs: 100 } }),
+      toolEvents,
+    },
+  ]);
+  const store = new LocalTraceStore();
+  await hydrateTraceStoreFromRedis(store, redis);
+  const spans = store.query({});
+  assert.equal(spans.length, 2, 'one invocation.restored + one tool_use');
+  const invocationSpan = spans.find((s) => s.name === 'cat_cafe.invocation.restored');
+  const toolSpan = spans.find((s) => s.name.startsWith('cat_cafe.tool_use '));
+  assert.ok(invocationSpan, 'invocation.restored present (msg-level tracing OK)');
+  assert.ok(toolSpan, 'tool span synthesized');
+});
+
+test('F153 Phase J AC-J8: record without tracing AND without toolEvents is a no-op (no fake DTOs)', async () => {
+  const redis = makeMockRedis([
+    {
+      id: 'msg-empty',
+      extra: null,
+      timestamp: Date.now() - 100,
+      catId: 'opus',
+      metadata: null,
+      toolEvents: null,
+    },
+  ]);
+  const store = new LocalTraceStore();
+  await hydrateTraceStoreFromRedis(store, redis);
+  assert.equal(store.stats().spanCount, 0, 'no DTOs synthesized for empty record');
+});
