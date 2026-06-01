@@ -498,9 +498,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const explicitProvider = 'provider' in body ? body.provider : undefined;
       const providerNameForValidation =
         explicitProvider ??
-        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
-          ? 'openai'
-          : undefined);
+        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/') ? 'openai' : undefined);
       await validateAccountBindingOrThrow(
         projectRoot,
         body.clientId,
@@ -566,7 +564,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.clientId === 'opencode'),
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
-          ...((body.provider || providerNameForValidation) ? { provider: body.provider ?? providerNameForValidation } : {}),
+          ...(body.provider || providerNameForValidation
+            ? { provider: body.provider ?? providerNameForValidation }
+            : {}),
           ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
         });
       }
