@@ -21,7 +21,15 @@ const NON_PUBLIC_IPV4_RANGES: readonly [number, number][] = [
   [0xf0000000, 0xf0000000], // 240.0.0.0/4 reserved
 ] as const;
 
-const NON_PUBLIC_IPV6_RANGES = [/^::1$/, /^::$/, /^f[cd][0-9a-f]{2}:/i, /^fe[89ab][0-9a-f]?:/i, /^ff/i, /^2001:db8:/i];
+const NON_PUBLIC_IPV6_RANGES = [
+  /^::1$/,
+  /^::$/,
+  /^f[cd][0-9a-f]{2}:/i,
+  /^fe[89ab][0-9a-f]?:/i,
+  /^fe[cdef][0-9a-f]?:/i,
+  /^ff/i,
+  /^2001:db8:/i,
+];
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal', 'metadata.internal']);
 

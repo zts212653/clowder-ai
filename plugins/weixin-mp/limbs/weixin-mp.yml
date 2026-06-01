@@ -16,7 +16,7 @@ capabilities:
     commands:
       - weixin_mp.publish_article
       - weixin_mp.upload_image
-    authLevel: gated
+    authLevel: leased
 
 commands:
   weixin_mp.check_status:

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
+import { LimbAccessPolicy } from '../dist/domains/limb/LimbAccessPolicy.js';
+import { LimbActionLog } from '../dist/domains/limb/LimbActionLog.js';
+import { LimbLeaseManager } from '../dist/domains/limb/LimbLeaseManager.js';
+import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
+import { loadLimbDeclaration } from '../dist/domains/limb/limb-yaml-loader.js';
 import { WeixinMpLimbNode } from '../dist/domains/limb/WeixinMpLimbNode.js';
 
 function createNodeWithDraftClient() {
@@ -21,6 +27,36 @@ function createNodeWithDraftClient() {
 }
 
 describe('WeixinMpLimbNode', () => {
+  it('declares publish commands with an invokable auth level', async () => {
+    const decl = loadLimbDeclaration(resolve('plugins/weixin-mp/limbs/weixin-mp.yml'));
+    const registry = new LimbRegistry();
+    registry.setDeps({
+      accessPolicy: new LimbAccessPolicy(),
+      leaseManager: new LimbLeaseManager(),
+      actionLog: new LimbActionLog(),
+    });
+    const calls = [];
+    await registry.register({
+      nodeId: decl.nodeId,
+      displayName: decl.displayName,
+      platform: decl.platform,
+      capabilities: decl.capabilities,
+      invoke: async (command) => {
+        calls.push(command);
+        return { success: true };
+      },
+    });
+
+    const publish = await registry.invoke(decl.nodeId, 'weixin_mp.publish_article', {}, { catId: 'codex' });
+    const upload = await registry.invoke(decl.nodeId, 'weixin_mp.upload_image', {}, { catId: 'codex' });
+
+    assert.equal(publish.success, true);
+    assert.equal(upload.success, true);
+    assert.deepEqual(calls, ['weixin_mp.publish_article', 'weixin_mp.upload_image']);
+    const publishCap = decl.capabilities.find((cap) => cap.cap === 'content_publish');
+    assert.equal(publishCap?.authLevel, 'leased');
+  });
+
   it('does not publish when publish is the string "false"', async () => {
     const { node, calls } = createNodeWithDraftClient();
 
