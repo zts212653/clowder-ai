@@ -40,6 +40,8 @@ OutputBaseFilename=CatCafe-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+; Always create a setup log (%TEMP%\Setup Log *.txt) for post-mortem debugging.
+SetupLogging=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -209,21 +211,47 @@ end;
 
 function ExtractArchive(const ArchiveName, DestSubDir, StatusLabel: String): Boolean;
 var
-  AppDir, ArchivePath, DestDir: String;
+  AppDir, ArchivePath, DestDir, TarExe: String;
   ResultCode: Integer;
 begin
   AppDir := ExpandConstant('{app}');
   ArchivePath := AppDir + '\bundled\archives\' + ArchiveName;
   DestDir := AppDir + '\' + DestSubDir;
+  { Full System32 path avoids WoW64 PATH-resolution failures when
+    32-bit Inno Setup calls CreateProcess on 64-bit Windows. }
+  TarExe := ExpandConstant('{sys}\tar.exe');
 
   WizardForm.StatusLabel.Caption := StatusLabel;
 
-  Result := Exec('tar.exe',
+  { Pre-check: archive must have been extracted from the installer by
+    the [Files] section. Missing = Inno Setup bug or disk-full during copy. }
+  if not FileExists(ArchivePath) then begin
+    Log('ExtractArchive: archive NOT FOUND: ' + ArchivePath);
+    Result := False;
+    Exit;
+  end;
+
+  { If {sys}\tar.exe doesn't exist (non-standard Windows or stripped
+    install), fall back to bare PATH lookup as a last resort. }
+  if not FileExists(TarExe) then begin
+    Log('ExtractArchive: ' + TarExe + ' not found, falling back to PATH');
+    TarExe := 'tar.exe';
+  end;
+
+  Log('ExtractArchive: ' + ArchiveName + ' -> ' + DestDir + ' via ' + TarExe);
+
+  Result := Exec(TarExe,
     '-xzf "' + ArchivePath + '" -C "' + DestDir + '"',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  if (not Result) or (ResultCode <> 0) then
+  if (not Result) or (ResultCode <> 0) then begin
+    Log('ExtractArchive FAILED: ' + ArchiveName
+      + ' | launched=' + IntToStr(Ord(Result))
+      + ' | exitCode=' + IntToStr(ResultCode)
+      + ' | tarExe=' + TarExe);
     Result := False;
+  end else
+    Log('ExtractArchive OK: ' + ArchiveName);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -258,7 +286,13 @@ begin
   if FailedArchives <> '' then begin
     MsgBox('The following archives failed to extract:' + FailedArchives
       + #13#10 + #13#10
-      + 'Post-install steps will be skipped. Please check disk space and reinstall.',
+      + 'Possible causes:' + #13#10
+      + '  - tar.exe not found (Windows 10 1803+ required)' + #13#10
+      + '  - Antivirus blocking extraction' + #13#10
+      + '  - Insufficient disk space' + #13#10 + #13#10
+      + 'Installer log saved to %TEMP%\Setup Log *.txt'
+      + #13#10 + #13#10
+      + 'Post-install steps will be skipped.',
       mbError, MB_OK);
     { ExtractionSucceeded stays False — [Run] entries gated by
       IsExtractionOK will be skipped, preventing post-install on a
