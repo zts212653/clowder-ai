@@ -37,20 +37,41 @@ function sanitizeUrl(url: string): string {
   return '';
 }
 
-function processInline(text: string): string {
+function processTextInline(text: string): string {
   const escaped = escapeHtml(text);
   return escaped
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_m, alt: string, url: string) => {
-      const safeUrl = sanitizeUrl(url);
-      return safeUrl ? `<img src="${safeUrl}" alt="${escapeAttr(alt)}" style="${S.img}" />` : escapeHtml(alt);
-    })
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label: string, url: string) => {
-      const safeUrl = sanitizeUrl(url);
-      return safeUrl ? `<a href="${safeUrl}" style="${S.a}">${label}</a>` : label;
-    })
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, `<code style="${S.code}">$1</code>`);
+}
+
+function processInline(text: string): string {
+  const out: string[] = [];
+  const markdownLinkPattern = /!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = markdownLinkPattern.exec(text)) !== null) {
+    out.push(processTextInline(text.slice(lastIndex, match.index)));
+
+    if (match[1] !== undefined) {
+      const alt = match[1];
+      const url = match[2]!;
+      const safeUrl = sanitizeUrl(url);
+      out.push(safeUrl ? `<img src="${safeUrl}" alt="${escapeAttr(alt)}" style="${S.img}" />` : processTextInline(alt));
+    } else {
+      const label = match[3]!;
+      const url = match[4]!;
+      const safeUrl = sanitizeUrl(url);
+      const safeLabel = processTextInline(label);
+      out.push(safeUrl ? `<a href="${safeUrl}" style="${S.a}">${safeLabel}</a>` : safeLabel);
+    }
+
+    lastIndex = markdownLinkPattern.lastIndex;
+  }
+
+  out.push(processTextInline(text.slice(lastIndex)));
+  return out.join('');
 }
 
 export function markdownToWxHtml(md: string): string {

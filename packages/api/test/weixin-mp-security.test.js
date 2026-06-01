@@ -240,6 +240,18 @@ describe('markdownToWxHtml sanitization', () => {
     assert.ok(html.includes('href="https://example.com"'));
   });
 
+  it('escapes query-string ampersands once in image URLs', () => {
+    const html = markdownToWxHtml('![cdn](https://cdn.example.com/img.jpg?token=a&sig=b)');
+    assert.ok(html.includes('src="https://cdn.example.com/img.jpg?token=a&amp;sig=b"'));
+    assert.ok(!html.includes('&amp;amp;'));
+  });
+
+  it('escapes query-string ampersands once in link URLs', () => {
+    const html = markdownToWxHtml('[cdn](https://cdn.example.com/page?token=a&sig=b)');
+    assert.ok(html.includes('href="https://cdn.example.com/page?token=a&amp;sig=b"'));
+    assert.ok(!html.includes('&amp;amp;'));
+  });
+
   it('escapes HTML entities in attribute values', () => {
     const html = markdownToWxHtml('!["><script>](https://example.com/img.png)');
     assert.ok(!html.includes('"><script>'), 'attribute injection should be escaped');
