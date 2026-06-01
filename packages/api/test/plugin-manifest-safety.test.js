@@ -679,6 +679,51 @@ describe('PluginResourceActivator config handling', () => {
 
     assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'fresh-token');
   });
+
+  it('refreshes enabled limb nodes with legacy backslash capability ids after plugin config changes', async () => {
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
+    const manifest = {
+      id: 'test-plugin-sync-legacy',
+      name: 'Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'TEST_PLUGIN_SYNC_LEGACY_TOKEN', label: 'Token', sensitive: true, required: true }],
+      resources: [{ type: 'limb', path: 'limbs/node.yaml' }],
+    };
+    mkdirSync(join(projectRoot, 'plugins', manifest.id, 'limbs'), { recursive: true });
+    writeFileSync(join(projectRoot, 'plugins', manifest.id, 'limbs', 'node.yaml'), 'nodeId: sync-node\n');
+
+    const { activator, getCapabilities, limbRegistry } = createActivator(
+      projectRoot,
+      async (_pluginId, _yamlPath, pluginConfig) => ({
+        nodeId: 'sync-node',
+        displayName: pluginConfig.TEST_PLUGIN_SYNC_LEGACY_TOKEN,
+        platform: 'test',
+        capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+        invoke: async () => ({ success: true }),
+      }),
+    );
+    getCapabilities().capabilities.push({
+      id: 'plugin:test-plugin-sync-legacy:limbs\\node.yaml',
+      type: 'limb',
+      enabled: true,
+      source: 'cat-cafe',
+      pluginId: manifest.id,
+      limbNodeId: 'sync-node',
+    });
+    await limbRegistry.register({
+      nodeId: 'sync-node',
+      displayName: 'old-token',
+      platform: 'test',
+      capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+      invoke: async () => ({ success: true }),
+    });
+
+    writePluginConfig(projectRoot, manifest.id, [{ name: 'TEST_PLUGIN_SYNC_LEGACY_TOKEN', value: 'fresh-token' }]);
+    await activator.syncPluginEnv(manifest);
+
+    assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'fresh-token');
+  });
 });
 
 describe('validateEnvSafety security', () => {

@@ -3,10 +3,13 @@
  */
 
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import http from 'node:http';
 import { describe, it } from 'node:test';
 import { markdownToWxHtml } from '../dist/domains/weixin-mp/markdown-to-wx-html.js';
 import {
   createPinnedRequestOptions,
+  fetchExternalUrlPinned,
   resolveExternalUrl,
   validateExternalUrl,
   validateExternalUrlResolved,
@@ -152,6 +155,60 @@ describe('validateExternalUrl', () => {
     assert.equal(options.servername, 'cdn.example.test');
     assert.equal(options.path, '/image.png?size=large');
     assert.deepEqual(options.headers, { Host: 'cdn.example.test:8443' });
+  });
+
+  it('rejects slow-drip image responses after the wall-clock timeout', async () => {
+    const originalRequest = http.request;
+    let fakeReq;
+
+    http.request = (_options, onResponse) => {
+      const req = new EventEmitter();
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.headers = { 'content-type': 'image/png' };
+      res.resume = () => {};
+      res.destroy = () => {};
+      req.setTimeout = () => req;
+      req.end = () => {
+        queueMicrotask(() => {
+          onResponse(res);
+          res.emit('data', Buffer.from([1]));
+        });
+      };
+      req.destroy = (err) => {
+        req.destroyedWith = err;
+        req.emit('error', err);
+        res.emit('error', err);
+      };
+      fakeReq = req;
+      return req;
+    };
+
+    try {
+      const fetchPromise = fetchExternalUrlPinned('http://cdn.example.test/image.png', {
+        timeoutMs: 20,
+        maxBytes: 1024,
+        dnsLookup: async () => [{ address: '93.184.216.34' }],
+      });
+      const result = await Promise.race([
+        fetchPromise.then(
+          () => ({ status: 'resolved' }),
+          (err) => ({ status: 'rejected', err }),
+        ),
+        new Promise((resolve) => setTimeout(() => resolve({ status: 'pending' }), 80)),
+      ]);
+
+      if (result.status === 'pending') {
+        fakeReq?.destroy(new Error('cleanup'));
+        await fetchPromise.catch(() => {});
+      }
+
+      assert.equal(result.status, 'rejected');
+      assert.match(result.err.message, /timed out after 20ms/);
+      assert.match(fakeReq.destroyedWith.message, /timed out after 20ms/);
+    } finally {
+      http.request = originalRequest;
+    }
   });
 });
 

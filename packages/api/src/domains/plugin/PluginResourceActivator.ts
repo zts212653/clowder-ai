@@ -731,7 +731,8 @@ export class PluginResourceActivator {
   ): Promise<boolean> {
     if (cap.type !== 'limb' || !cap.enabled) return false;
 
-    const resource = manifest.resources.find((r) => resourceCapId(manifest.id, r) === cap.id);
+    const normalizedCapId = normalizeCapId(cap.id);
+    const resource = manifest.resources.find((r) => resourceCapId(manifest.id, r) === normalizedCapId);
     if (!resource?.path) return false;
     if (!this.deps.limbAdapterFactory) {
       throw new Error('No limb adapter factory configured');

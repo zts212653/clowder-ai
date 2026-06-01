@@ -223,13 +223,33 @@ export async function fetchExternalUrlPinned(url: string, options: PinnedFetchOp
   const client = resolved.url.protocol === 'https:' ? https : http;
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutError = () => new Error(`External image fetch timed out after ${options.timeoutMs}ms`);
+    const settle = <T>(fn: (value: T) => void, value: T) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
+
     const req = client.request(requestOptions, (res) => {
-      collectPinnedResponse(res, options.maxBytes).then(resolve, reject);
+      collectPinnedResponse(res, options.maxBytes).then(
+        (result) => settle(resolve, result),
+        (err) => settle(reject, err),
+      );
     });
+    timer = setTimeout(() => {
+      const err = timeoutError();
+      req.destroy(err);
+      settle(reject, err);
+    }, options.timeoutMs);
     req.setTimeout(options.timeoutMs, () => {
-      req.destroy(new Error(`External image fetch timed out after ${options.timeoutMs}ms`));
+      const err = timeoutError();
+      req.destroy(err);
+      settle(reject, err);
     });
-    req.on('error', reject);
+    req.on('error', (err) => settle(reject, err));
     req.end();
   });
 }
