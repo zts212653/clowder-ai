@@ -65,6 +65,21 @@ export interface ArticleInput {
   readonly digest?: string;
 }
 
+export function deriveImageUploadMetadata(
+  contentType: string,
+  baseName = 'image',
+): { readonly mimeType: string; readonly fileName: string } {
+  const mimeType = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  if (!mimeType.startsWith('image/')) {
+    throw new Error(`Expected image content-type, got: ${contentType}`);
+  }
+
+  const subtype = mimeType.slice('image/'.length);
+  const normalizedSubtype = subtype === 'jpeg' ? 'jpg' : subtype.split('+', 1)[0];
+  const extension = /^[a-z0-9]+$/.test(normalizedSubtype) ? normalizedSubtype : 'img';
+  return { mimeType, fileName: `${baseName}.${extension}` };
+}
+
 async function wxPost<T extends WxApiResponse>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -86,14 +101,11 @@ export class WeixinMpClient {
     const token = await this.tokenMgr.getAccessToken();
     const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
     const contentType = imgRes.contentType;
-    if (!contentType.startsWith('image/')) {
-      throw new Error(`Expected image content-type, got: ${contentType}`);
-    }
-    const ext = imageUrl.match(/\.(jpe?g|png|gif|bmp)$/i)?.[1]?.toLowerCase() ?? 'png';
-    const blob = new Blob([imgRes.body], { type: `image/${ext === 'jpg' ? 'jpeg' : ext}` });
+    const metadata = deriveImageUploadMetadata(contentType);
+    const blob = new Blob([imgRes.body], { type: metadata.mimeType });
 
     const form = new FormData();
-    form.append('media', blob, `image.${ext}`);
+    form.append('media', blob, metadata.fileName);
 
     const res = await fetch(`${BASE}/media/uploadimg?access_token=${token}`, {
       method: 'POST',
@@ -109,13 +121,11 @@ export class WeixinMpClient {
     const token = await this.tokenMgr.getAccessToken();
     const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
     const contentType = imgRes.contentType;
-    if (!contentType.startsWith('image/')) {
-      throw new Error(`Expected image content-type, got: ${contentType}`);
-    }
-    const blob = new Blob([imgRes.body], { type: contentType });
+    const metadata = deriveImageUploadMetadata(contentType, 'cover');
+    const blob = new Blob([imgRes.body], { type: metadata.mimeType });
 
     const form = new FormData();
-    form.append('media', blob, 'cover.png');
+    form.append('media', blob, metadata.fileName);
 
     const res = await fetch(`${BASE}/material/add_material?access_token=${token}&type=image`, {
       method: 'POST',
