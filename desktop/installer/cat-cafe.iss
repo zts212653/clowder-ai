@@ -209,4 +209,3 @@ Type: filesandordirs; Name: "{app}\node"
 Type: filesandordirs; Name: "{app}\bundled"
 ; scripts/node_modules junction created by mklink /J in [Run]
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
-
