@@ -19,8 +19,11 @@ function createNodeWithDraftClient() {
       WEIXIN_MP_APP_SECRET: 'app-secret',
     },
   });
-  const calls = { publishDraft: 0 };
-  node.client.createDraft = async () => 'draft-media-id';
+  const calls = { createDraft: 0, publishDraft: 0 };
+  node.client.createDraft = async () => {
+    calls.createDraft += 1;
+    return 'draft-media-id';
+  };
   node.client.publishDraft = async () => {
     calls.publishDraft += 1;
     return 'publish-id';
@@ -70,6 +73,7 @@ describe('WeixinMpLimbNode', () => {
     });
 
     assert.equal(result.success, true);
+    assert.equal(calls.createDraft, 1);
     assert.equal(calls.publishDraft, 0);
     assert.deepEqual(result.data, { draftMediaId: 'draft-media-id' });
   });
@@ -85,7 +89,23 @@ describe('WeixinMpLimbNode', () => {
     });
 
     assert.equal(result.success, true);
+    assert.equal(calls.createDraft, 1);
     assert.equal(calls.publishDraft, 1);
     assert.deepEqual(result.data, { draftMediaId: 'draft-media-id', publishId: 'publish-id' });
+  });
+
+  it('rejects external inline image URLs before creating a draft', async () => {
+    const { node, calls } = createNodeWithDraftClient();
+
+    const result = await node.invoke('weixin_mp.publish_article', {
+      title: 'Draft title',
+      markdown: 'Inline image: ![remote](https://example.com/a.png)',
+      thumbMediaId: 'thumb-media-id',
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /upload_image/);
+    assert.match(result.error, /https:\/\/example\.com\/a\.png/);
+    assert.equal(calls.createDraft, 0);
   });
 });

@@ -10,6 +10,53 @@ export interface WeixinMpLimbConfig {
   pluginConfig: Record<string, string>;
 }
 
+const WEIXIN_INLINE_IMAGE_HOSTS = new Set(['mmbiz.qpic.cn']);
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+function isWeixinInlineImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    const hostname = url.hostname.toLowerCase();
+    return WEIXIN_INLINE_IMAGE_HOSTS.has(hostname) || hostname.endsWith('.mmbiz.qpic.cn');
+  } catch {
+    return false;
+  }
+}
+
+function removeFencedCodeBlocks(markdown: string): string {
+  const lines = markdown.split('\n');
+  const visibleLines: string[] = [];
+  let inFence = false;
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence) visibleLines.push(line);
+  }
+
+  return visibleLines.join('\n');
+}
+
+function findExternalInlineImageUrls(markdown: string): string[] {
+  const markdownLinkPattern = /!\[[^\]]*\]\(([^)]+)\)/g;
+  const urls = new Set<string>();
+  const visibleMarkdown = removeFencedCodeBlocks(markdown);
+  let match: RegExpExecArray | null;
+
+  while ((match = markdownLinkPattern.exec(visibleMarkdown)) !== null) {
+    const url = match[1]?.trim();
+    if (!url || !isHttpUrl(url) || isWeixinInlineImageUrl(url)) continue;
+    urls.add(url);
+  }
+
+  return [...urls];
+}
+
 export class WeixinMpLimbNode implements ILimbNode {
   readonly nodeId = 'weixin-mp';
   readonly displayName = '微信公众号';
@@ -88,6 +135,18 @@ export class WeixinMpLimbNode implements ILimbNode {
     const coverImageUrl = params['coverImageUrl'] as string | undefined;
     let thumbMediaId = params['thumbMediaId'] as string | undefined;
     const publish = params['publish'] === true;
+
+    const externalInlineImageUrls = findExternalInlineImageUrls(markdown);
+    if (externalInlineImageUrls.length > 0) {
+      return {
+        success: false,
+        error: [
+          'Article body contains external inline image URLs that WeChat may filter.',
+          'Upload inline images with weixin_mp.upload_image first and replace them with returned WeChat CDN URLs.',
+          `External image URLs: ${externalInlineImageUrls.slice(0, 3).join(', ')}`,
+        ].join(' '),
+      };
+    }
 
     const htmlContent = markdownToWxHtml(markdown);
 
