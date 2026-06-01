@@ -724,6 +724,52 @@ describe('PluginResourceActivator config handling', () => {
 
     assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'fresh-token');
   });
+
+  it('rejects limb source symlinks that escape the plugin root during config refresh', async () => {
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
+    const manifest = {
+      id: 'test-plugin-sync-symlink',
+      name: 'Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'TEST_PLUGIN_SYNC_SYMLINK_TOKEN', label: 'Token', sensitive: true, required: true }],
+      resources: [{ type: 'limb', path: 'limb.yml' }],
+    };
+    const pluginRoot = join(projectRoot, 'plugins', manifest.id);
+    const limbPath = join(pluginRoot, 'limb.yml');
+    const outsideDir = mkdtempSync(join(os.tmpdir(), 'plugin-config-outside-'));
+    const outsideYaml = join(outsideDir, 'node.yaml');
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(limbPath, 'nodeId: sync-node\n');
+    writeFileSync(outsideYaml, ['nodeId: outside-node', 'displayName: Outside', 'platform: test'].join('\n'));
+
+    const adapterPaths = [];
+    const { activator, limbRegistry } = createActivator(projectRoot, async (_pluginId, yamlPath, pluginConfig) => {
+      adapterPaths.push(yamlPath);
+      return {
+        nodeId: 'sync-node',
+        displayName: pluginConfig.TEST_PLUGIN_SYNC_SYMLINK_TOKEN,
+        platform: 'test',
+        capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+        invoke: async () => ({ success: true }),
+      };
+    });
+
+    process.env.TEST_PLUGIN_SYNC_SYMLINK_TOKEN = 'old-token';
+    try {
+      await activator.enablePlugin(manifest);
+    } finally {
+      delete process.env.TEST_PLUGIN_SYNC_SYMLINK_TOKEN;
+    }
+    fsModule.unlinkSync(limbPath);
+    symlinkSync(outsideYaml, limbPath);
+
+    writePluginConfig(projectRoot, manifest.id, [{ name: 'TEST_PLUGIN_SYNC_SYMLINK_TOKEN', value: 'fresh-token' }]);
+    await assert.rejects(() => activator.syncPluginEnv(manifest), /must resolve inside plugin root/);
+
+    assert.equal(adapterPaths.length, 1, 'escaping refresh path must be rejected before adapter load');
+    assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'old-token');
+  });
 });
 
 describe('validateEnvSafety security', () => {

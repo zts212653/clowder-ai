@@ -739,6 +739,7 @@ export class PluginResourceActivator {
     }
 
     const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
+    await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
     const refreshedNode = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
     await this.replaceRegisteredLimbNode(cap.limbNodeId, refreshedNode);
 
