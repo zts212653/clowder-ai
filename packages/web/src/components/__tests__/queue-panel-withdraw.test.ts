@@ -87,6 +87,85 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已取消')).toBe(true);
   });
 
+  it('withdraws entry and queues its text for composer recall-edit', async () => {
+    useChatStore.setState({ queue: [QUEUED_ENTRY], pendingChatInsert: null });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
+    expect(recallBtn).not.toBeNull();
+
+    await act(async () => {
+      recallBtn?.click();
+    });
+
+    expect(useChatStore.getState().queue).toHaveLength(0);
+    expect(useChatStore.getState().pendingChatInsert).toEqual({
+      threadId: 'thread-1',
+      text: 'queued to withdraw',
+    });
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
+  });
+
+  it('rolls back queue state and does not queue composer insert when recall-edit fails', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({
+      ok: false,
+      json: async () => ({ error: 'nope' }),
+    }));
+
+    useChatStore.setState({ queue: [QUEUED_ENTRY], pendingChatInsert: null });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
+    expect(recallBtn).not.toBeNull();
+
+    await act(async () => {
+      recallBtn?.click();
+    });
+
+    expect(useChatStore.getState().queue).toHaveLength(1);
+    expect(useChatStore.getState().pendingChatInsert).toBeNull();
+    expect(container.innerHTML).toContain('queued to withdraw');
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回失败')).toBe(true);
+  });
+
+  it('rolls back queue state and does not queue composer insert when recall-edit throws', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => {
+      throw new Error('network down');
+    });
+
+    useChatStore.setState({ queue: [QUEUED_ENTRY], pendingChatInsert: null });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
+    expect(recallBtn).not.toBeNull();
+
+    await act(async () => {
+      recallBtn?.click();
+    });
+
+    expect(useChatStore.getState().queue).toHaveLength(1);
+    expect(useChatStore.getState().pendingChatInsert).toBeNull();
+    expect(container.innerHTML).toContain('queued to withdraw');
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回失败')).toBe(true);
+  });
+
   it('rolls back queue state and shows error toast when withdraw fails', async () => {
     const { apiFetch } = await import('@/utils/api-client');
     (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({

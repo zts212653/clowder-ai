@@ -19,6 +19,7 @@ export interface QueueEntryRowProps {
   imageCount: number;
   ownerName: string;
   onRemove: (id: string) => void;
+  onRecallEdit: (id: string) => void;
   onSteer: (id: string) => void;
 }
 
@@ -41,10 +42,12 @@ function QueueEntryRow({
   imageCount,
   ownerName,
   onRemove,
+  onRecallEdit,
   onSteer,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
   const isAgent = entry.source === 'agent';
+  const canRecallEdit = entry.source === 'user';
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
 
@@ -141,8 +144,21 @@ function QueueEntryRow({
         Steer
       </button>
 
+      {canRecallEdit && (
+        <button
+          type="button"
+          onClick={() => onRecallEdit(entry.id)}
+          className="text-xs px-2 py-1 rounded-full text-cafe-muted hover:text-cafe-primary hover:bg-cafe-surface transition-colors shrink-0"
+          title="撤回编辑"
+          aria-label="撤回编辑"
+        >
+          撤回编辑
+        </button>
+      )}
+
       {/* Remove button */}
       <button
+        type="button"
         onClick={() => onRemove(entry.id)}
         className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
         title="撤回"
