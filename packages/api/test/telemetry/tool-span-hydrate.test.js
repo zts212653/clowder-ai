@@ -170,6 +170,77 @@ test('F153 Phase J AC-J8: tool_use without matching tool_result is silently skip
   assert.equal(dtos.length, 0, 'tool_use without tool_result (still open / lost) produces no span');
 });
 
+test('F153 Phase J AC-J8 (砚砚 R1 P2-1 fix): tool_result MISSING status is skipped (four-piece set)', () => {
+  // Distinct from explicit `status: 'unknown'` (which is honest ambiguity and maps to UNSET).
+  // A tool_result that simply omits the field means the producer never set it — provider
+  // wiring is incomplete; honoring KD-41 honesty means we skip rather than fake UNSET.
+  const events = [
+    {
+      id: 'tool-missing-status',
+      type: 'tool_use',
+      label: 'opus → mcp__cat-cafe__cat_cafe_post_message',
+      toolUseId: 'use-no-status',
+      tracing: tracing('t-m', 's-m'),
+      startTimeMs: 100,
+      timestamp: 100,
+    },
+    {
+      id: 'toolr-missing-status',
+      type: 'tool_result',
+      label: 'opus ← result',
+      toolUseId: 'use-no-status',
+      // NO status field — producer not yet wired
+      tracing: tracing('t-m', 's-m'),
+      endTimeMs: 250,
+      timestamp: 250,
+    },
+  ];
+  const dtos = synthesizeToolSpansFromEvents(events, 'opus', 500);
+  assert.equal(dtos.length, 0, 'missing status (not "unknown") → skip per KD-41 honesty');
+});
+
+test('F153 Phase J AC-J8 (云端 Codex P2 fix): duplicate tool_use preserves FIRST entry', () => {
+  // Mirrors ToolSpanTracker.start() first-wins semantics. A re-emitted tool_use
+  // should NOT overwrite the earlier startTimeMs (which would shrink span duration
+  // or even drop the pair when duplicate timestamp lands after the result).
+  const events = [
+    {
+      id: 'tool-first',
+      type: 'tool_use',
+      label: 'opus → mcp__cat-cafe__cat_cafe_post_message',
+      toolUseId: 'dup',
+      tracing: tracing('t-d', 's-d', 'p-d'),
+      startTimeMs: 1_000, // ← FIRST (should win)
+      timestamp: 1_000,
+    },
+    {
+      id: 'tool-dup',
+      type: 'tool_use',
+      label: 'opus → mcp__cat-cafe__cat_cafe_post_message',
+      toolUseId: 'dup',
+      tracing: tracing('t-d', 's-d-LATER', 'p-d'),
+      startTimeMs: 1_500, // ← later, must NOT overwrite
+      timestamp: 1_500,
+    },
+    {
+      id: 'toolr-dup',
+      type: 'tool_result',
+      label: 'opus ← result',
+      toolUseId: 'dup',
+      status: 'ok',
+      tracing: tracing('t-d', 's-d', 'p-d'),
+      endTimeMs: 2_000,
+      timestamp: 2_000,
+    },
+  ];
+  const dtos = synthesizeToolSpansFromEvents(events, 'opus', 3_000);
+  assert.equal(dtos.length, 1, 'one span per id');
+  const [dto] = dtos;
+  assert.equal(dto.startTimeMs, 1_000, 'FIRST tool_use timestamp wins');
+  assert.equal(dto.durationMs, 1_000, 'duration uses first start (2000-1000=1000), not second (2000-1500=500)');
+  assert.equal(dto.spanId, 's-d', 'first span context wins (not s-d-LATER)');
+});
+
 test('F153 Phase J AC-J8: zero / negative duration is rejected (sanity guard)', () => {
   const events = [
     {

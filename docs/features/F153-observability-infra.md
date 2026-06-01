@@ -379,7 +379,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 
 | Provider | start | end | id | status | 真实 duration span | 备注 |
 |----------|:-----:|:---:|:--:|:------:|:------------------:|------|
-| **Claude CLI** | ✅ | ✅ | ✅ `tool_use.id`（Anthropic block schema）| ✅ `is_error` | ✅ | 上游 provider，所有 cat 走 Claude CLI 时全四件套就位 |
+| **Claude CLI** | ✅ | ❓ | ⏳ | ❓ | ⏳ deferred | `claude-ndjson-parser.ts:196` 的 `tool_use` 分支当前**不抽取** `tool_use.id`（Anthropic block schema 里有，parser 未读出来），tool_result 路径也未 verified；Phase J Slice J-B follow-up wire 后才能升级矩阵（**砚砚 R1 P2-2 fix**：之前误标 ✅，已改 deferred 与代码现状对齐） |
 | **Codex** | ✅ | ✅ | ✅ `item.id`（lifecycle anchor，PR #755 R1 P2-2 verified — **不是 `tool_call_id`**） | ✅ `item.status` (`completed`/`failed`/`error`) | ✅ | AC-J2 wired in PR #774 |
 | **DARE** | ✅ | ✅ | ✅ `data.tool_call_id`（event payload） | ✅ `tool.result` vs `tool.error` event | ✅ | AC-J2 wired in PR #774；`tool_call_id` 从 toolInput lift 到顶层 toolUseId（release note） |
 | **CatAgent** | ✅ | ✅ | ✅ `block.id`（Anthropic native tool_use.id） | ✅ execution edge (`unknown tool` / 成功 / thrown error 三分支) | ✅ | AC-J2 wired in PR #774；status 严格从 execution edge 不从 content 猜（KD-38） |

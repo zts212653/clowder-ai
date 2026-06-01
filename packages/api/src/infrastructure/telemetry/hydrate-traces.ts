@@ -36,14 +36,26 @@ export function synthesizeToolSpansFromEvents(
   storedAt: number,
 ): TraceSpanDTO[] {
   // Index tool_use events by toolUseId so tool_result can find its mate.
+  // 云端 Codex P2: preserve FIRST tool_use on duplicate id (mirrors
+  // ToolSpanTracker.start() which is a no-op for duplicates, keeping the
+  // original span's start time). Without this, a re-emitted later tool_use
+  // would overwrite the earlier entry → under-reported duration or even
+  // a pair drop when the duplicate timestamp lands after the result.
   const starts = new Map<string, StoredToolEvent>();
   for (const ev of events) {
-    if (ev.type === 'tool_use' && ev.toolUseId) starts.set(ev.toolUseId, ev);
+    if (ev.type === 'tool_use' && ev.toolUseId && !starts.has(ev.toolUseId)) {
+      starts.set(ev.toolUseId, ev);
+    }
   }
 
   const dtos: TraceSpanDTO[] = [];
   for (const ev of events) {
-    if (ev.type !== 'tool_result' || !ev.toolUseId || !ev.tracing) continue;
+    // 砚砚 R1 P2-1: enforce the four-piece set including status. Missing
+    // status falls back to legacy invocation.restored on the parent, not
+    // a fake UNSET tool span (KD-41 honesty: don't materialize what we
+    // don't actually know). Explicit `status: 'unknown'` is allowed and
+    // maps to UNSET — the caller deliberately surfaced ambiguity.
+    if (ev.type !== 'tool_result' || !ev.toolUseId || !ev.tracing || !ev.status) continue;
     const startEv = starts.get(ev.toolUseId);
     if (!startEv || !startEv.tracing) continue;
 
