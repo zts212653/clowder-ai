@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 import { isLoopbackAddress } from '../../utils/loopback-request.js';
+import { resolveOwnerGate } from '../../utils/owner-gate.js';
 import { REDACTED_CAPABILITY_SECRET } from './capability-redaction.js';
 
 export interface CapabilityWriteRouteError {
@@ -24,21 +25,14 @@ export function requireCapabilityWriteOwner(
   userId: string,
   options: CapabilityWriteOwnerOptions = {},
 ): CapabilityWriteRouteError | null {
-  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
-  if (!ownerId) {
-    if (options.allowMissingOwner && !options.requireConfiguredOwner) return null;
-    return {
-      status: 403,
-      error: options.missingOwnerError ?? 'Capability writes require DEFAULT_OWNER_USER_ID to be configured',
-    };
-  }
-  if (userId !== ownerId) {
-    return {
-      status: 403,
-      error: 'Capability writes can only be modified by the configured owner',
-    };
-  }
-  return null;
+  // Write callers (MCP install/delete, plugin enable/disable) pass allowMissingOwner: true
+  // → fall through in single-user mode. The data-filter caller (canReadSensitiveMcpConfig)
+  // passes requireConfiguredOwner: true → fail when unconfigured (sensitive data gate).
+  const shouldFallThrough = !!options.allowMissingOwner && !options.requireConfiguredOwner;
+  return resolveOwnerGate(userId, {
+    requireConfiguredOwner: !shouldFallThrough,
+    errorMessage: options.missingOwnerError,
+  });
 }
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {

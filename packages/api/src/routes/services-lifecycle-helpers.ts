@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
 import { MODEL_ENV_VARS, PORT_ENV_VARS } from '../domains/services/service-manifest.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
 
 export const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30 * 60 * 1000;
 const LIFECYCLE_RUN_SETTLEMENT = Symbol('lifecycleRunSettlement');
@@ -17,9 +18,9 @@ export function requireLifecycleOwner(request: FastifyRequest, reply: FastifyRep
     reply.status(401);
     return null;
   }
-  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
-  if (ownerId && userId !== ownerId) {
-    reply.status(403);
+  const gateResult = resolveOwnerGate(userId);
+  if (gateResult) {
+    reply.status(gateResult.status);
     return null;
   }
   return userId;

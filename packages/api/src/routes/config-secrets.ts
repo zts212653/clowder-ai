@@ -16,7 +16,7 @@ import {
 } from '../config/connector-secret-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
-import { isLoopbackAddress } from '../utils/loopback-request.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 
 const secretsPatchSchema = z.object({
   updates: z
@@ -47,8 +47,9 @@ export async function configSecretsRoutes(app: FastifyInstance, opts: ConfigSecr
   const envFilePath = opts.envFilePath ?? resolve(projectRoot, '.env');
 
   app.post('/api/config/secrets', async (request, reply) => {
-    // Loopback guard
-    if (!opts.skipLoopbackCheck && !isLoopbackAddress(request.ip)) {
+    // Loopback guard — reject proxied requests where request.ip is loopback
+    // but the actual client is remote (reverse proxy / Tailscale sidecar).
+    if (!opts.skipLoopbackCheck && !isDirectLoopbackRequest(request)) {
       reply.status(403);
       return { error: 'Secrets endpoint is loopback-only' };
     }

@@ -1,5 +1,7 @@
 import type { FastifyRequest } from 'fastify';
 import { normalizeTelegramBotToken } from '../infrastructure/connectors/telegram-token.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { isConnectorSecret } from './connector-secrets-allowlist.js';
 
 export const REDACTED_PLACEHOLDER = '••••••';
@@ -20,20 +22,29 @@ export function resolveConnectorSessionUserId(request: FastifyRequest): string |
 }
 
 export function requireConnectorWriteOwner(userId: string): ConnectorWriteRouteError | null {
-  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
-  if (!ownerId) {
-    return {
-      status: 403,
-      error: 'Connector credential writes require DEFAULT_OWNER_USER_ID to be configured',
-    };
-  }
-  if (userId !== ownerId) {
-    return {
-      status: 403,
-      error: 'Connector credential writes can only be modified by the configured owner',
-    };
-  }
-  return null;
+  return resolveOwnerGate(userId, {
+    errorMessage: 'Connector credential writes can only be modified by the configured owner',
+  });
+}
+
+/**
+ * Network guard for connector secret writes.
+ *
+ * When DEFAULT_OWNER_USER_ID is not configured (single-user mode), connector
+ * writes are restricted to direct loopback requests (no proxy forwarding
+ * headers). This prevents LAN/Tailscale/proxied clients from writing
+ * connector secrets without an owner identity.
+ *
+ * When DEFAULT_OWNER_USER_ID IS configured, remote writes are allowed because
+ * the owner gate provides identity-based access control.
+ */
+export function requireConnectorWriteNetworkGuard(request: FastifyRequest): ConnectorWriteRouteError | null {
+  if (isDirectLoopbackRequest(request)) return null;
+  if (process.env.DEFAULT_OWNER_USER_ID?.trim()) return null;
+  return {
+    status: 403,
+    error: 'Connector credential writes from non-localhost require DEFAULT_OWNER_USER_ID to be configured',
+  };
 }
 
 export function containsRedactedPlaceholder(value: unknown): boolean {

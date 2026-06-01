@@ -6,8 +6,8 @@
 import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { getOwnerUserId } from '../config/cat-config-loader.js';
 import { loadCatOrder, saveCatOrder } from '../config/cat-order-store.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 interface CatOrderRoutesOptions {
@@ -31,9 +31,12 @@ export async function configCatOrderRoutes(app: FastifyInstance, opts: CatOrderR
       reply.status(400);
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
-    if (operator !== getOwnerUserId()) {
-      reply.status(403);
-      return { error: 'Only the owner can change cat order' };
+    const gateResult = resolveOwnerGate(operator, {
+      errorMessage: 'Only the owner can change cat order',
+    });
+    if (gateResult) {
+      reply.status(gateResult.status);
+      return { error: gateResult.error };
     }
 
     const parsed = putSchema.safeParse(request.body);
