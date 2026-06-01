@@ -744,12 +744,14 @@ export class AgentRouter {
 
       // Filter out routing_warnings for group mention keywords — they were already
       // matched by parseGroupMentions and are not individual cat mentions.
-      // Only ASCII group keywords can trigger the line-start fallback regex ([a-z0-9_.-]+).
+      // Build exact set from registry so unknown handles like @all-ghost still warn.
       const groupHandles = new Set(['all', 'thread']);
+      for (const config of Object.values(catRegistry.getAllConfigs())) {
+        if (config.breedId) groupHandles.add(`all-${config.breedId}`);
+      }
       const filteredWarnings = individual.routing_warnings.filter((w) => {
         if (w.kind !== 'cat_not_found') return true;
-        const h = w.mention.toLowerCase();
-        return !groupHandles.has(h) && !h.startsWith('all-');
+        return !groupHandles.has(w.mention.toLowerCase());
       });
 
       return {
