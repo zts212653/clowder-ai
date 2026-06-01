@@ -153,18 +153,16 @@ describe('GET /api/debug/callback-auth — auth rejections (F174-D1)', () => {
     }
   });
 
-  // Cloud Codex P1 (PR #1377, 21:13Z): defaulting expected owner to
-  // 'default-user' = silent public exposure (anyone can mint /api/session
-  // session as 'default-user'). Endpoint must fail-closed when env unset.
-  test('rejects 403 when DEFAULT_OWNER_USER_ID not configured (fail-closed P1 21:13Z)', async () => {
+  // Issue #794: in local single-user mode (no DEFAULT_OWNER_USER_ID),
+  // any authenticated session should be allowed through.
+  test('allows access in single-user mode when DEFAULT_OWNER_USER_ID not configured (issue #794)', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const res = await app.inject({
       method: 'GET',
       url: '/api/debug/callback-auth',
       headers: { 'x-test-session-user': 'default-user' },
     });
-    assert.equal(res.statusCode, 403, 'must fail-closed when owner not explicitly configured');
-    assert.match(JSON.parse(res.body).error, /DEFAULT_OWNER_USER_ID/);
+    assert.equal(res.statusCode, 200, 'should return 200 in single-user mode');
   });
 
   test('accepts owner session when DEFAULT_OWNER_USER_ID explicitly set to default-user', async () => {
@@ -315,15 +313,14 @@ describe('POST /api/debug/callback-auth/mark-viewed — F174 D2b-2 rev3', () => 
     }
   });
 
-  test('rejects 403 when DEFAULT_OWNER_USER_ID not configured (fail-closed)', async () => {
+  test('allows access in single-user mode when DEFAULT_OWNER_USER_ID not configured (issue #794)', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const res = await app.inject({
       method: 'POST',
       url: '/api/debug/callback-auth/mark-viewed',
       headers: { 'x-test-session-user': 'default-user' },
     });
-    assert.equal(res.statusCode, 403);
-    assert.match(JSON.parse(res.body).error, /DEFAULT_OWNER_USER_ID/);
+    assert.equal(res.statusCode, 200, 'should return 200 in single-user mode');
   });
 
   // Cloud Codex P2 #1425: optional viewedUpTo body — only ack failures the

@@ -44,6 +44,34 @@ function hasTrustedLocalOrigin(value: unknown): boolean {
   return isLoopbackHost(originHostName(value));
 }
 
+/** Standard proxy forwarding headers — if any are present, the peer-loopback
+ *  address is the proxy, not the original client. */
+const PROXY_FORWARDING_HEADERS = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-real-ip',
+  'x-client-ip',
+  'cf-connecting-ip',
+  'true-client-ip',
+] as const;
+
+function hasNonEmptyHeader(value: string | string[] | undefined): boolean {
+  if (Array.isArray(value)) return value.some((v) => v.trim().length > 0);
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * Returns true when the request originates from a direct loopback peer
+ * (not proxied). Use this for owner-gate loopback guards so that reverse-
+ * proxy / Tailscale sidecar deployments don't bypass the guard.
+ */
+export function isDirectLoopbackRequest(request: FastifyRequest): boolean {
+  if (!isLoopbackAddress(request.ip)) return false;
+  return !PROXY_FORWARDING_HEADERS.some((h) => hasNonEmptyHeader(request.headers[h]));
+}
+
 export function isTrustedLocalApiRequest(request: FastifyRequest): boolean {
   if (!isLoopbackAddress(request.ip)) return false;
 

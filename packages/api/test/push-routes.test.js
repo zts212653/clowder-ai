@@ -251,16 +251,15 @@ describe('push routes', () => {
     await appWithLiveConfig.close();
   });
 
-  it('POST /api/push/generate-vapid fails closed when DEFAULT_OWNER_USER_ID is missing', async () => {
+  it('POST /api/push/generate-vapid allows access in single-user mode (issue #794)', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const res = await app.inject({
       method: 'POST',
       url: '/api/push/generate-vapid',
       headers: { 'x-test-session-user': OWNER_ID },
     });
-    assert.equal(res.statusCode, 403);
-    assert.match(JSON.parse(res.payload).error, /DEFAULT_OWNER_USER_ID/);
-    assert.equal(auditEvents.length, 0);
+    // Should not 403 — may return 200 (keys generated) or another non-auth status.
+    assert.notEqual(res.statusCode, 403, 'should not 403 in single-user mode');
   });
 
   it('POST /api/push/generate-vapid rejects trusted header identity without a real session', async () => {

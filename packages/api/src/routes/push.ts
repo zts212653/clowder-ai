@@ -4,7 +4,7 @@ import { requireConnectorWriteOwner, resolveConnectorSessionUserId } from '../co
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { PushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
 import type { IPushSubscriptionStore } from '../domains/cats/services/stores/ports/PushSubscriptionStore.js';
-import { isLoopbackAddress } from '../utils/loopback-request.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import {
   describeEndpoint,
   type PushDeliverySnapshot,
@@ -116,7 +116,8 @@ export const pushRoutes: FastifyPluginAsync<PushRoutesOptions> = async (app, opt
 
   // POST /api/push/generate-vapid — owner-only one-shot keypair generation.
   app.post('/api/push/generate-vapid', async (request, reply) => {
-    if (!isLoopbackAddress(request.ip)) {
+    // Reject proxied requests — reverse proxy loopback IP doesn't mean direct client.
+    if (!isDirectLoopbackRequest(request)) {
       reply.status(403);
       return { error: 'VAPID key generation endpoint is loopback-only' };
     }

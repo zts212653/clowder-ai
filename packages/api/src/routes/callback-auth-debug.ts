@@ -5,25 +5,20 @@
  * callback auth issues without Prometheus / log tails. Shape matches
  * `getCallbackAuthFailureSnapshot()` from callback-auth-telemetry.
  *
- * Cloud Codex P1 sequence (PR #1377) walked through the bypass classes:
- *   - 18:50Z: public endpoint leaked per-tool failure counts + catIds
- *   - 19:11Z: resolveHeaderUserId trusted-origin fallback to 'default-user'
- *   - 19:31Z: raw X-Cat-Cafe-User header spoofable by any client
- *   - 20:30Z: same-origin browser GET can omit Origin
- *   - 20:46Z: DEFAULT_OWNER_USER_ID mismatch made endpoint unreachable
- *   - 21:00Z: `/api/session` mints sessions for anonymous callers —
- *             "has session" ≠ "authorized", so owner check IS required
+ * Security history (PR #1377): endpoint was originally public, then
+ * progressively hardened through session + owner gate. See PR #821
+ * (#794) for the unified gate migration.
  *
- * Final design: two-layer gate — session required AND session user must
- * match the configured owner. Owner defaults to 'default-user' (what
- * F156 D-1 session plugin currently mints). Operators running with
- * non-default DEFAULT_OWNER_USER_ID get 403 until session minting is
- * extended (F156 future work) — better fail-closed than silently public.
+ * Current design: session required + resolveOwnerGate(). When
+ * DEFAULT_OWNER_USER_ID is configured, only the owner can access.
+ * When unconfigured (single-user local mode), any valid session passes.
  */
 
 import { createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
 import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import {
   getCallbackAuthFailureSnapshot,
@@ -46,14 +41,18 @@ function checkOwnerGate(request: FastifyRequest, reply: FastifyReply): { error: 
     reply.status(401);
     return { error: 'Authenticated session required (establish via GET /api/session)' };
   }
-  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
-  if (!ownerId) {
+  // Network guard: non-direct-loopback requests without a configured owner are
+  // rejected to prevent LAN/proxied access to debug telemetry (#794).
+  if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
     reply.status(403);
-    return { error: 'Callback auth telemetry requires DEFAULT_OWNER_USER_ID to be explicitly configured' };
+    return { error: 'Debug endpoints from non-localhost require DEFAULT_OWNER_USER_ID to be configured' };
   }
-  if (operator !== ownerId) {
-    reply.status(403);
-    return { error: 'Callback auth telemetry can only be accessed by the configured owner' };
+  const gateResult = resolveOwnerGate(operator, {
+    errorMessage: 'Callback auth telemetry can only be accessed by the configured owner',
+  });
+  if (gateResult) {
+    reply.status(gateResult.status);
+    return { error: gateResult.error };
   }
   return null;
 }
