@@ -287,6 +287,23 @@ function resolveNextCli(params: {
   return undefined;
 }
 
+/**
+ * Infer OpenCode provider from a bare model name.
+ * Returns a known provider string or undefined (triggers validation error).
+ */
+function inferProviderFromModelName(model: string): string | undefined {
+  const m = model.trim().toLowerCase();
+  if (/^(gpt-|o[134]-|o[134]p|davinci|text-|chatgpt)/.test(m)) return 'openai';
+  if (/^claude/.test(m)) return 'anthropic';
+  if (/^gemini/.test(m)) return 'google';
+  if (/^(moonshot|kimi)/.test(m)) return 'kimi';
+  if (/^deepseek/.test(m)) return 'deepseek';
+  if (/^(glm|chatglm)/.test(m)) return 'zhipu';
+  if (/^(qwen|tongyi)/.test(m)) return 'dashscope';
+  if (/^minimax/.test(m)) return 'minimax';
+  return undefined;
+}
+
 function buildEffectiveAccountRefResolver() {
   return async (cat: CatConfig & { contextBudget?: ContextBudget }): Promise<string | undefined> =>
     resolveBoundAccountRefForCat('', cat.id, cat);
@@ -492,13 +509,16 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const accountRef = resolveAccountRef(body);
     try {
-      /* Default provider for opencode API-key accounts: most users connect to
-         OpenAI-compatible endpoints, so 'openai' is a safe default when the
-         model string has no provider prefix (e.g. 'gpt-4o' vs 'anthropic/claude'). */
+      /* Infer provider for opencode API-key accounts from the model name when no
+         explicit provider is given. This avoids hard-coding 'openai' for all bare
+         models — Anthropic/Google accounts get the correct adapter.
+         Unknown model prefixes → undefined → validation error preserved. */
       const explicitProvider = 'provider' in body ? body.provider : undefined;
       const providerNameForValidation =
         explicitProvider ??
-        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/') ? 'openai' : undefined);
+        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
+          ? inferProviderFromModelName(body.defaultModel)
+          : undefined);
       await validateAccountBindingOrThrow(
         projectRoot,
         body.clientId,
