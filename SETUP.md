@@ -601,7 +601,7 @@ This opt-in trusts browsers from RFC 1918 private networks (`10.x.x.x`, `172.16-
 
 ### Owner Identity for LAN/Remote Mode
 
-When the API is accessible from non-localhost addresses (`API_SERVER_HOST=0.0.0.0`), privileged write operations (sensitive env vars, connector credentials, plugin config, skill sync) require `DEFAULT_OWNER_USER_ID` to be set. Without it, these writes are rejected with 403 to prevent unauthorized LAN access.
+When the API is accessible from non-localhost addresses (`API_SERVER_HOST=0.0.0.0`), most privileged write operations (sensitive env vars, connector credentials, skill sync, default cat) require `DEFAULT_OWNER_USER_ID` to be set. Without it, these writes are rejected with 403 to prevent unauthorized LAN access. Plugin/capability config writes remain direct-localhost-only regardless of this setting.
 
 ```bash
 # Required for LAN/Tailscale/remote deployments that need privileged writes
