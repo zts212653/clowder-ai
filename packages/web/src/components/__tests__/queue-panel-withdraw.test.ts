@@ -111,6 +111,36 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
+  it('hides recall-edit button when queued entry has images (attachment loss gate)', async () => {
+    const entryWithImage: QueueEntry = { ...QUEUED_ENTRY, id: 'q-img', messageId: 'm-img' };
+    useChatStore.setState({
+      queue: [entryWithImage],
+      pendingChatInsert: null,
+      messages: [
+        {
+          id: 'm-img',
+          threadId: 'thread-1',
+          role: 'user',
+          content: 'queued with image',
+          contentBlocks: [{ type: 'image', url: 'https://example.com/img.png' }],
+          createdAt: NOW,
+        },
+      ] as never[],
+    });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    // Recall-edit should NOT appear (images would be lost)
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]');
+    expect(recallBtn).toBeNull();
+
+    // Regular remove should still be available
+    const removeBtn = container.querySelector('button[aria-label="撤回"]');
+    expect(removeBtn).not.toBeNull();
+  });
+
   it('rolls back queue state and does not queue composer insert when recall-edit fails', async () => {
     const { apiFetch } = await import('@/utils/api-client');
     (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({

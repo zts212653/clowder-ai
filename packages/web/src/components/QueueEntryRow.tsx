@@ -144,7 +144,7 @@ function QueueEntryRow({
         Steer
       </button>
 
-      {canRecallEdit && (
+      {canRecallEdit && imageCount === 0 && (
         <button
           type="button"
           onClick={() => onRecallEdit(entry.id)}
