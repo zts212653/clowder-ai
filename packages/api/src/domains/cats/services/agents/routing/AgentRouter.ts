@@ -742,9 +742,19 @@ export class AgentRouter {
         }
       }
 
+      // Filter out routing_warnings for group mention keywords — they were already
+      // matched by parseGroupMentions and are not individual cat mentions.
+      // Only ASCII group keywords can trigger the line-start fallback regex ([a-z0-9_.-]+).
+      const groupHandles = new Set(['all', 'thread']);
+      const filteredWarnings = individual.routing_warnings.filter((w) => {
+        if (w.kind !== 'cat_not_found') return true;
+        const h = w.mention.toLowerCase();
+        return !groupHandles.has(h) && !h.startsWith('all-');
+      });
+
       return {
         mentions: [...before, ...groupResult.cats, ...after],
-        routing_warnings: individual.routing_warnings,
+        routing_warnings: filteredWarnings,
       };
     }
     return this.parseMentions(message);
