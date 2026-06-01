@@ -25,6 +25,7 @@ NC='\033[0m'
 
 NO_REBASE=false
 SKIP_INSTALL=false
+CAT_CAFE_GATE_TEST_MODE="${CAT_CAFE_GATE_TEST_MODE:-auto}"
 
 usage() {
   cat <<'EOF'
@@ -63,6 +64,15 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$CAT_CAFE_GATE_TEST_MODE" in
+  auto|full|public)
+    ;;
+  *)
+    echo -e "${RED}❌ CAT_CAFE_GATE_TEST_MODE must be auto, full, or public (got: $CAT_CAFE_GATE_TEST_MODE)${NC}" >&2
+    exit 1
+    ;;
+esac
 
 echo ""
 echo "╔══════════════════════════════════════════════════════╗"
@@ -254,9 +264,28 @@ echo -e "${GREEN}✓ tsc --noEmit 通过（含测试文件）${NC}"
 record_step "tsc" "$STEP_START"
 echo ""
 
-# ── Step 5: Test（全量，不是 --filter） ──
+# ── Step 5: Test（按仓库形态选择 full 或 public） ──
+resolve_test_mode() {
+  if [ "$CAT_CAFE_GATE_TEST_MODE" = "full" ] || [ "$CAT_CAFE_GATE_TEST_MODE" = "public" ]; then
+    printf '%s\n' "$CAT_CAFE_GATE_TEST_MODE"
+    return 0
+  fi
+
+  # Public sync targets intentionally omit source-only governance artifacts
+  # such as .claude/settings.json, while exposing the API public test suite
+  # used by GitHub CI. In that shape, running source full tests is a false red.
+  if [ ! -f "$REPO_ROOT/.claude/settings.json" ] && [ -f "$REPO_ROOT/packages/api/package.json" ]; then
+    if node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.exit(p.scripts && p.scripts["test:public"] ? 0 : 1);' "$REPO_ROOT/packages/api/package.json"; then
+      printf '%s\n' "public"
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "full"
+}
+
 STEP_START=$SECONDS
-echo "── Step 5/6: 全量测试 ──"
+TEST_MODE="$(resolve_test_mode)"
 # 清除 REDIS_URL 以避免触发 Redis 隔离守卫。
 # Worktree 的 .env.local 设置了 REDIS_URL=6398（用于开发），
 # 但全量测试不应依赖 Redis——Redis 集成测试有专门的 test:redis 命令。
@@ -264,13 +293,25 @@ echo "── Step 5/6: 全量测试 ──"
 #
 # 挂起保护：API test script 配了 --test-timeout=30000，单个测试
 # 超过 30s 会被 node --test 标记为 FAIL 并继续。无需外部 watchdog。
-if ! env -u REDIS_URL pnpm test; then
-  echo ""
-  echo -e "${RED}❌ 全量测试未通过${NC}"
-  echo "   请修复失败的测试后重新执行 pnpm gate"
-  exit 1
+if [ "$TEST_MODE" = "public" ]; then
+  echo "── Step 5/6: Public repo test suite ──"
+  if ! env -u REDIS_URL pnpm --filter @cat-cafe/api run test:public; then
+    echo ""
+    echo -e "${RED}❌ Public 测试未通过${NC}"
+    echo "   请修复失败的测试后重新执行 pnpm gate"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ Public 测试通过${NC}"
+else
+  echo "── Step 5/6: 全量测试 ──"
+  if ! env -u REDIS_URL pnpm test; then
+    echo ""
+    echo -e "${RED}❌ 全量测试未通过${NC}"
+    echo "   请修复失败的测试后重新执行 pnpm gate"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ 全量测试通过${NC}"
 fi
-echo -e "${GREEN}✓ 全量测试通过${NC}"
 record_step "test" "$STEP_START"
 echo ""
 

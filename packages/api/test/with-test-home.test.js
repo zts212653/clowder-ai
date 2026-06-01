@@ -20,3 +20,17 @@ test('with-test-home forces NODE_ENV=test even when outer shell is production', 
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'test');
 });
+
+test('with-test-home strips runtime default cat override from outer shell', () => {
+  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.DEFAULT_CAT_ID ?? ""'], {
+    cwd: resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      DEFAULT_CAT_ID: 'codex',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '');
+});
