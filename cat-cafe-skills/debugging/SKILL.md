@@ -30,7 +30,7 @@ triggers:
 
 ```bash
 # 1. 找到 API 监听进程（绑端口，不用 grep 猜）
-API_PORT="${API_SERVER_PORT:-3004}"
+export API_PORT="${API_SERVER_PORT:-3004}"
 lsof -iTCP:"$API_PORT" -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1{print "PORT="ENVIRON["API_PORT"], "PID="$2}'
 
 # 2. 进程启动时间
