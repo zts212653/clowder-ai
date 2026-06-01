@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { LimbAccessPolicy } from '../dist/domains/limb/LimbAccessPolicy.js';
 import { LimbActionLog } from '../dist/domains/limb/LimbActionLog.js';
@@ -8,6 +8,8 @@ import { LimbLeaseManager } from '../dist/domains/limb/LimbLeaseManager.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../dist/domains/limb/limb-yaml-loader.js';
 import { WeixinMpLimbNode } from '../dist/domains/limb/WeixinMpLimbNode.js';
+
+const WEIXIN_MP_LIMB_PATH = fileURLToPath(new URL('../../../plugins/weixin-mp/limbs/weixin-mp.yml', import.meta.url));
 
 function createNodeWithDraftClient() {
   const node = new WeixinMpLimbNode({
@@ -28,7 +30,7 @@ function createNodeWithDraftClient() {
 
 describe('WeixinMpLimbNode', () => {
   it('declares publish commands with an invokable auth level', async () => {
-    const decl = loadLimbDeclaration(resolve('plugins/weixin-mp/limbs/weixin-mp.yml'));
+    const decl = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
     const registry = new LimbRegistry();
     registry.setDeps({
       accessPolicy: new LimbAccessPolicy(),
