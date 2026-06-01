@@ -144,6 +144,69 @@ describe('PUT /api/config/default-cat works without DEFAULT_OWNER_USER_ID', () =
   });
 });
 
+describe('PUT /api/config/default-cat network guard (#794)', () => {
+  let app;
+
+  before(async () => {
+    resetDefaultCatTestState();
+    const { configRoutes } = await import('../dist/routes/config.js');
+    app = Fastify();
+    await app.register(configRoutes);
+    await app.ready();
+  });
+
+  after(async () => {
+    clearRuntimeDefaultCatId();
+    catRegistry.reset();
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    await app?.close();
+  });
+
+  it('rejects non-loopback when owner is NOT configured', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const before = getDefaultCatId();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/config/default-cat',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+      payload: { catId: 'codex' },
+      remoteAddress: '192.168.1.100',
+    });
+    assert.equal(res.statusCode, 403, 'non-loopback default-cat write without owner must be 403');
+    assert.equal(getDefaultCatId(), before, 'default cat must not change on rejection');
+  });
+
+  it('rejects proxy-forwarded loopback when owner is NOT configured', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const before = getDefaultCatId();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/config/default-cat',
+      headers: {
+        'x-cat-cafe-user': 'default-user',
+        'x-forwarded-for': '203.0.113.50',
+      },
+      payload: { catId: 'codex' },
+    });
+    assert.equal(res.statusCode, 403, 'proxy-forwarded loopback default-cat write must be 403');
+    assert.equal(getDefaultCatId(), before, 'default cat must not change on rejection');
+  });
+
+  it('allows non-loopback when owner IS configured and matches', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = 'the-owner';
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/config/default-cat',
+      headers: { 'x-cat-cafe-user': 'the-owner' },
+      payload: { catId: 'codex' },
+      remoteAddress: '192.168.1.100',
+    });
+    assert.equal(res.statusCode, 200, 'non-loopback with matching owner should pass network guard');
+    clearRuntimeDefaultCatId();
+    delete process.env.DEFAULT_OWNER_USER_ID;
+  });
+});
+
 describe('getDefaultCatId reads DEFAULT_CAT_ID env (clowder-ai#543)', () => {
   before(() => {
     resetDefaultCatTestState();

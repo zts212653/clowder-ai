@@ -66,7 +66,7 @@ function requirePluginWriteAccess(request: FastifyRequest): PluginWriteAccess | 
     return { status: 401, error: 'Plugin write endpoint requires an authenticated owner session' };
   }
 
-  const ownerError = requireCapabilityWriteOwner(operator);
+  const ownerError = requireCapabilityWriteOwner(operator, { allowMissingOwner: true });
   if (ownerError) {
     return { status: ownerError.status, error: 'Plugin write endpoint requires configured owner authorization' };
   }

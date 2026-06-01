@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
 import {
+  requireConnectorWriteNetworkGuard,
   requireConnectorWriteOwner,
   resolveConnectorSessionUserId,
   validateConnectorSecretUpdates,
@@ -59,6 +60,11 @@ type ConnectorWriteIdentityResult = { userId: string; error?: never } | { userId
 function requireConnectorWriteIdentity(request: FastifyRequest, reply: FastifyReply): ConnectorWriteIdentityResult {
   const userId = requireSessionHubIdentity(request, reply);
   if (!userId) return { error: { error: 'Identity required' } };
+  const networkError = requireConnectorWriteNetworkGuard(request);
+  if (networkError) {
+    reply.status(networkError.status);
+    return { error: { error: networkError.error } };
+  }
   const ownerError = requireConnectorWriteOwner(userId);
   if (ownerError) {
     reply.status(ownerError.status);

@@ -73,7 +73,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
     assert.equal(notifier.calls.length, 0);
   });
 
-  test('403 when DEFAULT_OWNER_USER_ID is not configured', async () => {
+  test('allows access in single-user mode when DEFAULT_OWNER_USER_ID is not configured (issue #794)', async () => {
     process.env.DEFAULT_OWNER_USER_ID = '';
     const freshApp = await buildApp({ notifier });
     const res = await freshApp.inject({
@@ -82,8 +82,7 @@ describe('POST /api/debug/callback-auth/hide-similar (F174-D2b-1)', () => {
       headers: { 'x-test-session-user': 'default-user' },
       payload: { reason: 'expired', tool: 't', catId: 'opus', threadId: 't1', userId: 'u1' },
     });
-    assert.equal(res.statusCode, 403);
-    assert.equal(notifier.calls.length, 0);
+    assert.equal(res.statusCode, 200, 'should return 200 in single-user mode');
     await freshApp.close();
   });
 

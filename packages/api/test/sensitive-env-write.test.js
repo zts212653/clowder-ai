@@ -101,7 +101,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
     }
   });
 
-  it('rejects sensitive env writes when DEFAULT_OWNER_USER_ID is not configured', async () => {
+  it('allows sensitive env writes in single-user mode when DEFAULT_OWNER_USER_ID is not configured (issue #794)', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
     const envFilePath = resolve(tempRoot, '.env');
@@ -125,7 +125,7 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
         payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
       });
 
-      assert.equal(res.statusCode, 403, res.payload);
+      assert.equal(res.statusCode, 200, 'should return 200 in single-user mode');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });
@@ -285,6 +285,113 @@ describe('PATCH /api/config/env — sensitive env owner gate', () => {
       assert.ok(sensitiveAudit, 'should have env_sensitive_write event');
       assert.deepEqual(sensitiveAudit.data.keys, ['F102_API_KEY']);
       assert.ok(!sensitiveAudit.data.keys.includes('FRONTEND_URL'), 'non-sensitive key must not appear');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects sensitive env writes from non-loopback when owner is not configured (#794 P1)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-test-session-user': 'any-user' },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+        remoteAddress: '192.168.1.100',
+      });
+
+      assert.equal(res.statusCode, 403, 'non-loopback sensitive write without owner must be rejected');
+      assert.match(
+        JSON.parse(res.payload).error,
+        /non-localhost|DEFAULT_OWNER_USER_ID/i,
+        'error should mention network or owner requirement',
+      );
+      // .env must NOT be modified
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'F102_API_KEY=sk-old\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('allows sensitive env writes from non-loopback when owner IS configured and matches', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    setEnv('DEFAULT_OWNER_USER_ID', 'the-owner');
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-test-session-user': 'the-owner' },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+        remoteAddress: '192.168.1.100',
+      });
+
+      assert.equal(res.statusCode, 200, 'non-loopback with matching owner should be allowed');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects proxy-forwarded loopback sensitive writes when owner is not configured (#794 proxy guard)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'F102_API_KEY=sk-old\n', 'utf8');
+    delete process.env.DEFAULT_OWNER_USER_ID;
+
+    const app = Fastify({ logger: false });
+    addSessionHook(app);
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      // Loopback IP but with proxy forwarding header → not a direct client
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: {
+          'x-test-session-user': 'any-user',
+          'x-forwarded-for': '203.0.113.50',
+        },
+        payload: { updates: [{ name: 'F102_API_KEY', value: 'sk-new' }] },
+      });
+
+      assert.equal(res.statusCode, 403, 'proxy-forwarded loopback sensitive write without owner must be rejected');
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'F102_API_KEY=sk-old\n', '.env must NOT be modified');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

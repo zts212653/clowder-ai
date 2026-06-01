@@ -16,7 +16,6 @@ import { configStore } from '../config/ConfigStore.js';
 import {
   clearRuntimeDefaultCatId,
   getDefaultCatId,
-  getOwnerUserId,
   hasRuntimeDefaultCatOverride,
   isCatAvailable,
   setRuntimeDefaultCatId,
@@ -33,6 +32,8 @@ import {
 import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
+import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
 import { configCatOrderRoutes } from './config-cat-order.js';
@@ -293,20 +294,29 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
     }
 
     // Sensitive env writes require session-auth (not forgeable header identity)
+    // + loopback guard: non-localhost requests without a configured owner are
+    // rejected to prevent LAN/Tailscale write-through in single-user mode.
     const touchesSensitive = hasSensitiveEditableVars(updates.keys());
     if (touchesSensitive) {
       if (!sessionOperator) {
         reply.status(401);
         return { error: 'Sensitive env writes require session authentication' };
       }
-      const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
-      if (!ownerId) {
+      // Network guard: when DEFAULT_OWNER_USER_ID is unset, only direct
+      // loopback requests (no proxy) are trusted. Proxied or remote requests
+      // must have a configured owner. Same pattern as connector guards.
+      if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
         reply.status(403);
-        return { error: 'Sensitive env write requires DEFAULT_OWNER_USER_ID to be configured' };
+        return {
+          error: 'Sensitive env writes from non-localhost require DEFAULT_OWNER_USER_ID to be configured',
+        };
       }
-      if (sessionOperator !== ownerId) {
-        reply.status(403);
-        return { error: 'Sensitive env vars can only be modified by the owner' };
+      const gateResult = resolveOwnerGate(sessionOperator, {
+        errorMessage: 'Sensitive env vars can only be modified by the owner',
+      });
+      if (gateResult) {
+        reply.status(gateResult.status);
+        return { error: gateResult.error };
       }
     }
 
@@ -392,9 +402,21 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       return { error: 'Identity required (X-Cat-Cafe-User header)' };
     }
 
-    if (operator !== getOwnerUserId()) {
+    // Network guard: default-cat writes persist to .env — when
+    // DEFAULT_OWNER_USER_ID is unset, restrict to direct loopback to
+    // prevent LAN/proxied clients from changing the default cat via
+    // forgeable X-Cat-Cafe-User header (#794 P2).
+    if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
       reply.status(403);
-      return { error: 'Only the owner can change the default cat' };
+      return { error: 'Default cat changes from non-localhost require DEFAULT_OWNER_USER_ID to be configured' };
+    }
+
+    const gateResult = resolveOwnerGate(operator, {
+      errorMessage: 'Only the owner can change the default cat',
+    });
+    if (gateResult) {
+      reply.status(gateResult.status);
+      return { error: gateResult.error };
     }
 
     const parsed = defaultCatPutSchema.safeParse(request.body);
