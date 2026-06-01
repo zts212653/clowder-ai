@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -17,7 +17,7 @@ function writeExecutable(filePath, source) {
   chmodSync(filePath, 0o755);
 }
 
-function createGitStub(logPath) {
+function createGitStub(logPath, stubRoot = repoRoot) {
   return `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
@@ -51,12 +51,12 @@ if (args[0] === 'rev-parse' && args[1] === 'HEAD') {
 }
 
 if (args[0] === 'worktree' && args[1] === 'list' && args[2] === '--porcelain') {
-  process.stdout.write(${JSON.stringify(`worktree ${repoRoot}\n`)});
+  process.stdout.write(${JSON.stringify(`worktree ${stubRoot}\n`)});
   process.exit(0);
 }
 
 if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
-  process.stdout.write(${JSON.stringify(`${repoRoot}\n`)});
+  process.stdout.write(${JSON.stringify(`${stubRoot}\n`)});
   process.exit(0);
 }
 
@@ -97,19 +97,36 @@ process.exit(0);
 `;
 }
 
-function runGate(bash, args = [], extraEnv = {}) {
+function createPublicSyncFixture(baseDir) {
+  const fakeRoot = path.join(baseDir, 'fake-repo');
+  mkdirSync(path.join(fakeRoot, 'packages', 'api'), { recursive: true });
+  // Symlink scripts/ so gate guard and other script references work
+  symlinkSync(path.join(repoRoot, 'scripts'), path.join(fakeRoot, 'scripts'));
+  // Minimal package.json with test:public script — simulates public sync target
+  writeFileSync(
+    path.join(fakeRoot, 'packages', 'api', 'package.json'),
+    JSON.stringify({ scripts: { 'test:public': 'echo ok' } }),
+    'utf8',
+  );
+  // NO .claude/settings.json — that's the sentinel resolve_test_mode checks
+  return fakeRoot;
+}
+
+function runGate(bash, args = [], extraEnv = {}, options = {}) {
   const tempDir = mkdtempSync(path.join(os.tmpdir(), 'pre-merge-check-test-'));
   const binDir = path.join(tempDir, 'bin');
   const logPath = path.join(tempDir, 'commands.log');
 
+  const effectiveRoot = options.publicSyncFixture ? createPublicSyncFixture(tempDir) : repoRoot;
+
   try {
     writeFileSync(logPath, '', 'utf8');
     mkdirSync(binDir, { recursive: true });
-    writeExecutable(path.join(binDir, 'git'), createGitStub(logPath));
+    writeExecutable(path.join(binDir, 'git'), createGitStub(logPath, effectiveRoot));
     writeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
 
     const result = spawnSync(bash, [scriptPath, ...args], {
-      cwd: repoRoot,
+      cwd: effectiveRoot,
       encoding: 'utf8',
       env: {
         ...process.env,
@@ -165,7 +182,9 @@ describe('pre-merge-check dependency refresh order', () => {
 
   it('uses public API tests when source-only Claude settings are absent', (t) => {
     const bash = requireBash(t);
-    const result = runGate(bash);
+    // Use a fake repo root without .claude/settings.json to simulate public sync target.
+    // Without this fixture, source checkouts have the sentinel → resolve_test_mode picks "full".
+    const result = runGate(bash, [], {}, { publicSyncFixture: true });
 
     assert.equal(result.status, 0, result.stderr);
     assert.ok(
