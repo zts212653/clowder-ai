@@ -128,10 +128,28 @@ Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\desktop-dist\{#MyAppExeNam
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
-; Archive extraction moved to [Code] section (CurStepChanged / ssPostInstall)
-; for exit code validation — tar.exe failures are now caught and reported
-; instead of silently continuing with missing files.
-;
+; ── Extract bulk archives (tar.exe built into Windows 10 1803+) ───────
+; Full {sys} path ensures System32\tar.exe is found regardless of WoW64 state.
+Filename: "{sys}\tar.exe"; \
+  Parameters: "-xzf ""{app}\bundled\archives\deploy-api.tar.gz"" -C ""{app}\packages\api"""; \
+  StatusMsg: "Extracting API runtime..."; \
+  Flags: runhidden waituntilterminated
+Filename: "{sys}\tar.exe"; \
+  Parameters: "-xzf ""{app}\bundled\archives\deploy-web.tar.gz"" -C ""{app}\packages\web"""; \
+  StatusMsg: "Extracting Web runtime..."; \
+  Flags: runhidden waituntilterminated
+Filename: "{sys}\tar.exe"; \
+  Parameters: "-xzf ""{app}\bundled\archives\deploy-mcp-server.tar.gz"" -C ""{app}\packages\mcp-server"""; \
+  StatusMsg: "Extracting MCP Server..."; \
+  Flags: runhidden waituntilterminated
+Filename: "{sys}\tar.exe"; \
+  Parameters: "-xzf ""{app}\bundled\archives\electron.tar.gz"" -C ""{app}\desktop-dist"""; \
+  StatusMsg: "Extracting Electron shell..."; \
+  Flags: runhidden waituntilterminated
+Filename: "{sys}\tar.exe"; \
+  Parameters: "-xzf ""{app}\bundled\archives\node.tar.gz"" -C ""{app}\node"""; \
+  StatusMsg: "Extracting Node.js runtime..."; \
+  Flags: runhidden waituntilterminated
 ; Create scripts/node_modules junction → packages/api/node_modules.
 ; compile-system-prompt-l0.mjs uses ESM imports (@cat-cafe/shared) which
 ; require a filesystem node_modules chain (NODE_PATH is ignored by ESM).
@@ -140,42 +158,42 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "cmd.exe"; \
   Parameters: "/c mklink /J ""{app}\scripts\node_modules"" ""{app}\packages\api\node_modules"""; \
   StatusMsg: "Linking script dependencies..."; \
-  Flags: runhidden waituntilterminated; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated
 ; Clean up archives after extraction (saves ~100 MB disk space)
 Filename: "cmd.exe"; \
   Parameters: "/c rmdir /s /q ""{app}\bundled\archives"""; \
   StatusMsg: "Cleaning up temporary files..."; \
-  Flags: runhidden waituntilterminated; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated
 ; ── Post-install configuration ────────────────────────────────────────
 ; Enable Windows long paths — pnpm creates paths > 260 chars
 Filename: "reg.exe"; \
   Parameters: "add ""HKLM\SYSTEM\CurrentControlSet\Control\FileSystem"" /v LongPathsEnabled /t REG_DWORD /d 1 /f"; \
   StatusMsg: "Enabling long path support..."; \
-  Flags: runhidden waituntilterminated; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated
 ; Post-install: .env, skills, agent hooks.
 ; CLI tool provisioning removed — bundled Node has no global npm, so
 ; `npm install -g` fails on clean machines. Users install CLIs separately.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}"""; \
   StatusMsg: "Configuring Cat Cafe..."; \
-  Flags: runhidden waituntilterminated; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated
 ; User-level Agent CLI hook sync writes to ~/.claude and ~/.codex, so it must
 ; run as the invoking user rather than the elevated installer account.
 ; If Windows cannot recover the original credentials, Hub health check repairs it later.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}"" -AgentHooksOnly"; \
   StatusMsg: "Configuring Agent CLI hooks..."; \
-  Flags: runhidden waituntilterminated runasoriginaluser; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated runasoriginaluser
 
 ; Generate desktop-config.json
 Filename: "powershell.exe"; \
   Parameters: "-ExecutionPolicy Bypass -Command ""& '{app}\scripts\generate-desktop-config.ps1' -AppDir '{app}'"""; \
   StatusMsg: "Generating desktop configuration..."; \
-  Flags: runhidden waituntilterminated; Check: IsExtractionOK
+  Flags: runhidden waituntilterminated
 
 ; Offer to launch after install
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
-  Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent; Check: IsExtractionOK
+  Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -192,111 +210,3 @@ Type: filesandordirs; Name: "{app}\bundled"
 ; scripts/node_modules junction created by mklink /J in [Run]
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
 
-[Code]
-{ ── Archive extraction with exit code validation ──────────────────────
-  Replaces the previous [Run] tar.exe entries which used
-  waituntilterminated but silently continued on extraction failure.
-  Now each extraction is validated and failures are reported to the user.
-  If any extraction fails, ExtractionSucceeded stays False and all [Run]
-  entries gated by IsExtractionOK are skipped, preventing post-install
-  steps from running on a broken install tree. }
-
-var
-  ExtractionSucceeded: Boolean;
-
-function IsExtractionOK: Boolean;
-begin
-  Result := ExtractionSucceeded;
-end;
-
-function ExtractArchive(const ArchiveName, DestSubDir, StatusLabel: String): Boolean;
-var
-  AppDir, ArchivePath, DestDir, TarExe: String;
-  ResultCode: Integer;
-begin
-  AppDir := ExpandConstant('{app}');
-  ArchivePath := AppDir + '\bundled\archives\' + ArchiveName;
-  DestDir := AppDir + '\' + DestSubDir;
-  { Full System32 path avoids WoW64 PATH-resolution failures when
-    32-bit Inno Setup calls CreateProcess on 64-bit Windows. }
-  TarExe := ExpandConstant('{sys}\tar.exe');
-
-  WizardForm.StatusLabel.Caption := StatusLabel;
-
-  { Pre-check: archive must have been extracted from the installer by
-    the [Files] section. Missing = Inno Setup bug or disk-full during copy. }
-  if not FileExists(ArchivePath) then begin
-    Log('ExtractArchive: archive NOT FOUND: ' + ArchivePath);
-    Result := False;
-    Exit;
-  end;
-
-  { If {sys}\tar.exe doesn't exist (non-standard Windows or stripped
-    install), fall back to bare PATH lookup as a last resort. }
-  if not FileExists(TarExe) then begin
-    Log('ExtractArchive: ' + TarExe + ' not found, falling back to PATH');
-    TarExe := 'tar.exe';
-  end;
-
-  Log('ExtractArchive: ' + ArchiveName + ' -> ' + DestDir + ' via ' + TarExe);
-
-  Result := Exec(TarExe,
-    '-xzf "' + ArchivePath + '" -C "' + DestDir + '"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  if (not Result) or (ResultCode <> 0) then begin
-    Log('ExtractArchive FAILED: ' + ArchiveName
-      + ' | launched=' + IntToStr(Ord(Result))
-      + ' | exitCode=' + IntToStr(ResultCode)
-      + ' | tarExe=' + TarExe);
-    Result := False;
-  end else
-    Log('ExtractArchive OK: ' + ArchiveName);
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  FailedArchives: String;
-begin
-  if CurStep <> ssPostInstall then
-    Exit;
-
-  FailedArchives := '';
-
-  if not ExtractArchive('deploy-api.tar.gz', 'packages\api',
-       'Extracting API runtime...') then
-    FailedArchives := FailedArchives + #13#10 + '  - deploy-api.tar.gz';
-
-  if not ExtractArchive('deploy-web.tar.gz', 'packages\web',
-       'Extracting Web runtime...') then
-    FailedArchives := FailedArchives + #13#10 + '  - deploy-web.tar.gz';
-
-  if not ExtractArchive('deploy-mcp-server.tar.gz', 'packages\mcp-server',
-       'Extracting MCP Server...') then
-    FailedArchives := FailedArchives + #13#10 + '  - deploy-mcp-server.tar.gz';
-
-  if not ExtractArchive('electron.tar.gz', 'desktop-dist',
-       'Extracting Electron shell...') then
-    FailedArchives := FailedArchives + #13#10 + '  - electron.tar.gz';
-
-  if not ExtractArchive('node.tar.gz', 'node',
-       'Extracting Node.js runtime...') then
-    FailedArchives := FailedArchives + #13#10 + '  - node.tar.gz';
-
-  if FailedArchives <> '' then begin
-    MsgBox('The following archives failed to extract:' + FailedArchives
-      + #13#10 + #13#10
-      + 'Possible causes:' + #13#10
-      + '  - tar.exe not found (Windows 10 1803+ required)' + #13#10
-      + '  - Antivirus blocking extraction' + #13#10
-      + '  - Insufficient disk space' + #13#10 + #13#10
-      + 'Installer log saved to %TEMP%\Setup Log *.txt'
-      + #13#10 + #13#10
-      + 'Post-install steps will be skipped.',
-      mbError, MB_OK);
-    { ExtractionSucceeded stays False — [Run] entries gated by
-      IsExtractionOK will be skipped, preventing post-install on a
-      broken install tree. }
-  end else
-    ExtractionSucceeded := True;
-end;
