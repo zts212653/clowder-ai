@@ -492,7 +492,15 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const accountRef = resolveAccountRef(body);
     try {
-      const providerNameForValidation = 'provider' in body ? body.provider : undefined;
+      /* Default provider for opencode API-key accounts: most users connect to
+         OpenAI-compatible endpoints, so 'openai' is a safe default when the
+         model string has no provider prefix (e.g. 'gpt-4o' vs 'anthropic/claude'). */
+      const explicitProvider = 'provider' in body ? body.provider : undefined;
+      const providerNameForValidation =
+        explicitProvider ??
+        (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
+          ? 'openai'
+          : undefined);
       await validateAccountBindingOrThrow(
         projectRoot,
         body.clientId,
@@ -558,7 +566,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.clientId === 'opencode'),
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
-          ...(body.provider ? { provider: body.provider } : {}),
+          ...((body.provider || providerNameForValidation) ? { provider: body.provider ?? providerNameForValidation } : {}),
           ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
         });
       }
