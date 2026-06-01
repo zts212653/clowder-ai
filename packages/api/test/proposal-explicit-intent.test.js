@@ -84,15 +84,44 @@ describe('F128 explicit intent override (round-5)', () => {
     );
     assert.equal(entries[0].intent, 'ideate', 'intent must be ideate (parallel)');
 
-    // Message contract: cats receive ONLY the main thread header — they
-    // must NOT receive the serial chain protocol section because they were
-    // woken in parallel, not as a chain.
+    // Message contract: cats receive the main thread header but NOT the
+    // serial chain protocol section (woken in parallel, not as a chain).
     assert.ok(enqueued.includes('## 主 Thread'), 'main thread header still present (skill Step 5c report-back)');
     assert.ok(!enqueued.includes('## 接力链路'), 'serial chain protocol section MUST be suppressed for parallel mode');
     assert.ok(!enqueued.includes('Server 只 wake 了'), 'must NOT tell parallel cats that only the first cat was woken');
     assert.ok(
       !enqueued.includes('行首独立一行'),
       'must NOT instruct parallel cats to hand off with line-start @-mention',
+    );
+
+    // 砚砚 round-6 P1: parallel mode must NOT inherit the default "最后一棒猫
+    // reports back" rule, because there IS no "last cat" — all cats reply
+    // simultaneously and the report-back owner becomes undefined. Either no
+    // one cross-posts (lost report) or everyone does (duplicate reports).
+    // Fix: parallel mode pins preferredCats[0] (card order ground truth) as
+    // the explicit synthesizer + reporter; other parallel cats reply but
+    // must NOT cross_post to avoid duplicate reports.
+    assert.ok(
+      !enqueued.includes('最后一棒猫'),
+      'parallel mode must NOT inherit the "last cat reports back" rule — there is no last cat',
+    );
+    assert.ok(
+      enqueued.includes('并行模式 report-back owner'),
+      'parallel mode must inject an explicit report-back owner line',
+    );
+    // Find the report-back owner line and assert it names preferredCats[0]=kimi.
+    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(ownerLineMatch, 'must find the report-back owner line');
+    assert.ok(
+      ownerLineMatch[0].includes('kimi'),
+      `report-back owner must be preferredCats[0]=kimi; got line: ${ownerLineMatch[0]}`,
+    );
+    // The other parallel cats must be told NOT to cross_post themselves
+    // (otherwise we get duplicate cross-posts — the original "没人回报主
+    // thread" symptom, just flipped to "everyone reports").
+    assert.ok(
+      enqueued.includes('不要') && enqueued.includes('cat_cafe_cross_post_message'),
+      'must explicitly tell non-reporter parallel cats NOT to cross_post (prevents duplicate reports)',
     );
   });
 

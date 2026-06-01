@@ -105,57 +105,67 @@ export function enrichWithParentThreadHeader(
   rawInitialMessage?: string,
   resolveHandle: (token: string) => string | null = primaryMentionHandleForCatId,
 ): string {
-  const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
-  const headerLines: string[] = [
-    '---',
-    '## 主 Thread',
-    `ID: \`${sourceThreadId}\`${titleLine}`,
-    '',
-    '完成后请由最后一棒猫 `cat_cafe_cross_post_message` 把总结回报到这个主 Thread。',
-    '（这是 thread-orchestration skill 的 Step 5c 汇聚铁律，不要忘了汇报。）',
-  ];
+  // Mode detection (砚砚 round-5 P1 + round-6 P1): explicit `#ideate` in raw
+  // initialMessage flips report-back contract from "last cat in chain" to
+  // "explicit reporter owner". MUST be computed from raw, not `content`
+  // (which is enriched with server-injected text — parent title can
+  // contain literal `#ideate` and trip the regex; see jsdoc on
+  // AppendApprovedInitialMessageInput.rawContent).
+  let isParallelMode = false;
+  if (rawInitialMessage && preferredCats && preferredCats.length > 0) {
+    const parsed = parseIntent(rawInitialMessage, preferredCats.length);
+    isParallelMode = parsed.explicit && parsed.intent === 'ideate';
+  }
+  const reporterHandle =
+    isParallelMode && preferredCats && preferredCats.length > 0
+      ? (resolveHandle(preferredCats[0]) ?? `@${preferredCats[0]}`)
+      : null;
 
-  // F128 chain protocol injection (砚砚 PR #809 review P1 fix):
-  // Server tells the woken cat explicitly that this is a cat-driven @-chain
-  // — server only woke the first cat, subsequent cats are driven by line-start
-  // @-mentions in cat replies. Without this, the server knows the workflow is
-  // cat-driven but the cat doesn't, and the chain stalls after one step.
-  //
-  // 砚砚 round-5 P1: must be MODE-AWARE. dispatch's explicit `#ideate` branch
-  // wakes all preferredCats in parallel, so injecting "Server 只 wake 了第一棒
-  // ... 在你回复行首 @ 下一棒" would directly contradict the runtime — every
-  // parallel cat would emit unnecessary handoffs / duplicate report-back.
-  // Detect explicit `#ideate` from the raw user-typed initialMessage (never
-  // from `content`, which is enriched with server-injected text — see jsdoc
-  // on AppendApprovedInitialMessageInput.rawContent for that footgun) and
-  // suppress the chain section in parallel mode. Cats woken parallel only
-  // see the main thread header — they think + report back independently,
-  // no handoff instructions.
-  if (preferredCats && preferredCats.length > 0) {
-    let isExplicitIdeate = false;
-    if (rawInitialMessage) {
-      const parsed = parseIntent(rawInitialMessage, preferredCats.length);
-      isExplicitIdeate = parsed.explicit && parsed.intent === 'ideate';
-    }
-    if (!isExplicitIdeate) {
-      const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
-      const chainOrder = handles.join(' → ');
-      headerLines.push(
-        '',
-        '## 接力链路（cat-driven @-chain）',
-        `顺序: ${chainOrder} → 回到主 Thread`,
-        'Server 只 wake 了**第一棒**。你接到这条消息后:',
-        '  - 完成你的回合',
-        '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
-        '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
-        '',
-        // NOTE: do NOT write the literal "#ideate" string here — parseIntent
-        // would otherwise read this server-injected explanation as an explicit
-        // user tag and force parallel mode. Refer to the tool description for
-        // the actual opt-in syntax.
-        '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
-      );
-    }
+  const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
+  const headerLines: string[] = ['---', '## 主 Thread', `ID: \`${sourceThreadId}\`${titleLine}`, ''];
+
+  // F128 report-back contract — MODE-AWARE (砚砚 round-6 P1 fix):
+  // Default cat-driven chain: "last cat in the chain reports back" — implicit
+  // owner determined by the @-mention chain itself.
+  // Explicit `#ideate` parallel: there is no "last cat" — every cat replies
+  // independently. Without an explicit reporter the fork-and-return loop
+  // breaks (no one reports, or everyone duplicates cross_post). Pin
+  // preferredCats[0] (card order is ground truth) as the synthesizer +
+  // reporter, and tell the other parallel cats NOT to cross_post.
+  if (isParallelMode && reporterHandle) {
+    headerLines.push(
+      `**并行模式 report-back owner**：${reporterHandle}（提议顺序的第一棒）负责综合所有并行回复，用 \`cat_cafe_cross_post_message\` 把总结回报到这个主 Thread。`,
+      '其它并行的猫独立思考 / 回复就行，**不要** `cat_cafe_cross_post_message` 自己的回复（避免重复汇报，由 reporter owner 统一汇总）。',
+    );
+  } else {
+    headerLines.push(
+      '完成后请由最后一棒猫 `cat_cafe_cross_post_message` 把总结回报到这个主 Thread。',
+      '（这是 thread-orchestration skill 的 Step 5c 汇聚铁律，不要忘了汇报。）',
+    );
+  }
+
+  // F128 chain protocol injection (砚砚 round-1 P1 + round-5 P1):
+  // serial mode only — parallel cats are woken simultaneously and would
+  // emit redundant handoffs if told to chain. The report-back rule above
+  // already handles the parallel fork-and-return owner.
+  if (!isParallelMode && preferredCats && preferredCats.length > 0) {
+    const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
+    const chainOrder = handles.join(' → ');
+    headerLines.push(
+      '',
+      '## 接力链路（cat-driven @-chain）',
+      `顺序: ${chainOrder} → 回到主 Thread`,
+      'Server 只 wake 了**第一棒**。你接到这条消息后:',
+      '  - 完成你的回合',
+      '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
+      '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
+      '',
+      // NOTE: do NOT write the literal "#ideate" string here — parseIntent
+      // would otherwise read this server-injected explanation as an explicit
+      // user tag and force parallel mode. Refer to the tool description for
+      // the actual opt-in syntax.
+      '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
+    );
   }
 
   return `${content}\n\n${headerLines.join('\n')}`;
