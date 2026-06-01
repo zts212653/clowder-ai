@@ -72,7 +72,7 @@ describe('Skills write-route owner gate (AC-E4)', () => {
     }
   });
 
-  it('POST /api/skills/sync rejects when DEFAULT_OWNER_USER_ID is unset (fail-closed)', async () => {
+  it('POST /api/skills/sync allows access in single-user mode when DEFAULT_OWNER_USER_ID is unset (issue #794)', async () => {
     const prev = process.env.DEFAULT_OWNER_USER_ID;
     delete process.env.DEFAULT_OWNER_USER_ID;
 
@@ -85,7 +85,7 @@ describe('Skills write-route owner gate (AC-E4)', () => {
         payload: {},
       });
 
-      assert.equal(res.statusCode, 403, 'unset owner should fail closed');
+      assert.notEqual(res.statusCode, 403, 'should not 403 in single-user mode');
     } finally {
       if (prev === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = prev;
