@@ -6,7 +6,7 @@
  * POST /api/first-run/connectivity-test  — probe provider API connectivity
  */
 
-import { type ChildProcess, exec, spawn } from 'node:child_process';
+import { type ChildProcess, exec, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { builtinAccountIdForClient, type ClientId, protocolForClient } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -246,6 +246,15 @@ function spawnProbe(
 
     const timer = setTimeout(() => {
       try {
+        // On Windows with shell mode, child.kill() only kills the wrapper shell.
+        // Use taskkill /T to terminate the entire process tree.
+        if (IS_WINDOWS && child.pid) {
+          try {
+            execFile('taskkill', ['/T', '/F', '/PID', String(child.pid)], { timeout: 5000 });
+          } catch {
+            /* taskkill may fail if tree already exited */
+          }
+        }
         child.kill('SIGKILL');
       } catch {
         /* already exited */

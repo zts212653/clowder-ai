@@ -42,7 +42,7 @@ permissions:
 jobs:
   build:
     name: DMG (${{ matrix.arch }})
-    runs-on: macos-latest
+    runs-on: ${{ matrix.arch == 'x64' && 'macos-13' || 'macos-latest' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false

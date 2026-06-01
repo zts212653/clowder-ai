@@ -138,42 +138,42 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "cmd.exe"; \
   Parameters: "/c mklink /J ""{app}\scripts\node_modules"" ""{app}\packages\api\node_modules"""; \
   StatusMsg: "Linking script dependencies..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated; Check: IsExtractionOK
 ; Clean up archives after extraction (saves ~100 MB disk space)
 Filename: "cmd.exe"; \
   Parameters: "/c rmdir /s /q ""{app}\bundled\archives"""; \
   StatusMsg: "Cleaning up temporary files..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated; Check: IsExtractionOK
 ; ── Post-install configuration ────────────────────────────────────────
 ; Enable Windows long paths — pnpm creates paths > 260 chars
 Filename: "reg.exe"; \
   Parameters: "add ""HKLM\SYSTEM\CurrentControlSet\Control\FileSystem"" /v LongPathsEnabled /t REG_DWORD /d 1 /f"; \
   StatusMsg: "Enabling long path support..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated; Check: IsExtractionOK
 ; Post-install: .env, skills, agent hooks.
 ; CLI tool provisioning removed — bundled Node has no global npm, so
 ; `npm install -g` fails on clean machines. Users install CLIs separately.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}"""; \
   StatusMsg: "Configuring Cat Cafe..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated; Check: IsExtractionOK
 ; User-level Agent CLI hook sync writes to ~/.claude and ~/.codex, so it must
 ; run as the invoking user rather than the elevated installer account.
 ; If Windows cannot recover the original credentials, Hub health check repairs it later.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}"" -AgentHooksOnly"; \
   StatusMsg: "Configuring Agent CLI hooks..."; \
-  Flags: runhidden waituntilterminated runasoriginaluser
+  Flags: runhidden waituntilterminated runasoriginaluser; Check: IsExtractionOK
 
 ; Generate desktop-config.json
 Filename: "powershell.exe"; \
   Parameters: "-ExecutionPolicy Bypass -Command ""& '{app}\scripts\generate-desktop-config.ps1' -AppDir '{app}'"""; \
   StatusMsg: "Generating desktop configuration..."; \
-  Flags: runhidden waituntilterminated
+  Flags: runhidden waituntilterminated; Check: IsExtractionOK
 
 ; Offer to launch after install
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
-  Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
+  Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent; Check: IsExtractionOK
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -194,7 +194,18 @@ Type: filesandordirs; Name: "{app}\scripts\node_modules"
 { ── Archive extraction with exit code validation ──────────────────────
   Replaces the previous [Run] tar.exe entries which used
   waituntilterminated but silently continued on extraction failure.
-  Now each extraction is validated and failures are reported to the user. }
+  Now each extraction is validated and failures are reported to the user.
+  If any extraction fails, ExtractionSucceeded stays False and all [Run]
+  entries gated by IsExtractionOK are skipped, preventing post-install
+  steps from running on a broken install tree. }
+
+var
+  ExtractionSucceeded: Boolean;
+
+function IsExtractionOK: Boolean;
+begin
+  Result := ExtractionSucceeded;
+end;
 
 function ExtractArchive(const ArchiveName, DestSubDir, StatusLabel: String): Boolean;
 var
@@ -244,9 +255,14 @@ begin
        'Extracting Node.js runtime...') then
     FailedArchives := FailedArchives + #13#10 + '  - node.tar.gz';
 
-  if FailedArchives <> '' then
+  if FailedArchives <> '' then begin
     MsgBox('The following archives failed to extract:' + FailedArchives
       + #13#10 + #13#10
-      + 'Cat Cafe may not work correctly. Please check disk space and try reinstalling.',
+      + 'Post-install steps will be skipped. Please check disk space and reinstall.',
       mbError, MB_OK);
+    { ExtractionSucceeded stays False — [Run] entries gated by
+      IsExtractionOK will be skipped, preventing post-install on a
+      broken install tree. }
+  end else
+    ExtractionSucceeded := True;
 end;
