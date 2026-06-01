@@ -23,7 +23,7 @@
  * and delete the duplicate (P4 single source of truth).
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
@@ -82,7 +82,13 @@ async function bootstrapCatRegistry() {
 export function isCliEntrypoint(metaUrl, argv1) {
   if (!argv1) return false;
   try {
-    return fileURLToPath(metaUrl) === resolve(argv1);
+    // Desktop packaged layout: service-manager mirrors scripts/ into a
+    // user-writable project dir via symlink (project/scripts → .app/.../
+    // Resources/scripts). Node ESM resolves import.meta.url to the real
+    // path (inside .app) while process.argv[1] keeps the symlink path
+    // → naive comparison always mismatches → CLI entry never fires.
+    // realpathSync both sides so symlink vs real path compares correctly.
+    return realpathSync(fileURLToPath(metaUrl)) === realpathSync(resolve(argv1));
   } catch {
     return false;
   }

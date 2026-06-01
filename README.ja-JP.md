@@ -83,6 +83,25 @@ Clowder はモデル非依存です。各エージェント CLI / adapter は統
 
 デスクトップインストーラには、アプリランタイム、ポータブル Node.js、Redis がバンドルされているため、一般ユーザーは `pnpm install` や `pnpm build` を実行する必要は**ありません**。起動後、**Hub → System Settings → Account Configuration** を開いて、モデルプロバイダーと CLI アカウントを接続してください。
 
+**更新とアンインストール：**
+
+- **macOS**：新しい `.dmg` をインストールするだけで上書き更新されます。設定とデータは `~/Library/Application Support/Clowder AI/` に保存され、アプリ削除時には**削除されません**。完全アンインストール：アプリをゴミ箱に移動後、必要に応じてそのディレクトリを削除してください。
+- **Windows**：新しいインストーラを実行するだけでアップグレードされます。データは `%LOCALAPPDATA%\Clowder AI\` に保存され、アンインストール後も保持されます。
+
+**AI CLI ツール（別途インストール）：**
+
+デスクトップインストーラには AI CLI ツールは**含まれていません**。Agent 機能を使用するには別途インストールしてください：
+
+| ツール | インストールコマンド | 公式ドキュメント |
+|-------|-------------------|----------------|
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+| Codex CLI | `npm install -g @openai/codex` | [github.com/openai/codex](https://github.com/openai/codex) |
+| Antigravity CLI | [antigravity.google/cli](https://antigravity.google/cli) を参照 | [antigravity.google](https://antigravity.google/) |
+| Kimi CLI | `pip install kimi-cli` | [kimi.moonshot.cn](https://kimi.moonshot.cn/) |
+| opencode | [github.com/sst/opencode](https://github.com/sst/opencode) を参照 | [opencode.ai](https://opencode.ai/) |
+
+> **注意：** Claude Code と Codex CLI には [Node.js 20+](https://nodejs.org/) が、Kimi CLI には [Python 3.8+](https://www.python.org/) が必要です。CLI ツールインストール後、Cat Cafe を再起動すると自動検出されます。
+
 ### オプション B：ソースセットアップ
 
 **前提条件：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(オプション — スキップする場合は `--memory`)* · Git

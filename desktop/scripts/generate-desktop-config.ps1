@@ -4,22 +4,12 @@
 #>
 
 param(
-    [Parameter(Mandatory)] [string]$AppDir,
-    [switch]$Claude,
-    [switch]$Codex,
-    [switch]$Antigravity,
-    [switch]$Kimi
+    [Parameter(Mandatory)] [string]$AppDir
 )
 
 $config = @{
-    version = "0.2.0"
+    version = "0.10.1"
     installedAt = (Get-Date -Format "o")
-    components = @{
-        claude = $Claude.IsPresent
-        codex  = $Codex.IsPresent
-        antigravity = $Antigravity.IsPresent
-        kimi   = $Kimi.IsPresent
-    }
 }
 
 $configPath = Join-Path $AppDir ".cat-cafe\desktop-config.json"

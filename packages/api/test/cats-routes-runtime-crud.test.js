@@ -862,25 +862,45 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    // Case 1: bare model WITHOUT provider → 400 (no way to infer provider)
-    const bareReject = await app.inject({
+    // Case 1a: bare model with recognizable prefix (gpt-*) → 201 (provider inferred)
+    const bareInferred = await app.inject({
       method: 'POST',
       url: '/api/cats',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
       body: JSON.stringify({
-        catId: 'oc-bare-no-provider',
+        catId: 'oc-bare-inferred',
         name: '金渐层A',
         displayName: '金渐层A',
         avatar: '/avatars/opencode.png',
         color: { primary: '#0f172a', secondary: '#e2e8f0' },
-        mentionPatterns: ['@oc-bare-no-provider'],
+        mentionPatterns: ['@oc-bare-inferred'],
         roleDescription: '审查',
         clientId: 'opencode',
         accountRef: openaiProfile.id,
         defaultModel: 'gpt-5.4',
       }),
     });
-    assert.equal(bareReject.statusCode, 400, 'bare model without provider → 400');
+    assert.equal(bareInferred.statusCode, 201, 'bare gpt-* model → provider inferred as openai → 201');
+
+    // Case 1b: bare model with unrecognizable name → 400 (cannot infer provider)
+    const bareReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-bare-unknown',
+        name: '金渐层A2',
+        displayName: '金渐层A2',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-bare-unknown'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'custom-llm-v3',
+      }),
+    });
+    assert.equal(bareReject.statusCode, 400, 'bare unrecognizable model → 400');
     assert.match(JSON.parse(bareReject.body).error, /provider/i);
 
     // Case 2: provider/model format WITHOUT provider → 201 (provider inferred from model)
@@ -924,8 +944,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(bareAccept.statusCode, 201, 'bare model + provider → 201');
 
-    // Case 4: trailing-slash model WITHOUT provider → 400 (not valid provider/model)
-    const trailingSlashReject = await app.inject({
+    // Case 4: trailing-slash model (normalized to bare by schema) → 201 if
+    // the bare name is recognizable, 400 if not.
+    // 'minimax/' → 'minimax' → inferred as minimax provider → 201
+    const trailingSlashInferred = await app.inject({
       method: 'POST',
       url: '/api/cats',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
@@ -942,7 +964,31 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         defaultModel: 'minimax/',
       }),
     });
-    assert.equal(trailingSlashReject.statusCode, 400, 'trailing-slash model without provider → 400');
+    assert.equal(
+      trailingSlashInferred.statusCode,
+      201,
+      'trailing-slash → normalized bare model → provider inferred → 201',
+    );
+
+    // Case 4b: unrecognizable trailing-slash model → still 400
+    const trailingSlashReject = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'oc-trailing-slash-unk',
+        name: '金渐层D2',
+        displayName: '金渐层D2',
+        avatar: '/avatars/opencode.png',
+        color: { primary: '#0f172a', secondary: '#e2e8f0' },
+        mentionPatterns: ['@oc-trailing-slash-unk'],
+        roleDescription: '审查',
+        clientId: 'opencode',
+        accountRef: openaiProfile.id,
+        defaultModel: 'mystery-llm/',
+      }),
+    });
+    assert.equal(trailingSlashReject.statusCode, 400, 'trailing-slash unrecognizable model → 400');
 
     // Case 5: namespaced model from account's model list WITHOUT provider → 400
     // "z-ai/glm-4.7" exists in account models → it's a model namespace, not provider/model

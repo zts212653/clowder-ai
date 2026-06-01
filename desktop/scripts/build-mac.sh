@@ -3,8 +3,8 @@
 #
 # Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs two DMGs
 # (arm64 + x64) under dist/:
-#   CatCafe-0.2.0-arm64.dmg
-#   CatCafe-0.2.0-x64.dmg
+#   CatCafe-0.10.1-arm64.dmg
+#   CatCafe-0.10.1-x64.dmg
 #
 # Prerequisites on the build machine:
 #   - macOS 13+ (Xcode Command Line Tools: xcode-select --install)
@@ -17,12 +17,13 @@
 #   ./desktop/scripts/build-mac.sh --skip-deploy   # reuse bundled/deploy/
 #   ./desktop/scripts/build-mac.sh --skip-redis    # reuse bundled/redis-darwin-*
 #   ./desktop/scripts/build-mac.sh --skip-node     # reuse bundled/node-darwin-*
-#   ./desktop/scripts/build-mac.sh --skip-cli      # reuse bundled/cli-tools/
 #   ./desktop/scripts/build-mac.sh --arch arm64    # build single arch only
 #
-# Signing/notarization: intentionally disabled (identity=null in
-# desktop/package.json). End users must right-click → Open on first launch,
-# or run: xattr -cr "/Applications/Cat Cafe.app"
+# Signing: electron-builder signing is disabled (identity=null in
+# desktop/package.json) to avoid EMFILE with large bundles. Ad-hoc signing
+# is applied manually after electron-builder finishes (Step 6b).
+# Gatekeeper shows "unidentified developer" instead of "damaged" — users
+# right-click → Open on first launch. No Apple Developer account needed.
 
 set -euo pipefail
 
@@ -31,7 +32,6 @@ SKIP_WEB=0
 SKIP_DEPLOY=0
 SKIP_REDIS=0
 SKIP_NODE=0
-SKIP_CLI=0
 ARCHS=("arm64" "x64")
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,7 +39,6 @@ while [[ $# -gt 0 ]]; do
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --skip-redis)  SKIP_REDIS=1; shift ;;
     --skip-node)   SKIP_NODE=1; shift ;;
-    --skip-cli)    SKIP_CLI=1; shift ;;
     --arch)        ARCHS=("$2"); shift 2 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
@@ -50,7 +49,6 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "${SCRIPT_DIR}/../.." && pwd )"
 BUNDLED_DIR="${PROJECT_ROOT}/bundled"
 DEPLOY_ROOT="${BUNDLED_DIR}/deploy"
-CLI_TOOLS_DIR="${BUNDLED_DIR}/cli-tools"
 DESKTOP_DIR="${PROJECT_ROOT}/desktop"
 DIST_DIR="${PROJECT_ROOT}/dist"
 ASSETS_DIR="${DESKTOP_DIR}/assets"
@@ -86,7 +84,8 @@ if [[ $SKIP_DEPLOY -eq 0 ]]; then
   cd "$PROJECT_ROOT"
   for pkg in api web mcp-server; do
     echo "  Deploying @cat-cafe/$pkg ..."
-    pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy "${DEPLOY_ROOT}/${pkg}" \
+    CAT_CAFE_SKIP_NODE_RUNTIME_GUARD=1 \
+      pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy "${DEPLOY_ROOT}/${pkg}" \
       || die "pnpm deploy @cat-cafe/$pkg failed"
   done
   # Web's .next build output is outside the package's "files" field,
@@ -197,57 +196,13 @@ for arch in "${ARCHS[@]}"; do
   build_redis "$arch"
 done
 
-# ─── Step 5: Pack CLI tarballs + AGY native install guidance ───────────
-bold "Step 5/6 — Pack CLI tool tarballs + AGY native install guidance"
-mkdir -p "$CLI_TOOLS_DIR"
-# Prefer a bundled npm we just downloaded (version-pinned to build Node).
-NPM_CMD=""
-for arch in "${ARCHS[@]}"; do
-  c="${BUNDLED_DIR}/node-darwin-${arch}/bin/npm"
-  [[ -x "$c" ]] && NPM_CMD="$c" && break
-done
-# Fallback to system npm if no bundled one (e.g. --skip-node with nothing present)
-if [[ -z "$NPM_CMD" ]]; then
-  NPM_CMD="$(command -v npm || true)"
-fi
-[[ -n "$NPM_CMD" ]] || die "no npm available for 'npm pack'"
-
-cat > "${CLI_TOOLS_DIR}/agy-install-instructions.txt" <<'EOF'
-Antigravity CLI (agy) is a native binary, not an npm package.
-Install it with the official bootstrapper:
-
-  curl -fsSL https://antigravity.google/cli/install.sh | bash
-
-Offline Cat Cafe packages intentionally do not vendor agy until Google
-publishes a redistributable native binary contract.
-EOF
-ok "agy-install-instructions.txt written"
-
-cli_names=("claude" "codex")
-cli_pkgs=("@anthropic-ai/claude-code" "@openai/codex")
-all_packed=1
-for i in "${!cli_names[@]}"; do
-  name="${cli_names[$i]}"
-  pkg="${cli_pkgs[$i]}"
-  existing="$(ls "${CLI_TOOLS_DIR}"/*"${name}"*.tgz 2>/dev/null | head -1 || true)"
-  if [[ -n "$existing" && $SKIP_CLI -eq 1 ]]; then
-    ok "$(basename "$existing") reused (--skip-cli)"
-    continue
-  fi
-  if [[ -n "$existing" ]]; then
-    ok "$(basename "$existing") already present"
-    continue
-  fi
-  echo "  Packing ${pkg} ..."
-  ( cd "$CLI_TOOLS_DIR" && "$NPM_CMD" pack "$pkg" >/dev/null 2>&1 ) || {
-    err "${name} npm pack failed"
-    all_packed=0
-    continue
-  }
-  packed="$(ls "${CLI_TOOLS_DIR}"/*"${name}"*.tgz 2>/dev/null | head -1 || true)"
-  [[ -n "$packed" ]] && ok "$(basename "$packed") packed" || all_packed=0
-done
-[[ $all_packed -eq 1 ]] || die "Some CLI tarballs failed. Ensure network + registry access."
+# ─── Step 5: (macOS skips CLI tarball bundling) ──────────────────────────
+bold "Step 5/6 — CLI tools (skipped on macOS)"
+# macOS DMG has no post-install execution phase (unlike Windows Inno Setup),
+# so bundling CLI tarballs (claude, codex) would just waste ~60 MB in the DMG
+# without ever being installed. macOS users install CLIs via Homebrew / npm /
+# official installers. Windows build-desktop.ps1 handles CLI bundling separately.
+ok "Skipped — macOS DMG does not auto-install CLI tools"
 
 # ─── Step 6a: Generate icon.icns from icon.png (one-time) ──────────────
 bold "Step 6/6 — Assets + electron-builder"
@@ -289,7 +244,34 @@ done
 echo "  Running: npx electron-builder ${EB_ARGS[*]}"
 npx electron-builder "${EB_ARGS[@]}" || die "electron-builder failed"
 
+# Ad-hoc sign each .app bundle AFTER electron-builder finishes.
+# electron-builder's built-in signing (identity="-") opens every file in
+# the bundle simultaneously, hitting EMFILE when afterPack injects 3 full
+# node_modules trees (~10k+ files). Setting identity=null in package.json
+# skips EB's signing; we sign here with codesign --deep, which handles its
+# own file-descriptor management and never hits EMFILE.
+# Ad-hoc signing changes "damaged" → "unidentified developer" on macOS
+# Gatekeeper — users right-click → Open on first launch.
+for arch in "${ARCHS[@]}"; do
+  case "$arch" in
+    arm64) app_dir="${DESKTOP_DIR}/dist/mac-arm64" ;;
+    x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
+    *) continue ;;
+  esac
+  app_bundle="${app_dir}/Cat Cafe.app"
+  if [[ -d "$app_bundle" ]]; then
+    echo "  Ad-hoc signing ${arch} bundle ..."
+    codesign -s - --deep --force "$app_bundle" || die "codesign ${arch} failed"
+    # --strict rejects symlinks inside the bundle (scripts/node_modules →
+    # ../packages/api/node_modules), so use basic --deep verification only.
+    codesign --verify --deep "$app_bundle" || die "codesign verify ${arch} failed"
+    ok "Ad-hoc signed and verified ${arch}"
+  fi
+done
+
 # Create DMGs from .app bundles using hdiutil (handles large bundles reliably).
+# Each DMG contains the .app plus an /Applications symlink so users can
+# drag-to-install instead of accidentally running from the mounted volume.
 mkdir -p "$DIST_DIR"
 VERSION="$(node -p "require('./package.json').version")"
 for arch in "${ARCHS[@]}"; do
@@ -303,10 +285,15 @@ for arch in "${ARCHS[@]}"; do
   if [[ ! -d "$app_dir" ]]; then
     die "Expected app bundle directory not found for ${arch}: ${app_dir}"
   fi
+  # Stage .app + /Applications symlink in a temp directory for the DMG.
+  dmg_staging="$(mktemp -d)"
+  cp -R "${app_dir}/Cat Cafe.app" "$dmg_staging/"
+  ln -s /Applications "$dmg_staging/Applications"
   echo "  Creating ${dmg_name} via hdiutil ..."
   rm -f "$dmg_out"
-  hdiutil create -volname "Cat Cafe" -srcfolder "$app_dir" -ov -format UDZO "$dmg_out" \
+  hdiutil create -volname "Cat Cafe" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_out" \
     || die "hdiutil create failed for ${arch}"
+  rm -rf "$dmg_staging"
   ok "Created ${dmg_name}"
 done
 
@@ -319,6 +306,5 @@ for dmg in "${DIST_DIR}"/CatCafe-*-*.dmg; do
   echo "  $(basename "$dmg")  (${size_mb} MB)"
 done
 echo ""
-echo "  First-launch (unsigned): right-click the app → Open, or run:"
-echo "    xattr -cr \"/Applications/Cat Cafe.app\""
+echo "  First-launch (ad-hoc signed): right-click the app → Open"
 echo "  ========================================"

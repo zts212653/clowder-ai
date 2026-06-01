@@ -28,4 +28,17 @@ exports.default = async function afterPack(context) {
       console.warn(`  afterPack: ${src} not found, skipping`);
     }
   }
+
+  // scripts/ is copied as an extraResource but has no node_modules.
+  // compile-system-prompt-l0.mjs imports @cat-cafe/shared (ESM), and
+  // Node's ESM resolver ignores NODE_PATH — it only walks the filesystem
+  // node_modules chain. Create a relative symlink so the resolver finds
+  // packages from the api deployment.
+  const scriptsNM = path.join(resourcesDir, 'scripts', 'node_modules');
+  const apiNM = path.join(resourcesDir, 'packages', 'api', 'node_modules');
+  if (!fs.existsSync(scriptsNM) && fs.existsSync(apiNM)) {
+    // Relative symlink: scripts/node_modules → ../packages/api/node_modules
+    fs.symlinkSync(path.relative(path.dirname(scriptsNM), apiNM), scriptsNM);
+    console.log('  afterPack: scripts/node_modules → packages/api/node_modules (symlink)');
+  }
 };

@@ -29,6 +29,9 @@
 .PARAMETER SkipInstaller
   Skip Inno Setup compilation.
 
+.PARAMETER SkipPortableZip
+  Skip portable zip assembly.
+
 .EXAMPLE
   .\desktop\scripts\build-desktop.ps1
 #>
@@ -37,7 +40,8 @@ param(
     [switch]$SkipWebBuild,
     [switch]$SkipBundleDeps,
     [switch]$SkipElectronBuild,
-    [switch]$SkipInstaller
+    [switch]$SkipInstaller,
+    [switch]$SkipPortableZip
 )
 
 $ErrorActionPreference = "Stop"
@@ -50,7 +54,7 @@ function Write-Err   { param([string]$msg) Write-Host "  [ERR] $msg" -Foreground
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
 
 # Step 1: Build web app
-Write-Step "Step 1/5 - Build web application"
+Write-Step "Step 1/8 - Build web application"
 if (-not $SkipWebBuild) {
     Push-Location $ProjectRoot
     pnpm install --frozen-lockfile
@@ -67,7 +71,7 @@ if (-not $SkipWebBuild) {
 # Produces bundled/deploy/{api,web}/ with real files — no junctions, no workspace
 # references. Replaces the old "tar root node_modules" approach, which baked in
 # build-machine absolute paths via Windows junctions and broke on install.
-Write-Step "Step 2/5 - pnpm deploy runtime packages"
+Write-Step "Step 2/8 - pnpm deploy runtime packages"
 $bundledDir = Join-Path $ProjectRoot "bundled"
 $deployRoot = Join-Path $bundledDir "deploy"
 if (-not $SkipBundleDeps) {
@@ -103,7 +107,9 @@ if (-not $SkipBundleDeps) {
                     }
                     if (Test-Path $out) { Remove-Item $out -Recurse -Force }
                     Write-Host "  Deploying @cat-cafe/$pkg ..." -ForegroundColor Gray
+                    $env:CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = "1"
                     pnpm --filter "@cat-cafe/$pkg" --prod --config.node-linker=hoisted deploy $out 2>&1
+                    $env:CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = $null
                     if ($LASTEXITCODE -eq 0) { $deployed = $true; break }
                 }
                 if (-not $deployed) { throw "pnpm deploy @cat-cafe/$pkg failed after 3 attempts" }
@@ -145,7 +151,7 @@ if (-not $SkipBundleDeps) {
 }
 
 # Step 3: Bundle Redis portable + Node.js runtime
-Write-Step "Step 3/5 - Bundle Redis portable + Node.js"
+Write-Step "Step 3/8 - Bundle Redis portable + Node.js"
 
 # Node.js portable — without this, clean Windows installs with no system Node
 # cannot spawn the API/Web processes. CRITICAL: the bundled Node major version
@@ -245,8 +251,8 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
     }
 }
 
-# Step 4: Bundle CLI tool tarballs for offline installation
-Write-Step "Step 4/6 - Bundle CLI tool tarballs"
+# Step 4: Write CLI install guidance (CLIs are installed by users separately)
+Write-Step "Step 4/8 - Write CLI install guidance"
 
 $cliToolsDir = Join-Path $bundledDir "cli-tools"
 if (-not (Test-Path $cliToolsDir)) {
@@ -265,62 +271,13 @@ publishes a redistributable native binary contract.
 "@ | Set-Content -Path $agyInstructionsPath -Encoding ascii
 Write-Ok "agy-install-instructions.txt written"
 
-# Use bundled npm (guaranteed present after Step 3) to pack CLI tarballs.
-$npmCmd = Join-Path $bundledNode "npm.cmd"
-if (-not (Test-Path $npmCmd)) {
-    Write-Err "Bundled npm.cmd not found at $npmCmd — cannot pack CLI tools"
-    exit 1
-}
-
-$cliPackages = @(
-    @{ Name = "claude"; Pkg = "@anthropic-ai/claude-code" },
-    @{ Name = "codex";  Pkg = "@openai/codex" }
-)
-
-$cliAllPacked = $true
-foreach ($cli in $cliPackages) {
-    # Reuse existing tarball if already present (idempotent rebuilds)
-    $existing = Get-ChildItem -Path $cliToolsDir -Filter "*.tgz" -ErrorAction SilentlyContinue `
-        | Where-Object { $_.Name -like "*$($cli.Name)*" } | Select-Object -First 1
-    if ($existing) {
-        Write-Ok "$($cli.Name) tarball already present: $($existing.Name)"
-        continue
-    }
-    Write-Host "  Packing $($cli.Pkg) ..." -ForegroundColor Gray
-    try {
-        Push-Location $cliToolsDir
-        & $npmCmd pack $($cli.Pkg) 2>&1 | Out-Null
-        $packExit = $LASTEXITCODE
-        Pop-Location
-        if ($packExit -eq 0) {
-            $packed = Get-ChildItem -Path $cliToolsDir -Filter "*.tgz" -ErrorAction SilentlyContinue `
-                | Where-Object { $_.Name -like "*$($cli.Name)*" } | Select-Object -First 1
-            if ($packed) {
-                Write-Ok "$($cli.Name) tarball packed: $($packed.Name)"
-            } else {
-                Write-Err "$($cli.Name) npm pack succeeded but tarball not found"
-                $cliAllPacked = $false
-            }
-        } else {
-            Write-Err "$($cli.Name) npm pack failed (exit $packExit)"
-            $cliAllPacked = $false
-        }
-    } catch {
-        if ((Get-Location).Path -ne $ProjectRoot) { Pop-Location }
-        Write-Err "$($cli.Name) tarball failed: $_"
-        $cliAllPacked = $false
-    }
-}
-
-if (-not $cliAllPacked) {
-    Write-Err "Some CLI tarballs failed to pack. The installer requires all CLI tools."
-    Write-Err "Ensure network access is available during build."
-    exit 1
-}
-Write-Ok "All CLI tarballs ready under bundled/cli-tools/"
+# CLI tarballs (npm pack @anthropic-ai/claude-code, @openai/codex) were
+# removed — the installer/portable zip no longer provisions CLI tools.
+# Users install CLIs separately; see README "AI CLI Tools" section.
+Write-Ok "CLI tool provisioning removed — users install CLIs separately"
 
 # Step 5: Build Electron app
-Write-Step "Step 5/6 - Build Electron shell"
+Write-Step "Step 5/8 - Build Electron shell"
 $desktopDir = Join-Path $ProjectRoot "desktop"
 $desktopDist = Join-Path $ProjectRoot "desktop-dist"
 
@@ -373,8 +330,42 @@ if (-not $SkipElectronBuild) {
     Write-Ok "Electron build skipped (using existing desktop-dist/)"
 }
 
-# Step 6: Compile Inno Setup installer
-Write-Step "Step 6/6 - Compile installer"
+# Step 6: Archive bulky directories for fast Inno Setup extraction
+# Inno Setup per-file extraction of 30K+ node_modules files triggers per-file
+# NTFS metadata creation + Windows Defender real-time scan → 10+ min install.
+# Shipping tar.gz archives and extracting post-install with Windows' built-in
+# tar.exe reduces Inno Setup [Files] count from ~30K to ~100.
+Write-Step "Step 6/8 - Archive for fast installer extraction"
+$archiveDir = Join-Path $bundledDir "archives"
+if (Test-Path $archiveDir) { Remove-Item $archiveDir -Recurse -Force }
+New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
+
+$archiveTargets = @(
+    @{ Name = "deploy-api";        Src = Join-Path $deployRoot "api" },
+    @{ Name = "deploy-web";        Src = Join-Path $deployRoot "web" },
+    @{ Name = "deploy-mcp-server"; Src = Join-Path $deployRoot "mcp-server" },
+    @{ Name = "electron";          Src = Join-Path $desktopDist "win-unpacked" },
+    @{ Name = "node";              Src = Join-Path $bundledDir "node" }
+)
+
+foreach ($t in $archiveTargets) {
+    if (-not (Test-Path $t.Src)) {
+        Write-Warn "$($t.Src) not found — skipping $($t.Name).tar.gz"
+        continue
+    }
+    $archivePath = Join-Path $archiveDir "$($t.Name).tar.gz"
+    tar -czf $archivePath -C $t.Src .
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "tar failed for $($t.Name)"
+        exit 1
+    }
+    $sizeMB = [math]::Round((Get-Item $archivePath).Length / 1MB, 2)
+    Write-Ok "$($t.Name).tar.gz ($sizeMB MB)"
+}
+Write-Ok "Archives ready under bundled/archives/"
+
+# Step 7: Compile Inno Setup installer
+Write-Step "Step 7/8 - Compile installer"
 if (-not $SkipInstaller) {
     $issFile = Join-Path (Join-Path (Join-Path $ProjectRoot "desktop") "installer") "cat-cafe.iss"
     $distDir = Join-Path $ProjectRoot "dist"
@@ -424,4 +415,138 @@ if (-not $SkipInstaller) {
     Write-Host "  ========================================" -ForegroundColor Green
 } else {
     Write-Ok "Installer compilation skipped"
+}
+
+# Step 8: Assemble portable zip (no-install distribution)
+Write-Step "Step 8/8 - Portable zip"
+if (-not $SkipPortableZip) {
+    $distDir = Join-Path $ProjectRoot "dist"
+    if (-not (Test-Path $distDir)) { New-Item -ItemType Directory -Path $distDir | Out-Null }
+
+    # Version: same source as Inno Setup step
+    $desktopPkgPath = Join-Path (Join-Path $ProjectRoot "desktop") "package.json"
+    $desktopPkgJson = Get-Content $desktopPkgPath -Raw | ConvertFrom-Json
+    $zipVersion = if ($env:CATCAFE_VERSION) { $env:CATCAFE_VERSION } else { $desktopPkgJson.version }
+
+    $stagingName = "CatCafe-$zipVersion"
+    $staging = Join-Path $distDir $stagingName
+    if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
+    New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+    Write-Host "  Assembling portable layout ($zipVersion)..."
+
+    # Helper: copy directory recursively, creating parent as needed
+    function Copy-ToStaging {
+        param([string]$Src, [string]$RelDst)
+        $dst = Join-Path $staging $RelDst
+        $dstParent = Split-Path $dst -Parent
+        if (-not (Test-Path $dstParent)) { New-Item -ItemType Directory -Path $dstParent -Force | Out-Null }
+        if (Test-Path $Src) {
+            Copy-Item -Path $Src -Destination $dst -Recurse -Force
+        } else {
+            Write-Warn "Source not found: $Src"
+        }
+    }
+
+    # Mirror the Inno Setup [Files] layout (see desktop/installer/cat-cafe.iss)
+    # Deploy artifacts
+    Copy-ToStaging (Join-Path $deployRoot "api")         "packages\api"
+    Copy-ToStaging (Join-Path $deployRoot "web")         "packages\web"
+    Copy-ToStaging (Join-Path $deployRoot "mcp-server")  "packages\mcp-server"
+
+    # Root config files
+    foreach ($f in @("cat-template.json", "pnpm-workspace.yaml", "package.json")) {
+        $src = Join-Path $ProjectRoot $f
+        if (Test-Path $src) { Copy-Item $src (Join-Path $staging $f) }
+    }
+
+    # Skills
+    Copy-ToStaging (Join-Path $ProjectRoot "cat-cafe-skills") "cat-cafe-skills"
+
+    # Docs
+    Copy-ToStaging (Join-Path $ProjectRoot "docs") "docs"
+
+    # Bundled Node.js
+    Copy-ToStaging (Join-Path $ProjectRoot "bundled\node") "node"
+
+    # Runtime scripts — blacklist approach: copy all from root scripts/, then
+    # remove platform-irrelevant and dev artifacts. New files are automatically
+    # included (prevents the "missing file" class of bugs).
+    # IMPORTANT: this must run BEFORE desktop scripts are added, because
+    # Copy-ToStaging uses Copy-Item which, when the destination directory
+    # already exists, nests the source as a subdirectory (scripts/scripts/).
+    Copy-ToStaging (Join-Path $ProjectRoot "scripts") "scripts"
+    # Exclude: *.sh (bash — Linux/Mac only), *.test.* (test files), __pycache__
+    Get-ChildItem (Join-Path $staging "scripts") -Recurse -File `
+        | Where-Object { $_.Name -match '\.(sh)$' -or $_.Name -match '\.test\.' } `
+        | Remove-Item -Force
+    $pycache = Join-Path (Join-Path $staging "scripts") "__pycache__"
+    if (Test-Path $pycache) { Remove-Item $pycache -Recurse -Force }
+
+    # Desktop scripts (post-install, desktop-config, hook sync) — added on top
+    # of the root scripts directory that was just copied above.
+    $scriptsDir = Join-Path $staging "scripts"
+    foreach ($s in @("post-install-offline.ps1", "generate-desktop-config.ps1", "sync-agent-hooks-offline.mjs")) {
+        $src = Join-Path (Join-Path (Join-Path $ProjectRoot "desktop") "scripts") $s
+        if (Test-Path $src) { Copy-Item $src (Join-Path $scriptsDir $s) }
+    }
+
+    # Assets (system prompt templates, etc.)
+    Copy-ToStaging (Join-Path $ProjectRoot "assets") "assets"
+
+    # Guide registry + flow definitions — bootcamp/guide features
+    Copy-ToStaging (Join-Path $ProjectRoot "guides") "guides"
+
+    # Agent CLI hook templates
+    $hooksSource = Join-Path $ProjectRoot ".claude\hooks\user-level"
+    if (Test-Path $hooksSource) {
+        Copy-ToStaging $hooksSource ".claude\hooks\user-level"
+    }
+
+    # Electron app (win-unpacked contents → desktop-dist/)
+    $winUnpacked = Join-Path (Join-Path $ProjectRoot "desktop-dist") "win-unpacked"
+    Copy-ToStaging $winUnpacked "desktop-dist"
+
+    # Desktop assets
+    Copy-ToStaging (Join-Path (Join-Path $ProjectRoot "desktop") "assets") "desktop\assets"
+
+    # CLI tool tarballs
+    Copy-ToStaging (Join-Path $ProjectRoot "bundled\cli-tools") "bundled\cli-tools"
+
+    # Portable Redis → .cat-cafe/redis/windows/
+    $bundledRedisDir = Join-Path $ProjectRoot "bundled\redis"
+    if (Test-Path $bundledRedisDir) {
+        Copy-ToStaging $bundledRedisDir ".cat-cafe\redis\windows"
+    }
+
+    # start.bat — portable entry point
+    $startBat = Join-Path (Join-Path (Join-Path $ProjectRoot "desktop") "scripts") "start-portable.bat"
+    if (Test-Path $startBat) {
+        Copy-Item $startBat (Join-Path $staging "start.bat")
+    } else {
+        Write-Warn "start-portable.bat not found — portable zip will lack start.bat"
+    }
+
+    # Compress
+    $zipPath = Join-Path $distDir "$stagingName.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    Write-Host "  Compressing to $stagingName.zip ..."
+    Compress-Archive -Path "$staging\*" -DestinationPath $zipPath -CompressionLevel Optimal
+    if (-not (Test-Path $zipPath)) {
+        Write-Err "Compress-Archive did not produce output"
+        exit 1
+    }
+
+    # Clean staging
+    Remove-Item $staging -Recurse -Force
+
+    $zipFile = Get-Item $zipPath
+    Write-Host ""
+    Write-Host "  ========================================" -ForegroundColor Green
+    Write-Host "  Portable zip ready!" -ForegroundColor Green
+    Write-Host "  $($zipFile.FullName)" -ForegroundColor Green
+    Write-Host "  Size: $([math]::Round($zipFile.Length/1MB, 2)) MB" -ForegroundColor Green
+    Write-Host "  ========================================" -ForegroundColor Green
+} else {
+    Write-Ok "Portable zip skipped"
 }

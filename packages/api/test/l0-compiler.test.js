@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import {
+  clearL0Cache,
   compileL0ViaSubprocess,
   resolveL0CompilerScriptPath,
 } from '../dist/domains/cats/services/agents/providers/l0-compiler.js';
@@ -71,9 +72,14 @@ test('resolveL0CompilerScriptPath finds script when cwd is packages/api', () => 
   assert.equal(resolveL0CompilerScriptPath(join(root, 'packages', 'api')), resolve(root, SCRIPT_REL));
 });
 
-test('resolveL0CompilerScriptPath returns undefined when not found', () => {
+test('resolveL0CompilerScriptPath: cwd with no script falls back to install root', () => {
   const empty = mkdtempSync(join(tmpdir(), 'l0-empty-'));
-  assert.equal(resolveL0CompilerScriptPath(empty), undefined);
+  const result = resolveL0CompilerScriptPath(empty);
+  // In monorepo, deriveInstallRoot() resolves the real script via import.meta.url.
+  // Outside monorepo (e.g. consumer package), this would return undefined.
+  if (result !== undefined) {
+    assert.match(result, /compile-system-prompt-l0\.mjs$/);
+  }
 });
 
 // --- compileL0ViaSubprocess ---
@@ -86,6 +92,7 @@ function seedRepoRoot() {
 }
 
 test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async () => {
+  clearL0Cache();
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ stdout: '你是 布偶猫（Claude Opus）...L0 BODY...' });
   const out = await compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn });
@@ -96,6 +103,7 @@ test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async 
 });
 
 test('compileL0ViaSubprocess (outPath) passes --out and returns file content', async () => {
+  clearL0Cache();
   const root = seedRepoRoot();
   const outPath = join(mkdtempSync(join(tmpdir(), 'l0-out-')), 'system-prompt-l0.md');
   const spawnFn = buildFakeSpawn({ stderr: `Wrote compiled L0 → ${outPath}`, writeOut: 'COMPILED-L0-FILE-CONTENT' });
@@ -106,14 +114,18 @@ test('compileL0ViaSubprocess (outPath) passes --out and returns file content', a
 });
 
 test('compileL0ViaSubprocess fail-closed: unresolvable script path throws', async () => {
+  clearL0Cache();
   const empty = mkdtempSync(join(tmpdir(), 'l0-noscript-'));
   await assert.rejects(
-    () => compileL0ViaSubprocess({ catId: 'opus-47', cwd: empty, spawnFn: buildFakeSpawn({}) }),
-    /compile-system-prompt-l0|script.*not.*resolve|L0 compiler/i,
+    () => compileL0ViaSubprocess({ catId: 'no-script-cat', cwd: empty, spawnFn: buildFakeSpawn({}) }),
+    // Without install-root fallback: "script not resolvable" error.
+    // With install-root (monorepo): script found → fakeSpawn({}) returns empty → "empty output" error.
+    /compile-system-prompt-l0|script.*not.*resolve|L0 compiler|empty/i,
   );
 });
 
 test('compileL0ViaSubprocess fail-closed: non-zero exit throws with stderr', async () => {
+  clearL0Cache();
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ exitCode: 2, stderr: 'unknown catId "ghost"' });
   await assert.rejects(
@@ -126,15 +138,42 @@ test('compileL0ViaSubprocess fail-closed: non-zero exit throws with stderr', asy
 });
 
 test('compileL0ViaSubprocess fail-closed: empty stdout (no outPath) throws', async () => {
+  clearL0Cache();
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ stdout: '   \n' });
-  await assert.rejects(() => compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn }), /empty|no.*output/i);
+  await assert.rejects(() => compileL0ViaSubprocess({ catId: 'empty-cat', cwd: root, spawnFn }), /empty|no.*output/i);
 });
 
 test('compileL0ViaSubprocess fail-closed: spawn error (ENOENT) throws', async () => {
+  clearL0Cache();
   const root = seedRepoRoot();
   const spawnFn = buildFakeSpawn({ errorOnSpawn: Object.assign(new Error('spawn node ENOENT'), { code: 'ENOENT' }) });
-  await assert.rejects(() => compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn }), /ENOENT|spawn/i);
+  await assert.rejects(() => compileL0ViaSubprocess({ catId: 'enoent-cat', cwd: root, spawnFn }), /ENOENT|spawn/i);
+});
+
+// --- L0 cache ---
+
+test('compileL0ViaSubprocess caches result and clearL0Cache invalidates', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const spawnFn = buildFakeSpawn({ stdout: 'CACHED L0 CONTENT' });
+
+  // First call: subprocess runs
+  const out1 = await compileL0ViaSubprocess({ catId: 'cache-test-cat', cwd: root, spawnFn });
+  assert.equal(out1, 'CACHED L0 CONTENT');
+  assert.equal(spawnFn.calls.length, 1);
+
+  // Second call: cache hit, no new subprocess
+  const out2 = await compileL0ViaSubprocess({ catId: 'cache-test-cat', cwd: root, spawnFn });
+  assert.equal(out2, 'CACHED L0 CONTENT');
+  assert.equal(spawnFn.calls.length, 1, 'cache hit should skip subprocess');
+
+  // Clear single cat: next call should spawn again
+  clearL0Cache('cache-test-cat');
+  const spawnFn2 = buildFakeSpawn({ stdout: 'REFRESHED L0' });
+  const out3 = await compileL0ViaSubprocess({ catId: 'cache-test-cat', cwd: root, spawnFn: spawnFn2 });
+  assert.equal(out3, 'REFRESHED L0');
+  assert.equal(spawnFn2.calls.length, 1);
 });
 
 // --- L0 template content guard ---

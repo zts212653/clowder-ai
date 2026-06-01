@@ -77,6 +77,25 @@ Clowder 不绑定模型。当前支持的 Agent CLI / adapter：
 
 桌面安装包会自带应用运行时、便携 Node.js 和 Redis，普通用户不需要手动执行 `pnpm install` 或 `pnpm build`。启动后进入 **Hub → 系统配置 → 账号配置**，连接模型 provider 和 CLI 账号即可。
 
+**更新与卸载：**
+
+- **macOS**：直接安装新版 `.dmg` 即可覆盖更新。配置和数据存储在 `~/Library/Application Support/Clowder AI/`，删除应用**不会**丢失。完全卸载：拖应用到废纸篓后，可选删除该目录。
+- **Windows**：直接运行新版安装包即可原地升级。数据存储在 `%LOCALAPPDATA%\Clowder AI\`，卸载后保留。完全清理可手动删除该目录。
+
+**AI CLI 工具（需单独安装）：**
+
+桌面安装包**不包含** AI CLI 工具，需要自行安装以使用 Agent 功能：
+
+| 工具 | 安装命令 | 官方文档 |
+|------|---------|---------|
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+| Codex CLI | `npm install -g @openai/codex` | [github.com/openai/codex](https://github.com/openai/codex) |
+| Antigravity CLI | 参见 [antigravity.google/cli](https://antigravity.google/cli) | [antigravity.google](https://antigravity.google/) |
+| Kimi CLI | `pip install kimi-cli` | [kimi.moonshot.cn](https://kimi.moonshot.cn/) |
+| opencode | 参见 [github.com/sst/opencode](https://github.com/sst/opencode) | [opencode.ai](https://opencode.ai/) |
+
+> **提示：** Claude Code 和 Codex CLI 需要 [Node.js 20+](https://nodejs.org/)，Kimi CLI 需要 [Python 3.8+](https://www.python.org/)。安装完 CLI 工具后重启 Cat Cafe 即可自动检测。
+
 ### 方式 B：源码安装
 
 **前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
