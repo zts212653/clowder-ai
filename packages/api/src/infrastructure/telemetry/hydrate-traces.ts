@@ -2,17 +2,84 @@
  * F153 Phase F AC-F4/F5: Hydrate LocalTraceStore from Redis messages on cold start.
  *
  * Pointer-only restoration: scans recent messages, extracts tracing pointers
- * from extra.tracing, and creates stub DTOs with real timing. Does NOT restore
- * the full route/invocation/cli_session/llm_call span hierarchy — all restored
- * spans appear as flat `cat_cafe.invocation.restored` entries. Full semantic
- * reconstruction is deferred to a follow-up slice.
+ * from extra.tracing, and creates stub DTOs with real timing.
+ *
+ * F153 Phase J Slice J-B AC-J8: additionally reads `toolEvents[]` on each message
+ * and synthesizes real-duration `cat_cafe.tool_use {toolName}` child spans by
+ * pairing `tool_use` (startTimeMs) with matching `tool_result` (endTimeMs) by
+ * `toolUseId`. Each synthesized span carries the persisted `tracing` pointer so
+ * the hydrated trace shows the tool span under the invocation span — not as an
+ * orphan trace or a flat `cat_cafe.invocation.restored` marker (KD-39 boundary).
+ *
+ * For providers without Phase J wiring (no toolUseId / tracing), tool events are
+ * skipped on hydrate per KD-41 honesty (no fake duration). They still appear in
+ * the message history view via existing UI paths.
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import { safeParseExtra } from '../../domains/cats/services/stores/redis/redis-message-parsers.js';
+import type { StoredToolEvent } from '../../domains/cats/services/stores/ports/MessageStore.js';
+import { safeParseExtra, safeParseToolEvents } from '../../domains/cats/services/stores/redis/redis-message-parsers.js';
 import { MessageKeys } from '../../domains/cats/services/stores/redis-keys/message-keys.js';
 import { createModuleLogger } from '../logger.js';
 import { LOCAL_TRACE_STORE_DEFAULT_MAX_AGE_MS, type LocalTraceStore, type TraceSpanDTO } from './local-trace-store.js';
+
+/**
+ * F153 Phase J Slice J-B AC-J8: pair tool_use / tool_result events by toolUseId and
+ * synthesize one `cat_cafe.tool_use {toolName}` span per pair with real duration.
+ *
+ * Exported for unit testing — the loop is pure (no Redis / store side effects), so
+ * tests can drive it directly with crafted StoredToolEvent[] inputs.
+ */
+export function synthesizeToolSpansFromEvents(
+  events: readonly StoredToolEvent[],
+  catId: string | undefined,
+  storedAt: number,
+): TraceSpanDTO[] {
+  // Index tool_use events by toolUseId so tool_result can find its mate.
+  const starts = new Map<string, StoredToolEvent>();
+  for (const ev of events) {
+    if (ev.type === 'tool_use' && ev.toolUseId) starts.set(ev.toolUseId, ev);
+  }
+
+  const dtos: TraceSpanDTO[] = [];
+  for (const ev of events) {
+    if (ev.type !== 'tool_result' || !ev.toolUseId || !ev.tracing) continue;
+    const startEv = starts.get(ev.toolUseId);
+    if (!startEv || !startEv.tracing) continue;
+
+    const startTimeMs = startEv.startTimeMs ?? startEv.timestamp;
+    const endTimeMs = ev.endTimeMs ?? ev.timestamp;
+    if (!(endTimeMs > startTimeMs)) continue; // sanity guard: must have positive duration
+
+    // Extract tool name from the start event label ("{catId} → {toolName}").
+    const arrowIdx = startEv.label.indexOf(' → ');
+    const toolName = arrowIdx > 0 ? startEv.label.slice(arrowIdx + 3) : 'unknown';
+
+    const attributes: Record<string, unknown> = { 'tool.use_id': ev.toolUseId };
+    if (catId) attributes['agent.id'] = catId;
+    if (ev.status) attributes['tool.result.status'] = ev.status;
+
+    // OTel status: 2 = ERROR, 1 = OK, 0 = UNSET. Hydrated spans default UNSET for
+    // 'unknown' status (matches KD-38 honesty: surface ambiguity, don't fake OK).
+    const statusCode: 0 | 1 | 2 = ev.status === 'error' ? 2 : ev.status === 'ok' ? 1 : 0;
+
+    dtos.push({
+      traceId: startEv.tracing.traceId,
+      spanId: startEv.tracing.spanId,
+      parentSpanId: startEv.tracing.parentSpanId,
+      name: `cat_cafe.tool_use ${toolName}`,
+      kind: 0,
+      startTimeMs,
+      endTimeMs,
+      durationMs: endTimeMs - startTimeMs,
+      status: { code: statusCode },
+      attributes,
+      events: [],
+      storedAt,
+    });
+  }
+  return dtos;
+}
 
 const log = createModuleLogger('telemetry:hydrate');
 
@@ -32,7 +99,10 @@ export async function hydrateTraceStoreFromRedis(
 
     const pipeline = redis.pipeline();
     for (const id of ids) {
-      pipeline.hmget(MessageKeys.detail(id), 'extra', 'timestamp', 'catId', 'metadata');
+      // F153 Phase J Slice J-B AC-J8: also pull toolEvents so we can synthesize
+      // real-duration tool spans (KD-39 boundary: no flat invocation.restored when
+      // toolEvents carry full timing + tracing pointers).
+      pipeline.hmget(MessageKeys.detail(id), 'extra', 'timestamp', 'catId', 'metadata', 'toolEvents');
     }
     const results = await pipeline.exec();
 
@@ -41,7 +111,7 @@ export async function hydrateTraceStoreFromRedis(
     for (const result of results ?? []) {
       const [err, fields] = result as [Error | null, (string | null)[] | null];
       if (err || !fields) continue;
-      const [extraStr, timestampStr, catIdStr, metadataStr] = fields;
+      const [extraStr, timestampStr, catIdStr, metadataStr, toolEventsStr] = fields;
       if (!extraStr) continue;
 
       const extra = safeParseExtra(extraStr);
@@ -71,6 +141,15 @@ export async function hydrateTraceStoreFromRedis(
         events: [],
         storedAt: ts,
       });
+
+      // F153 Phase J Slice J-B AC-J8: synthesize tool spans for events that carry
+      // the four-piece set (toolUseId + tracing + start/end timestamps). Skips
+      // gracefully when fields are absent (legacy data / unwired providers).
+      const toolEvents = safeParseToolEvents(toolEventsStr ?? undefined);
+      if (toolEvents && toolEvents.length > 0) {
+        const toolDtos = synthesizeToolSpansFromEvents(toolEvents, catIdStr ?? undefined, ts);
+        dtos.push(...toolDtos);
+      }
     }
 
     if (dtos.length > 0) {
