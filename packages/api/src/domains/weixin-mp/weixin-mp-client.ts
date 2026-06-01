@@ -62,6 +62,7 @@ export interface ArticleInput {
   readonly content: string;
   readonly author?: string;
   readonly thumb_media_id: string;
+  readonly show_cover_pic: 0 | 1;
   readonly digest?: string;
 }
 

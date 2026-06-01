@@ -19,9 +19,10 @@ function createNodeWithDraftClient() {
       WEIXIN_MP_APP_SECRET: 'app-secret',
     },
   });
-  const calls = { createDraft: 0, publishDraft: 0 };
-  node.client.createDraft = async () => {
+  const calls = { createDraft: 0, publishDraft: 0, draftArticles: [] };
+  node.client.createDraft = async (articles) => {
     calls.createDraft += 1;
+    calls.draftArticles = articles;
     return 'draft-media-id';
   };
   node.client.publishDraft = async () => {
@@ -92,6 +93,20 @@ describe('WeixinMpLimbNode', () => {
     assert.equal(calls.createDraft, 1);
     assert.equal(calls.publishDraft, 1);
     assert.deepEqual(result.data, { draftMediaId: 'draft-media-id', publishId: 'publish-id' });
+  });
+
+  it('includes the required cover display flag in draft article payloads', async () => {
+    const { node, calls } = createNodeWithDraftClient();
+
+    const result = await node.invoke('weixin_mp.publish_article', {
+      title: 'Draft title',
+      markdown: '# Draft',
+      thumbMediaId: 'thumb-media-id',
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(calls.createDraft, 1);
+    assert.equal(calls.draftArticles[0]?.show_cover_pic, 1);
   });
 
   it('rejects external inline image URLs before creating a draft', async () => {

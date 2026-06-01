@@ -159,7 +159,7 @@ export class WeixinMpLimbNode implements ILimbNode {
     }
 
     const draftMediaId = await this.client.createDraft([
-      { title, content: htmlContent, author, digest, thumb_media_id: thumbMediaId },
+      { title, content: htmlContent, author, digest, thumb_media_id: thumbMediaId, show_cover_pic: 1 },
     ]);
     const result: Record<string, unknown> = { draftMediaId };
 
