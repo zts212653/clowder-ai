@@ -78,7 +78,16 @@ if (args[0] === 'install') {
 }
 
 const command = args[0] === '-r' ? args.slice(0, 4).join(' ') : args[0] === '--filter' ? args.slice(0, 3).join(' ') : args[0];
-const knownCommands = new Set(['install', 'build', 'test', 'check', '-r --if-present run build', '-r exec bash -lc', '--filter @cat-cafe/web lint']);
+const knownCommands = new Set([
+  'install',
+  'build',
+  'test',
+  'check',
+  '-r --if-present run build',
+  '-r exec bash -lc',
+  '--filter @cat-cafe/web lint',
+  '--filter @cat-cafe/api run',
+]);
 if (!knownCommands.has(command)) {
   process.stderr.write(\`unexpected pnpm invocation: \${args.join(' ')}\\n\`);
   process.exit(1);
@@ -151,6 +160,33 @@ describe('pre-merge-check dependency refresh order', () => {
       envLine,
       'env NODE_ENV=<unset> npm_config_production=<unset> NPM_CONFIG_PRODUCTION=<unset>',
       `expected gate to clear inherited production install env, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('uses public API tests when source-only Claude settings are absent', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+      result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'),
+      `expected public test suite in public sync target, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      !result.logLines.includes('pnpm test'),
+      `public sync target must not run source-only full tests, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('allows full test mode to be forced explicitly', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, [], { CAT_CAFE_GATE_TEST_MODE: 'full' });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.logLines.includes('pnpm test'), `expected full test suite, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      !result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'),
+      `full mode must not run public test suite, got:\n${result.logLines.join('\n')}`,
     );
   });
 });
