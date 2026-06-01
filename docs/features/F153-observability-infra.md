@@ -490,7 +490,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 
 - [x] AC-J7: `StoredToolEvent` 扩展 — `toolUseId`、`status`、`tracing { traceId, spanId, parentSpanId }`、`startTimeMs`、`endTimeMs`；不混用 message-level `extra.tracing`。Producer side：`ToolSpanTracker.getContext(toolUseId)` peek 接口 + `AgentMessage.toolTracing` 富化字段 + `invoke-single-cat` enrich 流程 + `toStoredToolEvent` 复制 5 个新字段。
 - [x] AC-J8: hydrate 从 `toolEvents[]` 恢复 `cat_cafe.tool_use ...` real-duration child span（不退化成 `invocation.restored`）。`synthesizeToolSpansFromEvents` 按 `toolUseId` 配对 tool_use/tool_result，用 startTimeMs/endTimeMs 算 duration，按 status 设 OTel span status code。缺字段的事件 honest 跳过（KD-41）。
-- [x] AC-J9: provider 支持矩阵附录 — F153 spec 已加表格列每个 provider 的 (start, end, id, status) 四件套支持情况（见 Phase J 章节 "Provider 支持矩阵" 子节）。Claude / Codex / DARE / CatAgent 四件套就位；Gemini / Antigravity / OpenCode follow-up 待 verify；Kimi 明确降级（无 `tool_result`）；A2A n/a。
+- [x] AC-J9: provider 支持矩阵附录 — F153 spec 已加表格列每个 provider 的 (start, end, id, status) 四件套支持情况（见 Phase J 章节 "Provider 支持矩阵" 子节）。**Codex / DARE / CatAgent** 四件套就位（AC-J2 wired in PR #774）；**Claude CLI / Gemini CLI / Antigravity / OpenCode** ⏳ deferred（parser 字段未 verify / wire — 见矩阵脚注）；**Kimi** 明确降级（无 `tool_result` 事件）；**A2A** n/a（非 LLM provider）。
 
 ## Dependencies
 
