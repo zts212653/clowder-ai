@@ -79,6 +79,7 @@ export interface RuntimeCoCreatorUpdate {
   name?: string;
   aliases?: string[];
   mentionPatterns?: string[];
+  timeZone?: string;
   avatar?: string | null;
   color?: CatColor | null;
 }
@@ -476,6 +477,10 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
       : {}),
   };
 
+  if (patch.timeZone !== undefined) {
+    nextOwner.timeZone = patch.timeZone.trim();
+  }
+
   if (patch.avatar !== undefined) {
     if (patch.avatar && patch.avatar.trim().length > 0) {
       nextOwner.avatar = patch.avatar.trim();
@@ -498,6 +503,7 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
     mentionPatterns: Array.isArray(nextOwner.mentionPatterns)
       ? (nextOwner.mentionPatterns as string[])
       : [...currentOwner.mentionPatterns],
+    ...(typeof nextOwner.timeZone === 'string' ? { timeZone: nextOwner.timeZone } : {}),
     ...(typeof nextOwner.avatar === 'string' ? { avatar: nextOwner.avatar } : {}),
     ...(nextOwner.color ? { color: nextOwner.color as CatColor } : {}),
   };

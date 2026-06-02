@@ -4,6 +4,11 @@ node_modules/
 # Build outputs
 dist/
 docs/.doc-index.json
+# Feature index — derived from docs/features/*.md, NO live consumer (runtime builds
+# its index from the docs directly; opensource sync regenerates it fresh). ADR-011
+# lists it as optional/never-completed. Decommitted to kill merge-order staleness
+# gate noise. Regenerate locally if needed: node scripts/generate-feature-index.mjs
+docs/features/index.json
 build/
 .next/
 

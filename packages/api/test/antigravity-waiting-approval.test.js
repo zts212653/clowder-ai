@@ -23,7 +23,8 @@ function createMockServiceBridge({ resolveOutstandingSteps, approvePendingIntera
   return {
     ensureConnected: mock.fn(async () => ({ port: 1234, csrfToken: 'test', useTls: false })),
     startCascade: mock.fn(async () => 'test-cascade-001'),
-    sendMessage: mock.fn(async () => 0),
+    // F211-REG8: sendMessage now returns { stepsBefore, wasBusy } (was a bare number).
+    sendMessage: mock.fn(async () => ({ stepsBefore: 0, wasBusy: false })),
     getTrajectorySteps: mock.fn(async () => []),
     getTrajectory: mock.fn(async () => ({ status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: 0 })),
     pollForSteps: mock.fn(async function* () {
@@ -636,6 +637,11 @@ describe('Antigravity waiting approval', () => {
     assert.equal(bridge.pollForSteps.mock.calls.length, 2);
     // Second call should start from step 1 (last delivered), not 0 (original stepsBefore)
     assert.equal(bridge.pollForSteps.mock.calls[1].arguments[1], 1, 'retry must resume from lastDeliveredStepCount=1');
+    assert.equal(
+      bridge.pollForSteps.mock.calls[1].arguments[6],
+      0,
+      'retry must preserve original replay baseline separately from the resume cursor',
+    );
   });
 
   test('AC-G1: keeps waiting across repeated stalls when trajectory still shows liveness', async () => {

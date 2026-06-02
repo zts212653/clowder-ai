@@ -106,6 +106,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
       name: coCreator.name,
       aliases: [...coCreator.aliases],
       mentionPatterns: [...coCreator.mentionPatterns],
+      ...(coCreator.timeZone ? { timeZone: coCreator.timeZone } : {}),
       ...(coCreator.avatar ? { avatar: coCreator.avatar } : {}),
       ...(coCreator.color ? { color: coCreator.color } : {}),
     },

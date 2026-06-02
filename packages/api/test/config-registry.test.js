@@ -123,6 +123,7 @@ describe('ConfigRegistry', () => {
       'coCreator.name is a non-empty string',
     );
     assert.ok(Array.isArray(snapshot.coCreator.mentionPatterns), 'coCreator.mentionPatterns is an array');
+    assert.equal(snapshot.coCreator.timeZone, 'America/Los_Angeles');
   });
 
   it('reads MAX_A2A_DEPTH from env', async () => {

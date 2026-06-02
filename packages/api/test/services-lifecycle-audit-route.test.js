@@ -110,4 +110,23 @@ describe('service lifecycle audit route', () => {
       restoreOwner(ORIGINAL_OWNER_ID);
     }
   });
+
+  it('rejects non-loopback audit reads when DEFAULT_OWNER_USER_ID is unset', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/audit',
+        headers: SESSION_HEADERS,
+        remoteAddress: '192.168.1.100',
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
+      assert.match(JSON.parse(res.payload).error, /non-localhost|DEFAULT_OWNER_USER_ID/);
+    } finally {
+      await app.close();
+      restoreOwner(ORIGINAL_OWNER_ID);
+    }
+  });
 });

@@ -895,6 +895,333 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(runtime.lifecycle.unexpectedRuntimeSessionSwitch, undefined);
   });
 
+  it('F201: marks zero-message automatic retry attempts as runtime retry fragments', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-fragment-old',
+      threadId: 'thread-f201-retry-fragment',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-fragment-old',
+      threadId: 'thread-f201-retry-fragment',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-fragment-next',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-fragment-next',
+            previousRuntimeSessionId: 'cascade-fragment-old',
+            sealReason: 'tool_conflict',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f201-retry-fragment',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-fragment-old');
+    const nextRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-fragment-next');
+
+    assert.equal(oldRuntime.lifecycle.state, 'sealed');
+    assert.deepEqual(oldRuntime.lifecycle.retryFragment, {
+      kind: 'retry',
+      retryReason: 'tool_conflict',
+      nextRuntimeSessionId: 'cascade-fragment-next',
+      detectedAt: oldRuntime.lifecycle.lastObservedAt,
+    });
+    assert.equal(nextRuntime.lifecycle.retryFragment, undefined, 'the successful fresh cascade is not the fragment');
+  });
+
+  it('F201: does not mark retry attempts that already emitted partial output', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-partial-output-old',
+      threadId: 'thread-f201-partial-output-retry',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-partial-output-old',
+      threadId: 'thread-f201-partial-output-retry',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'text',
+          catId: 'antig-opus',
+          content: 'partial answer that reached the user',
+          timestamp: Date.now(),
+        };
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-partial-output-next',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-partial-output-next',
+            previousRuntimeSessionId: 'cascade-partial-output-old',
+            sealReason: 'tool_conflict',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    const messages = await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f201-partial-output-retry',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-partial-output-old');
+    const oldRecordAfter = sessionChainStore.get(oldRecord.id);
+
+    assert.equal(
+      messages.some((msg) => msg.type === 'text' && msg.content.includes('partial answer')),
+      true,
+    );
+    assert.equal(oldRecordAfter.messageCount, 1);
+    assert.equal(oldRuntime.lifecycle.state, 'sealed');
+    assert.equal(oldRuntime.lifecycle.retryFragment, undefined);
+  });
+
+  it('F201: marks already-sealed automatic retry attempts as runtime retry fragments', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const oldRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-fragment-old-sealed',
+      threadId: 'thread-f201-sealed-retry-fragment',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    sessionChainStore.update(oldRecord.id, {
+      status: 'sealed',
+      sealedAt: 1000,
+      sealReason: 'tool_conflict',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: oldRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-fragment-old-sealed',
+      threadId: 'thread-f201-sealed-retry-fragment',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'sealed', startedAt: 1000, lastObservedAt: 1000, sealReason: 'tool_conflict' },
+    });
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-fragment-next-sealed',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-fragment-next-sealed',
+            previousRuntimeSessionId: 'cascade-fragment-old-sealed',
+            sealReason: 'tool_conflict',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f201-sealed-retry-fragment',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const oldRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-fragment-old-sealed');
+    const nextRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-fragment-next-sealed');
+
+    assert.equal(oldRuntime.lifecycle.state, 'sealed');
+    assert.deepEqual(oldRuntime.lifecycle.retryFragment, {
+      kind: 'retry',
+      retryReason: 'tool_conflict',
+      nextRuntimeSessionId: 'cascade-fragment-next-sealed',
+      detectedAt: oldRuntime.lifecycle.lastObservedAt,
+    });
+    assert.equal(nextRuntime.lifecycle.retryFragment, undefined, 'the successful fresh cascade is not the fragment');
+  });
+
+  it('F201: does not mark a mismatched declared previous runtime as a retry fragment', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const { RuntimeSessionStore } = await import(
+      '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'
+    );
+    const sessionChainStore = new SessionChainStore();
+    const runtimeSessionStore = new RuntimeSessionStore();
+    const declaredPreviousRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-declared-previous',
+      threadId: 'thread-f201-mismatched-previous',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    sessionChainStore.update(declaredPreviousRecord.id, {
+      status: 'sealed',
+      sealedAt: 1000,
+      sealReason: 'tool_conflict',
+    });
+    const activeRecord = sessionChainStore.create({
+      cliSessionId: 'cascade-actual-active',
+      threadId: 'thread-f201-mismatched-previous',
+      catId: 'antig-opus',
+      userId: 'user1',
+    });
+    runtimeSessionStore.upsert({
+      sessionId: declaredPreviousRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-declared-previous',
+      threadId: 'thread-f201-mismatched-previous',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 900, source: 'session_init' }],
+      lifecycle: { state: 'sealed', startedAt: 900, lastObservedAt: 1000, sealReason: 'tool_conflict' },
+    });
+    runtimeSessionStore.upsert({
+      sessionId: activeRecord.id,
+      runtime: 'antigravity-desktop',
+      runtimeSessionId: 'cascade-actual-active',
+      threadId: 'thread-f201-mismatched-previous',
+      catId: 'antig-opus',
+      userId: 'user1',
+      surface: 'cat-cafe-dispatch',
+      identityHistory: [{ catId: 'antig-opus', model: 'claude-opus-4-6', from: 1000, source: 'session_init' }],
+      lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
+    });
+    const sessionSealer = {
+      requestSeal: async () => ({ accepted: true, status: 'sealing' }),
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'session_init',
+          catId: 'antig-opus',
+          sessionId: 'cascade-new-mismatched',
+          sessionLifecycle: {
+            runtime: 'antigravity-desktop',
+            runtimeSessionId: 'cascade-new-mismatched',
+            previousRuntimeSessionId: 'cascade-declared-previous',
+            sealReason: 'tool_conflict',
+            drainResult: 'complete',
+          },
+          metadata: { provider: 'antigravity', model: 'claude-opus-4-6' },
+          timestamp: Date.now(),
+        };
+        yield { type: 'done', catId: 'antig-opus', timestamp: Date.now() };
+      },
+    };
+
+    await collect(
+      invokeSingleCat(
+        { ...makeDeps(), sessionChainStore, sessionSealer, runtimeSessionStore },
+        {
+          catId: 'antig-opus',
+          service,
+          prompt: 'test',
+          userId: 'user1',
+          threadId: 'thread-f201-mismatched-previous',
+          isLastCat: true,
+        },
+      ),
+    );
+
+    const declaredRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-declared-previous');
+    const actualRuntime = runtimeSessionStore.getByRuntimeSession('antigravity-desktop', 'cascade-actual-active');
+    assert.equal(declaredRuntime.lifecycle.retryFragment, undefined);
+    assert.equal(actualRuntime.lifecycle.sealReason, 'unexpected_runtime_session_switch');
+  });
+
   it('F211 D: Antigravity switch without previous runtime id is diagnosed as unexpected', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { RuntimeSessionStore } = await import(
@@ -5483,6 +5810,38 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       _clearTestStrategyOverrides();
       await rmWithRetry(root);
     }
+  });
+
+  it('configures cat invocation stall auto-kill to leave room for slow upstream responses', async () => {
+    const optionsSeen = [];
+    const service = {
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(makeDeps(), {
+        catId: 'codex',
+        service,
+        prompt: 'test liveness probe config',
+        userId: 'user-liveness-probe-config',
+        threadId: 'thread-liveness-probe-config',
+        isLastCat: true,
+      }),
+    );
+
+    assert.ok(
+      msgs.some((m) => m.type === 'done'),
+      'service should be invoked',
+    );
+    assert.equal(optionsSeen[0]?.livenessProbe?.stallAutoKill, true, 'cat invocations still opt into stall cleanup');
+    assert.equal(
+      optionsSeen[0]?.livenessProbe?.stallWarningMs,
+      7 * 60_000,
+      'stall auto-kill must leave async sampling and deferred-kill margin before the 10m stale-processing window',
+    );
   });
 
   it('F101: game thread projectPath (games/*) does not trigger governance gate', async () => {

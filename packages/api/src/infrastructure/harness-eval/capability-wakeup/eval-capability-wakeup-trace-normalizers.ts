@@ -1,4 +1,4 @@
-import { normalizeMcpToolName } from '../../domains/cats/services/tool-usage/normalize-mcp-tool-name.js';
+import { normalizeMcpToolName } from '../../../domains/cats/services/tool-usage/normalize-mcp-tool-name.js';
 import type {
   CapabilityPreviewAvailability,
   CapabilityTraceInput,

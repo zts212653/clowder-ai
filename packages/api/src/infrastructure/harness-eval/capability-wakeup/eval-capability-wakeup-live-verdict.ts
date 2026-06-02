@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { resolveA2aEvidenceBundle } from './eval-a2a-artifact-resolver.js';
+import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
+import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
+import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import {
   buildCapabilityWakeupVerdictHandoff,
   type CapabilityName,
   type ClassifiedCapabilityWakeupTrial,
 } from './eval-capability-wakeup-adapter.js';
-import type { EvalDomainRegistryEntry } from './eval-domain-registry.js';
-import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from './verdict-handoff.js';
 
 const SANITIZE_RULES_VERSION = 'f192-capability-wakeup-v1';
 const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;

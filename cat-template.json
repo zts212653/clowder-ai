@@ -104,6 +104,7 @@
     "name": "铲屎官",
     "nickname": "大当家",
     "avatar": "/avatars/keeper.png",
+    "timeZone": "America/Los_Angeles",
     "aliases": ["You", "Owner"],
     "mentionPatterns": ["@co-creator", "@owner", "@铲屎官"]
   },

@@ -36,6 +36,7 @@ export interface CliSpawnOptions {
     softWarningMs?: number;
     stallWarningMs?: number;
     boundedExtensionFactor?: number;
+    minCpuGrowthMs?: number;
     /** #774: Auto-kill on idle-silent suspected_stall instead of waiting for full timeout */
     stallAutoKill?: boolean;
   };
@@ -55,6 +56,15 @@ export interface CliSpawnOptions {
    * stdio[0] 设为 'pipe' 并将此内容写入 child.stdin。
    */
   stdinInput?: string;
+  /**
+   * F212 Phase F (AC-F1/F3 testability per 砚砚 R1 P1-1): test injection point for the
+   * structured-log writes (`'CLI abnormal exit'` + `'CLI stderr (LOG_CLI_STDERR=1)'`).
+   * Production passes nothing → falls back to the module logger. Tests pass a stub so they
+   * can assert the actual log payload (invocationId presence, stderrEmpty flag, etc.) —
+   * without this the AC-F6 assertions only cover `cliDiagnostics.publicHint`, leaving the
+   * core backend-log contract untestable.
+   */
+  diagnosticLogger?: { error: (payload: object, msg: string) => void };
 }
 
 /**

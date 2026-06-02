@@ -84,9 +84,10 @@ describe('FirstRunQuestWizard', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('选择角色模板');
-    expect(container.textContent).toContain('布偶猫');
-    expect(container.textContent).toContain('宪宪');
+    // FirstRunQuestWizard uses createPortal to document.body
+    expect(document.body.textContent).toContain('选择角色模板');
+    expect(document.body.textContent).toContain('布偶猫');
+    expect(document.body.textContent).toContain('宪宪');
   });
 
   it('shows step title for template step', async () => {
@@ -97,8 +98,9 @@ describe('FirstRunQuestWizard', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('第 1 步');
-    expect(container.textContent).toContain('选择角色模板');
+    // FirstRunQuestWizard uses createPortal to document.body
+    expect(document.body.textContent).toContain('第 1 步');
+    expect(document.body.textContent).toContain('选择角色模板');
   });
 
   it('shows empty state when no templates available', async () => {
@@ -109,7 +111,8 @@ describe('FirstRunQuestWizard', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('暂无可用角色模板');
+    // FirstRunQuestWizard uses createPortal to document.body
+    expect(document.body.textContent).toContain('暂无可用角色模板');
   });
 
   it('handles template API errors gracefully', async () => {
@@ -121,7 +124,8 @@ describe('FirstRunQuestWizard', () => {
     await flushEffects();
 
     // Should degrade gracefully, not crash
-    expect(container.textContent).toContain('暂无可用角色模板');
+    // FirstRunQuestWizard uses createPortal to document.body
+    expect(document.body.textContent).toContain('暂无可用角色模板');
   });
 
   it('sends clientId (not client) in POST /api/cats payload', async () => {
@@ -197,7 +201,8 @@ describe('FirstRunQuestWizard', () => {
     await flushEffects();
 
     // Step 1: select template
-    const templateButton = Array.from(container.querySelectorAll('button')).find((b) =>
+    // FirstRunQuestWizard uses createPortal to document.body
+    const templateButton = Array.from(document.querySelectorAll('button')).find((b) =>
       b.textContent?.includes('布偶猫'),
     );
     expect(templateButton).toBeTruthy();

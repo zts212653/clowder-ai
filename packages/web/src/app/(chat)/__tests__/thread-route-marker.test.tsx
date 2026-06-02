@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { resolveLayoutThreadId } from '../layout';
+import { resolveLayoutThreadId } from '../layout-thread-id';
 import Home from '../page';
 import ThreadPage from '../thread/[threadId]/page';
 

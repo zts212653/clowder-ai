@@ -40,6 +40,19 @@ export interface CatColor {
 }
 
 /**
+ * F210 Phase G: Isolated Antigravity CLI profile binding.
+ * The API runtime uses this to create a per-cat HOME sandbox before invoking `agy`.
+ */
+export interface AgyProfileConfig {
+  readonly enabled?: boolean;
+  readonly profileId?: string;
+  readonly homeRoot?: string;
+  readonly model?: string;
+  readonly autoApprove?: boolean;
+  readonly trustedWorkspaces?: readonly string[];
+}
+
+/**
  * Cat configuration (immutable)
  */
 export interface CatConfig {
@@ -57,6 +70,7 @@ export interface CatConfig {
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly cli?: CliConfig;
+  readonly agyProfile?: AgyProfileConfig;
   readonly commandArgs?: readonly string[];
   readonly contextBudget?: ContextBudget;
   readonly roleDescription: string;

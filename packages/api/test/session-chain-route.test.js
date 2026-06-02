@@ -250,6 +250,12 @@ describe('Session Chain Routes', () => {
         state: 'active',
         startedAt: 1000,
         lastObservedAt: 2000,
+        retryFragment: {
+          kind: 'retry',
+          retryReason: 'tool_conflict',
+          nextRuntimeSessionId: 'cascade-next',
+          detectedAt: 2000,
+        },
         unexpectedRuntimeSessionSwitch: {
           detectedAt: 2000,
           previousSessionId: 'session-old',
@@ -275,6 +281,12 @@ describe('Session Chain Routes', () => {
       runtimeConversationId: 'conversation-new',
       lifecycleState: 'active',
       lastObservedAt: 2000,
+      retryFragment: {
+        kind: 'retry',
+        retryReason: 'tool_conflict',
+        nextRuntimeSessionId: 'cascade-next',
+        detectedAt: 2000,
+      },
       unexpectedRuntimeSessionSwitch: {
         detectedAt: 2000,
         previousSessionId: 'session-old',

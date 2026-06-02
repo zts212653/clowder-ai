@@ -807,6 +807,28 @@ export class QueueProcessor {
       // 2. Start tracking ALL target cats (shared controller for F5/reconnect recovery)
       controller = invocationTracker.startAll(threadId, targetCats, userId);
 
+      // F216 c3: supersede tombstone guard. If a same-turn follow-up arrived during the
+      // pre-start window (between markProcessingById and startAll), callback-a2a-trigger
+      // removed this entry as a tombstone signal. Detect it here and self-abort before
+      // routeExecution — the follow-up is already queued and will run after this returns.
+      //
+      // Status: 'canceled_by_user' (not plain 'canceled') so onInvocationComplete takes
+      // the immediate-restart branch (tryAutoExecute) rather than the 10s pause branch.
+      // No suppressedAutoResume flag is set (only cancelAll sets it), so the suppress
+      // check is a no-op. Result: follow-up restarts immediately after slot release.
+      if (!queue.list(threadId, userId).some((e) => e.id === entry.id)) {
+        log.info(
+          { threadId, entryId: entry.id },
+          '[F216-c3] entry superseded during pre-start window — self-abort before routeExecution',
+        );
+        // Close the invocation record (created but never executed).
+        if (invocationId) {
+          await invocationRecordStore.update(invocationId, { status: 'canceled' });
+        }
+        finalStatus = 'canceled_by_user';
+        return 'canceled_by_user';
+      }
+
       // 3. Backfill message ID
       if (messageId) {
         await invocationRecordStore.update(invocationId, {

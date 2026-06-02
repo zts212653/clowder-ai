@@ -23,6 +23,25 @@ const STATUS_CONFIG: Record<PluginStatus, { label: string; tone: BadgeTone }> = 
   not_configured: { label: '未配置', tone: 'slate' },
 };
 
+const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
+  id: 'github',
+  name: 'GitHub',
+  version: '1.0.0',
+  description: '内置插件 · PR 追踪、Review 投递、CI/CD 监控与 Token 配置',
+  icon: 'key',
+  iconBg: '#24292e',
+  docsUrl: 'https://github.com/settings/tokens',
+  setupSteps: [
+    '在 GitHub 创建 Personal Access Token，需要 repo 权限',
+    'Token 用于 PR 追踪、Review 路由、CI/CD 状态同步',
+  ],
+  status: 'configured',
+  configured: true,
+  config: [],
+  resources: [],
+  hasHealthCheck: false,
+};
+
 export function PluginsContent() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,8 +50,8 @@ export function PluginsContent() {
   const fetchPlugins = useCallback(async () => {
     try {
       const res = await apiFetch('/api/plugins');
-      const data: PluginInfo[] = res.ok ? (((await res.json()) as { plugins: PluginInfo[] }).plugins ?? []) : [];
-      setPlugins(data);
+      const payload = res.ok ? ((await res.json()) as { plugins?: PluginInfo[] }) : {};
+      setPlugins(Array.isArray(payload.plugins) ? payload.plugins : [BUILTIN_GITHUB_PLUGIN]);
     } catch {
       setPlugins([]);
     } finally {
@@ -44,14 +63,34 @@ export function PluginsContent() {
     void fetchPlugins();
   }, [fetchPlugins]);
 
-  if (loading) return <p className="text-sm text-cafe-muted">加载中...</p>;
+  if (loading) {
+    return (
+      <SettingsText as="p" variant="sm" tone="muted">
+        加载中...
+      </SettingsText>
+    );
+  }
 
   if (plugins.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--console-card-bg)] px-8 py-16 text-center">
-        <HubIcon name="blocks" className="mb-3 h-10 w-10 text-cafe-muted opacity-40" />
-        <p className="text-[15px] font-semibold text-cafe">暂无已安装的插件</p>
-        <p className="mt-1 text-xs text-cafe-muted">插件在 plugins/ 目录下管理</p>
+      <div
+        className="flex flex-col items-center justify-center"
+        style={{
+          borderRadius: '1rem',
+          background: 'var(--console-card-bg)',
+          padding: '4rem 2rem',
+          textAlign: 'center',
+        }}
+      >
+        <span className="mb-3 opacity-40" style={{ color: 'var(--cafe-text-muted)' }}>
+          <HubIcon name="blocks" className="h-10 w-10" />
+        </span>
+        <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
+          暂无已安装的插件
+        </SettingsText>
+        <SettingsText as="p" tone="muted" className="mt-1">
+          插件在 plugins/ 目录下管理
+        </SettingsText>
       </div>
     );
   }
@@ -70,8 +109,11 @@ export function PluginsContent() {
               style={{ textAlign: 'left' }}
               onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
             >
-              <div className={settingsResourceAvatarClass} style={{ backgroundColor: plugin.iconBg ?? '#9ca3af' }}>
-                <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5 text-[var(--cafe-surface)]" />
+              <div
+                className={settingsResourceAvatarClass}
+                style={{ backgroundColor: plugin.iconBg ?? '#9ca3af', color: 'var(--cafe-surface)' }}
+              >
+                <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <SettingsText as="p" variant="sm" tone="default" className="font-semibold">

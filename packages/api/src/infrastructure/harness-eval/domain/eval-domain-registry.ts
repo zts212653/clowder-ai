@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+const evalDomainFixtureSchema = z.object({
+  id: z.string().min(1),
+  featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
+  path: z.string().min(1),
+  skill: z.string().min(1).optional(),
+  signal: z.string().min(1).optional(),
+});
+
 const evalDomainRegistryEntrySchema = z.object({
   domainId: z.enum(['eval:a2a', 'eval:memory', 'eval:sop', 'eval:capability-wakeup']),
   displayName: z.string().min(1),
@@ -26,6 +34,7 @@ const evalDomainRegistryEntrySchema = z.object({
     acknowledgeHours: z.number().int().positive('acknowledgeHours must be positive'),
     reevalWithinHours: z.number().int().positive('reevalWithinHours must be positive'),
   }),
+  fixtures: z.array(evalDomainFixtureSchema).default([]),
 });
 
 export type EvalDomainRegistryEntry = z.infer<typeof evalDomainRegistryEntrySchema>;

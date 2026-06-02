@@ -970,7 +970,7 @@ excluded:
       const inno = readFileSync(resolve(ROOT, 'desktop/installer/cat-cafe.iss'), 'utf-8');
       const postInstall = readFileSync(resolve(ROOT, 'desktop/scripts/post-install-offline.ps1'), 'utf-8');
       const adminPostInstallEntry = inno.match(
-        /; Post-install:[\s\S]*?Filename: "powershell\.exe";[\s\S]*?Components: core/,
+        /Filename: "powershell\.exe";\s*\\\s*Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""\{app\}\\scripts\\post-install-offline\.ps1"" -AppDir ""\{app\}""";\s*\\\s*StatusMsg: "Configuring Cat Cafe\.\.\.";\s*\\\s*Flags: runhidden waituntilterminated(?:;[^\n]*)?/,
       )?.[0];
 
       assert.match(
@@ -1006,7 +1006,7 @@ excluded:
 
       assert.match(
         serviceManager,
-        /const mirrors = \['\.claude', 'cat-cafe-skills', 'docs', 'packages'\]/,
+        /const mirrors = \[[^\]]*'\.claude'[^\]]*\]/,
         'desktop service manager should mirror .claude into the writable project root for API hook health',
       );
     });

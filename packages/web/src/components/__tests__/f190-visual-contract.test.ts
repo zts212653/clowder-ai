@@ -730,8 +730,8 @@ describe('#723 cross-page typography consistency', () => {
      * + theme-tokens.css using OKLCH. Verify the token chain instead of hex. */
     const consoleCss = readFileSync(resolve(testDir, '../../app/console-tokens.css'), 'utf8');
     const themeCss = readFileSync(resolve(testDir, '../../app/theme-tokens.css'), 'utf8');
-    /* field-bg aliases to cafe-surface-sunken */
-    expect(consoleCss).toMatch(/--console-field-bg:\s*var\(--cafe-surface-sunken\)/);
+    /* F056: field-bg aliases to cafe-surface (was cafe-surface-sunken pre-OKLCH) */
+    expect(consoleCss).toMatch(/--console-field-bg:\s*var\(--cafe-surface\)/);
     /* hover-bg uses a different recipe (color-mix with accent) */
     expect(consoleCss).toMatch(/--console-hover-bg:\s*color-mix/);
     /* surface-sunken in light is oklch(0.92 ...) — L > 0.9 = bright */

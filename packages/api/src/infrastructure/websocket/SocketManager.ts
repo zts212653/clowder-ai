@@ -206,6 +206,23 @@ export class SocketManager {
           log.warn({ socketId: socket.id, threadId: data.threadId }, 'Cancel attempt without room membership');
           return;
         }
+        // F211-REG6 instrument (observation-only): SocketManager hardcodes 'user_cancel' for every
+        // WS cancel_invocation, but the CVO reported spurious cancels he never triggered (Timeline
+        // 2026-05-29: WS flapped 6× in 2min). msSinceConnect is the discriminator — a cancel arriving
+        // milliseconds after a (re)connect is almost certainly reconnect/teardown noise, not a
+        // deliberate Stop click. Pin the real trigger before changing any attribution behavior.
+        log.info(
+          {
+            event: 'f211_reg6_ws_cancel_received',
+            socketId: socket.id,
+            threadId: data.threadId,
+            catId: data.catId ?? null,
+            scope: data.catId ? 'slot' : 'all',
+            msSinceConnect: Date.now() - socket.handshake.issued,
+            transport: socket.conn.transport.name,
+          },
+          'F211-REG6: cancel_invocation received — capturing real trigger provenance (genuine Stop vs reconnect-spurious)',
+        );
         if (data.catId) {
           // F108: Slot-specific cancel
           const result = this.invocationTracker.cancel(data.threadId, data.catId, userId, 'user_cancel');

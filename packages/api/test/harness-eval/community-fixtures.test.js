@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { parse as parseYaml } from 'yaml';
-import { parseCommunityEvalDomainEntry } from '../../dist/infrastructure/harness-eval/community-eval-domain.js';
-import { parseSanitizedIssuePacket } from '../../dist/infrastructure/harness-eval/community-issue-packet.js';
+import { parseCommunityEvalDomainEntry } from '../../dist/infrastructure/harness-eval/domain/community-eval-domain.js';
+import { parseSanitizedIssuePacket } from '../../dist/infrastructure/harness-eval/domain/community-issue-packet.js';
 
 const FIXTURES_DIR = resolve(import.meta.dirname, '../../../../docs/harness-feedback/eval-domains/community-fixtures');
 

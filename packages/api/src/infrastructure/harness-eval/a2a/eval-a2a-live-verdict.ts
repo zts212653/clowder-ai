@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
+import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { buildA2aVerdictHandoff } from './eval-a2a-adapter.js';
 import { resolveA2aEvidenceBundle } from './eval-a2a-artifact-resolver.js';
-import type { EvalDomainRegistryEntry } from './eval-domain-registry.js';
-import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from './verdict-handoff.js';
 
 const SANITIZE_RULES_VERSION = 'f192-e-pilot-v1';
 const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;

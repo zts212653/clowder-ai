@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -101,6 +101,14 @@ function emitExitThenLatePlainTextBeforeClose(proc, text, code = 0) {
     });
     proc.stdout.end();
   });
+}
+
+function assertFileRemoved(path, message) {
+  try {
+    assert.equal(existsSync(path), false, message);
+  } finally {
+    rmSync(path, { force: true });
+  }
 }
 
 function writeGeminiJsonlSession(home, projectDir, sessionId, messages) {
@@ -482,16 +490,192 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     const args = call.arguments[1];
     assert.ok(args.includes('--print'));
     assert.ok(args.includes('--print-timeout'));
-    assert.ok(args.includes('--dangerously-skip-permissions'));
+    assert.equal(
+      args.includes('--dangerously-skip-permissions'),
+      false,
+      'unprofiled global-HOME AGY path must not use unattended yolo',
+    );
     assert.ok(args.includes('--add-dir'));
     assert.equal(args[args.indexOf('--add-dir') + 1], workDir);
     assert.equal(args[args.indexOf('--print') + 1], 'System identity\n\nSay hi');
     assert.equal(args.includes('--model'), false, 'agy 1.0.1 has no verified --model flag');
   });
 
-  test('creates a resumable agy conversation id on first turn', async () => {
+  test('filters user-provided AGY yolo flags without sandbox proof', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'gemini-3.5-flash',
+    });
+
+    const promise = collect(
+      service.invoke('Say hi', {
+        cliConfigArgs: [
+          '--dangerously-skip-permissions --dangerously-skip-permissions=true --add-dir /tmp/extra-agy-dir',
+        ],
+      }),
+    );
+    emitPlainText(proc, 'AGY_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg === '--dangerously-skip-permissions' || arg.startsWith('--dangerously-skip-permissions=')),
+      false,
+      'unprofiled user cliConfigArgs must not bypass the yolo sandbox gate',
+    );
+    assert.ok(args.includes('/tmp/extra-agy-dir'), 'unrelated user --add-dir should remain');
+  });
+
+  test('uses isolated AGY profile HOME and gates yolo on sandbox proof', async () => {
+    const proc = createMockProcess();
+    const profileRoot = mkdtempSync(join(tmpdir(), 'agy-service-profile-root-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-service-workdir-'));
+    const spawnFn = mock.fn((_command, args) => {
+      const logPath = args[args.indexOf('--log-file') + 1];
+      writeFileSync(
+        logPath,
+        'I0531 01:14:59.518377 model.go:42] Propagating selected model override to backend: label="Gemini 3.5 Flash (High)"\n',
+      );
+      return proc;
+    });
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+      agyProfile: { enabled: true, homeRoot: profileRoot, model: 'Gemini 3.5 Flash (High)' },
+    });
+
+    try {
+      const promise = collect(service.invoke('profile prompt', { workingDirectory: workDir }));
+      emitPlainText(proc, 'AGY_PROFILE_OK\n');
+
+      const msgs = await promise;
+      const done = msgs.find((m) => m.type === 'done');
+      assert.equal(done?.metadata?.model, 'Gemini 3.5 Flash (High) (antigravity-cli profile)');
+      assert.equal(done?.metadata?.modelVerified, true);
+
+      const call = spawnFn.mock.calls[0];
+      const args = call.arguments[1];
+      assert.ok(args.includes('--dangerously-skip-permissions'), 'sandboxed profile should enable yolo');
+      assert.equal(call.arguments[2].env.HOME, join(profileRoot, 'gemini'));
+
+      const settingsPath = join(profileRoot, 'gemini', '.gemini', 'antigravity-cli', 'settings.json');
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      assert.equal(settings.model, 'Gemini 3.5 Flash (High)');
+      assert.deepEqual(settings.trustedWorkspaces, [workDir]);
+    } finally {
+      rmSync(profileRoot, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when AGY observed model differs from the configured profile model', async () => {
+    const proc = createMockProcess();
+    const profileRoot = mkdtempSync(join(tmpdir(), 'agy-service-profile-root-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-service-workdir-'));
+    const wrongModelConversationId = 'e40c0f44-8e00-4b21-8ea4-7b17f182a134';
+    const spawnFn = mock.fn((_command, args) => {
+      const logPath = args[args.indexOf('--log-file') + 1];
+      writeFileSync(
+        logPath,
+        'I0531 01:14:59.518377 model.go:42] Propagating selected model override to backend: label="Gemini 3.1 Pro (High)"\n' +
+          `I0531 01:14:59.518377 server.go:755] Created conversation ${wrongModelConversationId}\n`,
+      );
+      return proc;
+    });
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+      agyProfile: { enabled: true, homeRoot: profileRoot, model: 'Gemini 3.5 Flash (High)' },
+    });
+
+    try {
+      const promise = collect(service.invoke('profile prompt', { workingDirectory: workDir }));
+      emitPlainText(proc, 'WRONG_MODEL_TEXT\n');
+
+      const msgs = await promise;
+      assert.equal(
+        msgs.some((m) => m.type === 'text'),
+        false,
+        'wrong-model AGY output must not be surfaced as successful profile text',
+      );
+      assert.equal(
+        msgs.some((m) => m.type === 'session_init'),
+        false,
+        'wrong-model AGY output must not record a resumable conversation',
+      );
+      const err = msgs.find((m) => m.type === 'error');
+      assert.ok(err);
+      assert.match(err.error, /selected model mismatch/);
+      assert.equal(err.metadata?.modelVerified, false);
+      assert.equal(err.metadata?.diagnostics?.antigravityCli?.observedModel, 'Gemini 3.1 Pro (High)');
+    } finally {
+      rmSync(profileRoot, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when profiled AGY output lacks an observed selected model label', async () => {
+    const proc = createMockProcess();
+    const profileRoot = mkdtempSync(join(tmpdir(), 'agy-service-profile-root-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-service-workdir-'));
+    const spawnFn = mock.fn((_command, args) => {
+      const logPath = args[args.indexOf('--log-file') + 1];
+      writeFileSync(logPath, 'I0531 01:14:59.518377 server.go:755] Created conversation missing-model-label\n');
+      return proc;
+    });
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+      agyProfile: { enabled: true, homeRoot: profileRoot, model: 'Gemini 3.5 Flash (High)' },
+    });
+
+    try {
+      const promise = collect(service.invoke('profile prompt', { workingDirectory: workDir }));
+      emitPlainText(proc, 'UNVERIFIED_MODEL_TEXT\n');
+
+      const msgs = await promise;
+      assert.equal(
+        msgs.some((m) => m.type === 'text'),
+        false,
+        'profiled AGY output without a selected-model log label must not be surfaced',
+      );
+      assert.equal(
+        msgs.some((m) => m.type === 'session_init'),
+        false,
+        'unverified profile output must not record a resumable conversation',
+      );
+      const err = msgs.find((m) => m.type === 'error');
+      assert.ok(err);
+      assert.match(err.error, /selected model.*not verified/i);
+      assert.equal(err.metadata?.modelVerified, false);
+    } finally {
+      rmSync(profileRoot, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('records the AGY-created conversation id on first turn', async () => {
+    const proc = createMockProcess();
+    const actualConversationId = 'e40c0f44-8e00-4b21-8ea4-7b17f182a134';
+    let capturedLogPath;
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file to capture the real conversation id');
+      const logPath = args[logIndex + 1];
+      capturedLogPath = logPath;
+      writeFileSync(
+        logPath,
+        `I0531 01:14:59.518377 server.go:755] Created conversation ${actualConversationId}\n` +
+          `I0531 01:14:59.518698 printmode.go:130] Print mode: conversation=${actualConversationId}, sending message\n`,
+      );
+      return proc;
+    });
     const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
 
     const promise = collect(service.invoke('new agy thread'));
@@ -499,13 +683,37 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
 
     const msgs = await promise;
     assert.equal(msgs[0].type, 'session_init');
-    assert.match(msgs[0].sessionId, /^agy-/);
+    assert.equal(msgs[0].sessionId, actualConversationId);
     assert.equal(msgs[1].type, 'text');
     assert.equal(msgs[1].content, 'AGY_SESSION_OK');
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('--conversation'));
-    assert.equal(args[args.indexOf('--conversation') + 1], msgs[0].sessionId);
+    assert.ok(args.includes('--log-file'));
+    assert.equal(args.includes('--conversation'), false, 'fresh AGY turns must not pass a made-up conversation id');
+    assertFileRemoved(capturedLogPath, 'runtime-owned AGY log file must be removed after capturing conversation id');
+  });
+
+  test('removes the AGY log file on provider error paths', async () => {
+    const proc = createMockProcess();
+    let capturedLogPath;
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      capturedLogPath = args[logIndex + 1];
+      writeFileSync(capturedLogPath, 'I0531 01:14:59.518377 server.go:755] provider error path\n');
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('slow prompt'));
+    emitPlainText(proc, 'Error: timed out waiting for response\n', 0);
+
+    const msgs = await promise;
+    assert.ok(
+      msgs.some((m) => m.type === 'error'),
+      'provider error path should still report the error',
+    );
+    assertFileRemoved(capturedLogPath, 'runtime-owned AGY log file must be removed on provider error');
   });
 
   test('marks resumed agy stdout as replace because print mode can replay prior text', async () => {
@@ -523,6 +731,42 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
 
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(args[args.indexOf('--conversation') + 1], 'agy-existing-session');
+  });
+
+  test('treats log-only stale agy conversation warnings as missing session on resume', async () => {
+    const proc = createMockProcess();
+    let capturedLogPath;
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      capturedLogPath = args[logIndex + 1];
+      writeFileSync(
+        capturedLogPath,
+        [
+          'W0531 01:14:56.217832 common.go:246] Conversation stale-agy-session not found, ignoring --conversation flag',
+          'I0531 01:14:59.518377 server.go:755] Created conversation e40c0f44-8e00-4b21-8ea4-7b17f182a134',
+        ].join('\n'),
+      );
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('resume agy thread', { sessionId: 'stale-agy-session' }));
+    emitPlainText(proc, 'NEW_TEXT_WITHOUT_CONTEXT\n');
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'text'),
+      false,
+      'stale resume must not surface fresh-context stdout as a successful continuation',
+    );
+    const err = msgs.find((m) => m.type === 'error');
+    assert.ok(err, 'log-only stale resume warning must produce an error');
+    assert.match(err.error, /No conversation found with session ID: stale-agy-session/);
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[args.indexOf('--conversation') + 1], 'stale-agy-session');
+    assertFileRemoved(capturedLogPath, 'runtime-owned AGY log file must be removed after stale resume handling');
   });
 
   test('reports per-call model override as unsupported without passing --model to agy', async () => {
@@ -618,6 +862,37 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.equal(capturedOpts?.cliSessionId, 'cli-agy-override');
   });
 
+  test('filters equals-form user overrides for runtime-owned AGY conversation and log flags', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(
+      service.invoke('resume agy thread', {
+        sessionId: 'agy-real-session',
+        cliConfigArgs: ['--conversation=stale-session --log-file=/tmp/user-owned-agy.log --add-dir /tmp/extra-agy-dir'],
+      }),
+    );
+    emitPlainText(proc, 'AGY_EQUALS_OVERRIDE_OK\n');
+
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(
+      args.some((arg) => arg.startsWith('--conversation=')),
+      false,
+      'equals-form user --conversation must be removed',
+    );
+    assert.equal(
+      args.some((arg) => arg.startsWith('--log-file=')),
+      false,
+      'equals-form user --log-file must be removed',
+    );
+    assert.equal(args[args.indexOf('--conversation') + 1], 'agy-real-session');
+    assert.ok(args.includes('--log-file'), 'internal runtime-owned --log-file should remain');
+    assert.ok(args.includes('/tmp/extra-agy-dir'), 'unrelated user --add-dir should remain');
+  });
+
   test('waits for process close before classifying final agy stdout', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
@@ -704,6 +979,39 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.ok(err, 'missing model stdout must produce an error');
     assert.match(err.error, /\/model/);
     assert.match(err.error, /Antigravity CLI|AGY/);
+    assert.equal(msgs[msgs.length - 1].type, 'done');
+  });
+
+  test('classifies auth-required agy stdout as provider error instead of model text', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
+
+    const promise = collect(service.invoke('hello from isolated profile'));
+    emitPlainText(
+      proc,
+      [
+        'Authentication required. Please visit the URL to log in:',
+        '  https://accounts.google.com/o/oauth2/auth?[REDACTED]',
+        '',
+        'Waiting for authentication (timeout 30s)...',
+        'Or, paste the authorization code here and press Enter:',
+        '',
+        'Error: authentication interrupted.',
+      ].join('\n'),
+      0,
+    );
+
+    const msgs = await promise;
+    assert.equal(
+      msgs.some((m) => m.type === 'text'),
+      false,
+    );
+    const err = msgs.find((m) => m.type === 'error');
+    assert.ok(err, 'auth-required stdout must produce an error');
+    assert.match(err.error, /Antigravity CLI|AGY/);
+    assert.match(err.error, /login|auth/i);
+    assert.doesNotMatch(err.error, /accounts\.google\.com/);
     assert.equal(msgs[msgs.length - 1].type, 'done');
   });
 

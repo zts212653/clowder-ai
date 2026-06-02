@@ -485,6 +485,31 @@ skills:
     sop_step: null
     merged_from: ["deep-research-pipeline"]
 
+  # ── 信源审计（F218）──
+  source-audit:
+    description: >
+      外部证据信源卫生中档闸门。
+      Use when: 准备引用外部 claim，且命中数字/百分比、benchmark、因果归因、趋势判断、模型能力对比、论文/医学/金融、或会落 docs/ADR/PPT 的高风险特征。
+      Not for: 简单事实查询、只读官方一手文档且不做外推、已经进入 deep-research 的重调研。
+      Output: claim ledger + verdict（use / use-with-caveat / reject / escalate-to-deep-research）+ provenance 行。
+    triggers:
+      - "信源"
+      - "source audit"
+      - "provenance"
+      - "百分比"
+      - "benchmark"
+      - "因果归因"
+      - "趋势判断"
+      - "模型能力对比"
+    not_for:
+      - "简单事实查询"
+      - "官方一手文档且不外推"
+      - "已进入 deep-research"
+    output: "Claim ledger + verdict + provenance"
+    next: ["deep-research"]
+    sop_step: null
+    merged_from: null
+
   # ── 记忆系统三入口路由（F188 Phase F）──
   memory-navigation:
     description: >

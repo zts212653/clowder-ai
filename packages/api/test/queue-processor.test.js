@@ -2223,4 +2223,93 @@ describe('QueueProcessor', () => {
       );
     });
   });
+
+  // ── F216 c3: supersede tombstone guard + immediate restart regression ──
+
+  describe('F216 c3: pre-start window supersede tombstone', () => {
+    it('FIRST never reaches routeExecution and SECOND restarts immediately (no 10s pause)', async () => {
+      // This test catches the exact bug from review R3: if the tombstone guard returns
+      // plain 'canceled' instead of 'canceled_by_user', onInvocationComplete pauses the
+      // slot for 10s and SECOND doesn't start promptly. 22/22 existing tests were green
+      // on that broken commit — THIS test would have caught it.
+
+      const routedContents = [];
+      let createResolve;
+      const createPromise = new Promise((resolve) => {
+        createResolve = resolve;
+      });
+
+      const deps = stubDeps({
+        invocationRecordStore: {
+          // Delayed create() — simulates the pre-start window (markProcessing → startAll gap)
+          create: mock.fn(async () => {
+            await createPromise; // blocks until we manually resolve
+            return { outcome: 'created', invocationId: 'inv-supersede-test' };
+          }),
+          update: mock.fn(async () => {}),
+        },
+        router: {
+          routeExecution: mock.fn(async function* (_userId, content, _threadId, _messageId, targetCats) {
+            routedContents.push(content);
+            yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+      });
+
+      const processor = new QueueProcessor(deps);
+
+      // 1. Enqueue FIRST and trigger execution — it will block at create()
+      const first = enqueueEntry(deps.queue, {
+        content: 'FIRST: do task X',
+        source: 'agent',
+        targetCats: ['antig-opus'],
+        autoExecute: true,
+      });
+      deps.queue.backfillMessageId('t1', 'u1', first.id, 'msg-first');
+      await processor.tryAutoExecute('t1');
+
+      // At this point: FIRST is marked processing, executeEntry is awaiting createPromise.
+      // Verify FIRST is processing (slot taken).
+      assert.equal(
+        deps.queue.list('t1', 'u1').some((e) => e.id === first.id && e.status === 'processing'),
+        true,
+        'FIRST should be processing (pre-start window open)',
+      );
+
+      // 2. Simulate supersede: remove FIRST (tombstone) + enqueue SECOND (follow-up)
+      deps.queue.removeProcessed('t1', 'u1', first.id);
+      deps.queue.enqueue({
+        threadId: 't1',
+        userId: 'u1',
+        content: 'SECOND: answer 3 questions first',
+        source: 'agent',
+        targetCats: ['antig-opus'],
+        intent: 'execute',
+        autoExecute: true,
+      });
+
+      // 3. Release the create() — executeEntry continues to startAll → tombstone guard fires
+      createResolve();
+
+      // Wait for the full chain: startAll → guard → return 'canceled_by_user' → .then →
+      // processingSlots.delete → onInvocationComplete → tryAutoExecute → SECOND starts
+      await new Promise((r) => setTimeout(r, 100));
+
+      // 4. FIRST must NOT have been routed
+      const firstRouted = routedContents.some((c) => c.includes('FIRST'));
+      assert.equal(firstRouted, false, 'FIRST must NOT reach routeExecution (tombstone guard)');
+
+      // 5. SECOND must have been routed (immediate restart, not 10s pause)
+      const secondRouted = routedContents.some((c) => c.includes('SECOND'));
+      assert.equal(secondRouted, true, 'SECOND must route promptly via immediate restart (not 10s pause)');
+
+      // 6. No paused slots remain (regression: 'canceled' would leave a paused slot)
+      assert.equal(processor.getPauseReason('t1', 'antig-opus'), undefined, 'no stale pause on the slot');
+
+      // 7. Queue should be empty (both entries consumed)
+      const remaining = deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued');
+      assert.equal(remaining.length, 0, 'queue should be empty after supersede lifecycle');
+    });
+  });
 });

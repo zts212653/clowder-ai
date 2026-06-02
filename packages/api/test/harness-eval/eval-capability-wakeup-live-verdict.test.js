@@ -8,9 +8,9 @@ import {
   buildCapabilityTrace,
   classifyCapabilityWakeupTrials,
   evaluateCapabilityWakeupTrace,
-} from '../../dist/infrastructure/harness-eval/eval-capability-wakeup-adapter.js';
-import { generateCapabilityWakeupLiveVerdict } from '../../dist/infrastructure/harness-eval/eval-capability-wakeup-live-verdict.js';
-import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/eval-hub-read-model.js';
+} from '../../dist/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-adapter.js';
+import { generateCapabilityWakeupLiveVerdict } from '../../dist/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-live-verdict.js';
+import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 
 function transcriptEvent(eventNo, invocationId, event) {
   const baseTs = 1700000000000;

@@ -327,6 +327,12 @@ export function AccountSection({
   const accountOptions = availableProfiles;
   const selectedProfile = availableProfiles.find((p) => p.id === form.accountRef);
   const callHint = buildCallHint(form.clientId, selectedProfile, form.defaultModel, form.provider);
+  const selectedModel = form.defaultModel.trim();
+  const modelNotListed = selectedModel.length > 0 && modelOptions.length > 0 && !modelOptions.includes(selectedModel);
+  const modelSuggestions = useMemo(
+    () => (modelNotListed ? [selectedModel, ...modelOptions] : modelOptions),
+    [modelNotListed, modelOptions, selectedModel],
+  );
   const providerSuggestions = useMemo(
     () => buildProviderSuggestions(selectedProfile?.models ?? []),
     [selectedProfile?.models],
@@ -393,7 +399,7 @@ export function AccountSection({
               ariaLabel="Model"
               value={form.defaultModel}
               onChange={(value) => onChange({ defaultModel: value })}
-              suggestions={modelOptions}
+              suggestions={modelSuggestions}
               required
               placeholder={
                 form.clientId === 'opencode'
@@ -401,6 +407,13 @@ export function AccountSection({
                   : '模型标识符，如 claude-sonnet-4-5'
               }
             />
+            {modelNotListed ? (
+              <div className="rounded-[10px] bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2">
+                <p className="text-xs leading-4 text-conn-amber-text">
+                  当前模型不在此认证信息的模型列表中；未修改 Model 时保存会保留原值，修改后会保存你输入的自定义值。
+                </p>
+              </div>
+            ) : null}
             {form.clientId === 'opencode' && selectedProfile?.authType === 'api_key' ? (
               <>
                 <ComboField

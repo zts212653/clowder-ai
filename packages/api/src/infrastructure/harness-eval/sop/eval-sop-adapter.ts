@@ -9,15 +9,15 @@
  * - no violations → 'keep_observe'
  */
 
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './eval-domain-registry.js';
-import type { RuleOwner, SopDefinitionInput, SopEvalResult } from './sop-predicate-evaluator.js';
-import { evaluateSopDefinition } from './sop-predicate-evaluator.js';
-import type { SopTrace } from './sop-trace-adapter.js';
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
 import {
   assertCanCrossThreadHandoff,
   parseVerdictHandoffPacket,
   type VerdictHandoffPacket,
-} from './verdict-handoff.js';
+} from '../verdict-handoff.js';
+import type { RuleOwner, SopDefinitionInput, SopEvalResult } from './sop-predicate-evaluator.js';
+import { evaluateSopDefinition } from './sop-predicate-evaluator.js';
+import type { SopTrace } from './sop-trace-adapter.js';
 
 /**
  * AC-E21: Optional rule-owner → handoff target resolver.

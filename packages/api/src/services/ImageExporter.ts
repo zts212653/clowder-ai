@@ -10,6 +10,53 @@ const log = createModuleLogger('image-exporter');
 const CHUNK_HEIGHT = 4000;
 const VIEWPORT_WIDTH = 1280;
 
+function resolveConfiguredChromePath(): string | null {
+  const envPath = process.env.CHROME_EXECUTABLE_PATH;
+  if (!envPath) return null;
+  if (fs.existsSync(envPath)) {
+    log.info({ path: envPath }, 'Using CHROME_EXECUTABLE_PATH from env');
+    return envPath;
+  }
+  log.warn({ path: envPath }, 'CHROME_EXECUTABLE_PATH set but file not found, falling back to auto-detect');
+  return null;
+}
+
+function findLinuxBrowserCandidates(): string[] {
+  const candidates: string[] = [];
+  for (const name of ['google-chrome', 'google-chrome-stable', 'microsoft-edge', 'chromium', 'chromium-browser']) {
+    try {
+      const resolved = execFileSync('which', [name], { encoding: 'utf8' }).trim();
+      if (resolved) candidates.push(resolved);
+    } catch {
+      // not found, continue
+    }
+  }
+  return candidates;
+}
+
+function browserCandidatesForPlatform(): string[] {
+  if (process.platform === 'darwin') {
+    return [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ];
+  }
+
+  if (process.platform === 'win32') {
+    return [
+      process.env.PROGRAMFILES ? `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe` : null,
+      process.env['PROGRAMFILES(X86)']
+        ? `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`
+        : null,
+      process.env.PROGRAMFILES ? `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe` : null,
+    ].filter((candidate): candidate is string => Boolean(candidate));
+  }
+
+  if (process.platform === 'linux') return findLinuxBrowserCandidates();
+  return [];
+}
+
 /**
  * Detect a Chromium-based browser executable on the system.
  * Priority: CHROME_EXECUTABLE_PATH env > system Chrome > Edge > Chromium.
@@ -17,48 +64,10 @@ const VIEWPORT_WIDTH = 1280;
  * Firefox/Safari are not supported.
  */
 function detectChromePath(): string {
-  // 1. Explicit override via env var (highest priority)
-  const envPath = process.env.CHROME_EXECUTABLE_PATH;
-  if (envPath) {
-    if (fs.existsSync(envPath)) {
-      log.info({ path: envPath }, 'Using CHROME_EXECUTABLE_PATH from env');
-      return envPath;
-    }
-    log.warn({ path: envPath }, 'CHROME_EXECUTABLE_PATH set but file not found, falling back to auto-detect');
-  }
+  const configuredPath = resolveConfiguredChromePath();
+  if (configuredPath) return configuredPath;
 
-  // 2. Auto-detect system browser
-  const platform = process.platform;
-
-  const candidates: string[] =
-    platform === 'darwin'
-      ? [
-          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-          '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-          '/Applications/Chromium.app/Contents/MacOS/Chromium',
-        ]
-      : platform === 'win32'
-        ? [
-            `${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
-            `${process.env['PROGRAMFILES(X86)']}\\Google\\Chrome\\Application\\chrome.exe`,
-            `${process.env.PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
-          ]
-        : [
-            // Linux: try `which` first, then common paths
-          ];
-
-  // On Linux, try `which` for common names
-  if (platform === 'linux') {
-    for (const name of ['google-chrome', 'google-chrome-stable', 'microsoft-edge', 'chromium', 'chromium-browser']) {
-      try {
-        const resolved = execFileSync('which', [name], { encoding: 'utf8' }).trim();
-        if (resolved) candidates.push(resolved);
-      } catch {
-        // not found, continue
-      }
-    }
-  }
-
+  const candidates = browserCandidatesForPlatform();
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) {
       log.info({ path: candidate }, 'Detected Chromium-based browser');

@@ -84,6 +84,14 @@ const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const TRANSCRIPT_DIR =
   process.env.TRANSCRIPT_DIR ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
+const CAT_INVOCATION_STALL_AUTO_KILL_MS = 7 * 60_000;
+const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
+  'model_capacity',
+  'empty_response',
+  'stream_error',
+  'tool_conflict',
+  'runtime_disconnected',
+]);
 let _openCodeKnownModels: Set<string> | null = null;
 
 export function getOpenCodeKnownModels(): Set<string> {
@@ -117,7 +125,10 @@ export function _resetOpenCodeKnownModels(override?: Set<string> | null): void {
   _openCodeKnownModels = override ?? null;
 }
 
-import type { RuntimeSessionUnexpectedRuntimeSessionSwitch } from '../../runtime-session/RuntimeSessionMetadata.js';
+import type {
+  RuntimeSessionMetadata,
+  RuntimeSessionUnexpectedRuntimeSessionSwitch,
+} from '../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -283,11 +294,74 @@ function buildUnexpectedRuntimeSessionSwitch(input: {
   };
 }
 
+async function markPreviousAntigravityRetryFragment(input: {
+  runtimeSessionStore: IRuntimeSessionStore;
+  sessionChainStore: ISessionChainStore;
+  lifecycle: NonNullable<AgentMessage['sessionLifecycle']>;
+  activePreviousRuntimeSessionId?: string;
+  userVisibleOutputSessionIds?: ReadonlySet<string>;
+  threadId: string;
+  catId: CatId;
+  now: number;
+}): Promise<void> {
+  const previousRuntimeSessionId = input.lifecycle.previousRuntimeSessionId;
+  const retryReason = input.lifecycle.sealReason;
+  if (!previousRuntimeSessionId) return;
+  if (!retryReason) return;
+  if (!ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS.has(retryReason)) return;
+  if (input.activePreviousRuntimeSessionId && previousRuntimeSessionId !== input.activePreviousRuntimeSessionId) return;
+
+  const previousRuntime = await input.runtimeSessionStore.getByRuntimeSession(
+    'antigravity-desktop',
+    previousRuntimeSessionId,
+  );
+  if (!previousRuntime) return;
+  if (!isRuntimeSessionInThread(previousRuntime, input.threadId, input.catId)) return;
+  if (!input.activePreviousRuntimeSessionId && !isAlreadySealedAntigravityRetryPrevious(previousRuntime, retryReason)) {
+    return;
+  }
+  if (input.userVisibleOutputSessionIds?.has(previousRuntime.sessionId)) return;
+
+  const previousRecord = await input.sessionChainStore.get(previousRuntime.sessionId);
+  if (!previousRecord) return;
+  if (!isSessionRecordInThread(previousRecord, input.threadId, input.catId)) return;
+  const activeRecord = await input.sessionChainStore.getActive(input.catId, input.threadId);
+  if (activeRecord?.id === previousRecord.id) return;
+  if (previousRecord.messageCount !== 0) return;
+
+  await input.runtimeSessionStore.updateLifecycle(previousRuntime.sessionId, {
+    retryFragment: {
+      kind: 'retry',
+      retryReason,
+      nextRuntimeSessionId: input.lifecycle.runtimeSessionId,
+      detectedAt: input.now,
+    },
+    lastObservedAt: Math.max(previousRuntime.lifecycle.lastObservedAt, input.now),
+  });
+}
+
+function isAlreadySealedAntigravityRetryPrevious(runtimeSession: RuntimeSessionMetadata, retryReason: string): boolean {
+  return runtimeSession.lifecycle.state !== 'active' && runtimeSession.lifecycle.sealReason === retryReason;
+}
+
+function isRuntimeSessionInThread(runtimeSession: RuntimeSessionMetadata, threadId: string, catId: CatId): boolean {
+  return runtimeSession.threadId === threadId && runtimeSession.catId === catId;
+}
+
+function isSessionRecordInThread(session: SessionRecord, threadId: string, catId: CatId): boolean {
+  return session.threadId === threadId && session.catId === catId;
+}
+
+function isUserVisibleSessionOutput(msg: AgentMessage): boolean {
+  return msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result';
+}
+
 async function syncAntigravityRuntimeMetadata(input: {
   runtimeSessionStore: IRuntimeSessionStore;
   sessionChainStore: ISessionChainStore;
   activeRec: SessionRecord;
   msg: AgentMessage;
+  userVisibleOutputSessionIds?: ReadonlySet<string>;
   threadId: string;
   catId: CatId;
   userId: string;
@@ -304,55 +378,65 @@ async function syncAntigravityRuntimeMetadata(input: {
     input.threadId,
     input.catId,
   );
-  const unexpectedRuntimeSessionSwitch =
+  const activeRuntimeBeingReplaced =
     activeRuntime &&
     activeRuntime.runtimeSessionId !== runtimeSessionId &&
     activeRuntime.sessionId !== input.activeRec.id
-      ? buildUnexpectedRuntimeSessionSwitch({
-          lifecycle,
-          previousSessionId: activeRuntime.sessionId,
-          previousRuntimeSessionId: activeRuntime.runtimeSessionId,
-          currentRuntimeSessionId: runtimeSessionId,
-          detectedAt: now,
-        })
+      ? activeRuntime
       : null;
-  if (
-    activeRuntime &&
-    activeRuntime.runtimeSessionId !== runtimeSessionId &&
-    activeRuntime.sessionId !== input.activeRec.id
-  ) {
-    const hostRecord = await input.sessionChainStore.get(activeRuntime.sessionId);
+  const unexpectedRuntimeSessionSwitch = activeRuntimeBeingReplaced
+    ? buildUnexpectedRuntimeSessionSwitch({
+        lifecycle,
+        previousSessionId: activeRuntimeBeingReplaced.sessionId,
+        previousRuntimeSessionId: activeRuntimeBeingReplaced.runtimeSessionId,
+        currentRuntimeSessionId: runtimeSessionId,
+        detectedAt: now,
+      })
+    : null;
+  if (activeRuntimeBeingReplaced) {
+    const hostRecord = await input.sessionChainStore.get(activeRuntimeBeingReplaced.sessionId);
     if (hostRecord && hostRecord.threadId === input.threadId && hostRecord.catId === input.catId) {
       const sealReason =
         unexpectedRuntimeSessionSwitch !== null
           ? UNEXPECTED_RUNTIME_SESSION_SWITCH_SEAL_REASON
-          : (lifecycle.sealReason ?? activeRuntime.lifecycle.sealReason ?? 'cli_session_replaced');
+          : (lifecycle.sealReason ?? activeRuntimeBeingReplaced.lifecycle.sealReason ?? 'cli_session_replaced');
       const drainIncomplete =
         lifecycle.degraded === true || (lifecycle.drainResult && lifecycle.drainResult !== 'complete');
-      await input.runtimeSessionStore.updateLifecycle(activeRuntime.sessionId, {
+      await input.runtimeSessionStore.updateLifecycle(activeRuntimeBeingReplaced.sessionId, {
         state: drainIncomplete ? 'runtime_seal_pending' : 'sealed',
         sealReason,
         ...(lifecycle.drainResult ? { drainResult: lifecycle.drainResult } : {}),
         ...(drainIncomplete
           ? {
-              pendingSince: activeRuntime.lifecycle.pendingSince ?? now,
-              retryCount: activeRuntime.lifecycle.retryCount ?? 0,
+              pendingSince: activeRuntimeBeingReplaced.lifecycle.pendingSince ?? now,
+              retryCount: activeRuntimeBeingReplaced.lifecycle.retryCount ?? 0,
               lastFailureReason:
                 lifecycle.degradedReason ??
-                activeRuntime.lifecycle.lastFailureReason ??
+                activeRuntimeBeingReplaced.lifecycle.lastFailureReason ??
                 'runtime drain did not prove completion',
             }
           : {}),
         lastObservedAt: now,
       });
     } else {
-      await input.runtimeSessionStore.updateLifecycle(activeRuntime.sessionId, {
+      await input.runtimeSessionStore.updateLifecycle(activeRuntimeBeingReplaced.sessionId, {
         state: 'runtime_conflict_pending',
         lastObservedAt: now,
-        lastFailureReason: `active runtime binding ${activeRuntime.runtimeSessionId} points to missing SessionRecord ${activeRuntime.sessionId}`,
+        lastFailureReason: `active runtime binding ${activeRuntimeBeingReplaced.runtimeSessionId} points to missing SessionRecord ${activeRuntimeBeingReplaced.sessionId}`,
       });
     }
   }
+
+  await markPreviousAntigravityRetryFragment({
+    runtimeSessionStore: input.runtimeSessionStore,
+    sessionChainStore: input.sessionChainStore,
+    lifecycle,
+    activePreviousRuntimeSessionId: activeRuntimeBeingReplaced?.runtimeSessionId,
+    userVisibleOutputSessionIds: input.userVisibleOutputSessionIds,
+    threadId: input.threadId,
+    catId: input.catId,
+    now,
+  });
 
   const existingRuntime = await input.runtimeSessionStore.getByRuntimeSession('antigravity-desktop', runtimeSessionId);
   const identityHistory =
@@ -1382,14 +1466,35 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
-      // F118 Phase B: Enable liveness probe with defaults for all CLI providers
-      // #774: stallAutoKill — auto-kill on idle-silent stall (~5min) instead of waiting 30min
-      livenessProbe: { stallAutoKill: true },
+      // F118 Phase B: Enable liveness probe for all CLI providers.
+      // #774: stallAutoKill clears truly stuck idle-silent CLIs before F216's 10m stale-processing guard.
+      // Leave room for async ps sampling + deferred kill probes, while avoiding the 5m slow-API false kills.
+      livenessProbe: { stallAutoKill: true, stallWarningMs: CAT_INVOCATION_STALL_AUTO_KILL_MS },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
       parentSpan: invocationSpan,
     };
 
     let lastErrorMessage: string | undefined;
+    const userVisibleOutputSessionIds = new Set<string>();
+    const userVisibleOutputCountedSessionIds = new Set<string>();
+
+    const recordActiveSessionUserVisibleOutput = async (): Promise<void> => {
+      if (!deps.sessionChainStore || !sessionChainActive) return;
+      try {
+        const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
+        if (!activeRec) return;
+        userVisibleOutputSessionIds.add(activeRec.id);
+        if ((activeRec.messageCount ?? 0) !== 0) return;
+        await deps.sessionChainStore.update(activeRec.id, {
+          messageCount: 1,
+          updatedAt: Date.now(),
+        });
+        userVisibleOutputCountedSessionIds.add(activeRec.id);
+        sessionRounds.record(1, { [AGENT_ID]: catId });
+      } catch {
+        /* best-effort: messageCount miss won't break invocation */
+      }
+    };
 
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       const outputs: AgentMessage[] = [];
@@ -1555,6 +1660,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 sessionChainStore: deps.sessionChainStore,
                 activeRec,
                 msg,
+                userVisibleOutputSessionIds,
                 threadId,
                 catId,
                 userId,
@@ -1615,17 +1721,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
         // Increment session messageCount (best-effort).
         // This counter is critical for unseal safety: empty sessions (0 messages)
-        // can be displaced, but sessions with messages must not be silently sealed.
+        // can be displaced, but sessions with user-visible output must not be
+        // silently sealed or folded away before a final done event arrives.
         if (deps.sessionChainStore && sessionChainActive) {
           try {
             const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
             if (activeRec) {
-              const newCount = (activeRec.messageCount ?? 0) + 1;
-              await deps.sessionChainStore.update(activeRec.id, {
-                messageCount: newCount,
-                updatedAt: Date.now(),
-              });
-              sessionRounds.record(newCount, { [AGENT_ID]: catId });
+              if (!userVisibleOutputCountedSessionIds.has(activeRec.id)) {
+                const newCount = (activeRec.messageCount ?? 0) + 1;
+                await deps.sessionChainStore.update(activeRec.id, {
+                  messageCount: newCount,
+                  updatedAt: Date.now(),
+                });
+                sessionRounds.record(newCount, { [AGENT_ID]: catId });
+              }
             }
           } catch {
             /* best-effort: messageCount miss won't break invocation */
@@ -1942,6 +2051,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (msg.type === 'agent_loop') {
           if (invocationSpan) recordAgentLoop(invocationSpan);
           return outputs;
+        }
+        if (isUserVisibleSessionOutput(msg)) {
+          await recordActiveSessionUserVisibleOutput();
         }
         outputs.push(attachInvocationIdToTaskProgress(msg));
 
@@ -2314,7 +2426,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // Bug: system_info from rate_limit_event precedes malformed turn → sets
           // attemptHasContentOutput=true → malformed suppress guard !attemptHasContentOutput
           // fails → seal/fresh-retry/46接力 all skipped → bare malformed error leaks to user.
-          if (msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result') {
+          if (isUserVisibleSessionOutput(msg)) {
             attemptHasContentOutput = true;
           }
           // Substantive = real model output, excludes system_info (e.g. timeout_diagnostics).
