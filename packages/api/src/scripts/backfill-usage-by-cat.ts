@@ -93,7 +93,10 @@ function parseArgs(argv: readonly string[]): CliArgs {
   return { dryRun, days, ...(redisUrl ? { redisUrl } : {}), ...(keyPrefix ? { keyPrefix } : {}), help };
 }
 
-async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore): Promise<{ applied: number; failed: number }> {
+async function applyPlan(
+  plan: BackfillPlan,
+  store: RedisInvocationRecordStore,
+): Promise<{ applied: number; failed: number }> {
   let applied = 0;
   let failed = 0;
   for (const entry of plan.entries) {
@@ -107,9 +110,7 @@ async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore):
       } else {
         // CAS mismatch (e.g. record was meanwhile updated by another writer) — record but continue
         failed += 1;
-        console.warn(
-          `[backfill-usage] update returned null for ${entry.invocationId} (CAS mismatch / not found)`,
-        );
+        console.warn(`[backfill-usage] update returned null for ${entry.invocationId} (CAS mismatch / not found)`);
       }
     } catch (err) {
       failed += 1;

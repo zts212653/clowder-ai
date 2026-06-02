@@ -154,15 +154,7 @@ export function DailyUsageSection() {
   );
 }
 
-function CatUsageRow({
-  catId,
-  usage,
-  cat,
-}: {
-  catId: string;
-  usage: CatDailyUsage;
-  cat: CatData | undefined;
-}) {
+function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsage; cat: CatData | undefined }) {
   const label = buildCatLabel(catId, cat);
   // Issue #845: show defaultModel inline so "猫名 vs 模型" stays honest.
   // The aggregated TokenUsage has no per-record model field (catId may have run
@@ -175,7 +167,10 @@ function CatUsageRow({
       <div className="flex items-center gap-2 min-w-0">
         <span className="font-medium text-cafe-secondary truncate">{label}</span>
         {model && (
-          <span className="text-cafe-muted text-[10px] truncate" title={`当前默认模型：${model}（历史聚合不区分模型版本）`}>
+          <span
+            className="text-cafe-muted text-[10px] truncate"
+            title={`当前默认模型：${model}（历史聚合不区分模型版本）`}
+          >
             {model}
           </span>
         )}
