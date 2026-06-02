@@ -10,6 +10,7 @@
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
+import { mergeTokenUsage, type TokenUsage } from '../../types.js';
 import {
   accumulateTextAggregate,
   accumulateTextParts,
@@ -939,6 +940,10 @@ export class QueueProcessor {
       // 7. Route execution
       const persistenceContext: { richBlocks?: Array<{ kind: string; [key: string]: unknown }> } = {};
       const collectedTextParts: string[] = [];
+      // #845 fix: per-cat token usage from done events (same pattern as messages.ts / ConnectorInvokeTrigger).
+      // Without this, queued/connector invocations succeed without writing usageByCat, leaving 159+ orphans
+      // in the daily usage report.
+      const collectedUsage = new Map<string, TokenUsage>();
 
       // F088 fix: Track per-turn content for outbound delivery (same pattern as ConnectorInvokeTrigger)
       const outboundTurns: Array<{
@@ -1069,6 +1074,17 @@ export class QueueProcessor {
           invocationTracker.completeSlot?.(threadId, msg.catId, controller);
         }
 
+        // #845 fix: accumulate per-cat token usage on done events. Mirrors messages.ts:992-994
+        // and ConnectorInvokeTrigger.ts:386-387. Without this, queue-* and connector-* invocations
+        // succeed but never write usageByCat, dropping ~159/164 records from the daily report.
+        // RouterLike.routeExecution yields an opaque record type, so narrow metadata via local cast.
+        if (msg.type === 'done' && msg.catId) {
+          const metadata = (msg as { metadata?: { usage?: TokenUsage } }).metadata;
+          if (metadata?.usage) {
+            collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), metadata.usage));
+          }
+        }
+
         // F088 fix: collect per-turn content for outbound delivery
         if (msg.type === 'done' && msg.catId) {
           if (persistenceContext.richBlocks) {
@@ -1193,6 +1209,13 @@ export class QueueProcessor {
       await router.ackCollectedCursors(userId, threadId, cursorBoundaries);
       await invocationRecordStore.update(invocationId, {
         status: 'succeeded',
+        // #845 fix: carry token usage same as messages.ts:1152-1158. Without this, queued/connector
+        // succeeded invocations never recorded usageByCat → daily stats undercount.
+        ...(collectedUsage.size > 0
+          ? {
+              usageByCat: Object.fromEntries(collectedUsage),
+            }
+          : {}),
       });
 
       finalStatus = 'succeeded';

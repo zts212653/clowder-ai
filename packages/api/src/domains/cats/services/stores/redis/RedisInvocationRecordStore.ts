@@ -277,9 +277,15 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) {
       pairs.push('usageByCat', JSON.stringify(input.usageByCat));
-      // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
-      const existing = await this.redis.hget(key, 'usageRecordedAt');
-      if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+      // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics).
+      // Issue #845 backfill: explicit input.usageRecordedAt overrides — pinned to the
+      // invocation's original day so recovered usage doesn't all collapse onto "today".
+      if (input.usageRecordedAt != null) {
+        pairs.push('usageRecordedAt', String(input.usageRecordedAt));
+      } else {
+        const existing = await this.redis.hget(key, 'usageRecordedAt');
+        if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+      }
     }
     return pairs;
   }

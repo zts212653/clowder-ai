@@ -87,6 +87,79 @@ describe('QueueProcessor', () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
+  it('issue #845: done event with metadata.usage → invocation.update writes usageByCat', async () => {
+    // Reproduce the QueueProcessor execution path where a routed done event carries
+    // metadata.usage. Prior to the fix, executeEntry only wrote `status: succeeded`
+    // without `usageByCat`, leaving 159+ historical succeeded invocations with empty
+    // usage in production. The Phase A fix mirrors the messages.ts collectedUsage
+    // pattern so the queue path now persists per-cat token usage.
+    const customDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          yield {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            metadata: {
+              provider: 'claude',
+              model: 'claude-opus-4-7',
+              usage: { inputTokens: 1234, outputTokens: 567, cacheReadTokens: 100, costUsd: 0.05 },
+            },
+          };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const customProcessor = new QueueProcessor(customDeps);
+    const entry = enqueueEntry(customDeps.queue);
+    customDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await customProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
+    // Wait for background executeEntry to finish (it's spawned in setImmediate).
+    await new Promise((r) => setTimeout(r, 100));
+
+    const updateCalls = customDeps.invocationRecordStore.update.mock.calls;
+    const succeededCall = updateCalls.find((c) => c.arguments[1]?.status === 'succeeded');
+    assert.ok(succeededCall, 'expected an update(...,{status:succeeded,...}) call');
+    const payload = succeededCall.arguments[1];
+    assert.ok(payload.usageByCat, 'usageByCat must be present on the succeeded update');
+    assert.deepEqual(payload.usageByCat.opus, {
+      inputTokens: 1234,
+      outputTokens: 567,
+      cacheReadTokens: 100,
+      costUsd: 0.05,
+    });
+  });
+
+  it('issue #845: done event without metadata.usage → succeeded update omits usageByCat', async () => {
+    // Guard the opposite direction: when a provider does not emit usage on done,
+    // we must not write an empty usageByCat (would mask the diagnostic that the
+    // provider is dropping usage upstream).
+    const customDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const customProcessor = new QueueProcessor(customDeps);
+    const entry = enqueueEntry(customDeps.queue);
+    customDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await customProcessor.onInvocationComplete('t1', 'opus', 'succeeded');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const updateCalls = customDeps.invocationRecordStore.update.mock.calls;
+    const succeededCall = updateCalls.find((c) => c.arguments[1]?.status === 'succeeded');
+    assert.ok(succeededCall, 'expected an update(...,{status:succeeded,...}) call');
+    assert.equal(
+      succeededCall.arguments[1].usageByCat,
+      undefined,
+      'usageByCat must remain undefined when provider emitted no usage',
+    );
+  });
+
   it('succeeded + stale user queued entry → auto-dequeues and starts execution', async () => {
     const entry = enqueueEntry(deps.queue, { source: 'user' });
     deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');

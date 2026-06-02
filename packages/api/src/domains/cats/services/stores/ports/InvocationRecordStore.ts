@@ -64,6 +64,11 @@ export interface UpdateInvocationInput {
   expectedStatus?: InvocationStatus;
   /** F8: Per-cat token usage (key = catId) */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
+  /** Issue #845 backfill: override the usageRecordedAt timestamp (epoch ms).
+   *  Live writers should NEVER set this — let the store stamp Date.now() so day bucketing
+   *  stays honest. Only the backfill script sets it, to anchor recovered usage to the
+   *  invocation's original day instead of "today". */
+  usageRecordedAt?: number;
 }
 
 /**
@@ -182,8 +187,14 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (input.error !== undefined) record.error = input.error;
     if (input.usageByCat !== undefined) {
       record.usageByCat = input.usageByCat;
-      // F128: stamp usageRecordedAt only on first write (stable for daily bucketing)
-      if (record.usageRecordedAt == null) record.usageRecordedAt = Date.now();
+      // F128: stamp usageRecordedAt only on first write (stable for daily bucketing).
+      // Issue #845 backfill: explicit input.usageRecordedAt overrides, so the recovered
+      // usage anchors to the invocation's original day rather than "today".
+      if (input.usageRecordedAt != null) {
+        record.usageRecordedAt = input.usageRecordedAt;
+      } else if (record.usageRecordedAt == null) {
+        record.usageRecordedAt = Date.now();
+      }
     }
     record.updatedAt = Date.now();
 
