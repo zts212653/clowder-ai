@@ -1,6 +1,6 @@
 {
   "name": "cat-cafe-desktop",
-  "version": "0.2.0",
+  "version": "0.10.1",
   "description": "Cat Cafe Desktop - Multi-Agent Collaboration Platform",
   "main": "main.js",
   "scripts": {
@@ -102,8 +102,22 @@
         "to": "docs"
       },
       {
-        "from": "../bundled/cli-tools",
-        "to": "bundled/cli-tools"
+        "from": "../scripts",
+        "to": "scripts",
+        "filter": [
+          "**/*",
+          "!**/*.ps1",
+          "!**/*.test.*",
+          "!**/__pycache__/**"
+        ]
+      },
+      {
+        "from": "../guides",
+        "to": "guides"
+      },
+      {
+        "from": "../assets/system-prompts",
+        "to": "assets/system-prompts"
       }
     ],
     "asar": false,

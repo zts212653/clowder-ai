@@ -19,7 +19,16 @@ const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
 const FRONTEND_PORT = 3003;
 const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
-const DEBUG_LOG = path.join(process.env.TEMP || os.tmpdir(), 'cat-cafe-main.log');
+// Main process log in the user data directory alongside API + desktop logs.
+const IS_MAC_MAIN = process.platform === 'darwin';
+const userDataRoot = IS_MAC_MAIN
+  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', 'Clowder AI')
+  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Clowder AI');
+const mainLogDir = path.join(userDataRoot, 'data', 'logs');
+try {
+  fs.mkdirSync(mainLogDir, { recursive: true });
+} catch {}
+const DEBUG_LOG = path.join(mainLogDir, 'main.log');
 
 function dbg(msg) {
   const line = `[main ${new Date().toISOString()}] ${msg}\n`;
@@ -35,6 +44,7 @@ let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let services = null;
+let isQuitting = false;
 
 function createSplashWindow() {
   splashWindow = new BrowserWindow({
@@ -79,7 +89,11 @@ function createMainWindow() {
   });
 
   mainWindow.on('close', (e) => {
-    if (tray) {
+    // Hide to tray on manual close — but let the window close when the
+    // app is quitting (Cmd+Q / OS quit / tray "Quit"). Without the
+    // isQuitting guard, the close handler blocks app.quit() because
+    // tray still exists → zombie Electron shell with dead services.
+    if (tray && !isQuitting) {
       e.preventDefault();
       mainWindow.hide();
     }
@@ -164,6 +178,21 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'win32') quitApp();
 });
 
-app.on('before-quit', async () => {
-  if (services) await services.stopAll();
+app.on('before-quit', (e) => {
+  // Signal close handlers to stop hiding windows to tray.
+  isQuitting = true;
+  // Electron does NOT await async event handlers. Without blocking here,
+  // the app exits before stopAll() finishes → orphaned node/redis processes.
+  // Prevent default, run cleanup, then quit when done.
+  if (services) {
+    e.preventDefault();
+    services.stopAll().finally(() => {
+      services = null; // prevent re-entry
+      if (tray) {
+        tray.destroy();
+        tray = null;
+      }
+      app.quit();
+    });
+  }
 });

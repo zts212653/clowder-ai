@@ -250,14 +250,19 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     });
   }, [availableProfiles, cat, draft, form.clientId]);
 
+  // Auto-fill first available model only on profile/client change — NOT when
+  // the user clears the field. Previous code had form.defaultModel in deps,
+  // which re-filled immediately after the user cleared the input (#802).
   useEffect(() => {
     if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
-    if (form.defaultModel.trim().length > 0) return;
     setForm((prev) => {
       if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
       return { ...prev, defaultModel: modelOptions[0] ?? '' };
     });
-  }, [form.clientId, form.defaultModel, modelOptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+    // excludes form.defaultModel: auto-fill runs on profile change, not on
+    // user clearing the model input.
+  }, [form.clientId, modelOptions]);
 
   useEffect(() => {
     if (form.clientId !== 'antigravity') return;

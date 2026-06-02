@@ -83,6 +83,25 @@ If a desktop release asset is available on the [Releases page](https://github.co
 
 The desktop installer bundles the app runtime, portable Node.js, and Redis, so regular users do **not** need to run `pnpm install` or `pnpm build`. After launch, open **Hub → System Settings → Account Configuration** to connect your model providers and CLI accounts.
 
+**Updating & Uninstalling:**
+
+- **macOS**: To update, just install the new `.dmg` — it overwrites the old `Cat Cafe.app` in `/Applications/`. Your configuration and data are stored separately in `~/Library/Application Support/Clowder AI/` and are **not** removed when you delete the app. To fully uninstall, drag the app to Trash, then optionally remove `~/Library/Application Support/Clowder AI/`.
+- **Windows**: Run the new installer over the old one — it upgrades in place. Your data is stored in `%LOCALAPPDATA%\Clowder AI\` and survives uninstall. To fully clean up after uninstalling, optionally remove that folder.
+
+**AI CLI Tools (installed separately):**
+
+The desktop installer does **not** bundle AI CLI tools — install them separately to use agent features:
+
+| Tool | Install Command | Official Docs |
+|------|----------------|---------------|
+| Claude Code | `npm install -g @anthropic-ai/claude-code` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
+| Codex CLI | `npm install -g @openai/codex` | [github.com/openai/codex](https://github.com/openai/codex) |
+| Antigravity CLI | See [antigravity.google/cli](https://antigravity.google/cli) | [antigravity.google](https://antigravity.google/) |
+| Kimi CLI | `pip install kimi-cli` | [kimi.moonshot.cn](https://kimi.moonshot.cn/) |
+| opencode | See [github.com/sst/opencode](https://github.com/sst/opencode) | [opencode.ai](https://opencode.ai/) |
+
+> **Note:** Claude Code and Codex CLI require [Node.js 20+](https://nodejs.org/). Kimi CLI requires [Python 3.8+](https://www.python.org/). After installing a CLI tool, restart Cat Cafe to detect it automatically.
+
 ### Option B: Source Setup
 
 **Prerequisites:** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git

@@ -27,6 +27,7 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
@@ -42,6 +43,16 @@ import { extractImagePaths } from '../providers/image-paths.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 
 const log = createModuleLogger('codex-agent');
+
+/** Redact a custom base URL for diagnostic logging — expose protocol+host only. */
+function redactUrlForLog(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return '[invalid-url]';
+  }
+}
 
 /**
  * Options for constructing CodexAgentService (dependency injection)
@@ -99,7 +110,7 @@ function collectCodexStreamError(event: unknown, recentErrors: string[]): void {
   const raw = record.message;
   if (typeof raw !== 'string') return;
 
-  const msg = raw.trim().slice(0, MAX_STREAM_ERROR_LENGTH);
+  const msg = sanitizeCliStderr(raw.trim()).slice(0, MAX_STREAM_ERROR_LENGTH);
   if (!msg) return;
 
   const last = recentErrors[recentErrors.length - 1];
@@ -576,7 +587,28 @@ export class CodexAgentService implements AgentService {
           rawEnv.USERPROFILE = isolatedHome;
         }
       }
+      const homeIsolated = authMode === 'api_key' && !!customBaseUrl;
       const codexEnv = applyAuthMode(rawEnv, authMode);
+
+      // Diagnostic logging: critical env state for debugging CLI startup failures
+      log.info(
+        {
+          catId: this.catId,
+          authMode,
+          homeIsolated,
+          isolatedHome: homeIsolated ? rawEnv.HOME : undefined,
+          customBaseUrl: customBaseUrl ? redactUrlForLog(customBaseUrl) : null,
+          sandboxMode,
+          hasOpenaiKey: !!codexEnv.OPENAI_API_KEY,
+          hasOpenaiKeyAfterAuth: codexEnv.OPENAI_API_KEY !== null && codexEnv.OPENAI_API_KEY !== undefined,
+          envKeysCallbackEnv: Object.keys(options?.callbackEnv ?? {}),
+          envKeysAccountEnv: Object.keys(options?.accountEnv ?? {}),
+          cwd: options?.workingDirectory ?? null,
+          platform: process.platform,
+        },
+        '[codex-diag] Auth + env setup',
+      );
+
       // F171: Account env vars applied LAST — user overrides provider-injected values.
       // Strip OPENAI_BASE_URL/OPENAI_API_BASE if already consumed via --config model_providers
       // to prevent the deprecated env var from conflicting with the CLI config.
@@ -602,20 +634,24 @@ export class CodexAgentService implements AgentService {
         return;
       }
 
-      log.debug(
+      // Diagnostic: log full invocation params at info level for troubleshooting
+      log.info(
         {
           catId: this.catId,
           command: codexCommand,
           model: cliModel,
           originalModel: effectiveModel,
-          customBaseUrl: customBaseUrl ?? null,
+          customBaseUrl: customBaseUrl ? redactUrlForLog(customBaseUrl) : null,
           sessionId: options?.sessionId ?? null,
           invocationId: options?.invocationId ?? null,
           cwd: options?.workingDirectory ?? null,
           authMode,
           argCount: args.length,
+          // Log flag names + --config keys (no values) for debugging
+          cliFlags: args.filter((a) => a.startsWith('-')),
+          cliConfigKeys: args.map((a, i) => (args[i - 1] === '--config' ? a.split('=')[0] : null)).filter(Boolean),
         },
-        'Invoking Codex CLI',
+        '[codex-diag] Invoking Codex CLI',
       );
 
       const cliOpts = {
@@ -721,6 +757,22 @@ export class CodexAgentService implements AgentService {
             );
             continue;
           }
+          // Diagnostic: log full error details at info level for troubleshooting
+          log.info(
+            {
+              catId: this.catId,
+              exitCode: event.exitCode,
+              signal: event.signal,
+              message: event.message,
+              reasonCode: event.reasonCode,
+              publicSummary: event.cliDiagnostics?.publicSummary,
+              safeExcerpt: event.cliDiagnostics?.safeExcerpt,
+              debugRef: event.cliDiagnostics?.debugRef,
+              sawSubstantiveOutput,
+              recentStreamErrors,
+            },
+            '[codex-diag] CLI error exit — full diagnostics',
+          );
           const base = formatCliExitError('Codex CLI', event);
           // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
           yield {

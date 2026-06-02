@@ -4,9 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const { resolveCmdShimScript, resolveWindowsShimSpawn, escapeCmdArg, extractBareName, parseShimFile } = await import(
-  '../dist/utils/cli-spawn-win.js'
-);
+const { resolveCmdShimScript, resolveWindowsShimSpawn, escapeCmdArg, extractBareName, parseShimFile, findSystemNode } =
+  await import('../dist/utils/cli-spawn-win.js');
 
 test(
   'resolveCmdShimScript supports %dp0 shims and keeps scanning where results until one resolves',
@@ -173,13 +172,15 @@ test(
   },
 );
 
-test('resolveWindowsShimSpawn uses the current Node executable for direct shim launches', () => {
+test('resolveWindowsShimSpawn uses the system Node executable for direct shim launches', () => {
   const shimScript = join(tmpdir(), 'codex-shim-target.js');
+  const systemNode = findSystemNode();
+  assert.ok(systemNode, 'findSystemNode() must locate a node binary on CI');
 
   const resolved = resolveWindowsShimSpawn('codex', ['--json'], shimScript);
 
   assert.deepEqual(resolved, {
-    command: process.execPath,
+    command: systemNode,
     args: [shimScript, '--json'],
   });
 });

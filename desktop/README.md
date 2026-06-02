@@ -129,7 +129,7 @@ pnpm desktop:pack
 ./desktop/scripts/build-mac.sh --arch arm64
 
 # 跳过已有缓存步骤（增量构建）
-./desktop/scripts/build-mac.sh --skip-web --skip-deploy --skip-node --skip-redis --skip-cli
+./desktop/scripts/build-mac.sh --skip-web --skip-deploy --skip-node --skip-redis
 ```
 
 #### 构建流程（6 步）
@@ -140,7 +140,7 @@ pnpm desktop:pack
 | 2/6 | `pnpm deploy` 导出 api/web/mcp-server 运行时包 | `bundled/deploy/{api,web,mcp-server}/` |
 | 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
 | 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
-| 5/6 | `npm pack` 打包可 vendoring 的 CLI 工具（Claude/Codex；Antigravity CLI 走官方安装器/说明） | `bundled/cli-tools/*.tgz` |
+| 5/6 | 跳过（macOS DMG 无 post-install 阶段，不捆绑 CLI 工具；用户自行安装） | — |
 | 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/CatCafe-{version}-{arch}.dmg` |
 
 #### 已知注意事项
@@ -225,10 +225,10 @@ pnpm desktop:installer
 
 ## 调试
 
-桌面应用的运行日志会写入系统临时目录：
+桌面应用的运行日志集中在用户数据目录：
 
-- **Windows**：`%TEMP%\cat-cafe-main.log` / `%TEMP%\cat-cafe-desktop.log`
-- **macOS**：`$TMPDIR/cat-cafe-main.log` / `$TMPDIR/cat-cafe-desktop.log`
+- **Windows**：`%LOCALAPPDATA%\Clowder AI\data\logs\` (`main.log` / `desktop.log` / `api\api.log`)
+- **macOS**：`~/Library/Application Support/Clowder AI/data/logs/` (`main.log` / `desktop.log` / `api/api.log`)
 
 ## 故障排查
 

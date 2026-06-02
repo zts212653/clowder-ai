@@ -47,6 +47,7 @@ import {
 } from './domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 import { RedisAntigravitySupervisorStore } from './domains/cats/services/agents/providers/antigravity/AntigravitySupervisorStore.js';
+import { clearL0Cache, warmL0Cache } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
@@ -1032,6 +1033,7 @@ async function main(): Promise<void> {
   let router!: AgentRouter;
   const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
     agentRegistry.reset();
+    clearL0Cache(); // Invalidate stale L0 compilations from previous sync
     for (const [id, config] of Object.entries(configs)) {
       const catId = config.id;
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
@@ -1143,6 +1145,13 @@ async function main(): Promise<void> {
       agentRegistry.register(id, service);
     }
     if (router) router.refreshFromRegistry(agentRegistry);
+
+    // Pre-compile L0 system prompts for all registered cats in parallel.
+    // Avoids per-invocation subprocess overhead and ensures L0 is ready
+    // before the first message — also bypasses Windows NTFS junction
+    // issues that resolve by the time the user actually interacts (#802).
+    const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
+    await warmL0Cache(registeredCatIds, app.log);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
