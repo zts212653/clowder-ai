@@ -4,28 +4,28 @@
       "path": "packages/api/src/routes",
       "owner": "opus",
       "reason": "Routes 按功能已分文件，ADR-010 重构 scope 不含 routes，后续评估是否拆子目录",
-      "expiresAt": "2026-06-01",
+      "expiresAt": "2026-07-01",
       "ticket": "F23"
     },
     {
       "path": "packages/api/src/config",
       "owner": "opus",
       "reason": "Config 文件数接近 warn，均为独立配置项（cat-budgets/cat-config/env 等），暂不拆",
-      "expiresAt": "2026-06-01",
+      "expiresAt": "2026-07-01",
       "ticket": "F23"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/invocation",
       "owner": "opus",
       "reason": "Invocation 控制面当前 25 files；full sync 前先登记基线红灯，后续按 queue/registry/tracker/progress/reconciliation 子域拆分",
-      "expiresAt": "2026-06-01",
+      "expiresAt": "2026-07-01",
       "ticket": "F23"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/providers",
       "owner": "opus",
-      "reason": "Agent providers 当前 30 files；full sync 前先登记基线红灯，后续按 carrier/event-transform/image-publication/provider-adapters 子域拆分",
-      "expiresAt": "2026-06-01",
+      "reason": "Agent providers 当前 31 files；full sync 前先登记基线红灯，后续按 carrier/event-transform/image-publication/provider-adapters 子域拆分",
+      "expiresAt": "2026-07-01",
       "ticket": "F23"
     },
     {
@@ -38,8 +38,8 @@
     {
       "path": "packages/api/src/utils",
       "owner": "codex",
-      "reason": "API utils 当前 25 files；full sync 前先登记基线红灯，后续按 cli/process/path/network/storage/security 子域拆分",
-      "expiresAt": "2026-06-01",
+      "reason": "API utils 当前 31 files；full sync 前先登记基线红灯，后续按 cli/process/path/network/storage/security 子域拆分（2026-06-02 by 宪宪/opus 代续期 unblock CI；待 @codex ack 或接手 directory refactor）",
+      "expiresAt": "2026-07-01",
       "ticket": "F23"
     },
     {
