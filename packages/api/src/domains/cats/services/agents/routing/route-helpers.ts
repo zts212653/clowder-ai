@@ -313,6 +313,9 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
       id: `tool-${msg.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
       type: 'tool_use',
       label: `${msg.catId as string} → ${toolName}`,
+      // R6 maintainer: persist native tool name as data field (decoupled from display label).
+      // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
+      toolName,
       ...(detail ? { detail } : {}),
       timestamp: msg.timestamp,
       ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),

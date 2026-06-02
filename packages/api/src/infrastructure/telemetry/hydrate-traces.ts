@@ -63,9 +63,16 @@ export function synthesizeToolSpansFromEvents(
     const endTimeMs = ev.endTimeMs ?? ev.timestamp;
     if (!(endTimeMs > startTimeMs)) continue; // sanity guard: must have positive duration
 
-    // Extract tool name from the start event label ("{catId} → {toolName}").
-    const arrowIdx = startEv.label.indexOf(' → ');
-    const toolName = arrowIdx > 0 ? startEv.label.slice(arrowIdx + 3) : 'unknown';
+    // R6 maintainer: prefer the persisted `toolName` data field; fall back to
+    // parsing the display `label` only for legacy stored events (pre-R6 wiring).
+    // This decouples hydrate from UI/display contract — label format changes
+    // (arrow→colon, localization, shortening) no longer silently degrade traces
+    // to `unknown` or the wrong tool name.
+    let toolName = startEv.toolName;
+    if (!toolName) {
+      const arrowIdx = startEv.label.indexOf(' → ');
+      toolName = arrowIdx > 0 ? startEv.label.slice(arrowIdx + 3) : 'unknown';
+    }
 
     const attributes: Record<string, unknown> = { 'tool.use_id': ev.toolUseId };
     if (catId) attributes['agent.id'] = catId;

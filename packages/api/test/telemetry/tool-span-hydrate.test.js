@@ -495,3 +495,113 @@ test('F153 Phase J AC-J8: record without tracing AND without toolEvents is a no-
   await hydrateTraceStoreFromRedis(store, redis);
   assert.equal(store.stats().spanCount, 0, 'no DTOs synthesized for empty record');
 });
+
+// =============================================================================
+// R6 maintainer fix: hydrate prefers persisted `toolName` data field, decoupling
+// from UI/display `label` parsing. Label remains as legacy fallback for stored
+// events that predate this field.
+// =============================================================================
+
+test('R6: toolName data field is preferred over label — label format change does NOT degrade span name', () => {
+  // Simulate a stored event where the UI label format has been changed (e.g.
+  // arrow swapped, catId prefix dropped, label localized) but the persisted
+  // `toolName` data field still carries the truth.
+  const events = [
+    {
+      id: 'tool-r6-a',
+      type: 'tool_use',
+      // Label format intentionally different from the legacy "{catId} → {toolName}"
+      // pattern — could be localized, shortened, or swapped to a colon delimiter.
+      // Hydrate must NOT parse this; it must use the toolName field instead.
+      label: '🐾 工具调用：发送消息（已脱敏）',
+      toolName: 'mcp__cat-cafe__cat_cafe_post_message',
+      toolUseId: 'r6-use-a',
+      tracing: tracing('t-r6a', 's-r6a', 'p-r6'),
+      startTimeMs: 5_000,
+      timestamp: 5_000,
+    },
+    {
+      id: 'toolr-r6-a',
+      type: 'tool_result',
+      label: '🐾 结果',
+      toolUseId: 'r6-use-a',
+      status: 'ok',
+      tracing: tracing('t-r6a', 's-r6a', 'p-r6'),
+      endTimeMs: 5_120,
+      timestamp: 5_120,
+    },
+  ];
+
+  const [dto] = synthesizeToolSpansFromEvents(events, 'opus', 6_000);
+  assert.equal(
+    dto.name,
+    'cat_cafe.tool_use mcp__cat-cafe__cat_cafe_post_message',
+    'span name derives from toolName data field, NOT from parsing label',
+  );
+  assert.equal(dto.durationMs, 120, 'duration still computed from start/end');
+  assert.equal(dto.status.code, 1, 'OK status preserved');
+});
+
+test('R6: legacy stored event without toolName falls back to parsing label (backward compat)', () => {
+  // Pre-R6 stored events have no `toolName` field. Hydrate must still recover
+  // the tool name by parsing the legacy "{catId} → {toolName}" label format.
+  const events = [
+    {
+      id: 'tool-legacy',
+      type: 'tool_use',
+      // Note: NO toolName field — simulating a stored event written before R6.
+      label: 'sonnet → mcp__cat-cafe__cat_cafe_list_threads',
+      toolUseId: 'legacy-use',
+      tracing: tracing('t-leg', 's-leg', 'p-leg'),
+      startTimeMs: 7_000,
+      timestamp: 7_000,
+    },
+    {
+      id: 'toolr-legacy',
+      type: 'tool_result',
+      label: 'sonnet ← result',
+      toolUseId: 'legacy-use',
+      status: 'ok',
+      tracing: tracing('t-leg', 's-leg', 'p-leg'),
+      endTimeMs: 7_080,
+      timestamp: 7_080,
+    },
+  ];
+
+  const [dto] = synthesizeToolSpansFromEvents(events, 'sonnet', 8_000);
+  assert.equal(
+    dto.name,
+    'cat_cafe.tool_use mcp__cat-cafe__cat_cafe_list_threads',
+    'legacy fallback parses label "{catId} → {toolName}" when toolName absent',
+  );
+});
+
+test('R6: legacy stored event without toolName AND label missing arrow → unknown (last-resort fallback)', () => {
+  // Edge case: legacy stored event where label parsing also fails (no arrow).
+  // Must degrade gracefully to 'unknown' rather than throwing or producing
+  // a malformed span name.
+  const events = [
+    {
+      id: 'tool-malformed',
+      type: 'tool_use',
+      label: 'malformed label without arrow',
+      toolUseId: 'mal-use',
+      tracing: tracing('t-mal', 's-mal'),
+      startTimeMs: 11_000,
+      timestamp: 11_000,
+    },
+    {
+      id: 'toolr-malformed',
+      type: 'tool_result',
+      label: 'result',
+      toolUseId: 'mal-use',
+      status: 'ok',
+      tracing: tracing('t-mal', 's-mal'),
+      endTimeMs: 11_050,
+      timestamp: 11_050,
+    },
+  ];
+
+  const [dto] = synthesizeToolSpansFromEvents(events, 'opus', 12_000);
+  assert.equal(dto.name, 'cat_cafe.tool_use unknown', 'last-resort fallback to unknown');
+});

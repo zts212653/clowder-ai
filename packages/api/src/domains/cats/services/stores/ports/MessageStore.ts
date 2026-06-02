@@ -67,6 +67,13 @@ export interface StoredToolEvent {
    *  when the ToolSpanTracker closes the span. Together with `startTimeMs` enables
    *  AC-J8 real-duration restore (vs flat `invocation.restored`). */
   endTimeMs?: number;
+  /** R6 maintainer (Slice J-B): native tool name persisted as a separate data field
+   *  (decoupled from the UI display `label`). Hydrate's `synthesizeToolSpansFromEvents`
+   *  prefers this field for the synthesized span name; falls back to parsing `label`
+   *  only for legacy stored events that predate this field. Set on `tool_use` events
+   *  from `AgentMessage.toolName ?? 'unknown'`. Avoids silent degradation to `unknown`
+   *  or wrong tool names if the label arrow format / catId prefix / localization changes. */
+  toolName?: string;
 }
 
 /**
