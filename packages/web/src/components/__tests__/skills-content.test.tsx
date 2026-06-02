@@ -199,7 +199,8 @@ describe('SkillsContent', () => {
     await flushEffects();
 
     expect(mockFetch).toHaveBeenCalledWith('/api/rules/skill/browser-preview');
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('Local preview instructions');
+    // SkillPreviewModal uses createPortal(... , document.body)
+    expect(document.body.querySelector('[role="dialog"]')?.textContent).toContain('Local preview instructions');
   });
 
   it('filters the skill list with the search input', async () => {

@@ -35,14 +35,22 @@ describe('global css architecture', () => {
   it('loads split global css files from the root layout', () => {
     const layoutSource = readFileSync(resolve(appDir, 'layout.tsx'), 'utf8');
 
-    expect(layoutSource).toContain("import './theme-tokens.css';");
-    expect(layoutSource).toContain("import './cat-persona-tokens.css';");
-    expect(layoutSource).toContain("import './cat-persona-derived.css';");
-    expect(layoutSource).toContain("import './connector-tokens.css';");
-    expect(layoutSource).toContain("import './theme-extras.css';");
+    /* globals.css is the only CSS still loaded via JS import */
     expect(layoutSource).toContain("import './globals.css';");
-    expect(layoutSource).toContain("import './console-tokens.css';");
-    expect(layoutSource).toContain("import './console-shell.css';");
-    expect(layoutSource).toContain("import './console-controls.css';");
+
+    /* All other token/control sheets are served as static <link> tags via /vendor/app/ */
+    const vendorSheets = [
+      'theme-tokens.css',
+      'cat-persona-tokens.css',
+      'cat-persona-derived.css',
+      'connector-tokens.css',
+      'theme-extras.css',
+      'console-tokens.css',
+      'console-shell.css',
+      'console-controls.css',
+    ];
+    for (const sheet of vendorSheets) {
+      expect(layoutSource).toContain(`/vendor/app/${sheet}`);
+    }
   });
 });

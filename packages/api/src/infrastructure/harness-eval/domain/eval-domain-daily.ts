@@ -13,12 +13,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { IThreadStore } from '../../domains/cats/services/stores/ports/ThreadStore.js';
-import type { TaskSpec_P1 } from '../scheduler/types.js';
-import { buildEvalCatInvocation } from './eval-cat-invocation.js';
+import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
+import type { TaskSpec_P1 } from '../../scheduler/types.js';
+import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
+import { ensureEvalDomainThreads } from '../hub/eval-hub-thread-ensure.js';
+import { inventoryLegacyTasks, type LegacyScheduledTaskLike } from '../legacy-task-cleanup.js';
+import { getEvalCatOverride } from './eval-domain-override.js';
 import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from './eval-domain-registry.js';
-import { ensureEvalDomainThreads } from './eval-hub-thread-ensure.js';
-import { inventoryLegacyTasks, type LegacyScheduledTaskLike } from './legacy-task-cleanup.js';
 
 export interface EvalDomainScheduleOpts {
   harnessFeedbackRoot: string;
@@ -27,6 +28,8 @@ export interface EvalDomainScheduleOpts {
   defaultUserId?: string;
   /** When provided, gate filters out domains whose legacy tasks are still enabled — prevents double-trigger. */
   listDynamicTasks?: () => LegacyScheduledTaskLike[];
+  /** OQ-20: Redis client for reading evalCat overrides (community users may assign different cats). */
+  redis?: import('ioredis').Redis;
 }
 
 /** @deprecated Use EvalDomainScheduleOpts — kept for backward compat. */
@@ -128,8 +131,20 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
         const enabledLegacy = inventoryLegacyTasks(domain, activeTasks).filter((t) => t.enabled);
         const legacyStatus = enabledLegacy.length > 0 ? 'dry_run_ready' : 'disabled';
 
+        // OQ-20: Apply Redis evalCat override if community user assigned a different cat.
+        let effectiveDomain = domain;
+        if (config.redis) {
+          const override = await getEvalCatOverride(config.redis, domain.domainId);
+          if (override) {
+            effectiveDomain = {
+              ...domain,
+              evalCat: { catId: override.catId, handle: override.handle, model: override.model },
+            };
+          }
+        }
+
         const invocation = buildEvalCatInvocation({
-          domain,
+          domain: effectiveDomain,
           trendRefs: [],
           verdictRefs: [],
           legacyCleanup: { status: legacyStatus },

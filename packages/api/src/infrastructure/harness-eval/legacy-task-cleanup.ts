@@ -1,4 +1,4 @@
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './eval-domain-registry.js';
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './domain/eval-domain-registry.js';
 
 export interface LegacyScheduledTaskLike {
   id: string;

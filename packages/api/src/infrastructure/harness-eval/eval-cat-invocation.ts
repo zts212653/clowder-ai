@@ -1,4 +1,4 @@
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './eval-domain-registry.js';
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './domain/eval-domain-registry.js';
 
 export interface LegacyCleanupStatus {
   status: 'not_checked' | 'dry_run_ready' | 'redirected' | 'disabled';
@@ -22,6 +22,7 @@ export interface EvalCatInvocationPacket {
     verdictRefs: string[];
     sourceAdapter: EvalDomainRegistryEntry['sourceAdapter'];
     legacyScheduledTaskIds: string[];
+    fixtures: EvalDomainRegistryEntry['fixtures'];
     legacyCleanup: LegacyCleanupStatus;
     sla: EvalDomainRegistryEntry['sla'];
   };
@@ -54,6 +55,7 @@ export function buildEvalCatInvocation(input: EvalCatInvocationInput): EvalCatIn
       verdictRefs: input.verdictRefs,
       sourceAdapter: domain.sourceAdapter,
       legacyScheduledTaskIds: domain.legacyScheduledTaskIds,
+      fixtures: domain.fixtures,
       legacyCleanup: input.legacyCleanup,
       sla: domain.sla,
     },

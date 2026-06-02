@@ -44,6 +44,12 @@ interface RuntimeSessionSummary {
   runtimeConversationId?: string;
   lifecycleState: string;
   lastObservedAt: number;
+  retryFragment?: {
+    kind: 'retry';
+    retryReason: string;
+    nextRuntimeSessionId?: string;
+    detectedAt: number;
+  };
   unexpectedRuntimeSessionSwitch?: {
     detectedAt: number;
     previousSessionId: string;
@@ -170,6 +176,38 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
   const sealedSessions = sessions
     .filter((s) => s.status === 'sealed' || s.status === 'sealing')
     .sort((a, b) => (b.sealedAt ?? b.createdAt) - (a.sealedAt ?? a.createdAt));
+
+  // F201-churn: runtime-tagged retry fragments are authoritative and fold even when there is only
+  // one. Untagged legacy `tool_conflict` corpses still require ≥2 before collapsing because they are
+  // heuristic-only old data.
+  // 砚砚 review P2: require status==='sealed'. requestSeal() writes sealReason while the record is
+  // still 'sealing' (async-finalizes to 'sealed' later), so an in-flight sealing 0-msg tool_conflict
+  // record must NOT be folded — it still needs its live status + 查看/解封 actions visible.
+  const isRuntimeTaggedRetryFragment = (s: SessionSummary) => s.runtimeSession?.retryFragment?.kind === 'retry';
+  const isLegacyToolConflictRetryCorpse = (s: SessionSummary) => s.sealReason === 'tool_conflict';
+  const isRetryCorpse = (s: SessionSummary) => {
+    if (s.status !== 'sealed') return false;
+    if (s.messageCount !== 0) return false;
+    if (isRuntimeTaggedRetryFragment(s)) return true;
+    return isLegacyToolConflictRetryCorpse(s);
+  };
+  const runtimeTaggedRetryFragments = sealedSessions.filter((s) => isRetryCorpse(s) && isRuntimeTaggedRetryFragment(s));
+  const legacyToolConflictRetryCorpses = sealedSessions.filter(
+    (s) => isRetryCorpse(s) && !isRuntimeTaggedRetryFragment(s),
+  );
+  const retryCorpses = [
+    ...runtimeTaggedRetryFragments,
+    ...(legacyToolConflictRetryCorpses.length >= 2 ? legacyToolConflictRetryCorpses : []),
+  ];
+  const retryCorpseIds = new Set(retryCorpses.map((s) => s.id));
+  const collapseRetryCorpses = retryCorpses.length > 0;
+  const visibleSealedSessions = collapseRetryCorpses
+    ? sealedSessions.filter((s) => !retryCorpseIds.has(s.id))
+    : sealedSessions;
+  const hasRuntimeTaggedRetryFragments = runtimeTaggedRetryFragments.length > 0;
+  const retryCollapseLabel = hasRuntimeTaggedRetryFragments
+    ? `${retryCorpses.length} 次重试片段（已折叠 · 各 0 msgs）`
+    : `${retryCorpses.length} 次 tool_conflict 重试残骸（已折叠 · 各 0 msgs）`;
 
   // Check if any cat recently had a compact (from hooks)
   const hasRecentCompact = Object.values(catInvocations).some((inv) => inv.sessionSealed);
@@ -345,7 +383,7 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
             <span className="text-micro font-bold text-cafe-muted uppercase tracking-wider">Sealed</span>
           </div>
           <div className="space-y-1">
-            {sealedSessions.map((session) => {
+            {visibleSealedSessions.map((session) => {
               const sealedColors = colorsForCat(session.catId);
               return (
                 <div
@@ -425,6 +463,15 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                 </div>
               );
             })}
+            {collapseRetryCorpses && (
+              <div
+                data-testid="session-card-retry-collapsed"
+                className="console-list-card flex items-center gap-2 rounded-xl px-2.5 py-1.5 opacity-70"
+              >
+                <span className="flex-shrink-0 text-micro text-cafe-muted">&#8635;</span>
+                <span className="flex-1 min-w-0 truncate text-micro text-cafe-muted">{retryCollapseLabel}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

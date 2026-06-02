@@ -4,6 +4,16 @@
 
 const DEFAULT_RETRY_DELAYS_MS = [1000, 2000, 4000];
 
+/**
+ * Default per-attempt fetch timeout. Mirrors refresh-loop PR #1368 (e521cc7aa):
+ * a raw fetch with no AbortSignal leaves `await fetch` pending FOREVER on a hung
+ * TCP socket (server accepts but never responds) — it neither resolves nor throws,
+ * so the retry loop never advances and the caller's tool call (hold_ball /
+ * post_message / ...) hangs indefinitely. This callback path missed that fix.
+ * 10s covers slow networks; each retry attempt gets a fresh timeout.
+ */
+const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+
 export interface CallbackPostFailure {
   error: string;
   retryable: boolean;
@@ -19,6 +29,13 @@ export function getRetryDelaysMs(): number[] {
     .map((value) => Number.parseInt(value.trim(), 10))
     .filter((value) => Number.isFinite(value) && value >= 0);
   return parsed.length > 0 ? parsed : DEFAULT_RETRY_DELAYS_MS;
+}
+
+export function getFetchTimeoutMs(): number {
+  const raw = process.env['CAT_CAFE_CALLBACK_FETCH_TIMEOUT_MS'];
+  if (!raw) return DEFAULT_FETCH_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw.trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FETCH_TIMEOUT_MS;
 }
 
 function shouldRetryStatus(status: number): boolean {
@@ -70,6 +87,9 @@ export async function postJsonWithRetry(
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...extraHeaders },
         body: payload,
+        // #1368-class fix: bound each attempt so a hung socket aborts (→ a
+        // timeout error, caught below as retryable) instead of pending forever.
+        signal: AbortSignal.timeout(getFetchTimeoutMs()),
       });
 
       if (response.ok) {

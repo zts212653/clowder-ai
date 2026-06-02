@@ -9,10 +9,12 @@ interface EvalDomainSummary {
   displayName: string;
   systemThreadId: string;
   frequency: string;
+  evalCatId: string;
   evalCatHandle: string;
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];
+  nextCronFireAt: string;
 }
 
 interface EvalHubSummary {
@@ -135,7 +137,7 @@ export function HubEvalTab() {
         <div className="space-y-3">
           <h2 className="text-sm font-semibold text-cafe">评估域总览</h2>
           {summary.domains.map((domain) => (
-            <DomainCard key={domain.domainId} domain={domain} />
+            <DomainCard key={domain.domainId} domain={domain} onCatUpdated={fetchSummary} />
           ))}
         </div>
       )}
@@ -232,7 +234,50 @@ function EvalVerdictCard({ item }: { item: EvalHubItem }) {
   );
 }
 
-function DomainCard({ domain }: { domain: EvalDomainSummary }) {
+function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCatUpdated?: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [catId, setCatId] = useState(domain.evalCatId);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [availableCats, setAvailableCats] = useState<Array<{ catId: string; handle: string; family: string }>>([]);
+
+  const startEditing = useCallback(async () => {
+    setEditing(true);
+    try {
+      const res = await apiFetch('/api/eval-hub/available-cats');
+      if (res.ok) {
+        const data = (await res.json()) as { cats: Array<{ catId: string; handle: string; family: string }> };
+        setAvailableCats(data.cats);
+      }
+    } catch {
+      /* best-effort roster load */
+    }
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!catId.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/eval-domains/${encodeURIComponent(domain.domainId)}/eval-cat`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ catId: catId.trim() }),
+      });
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        throw new Error(body.error ?? `Save failed (${res.status})`);
+      }
+      setEditing(false);
+      onCatUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [catId, domain.domainId, onCatUpdated]);
+
   return (
     <section className="rounded-lg bg-cafe-surface-elevated p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -240,8 +285,66 @@ function DomainCard({ domain }: { domain: EvalDomainSummary }) {
           <div className="text-xs font-medium uppercase tracking-wide text-cafe-muted">{domain.domainId}</div>
           <h3 className="mt-1 text-base font-semibold text-cafe">{domain.displayName}</h3>
           <p className="mt-1 text-xs text-cafe-muted">
-            评估频率: {domain.frequency} · 评估猫: {domain.evalCatHandle}
+            评估频率: {domain.frequency} · 评估猫:{' '}
+            {editing ? (
+              <span className="inline-flex items-center gap-1">
+                {availableCats.length > 0 ? (
+                  <select
+                    value={catId}
+                    onChange={(e) => setCatId(e.target.value)}
+                    className="w-36 rounded border border-cafe bg-cafe-surface px-1.5 py-0.5 text-xs text-cafe"
+                  >
+                    {availableCats.map((cat) => (
+                      <option key={cat.catId} value={cat.catId}>
+                        {cat.handle} ({cat.family})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={catId}
+                    onChange={(e) => setCatId(e.target.value)}
+                    className="w-28 rounded border border-cafe bg-cafe-surface px-1.5 py-0.5 text-xs text-cafe"
+                    placeholder="catId"
+                  />
+                )}
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="rounded bg-[var(--console-button-emphasis)] px-2 py-0.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  {saving ? '...' : '保存'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setCatId(domain.evalCatId);
+                    setError(null);
+                  }}
+                  className="text-xs text-cafe-muted hover:text-cafe"
+                >
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span>
+                {domain.evalCatHandle}{' '}
+                <button
+                  type="button"
+                  onClick={startEditing}
+                  className="text-xs text-cafe-muted hover:text-cafe"
+                  title="编辑评估猫"
+                >
+                  ✏️
+                </button>
+              </span>
+            )}
           </p>
+          {error && <p className="mt-1 text-xs text-conn-red-text">{error}</p>}
+          <p className="mt-0.5 text-xs text-cafe-muted">下次评估: {new Date(domain.nextCronFireAt).toLocaleString()}</p>
         </div>
         <span className="inline-flex shrink-0 rounded-md bg-cafe-surface px-2.5 py-1 text-xs font-semibold text-[var(--console-button-emphasis)]">
           {domain.hasVerdict && domain.latestVerdict ? VERDICT_LABELS[domain.latestVerdict] : '待首次评估'}

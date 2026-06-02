@@ -138,3 +138,51 @@ describe('reminderTemplate', () => {
     assert.equal(deliverMock.mock.calls[0].arguments[0].content, `${SCHEDULER_TRIGGER_PREFIX} 定时提醒`);
   });
 });
+
+describe('reminderTemplate firePolicy activation guard (F167 Phase M — codex P1)', () => {
+  const FUTURE = 9_999_999_999_000;
+
+  it('does NOT activate firePolicy for non-hold-ball dyn-* task even if params forge deferWhileThreadBusy', () => {
+    // /api/schedule/tasks generates dyn-* ids + accepts arbitrary params (schedule.ts:417).
+    // A forged deferWhileThreadBusy must NOT activate pre-fire defer on a public reminder.
+    const spec = reminderTemplate.createSpec('dyn-1748000000-abc123', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'forged', deferWhileThreadBusy: true },
+      deliveryThreadId: 'th-forge',
+    });
+    assert.equal(spec.firePolicy, undefined, 'forged dyn-* reminder must NOT get firePolicy');
+  });
+
+  it('activates firePolicy only for hold-ball-* instanceId with deferWhileThreadBusy', () => {
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-abc123', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake', deferWhileThreadBusy: true },
+      deliveryThreadId: 'th-hold',
+    });
+    assert.ok(spec.firePolicy, 'hold-ball-* + deferWhileThreadBusy gets firePolicy');
+    assert.equal(spec.firePolicy.deferWhileThreadBusy, true);
+    assert.equal(spec.firePolicy.threadId, 'th-hold');
+  });
+
+  it('ignores caller-supplied deferIntervalMs/maxDefers (no churn injection via public params)', () => {
+    // deferIntervalMs:0 + huge maxDefers would cause 0ms re-arm churn on a busy thread.
+    // Defer tuning must come from TaskRunnerV2 internal defaults, never public params.
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-xyz', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake', deferWhileThreadBusy: true, deferIntervalMs: 0, maxDefers: 999999 },
+      deliveryThreadId: 'th-hold2',
+    });
+    assert.ok(spec.firePolicy);
+    assert.equal(spec.firePolicy.deferIntervalMs, undefined, 'deferIntervalMs must not be readable from public params');
+    assert.equal(spec.firePolicy.maxDefers, undefined, 'maxDefers must not be readable from public params');
+  });
+
+  it('does not set firePolicy when deferWhileThreadBusy is absent', () => {
+    const spec = reminderTemplate.createSpec('hold-ball-1748000000-nodefer', {
+      trigger: { type: 'once', fireAt: FUTURE },
+      params: { message: 'wake' },
+      deliveryThreadId: 'th-nodefer',
+    });
+    assert.equal(spec.firePolicy, undefined);
+  });
+});

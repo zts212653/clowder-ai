@@ -7,7 +7,7 @@ export interface CallbackDeliveryDecisionInput {
   threadId: string;
   log: Pick<FastifyBaseLogger, 'error' | 'warn'>;
   logContext?: Record<string, unknown>;
-  enqueueA2A: () => Promise<{ enqueued: readonly string[] }>;
+  enqueueA2A: () => Promise<{ enqueued: readonly string[]; coalesced?: readonly string[] }>;
   markDelivered?: (deliveredAt: number) => Promise<unknown> | unknown;
   zeroEnqueuedWarnMessage: string;
   enqueueFailureMessage: string;
@@ -50,7 +50,10 @@ export class MessageDeliveryService {
     try {
       const a2aResult = await input.enqueueA2A();
       enqueued = a2aResult.enqueued;
-      if (input.willEnqueueToQueue && a2aResult.enqueued.length === 0) {
+      // F216 AC-D6: coalesced targets are handled (content merged into existing entry).
+      // Only warn/recover when truly nothing was handled (enqueued=0 AND coalesced=0).
+      const anyHandled = a2aResult.enqueued.length > 0 || (a2aResult.coalesced?.length ?? 0) > 0;
+      if (input.willEnqueueToQueue && !anyHandled) {
         await recoverQueuedMessage(input, input.zeroEnqueuedWarnMessage);
         messageStaysQueued = false;
       }

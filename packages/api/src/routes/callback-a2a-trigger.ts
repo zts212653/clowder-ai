@@ -36,6 +36,11 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 export interface QueueProcessorLike {
   onInvocationComplete(threadId: string, catId: string, status: 'succeeded' | 'failed' | 'canceled'): Promise<void>;
   tryAutoExecute?(threadId: string): Promise<void>;
+  /** F216 c3 supersede: reuse the force-send abort-resume coordinate system.
+   *  clearPause prevents the aborted invocation's async cleanup from poisoning QueueProcessor state (F39).
+   *  releaseSlot force-frees the per-slot processingSlots mutex so tryAutoExecute sees a free slot. */
+  clearPause?(threadId: string, catId?: string): void;
+  releaseSlot?(threadId: string, catId: string): void;
 }
 
 export interface A2ATriggerDeps {
@@ -45,10 +50,20 @@ export interface A2ATriggerDeps {
   invocationTracker?: InvocationTracker;
   deliveryCursorStore?: DeliveryCursorStore;
   queueProcessor?: QueueProcessorLike;
-  /** F122B: InvocationQueue for agent-sourced entries */
+  /** F122B: InvocationQueue for agent-sourced entries.
+   *  F-coalesce: + findInFlightAgentEntry / coalesceContentIntoQueuedAgent for same-turn handoff merge. */
   invocationQueue?: Pick<
     InvocationQueue,
-    'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'backfillMessageId' | 'list'
+    // F-coalesce: Guard 2 replaced hasQueuedAgentForCat with findInFlightAgentEntry +
+    // coalesceContentIntoQueuedAgent — the old skip-dedup method is no longer referenced here.
+    | 'enqueue'
+    | 'countAgentEntriesForThread'
+    | 'findInFlightAgentEntry'
+    | 'coalesceContentIntoQueuedAgent'
+    | 'backfillMessageId'
+    | 'list'
+    // F216 c3: removeProcessed clears the superseded processing entry so it cannot re-run.
+    | 'removeProcessed'
   >;
   log: FastifyBaseLogger;
 }
@@ -74,7 +89,7 @@ export async function enqueueA2ATargets(
     /** F153: caller trace context for cross-route A2A propagation */
     callerTraceContext?: CallerTraceContext;
   },
-): Promise<{ enqueued: CatId[]; fallback: boolean }> {
+): Promise<{ enqueued: CatId[]; coalesced?: CatId[]; fallback: boolean }> {
   const { log } = deps;
   const { threadId, callerCatId } = opts;
   const triggerMessageId = opts.triggerMessage.id;
@@ -114,6 +129,12 @@ export async function enqueueA2ATargets(
     const streakEntry = canTrackStreak ? getWorklist(threadId, opts.parentInvocationId) : null;
 
     const enqueued: CatId[] = [];
+    // F-coalesce: cats whose same-turn handoff was MERGED into an existing queued entry.
+    // Tracked separately from `enqueued` because callbacks.ts derives body.routed from `enqueued`
+    // — a coalesce is NOT a new A2A route (routed must stay []), but the caller's intent IS handled
+    // (no duplicate dispatch, mention cursor still advances). Conflating the two falsely reports
+    // "已路由" for a merge (the gate-caught regression: callback-a2a-postmsg.test.js).
+    const coalesced: CatId[] = [];
     const queueDiagnostics: Array<{
       catId: CatId;
       outcome: string;
@@ -130,10 +151,79 @@ export async function enqueueA2ATargets(
         );
         break;
       }
-      // Guard 2: Duplicate detection — skip cats already queued as agent entries
-      if (deps.invocationQueue.hasQueuedAgentForCat(threadId, catId)) {
-        log.info({ threadId, triggerMessageId, catId }, '[F122B] A2A callback: skipping duplicate agent entry for cat');
-        continue;
+      // Guard 2 (F-coalesce): coalesce a caller's repeated same-turn handoffs to the same cat
+      // instead of dispatching a duplicate invocation. Replaces the old skip-dedup, which only
+      // matched 'queued' entries (so a handoff arriving after the first auto-executed into
+      // 'processing' slipped through and ran as a SECOND independent invocation — the bug: the
+      // target cat executed the first, possibly-superseded handoff before ever seeing the caller's
+      // real follow-up intent).
+      const inFlight = deps.invocationQueue.findInFlightAgentEntry?.(threadId, catId, callerCatId) ?? null;
+      if (inFlight) {
+        if (inFlight.status === 'queued') {
+          // Not yet dispatched → merge content in place. The target sees both handoffs as one
+          // coherent message (parity with user-message collectUserBatch). No duplicate entry.
+          const merged =
+            deps.invocationQueue.coalesceContentIntoQueuedAgent?.(
+              threadId,
+              inFlight.userId,
+              inFlight.id,
+              opts.content,
+              triggerMessageId,
+              callerCatId,
+            ) ?? false;
+          if (merged) {
+            // Merged into an existing queued entry — handled but NOT a new route (see `coalesced` decl).
+            coalesced.push(catId);
+            log.info(
+              { threadId, triggerMessageId, catId, mergedInto: inFlight.id },
+              '[F-coalesce] merged repeated same-turn handoff into queued agent entry',
+            );
+            continue;
+          }
+          // Raced to processing between find and merge → fall through to enqueue a follow-up.
+        } else {
+          // F216 c3 SUPERSEDE: the first handoff is already processing but the caller sent a
+          // second same-turn handoff — last-wins semantics.
+          //
+          // GUARD: QueueProcessor marks an entry 'processing' (markProcessingById) before
+          // executeEntry reaches startAll (which registers the tracker slot). In the pre-start
+          // window (markProcessing → startAll, spans invocationRecordStore.create await),
+          // tracker.has() returns false and cancelInvocation would return []. If we naively
+          // releaseSlot + removeProcessed in that window, the old executeEntry (which captured
+          // the entry reference) keeps running AND the follow-up starts = double-execute.
+          //
+          // Solution: only do the full abort-resume sequence when tracker confirms registration.
+          // Pre-start window → graceful degradation to sequential (follow-up runs after the
+          // current execution completes via onInvocationComplete → tryAutoExecute).
+          const trackerRegistered = deps.invocationTracker?.has(threadId, catId) ?? false;
+          if (trackerRegistered) {
+            // Safe to abort: tracker has the slot, controller exists.
+            deps.invocationTracker!.cancelInvocation(threadId, [catId], inFlight.userId, 'preempted');
+            // Drop stale pause the aborted invocation's async cleanup will set (F39).
+            deps.queueProcessor?.clearPause?.(threadId, catId);
+            // Force-free the per-slot mutex — the async .catch hasn't deleted it yet.
+            deps.queueProcessor?.releaseSlot?.(threadId, catId);
+            // Remove the superseded processing entry so it cannot re-run.
+            deps.invocationQueue?.removeProcessed?.(threadId, inFlight.userId, inFlight.id);
+            log.info(
+              { threadId, triggerMessageId, catId, supersededEntry: inFlight.id },
+              '[F216-c3] supersede: aborted running handoff, follow-up will restart via tryAutoExecute',
+            );
+          } else {
+            // Pre-start window: tracker not yet registered (markProcessing → startAll gap).
+            // Cannot cancel via tracker, but CAN remove the entry as a tombstone signal:
+            // QueueProcessor.executeEntry checks entry presence after startAll and self-aborts
+            // if the entry was removed. Do NOT releaseSlot (slot freed by executeEntry's
+            // finally→.then chain after the self-abort return 'canceled').
+            deps.invocationQueue?.removeProcessed?.(threadId, inFlight.userId, inFlight.id);
+            log.warn(
+              { threadId, triggerMessageId, catId, supersededEntry: inFlight.id },
+              '[F216-c3] supersede tombstone: entry removed for executeEntry guard (pre-start window)',
+            );
+          }
+          // Fall through to enqueue the follow-up as a queued entry; tryAutoExecute (called after
+          // enqueue at line ~284) sees the freed slot and auto-starts it.
+        }
       }
       // Guard 3 (F167 Phase D cloud Codex P1): streak check fires here — after
       // depth + dedup — so a would-be-skipped target never mutates the counter.
@@ -193,18 +283,32 @@ export async function enqueueA2ATargets(
         }
       }
     }
-    // Best-effort auto-ack mentions (same as worklist path)
-    if (deliveryCursorStore && enqueued.length > 0) {
-      const ackTargets = enqueued.filter((catId) => opts.triggerMessage.mentions.includes(catId));
+    // Best-effort auto-ack mentions (same as worklist path).
+    // F-coalesce: ack covers BOTH enqueued AND coalesced targets — a coalesced mention WAS handled
+    // (merged into an existing queued entry), so its cursor must advance too, otherwise the
+    // merged-away mention lingers as a phantom pending backlog.
+    const handled = [...enqueued, ...coalesced];
+    if (deliveryCursorStore && handled.length > 0) {
+      const ackTargets = handled.filter((catId) => opts.triggerMessage.mentions.includes(catId));
       await Promise.allSettled(
         ackTargets.map((catId) => deliveryCursorStore.ackMentionCursor(opts.userId, catId, threadId, triggerMessageId)),
       );
     }
-    if (enqueued.length > 0) {
+    // queue_updated emits on BOTH a new entry (enqueued) AND a coalesce (云端 codex R4 P2).
+    // A coalesce mutates entry.content in place — and the web client's QueueEntryRow renders
+    // entry.content, replacing QueuePanel state from each queue_updated event. Without emitting on
+    // coalesce, the user keeps seeing the STALE pre-merge handoff until some later unrelated queue
+    // event fires, even though the backend will execute the merged content. (My earlier "no visible
+    // delta" reasoning was wrong: content IS a rendered field. 46 R3 and I both missed the frontend
+    // render dependency; cloud codex caught it.) Gate on `handled` (enqueued ∪ coalesced).
+    if (handled.length > 0) {
+      // F216 AC-D7: use semantically accurate action — 'coalesced' when content was merged
+      // into an existing entry (no new entry created), 'enqueued' when a new entry was added.
+      const action = enqueued.length > 0 ? 'enqueued' : 'coalesced';
       deps.socketManager.emitToUser(opts.userId, 'queue_updated', {
         threadId,
         queue: deps.invocationQueue.list(threadId, opts.userId),
-        action: 'enqueued',
+        action,
       });
     }
     log.info(
@@ -221,12 +325,12 @@ export async function enqueueA2ATargets(
     // Trigger auto-execute for entries whose target slot is free
     await deps.queueProcessor?.tryAutoExecute?.(threadId);
     log.info(
-      { threadId, triggerMessageId, enqueued, targetCats },
+      { threadId, triggerMessageId, enqueued, coalesced, targetCats },
       enqueued.length > 0
         ? '[F122B] A2A callback: enqueued to InvocationQueue'
         : '[F122B] A2A callback: no new InvocationQueue entries enqueued',
     );
-    return { enqueued, fallback: false };
+    return { enqueued, coalesced, fallback: false };
   }
 
   // Legacy path: F27 worklist + standalone fallback (when invocationQueue dep not wired)

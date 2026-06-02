@@ -134,9 +134,10 @@ describe('F194 Phase Z3 R16 — suppression keys turn id (cloud Codex P1)', () =
   // parent-only. Active-path test setup is heavyweight (needs full hook mount with
   // currentThreadId match); covered by code review + the principle is exercised
   // implicitly via R16 (suppression key turn-aware) + R18 (rebind writes turn key).
-  // Bg invocation_created handler does NOT have a boundary loop (different semantics
-  // — bg bubbles finalize via done events, not invocation_created), so dispatchBg
-  // can't reach the active-path boundary code path being fixed.
+  // Bg invocation_created now has its own same-cat stale-boundary cleanup for live
+  // stream/hydration parity. This test still targets a different invariant: dual-id
+  // rebind must write the turn key so subsequent chunks for the same turn survive
+  // stale checks.
 
   it('R18 (cloud Codex P1 on R17): bg invocation_created rebind writes turn key so subsequent dual-id chunks survive stale check', () => {
     // Cloud Codex R17 P1 (line 2800 stale check):

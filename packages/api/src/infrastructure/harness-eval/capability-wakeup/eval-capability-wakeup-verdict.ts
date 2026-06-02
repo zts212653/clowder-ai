@@ -1,14 +1,14 @@
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
+import {
+  assertCanCrossThreadHandoff,
+  parseVerdictHandoffPacket,
+  type VerdictHandoffPacket,
+} from '../verdict-handoff.js';
 import type {
   CapabilityMissLabel,
   CapabilityName,
   ClassifiedCapabilityWakeupTrial,
 } from './eval-capability-wakeup-types.js';
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './eval-domain-registry.js';
-import {
-  assertCanCrossThreadHandoff,
-  parseVerdictHandoffPacket,
-  type VerdictHandoffPacket,
-} from './verdict-handoff.js';
 
 export function buildCapabilityWakeupVerdictHandoff(input: {
   domain: EvalDomainRegistryEntry;

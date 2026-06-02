@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { VerdictHandoffPacket } from './verdict-handoff.js';
+import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 
 // ---- Schema ----
 

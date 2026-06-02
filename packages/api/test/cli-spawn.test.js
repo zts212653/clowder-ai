@@ -1860,6 +1860,241 @@ test('F212 AC-A8: NDJSON stream error event triggers cliDiagnostics.reasonCode',
   assert.equal(err.cliDiagnostics.reasonCode, 'model_not_found');
 });
 
+// =============================================================================
+// F212 Phase F — Empty-stderr observability follow-up (砚砚 catch + CVO 2026-05-30)
+// =============================================================================
+
+// Test stub helper for P1-1 (砚砚 R1): captures log calls so we can assert the actual
+// backend-log contract (AC-F1 unconditional 'CLI abnormal exit' + AC-F3 invocationId in
+// stderr log). Without this stub, AC-F6 tests only proved publicHint behavior and the
+// log.error lines could be deleted without test failure — exactly the gap 砚砚 caught.
+function createLogStub() {
+  const calls = [];
+  return {
+    stub: { error: (payload, msg) => calls.push({ payload, msg }) },
+    calls,
+    callsByMsg: (msg) => calls.filter((c) => c.msg === msg),
+  };
+}
+
+test('F212 Phase F (AC-F1 + AC-F6, 砚砚 P1-1): abnormal exit writes "CLI abnormal exit" log UNCONDITIONALLY with full payload (empty stderr)', async () => {
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const { stub, callsByMsg } = createLogStub();
+
+  const promise = collect(
+    spawnCli(
+      { command: 'codex.cmd', args: ['exec'], invocationId: 'inv-empty-windows', diagnosticLogger: stub },
+      { spawnFn },
+    ),
+  );
+  // No stderr — Windows codex.cmd empty-stderr case
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+  await promise;
+
+  // P1-1: assert the actual log was written (not just inferred from publicHint)
+  const abnormalLogs = callsByMsg('CLI abnormal exit');
+  assert.equal(abnormalLogs.length, 1, 'exactly one CLI abnormal exit log per abnormal exit');
+  const payload = abnormalLogs[0].payload;
+  // Full F1 payload contract verified — deleting any field below makes this fail
+  assert.equal(payload.invocationId, 'inv-empty-windows', 'invocationId in log (砚砚 P1-1: was untested)');
+  assert.equal(payload.command, 'codex.cmd');
+  assert.equal(payload.exitCode, 1);
+  assert.equal(payload.signal, null);
+  assert.equal(payload.stderrEmpty, true, 'empty-stderr flag — the Windows codex.cmd 死胡同 case');
+  assert.equal(payload.streamErrorCount, 0);
+  // P1-2: cwd MUST NOT leak into payload even though production code passes it
+  assert.ok(!('cwd' in payload), `cwd MUST NOT appear in log (砚砚 P1-2 安全边界): ${JSON.stringify(payload)}`);
+});
+
+test('F212 Phase F (AC-F2 scope): "CLI abnormal exit" log fires when LOG_CLI_STDERR is UNSET (gate doesn\'t bleed)', async () => {
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const { stub, callsByMsg } = createLogStub();
+
+  const promise = collect(
+    spawnCli({ command: 'codex', args: [], invocationId: 'inv-gate-unset', diagnosticLogger: stub }, { spawnFn }),
+  );
+  proc.stderr.write('Some stderr content\n'); // non-empty stderr
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+  await promise;
+
+  // AC-F2: env gate does NOT control whether 'CLI abnormal exit' fires
+  assert.equal(callsByMsg('CLI abnormal exit').length, 1, "'CLI abnormal exit' fires regardless of env gate");
+  // The stderr log IS gated by LOG_CLI_STDERR — unset → no stderr log
+  assert.equal(callsByMsg('CLI stderr (LOG_CLI_STDERR=1)').length, 0, 'stderr log gated off when LOG_CLI_STDERR unset');
+});
+
+test('F212 Phase F (AC-F3, 砚砚 P1-1): stderr log payload includes invocationId for cross-log correlation', async () => {
+  process.env.LOG_CLI_STDERR = '1'; // enable stderr log so we can inspect its payload
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+  const { stub, callsByMsg } = createLogStub();
+
+  const promise = collect(
+    spawnCli({ command: 'codex', args: [], invocationId: 'inv-stderr-log-id', diagnosticLogger: stub }, { spawnFn }),
+  );
+  proc.stderr.write('401 Unauthorized\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+  await promise;
+  delete process.env.LOG_CLI_STDERR;
+
+  const stderrLogs = callsByMsg('CLI stderr (LOG_CLI_STDERR=1)');
+  assert.equal(stderrLogs.length, 1, 'stderr log fires when env=1');
+  // AC-F3 P1-1: invocationId in payload — deleting this assertion would let us regress
+  assert.equal(
+    stderrLogs[0].payload.invocationId,
+    'inv-stderr-log-id',
+    'invocationId in stderr log so frontend debugRef.invocationId can grep to this entry',
+  );
+});
+
+// F212 Phase F (砚砚 R2 post-merge follow-up): timeout branch was missing the same fixes
+// as abnormal-exit branch — buildCliDiagnostics call had no stderrEmpty (AC-F4 dead-end
+// reappears) + timeout stderr log used module log directly (AC-F3 contract untestable).
+// Without these tests, removing stderrEmpty pass-through OR removing diagnosticLogger
+// injection in timeout branch would not be caught by the existing AC-F3/F4 suite.
+
+test('F212 Phase F (AC-F4, 砚砚 R2 P1): timeout + empty stderr + unknown → honest hint, NO LOG_CLI_STDERR dangle', async () => {
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess(); // default exitOnKill — kills on timeout
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'codex.cmd', args: [], timeoutMs: 50, invocationId: 'inv-timeout-empty' }, { spawnFn }),
+  );
+  // Let timeout fire, then close stdout so the generator returns
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  proc.stdout.end();
+
+  const results = await promise;
+  const timeout = results.find((r) => r?.__cliTimeout);
+  assert.ok(timeout, 'should yield __cliTimeout when no stderr + timeout fires');
+  assert.equal(timeout.cliDiagnostics.reasonCode, undefined, 'unknown classifier (empty rawText)');
+  // Same AC-F4 assertions as abnormal-exit branch
+  assert.ok(
+    timeout.cliDiagnostics.publicHint.includes('没有输出 stderr'),
+    `timeout empty-stderr hint must mention "没有输出 stderr": ${timeout.cliDiagnostics.publicHint}`,
+  );
+  assert.ok(
+    timeout.cliDiagnostics.publicHint.includes('invocationId'),
+    `timeout empty-stderr hint must mention invocationId: ${timeout.cliDiagnostics.publicHint}`,
+  );
+  // Critical regression guard: do NOT dangle LOG_CLI_STDERR=1 false hope
+  assert.ok(
+    !timeout.cliDiagnostics.publicHint.includes('LOG_CLI_STDERR'),
+    `timeout empty-stderr hint must NOT mention LOG_CLI_STDERR (would resurface dead-end UX): ${timeout.cliDiagnostics.publicHint}`,
+  );
+});
+
+test('F212 Phase F (AC-F3, 砚砚 R2 P1): timeout stderr log routes through diagnosticLogger + carries invocationId', async () => {
+  process.env.LOG_CLI_STDERR = '1';
+  const proc = createMockProcess(); // default exitOnKill — kills on timeout
+  const spawnFn = createMockSpawnFn(proc);
+  const { stub, callsByMsg } = createLogStub();
+
+  const promise = collect(
+    spawnCli(
+      {
+        command: 'codex',
+        args: [],
+        timeoutMs: 50,
+        invocationId: 'inv-timeout-stderr-id',
+        diagnosticLogger: stub,
+      },
+      { spawnFn },
+    ),
+  );
+  // Write stderr BEFORE timeout fires so the branch sees non-empty stderr and emits the log
+  proc.stderr.write('401 Unauthorized\n');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  proc.stdout.end();
+  await promise;
+  delete process.env.LOG_CLI_STDERR;
+
+  // AC-F3 spec: 'CLI stderr on timeout (LOG_CLI_STDERR=1)' MUST also flow through the
+  // stub (R2 P1 catch was: was hard-using module log → stub silent → contract untestable)
+  const timeoutStderrLogs = callsByMsg('CLI stderr on timeout (LOG_CLI_STDERR=1)');
+  assert.equal(timeoutStderrLogs.length, 1, 'timeout stderr log MUST route through diagnosticLogger (R2 P1 fix)');
+  assert.equal(
+    timeoutStderrLogs[0].payload.invocationId,
+    'inv-timeout-stderr-id',
+    'invocationId in timeout stderr log payload (AC-F3 contract)',
+  );
+});
+
+test('F212 Phase F (AC-F4): exit 1 + empty stderr → cliDiagnostics carries empty-stderr honest hint (no LOG_CLI_STDERR mention)', async () => {
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'codex.cmd', args: ['exec'], invocationId: 'inv-empty-windows' }, { spawnFn }),
+  );
+  // No stderr — replicates Windows codex.cmd exit 1 case
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err, 'should yield __cliError on exit 1');
+  assert.equal(err.exitCode, 1);
+  // unknown reasonCode (no rawText to classify)
+  assert.equal(err.cliDiagnostics.reasonCode, undefined);
+  // F4: hint mentions empty stderr + invocationId + suggests running CLI directly
+  assert.ok(
+    err.cliDiagnostics.publicHint.includes('没有输出 stderr'),
+    `hint should mention empty stderr: ${err.cliDiagnostics.publicHint}`,
+  );
+  assert.ok(
+    err.cliDiagnostics.publicHint.includes('invocationId'),
+    `hint should mention invocationId search: ${err.cliDiagnostics.publicHint}`,
+  );
+  // Critical: hint must NOT dangle LOG_CLI_STDERR=1 false hope
+  assert.ok(
+    !err.cliDiagnostics.publicHint.includes('LOG_CLI_STDERR'),
+    `hint must NOT mention LOG_CLI_STDERR for empty stderr: ${err.cliDiagnostics.publicHint}`,
+  );
+});
+
+test('F212 Phase F (AC-F5): exit 1 + non-empty unclassified stderr → cliDiagnostics points to env-summary endpoint (NO absolute path)', async () => {
+  delete process.env.LOG_CLI_STDERR;
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(
+    spawnCli({ command: 'opencode', args: [], invocationId: 'inv-nonempty-unknown' }, { spawnFn }),
+  );
+  // Non-empty but non-classifiable stderr
+  proc.stderr.write('Some unfamiliar tool-specific error text\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+  const err = results.find((r) => r?.__cliError);
+  assert.ok(err, 'should yield __cliError on exit 1');
+  assert.equal(err.cliDiagnostics.reasonCode, undefined);
+  // F5: hint points users to env-summary (NOT absolute path)
+  assert.ok(
+    err.cliDiagnostics.publicHint.includes('env-summary'),
+    `hint should point to env-summary: ${err.cliDiagnostics.publicHint}`,
+  );
+  assert.ok(
+    err.cliDiagnostics.publicHint.includes('runtimeLogs'),
+    `hint should mention runtimeLogs key: ${err.cliDiagnostics.publicHint}`,
+  );
+  // F212 safety: NO absolute path leak in hint
+  assert.ok(
+    !err.cliDiagnostics.publicHint.match(/\/Users\/|\/home\/|C:\\\\/),
+    `hint must NOT contain absolute path: ${err.cliDiagnostics.publicHint}`,
+  );
+});
+
 test('F212 AC-A7: stderr NOT logged when LOG_CLI_STDERR unset (default)', async () => {
   // We can't easily stub the module logger, so smoke-test that no exception is thrown
   // and that __cliError still emits cliDiagnostics correctly.

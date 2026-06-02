@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { ensureEvalDomainThreads } from '../../dist/infrastructure/harness-eval/eval-hub-thread-ensure.js';
+import { ensureEvalDomainThreads } from '../../dist/infrastructure/harness-eval/hub/eval-hub-thread-ensure.js';
 
 describe('ensureEvalDomainThreads', () => {
   function makeDomain(domainId, systemThreadId, displayName) {

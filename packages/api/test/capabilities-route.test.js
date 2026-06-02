@@ -724,7 +724,7 @@ describe('GET /api/capabilities (Fastify)', () => {
 
     const projectDir = join('/tmp', `cap-route-test-dir-symlink-${Date.now()}`);
     const homeDir = join('/tmp', `cap-route-test-home-${Date.now()}`);
-    const sourceSkillsDir = join(process.cwd(), '..', '..', 'cat-cafe-skills');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
 
     await Promise.all([

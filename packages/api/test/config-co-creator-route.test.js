@@ -108,6 +108,7 @@ describe('PATCH /api/config/co-creator', () => {
         name: 'Lang',
         aliases: ['共创伙伴', 'Lang'],
         mentionPatterns: ['@co-worker', '@lang'],
+        timeZone: 'Asia/Tokyo',
         avatar: '/uploads/owner-lang.png',
         color: { primary: '#D49266', secondary: '#FFE4D6' },
       },
@@ -118,6 +119,7 @@ describe('PATCH /api/config/co-creator', () => {
     assert.equal(body.config.coCreator.name, 'Lang');
     assert.deepEqual(body.config.coCreator.aliases, ['共创伙伴', 'Lang']);
     assert.deepEqual(body.config.coCreator.mentionPatterns, ['@co-worker', '@lang']);
+    assert.equal(body.config.coCreator.timeZone, 'Asia/Tokyo');
     assert.equal(body.config.coCreator.avatar, '/uploads/owner-lang.png');
     assert.deepEqual(body.config.coCreator.color, { primary: '#D49266', secondary: '#FFE4D6' });
   });
@@ -147,5 +149,35 @@ describe('PATCH /api/config/co-creator', () => {
 
     assert.equal(res.statusCode, 400);
     assert.match(res.json().error, /co-creator mention alias "@opus" conflicts with cat "opus"/);
+  });
+
+  it('rejects invalid owner timezone before writing runtime catalog', async () => {
+    const projectRoot = createProjectRoot();
+    savedTemplatePath = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    app = Fastify();
+    await app.register(configRoutes, { projectRoot });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/co-creator',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      payload: {
+        name: 'Co-worker',
+        aliases: ['共创伙伴'],
+        mentionPatterns: ['@co-worker', '@owner'],
+        timeZone: 'Mars/Base',
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+    const body = res.json();
+    assert.equal(body.error, 'Invalid request');
+    assert.equal(body.details[0].message, 'timeZone must be a valid IANA timezone');
   });
 });

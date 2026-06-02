@@ -7,6 +7,13 @@ export interface GuardianMatchOptions {
   reviewer: CatId;
   policy?: Partial<ReviewPolicy>;
   threadActivity?: Record<string, number>;
+  /**
+   * Roster override (test seam). Production callers omit this and fall back to
+   * the live `getRoster()`. Tests inject an explicit roster so guardian matching
+   * is hermetic to the global cat-config singleton + ambient `.cat-cafe` catalog
+   * artifacts other concurrent test files may leave behind (F211 candidates=0 flake).
+   */
+  roster?: Roster;
 }
 
 export interface GuardianMatchResult {
@@ -17,7 +24,7 @@ export interface GuardianMatchResult {
 }
 
 export async function resolveGuardian(options: GuardianMatchOptions): Promise<GuardianMatchResult> {
-  const roster = getRoster();
+  const roster = options.roster ?? getRoster();
   const defaultPolicy = getReviewPolicy();
   const policy: ReviewPolicy = { ...defaultPolicy, ...options.policy };
   const authorId = options.author as string;

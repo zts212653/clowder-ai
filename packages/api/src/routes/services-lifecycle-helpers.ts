@@ -2,31 +2,49 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
 import { MODEL_ENV_VARS, PORT_ENV_VARS } from '../domains/services/service-manifest.js';
+import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 
 export const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30 * 60 * 1000;
 const LIFECYCLE_RUN_SETTLEMENT = Symbol('lifecycleRunSettlement');
+const LIFECYCLE_OWNER_ERROR = Symbol('lifecycleOwnerError');
 
 function resolveSessionUserId(request: FastifyRequest): string | null {
   const userId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
   return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
 }
 
+function setLifecycleOwnerError(reply: FastifyReply, error: string): void {
+  (reply as FastifyReply & { [LIFECYCLE_OWNER_ERROR]?: string })[LIFECYCLE_OWNER_ERROR] = error;
+}
+
 export function requireLifecycleOwner(request: FastifyRequest, reply: FastifyReply): string | null {
   const userId = resolveSessionUserId(request);
   if (!userId) {
     reply.status(401);
+    setLifecycleOwnerError(reply, 'Authentication required');
+    return null;
+  }
+  if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
+    reply.status(403);
+    setLifecycleOwnerError(
+      reply,
+      'Service lifecycle access from non-localhost requires DEFAULT_OWNER_USER_ID to be configured',
+    );
     return null;
   }
   const gateResult = resolveOwnerGate(userId);
   if (gateResult) {
     reply.status(gateResult.status);
+    setLifecycleOwnerError(reply, gateResult.error);
     return null;
   }
   return userId;
 }
 
 export function lifecycleOwnerError(reply: FastifyReply): { error: string } {
+  const storedError = (reply as FastifyReply & { [LIFECYCLE_OWNER_ERROR]?: string })[LIFECYCLE_OWNER_ERROR];
+  if (storedError) return { error: storedError };
   if (reply.statusCode === 401) return { error: 'Authentication required' };
   return {
     error: 'Service lifecycle writes can only be performed by the configured owner',

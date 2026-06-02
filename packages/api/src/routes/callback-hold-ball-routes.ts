@@ -158,8 +158,13 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const taskId = `hold-ball-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const fireAt = Date.now() + wakeAfterMs;
+    // F167 Phase M (M-2): de-frozen wake copy — guide re-evaluation instead of
+    // commanding execution of a possibly-stale reason. The wake fires later (or after
+    // defer), by which time the awaited condition may have changed; so prompt the cat
+    // to re-judge rather than replay "球仍在你手上，现在执行".
     const wakeMessage =
-      `持球唤醒：${reason}。球仍在你手上。现在执行：${nextStep}。` + '若条件仍未满足：再持一次或升级；禁止无限持球。';
+      `持球唤醒：你之前因为「${reason}」持球。先重新评估当前是否还需要等——` +
+      `若条件已满足，继续：${nextStep}；若仍未满足，可再持一次或升级（禁止无限持球）。`;
 
     const taskParams = {
       trigger: { type: 'once' as const, fireAt },
@@ -167,6 +172,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         message: wakeMessage,
         targetCatId: catIdStr,
         triggerUserId: userId,
+        // F167 Phase M (M-1 activation): pre-fire defer. If this cat's thread is busy
+        // when the wake fires, the scheduler re-arms instead of delivering a stale wake.
+        // Mechanism is scheduler-generic (firePolicy); hold_ball opts in here.
+        deferWhileThreadBusy: true,
       },
       deliveryThreadId: threadId as string | null,
     };

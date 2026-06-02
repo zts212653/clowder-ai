@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { resolveA2aEvidenceBundle } from '../../dist/infrastructure/harness-eval/eval-a2a-artifact-resolver.js';
+import { resolveA2aEvidenceBundle } from '../../dist/infrastructure/harness-eval/a2a/eval-a2a-artifact-resolver.js';
 
 const verdictId = '2026-05-22-eval-a2a-live-verdict';
 

@@ -5,7 +5,7 @@
  * external project CLAUDE.md/AGENTS.md/GEMINI.md/KIMI.md files.
  *
  * Port values are read from environment variables at runtime,
- * falling back to .env.example defaults (3003/3004/6399/6398).
+ * falling back to home defaults (3003/3004/6399/6398).
  * Fixes #601 (Redis port hardcoding) and #602 (frontend/API port hardcoding).
  */
 import { createHash } from 'node:crypto';
@@ -23,6 +23,8 @@ export const MANAGED_BLOCK_END = '<!-- CAT-CAFE-GOVERNANCE-END -->';
  *  External caches assuming "same cat-cafe version → same governance block"
  *  must account for this — use checksum as cache key, not version alone. */
 function getHardConstraints(): string {
+  // Home defaults: frontend 3001 / API 3002 (sanitizer transforms `?? '3003'` → `?? '3003'`,
+  // `?? '3004'` → `?? '3004'` on outbound sync). Redis ports stay as-is across both repos.
   const frontendPort = process.env.FRONTEND_PORT ?? '3003';
   const apiPort = process.env.API_SERVER_PORT ?? '3004';
   const redisPort = process.env.REDIS_PORT ?? '6399';

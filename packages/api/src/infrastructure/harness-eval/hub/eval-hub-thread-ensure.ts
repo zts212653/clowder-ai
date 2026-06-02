@@ -1,4 +1,4 @@
-import type { IThreadStore } from '../../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 
 export interface EvalDomainThreadSpec {
   domainId: string;

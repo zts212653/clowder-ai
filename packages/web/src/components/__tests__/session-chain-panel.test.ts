@@ -124,6 +124,132 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('2 sessions');
   });
 
+  it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
+    const corpse = (seq: number) => ({
+      id: `corpse-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealed',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealedAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'tool_conflict',
+    });
+    mockSessionsResponse([
+      {
+        id: 'real-sealed',
+        catId: 'antig-opus',
+        seq: 9,
+        status: 'sealed',
+        messageCount: 12,
+        createdAt: Date.now() - 5000,
+        sealedAt: Date.now() - 4000,
+        sealReason: 'runtime_disconnected',
+      },
+      corpse(1),
+      corpse(2),
+      corpse(3),
+      corpse(4),
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    // F201-churn: 4 empty (0-msg) tool_conflict retry corpses collapse into ONE summary,
+    // leaving only the real sealed session as a full card. Transparency preserved via the
+    // summary's visible count; the UI no longer litters one corpse card per F201 retry.
+    const sealedCards = container.querySelectorAll('[data-testid="session-card-sealed"]');
+    expect(sealedCards.length).toBe(1);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('4');
+    expect(summary?.textContent).toContain('重试残骸');
+  });
+
+  it('collapses repeated runtime-tagged retry fragments without relying on sealReason heuristics', async () => {
+    const fragment = (seq: number) => ({
+      id: `fragment-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealed',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealedAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'model_capacity',
+      runtimeSession: {
+        runtime: 'antigravity-desktop',
+        runtimeSessionId: `cascade-fragment-${seq}`,
+        lifecycleState: 'sealed',
+        lastObservedAt: Date.now() - (10 - seq) * 1000,
+        retryFragment: {
+          kind: 'retry',
+          retryReason: 'model_capacity',
+          nextRuntimeSessionId: `cascade-next-${seq}`,
+          detectedAt: Date.now() - (10 - seq) * 1000,
+        },
+      },
+    });
+    mockSessionsResponse([fragment(1), fragment(2), fragment(3)]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('3');
+    expect(summary?.textContent).toContain('重试片段');
+  });
+
+  it('collapses a single runtime-tagged retry fragment', async () => {
+    mockSessionsResponse([
+      {
+        id: 'fragment-single',
+        catId: 'antig-opus',
+        seq: 1,
+        status: 'sealed',
+        messageCount: 0,
+        createdAt: Date.now() - 5000,
+        sealedAt: Date.now() - 4000,
+        sealReason: 'model_capacity',
+        runtimeSession: {
+          runtime: 'antigravity-desktop',
+          runtimeSessionId: 'cascade-fragment-single',
+          lifecycleState: 'sealed',
+          lastObservedAt: Date.now() - 4000,
+          retryFragment: {
+            kind: 'retry',
+            retryReason: 'model_capacity',
+            nextRuntimeSessionId: 'cascade-next-single',
+            detectedAt: Date.now() - 4000,
+          },
+        },
+      },
+    ]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
+    const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
+    expect(summary).not.toBeNull();
+    expect(summary?.textContent).toContain('1');
+    expect(summary?.textContent).toContain('重试片段');
+  });
+
+  it('does NOT collapse in-flight sealing 0-msg tool_conflict records (砚砚 review P2)', async () => {
+    // requestSeal() writes sealReason while status is still 'sealing' (async-finalizes to 'sealed'
+    // later) — a sealing record must keep its own card (live status + 查看/解封), NOT be folded.
+    const sealingCorpseLike = (seq: number) => ({
+      id: `sealing-${seq}`,
+      catId: 'antig-opus',
+      seq,
+      status: 'sealing',
+      messageCount: 0,
+      createdAt: Date.now() - (10 - seq) * 1000,
+      sealReason: 'tool_conflict',
+    });
+    mockSessionsResponse([sealingCorpseLike(1), sealingCorpseLike(2)]);
+    renderPanel('thread-1');
+    await flushFetch();
+    expect(container.querySelector('[data-testid="session-card-retry-collapsed"]')).toBeNull();
+    expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(2);
+  });
+
   it('renders active session with seq number, cat badge, and clickable session ID', async () => {
     mockSessionsResponse([
       { id: 'ses_abc12345xyz', catId: 'opus', seq: 2, status: 'active', messageCount: 8, createdAt: Date.now() - 5000 },

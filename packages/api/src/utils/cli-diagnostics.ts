@@ -94,8 +94,23 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
 
 const UNKNOWN_TEXT = {
   summary: '未识别的 CLI 错误',
+  // Legacy fallback (callers without stderrEmpty signal). Phase F adds split-by-stderrEmpty
+  // variants below — UNKNOWN_HINT_EMPTY_STDERR for empty case (don't promise more from
+  // env var), UNKNOWN_HINT_HAS_STDERR for non-empty (point to env-summary, NOT raw path).
   hint: '详细诊断信息见后端日志（启用：环境变量 LOG_CLI_STDERR=1）。',
 };
+
+// F212 Phase F (AC-F4): empty-stderr honest hint. Do NOT mention LOG_CLI_STDERR — empty
+// stderr means env gate would write nothing anyway (砚砚 cross thread 2026-05-30 catch:
+// previous hint suggested LOG_CLI_STDERR=1 gives more info, but for empty-stderr it doesn't).
+const UNKNOWN_HINT_EMPTY_STDERR =
+  'CLI 已退出但没有输出 stderr。请在后端日志中用 debugRef.invocationId 搜索；如仍无结果，请直接运行该 CLI 并分别捕获 stdout/stderr。';
+
+// F212 Phase F (AC-F5): non-empty stderr hint. Point to /api/config/env-summary for log dir
+// lookup (the response carries paths.dataDirs.runtimeLogs) — never embed absolute path in
+// payload (砚砚 push back: F212 安全边界 = no raw path / no path leak).
+const UNKNOWN_HINT_HAS_STDERR =
+  '详细诊断信息见后端日志。运行时日志目录可通过 GET /api/config/env-summary 的 paths.dataDirs.runtimeLogs 字段查询，再用 debugRef.invocationId 搜索对应行。';
 
 // =============================================================================
 // safeExcerpt extraction (KD-2: sanitize first, slice after)
@@ -189,6 +204,10 @@ export function buildCliDiagnostics(args: {
    *  Claude CLI result error event). Safe to surface even when reasonCode is unknown — it is
    *  CC's own standard wording, NOT raw stderr. */
   structuredErrorText?: string;
+  /** F212 Phase F (AC-F4/F5): caller signals whether stderr was empty so we can pick the
+   *  honest unknown-fallback hint (don't dangle LOG_CLI_STDERR=1 for empty-stderr cases).
+   *  Omitted = legacy hint (backward-compat for callers not yet on Phase F contract). */
+  stderrEmpty?: boolean;
 }): CliDiagnostics {
   const reasonCode = classifyCliError(args.rawText);
 
@@ -236,9 +255,82 @@ export function buildCliDiagnostics(args: {
   }
 
   // Truly unknown (no structured CC error) — keep KD-1: no safeExcerpt.
+  // F212 Phase F (AC-F4/F5): pick honest unknown hint by stderrEmpty signal when caller
+  // provides it; fall back to legacy hint for backward-compat (callers without Phase F awareness).
+  let unknownHint: string = UNKNOWN_TEXT.hint;
+  if (args.stderrEmpty === true) unknownHint = UNKNOWN_HINT_EMPTY_STDERR;
+  else if (args.stderrEmpty === false) unknownHint = UNKNOWN_HINT_HAS_STDERR;
   return {
     publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : UNKNOWN_TEXT.summary,
-    publicHint: UNKNOWN_TEXT.hint,
+    publicHint: unknownHint,
     debugRef: args.debugRef,
+  };
+}
+
+// =============================================================================
+// F212 Phase F — abnormal-exit structured diagnostic log payload (AC-F1, AC-F2)
+// =============================================================================
+
+/**
+ * F212 Phase F (AC-F1): structured payload written on every abnormal CLI exit,
+ * INDEPENDENT of `LOG_CLI_STDERR` env gate and INDEPENDENT of whether stderr is empty.
+ *
+ * Why: previously the cli-spawn abnormal exit branch only wrote `'CLI stderr ...'` log
+ * when `formatCliStderrForLog(stderrBuffer)` returned non-null (i.e. env=1 AND stderr
+ * non-empty). For the common Windows `codex.cmd exit 1 + empty stderr` case, this
+ * produced ZERO log lines → users got `publicHint = '见后端日志（启用 LOG_CLI_STDERR=1）'`
+ * but the log was always empty regardless. Dead-end UX (砚砚 cross thread 2026-05-30 catch).
+ *
+ * AC-F2 scope contract: `LOG_CLI_STDERR=1` env gate STILL controls only the raw/sanitized
+ * stderr content field (handled separately by `formatCliStderrForLog`). This helper's
+ * payload is unconditional — gate scope strictly does not bleed into the diagnostic log
+ * decision.
+ *
+ * AC-F1 fields: every field is searchable by ops / users.
+ *  - invocationId: lets users grep the log by the ID shown in the frontend debugRef
+ *  - command / exitCode / signal: matches the user-facing diagnostic
+ *  - reasonCode: links to the classified bucket (or null for unknown)
+ *  - stderrEmpty: boolean so an alert can fire on "abnormal exit AND no stderr" (the
+ *    case where users have nothing to grep)
+ *  - streamErrorCount: F212 AC-A8 carrier — NDJSON stream errors are another channel
+ *
+ * NOTE: cwd is intentionally NOT in this payload (砚砚 R1 P1-2 + cloud codex R1 P2 双源
+ * catch): sanitizeCliStderr only covers HOME-based paths, so non-HOME server installs
+ * (/srv, /workspace, /var/lib, D:\work) would leak raw absolute paths. cwd is also
+ * redundant with `command` (binary path conveys install context) + `invocationId`
+ * (lookup via thread/session metadata). Do NOT add cwd back without a full safety review.
+ */
+export interface CliExitDiagnosticPayload {
+  invocationId: string | null;
+  command: string;
+  exitCode: number | null;
+  signal: string | null;
+  reasonCode: CliErrorReasonCode | null;
+  stderrEmpty: boolean;
+  streamErrorCount: number;
+}
+
+export function buildCliExitDiagnostic(input: {
+  invocationId?: string;
+  command: string;
+  exitCode: number | null;
+  signal: string | null;
+  reasonCode?: CliErrorReasonCode;
+  stderrLength: number;
+  streamErrorCount: number;
+}): CliExitDiagnosticPayload {
+  // P1-2 (砚砚 R1): cwd field deliberately omitted. The shared sanitizeCliStderr only
+  // handles HOME / userProfile / C:\Users / /tmp paths — non-HOME server installs (/srv,
+  // /workspace, /var/lib, D:\work) would leak raw absolute paths into the error log. Per
+  // 砚砚 directive "无法证明安全就 omit"; cwd is also redundant with `command` (the binary
+  // path usually conveys install location) + invocationId (lookup via thread/session metadata).
+  return {
+    invocationId: input.invocationId ?? null,
+    command: input.command,
+    exitCode: input.exitCode,
+    signal: input.signal,
+    reasonCode: input.reasonCode ?? null,
+    stderrEmpty: input.stderrLength === 0,
+    streamErrorCount: input.streamErrorCount,
   };
 }

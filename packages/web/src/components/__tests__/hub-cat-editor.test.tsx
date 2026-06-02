@@ -71,8 +71,9 @@ async function changeField(
   });
 }
 
-function queryField<T extends HTMLElement>(container: HTMLElement, selector: string): T {
-  const element = container.querySelector(selector);
+function queryField<T extends HTMLElement>(_container: HTMLElement, selector: string): T {
+  // HubCatEditor uses createPortal(... , document.body), so query the body
+  const element = document.body.querySelector(selector);
   if (!element) {
     throw new Error(`Missing element: ${selector}`);
   }
@@ -162,12 +163,12 @@ describe('HubCatEditor', () => {
   it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
     for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'] as const) {
       await renderAdvancedRuntimeSection(clientId);
-      expect(container.textContent, clientId).toContain('额外 CLI 参数');
+      expect(document.body.textContent, clientId).toContain('额外 CLI 参数');
     }
 
     for (const clientId of ['antigravity', 'catagent'] as const) {
       await renderAdvancedRuntimeSection(clientId);
-      expect(container.textContent, clientId).not.toContain('额外 CLI 参数');
+      expect(document.body.textContent, clientId).not.toContain('额外 CLI 参数');
     }
   });
 
@@ -409,8 +410,8 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('认证信息');
-    expect(container.textContent).not.toContain('CLI Command');
+    expect(document.body.textContent).toContain('认证信息');
+    expect(document.body.textContent).not.toContain('CLI Command');
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
@@ -421,7 +422,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), 'codex-sponsor', 'change');
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -488,7 +491,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -559,7 +564,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark');
 
-    const voiceToggle = Array.from(container.querySelectorAll('button')).find((button) =>
+    const voiceToggle = Array.from(document.body.querySelectorAll('button')).find((button) =>
       button.textContent?.includes('Voice Config'),
     );
     await act(async () => {
@@ -579,7 +584,9 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -646,7 +653,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -711,7 +720,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Description"]'), '快速执行');
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-spark, @火花猫');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -790,7 +801,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Description"]'), '审查');
     await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-jinjianceng');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -799,7 +812,7 @@ describe('HubCatEditor', () => {
     // Save should be blocked — opencode+api_key without provider is rejected.
     const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
     expect(postCall).toBeUndefined();
-    expect(container.textContent).toContain('Provider 名称');
+    expect(document.body.textContent).toContain('Provider 名称');
   });
 
   it('resets defaultModel when switching Provider to prevent stale model carry-over', async () => {
@@ -962,8 +975,8 @@ describe('HubCatEditor', () => {
     await flushEffects();
 
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'antigravity', 'change');
-    expect(container.textContent).toContain('CLI Command');
-    expect(container.querySelector('select[aria-label="认证信息"]')).toBeNull();
+    expect(document.body.textContent).toContain('CLI Command');
+    expect(document.body.querySelector('select[aria-label="认证信息"]')).toBeNull();
   });
 
   it('shows the selected client builtin account together with all API key accounts', async () => {
@@ -1312,7 +1325,16 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    expect(modelInput.value).toBe('gpt-5.3-codex-spark');
+    const modelList = document.getElementById(modelInput.getAttribute('list') ?? '');
+    const modelSuggestions = Array.from(modelList?.querySelectorAll('option') ?? []).map((option) => option.value);
+    expect(modelSuggestions).toEqual(['gpt-5.3-codex-spark', 'gpt-5.4']);
+    expect(document.body.textContent).toContain('当前模型不在此认证信息的模型列表中');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1323,7 +1345,168 @@ describe('HubCatEditor', () => {
     );
     expect(patchCall).toBeTruthy();
     const payload = JSON.parse(String(patchCall?.[1]?.body));
-    expect(payload.defaultModel).toBe('gpt-5.3-codex-spark');
+    expect(payload.defaultModel).toBeUndefined();
+    expect(payload.clientId).toBeUndefined();
+    expect(payload.accountRef).toBeUndefined();
+  });
+
+  it('describes and saves edited custom models that are not listed in provider defaults', async () => {
+    const existingCat = {
+      id: 'runtime-codex',
+      name: 'runtime-codex',
+      displayName: '运行时缅因猫',
+      clientId: 'openai',
+      accountRef: 'codex-oauth',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@runtime-codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: 'review',
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'codex-oauth',
+            providers: [
+              {
+                id: 'codex-oauth',
+                provider: 'codex-oauth',
+                displayName: 'Codex (OAuth)',
+                name: 'Codex (OAuth)',
+                authType: 'oauth',
+                protocol: 'openai',
+                mode: 'subscription',
+                models: ['gpt-5.4'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/config' && !init?.method) {
+        return Promise.resolve(jsonResponse({ config: { cli: {}, codexExecution: {} } }));
+      }
+      if (path === '/api/cats/runtime-codex' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-codex' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-custom');
+
+    expect(document.body.textContent).toContain('修改后会保存你输入的自定义值');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/runtime-codex' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.defaultModel).toBe('gpt-5.4-custom');
+  });
+
+  it('does not rewrite unchanged Gemini model when saving alias-only edits', async () => {
+    const existingCat = {
+      id: 'gemini25',
+      name: '遇罗猫',
+      displayName: '遇罗猫',
+      variantLabel: 'Gemini 3.5 Flash',
+      clientId: 'google',
+      accountRef: 'gemini',
+      defaultModel: 'Gemini 3.5 Flash (High)',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@gemini25'],
+      avatar: '/avatars/gemini.png',
+      roleDescription: '审美与创意探索',
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'gemini',
+            providers: [
+              {
+                id: 'gemini',
+                provider: 'gemini',
+                displayName: 'Gemini (OAuth)',
+                name: 'Gemini (OAuth)',
+                authType: 'oauth',
+                protocol: 'google',
+                mode: 'subscription',
+                models: ['gemini-2.5-pro', 'gemini-3.1-pro-preview'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/gemini25' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'gemini25' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, { open: true, cat: existingCat, onClose: vi.fn(), onSaved: vi.fn() }),
+      );
+    });
+    await flushEffects();
+
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@gemini35, @gemini-35');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/gemini25' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.mentionPatterns).toEqual(['@gemini35', '@gemini-35']);
+    expect(payload.defaultModel).toBeUndefined();
+    expect(payload.clientId).toBeUndefined();
+    expect(payload.accountRef).toBeUndefined();
   });
 
   it('keeps unbound cats unbound when opening the editor', async () => {
@@ -1400,7 +1583,9 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1485,7 +1670,9 @@ describe('HubCatEditor', () => {
 
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]').value).toBe('');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1540,7 +1727,9 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     expect(saveButton).toBeTruthy();
     expect((saveButton as HTMLButtonElement).disabled).toBe(false);
 
@@ -1655,7 +1844,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label="认证信息"]'), '', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1733,7 +1924,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gemini-bridge');
     await changeField(queryField(container, 'input[aria-label="CLI Command"]'), 'chat --mode agent');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1820,7 +2013,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Max Messages"]'), '');
     await changeField(queryField(container, 'input[aria-label="Max Content Length Per Msg"]'), '');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -1873,7 +2068,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('4 项要么全部留空，要么全部填写');
+    expect(document.body.textContent).toContain('4 项要么全部留空，要么全部填写');
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '火花猫');
     await changeField(queryField(container, 'input[aria-label="Avatar"]'), '/avatars/spark.png');
@@ -1885,13 +2080,15 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Model"]'), 'gpt-5.4-mini');
     await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
+    expect(document.body.textContent).toContain('上下文预算要么全部留空，要么 4 项都填写');
     expect(mockApiFetch).not.toHaveBeenCalledWith('/api/cats', expect.objectContaining({ method: 'POST' }));
   });
 
@@ -1929,8 +2126,8 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
-    expect(container.textContent).not.toContain('删除成员');
+    expect(document.body.querySelector('button[aria-label="删除成员"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('删除成员');
   });
 
   it('prompts before closing when there are unsaved edits', async () => {
@@ -1951,7 +2148,7 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Name"]'), '临时名字');
 
-    const closeButton = container.querySelector('button[aria-label="关闭"]') as HTMLElement;
+    const closeButton = document.body.querySelector('button[aria-label="关闭"]') as HTMLElement;
     await act(async () => {
       closeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2007,7 +2204,7 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('button[aria-label="删除成员"]')).toBeNull();
+    expect(document.body.querySelector('button[aria-label="删除成员"]')).toBeNull();
   });
 
   it('loads runtime controls for an existing member and saves strategy separately', async () => {
@@ -2154,31 +2351,31 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('昵称');
-    expect(container.textContent).toContain('显示后缀');
-    expect(container.textContent).toContain('擅长领域');
-    expect(container.textContent).toContain('注意事项');
-    expect(container.textContent).toContain('Strengths');
-    expect(container.textContent).toContain('▸ Voice Config');
-    expect(container.textContent).toContain('展开后可配置 TTS clone 参考音频和文本。');
-    expect(container.textContent).toContain('别名与 @ 路由');
-    expect(container.textContent).toContain('认证与模型');
-    expect(container.textContent).toContain('Session Chain');
-    expect(container.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
-    expect(container.textContent).toContain('Codex Sandbox (Codex)');
-    expect(container.textContent).toContain('Codex Approval (Codex)');
-    expect(container.textContent).toContain('Codex Auth Mode (Codex)');
-    expect(container.textContent).not.toContain('这 3 项是全局运行参数（非成员级）');
+    expect(document.body.textContent).toContain('昵称');
+    expect(document.body.textContent).toContain('显示后缀');
+    expect(document.body.textContent).toContain('擅长领域');
+    expect(document.body.textContent).toContain('注意事项');
+    expect(document.body.textContent).toContain('Strengths');
+    expect(document.body.textContent).toContain('▸ Voice Config');
+    expect(document.body.textContent).toContain('展开后可配置 TTS clone 参考音频和文本。');
+    expect(document.body.textContent).toContain('别名与 @ 路由');
+    expect(document.body.textContent).toContain('认证与模型');
+    expect(document.body.textContent).toContain('Session Chain');
+    expect(document.body.textContent).toContain('── Codex 专属 (仅 Client=Codex 时显示) ──');
+    expect(document.body.textContent).toContain('Codex Sandbox (Codex)');
+    expect(document.body.textContent).toContain('Codex Approval (Codex)');
+    expect(document.body.textContent).toContain('Codex Auth Mode (Codex)');
+    expect(document.body.textContent).not.toContain('这 3 项是全局运行参数（非成员级）');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(false);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(false);
-    expect(container.textContent).toContain('运行时持久化');
-    expect(container.textContent).toContain('保存');
-    expect(container.textContent).not.toContain('删除成员');
-    expect(container.textContent).not.toContain('账号与运行方式');
-    expect(container.textContent).not.toContain('Primary');
-    expect(container.textContent).not.toContain('Secondary');
-    expect(container.textContent).not.toContain('Display Name');
+    expect(document.body.textContent).toContain('运行时持久化');
+    expect(document.body.textContent).toContain('保存');
+    expect(document.body.textContent).not.toContain('删除成员');
+    expect(document.body.textContent).not.toContain('账号与运行方式');
+    expect(document.body.textContent).not.toContain('Primary');
+    expect(document.body.textContent).not.toContain('Secondary');
+    expect(document.body.textContent).not.toContain('Display Name');
 
     await changeField(queryField(container, 'input[aria-label="Max Prompt Tokens"]'), '48000');
     await changeField(queryField(container, 'input[aria-label="Variant Label"]'), 'GPT-5.5');
@@ -2191,7 +2388,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'api_key', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2329,7 +2528,9 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '砚砚');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2406,13 +2607,15 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Session Chain 未开启');
-    expect(container.textContent).toContain('策略不会生效');
-    expect(container.querySelector('select[aria-label="Session Strategy"]')).toBeNull();
-    expect(container.querySelector('input[aria-label="Session Warn Threshold"]')).toBeNull();
-    expect(container.querySelector('input[aria-label="Session Action Threshold"]')).toBeNull();
+    expect(document.body.textContent).toContain('Session Chain 未开启');
+    expect(document.body.textContent).toContain('策略不会生效');
+    expect(document.body.querySelector('select[aria-label="Session Strategy"]')).toBeNull();
+    expect(document.body.querySelector('input[aria-label="Session Warn Threshold"]')).toBeNull();
+    expect(document.body.querySelector('input[aria-label="Session Action Threshold"]')).toBeNull();
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2426,7 +2629,7 @@ describe('HubCatEditor', () => {
       ([path, init]) => path === '/api/config/session-strategy/opencode' && init?.method === 'PATCH',
     );
     expect(strategyPatch).toBeFalsy();
-    expect(container.textContent).not.toContain('Warn Threshold 必须小于 Action Threshold');
+    expect(document.body.textContent).not.toContain('Warn Threshold 必须小于 Action Threshold');
     expect(onSaved).toHaveBeenCalled();
   });
 
@@ -2494,7 +2697,7 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Client"]'), 'openai', 'change');
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex Sandbox (Codex)');
+    expect(document.body.textContent).toContain('Codex Sandbox (Codex)');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').value).toBe(
       'danger-full-access',
     );
@@ -2515,7 +2718,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'on-request', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Auth Mode"]'), 'oauth', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2610,13 +2815,15 @@ describe('HubCatEditor', () => {
 
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex PATCH failed');
+    expect(document.body.textContent).toContain('Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -2683,15 +2890,17 @@ describe('HubCatEditor', () => {
     });
     await flushEffects();
 
-    expect(container.textContent).toContain('Codex 运行参数加载失败 (503)');
-    expect(container.textContent).toContain('Codex 配置基线未加载成功');
+    expect(document.body.textContent).toContain('Codex 运行参数加载失败 (503)');
+    expect(document.body.textContent).toContain('Codex 配置基线未加载成功');
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Sandbox"]').disabled).toBe(true);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Approval"]').disabled).toBe(true);
     expect(queryField<HTMLSelectElement>(container, 'select[aria-label^="Codex Auth Mode"]').disabled).toBe(true);
 
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2787,7 +2996,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'input[aria-label="Nickname"]'), '新昵称');
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2805,7 +3016,7 @@ describe('HubCatEditor', () => {
     expect(rollbackPayload.nickname).toBe('旧昵称');
     expect(rollbackPayload.defaultModel).toBe('gpt-5.4');
     expect(rollbackPayload.accountRef).toBe('codex-sponsor');
-    expect(container.textContent).toContain('Codex PATCH failed');
+    expect(document.body.textContent).toContain('Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -2920,7 +3131,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label^="Codex Sandbox"]'), 'danger-full-access', 'change');
     await changeField(queryField(container, 'select[aria-label^="Codex Approval"]'), 'never', 'change');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -2952,7 +3165,7 @@ describe('HubCatEditor', () => {
     expect(catPatches).toHaveLength(2);
     const rollbackPayload = JSON.parse(String(catPatches[1]?.[1]?.body));
     expect(rollbackPayload.nickname).toBe('旧昵称');
-    expect(container.textContent).toContain('Second Codex PATCH failed');
+    expect(document.body.textContent).toContain('Second Codex PATCH failed');
     expect(onSaved).not.toHaveBeenCalled();
   });
 
@@ -3056,7 +3269,9 @@ describe('HubCatEditor', () => {
     await changeField(queryField(container, 'select[aria-label="Session Strategy"]'), 'handoff', 'change');
     await changeField(queryField(container, 'input[aria-label="Session Warn Threshold"]'), '0.55');
 
-    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
     await act(async () => {
       saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
@@ -3068,7 +3283,7 @@ describe('HubCatEditor', () => {
     expect(strategyPatches).toHaveLength(2);
     expect(JSON.parse(String(strategyPatches[0]?.[1]?.body)).strategy).toBe('handoff');
     expect(JSON.parse(String(strategyPatches[1]?.[1]?.body)).strategy).toBe('compress');
-    expect(container.textContent).toContain('network dropped during cat save');
+    expect(document.body.textContent).toContain('network dropped during cat save');
     expect(onSaved).not.toHaveBeenCalled();
   });
 });

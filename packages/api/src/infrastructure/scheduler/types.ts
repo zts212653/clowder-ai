@@ -137,6 +137,24 @@ export interface ExecuteContext {
 }
 
 /**
+ * F167 Phase M: pre-fire defer policy (scheduler-generic mechanism).
+ * When the target thread is busy at fire time, the scheduler defers the once-task
+ * fire (re-arm with a fresh fireAt) instead of executing — avoiding stale-wake
+ * "history replay" while the cat is mid-work. hold_ball activates this; the busy
+ * signal is the scheduler's own mechanical occupancy check (NOT structured-callback
+ * subject binding — KD-27 safe).
+ */
+export interface FirePolicy {
+  deferWhileThreadBusy: boolean;
+  /** thread whose busy state gates the fire (hold_ball: the wake's delivery thread) */
+  threadId: string;
+  /** ms to wait before re-checking busy state before the next fire attempt (default 30_000) */
+  deferIntervalMs?: number;
+  /** max consecutive defers before force-firing (avoid infinite defer; default 10) */
+  maxDefers?: number;
+}
+
+/**
  * Phase 1a TaskSpec — six dimensions minus Context (Phase 2).
  * Gate returns workItems[] for per-subject execute + ledger.
  * Lease is task-level in Phase 1a; subject-level lease deferred to Phase 1b.
@@ -145,6 +163,8 @@ export interface TaskSpec_P1<Signal = unknown> {
   id: string;
   profile: TaskProfile;
   trigger: TriggerSpec;
+  /** F167 Phase M: optional pre-fire defer policy (busy thread → re-arm instead of fire) */
+  firePolicy?: FirePolicy;
   admission: {
     gate: (ctx: GateCtx) => Promise<GateResult<Signal>>;
   };

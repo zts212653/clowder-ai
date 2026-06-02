@@ -37,6 +37,26 @@ test('new probe starts in active state', () => {
   probe.stop();
 });
 
+test('treats tiny CPU drift as idle-silent so stall auto-kill can fire', () => {
+  const probe = new ProcessLivenessProbe(process.pid, {
+    sampleIntervalMs: 1,
+    softWarningMs: 100,
+    stallWarningMs: 300,
+    minCpuGrowthMs: 50,
+  });
+
+  probe.updateCpuSample(230);
+  probe.lastActivityAt = Date.now() - 1_000;
+  probe.updateCpuSample(270);
+
+  const warnings = probe.drainWarnings();
+  const stallWarning = warnings.find((w) => w.level === 'suspected_stall');
+  assert.equal(probe.getState(), 'idle-silent');
+  assert.equal(probe.shouldExtendTimeout(), false);
+  assert.equal(stallWarning?.state, 'idle-silent');
+  probe.stop();
+});
+
 test('detects dead process (PID does not exist)', async () => {
   const probe = new ProcessLivenessProbe(99999, { sampleIntervalMs: 50 });
   probe.start();

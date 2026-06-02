@@ -227,8 +227,8 @@ pnpm desktop:installer
 
 桌面应用的运行日志集中在用户数据目录：
 
-- **Windows**：`%LOCALAPPDATA%\Clowder AI\data\logs\` (`main.log` / `desktop.log` / `api\api.log`)
-- **macOS**：`~/Library/Application Support/Clowder AI/data/logs/` (`main.log` / `desktop.log` / `api/api.log`)
+- **Windows**：`%LOCALAPPDATA%\Cat Cafe\data\logs\` (`main.log` / `desktop.log` / `api\api.log`)
+- **macOS**：`~/Library/Application Support/Cat Cafe/data/logs/` (`main.log` / `desktop.log` / `api/api.log`)
 
 ## 故障排查
 

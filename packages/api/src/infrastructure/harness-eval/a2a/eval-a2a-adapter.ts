@@ -1,10 +1,10 @@
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from './eval-domain-registry.js';
-import type { ComponentHealth } from './f167-eval.js';
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
+import type { ComponentHealth } from '../f167-eval.js';
 import {
   assertCanCrossThreadHandoff,
   parseVerdictHandoffPacket,
   type VerdictHandoffPacket,
-} from './verdict-handoff.js';
+} from '../verdict-handoff.js';
 
 type FindingVerdict = Exclude<VerdictHandoffPacket['verdict'], 'keep_observe'>;
 

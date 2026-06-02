@@ -2311,9 +2311,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         callerTraceContext: record.traceContext,
       };
       try {
-        const { enqueued } = await enqueueA2ATargets(a2aDeps, a2aOpts);
-        // Fallback: voters that hit queue capacity limit → direct dispatch
-        const missed = mentionCatIds.filter((c) => !enqueued.includes(c));
+        const { enqueued, coalesced } = await enqueueA2ATargets(a2aDeps, a2aOpts);
+        // Fallback: voters that hit queue capacity limit → direct dispatch.
+        // F216 AC-D5: coalesced voters are already handled (content merged into existing entry),
+        // so they must NOT be counted as missed. Only truly unhandled cats get direct dispatch.
+        const handled = new Set([...enqueued, ...(coalesced ?? [])]);
+        const missed = mentionCatIds.filter((c) => !handled.has(c));
         if (missed.length > 0) {
           app.log.info(
             { threadId: record.threadId, missed, enqueued },

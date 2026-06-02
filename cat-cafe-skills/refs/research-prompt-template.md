@@ -53,6 +53,12 @@
 - [ ] 开源项目实现（GitHub repo、design doc）
 - [ ] 竞品/同行方案文档
 
+并对每个会进入结论的高风险 claim 做信源卫生标注：
+- [ ] **Primary Source Trace**：数字 / benchmark / 因果 claim 追到原始论文、官方文档、实验报告或数据集；互引博客不算独立来源。
+- [ ] **Conflict of Interest**：标出 vendor / 咨询 / 课程 / 投资方 / 媒体流量动机；商业来源只能作为线索或带 caveat 的证据。
+- [ ] **Temporal Applicability**：记录发布时间、测试年份、模型/版本；AI 领域旧模型数据不得直接外推到新模型。
+- [ ] **Object Applicability**：确认证据测量对象和本次结论对象一致；比如 GPT-4.1 / Claude 3.7 数据不能直接证明 GPT-5 / Opus 4.6 行为。
+
 ## 5. Local Constraints（我们的约束）{必填}
 
 调研结论必须在以下约束下可行：

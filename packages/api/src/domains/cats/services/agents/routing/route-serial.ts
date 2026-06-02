@@ -80,6 +80,7 @@ import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentServi
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
   isSubstantiveTool,
+  peekStreakOnPush,
   registerWorklist,
   unregisterWorklist,
   updateStreakOnPush,
@@ -104,6 +105,7 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+import { resolveRoutingDecisions } from './routing-decision.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 import { shouldWarnVerdictWithoutPass } from './verdict-detect.js';
 import { shouldWarnVoidHold } from './void-hold-detect.js';
@@ -1710,35 +1712,61 @@ export async function* routeSerial(
           let dispatchSpan: Span | undefined;
           const pendingTail = worklist.slice(index + 1);
           const pendingOriginalTargets = targetCats.slice(index + 1);
+          // F216 c1.3 + P1-2 (砚砚 review): route each mentioned cat through the pure
+          // resolveRoutingDecisions function (unifies the depth/dedup/pendingTail/streak/fairness guards
+          // that used to be inline here + duplicated in the relay path). Resolve+apply ONE cat at a time
+          // so each target's decision observes the prior targets' mutations (a2aCount++ and streak
+          // update) — matching the original sequential semantics. A single batch resolve would freeze
+          // every target's streak peek against the pre-loop streakPair: e.g. "@gemini @codex" with a hot
+          // opus<->codex streak would wrongly block @codex even though processing @gemini first resets
+          // the pair. The decision layer PEEKS streak read-only; this execution layer does the real
+          // updateStreakOnPush mutation + worklist.push + span + yield (砚砚 OQ3: side effects stay here).
+          // callerActivity is loop-invariant (same for every target this turn) → hoist once.
+          const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
           for (const nextCat of a2aMentions) {
-            if (worklistEntry.a2aCount >= maxDepth) break;
-            // A2A cross-path dedup: skip if this cat is actively processing via callback (InvocationQueue)
-            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
-              );
-              continue;
-            }
-            if (pendingTail.includes(nextCat)) {
-              // Keep original user-selected targets replying to user, not to another cat.
-              if (!pendingOriginalTargets.includes(nextCat)) {
-                worklistEntry.a2aFrom.set(nextCat, catId);
-                // F121: response-text path — set trigger message for auto-replyTo
-                if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+            const [decision] = resolveRoutingDecisions(
+              { type: 'inline_mention', cats: [nextCat], content: storedContent, callerCatId: catId },
+              {
+                a2aCount: worklistEntry.a2aCount,
+                maxDepth,
+                aborted: Boolean(catSignal?.aborted),
+                queuedMessagesPending,
+                pendingTail,
+                pendingOriginalTargets,
+                hasActiveAgent: (c) => Boolean(hasQueuedOrActiveAgentForCat?.(threadId, c)),
+                peekStreak: (target) =>
+                  peekStreakOnPush(worklistEntry, catId, target, {
+                    hadSubstantiveToolCall,
+                    outputLength: storedContent.length,
+                  }),
+              },
+            );
+            if (!decision) continue; // pending original target → replies to user, no decision emitted
+            if (decision.action === 'skip') {
+              if (decision.reason === 'dedup_active') {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId },
+                  'A2A text-scan dedup: cat actively processing in InvocationQueue, skipping',
+                );
               }
               continue;
             }
-            // F167 L1 + Phase D: ping-pong streak check (canonical enqueue point).
-            // callerActivity (substantive tool + output length) gates streak accumulation —
-            // real work / long discussion no longer trips the breaker falsely.
-            // streak=4+ (pure language inertia) → block enqueue + emit a2a_pingpong_terminated.
-            const hadSubstantiveToolCall = collectedToolNames.some((n) => isSubstantiveTool(n));
+            if (decision.action === 'mark_replyto') {
+              // pendingTail hit (non-original target): bind reply metadata, don't push again.
+              worklistEntry.a2aFrom.set(nextCat, catId);
+              // F121: response-text path — set trigger message for auto-replyTo
+              if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+              continue;
+            }
+            // enqueue_worklist | block_pingpong both reached the streak gate in the legacy code, so the
+            // real (mutating) updateStreakOnPush must run exactly once here for either — peek above was
+            // read-only prediction; this is the canonical mutation point (parity guaranteed by c1.1).
+            // F167 L1 + Phase D: callerActivity gates streak accumulation; streak>=4 inertia → block.
             const streak = updateStreakOnPush(worklistEntry, catId, nextCat, {
               hadSubstantiveToolCall,
               outputLength: storedContent.length,
             });
-            if (streak.blockPingPong) {
+            if (decision.action === 'block_pingpong') {
               log.info(
                 { threadId, catId: nextCat, fromCat: catId, count: streak.count },
                 'F167 L1: A2A ping-pong terminated (streak >= 4)',
@@ -1757,6 +1785,7 @@ export async function* routeSerial(
               continue;
             }
 
+            // decision.action === 'enqueue_worklist'
             // F153: lazily create mention_dispatch span on first actual push
             if (!dispatchSpan) {
               const mentionerSpan = catInvocationSpans.get(index);
@@ -1796,30 +1825,61 @@ export async function* routeSerial(
             }
           }
         } else if (a2aMentions.length > 0 && queuedMessagesPending && deferA2AEnqueue && !catSignal?.aborted) {
-          // F185 Phase B: deferred enqueue — preserve A2A handoff behind non-agent entries
+          // F216 c2: deferred enqueue via the unified resolveRoutingDecisions decision layer.
+          // Same guard chain as inline (depth/dedup/pendingTail/streak) but ctx.queuedMessagesPending=true
+          // makes the LAST gate return defer_queue instead of enqueue_worklist. Resolve+apply ONE cat at a
+          // time (NOT batch) so each target's decision observes prior targets' a2aCount++ and streak
+          // mutations — same per-target ordering fix as the inline path (砚砚 P1-2: a batch resolve would
+          // freeze every peekStreak against the pre-loop streakPair and mis-block later targets).
+          // F185 Phase B: deferred enqueue preserves A2A handoff behind non-agent entries.
           const pendingTailDeferred = worklist.slice(index + 1);
-          // F153 Phase I: lazy mention_dispatch span for deferred path (mirrors inline path at :1661-1675).
-          // End span immediately because the child route runs through QueueProcessor in a separate
-          // loop; the captured trace context is propagated via entry.callerTraceContext so the
-          // dispatched route still parents itself under this dispatch span.
+          const pendingOriginalTargetsDeferred = targetCats.slice(index + 1);
+          const hadSubstantiveToolCallDeferred = collectedToolNames.some((n) => isSubstantiveTool(n));
+          // F153 Phase I: lazy mention_dispatch span for deferred path. End span immediately because the
+          // child route runs through QueueProcessor in a separate loop; the captured trace context is
+          // propagated via entry.callerTraceContext so the dispatched route parents under this span.
           let deferredDispatchCtx: CallerTraceContext | undefined;
           for (const nextCat of a2aMentions) {
-            if (worklistEntry.a2aCount >= maxDepth) break;
-            if (pendingTailDeferred.includes(nextCat)) continue;
-            if (hasQueuedOrActiveAgentForCat && hasQueuedOrActiveAgentForCat(threadId, nextCat)) {
-              log.info(
-                { threadId, catId: nextCat, fromCat: catId },
-                'A2A text-scan dedup (deferred): cat actively processing, skipping',
-              );
+            const [decision] = resolveRoutingDecisions(
+              { type: 'deferred', cats: [nextCat], content: storedContent, callerCatId: catId },
+              {
+                a2aCount: worklistEntry.a2aCount,
+                maxDepth,
+                aborted: Boolean(catSignal?.aborted),
+                queuedMessagesPending: true,
+                pendingTail: pendingTailDeferred,
+                pendingOriginalTargets: pendingOriginalTargetsDeferred,
+                hasActiveAgent: (c) => Boolean(hasQueuedOrActiveAgentForCat?.(threadId, c)),
+                peekStreak: (target) =>
+                  peekStreakOnPush(worklistEntry, catId, target, {
+                    hadSubstantiveToolCall: hadSubstantiveToolCallDeferred,
+                    outputLength: storedContent.length,
+                  }),
+              },
+            );
+            if (!decision) continue; // pending original target → replies to user, no decision
+            if (decision.action === 'skip') {
+              if (decision.reason === 'dedup_active') {
+                log.info(
+                  { threadId, catId: nextCat, fromCat: catId },
+                  'A2A text-scan dedup (deferred): cat actively processing, skipping',
+                );
+              }
               continue;
             }
-            // F167 L1 + F185-B AC-B3a: ping-pong streak check for deferred path
-            const hadSubstantiveToolCallDeferred = collectedToolNames.some((n) => isSubstantiveTool(n));
+            if (decision.action === 'mark_replyto') {
+              // pendingTail hit (non-original target): rebind reply metadata, don't enqueue again.
+              worklistEntry.a2aFrom.set(nextCat, catId);
+              if (storedMsgId) worklistEntry.a2aTriggerMessageId.set(nextCat, storedMsgId);
+              continue;
+            }
+            // defer_queue | block_pingpong both passed the peek gate, so the real (mutating)
+            // updateStreakOnPush runs exactly once here for either (parity with inline c1.3 + c1.1).
             const streakDeferred = updateStreakOnPush(worklistEntry, catId, nextCat, {
               hadSubstantiveToolCall: hadSubstantiveToolCallDeferred,
               outputLength: storedContent.length,
             });
-            if (streakDeferred.blockPingPong) {
+            if (decision.action === 'block_pingpong') {
               log.info(
                 { threadId, catId: nextCat, fromCat: catId, count: streakDeferred.count },
                 'F167 L1: A2A ping-pong terminated in deferred path (streak >= 4)',
@@ -1837,6 +1897,7 @@ export async function* routeSerial(
               } as AgentMessage;
               continue;
             }
+            // decision.action === 'defer_queue'
             // F153 Phase I: create dispatch span on first real enqueue and capture its trace
             // context for cross-route causality.
             if (!deferredDispatchCtx) {
