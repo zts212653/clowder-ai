@@ -2052,24 +2052,55 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           if (invocationSpan) recordAgentLoop(invocationSpan);
           return outputs;
         }
+        // Main-merge: record user-visible session output (independent of toolTracing — uses raw msg).
         if (isUserVisibleSessionOutput(msg)) {
           await recordActiveSessionUserVisibleOutput();
         }
-        outputs.push(attachInvocationIdToTaskProgress(msg));
 
-        // F153 Phase J AC-J2/J3: real-duration MCP tool spans when provider injects toolUseId,
-        // legacy zero-duration fallback otherwise (provider not yet wired per KD-41).
+        // F153 Phase J AC-J2/J3 + J-B AC-J7: real-duration MCP tool spans when provider
+        // injects toolUseId, legacy zero-duration fallback otherwise (provider not yet
+        // wired per KD-41). For Slice J-B: enrich the AgentMessage with `toolTracing` so
+        // downstream `toStoredToolEvent` carries the tool span pointer into persistence
+        // (enabling AC-J8 hydrate-side real-duration restore). Push happens after enrichment
+        // (see line below) so outputs carry the enriched form, not the raw msg.
+        let enrichedMsg = msg;
         if (msg.type === 'tool_use' && msg.toolName && invocationSpan) {
           if (msg.toolUseId) {
-            toolSpanTracker.start(msg.toolName, msg.toolUseId, msg.toolInput as Record<string, unknown>);
+            const span = toolSpanTracker.start(msg.toolName, msg.toolUseId, msg.toolInput as Record<string, unknown>);
+            if (span) {
+              const sc = span.spanContext();
+              enrichedMsg = {
+                ...msg,
+                toolTracing: {
+                  traceId: sc.traceId,
+                  spanId: sc.spanId,
+                  parentSpanId: invocationSpan.spanContext().spanId,
+                },
+              };
+            }
           } else {
             recordToolUseSpan(invocationSpan, catId, msg.toolName, msg.toolInput as Record<string, unknown>);
           }
         }
-        // F153 Phase J AC-J2: pair tool_result with matching tool_use span; close with status.
+        // F153 Phase J AC-J2 + J-B AC-J7: pair tool_result with matching tool_use span,
+        // stamp `toolTracing` BEFORE closing the span (getContext peeks without removing),
+        // then close with status.
         if (msg.type === 'tool_result' && msg.toolUseId) {
+          const ctx = toolSpanTracker.getContext(msg.toolUseId);
+          if (ctx && invocationSpan) {
+            enrichedMsg = {
+              ...msg,
+              toolTracing: {
+                traceId: ctx.traceId,
+                spanId: ctx.spanId,
+                parentSpanId: invocationSpan.spanContext().spanId,
+              },
+            };
+          }
           toolSpanTracker.end(msg.toolUseId, msg.toolResultStatus ?? 'unknown');
         }
+
+        outputs.push(attachInvocationIdToTaskProgress(enrichedMsg));
 
         // F26: Detect task management tools and emit task_progress for frontend
         if (msg.type === 'tool_use' && msg.toolName) {

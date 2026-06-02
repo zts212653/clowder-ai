@@ -368,6 +368,35 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 - **历史 tool span 回填** — hydrate 前的旧数据保持现状，不重建
 - **Tool input/result body 写入 span attr** — 保持低敏，只存 `tool.input.keys` / `tool.result.status`，不存正文
 
+#### Provider 支持矩阵（AC-J9）
+
+四件套 = 真实 duration span 所需的最小信号集：
+
+- **start**: 在 `tool_use` 事件能识别工具调用开始（`AgentMessage.toolUseId` 已注入）
+- **end**: 在 `tool_result` 事件能识别工具调用结束（同 `toolUseId` 配对）
+- **id**: provider 原生 ID（不是合成 UUID，可跨进程稳定）
+- **status**: 来自 execution edge 的结构化 `'ok' | 'error' | 'unknown'`（非 content 字符串猜测，KD-38）
+
+| Provider | start | end | id | status | 真实 duration span | 备注 |
+|----------|:-----:|:---:|:--:|:------:|:------------------:|------|
+| **Claude CLI** | ✅ | ❓ | ⏳ | ❓ | ⏳ deferred | `claude-ndjson-parser.ts:196` 的 `tool_use` 分支当前**不抽取** `tool_use.id`（Anthropic block schema 里有，parser 未读出来），tool_result 路径也未 verified；Phase J Slice J-B follow-up wire 后才能升级矩阵（**砚砚 R1 P2-2 fix**：之前误标 ✅，已改 deferred 与代码现状对齐） |
+| **Codex** | ✅ | ✅ | ✅ `item.id`（lifecycle anchor，PR #755 R1 P2-2 verified — **不是 `tool_call_id`**） | ✅ `item.status` (`completed`/`failed`/`error`) | ✅ | AC-J2 wired in PR #774 |
+| **DARE** | ✅ | ✅ | ✅ `data.tool_call_id`（event payload） | ✅ `tool.result` vs `tool.error` event | ✅ | AC-J2 wired in PR #774；`tool_call_id` 从 toolInput lift 到顶层 toolUseId（release note） |
+| **CatAgent** | ✅ | ✅ | ✅ `block.id`（Anthropic native tool_use.id） | ✅ execution edge (`unknown tool` / 成功 / thrown error 三分支) | ✅ | AC-J2 wired in PR #774；status 严格从 execution edge 不从 content 猜（KD-38） |
+| **Gemini CLI** | ✅ | ❓ | ❓ | ❓ | ⏳ deferred | `gemini-event-parser.ts:53` 有 `tool_use` 但 `tool_result` 字段名待 verify；Slice J-B follow-up |
+| **Antigravity** | ✅ | ✅ | ❓ | ❓ | ⏳ deferred | provider 流形复杂（CDP 桥 + 多模型切换），字段名 follow-up |
+| **OpenCode** | ✅ | ❓ | ❓ | ❓ | ⏳ deferred | 字段名 follow-up |
+| **Kimi** | ✅ | ❌ | ❌ | ❌ | ❌ 明确降级 | `KimiAgentService.ts:319` 有 `tool_use` 但 **无 `tool_result` 事件**；明确 fallback 不开 span（KD-41） |
+| **A2A** | n/a | n/a | n/a | n/a | ❌ 不适用 | A2A 不是 LLM provider 而是 cat-to-cat 路由；不参与 tool span 度量 |
+
+**降级行为约束（KD-41 honesty）**：
+
+- 缺 id → 不开 span（不伪造合成 UUID 撑数）
+- 缺 end / status → 不开 span（不假定 `ok` 兜底）
+- 任一字段缺失的 provider，事件仍透传到 `StoredToolEvent` 用于 Hub 历史展示；hydrate 跳过 span 合成
+
+> **未来 PR 加新 provider**：必须先更新此矩阵 + provide AC-J2 wire；不允许"先 wire 后补 matrix"。
+
 ## Acceptance Criteria
 
 ### Phase B（OTel 全链路追踪）✅
@@ -415,7 +444,7 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 - [x] AC-F5: hydrate 使用 `msg:timeline` sorted set 范围查询，不做全表扫描
 - [x] AC-F6: 每条消息 tracing 指针增量 ≤ 100 bytes，不存完整 span 快照
 - [x] AC-F7: `StoredMessage.extra` 类型扩展含 `tracing`，parser round-trip 保留，`updateExtra()` 使用 merge 语义
-- [ ] AC-F8: tool_use spans 暂不持久化（零时长点标记，待 Phase J 升级 — 由 Slice J-B AC-J7/J8 直接接续）
+- [x] AC-F8: tool_use spans 持久化 — Phase J Slice J-B AC-J7/J8 直接接续：`StoredToolEvent` 扩展 + hydrate 合成真实 duration `cat_cafe.tool_use ...` child span（不再退化为 `invocation.restored`）
 
 ### Phase D（Runtime 调试 exporter + 启动语义对齐）✅
 - [x] AC-D1: `TELEMETRY_DEBUG` 通过 `ConsoleSpanExporter` 输出 spans，且 regular OTLP pipeline 仍保持 redaction
@@ -459,9 +488,9 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 
 #### Slice J-B: Persist + hydrate
 
-- [ ] AC-J7: `StoredToolEvent` 扩展 — `toolUseId`、`status`、`tracing { traceId, spanId, parentSpanId }`、`startTimeMs`、`endTimeMs`；不混用 message-level `extra.tracing`
-- [ ] AC-J8: hydrate 从 `toolEvents[]` 恢复 `cat_cafe.tool_use ...` real-duration child span（不退化成 `invocation.restored`）
-- [ ] AC-J9: provider 支持矩阵附录 — F153 spec 加表格列每个 provider 的 (start, end, id, status) 四件套支持情况
+- [x] AC-J7: `StoredToolEvent` 扩展 — `toolUseId`、`status`、`tracing { traceId, spanId, parentSpanId }`、`startTimeMs`、`endTimeMs`；不混用 message-level `extra.tracing`。Producer side：`ToolSpanTracker.getContext(toolUseId)` peek 接口 + `AgentMessage.toolTracing` 富化字段 + `invoke-single-cat` enrich 流程 + `toStoredToolEvent` 复制 5 个新字段。
+- [x] AC-J8: hydrate 从 `toolEvents[]` 恢复 `cat_cafe.tool_use ...` real-duration child span（不退化成 `invocation.restored`）。`synthesizeToolSpansFromEvents` 按 `toolUseId` 配对 tool_use/tool_result，用 startTimeMs/endTimeMs 算 duration，按 status 设 OTel span status code。缺字段的事件 honest 跳过（KD-41）。
+- [x] AC-J9: provider 支持矩阵附录 — F153 spec 已加表格列每个 provider 的 (start, end, id, status) 四件套支持情况（见 Phase J 章节 "Provider 支持矩阵" 子节）。**Codex / DARE / CatAgent** 四件套就位（AC-J2 wired in PR #774）；**Claude CLI / Gemini CLI / Antigravity / OpenCode** ⏳ deferred（parser 字段未 verify / wire — 见矩阵脚注）；**Kimi** 明确降级（无 `tool_result` 事件）；**A2A** n/a（非 LLM provider）。
 
 ## Dependencies
 

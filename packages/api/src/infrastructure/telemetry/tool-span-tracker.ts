@@ -131,4 +131,21 @@ export class ToolSpanTracker {
   size(): number {
     return this.spans.size;
   }
+
+  /**
+   * F153 Phase J Slice J-B AC-J7: peek at an open tool span's trace context without
+   * closing it. Used by the producer side (invoke-single-cat) to enrich AgentMessage
+   * with `toolTracing` so route-helpers persists the pointer into StoredToolEvent —
+   * enabling AC-J8 hydrate-side real-duration tool span synthesis on cold start.
+   *
+   * Returns `undefined` for unknown toolUseId (basic tool that bypassed span
+   * creation, or unmatched tool_result event). Caller falls back gracefully:
+   * StoredToolEvent without `tracing` is skipped on hydrate per KD-41 honesty.
+   */
+  getContext(toolUseId: string): { traceId: string; spanId: string } | undefined {
+    const span = this.spans.get(toolUseId);
+    if (!span) return undefined;
+    const sc = span.spanContext();
+    return { traceId: sc.traceId, spanId: sc.spanId };
+  }
 }
