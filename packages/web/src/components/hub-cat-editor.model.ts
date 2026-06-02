@@ -453,6 +453,7 @@ export function buildCodexConfigPatches(
 // Extracted to hub-cat-editor.payload.ts:
 // buildCatPayload, buildContextBudget, hintModelFormatForClient, validateModelFormatForClient
 export {
+  buildCatPatchPayload,
   buildCatPayload,
   buildContextBudget,
   hintModelFormatForClient,

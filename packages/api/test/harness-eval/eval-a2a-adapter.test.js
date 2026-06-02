@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildA2aVerdictHandoff } from '../../dist/infrastructure/harness-eval/eval-a2a-adapter.js';
+import { buildA2aVerdictHandoff } from '../../dist/infrastructure/harness-eval/a2a/eval-a2a-adapter.js';
 
 const domain = {
   domainId: 'eval:a2a',

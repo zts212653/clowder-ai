@@ -323,6 +323,21 @@ describe('formatNavigationHeader', () => {
     assert.ok(header.includes('Fix Redis'));
   });
 
+  it('shows co-creator local time and UTC in the baton timestamp', () => {
+    const header = formatNavigationHeader({
+      baton: {
+        fromMessageId: 'm1',
+        fromSpeaker: 'user',
+        fromSpeakerDisplay: '铲屎官',
+        timestamp: Date.UTC(2026, 5, 1, 6, 20, 0, 0),
+        mentionExcerpt: '现在不是凌晨',
+        staleHoldWarning: false,
+      },
+      tasks: [],
+    });
+    assert.ok(header.includes('铲屎官本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC'), header);
+  });
+
   it('includes stale hold warning when present', () => {
     const header = formatNavigationHeader({
       baton: {

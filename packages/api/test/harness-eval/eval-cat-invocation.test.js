@@ -83,4 +83,41 @@ describe('Eval cat invocation packet', () => {
     assert.match(invocation.instructions, /capability wakeup/i);
     assert.match(invocation.instructions, /miss/i);
   });
+
+  it('includes registry fixture refs in the eval-cat context', () => {
+    const invocation = buildEvalCatInvocation({
+      domain: {
+        ...domain,
+        domainId: 'eval:capability-wakeup',
+        displayName: 'Capability Wakeup Eval',
+        systemThreadId: 'thread_eval_capability_wakeup',
+        sourceAdapter: 'capability-wakeup-eval',
+        frequency: 'weekly',
+        legacyScheduledTaskIds: [],
+        handoffTargetResolver: { featureId: 'F203', ownerCatId: 'opus47', threadLookup: 'feature-thread' },
+        fixtures: [
+          {
+            id: 'source-hygiene-memu-echo-chamber',
+            featureId: 'F218',
+            path: 'docs/harness-feedback/fixtures/source-hygiene-memu-echo-chamber.md',
+            skill: 'source-audit',
+            signal: 'high-risk external claim without provenance',
+          },
+        ],
+      },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+
+    assert.deepEqual(invocation.context.fixtures, [
+      {
+        id: 'source-hygiene-memu-echo-chamber',
+        featureId: 'F218',
+        path: 'docs/harness-feedback/fixtures/source-hygiene-memu-echo-chamber.md',
+        skill: 'source-audit',
+        signal: 'high-risk external claim without provenance',
+      },
+    ]);
+  });
 });

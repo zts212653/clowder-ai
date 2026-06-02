@@ -13,7 +13,6 @@ const repoRoot = process.argv[2] ? resolve(process.argv[2]) : defaultRepoRoot;
 
 const backlogPath = join(repoRoot, 'docs', 'BACKLOG.md');
 const roadmapPath = join(repoRoot, 'docs', 'ROADMAP.md');
-const currentIndexPath = join(repoRoot, 'docs', 'features', 'index.json');
 const generatorPath = join(repoRoot, 'scripts', 'generate-feature-index.mjs');
 
 function isDoneStatus(status) {
@@ -93,33 +92,25 @@ function generateFreshIndex(outputPath) {
   });
 }
 
-function deepEqualFeatures(a, b) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
 function main() {
   const errors = [];
   const tempDir = mkdtempSync(join(tmpdir(), 'cc-feature-truth-'));
   const generatedIndexPath = join(tempDir, 'index.json');
 
   try {
-    if (!existsSync(currentIndexPath)) {
-      throw new Error(`Missing feature index: ${currentIndexPath}`);
-    }
-
+    // docs/features/index.json is a derived artifact with no live consumer:
+    // the runtime builds its feature index from the docs directly and the
+    // opensource sync regenerates it fresh. It is no longer committed, so we
+    // regenerate it into a tempdir and validate truth from that fresh copy.
+    // There is nothing to diff a committed file against — which removes the
+    // merge-order staleness that only ever produced gate noise.
     generateFreshIndex(generatedIndexPath);
 
     const truthDoc = resolveTruthDocPath();
     const backlogMarkdown = readFileSync(truthDoc.path, 'utf-8');
-    const currentIndex = loadJson(currentIndexPath);
     const generatedIndex = loadJson(generatedIndexPath);
 
-    const currentFeatures = Array.isArray(currentIndex.features) ? currentIndex.features : [];
     const generatedFeatures = Array.isArray(generatedIndex.features) ? generatedIndex.features : [];
-
-    if (!deepEqualFeatures(currentFeatures, generatedFeatures)) {
-      errors.push('[index-sync] docs/features/index.json is stale. Run: node scripts/generate-feature-index.mjs');
-    }
 
     const backlogIds = parseBacklogFeatureIds(backlogMarkdown);
     const statusMap = buildFeatureStatusMap(generatedFeatures);

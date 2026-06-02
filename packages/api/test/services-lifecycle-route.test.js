@@ -69,7 +69,7 @@ describe('service lifecycle write routes', () => {
     }
   });
 
-  it('allows lifecycle writes when DEFAULT_OWNER_USER_ID is unset (permissive mode)', async () => {
+  it('allows direct-loopback lifecycle writes when DEFAULT_OWNER_USER_ID is unset', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const app = await buildApp({
       lifecycle: {
@@ -86,6 +86,56 @@ describe('service lifecycle write routes', () => {
 
       assert.notEqual(res.statusCode, 403, `should not 403 in permissive mode: ${res.payload}`);
       assert.notEqual(res.statusCode, 401, `should not 401 with valid session: ${res.payload}`);
+    } finally {
+      await app.close();
+      restoreOwner(ORIGINAL_OWNER_ID);
+    }
+  });
+
+  it('rejects non-loopback lifecycle writes when DEFAULT_OWNER_USER_ID is unset', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const app = await buildApp({
+      lifecycle: {
+        runScript: async () => ({ code: 0, output: 'installed' }),
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/install',
+        headers: SESSION_HEADERS,
+        payload: { model: 'mlx-community/whisper-large-v3-turbo' },
+        remoteAddress: '192.168.1.100',
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
+      assert.match(JSON.parse(res.payload).error, /non-localhost|DEFAULT_OWNER_USER_ID/);
+    } finally {
+      await app.close();
+      restoreOwner(ORIGINAL_OWNER_ID);
+    }
+  });
+
+  it('rejects proxy-forwarded loopback lifecycle writes when DEFAULT_OWNER_USER_ID is unset', async () => {
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const app = await buildApp({
+      lifecycle: {
+        runScript: async () => ({ code: 0, output: 'installed' }),
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/install',
+        headers: {
+          ...SESSION_HEADERS,
+          'x-forwarded-for': '203.0.113.50',
+        },
+        payload: { model: 'mlx-community/whisper-large-v3-turbo' },
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
+      assert.match(JSON.parse(res.payload).error, /non-localhost|DEFAULT_OWNER_USER_ID/);
     } finally {
       await app.close();
       restoreOwner(ORIGINAL_OWNER_ID);

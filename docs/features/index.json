@@ -135,7 +135,7 @@
     {
       "id": "F023",
       "name": "目录结构防腐化 + 重构 + 代码检查工具链",
-      "status": "done | **Owner**: 三猫",
+      "status": "done（Phase 1）/ phase-2-followup-open | **Owner**: 三猫",
       "file": "F023-directory-corrosion-defense.md"
     },
     {
@@ -339,7 +339,7 @@
     {
       "id": "F056",
       "name": "Cat Café 设计语言 — 猫猫化不是猫化",
-      "status": "doing（Phase E 11/12 done + Phase E Sweep 2026-05-25~28 完成：bubble routing 统一 / variant slug 补齐 / 350-line split / PR #784 review-response — AC-E12 Playwright baseline deferred 到集成验证） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
+      "status": "doing（Phase E 11/12 done + Phase E Sweep 2026-05-25~28 完成：bubble routing 统一 / variant slug 补齐 / 350-line split / clowder-ai#784 review-response — AC-E12 Playwright baseline deferred 到集成验证） | **Owner**: Maine Coon/GPT-5.2 + Ragdoll 主导设计执行 + Ragdoll工程架构 + Siamese概念方向",
       "file": "F056-cat-cafe-design-language.md"
     },
     {
@@ -1227,7 +1227,7 @@
     {
       "id": "F202",
       "name": "Plugin Framework — local discovery, config, and resource activation",
-      "status": "review | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "status": "in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
       "file": "F202-plugin-framework.md"
     },
     {
@@ -1281,7 +1281,7 @@
     {
       "id": "F211",
       "name": "Cross-Runtime Session Transparency — Antigravity Session Chain + IDE Direct Registration",
-      "status": "done ✅ REG1 + REG2 + REG3 (Layer B urls + Layer C image media) FIXED + merged + e2e-verified (PR #1940 `a0f7cf208`, PR #1944 `fb37ecc7e`, opus-4.8) ⚠️ **REG4 RESOLVED 2026-05-29 (stale `sessionChain:false` catalog overlay gated the block off — NOT a thrown exception; CVO toggled session-chain ON; durable migration paused). **REG5 (P1) FIXED + merged + LIVE e2e-VERIFIED (PR #1959 squash `bca4c6b82`, 2026-05-30)** — follow-up-while-busy now REUSES the running cascade (full native memory) instead of spinning a fresh blank one; post-deploy controlled mid-work test proved it on the live runtime (task + mid-work follow-up both reused the SAME busy cascade `633808bb`, log-confirmed RUNNING at reuse, Bengal kept full memory); core amnesia + the whole same-class boundary/abort/terminal edge set fixed (getOrCreateSession reuse + preflight health-rotation). Busy-reuse BOUNDARY residual (memory-preserved stale-output + count==0-WAITING) deferred → **REG8** (CVO-approved 2026-05-30). Still open: REG6 (interruption misclassified as `runtime_error_reset` crash) + REG7 (WS flap / premature done affordance). **Runtime sync (deploy to Bengal) = CVO.** | **Owner**: Maine Coon（Maine Coon）; regression + REG4/5/6/7 fixes Ragdoll Opus 4.8 | **Priority**: P1 | **Completed**: 2026-05-26",
+      "status": "done ✅ REG1 + REG2 + REG3 (Layer B urls + Layer C image media) FIXED + merged + e2e-verified (PR #1940 `a0f7cf208`, PR #1944 `fb37ecc7e`, opus-4.8) ⚠️ **REG4 RESOLVED 2026-05-29 (stale `sessionChain:false` catalog overlay gated the block off — NOT a thrown exception; CVO toggled session-chain ON; durable migration paused). **REG5 (P1) FIXED + merged + LIVE e2e-VERIFIED (PR #1959 squash `bca4c6b82`, 2026-05-30)** — follow-up-while-busy now REUSES the running cascade (full native memory) instead of spinning a fresh blank one; post-deploy controlled mid-work test proved it on the live runtime (task + mid-work follow-up both reused the SAME busy cascade `633808bb`, log-confirmed RUNNING at reuse, Bengal kept full memory); core amnesia + the whole same-class boundary/abort/terminal edge set fixed (getOrCreateSession reuse + preflight health-rotation). Busy-reuse BOUNDARY residual → **REG8 (P1) FIXED + merged** (PR #1976 squash `b65e94fd`, 2026-05-30: boundary-aware polling facet a — #3 poll-aware preserving REG5 no-drain; opus-4.8 + 孟加拉; facet b count==0-WAITING → REG6/REG9). Still open: **REG6-part2** (`SocketManager:211` `'user_cancel'` 归因 — part 1 abort-not-crash-sealed **FIXED** via PR #1986 `eab674998`; **part 2 instrument MERGED PR #2017 `db40271c6` — observation-only cancel-trigger logs `f211_reg6_*`; behavior fix awaits live trigger evidence**) + REG7 (WS flap / premature done affordance). **REG9 (P1) FIXED + merged** (PR #1984 squash `7abb22e68`, 2026-05-31: cheap status-poll gate 灭 O(全历史) 轮询 + invoke finalizer seal abandoned generator；70× poll-byte 降已实测；push/streaming transport → REG10). **Runtime synced + restarted 2026-05-31 → batch-live VALIDATED** (sonnet drove 2 rounds + Bengal parallel): REG5 cascade-reuse live-reconfirmed (`d492e8e1` reused across task + mid-work follow-up); REG9 no-4MB poll (status-gate 1–37KB); REG7 no WS-flap (REG9-mitigated); REG6 controlled-seal (≠ crash). REG8 low-risk **live-residual** (batch-live took retry/supersede paths, not the queue-boundary path — unit+review-solid). **F201 corpse-churn finding** (Bengal's model repeatedly guessed the wrong F211 filename → invalid view_file → F201 retry seals a 0-msg cascade + spawns fresh ×4 before the 5th ran clean; **ruled out F216** — its supersede fired exactly 1×) → **UI symptom (空尸体堆积) FIXED + merged (PR #2006 squash `355062d0c`, SessionChainPanel 折叠 ≥2 个 0-msg `tool_conflict` 残骸)** → **#2021 (`fc34cf6f1`) 升级为 runtime-tagged `retryFragment` 标记折叠（保留 partial-output/active/sealing 不折叠）**; F201 根因 cascade-reuse/cleanup 硬化仍 毛线球, see Timeline 2026-05-31. | **Owner**: Maine Coon（Maine Coon）; regression + REG4/5/6/7 fixes Ragdoll Opus 4.8 | **Priority**: P1 | **Completed**: 2026-05-26",
       "file": "F211-cross-runtime-session-transparency.md"
     },
     {
@@ -1311,8 +1311,20 @@
     {
       "id": "F216",
       "name": "routeSerial 决策层/执行层分离重构",
-      "status": "spec | **Owner**: 设计 @opus48 (F215 thread) / 执行待 fresh-thread opus-48 | **Priority**: P1 | **Source**: internal (F215 引爆点)",
+      "status": "done ✅ (PR #1987/#1991/#1997/#2002/#2003/#2008/#2010 已全部合入，F216-c3 抢占重启与 Steer UX 加固均通过 alpha 验收与 review；未竟复杂度重构已作为独立技术债挂载) | **Owner**: @opus48（设计 from F215-thread handoff + 执行 owner） | **Priority**: P1 | **Source**: internal (F215 引爆点)",
       "file": "F216-route-serial-refactor.md"
+    },
+    {
+      "id": "F217",
+      "name": "Merge Gate Integrity — 检查覆盖 + 强制力 + 元守护",
+      "status": "spec | **Owner**: Ragdoll/Ragdoll (Opus-4.8) | **Priority**: P1",
+      "file": "F217-merge-gate-integrity.md"
+    },
+    {
+      "id": "F218",
+      "name": "Evidence Provenance & Source Hygiene — 外部证据溯源与信源卫生",
+      "status": "done | **Completed**: 2026-05-31 | **Owner**: Ragdoll | **Priority**: P1",
+      "file": "F218-evidence-provenance-source-hygiene.md"
     }
   ]
 }

@@ -442,12 +442,22 @@ export class AntigravityAgentService implements AgentService {
     };
     let flushSideEffectJournalAudit = async () => {};
     let lastKnownCascadeId: string | undefined;
+    // F211-REG9: track whether a terminal `done` was emitted. If this generator is abandoned
+    // (consumer stops iterating / WS drops / process tears down), it resumes at the suspended await
+    // and runs the `finally` below WITHOUT having emitted a terminal — the silent-vanish that leaves
+    // the UI stuck "Thinking" forever. emitDone() flips the flag at every done so the finally can
+    // distinguish a clean exit from an abandonment and seal the runtime session visibly.
+    let terminalEmitted = false;
+    const emitDone = (): AgentMessage => {
+      terminalEmitted = true;
+      return { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+    };
 
     try {
       // Abort check
       if (options?.signal?.aborted) {
         yield { type: 'error', catId: this.catId, error: 'Aborted before start', metadata, timestamp: Date.now() };
-        yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+        yield emitDone();
         return;
       }
 
@@ -861,10 +871,13 @@ export class AntigravityAgentService implements AgentService {
         // do not enqueue a prompt the user already aborted (cloud P1, line 1029).
         if (options?.signal?.aborted) {
           yield { type: 'error', catId: this.catId, error: 'Aborted before send', metadata, timestamp: Date.now() };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          yield emitDone();
           return;
         }
-        const stepsBefore = await this.bridge.sendMessage(
+        // F211-REG8: sendMessage reports whether the cascade was RUNNING at send (busy-reuse). When
+        // it was, the follow-up queues behind the current turn, so the FIRST pollForSteps must wait
+        // for the follow-up's own turn instead of terminating at the old turn's IDLE (expectFollowUpTurn).
+        const { stepsBefore, wasBusy } = await this.bridge.sendMessage(
           cascadeId,
           promptForCurrentCascade,
           this.model,
@@ -875,7 +888,7 @@ export class AntigravityAgentService implements AgentService {
         // Abort check after send
         if (options?.signal?.aborted) {
           yield { type: 'error', catId: this.catId, error: 'Aborted after send', metadata, timestamp: Date.now() };
-          yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+          yield emitDone();
           return;
         }
 
@@ -1120,7 +1133,19 @@ export class AntigravityAgentService implements AgentService {
         const seenUnknownKeys = new Set<string>();
         const pollOnce = async function* (self: AntigravityAgentService, fromStep: number) {
           const iterator = self.bridge
-            .pollForSteps(cascadeId, fromStep, self.pollTimeoutMs, 2_000, options?.signal)
+            // F211-REG8: only the FIRST poll (fromStep === the original stepsBefore) is the busy-reuse
+            // follow-up; re-polls advance fromStep and must use normal termination (no extra USER_INPUT wait).
+            // Keep the replay baseline pinned to the original send boundary so same-turn planner
+            // mutations still replay after a stall/probe resumes from lastDelivered.
+            .pollForSteps(
+              cascadeId,
+              fromStep,
+              self.pollTimeoutMs,
+              2_000,
+              options?.signal,
+              wasBusy && fromStep === stepsBefore,
+              stepsBefore,
+            )
             [Symbol.asyncIterator]();
 
           while (true) {
@@ -2211,18 +2236,27 @@ export class AntigravityAgentService implements AgentService {
           });
         }
         await flushSideEffectJournalAudit();
-        yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+        yield emitDone();
         return;
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       log.error(`invoke failed: ${errorMsg}`);
+      // F211-REG6: distinguish a graceful interruption-abort (the signal aborted — a new message
+      // preempting the slot, or a WS reconcile) from a real runtime crash, so the abort is NOT
+      // mis-sealed as a crash below. Signal-aborted is authoritative (all abort sources fire it);
+      // the message prefix is a secondary guard.
+      const isInterruptionAbort =
+        options?.signal?.aborted === true || (err instanceof Error && /^Aborted\b/i.test(err.message));
       await flushSideEffectJournalAudit();
       yield {
         type: 'error',
         catId: this.catId,
         error: errorMsg,
-        ...(lastKnownCascadeId
+        // F211-REG6: only a genuine error crash-seals; an interruption-abort preserves the cascade
+        // (no seal, like a normal turn-end) so the next message reuses it (REG5) instead of the old
+        // crash-seal that fired cascade-replacement and lost continuity.
+        ...(lastKnownCascadeId && !isInterruptionAbort
           ? {
               sessionLifecycle: buildAntigravitySessionLifecycle({
                 runtimeSessionId: lastKnownCascadeId,
@@ -2233,7 +2267,34 @@ export class AntigravityAgentService implements AgentService {
         metadata,
         timestamp: Date.now(),
       };
-      yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
+      yield emitDone();
+    } finally {
+      // F211-REG9: the generator resumes here on ANY exit. On a clean done/error the flag is set and
+      // this is a no-op. On abandonment (consumer stopped iterating / WS dropped / process killed) no
+      // terminal was emitted — make it visible instead of vanishing silently: seal the still-active
+      // runtime session so the UI / next session sees it ended (interrupted), not a forever-"Thinking"
+      // hang. finally cannot yield (the consumer is gone) — best-effort side-effect seal, never throws.
+      if (!terminalEmitted) {
+        log.warn(
+          `F211-REG9: Antigravity invoke for ${this.catId} ended without done/error (abandoned/interrupted; cascade=${lastKnownCascadeId ?? 'unknown'}); sealing runtime session to avoid a silent hang`,
+        );
+        if (lastKnownCascadeId && this.runtimeSessionStore) {
+          try {
+            const rec = await this.runtimeSessionStore.getByRuntimeSession('antigravity-desktop', lastKnownCascadeId);
+            if (rec && rec.lifecycle?.state === 'active') {
+              await this.runtimeSessionStore.updateLifecycle(rec.sessionId, {
+                state: 'sealed',
+                sealReason: 'runtime_disconnected',
+                lastObservedAt: Date.now(),
+              });
+            }
+          } catch (sealErr) {
+            log.error(
+              `F211-REG9 finalizer seal failed (cascade=${lastKnownCascadeId}): ${sealErr instanceof Error ? sealErr.message : String(sealErr)}`,
+            );
+          }
+        }
+      }
     }
   }
 }

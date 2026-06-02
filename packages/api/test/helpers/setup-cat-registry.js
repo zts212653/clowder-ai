@@ -14,22 +14,24 @@
  * See also: packages/api/package.json `--import $(pwd)/...` for Node loader usage.
  */
 
-import { cpSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+import { createIsolatedTemplateRoot } from './isolated-template-root.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, '../../../../cat-template.json');
 
-// Redirect CAT_TEMPLATE_PATH to a temp directory that has no .cat-cafe/ subdir.
-// This ensures loadCatConfig() (called by getCachedConfig → getRoster, etc.)
-// never finds stale cat-catalog.json files created by tests like
-// cat-account-binding, even after _resetCachedConfig() clears the cache.
-const tmpDir = resolve(process.env.TMPDIR ?? '/tmp', `cat-cafe-test-template-${process.pid}`);
-mkdirSync(tmpDir, { recursive: true });
-cpSync(TEMPLATE_PATH, resolve(tmpDir, 'cat-template.json'));
-process.env.CAT_TEMPLATE_PATH = resolve(tmpDir, 'cat-template.json');
+// Redirect CAT_TEMPLATE_PATH to a UNIQUE, collision-free temp root (mkdtemp) with no
+// .cat-cafe/ overlay, so loadCatConfig() (called by getCachedConfig → getRoster, etc.)
+// never inherits a stale breeds:[] cat-catalog.json that a pid-reused prior process left
+// behind (its app boot wrote one via bootstrapDefaultCatCatalog). The previous
+// `cat-cafe-test-template-${process.pid}` name was not unique across time → pid reuse
+// leaked an empty roster into unrelated tests. See isolated-template-root.js for the
+// full F211 #2013 follow-up rationale.
+const { templatePath, cleanup } = createIsolatedTemplateRoot(process.env.TMPDIR ?? '/tmp', TEMPLATE_PATH);
+process.on('exit', cleanup);
+process.env.CAT_TEMPLATE_PATH = templatePath;
 
 async function registerAllCats() {
   const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');

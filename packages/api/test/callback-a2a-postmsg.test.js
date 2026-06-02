@@ -16,6 +16,7 @@ import Fastify from 'fastify';
 function createMockSocketManager() {
   const messages = [];
   const roomEvents = [];
+  const userEvents = [];
   return {
     broadcastAgentMessage(msg) {
       messages.push(msg);
@@ -23,11 +24,19 @@ function createMockSocketManager() {
     broadcastToRoom(room, event, data) {
       roomEvents.push({ room, event, data });
     },
+    // F-coalesce: production SocketManager has emitToUser (enqueueA2ATargets emits queue_updated on
+    // both enqueue AND coalesce). The mock previously omitted it; coalesce path now exercises it.
+    emitToUser(userId, event, data) {
+      userEvents.push({ userId, event, data });
+    },
     getMessages() {
       return messages;
     },
     getRoomEvents() {
       return roomEvents;
+    },
+    getUserEvents() {
+      return userEvents;
     },
   };
 }
@@ -249,7 +258,14 @@ describe('post_message A2A mention invocation', () => {
     assert.equal(socketManager.getMessages().length, 0, 'queued recovery should wait for QueueProcessor delivery');
   });
 
-  test('post-message does not claim routed when InvocationQueue skips a duplicate queued target', async () => {
+  // F-coalesce: mechanism changed from skip-dedup (hasQueuedAgentForCat) to coalesce
+  // (findInFlightAgentEntry + coalesceContentIntoQueuedAgent). The USER-FACING CONTRACT this test
+  // guards is unchanged and still asserted verbatim: a same-cat duplicate must NOT be reported as a
+  // new route (routed=[], no "已路由" message), must NOT create a second entry (enqueue/backfill
+  // throw = hard guard), must NOT create a legacy InvocationRecord, and MUST still nudge
+  // tryAutoExecute so the already-queued entry gets picked up. Only the dedup mock methods are
+  // swapped to the new interface so the test exercises the real code path again.
+  test('post-message does not claim routed when InvocationQueue coalesces a duplicate queued target', async () => {
     const tryAutoExecuteCalls = [];
     const queueProcessor = {
       async onInvocationComplete() {},
@@ -259,20 +275,29 @@ describe('post_message A2A mention invocation', () => {
       registerEntryCompleteHook() {},
       unregisterEntryCompleteHook() {},
     };
+    let coalesceCalled = false;
     const invocationQueue = {
       countAgentEntriesForThread() {
         return 1;
       },
-      hasQueuedAgentForCat(threadId, catId) {
+      // New dedup entry-point: the duplicate target already has a QUEUED agent entry.
+      findInFlightAgentEntry(threadId, catId) {
         assert.equal(threadId, 't1');
         assert.equal(catId, 'codex');
+        return { id: 'q-existing', userId: 'user-1', status: 'queued', source: 'agent', targetCats: ['codex'] };
+      },
+      // The new content is merged into the existing queued entry (not dropped, not re-dispatched).
+      coalesceContentIntoQueuedAgent(threadId, _userId, entryId) {
+        assert.equal(threadId, 't1');
+        assert.equal(entryId, 'q-existing');
+        coalesceCalled = true;
         return true;
       },
       enqueue() {
-        throw new Error('duplicate target must not be enqueued again');
+        throw new Error('coalesced duplicate must not be enqueued again');
       },
       backfillMessageId() {
-        throw new Error('skipped duplicate must not backfill a new queue entry');
+        throw new Error('coalesced duplicate must not backfill a new queue entry');
       },
       list() {
         return [];
@@ -292,8 +317,9 @@ describe('post_message A2A mention invocation', () => {
 
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
+    assert.ok(coalesceCalled, 'duplicate queued target should be coalesced, not re-dispatched');
     assert.deepEqual(body.routed, [], 'Response must expose that no new A2A route was enqueued');
-    assert.doesNotMatch(body.message, /消息已路由给 @codex/, 'Duplicate skip must not be reported as routed');
+    assert.doesNotMatch(body.message, /消息已路由给 @codex/, 'Coalesced duplicate must not be reported as routed');
     assert.match(body.message, /未新增唤醒|已有待处理队列/);
     assert.deepEqual(tryAutoExecuteCalls, ['t1'], 'Existing queued entry should still be nudged for auto-execute');
     assert.equal(invocationRecordStore.getRecords().length, 0, 'InvocationQueue path must not create legacy records');

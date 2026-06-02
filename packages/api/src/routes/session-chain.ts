@@ -42,6 +42,7 @@ interface RuntimeSessionSummary {
   runtimeConversationId?: string;
   lifecycleState: RuntimeSessionMetadata['lifecycle']['state'];
   lastObservedAt: number;
+  retryFragment?: RuntimeSessionMetadata['lifecycle']['retryFragment'];
   unexpectedRuntimeSessionSwitch?: RuntimeSessionMetadata['lifecycle']['unexpectedRuntimeSessionSwitch'];
 }
 
@@ -69,6 +70,7 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
       : {}),
     lifecycleState: metadata.lifecycle.state,
     lastObservedAt: metadata.lifecycle.lastObservedAt,
+    ...(metadata.lifecycle.retryFragment ? { retryFragment: metadata.lifecycle.retryFragment } : {}),
     ...(metadata.lifecycle.unexpectedRuntimeSessionSwitch
       ? { unexpectedRuntimeSessionSwitch: metadata.lifecycle.unexpectedRuntimeSessionSwitch }
       : {}),

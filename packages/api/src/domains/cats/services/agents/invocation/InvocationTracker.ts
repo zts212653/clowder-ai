@@ -9,7 +9,10 @@
  * F118 D3: TTL guard — slots exceeding maxSlotTtlMs are auto-cleaned on read.
  */
 
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+
+const log = createModuleLogger('invocation-tracker');
 
 interface ActiveInvocation {
   controller: AbortController;
@@ -152,6 +155,21 @@ export class InvocationTracker {
     if (requestUserId && inv.userId !== requestUserId) return { cancelled: false, catIds: [] };
     const { catIds } = inv;
     inv.controller.abort(abortReason);
+    // F211-REG6 instrument (observation-only): the cancel funnel is the complete chokepoint for the
+    // hardcoded 'user_cancel' reason (SocketManager:211 + queue.ts). Logging abortReason + msSinceStart
+    // here (vs only at the WS layer) disambiguates WS-sourced cancels from any non-WS path, and a very
+    // short msSinceStart hints at reconnect/teardown churn rather than a deliberate mid-turn Stop.
+    log.info(
+      {
+        event: 'f211_reg6_invocation_abort',
+        method: 'cancel',
+        threadId,
+        catId,
+        abortReason: abortReason ?? null,
+        msSinceStart: Date.now() - inv.startedAt,
+      },
+      'F211-REG6: invocation aborted (cancel funnel) — abortReason provenance',
+    );
     // F-parallel-cancel: tombstone — do NOT delete the slot. Keep it as a 'canceled' tombstone so
     // getController() still returns the aborted controller for a cat cancelled BEFORE the route
     // layer grabbed its own signal (pre-invoke cancel must not be lost / fall back to the batch
@@ -170,6 +188,10 @@ export class InvocationTracker {
   cancelAll(threadId: string, requestUserId?: string, abortReason?: string): string[] {
     const prefix = `${threadId}:`;
     const cancelledCatIds: string[] = [];
+    // F211-REG6 instrument (observation-only): per-cat age evidence for the all-scope path,
+    // mirroring cancel()'s msSinceStart. An all-scope cancel / force-reset must also answer
+    // "just started" vs "ran a while" — without this, the cancelAll log can't distinguish them.
+    const cancelledSlots: Array<{ catId: string; msSinceStart: number }> = [];
     // F-parallel-cancel: cancelAll is the "stop the whole invocation" path (force-reset /
     // cancel_all button), so it must abort the INDEPENDENT batch gate too — single-cat cancel
     // does NOT (see startAll). Collect + dedup batch controllers of the slots we cancel.
@@ -178,12 +200,27 @@ export class InvocationTracker {
       if (key.startsWith(prefix)) {
         if (requestUserId && inv.userId !== requestUserId) continue;
         cancelledCatIds.push(inv.catId);
+        cancelledSlots.push({ catId: inv.catId, msSinceStart: Date.now() - inv.startedAt });
         inv.controller.abort(abortReason);
         if (inv.batchController) batchControllers.add(inv.batchController);
         this.active.delete(key);
       }
     }
     for (const bc of batchControllers) bc.abort(abortReason);
+    if (cancelledCatIds.length > 0) {
+      // F211-REG6 instrument (observation-only): mirror the cancel() funnel for the cancel_all path.
+      log.info(
+        {
+          event: 'f211_reg6_invocation_abort',
+          method: 'cancelAll',
+          threadId,
+          abortReason: abortReason ?? null,
+          cancelledCatIds,
+          cancelledSlots,
+        },
+        'F211-REG6: invocations aborted (cancelAll funnel) — abortReason provenance',
+      );
+    }
     return cancelledCatIds;
   }
 

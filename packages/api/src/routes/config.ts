@@ -30,7 +30,13 @@ import {
   isEditableEnvVarName,
 } from '../config/env-registry.js';
 import { updateRuntimeCoCreator } from '../config/runtime-cat-catalog.js';
+import { isValidTimeZone } from '../config/time-zone.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+// F212 Phase F (cloud codex R4 P2-#2 on fc69597675): import logger's captured LOG_DIR
+// so env-summary returns the path the active pino destination is actually writing to.
+// Reading process.env.LOG_DIR here would diverge from logger after a runtime
+// `PATCH /api/config/env` LOG_DIR edit — env-summary would lie about effective path.
+import { LOG_DIR_PATH } from '../infrastructure/logger.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
@@ -47,10 +53,17 @@ const envPatchSchema = z.object({
   updates: z.array(z.object({ name: z.string().min(1), value: z.string().nullable() })).min(1),
 });
 
+const timeZonePatchSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(isValidTimeZone, { message: 'timeZone must be a valid IANA timezone' });
+
 const coCreatorPatchSchema = z.object({
   name: z.string().trim().min(1),
   aliases: z.array(z.string().trim().min(1)),
   mentionPatterns: z.array(z.string().trim().min(1)).min(1),
+  timeZone: timeZonePatchSchema.optional(),
   avatar: z.string().trim().nullable().optional(),
   color: z
     .object({
@@ -216,6 +229,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         name: parsed.data.name,
         aliases: parsed.data.aliases,
         mentionPatterns: parsed.data.mentionPatterns,
+        ...(parsed.data.timeZone !== undefined ? { timeZone: parsed.data.timeZone } : {}),
         ...(parsed.data.avatar !== undefined ? { avatar: parsed.data.avatar } : {}),
         ...(parsed.data.color !== undefined ? { color: parsed.data.color } : {}),
       });
@@ -233,6 +247,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
           operator,
           name: next.coCreator.name,
           mentionPatterns: next.coCreator.mentionPatterns,
+          timeZone: next.coCreator.timeZone,
         },
       });
     } catch (err) {
@@ -261,7 +276,13 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
         homeDir: home,
         dataDirs: {
           auditLogs: resolve(apiCwd, process.env.AUDIT_LOG_DIR ?? './data/audit-logs'),
-          runtimeLogs: resolve(apiCwd, './data/logs/api'),
+          // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675): use
+          // the path the pino destination CAPTURED at logger import. Reading process.env.
+          // LOG_DIR directly would let runtime `PATCH /api/config/env` edits change what
+          // env-summary returns while pino keeps writing to the import-time value — the
+          // AC-F5 hint would then point users to a directory that has no current logs.
+          // Single source of truth = LOG_DIR_PATH.
+          runtimeLogs: LOG_DIR_PATH,
           cliArchive: resolve(apiCwd, process.env.CLI_RAW_ARCHIVE_DIR ?? './data/cli-raw-archive'),
           redisDevSandbox: resolve(home, '.cat-cafe/redis-dev-sandbox'),
           uploads: getDefaultUploadDir(process.env.UPLOAD_DIR),

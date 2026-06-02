@@ -15,11 +15,10 @@ threadPolicy:
     - longitudinal-analysis
     - verdict-discussion
     - handoff-drafts
-legacyScheduledTaskIds:
-  - harness-fit-digest
+legacyScheduledTaskIds: [] # Cleaned 2026-06-01 — see migrations/2026-06-01-eval-a2a-legacy-task-cleanup.md
 handoffTargetResolver:
   featureId: F167
-  ownerCatId: opus47
+  ownerCatId: opus-47
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 24

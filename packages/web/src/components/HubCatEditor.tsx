@@ -10,6 +10,7 @@ import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
+  buildCatPatchPayload,
   buildCatPayload,
   buildCodexConfigPatches,
   buildStrategyPayload,
@@ -427,7 +428,7 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
     try {
       const effectiveForm =
         !cat && selectedProfile?.authType === 'api_key' ? withDefaultModelMentionPattern(form) : form;
-      const catPayload = buildCatPayload(effectiveForm, cat);
+      const catPayload = cat ? buildCatPatchPayload(effectiveForm, cat) : buildCatPayload(effectiveForm, cat);
       const rollbackCatPayload = cat ? buildCatPayload(initialState(cat, null), cat) : null;
       const strategyEditable = Boolean(
         cat && form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true),

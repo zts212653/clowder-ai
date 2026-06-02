@@ -39,6 +39,7 @@ const ALLOWLIST = new Map([
   ['all_proxy', 'Standard proxy convention (lowercase variant of ALL_PROXY)'],
   ['npm_execpath', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
+  ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
 ]);
 

@@ -153,3 +153,34 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         : {}),
   };
 }
+
+function normalizeOptionalText(value: unknown): string | null {
+  const trimmed = trimText(value);
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData) {
+  const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+
+  if (form.clientId === cat.clientId) {
+    delete payload.clientId;
+  }
+  if (trimText(form.defaultModel) === trimText(cat.defaultModel)) {
+    delete payload.defaultModel;
+  }
+
+  const nextAccountRef = normalizeOptionalText(form.accountRef);
+  const currentAccountRef = normalizeOptionalText(cat.accountRef);
+  if (nextAccountRef === currentAccountRef) {
+    delete payload.accountRef;
+  }
+
+  const nextProvider =
+    form.clientId === 'opencode' && trimText(form.provider).length > 0 ? trimText(form.provider) : null;
+  const currentProvider = normalizeOptionalText(cat.provider);
+  if (nextProvider === currentProvider) {
+    delete payload.provider;
+  }
+
+  return payload;
+}

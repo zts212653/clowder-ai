@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
-import { generateA2aLiveVerdict } from '../../dist/infrastructure/harness-eval/eval-a2a-live-verdict.js';
+import { generateA2aLiveVerdict } from '../../dist/infrastructure/harness-eval/a2a/eval-a2a-live-verdict.js';
 
 const domain = {
   domainId: 'eval:a2a',

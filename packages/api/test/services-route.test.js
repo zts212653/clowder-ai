@@ -185,6 +185,56 @@ describe('services routes', () => {
     }
   });
 
+  it('rejects non-loopback /api/services/endpoints when DEFAULT_OWNER_USER_ID is unset', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const app = await buildApp({
+      env: { WHISPER_URL: 'https://user:secret@example.com/healthy' },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/endpoints',
+        headers: SESSION_HEADERS,
+        remoteAddress: '192.168.1.100',
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
+      assert.match(JSON.parse(res.payload).error, /non-localhost|DEFAULT_OWNER_USER_ID/);
+      assert.equal(res.payload.includes('secret'), false);
+    } finally {
+      await app.close();
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('rejects proxy-forwarded loopback /api/services/endpoints when DEFAULT_OWNER_USER_ID is unset', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    delete process.env.DEFAULT_OWNER_USER_ID;
+    const app = await buildApp({
+      env: { WHISPER_URL: 'https://user:secret@example.com/healthy' },
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/services/endpoints',
+        headers: {
+          ...SESSION_HEADERS,
+          'x-forwarded-for': '203.0.113.50',
+        },
+      });
+
+      assert.equal(res.statusCode, 403, res.payload);
+      assert.match(JSON.parse(res.payload).error, /non-localhost|DEFAULT_OWNER_USER_ID/);
+      assert.equal(res.payload.includes('secret'), false);
+    } finally {
+      await app.close();
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
   it('redacts URL credentials from display surfaces but keeps them on /endpoints', async () => {
     const app = await buildApp({
       env: {

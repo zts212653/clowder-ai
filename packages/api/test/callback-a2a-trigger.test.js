@@ -1287,10 +1287,14 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
     assert.deepEqual(result.enqueued, []);
   });
 
-  test('deduplicates — skips targets already queued as agent entries', async () => {
+  test('F-coalesce: merges into a queued agent entry instead of dispatching a duplicate', async () => {
+    // Contract change (F-coalesce): a repeated same-turn handoff to a cat that already has a QUEUED
+    // agent entry is now MERGED into that entry (caller intent preserved) rather than skip-dropped
+    // (old behaviour lost the follow-up). A new (non-duplicate) cat still enqueues normally.
     const { enqueueA2ATargets } = await import('../dist/routes/callback-a2a-trigger.js');
 
     const enqueueCalls = [];
+    const coalesceCalls = [];
     const mockInvocationQueue = {
       enqueue(input) {
         enqueueCalls.push(input);
@@ -1299,9 +1303,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       countAgentEntriesForThread() {
         return 0;
       },
-      // opus already has a queued agent entry
-      hasQueuedAgentForCat(_threadId, catId) {
-        return catId === 'opus';
+      // opus already has a queued agent entry → returned as in-flight for coalescing
+      findInFlightAgentEntry(_threadId, catId) {
+        return catId === 'opus'
+          ? { id: 'q-existing', userId: 'system', status: 'queued', source: 'agent', targetCats: ['opus'] }
+          : null;
+      },
+      coalesceContentIntoQueuedAgent(_threadId, _userId, entryId, content, messageId) {
+        coalesceCalls.push({ entryId, content, messageId });
+        return true;
       },
       backfillMessageId() {},
       list() {
@@ -1348,10 +1358,15 @@ describe('enqueueA2ATargets F122B (InvocationQueue path)', () => {
       },
     );
 
-    // opus should be skipped (already queued), codex should enqueue
-    assert.equal(enqueueCalls.length, 1, 'should only enqueue non-duplicate cat');
+    // opus → coalesced into its queued entry (no new enqueue); codex → enqueued fresh
+    assert.equal(coalesceCalls.length, 1, 'opus handoff should be coalesced into the queued entry');
+    assert.equal(coalesceCalls[0].entryId, 'q-existing');
+    assert.equal(enqueueCalls.length, 1, 'only the non-duplicate cat creates a new entry');
     assert.equal(enqueueCalls[0].targetCats[0], 'codex');
-    assert.deepEqual(result.enqueued, ['codex']);
+    // Split semantics: codex is a NEW route (enqueued → body.routed); opus is a MERGE (coalesced,
+    // NOT a new route). Conflating them would falsely report opus as "已路由" (gate regression).
+    assert.deepEqual(result.enqueued, ['codex'], 'only the fresh dispatch is a new route');
+    assert.deepEqual(result.coalesced, ['opus'], 'the merged cat is reported as coalesced, not routed');
   });
 
   test('depth limit enforced per-target — multi-target stops at limit (cloud P1)', async () => {

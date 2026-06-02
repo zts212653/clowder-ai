@@ -3,7 +3,7 @@ domainId: eval:capability-wakeup
 displayName: Capability Wakeup Eval
 systemThreadId: thread_eval_capability_wakeup
 evalCat:
-  catId: opus47
+  catId: opus-47
   handle: "@opus47"
   model: claude-opus-4-7
 frequency: weekly
@@ -18,8 +18,14 @@ threadPolicy:
 legacyScheduledTaskIds: []
 handoffTargetResolver:
   featureId: F203
-  ownerCatId: opus47
+  ownerCatId: opus-47
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 168
+fixtures:
+  - id: source-hygiene-memu-echo-chamber
+    featureId: F218
+    path: docs/harness-feedback/fixtures/source-hygiene-memu-echo-chamber.md
+    skill: source-audit
+    signal: high-risk external claim without provenance

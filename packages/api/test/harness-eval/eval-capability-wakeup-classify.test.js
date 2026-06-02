@@ -4,7 +4,7 @@ import {
   buildCapabilityTrace,
   classifyCapabilityWakeupTrials,
   evaluateCapabilityWakeupTrace,
-} from '../../dist/infrastructure/harness-eval/eval-capability-wakeup-adapter.js';
+} from '../../dist/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-adapter.js';
 import { toolEvent, transcriptEvent } from './capability-wakeup-test-helpers.js';
 
 describe('Capability Wakeup Classification', () => {

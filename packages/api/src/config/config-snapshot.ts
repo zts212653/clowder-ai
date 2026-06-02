@@ -7,6 +7,7 @@ export interface ConfigSnapshot {
     name: string;
     aliases: string[];
     mentionPatterns: string[];
+    timeZone?: string;
     avatar?: string;
     color?: {
       primary: string;

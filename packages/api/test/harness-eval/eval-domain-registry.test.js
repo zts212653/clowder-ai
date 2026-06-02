@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import {
   parseEvalDomainRegistryEntry,
   parseEvalDomainRegistryFile,
-} from '../../dist/infrastructure/harness-eval/eval-domain-registry.js';
+} from '../../dist/infrastructure/harness-eval/domain/eval-domain-registry.js';
 
 const validEntry = {
   domainId: 'eval:a2a',
@@ -238,5 +238,14 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.sourceAdapter, 'capability-wakeup-eval');
     assert.equal(entry.frequency, 'weekly');
     assert.equal(entry.handoffTargetResolver.featureId, 'F203');
+    assert.deepEqual(entry.fixtures, [
+      {
+        id: 'source-hygiene-memu-echo-chamber',
+        featureId: 'F218',
+        path: 'docs/harness-feedback/fixtures/source-hygiene-memu-echo-chamber.md',
+        skill: 'source-audit',
+        signal: 'high-risk external claim without provenance',
+      },
+    ]);
   });
 });

@@ -32,7 +32,7 @@ triggers:
 
 ### Review Continuity Guard（review 是否真的覆盖当前 HEAD）
 
-`pnpm gate`、rebase、fixup、feature index regeneration 都可能让 HEAD 变化。**只要 HEAD 变了，旧 review 默认不自动继承。**
+`pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**只要 HEAD 变了，旧 review 默认不自动继承。**
 
 进入 Step 7 之前，author 必须核对：
 
@@ -43,7 +43,7 @@ echo "$CURRENT_HEAD"
 
 - reviewer 放行对应的 SHA = `CURRENT_HEAD` → 通过
 - reviewer 放行时的 SHA ≠ `CURRENT_HEAD` → **停止 merge-gate**
-  - 非行为性 delta（例如 `docs/features/index.json` regenerate、纯 rebase 无代码差异）：
+  - 非行为性 delta（例如纯 rebase 无代码差异、biome 格式化刷新）：
     reviewer 必须在 thread / PR 上**显式写出**“放行延续到 `{CURRENT_HEAD:0:8}`”
   - 行为性 delta（代码、测试、配置、接口变化）：
     重新 review，不能拿旧放行硬套新 HEAD

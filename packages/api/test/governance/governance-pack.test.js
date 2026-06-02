@@ -26,9 +26,9 @@ describe('governance-pack', () => {
     assert.ok(block.includes('6399'), 'Source should use internal port 6399');
   });
 
-  it('port reservation concept is present', () => {
+  it('public local defaults guidance is present', () => {
     const block = getGovernanceManagedBlock('claude');
-    assert.ok(block.includes('local defaults'), 'Port defaults guidance should be present');
+    assert.ok(block.includes('Public local defaults'), 'Port defaults guidance should be present');
     assert.ok(block.includes('production Redis'), 'Redis port guidance should be present');
   });
 

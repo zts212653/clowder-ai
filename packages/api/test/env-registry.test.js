@@ -282,6 +282,59 @@ describe('GET /api/config/env-summary (route)', () => {
 
     await app.close();
   });
+
+  // F212 Phase F (cloud codex R3 P2 on 3083d7c5f + R4 P2-#2 on fc69597675):
+  // env-summary.runtimeLogs MUST equal logger's CAPTURED LOG_DIR_PATH — not
+  // process.env.LOG_DIR read at request time. Runtime `PATCH /api/config/env` LOG_DIR
+  // edit would change process.env but pino destination is already bound to the
+  // captured path → users following the AC-F5 hint would grep an empty new directory.
+  it('AC-F5 (R3+R4): runtimeLogs equals logger captured LOG_DIR_PATH (single source of truth)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const { LOG_DIR_PATH } = await import('../dist/infrastructure/logger.js');
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app);
+      await app.ready();
+      const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      const body = JSON.parse(res.payload);
+      assert.equal(
+        body.paths.dataDirs.runtimeLogs,
+        LOG_DIR_PATH,
+        'runtimeLogs MUST equal logger LOG_DIR_PATH (R3+R4 single-source fix)',
+      );
+      assert.ok(body.paths.dataDirs.runtimeLogs.startsWith('/'), 'absolute path');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('AC-F5 (R4 P2-#2): runtime process.env.LOG_DIR mutation MUST NOT change reported runtimeLogs', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const { LOG_DIR_PATH } = await import('../dist/infrastructure/logger.js');
+    // Mutate AFTER logger already captured (simulates runtime PATCH /api/config/env).
+    const mutatedPath = mkdtempSync(resolve(tmpdir(), 'cat-cafe-mutated-log-'));
+    setEnv('LOG_DIR', mutatedPath);
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app);
+      await app.ready();
+      const res = await app.inject({ method: 'GET', url: '/api/config/env-summary' });
+      const body = JSON.parse(res.payload);
+      assert.equal(
+        body.paths.dataDirs.runtimeLogs,
+        LOG_DIR_PATH,
+        'env-summary ignores runtime mutation — stays on captured logger path',
+      );
+      assert.notEqual(
+        body.paths.dataDirs.runtimeLogs,
+        mutatedPath,
+        'mutated env value MUST NOT propagate (R4 P2-#2 regression guard)',
+      );
+    } finally {
+      await app.close();
+      rmSync(mutatedPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('PATCH /api/config/env (route)', () => {

@@ -20,24 +20,37 @@ const load = () => import('../dist/domains/cats/services/format-time.js');
 describe('format-time — formatPromptTime (UTC-consistent prompt timestamps)', () => {
   it('formats epoch-ms as "HH:mm UTC" with an explicit timezone marker', async () => {
     const { formatPromptTime } = await load();
-    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 6, 40, 0, 0)), '06:40 UTC');
+    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 6, 40, 0, 0), { timeZone: null }), '06:40 UTC');
+  });
+
+  it('formats co-creator local time plus UTC when an IANA timezone is configured', async () => {
+    const { formatPromptTime } = await load();
+    assert.equal(
+      formatPromptTime(Date.UTC(2026, 5, 1, 6, 20, 0, 0), { timeZone: 'America/Los_Angeles' }),
+      '铲屎官本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC',
+    );
+  });
+
+  it('keeps UTC-only output by default so history lines stay compact', async () => {
+    const { formatPromptTime } = await load();
+    assert.equal(formatPromptTime(Date.UTC(2026, 5, 1, 6, 20, 0, 0)), '06:20 UTC');
   });
 
   it('uses UTC base, NOT host-local (a PDT host would render this instant as 20:00 prev day)', async () => {
     const { formatPromptTime } = await load();
     // 03:00 UTC — the exact instant from PR #793. getHours() on a UTC-7 host
     // would return 20:00 (previous day); asserting 03:00 proves UTC base.
-    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 3, 0, 0, 0)), '03:00 UTC');
+    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 3, 0, 0, 0), { timeZone: null }), '03:00 UTC');
   });
 
   it('zero-pads single-digit hours and minutes', async () => {
     const { formatPromptTime } = await load();
-    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 3, 5, 0, 0)), '03:05 UTC');
+    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 3, 5, 0, 0), { timeZone: null }), '03:05 UTC');
   });
 
   it('handles the midnight boundary', async () => {
     const { formatPromptTime } = await load();
-    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 0, 0, 0, 0)), '00:00 UTC');
+    assert.equal(formatPromptTime(Date.UTC(2026, 4, 29, 0, 0, 0, 0), { timeZone: null }), '00:00 UTC');
   });
 });
 
@@ -46,13 +59,23 @@ describe('format-time — formatPromptTimeRange', () => {
     const { formatPromptTimeRange } = await load();
     const from = Date.UTC(2026, 4, 29, 6, 40, 0, 0);
     const to = Date.UTC(2026, 4, 29, 7, 5, 0, 0);
-    assert.equal(formatPromptTimeRange(from, to), '06:40 — 07:05 UTC');
+    assert.equal(formatPromptTimeRange(from, to, { timeZone: null }), '06:40 — 07:05 UTC');
+  });
+
+  it('renders local and UTC range when an IANA timezone is configured', async () => {
+    const { formatPromptTimeRange } = await load();
+    const from = Date.UTC(2026, 5, 1, 6, 20, 0, 0);
+    const to = Date.UTC(2026, 5, 1, 7, 5, 0, 0);
+    assert.equal(
+      formatPromptTimeRange(from, to, { timeZone: 'America/Los_Angeles' }),
+      '铲屎官本地 2026-05-31 23:20 — 2026-06-01 00:05 America/Los_Angeles / 06:20 — 07:05 UTC',
+    );
   });
 
   it('range endpoints use UTC base', async () => {
     const { formatPromptTimeRange } = await load();
     const from = Date.UTC(2026, 4, 29, 0, 0, 0, 0);
     const to = Date.UTC(2026, 4, 29, 23, 59, 0, 0);
-    assert.equal(formatPromptTimeRange(from, to), '00:00 — 23:59 UTC');
+    assert.equal(formatPromptTimeRange(from, to, { timeZone: null }), '00:00 — 23:59 UTC');
   });
 });

@@ -139,6 +139,66 @@ describe('consumeBackgroundSystemInfo web_search', () => {
     );
   });
 
+  it('finalizes stale same-cat background stream before binding a new invocation', () => {
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [
+          {
+            id: 'bg-old-bound',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'previous invocation finished in backend',
+            isStreaming: true,
+            origin: 'stream',
+            extra: {
+              stream: {
+                invocationId: 'parent-old',
+                turnInvocationId: 'turn-old',
+              },
+            },
+            timestamp: Date.now() - 1_000,
+          },
+          {
+            id: 'bg-new-placeholder',
+            type: 'assistant',
+            catId: 'codex',
+            content: '',
+            isStreaming: true,
+            origin: 'stream',
+            timestamp: Date.now(),
+          },
+        ],
+        catStatuses: {},
+        catInvocations: {},
+      })),
+    });
+
+    const msg = {
+      type: 'system_info',
+      catId: 'codex',
+      threadId: 'thread-1',
+      invocationId: 'parent-new',
+      turnInvocationId: 'turn-new',
+      content: JSON.stringify({ type: 'invocation_created', invocationId: 'turn-new' }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(
+      msg,
+      { id: 'bg-old-bound', threadId: 'thread-1', catId: 'codex' },
+      options,
+    );
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.setThreadMessageStreaming).toHaveBeenCalledWith('thread-1', 'bg-old-bound', false);
+    expect(options.store.setThreadMessageStreamInvocation).toHaveBeenCalledWith(
+      'thread-1',
+      'bg-new-placeholder',
+      'parent-new',
+      'turn-new',
+    );
+  });
+
   // F194 Phase Z3 R12 (砚砚 R13 RED requirement): background invocation_created with dual id
   // (msg.invocationId=parent + msg.turnInvocationId=child) must call setThreadMessageStreamInvocation
   // with parent + turnInvocationId, so existing stream bubble preserves dual id contract.

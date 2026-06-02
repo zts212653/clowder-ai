@@ -42,8 +42,7 @@ export function initCollapsedSet(allGroupKeys: string[], storage: StorageLike): 
 }
 
 /** Determine if a group should render as collapsed. */
-export function shouldCollapse(groupKey: string, collapsedSet: Set<string>, searchQuery: string): boolean {
-  if (searchQuery.length > 0) return false;
+export function shouldCollapse(groupKey: string, collapsedSet: Set<string>): boolean {
   return collapsedSet.has(groupKey);
 }
 
@@ -57,15 +56,20 @@ export function shouldCollapseBeforeInit(_groupKey: string): boolean {
  * Resolve collapse state for a group, handling pre-init + search priority.
  * This is the pure-function equivalent of the hook's isCollapsed callback.
  */
-export function resolveCollapse(
-  groupKey: string,
-  collapsedSet: Set<string>,
-  searchQuery: string,
-  isInitialized: boolean,
-): boolean {
-  if (searchQuery.length > 0) return false;
+export function resolveCollapse(groupKey: string, collapsedSet: Set<string>, isInitialized: boolean): boolean {
   if (!isInitialized) return shouldCollapseBeforeInit(groupKey);
-  return shouldCollapse(groupKey, collapsedSet, searchQuery);
+  return shouldCollapse(groupKey, collapsedSet);
+}
+
+/** Expand currently visible search result groups without overriding later manual collapse. */
+export function expandGroupsForSearch(collapsedSet: Set<string>, visibleGroupKeys: string[]): Set<string> {
+  let next: Set<string> | undefined;
+  for (const key of visibleGroupKeys) {
+    if (!collapsedSet.has(key)) continue;
+    next ??= new Set(collapsedSet);
+    next.delete(key);
+  }
+  return next ?? collapsedSet;
 }
 
 /** Return empty set (all expanded). */

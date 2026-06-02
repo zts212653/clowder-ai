@@ -27,6 +27,7 @@ export interface ProbeConfig {
   softWarningMs: number;
   stallWarningMs: number;
   boundedExtensionFactor: number;
+  minCpuGrowthMs: number;
 }
 
 const DEFAULT_CONFIG: ProbeConfig = {
@@ -34,6 +35,8 @@ const DEFAULT_CONFIG: ProbeConfig = {
   softWarningMs: 120_000,
   stallWarningMs: 300_000,
   boundedExtensionFactor: 2.0,
+  // Ignore ps cputime jitter: tiny drift must not keep a silent CLI alive for 30m.
+  minCpuGrowthMs: 50,
 };
 
 /** Parse ps cputime format (mm:ss.SS or h:mm:ss) to milliseconds */
@@ -195,7 +198,7 @@ export class ProcessLivenessProbe {
   private updateCpuSample(totalCpuMs: number): void {
     this.prevCpuTimeMs = this.currCpuTimeMs;
     this.currCpuTimeMs = totalCpuMs;
-    this.cpuGrowing = this.currCpuTimeMs > this.prevCpuTimeMs;
+    this.cpuGrowing = this.currCpuTimeMs - this.prevCpuTimeMs >= this.config.minCpuGrowthMs;
     this.emitSilenceWarnings();
     this.sampling = false;
   }

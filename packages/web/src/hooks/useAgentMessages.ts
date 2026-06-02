@@ -475,6 +475,80 @@ function recoverBackgroundStreamingMessage(
   return undefined;
 }
 
+function getStreamStableInvocationKey(message: ChatMessage): string | undefined {
+  const invocationId = message.extra?.stream?.invocationId;
+  if (typeof invocationId !== 'string' || invocationId.length === 0) return undefined;
+  const turnInvocationId = message.extra?.stream?.turnInvocationId;
+  return typeof turnInvocationId === 'string' && turnInvocationId.length > 0 ? turnInvocationId : invocationId;
+}
+
+function isBackgroundStreamingAssistant(message: ChatMessage, catId: string): boolean {
+  return message.type === 'assistant' && message.catId === catId && message.isStreaming === true;
+}
+
+function finalizeStaleBackgroundInvocationStreams(
+  threadId: string,
+  catId: string,
+  incomingStableKey: string,
+  options: HandleBackgroundMessageOptions,
+): void {
+  const streamKey = `${threadId}::${catId}`;
+  const activeRef = options.bgStreamRefs.get(streamKey);
+  const closedStableKeys = new Set<string>();
+  const threadMessages = options.store.getThreadState(threadId).messages;
+  for (const message of threadMessages) {
+    if (!isBackgroundStreamingAssistant(message, catId)) continue;
+    const stableKey = getStreamStableInvocationKey(message);
+    if (!stableKey || stableKey === incomingStableKey) continue;
+    options.store.setThreadMessageStreaming(threadId, message.id, false);
+    closedStableKeys.add(stableKey);
+    if (activeRef?.id === message.id) {
+      options.bgStreamRefs.delete(streamKey);
+    }
+  }
+  for (const stableKey of closedStableKeys) {
+    markReplacedInvocation(threadId, catId, stableKey);
+  }
+}
+
+function findBackgroundInvocationCreatedTarget(
+  msg: BackgroundAgentMessage,
+  targetCatId: string,
+  existingRef: BackgroundStreamRef | undefined,
+  incomingStableKey: string,
+  options: HandleBackgroundMessageOptions,
+): string | undefined {
+  const streamKey = `${msg.threadId}::${targetCatId}`;
+  const threadMessages = options.store.getThreadState(msg.threadId).messages;
+  const isEligible = (message: ChatMessage | undefined): message is ChatMessage => {
+    if (!message || !isBackgroundStreamingAssistant(message, targetCatId)) return false;
+    const stableKey = getStreamStableInvocationKey(message);
+    return !stableKey || stableKey === incomingStableKey;
+  };
+
+  if (existingRef?.id) {
+    const existing = threadMessages.find((message) => message.id === existingRef.id);
+    if (isEligible(existing)) {
+      options.bgStreamRefs.set(streamKey, { id: existing.id, threadId: msg.threadId, catId: targetCatId });
+      if (msg.metadata) {
+        options.store.setThreadMessageMetadata(msg.threadId, existing.id, msg.metadata);
+      }
+      return existing.id;
+    }
+  }
+
+  for (let i = threadMessages.length - 1; i >= 0; i--) {
+    const message = threadMessages[i];
+    if (!isEligible(message)) continue;
+    options.bgStreamRefs.set(streamKey, { id: message.id, threadId: msg.threadId, catId: targetCatId });
+    if (msg.metadata) {
+      options.store.setThreadMessageMetadata(msg.threadId, message.id, msg.metadata);
+    }
+    return message.id;
+  }
+  return undefined;
+}
+
 export function consumeBackgroundSystemInfo(
   msg: BackgroundAgentMessage,
   existingRef: BackgroundStreamRef | undefined,
@@ -512,6 +586,8 @@ export function consumeBackgroundSystemInfo(
       const bgStreamKey = `${msg.threadId}::${targetCatId}`;
       options.finalizedBgRefs.delete(bgStreamKey);
       if (targetCatId && invocationId) {
+        const incomingStableKey = turnInvocationId ?? invocationId;
+        finalizeStaleBackgroundInvocationStreams(msg.threadId, targetCatId, incomingStableKey, options);
         options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
           invocationId,
           ...(turnInvocationId ? { turnInvocationId } : {}),
@@ -523,7 +599,13 @@ export function consumeBackgroundSystemInfo(
             lastInvocationId: invocationId,
           },
         });
-        const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+        const targetId = findBackgroundInvocationCreatedTarget(
+          msg,
+          targetCatId,
+          existingRef,
+          incomingStableKey,
+          options,
+        );
         if (targetId) {
           // F194 Phase Z3 R12 P1: forward turnInvocationId so background bind preserves dual id
           options.store.setThreadMessageStreamInvocation(msg.threadId, targetId, invocationId, turnInvocationId);

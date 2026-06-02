@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { chdir, cwd } from 'node:process';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/eval-hub-read-model.js';
+import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -340,6 +340,45 @@ Evidence:
     assert.ok(capabilityWakeupDomain, 'eval:capability-wakeup must appear in domains');
     assert.equal(capabilityWakeupDomain.hasVerdict, false);
     assert.equal(capabilityWakeupDomain.evalCatHandle, '@opus47');
+  });
+
+  // OQ-20: domain summary must include evalCatId + nextCronFireAt for frontend edit + display
+  it('includes evalCatId and nextCronFireAt in domain summaries (#OQ-20)', () => {
+    const summary = loadEvalHubSummary({
+      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      now: FIXTURE_NOW_BEFORE_DEADLINE,
+    });
+
+    const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
+    assert.ok(a2aDomain);
+    // evalCatId must be exposed for the PATCH edit endpoint
+    assert.equal(a2aDomain.evalCatId, 'codex', 'domain summary must include evalCatId');
+    // P1-2 fix: nextCronFireAt is the scheduler's next fire time, not verdict re-eval deadline
+    // FIXTURE_NOW_BEFORE_DEADLINE = 2026-05-23T12:00 → next daily 03:00 UTC = 2026-05-24T03:00
+    assert.equal(
+      a2aDomain.nextCronFireAt,
+      '2026-05-24T03:00:00.000Z',
+      'daily domain nextCronFireAt = next 03:00 UTC after now',
+    );
+
+    // P1-2 fix: ALL domains get nextCronFireAt, including those without verdicts
+    const memoryDomain = summary.domains.find((d) => d.domainId === 'eval:memory');
+    assert.ok(memoryDomain);
+    assert.equal(memoryDomain.evalCatId, 'opus-47');
+    assert.equal(
+      memoryDomain.nextCronFireAt,
+      '2026-05-24T03:00:00.000Z',
+      'no-verdict domain still gets nextCronFireAt',
+    );
+
+    // Weekly domain: next Sunday 03:00 UTC after 2026-05-23 (Saturday) = 2026-05-24 (Sunday)
+    const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
+    assert.ok(sopDomain);
+    assert.equal(
+      sopDomain.nextCronFireAt,
+      '2026-05-24T03:00:00.000Z',
+      'weekly domain nextCronFireAt = next Sunday 03:00 UTC',
+    );
   });
 
   it('fails closed when a live verdict points at a missing evidence bundle', () => {

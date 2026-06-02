@@ -126,34 +126,68 @@ function isSubstantiveActivity(activity?: CallerActivity): boolean {
   return activity.hadSubstantiveToolCall || activity.outputLength > OUTPUT_LEN_T;
 }
 
+/** F167 L1: pure verdict from a (possibly predicted) post-push streak count. */
+function streakVerdict(count: number): StreakResult {
+  return {
+    warnPingPong: count >= PINGPONG_WARN_THRESHOLD && count < PINGPONG_BLOCK_THRESHOLD,
+    blockPingPong: count >= PINGPONG_BLOCK_THRESHOLD,
+    count,
+  };
+}
+
+/**
+ * F167 Phase D rule, factored out as a PURE prediction (no mutation):
+ * same-pair inertia (short text + no substantive tool) → count+1;
+ * same-pair substantive work / long discussion → RESET to 1 (a real-work round breaks inertia,
+ * otherwise `3 short + 1 substantive + 1 short` would still block on round 5 — gpt52 P1-1);
+ * different/new pair → 1.
+ */
+function predictStreakCount(
+  entry: WorklistEntry,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): number {
+  if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
+    return isSubstantiveActivity(activity) ? 1 : entry.streakPair.count + 1;
+  }
+  return 1;
+}
+
+/**
+ * F216 c1.1: read-only streak prediction — computes the verdict updateStreakOnPush WOULD return,
+ * without mutating entry.streakPair. Lets resolveRoutingDecisions stay a pure decision function
+ * (砚砚 OQ3); the actual mutation happens in the execution layer via updateStreakOnPush.
+ * `wouldBlock` mirrors StreakResult.blockPingPong (parity test guards this).
+ */
+export function peekStreakOnPush(
+  entry: WorklistEntry,
+  callerCatId: CatId,
+  target: CatId,
+  activity?: CallerActivity,
+): { wouldBlock: boolean; wouldWarn: boolean; count: number } {
+  const count = predictStreakCount(entry, callerCatId, target, activity);
+  const v = streakVerdict(count);
+  return { wouldBlock: v.blockPingPong, wouldWarn: v.warnPingPong, count };
+}
+
+/** F167 L1: ping-pong streak record — see WorklistEntry.streakPair. Mutates entry.streakPair. */
 export function updateStreakOnPush(
   entry: WorklistEntry,
   callerCatId: CatId,
   target: CatId,
   activity?: CallerActivity,
 ): StreakResult {
+  // Shared rule with peekStreakOnPush (parity): compute predicted count, then write it.
+  const count = predictStreakCount(entry, callerCatId, target, activity);
   if (entry.streakPair && samePair(entry.streakPair, callerCatId, target)) {
-    // F167 Phase D: same-pair push. On pure language inertia (short text + no
-    // substantive tool) → streak++. On substantive work / long discussion →
-    // RESET to 1 (not merely "skip increment"): a real-work round BREAKS any
-    // prior inertia streak, otherwise `3 short + 1 substantive + 1 short`
-    // would still block on round 5 (gpt52 review P1-1).
-    if (!isSubstantiveActivity(activity)) {
-      entry.streakPair.count++;
-    } else {
-      entry.streakPair.count = 1;
-    }
+    entry.streakPair.count = count;
     entry.streakPair.from = callerCatId;
     entry.streakPair.to = target;
   } else {
-    entry.streakPair = { from: callerCatId, to: target, count: 1 };
+    entry.streakPair = { from: callerCatId, to: target, count };
   }
-  const count = entry.streakPair.count;
-  return {
-    warnPingPong: count >= PINGPONG_WARN_THRESHOLD && count < PINGPONG_BLOCK_THRESHOLD,
-    blockPingPong: count >= PINGPONG_BLOCK_THRESHOLD,
-    count,
-  };
+  return streakVerdict(count);
 }
 
 /** Primary registry: registryKey → WorklistEntry */

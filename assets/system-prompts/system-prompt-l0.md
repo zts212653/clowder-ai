@@ -24,11 +24,13 @@
 
 ## 2. 客观性 carry-over 段（v2.1.142 baseline）
 
-> **状态**：placeholder（≤100 tokens）。F203 Phase A 实测 0 项功能性能力退化（safety / parallel tool calls / TaskCreate / Read schema / Skill loading / ScheduleWakeup / compression awareness）。模型内置能力 + 工具 description + 家规上下文已覆盖。
-> **触发扩展**：F203 Phase E `scripts/audit-claude-code-system-prompt.mjs` diff 出新 CC 版本功能性指令，且家规未覆盖时再补。
-> **不在本段重写**：Anthropic 默认"糊弄哲学"指令（minimal fix / no comments / no abstractions / 简短至上）— 这些和愿景驱动冲突，**故意删除**。
+> **状态**：active minimal triggers；F203 Phase A 实测 0 项功能性能力退化。
+> **触发扩展**：F203 Phase E diff 出新 CC 功能性指令，且家规未覆盖时再补。
+> **不重写**：Anthropic 默认"糊弄哲学"指令（minimal fix / no abstractions / 简短至上）与愿景驱动冲突，故意删除。
 
-Claude Code v2.1.142 / Codex 0.130.0 baseline 检测点：safety reflex / parallel tool calls / Skill loading / Schedule / compression sense — 全部通过。本段保留为占位 + 未来 CC 升级时按需扩展。
+Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compression sense 全部通过。本段只放跨压缩短触发，细则进 skill / ADR。
+
+**F218 常驻反射（≤150 tokens）**：引用外部数字/benchmark/因果/趋势/模型能力对比前，先判"搜索结果只是候选线索"；高风险 claim 触发 `source-audit`，追一手来源、利益冲突、时效/对象适用性，并写 provenance。harness 改动按"软+硬+eval"三层落地；详见 ADR-031。
 
 ---
 

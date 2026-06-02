@@ -44,7 +44,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const addToast = useToastStore((s) => s.addToast);
 
   const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
-  const [steerMode, setSteerMode] = useState<SteerMode>('immediate');
+  const [steerMode, setSteerMode] = useState<SteerMode>('promote');
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -98,7 +98,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   }, [threadId]);
 
   const handleSteerOpen = useCallback((entryId: string) => {
-    setSteerMode('immediate');
+    setSteerMode('promote');
     setSteerEntryId(entryId);
   }, []);
 

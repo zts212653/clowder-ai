@@ -84,6 +84,34 @@ describe('RuntimeSessionMetadata', () => {
     });
   });
 
+  test('normalizes retry fragment lifecycle metadata', async () => {
+    const { normalizeRuntimeSessionMetadata } = await loadModule();
+
+    const normalized = normalizeRuntimeSessionMetadata(
+      validMetadata({
+        lifecycle: {
+          state: 'sealed',
+          startedAt: 1000,
+          lastObservedAt: 2000,
+          sealReason: 'tool_conflict',
+          retryFragment: {
+            kind: 'retry',
+            retryReason: 'tool_conflict',
+            nextRuntimeSessionId: 'cascade-next',
+            detectedAt: 2000,
+          },
+        },
+      }),
+    );
+
+    assert.deepEqual(normalized.lifecycle.retryFragment, {
+      kind: 'retry',
+      retryReason: 'tool_conflict',
+      nextRuntimeSessionId: 'cascade-next',
+      detectedAt: 2000,
+    });
+  });
+
   test('rejects empty identifiers and invalid lifecycle state', async () => {
     const { normalizeRuntimeSessionMetadata } = await loadModule();
 

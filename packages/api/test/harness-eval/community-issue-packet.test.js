@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import {
   parseSanitizedIssuePacket,
   sanitizeVerdictForExport,
-} from '../../dist/infrastructure/harness-eval/community-issue-packet.js';
+} from '../../dist/infrastructure/harness-eval/domain/community-issue-packet.js';
 import { parseVerdictHandoffPacket } from '../../dist/infrastructure/harness-eval/verdict-handoff.js';
 
 /** Minimal valid VerdictHandoffPacket for testing sanitization. */

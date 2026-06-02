@@ -5,20 +5,11 @@ import { useLayoutEffect, useState } from 'react';
 import { ChatContainer } from '@/components/ChatContainer';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadIdFromPathname } from '@/components/ThreadSidebar/thread-navigation';
 import { CallbackAuthSnapshotMount } from '@/stores/callbackAuthStore';
+import { resolveLayoutThreadId } from './layout-thread-id';
 
 function getThreadRouteSnapshot(): string {
   if (typeof window === 'undefined') return 'default';
   return getThreadIdFromPathname(window.location.pathname);
-}
-
-export function resolveLayoutThreadId(
-  pathnameThreadId: string,
-  browserThreadId: string | null,
-  immediateBrowserThreadId: string | null = null,
-): string {
-  if (browserThreadId !== null) return browserThreadId;
-  if (immediateBrowserThreadId !== null) return immediateBrowserThreadId;
-  return pathnameThreadId;
 }
 
 /**

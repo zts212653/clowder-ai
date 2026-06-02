@@ -1120,7 +1120,8 @@ describe('AntigravityBridge session persistence (G0)', () => {
     });
 
     const media = [{ mimeType: 'image/png', inlineData: 'aW1hZ2VieXRlcw==' }];
-    const stepsBefore = await bridge.sendMessage('cascade-x', '看这张图', undefined, media);
+    // F211-REG8: sendMessage now returns { stepsBefore, wasBusy } (was a bare number).
+    const { stepsBefore } = await bridge.sendMessage('cascade-x', '看这张图', undefined, media);
 
     assert.equal(stepsBefore, 3);
     assert.equal(capturedMethod, 'SendUserCascadeMessage');
