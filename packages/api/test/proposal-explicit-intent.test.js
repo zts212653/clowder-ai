@@ -125,6 +125,90 @@ describe('F128 explicit intent override (round-5)', () => {
     );
   });
 
+  test('explicit `#ideate` + preferredCats=[] + raw `@-mentions`: parallel report-back owner falls back to raw first @-token', async () => {
+    // 砚砚 PR #809 round-7 P1: round-6 fix only covered preferredCats non-empty.
+    // dispatch's other parallel path — explicit `#ideate` + preferredCats=[]
+    // + raw `@A @B @C` — wakes resolved.targetCats parallel via the
+    // `targetCats = preferredCats.length > 0 ? preferredCats : resolved.targetCats`
+    // branch, but enrich previously required preferredCats.length > 0 for
+    // mode detection. Result: parallel cats woken, but message still says
+    // "最后一棒猫 reports back" — fork-and-return owner undefined again,
+    // same failure shape as round-6 just through a different code path.
+    //
+    // Fix: enrich detects parallel mode from raw alone (no preferredCats
+    // precondition) and falls back to raw first @-token as reporter handle.
+    // This matches what router resolves first AND what dispatch wakes first
+    // (in raw-mention order) — a faithful approximation without requiring
+    // enrich to peek the router.
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = new InvocationQueue();
+    const router = {
+      async resolveTargetsAndIntent() {
+        // Simulate router: raw `#ideate @kimi @gemini @codex` resolves all 3.
+        return { targetCats: ['kimi', 'gemini', 'codex'], intent: { intent: 'ideate' }, hasMentions: true };
+      },
+    };
+    const queueProcessor = {
+      async processNext() {
+        return { started: true };
+      },
+    };
+    const ctx = await createProposalTestContext({
+      routerOverride: router,
+      invocationQueueOverride: invocationQueue,
+      queueProcessorOverride: queueProcessor,
+    });
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          body: {
+            initialMessage: '#ideate @kimi @gemini @codex 大家并行想',
+            preferredCats: [],
+          },
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const entries = invocationQueue.list(body.threadId, 'alice');
+    assert.equal(entries.length, 1);
+    const enqueued = entries[0].content;
+
+    // Runtime: dispatch wakes all 3 router-resolved targets in parallel.
+    assert.deepEqual(
+      entries[0].targetCats,
+      ['kimi', 'gemini', 'codex'],
+      'preferredCats=[] + explicit #ideate must wake all router-resolved targets parallel',
+    );
+    assert.equal(entries[0].intent, 'ideate', 'intent must be ideate (parallel)');
+
+    // The round-7 contract: header must NOT inherit serial "最后一棒猫" rule
+    // and MUST declare an explicit parallel reporter owner.
+    assert.ok(
+      !enqueued.includes('最后一棒猫'),
+      'parallel mode (preferredCats=[] path) must NOT inherit "last cat reports back"',
+    );
+    assert.ok(
+      enqueued.includes('并行模式 report-back owner'),
+      'parallel mode must inject explicit report-back owner line even when preferredCats=[]',
+    );
+    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(ownerLineMatch, 'must find the report-back owner line');
+    assert.ok(
+      ownerLineMatch[0].includes('@kimi'),
+      `reporter must fall back to raw first @-token (@kimi); got line: ${ownerLineMatch[0]}`,
+    );
+    assert.ok(
+      !enqueued.includes('## 接力链路'),
+      'chain protocol section still suppressed in parallel mode (round-5 contract)',
+    );
+  });
+
   test('explicit `#execute` + preferredCats=[] + multi-target raw: preserve all targets (do not silently collapse to first)', async () => {
     // 砚砚 PR #809 round-5 P2: previously dispatch fell through to
     // `firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0]` for

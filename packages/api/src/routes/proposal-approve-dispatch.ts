@@ -105,21 +105,30 @@ export function enrichWithParentThreadHeader(
   rawInitialMessage?: string,
   resolveHandle: (token: string) => string | null = primaryMentionHandleForCatId,
 ): string {
-  // Mode detection (砚砚 round-5 P1 + round-6 P1): explicit `#ideate` in raw
-  // initialMessage flips report-back contract from "last cat in chain" to
-  // "explicit reporter owner". MUST be computed from raw, not `content`
-  // (which is enriched with server-injected text — parent title can
-  // contain literal `#ideate` and trip the regex; see jsdoc on
-  // AppendApprovedInitialMessageInput.rawContent).
+  // Mode + reporter detection (砚砚 round-5 / 6 / 7 P1).
+  // Detection MUST read raw, not enriched `content` (parent title could
+  // contain literal `#ideate` and trip the regex — see rawContent jsdoc).
+  // Round-7 removed the `preferredCats.length > 0` precondition: dispatch's
+  // explicit `#ideate + preferredCats=[]` path wakes `resolved.targetCats`
+  // in parallel — same semantics, different target source — and previously
+  // fell through to the serial "最后一棒猫" rule.
+  // Reporter resolution: preferredCats[0] → raw first `@<token>` fallback
+  // (matches the router's first resolved target; cat-side display fidelity
+  // since both read the same raw string).
   let isParallelMode = false;
-  if (rawInitialMessage && preferredCats && preferredCats.length > 0) {
-    const parsed = parseIntent(rawInitialMessage, preferredCats.length);
+  if (rawInitialMessage) {
+    const parsed = parseIntent(rawInitialMessage, preferredCats?.length ?? 0);
     isParallelMode = parsed.explicit && parsed.intent === 'ideate';
   }
-  const reporterHandle =
-    isParallelMode && preferredCats && preferredCats.length > 0
-      ? (resolveHandle(preferredCats[0]) ?? `@${preferredCats[0]}`)
-      : null;
+  let reporterHandle: string | null = null;
+  if (isParallelMode) {
+    if (preferredCats && preferredCats.length > 0) {
+      reporterHandle = resolveHandle(preferredCats[0]) ?? `@${preferredCats[0]}`;
+    } else if (rawInitialMessage) {
+      const firstMention = rawInitialMessage.match(/@([\w-]+)/);
+      if (firstMention) reporterHandle = `@${firstMention[1]}`;
+    }
+  }
 
   const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
   const headerLines: string[] = ['---', '## 主 Thread', `ID: \`${sourceThreadId}\`${titleLine}`, ''];
