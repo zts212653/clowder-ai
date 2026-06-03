@@ -529,7 +529,7 @@ export class ConnectorRouter {
           }
         } else if (att.type === 'image') {
           parts.push(`${originalText} ${downloaded.localUrl}`);
-          contentBlocks.push({ type: 'image', url: downloaded.absPath });
+          contentBlocks.push({ type: 'image', url: downloaded.localUrl });
         } else {
           parts.push(`${originalText} ${downloaded.localUrl}`);
         }
