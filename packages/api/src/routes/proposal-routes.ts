@@ -21,7 +21,7 @@ import type { IProposalStore } from '../domains/cats/services/stores/ports/Propo
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { appendApprovedInitialMessage, enrichWithParentThreadHeader } from './proposal-approve-dispatch.js';
+import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
 import { handleApproveStaleClaim, handleRejectStaleClaim } from './proposal-stale-recovery.js';
 
 export interface ProposalRoutesOptions {
@@ -190,28 +190,22 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     }
     if (finalInitialMessage) {
       try {
-        // F128 (thread-orchestration skill Step 5 enforcement): inject the
-        // "## 主 Thread" header into the first sub-thread message so cats
-        // inside the new thread can locate the parent and report back when
-        // work completes. Cat-typed initialMessage often omits this header,
-        // breaking the fork-and-return loop the user (CVO) expects.
-        // The proposal store keeps the raw user-typed initialMessage; only
-        // the appended thread message gets enriched.
+        // F128 round-9 plan-based: routes pass raw user input + parent
+        // metadata only; dispatch is the single owner of router resolve,
+        // parseIntent, plan computation (targetCats / intent / reporter),
+        // enrichWithParentThreadHeader, and enqueue. This closes the
+        // round-7/8 補锅匠 trap where enrich had to recover the parallel
+        // reporter from a raw `@<token>` regex (which kept missing handle
+        // shapes — CJK, dotted, hyphenated).
         const sourceThread = await threadStore.get(proposal.sourceThreadId);
-        const enrichedContent = enrichWithParentThreadHeader(
-          finalInitialMessage,
-          proposal.sourceThreadId,
-          sourceThread?.title,
-        );
 
         const result = await appendApprovedInitialMessage({
           proposalId: proposal.proposalId,
           userId,
           threadId: thread.id,
-          content: enrichedContent,
-          // F128: pass the proposal's preferredCats so dispatch can wake up all
-          // proposed members even when the user-typed initialMessage has no
-          // @-mention. Without this, only the thread owner gets woken up.
+          rawInitialMessage: finalInitialMessage,
+          sourceThreadId: proposal.sourceThreadId,
+          sourceThreadTitle: sourceThread?.title,
           preferredCats: finalPreferredCats,
           messageStore,
           router: opts.router,
