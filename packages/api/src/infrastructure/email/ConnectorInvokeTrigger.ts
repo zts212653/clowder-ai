@@ -22,7 +22,7 @@ import type { IInvocationRecordStore } from '../../domains/cats/services/stores/
 import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
-import { emitQueueUpdated } from '../../utils/queue-enrichment.js';
+import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
@@ -209,11 +209,15 @@ export class ConnectorInvokeTrigger {
     });
 
     if (result.outcome === 'full') {
+      const fullQueue = await enrichQueueEntries(
+        invocationQueue.list(threadId, userId),
+        this.opts.messageStore ?? null,
+      );
       socketManager.emitToUser(userId, 'queue_full_warning', {
         threadId,
         source: 'connector',
         queueSize: invocationQueue.size(threadId, userId),
-        queue: invocationQueue.list(threadId, userId),
+        queue: fullQueue,
       });
       socketManager.broadcastAgentMessage(
         {

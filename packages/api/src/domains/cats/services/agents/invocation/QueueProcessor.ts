@@ -8,7 +8,7 @@
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
-import { emitQueueUpdated } from '../../../../../utils/queue-enrichment.js';
+import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   accumulateTextAggregate,
@@ -513,7 +513,7 @@ export class QueueProcessor {
       const epoch = (this.pauseEpoch.get(sk) ?? 0) + 1;
       this.pauseEpoch.set(sk, epoch);
       this.pausedSlots.set(sk, status);
-      this.emitPausedToQueuedUsers(threadId, status);
+      await this.emitPausedToQueuedUsers(threadId, status);
 
       // #595: auto-recover paused slot after delay — prevents indefinite stuck state
       setTimeout(() => {
@@ -1459,15 +1459,16 @@ export class QueueProcessor {
   }
 
   /** Emit queue_paused to each user who has queued entries for this thread. */
-  private emitPausedToQueuedUsers(threadId: string, reason: 'canceled' | 'failed'): void {
+  private async emitPausedToQueuedUsers(threadId: string, reason: 'canceled' | 'failed'): Promise<void> {
     const users = this.deps.queue.listUsersForThread(threadId);
     for (const userId of users) {
       const userQueue = this.deps.queue.list(threadId, userId);
       if (!userQueue.some((e) => e.status === 'queued')) continue;
+      const enriched = await enrichQueueEntries(userQueue, this.deps.messageStore);
       this.deps.socketManager.emitToUser(userId, 'queue_paused', {
         threadId,
         reason,
-        queue: userQueue,
+        queue: enriched,
       });
     }
   }
