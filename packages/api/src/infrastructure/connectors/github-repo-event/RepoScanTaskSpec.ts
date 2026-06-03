@@ -52,7 +52,13 @@ export interface RepoScanTaskSpecOptions {
   deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   deliveryDeps: ConnectorDeliveryDeps;
   invokeTrigger: {
-    trigger(threadId: string, catId: CatId, userId: string, message: string, messageId: string): void;
+    trigger(
+      threadId: string,
+      catId: CatId,
+      userId: string,
+      message: string,
+      messageId: string,
+    ): void | Promise<unknown>;
   };
   fetchOpenPRs: (repo: string) => Promise<GhPrItem[]>;
   fetchOpenIssues: (repo: string) => Promise<GhIssueItem[]>;
@@ -227,17 +233,15 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
 
         await opts.reconciliationDedup.markNotified(signal.repoFullName, signal.subjectType, signal.number);
 
-        try {
+        void Promise.resolve(
           opts.invokeTrigger.trigger(
             binding.threadId,
             opts.inboxCatId as CatId,
             opts.defaultUserId,
             content,
             delivered.messageId,
-          );
-        } catch {
-          opts.log.warn(`[repo-scan] trigger failed for ${signal.repoFullName}#${signal.number}`);
-        }
+          ),
+        ).catch(() => opts.log.warn(`[repo-scan] trigger failed for ${signal.repoFullName}#${signal.number}`));
       },
     },
     state: { runLedger: 'sqlite' },

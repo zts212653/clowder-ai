@@ -1286,12 +1286,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             routeChainTracker.succeed(createResult.invocationId);
 
             for (const continuationCapsule of continuationCapsules.values()) {
-              void opts.queueProcessor?.enqueueContinuation({
-                threadId: resolvedThreadId,
-                userId,
-                catId: continuationCapsule.catId,
-                capsule: continuationCapsule,
-              });
+              void opts.queueProcessor
+                ?.enqueueContinuation({
+                  threadId: resolvedThreadId,
+                  userId,
+                  catId: continuationCapsule.catId,
+                  capsule: continuationCapsule,
+                })
+                .catch((err) =>
+                  log.warn({ err, threadId: resolvedThreadId }, 'enqueueContinuation failed (best-effort)'),
+                );
             }
 
             // Push notification: cat(s) finished responding

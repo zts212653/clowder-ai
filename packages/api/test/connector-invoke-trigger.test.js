@@ -1361,7 +1361,13 @@ describe('ConnectorInvokeTrigger', () => {
       // Scenario: opus is running, connector targets codex — should still queue (thread-level)
       trackerMock.setActive('thread-1', 'user-1');
       const trigger = createTrigger();
-      const outcome = await trigger.trigger('thread-1', /** @type {any} */ ('codex'), 'user-1', 'CI notification', 'msg-ci');
+      const outcome = await trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('codex'),
+        'user-1',
+        'CI notification',
+        'msg-ci',
+      );
 
       assert.strictEqual(outcome, 'enqueued', 'connector must queue when ANY cat is busy in thread');
       assert.strictEqual(routerMock.calls.length, 0, 'should NOT dispatch concurrently');

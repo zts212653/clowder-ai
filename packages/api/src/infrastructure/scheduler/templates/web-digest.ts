@@ -55,11 +55,13 @@ export const webDigestTemplate: TaskTemplate = {
               content: triggerContent,
               userId: 'scheduler',
             });
-            ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
-              reason: 'scheduled_web_digest_browser_fetch',
-              sourceCategory: 'scheduled',
-              suggestedSkill: 'browser-automation',
-            });
+            void Promise.resolve(
+              ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
+                reason: 'scheduled_web_digest_browser_fetch',
+                sourceCategory: 'scheduled',
+                suggestedSkill: 'browser-automation',
+              }),
+            ).catch(() => {});
             return;
           }
           const header = result.title || url;

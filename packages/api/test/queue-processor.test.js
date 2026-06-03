@@ -951,7 +951,12 @@ describe('QueueProcessor', () => {
         },
       );
 
-      const outcome = await dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await dispatchProcessor.enqueueContinuation({
+        threadId: 't1',
+        userId: 'u1',
+        catId: 'opus',
+        capsule,
+      });
       assert.equal(outcome.outcome, 'enqueued');
       assert.equal(dispatchDeps.queue.list('t1', 'u1').length, 2, 'continuation should wait behind agent work');
 

@@ -119,7 +119,7 @@ export interface ScheduleInvokeTrigger {
     messageId: string,
     contentBlocks?: readonly unknown[],
     policy?: ScheduleTriggerPolicy,
-  ): void;
+  ): void | Promise<unknown>;
 }
 
 /** Phase 1b+2: context passed to execute — carries actor resolution + context spec */
