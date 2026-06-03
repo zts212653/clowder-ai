@@ -580,6 +580,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     if (mode === 'queue' && hasActive && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
+      // F706: Pre-compute image count for QueuePanel badge rendering
+      const imageCount = contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
         userId,
@@ -588,6 +590,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         source: 'user',
         targetCats,
         intent: intent.intent,
+        ...(imageCount > 0 ? { imageCount } : {}),
       });
 
       // Queue full → 429, no message written (no ghost message)
@@ -709,6 +712,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         if (tryResult === null) {
           // TOCTOU: thread became busy between has() and here — degrade to queue
           if (opts.invocationQueue) {
+            const toctouImageCount = contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
             const enqueueResult = opts.invocationQueue.enqueue({
               threadId: resolvedThreadId,
               userId,
@@ -717,6 +721,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               source: 'user',
               targetCats,
               intent: intent.intent,
+              ...(toctouImageCount > 0 ? { imageCount: toctouImageCount } : {}),
             });
             if (enqueueResult.outcome === 'full') {
               opts.socketManager.emitToUser(userId, 'queue_full_warning', {

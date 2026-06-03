@@ -544,6 +544,8 @@ export interface QueueEntry {
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
   position?: number;
+  /** F706: Pre-computed image count from server, avoids unreliable client-store lookup */
+  imageCount?: number;
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */

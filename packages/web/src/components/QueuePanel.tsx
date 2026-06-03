@@ -371,11 +371,19 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
             <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5 p-1">
               {visibleEntries.map((entry, idx) => {
-                const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-                const imageCount = allMsgIds.reduce((count, msgId) => {
-                  const msg = messages.find((m) => m.id === msgId);
-                  return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
-                }, 0);
+                // F706: Use server-provided imageCount (reliable). Fall back to
+                // client-store lookup for entries enqueued before this change.
+                const imageCount =
+                  entry.imageCount ??
+                  (() => {
+                    const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(
+                      Boolean,
+                    ) as string[];
+                    return allMsgIds.reduce((count, msgId) => {
+                      const msg = messages.find((m) => m.id === msgId);
+                      return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
+                    }, 0);
+                  })();
                 return (
                   <SortableQueueEntryRow
                     key={entry.id}

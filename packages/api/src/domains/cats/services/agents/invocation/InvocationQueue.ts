@@ -49,6 +49,9 @@ export interface QueueEntry {
   callerTraceContext?: CallerTraceContext;
   /** Explicit A2A trigger message for stream reply threading. */
   a2aTriggerMessageId?: string;
+  /** F706: Pre-computed image count from contentBlocks at enqueue time.
+   *  Allows QueuePanel to render the badge without client-store lookup. */
+  imageCount?: number;
 }
 
 export interface EnqueueResult {
@@ -153,6 +156,7 @@ export class InvocationQueue {
       priority?: 'urgent' | 'normal';
       suggestedSkill?: string;
       messageId?: string | null;
+      imageCount?: number;
       /** Defaults true for request replay dedupe; connector coalescing can opt out for in-flight entries. */
       dedupeProcessing?: boolean;
     },
@@ -224,6 +228,7 @@ export class InvocationQueue {
       suggestedSkill: input.suggestedSkill,
       callerTraceContext: input.callerTraceContext,
       a2aTriggerMessageId: input.a2aTriggerMessageId,
+      imageCount: input.imageCount,
       position: undefined,
     };
     q.push(entry);
