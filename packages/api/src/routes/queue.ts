@@ -269,8 +269,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       queueProcessor.unregisterEntryCompleteHook?.(entryId);
 
       await emitQueueUpdated(
-        socketManager, guard.userId, threadId,
-        invocationQueue.list(threadId, guard.userId), messageStore, 'removed',
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        messageStore,
+        'removed',
       );
 
       // F117: Mark queued messages as canceled + emit message_deleted
@@ -332,8 +336,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (mode === 'promote') {
         invocationQueue.promote(threadId, guard.userId, entryId);
         await emitQueueUpdated(
-          socketManager, guard.userId, threadId,
-          invocationQueue.list(threadId, guard.userId), messageStore, 'steer_promote',
+          socketManager,
+          guard.userId,
+          threadId,
+          invocationQueue.list(threadId, guard.userId),
+          messageStore,
+          'steer_promote',
         );
         return { ok: true };
       }
@@ -433,8 +441,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       invocationQueue.promote(threadId, guard.userId, entryId);
       await emitQueueUpdated(
-        socketManager, guard.userId, threadId,
-        invocationQueue.list(threadId, guard.userId), messageStore, 'steer_immediate',
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        messageStore,
+        'steer_immediate',
       );
 
       const result = await queueProcessor.processNext(threadId, guard.userId);
@@ -479,8 +491,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
       invocationQueue.move(threadId, guard.userId, entryId, parseResult.data.direction);
       await emitQueueUpdated(
-        socketManager, guard.userId, threadId,
-        invocationQueue.list(threadId, guard.userId), messageStore, 'reordered',
+        socketManager,
+        guard.userId,
+        threadId,
+        invocationQueue.list(threadId, guard.userId),
+        messageStore,
+        'reordered',
       );
 
       return { ok: true };
@@ -534,8 +550,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
     }
 
     await emitQueueUpdated(
-      socketManager, guard.userId, threadId,
-      invocationQueue.list(threadId, guard.userId), messageStore, 'reordered',
+      socketManager,
+      guard.userId,
+      threadId,
+      invocationQueue.list(threadId, guard.userId),
+      messageStore,
+      'reordered',
     );
     return { ok: true };
   });

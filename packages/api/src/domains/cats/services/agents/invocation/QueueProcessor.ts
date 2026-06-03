@@ -387,8 +387,12 @@ export class QueueProcessor {
     recent.push(now);
     this.setContinuationWindow(key, recent);
     await emitQueueUpdated(
-      this.deps.socketManager, userId, threadId,
-      this.deps.queue.list(threadId, userId), this.deps.messageStore, 'continuation_enqueued',
+      this.deps.socketManager,
+      userId,
+      threadId,
+      this.deps.queue.list(threadId, userId),
+      this.deps.messageStore,
+      'continuation_enqueued',
     );
     return { outcome: 'enqueued', entry: result.entry };
   }
@@ -866,10 +870,7 @@ export class QueueProcessor {
       let intentModeBroadcast = false;
 
       // 6. Emit queue_updated (processing)
-      await emitQueueUpdated(
-        socketManager, userId, threadId,
-        queue.list(threadId, userId), messageStore, 'processing',
-      );
+      await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), messageStore, 'processing');
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
       // F117: Collect full message objects for frontend bubble rendering
@@ -1269,10 +1270,7 @@ export class QueueProcessor {
           queue.rollbackProcessing(threadId, bid);
         }
       }
-      await emitQueueUpdated(
-        socketManager, userId, threadId,
-        queue.list(threadId, userId), messageStore, 'completed',
-      );
+      await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), messageStore, 'completed');
       // F122B B6: Fire completion hook (one-shot) and clean up
       const completeHook = this.entryCompleteHooks.get(entry.id);
       if (completeHook) {

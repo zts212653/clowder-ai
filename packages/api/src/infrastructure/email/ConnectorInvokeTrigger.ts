@@ -233,8 +233,12 @@ export class ConnectorInvokeTrigger {
     }
 
     await emitQueueUpdated(
-      socketManager, userId, threadId,
-      invocationQueue.list(threadId, userId), this.opts.messageStore ?? null, result.outcome,
+      socketManager,
+      userId,
+      threadId,
+      invocationQueue.list(threadId, userId),
+      this.opts.messageStore ?? null,
+      result.outcome,
     );
     log.info(
       { threadId, catId, outcome: result.outcome },

@@ -309,8 +309,12 @@ export async function enqueueA2ATargets(
       // into an existing entry (no new entry created), 'enqueued' when a new entry was added.
       const action = enqueued.length > 0 ? 'enqueued' : 'coalesced';
       await emitQueueUpdated(
-        deps.socketManager, opts.userId, threadId,
-        deps.invocationQueue.list(threadId, opts.userId), deps.messageStore ?? null, action,
+        deps.socketManager,
+        opts.userId,
+        threadId,
+        deps.invocationQueue.list(threadId, opts.userId),
+        deps.messageStore ?? null,
+        action,
       );
     }
     log.info(

@@ -370,8 +370,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
             <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5 p-1">
               {visibleEntries.map((entry, idx) => {
                 // F706: Compute image count from server-enriched messagePreview
-                const imageCount =
-                  entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
+                const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
                 return (
                   <SortableQueueEntryRow
                     key={entry.id}
