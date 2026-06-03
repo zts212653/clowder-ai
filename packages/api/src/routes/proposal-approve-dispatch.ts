@@ -5,6 +5,9 @@ import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
+import { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
+
+export { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
 
 type ProposalRouter = Pick<AgentRouter, 'resolveTargetsAndIntent'>;
 type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
@@ -21,41 +24,31 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   userId: string;
   threadId: string;
   /**
-   * Content actually enqueued + persisted as the first sub-thread message.
-   * Typically pre-enriched by `enrichWithParentThreadHeader` (parent thread
-   * pointer + cat-driven chain protocol section).
+   * Raw user-typed initialMessage. dispatch is now the single owner of the
+   * full plan: it runs router resolve + parseIntent + computes effective
+   * targets/intent/reporter, then calls enrichWithParentThreadHeader to
+   * build the enqueued+stored content. Routes only pass raw user input +
+   * parent thread metadata; dispatch handles every transformation.
+   *
+   * Why this routing flows through dispatch only (round-9 plan-based):
+   *   - parseIntent and router.resolveTargetsAndIntent MUST read raw, not
+   *     enriched. enriched content carries server-injected text (parent
+   *     title, chain protocol) that can trip both `#tag` and `@-mention`
+   *     parsers, causing serial proposals to flip to parallel
+   *     (round-2 P2) and parent-title `@cat` mentions to silently wake +
+   *     persist into participants (round-3 P2).
+   *   - The reporter handle for explicit `#ideate` parallel mode must be
+   *     derived from the router's resolved catId via
+   *     primaryMentionHandleForCatId — NOT from a raw `@<token>` regex
+   *     (round-7/8 補锅匠 trap: every handle shape — CJK, dotted,
+   *     hyphenated — wanted a new charclass). Plan-based ownership in
+   *     dispatch is the only place that has both pieces.
    */
-  content: string;
-  /**
-   * Raw user-typed initialMessage BEFORE enrichWithParentThreadHeader. Used
-   * as the parseIntent source AND as the router.resolveTargetsAndIntent
-   * source — NEVER stored or enqueued (enqueue/store continue to use the
-   * enriched `content` so cats see the full parent-thread header + chain
-   * protocol section). Defaults to `content` for backward compatibility,
-   * but callers that pre-enrich MUST pass the raw form, otherwise
-   * server-injected text leaks into routing in two ways:
-   *
-   *   1. parseIntent footgun (砚砚 PR #809 round-2 P2): a parent thread
-   *      title containing `#ideate` trips `/#(\w+)/gi` and forces serial
-   *      proposals into parallel mode. Reproduced: parent title
-   *      `Parent #ideate title` + initialMessage `开玩!` → intent=ideate.
-   *
-   *   2. router @-mention persistence footgun (砚砚 PR #809 round-3 P2):
-   *      `router.resolveTargetsAndIntent(..., { persist: true })` scans
-   *      its input for `@-mentions` and persists every hit to thread
-   *      participants. A parent thread title `Parent @opus thread` would
-   *      silently wake `opus` AND write `opus` into the new sub-thread's
-   *      participants whenever the user proposed with `preferredCats=[]`
-   *      and no `@` in their initialMessage. Both effects are wrong: the
-   *      parent title is server-injected display text, not user intent.
-   *
-   * dispatch fallback `preferredCats?.[0] ?? resolved.targetCats[0]` only
-   * uses resolved.targetCats when preferredCats is empty, but that path
-   * exists, so we must close the leak at the router input. router still
-   * needs the threadId for context (e.g. existing participants), but the
-   * message argument must be the raw user intent only.
-   */
-  rawContent?: string;
+  rawInitialMessage: string;
+  /** Source thread id — injected into the "## 主 Thread" header. */
+  sourceThreadId: string;
+  /** Source thread title — optional display in the parent header. */
+  sourceThreadTitle?: string | null;
   /**
    * Proposed chain participants in user-intended order.
    *
@@ -82,113 +75,13 @@ export interface AppendApprovedInitialMessageResult {
   warning?: string;
 }
 
-/**
- * Build the "## 主 Thread" header that the thread-orchestration skill mandates
- * for the first message of any sub-thread. This header lets cats inside the
- * sub-thread locate the parent thread and report back when work is done
- * (skill Step 5c "汇聚" — final report flow).
- *
- * F128: cats sometimes forget to include this header when writing
- * `initialMessage` on the proposal card. Server injects it defensively at
- * approve time so the fork-and-return loop never breaks on cat omission.
- *
- * The header is appended to the END of the user-typed content (rather than
- * prepended) so it doesn't visually break the user's opening (greeting /
- * game rules / topic intro). Cats reading the thread bottom-up still pick
- * it up reliably because it stays in the first message.
- */
-export function enrichWithParentThreadHeader(
-  content: string,
-  sourceThreadId: string,
-  sourceThreadTitle?: string | null,
-  preferredCats?: readonly CatId[],
-  rawInitialMessage?: string,
-  resolveHandle: (token: string) => string | null = primaryMentionHandleForCatId,
-): string {
-  // Mode + reporter detection (砚砚 round-5 / 6 / 7 P1).
-  // Detection MUST read raw, not enriched `content` (parent title could
-  // contain literal `#ideate` and trip the regex — see rawContent jsdoc).
-  // Round-7 removed the `preferredCats.length > 0` precondition: dispatch's
-  // explicit `#ideate + preferredCats=[]` path wakes `resolved.targetCats`
-  // in parallel — same semantics, different target source — and previously
-  // fell through to the serial "最后一棒猫" rule.
-  // Reporter resolution: preferredCats[0] → raw first `@<token>` fallback
-  // (matches the router's first resolved target; cat-side display fidelity
-  // since both read the same raw string).
-  let isParallelMode = false;
-  if (rawInitialMessage) {
-    const parsed = parseIntent(rawInitialMessage, preferredCats?.length ?? 0);
-    isParallelMode = parsed.explicit && parsed.intent === 'ideate';
-  }
-  let reporterHandle: string | null = null;
-  if (isParallelMode) {
-    if (preferredCats && preferredCats.length > 0) {
-      reporterHandle = resolveHandle(preferredCats[0]) ?? `@${preferredCats[0]}`;
-    } else if (rawInitialMessage) {
-      // codex bot P2: must accept non-ASCII handles (e.g. `@砚砚`,
-      // `@宪宪`) — the tool description recommends Chinese aliases. JS
-      // `\w` is ASCII-only; use Unicode letter/number class + `u` flag.
-      const firstMention = rawInitialMessage.match(/@([\p{L}\p{N}_-]+)/u);
-      if (firstMention) reporterHandle = `@${firstMention[1]}`;
-    }
-  }
-
-  const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
-  const headerLines: string[] = ['---', '## 主 Thread', `ID: \`${sourceThreadId}\`${titleLine}`, ''];
-
-  // F128 report-back contract — MODE-AWARE (砚砚 round-6 P1 fix):
-  // Default cat-driven chain: "last cat in the chain reports back" — implicit
-  // owner determined by the @-mention chain itself.
-  // Explicit `#ideate` parallel: there is no "last cat" — every cat replies
-  // independently. Without an explicit reporter the fork-and-return loop
-  // breaks (no one reports, or everyone duplicates cross_post). Pin
-  // preferredCats[0] (card order is ground truth) as the synthesizer +
-  // reporter, and tell the other parallel cats NOT to cross_post.
-  if (isParallelMode && reporterHandle) {
-    headerLines.push(
-      `**并行模式 report-back owner**：${reporterHandle}（提议顺序的第一棒）负责综合所有并行回复，用 \`cat_cafe_cross_post_message\` 把总结回报到这个主 Thread。`,
-      '其它并行的猫独立思考 / 回复就行，**不要** `cat_cafe_cross_post_message` 自己的回复（避免重复汇报，由 reporter owner 统一汇总）。',
-    );
-  } else {
-    headerLines.push(
-      '完成后请由最后一棒猫 `cat_cafe_cross_post_message` 把总结回报到这个主 Thread。',
-      '（这是 thread-orchestration skill 的 Step 5c 汇聚铁律，不要忘了汇报。）',
-    );
-  }
-
-  // F128 chain protocol injection (砚砚 round-1 P1 + round-5 P1):
-  // serial mode only — parallel cats are woken simultaneously and would
-  // emit redundant handoffs if told to chain. The report-back rule above
-  // already handles the parallel fork-and-return owner.
-  if (!isParallelMode && preferredCats && preferredCats.length > 0) {
-    const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
-    const chainOrder = handles.join(' → ');
-    headerLines.push(
-      '',
-      '## 接力链路（cat-driven @-chain）',
-      `顺序: ${chainOrder} → 回到主 Thread`,
-      'Server 只 wake 了**第一棒**。你接到这条消息后:',
-      '  - 完成你的回合',
-      '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
-      '  - 最后一棒完成后, 用 `cat_cafe_cross_post_message` 把总结回报到主 Thread',
-      '',
-      // NOTE: do NOT write the literal "#ideate" string here — parseIntent
-      // would otherwise read this server-injected explanation as an explicit
-      // user tag and force parallel mode. Refer to the tool description for
-      // the actual opt-in syntax.
-      '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
-    );
-  }
-
-  return `${content}\n\n${headerLines.join('\n')}`;
-}
-
 export async function appendApprovedInitialMessage({
   proposalId,
   userId,
   threadId,
-  content,
-  rawContent,
+  rawInitialMessage,
+  sourceThreadId,
+  sourceThreadTitle,
   preferredCats,
   messageStore,
   router,
@@ -196,10 +89,18 @@ export async function appendApprovedInitialMessage({
   queueProcessor,
 }: AppendApprovedInitialMessageInput): Promise<AppendApprovedInitialMessageResult> {
   if (!router || !invocationQueue || !queueProcessor) {
+    const enrichedFallback = enrichWithParentThreadHeader(
+      rawInitialMessage,
+      sourceThreadId,
+      sourceThreadTitle,
+      preferredCats,
+      rawInitialMessage,
+      null,
+    );
     const stored = await messageStore.append({
       userId,
       catId: null,
-      content,
+      content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
       threadId,
@@ -210,18 +111,10 @@ export async function appendApprovedInitialMessage({
     };
   }
 
-  // F128 (砚砚 PR #809 round-2 + round-3 P2): isolate router AND parseIntent
-  // inputs to the raw user-typed initialMessage. Enqueue/store still use the
-  // enriched content below so cats see the full "## 主 Thread" + chain
-  // protocol section. See AppendApprovedInitialMessageInput.rawContent
-  // jsdoc for the full footgun catalogue.
-  //   - parseIntent: must not see `#ideate` from parent title
-  //   - router.resolveTargetsAndIntent(persist=true): must not write
-  //     parent-title `@cat` mentions into the new sub-thread participants
-  //     and must not feed dispatch fallback (preferredCats=[] path).
-  const intentSource = rawContent ?? content;
-  const resolved = await router.resolveTargetsAndIntent(intentSource, threadId, { persist: true });
-  const parsed = parseIntent(intentSource, preferredCats?.length ?? resolved.targetCats.length);
+  // Router resolve + parseIntent BOTH read raw (round-2/3 P2 — server-injected
+  // header text must NOT leak into the @-mention persist boundary).
+  const resolved = await router.resolveTargetsAndIntent(rawInitialMessage, threadId, { persist: true });
+  const parsed = parseIntent(rawInitialMessage, preferredCats?.length ?? resolved.targetCats.length);
 
   // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
   //
@@ -267,6 +160,31 @@ export async function appendApprovedInitialMessage({
     targetCats = firstCandidate ? [firstCandidate] : [];
     intentName = 'execute';
   }
+
+  // Round-9 plan-based reporter resolution: compute canonical reporter
+  // handle from the router-resolved catId (not raw token regex). This
+  // closes the round-7/8 補锅匠 trap — primaryMentionHandleForCatId
+  // returns the catRegistry-configured primary handle regardless of how
+  // the user wrote the raw mention (CJK / dotted / hyphenated all work).
+  let parallelReporterHandle: string | null = null;
+  if (parsed.explicit && parsed.intent === 'ideate') {
+    const reporterCatId = preferredCats?.[0] ?? resolved.targetCats[0];
+    if (reporterCatId) {
+      parallelReporterHandle = primaryMentionHandleForCatId(reporterCatId) ?? `@${reporterCatId}`;
+    }
+  }
+
+  // Build the full enqueued+stored content: parent thread header + mode-aware
+  // report-back rule + (serial only) chain protocol. dispatch is the single
+  // owner of this pipeline; routes only pass raw + parent metadata.
+  const content = enrichWithParentThreadHeader(
+    rawInitialMessage,
+    sourceThreadId,
+    sourceThreadTitle,
+    preferredCats,
+    rawInitialMessage,
+    parallelReporterHandle,
+  );
 
   if (targetCats.length === 0) {
     const stored = await messageStore.append({

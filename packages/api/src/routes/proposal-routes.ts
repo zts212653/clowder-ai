@@ -21,7 +21,7 @@ import type { IProposalStore } from '../domains/cats/services/stores/ports/Propo
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
-import { appendApprovedInitialMessage, enrichWithParentThreadHeader } from './proposal-approve-dispatch.js';
+import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
 import { handleApproveStaleClaim, handleRejectStaleClaim } from './proposal-stale-recovery.js';
 
 export interface ProposalRoutesOptions {
@@ -190,38 +190,22 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     }
     if (finalInitialMessage) {
       try {
-        // F128 (thread-orchestration skill Step 5 enforcement): inject the
-        // "## 主 Thread" header into the first sub-thread message so cats
-        // inside the new thread can locate the parent and report back when
-        // work completes. Cat-typed initialMessage often omits this header,
-        // breaking the fork-and-return loop the user (CVO) expects.
-        // The proposal store keeps the raw user-typed initialMessage; only
-        // the appended thread message gets enriched.
+        // F128 round-9 plan-based: routes pass raw user input + parent
+        // metadata only; dispatch is the single owner of router resolve,
+        // parseIntent, plan computation (targetCats / intent / reporter),
+        // enrichWithParentThreadHeader, and enqueue. This closes the
+        // round-7/8 補锅匠 trap where enrich had to recover the parallel
+        // reporter from a raw `@<token>` regex (which kept missing handle
+        // shapes — CJK, dotted, hyphenated).
         const sourceThread = await threadStore.get(proposal.sourceThreadId);
-        const enrichedContent = enrichWithParentThreadHeader(
-          finalInitialMessage,
-          proposal.sourceThreadId,
-          sourceThread?.title,
-          finalPreferredCats,
-          finalInitialMessage, // 砚砚 round-5 P1: raw for explicit-#ideate mode detection
-        );
 
         const result = await appendApprovedInitialMessage({
           proposalId: proposal.proposalId,
           userId,
           threadId: thread.id,
-          content: enrichedContent,
-          // F128 (砚砚 PR #809 review P2): pass the raw user-typed
-          // initialMessage so dispatch's parseIntent can read user intent
-          // tags (#ideate / #execute) without being contaminated by
-          // server-injected text — e.g. a parent thread title that happens
-          // to contain `#ideate` must NOT flip a serial proposal to parallel.
-          rawContent: finalInitialMessage,
-          // F128 (owner spec 2026-05-27 "他们自己决定下一个要把谁叫出来"):
-          // pass preferredCats so dispatch can pick the chain starter
-          // (preferredCats[0]) — subsequent cats are driven by cat-side
-          // @-mentions in their own replies. #ideate explicit tag in the
-          // initialMessage opts into parallel "wake all" behaviour.
+          rawInitialMessage: finalInitialMessage,
+          sourceThreadId: proposal.sourceThreadId,
+          sourceThreadTitle: sourceThread?.title,
           preferredCats: finalPreferredCats,
           messageStore,
           router: opts.router,
