@@ -209,6 +209,73 @@ describe('F128 explicit intent override (round-5)', () => {
     );
   });
 
+  test('explicit `#ideate` + preferredCats=[] + non-ASCII raw `@-mentions`: reporter fallback matches Chinese handles', async () => {
+    // chatgpt-codex bot P2 on round-7 commit: the raw `@<token>` fallback
+    // regex was ASCII-only (`/@([\w-]+)/`). JS `\w` does NOT include
+    // Unicode letters, so a registered non-ASCII handle like `@砚砚`
+    // (which the cat_cafe_propose_thread tool description recommends)
+    // failed to match → reporterHandle stayed null → enrich fell back to
+    // serial "最后一棒猫" — same round-7 failure shape, just for Chinese
+    // handles. Fix: switch to Unicode property `[\p{L}\p{N}_-]` + `u`
+    // flag so both ASCII (`@kimi`) and CJK (`@砚砚` / `@宪宪`) handles
+    // resolve as reporter fallback.
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
+    const invocationQueue = new InvocationQueue();
+    const router = {
+      async resolveTargetsAndIntent() {
+        // Router still resolves Chinese handles to catIds (alias config).
+        // Mock returns the resolved catIds — dispatch uses these for the
+        // wake list; enrich uses raw for the reporter display handle.
+        return { targetCats: ['codex', 'opus'], intent: { intent: 'ideate' }, hasMentions: true };
+      },
+    };
+    const queueProcessor = {
+      async processNext() {
+        return { started: true };
+      },
+    };
+    const ctx = await createProposalTestContext({
+      routerOverride: router,
+      invocationQueueOverride: invocationQueue,
+      queueProcessorOverride: queueProcessor,
+    });
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          body: {
+            initialMessage: '#ideate @砚砚 @宪宪 大家并行想想',
+            preferredCats: [],
+          },
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const entries = invocationQueue.list(body.threadId, 'alice');
+    assert.equal(entries.length, 1);
+    const enqueued = entries[0].content;
+
+    // The Unicode-aware reporter fallback must capture `@砚砚` (first
+    // CJK @-token), not silently fail and fall back to serial.
+    assert.ok(!enqueued.includes('最后一棒猫'), 'CJK @-handle path must NOT inherit serial "last cat" rule');
+    assert.ok(
+      enqueued.includes('并行模式 report-back owner'),
+      'CJK @-handle path must still inject parallel report-back owner',
+    );
+    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(ownerLineMatch, 'must find the report-back owner line');
+    assert.ok(
+      ownerLineMatch[0].includes('@砚砚'),
+      `reporter must capture CJK first @-token (@砚砚); got line: ${ownerLineMatch[0]}`,
+    );
+    assert.ok(!enqueued.includes('## 接力链路'), 'chain protocol section still suppressed in parallel mode');
+  });
+
   test('explicit `#execute` + preferredCats=[] + multi-target raw: preserve all targets (do not silently collapse to first)', async () => {
     // 砚砚 PR #809 round-5 P2: previously dispatch fell through to
     // `firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0]` for

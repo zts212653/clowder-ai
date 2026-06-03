@@ -125,7 +125,10 @@ export function enrichWithParentThreadHeader(
     if (preferredCats && preferredCats.length > 0) {
       reporterHandle = resolveHandle(preferredCats[0]) ?? `@${preferredCats[0]}`;
     } else if (rawInitialMessage) {
-      const firstMention = rawInitialMessage.match(/@([\w-]+)/);
+      // codex bot P2: must accept non-ASCII handles (e.g. `@砚砚`,
+      // `@宪宪`) — the tool description recommends Chinese aliases. JS
+      // `\w` is ASCII-only; use Unicode letter/number class + `u` flag.
+      const firstMention = rawInitialMessage.match(/@([\p{L}\p{N}_-]+)/u);
       if (firstMention) reporterHandle = `@${firstMention[1]}`;
     }
   }
