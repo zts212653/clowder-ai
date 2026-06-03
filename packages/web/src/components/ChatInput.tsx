@@ -117,9 +117,12 @@ export function ChatInput({
       const separator = prev && !prev.endsWith('\n') ? '\n' : '';
       return prev + separator + pendingChatInsert.text;
     });
-    // F706: Restore images from recalled queue message
+    // F706: Restore images from recalled queue message.
+    // Writes to threadImageDrafts directly so files survive unmount if the user
+    // switches threads while fetches are in-flight.
     if (pendingChatInsert.imageUrls?.length) {
       const urls = pendingChatInsert.imageUrls;
+      const targetThreadId = pendingChatInsert.threadId;
       void (async () => {
         setIsPreparingImages(true);
         try {
@@ -137,6 +140,12 @@ export function ChatInput({
             }
           }
           if (restored.length > 0) {
+            // Persist to module-level draft so data survives component unmount
+            const existing = threadImageDrafts.get(targetThreadId) ?? [];
+            const merged = [...existing, ...restored].slice(0, 5);
+            threadImageDrafts.set(targetThreadId, merged);
+            setThreadHasDraft(targetThreadId, true);
+            // Also update local state if still mounted on the same thread
             setImages((prev) => [...prev, ...restored].slice(0, 5));
           }
         } finally {
