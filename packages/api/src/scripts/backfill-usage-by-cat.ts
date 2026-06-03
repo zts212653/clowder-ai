@@ -21,6 +21,7 @@ import { RedisInvocationRecordStore } from '../domains/cats/services/stores/redi
 import { RedisMessageStore } from '../domains/cats/services/stores/redis/RedisMessageStore.js';
 import {
   type BackfillPlan,
+  decideApplyOutcome,
   formatBackfillPreview,
   indexMessagesByInvocation,
   planBackfill,
@@ -49,75 +50,131 @@ Options:
   --help              print this help
 `;
 
-function parseArgs(argv: readonly string[]): CliArgs {
-  let dryRun = true;
-  let days = 30;
-  let redisUrl: string | undefined;
-  let keyPrefix: string | undefined;
-  let help = false;
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--apply') {
-      dryRun = false;
-      continue;
-    }
-    if (arg === '--dry-run') {
-      dryRun = true;
-      continue;
-    }
-    if (arg === '--help' || arg === '-h') {
-      help = true;
-      continue;
-    }
-    if (arg === '--days' || arg === '--redis-url' || arg === '--key-prefix') {
-      const value = argv[i + 1];
-      if (!value || value.startsWith('--')) {
-        throw new Error(`${arg} requires a value`);
-      }
-      if (arg === '--days') {
-        const parsed = Number.parseInt(value, 10);
-        if (!Number.isFinite(parsed) || parsed <= 0) {
-          throw new Error(`--days requires a positive integer, got: ${value}`);
-        }
-        days = parsed;
-      } else if (arg === '--redis-url') {
-        redisUrl = value;
-      } else if (arg === '--key-prefix') {
-        keyPrefix = value;
-      }
-      i += 1;
-      continue;
-    }
-    throw new Error(`unknown argument: ${arg}`);
+/** Read the next argv slot as a value for a `--name <value>` style flag. */
+function readValue(argv: readonly string[], i: number, flag: string): string {
+  const value = argv[i + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${flag} requires a value`);
   }
-  return { dryRun, days, ...(redisUrl ? { redisUrl } : {}), ...(keyPrefix ? { keyPrefix } : {}), help };
+  return value;
 }
 
-async function applyPlan(
-  plan: BackfillPlan,
-  store: RedisInvocationRecordStore,
-): Promise<{ applied: number; failed: number }> {
-  let applied = 0;
-  let failed = 0;
+function parseDays(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`--days requires a positive integer, got: ${value}`);
+  }
+  return parsed;
+}
+
+interface MutableCliArgs {
+  dryRun: boolean;
+  days: number;
+  redisUrl?: string;
+  keyPrefix?: string;
+  help: boolean;
+}
+
+/** Apply a single argv token to the in-progress CliArgs accumulator.
+ *  Returns the number of slots consumed (1 for boolean flags, 2 for value flags). */
+function applyArg(argv: readonly string[], i: number, out: MutableCliArgs): number {
+  const arg = argv[i];
+  switch (arg) {
+    case '--apply':
+      out.dryRun = false;
+      return 1;
+    case '--dry-run':
+      out.dryRun = true;
+      return 1;
+    case '--help':
+    case '-h':
+      out.help = true;
+      return 1;
+    case '--days':
+      out.days = parseDays(readValue(argv, i, '--days'));
+      return 2;
+    case '--redis-url':
+      out.redisUrl = readValue(argv, i, '--redis-url');
+      return 2;
+    case '--key-prefix':
+      out.keyPrefix = readValue(argv, i, '--key-prefix');
+      return 2;
+    default:
+      throw new Error(`unknown argument: ${arg}`);
+  }
+}
+
+function parseArgs(argv: readonly string[]): CliArgs {
+  const out: MutableCliArgs = { dryRun: true, days: 30, help: false };
+  for (let i = 0; i < argv.length; i += applyArg(argv, i, out)) {
+    // applyArg advances i — body intentionally empty
+  }
+  return {
+    dryRun: out.dryRun,
+    days: out.days,
+    ...(out.redisUrl ? { redisUrl: out.redisUrl } : {}),
+    ...(out.keyPrefix ? { keyPrefix: out.keyPrefix } : {}),
+    help: out.help,
+  };
+}
+
+interface ApplyStats {
+  applied: number;
+  skippedMissing: number;
+  skippedStatus: number;
+  skippedPopulated: number;
+  failed: number;
+}
+
+async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore): Promise<ApplyStats> {
+  // 砚砚 cloud review P1-B: never overwrite a usageByCat that arrived between
+  // the planning scan and this loop. For each entry we (a) re-read the current
+  // record, (b) run the pure decideApplyOutcome predicate, and (c) pass
+  // expectedStatus='succeeded' so the underlying CAS on update() still guards
+  // against the narrow window between our re-read and the store's atomic write.
+  const stats: ApplyStats = { applied: 0, skippedMissing: 0, skippedStatus: 0, skippedPopulated: 0, failed: 0 };
   for (const entry of plan.entries) {
     try {
+      const current = await store.get(entry.invocationId);
+      const decision = decideApplyOutcome(entry, current);
+      if (decision.kind === 'skip-missing') {
+        stats.skippedMissing += 1;
+        console.warn(`[backfill-usage] skip ${entry.invocationId}: ${decision.reason}`);
+        continue;
+      }
+      if (decision.kind === 'skip-status') {
+        stats.skippedStatus += 1;
+        console.warn(`[backfill-usage] skip ${entry.invocationId}: ${decision.reason}`);
+        continue;
+      }
+      if (decision.kind === 'skip-populated') {
+        stats.skippedPopulated += 1;
+        console.warn(`[backfill-usage] skip ${entry.invocationId}: ${decision.reason}`);
+        continue;
+      }
       const updated = await store.update(entry.invocationId, {
         usageByCat: entry.usageByCat,
         usageRecordedAt: entry.usageRecordedAt,
+        // CAS — fail closed if status flipped between our re-read and the store's
+        // atomic Lua transaction. Better to leave the record alone than to
+        // collide with a writer that legitimately moved it past 'succeeded'.
+        expectedStatus: 'succeeded',
       });
       if (updated) {
-        applied += 1;
+        stats.applied += 1;
       } else {
-        // CAS mismatch (e.g. record was meanwhile updated by another writer) — record but continue
-        failed += 1;
-        console.warn(`[backfill-usage] update returned null for ${entry.invocationId} (CAS mismatch / not found)`);
+        stats.failed += 1;
+        console.warn(
+          `[backfill-usage] update returned null for ${entry.invocationId} ` +
+            '(CAS mismatch — status changed during apply)',
+        );
       }
     } catch (err) {
-      failed += 1;
+      stats.failed += 1;
       console.error(`[backfill-usage] update failed for ${entry.invocationId}:`, err);
     }
   }
-  return { applied, failed };
+  return stats;
 }
 
 export async function runBackfill(argv: readonly string[]): Promise<number> {
@@ -158,9 +215,15 @@ export async function runBackfill(argv: readonly string[]): Promise<number> {
 
     if (!args.dryRun) {
       console.log('[backfill-usage] applying writes...');
-      const { applied, failed } = await applyPlan(plan, invocationStore);
-      console.log(`[backfill-usage] applied: ${applied}, failed: ${failed}`);
-      return failed === 0 ? 0 : 2;
+      const stats = await applyPlan(plan, invocationStore);
+      console.log(
+        `[backfill-usage] applied: ${stats.applied}, ` +
+          `skipped(missing): ${stats.skippedMissing}, ` +
+          `skipped(status): ${stats.skippedStatus}, ` +
+          `skipped(populated): ${stats.skippedPopulated}, ` +
+          `failed: ${stats.failed}`,
+      );
+      return stats.failed === 0 ? 0 : 2;
     }
     console.log('[backfill-usage] DRY-RUN complete — re-run with --apply to write.');
     return 0;

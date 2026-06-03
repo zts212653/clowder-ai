@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { indexMessagesByInvocation, planBackfill, formatBackfillPreview } = await import(
+const { indexMessagesByInvocation, planBackfill, formatBackfillPreview, decideApplyOutcome } = await import(
   '../dist/scripts/backfill-usage-by-cat/core.js'
 );
 
@@ -253,5 +253,82 @@ describe('planBackfill', () => {
     assert.match(out, /DRY-RUN/);
     assert.match(out, /recoverable: {9}1/);
     assert.match(out, /queue: 1/);
+  });
+});
+
+// 砚砚 cloud review P1-B (PR #847): regression coverage for the race-safe
+// pre-write guard. The planner builds entries from a SCAN snapshot; by the
+// time applyPlan reaches each entry, a concurrent writer may have populated
+// usageByCat or moved the record off 'succeeded'. decideApplyOutcome MUST NOT
+// return 'apply' in those windows.
+describe('decideApplyOutcome — apply-time race-safe guard', () => {
+  function makeEntry(overrides = {}) {
+    return {
+      invocationId: 'inv-1',
+      threadId: 'thread-1',
+      date: '2026-06-02',
+      usageRecordedAt: 1_770_000_000_000,
+      source: 'queue',
+      usageByCat: { opus: { inputTokens: 100, outputTokens: 10 } },
+      messageCount: 1,
+      ...overrides,
+    };
+  }
+
+  function makeRecord(overrides = {}) {
+    return {
+      id: 'inv-1',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      userMessageId: null,
+      targetCats: ['opus'],
+      intent: 'execute',
+      status: 'succeeded',
+      idempotencyKey: 'queue-abc',
+      createdAt: 1_770_000_000_000,
+      updatedAt: 1_770_000_000_001,
+      ...overrides,
+    };
+  }
+
+  test('record disappeared since plan → skip-missing', () => {
+    const out = decideApplyOutcome(makeEntry(), null);
+    assert.equal(out.kind, 'skip-missing');
+    assert.match(out.reason, /disappeared/);
+  });
+
+  test('status moved away from succeeded → skip-status', () => {
+    for (const status of ['running', 'failed', 'canceled', 'queued']) {
+      const out = decideApplyOutcome(makeEntry(), makeRecord({ status }));
+      assert.equal(out.kind, 'skip-status', `status=${status}`);
+      assert.match(out.reason, new RegExp(status));
+    }
+  });
+
+  test('concurrent writer populated usageByCat → skip-populated (no overwrite)', () => {
+    const record = makeRecord({
+      usageByCat: {
+        opus: { inputTokens: 999_999, outputTokens: 999, costUsd: 1.23 },
+      },
+      usageRecordedAt: 1_770_000_500_000,
+    });
+    const out = decideApplyOutcome(makeEntry(), record);
+    assert.equal(out.kind, 'skip-populated');
+    assert.match(out.reason, /concurrent writer/);
+  });
+
+  test('empty usageByCat object is treated as not populated → apply proceeds', () => {
+    // Defensive: a record could in principle hold an empty object. Guard against
+    // accidentally reading `{}` as "already populated" — that would lock the
+    // backfill out forever once any partial write left an empty map behind.
+    const record = makeRecord({ usageByCat: {} });
+    const out = decideApplyOutcome(makeEntry(), record);
+    assert.equal(out.kind, 'apply');
+  });
+
+  test('all guards pass → apply', () => {
+    const out = decideApplyOutcome(makeEntry(), makeRecord());
+    assert.equal(out.kind, 'apply');
+    assert.equal(out.reason, undefined);
   });
 });
