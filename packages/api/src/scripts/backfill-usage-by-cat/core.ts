@@ -91,6 +91,68 @@ export function indexMessagesByInvocation(messages: readonly StoredMessage[]): M
 }
 
 /**
+ * Aggregate the per-cat usage and the anchor timestamp from a non-empty set of
+ * contributing messages. Returns `null` when none of them carries a usable
+ * `metadata.usage` (the orphan is unrecoverable).
+ */
+function aggregateUsageFromMessages(
+  messages: readonly StoredMessage[],
+): { usageByCat: Record<string, TokenUsage>; messageCount: number; maxTimestamp: number } | null {
+  const aggregated = new Map<string, TokenUsage>();
+  let messageCount = 0;
+  let maxTimestamp = 0;
+  for (const msg of messages) {
+    if (!msg.catId) continue;
+    const usage = msg.metadata?.usage;
+    if (!usage) continue;
+    aggregated.set(msg.catId, mergeTokenUsage(aggregated.get(msg.catId), usage));
+    messageCount += 1;
+    if (typeof msg.timestamp === 'number' && msg.timestamp > maxTimestamp) {
+      maxTimestamp = msg.timestamp;
+    }
+  }
+  if (aggregated.size === 0) return null;
+  return { usageByCat: Object.fromEntries(aggregated), messageCount, maxTimestamp };
+}
+
+type OrphanOutcome = { kind: 'entry'; entry: BackfillPlanEntry } | { kind: 'unrecoverable' };
+
+/**
+ * Decide the outcome for a single orphan candidate (already passed status /
+ * usageByCat / window guards in the caller). Splitting this out keeps
+ * `planBackfill` flat and lets each rule be reviewed in isolation.
+ */
+function planOrphan(
+  invocation: InvocationRecord,
+  messageIndex: ReadonlyMap<string, readonly StoredMessage[]>,
+): OrphanOutcome {
+  const relatedMessages = messageIndex.get(invocation.id);
+  if (!relatedMessages || relatedMessages.length === 0) return { kind: 'unrecoverable' };
+
+  const aggregate = aggregateUsageFromMessages(relatedMessages);
+  if (!aggregate) return { kind: 'unrecoverable' };
+
+  // Anchor to live-writer semantics: usage arrived around the done event time,
+  // which is captured by the contributing message's timestamp. Fall back to
+  // invocation.updatedAt (≈ succeeded-update time) if no message carried a
+  // usable timestamp. We never use createdAt — that would mis-bucket
+  // cross-midnight invocations relative to the live writer's behavior.
+  const usageRecordedAt = aggregate.maxTimestamp > 0 ? aggregate.maxTimestamp : invocation.updatedAt;
+  return {
+    kind: 'entry',
+    entry: {
+      invocationId: invocation.id,
+      threadId: invocation.threadId,
+      date: toDateString(usageRecordedAt),
+      usageRecordedAt,
+      source: classifySource(invocation.idempotencyKey),
+      usageByCat: aggregate.usageByCat,
+      messageCount: aggregate.messageCount,
+    },
+  };
+}
+
+/**
  * Plan the backfill. Pure function — given the full set of invocations and the
  * precomputed message index, returns the list of update plans plus a summary.
  *
@@ -129,50 +191,14 @@ export function planBackfill(
     if (invocation.createdAt < options.cutoffMs) continue; // outside window
     orphanCandidates += 1;
 
-    const relatedMessages = messageIndex.get(invocation.id);
-    if (!relatedMessages || relatedMessages.length === 0) {
+    const outcome = planOrphan(invocation, messageIndex);
+    if (outcome.kind === 'unrecoverable') {
       unrecoverable += 1;
       continue;
     }
-
-    const aggregated = new Map<string, TokenUsage>();
-    let usableCount = 0;
-    let maxMessageTimestamp = 0;
-    for (const msg of relatedMessages) {
-      if (!msg.catId) continue;
-      const usage = msg.metadata?.usage;
-      if (!usage) continue;
-      aggregated.set(msg.catId, mergeTokenUsage(aggregated.get(msg.catId), usage));
-      usableCount += 1;
-      if (typeof msg.timestamp === 'number' && msg.timestamp > maxMessageTimestamp) {
-        maxMessageTimestamp = msg.timestamp;
-      }
-    }
-
-    if (aggregated.size === 0) {
-      unrecoverable += 1;
-      continue;
-    }
-
-    // Anchor to live-writer semantics: usage arrived around the done event time,
-    // which is captured by the contributing message's timestamp. Fall back to
-    // invocation.updatedAt (≈ succeeded-update time) if no message carried a
-    // usable timestamp. We never use createdAt — that would mis-bucket
-    // cross-midnight invocations relative to the live writer's behavior.
-    const usageRecordedAt = maxMessageTimestamp > 0 ? maxMessageTimestamp : invocation.updatedAt;
-    const date = toDateString(usageRecordedAt);
-    const source = classifySource(invocation.idempotencyKey);
-    entries.push({
-      invocationId: invocation.id,
-      threadId: invocation.threadId,
-      date,
-      usageRecordedAt,
-      source,
-      usageByCat: Object.fromEntries(aggregated),
-      messageCount: usableCount,
-    });
-    byDate[date] = (byDate[date] ?? 0) + 1;
-    bySource[source] = (bySource[source] ?? 0) + 1;
+    entries.push(outcome.entry);
+    byDate[outcome.entry.date] = (byDate[outcome.entry.date] ?? 0) + 1;
+    bySource[outcome.entry.source] = (bySource[outcome.entry.source] ?? 0) + 1;
   }
 
   return {

@@ -191,13 +191,9 @@ describe('planBackfill', () => {
     // produce a non-NaN anchor; updatedAt is the closest analog to succeeded time.
     const now = Date.now();
     const invUpdatedAt = now - DAY_MS;
-    const messages = [
-      makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: 0 }),
-    ];
+    const messages = [makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: 0 })];
     const messageIndex = indexMessagesByInvocation(messages);
-    const invocations = [
-      makeInvocation({ id: 'inv-1', createdAt: invUpdatedAt - 60_000, updatedAt: invUpdatedAt }),
-    ];
+    const invocations = [makeInvocation({ id: 'inv-1', createdAt: invUpdatedAt - 60_000, updatedAt: invUpdatedAt })];
 
     const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
     assert.equal(plan.entries.length, 1);
