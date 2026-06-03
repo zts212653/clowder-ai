@@ -376,9 +376,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                 const imageCount =
                   entry.imageCount ??
                   (() => {
-                    const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(
-                      Boolean,
-                    ) as string[];
+                    const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
                     return allMsgIds.reduce((count, msgId) => {
                       const msg = messages.find((m) => m.id === msgId);
                       return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
