@@ -34,10 +34,24 @@ const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
 // startup via warmL0Cache() and invalidated on hot-reload via clearL0Cache().
 const l0Cache = new Map<string, string>();
 
+// In-flight Promise dedup — Phase G AC-G10 (砚砚 Design Gate position 1).
+// Without this, two concurrent calls on a cold cache (e.g. invoke provider
+// + Prompt X-Ray capture inside the same invocation hot path) both spawn
+// subprocesses. The dedup map collapses concurrent compiles onto a single
+// subprocess invocation; the in-flight entry is removed once the Promise
+// settles, after which the result is in l0Cache for any subsequent reads.
+const l0InflightPromises = new Map<string, Promise<string>>();
+
 /** Clear cached L0 for one cat or all cats (call on hot-reload / re-sync). */
 export function clearL0Cache(catId?: string): void {
-  if (catId) l0Cache.delete(catId);
-  else l0Cache.clear();
+  if (catId) {
+    l0Cache.delete(catId);
+    // Also drop any in-flight promise — next call will re-spawn fresh.
+    l0InflightPromises.delete(catId);
+  } else {
+    l0Cache.clear();
+    l0InflightPromises.clear();
+  }
 }
 
 /** Number of cached entries (test/diagnostic). */
@@ -139,6 +153,35 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
     return cached;
   }
 
+  // In-flight dedup — collapse concurrent cold-cache callers onto a single
+  // subprocess. The first caller installs the Promise; subsequent callers
+  // await the same one. Per-call `outPath` is honored: any caller that
+  // passed `outPath` writes the resolved L0 to that path before returning.
+  // Phase G AC-G10 — see comment block at l0InflightPromises declaration.
+  const inflight = l0InflightPromises.get(catId);
+  if (inflight) {
+    const result = await inflight;
+    if (outPath) writeFileSync(outPath, result, 'utf8');
+    return result;
+  }
+
+  const compilePromise = doCompileL0(options);
+  l0InflightPromises.set(catId, compilePromise);
+  try {
+    return await compilePromise;
+  } finally {
+    // Always clean up the in-flight entry once settled — subsequent calls
+    // will read from l0Cache (on success) or re-attempt (on failure).
+    l0InflightPromises.delete(catId);
+  }
+}
+
+/**
+ * Internal compile path — separated from `compileL0ViaSubprocess` so the
+ * in-flight dedup wrapper can install the Promise without recursing.
+ */
+async function doCompileL0(options: CompileL0Options): Promise<string> {
+  const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   if (!scriptPath) {
     throw new Error(
