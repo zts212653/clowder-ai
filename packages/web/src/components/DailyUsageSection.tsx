@@ -156,11 +156,12 @@ export function DailyUsageSection() {
 
 function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsage; cat: CatData | undefined }) {
   const label = buildCatLabel(catId, cat);
-  // Issue #845: show defaultModel inline so "猫名 vs 模型" stays honest.
-  // The aggregated TokenUsage has no per-record model field (catId may have run
-  // multiple model versions historically), so this is the *current* defaultModel
-  // for the catId — not a per-row attribution. Marked with the same caveat in the
-  // follow-up issue tracking catId+model schema upgrade.
+  // Issue #845 (砚砚 P2 fix): show the catId's *current* defaultModel as a hint,
+  // NOT as a historical attribution. The aggregated TokenUsage has no per-record
+  // model field — a single catId may have run multiple model versions over time.
+  // The "当前默认" prefix + tooltip keep the semantics explicit so the user never
+  // mistakes the inline label for a per-day model. A follow-up issue tracks the
+  // proper (catId, model) double-key schema.
   const model = cat?.defaultModel;
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
@@ -168,10 +169,10 @@ function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsag
         <span className="font-medium text-cafe-secondary truncate">{label}</span>
         {model && (
           <span
-            className="text-cafe-muted text-[10px] truncate"
-            title={`当前默认模型：${model}（历史聚合不区分模型版本）`}
+            className="text-cafe-muted text-[10px] truncate italic"
+            title={`${catId} 当前默认模型：${model}。历史聚合按 catId 分桶，不区分模型版本。`}
           >
-            {model}
+            当前默认 {model}
           </span>
         )}
         <span className="text-cafe-muted">{usage.participations}次</span>

@@ -128,29 +128,80 @@ describe('planBackfill', () => {
     assert.equal(plan.summary.orphanCandidates, 0);
   });
 
-  test('recoverable: aggregates messages, anchors usageRecordedAt to createdAt', () => {
+  test('recoverable: aggregates messages, anchors usageRecordedAt to max(message.timestamp)', () => {
     const now = Date.now();
     const invCreatedAt = now - 2 * DAY_MS;
+    const invUpdatedAt = invCreatedAt + 30_000;
+    // Spread messages across the invocation lifetime; the latest one wins as the anchor.
+    const earlyTs = invCreatedAt + 5_000;
+    const midTs = invCreatedAt + 12_000;
+    const lateTs = invCreatedAt + 28_000;
     const messages = [
-      makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 }),
-      makeMessage('inv-1', 'opus', { inputTokens: 50, outputTokens: 5 }, { id: 'msg-second' }),
-      makeMessage('inv-1', 'codex', { inputTokens: 200, outputTokens: 20 }),
+      makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: earlyTs }),
+      makeMessage('inv-1', 'opus', { inputTokens: 50, outputTokens: 5 }, { id: 'msg-second', timestamp: midTs }),
+      makeMessage('inv-1', 'codex', { inputTokens: 200, outputTokens: 20 }, { timestamp: lateTs }),
     ];
     const messageIndex = indexMessagesByInvocation(messages);
-    const invocations = [makeInvocation({ id: 'inv-1', createdAt: invCreatedAt })];
+    const invocations = [makeInvocation({ id: 'inv-1', createdAt: invCreatedAt, updatedAt: invUpdatedAt })];
 
     const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
     assert.equal(plan.entries.length, 1);
     const [entry] = plan.entries;
     assert.equal(entry.invocationId, 'inv-1');
-    assert.equal(entry.usageRecordedAt, invCreatedAt);
-    assert.equal(entry.date, new Date(invCreatedAt).toISOString().slice(0, 10));
+    assert.equal(entry.usageRecordedAt, lateTs, 'anchor should be the latest contributing message timestamp');
+    assert.equal(entry.date, new Date(lateTs).toISOString().slice(0, 10));
     assert.equal(entry.source, 'queue');
     assert.equal(entry.messageCount, 3);
     assert.equal(entry.usageByCat.opus.inputTokens, 150);
     assert.equal(entry.usageByCat.opus.outputTokens, 15);
     assert.equal(entry.usageByCat.codex.inputTokens, 200);
     assert.equal(entry.usageByCat.codex.outputTokens, 20);
+  });
+
+  test('cross-midnight invocation anchors to message.timestamp, not createdAt', () => {
+    // Reproduce the case 砚砚 flagged: invocation begins one calendar day and finishes
+    // the next. The live writer would have stamped usageRecordedAt ≈ succeeded time,
+    // which lands the row on the *finish* day. The backfill must preserve that.
+    const now = Date.now();
+    const yesterdayLateNight = Date.UTC(2026, 4, 30, 23, 50, 0); // 2026-05-30 23:50 UTC
+    const todayEarlyMorning = Date.UTC(2026, 4, 31, 0, 15, 0); // 2026-05-31 00:15 UTC
+    // Window of "now" doesn't matter for the cutoff guard — make it generous.
+    const messages = [
+      makeMessage('inv-cross', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: todayEarlyMorning }),
+    ];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-cross',
+        createdAt: yesterdayLateNight,
+        updatedAt: todayEarlyMorning,
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 365 * DAY_MS });
+    assert.equal(plan.entries.length, 1);
+    const [entry] = plan.entries;
+    assert.equal(entry.usageRecordedAt, todayEarlyMorning, 'anchor must follow the done event, not the start');
+    assert.equal(entry.date, '2026-05-31', 'cross-midnight rows must land on the finish day');
+    assert.notEqual(entry.date, '2026-05-30', 'must NOT bucket onto the start day');
+  });
+
+  test('falls back to invocation.updatedAt when messages have no usable timestamp', () => {
+    // Defensive path: legacy messages or imports may lack timestamps. We still must
+    // produce a non-NaN anchor; updatedAt is the closest analog to succeeded time.
+    const now = Date.now();
+    const invUpdatedAt = now - DAY_MS;
+    const messages = [
+      makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: 0 }),
+    ];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({ id: 'inv-1', createdAt: invUpdatedAt - 60_000, updatedAt: invUpdatedAt }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
+    assert.equal(plan.entries.length, 1);
+    assert.equal(plan.entries[0].usageRecordedAt, invUpdatedAt);
   });
 
   test('unrecoverable: no matching messages → entry skipped but counted', () => {

@@ -101,8 +101,14 @@ export function indexMessagesByInvocation(messages: readonly StoredMessage[]): M
  *   4. Records whose related messages contain no `metadata.usage` are reported
  *      as unrecoverable (not in the entries list) so the operator sees how
  *      many orphans cannot be repaired.
- *   5. `usageRecordedAt` is pinned to `invocation.createdAt` so the recovered
- *      rows land on the correct daily bucket instead of "today".
+ *   5. `usageRecordedAt` mirrors the *live writer* semantics: the moment usage
+ *      actually arrived. For the live path this is roughly the succeeded-update
+ *      time, so we use `max(message.timestamp)` over the contributing messages
+ *      (the timestamp on the `done` event), falling back to
+ *      `invocation.updatedAt` if no message timestamp is available.
+ *      We deliberately do NOT use `invocation.createdAt`: a long invocation
+ *      that started before UTC midnight and finished after would otherwise
+ *      backfill onto the wrong day relative to the live writer's behavior.
  */
 export function planBackfill(
   invocations: readonly InvocationRecord[],
@@ -131,12 +137,16 @@ export function planBackfill(
 
     const aggregated = new Map<string, TokenUsage>();
     let usableCount = 0;
+    let maxMessageTimestamp = 0;
     for (const msg of relatedMessages) {
       if (!msg.catId) continue;
       const usage = msg.metadata?.usage;
       if (!usage) continue;
       aggregated.set(msg.catId, mergeTokenUsage(aggregated.get(msg.catId), usage));
       usableCount += 1;
+      if (typeof msg.timestamp === 'number' && msg.timestamp > maxMessageTimestamp) {
+        maxMessageTimestamp = msg.timestamp;
+      }
     }
 
     if (aggregated.size === 0) {
@@ -144,13 +154,19 @@ export function planBackfill(
       continue;
     }
 
-    const date = toDateString(invocation.createdAt);
+    // Anchor to live-writer semantics: usage arrived around the done event time,
+    // which is captured by the contributing message's timestamp. Fall back to
+    // invocation.updatedAt (≈ succeeded-update time) if no message carried a
+    // usable timestamp. We never use createdAt — that would mis-bucket
+    // cross-midnight invocations relative to the live writer's behavior.
+    const usageRecordedAt = maxMessageTimestamp > 0 ? maxMessageTimestamp : invocation.updatedAt;
+    const date = toDateString(usageRecordedAt);
     const source = classifySource(invocation.idempotencyKey);
     entries.push({
       invocationId: invocation.id,
       threadId: invocation.threadId,
       date,
-      usageRecordedAt: invocation.createdAt,
+      usageRecordedAt,
       source,
       usageByCat: Object.fromEntries(aggregated),
       messageCount: usableCount,
