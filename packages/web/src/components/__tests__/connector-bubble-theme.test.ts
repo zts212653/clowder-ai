@@ -1,6 +1,13 @@
 /**
  * Connector bubble theming
- * - GitHub Review notifications should be visually distinct from generic connector bubbles.
+ *
+ * F056 OKLCH migration: ConnectorBubble no longer uses Tailwind bg-conn-*
+ * classes. Instead it uses inline CSS custom properties:
+ *   - bubble bg:  var(--color-{connId}-surface, var(--cafe-surface))
+ *   - label color: var(--color-{connId}-bubble, var(--cafe-text))
+ * Avatar ring/bg come from connector definitions (getConnectorDefinition).
+ *
+ * Tests assert on the CSS variable pattern in the rendered HTML.
  */
 
 import React, { act } from 'react';
@@ -34,7 +41,7 @@ describe('ConnectorBubble theme', () => {
     container.remove();
   });
 
-  it('uses purple theme for vote-result connector', () => {
+  it('uses OKLCH surface token for vote-result connector', () => {
     const message: ChatMessage = {
       id: 'm-vote',
       type: 'connector',
@@ -52,10 +59,8 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-purple-bg');
-    expect(html).toContain('border-conn-purple-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
-    expect(html).not.toContain('bg-conn-slate-bg');
+    expect(html).toContain('var(--color-vote-result-surface');
+    expect(html).toContain('var(--color-vote-result-bubble');
   });
 
   it('renders rich block fields inside connector bubble', () => {
@@ -126,7 +131,7 @@ describe('ConnectorBubble theme', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('uses slate theme for github-review connector', () => {
+  it('uses OKLCH surface token for github-review connector', () => {
     const message: ChatMessage = {
       id: 'm1',
       type: 'connector',
@@ -145,12 +150,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-slate-bg');
-    expect(html).toContain('border-conn-slate-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-github-review-surface');
+    expect(html).toContain('var(--color-github-review-bubble');
   });
 
-  it('uses slate theme for github-ci connector (same as github-review)', () => {
+  it('uses OKLCH surface token for github-ci connector', () => {
     const message: ChatMessage = {
       id: 'm-ci',
       type: 'connector',
@@ -169,10 +173,8 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    // Same slate theme as github-review
-    expect(html).toContain('bg-conn-slate-bg');
-    expect(html).toContain('border-conn-slate-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-github-ci-surface');
+    expect(html).toContain('var(--color-github-ci-bubble');
     // Should render GitHubIcon SVG, not raw text "github"
     expect(html).toContain('<svg');
     expect(html).not.toContain('>github<');
@@ -200,7 +202,7 @@ describe('ConnectorBubble theme', () => {
     expect(html).toContain('⚠️');
   });
 
-  it('uses emerald theme for multi-mention-result connector', () => {
+  it('uses OKLCH surface token for multi-mention-result connector', () => {
     const message: ChatMessage = {
       id: 'm-mm',
       type: 'connector',
@@ -218,12 +220,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-emerald-bg');
-    expect(html).toContain('border-conn-emerald-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-multi-mention-result-surface');
+    expect(html).toContain('var(--color-multi-mention-result-bubble');
   });
 
-  it('uses blue theme for feishu connector', () => {
+  it('uses OKLCH surface token for feishu connector', () => {
     const message: ChatMessage = {
       id: 'm-fs',
       type: 'connector',
@@ -241,11 +242,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-blue-bg');
-    expect(html).toContain('border-conn-blue-bubble-border');
+    expect(html).toContain('var(--color-feishu-surface');
+    expect(html).toContain('var(--color-feishu-bubble');
   });
 
-  it('uses sky theme for telegram connector', () => {
+  it('uses OKLCH surface token for telegram connector', () => {
     const message: ChatMessage = {
       id: 'm-tg',
       type: 'connector',
@@ -263,12 +264,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-sky-bg');
-    expect(html).toContain('border-conn-sky-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-telegram-surface');
+    expect(html).toContain('var(--color-telegram-bubble');
   });
 
-  it('uses default blue theme for unknown/unregistered connector (B5 fallback)', () => {
+  it('uses fallback CSS var for unknown/unregistered connector', () => {
     const message: ChatMessage = {
       id: 'm-unknown',
       type: 'connector',
@@ -286,12 +286,12 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    // Unknown connectors fall back to default blue theme
-    expect(html).toContain('bg-conn-blue-bg');
-    expect(html).toContain('border-conn-blue-bubble-border');
+    // Unknown connectors use var(--color-imessage-surface, var(--cafe-surface)) fallback
+    expect(html).toContain('var(--color-imessage-surface');
+    expect(html).toContain('var(--cafe-surface)');
   });
 
-  it('uses indigo theme for wecom-bot connector', () => {
+  it('uses OKLCH surface token for wecom-bot connector', () => {
     const message: ChatMessage = {
       id: 'm-wecom',
       type: 'connector',
@@ -309,12 +309,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-indigo-bg');
-    expect(html).toContain('border-conn-indigo-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-wecom-bot-surface');
+    expect(html).toContain('var(--color-wecom-bot-bubble');
   });
 
-  it('uses cyan theme for dingtalk connector', () => {
+  it('uses OKLCH surface token for dingtalk connector', () => {
     const message: ChatMessage = {
       id: 'm-dingtalk',
       type: 'connector',
@@ -332,12 +331,11 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-cyan-bg');
-    expect(html).toContain('border-conn-cyan-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-dingtalk-surface');
+    expect(html).toContain('var(--color-dingtalk-bubble');
   });
 
-  it('uses violet theme for wecom-agent connector', () => {
+  it('uses OKLCH surface token for wecom-agent connector', () => {
     const message: ChatMessage = {
       id: 'm-wecom-agent',
       type: 'connector',
@@ -355,8 +353,7 @@ describe('ConnectorBubble theme', () => {
     });
 
     const html = container.innerHTML;
-    expect(html).toContain('bg-conn-violet-bg');
-    expect(html).toContain('border-conn-violet-bubble-border');
-    expect(html).not.toContain('bg-conn-blue-bg');
+    expect(html).toContain('var(--color-wecom-agent-surface');
+    expect(html).toContain('var(--color-wecom-agent-bubble');
   });
 });

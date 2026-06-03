@@ -6,6 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -406,79 +407,153 @@ describe('buildProbeEnv (unit)', () => {
 });
 
 describe('tryCliProbe (unit)', () => {
-  /** @param {string} stdout */
-  function mockExec(stdout, shouldThrow = false, errorMsg = '') {
-    return async () => {
-      if (shouldThrow) throw new Error(errorMsg);
-      return { stdout };
+  /**
+   * Create a mock spawn function that simulates child_process.spawn.
+   * Returns a function with a `.captured()` method to inspect spawn args.
+   */
+  function createMockSpawn({ stdout = '', stderr = '', exitCode = 0 } = {}) {
+    let capturedCmd, capturedArgs, capturedOpts;
+    const fn = (command, args, opts) => {
+      capturedCmd = command;
+      capturedArgs = args;
+      capturedOpts = opts;
+      const proc = new EventEmitter();
+      proc.stdin = { write() {}, end() {} };
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => true;
+      process.nextTick(() => {
+        if (stdout) proc.stdout.emit('data', Buffer.from(stdout));
+        if (stderr) proc.stderr.emit('data', Buffer.from(stderr));
+        proc.emit('close', exitCode);
+      });
+      return proc;
     };
+    fn.captured = () => ({ command: capturedCmd, args: capturedArgs, opts: capturedOpts });
+    return fn;
+  }
+
+  /**
+   * Create a mock exec function for exec()-based probes (Claude).
+   * Simulates promisified child_process.exec.
+   */
+  function createMockExec({ stdout = '', stderr = '', reject = false, rejectCode = 1 } = {}) {
+    let capturedCmd, capturedOpts;
+    const fn = async (cmd, opts) => {
+      capturedCmd = cmd;
+      capturedOpts = opts;
+      if (reject) {
+        const err = new Error(stderr || 'exec failed');
+        err.stderr = stderr;
+        err.code = rejectCode;
+        throw err;
+      }
+      return { stdout, stderr };
+    };
+    fn.captured = () => ({ cmd: capturedCmd, opts: capturedOpts });
+    return fn;
   }
 
   test('returns null for unknown client', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('unknown-cli', { execFn: mockExec('') });
+    const result = await tryCliProbe('unknown-cli');
     assert.equal(result, null);
   });
 
-  test('returns ok when CLI produces non-error output', async () => {
+  /* ── Claude tests (exec path) ──────────────────────────────────────── */
+
+  test('claude: returns ok when CLI produces non-error output', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('claude', { execFn: mockExec('pong') });
+    const result = await tryCliProbe('claude', { execFn: createMockExec({ stdout: 'pong' }) });
     assert.ok(result);
     assert.equal(result.ok, true);
     assert.ok(result.message.includes('连接正常'));
   });
 
-  test('returns failure when stdout is empty', async () => {
+  test('claude: returns failure when stdout is empty', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('claude', { execFn: mockExec('') });
+    const result = await tryCliProbe('claude', { execFn: createMockExec({ stdout: '' }) });
     assert.ok(result);
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('无响应'));
   });
 
-  test('detects error patterns in stdout as failure (false positive guard)', async () => {
+  test('claude: treats budget/exceeded errors as connectivity success (catch path)', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('opencode', { execFn: mockExec('Error: The resource is frozen.') });
-    assert.ok(result);
-    assert.equal(result.ok, false);
-    assert.ok(result.message.includes('异常'));
-  });
-
-  test('treats budget/exceeded errors as connectivity success', async () => {
-    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('claude', { execFn: mockExec('', true, 'Exceeded USD budget (0.05)') });
+    const result = await tryCliProbe('claude', {
+      execFn: createMockExec({ stderr: 'Exceeded USD budget (0.05)', reject: true }),
+    });
     assert.ok(result);
     assert.equal(result.ok, true);
     assert.ok(result.message.includes('受限响应'));
   });
 
-  test('detects authentication errors', async () => {
+  test('claude: treats budget error in stdout (exit 0) as connectivity success', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('claude', { execFn: mockExec('', true, 'authentication required: please login') });
+    const result = await tryCliProbe('claude', {
+      execFn: createMockExec({ stdout: 'Error: Exceeded USD budget (0.05)' }),
+    });
+    assert.ok(result);
+    assert.equal(result.ok, true);
+    assert.ok(result.message.includes('受限响应'));
+  });
+
+  test('claude: detects authentication errors', async () => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const result = await tryCliProbe('claude', {
+      execFn: createMockExec({ stderr: 'authentication required: please login', reject: true }),
+    });
     assert.ok(result);
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('OAuth'));
   });
 
-  test('includes --model in CLI command when model is provided', async () => {
+  test('claude: includes --model in exec command string', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    let capturedCmd = '';
-    const exec = async (cmd) => {
-      capturedCmd = cmd;
-      return { stdout: 'pong' };
-    };
-    const result = await tryCliProbe('claude', { model: 'claude-sonnet-4-6', execFn: exec });
+    const mock = createMockExec({ stdout: 'pong' });
+    const result = await tryCliProbe('claude', { model: 'claude-sonnet-4-6', execFn: mock });
     assert.ok(result);
     assert.equal(result.ok, true);
-    assert.ok(capturedCmd.includes('--model claude-sonnet-4-6'));
+    const { cmd } = mock.captured();
+    assert.ok(cmd.includes('--model'), 'exec cmd should contain --model flag');
+    assert.ok(cmd.includes('claude-sonnet-4-6'), 'exec cmd should contain model name');
+    assert.ok(cmd.includes('echo'), 'exec cmd should use echo pipe');
   });
 
-  test('treats budget error in stdout (exit 0) as connectivity success', async () => {
+  test('claude: forwards env vars via exec opts', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('claude', { execFn: mockExec('Error: Exceeded USD budget (0.05)') });
+    const mock = createMockExec({ stdout: 'pong' });
+    await tryCliProbe('claude', {
+      env: { ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_BASE_URL: 'https://proxy.test' },
+      execFn: mock,
+    });
+    const { opts } = mock.captured();
+    assert.ok(opts.env, 'env should be passed to exec');
+    assert.equal(opts.env.ANTHROPIC_API_KEY, 'sk-test');
+    assert.equal(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.test');
+    assert.equal(opts.env.PATH, process.env.PATH, 'should merge with process.env');
+  });
+
+  test('claude: timeout reports exec timeout (code null)', async () => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const result = await tryCliProbe('claude', {
+      execFn: createMockExec({ stderr: 'killed', reject: true, rejectCode: null }),
+    });
     assert.ok(result);
-    assert.equal(result.ok, true);
-    assert.ok(result.message.includes('受限响应'));
+    assert.equal(result.ok, false);
+    assert.ok(result.message.includes('超时'));
+  });
+
+  /* ── Spawn-path tests (opencode, gemini, kimi) ─────────────────────── */
+
+  test('opencode: detects error patterns in stdout as failure', async () => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const result = await tryCliProbe('opencode', {
+      spawnFn: createMockSpawn({ stdout: 'Error: The resource is frozen.' }),
+    });
+    assert.ok(result);
+    assert.equal(result.ok, false);
+    assert.ok(result.message.includes('异常'));
   });
 
   test('rejects model names with unsafe characters', async () => {
@@ -489,54 +564,46 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(result.message.includes('非法字符'));
   });
 
-  test('reports generic CLI failures', async () => {
+  test('gemini: reports generic CLI failures', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    const result = await tryCliProbe('gemini', { execFn: mockExec('', true, 'Not enough arguments following: p') });
+    const result = await tryCliProbe('gemini', {
+      spawnFn: createMockSpawn({ stderr: 'Not enough arguments following: p', exitCode: 1 }),
+    });
     assert.ok(result);
     assert.equal(result.ok, false);
     assert.ok(result.message.includes('调用失败'));
   });
 
-  test('forwards env vars to CLI subprocess', async () => {
+  test('codex: forwards env vars to spawn subprocess', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    let capturedOpts;
-    const exec = async (cmd, opts) => {
-      capturedOpts = opts;
-      return { stdout: 'pong' };
-    };
-    await tryCliProbe('claude', {
-      env: { ANTHROPIC_API_KEY: 'sk-test', ANTHROPIC_BASE_URL: 'https://proxy.test' },
-      execFn: exec,
+    const mock = createMockSpawn({ stdout: 'pong' });
+    await tryCliProbe('codex', {
+      env: { OPENAI_API_KEY: 'sk-test' },
+      spawnFn: mock,
     });
-    assert.ok(capturedOpts.env, 'env should be passed to exec');
-    assert.equal(capturedOpts.env.ANTHROPIC_API_KEY, 'sk-test');
-    assert.equal(capturedOpts.env.ANTHROPIC_BASE_URL, 'https://proxy.test');
-    // process.env vars should also be present (merged)
-    assert.equal(capturedOpts.env.PATH, process.env.PATH);
+    const { opts } = mock.captured();
+    assert.ok(opts.env, 'env should be passed to spawn');
+    assert.equal(opts.env.OPENAI_API_KEY, 'sk-test');
+    assert.equal(opts.env.PATH, process.env.PATH);
   });
 
-  test('does not set env when no env vars provided', async () => {
+  test('codex: uses process.env when no custom env vars provided', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    let capturedOpts;
-    const exec = async (cmd, opts) => {
-      capturedOpts = opts;
-      return { stdout: 'pong' };
-    };
-    await tryCliProbe('claude', { execFn: exec });
-    assert.equal(capturedOpts.env, undefined, 'env should not be set when empty');
+    const mock = createMockSpawn({ stdout: 'pong' });
+    await tryCliProbe('codex', { spawnFn: mock });
+    const { opts } = mock.captured();
+    assert.ok(opts.env, 'env should be present (process.env spread)');
+    assert.equal(opts.env.PATH, process.env.PATH, 'should include process.env');
   });
 
-  test('kimi CLI probe command is registered', async () => {
+  test('kimi: probe args are correct', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
-    let capturedCmd = '';
-    const exec = async (cmd) => {
-      capturedCmd = cmd;
-      return { stdout: 'pong' };
-    };
-    const result = await tryCliProbe('kimi', { execFn: exec });
+    const mock = createMockSpawn({ stdout: 'pong' });
+    const result = await tryCliProbe('kimi', { spawnFn: mock });
     assert.ok(result);
     assert.equal(result.ok, true);
-    assert.ok(capturedCmd.includes('kimi --print'));
-    assert.ok(capturedCmd.includes('--prompt'));
+    const { args } = mock.captured();
+    assert.ok(args.includes('--print'), 'should use --print flag');
+    assert.ok(args.includes('--prompt'), 'should use --prompt flag');
   });
 });

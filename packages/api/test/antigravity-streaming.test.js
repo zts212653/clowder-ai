@@ -6,6 +6,13 @@ function createBridge() {
   return new AntigravityBridge({ port: 1234, csrfToken: 'test', useTls: false });
 }
 
+function plannerTextsFromBatches(batches) {
+  return batches
+    .flatMap((batch) => batch.steps)
+    .map((step) => step.plannerResponse?.modifiedResponse ?? step.plannerResponse?.response)
+    .filter(Boolean);
+}
+
 // ── G2: Streaming delivery (async generator) ───────────────────────
 
 describe('G2: pollForSteps yields steps incrementally', () => {
@@ -270,6 +277,175 @@ describe('G2: pollForSteps yields steps incrementally', () => {
     assert.equal(yielded[0].steps[0].plannerResponse.modifiedResponse, 'new delta');
     assert.equal(yielded[0].cursor.lastDeliveredStepCount, 4);
     assert.equal(yielded[0].cursor.terminalSeen, true);
+  });
+
+  test('does not emit baseline planner mutations as text for a later user turn', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'previous answer partial' },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 3,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'previous answer partial finalized' },
+            },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'current answer' },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 2, 5000, 10)) {
+      yielded.push(batch);
+    }
+
+    const emittedPlannerTexts = plannerTextsFromBatches(yielded);
+
+    assert.deepEqual(emittedPlannerTexts, ['current answer']);
+    assert.equal(yielded.at(-1).cursor.terminalSeen, true);
+  });
+
+  test('does not treat skipped baseline-only mutation as current-turn progress', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'previous answer partial' },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'previous answer partial finalized' },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 3,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'previous answer partial finalized' },
+            },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'current answer' },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 2, 5000, 10)) {
+      yielded.push(batch);
+    }
+
+    const emittedPlannerTexts = plannerTextsFromBatches(yielded);
+
+    assert.deepEqual(emittedPlannerTexts, ['current answer']);
+    assert.equal(yielded.length, 1, 'baseline-only mutation must not emit an empty terminal batch');
+    assert.equal(yielded.at(-1).cursor.terminalSeen, true);
+  });
+
+  test('replays current-turn mutation when retry resumes after the original baseline', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'current answer partial' },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 2,
+        trajectory: {
+          steps: [
+            { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'DONE',
+              plannerResponse: { modifiedResponse: 'current answer partial finalized' },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 2, 80, 10, undefined, false, 1)) {
+      yielded.push(batch);
+    }
+
+    const emittedPlannerTexts = plannerTextsFromBatches(yielded);
+
+    assert.deepEqual(emittedPlannerTexts, [' finalized']);
+    assert.equal(yielded.length, 1, 'retry mutation should emit one delta batch, not an empty terminal batch');
+    assert.equal(yielded.at(-1).cursor.baselineStepCount, 1);
+    assert.equal(yielded.at(-1).cursor.lastDeliveredStepCount, 2);
+    assert.equal(yielded.at(-1).cursor.terminalSeen, true);
   });
 
   test('does not repeatedly fetch full trajectory on terminal resume without inline steps', async () => {

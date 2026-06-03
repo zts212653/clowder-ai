@@ -24,8 +24,9 @@ async function flushEffects() {
   });
 }
 
-function queryButton(container: HTMLElement, text: string): HTMLButtonElement {
-  const button = Array.from(container.querySelectorAll('button')).find((candidate) =>
+function queryButton(_container: HTMLElement, text: string): HTMLButtonElement {
+  // HubCoCreatorEditor uses createPortal(... , document.body), so query the body
+  const button = Array.from(document.body.querySelectorAll('button')).find((candidate) =>
     candidate.textContent?.includes(text),
   );
   if (!button) throw new Error(`Missing button: ${text}`);
@@ -82,8 +83,8 @@ describe('HubCoCreatorEditor', () => {
     });
     await flushEffects();
 
-    expect(container.querySelector('input[aria-label="Owner Avatar"]')).toBeNull();
-    expect(container.textContent).not.toContain('/uploads/owner-lang.png');
+    expect(document.body.querySelector('input[aria-label="Owner Avatar"]')).toBeNull();
+    expect(document.body.textContent).not.toContain('/uploads/owner-lang.png');
 
     await act(async () => {
       queryButton(container, '保存').dispatchEvent(new MouseEvent('click', { bubbles: true }));

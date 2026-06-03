@@ -157,6 +157,7 @@ export type {
 } from './capability.js';
 // Cat types
 export type {
+  AgyProfileConfig,
   CatColor,
   CatConfig,
   /** @deprecated clowder-ai#340: Use ClientId instead. */

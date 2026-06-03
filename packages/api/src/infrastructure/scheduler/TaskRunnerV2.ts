@@ -37,6 +37,14 @@ export interface TaskRunnerV2Options {
   notifyLifecycle?: ScheduleLifecycleNotifier;
   /** #415: dynamic task store — needed for once-trigger auto-retirement */
   dynamicTaskStore?: DynamicTaskStore;
+  /**
+   * F167 Phase M: busy checker for pre-fire defer. When a task with
+   * firePolicy.deferWhileThreadBusy fires while its thread is busy, the scheduler
+   * re-arms instead of executing. Mechanical occupancy only — NOT structured
+   * callback subject binding (KD-27 safe). Late-bind via setBusyChecker() when the
+   * invocationTracker/queueProcessor are constructed after the runner.
+   */
+  isThreadBusy?: (threadId: string) => boolean;
 }
 
 /** Phase 2.5: Compute human-readable subject preview from subjectKind + lastRun (AC-E2) */
@@ -108,6 +116,10 @@ export class TaskRunnerV2 {
   private invokeTrigger: TaskRunnerV2Options['invokeTrigger'];
   private notifyLifecycle: TaskRunnerV2Options['notifyLifecycle'];
   private dynamicTaskStore: TaskRunnerV2Options['dynamicTaskStore'];
+  /** F167 Phase M: busy checker for pre-fire defer (queueProcessor.isThreadBusy() || invocationTracker.has()) */
+  private isThreadBusy: TaskRunnerV2Options['isThreadBusy'];
+  /** F167 Phase M: per-task consecutive defer counter (reset on fire) */
+  private deferCounts = new Map<string, number>();
 
   constructor(opts: TaskRunnerV2Options) {
     this.logger = opts.logger;
@@ -120,11 +132,17 @@ export class TaskRunnerV2 {
     this.invokeTrigger = opts.invokeTrigger;
     this.notifyLifecycle = opts.notifyLifecycle;
     this.dynamicTaskStore = opts.dynamicTaskStore;
+    this.isThreadBusy = opts.isThreadBusy;
   }
 
   /** Late-bind invokeTrigger (constructed after TaskRunnerV2 in boot sequence) */
   setInvokeTrigger(trigger: ScheduleInvokeTrigger): void {
     this.invokeTrigger = trigger;
+  }
+
+  /** F167 Phase M: late-bind busy checker (invocationTracker/queueProcessor built after runner in boot) */
+  setBusyChecker(fn: (threadId: string) => boolean): void {
+    this.isThreadBusy = fn;
   }
 
   /** #415: Late-bind dynamicTaskStore (constructed after TaskRunnerV2 in boot sequence) */
@@ -313,6 +331,29 @@ export class TaskRunnerV2 {
     const timer = setTimeout(() => {
       // Guard: skip if task was unregistered before timeout fires
       if (!this.timers.has(task.id)) return;
+      // F167 Phase M: pre-fire defer — if the target thread is busy at fire time,
+      // re-arm with a fresh fireAt instead of executing (avoids stale-wake "history
+      // replay" while the cat is mid-work). This happens PRE-FIRE (codex insight:
+      // execute is too late — it delivers-or-fails then retires via .finally). The
+      // busy signal is the scheduler's own mechanical occupancy check (KD-27 safe).
+      const fp = task.firePolicy;
+      if (fp?.deferWhileThreadBusy && task.trigger.type === 'once' && this.isThreadBusy?.(fp.threadId)) {
+        const deferred = this.deferCounts.get(task.id) ?? 0;
+        const maxDefers = fp.maxDefers ?? 10;
+        if (deferred < maxDefers) {
+          this.deferCounts.set(task.id, deferred + 1);
+          task.trigger.fireAt = Date.now() + (fp.deferIntervalMs ?? 30_000);
+          // persist re-armed fireAt so a restart mid-defer doesn't read a stale (missed) window
+          this.dynamicTaskStore?.updateTrigger(task.id, task.trigger);
+          this.logger.info(
+            `[scheduler] ${task.id}: pre-fire defer (thread ${fp.threadId} busy, ${deferred + 1}/${maxDefers})`,
+          );
+          this.scheduleOnceTick(task); // re-arm with new fireAt — no execute, no deliver, no retire
+          return;
+        }
+        this.logger.info(`[scheduler] ${task.id}: maxDefers (${maxDefers}) reached → force-fire despite busy thread`);
+      }
+      this.deferCounts.delete(task.id); // reset defer counter on actual fire
       this.executePipeline(task)
         .catch((err) => {
           this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);

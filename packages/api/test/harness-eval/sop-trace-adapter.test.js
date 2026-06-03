@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildSopTrace } from '../../dist/infrastructure/harness-eval/sop-trace-adapter.js';
+import { buildSopTrace } from '../../dist/infrastructure/harness-eval/sop/sop-trace-adapter.js';
 
 const validInput = {
   sessionId: 'session-001',

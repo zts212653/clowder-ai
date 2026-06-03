@@ -121,13 +121,18 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
   const hasSteps = plugin.setupSteps && plugin.setupSteps.length > 0;
 
   return (
-    <div className="space-y-3.5 px-4 pb-4">
+    <div className="space-y-3.5" style={{ paddingInline: '1rem', paddingBottom: '1rem' }}>
       {hasSteps &&
         plugin.setupSteps!.map((step, idx) => (
           <div key={idx} className="space-y-1.5">
             <div className="flex items-center gap-1.5">
               <StepBadge num={idx + 1} />
-              <span className="text-[13px] font-medium text-cafe">{step}</span>
+              <span
+                className="font-medium"
+                style={{ fontSize: 'var(--console-font-compact)', lineHeight: '20px', color: 'var(--cafe-text)' }}
+              >
+                {step}
+              </span>
             </div>
             {idx === 0 && plugin.docsUrl && isSafeUrl(plugin.docsUrl) && (
               <div className="ml-[26px]">
@@ -152,13 +157,22 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
           {hasSteps && (
             <div className="flex items-center gap-1.5">
               <StepBadge num={plugin.setupSteps!.length + 1} />
-              <span className="text-[13px] font-medium text-cafe">填写应用凭证</span>
+              <span
+                className="font-medium"
+                style={{ fontSize: 'var(--console-font-compact)', lineHeight: '20px', color: 'var(--cafe-text)' }}
+              >
+                填写应用凭证
+              </span>
             </div>
           )}
           <div className={hasSteps ? 'ml-[26px] space-y-2.5' : 'space-y-2.5'}>
             {plugin.config.map((f) => (
               <div key={f.envName}>
-                <label htmlFor={`plugin-${f.envName}`} className="mb-1 block text-xs font-medium text-cafe-secondary">
+                <label
+                  htmlFor={`plugin-${f.envName}`}
+                  className="mb-1 block font-medium"
+                  style={{ fontSize: 'var(--console-font-xs)', color: 'var(--cafe-text-secondary)' }}
+                >
                   {f.label}
                 </label>
                 <input
@@ -169,7 +183,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
                   }
                   value={fieldValues[f.envName] ?? ''}
                   onChange={(e) => setFieldValues((prev) => ({ ...prev, [f.envName]: e.target.value }))}
-                  className="console-form-input py-2.5 text-[13px]"
+                  className="console-form-input"
+                  style={{ paddingBlock: '0.625rem', fontSize: 'var(--console-font-compact)' }}
                   data-testid={`field-${f.envName}`}
                 />
               </div>
@@ -211,7 +226,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
             type="button"
             onClick={() => void handleToggle('disable')}
             disabled={toggling}
-            className="console-button-secondary text-compact disabled:opacity-50"
+            className="console-button-secondary disabled:opacity-50"
+            style={{ fontSize: 'var(--console-font-compact)' }}
             data-testid="plugin-disable-btn"
           >
             {toggling ? '处理中...' : '停用'}
@@ -222,7 +238,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
             type="button"
             onClick={() => void handleToggle('enable')}
             disabled={toggling}
-            className="console-button-secondary text-compact disabled:opacity-50"
+            className="console-button-secondary disabled:opacity-50"
+            style={{ fontSize: 'var(--console-font-compact)' }}
             data-testid="plugin-enable-btn"
           >
             {toggling ? '处理中...' : '启用'}
@@ -233,7 +250,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
             type="button"
             onClick={() => void handleTest()}
             disabled={testing}
-            className="console-button-secondary text-compact disabled:opacity-50"
+            className="console-button-secondary disabled:opacity-50"
+            style={{ fontSize: 'var(--console-font-compact)' }}
           >
             {testing ? '测试中...' : '测试连接'}
           </button>
@@ -243,7 +261,8 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
             type="button"
             onClick={() => void handleSave()}
             disabled={saving}
-            className="console-button-primary text-compact disabled:opacity-50"
+            className="console-button-primary disabled:opacity-50"
+            style={{ fontSize: 'var(--console-font-compact)' }}
           >
             {saving ? '保存中...' : '保存配置'}
           </button>

@@ -154,6 +154,25 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 2. **扩 reasonCode**：加 `tool_call_parse_failed`（"tool call could not be parsed"）
 3. **unknown fallback 措辞**：CC structured result error 安全显示 `Claude Code 报告：<原因>`，区分 CC/模型报错 vs 猫咖未分类
 
+### Phase F: Empty-stderr observability follow-up（2026-05-30 organic 验证发现）
+
+**触发**：社区小伙伴贴截图——Windows `codex.cmd` exit 1 + stderr empty + 配了 `LOG_CLI_STDERR=1`/`debug`/`err=1` 都没用 → cliDiagnostics 让用户去看后端日志但**日志里啥也没有** = 死胡同 UX。Maine Coon（@codex，F212 历史 reviewer）跨 thread 投诉 + 5 AC refined plan，team lead directive：F212 status 不动，feat doc 加 Phase F section + worktree implement。
+
+**根因（三层 verified in main `eddadf97c`）**：
+1. `cli-spawn.ts:647-653` `formatCliStderrForLog(stderrBuffer)` empty returns null → `if (stderrForLog)` gate → abnormal exit + stderr empty = **静默无后端 log**。`LOG_CLI_STDERR` env gate 和 "是否写诊断 log" 这两个 scope 被错误合并。
+2. `cli-spawn.ts:649-652` log payload `{ command, stderr, reasonCode }` — **缺 `invocationId`**。用户拿前端截图里的 invocationId 搜后端 log 搜不到。
+3. `cli-diagnostics.ts:97` `UNKNOWN_TEXT.hint = '详细诊断信息见后端日志（启用：环境变量 LOG_CLI_STDERR=1）。'` — empty-stderr case 这是骗人的死胡同（**hint 暗示设了 env 就有更多信息，但 stderr empty 时根本没东西可显**）。
+
+**与 F212 愿景的关系**：F212 Why 段原话 "CVO 自己 + 全部社区用户失明 100%；真威胁也没堵住"——Phase A-D 修了大部分 case，但 **`exit 1 + empty stderr` 这个 case 仍 100% 失明**。Maine Coon定性："F212 done scope 漏验 case，不是新 feature"。Phase F = 在 F212 内闭环这个漏 case，status 仍 done（同 Phase E pattern）。
+
+**修复（按Maine Coon refined plan + 2 个执行提醒）**：
+1. **结构化 exit diagnostic log 独立于 stderr gate**（F1）：`cli-spawn.ts` abnormal exit 分支无条件打一条 `'CLI abnormal exit'` log，字段：`invocationId / command / exitCode / signal / reasonCode / stderrEmpty (boolean) / streamErrorCount`。**cwd 字段不收录**（R1 Maine Coon P1-2 + cloud codex R1 P2 双源 catch: `sanitizeCliStderr` 只覆盖 HOME/userprofile/`C:\Users`/`/tmp`，非 HOME server installs `/srv` / `/workspace` / `/var/lib` / `D:\work` 会原样 leak — 安全 > 诊断 redundancy with `command`+`invocationId`）。`LOG_CLI_STDERR=1` env gate 仍**只控** raw/sanitized stderr 字段的内容（含/不含），**不控**这条 diagnostic log 是否写——scope 边界严格收窄（避免之前 gate 混淆 bug 复发）。
+2. **invocationId 进 stderr log**（F3）：`'CLI stderr (LOG_CLI_STDERR=1)'` log payload 加 `invocationId` 字段 + 回归测试断言（防再丢）。
+3. **publicHint empty-stderr 诚实文案**（F4，Maine Coon给的中文文案）：classifier unknown + stderr empty 时给 "CLI 已退出但没有输出 stderr。请在后端日志中用 debugRef.invocationId 搜索；如仍无结果，请直接运行该 CLI 并分别捕获 stdout/stderr。" **不暗示** `LOG_CLI_STDERR=1` 一定有更多信息（避免再制造死胡同）。
+4. **publicHint 不暴露 absolute log path**（F5，Maine Coon安全 push back）：classifier unknown + stderr 非 empty 时给 "查路径的方法"——hint 提示用户去 `/api/config/env-summary` 看 `paths.dataDirs.runtimeLogs` 再用 invocationId 搜，**不在 payload 里塞 absolute path**（保 F212 之前的安全边界：no raw path / no path leak）。
+
+**与 F215 / F210 边界**：F215 是 malformed tool-call 检测 + 接力兜底（模型行为），F210 是 Antigravity migration（runtime 切换），都与 F212 平行。Phase F 只动 `cli-spawn.ts` + `cli-diagnostics.ts` + 对应 web 文案，不碰 F215 / F210 路径。
+
 ## Acceptance Criteria
 
 ### Phase A（Backend cliDiagnostics + Sanitizer）— ✅ merged PR #1907 (2026-05-27)
@@ -189,6 +208,16 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 - [x] AC-D3: unknown fallback 措辞：rawText 含 CC structured result error（structuredErrorText）时显示 `Claude Code 报告：<原因>`，区分 CC/模型报错（非猫咖 bug）vs 猫咖真未分类；KD-1 白名单放行 CC structured result error（安全，CC 标准措辞）
 - [x] AC-D4: 红测先行（先红后绿）：用**真实 A2 结构**（`subtype:success+is_error:true+result文本`，非想象的 subtype:error）做 fixture → maybeCollectStreamError 收集 + buildCliDiagnostics 分类/措辞回归；验证旧 subtype-only guard 对真实数据必 false（红）、is_error guard 收集（绿）、正常 success（is_error:false）不误收；守 AC-A9 红线（raw stderr 不进 user-facing）
 - [x] AC-D5: 跨族 review + 云端 review + 愿景守护 — @gpt52（Maine Coon GPT-5.4）跨族 3 轮 delta APPROVE（6d07ef377 → da1f81763 → 61665f350）；云端 codex 3 轮 review（R1 P2 excerptSource white-list → R2 P1 isResultError gate → R3 Bravo on 61665f350）；merge commit 40af2b82e；愿景守护 cross-post @gemini25 跨族暹罗（非作者非 reviewer）
+
+### Phase F（Empty-stderr observability follow-up）— implementation merged, review pending (2026-05-31)
+
+- [x] AC-F1: abnormal CLI exit 分支无条件调用 `buildCliExitDiagnostic` helper + `'CLI abnormal exit'` log（**独立于** `LOG_CLI_STDERR` env gate 和 stderr 是否为空），payload 字段：`invocationId`, `command`, `exitCode`, `signal`, `reasonCode`, `stderrEmpty (boolean)`, `streamErrorCount`。**cwd 已 drop**（R1 Maine Coon P1-2: `sanitizeCliStderr` 只覆盖 HOME 系 paths，非 HOME server installs `/srv` / `/workspace` / `/var/lib` / `D:\work` 会原样 leak — 安全 > 诊断 redundancy）。
+- [x] AC-F2: `LOG_CLI_STDERR=1` 仍只控 raw/sanitized stderr 字段内容；F1 结构化 diagnostic log 不复用此 gate。Integration test 显式验证：env unset 时 `'CLI abnormal exit'` 仍触发，stderr log 才被 gate 抑制。
+- [x] AC-F3: `'CLI stderr (LOG_CLI_STDERR=1)'` + `'CLI stderr on timeout'` 两条 log payload 加 `invocationId` 字段。Integration test 用 `createLogStub()` 断言 invocationId 入 payload（R1 Maine Coon P1-1 fix: 之前 publicHint-only assertion 无法 catch log 删除 regression）。
+- [x] AC-F4: classifier unknown + `stderrEmpty===true` 时 publicHint = "CLI 已退出但没有输出 stderr。请在后端日志中用 debugRef.invocationId 搜索；如仍无结果，请直接运行该 CLI 并分别捕获 stdout/stderr。" Maine Coon原文案，**不暗示** `LOG_CLI_STDERR=1` 给假希望。
+- [x] AC-F5: classifier unknown + `stderrEmpty===false` 时 publicHint 提示用户调 `/api/config/env-summary` 看 `paths.dataDirs.runtimeLogs` 再用 invocationId 搜，**不在 payload 里塞 absolute path`（Maine Coon跨族 push back 守 F212 no-path-leak 安全边界）。
+- [x] AC-F6: 红测先行（先红后绿）：unit tests in `cli-diagnostics.test.js` (helper shape + hint variants + backward-compat); integration tests in `cli-spawn.test.js` (3 tests using `diagnosticLogger` stub assert real log payloads + 2 tests assert publicHint via `__cliError` yield). 137/137 pass.
+- [ ] AC-F7: 跨族 review + 云端 review — Maine Coon @codex R1 BLOCKING (2 P1s caught, both fixed at `6b1bfb82d`) → R2 pending. 云端 codex R1 P2 cwd leak (双源 same as Maine Coon P1-2, both fixed) → R2 P2 spec checkbox staleness (this update fixes it) → R3 pending. Phase F merge 不 reopen F212 status（仍 done），同 Phase E follow-up pattern.
 
 ## Dependencies
 

@@ -55,7 +55,15 @@ export interface RuntimeSessionLifecycle {
   retryCount?: number;
   lastRetryAt?: number;
   lastFailureReason?: string;
+  retryFragment?: RuntimeSessionRetryFragment;
   unexpectedRuntimeSessionSwitch?: RuntimeSessionUnexpectedRuntimeSessionSwitch;
+}
+
+export interface RuntimeSessionRetryFragment {
+  kind: 'retry';
+  retryReason: string;
+  nextRuntimeSessionId?: string;
+  detectedAt: number;
 }
 
 export interface RuntimeSessionUnexpectedRuntimeSessionSwitch {
@@ -168,7 +176,22 @@ function normalizeLifecycle(input: Record<string, unknown>): RuntimeSessionLifec
     ...optionalNumberField(input.retryCount, 'lifecycle.retryCount'),
     ...optionalNumberField(input.lastRetryAt, 'lifecycle.lastRetryAt'),
     ...optionalStringField(input.lastFailureReason, 'lifecycle.lastFailureReason'),
+    ...optionalRetryFragment(input.retryFragment),
     ...optionalUnexpectedRuntimeSessionSwitch(input.unexpectedRuntimeSessionSwitch),
+  };
+}
+
+function normalizeRetryFragment(input: unknown): RuntimeSessionRetryFragment {
+  const record = requireRecord(input, 'runtime session retry fragment');
+  const kind = requireNonEmptyString(record.kind, 'retryFragment.kind');
+  if (kind !== 'retry') {
+    throw new Error('invalid retryFragment.kind');
+  }
+  return {
+    kind,
+    retryReason: requireNonEmptyString(record.retryReason, 'retryFragment.retryReason'),
+    ...optionalStringField(record.nextRuntimeSessionId, 'retryFragment.nextRuntimeSessionId'),
+    detectedAt: requireFiniteNumber(record.detectedAt, 'retryFragment.detectedAt'),
   };
 }
 
@@ -317,6 +340,11 @@ function optionalOneOfField<const T extends readonly string[]>(
 function optionalExternalRegistration(value: unknown): Record<string, RuntimeSessionExternalRegistrationState> {
   if (value === undefined) return {};
   return { externalRegistration: normalizeExternalRegistration(value) };
+}
+
+function optionalRetryFragment(value: unknown): Record<string, RuntimeSessionRetryFragment> {
+  if (value === undefined) return {};
+  return { retryFragment: normalizeRetryFragment(value) };
 }
 
 function optionalUnexpectedRuntimeSessionSwitch(

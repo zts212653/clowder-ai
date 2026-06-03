@@ -723,6 +723,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_CALLBACK_FETCH_TIMEOUT_MS',
+    defaultValue: '10000',
+    description: 'Callback fetch 每次尝试超时（毫秒，防 hung socket 永久挂起，照 #1368）',
+    category: 'cli',
+    sensitive: false,
+  },
+  {
     name: 'CDP_DEBUG',
     defaultValue: '(未设置)',
     description: 'CDP Bridge 调试模式',
@@ -1122,6 +1129,14 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '暹罗猫适配器 (antigravity-cli/gemini-cli/antigravity)',
     category: 'gemini',
     sensitive: false,
+  },
+  {
+    name: 'CAT_CAFE_AGY_PROFILE_ROOT',
+    defaultValue: '~/.cat-cafe/agy-profiles',
+    description: 'F210 Phase G：隔离 AGY profile HOME 根目录；每只 AGY profile 猫会在此目录下创建独立 HOME。',
+    category: 'gemini',
+    sensitive: false,
+    runtimeEditable: false,
   },
 
   // --- kimi ---

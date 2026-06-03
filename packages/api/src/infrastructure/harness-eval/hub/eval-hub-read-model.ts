@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { resolveA2aEvidenceBundle } from './eval-a2a-artifact-resolver.js';
-import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from './eval-domain-registry.js';
+import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
+import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from '../domain/eval-domain-registry.js';
 
 type CountRecord = Record<string, number | null>;
 
@@ -21,10 +21,13 @@ export interface EvalDomainSummary {
   displayName: string;
   systemThreadId: string;
   frequency: string;
+  evalCatId: string;
   evalCatHandle: string;
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];
+  /** Next scheduled cron fire time (computed from frequency, not verdict re-eval deadline). */
+  nextCronFireAt: string;
 }
 
 export interface EvalHubSummary {
@@ -135,9 +138,16 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
       displayName: domain.displayName,
       systemThreadId: domain.systemThreadId,
       frequency: domain.frequency,
+      evalCatId: domain.evalCat.catId,
       evalCatHandle: domain.evalCat.handle,
       hasVerdict: domainVerdicts.length > 0,
-      ...(latest ? { latestVerdictId: latest.id, latestVerdict: latest.verdict } : {}),
+      nextCronFireAt: computeNextCronFire(domain.frequency, now).toISOString(),
+      ...(latest
+        ? {
+            latestVerdictId: latest.id,
+            latestVerdict: latest.verdict,
+          }
+        : {}),
     };
   });
 
@@ -255,7 +265,10 @@ function parseFrontmatter(markdown: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-function loadDomains(harnessFeedbackRoot: string): Map<EvalDomainRegistryEntry['domainId'], EvalDomainRegistryEntry> {
+/** Loads all registered eval domains from YAML files. Exported for registry-only validation (e.g. PATCH override). */
+export function loadDomains(
+  harnessFeedbackRoot: string,
+): Map<EvalDomainRegistryEntry['domainId'], EvalDomainRegistryEntry> {
   const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
   if (!existsSync(domainsDir)) return new Map();
   const domains = new Map<EvalDomainRegistryEntry['domainId'], EvalDomainRegistryEntry>();
@@ -380,6 +393,40 @@ function computeStale(nextEvalAt: string | undefined, now: Date): boolean {
  * `false`. Mutates `items` in place, consistent with the sibling sort/map style
  * upstream in `loadEvalHubSummary`.
  */
+/**
+ * OQ-20 P1-2 fix: Compute next cron fire time from domain frequency.
+ *
+ * Daily domains fire at 03:00 UTC every day (`0 3 * * *`).
+ * Weekly domains fire at 03:00 UTC every Sunday (`0 3 * * 0`).
+ *
+ * Returns the next fire time after `now`. This is what the user sees as
+ * "下次评估" — the actual scheduler trigger time, not a verdict re-eval
+ * deadline. Available for ALL domains including those without verdicts.
+ */
+export function computeNextCronFire(frequency: string, now: Date): Date {
+  const FIRE_HOUR_UTC = 3;
+  const next = new Date(now);
+  next.setUTCMinutes(0, 0, 0);
+
+  if (frequency === 'weekly') {
+    // Sunday 03:00 UTC
+    next.setUTCHours(FIRE_HOUR_UTC);
+    const daysUntilSunday = (7 - next.getUTCDay()) % 7;
+    if (daysUntilSunday === 0 && now.getTime() >= next.getTime()) {
+      next.setUTCDate(next.getUTCDate() + 7);
+    } else {
+      next.setUTCDate(next.getUTCDate() + daysUntilSunday);
+    }
+  } else {
+    // Daily 03:00 UTC
+    next.setUTCHours(FIRE_HOUR_UTC);
+    if (now.getTime() >= next.getTime()) {
+      next.setUTCDate(next.getUTCDate() + 1);
+    }
+  }
+  return next;
+}
+
 function markSupersededAsClosed(items: EvalHubItem[]): void {
   const seenDomains = new Set<EvalHubItem['domainId']>();
   for (const item of items) {

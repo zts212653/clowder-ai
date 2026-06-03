@@ -114,6 +114,29 @@ describe('QueuePanel steer (F047)', () => {
     expect(callArgs.body).toContain('"mode":"promote"');
   });
 
+  it('defaults steer to promote so confirming does not interrupt a busy target cat', async () => {
+    const { apiFetch } = await import('@/utils/api-client');
+    useChatStore.setState({ queue: [QUEUED_ENTRY] });
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const steerBtn = container.querySelector('[data-testid="steer-q1"]') as HTMLButtonElement | null;
+    expect(steerBtn).not.toBeNull();
+    act(() => steerBtn?.click());
+
+    const confirm = container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement | null;
+    expect(confirm).not.toBeNull();
+
+    await act(async () => {
+      confirm?.click();
+    });
+
+    const callArgs = (apiFetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[1] as { body?: string };
+    expect(callArgs.body).toContain('"mode":"promote"');
+    expect(callArgs.body).not.toContain('"mode":"immediate"');
+  });
+
   it('shows conditional copy for immediate steer (only interrupts when target cat is busy)', () => {
     useChatStore.setState({ queue: [QUEUED_ENTRY] });
     act(() => {

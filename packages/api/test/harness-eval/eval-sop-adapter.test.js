@@ -4,7 +4,7 @@ import {
   buildSopVerdictHandoff,
   reevalSopVerdict,
   runSopEval,
-} from '../../dist/infrastructure/harness-eval/eval-sop-adapter.js';
+} from '../../dist/infrastructure/harness-eval/sop/eval-sop-adapter.js';
 
 const sopDomain = {
   domainId: 'eval:sop',

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   loadCommunityDomains,
   parseCommunityEvalDomainEntry,
-} from '../../dist/infrastructure/harness-eval/community-eval-domain.js';
+} from '../../dist/infrastructure/harness-eval/domain/community-eval-domain.js';
 
 /** Minimal valid community domain entry. */
 function makeDomain(overrides = {}) {

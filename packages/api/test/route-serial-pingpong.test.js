@@ -348,4 +348,125 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
       }
     }
   });
+
+  // F216 P1-2 (砚砚 review): a multi-mention in ONE response must apply streak per-target IN ORDER.
+  // Repro: build opus<->codex streak hot, then codex emits "@gemini @opus" (multi-mention).
+  //   Correct (resolve+apply one cat at a time): processing @gemini first RESETS the pair → @opus is
+  //     then evaluated against a fresh pair → enqueued, opus runs again, no termination.
+  //   Stale-batch bug (resolve ALL decisions before any mutation): both peeks read the hot
+  //     opus<->codex streak, so @opus is predicted to hit the block threshold and gets WRONGLY blocked.
+  test('F216 P1-2: multi-mention applies streak per-target — gemini resets pair, @opus not stale-blocked', async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      // Round-aware service: empty text after the scripted rounds → chain terminates deterministically.
+      const roundAware = (catId, textsByCall) => {
+        const calls = [];
+        return {
+          calls,
+          async *invoke(prompt) {
+            const i = calls.length;
+            calls.push(prompt);
+            const content = i < textsByCall.length ? textsByCall[i] : '';
+            yield { type: 'text', catId, content, timestamp: Date.now() };
+            yield { type: 'done', catId, timestamp: Date.now() };
+          },
+        };
+      };
+      // opus<->codex pings: R0 opus@codex(streak1), R1 codex@opus(2), R2 opus@codex(3),
+      // R3 codex emits "@gemini @opus": gemini resets pair, @opus must enqueue (fresh pair=1).
+      const opusService = roundAware('opus', ['看了\n@codex review 一下', '看了\n@codex review 一下']);
+      const codexService = roundAware('codex', ['看了\n@opus 确认一下', '看了\n@gemini @opus 你们看看']);
+      const geminiService = roundAware('gemini', ['看过了，没问题']);
+      const deps = createMockDeps({ opus: opusService, codex: codexService, gemini: geminiService });
+
+      const events = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'multi-mention streak test', 'user1', 'thread-pp-multi', {
+        thinkingMode: 'play',
+      })) {
+        events.push(msg);
+      }
+
+      const terminated = events.find(
+        (e) =>
+          e.type === 'system_info' && typeof e.content === 'string' && e.content.includes('a2a_pingpong_terminated'),
+      );
+      assert.ok(!terminated, 'round-3 @opus must NOT be stale-blocked — gemini should reset the pair first');
+      assert.ok(geminiService.calls.length >= 1, 'gemini must be invoked (enqueued from the multi-mention)');
+      assert.strictEqual(opusService.calls.length, 3, 'opus must invoke 3x (rounds 0,2, + round-3 re-enqueue)');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  // F216 c2 (behavior-preservation lock for the deferred-path refactor): the deferred block was rewired
+  // from a hand-written `for (nextCat of a2aMentions) { updateStreakOnPush per-iteration }` loop to the
+  // unified resolveRoutingDecisions decision layer (consistent with inline c1.3). Both the old loop and
+  // the new decision-driven loop apply streak PER-TARGET (mutate before evaluating the next cat), so this
+  // test passes on BOTH — it is a preservation guard, NOT a red→green regression (main's deferred was
+  // never the batch form that caused 砚砚's inline P1-2). It locks the per-target property so a future
+  // refactor that accidentally batches the deferred peeks (freezing every peekStreak against the pre-loop
+  // streakPair) would break here: rounds 0-2 build a hot opus<->codex streak inline, then round 3
+  // (codex emits "@gemini @opus", deferred) must let gemini reset the pair first so @opus is not blocked.
+  // Captured via deferA2AEnqueue (deferred path enqueues there, not into the worklist).
+  test('F216 c2: deferred path preserves per-target streak — gemini resets pair, @opus not stale-blocked', async () => {
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const roundAware = (catId, textsByCall) => {
+        const calls = [];
+        return {
+          calls,
+          async *invoke(prompt) {
+            const i = calls.length;
+            calls.push(prompt);
+            const content = i < textsByCall.length ? textsByCall[i] : '';
+            yield { type: 'text', catId, content, timestamp: Date.now() };
+            yield { type: 'done', catId, timestamp: Date.now() };
+          },
+        };
+      };
+      const opusService = roundAware('opus', ['看了\n@codex review 一下', '看了\n@codex review 一下']);
+      const codexService = roundAware('codex', ['看了\n@opus 确认一下', '看了\n@gemini @opus 你们看看']);
+      const geminiService = roundAware('gemini', ['看过了，没问题']);
+      const deps = createMockDeps({ opus: opusService, codex: codexService, gemini: geminiService });
+
+      // Rounds 0-2 run INLINE (queue not pending) to build the opus<->codex streak to 3.
+      // Round 3 (codex emits "@gemini @opus") runs DEFERRED (queue pending) — the path under test.
+      let callCount = 0;
+      const deferredEntries = [];
+      const events = [];
+      for await (const msg of routeSerial(deps, ['opus'], 'deferred streak test', 'user1', 'thread-pp-defer-multi', {
+        thinkingMode: 'play',
+        queueHasQueuedMessages: () => {
+          callCount++;
+          return callCount >= 4; // rounds 0,1,2 inline (build streak); round 3 deferred (multi-mention)
+        },
+        deferA2AEnqueue: (entry) => deferredEntries.push(entry),
+      })) {
+        events.push(msg);
+      }
+
+      // Buggy batch-resolve: @opus in round 3 frozen against opus<->codex=3 → block_pingpong, terminated.
+      // Fixed per-cat: gemini deferred first (resets pair), @opus deferred against fresh pair → no block.
+      const terminated = events.find(
+        (e) =>
+          e.type === 'system_info' && typeof e.content === 'string' && e.content.includes('a2a_pingpong_terminated'),
+      );
+      assert.ok(!terminated, 'deferred round-3 @opus must NOT be stale-blocked — gemini resets the pair first');
+      const deferredCats = deferredEntries.flatMap((e) => e.targetCats);
+      assert.ok(deferredCats.includes('gemini'), 'gemini must be deferred-enqueued from the multi-mention');
+      assert.ok(deferredCats.includes('opus'), 'opus must be deferred-enqueued (not stale-blocked) in round 3');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
 });

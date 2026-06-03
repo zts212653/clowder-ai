@@ -19,10 +19,19 @@ export const reminderTemplate: TaskTemplate = {
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
     const threadId = p.deliveryThreadId;
+    // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
+    // Gate on the `hold-ball-` instanceId prefix — callback-hold-ball-routes mints those
+    // ids, while public /api/schedule/tasks only mints `dyn-*` (schedule.ts:417), so a
+    // forged deferWhileThreadBusy on a dyn-* reminder cannot activate pre-fire defer.
+    // Defer tuning (interval/maxDefers) is NOT read from public params — it uses
+    // TaskRunnerV2 internal defaults — so a deferIntervalMs:0 + huge maxDefers churn
+    // attack via /api/schedule/tasks is structurally impossible.
+    const deferWhileThreadBusy = p.params.deferWhileThreadBusy === true && instanceId.startsWith('hold-ball-');
     return {
       id: instanceId,
       profile: 'awareness',
       trigger: p.trigger,
+      ...(deferWhileThreadBusy && threadId ? { firePolicy: { deferWhileThreadBusy: true, threadId } } : {}),
       admission: {
         async gate() {
           if (!threadId) return { run: false, reason: 'no deliveryThreadId' };

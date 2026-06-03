@@ -56,6 +56,19 @@ export class DynamicTaskStore {
     const result = this.db.prepare('UPDATE dynamic_task_defs SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id);
     return result.changes > 0;
   }
+
+  /**
+   * F167 Phase M: persist a re-armed trigger (pre-fire defer updates fireAt).
+   * Without this, a deferred once-task's new fireAt lives only in memory — on
+   * restart, hydrateDynamic() reads the stale (earlier) fireAt and may treat the
+   * wake as a missed window. Persisting keeps the defer durable across restarts.
+   */
+  updateTrigger(id: string, trigger: TriggerSpec): boolean {
+    const result = this.db
+      .prepare('UPDATE dynamic_task_defs SET trigger_json = ? WHERE id = ?')
+      .run(JSON.stringify(trigger), id);
+    return result.changes > 0;
+  }
 }
 
 interface RawRow {

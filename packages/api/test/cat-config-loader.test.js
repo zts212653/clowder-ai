@@ -248,6 +248,59 @@ describe('cat-config-loader', () => {
       }
     });
 
+    it('projects agyProfile and replaces it atomically during catalog overlay', () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'cat-agy-profile-merge-project-'));
+      const templatePath = join(projectDir, 'cat-template.json');
+
+      const base = validConfig();
+      base.breeds[0].variants[0].clientId = 'google';
+      base.breeds[0].variants[0].defaultModel = 'Gemini 3.1 Pro (High)';
+      base.breeds[0].variants[0].agyProfile = {
+        enabled: true,
+        homeRoot: '/base/agy-profiles',
+        model: 'Gemini 3.1 Pro (High)',
+        autoApprove: true,
+        trustedWorkspaces: ['/base/worktree'],
+      };
+      writeFileSync(templatePath, JSON.stringify(base));
+
+      const runtimeDir = join(projectDir, '.cat-cafe');
+      mkdirSync(runtimeDir, { recursive: true });
+      const catalog = validConfig();
+      catalog.breeds[0].variants[0].clientId = 'google';
+      catalog.breeds[0].variants[0].defaultModel = 'Gemini 3.5 Flash (High)';
+      catalog.breeds[0].variants[0].agyProfile = {
+        enabled: true,
+        homeRoot: '/runtime/agy-profiles',
+      };
+      writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(catalog));
+
+      const saved = process.env.CAT_TEMPLATE_PATH;
+      process.env.CAT_TEMPLATE_PATH = templatePath;
+      try {
+        const config = loadCatConfig();
+        const variant = config.breeds[0].variants[0];
+        assert.deepEqual(variant.agyProfile, {
+          enabled: true,
+          homeRoot: '/runtime/agy-profiles',
+        });
+        assert.equal('model' in variant.agyProfile, false, 'base agyProfile.model must not leak through');
+        assert.equal('trustedWorkspaces' in variant.agyProfile, false, 'base trustedWorkspaces must not leak through');
+
+        const cats = toAllCatConfigs(config);
+        assert.deepEqual(cats.opus.agyProfile, {
+          enabled: true,
+          homeRoot: '/runtime/agy-profiles',
+        });
+      } finally {
+        if (saved === undefined) {
+          delete process.env.CAT_TEMPLATE_PATH;
+        } else {
+          process.env.CAT_TEMPLATE_PATH = saved;
+        }
+      }
+    });
+
     it('rejects invalid JSON (missing required field)', () => {
       const bad = validConfig();
       delete bad.breeds[0].roleDescription;

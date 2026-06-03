@@ -1,6 +1,7 @@
 // F148 Phase E: Pure function to format context briefing content.
 
 import type { RichCardBlock, RichMessageExtra } from '@cat-cafe/shared';
+import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { formatPromptTime, formatPromptTimeRange } from '../../format-time.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { RecentArtifact } from './artifact-tracking.js';
@@ -64,7 +65,7 @@ export function formatContextBriefing(
 
 function formatBatonField(baton?: BatonContext): string {
   if (!baton) return '直接 @';
-  const timeStr = formatPromptTime(baton.timestamp);
+  const timeStr = formatPromptTime(baton.timestamp, { timeZone: getCoCreatorConfig().timeZone });
   let value = `${baton.fromSpeakerDisplay} → 你 (${timeStr})`;
   if (baton.staleHoldWarning) value += ' ⚠️';
   return value;
@@ -142,7 +143,7 @@ export function buildBriefingMessage(
   }
   if (options?.baton) {
     const b = options.baton;
-    const timeStr = formatPromptTime(b.timestamp);
+    const timeStr = formatPromptTime(b.timestamp, { timeZone: getCoCreatorConfig().timeZone });
     let batonLine = `**传球**: ${b.fromSpeakerDisplay} → 你 (${timeStr})`;
     if (b.mentionExcerpt) batonLine += ` | 原文: "${b.mentionExcerpt}"`;
     if (b.staleHoldWarning) batonLine += ' ⚠️ 之前有"别动"指令';

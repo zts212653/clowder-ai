@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import {
   evaluatePredicate,
   evaluateSopDefinition,
-} from '../../dist/infrastructure/harness-eval/sop-predicate-evaluator.js';
+} from '../../dist/infrastructure/harness-eval/sop/sop-predicate-evaluator.js';
 
 // ---- Shared test trace ----
 

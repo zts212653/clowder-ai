@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, test } from 'node:test';
 
-const { classifyAntigravityCliPlainText } = await import(
+const { classifyAntigravityCliPlainText, extractAntigravityCliConversationId } = await import(
   '../dist/domains/cats/services/agents/providers/antigravity-cli-event-parser.js'
 );
 
@@ -54,7 +54,17 @@ describe('Antigravity CLI plain text parser', () => {
     assert.equal(result.textMode, 'replace');
   });
 
-  test('strips fresh conversation warning before surfacing final text', () => {
+  test('extracts the AGY-created conversation id from print-mode logs', () => {
+    const logText = [
+      'W0531 01:14:56.217832 common.go:246] Conversation cat-cafe-probe not found, ignoring --conversation flag',
+      'I0531 01:14:59.518377 server.go:755] Created conversation e40c0f44-8e00-4b21-8ea4-7b17f182a134',
+      'I0531 01:14:59.518698 printmode.go:130] Print mode: conversation=e40c0f44-8e00-4b21-8ea4-7b17f182a134, sending message',
+    ].join('\n');
+
+    assert.equal(extractAntigravityCliConversationId(logText), 'e40c0f44-8e00-4b21-8ea4-7b17f182a134');
+  });
+
+  test('strips legacy generated fresh conversation warning before surfacing final text', () => {
     const result = classifyAntigravityCliPlainText({
       stdout: 'Warning: conversation "agy-live-smoke" not found.\nCAT_CAFE_AGY_E2E_OK\n',
       stderr: '',
@@ -62,6 +72,47 @@ describe('Antigravity CLI plain text parser', () => {
     });
 
     assert.deepEqual(result, { kind: 'text', content: 'CAT_CAFE_AGY_E2E_OK' });
+  });
+
+  test('preserves model-authored conversation warning text on fresh turns', () => {
+    const result = classifyAntigravityCliPlainText({
+      stdout: 'Warning: conversation "printed-by-model" not found.\nThis is model-authored text.\n',
+      stderr: '',
+      resumed: false,
+    });
+
+    assert.deepEqual(result, {
+      kind: 'text',
+      content: 'Warning: conversation "printed-by-model" not found.\nThis is model-authored text.',
+    });
+  });
+
+  test('classifies resumed conversation-not-found warnings as missing session', () => {
+    const result = classifyAntigravityCliPlainText({
+      stdout: 'Warning: conversation "stale-agy-session" not found.\nNEW_TEXT_WITHOUT_CONTEXT\n',
+      stderr: '',
+      resumed: true,
+    });
+
+    assert.equal(result.kind, 'error');
+    assert.equal(result.errorKind, 'missing_session');
+    assert.match(result.error, /No conversation found with session ID: stale-agy-session/);
+  });
+
+  test('classifies resumed log-only conversation-not-found warnings as missing session', () => {
+    const result = classifyAntigravityCliPlainText({
+      stdout: 'NEW_TEXT_WITHOUT_CONTEXT\n',
+      stderr: '',
+      resumed: true,
+      agyLogText: [
+        'W0531 01:14:56.217832 common.go:246] Conversation stale-agy-session not found, ignoring --conversation flag',
+        'I0531 01:14:59.518377 server.go:755] Created conversation e40c0f44-8e00-4b21-8ea4-7b17f182a134',
+      ].join('\n'),
+    });
+
+    assert.equal(result.kind, 'error');
+    assert.equal(result.errorKind, 'missing_session');
+    assert.match(result.error, /No conversation found with session ID: stale-agy-session/);
   });
 
   test('classifies the F210 stdout timeout fixture as provider error despite exit 0', () => {
@@ -82,6 +133,33 @@ describe('Antigravity CLI plain text parser', () => {
     assert.equal(result.kind, 'error');
     assert.equal(result.errorKind, 'missing_model');
     assert.match(result.error, /\/model/);
+  });
+
+  test('classifies F210 auth-required OAuth stdout as onboarding error', () => {
+    const stdout = extractBlock(readFixture('agy-print-auth-required.txt'), 'stdout');
+
+    const result = classifyAntigravityCliPlainText({ stdout, stderr: '', resumed: false });
+
+    assert.equal(result.kind, 'error');
+    assert.equal(result.errorKind, 'auth_required');
+    assert.match(result.error, /agy/i);
+    assert.match(result.error, /login|auth/i);
+    assert.doesNotMatch(result.error, /accounts\.google\.com/);
+  });
+
+  test('preserves model-authored auth prompt text without AGY OAuth markers', () => {
+    const stdout = [
+      'Authentication required. Please visit the URL to log in:',
+      'This is an example onboarding message for documentation.',
+    ].join('\n');
+
+    const result = classifyAntigravityCliPlainText({ stdout, stderr: '', resumed: false });
+
+    assert.deepEqual(result, {
+      kind: 'text',
+      content:
+        'Authentication required. Please visit the URL to log in:\nThis is an example onboarding message for documentation.',
+    });
   });
 
   test('keeps normal model-authored Error-prefixed text as text', () => {

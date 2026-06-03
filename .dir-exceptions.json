@@ -3,30 +3,30 @@
     {
       "path": "packages/api/src/routes",
       "owner": "opus",
-      "reason": "Routes 按功能已分文件，ADR-010 重构 scope 不含 routes，后续评估是否拆子目录",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "reason": "Routes 按功能已分文件（147 files），ADR-010 重构 scope 不含 routes，需要按 HTTP verb / domain 重新评估子拆分边界。SECOND-ROUND unblock（首轮 a4e81b8791 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/config",
       "owner": "opus",
-      "reason": "Config 文件数接近 warn，均为独立配置项（cat-budgets/cat-config/env 等），暂不拆",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "reason": "Config 38 files（cat-budgets/cat-config/env 等独立配置项）。需要先做 config 域 audit 再确定子拆分边界。SECOND-ROUND unblock（首轮 a4e81b8791 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/invocation",
       "owner": "opus",
-      "reason": "Invocation 控制面当前 25 files；full sync 前先登记基线红灯，后续按 queue/registry/tracker/progress/reconciliation 子域拆分",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "reason": "Invocation 控制面 25 files；按 queue/registry/tracker/progress/reconciliation/delivery/auth 子域拆分。SECOND-ROUND unblock（首轮 4136847b10 砚砚 2026-05-18 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/cats/services/agents/providers",
       "owner": "opus",
-      "reason": "Agent providers 当前 30 files；full sync 前先登记基线红灯，后续按 carrier/event-transform/image-publication/provider-adapters 子域拆分",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
+      "reason": "Agent providers 32 files；按 agents/event-transforms/carriers/image/configs 子域拆分。SECOND-ROUND unblock（首轮 4136847b10 砚砚 2026-05-18 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
     },
     {
       "path": "packages/api/src/domains/memory",
@@ -38,16 +38,9 @@
     {
       "path": "packages/api/src/utils",
       "owner": "codex",
-      "reason": "API utils 当前 25 files；full sync 前先登记基线红灯，后续按 cli/process/path/network/storage/security 子域拆分",
-      "expiresAt": "2026-06-01",
-      "ticket": "F23"
-    },
-    {
-      "path": "packages/api/src/infrastructure/harness-eval",
-      "owner": "opus",
-      "reason": "F192 socio-technical harness eval 当前 29 .ts（Phase F capability-wakeup 一批 eval-capability-wakeup-* 加入超 error=25）；登记基线红灯，后续按 capability-wakeup / a2a / domain / hub 子域拆分。详见 F192 feat doc Known Debt + GitHub issue。",
-      "expiresAt": "2026-06-15",
-      "ticket": "F192"
+      "reason": "API utils 31 files；按 cli/process/media/paths/network/parsing/skills 子域拆分（详见 F23 § Phase 2）。SECOND-ROUND unblock（首轮 4136847b10 砚砚 2026-05-18 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
     }
   ]
 }

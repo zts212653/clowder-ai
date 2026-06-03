@@ -11,7 +11,7 @@ status: done
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1
 **Phase A~D completed: 2026-03-13** | **Phase E/F/G completed: 2026-03-27**
-**Implementation**: PR #366 / #370 / #373 / #376 / #378 / #380 / #779
+**Implementation**: PR #366 / #370 / #373 / #376 / #378 / #380 / #779 / #2022
 
 ## Why
 
@@ -143,7 +143,7 @@ IM Hub 连接器等系统级 thread 需要专属管理，不应丢到"未分类"
 - [x] AC-A2: 多个分组可以各自独立记忆状态
 - [x] AC-A3: 首次访问（无 localStorage 记录）时保持默认全部折叠
 - [x] AC-A4: localStorage key 有命名空间前缀（如 `cat-cafe:sidebar:`），不与其他功能冲突
-- [x] AC-A5: 搜索时匹配 thread 所在分组强制展开（忽略折叠状态）
+- [x] AC-A5: 搜索时匹配 thread 所在分组自动展开（首次展开后手动折叠优先，PR #2022 修正）
 - [x] AC-A6: 切换 thread 时目标分组自动展开
 - [x] AC-A7: "全部展开/全部折叠"按钮可用
 
@@ -197,7 +197,7 @@ IM Hub 连接器等系统级 thread 需要专属管理，不应丢到"未分类"
 |----|---------------------------|---------|----------|------|
 | R1 | "能够记录我是不是展开或者默认折叠" | AC-A1~A4 | test + manual | [x] |
 | R2 | "默认折叠" | AC-A3 | test | [x] |
-| R3 | 搜到了但分组折叠看不到（Maine Coon发现） | AC-A5 | test | [x] |
+| R3 | 搜到了但分组折叠看不到（Maine Coon发现）；搜索态手动折叠不生效（team lead 2026-06-01 报告，PR #2022 修复） | AC-A5 | test | [x] |
 | R4 | "我想用的 cat cafe 在这么下面" | AC-B1~B5 | screenshot | [x] |
 | R5 | "如果后续我们有 20 个项目 50 个项目怎么办" | AC-B2~B7 | test + screenshot | [x] |
 | R6 | "我可以填写他的 thread 名字" | AC-C1 | test + manual | [x] |

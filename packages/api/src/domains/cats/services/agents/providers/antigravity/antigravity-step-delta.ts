@@ -119,6 +119,7 @@ export function diffDeliveredSteps(
   deliveredCount: number,
   previousFingerprints: string[],
   previousPlannerTexts: string[],
+  replayStartIndex = 0,
 ): {
   replaySteps: TrajectoryStep[];
   nextFingerprints: string[];
@@ -132,6 +133,7 @@ export function diffDeliveredSteps(
 
   for (let index = 0; index < Math.min(deliveredCount, allSteps.length); index += 1) {
     if (previousFingerprints[index] === nextFingerprints[index]) continue;
+    if (index < replayStartIndex) continue;
     hadMutation = true;
     const replayStep = toReplayStep(allSteps[index], previousPlannerTexts[index] ?? '');
     if (replayStep) replaySteps.push(replayStep);

@@ -16,6 +16,72 @@ import { dirname, join, win32 } from 'node:path';
 const resolvedShimCache = new Map<string, string | null>();
 
 /**
+ * Cache for system Node.js path lookup (null = not found).
+ */
+let cachedSystemNodePath: string | undefined | null;
+
+/**
+ * Find the system Node.js executable (cross-platform).
+ *
+ * External CLI shim scripts (.js entry points installed via npm) must always be
+ * executed with the system Node.js — never with process.execPath. In dev mode
+ * process.execPath happens to be system node, but in packaged Electron it points
+ * to the Electron binary whose module resolver can't find global npm packages.
+ * Rather than detecting Electron as a special case, we unconditionally resolve
+ * the system node for external shims: if we don't bundle it, we don't run it
+ * with our own runtime.
+ *
+ * Tries `where node.exe` (Windows) then `which node` (Unix/macOS) so the
+ * function works on all platforms — including CI environments where
+ * process.platform may be patched to 'win32' for testing.
+ *
+ * Returns null if not found — caller should fall back to shell mode.
+ */
+export function findSystemNode(): string | null {
+  if (cachedSystemNodePath !== undefined) return cachedSystemNodePath ?? null;
+  // Try both Windows and Unix commands. Each command uses an explicit shell
+  // to avoid Node.js selecting cmd.exe when process.platform is patched to
+  // 'win32' in tests — on macOS/Linux cmd.exe doesn't exist (ENOENT).
+  const commands: Array<{ cmd: string; shell?: string }> = [
+    { cmd: 'where node.exe' }, // Windows default shell (cmd.exe / ComSpec)
+    { cmd: 'which node', shell: '/bin/sh' }, // explicit Unix shell
+  ];
+  for (const { cmd, shell } of commands) {
+    try {
+      const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000, shell }).trim();
+      for (const line of output.split(/\r?\n/)) {
+        const candidate = line.trim();
+        if (!candidate) continue;
+        if (existsSync(candidate)) {
+          cachedSystemNodePath = candidate;
+          return candidate;
+        }
+      }
+    } catch {
+      // Command failed or timed out — try next
+    }
+  }
+  // Fallback: probe standard Windows Node.js install locations when PATH
+  // doesn't include Node (common in packaged Electron apps).
+  if (process.platform === 'win32') {
+    const programFiles = process.env.PROGRAMFILES ?? 'C:\\Program Files';
+    const standardPaths = [
+      join(programFiles, 'nodejs', 'node.exe'),
+      'C:\\Program Files\\nodejs\\node.exe',
+      'C:\\Program Files (x86)\\nodejs\\node.exe',
+    ];
+    for (const candidate of standardPaths) {
+      if (existsSync(candidate)) {
+        cachedSystemNodePath = candidate;
+        return candidate;
+      }
+    }
+  }
+  cachedSystemNodePath = null;
+  return null;
+}
+
+/**
  * Known npm-global paths for common CLI tools on Windows.
  * Checked first for fast resolution before falling back to `where`.
  */
@@ -187,8 +253,13 @@ export function resolveWindowsShimSpawn(
       args: [...args],
     };
   }
+  // External CLI shim scripts belong to the user's system, not to us.
+  // Always use the system node to run them — never process.execPath,
+  // which may be Electron, a bundled runtime, or anything else we control.
+  const systemNode = findSystemNode();
+  if (!systemNode) return null; // Fall through to shell mode
   return {
-    command: process.execPath,
+    command: systemNode,
     args: [shimScript, ...args],
   };
 }

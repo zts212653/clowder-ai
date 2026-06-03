@@ -20,7 +20,8 @@ export function createMockBridge({
   return {
     ensureConnected: mock.fn(async () => ({ port: 1234, csrfToken: 'test', useTls: false })),
     startCascade: mock.fn(async () => cascadeId),
-    sendMessage: mock.fn(async () => 0),
+    // F211-REG8: sendMessage now returns { stepsBefore, wasBusy } (was a bare number).
+    sendMessage: mock.fn(async () => ({ stepsBefore: 0, wasBusy: false })),
     getTrajectorySteps: mock.fn(async () => steps),
     getTrajectory: mock.fn(async () => ({ status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: steps.length })),
     getCascadeHealth: mock.fn(async () => ({

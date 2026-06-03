@@ -139,9 +139,10 @@ describe('HubSkillsTab', () => {
     await flushEffects();
 
     expect(mockApiFetch).toHaveBeenCalledWith('/api/rules/skill/cross-cat-handoff');
-    const dialog = container.querySelector('[role="dialog"]');
+    // SkillPreviewModal uses createPortal(... , document.body)
+    const dialog = document.body.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain('协作');
-    expect(container.textContent).toContain('Handoff instructions');
-    expect(container.textContent).toContain('/repo/cat-cafe-skills/cross-cat-handoff/SKILL.md');
+    expect(document.body.textContent).toContain('Handoff instructions');
+    expect(document.body.textContent).toContain('/repo/cat-cafe-skills/cross-cat-handoff/SKILL.md');
   });
 });

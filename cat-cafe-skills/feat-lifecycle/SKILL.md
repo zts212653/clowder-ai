@@ -163,6 +163,18 @@ harness / skill / MCP / shared-rules 类 feature 的 spec **必须含 `## Eval /
 3. Regression Fixture（最少 1 条，建议 2-5）
 4. Sunset Signal（**空填 = 不通过，不设 reviewer 签字降级**——KD-4）
 
+**Harness 方法论教学（F218 / ADR-031）🔴**：
+
+凡是 harness / skill / MCP / shared-rules / SOP / L0 等会改变猫猫行为模式的 feature，Design Gate 必须写出 **软+硬+eval** 三层计划；不是每层都要很重，但漏掉任何一层都要说明理由。
+
+| 层 | 承重 | 常见载体 |
+|----|------|----------|
+| Soft | 让猫在正确认知路径上想起该动作 | L0 触发句 / skill description / SOP 教学 |
+| Hard | 不靠自觉也能挡住或暴露错误 | test / linter / schema / runtime guard / compile gate |
+| Eval | 持续检验这条 harness 是否真的让行为变好 | F192 fixture / regression case / friction metric / sunset signal |
+
+一句话判断：只写 Soft = 希望猫下次记得；只有 Soft + Hard = 修了但不知道会不会长期有效；Soft + Hard + Eval 才是 ADR-031 的完整 harness loop。
+
 **在地设计检查 (Design in Context) 🔴**：
 凡是改动或往已有页面/组件添加新 UI 元素，必须逐项过 `cat-cafe-skills/refs/design-in-context-checklist.md`。禁止在真空中凭想象画已有页面的布局。
 

@@ -31,6 +31,16 @@ export function isDelivered(msg: StoredMessage): boolean {
 /**
  * A tool event recorded during agent invocation (tool_use / tool_result).
  * Persisted alongside the assistant message so history reload can display them.
+ *
+ * F153 Phase J Slice J-B AC-J7: extends StoredToolEvent with the four-piece
+ * telemetry set (toolUseId / status / tracing / startTimeMs / endTimeMs) so
+ * the cold-start `hydrate-traces.ts` path can synthesize real-duration
+ * `cat_cafe.tool_use` child spans instead of degrading to flat
+ * `cat_cafe.invocation.restored` markers (per KD-39 / AC-J8).
+ *
+ * NEW fields are all optional for backward compat: legacy messages without
+ * Phase J wiring still load cleanly, hydrate just skips tool span synthesis
+ * for those entries (per KD-41: no fake duration when source signal absent).
  */
 export interface StoredToolEvent {
   id: string;
@@ -38,6 +48,32 @@ export interface StoredToolEvent {
   label: string;
   detail?: string;
   timestamp: number;
+  /** F153 Phase J AC-J7: native provider tool id, used to pair tool_use ↔ tool_result
+   *  and to key the synthesized span on hydrate. Set by provider transformer via
+   *  AgentMessage.toolUseId (AC-J2). */
+  toolUseId?: string;
+  /** F153 Phase J AC-J7: structured execution outcome, set on tool_result events.
+   *  Mapped from AgentMessage.toolResultStatus (AC-J2 execution edge); NEVER inferred
+   *  from content text (KD-38 honesty). */
+  status?: 'ok' | 'error' | 'unknown';
+  /** F153 Phase J AC-J7: OTel span context for the tool span. Persisted so hydrate
+   *  can re-parent the synthesized span under the invocation span (parentSpanId
+   *  points at the invocation span context written into message.extra.tracing). */
+  tracing?: { traceId: string; spanId: string; parentSpanId?: string };
+  /** F153 Phase J AC-J7: span start Unix timestamp (ms). Set on tool_use events
+   *  when the ToolSpanTracker opens the span. */
+  startTimeMs?: number;
+  /** F153 Phase J AC-J7: span end Unix timestamp (ms). Set on tool_result events
+   *  when the ToolSpanTracker closes the span. Together with `startTimeMs` enables
+   *  AC-J8 real-duration restore (vs flat `invocation.restored`). */
+  endTimeMs?: number;
+  /** R6 maintainer (Slice J-B): native tool name persisted as a separate data field
+   *  (decoupled from the UI display `label`). Hydrate's `synthesizeToolSpansFromEvents`
+   *  prefers this field for the synthesized span name; falls back to parsing `label`
+   *  only for legacy stored events that predate this field. Set on `tool_use` events
+   *  from `AgentMessage.toolName ?? 'unknown'`. Avoids silent degradation to `unknown`
+   *  or wrong tool names if the label arrow format / catId prefix / localization changes. */
+  toolName?: string;
 }
 
 /**

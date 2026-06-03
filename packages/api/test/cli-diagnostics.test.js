@@ -2,7 +2,7 @@
 
 import assert from 'node:assert';
 import test from 'node:test';
-import { buildCliDiagnostics, formatCliStderrForLog } from '../dist/utils/cli-diagnostics.js';
+import { buildCliDiagnostics, buildCliExitDiagnostic, formatCliStderrForLog } from '../dist/utils/cli-diagnostics.js';
 import { maybeCollectStreamError } from '../dist/utils/cli-spawn.js';
 
 const baseRef = { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-1' };
@@ -359,4 +359,105 @@ test('REASON_TEXT invariant: publicSummary + publicHint MUST be plain text (no m
       `${expectedCode}: publicHint leaks [link](url) markdown: ${d.publicHint}`,
     );
   }
+});
+
+// =============================================================================
+// F212 Phase F — Empty-stderr observability (砚砚 catch + CVO directive 2026-05-30)
+// =============================================================================
+
+// AC-F1 + F6: buildCliExitDiagnostic builds structured payload with every required field
+// P1-2 (砚砚 R1): cwd field deliberately omitted — sanitizeCliStderr only covers HOME-based
+// paths, so non-HOME server installs (/srv, /workspace, /var/lib, D:\work) would leak raw
+// absolute paths into the error log. Helper signature/payload no longer accepts cwd.
+test('AC-F1: buildCliExitDiagnostic returns invocationId / command / exit / signal / reasonCode / stderrEmpty / streamErrorCount (NO cwd)', () => {
+  const payload = buildCliExitDiagnostic({
+    invocationId: 'inv-empty-1',
+    command: 'codex.cmd',
+    exitCode: 1,
+    signal: null,
+    reasonCode: undefined, // unknown classifier
+    stderrLength: 0,
+    streamErrorCount: 0,
+  });
+  assert.strictEqual(payload.invocationId, 'inv-empty-1');
+  assert.strictEqual(payload.command, 'codex.cmd');
+  assert.strictEqual(payload.exitCode, 1);
+  assert.strictEqual(payload.signal, null);
+  assert.strictEqual(payload.reasonCode, null);
+  assert.strictEqual(payload.stderrEmpty, true);
+  assert.strictEqual(payload.streamErrorCount, 0);
+  // P1-2: cwd MUST NOT appear in payload (omitted entirely to avoid raw path leak)
+  assert.ok(!('cwd' in payload), `cwd MUST NOT be in payload (P1-2 安全边界): ${JSON.stringify(payload)}`);
+});
+
+// AC-F1: invocationId null when missing (don't drop the field)
+test('AC-F1: buildCliExitDiagnostic invocationId is null (not undefined) when missing', () => {
+  const payload = buildCliExitDiagnostic({
+    command: 'codex',
+    exitCode: 1,
+    signal: null,
+    stderrLength: 100,
+    streamErrorCount: 0,
+  });
+  assert.strictEqual(payload.invocationId, null);
+  assert.strictEqual(payload.reasonCode, null);
+  assert.strictEqual(payload.stderrEmpty, false);
+});
+
+// AC-F1: reasonCode preserved when classifier hit
+test('AC-F1: buildCliExitDiagnostic preserves classifier reasonCode', () => {
+  const payload = buildCliExitDiagnostic({
+    command: 'codex',
+    exitCode: 1,
+    signal: null,
+    reasonCode: 'auth_failed',
+    stderrLength: 50,
+    streamErrorCount: 0,
+  });
+  assert.strictEqual(payload.reasonCode, 'auth_failed');
+  assert.strictEqual(payload.stderrEmpty, false);
+});
+
+// AC-F4: unknown classifier + stderrEmpty=true → 诚实文案 (no LOG_CLI_STDERR=1 false hope)
+test('AC-F4: buildCliDiagnostics unknown+stderrEmpty=true → honest empty-stderr hint, no LOG_CLI_STDERR mention', () => {
+  const d = buildCliDiagnostics({
+    rawText: '',
+    structuredErrorText: '',
+    debugRef: { command: 'codex.cmd', exitCode: 1, signal: null, invocationId: 'inv-empty' },
+    stderrEmpty: true,
+  });
+  assert.strictEqual(d.reasonCode, undefined, 'unknown classifier');
+  assert.ok(d.publicHint.includes('没有输出 stderr'), `hint should mention empty stderr: ${d.publicHint}`);
+  assert.ok(d.publicHint.includes('invocationId'), `hint should mention invocationId search: ${d.publicHint}`);
+  assert.ok(d.publicHint.includes('直接运行'), `hint should suggest running CLI directly: ${d.publicHint}`);
+  // 关键：不暗示 LOG_CLI_STDERR=1 会有更多信息（避免再制造死胡同 UX）
+  assert.ok(!d.publicHint.includes('LOG_CLI_STDERR'), `hint must NOT mention LOG_CLI_STDERR: ${d.publicHint}`);
+});
+
+// AC-F5: unknown classifier + stderrEmpty=false → "查路径的方法" 不暴露 absolute path
+test('AC-F5: buildCliDiagnostics unknown+stderrEmpty=false → env-summary path-hint, NO absolute log path', () => {
+  const d = buildCliDiagnostics({
+    rawText: 'Some non-classifiable stderr text\n',
+    structuredErrorText: '',
+    debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-nonempty' },
+    stderrEmpty: false,
+  });
+  assert.strictEqual(d.reasonCode, undefined, 'unknown classifier');
+  assert.ok(d.publicHint.includes('env-summary'), `hint should point to env-summary endpoint: ${d.publicHint}`);
+  assert.ok(d.publicHint.includes('runtimeLogs'), `hint should mention runtimeLogs key: ${d.publicHint}`);
+  // 安全边界：不在 payload 里塞 absolute path
+  assert.ok(!d.publicHint.match(/\/Users\/|\/home\/|C:\\\\/), `hint MUST NOT contain absolute path: ${d.publicHint}`);
+});
+
+// AC-F4/F5: backward-compat — stderrEmpty omitted → keep legacy UNKNOWN_TEXT hint
+test('AC-F4/F5 backward-compat: buildCliDiagnostics omitting stderrEmpty keeps legacy hint', () => {
+  const d = buildCliDiagnostics({
+    rawText: 'Unclassified text\n',
+    structuredErrorText: '',
+    debugRef: { command: 'codex', exitCode: 1, signal: null },
+    // stderrEmpty omitted
+  });
+  assert.strictEqual(d.reasonCode, undefined);
+  // legacy hint still works (callers without stderrEmpty signal)
+  assert.ok(d.publicHint, 'legacy hint must exist');
 });

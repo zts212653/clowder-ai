@@ -288,7 +288,7 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
         const invocationQueue = new InvocationQueue();
         const longContent = `${'详细架构分析'.repeat(40)}\n@opus 这段需要你确认`;
         const socketManager = createMockSocketManager();
-        const result = await enqueueA2ATargets(
+        const _result = await enqueueA2ATargets(
           {
             router: null,
             invocationRecordStore: null,
@@ -356,17 +356,26 @@ describe('F167 L1 AC-A4: callback-a2a-trigger ping-pong circuit breaker', () => 
         pushToWorklist(threadId, ['codex'], 'opus');
         entry.executedIndex = 3; // streak=3
 
-        // Preload InvocationQueue with 'opus' so dedup skips the callback.
+        // Preload InvocationQueue with a queued A2A 'opus' entry so the same-turn dedup path fires.
+        // F-coalesce (云端 codex R4 P1): dedup now coalesces via findInFlightAgentEntry, which is
+        // SCOPED to sourceCategory==='a2a' (continuation/multi-mention entries are NOT mergeable).
+        // A real A2A entry always carries sourceCategory:'a2a' (callback-a2a-trigger enqueue), so the
+        // preload must too — otherwise it models a shape production never emits.
         const invocationQueue = new InvocationQueue();
         invocationQueue.enqueue({
           threadId,
           userId: 'user1',
           content: 'existing',
           source: 'agent',
+          sourceCategory: 'a2a',
           targetCats: ['opus'],
           intent: 'execute',
           autoExecute: true,
-          callerCatId: 'somecat',
+          // F216 c0 (砚砚 P1): findInFlightAgentEntry now caller-scopes. The trigger below uses
+          // callerCatId 'codex', so the preload must too — otherwise the in-flight dedup/coalesce
+          // path never fires and this test's "skip → streak unchanged" premise breaks. Same caller
+          // = the legit same-turn repeat this test exercises.
+          callerCatId: 'codex',
         });
         assert.ok(invocationQueue.hasQueuedAgentForCat(threadId, 'opus'), 'precondition: opus already queued');
 

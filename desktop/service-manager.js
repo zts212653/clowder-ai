@@ -19,10 +19,25 @@ const EXE_SUFFIX = IS_WIN ? '.exe' : '';
 // so extraResources like bundled/redis-darwin-${arch} map directly to these dirs.
 const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 
-// Log file for diagnosing service startup issues. os.tmpdir() resolves to
-// %TEMP% on Windows and /var/folders/... on macOS, avoiding the old
-// 'C:\\Temp' fallback that broke on non-Windows.
-const LOG_FILE = path.join(os.tmpdir(), 'cat-cafe-desktop.log');
+// Resolve the per-user writable data root. Extracted to module level so
+// LOG_FILE can be set before ServiceManager is instantiated.
+function resolveUserDataDir() {
+  if (IS_MAC) {
+    const home = process.env.HOME || os.homedir();
+    return path.join(home, 'Library', 'Application Support', 'Clowder AI');
+  }
+  const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  return path.join(localAppData, 'Clowder AI');
+}
+
+// Desktop log alongside API logs in the user data directory.
+// Prior location (os.tmpdir()) was hard to find for debugging.
+const USER_DATA_DIR = resolveUserDataDir();
+const LOG_DIR_DESKTOP = path.join(USER_DATA_DIR, 'data', 'logs');
+try {
+  fs.mkdirSync(LOG_DIR_DESKTOP, { recursive: true });
+} catch {}
+const LOG_FILE = path.join(LOG_DIR_DESKTOP, 'desktop.log');
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   process.stdout.write(line);
@@ -155,13 +170,7 @@ class ServiceManager {
   }
 
   _getUserDataDir() {
-    if (IS_MAC) {
-      // macOS convention: app data lives under ~/Library/Application Support/
-      const home = process.env.HOME || os.homedir();
-      return path.join(home, 'Library', 'Application Support', 'Clowder AI');
-    }
-    const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-    return path.join(localAppData, 'Clowder AI');
+    return resolveUserDataDir();
   }
 
   _ensureUserDataDir(baseDir) {
@@ -209,7 +218,24 @@ class ServiceManager {
     // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
     // uses plain directory symlinks.
     const linkType = IS_WIN ? 'junction' : 'dir';
-    const mirrors = ['.claude', 'cat-cafe-skills', 'docs', 'packages'];
+    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'scripts'];
+
+    // Helper: remove a junction or symlink. On Windows, NTFS junctions are
+    // directory reparse points — fs.unlinkSync calls DeleteFileW which fails
+    // on directory entries (EPERM). fs.rmdirSync calls RemoveDirectoryW which
+    // correctly removes junctions without recursing into the target.
+    const removeLink = (linkPath) => {
+      if (IS_WIN) {
+        try {
+          fs.rmdirSync(linkPath);
+        } catch {
+          fs.unlinkSync(linkPath); // fallback for true symlinks
+        }
+      } else {
+        fs.unlinkSync(linkPath);
+      }
+    };
+
     for (const name of mirrors) {
       const src = path.join(this.root, name);
       const dst = path.join(projectDir, name);
@@ -218,12 +244,112 @@ class ServiceManager {
         continue;
       }
       try {
-        const dstStat = fs.existsSync(dst) ? fs.lstatSync(dst) : null;
-        if (dstStat?.isSymbolicLink() || dstStat?.isDirectory()) continue;
+        // lstatSync does NOT follow symlinks/junctions — it inspects the
+        // link entry itself. existsSync follows the target, so a broken
+        // junction (target path removed after reinstall) returns false
+        // even though the junction entry still occupies the path, causing
+        // symlinkSync to fail with EEXIST.
+        let dstStat = null;
+        try {
+          dstStat = fs.lstatSync(dst);
+        } catch {
+          // Path doesn't exist at all — proceed to create
+        }
+        if (dstStat?.isSymbolicLink()) {
+          // Verify junction/symlink target matches current install root.
+          // After reinstall to a different path, stale junctions cause
+          // UNKNOWN errors because the old target no longer exists.
+          try {
+            const target = fs.readlinkSync(dst);
+            if (path.resolve(target) === path.resolve(src)) continue;
+            removeLink(dst);
+            log(`Removed stale ${linkType}: ${dst} (was -> ${target})`);
+          } catch {
+            try {
+              removeLink(dst);
+            } catch {
+              // Ignore — symlinkSync below will report the real error
+            }
+          }
+        } else if (dstStat?.isDirectory()) {
+          // On Windows, lstatSync().isSymbolicLink() can return false for
+          // NTFS junctions (IO_REPARSE_TAG_MOUNT_POINT ≠ SYMLINK tag),
+          // making them appear as plain directories. Probe with readlinkSync
+          // to detect hidden junctions; real directories throw EINVAL.
+          if (IS_WIN) {
+            try {
+              const target = fs.readlinkSync(dst);
+              // readlinkSync succeeded → it's a junction, not a real dir.
+              if (path.resolve(target) === path.resolve(src)) continue;
+              removeLink(dst);
+              log(`Removed stale junction (was dir-flagged): ${dst} (was -> ${target})`);
+            } catch {
+              continue; // Genuine directory — don't replace
+            }
+          } else {
+            continue; // Real directory on macOS — don't replace
+          }
+        }
         fs.symlinkSync(src, dst, linkType);
         log(`Mirror ${linkType} created: ${dst} -> ${src}`);
       } catch (err) {
         log(`Warning: failed to create ${linkType} ${dst}: ${err.message}`);
+      }
+    }
+
+    // Verify critical junctions are traversable. On Windows, freshly-created
+    // NTFS junctions occasionally return UNKNOWN errors from readFileSync
+    // even though the link entry and target both exist (observed on first
+    // launch after installer on clean machines). Removing and recreating
+    // the junction resolves it — so retry once if the probe fails.
+    const criticalProbes = [{ mirror: 'cat-cafe-skills', probe: path.join('refs', 'shared-rules.md') }];
+    for (const { mirror, probe } of criticalProbes) {
+      const probePath = path.join(projectDir, mirror, probe);
+      const src = path.join(this.root, mirror);
+      const dst = path.join(projectDir, mirror);
+      try {
+        fs.readFileSync(probePath, 'utf-8');
+      } catch (probeErr) {
+        log(`Junction probe FAILED for ${probePath}: ${probeErr.message} — rebuilding`);
+        try {
+          removeLink(dst);
+        } catch {
+          /* best effort */
+        }
+        try {
+          fs.symlinkSync(src, dst, linkType);
+          // Second attempt — verify again
+          fs.readFileSync(probePath, 'utf-8');
+          log(`Junction rebuilt and verified: ${dst} -> ${src}`);
+        } catch (retryErr) {
+          log(`Junction rebuild ALSO FAILED: ${retryErr.message}`);
+        }
+      }
+    }
+
+    // scripts/ has no node_modules. compile-system-prompt-l0.mjs uses ESM
+    // `import { catRegistry } from '@cat-cafe/shared'` — Node ESM ignores
+    // NODE_PATH and only walks the filesystem node_modules chain.
+    // Three creation paths (first one wins):
+    //   1. macOS: afterPack.js bakes the symlink into the .app bundle
+    //   2. Windows installer: Inno Setup [Run] creates junction (admin)
+    //   3. Runtime (here): safety net for portable zip (writable dir) and
+    //      dev builds. On installed Windows (Program Files) this silently
+    //      fails with EPERM — fine, path 2 already created it.
+    const scriptsNmSrc = path.join(this.root, 'packages', 'api', 'node_modules');
+    const scriptsNmDst = path.join(this.root, 'scripts', 'node_modules');
+    if (fs.existsSync(scriptsNmSrc) && !fs.existsSync(scriptsNmDst)) {
+      try {
+        if (IS_WIN) {
+          fs.symlinkSync(scriptsNmSrc, scriptsNmDst, 'junction');
+        } else {
+          fs.symlinkSync(path.relative(path.dirname(scriptsNmDst), scriptsNmSrc), scriptsNmDst);
+        }
+        log(`scripts/node_modules -> packages/api/node_modules (${IS_WIN ? 'junction' : 'symlink'})`);
+      } catch (err) {
+        // Expected to fail on installed Windows (Program Files is read-only).
+        // Inno Setup already created the junction during install.
+        log(`Warning: scripts/node_modules link: ${err.message}`);
       }
     }
   }
@@ -439,6 +565,37 @@ class ServiceManager {
       PROMPT_DEBUG: '1',
     };
 
+    // macOS Electron apps launched from Finder/Dock inherit a minimal PATH
+    // (/usr/bin:/bin:/usr/sbin:/sbin) that excludes common CLI install dirs.
+    // Augment PATH so CLI detection (command -v claude/codex/...) works.
+    if (IS_MAC) {
+      const home = os.homedir();
+      const extraDirs = [
+        '/opt/homebrew/bin', // Homebrew (Apple Silicon)
+        '/usr/local/bin', // Homebrew (Intel) / npm global
+        path.join(home, '.local', 'bin'), // pipx, cargo, etc.
+        '/opt/homebrew/sbin',
+        '/usr/local/sbin',
+      ];
+      const currentPath = env.PATH || '';
+      const missing = extraDirs.filter((d) => !currentPath.includes(d));
+      if (missing.length > 0) {
+        env.PATH = `${currentPath}:${missing.join(':')}`;
+      }
+    }
+
+    // In packaged desktop mode, scripts/ has no node_modules. Workspace
+    // packages like @cat-cafe/shared are only available in the pnpm-deployed
+    // packages/api/node_modules. Set NODE_PATH so subprocess scripts
+    // (e.g. compile-system-prompt-l0.mjs) can resolve workspace imports.
+    const apiNodeModules = path.join(this.root, 'packages', 'api', 'node_modules');
+    if (fs.existsSync(apiNodeModules)) {
+      const existing = env.NODE_PATH || '';
+      if (!existing.includes(apiNodeModules)) {
+        env.NODE_PATH = existing ? `${existing}${path.delimiter}${apiNodeModules}` : apiNodeModules;
+      }
+    }
+
     if (this.memoryMode) {
       env.MEMORY_STORE = '1';
       delete env.REDIS_URL;
@@ -563,13 +720,69 @@ class ServiceManager {
   }
 
   async stopAll() {
+    const KILL_TIMEOUT_MS = 5000;
+    const killPromises = [];
+
     for (const [name, proc] of Object.entries(this.procs)) {
-      if (proc && !proc.killed) {
-        console.log(`[desktop] stopping ${name}...`);
-        proc.kill('SIGTERM');
+      if (!proc || proc.killed) continue;
+      // Skip children that already exited on their own — their PID may have
+      // been reused by Windows, so taskkill could hit an unrelated process.
+      if (proc.exitCode !== null || proc.signalCode !== null) {
+        log(`[desktop] ${name} already exited (code=${proc.exitCode}), skipping`);
+        continue;
       }
+      log(`[desktop] stopping ${name} (pid=${proc.pid})...`);
+
+      killPromises.push(this._killProcessTree(name, proc, KILL_TIMEOUT_MS));
     }
+
+    await Promise.allSettled(killPromises);
     this.procs = {};
+  }
+
+  async _killProcessTree(name, proc, timeoutMs) {
+    if (!proc.pid) {
+      log(`[${name}] no pid — skipping`);
+      return;
+    }
+
+    if (IS_WIN) {
+      // On Windows, proc.kill('SIGTERM') only kills the direct child process.
+      // Child processes spawned by it (e.g., cmd.exe → node, or node → workers)
+      // become orphans. Use taskkill /T (tree) /F (force) to kill the entire
+      // process tree rooted at the PID.
+      try {
+        execSync(`taskkill /PID ${proc.pid} /T /F`, {
+          timeout: timeoutMs,
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+        log(`[${name}] process tree killed via taskkill`);
+      } catch (err) {
+        // taskkill exits non-zero if the process is already gone — that's fine
+        log(`[${name}] taskkill: ${err.message}`);
+      }
+      return;
+    }
+
+    // macOS/Linux: SIGTERM first, then SIGKILL after timeout
+    proc.kill('SIGTERM');
+
+    const exited = await new Promise((resolve) => {
+      if (proc.exitCode !== null) return resolve(true);
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      proc.once('exit', () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+
+    if (!exited) {
+      log(`[${name}] did not exit after SIGTERM, sending SIGKILL`);
+      try {
+        proc.kill('SIGKILL');
+      } catch {}
+    }
   }
 }
 

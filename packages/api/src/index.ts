@@ -47,6 +47,7 @@ import {
 } from './domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 import { RedisAntigravitySupervisorStore } from './domains/cats/services/agents/providers/antigravity/AntigravitySupervisorStore.js';
+import { clearL0Cache, warmL0Cache } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
 import {
@@ -1032,6 +1033,7 @@ async function main(): Promise<void> {
   let router!: AgentRouter;
   const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
     agentRegistry.reset();
+    clearL0Cache(); // Invalidate stale L0 compilations from previous sync
     for (const [id, config] of Object.entries(configs)) {
       const catId = config.id;
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
@@ -1093,7 +1095,7 @@ async function main(): Promise<void> {
               mcpServers,
             });
           } else {
-            service = new GeminiAgentService({ catId });
+            service = new GeminiAgentService({ catId, agyProfile: config.agyProfile });
           }
           break;
         }
@@ -1143,6 +1145,13 @@ async function main(): Promise<void> {
       agentRegistry.register(id, service);
     }
     if (router) router.refreshFromRegistry(agentRegistry);
+
+    // Pre-compile L0 system prompts for all registered cats in parallel.
+    // Avoids per-invocation subprocess overhead and ensures L0 is ready
+    // before the first message — also bypasses Windows NTFS junction
+    // issues that resolve by the time the user actually interacts (#802).
+    const registeredCatIds = Object.keys(configs).filter((id) => agentRegistry.has(id));
+    await warmL0Cache(registeredCatIds, app.log);
   };
   await syncAgentRegistry(catRegistry.getAllConfigs());
 
@@ -1501,6 +1510,7 @@ async function main(): Promise<void> {
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
+    redis: redisClient ?? undefined,
   });
 
   // F153: Prompt X-Ray debug routes
@@ -2556,6 +2566,13 @@ async function main(): Promise<void> {
   // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
   taskRunnerV2.setInvokeTrigger(invokeTrigger);
 
+  // F167 Phase M: late-bind busy checker for pre-fire defer (hold_ball activation).
+  // Same thread-busy signal as delivery-batch-done (messages.ts:1822 /
+  // ConnectorInvokeTrigger.ts:692): active invocation OR queued/processing slot.
+  // When a hold wake fires while the cat is mid-work, the scheduler re-arms the
+  // once-task instead of delivering a stale wake ("history replay").
+  taskRunnerV2.setBusyChecker((threadId) => invocationTracker.has(threadId) || queueProcessor.isThreadBusy(threadId));
+
   // F139: Register PR-related TaskSpecs into unified scheduler
   {
     const { createCiCdCheckTaskSpec } = await import('./infrastructure/email/CiCdCheckTaskSpec.js');
@@ -2830,7 +2847,7 @@ async function main(): Promise<void> {
 
   // F192 livefix OQ-17: Register daily + weekly eval domain tasks (reads eval-domains/*.yaml, triggers eval cats)
   const { createEvalDomainDailySpec, createEvalDomainWeeklySpec } = await import(
-    './infrastructure/harness-eval/eval-domain-daily.js'
+    './infrastructure/harness-eval/domain/eval-domain-daily.js'
   );
   const { getOwnerUserId } = await import('./config/cat-config-loader.js');
   const evalScheduleOpts = {
@@ -2838,6 +2855,7 @@ async function main(): Promise<void> {
     threadStore,
     defaultUserId: getOwnerUserId(),
     listDynamicTasks: () => dynamicTaskStore.getAll(),
+    redis: redisClient ?? undefined,
   };
   taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
   taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));
