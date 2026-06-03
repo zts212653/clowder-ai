@@ -15,9 +15,14 @@ import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/ty
 export interface BackfillPlanEntry {
   invocationId: string;
   threadId: string;
-  /** UTC date string YYYY-MM-DD, derived from invocation.createdAt. Used by aggregator. */
+  /** UTC date string YYYY-MM-DD, derived from `usageRecordedAt` (the same anchor the
+   *  aggregator buckets by). Mirrors the live writer's "usage arrived at this time"
+   *  semantics — NOT the invocation's createdAt. */
   date: string;
-  /** epoch ms — usageRecordedAt override pinned to original invocation day */
+  /** epoch ms — usageRecordedAt override pinned to the live-writer anchor:
+   *  `max(message.timestamp)` over contributing messages, falling back to
+   *  `invocation.updatedAt` when no message carries a usable timestamp.
+   *  Never `invocation.createdAt` (would mis-bucket cross-midnight runs). */
   usageRecordedAt: number;
   /** queue-* / connector-* / mm-* / other — classification by idempotency prefix */
   source: string;

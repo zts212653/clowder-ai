@@ -278,8 +278,9 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.usageByCat !== undefined) {
       pairs.push('usageByCat', JSON.stringify(input.usageByCat));
       // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics).
-      // Issue #845 backfill: explicit input.usageRecordedAt overrides — pinned to the
-      // invocation's original day so recovered usage doesn't all collapse onto "today".
+      // Issue #845 backfill: explicit input.usageRecordedAt overrides — anchored to the
+      // live-writer semantics (max(message.timestamp) ?? invocation.updatedAt), so
+      // recovered usage lands on the same day the live writer would have written.
       if (input.usageRecordedAt != null) {
         pairs.push('usageRecordedAt', String(input.usageRecordedAt));
       } else {
