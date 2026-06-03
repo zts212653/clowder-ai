@@ -259,7 +259,14 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // F117: Collect message IDs before removing (entry contains messageId + mergedMessageIds)
       const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
 
-      // F706: Snapshot contentBlocks from persisted messages BEFORE canceling.
+      // Remove entry from queue FIRST (sync) to close the TOCTOU window —
+      // prevents queue processor from promoting to 'processing' during the
+      // async contentBlocks snapshot below.
+      const removed = invocationQueue.remove(threadId, guard.userId, entryId);
+      // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
+      queueProcessor.unregisterEntryCompleteHook?.(entryId);
+
+      // F706: Snapshot contentBlocks from persisted messages BEFORE marking canceled.
       // The client store may not have these messages (F117 skip-optimistic-insert),
       // so the response carries them for recall-edit image restoration.
       const recalledContentBlocks: Array<{ type: string; url?: string; text?: string }> = [];
@@ -273,10 +280,6 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           }
         }
       }
-
-      const removed = invocationQueue.remove(threadId, guard.userId, entryId);
-      // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
-      queueProcessor.unregisterEntryCompleteHook?.(entryId);
       socketManager.emitToUser(guard.userId, 'queue_updated', {
         threadId,
         queue: invocationQueue.list(threadId, guard.userId),
