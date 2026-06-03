@@ -155,16 +155,6 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       const entry = queue.find((e) => e.id === entryId);
       if (!entry) return;
 
-      // F706: Snapshot image URLs BEFORE the DELETE — the DELETE route emits
-      // message_deleted which removes the backing message from the store, so a
-      // post-DELETE lookup would race and produce an empty imageUrls list.
-      const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-      const snapshotMessages = useChatStore.getState().messages;
-      const imageUrls = allMsgIds.flatMap((msgId) => {
-        const msg = snapshotMessages.find((m) => m.id === msgId);
-        return (msg?.contentBlocks ?? []).filter((b) => b.type === 'image').map((b) => (b as { url: string }).url);
-      });
-
       const prevQueue = queue;
       setQueue(
         threadId,
@@ -185,6 +175,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           });
           return;
         }
+
+        // F706: Extract image URLs from the server response (authoritative source).
+        // The DELETE endpoint reads persisted contentBlocks before canceling, so this
+        // works even when the client store has no message (F117 skip-optimistic-insert).
+        const data = await res.json().catch(() => ({}));
+        const serverBlocks: Array<{ type: string; url?: string }> = data?.contentBlocks ?? [];
+        const imageUrls = serverBlocks.filter((b) => b.type === 'image' && b.url).map((b) => b.url!);
 
         setPendingChatInsert({
           threadId,

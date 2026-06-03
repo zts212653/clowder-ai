@@ -259,6 +259,21 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       // F117: Collect message IDs before removing (entry contains messageId + mergedMessageIds)
       const messageIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
 
+      // F706: Snapshot contentBlocks from persisted messages BEFORE canceling.
+      // The client store may not have these messages (F117 skip-optimistic-insert),
+      // so the response carries them for recall-edit image restoration.
+      const recalledContentBlocks: Array<{ type: string; url?: string; text?: string }> = [];
+      if (messageStore) {
+        for (const msgId of messageIds) {
+          const msg = await messageStore.getById(msgId);
+          if (msg?.contentBlocks) {
+            for (const block of msg.contentBlocks) {
+              recalledContentBlocks.push(block);
+            }
+          }
+        }
+      }
+
       const removed = invocationQueue.remove(threadId, guard.userId, entryId);
       // F122B B6 P2: Clean up completion hook to prevent leak when entry removed before execution
       queueProcessor.unregisterEntryCompleteHook?.(entryId);
@@ -280,7 +295,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
         }
       }
 
-      return { removed };
+      return { removed, contentBlocks: recalledContentBlocks };
     },
   );
 

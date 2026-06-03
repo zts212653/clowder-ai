@@ -111,21 +111,26 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
-  it('recall-edit includes imageUrls when message has images (F706 root fix)', async () => {
+  it('recall-edit includes imageUrls from server response (F706 root fix)', async () => {
+    // F706: Image URLs come from the DELETE response (server-authoritative),
+    // NOT the client store — works even when F117 skipped optimistic insert.
+    const { apiFetch } = await import('@/utils/api-client');
+    (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        removed: true,
+        contentBlocks: [
+          { type: 'text', text: 'queued to withdraw' },
+          { type: 'image', url: '/uploads/img.png' },
+        ],
+      }),
+    }));
+
     const entryWithImage: QueueEntry = { ...QUEUED_ENTRY, id: 'q-img', messageId: 'm-img' };
     useChatStore.setState({
       queue: [entryWithImage],
       pendingChatInsert: null,
-      messages: [
-        {
-          id: 'm-img',
-          threadId: 'thread-1',
-          role: 'user',
-          content: 'queued with image',
-          contentBlocks: [{ type: 'image', url: '/uploads/img.png' }],
-          createdAt: NOW,
-        },
-      ] as never[],
+      messages: [], // deliberately empty — simulates F117 skip-optimistic-insert
     });
 
     act(() => {
