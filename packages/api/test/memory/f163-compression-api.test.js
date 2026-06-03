@@ -9,16 +9,26 @@ import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { f163AdminRoutes } from '../../dist/routes/f163-admin.js';
+import {
+  f163OwnerHeaders,
+  installF163AdminTestSessionHook,
+  restoreDefaultOwnerUserId,
+  useF163TestOwner,
+} from '../helpers/f163-admin-auth.js';
+
+const ORIGINAL_DEFAULT_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('F163 compression scan API (AC-B1)', () => {
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];
     }
+    restoreDefaultOwnerUserId(ORIGINAL_DEFAULT_OWNER_USER_ID);
   });
 
   async function setup(compressionFlag) {
     if (compressionFlag) process.env.F163_COMPRESSION = compressionFlag;
+    useF163TestOwner();
 
     const store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
@@ -52,6 +62,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     ]);
 
     const app = Fastify();
+    installF163AdminTestSessionHook(app);
     await app.register(f163AdminRoutes, { evidenceStore: store });
     await app.ready();
     return { app, store };
@@ -62,7 +73,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
     });
     assert.equal(res.statusCode, 403);
     const body = res.json();
@@ -74,7 +85,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
     });
     assert.equal(res.statusCode, 403);
   });
@@ -84,7 +95,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: { threshold: 0.2 },
     });
     assert.equal(res.statusCode, 200);
@@ -97,7 +108,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: { threshold: 0.2 },
     });
     assert.equal(res.statusCode, 200);
@@ -107,10 +118,11 @@ describe('F163 compression scan API (AC-B1)', () => {
 
   it('rejects non-localhost requests', async () => {
     const { app } = await setup('suggest');
+    delete process.env.DEFAULT_OWNER_USER_ID;
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '192.168.1.100' },
+      headers: f163OwnerHeaders({ 'x-forwarded-for': '192.168.1.100' }),
       remoteAddress: '192.168.1.100',
     });
     assert.equal(res.statusCode, 403);
@@ -121,7 +133,7 @@ describe('F163 compression scan API (AC-B1)', () => {
     await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: { threshold: 0.3 },
     });
 
@@ -137,13 +149,13 @@ describe('F163 compression scan API (AC-B1)', () => {
     await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: { threshold: 0.3 },
     });
     await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: { threshold: 0.3 },
     });
 

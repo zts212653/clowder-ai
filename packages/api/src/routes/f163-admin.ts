@@ -10,6 +10,7 @@ import { DuplicateScanner } from '../domains/memory/f163-duplicate-scanner.js';
 import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.js';
 import type { F163Authority } from '../domains/memory/f163-types.js';
 import { computeVariantId, freezeFlags } from '../domains/memory/f163-types.js';
+import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
 
 const AUTHORITY_LEVELS: F163Authority[] = ['observed', 'candidate', 'validated', 'constitutional'];
 
@@ -49,14 +50,15 @@ const applySchema = z.object({
   rationale: z.string().min(1),
 });
 
+const F163_ADMIN_GATE = {
+  surface: 'F163 admin routes',
+  ownerErrorMessage: 'F163 admin routes can only be accessed by the configured owner',
+};
+
 export const f163AdminRoutes: FastifyPluginAsync<F163AdminRoutesOptions> = async (app, opts) => {
   app.post('/api/f163/promote', async (request, reply) => {
-    // Localhost-only guard
-    const remoteIp = request.ip;
-    if (remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
-      reply.status(403);
-      return { error: 'promote only allowed from localhost' };
-    }
+    const gate = requirePrivilegedRouteOwner(request, reply, F163_ADMIN_GATE);
+    if (!gate.ok) return gate.response;
 
     const parsed = promoteSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -116,12 +118,8 @@ export const f163AdminRoutes: FastifyPluginAsync<F163AdminRoutesOptions> = async
   // ── Phase B: Compression scan (AC-B1) ──────────────────────────────
 
   app.post('/api/f163/compress/scan', async (request, reply) => {
-    // Localhost-only guard
-    const remoteIp = request.ip;
-    if (remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
-      reply.status(403);
-      return { error: 'compression scan only allowed from localhost' };
-    }
+    const gate = requirePrivilegedRouteOwner(request, reply, F163_ADMIN_GATE);
+    if (!gate.ok) return gate.response;
 
     // Flag gate: compression must not be 'off'
     const flags = freezeFlags();
@@ -161,12 +159,8 @@ export const f163AdminRoutes: FastifyPluginAsync<F163AdminRoutesOptions> = async
   // ── Phase B: Compression apply (AC-B2) ─────────────────────────────
 
   app.post('/api/f163/compress/apply', async (request, reply) => {
-    // Localhost-only guard
-    const remoteIp = request.ip;
-    if (remoteIp !== '127.0.0.1' && remoteIp !== '::1' && remoteIp !== '::ffff:127.0.0.1') {
-      reply.status(403);
-      return { error: 'compression apply only allowed from localhost' };
-    }
+    const gate = requirePrivilegedRouteOwner(request, reply, F163_ADMIN_GATE);
+    if (!gate.ok) return gate.response;
 
     // Flag gate: compression must be 'apply'
     const flags = freezeFlags();
@@ -211,6 +205,9 @@ export const f163AdminRoutes: FastifyPluginAsync<F163AdminRoutesOptions> = async
   // ── Phase B: Source expansion (AC-B3) ──────────────────────────────
 
   app.get('/api/f163/expand/:anchor', async (request, reply) => {
+    const gate = requirePrivilegedRouteOwner(request, reply, F163_ADMIN_GATE);
+    if (!gate.ok) return gate.response;
+
     const { anchor } = request.params as { anchor: string };
 
     // Look up the doc
