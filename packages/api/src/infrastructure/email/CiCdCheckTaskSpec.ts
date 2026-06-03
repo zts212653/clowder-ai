@@ -92,7 +92,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
             reason: 'github_ci_failure',
             sourceCategory: 'ci',
           };
-          opts.invokeTrigger.trigger(
+          void opts.invokeTrigger.trigger(
             routeResult.threadId,
             routeResult.catId as CatId,
             signal.task.userId ?? '',

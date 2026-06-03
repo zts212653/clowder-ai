@@ -723,7 +723,7 @@ describe('QueueProcessor', () => {
       },
     );
 
-    const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+    const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
     assert.equal(outcome.outcome, 'enqueued');
     const queue = deps.queue.list('t1', 'u1');
@@ -753,7 +753,7 @@ describe('QueueProcessor', () => {
         },
       );
 
-      const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
       assert.equal(outcome.outcome, 'enqueued');
       const queue = deps.queue.list('t1', 'u1');
@@ -787,7 +787,7 @@ describe('QueueProcessor', () => {
       },
     );
 
-    const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+    const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
     assert.equal(outcome.outcome, 'skipped_existing_entry');
     assert.equal(processor.continuationWindows.has('t1:opus'), false);
@@ -821,19 +821,19 @@ describe('QueueProcessor', () => {
       },
     );
 
-    const first = processor.enqueueContinuation({
+    const first = await processor.enqueueContinuation({
       threadId: 't1',
       userId: 'u1',
       catId: 'opus',
       capsule: firstCapsule,
     });
-    const duplicateFirst = processor.enqueueContinuation({
+    const duplicateFirst = await processor.enqueueContinuation({
       threadId: 't1',
       userId: 'u1',
       catId: 'opus',
       capsule: firstCapsule,
     });
-    const second = processor.enqueueContinuation({
+    const second = await processor.enqueueContinuation({
       threadId: 't1',
       userId: 'u1',
       catId: 'opus',
@@ -867,7 +867,7 @@ describe('QueueProcessor', () => {
         },
       );
 
-      const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
       assert.equal(outcome.outcome, 'enqueued');
       const queue = deps.queue.list('t1', 'u1');
@@ -905,7 +905,7 @@ describe('QueueProcessor', () => {
         },
       );
 
-      const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
       assert.equal(outcome.outcome, 'enqueued');
       assert.equal(outcome.entry?.targetCats[0], 'opus');
@@ -951,7 +951,7 @@ describe('QueueProcessor', () => {
         },
       );
 
-      const outcome = dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await dispatchProcessor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
       assert.equal(outcome.outcome, 'enqueued');
       assert.equal(dispatchDeps.queue.list('t1', 'u1').length, 2, 'continuation should wait behind agent work');
 
@@ -987,12 +987,12 @@ describe('QueueProcessor', () => {
     );
 
     for (let i = 0; i < 5; i++) {
-      const outcome = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+      const outcome = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
       assert.equal(outcome.outcome, 'enqueued');
       deps.queue.clear('t1', 'u1');
     }
 
-    const sixth = processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
+    const sixth = await processor.enqueueContinuation({ threadId: 't1', userId: 'u1', catId: 'opus', capsule });
 
     assert.equal(sixth.outcome, 'skipped_rate_limited');
     assert.equal(deps.queue.list('t1', 'u1').length, 0);

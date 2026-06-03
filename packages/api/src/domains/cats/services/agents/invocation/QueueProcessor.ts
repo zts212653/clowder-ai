@@ -1258,7 +1258,7 @@ export class QueueProcessor {
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         for (const continuationCapsule of continuationCapsules.values()) {
-          this.enqueueContinuation({
+          void this.enqueueContinuation({
             threadId,
             userId,
             catId: continuationCapsule.catId,

@@ -63,15 +63,21 @@ export async function enrichQueueEntries(
 ): Promise<EnrichedQueueEntry[]> {
   if (!messageStore || entries.length === 0) return entries;
 
-  return Promise.all(
-    entries.map(async (entry) => {
-      const msgIds = collectMessageIds(entry);
-      if (msgIds.length === 0) return entry;
+  try {
+    return await Promise.all(
+      entries.map(async (entry) => {
+        const msgIds = collectMessageIds(entry);
+        if (msgIds.length === 0) return entry;
 
-      const preview = await buildPreview(msgIds, messageStore);
-      return preview ? { ...entry, messagePreview: preview } : entry;
-    }),
-  );
+        const preview = await buildPreview(msgIds, messageStore);
+        return preview ? { ...entry, messagePreview: preview } : entry;
+      }),
+    );
+  } catch {
+    // Presentation-layer enrichment must not break queue mutations.
+    // Fall back to raw entries on any messageStore error.
+    return entries;
+  }
 }
 
 /**
@@ -88,10 +94,15 @@ export async function emitQueueUpdated(
   messageStore: IMessageStore | null | undefined,
   action: string,
 ): Promise<void> {
-  const enriched = await enrichQueueEntries(entries, messageStore);
+  let payload: QueueEntry[] | EnrichedQueueEntry[] = entries;
+  try {
+    payload = await enrichQueueEntries(entries, messageStore);
+  } catch {
+    // Enrichment is best-effort; emit raw entries on failure.
+  }
   socketManager.emitToUser(userId, 'queue_updated', {
     threadId,
-    queue: enriched,
+    queue: payload,
     action,
   });
 }

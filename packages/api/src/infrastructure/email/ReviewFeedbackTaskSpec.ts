@@ -230,7 +230,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               suggestedSkill,
               coalesceKey: `${subjectKey}:review-feedback:${coalesceTargetCatId}`,
             };
-            opts.invokeTrigger.trigger(
+            void opts.invokeTrigger.trigger(
               routeResult.threadId,
               routeResult.catId as CatId,
               task.userId ?? '',

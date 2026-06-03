@@ -101,7 +101,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             reason: 'github_pr_conflict',
             sourceCategory: 'conflict',
           };
-          opts.invokeTrigger.trigger(
+          void opts.invokeTrigger.trigger(
             routeResult.threadId,
             routeResult.catId as CatId,
             workItem.task.userId ?? '',
