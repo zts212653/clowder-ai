@@ -111,7 +111,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
-  it('hides recall-edit button when queued entry has images (attachment loss gate)', async () => {
+  it('recall-edit includes imageUrls when message has images (F706 root fix)', async () => {
     const entryWithImage: QueueEntry = { ...QUEUED_ENTRY, id: 'q-img', messageId: 'm-img' };
     useChatStore.setState({
       queue: [entryWithImage],
@@ -122,7 +122,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
           threadId: 'thread-1',
           role: 'user',
           content: 'queued with image',
-          contentBlocks: [{ type: 'image', url: 'https://example.com/img.png' }],
+          contentBlocks: [{ type: 'image', url: '/uploads/img.png' }],
           createdAt: NOW,
         },
       ] as never[],
@@ -132,13 +132,23 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    // Recall-edit should NOT appear (images would be lost)
-    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]');
-    expect(recallBtn).toBeNull();
+    // F706: Recall-edit button should appear even for messages with images
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
+    expect(recallBtn).not.toBeNull();
 
-    // Regular remove should still be available
-    const removeBtn = container.querySelector('button[aria-label="撤回"]');
-    expect(removeBtn).not.toBeNull();
+    await act(async () => {
+      recallBtn?.click();
+    });
+
+    expect(useChatStore.getState().queue).toHaveLength(0);
+    expect(useChatStore.getState().pendingChatInsert).toEqual({
+      threadId: 'thread-1',
+      text: 'queued to withdraw',
+      imageUrls: ['/uploads/img.png'],
+    });
+
+    const toasts = useToastStore.getState().toasts;
+    expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
   it('rolls back queue state and does not queue composer insert when recall-edit fails', async () => {

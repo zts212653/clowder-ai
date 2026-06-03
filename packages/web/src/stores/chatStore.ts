@@ -999,9 +999,9 @@ export interface ChatState {
   setPendingPreviewAutoOpen: (data: { port: number; path: string }) => void;
   consumePreviewAutoOpen: () => { port: number; path: string } | null;
 
-  // ── F63-AC15: Code-to-chat reference ──
-  pendingChatInsert: { threadId: string; text: string } | null;
-  setPendingChatInsert: (insert: { threadId: string; text: string } | null) => void;
+  // ── F63-AC15: Code-to-chat reference ── F706: +imageUrls for recall-edit
+  pendingChatInsert: { threadId: string; text: string; imageUrls?: string[] } | null;
+  setPendingChatInsert: (insert: { threadId: string; text: string; imageUrls?: string[] } | null) => void;
 
   // ── F079: Vote modal ──
   showVoteModal: boolean;

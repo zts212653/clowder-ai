@@ -106,6 +106,7 @@ export function ChatInput({
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
   // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
+  // F706: also restores image attachments from recall-edit
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
@@ -116,6 +117,33 @@ export function ChatInput({
       const separator = prev && !prev.endsWith('\n') ? '\n' : '';
       return prev + separator + pendingChatInsert.text;
     });
+    // F706: Restore images from recalled queue message
+    if (pendingChatInsert.imageUrls?.length) {
+      const urls = pendingChatInsert.imageUrls;
+      void (async () => {
+        setIsPreparingImages(true);
+        try {
+          const restored: File[] = [];
+          for (const url of urls) {
+            if (restored.length >= 5) break;
+            try {
+              const res = await apiFetch(url);
+              const blob = await res.blob();
+              const ext = url.split('.').pop() ?? 'png';
+              const name = `recalled-${Date.now()}-${restored.length}.${ext}`;
+              restored.push(new File([blob], name, { type: blob.type || `image/${ext}` }));
+            } catch {
+              // Best-effort: skip images that fail to fetch
+            }
+          }
+          if (restored.length > 0) {
+            setImages((prev) => [...prev, ...restored].slice(0, 5));
+          }
+        } finally {
+          setIsPreparingImages(false);
+        }
+      })();
+    }
     setPendingChatInsert(null);
     textareaRef.current?.focus();
   }, [pendingChatInsert, setPendingChatInsert, threadId]);

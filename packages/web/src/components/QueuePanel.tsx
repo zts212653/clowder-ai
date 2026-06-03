@@ -176,11 +176,24 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           return;
         }
 
-        setPendingChatInsert({ threadId, text: entry.content });
+        // F706: Extract image URLs from the original message's contentBlocks
+        const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
+        const currentMessages = useChatStore.getState().messages;
+        const imageUrls = allMsgIds.flatMap((msgId) => {
+          const msg = currentMessages.find((m) => m.id === msgId);
+          return (msg?.contentBlocks ?? []).filter((b) => b.type === 'image').map((b) => (b as { url: string }).url);
+        });
+
+        setPendingChatInsert({
+          threadId,
+          text: entry.content,
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        });
+        const hasImages = imageUrls.length > 0;
         addToast({
           type: 'success',
           title: '已撤回编辑',
-          message: '已回填到输入框',
+          message: hasImages ? '已回填文字和图片到输入框' : '已回填到输入框',
           threadId,
           duration: 2500,
         });
