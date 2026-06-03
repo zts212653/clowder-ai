@@ -92,7 +92,12 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       autoExecutor,
       log: noopLog,
     });
@@ -119,7 +124,12 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       autoExecutor,
       log: noopLog,
     });
@@ -146,7 +156,12 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       autoExecutor,
       log: noopLog,
     });
@@ -171,7 +186,7 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
         },
       },
-      invokeTrigger: { trigger: () => {} },
+      invokeTrigger: { trigger: () => Promise.resolve() },
       log: noopLog,
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
@@ -193,7 +208,12 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       // no autoExecutor
       log: noopLog,
     });

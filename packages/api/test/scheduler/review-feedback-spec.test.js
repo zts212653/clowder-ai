@@ -684,7 +684,12 @@ describe('ReviewFeedbackTaskSpec', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'review' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       log: noopLog,
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
@@ -710,7 +715,12 @@ describe('ReviewFeedbackTaskSpec', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'approved' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       log: noopLog,
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
@@ -736,7 +746,12 @@ describe('ReviewFeedbackTaskSpec', () => {
           return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'comment' };
         },
       },
-      invokeTrigger: { trigger: (...args) => triggered.push(args) },
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
       log: noopLog,
     });
     const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });

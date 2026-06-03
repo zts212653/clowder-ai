@@ -145,6 +145,7 @@ describe('ConflictCheckTaskSpec', () => {
     const mockTrigger = {
       trigger(...args) {
         triggerCalls.push(args);
+        return Promise.resolve();
       },
     };
     const spec = createConflictCheckTaskSpec({
@@ -178,6 +179,7 @@ describe('ConflictCheckTaskSpec', () => {
     const mockTrigger = {
       trigger(...args) {
         triggerCalls.push(args);
+        return Promise.resolve();
       },
     };
     const spec = createConflictCheckTaskSpec({
