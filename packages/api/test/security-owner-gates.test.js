@@ -116,6 +116,23 @@ describe('security owner/network gates for #835 surfaces', () => {
     await app.close();
   });
 
+  it('rejects proxied privileged routes when owner is the public default session user', async () => {
+    process.env.DEFAULT_OWNER_USER_ID = 'default-user';
+    const app = await buildF163App();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/f163/expand/summary-anchor',
+      headers: {
+        'x-test-session-user': 'default-user',
+        'x-forwarded-for': '192.168.1.23',
+      },
+    });
+
+    assert.equal(res.statusCode, 403);
+    assert.match(res.json().error, /localhost/i);
+    await app.close();
+  });
+
   it('rejects proxied F163 promote writes when no owner is configured', async () => {
     delete process.env.DEFAULT_OWNER_USER_ID;
     const app = await buildF163App();

@@ -14,6 +14,11 @@ function resolveSessionUserId(request: FastifyRequest): string | null {
   return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
 }
 
+function resolveConfiguredOwnerUserId(): string | null {
+  const ownerId = process.env.DEFAULT_OWNER_USER_ID?.trim();
+  return ownerId ? ownerId : null;
+}
+
 export function requirePrivilegedRouteOwner(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -25,11 +30,14 @@ export function requirePrivilegedRouteOwner(
     return { ok: false, response: { error: 'Authenticated session required (establish via GET /api/session)' } };
   }
 
-  if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
+  const configuredOwnerId = resolveConfiguredOwnerUserId();
+  if (!isDirectLoopbackRequest(request) && (!configuredOwnerId || configuredOwnerId === 'default-user')) {
     reply.status(403);
     return {
       ok: false,
-      response: { error: `${options.surface} from non-localhost requires DEFAULT_OWNER_USER_ID to be configured` },
+      response: {
+        error: `${options.surface} from non-localhost requires DEFAULT_OWNER_USER_ID to be configured to a non-default owner`,
+      },
     };
   }
 
