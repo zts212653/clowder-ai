@@ -131,6 +131,7 @@ export function ChatInput({
             if (restored.length >= 5) break;
             try {
               const res = await apiFetch(url);
+              if (!res.ok) continue; // Skip images that return non-2xx (stale/cleaned-up uploads)
               const blob = await res.blob();
               const ext = url.split('.').pop() ?? 'png';
               const name = `recalled-${Date.now()}-${restored.length}.${ext}`;
