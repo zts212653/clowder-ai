@@ -148,11 +148,14 @@ function QueueEntryRow({
         <button
           type="button"
           onClick={() => onRecallEdit(entry.id)}
-          className="text-xs px-2 py-1 rounded-full text-cafe-muted hover:text-cafe-primary hover:bg-cafe-surface transition-colors shrink-0"
+          className="p-1 text-cafe-muted hover:text-cafe-primary hover:bg-cafe-surface rounded-full transition-colors shrink-0"
           title="撤回编辑"
           aria-label="撤回编辑"
         >
-          撤回编辑
+          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <title>撤回编辑</title>
+            <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+          </svg>
         </button>
       )}
 
