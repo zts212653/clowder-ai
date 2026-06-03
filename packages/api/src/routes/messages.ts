@@ -93,6 +93,7 @@ interface StreamingHookLike {
 }
 
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
+import { emitQueueUpdated } from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
@@ -580,8 +581,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     if (mode === 'queue' && hasActive && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
-      // F706: Pre-compute image count for QueuePanel badge rendering
-      const imageCount = contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
         userId,
@@ -590,7 +589,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         source: 'user',
         targetCats,
         intent: intent.intent,
-        ...(imageCount > 0 ? { imageCount } : {}),
       });
 
       // Queue full → 429, no message written (no ghost message)
@@ -648,11 +646,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
 
       // Emit queue update to this user only (privacy: scopeKey isolation)
-      opts.socketManager.emitToUser(userId, 'queue_updated', {
-        threadId: resolvedThreadId,
-        queue: opts.invocationQueue.list(resolvedThreadId, userId),
-        action: enqueueResult.outcome,
-      });
+      await emitQueueUpdated(
+        opts.socketManager, userId, resolvedThreadId,
+        opts.invocationQueue.list(resolvedThreadId, userId), opts.messageStore, enqueueResult.outcome,
+      );
 
       tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
@@ -691,11 +688,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       // F39 bugfix: Notify frontend that force-cancel happened (clear stale queue UI)
       if (opts.invocationQueue) {
-        opts.socketManager.emitToUser(userId, 'queue_updated', {
-          threadId: resolvedThreadId,
-          queue: opts.invocationQueue.list(resolvedThreadId, userId),
-          action: 'force_cleared',
-        });
+        await emitQueueUpdated(
+          opts.socketManager, userId, resolvedThreadId,
+          opts.invocationQueue.list(resolvedThreadId, userId), opts.messageStore, 'force_cleared',
+        );
       }
       // Fall through to immediate execution below
     }
@@ -712,7 +708,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         if (tryResult === null) {
           // TOCTOU: thread became busy between has() and here — degrade to queue
           if (opts.invocationQueue) {
-            const toctouImageCount = contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
             const enqueueResult = opts.invocationQueue.enqueue({
               threadId: resolvedThreadId,
               userId,
@@ -721,7 +716,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               source: 'user',
               targetCats,
               intent: intent.intent,
-              ...(toctouImageCount > 0 ? { imageCount: toctouImageCount } : {}),
             });
             if (enqueueResult.outcome === 'full') {
               opts.socketManager.emitToUser(userId, 'queue_full_warning', {
@@ -765,11 +759,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 throw err;
               }
             }
-            opts.socketManager.emitToUser(userId, 'queue_updated', {
-              threadId: resolvedThreadId,
-              queue: opts.invocationQueue.list(resolvedThreadId, userId),
-              action: enqueueResult.outcome,
-            });
+            await emitQueueUpdated(
+              opts.socketManager, userId, resolvedThreadId,
+              opts.invocationQueue.list(resolvedThreadId, userId), opts.messageStore, enqueueResult.outcome,
+            );
             tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
             reply.status(202);
             return {

@@ -111,22 +111,21 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
-  it('recall-edit includes imageUrls from server response (F706 root fix)', async () => {
-    // F706: Image URLs come from the DELETE response (server-authoritative),
-    // NOT the client store — works even when F117 skipped optimistic insert.
-    const { apiFetch } = await import('@/utils/api-client');
-    (apiFetch as unknown as { mockImplementation: (fn: unknown) => void }).mockImplementation(async () => ({
-      ok: true,
-      json: async () => ({
-        removed: true,
+  it('recall-edit includes imageUrls from messagePreview (F706 server-enriched)', async () => {
+    // F706: Image URLs come from entry.messagePreview.contentBlocks,
+    // enriched by server at queue_updated SSE emit time — available
+    // in queue state before the DELETE request is even sent.
+    const entryWithImage: QueueEntry = {
+      ...QUEUED_ENTRY,
+      id: 'q-img',
+      messageId: 'm-img',
+      messagePreview: {
         contentBlocks: [
           { type: 'text', text: 'queued to withdraw' },
           { type: 'image', url: '/uploads/img.png' },
         ],
-      }),
-    }));
-
-    const entryWithImage: QueueEntry = { ...QUEUED_ENTRY, id: 'q-img', messageId: 'm-img' };
+      },
+    };
     useChatStore.setState({
       queue: [entryWithImage],
       pendingChatInsert: null,

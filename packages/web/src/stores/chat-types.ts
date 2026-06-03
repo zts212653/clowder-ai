@@ -544,8 +544,12 @@ export interface QueueEntry {
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
   position?: number;
-  /** F706: Pre-computed image count from server, avoids unreliable client-store lookup */
-  imageCount?: number;
+  /** F706: Server-enriched message preview for QueuePanel display + recall-edit.
+   *  Attached by emitQueueUpdated() at push time via messageStore join. */
+  messagePreview?: {
+    contentBlocks?: ReadonlyArray<{ type: string; url?: string; text?: string; alt?: string }>;
+    replyTo?: string;
+  };
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */

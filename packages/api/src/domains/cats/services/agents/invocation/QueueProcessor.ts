@@ -8,6 +8,7 @@
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { emitQueueUpdated } from '../../../../../utils/queue-enrichment.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   accumulateTextAggregate,
@@ -307,13 +308,13 @@ export class QueueProcessor {
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
   }
 
-  enqueueContinuation(input: {
+  async enqueueContinuation(input: {
     threadId: string;
     userId: string;
     catId: string;
     capsule?: CollaborationContinuityCapsuleV1 | null;
     excludeEntryId?: string;
-  }): { outcome: ContinuationEnqueueOutcome; entry?: QueueEntry } {
+  }): Promise<{ outcome: ContinuationEnqueueOutcome; entry?: QueueEntry }> {
     const { threadId, userId, catId, capsule, excludeEntryId } = input;
     if (!capsule) {
       this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: missing capsule');
@@ -385,11 +386,10 @@ export class QueueProcessor {
 
     recent.push(now);
     this.setContinuationWindow(key, recent);
-    this.deps.socketManager.emitToUser(userId, 'queue_updated', {
-      threadId,
-      queue: this.deps.queue.list(threadId, userId),
-      action: 'continuation_enqueued',
-    });
+    await emitQueueUpdated(
+      this.deps.socketManager, userId, threadId,
+      this.deps.queue.list(threadId, userId), this.deps.messageStore, 'continuation_enqueued',
+    );
     return { outcome: 'enqueued', entry: result.entry };
   }
 
@@ -866,11 +866,10 @@ export class QueueProcessor {
       let intentModeBroadcast = false;
 
       // 6. Emit queue_updated (processing)
-      socketManager.emitToUser(userId, 'queue_updated', {
-        threadId,
-        queue: queue.list(threadId, userId),
-        action: 'processing',
-      });
+      await emitQueueUpdated(
+        socketManager, userId, threadId,
+        queue.list(threadId, userId), messageStore, 'processing',
+      );
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
       // F117: Collect full message objects for frontend bubble rendering
@@ -1270,11 +1269,10 @@ export class QueueProcessor {
           queue.rollbackProcessing(threadId, bid);
         }
       }
-      socketManager.emitToUser(userId, 'queue_updated', {
-        threadId,
-        queue: queue.list(threadId, userId),
-        action: 'completed',
-      });
+      await emitQueueUpdated(
+        socketManager, userId, threadId,
+        queue.list(threadId, userId), messageStore, 'completed',
+      );
       // F122B B6: Fire completion hook (one-shot) and clean up
       const completeHook = this.entryCompleteHooks.get(entry.id);
       if (completeHook) {

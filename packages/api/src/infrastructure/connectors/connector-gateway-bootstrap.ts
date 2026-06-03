@@ -158,7 +158,7 @@ export interface ConnectorGatewayDeps {
       message: string,
       messageId: string,
       ...args: unknown[]
-    ): 'dispatched' | 'enqueued' | 'full';
+    ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
   readonly socketManager?:
     | {
