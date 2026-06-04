@@ -2031,7 +2031,10 @@ describe('QueueProcessor', () => {
 
       const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
       assert.equal(calledContent, 'conn-a', 'connector entries should not be batched');
-      assert.equal(deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length, 1);
+      // After auto-dequeue settles, conn-b should be processed separately (not batched with conn-a)
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(deps.router.routeExecution.mock.calls.length, 2, 'each connector entry processed separately');
+      assert.equal(deps.router.routeExecution.mock.calls[1].arguments[1], 'conn-b');
     });
 
     it('stops batch at different intent', async () => {
@@ -2115,11 +2118,10 @@ describe('QueueProcessor', () => {
 
       const calledContent = deps.router.routeExecution.mock.calls[0].arguments[1];
       assert.equal(calledContent, 'user-msg', 'connector entry must not be batched into user content');
-      assert.equal(
-        deps.queue.list('t1', 'u1').filter((e) => e.status === 'queued').length,
-        1,
-        'connector entry should remain queued',
-      );
+      // After auto-dequeue settles, connector entry should be processed separately
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(deps.router.routeExecution.mock.calls.length, 2, 'connector entry processed separately');
+      assert.equal(deps.router.routeExecution.mock.calls[1].arguments[1], 'connector-msg');
     });
 
     it('P2: urgent entry for busy slot does not block lower-priority entry for free slot', async () => {
