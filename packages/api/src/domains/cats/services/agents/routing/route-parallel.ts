@@ -227,11 +227,11 @@ export async function* routeParallel(
           const f163Flags = freezeFlags();
           alwaysOnInjectionMode = f163Flags.alwaysOnInjection;
           if (alwaysOnInjectionMode !== 'off') {
-            const queryAlwaysOn = (
-              deps.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }> }
-            ).queryAlwaysOn;
-            if (queryAlwaysOn) {
-              const docs = queryAlwaysOn();
+            const evStore = deps.evidenceStore as {
+              queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }>;
+            };
+            if (typeof evStore.queryAlwaysOn === 'function') {
+              const docs = evStore.queryAlwaysOn();
               if (docs.length > 0) alwaysOnDocs = docs;
             }
           }

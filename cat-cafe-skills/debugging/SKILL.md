@@ -26,9 +26,26 @@ triggers:
 
 **如果 bug 涉及 runtime 行为**（前端显示异常、API 返回错误、猫猫行为异常、stream 错误等），**在进入 Phase 1 之前**必须先完成三件套验证：
 
-**一键运行**：`bash scripts/runtime-preflight.sh [目标commit]`
+**手动三件套**（按顺序执行，收集 7 个字段）：
 
-脚本输出固定 7 行字段（绑端口而非 grep 猜测）：
+```bash
+# 1. 找到 API 监听进程（绑端口，不用 grep 猜）
+export API_PORT="${API_SERVER_PORT:-3004}"
+lsof -iTCP:"$API_PORT" -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1{print "PORT="ENVIRON["API_PORT"], "PID="$2}'
+
+# 2. 进程启动时间
+ps -p <PID> -o lstart=
+
+# 3. Runtime worktree HEAD vs 目标 commit
+git -C <runtime-worktree> log --oneline -1        # HEAD=
+TARGET_COMMIT=<你预期的commit>
+# 判断进程是否在 commit 之后启动：比较 commit 时间 vs 进程启动时间
+
+# 4. 当前 PID 在最新日志中的行数
+grep -c "<PID>" <最新日志文件路径>                  # LOG_EVIDENCE=
+```
+
+收集到的 7 个字段：
 
 ```
 PORT=3004              ← 默认 API 端口（3003=前端），只取 LISTEN PID

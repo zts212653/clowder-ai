@@ -30,4 +30,8 @@ unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
 
+# DEFAULT_CAT_ID is user/runtime preference, not test fixture state. Leaving it
+# inherited makes routing tests depend on which cat launched the test command.
+unset DEFAULT_CAT_ID
+
 exec "$@"

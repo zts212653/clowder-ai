@@ -213,9 +213,9 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       // F163 AC-A3: report always_on injection sources in response envelope
       let injectionSources: string[] | undefined;
       if (f163Flags.alwaysOnInjection !== 'off') {
-        const queryAlwaysOn = (opts.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string }> }).queryAlwaysOn;
-        if (queryAlwaysOn) {
-          injectionSources = queryAlwaysOn().map((d) => d.anchor);
+        const evStore = opts.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string }> };
+        if (typeof evStore.queryAlwaysOn === 'function') {
+          injectionSources = evStore.queryAlwaysOn().map((d) => d.anchor);
         }
       }
 

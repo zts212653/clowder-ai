@@ -13,7 +13,6 @@ import asyncio
 import logging
 import os
 import platform
-import resource
 import signal
 import sys
 import time
@@ -96,11 +95,17 @@ def _allow_sentence_transformers_fallback() -> bool:
 
 
 def _process_max_rss_bytes() -> int:
-    """Return process max RSS in bytes (macOS reports bytes, Linux reports KiB)."""
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    if sys.platform == "darwin":
-        return int(rss)
-    return int(rss * 1024)
+    """Return process max RSS in bytes (macOS reports bytes, Linux reports KiB).
+    Returns 0 on Windows where the resource module is unavailable."""
+    try:
+        import resource
+
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if sys.platform == "darwin":
+            return int(rss)
+        return int(rss * 1024)
+    except ImportError:
+        return 0
 
 
 # ─── Request/Response models ──────────────────────────────────────
