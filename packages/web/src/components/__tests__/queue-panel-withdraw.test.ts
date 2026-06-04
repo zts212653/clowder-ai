@@ -111,8 +111,8 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
-  it('recall-edit includes imageUrls from messagePreview (F706 server-enriched)', async () => {
-    // F706: Image URLs come from entry.messagePreview.contentBlocks,
+  it('recall-edit includes imageUrls from messagePreview (#706 server-enriched)', async () => {
+    // #706: Image URLs come from entry.messagePreview.contentBlocks,
     // enriched by server at queue_updated SSE emit time — available
     // in queue state before the DELETE request is even sent.
     const entryWithImage: QueueEntry = {
@@ -136,7 +136,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    // F706: Recall-edit button should appear even for messages with images
+    // #706: Recall-edit button should appear even for messages with images
     const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
     expect(recallBtn).not.toBeNull();
 
@@ -153,6 +153,43 @@ describe('QueuePanel withdraw UX (F39)', () => {
 
     const toasts = useToastStore.getState().toasts;
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
+  });
+
+  it('recall-edit preserves replyTo from messagePreview (#706 + #833 cross-PR)', async () => {
+    // Cross-PR regression: when #833 (user quoting) is merged, messages may
+    // carry replyTo. Recall-edit must pass replyTo through pendingChatInsert
+    // so the composer can restore the quote state on re-edit.
+    const entryWithReply: QueueEntry = {
+      ...QUEUED_ENTRY,
+      id: 'q-reply',
+      messageId: 'm-reply',
+      messagePreview: {
+        contentBlocks: [{ type: 'text', text: 'replying' }],
+        replyTo: 'msg-original-123',
+      },
+    };
+    useChatStore.setState({
+      queue: [entryWithReply],
+      pendingChatInsert: null,
+      messages: [],
+    });
+
+    act(() => {
+      root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
+    });
+
+    const recallBtn = container.querySelector('button[aria-label="撤回编辑"]') as HTMLButtonElement | null;
+    expect(recallBtn).not.toBeNull();
+
+    await act(async () => {
+      recallBtn?.click();
+    });
+
+    expect(useChatStore.getState().pendingChatInsert).toEqual({
+      threadId: 'thread-1',
+      text: 'queued to withdraw',
+      replyTo: 'msg-original-123',
+    });
   });
 
   it('rolls back queue state and does not queue composer insert when recall-edit fails', async () => {

@@ -106,7 +106,10 @@ export function ChatInput({
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
   // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
-  // F706: also restores image attachments from recall-edit
+  // #706: also restores image attachments + replyTo from recall-edit
+  // NOTE: replyTo is carried through pendingChatInsert for cross-PR compat with #833 (user quoting).
+  // When #833 merges and adds a quote composing UI, consume pendingChatInsert.replyTo here
+  // to restore the quote state (e.g. setReplyTo(pendingChatInsert.replyTo)).
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
@@ -117,7 +120,7 @@ export function ChatInput({
       const separator = prev && !prev.endsWith('\n') ? '\n' : '';
       return prev + separator + pendingChatInsert.text;
     });
-    // F706: Restore images from recalled queue message.
+    // #706: Restore images from recalled queue message.
     // Writes to threadImageDrafts directly so files survive unmount if the user
     // switches threads while fetches are in-flight.
     if (pendingChatInsert.imageUrls?.length) {

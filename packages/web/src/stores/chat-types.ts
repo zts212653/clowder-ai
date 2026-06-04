@@ -544,7 +544,7 @@ export interface QueueEntry {
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
   position?: number;
-  /** F706: Server-enriched message preview for QueuePanel display + recall-edit.
+  /** #706: Server-enriched message preview for QueuePanel display + recall-edit.
    *  Attached by emitQueueUpdated() at push time via messageStore join. */
   messagePreview?: {
     contentBlocks?: ReadonlyArray<{ type: string; url?: string; text?: string; alt?: string }>;

@@ -154,7 +154,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       const entry = queue.find((e) => e.id === entryId);
       if (!entry) return;
 
-      // F706: Extract image URLs from server-enriched messagePreview (already in queue data).
+      // #706: Extract image URLs from server-enriched messagePreview (already in queue data).
       // No need to read from DELETE response — the data is available before the request.
       const imageUrls = (entry.messagePreview?.contentBlocks ?? [])
         .filter((b) => b.type === 'image' && b.url)
@@ -181,10 +181,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           return;
         }
 
+        // #706 + #833 cross-PR: preserve replyTo so recall-edit restores quote state
+        const replyTo = entry.messagePreview?.replyTo;
         setPendingChatInsert({
           threadId,
           text: entry.content,
           ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          ...(replyTo ? { replyTo } : {}),
         });
         const hasImages = imageUrls.length > 0;
         addToast({
@@ -369,7 +372,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
             <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5 p-1">
               {visibleEntries.map((entry, idx) => {
-                // F706: Compute image count from server-enriched messagePreview
+                // #706: Compute image count from server-enriched messagePreview
                 const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
                 return (
                   <SortableQueueEntryRow

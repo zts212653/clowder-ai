@@ -163,7 +163,7 @@ describe('ConnectorRouter media handling', () => {
     assert.ok(Array.isArray(contentBlocks), 'contentBlocks should be an array');
     assert.ok(contentBlocks.length > 0, 'contentBlocks should not be empty');
     assert.equal(contentBlocks[0].type, 'image');
-    // F706: contentBlocks must use localUrl (public HTTP route), not absPath (filesystem leak)
+    // #706: contentBlocks must use localUrl (public HTTP route), not absPath (filesystem leak)
     assert.equal(contentBlocks[0].url, '/api/connector-media/photo.jpg');
   });
 

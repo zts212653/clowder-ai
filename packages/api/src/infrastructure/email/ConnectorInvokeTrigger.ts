@@ -41,7 +41,7 @@ export interface ConnectorInvokeTriggerOptions {
   readonly threadMetaLookup?: (threadId: string) => ThreadMeta | undefined | Promise<ThreadMeta | undefined>;
   /** Per-cat outbound deliver timeout in ms (default 10000). Prevents hanging deliver from blocking cleanup. */
   readonly deliverTimeoutMs?: number;
-  /** F706: MessageStore for queue enrichment (messagePreview in queue_updated SSE). */
+  /** #706: MessageStore for queue enrichment (messagePreview in queue_updated SSE). */
   readonly messageStore?: IMessageStore;
   readonly log: FastifyBaseLogger;
 }
