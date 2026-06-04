@@ -8,16 +8,26 @@ import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { f163AdminRoutes } from '../../dist/routes/f163-admin.js';
+import {
+  f163OwnerHeaders,
+  installF163AdminTestSessionHook,
+  restoreDefaultOwnerUserId,
+  useF163TestOwner,
+} from '../helpers/f163-admin-auth.js';
+
+const ORIGINAL_DEFAULT_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('F163 source expansion API (AC-B3)', () => {
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];
     }
+    restoreDefaultOwnerUserId(ORIGINAL_DEFAULT_OWNER_USER_ID);
   });
 
   async function setup() {
     process.env.F163_COMPRESSION = 'apply';
+    useF163TestOwner();
     const store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
 
@@ -43,13 +53,14 @@ describe('F163 source expansion API (AC-B3)', () => {
 
     // Create summary via the API
     const app = Fastify();
+    installF163AdminTestSessionHook(app);
     await app.register(f163AdminRoutes, { evidenceStore: store });
     await app.ready();
 
     const applyRes = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-E01', 'LL-E02'],
         summaryTitle: 'Combined lesson',
@@ -68,7 +79,7 @@ describe('F163 source expansion API (AC-B3)', () => {
     const res = await app.inject({
       method: 'GET',
       url: `/api/f163/expand/${summaryAnchor}`,
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 200);
@@ -88,7 +99,7 @@ describe('F163 source expansion API (AC-B3)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/f163/expand/NONEXISTENT',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 404);
@@ -100,7 +111,7 @@ describe('F163 source expansion API (AC-B3)', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/f163/expand/LL-E01',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 400);

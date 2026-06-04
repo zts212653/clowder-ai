@@ -3,17 +3,31 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { f163AdminRoutes } from '../../dist/routes/f163-admin.js';
+import {
+  f163OwnerHeaders,
+  installF163AdminTestSessionHook,
+  restoreDefaultOwnerUserId,
+  useF163TestOwner,
+} from '../helpers/f163-admin-auth.js';
+
+const ORIGINAL_DEFAULT_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('POST /api/f163/promote', () => {
   let app;
   let store;
 
+  afterEach(() => {
+    restoreDefaultOwnerUserId(ORIGINAL_DEFAULT_OWNER_USER_ID);
+  });
+
   beforeEach(async () => {
+    useF163TestOwner();
     app = Fastify();
+    installF163AdminTestSessionHook(app);
     store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
 
@@ -44,7 +58,7 @@ describe('POST /api/f163/promote', () => {
         targetAuthority: 'candidate',
         reason: 'Confirmed by review',
       },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 200);
@@ -71,7 +85,7 @@ describe('POST /api/f163/promote', () => {
         targetAuthority: 'validated',
         reason: 'Validated by CVO',
       },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 200);
@@ -91,7 +105,7 @@ describe('POST /api/f163/promote', () => {
         targetAuthority: 'observed',
         reason: 'Trying to demote',
       },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 400);
@@ -111,7 +125,7 @@ describe('POST /api/f163/promote', () => {
         targetAuthority: 'constitutional',
         reason: 'Trying to go constitutional',
       },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 403);
@@ -128,7 +142,7 @@ describe('POST /api/f163/promote', () => {
         targetAuthority: 'candidate',
         reason: 'Test',
       },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 404);
@@ -139,7 +153,7 @@ describe('POST /api/f163/promote', () => {
       method: 'POST',
       url: '/api/f163/promote',
       payload: { anchor: 'test-promote-1' },
-      remoteAddress: '127.0.0.1',
+      headers: f163OwnerHeaders(),
     });
 
     assert.equal(res.statusCode, 400);
