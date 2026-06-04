@@ -744,10 +744,13 @@ export class AgentRouter {
 
       // Filter out routing_warnings for group mention keywords — they were already
       // matched by parseGroupMentions and are not individual cat mentions.
-      // Build exact set from registry so unknown handles like @all-ghost still warn.
+      // Only suppress breed handles with ≥1 routable cat (same scope as
+      // parseGroupMentions resolve); breeds without services still warn.
       const groupHandles = new Set(['all', 'thread']);
-      for (const config of Object.values(catRegistry.getAllConfigs())) {
-        if (config.breedId) groupHandles.add(`all-${config.breedId}`);
+      for (const [catId, config] of Object.entries(catRegistry.getAllConfigs())) {
+        if (config.breedId && Object.hasOwn(this.services, catId)) {
+          groupHandles.add(`all-${config.breedId}`);
+        }
       }
       const filteredWarnings = individual.routing_warnings.filter((w) => {
         if (w.kind !== 'cat_not_found') return true;
