@@ -744,11 +744,11 @@ export class AgentRouter {
 
       // Filter out routing_warnings for group mention keywords — they were already
       // matched by parseGroupMentions and are not individual cat mentions.
-      // Only suppress breed handles with ≥1 routable cat (same scope as
-      // parseGroupMentions resolve); breeds without services still warn.
+      // Only suppress breed handles with ≥1 routable cat (service + available);
+      // breeds where all cats are unavailable still warn so the user gets feedback.
       const groupHandles = new Set(['all', 'thread']);
       for (const [catId, config] of Object.entries(catRegistry.getAllConfigs())) {
-        if (config.breedId && Object.hasOwn(this.services, catId)) {
+        if (config.breedId && this.isRoutableCat(catId)) {
           groupHandles.add(`all-${config.breedId}`);
         }
       }

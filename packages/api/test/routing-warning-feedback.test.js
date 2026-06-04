@@ -122,4 +122,31 @@ describe('AgentRouter.resolveTargetsAndIntent: routing_warnings for not-found ca
       `expected cat_not_found warning for unroutable @all-dragon-li breed handle, got warnings: ${JSON.stringify(result.routing_warnings)}`,
     );
   });
+
+  it('preserves warning for breed with service but all cats unavailable (#826 maintainer re-review)', async () => {
+    // "antigravity" (breedId: bengal) has available:false in cat-template.json.
+    // Register a service for it so it's service-backed but unavailable.
+    const agentRegistry = new AgentRegistry();
+    agentRegistry.register('opus', createMockService('opus'));
+    agentRegistry.register('codex', createMockService('codex'));
+    agentRegistry.register('antigravity', createMockService('antigravity'));
+
+    const router = new AgentRouter({
+      agentRegistry,
+      registry: createMockRegistry(),
+      messageStore: createMockMessageStore(),
+    });
+
+    // antigravity has a service but available:false → isRoutableCat returns false.
+    // @all-bengal should NOT be suppressed — user should know the breed didn't route.
+    const result = await router.resolveTargetsAndIntent('@thread\n@all-bengal hi', 'thread-1');
+
+    const bengalWarning = result.routing_warnings.find(
+      (w) => w.kind === 'cat_not_found' && w.mention.toLowerCase().includes('bengal'),
+    );
+    assert.ok(
+      bengalWarning,
+      `expected cat_not_found warning for unavailable @all-bengal breed, got warnings: ${JSON.stringify(result.routing_warnings)}`,
+    );
+  });
 });
