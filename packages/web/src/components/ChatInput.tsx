@@ -105,11 +105,11 @@ export function ChatInput({
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
-  // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
-  // #706: also restores image attachments + replyTo from recall-edit
-  // NOTE: replyTo is carried through pendingChatInsert for cross-PR compat with #833 (user quoting).
-  // When #833 merges and adds a quote composing UI, consume pendingChatInsert.replyTo here
-  // to restore the quote state (e.g. setReplyTo(pendingChatInsert.replyTo)).
+  // F63-AC15: consume pendingChatInsert (ComposerDraftInsert) from workspace (thread-guarded)
+  // #706: restores text, image attachments, and replyToId from recall-edit
+  // TODO(#833): When user-quoting merges, consume pendingChatInsert.replyToId here
+  // to restore the quote composing state (e.g. setReplyTo(insert.replyToId)).
+  // replyToPreview can be used directly to render ReplyPreviewBar without hydrate.
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);

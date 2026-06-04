@@ -157,7 +157,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
 
   it('recall-edit preserves replyTo from messagePreview (#706 + #833 cross-PR)', async () => {
     // Cross-PR regression: when #833 (user quoting) is merged, messages may
-    // carry replyTo. Recall-edit must pass replyTo through pendingChatInsert
+    // carry replyTo. Recall-edit must pass replyToId through ComposerDraftInsert
     // so the composer can restore the quote state on re-edit.
     const entryWithReply: QueueEntry = {
       ...QUEUED_ENTRY,
@@ -188,7 +188,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(useChatStore.getState().pendingChatInsert).toEqual({
       threadId: 'thread-1',
       text: 'queued to withdraw',
-      replyTo: 'msg-original-123',
+      replyToId: 'msg-original-123',
     });
   });
 

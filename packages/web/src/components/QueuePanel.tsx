@@ -181,13 +181,13 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           return;
         }
 
-        // #706 + #833 cross-PR: preserve replyTo so recall-edit restores quote state
-        const replyTo = entry.messagePreview?.replyTo;
+        // #706 + #833 cross-PR: preserve replyToId so recall-edit restores quote state
+        const replyToId = entry.messagePreview?.replyTo;
         setPendingChatInsert({
           threadId,
           text: entry.content,
           ...(imageUrls.length > 0 ? { imageUrls } : {}),
-          ...(replyTo ? { replyTo } : {}),
+          ...(replyToId ? { replyToId } : {}),
         });
         const hasImages = imageUrls.length > 0;
         addToast({
