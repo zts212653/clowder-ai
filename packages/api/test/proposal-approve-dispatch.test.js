@@ -7,10 +7,10 @@
  * the initial message when the user approves a proposal" behaviours:
  *
  *  - approve dispatches initialMessage via router + InvocationQueue + processNext
- *  - preferredCats fallback when router resolves 0 targets from message text
- *  - explicit #ideate / #execute tags vs default serial intent
+ *  - dispatch wakes ONLY preferredCats[0] (chain starter); rest is cat-driven
+ *  - explicit #ideate tag opts into "wake all preferredCats" parallel mode
  *  - server-injected "## 主 Thread" header (fork-and-return / skill Step 5c)
- *  - explicit @-mention in content beats preferredCats fallback
+ *  - preferredCats[0] is ground truth; message-body @-mentions are narrative
  *
  * Split out from proposal-flow.test.js to honor AC-X1 ≤350-line file cap
  * (砚砚 re-review on fd8f07ae..76e8d164 flagged the regression).
@@ -60,12 +60,23 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.warnings, undefined);
     assert.equal(resolveCalls.length, 1);
-    // Server now injects "## 主 Thread" header (skill Step 5c fork-and-return),
-    // so router sees enriched content. The header is additive — user-typed
-    // content still appears at the start.
+    // 砚砚 PR #809 round-3 P2: router receives the RAW user-typed
+    // initialMessage, NOT the enriched "## 主 Thread" header content. The
+    // header is injected only into what gets enqueued + stored (so cats see
+    // parent-thread pointer + chain protocol), but server-injected text must
+    // never leak into router's @mention parser / persist boundary (that
+    // would let parent thread title `@cat` mentions silently wake / persist).
+    // P3 round-5: pin this contract with equality, not startsWith, so a
+    // future regression can't accidentally re-enrich router's input without
+    // tripping the test.
+    assert.equal(
+      resolveCalls[0].content,
+      'Kick this off',
+      'router input must equal raw initialMessage exactly — no server-injected header',
+    );
     assert.ok(
-      resolveCalls[0].content.startsWith('Kick this off'),
-      'router input should start with user-typed initialMessage',
+      !resolveCalls[0].content.includes('## 主 Thread'),
+      'router input must NOT contain server-injected "## 主 Thread" header',
     );
     assert.equal(resolveCalls[0].threadId, body.threadId);
     assert.equal(resolveCalls[0].options.persist, true);
@@ -129,19 +140,15 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     assert.equal(entries.length, 1);
     assert.deepEqual(
       entries[0].targetCats,
-      ['kimi', 'gemini', 'codex'],
-      'targetCats must come from preferredCats when content has no @-mention',
+      ['kimi'],
+      'dispatch wakes ONLY preferredCats[0] (first cat); subsequent cats are driven by cat-side @-mentions ("他们自己决定下一个要把谁叫出来" — owner spec 2026-05-27)',
     );
-    assert.equal(
-      entries[0].intent,
-      'execute',
-      'fallback intent must default to serial (execute) so preferredCats order is honored as a chain — picking members on the card implies an ordered walk, not parallel ideate',
-    );
+    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial (intent execute)');
     const stored = await ctx.messageStore.getById(entries[0].messageId);
     assert.deepEqual(
       stored.mentions,
-      ['kimi', 'gemini', 'codex'],
-      'message mentions must reflect the fallback targets so cats see why they were woken',
+      ['kimi'],
+      'message mentions reflect the single woken cat — the chain extends via cat @-mentions in their replies',
     );
   });
 
@@ -247,11 +254,20 @@ describe('F128 approve dispatch — initialMessage routing', () => {
       '开玩！我先起头：一帆风顺',
       'proposal record stores user-typed initialMessage verbatim; header lives only in the thread message',
     );
+
+    // F128 chain protocol injection (砚砚 PR #809 review P1):
+    // single-cat preferredCats still gets the chain section so the cat knows
+    // "you are the only invited member; report back when done".
+    assert.ok(enqueued.includes('接力链路'), 'chain protocol section must be injected when preferredCats provided');
+    assert.ok(enqueued.includes('Server 只 wake 了'), 'chain protocol must explain that only the first cat was woken');
   });
 
-  test('approve preserves router-resolved targets when initialMessage has @-mention (no fallback)', async () => {
-    // Defensive: if the user explicitly @-mentions someone in initialMessage, the router's
-    // resolution wins — preferredCats does NOT override the explicit user intent.
+  test('approve always picks preferredCats[0] as first cat (card order is ground truth, message @s are narrative)', async () => {
+    // F128 design (owner spec 2026-05-27): the proposal card's preferredCats
+    // ORDER is the ground truth for who starts the chain. @-mentions in the
+    // initialMessage body are narrative / rule-stating prose (e.g.
+    // "@opus46 把球传过去" inside instructions). They must NOT override the
+    // card's first-picked member.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const invocationQueue = new InvocationQueue();
     const router = {
@@ -289,8 +305,9 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.deepEqual(
       entries[0].targetCats,
-      ['codex'],
-      'explicit @-mention in content must beat the preferredCats fallback',
+      ['kimi'],
+      'preferredCats[0]=kimi wakes first, even though message body @s @codex — message @s are prompt-level narrative, dispatch follows card order',
     );
+    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial');
   });
 });

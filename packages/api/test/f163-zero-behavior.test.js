@@ -8,7 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 import Fastify from 'fastify';
 import { computeVariantId, freezeFlags } from '../dist/domains/memory/f163-types.js';
@@ -16,11 +16,28 @@ import { SqliteEvidenceStore } from '../dist/domains/memory/SqliteEvidenceStore.
 import { applyMigrations } from '../dist/domains/memory/schema.js';
 import { evidenceRoutes } from '../dist/routes/evidence.js';
 
+const ORIGINAL_DEFAULT_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
+
+function restoreDefaultOwnerUserId() {
+  if (ORIGINAL_DEFAULT_OWNER_USER_ID === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+  else process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_DEFAULT_OWNER_USER_ID;
+}
+
+function installTestSessionHook(app) {
+  app.addHook('preHandler', async (request) => {
+    const sessionUser = request.headers['x-test-session-user'];
+    if (typeof sessionUser === 'string' && sessionUser.trim()) {
+      request.sessionUserId = sessionUser.trim();
+    }
+  });
+}
+
 describe('F163 Zero-behavior regression', () => {
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];
     }
+    restoreDefaultOwnerUserId();
   });
 
   it('all flags off = no authority boost applied', async () => {
@@ -188,13 +205,15 @@ describe('F163 Zero-behavior regression', () => {
 
     const { f163AdminRoutes } = await import('../dist/routes/f163-admin.js');
     const app = Fastify();
+    installTestSessionHook(app);
     await app.register(f163AdminRoutes, { evidenceStore: store });
     await app.ready();
 
+    process.env.DEFAULT_OWNER_USER_ID = 'f163-owner';
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/scan',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: { 'x-test-session-user': 'f163-owner' },
     });
     assert.equal(res.statusCode, 403, 'scan should be blocked when compression=off');
   });
@@ -212,13 +231,15 @@ describe('F163 Zero-behavior regression', () => {
     // But the API level should block it
     const { f163AdminRoutes } = await import('../dist/routes/f163-admin.js');
     const app = Fastify();
+    installTestSessionHook(app);
     await app.register(f163AdminRoutes, { evidenceStore: store });
     await app.ready();
 
+    process.env.DEFAULT_OWNER_USER_ID = 'f163-owner';
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: { 'x-test-session-user': 'f163-owner' },
       payload: {
         sourceAnchors: ['nonexistent'],
         summaryTitle: 'Test',

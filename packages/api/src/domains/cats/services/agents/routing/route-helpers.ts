@@ -287,7 +287,17 @@ export function truncateDetail(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength)}…`;
 }
 
-/** Build a StoredToolEvent from a streaming AgentMessage */
+/** Build a StoredToolEvent from a streaming AgentMessage.
+ *
+ * F153 Phase J Slice J-B AC-J7: extends the event with the four-piece telemetry set
+ * (`toolUseId`, `status`, `tracing`, `startTimeMs`/`endTimeMs`) so cold-start hydrate
+ * (AC-J8) can synthesize a real-duration `cat_cafe.tool_use ...` child span instead
+ * of degrading to a flat `cat_cafe.invocation.restored` marker.
+ *
+ * All new fields are optional: messages without Phase J wiring (legacy, or providers
+ * deferred per KD-41) still produce a valid StoredToolEvent that the hydrate path
+ * skips for span synthesis but still surfaces in the Hub history view.
+ */
 export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
   if (msg.type === 'tool_use') {
     const toolName = msg.toolName ?? 'unknown';
@@ -303,8 +313,15 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
       id: `tool-${msg.timestamp}-${Math.random().toString(36).slice(2, 6)}`,
       type: 'tool_use',
       label: `${msg.catId as string} → ${toolName}`,
+      // R6 maintainer: persist native tool name as data field (decoupled from display label).
+      // Hydrate prefers this for span naming; label parse becomes legacy fallback only.
+      toolName,
       ...(detail ? { detail } : {}),
       timestamp: msg.timestamp,
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
+      // For tool_use events, msg.timestamp marks when the span opened.
+      startTimeMs: msg.timestamp,
     };
   }
   if (msg.type === 'tool_result') {
@@ -316,6 +333,11 @@ export function toStoredToolEvent(msg: AgentMessage): StoredToolEvent | null {
       label: `${msg.catId as string} ← result`,
       detail,
       timestamp: msg.timestamp,
+      ...(msg.toolUseId ? { toolUseId: msg.toolUseId } : {}),
+      ...(msg.toolResultStatus ? { status: msg.toolResultStatus } : {}),
+      ...(msg.toolTracing ? { tracing: msg.toolTracing } : {}),
+      // For tool_result events, msg.timestamp marks when the span closed.
+      endTimeMs: msg.timestamp,
     };
   }
   return null;

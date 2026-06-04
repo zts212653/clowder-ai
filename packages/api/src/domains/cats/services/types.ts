@@ -161,6 +161,13 @@ export interface AgentMessage {
    *  Provider transformers MUST map from raw payload (is_error / success / exitCode / status) instead of
    *  letting downstream guess from content string. Use 'unknown' when raw signal is genuinely absent. */
   toolResultStatus?: 'ok' | 'error' | 'unknown';
+  /** F153 Phase J Slice J-B AC-J7: tool span trace context for hydrate-side real-duration
+   *  span synthesis. Stamped by invoke-single-cat when ToolSpanTracker opens / has-open
+   *  a span for this event (so route-helpers can carry it into StoredToolEvent.tracing).
+   *  Distinct from `tracing` above (which carries the invocation/route span pointer);
+   *  this one points at the tool span itself, and parentSpanId points at the invocation
+   *  span so hydrate can re-parent the synthesized `cat_cafe.tool_use ...` span. */
+  toolTracing?: { traceId: string; spanId: string; parentSpanId?: string };
   /** Error message (for 'error' type) */
   error?: string;
   /** Whether this is the final 'done' in a multi-cat invocation (for 'done' type) */

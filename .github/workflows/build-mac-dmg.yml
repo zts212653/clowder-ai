@@ -1,0 +1,104 @@
+name: Build macOS DMG
+
+# Reusable workflow: builds macOS DMG installer(s) for Cat Cafe.
+# arm64 and x64 run as parallel matrix jobs for faster CI turnaround.
+#
+# Called by: release-desktop.yml (orchestrator)
+# Standalone: workflow_dispatch for single-arch dry-run verification
+#
+# F179: Desktop Installer Release Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Semver version (e.g. 0.10.1)"
+        required: true
+        type: string
+      upload-to-release:
+        description: "Attach DMGs to the triggering GitHub release"
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.10.1) — dry-run, artifacts only"
+        required: true
+        type: string
+      arch:
+        description: "Target architecture (all = parallel matrix)"
+        required: false
+        type: choice
+        options:
+          - all
+          - arm64
+          - x64
+        default: all
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'x64' && 'macos-15-intel' || 'macos-latest' }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Dynamic matrix: single-arch when workflow_dispatch selects one,
+        # otherwise both. fromJSON builds the array at parse time (before
+        # matrix expansion), avoiding the "unrecognized matrix" error that
+        # occurs when job-level `if` references matrix.* in reusable workflows.
+        arch: ${{ fromJSON(inputs.arch && inputs.arch != 'all' && format('["{0}"]', inputs.arch) || '["arm64","x64"]') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync desktop/package.json version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const path = 'desktop/package.json';
+            const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+            pkg.version = '$VERSION';
+            fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+            console.log('desktop/package.json version =', pkg.version);
+          "
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build macOS DMG (${{ matrix.arch }})
+        env:
+          CATCAFE_VERSION: ${{ inputs.version }}
+        run: |
+          chmod +x desktop/scripts/build-mac.sh
+          ./desktop/scripts/build-mac.sh --arch ${{ matrix.arch }}
+
+      - name: List build artifacts
+        run: ls -la dist/
+
+      - name: Upload DMG to release
+        if: inputs.upload-to-release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/CatCafe-*-${{ matrix.arch }}.dmg
+          fail_on_unmatched_files: true
+
+      - name: Upload DMG as workflow artifact
+        if: ${{ !inputs.upload-to-release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ matrix.arch }}-${{ inputs.version }}
+          path: dist/CatCafe-*-${{ matrix.arch }}.dmg
+          if-no-files-found: error

@@ -9,16 +9,26 @@ import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { SqliteEvidenceStore } from '../../dist/domains/memory/SqliteEvidenceStore.js';
 import { f163AdminRoutes } from '../../dist/routes/f163-admin.js';
+import {
+  f163OwnerHeaders,
+  installF163AdminTestSessionHook,
+  restoreDefaultOwnerUserId,
+  useF163TestOwner,
+} from '../helpers/f163-admin-auth.js';
+
+const ORIGINAL_DEFAULT_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('F163 compression apply API (AC-B2)', () => {
   afterEach(() => {
     for (const key of Object.keys(process.env)) {
       if (key.startsWith('F163_')) delete process.env[key];
     }
+    restoreDefaultOwnerUserId(ORIGINAL_DEFAULT_OWNER_USER_ID);
   });
 
   async function setup(compressionFlag) {
     if (compressionFlag) process.env.F163_COMPRESSION = compressionFlag;
+    useF163TestOwner();
 
     const store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
@@ -52,6 +62,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     ]);
 
     const app = Fastify();
+    installF163AdminTestSessionHook(app);
     await app.register(f163AdminRoutes, { evidenceStore: store });
     await app.ready();
     return { app, store };
@@ -62,7 +73,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02'],
         summaryTitle: 'Redis keyPrefix scripting summary',
@@ -78,7 +89,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02'],
         summaryTitle: 'Summary',
@@ -94,7 +105,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02', 'LL-A03'],
         summaryTitle: 'Redis keyPrefix scripting behavior',
@@ -131,7 +142,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'NONEXISTENT'],
         summaryTitle: 'Summary',
@@ -149,7 +160,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02'],
         summaryTitle: 'Logging test summary',
@@ -171,7 +182,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02'],
         summaryTitle: 'First apply',
@@ -191,7 +202,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01'],
         summaryTitle: 'Single source summary',
@@ -209,7 +220,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res1 = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: ['LL-A01', 'LL-A02'],
         summaryTitle: 'First summary',
@@ -224,7 +235,7 @@ describe('F163 compression apply API (AC-B2)', () => {
     const res2 = await app.inject({
       method: 'POST',
       url: '/api/f163/compress/apply',
-      headers: { 'x-forwarded-for': '127.0.0.1' },
+      headers: f163OwnerHeaders(),
       payload: {
         sourceAnchors: [summaryAnchor, 'LL-A03'],
         summaryTitle: 'Second summary',

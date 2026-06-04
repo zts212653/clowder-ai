@@ -4,6 +4,10 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
+import { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
+
+export { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
 
 type ProposalRouter = Pick<AgentRouter, 'resolveTargetsAndIntent'>;
 type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
@@ -19,13 +23,48 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
   proposalId: string;
   userId: string;
   threadId: string;
-  content: string;
   /**
-   * Optional fallback targets. When the router cannot resolve any @-mention in
-   * `content` (typical case: user wrote "开玩！" as initialMessage without
-   * @-ing the proposed members), we fall back to the proposal's preferredCats
-   * so all proposed members get woken up — that's the whole point of
-   * choosing them on the proposal card.
+   * Raw user-typed initialMessage. dispatch is now the single owner of the
+   * full plan: it runs router resolve + parseIntent + computes effective
+   * targets/intent/reporter, then calls enrichWithParentThreadHeader to
+   * build the enqueued+stored content. Routes only pass raw user input +
+   * parent thread metadata; dispatch handles every transformation.
+   *
+   * Why this routing flows through dispatch only (round-9 plan-based):
+   *   - parseIntent and router.resolveTargetsAndIntent MUST read raw, not
+   *     enriched. enriched content carries server-injected text (parent
+   *     title, chain protocol) that can trip both `#tag` and `@-mention`
+   *     parsers, causing serial proposals to flip to parallel
+   *     (round-2 P2) and parent-title `@cat` mentions to silently wake +
+   *     persist into participants (round-3 P2).
+   *   - The reporter handle for explicit `#ideate` parallel mode must be
+   *     derived from the router's resolved catId via
+   *     primaryMentionHandleForCatId — NOT from a raw `@<token>` regex
+   *     (round-7/8 補锅匠 trap: every handle shape — CJK, dotted,
+   *     hyphenated — wanted a new charclass). Plan-based ownership in
+   *     dispatch is the only place that has both pieces.
+   */
+  rawInitialMessage: string;
+  /** Source thread id — injected into the "## 主 Thread" header. */
+  sourceThreadId: string;
+  /** Source thread title — optional display in the parent header. */
+  sourceThreadTitle?: string | null;
+  /**
+   * Proposed chain participants in user-intended order.
+   *
+   * Default behaviour: dispatch wakes ONLY `preferredCats[0]` (the chain
+   * starter); subsequent cats are driven by the cat-side @-mention chain in
+   * their own replies — "他们自己决定下一个要把谁叫出来" (owner spec
+   * 2026-05-27).
+   *
+   * Explicit-intent overrides (read from raw initialMessage, NOT enriched):
+   *   - `#ideate` tag → wake all `preferredCats` (or `resolved.targetCats` if
+   *     `preferredCats` empty) in parallel; chain protocol injection is
+   *     suppressed by `enrichWithParentThreadHeader` so cats are not told to
+   *     hand off serially while they were woken parallel (砚砚 round-5 P1).
+   *   - `#execute` tag with `preferredCats=[]` and multiple `resolved.targetCats`
+   *     → preserve all router-resolved targets (砚砚 round-5 P2: silently
+   *     collapsing to the first target would discard explicit user intent).
    */
   preferredCats?: readonly CatId[];
   messageStore: IMessageStore;
@@ -36,43 +75,13 @@ export interface AppendApprovedInitialMessageResult {
   warning?: string;
 }
 
-/**
- * Build the "## 主 Thread" header that the thread-orchestration skill mandates
- * for the first message of any sub-thread. This header lets cats inside the
- * sub-thread locate the parent thread and report back when work is done
- * (skill Step 5c "汇聚" — final report flow).
- *
- * F128: cats sometimes forget to include this header when writing
- * `initialMessage` on the proposal card. Server injects it defensively at
- * approve time so the fork-and-return loop never breaks on cat omission.
- *
- * The header is appended to the END of the user-typed content (rather than
- * prepended) so it doesn't visually break the user's opening (greeting /
- * game rules / topic intro). Cats reading the thread bottom-up still pick
- * it up reliably because it stays in the first message.
- */
-export function enrichWithParentThreadHeader(
-  content: string,
-  sourceThreadId: string,
-  sourceThreadTitle?: string | null,
-): string {
-  const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
-  const header = [
-    '---',
-    '## 主 Thread',
-    `ID: \`${sourceThreadId}\`${titleLine}`,
-    '',
-    '完成后请由最后一棒猫 `cat_cafe_cross_post_message` 把总结回报到这个主 Thread。',
-    '（这是 thread-orchestration skill 的 Step 5c 汇聚铁律，不要忘了汇报。）',
-  ].join('\n');
-  return `${content}\n\n${header}`;
-}
-
 export async function appendApprovedInitialMessage({
   proposalId,
   userId,
   threadId,
-  content,
+  rawInitialMessage,
+  sourceThreadId,
+  sourceThreadTitle,
   preferredCats,
   messageStore,
   router,
@@ -80,10 +89,18 @@ export async function appendApprovedInitialMessage({
   queueProcessor,
 }: AppendApprovedInitialMessageInput): Promise<AppendApprovedInitialMessageResult> {
   if (!router || !invocationQueue || !queueProcessor) {
+    const enrichedFallback = enrichWithParentThreadHeader(
+      rawInitialMessage,
+      sourceThreadId,
+      sourceThreadTitle,
+      preferredCats,
+      rawInitialMessage,
+      null,
+    );
     const stored = await messageStore.append({
       userId,
       catId: null,
-      content,
+      content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
       threadId,
@@ -94,27 +111,80 @@ export async function appendApprovedInitialMessage({
     };
   }
 
-  const resolved = await router.resolveTargetsAndIntent(content, threadId, { persist: true });
-  let targetCats: readonly CatId[] = resolved.targetCats;
-  let intentName: string = resolved.intent.intent;
+  // Router resolve + parseIntent BOTH read raw (round-2/3 P2 — server-injected
+  // header text must NOT leak into the @-mention persist boundary).
+  const resolved = await router.resolveTargetsAndIntent(rawInitialMessage, threadId, { persist: true });
+  const parsed = parseIntent(rawInitialMessage, preferredCats?.length ?? resolved.targetCats.length);
 
-  // F128 — preferredCats fallback: if the user-typed initialMessage has no
-  // @-mention, the router returns 0 targets and we'd silently skip dispatch.
-  // But the proposal card already let the user pick proposed members; honoring
-  // that choice is the whole product point. Treat preferredCats as the
-  // fallback target list.
+  // F128 dispatch model — "他们自己决定下一个要把谁叫出来" (owner-defined, 2026-05-27):
   //
-  // Intent: parseIntent's default rule (≥2 cats → ideate → parallel) is wrong
-  // for proposal-card cases. Picking members on the card implies user wants
-  // them in that ORDER (chain / 轮转 / 接龙). parallel ideate scrambles the
-  // order. So we honor explicit #ideate / #execute tags from the user, but
-  // default to 'execute' (serial) when neither is present — this preserves
-  // the preferredCats ordering as a serial chain.
-  if (targetCats.length === 0 && preferredCats && preferredCats.length > 0) {
-    targetCats = preferredCats;
-    const parsed = parseIntent(content, preferredCats.length);
-    intentName = parsed.explicit ? parsed.intent : 'execute';
+  // Default behaviour: wake ONLY the first cat. Subsequent turns are driven by
+  // cat-side @-mentions in the chain (the first cat reads initialMessage,
+  // sees the order/rules, and @s the next cat; that cat does the same).
+  // Dispatch does NOT pre-fire all proposedCats — that would scramble
+  // ordering and force a parallel race where the user wants a chain (接龙
+  // / 轮转 / 讨论).
+  //
+  // First-cat preference:
+  //   1. preferredCats[0] — the card's first picked member is the narrative
+  //      intent ("you chose them, in this order, the first one starts").
+  //   2. router-resolved first mention — fallback when preferredCats is empty
+  //      but the message text @-mentions someone.
+  //
+  // Explicit #ideate escape hatch: if the user really wants parallel
+  // ideation (everyone replies independently at once), they tag #ideate in
+  // the initialMessage. That brings back the legacy "wake all" behaviour.
+  //
+  // 砚砚 round-5 P2 escape hatch: explicit #execute + no preferredCats +
+  // raw text @-mentions multiple cats means the user is asking for serial
+  // multi-cat execution (the F088 router contract for #execute outside
+  // F128). Silently collapsing to the first target would discard explicit
+  // user intent. preferredCats non-empty still wins (card order is ground
+  // truth — first-cat chain starter), but preferredCats=[] + explicit
+  // #execute should preserve all router-resolved targets.
+  let targetCats: readonly CatId[];
+  let intentName: string;
+  if (parsed.explicit && parsed.intent === 'ideate') {
+    targetCats = preferredCats && preferredCats.length > 0 ? preferredCats : resolved.targetCats;
+    intentName = 'ideate';
+  } else if (
+    parsed.explicit &&
+    parsed.intent === 'execute' &&
+    (!preferredCats || preferredCats.length === 0) &&
+    resolved.targetCats.length > 0
+  ) {
+    targetCats = resolved.targetCats;
+    intentName = 'execute';
+  } else {
+    const firstCandidate = preferredCats?.[0] ?? resolved.targetCats[0];
+    targetCats = firstCandidate ? [firstCandidate] : [];
+    intentName = 'execute';
   }
+
+  // Round-9 plan-based reporter resolution: compute canonical reporter
+  // handle from the router-resolved catId (not raw token regex). This
+  // closes the round-7/8 補锅匠 trap — primaryMentionHandleForCatId
+  // returns the catRegistry-configured primary handle regardless of how
+  // the user wrote the raw mention (CJK / dotted / hyphenated all work).
+  let parallelReporterHandle: string | null = null;
+  if (parsed.explicit && parsed.intent === 'ideate') {
+    const reporterCatId = preferredCats?.[0] ?? resolved.targetCats[0];
+    if (reporterCatId) {
+      parallelReporterHandle = primaryMentionHandleForCatId(reporterCatId) ?? `@${reporterCatId}`;
+    }
+  }
+
+  // Build the full enqueued+stored content: parent thread header + mode-aware
+  // report-back rule + (serial only) chain protocol. dispatch is the single
+  // owner of this pipeline; routes only pass raw + parent metadata.
+  const content = enrichWithParentThreadHeader(
+    rawInitialMessage,
+    sourceThreadId,
+    sourceThreadTitle,
+    preferredCats,
+    rawInitialMessage,
+    parallelReporterHandle,
+  );
 
   if (targetCats.length === 0) {
     const stored = await messageStore.append({
