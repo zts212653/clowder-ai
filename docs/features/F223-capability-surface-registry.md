@@ -62,7 +62,7 @@ Decision Ladder：
 
 Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action-plane` cell，还是新建 `hub-action-surface` / `first-party-action-surface` cell。OQ-3 未决前，Phase B 不落新的第一方 Hub MCP wrapper。
 
-**Phase A result (2026-06-03)**：选新建 `hub-action-surface` cell，不扩 `action-plane`。Inventory 真相源为 `docs/features/assets/F223/capability-surface-inventory.md`，Phase D 如需 hard check 可再从该文档生成 JSON/YAML。
+**Phase A result (2026-06-03)**：选新建 `hub-action-surface` cell，不扩 `action-plane`。Inventory 真相源为 [capability-surface-inventory](assets/F223/capability-surface-inventory.md)，Phase D 如需 hard check 可再从该文档生成 JSON/YAML。
 
 ### Phase B: First-Class Display Surfaces
 
@@ -128,7 +128,7 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 
 ### Phase A（Inventory + Decision Ladder）✅
 
-- [x] AC-A1: 产出 capability surface inventory，覆盖来源至少包括 `capability-wakeup-index.md`、`cat-cafe-skills/*/SKILL.md`、`packages/mcp-server/src/tools/*`、cat-callable API routes、LL-041、F131、F192、F203。✅ `docs/features/assets/F223/capability-surface-inventory.md`
+- [x] AC-A1: 产出 capability surface inventory，覆盖来源至少包括 `capability-wakeup-index.md`、`cat-cafe-skills/*/SKILL.md`、`packages/mcp-server/src/tools/*`、cat-callable API routes、LL-041、F131、F192、F203。✅ [capability-surface-inventory](assets/F223/capability-surface-inventory.md)
 - [x] AC-A2: 每个 inventory 条目都有 `trigger_surface`、`execution_surface`、`verification_probe`、`eval_signal`、`owner`、`recommended_action`。✅ inventory 主表
 - [x] AC-A3: 给出“skill only / helper / callback route / MCP / ActionService / hook”的分类理由，且与 ADR-029 不冲突。✅ inventory Decision Ladder + ADR-029 Compatibility
 - [x] AC-A4: 明确哪些需求挂 F192/F203/F131，哪些由 F223 自己承接；不把 eval、L0、单能力 bug 混成一个 owner。✅ inventory Ownership Split

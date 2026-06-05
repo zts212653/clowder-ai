@@ -24,21 +24,43 @@ describe('F167 C2 AC-C7: hasReviewVerdict', () => {
     assert.equal(hasReviewVerdict('Lgtm!'), true);
   });
 
-  test('detects approve / approved', () => {
-    assert.equal(hasReviewVerdict('I approve this change'), true);
+  test('detects "approved" (past tense — the decision-made form, 2026-06-05 tuning)', () => {
     assert.equal(hasReviewVerdict('approved'), true);
-    assert.equal(hasReviewVerdict('APPROVE'), true);
+    assert.equal(hasReviewVerdict('Approved with caveats'), true);
+    assert.equal(hasReviewVerdict('approved by reviewer'), true);
+    assert.equal(hasReviewVerdict('APPROVED'), true);
+  });
+
+  test('does NOT trigger on bare "approve" / "approves" / "APPROVE" (intent, not decision, 2026-06-05 tuning)', () => {
+    // Tightened from `/\bapprove(d|s)?\b/i` to `/\bapproved\b/i` because the build
+    // observability (#2058 → 2026-06-05 eval) showed bare `approve` dominated
+    // false-positive fires (intent statements in working messages, not actual verdicts).
+    assert.equal(hasReviewVerdict('I approve this approach'), false);
+    assert.equal(hasReviewVerdict('the team approves the design'), false);
+    assert.equal(hasReviewVerdict('APPROVE'), false);
   });
 
   test('detects reject / rejected', () => {
     assert.equal(hasReviewVerdict('reject this'), true);
-    assert.equal(hasReviewVerdict('rejected due to P1'), true);
+    assert.equal(hasReviewVerdict('rejected due to spec mismatch'), true);
+    // P1 alone without colon no longer matches — but `rejected` still does (verb-form match).
+    assert.equal(hasReviewVerdict('rejected with P1 finding'), true);
   });
 
-  test('detects P1 / P2 priority flags', () => {
+  test('detects P1: / P2: with colon (classic verdict format, 2026-06-05 tuning)', () => {
     assert.equal(hasReviewVerdict('P1: logic bug in handler'), true);
-    assert.equal(hasReviewVerdict('found P2 in the wire-up'), true);
-    assert.equal(hasReviewVerdict('P0/P1/P2 all clean'), true);
+    assert.equal(hasReviewVerdict('P2: nit on naming'), true);
+    assert.equal(hasReviewVerdict('P1 : with space before colon'), true);
+    assert.equal(hasReviewVerdict('P2：中文冒号'), true);
+  });
+
+  test('does NOT trigger on bare "P1" / "P2" mentions without colon (2026-06-05 tuning)', () => {
+    // Tightened from `/\bP[12]\b/` to `/\bP[12]\s*[:：]/` — bare mentions are usually
+    // status updates / list items / narrative, not verdicts. Real verdicts use `P1:`.
+    assert.equal(hasReviewVerdict('P1 already fixed'), false);
+    assert.equal(hasReviewVerdict('found P2 in the wire-up'), false);
+    assert.equal(hasReviewVerdict('P0/P1/P2 all clean'), false);
+    assert.equal(hasReviewVerdict('PR review with P1 addressed'), false);
   });
 
   test('detects Chinese verdict keywords', () => {
@@ -73,9 +95,12 @@ describe('F167 C2 AC-C7: detectMatchedVerdictKeyword (F192 build verdict 2026-06
     assert.equal(detectMatchedVerdictKeyword('lgtm'), 'lgtm');
   });
 
-  test('returns "approve" for approve / approved', () => {
-    assert.equal(detectMatchedVerdictKeyword('I approve this change'), 'approve');
+  test('returns "approve" only for past tense "approved" (2026-06-05 tuning)', () => {
     assert.equal(detectMatchedVerdictKeyword('approved by reviewer'), 'approve');
+    assert.equal(detectMatchedVerdictKeyword('Approved with caveats'), 'approve');
+    // Bare present-tense "approve" / "approves" no longer match (intent ≠ decision).
+    assert.equal(detectMatchedVerdictKeyword('I approve this change'), null);
+    assert.equal(detectMatchedVerdictKeyword('the team approves the design'), null);
   });
 
   test('returns "reject" for reject / rejected', () => {
@@ -83,9 +108,14 @@ describe('F167 C2 AC-C7: detectMatchedVerdictKeyword (F192 build verdict 2026-06
     assert.equal(detectMatchedVerdictKeyword('rejected due to spec mismatch'), 'reject');
   });
 
-  test('returns "p1p2" for P1 or P2 (the overloaded review-discussion vocab)', () => {
+  test('returns "p1p2" only when P1/P2 is followed by colon (2026-06-05 tuning)', () => {
     assert.equal(detectMatchedVerdictKeyword('P1: logic bug'), 'p1p2');
-    assert.equal(detectMatchedVerdictKeyword('found P2 in handler'), 'p1p2');
+    assert.equal(detectMatchedVerdictKeyword('P2: nit on naming'), 'p1p2');
+    assert.equal(detectMatchedVerdictKeyword('P1：中文冒号'), 'p1p2');
+    // Bare mentions without colon no longer match.
+    assert.equal(detectMatchedVerdictKeyword('found P2 in handler'), null);
+    assert.equal(detectMatchedVerdictKeyword('P1 already addressed'), null);
+    assert.equal(detectMatchedVerdictKeyword('P0/P1/P2 all clean'), null);
   });
 
   test('returns "modify_suggestion" for 修改建议', () => {
@@ -111,19 +141,21 @@ describe('F167 C2 AC-C7: detectMatchedVerdictKeyword (F192 build verdict 2026-06
     // Locks the contract: if the text matches multiple patterns, the result is the
     // first one in VERDICT_PATTERNS order. Future reorderings would need to update
     // this test and consider how downstream label aggregations would shift.
-    assert.equal(detectMatchedVerdictKeyword('LGTM but also P1 finding'), 'lgtm');
-    assert.equal(detectMatchedVerdictKeyword('approve with P2 nit'), 'approve');
+    assert.equal(detectMatchedVerdictKeyword('LGTM but also P1: finding'), 'lgtm');
+    assert.equal(detectMatchedVerdictKeyword('approved with P2: nit'), 'approve');
   });
 
   test('hasReviewVerdict and detectMatchedVerdictKeyword agree on positives', () => {
     // Consistency between the boolean gate (route-serial uses) and the keyword
     // detector (counter label): same inputs should never disagree on whether the
-    // verdict pattern matched.
+    // verdict pattern matched. Samples cover the *current* (post-2026-06-05) contract.
     const samples = [
       'LGTM',
-      'approve this',
+      'approved by reviewer',
+      'I approve this approach', // bare approve no longer matches
       'reject',
-      'P1 finding',
+      'P1: finding',
+      'found P2 in handler', // no colon → no longer matches
       '修改建议: rename',
       '放行',
       '打回',

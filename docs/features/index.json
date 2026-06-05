@@ -1361,6 +1361,12 @@
       "name": "A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）",
       "status": "spec | **Owner**: Ragdoll (Opus-4.8) | **Priority**: P1 | **Source**: community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834)",
       "file": "F224-a2a-session-message-reliability.md"
+    },
+    {
+      "id": "F225",
+      "name": "Cat-Initiated Session Handoff — 猫主导的 session 接力",
+      "status": "spec | **Owner**: Ragdoll（Opus 4.8） | **Priority**: P2",
+      "file": "F225-cat-initiated-session-handoff.md"
     }
   ]
 }
