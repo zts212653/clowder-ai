@@ -20,8 +20,8 @@ export interface BackfillPlanEntry {
    *  semantics — NOT the invocation's createdAt. */
   date: string;
   /** epoch ms — usageRecordedAt override pinned to the live-writer anchor:
-   *  `max(message.timestamp)` over contributing messages, falling back to
-   *  `invocation.updatedAt` when no message carries a usable timestamp.
+   *  `invocation.updatedAt`, the closest persisted analog to the succeeded
+   *  update time used by live writers.
    *  Never `invocation.createdAt` (would mis-bucket cross-midnight runs). */
   usageRecordedAt: number;
   /** queue-* / connector-* / mm-* / other — classification by idempotency prefix */
@@ -96,28 +96,24 @@ export function indexMessagesByInvocation(messages: readonly StoredMessage[]): M
 }
 
 /**
- * Aggregate the per-cat usage and the anchor timestamp from a non-empty set of
- * contributing messages. Returns `null` when none of them carries a usable
- * `metadata.usage` (the orphan is unrecoverable).
+ * Aggregate the per-cat usage from a non-empty set of contributing messages.
+ * Returns `null` when none of them carries usable `metadata.usage` (the orphan
+ * is unrecoverable).
  */
 function aggregateUsageFromMessages(
   messages: readonly StoredMessage[],
-): { usageByCat: Record<string, TokenUsage>; messageCount: number; maxTimestamp: number } | null {
+): { usageByCat: Record<string, TokenUsage>; messageCount: number } | null {
   const aggregated = new Map<string, TokenUsage>();
   let messageCount = 0;
-  let maxTimestamp = 0;
   for (const msg of messages) {
     if (!msg.catId) continue;
     const usage = msg.metadata?.usage;
     if (!usage) continue;
     aggregated.set(msg.catId, mergeTokenUsage(aggregated.get(msg.catId), usage));
     messageCount += 1;
-    if (typeof msg.timestamp === 'number' && msg.timestamp > maxTimestamp) {
-      maxTimestamp = msg.timestamp;
-    }
   }
   if (aggregated.size === 0) return null;
-  return { usageByCat: Object.fromEntries(aggregated), messageCount, maxTimestamp };
+  return { usageByCat: Object.fromEntries(aggregated), messageCount };
 }
 
 type OrphanOutcome = { kind: 'entry'; entry: BackfillPlanEntry } | { kind: 'unrecoverable' };
@@ -137,12 +133,11 @@ function planOrphan(
   const aggregate = aggregateUsageFromMessages(relatedMessages);
   if (!aggregate) return { kind: 'unrecoverable' };
 
-  // Anchor to live-writer semantics: usage arrived around the done event time,
-  // which is captured by the contributing message's timestamp. Fall back to
-  // invocation.updatedAt (≈ succeeded-update time) if no message carried a
-  // usable timestamp. We never use createdAt — that would mis-bucket
-  // cross-midnight invocations relative to the live writer's behavior.
-  const usageRecordedAt = aggregate.maxTimestamp > 0 ? aggregate.maxTimestamp : invocation.updatedAt;
+  // Anchor to live-writer semantics: live writers stamp usageRecordedAt at the
+  // succeeded update. Stream-persisted message timestamps are invocation start
+  // times, so they cannot be used as completion anchors. updatedAt is the
+  // closest persisted analog for historical orphan records.
+  const usageRecordedAt = invocation.updatedAt;
   return {
     kind: 'entry',
     entry: {
@@ -170,10 +165,9 @@ function planOrphan(
  *      as unrecoverable (not in the entries list) so the operator sees how
  *      many orphans cannot be repaired.
  *   5. `usageRecordedAt` mirrors the *live writer* semantics: the moment usage
- *      actually arrived. For the live path this is roughly the succeeded-update
- *      time, so we use `max(message.timestamp)` over the contributing messages
- *      (the timestamp on the `done` event), falling back to
- *      `invocation.updatedAt` if no message timestamp is available.
+ *      was written on success. For historical orphans this is represented by
+ *      `invocation.updatedAt`. We deliberately do NOT use message timestamps:
+ *      stream-persisted assistant messages are stamped at invocation start.
  *      We deliberately do NOT use `invocation.createdAt`: a long invocation
  *      that started before UTC midnight and finished after would otherwise
  *      backfill onto the wrong day relative to the live writer's behavior.

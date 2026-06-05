@@ -148,11 +148,12 @@ describe('planBackfill', () => {
     assert.equal(plan.summary.orphanCandidates, 0);
   });
 
-  test('recoverable: aggregates messages, anchors usageRecordedAt to max(message.timestamp)', () => {
+  test('recoverable: aggregates messages, anchors usageRecordedAt to invocation.updatedAt', () => {
     const now = Date.now();
     const invCreatedAt = now - 2 * DAY_MS;
     const invUpdatedAt = invCreatedAt + 30_000;
-    // Spread messages across the invocation lifetime; the latest one wins as the anchor.
+    // Message timestamps may be stream-start timestamps; invocation.updatedAt is the
+    // closest persisted analog to the live writer's succeeded update time.
     const earlyTs = invCreatedAt + 5_000;
     const midTs = invCreatedAt + 12_000;
     const lateTs = invCreatedAt + 28_000;
@@ -168,8 +169,8 @@ describe('planBackfill', () => {
     assert.equal(plan.entries.length, 1);
     const [entry] = plan.entries;
     assert.equal(entry.invocationId, 'inv-1');
-    assert.equal(entry.usageRecordedAt, lateTs, 'anchor should be the latest contributing message timestamp');
-    assert.equal(entry.date, new Date(lateTs).toISOString().slice(0, 10));
+    assert.equal(entry.usageRecordedAt, invUpdatedAt, 'anchor should use invocation completion/update time');
+    assert.equal(entry.date, new Date(invUpdatedAt).toISOString().slice(0, 10));
     assert.equal(entry.source, 'queue');
     assert.equal(entry.messageCount, 3);
     assert.equal(entry.usageByCat.opus.inputTokens, 150);
@@ -178,7 +179,7 @@ describe('planBackfill', () => {
     assert.equal(entry.usageByCat.codex.outputTokens, 20);
   });
 
-  test('cross-midnight invocation anchors to message.timestamp, not createdAt', () => {
+  test('cross-midnight invocation anchors to invocation.updatedAt, not message start timestamp', () => {
     // Reproduce the case 砚砚 flagged: invocation begins one calendar day and finishes
     // the next. The live writer would have stamped usageRecordedAt ≈ succeeded time,
     // which lands the row on the *finish* day. The backfill must preserve that.
@@ -187,7 +188,7 @@ describe('planBackfill', () => {
     const todayEarlyMorning = Date.UTC(2026, 4, 31, 0, 15, 0); // 2026-05-31 00:15 UTC
     // Window of "now" doesn't matter for the cutoff guard — make it generous.
     const messages = [
-      makeMessage('inv-cross', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: todayEarlyMorning }),
+      makeMessage('inv-cross', 'opus', { inputTokens: 100, outputTokens: 10 }, { timestamp: yesterdayLateNight }),
     ];
     const messageIndex = indexMessagesByInvocation(messages);
     const invocations = [
@@ -201,7 +202,11 @@ describe('planBackfill', () => {
     const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 365 * DAY_MS });
     assert.equal(plan.entries.length, 1);
     const [entry] = plan.entries;
-    assert.equal(entry.usageRecordedAt, todayEarlyMorning, 'anchor must follow the done event, not the start');
+    assert.equal(
+      entry.usageRecordedAt,
+      todayEarlyMorning,
+      'anchor must follow invocation completion, not message start',
+    );
     assert.equal(entry.date, '2026-05-31', 'cross-midnight rows must land on the finish day');
     assert.notEqual(entry.date, '2026-05-30', 'must NOT bucket onto the start day');
   });
