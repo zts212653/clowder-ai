@@ -95,6 +95,10 @@ describe('validateExternalUrl', () => {
     assert.throws(() => validateExternalUrl('http://[feff::1]/secret'), /private/);
   });
 
+  it('rejects local-use IPv6 translation addresses', () => {
+    assert.throws(() => validateExternalUrl('http://[64:ff9b:1::a9fe:a9fe]/secret'), /private/);
+  });
+
   it('allows hostnames that resolve to public addresses', async () => {
     await assert.doesNotReject(() =>
       validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: '93.184.216.34' }]),
@@ -140,6 +144,16 @@ describe('validateExternalUrl', () => {
   it('rejects hostnames that resolve to site-local IPv6 addresses', async () => {
     await assert.rejects(
       () => validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [{ address: 'fec0::1' }]),
+      /private/,
+    );
+  });
+
+  it('rejects hostnames that resolve to local-use IPv6 translation addresses', async () => {
+    await assert.rejects(
+      () =>
+        validateExternalUrlResolved('https://cdn.example.test/image.png', async () => [
+          { address: '64:ff9b:1::a9fe:a9fe' },
+        ]),
       /private/,
     );
   });

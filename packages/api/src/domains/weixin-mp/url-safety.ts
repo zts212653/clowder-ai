@@ -21,15 +21,36 @@ const NON_PUBLIC_IPV4_RANGES: readonly [number, number][] = [
   [0xf0000000, 0xf0000000], // 240.0.0.0/4 reserved
 ] as const;
 
-const NON_PUBLIC_IPV6_RANGES = [
-  /^::1$/,
-  /^::$/,
-  /^f[cd][0-9a-f]{2}:/i,
-  /^fe[89ab][0-9a-f]?:/i,
-  /^fe[cdef][0-9a-f]?:/i,
-  /^ff/i,
-  /^2001:db8:/i,
-];
+const IPV6_FULL_MASK = (1n << 128n) - 1n;
+
+const NON_PUBLIC_IPV6_CIDRS = [
+  '::/128', // unspecified
+  '::1/128', // loopback
+  '64:ff9b::/96', // IPv4/IPv6 translation
+  '64:ff9b:1::/48', // local-use IPv4/IPv6 translation
+  '100::/64', // discard-only
+  '2001::/23', // IETF protocol assignments
+  '2001:2::/48', // benchmark tests
+  '2001:db8::/32', // documentation
+  '2001:10::/28', // deprecated ORCHID
+  '2001:20::/28', // ORCHIDv2
+  '2002::/16', // 6to4
+  '3fff::/20', // documentation
+  'fc00::/7', // unique local
+  'fe80::/10', // link-local
+  'fec0::/10', // deprecated site-local
+  'ff00::/8', // multicast
+] as const;
+
+const NON_PUBLIC_IPV6_RANGES = NON_PUBLIC_IPV6_CIDRS.map((cidr) => {
+  const [address, prefixRaw] = cidr.split('/');
+  const prefixLength = Number(prefixRaw);
+  const network = parseIpv6(address ?? '');
+  if (network === null || !Number.isInteger(prefixLength) || prefixLength < 0 || prefixLength > 128) {
+    throw new Error(`Invalid IPv6 CIDR: ${cidr}`);
+  }
+  return { network, prefixLength };
+});
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal', 'metadata.internal']);
 
@@ -88,8 +109,60 @@ function isPublicIpv4(hostname: string): boolean {
   return !NON_PUBLIC_IPV4_RANGES.some(([network, mask]) => (value & mask) >>> 0 === network);
 }
 
+function parseIpv6Part(part: string): number[] | null {
+  if (part.length === 0) return [];
+  const values: number[] = [];
+  for (const segment of part.split(':')) {
+    if (segment.length === 0) return null;
+    if (segment.includes('.')) {
+      const v4 = parseIpv4(segment);
+      if (v4 === null) return null;
+      values.push((v4 >>> 16) & 0xffff, v4 & 0xffff);
+      continue;
+    }
+    if (!/^[0-9a-f]{1,4}$/i.test(segment)) return null;
+    values.push(parseInt(segment, 16));
+  }
+  return values;
+}
+
+function parseIpv6(hostname: string): bigint | null {
+  const [address] = hostname.toLowerCase().split('%', 1);
+  if (!address || address.includes(':::')) return null;
+  const compressed = address.split('::');
+  if (compressed.length > 2) return null;
+
+  const left = parseIpv6Part(compressed[0] ?? '');
+  const right = parseIpv6Part(compressed.length === 2 ? (compressed[1] ?? '') : '');
+  if (!left || !right) return null;
+
+  const missing = 8 - left.length - right.length;
+  if (compressed.length === 1) {
+    if (missing !== 0) return null;
+  } else if (missing < 0) {
+    return null;
+  }
+
+  const groups = compressed.length === 1 ? left : [...left, ...Array.from({ length: missing }, () => 0), ...right];
+  if (groups.length !== 8) return null;
+
+  return groups.reduce((value, group) => (value << 16n) | BigInt(group), 0n);
+}
+
+function ipv6Mask(prefixLength: number): bigint {
+  if (prefixLength === 0) return 0n;
+  return (IPV6_FULL_MASK << BigInt(128 - prefixLength)) & IPV6_FULL_MASK;
+}
+
+function matchesIpv6Range(address: bigint, network: bigint, prefixLength: number): boolean {
+  const mask = ipv6Mask(prefixLength);
+  return (address & mask) === (network & mask);
+}
+
 function isPublicIpv6(hostname: string): boolean {
-  return !NON_PUBLIC_IPV6_RANGES.some((pattern) => pattern.test(hostname));
+  const address = parseIpv6(hostname);
+  if (address === null) return false;
+  return !NON_PUBLIC_IPV6_RANGES.some(({ network, prefixLength }) => matchesIpv6Range(address, network, prefixLength));
 }
 
 function assertExternalHostnameAllowed(hostname: string): string {
