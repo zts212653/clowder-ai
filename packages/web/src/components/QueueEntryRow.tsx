@@ -164,8 +164,8 @@ function QueueEntryRow({
         type="button"
         onClick={() => onRemove(entry.id)}
         className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
-        title="撤回"
-        aria-label="撤回"
+        title="删除"
+        aria-label="删除"
       >
         <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
           <path

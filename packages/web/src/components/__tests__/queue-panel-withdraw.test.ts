@@ -1,6 +1,6 @@
 /**
  * F39 UX: withdrawing a queued entry should update UI immediately.
- * User expectation: after "撤回/取消" a queued message, it shouldn't linger stale in QueuePanel.
+ * User expectation: after "撤回编辑/删除" a queued message, it shouldn't linger stale in QueuePanel.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -73,7 +73,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
 
     expect(container.innerHTML).toContain('queued to withdraw');
 
-    const removeBtn = container.querySelector('button[aria-label="撤回"]') as HTMLButtonElement | null;
+    const removeBtn = container.querySelector('button[aria-label="删除"]') as HTMLButtonElement | null;
     expect(removeBtn).not.toBeNull();
 
     await act(async () => {
@@ -84,7 +84,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toBe('');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.title === '已取消')).toBe(true);
+    expect(toasts.some((t) => t.title === '已删除')).toBe(true);
   });
 
   it('withdraws entry and queues its text for composer recall-edit', async () => {
@@ -217,7 +217,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toContain('queued to withdraw');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回失败')).toBe(true);
+    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回编辑失败')).toBe(true);
   });
 
   it('rolls back queue state and does not queue composer insert when recall-edit throws', async () => {
@@ -244,7 +244,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toContain('queued to withdraw');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回失败')).toBe(true);
+    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回编辑失败')).toBe(true);
   });
 
   it('rolls back queue state and shows error toast when withdraw fails', async () => {
@@ -259,7 +259,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       root.render(React.createElement(QueuePanel, { threadId: 'thread-1' }));
     });
 
-    const removeBtn = container.querySelector('button[aria-label="撤回"]') as HTMLButtonElement | null;
+    const removeBtn = container.querySelector('button[aria-label="删除"]') as HTMLButtonElement | null;
     expect(removeBtn).not.toBeNull();
 
     await act(async () => {
@@ -271,6 +271,6 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(container.innerHTML).toContain('queued to withdraw');
 
     const toasts = useToastStore.getState().toasts;
-    expect(toasts.some((t) => t.type === 'error' && t.title === '撤回失败')).toBe(true);
+    expect(toasts.some((t) => t.type === 'error' && t.title === '删除失败')).toBe(true);
   });
 });

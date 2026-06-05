@@ -133,17 +133,17 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '撤回失败',
-            message: data?.error ?? '撤回失败，请重试',
+            title: '删除失败',
+            message: data?.error ?? '删除失败，请重试',
             threadId,
             duration: 5000,
           });
           return;
         }
-        addToast({ type: 'success', title: '已取消', message: '已从队列撤回', threadId, duration: 2500 });
+        addToast({ type: 'success', title: '已删除', message: '已从队列删除', threadId, duration: 2500 });
       } catch {
         setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '撤回失败', message: '撤回失败，请重试', threadId, duration: 5000 });
+        addToast({ type: 'error', title: '删除失败', message: '删除失败，请重试', threadId, duration: 5000 });
       }
     },
     [addToast, queue, setQueue, threadId],
@@ -173,8 +173,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '撤回失败',
-            message: data?.error ?? '撤回失败，请重试',
+            title: '撤回编辑失败',
+            message: data?.error ?? '撤回编辑失败，请重试',
             threadId,
             duration: 5000,
           });
@@ -199,7 +199,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         });
       } catch {
         setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '撤回失败', message: '撤回失败，请重试', threadId, duration: 5000 });
+        addToast({ type: 'error', title: '撤回编辑失败', message: '撤回编辑失败，请重试', threadId, duration: 5000 });
       }
     },
     [addToast, queue, setPendingChatInsert, setQueue, threadId],
