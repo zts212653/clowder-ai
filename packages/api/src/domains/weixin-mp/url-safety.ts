@@ -3,6 +3,7 @@ import type { IncomingMessage, RequestOptions } from 'node:http';
 import http from 'node:http';
 import https from 'node:https';
 import { isIP } from 'node:net';
+import { performance } from 'node:perf_hooks';
 
 const NON_PUBLIC_IPV4_RANGES: readonly [number, number][] = [
   [0x00000000, 0xff000000], // 0.0.0.0/8 "this network"
@@ -253,6 +254,28 @@ export function createPinnedRequestOptions(resolved: ResolvedExternalUrl): Pinne
   return options;
 }
 
+function createPinnedFetchTimeoutError(timeoutMs: number): Error {
+  return new Error(`External image fetch timed out after ${timeoutMs}ms`);
+}
+
+async function resolveExternalUrlWithinTimeout(
+  url: string,
+  dnsLookup: DnsLookup,
+  timeoutMs: number,
+): Promise<ResolvedExternalUrl> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      resolveExternalUrl(url, dnsLookup),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(createPinnedFetchTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function collectPinnedResponse(res: IncomingMessage, maxBytes: number): Promise<PinnedFetchResult> {
   return new Promise((resolve, reject) => {
     const statusCode = res.statusCode ?? 0;
@@ -291,14 +314,18 @@ function collectPinnedResponse(res: IncomingMessage, maxBytes: number): Promise<
 }
 
 export async function fetchExternalUrlPinned(url: string, options: PinnedFetchOptions): Promise<PinnedFetchResult> {
-  const resolved = await resolveExternalUrl(url, options.dnsLookup ?? defaultDnsLookup);
+  const startedAt = performance.now();
+  const timeoutError = () => createPinnedFetchTimeoutError(options.timeoutMs);
+  const resolved = await resolveExternalUrlWithinTimeout(url, options.dnsLookup ?? defaultDnsLookup, options.timeoutMs);
+  const remainingTimeoutMs = Math.ceil(options.timeoutMs - (performance.now() - startedAt));
+  if (remainingTimeoutMs <= 0) throw timeoutError();
+
   const requestOptions = createPinnedRequestOptions(resolved);
   const client = resolved.url.protocol === 'https:' ? https : http;
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeoutError = () => new Error(`External image fetch timed out after ${options.timeoutMs}ms`);
     const settle = <T>(fn: (value: T) => void, value: T) => {
       if (settled) return;
       settled = true;
@@ -316,8 +343,8 @@ export async function fetchExternalUrlPinned(url: string, options: PinnedFetchOp
       const err = timeoutError();
       req.destroy(err);
       settle(reject, err);
-    }, options.timeoutMs);
-    req.setTimeout(options.timeoutMs, () => {
+    }, remainingTimeoutMs);
+    req.setTimeout(remainingTimeoutMs, () => {
       const err = timeoutError();
       req.destroy(err);
       settle(reject, err);

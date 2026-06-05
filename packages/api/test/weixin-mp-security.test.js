@@ -224,6 +224,38 @@ describe('validateExternalUrl', () => {
       http.request = originalRequest;
     }
   });
+
+  it('rejects stalled DNS resolution after the wall-clock timeout', async () => {
+    const originalRequest = http.request;
+    let requestCalled = false;
+
+    http.request = () => {
+      requestCalled = true;
+      throw new Error('request should not start before DNS timeout');
+    };
+
+    try {
+      const fetchPromise = fetchExternalUrlPinned('http://cdn.example.test/image.png', {
+        timeoutMs: 20,
+        maxBytes: 1024,
+        dnsLookup: async () => new Promise(() => {}),
+      });
+
+      const result = await Promise.race([
+        fetchPromise.then(
+          () => ({ status: 'resolved' }),
+          (err) => ({ status: 'rejected', err }),
+        ),
+        new Promise((resolve) => setTimeout(() => resolve({ status: 'pending' }), 80)),
+      ]);
+
+      assert.equal(result.status, 'rejected');
+      assert.match(result.err.message, /timed out after 20ms/);
+      assert.equal(requestCalled, false);
+    } finally {
+      http.request = originalRequest;
+    }
+  });
 });
 
 describe('markdownToWxHtml sanitization', () => {
