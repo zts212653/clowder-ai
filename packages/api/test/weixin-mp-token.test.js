@@ -113,7 +113,8 @@ describe('WeixinMpTokenManager Redis cache resilience', () => {
 
     assert.equal(await manager.getAccessToken(), 'redis-token');
     await manager.invalidateAccessToken();
-    assert.equal(deletedKey, 'weixin-mp:access-token:appid');
+    assert.match(deletedKey, /^weixin-mp:access-token:appid:[0-9a-f]{16}$/);
+    assert.ok(!deletedKey.includes('secret'), 'Redis token key must not expose the AppSecret');
     assert.equal(await manager.getAccessToken(), 'fresh-token');
     assert.equal(fetchCalls, 1);
   });
@@ -145,5 +146,59 @@ describe('WeixinMpTokenManager Redis cache resilience', () => {
     assert.equal(await manager.getAccessToken(), 'fresh-token');
     assert.equal(fetchCalls, 1);
     assert.equal(cached, 'fresh-token');
+  });
+
+  it('refreshes the in-memory token when the AppSecret changes', async () => {
+    const secrets = [];
+    globalThis.fetch = async (url) => {
+      const secret = new URL(String(url)).searchParams.get('secret');
+      secrets.push(secret);
+      return tokenResponse(`${secret}-token`);
+    };
+
+    const redis = {
+      get: async () => null,
+      setex: async () => undefined,
+    };
+    const config = {
+      WEIXIN_MP_APP_ID: 'appid',
+      WEIXIN_MP_APP_SECRET: 'old-secret',
+    };
+    const manager = new WeixinMpTokenManager(redis, config);
+
+    assert.equal(await manager.getAccessToken(), 'old-secret-token');
+    config.WEIXIN_MP_APP_SECRET = 'new-secret';
+    assert.equal(await manager.getAccessToken(), 'new-secret-token');
+    assert.deepEqual(secrets, ['old-secret', 'new-secret']);
+  });
+
+  it('does not reuse Redis tokens written for a previous AppSecret', async () => {
+    const cachedTokens = new Map();
+    const secrets = [];
+    globalThis.fetch = async (url) => {
+      const secret = new URL(String(url)).searchParams.get('secret');
+      secrets.push(secret);
+      return tokenResponse(`${secret}-token`);
+    };
+
+    const redis = {
+      get: async (key) => cachedTokens.get(key) ?? null,
+      setex: async (key, _ttl, token) => {
+        cachedTokens.set(key, token);
+      },
+    };
+
+    const oldManager = new WeixinMpTokenManager(redis, {
+      WEIXIN_MP_APP_ID: 'appid',
+      WEIXIN_MP_APP_SECRET: 'old-secret',
+    });
+    assert.equal(await oldManager.getAccessToken(), 'old-secret-token');
+
+    const newManager = new WeixinMpTokenManager(redis, {
+      WEIXIN_MP_APP_ID: 'appid',
+      WEIXIN_MP_APP_SECRET: 'new-secret',
+    });
+    assert.equal(await newManager.getAccessToken(), 'new-secret-token');
+    assert.deepEqual(secrets, ['old-secret', 'new-secret']);
   });
 });
