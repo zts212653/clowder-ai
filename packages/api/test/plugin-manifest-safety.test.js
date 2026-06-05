@@ -680,6 +680,65 @@ describe('PluginResourceActivator config handling', () => {
     assert.equal(limbRegistry.getNode('sync-node')?.displayName, 'fresh-token');
   });
 
+  it('keeps registered limb aligned with persisted config when config refresh write fails', async () => {
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
+    const manifest = {
+      id: 'test-plugin-sync-write-fail',
+      name: 'Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'TEST_PLUGIN_SYNC_WRITE_FAIL_TOKEN', label: 'Token', sensitive: true, required: true }],
+      resources: [{ type: 'limb', path: 'limb.yml' }],
+    };
+    mkdirSync(join(projectRoot, 'plugins', manifest.id), { recursive: true });
+    writeFileSync(join(projectRoot, 'plugins', manifest.id, 'limb.yml'), 'nodeId: sync-node\n');
+
+    let capabilities = { version: 1, capabilities: [] };
+    let failRefreshWrite = false;
+    const limbRegistry = new LimbRegistry();
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir: join(projectRoot, 'plugins'),
+      limbRegistry,
+      readCapabilities: async () => structuredClone(capabilities),
+      writeCapabilities: async (next) => {
+        const writesFreshNode = next.capabilities.some((cap) => cap.limbNodeId === 'fresh-node');
+        if (failRefreshWrite && writesFreshNode) {
+          throw new Error('simulated config write failure');
+        }
+        capabilities = structuredClone(next);
+      },
+      withCapabilityLock: async (fn) => fn(),
+      limbAdapterFactory: async (_pluginId, _yamlPath, pluginConfig) => {
+        const token = pluginConfig.TEST_PLUGIN_SYNC_WRITE_FAIL_TOKEN;
+        return {
+          nodeId: token === 'fresh-token' ? 'fresh-node' : 'old-node',
+          displayName: token,
+          platform: 'test',
+          capabilities: [{ cap: 'test', commands: ['test.run'], authLevel: 'free' }],
+          invoke: async () => ({ success: true }),
+        };
+      },
+    });
+
+    process.env.TEST_PLUGIN_SYNC_WRITE_FAIL_TOKEN = 'old-token';
+    try {
+      await activator.enablePlugin(manifest);
+    } finally {
+      delete process.env.TEST_PLUGIN_SYNC_WRITE_FAIL_TOKEN;
+    }
+    assert.equal(capabilities.capabilities[0]?.limbNodeId, 'old-node');
+    assert.equal(limbRegistry.getNode('old-node')?.displayName, 'old-token');
+
+    writePluginConfig(projectRoot, manifest.id, [{ name: 'TEST_PLUGIN_SYNC_WRITE_FAIL_TOKEN', value: 'fresh-token' }]);
+    failRefreshWrite = true;
+    await assert.rejects(() => activator.syncPluginEnv(manifest), /simulated config write failure/);
+
+    assert.equal(capabilities.capabilities[0]?.limbNodeId, 'old-node');
+    assert.equal(limbRegistry.getNode('old-node')?.displayName, 'old-token');
+    assert.equal(limbRegistry.getNode('fresh-node'), undefined);
+  });
+
   it('refreshes enabled limb nodes with legacy backslash capability ids after plugin config changes', async () => {
     const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-config-test-'));
     const manifest = {

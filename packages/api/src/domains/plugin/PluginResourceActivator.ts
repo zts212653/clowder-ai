@@ -46,6 +46,13 @@ export interface ScheduleTaskRunner {
   unregister(taskId: string): boolean;
 }
 
+interface PendingLimbNodeSwap {
+  oldNodeId?: string;
+  oldNode?: ILimbNode;
+  refreshedNode: ILimbNode;
+  capabilityChanged: boolean;
+}
+
 export interface PluginResourceActivatorDeps {
   resolveProjectRoot: () => string;
   resolveMainProjectRoot?: () => string;
@@ -687,12 +694,31 @@ export class PluginResourceActivator {
       const mcpEnv = this.buildMcpEnv(manifest);
       const pluginConfig = resolveRuntimePluginConfig(manifest);
       let changed = false;
+      const pendingLimbSwaps: PendingLimbNodeSwap[] = [];
       for (const cap of next.capabilities) {
         if (cap.pluginId !== manifest.id) continue;
         if (this.syncMcpCapabilityEnv(cap, mcpEnv)) changed = true;
-        if (await this.refreshLimbCapability(manifest, cap, pluginConfig)) changed = true;
+        const limbSwap = await this.prepareLimbCapabilityRefresh(manifest, cap, pluginConfig);
+        if (limbSwap) {
+          pendingLimbSwaps.push(limbSwap);
+          if (limbSwap.capabilityChanged) changed = true;
+        }
       }
-      if (changed) await this.writeCapabilitiesWithRollback(previous, next);
+      if (changed) {
+        await this.writeCapabilitiesWithRollback(previous, next);
+        try {
+          await this.applyPendingLimbSwaps(pendingLimbSwaps);
+        } catch (err) {
+          try {
+            await this.writeCapabilitiesWithRollback(next, previous);
+          } catch {
+            /* Preserve the registry swap failure; config rollback is best-effort here. */
+          }
+          throw err;
+        }
+      } else {
+        await this.applyPendingLimbSwaps(pendingLimbSwaps);
+      }
     });
   }
 
@@ -724,16 +750,16 @@ export class PluginResourceActivator {
     return true;
   }
 
-  private async refreshLimbCapability(
+  private async prepareLimbCapabilityRefresh(
     manifest: PluginManifest,
     cap: CapabilityEntry,
     pluginConfig: Record<string, string>,
-  ): Promise<boolean> {
-    if (cap.type !== 'limb' || !cap.enabled) return false;
+  ): Promise<PendingLimbNodeSwap | null> {
+    if (cap.type !== 'limb' || !cap.enabled) return null;
 
     const normalizedCapId = normalizeCapId(cap.id);
     const resource = manifest.resources.find((r) => resourceCapId(manifest.id, r) === normalizedCapId);
-    if (!resource?.path) return false;
+    if (!resource?.path) return null;
     if (!this.deps.limbAdapterFactory) {
       throw new Error('No limb adapter factory configured');
     }
@@ -741,11 +767,29 @@ export class PluginResourceActivator {
     const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
     const refreshedNode = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
-    await this.replaceRegisteredLimbNode(cap.limbNodeId, refreshedNode);
-
-    if (cap.limbNodeId === refreshedNode.nodeId) return false;
+    const oldNodeId = cap.limbNodeId;
+    const oldNode = oldNodeId ? this.deps.limbRegistry.getNodeHandle(oldNodeId) : undefined;
+    const capabilityChanged = oldNodeId !== refreshedNode.nodeId;
+    if (!capabilityChanged) {
+      return { oldNodeId, oldNode, refreshedNode, capabilityChanged };
+    }
     cap.limbNodeId = refreshedNode.nodeId;
-    return true;
+    return { oldNodeId, oldNode, refreshedNode, capabilityChanged };
+  }
+
+  private async applyPendingLimbSwaps(swaps: PendingLimbNodeSwap[]): Promise<void> {
+    const applied: PendingLimbNodeSwap[] = [];
+    try {
+      for (const swap of swaps) {
+        await this.replaceRegisteredLimbNode(swap.oldNodeId, swap.refreshedNode);
+        applied.push(swap);
+      }
+    } catch (err) {
+      for (const swap of applied.reverse()) {
+        await this.restoreRegisteredLimbNode(swap);
+      }
+      throw err;
+    }
   }
 
   private async replaceRegisteredLimbNode(oldNodeId: string | undefined, refreshedNode: ILimbNode): Promise<void> {
@@ -762,6 +806,20 @@ export class PluginResourceActivator {
         }
       }
       throw err;
+    }
+  }
+
+  private async restoreRegisteredLimbNode(swap: PendingLimbNodeSwap): Promise<void> {
+    try {
+      this.deps.limbRegistry.deregister(swap.refreshedNode.nodeId);
+    } catch {
+      /* best-effort registry rollback */
+    }
+    if (!swap.oldNode) return;
+    try {
+      await this.deps.limbRegistry.register(swap.oldNode);
+    } catch {
+      /* best-effort registry rollback */
     }
   }
 
