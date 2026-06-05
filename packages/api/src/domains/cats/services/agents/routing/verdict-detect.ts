@@ -15,20 +15,38 @@
 
 /**
  * Review verdict 关键词。保守集，避免常见日常用语误报：
- * - 英文：LGTM / approve(d) / reject(ed) / P1 / P2
+ * - 英文：LGTM / approved (past-tense only — see tuning note) / reject(ed) / P1: / P2:
  * - 中文：修改建议 / 放行 / 打回
  *
- * 故意不收录："通过"（"测试通过"类日常说法过多）、"approved by"（和"approve"重复）。
+ * 故意不收录："通过"（"测试通过"类日常说法过多）、"approved by"（和"approved"重复）。
  *
  * Each pattern carries a stable telemetry name so the C2 counter can attribute which
  * keyword fired (F192 build verdict 2026-06-03: owner needs keyword-overload visibility
  * to decide whether to tune VERDICT_PATTERNS vs bypass specific thread kinds).
+ *
+ * **2026-06-05 keyword tuning (eval:a2a fix verdict)**: the build observability shipped
+ * in #2058 produced a decisive breakdown — 19/19 fires were `thread_system_kind="product"`
+ * (system-thread bypass hypothesis falsified) and 18/19 were `trigger="approve"|"p1p2"`
+ * (keyword-overload hypothesis confirmed). Two surgical tightenings:
+ *
+ * 1. `approve`: was `/\bapprove(d|s)?\b/i`, now `/\bapproved\b/i`. Past-tense only — the
+ *    strongest "decision made" signal. Drops bare `approve` / `approves`, which mostly
+ *    show up as intent statements ("I approve this approach") or third-person narrative
+ *    ("the team approves the design") rather than ball-dropping verdicts.
+ * 2. `p1p2`: was `/\bP[12]\b/`, now `/\bP[12]\s*[:：]/`. Colon required — the classic
+ *    verdict format (`P1: bug`, `P2: nit`). Drops bare mentions like `P1 already fixed`
+ *    (status update), `P0/P1/P2 all clean` (list/summary), `PR review with P1 addressed`.
+ *
+ * Trade-off accepted: a few uncolon'd real verdicts ("found P1 in handler") will slip
+ * through. If next eval shows ratio still elevated, re-tune (likely add classifier-context
+ * fallback `P[12]\s+(?:finding|issue|bug|blocker|nit)`); if ratio crashes below floor and
+ * real ball-drops escape, restore broader pattern. Reversible.
  */
 const VERDICT_PATTERNS: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
   { name: 'lgtm', pattern: /\bLGTM\b/i },
-  { name: 'approve', pattern: /\bapprove(d|s)?\b/i },
+  { name: 'approve', pattern: /\bapproved\b/i },
   { name: 'reject', pattern: /\breject(ed|s)?\b/i },
-  { name: 'p1p2', pattern: /\bP[12]\b/ },
+  { name: 'p1p2', pattern: /\bP[12]\s*[:：]/ },
   { name: 'modify_suggestion', pattern: /修改建议/ },
   { name: 'approve_cn', pattern: /放行/ },
   { name: 'reject_cn', pattern: /打回/ },
