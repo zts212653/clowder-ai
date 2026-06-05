@@ -18,6 +18,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
@@ -129,6 +131,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',

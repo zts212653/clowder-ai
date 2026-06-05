@@ -75,6 +75,8 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
   'cat_cafe_get_thread_context',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
   'cat_cafe_list_threads',
   'cat_cafe_register_external_runtime_session',
   // F223: first-party Hub UX actions are callback-authenticated writes that

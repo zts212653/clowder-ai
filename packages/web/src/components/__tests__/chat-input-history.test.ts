@@ -19,6 +19,14 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
+    name: 'ME',
+    aliases: [],
+    mentionPatterns: ['@co-creator'],
+    color: { primary: '#D4A76A', secondary: '#FFF8F0' },
+  }),
+}));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     cats: [
@@ -88,7 +96,7 @@ describe('ChatInput history completion', () => {
       pressKey(getTextarea(), 'Enter');
     });
 
-    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('hello world', undefined, undefined, undefined, undefined);
     expect(useInputHistoryStore.getState().entries).toContain('hello world');
   });
 

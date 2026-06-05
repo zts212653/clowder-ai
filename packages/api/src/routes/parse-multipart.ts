@@ -19,6 +19,8 @@ export type ParsedMultipart =
       visibility?: string;
       whisperTo?: string[];
       deliveryMode?: 'immediate' | 'queue' | 'force';
+      /** #699: ID of message being replied to (quote). */
+      replyTo?: string;
     }
   | { error: string };
 
@@ -88,6 +90,7 @@ export async function parseMultipart(
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
     ...(parseResult.data.deliveryMode ? { deliveryMode: parseResult.data.deliveryMode } : {}),
+    ...(parseResult.data.replyTo ? { replyTo: parseResult.data.replyTo } : {}),
     contentBlocks: blocks,
   };
 }
