@@ -179,6 +179,7 @@ describe('PluginsContent GitHub configuration', () => {
 
     const disableToggle = container.querySelector('button[title="禁用"]');
     expect(disableToggle).toBeTruthy();
+    expect(disableToggle?.parentElement?.closest('button')).toBeNull();
 
     await act(async () => {
       disableToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

@@ -119,32 +119,34 @@ export function PluginsContent() {
 
         return (
           <article key={plugin.id} className={settingsResourceCardClass}>
-            <button
-              type="button"
-              className={`${settingsResourceRowClass} w-full`}
-              style={{ textAlign: 'left' }}
-              onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
-            >
-              <div
-                className={settingsResourceAvatarClass}
-                style={{ backgroundColor: plugin.iconBg ?? '#9ca3af', color: 'var(--cafe-surface)' }}
+            <div className={`${settingsResourceRowClass} w-full`}>
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-3"
+                style={{ textAlign: 'left' }}
+                onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
               >
-                {plugin.icon === 'github' ? (
-                  <GitHubIcon className="h-5 w-5" color="var(--cafe-surface)" />
-                ) : (
-                  <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
-                  {plugin.name}
-                </SettingsText>
-                {plugin.description && (
-                  <SettingsText as="p" tone="secondary" className="mt-0.5">
-                    {plugin.description}
+                <div
+                  className={settingsResourceAvatarClass}
+                  style={{ backgroundColor: plugin.iconBg ?? '#9ca3af', color: 'var(--cafe-surface)' }}
+                >
+                  {plugin.icon === 'github' ? (
+                    <GitHubIcon className="h-5 w-5" color="var(--cafe-surface)" />
+                  ) : (
+                    <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
+                    {plugin.name}
                   </SettingsText>
-                )}
-              </div>
+                  {plugin.description && (
+                    <SettingsText as="p" tone="secondary" className="mt-0.5">
+                      {plugin.description}
+                    </SettingsText>
+                  )}
+                </div>
+              </button>
               <div className={settingsResourceActionGroupClass}>
                 <SettingsBadge tone={statusCfg.tone} className="shrink-0 font-medium">
                   {statusCfg.label}
@@ -160,7 +162,7 @@ export function PluginsContent() {
                   />
                 )}
               </div>
-            </button>
+            </div>
 
             {isExpanded && <PluginConfigPanel plugin={plugin} onUpdated={fetchPlugins} />}
           </article>
