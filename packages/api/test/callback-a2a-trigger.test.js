@@ -647,6 +647,78 @@ describe('triggerA2AInvocation (fallback path)', () => {
     assert.equal(completions[0].threadId, 't-queue-cancel');
     assert.equal(completions[0].status, 'canceled');
   });
+
+  test('F222 P1: A2A direct routeExecution passes frustrationAutoIssueEligible=false', async () => {
+    const { triggerA2AInvocation } = await import('../dist/routes/callback-a2a-trigger.js');
+
+    let capturedOpts;
+    const mockRouterCapture = {
+      async *routeExecution(_userId, _content, _threadId, _messageId, _targetCats, _intent, opts) {
+        capturedOpts = opts;
+        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+      },
+    };
+
+    const mockInvocationRecordStore = {
+      create() {
+        return { outcome: 'created', invocationId: 'inv-f222' };
+      },
+      update() {},
+    };
+    const mockInvocationTracker = {
+      has() {
+        return false;
+      },
+      start() {
+        return new AbortController();
+      },
+      startAll() {
+        return new AbortController();
+      },
+      tryStartThreadAll() {
+        return new AbortController();
+      },
+      complete() {},
+      completeAll() {},
+    };
+    const mockQueueProcessor = { async onInvocationComplete() {} };
+    const mockSocketManager = { broadcastAgentMessage() {}, broadcastToRoom() {} };
+    const mockLog = { error() {}, warn() {}, info() {} };
+
+    await triggerA2AInvocation(
+      {
+        router: mockRouterCapture,
+        invocationRecordStore: mockInvocationRecordStore,
+        socketManager: mockSocketManager,
+        invocationTracker: mockInvocationTracker,
+        queueProcessor: mockQueueProcessor,
+        log: mockLog,
+      },
+      {
+        targetCats: ['codex'],
+        content: '@缅因猫\nreview',
+        userId: 'user-1',
+        threadId: 't-f222-provenance',
+        triggerMessage: {
+          id: 'msg-f222',
+          threadId: 't-f222-provenance',
+          userId: 'user-1',
+          catId: 'opus',
+          content: 'test',
+          mentions: [],
+          timestamp: Date.now(),
+        },
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    assert.equal(
+      capturedOpts?.frustrationAutoIssueEligible,
+      false,
+      'A2A direct execution must suppress frustration detection',
+    );
+  });
 });
 
 describe('enqueueA2ATargets (F27 primary path)', () => {

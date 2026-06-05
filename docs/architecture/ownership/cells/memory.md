@@ -27,6 +27,7 @@ cited_by:
   - {feature: F209, date: 2026-05-22, delta: "passage-level semantic recall, entity registry as retrieval anchors, typed evidence drill-down readers, and Perspective query-plan surface"}
   - {feature: F211, date: 2026-05-24, delta: "boundary note — F211 produces runtime session transcript/digest evidence; memory consumes and retrieves that evidence without owning runtime binding"}
   - {feature: F211, date: 2026-05-25, delta: "Phase B keeps external runtime registration/list/read in identity-session; memory remains a consumer after transcript/digest materialization"}
+  - {feature: F193, date: 2026-06-03, delta: "Phase E adds read-side cross-post affordance hints to search_evidence and list_recent result envelopes"}
 ---
 
 # Memory / Evidence

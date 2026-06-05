@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>F220 Phase 3 — force-reset 逃生口像素稿</title>
+<!--
+  真相源：docs/features/F220-a2a-collab-reliability.md §设计稿
+  铲屎官 2026-06-02 Design Gate 通过。Phase 3 实现对照此稿，勿走样。
+  三态：① 默认低调入口 ② 卡死升级上浮 ③ 确认弹窗。
+  tokens 用真实 cat-cafe oklch 值；icon 全 lucide SVG（🐾 paw 例外=品牌元素）。
+-->
+<style>
+:root{
+  --bg:oklch(0.97 0.01 70);
+  --surface:oklch(0.99 0.005 70);
+  --text:oklch(0.30 0.01 70);
+  --t2:oklch(0.55 0.015 70);
+  --border:oklch(0.91 0.01 70);
+  --crit:oklch(0.57 0.12 38);          /* --semantic-critical 危险红 */
+  --crit-s:oklch(0.96 0.03 38);        /* --semantic-critical-surface */
+  --warn:oklch(0.57 0.12 46);          /* --semantic-warning 升级警告 */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Segoe UI",sans-serif;background:var(--bg);color:var(--text);padding:18px;font-size:14px;line-height:1.5}
+.lbl{font-size:11px;color:var(--t2);letter-spacing:.04em;margin:16px 0 7px;font-weight:600}
+.lbl:first-child{margin-top:0}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 15px}
+.pt{font-size:12px;color:var(--t2);margin-bottom:9px;font-weight:600}
+.er{display:flex;align-items:center;gap:8px}
+.paw{font-size:15px}
+.nm{font-weight:600}
+.st{color:var(--t2)}
+.st.warn{color:var(--warn);font-weight:600}
+.dots{display:inline-flex;gap:3px}
+.dot{width:4px;height:4px;border-radius:50%;background:var(--t2)}
+.sp{flex:1}
+.stop{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:9px;padding:5px 11px;font-size:13px;color:var(--t2);background:transparent}
+.stop svg{width:13px;height:13px}
+/* ① 默认低调入口：dashed-top 分隔 + 灰 + 小，藏面板底 */
+.rd{margin-top:10px;padding-top:9px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);cursor:pointer}
+.rd svg{width:13px;height:13px;opacity:.65}
+/* ② 升级态：critical-surface 底 + 上浮居中 + 警告色 */
+.re{margin-top:11px;display:flex;align-items:center;justify-content:center;gap:7px;background:var(--crit-s);border:1px solid color-mix(in srgb,var(--crit) 32%,transparent);color:var(--crit);border-radius:10px;padding:9px;font-size:13px;font-weight:600;cursor:pointer}
+.re svg{width:15px;height:15px}
+/* ③ 确认弹窗 */
+.stage{background:oklch(0.30 0.01 70/.32);border-radius:12px;padding:26px 18px;display:flex;justify-content:center}
+.modal{background:var(--surface);border-radius:14px;width:100%;max-width:380px;overflow:hidden;box-shadow:0 14px 44px oklch(0.3 0.02 70/.28)}
+.mh{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--border)}
+.mh h3{font-size:15px;font-weight:700}
+.mhx{color:var(--t2);font-size:15px;cursor:pointer}
+.mb{padding:15px 18px;display:flex;flex-direction:column;gap:12px}
+.mr{display:flex;gap:10px;align-items:flex-start}
+.mr svg{width:17px;height:17px;flex-shrink:0;margin-top:1px}
+.mr.do svg{color:var(--crit)}
+.mr.keep svg{color:oklch(0.55 0.10 150)}
+.mr.when svg{color:var(--t2)}
+.tx{font-size:13px}
+.mf{display:flex;justify-content:flex-end;gap:10px;padding:13px 18px;border-top:1px solid var(--border)}
+.btn{border-radius:10px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent}
+.cancel{background:var(--surface);border-color:var(--border);color:var(--text)}
+.danger{background:var(--crit);color:#fff}
+</style>
+</head>
+<body>
+  <div class="lbl">① 默认态 — 有猫在跑，强制重置藏在面板底（灰、不抢眼）</div>
+  <div class="panel">
+    <div class="pt">当前调用</div>
+    <div class="er">
+      <span class="paw">🐾</span><span class="nm">砚砚</span><span class="st">回复中</span>
+      <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+      <span class="sp"></span>
+      <button class="stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>停止</button>
+    </div>
+    <div class="rd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>卡住了？强制重置</div>
+  </div>
+
+  <div class="lbl">② 升级态 — 久无输出/停止失效，入口上浮变醒目（警告色）</div>
+  <div class="panel">
+    <div class="pt">当前调用</div>
+    <div class="er">
+      <span class="paw">🐾</span><span class="nm">砚砚</span><span class="st warn">可能卡住了 · 12m 无输出</span>
+      <span class="sp"></span>
+      <button class="stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>停止</button>
+    </div>
+    <div class="re"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>卡住了？强制重置</div>
+  </div>
+
+  <div class="lbl">③ 点击 → 确认弹窗（铲屎官点名要的，先讲清再执行）</div>
+  <div class="stage">
+    <div class="modal">
+      <div class="mh"><h3>强制重置这个对话？</h3><span class="mhx">✕</span></div>
+      <div class="mb">
+        <div class="mr do"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg><div class="tx"><b>会做什么：</b>取消这个对话里所有正在运行的猫，清掉卡住的“正在回复中”。</div></div>
+        <div class="mr keep"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg><div class="tx"><b>会保留什么：</b>消息和历史全部保留——只清运行状态。</div></div>
+        <div class="mr when"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg><div class="tx"><b>何时用：</b>仅在猫卡死、点「停止」也没反应时的最后手段。</div></div>
+      </div>
+      <div class="mf"><button class="btn cancel">取消</button><button class="btn danger">强制重置</button></div>
+    </div>
+  </div>
+</body>
+</html>

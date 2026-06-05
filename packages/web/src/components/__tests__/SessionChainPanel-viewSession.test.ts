@@ -92,8 +92,18 @@ describe('SessionChainPanel onViewSession', () => {
     return defaultProps;
   }
 
+  /** Sealed section is default-collapsed — expand it first */
+  async function expandSealedSection() {
+    const sealedBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('Sealed'));
+    expect(sealedBtn).toBeTruthy();
+    await act(async () => {
+      sealedBtn?.click();
+    });
+  }
+
   it('renders a "查看" button on sealed sessions when onViewSession is provided', async () => {
     await renderPanel();
+    await expandSealedSection();
 
     const viewBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '查看');
     expect(viewBtn).toBeTruthy();
@@ -101,6 +111,7 @@ describe('SessionChainPanel onViewSession', () => {
 
   it('calls onViewSession with sessionId when "查看" is clicked', async () => {
     const props = await renderPanel();
+    await expandSealedSection();
 
     const viewBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '查看');
     expect(viewBtn).toBeTruthy();

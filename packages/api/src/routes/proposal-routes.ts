@@ -207,6 +207,8 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           sourceThreadId: proposal.sourceThreadId,
           sourceThreadTitle: sourceThread?.title,
           preferredCats: finalPreferredCats,
+          // C-Y1: reportingMode is fixed at create time (not in approve overrides).
+          reportingMode: proposal.reportingMode,
           messageStore,
           router: opts.router,
           invocationQueue: opts.invocationQueue,

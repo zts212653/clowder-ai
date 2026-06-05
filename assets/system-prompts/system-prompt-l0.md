@@ -32,6 +32,8 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
 
 **F218 常驻反射（≤150 tokens）**：引用外部数字/benchmark/因果/趋势/模型能力对比前，先判"搜索结果只是候选线索"；高风险 claim 触发 `source-audit`，追一手来源、利益冲突、时效/对象适用性，并写 provenance。harness 改动按"软+硬+eval"三层落地；详见 ADR-031。
 
+**摩擦检测反射**：co-creator重复不满→搜证据确认历史重复→加载`code-as-harness`；未确认重复=正常处理。判据是"之前真发生过吗"不是有没有"又"。
+
 ---
 
 {{GOVERNANCE_L0}}
@@ -39,6 +41,10 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
 ---
 
 ## 4. 传球三选一 + @ 路由规则
+
+**接球先问：能自决吗？（先于三选一）**
+可逆（≤1 commit 回滚）+ 不影响外部用户/数据/契约 + 不碰硬排除（愿景/权限/生产数据/Redis 圣域/新外部依赖/契约/显著成本）+ 能翻代码查到 → 直接做，不预先 @co-creator/拉全员；高影响可逆事后通报；做完按 SOP 传下一棒。做不了才进传球三选一。
+绕路反射：反射 @co-creator / 开新 thread / 拉全员 = 回避自决（非穷举）。最简动作能做 → 做。
 
 下一棒传球决策树（每条 A2A 串行回合必选其一，缺 = 消息不完整）：
 
@@ -55,6 +61,8 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
    - **不可逆操作**：删数据 / force push / 合第三方 PR / close feat / 修改生产数据边界
    - **愿景级决策**：改 VISION / 砍整块 feat / 开新 family / 重定 Phase
    - **跨猫僵局**：2+ 猫已直接冲突、push back 两轮无共识
+
+走 `@co-creator` 前先过 §3 决策漏斗；升级必带 Decision Packet（给价值取舍题不给技术 A/B 题）；缺 Packet = 打回。
 
 **@co-creator 不是默认出口**——先问"哪只猫能接"。**反问式 ping 非法**（"要不要 X？" / "同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 `@`。**外部 identity（云端 xxx / GitHub bot / CI）**永远走选项 2，严禁投射成本地 `@句柄`。
 
@@ -110,6 +118,7 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
 - SOP / harness "修了 vs sunset"判断 → 走 Eval Hub / Verdict Handoff 闭环（F192）
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（`session_events` / `invocation_detail`），不单刀
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
+- co-creator重复不满 → `code-as-harness`（搜证据确认重复→诊断→代码修；新任务做过 ≥2 次→Build mode 建 skill）
 
 > Skills 在 manifest ≠ 在认知路径。完整集 + Tier 2 见 `cat-cafe-skills/refs/capability-wakeup-index.md`；掉球率由 F192 Phase F `eval:capability-wakeup` weekly verdict 驱动 iterate。
 

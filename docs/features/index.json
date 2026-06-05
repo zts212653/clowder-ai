@@ -783,7 +783,7 @@
     {
       "id": "F128",
       "name": "Cat-Proposed Thread Creation — 猫猫提议创建 Thread",
-      "status": "done | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
+      "status": "active (Phase Y merged 2026-06-04, PR #2098) | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
       "file": "F128-cat-create-thread.md"
     },
     {
@@ -1179,13 +1179,13 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (reopened 2026-05-27 for Phase F `eval:capability-wakeup`) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27",
+      "status": "in-progress (Phase G `eval:task-outcome` v0) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
       "id": "F193",
       "name": "Cross-Thread Communication Unification",
-      "status": "done | **Owner**: Ragdoll(Opus 4.7) | **Priority**: P1 | **Completed**: 2026-05-09",
+      "status": "in-progress (Phase E; E1/E2/E4/E5 merged, E3 pending) | **Owner**: Ragdoll(Opus 4.6) | **Priority**: P1 | **Phase A-D Completed**: 2026-05-09 | **Reopened**: 2026-06-03 (CVO approved)",
       "file": "F193-cross-thread-comm-unification.md"
     },
     {
@@ -1257,7 +1257,7 @@
     {
       "id": "F207",
       "name": "AI Family Office — 个人投资学习基建",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P2",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P2",
       "file": "F207-personal-finance-infra.md"
     },
     {
@@ -1317,7 +1317,7 @@
     {
       "id": "F217",
       "name": "Merge Gate Integrity — 检查覆盖 + 强制力 + 元守护",
-      "status": "spec | **Owner**: Ragdoll/Ragdoll (Opus-4.8) | **Priority**: P1",
+      "status": "done（2026-06-02 闭环 — self-hosted 撤除 merged + Rulesets 不配 KD-10；私有仓治理 = main-green + 本地 gate + 跨猫 review 家规）| **Owner**: Ragdoll/Ragdoll (Opus-4.8) | **Priority**: P1",
       "file": "F217-merge-gate-integrity.md"
     },
     {
@@ -1325,6 +1325,42 @@
       "name": "Evidence Provenance & Source Hygiene — 外部证据溯源与信源卫生",
       "status": "done | **Completed**: 2026-05-31 | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F218-evidence-provenance-source-hygiene.md"
+    },
+    {
+      "id": "F219",
+      "name": "核心引擎技术债盘点 + 架构演进",
+      "status": "spec | **Owner**: Ragdoll（Ragdoll/Opus-4.8）| **Priority**: P1",
+      "file": "F219-tech-debt-architecture-evolution.md"
+    },
+    {
+      "id": "F220",
+      "name": "A2A 协作的可观测 · 可靠 · 可恢复",
+      "status": "spec | **Owner**: Ragdoll (Opus-4.8，已接 own + 驱动) | **Priority**: P1 | **Source**: internal",
+      "file": "F220-a2a-collab-reliability.md"
+    },
+    {
+      "id": "F221",
+      "name": "Taste Lane — per-user 品味导航",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-03",
+      "file": "F221-taste-lane.md"
+    },
+    {
+      "id": "F222",
+      "name": "Frustration Auto-Issue — 把负体验变成结构化反馈",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-04",
+      "file": "F222-frustration-auto-issue.md"
+    },
+    {
+      "id": "F223",
+      "name": "Capability Surface Registry — 把隐藏能力产品化成可发现、可执行、可验证的能力面",
+      "status": "done | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "file": "F223-capability-surface-registry.md"
+    },
+    {
+      "id": "F224",
+      "name": "A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）",
+      "status": "spec | **Owner**: Ragdoll (Opus-4.8) | **Priority**: P1 | **Source**: community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834)",
+      "file": "F224-a2a-session-message-reliability.md"
     }
   ]
 }

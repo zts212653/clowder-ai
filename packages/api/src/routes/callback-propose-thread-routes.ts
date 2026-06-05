@@ -9,7 +9,7 @@
  * proposal-routes.ts.
  */
 
-import type { CatId, RichCardBlock, ThreadProposal } from '@cat-cafe/shared';
+import type { CatId, ReportingMode, RichCardBlock, ThreadProposal } from '@cat-cafe/shared';
 import { catIdSchema, generateProposalId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -26,6 +26,8 @@ const proposeThreadCallbackSchema = z.object({
   reason: z.string().trim().min(1).max(1000),
   preferredCats: z.array(catIdSchema()).max(10).optional(),
   initialMessage: z.string().max(4000).optional(),
+  // F128 Phase Y: reporting contract for the sub-thread. Omitted → default none (AC-Y6).
+  reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
   parentThreadId: z.string().min(1).optional(),
   clientRequestId: z.string().min(1).max(200).optional(),
 });
@@ -38,6 +40,16 @@ export interface ProposeThreadDeps {
   socketManager: SocketManager;
 }
 
+// F128 Phase Y: user-facing label for each reporting mode (C-Y4 — none shown as
+// "autonomous"). The proposal card MUST surface this create-time contract because
+// it is fixed at create time and not editable on approve (C-Y1).
+const REPORTING_MODE_LABEL: Record<ReportingMode, string> = {
+  none: 'autonomous（默认 · 下游自治，无强制回报）',
+  'final-only': 'final-only（完成时回报一次）',
+  'state-transitions': 'state-transitions（每阶段边界回报）',
+  'blocking-ack': 'blocking-ack（遇阻塞点等 ack）',
+};
+
 export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock {
   const fields: Array<{ label: string; value: string }> = [
     { label: '父 Thread', value: proposal.parentThreadId },
@@ -45,6 +57,7 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
       label: '建议成员',
       value: proposal.preferredCats.length > 0 ? proposal.preferredCats.join(', ') : '（未指定）',
     },
+    { label: '回报模式', value: REPORTING_MODE_LABEL[proposal.reportingMode ?? 'none'] },
   ];
   if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });
   return {
@@ -80,6 +93,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       reason,
       preferredCats,
       initialMessage: rawInitialMessage,
+      reportingMode,
       parentThreadId,
       clientRequestId,
     } = parsed.data;
@@ -214,6 +228,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         projectPath: sourceThread.projectPath,
         createdBy: record.userId,
         ...(initialMessage ? { initialMessage } : {}),
+        ...(reportingMode ? { reportingMode } : {}),
       });
     } catch (err) {
       // Critical: if we reserved a dedup key but failed to create the proposal it points at,

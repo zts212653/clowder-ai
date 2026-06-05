@@ -40,6 +40,9 @@ function buildDeps(overrides = {}) {
       broadcastToRoom: mock.fn(),
       emitToUser: mock.fn(),
     },
+    messageStore: {
+      markCanceled: mock.fn(async () => {}),
+    },
     ...overrides,
   };
 }
@@ -524,6 +527,126 @@ describe('Queue Management API', () => {
     });
     assert.equal(res.statusCode, 200);
     assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 1);
+  });
+
+  it('POST /queue/:entryId/steer immediate TOMBSTONES a pre-start in-flight entry instead of force-releasing (race-safe, 云端 R3 P1)', async () => {
+    // In-flight entry A occupies the opus per-cat slot (processing), e.g. its executeEntry is in the
+    // pre-start create-await window so invocationTracker.has(opus) is false. The user steers a second
+    // opus entry B. Force-releasing A's slot would double-start opus once create returns; instead
+    // steer must TOMBSTONE A (removeProcessed) so executeEntry self-aborts, and NOT force-release.
+    const a = enqueueEntry(deps.invocationQueue, { content: 'inflight', targetCats: ['opus'] });
+    deps.invocationQueue.markProcessing('t1', 'user-a'); // A → processing (holds opus slot)
+    const b = enqueueEntry(deps.invocationQueue, { content: 'steered', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false); // pre-start: tracker not yet registered
+    // Precondition: A holds the opus slot (in-flight).
+    assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id, a.entry.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${b.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    // Deferred response (not QUEUE_BUSY, not synchronous start) — B runs via tryAutoExecute after
+    // A's executeEntry self-aborts.
+    assert.equal(res.statusCode, 202);
+    const body = res.json();
+    assert.equal(body.deferred, true);
+    assert.equal(body.code, 'PREEMPT_PENDING_PRESTART');
+
+    // A was tombstoned (removed) so executeEntry self-aborts at its post-startAll guard.
+    assert.equal(deps.invocationQueue.findProcessingByCat('t1', 'opus'), null, 'in-flight A must be tombstoned');
+    // Race-safe: NO force slot-release, NO cancel of a non-existent tracker invocation.
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0, 'must NOT force-release a pre-start slot');
+    assert.equal(deps.invocationTracker.cancel.mock.calls.length, 0);
+    // B was promoted to run next.
+    assert.equal(deps.invocationQueue.list('t1', 'user-a')[0].id, b.entry.id);
+  });
+
+  it('POST /queue/:entryId/steer immediate must NOT tombstone ANOTHER user’s pre-start entry (云端 R4 P1-b cross-user)', async () => {
+    // user-b holds the opus slot via an in-flight (pre-start) entry; user-a steers their own opus
+    // entry. The cross-user guard must reject (INVOCATION_ACTIVE) and leave user-b's entry intact —
+    // one user cannot interrupt another's in-flight invocation by steering their own.
+    const other = enqueueEntry(deps.invocationQueue, {
+      userId: 'user-b',
+      content: 'other-inflight',
+      targetCats: ['opus'],
+    });
+    deps.invocationQueue.markProcessing('t1', 'user-b'); // user-b's entry → processing (holds opus slot)
+    const mine = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'mine', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false); // pre-start: tracker not yet registered
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${mine.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.json().code, 'INVOCATION_ACTIVE');
+    // user-b's in-flight entry must NOT be tombstoned.
+    assert.equal(
+      deps.invocationQueue.findProcessingByCat('t1', 'opus')?.id,
+      other.entry.id,
+      "other user's entry intact",
+    );
+  });
+
+  it('POST /queue/:entryId/steer immediate NEVER force-releases an occupied slot — always tombstones (云端 R6: age unsound)', async () => {
+    // 云端 R3–R6 converged: an occupied slot with has()=false is always "executeEntry pending in
+    // create-await"; steer cannot tell a slow-but-live create from a hung one (create awaits an
+    // unbounded Redis eval), so NO age threshold is sound. Even an "old" processing entry must be
+    // tombstoned (not force-released) — a force-release would double-start if create later resumes.
+    enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'old-inflight', targetCats: ['opus'] });
+    deps.invocationQueue.markProcessing('t1', 'user-a');
+    const old = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    old.processingStartedAt = Date.now() - 60 * 60_000; // 1h old — still must NOT force-release
+    const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    // Sound: tombstone + 202-deferred, regardless of entry age. NO force-release (double-start risk).
+    assert.equal(res.statusCode, 202);
+    assert.equal(res.json().code, 'PREEMPT_PENDING_PRESTART');
+    assert.equal(deps.queueProcessor.releaseSlot.mock.calls.length, 0, 'must NEVER force-release by age');
+  });
+
+  it('POST /queue/:entryId/steer immediate marks the TOMBSTONED user message canceled (云端 R7 P1 F117)', async () => {
+    // Tombstoning an in-flight user entry must mirror withdraw/clear F117 cleanup: its message would
+    // otherwise stay permanently 'queued' (undelivered + excluded from context) since executeEntry
+    // self-aborts before its markDelivered block.
+    enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'inflight', targetCats: ['opus'] });
+    deps.invocationQueue.markProcessing('t1', 'user-a');
+    const inflight = deps.invocationQueue.findProcessingByCat('t1', 'opus');
+    inflight.messageId = 'msg-inflight'; // user message backing the in-flight entry
+    const steered = enqueueEntry(deps.invocationQueue, { userId: 'user-a', content: 'steered', targetCats: ['opus'] });
+
+    deps.invocationTracker.has = mock.fn(() => false);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/t1/queue/${steered.entry.id}/steer`,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: { mode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 202);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 1, 'tombstoned message must be marked canceled');
+    assert.equal(deps.messageStore.markCanceled.mock.calls[0].arguments[0], 'msg-inflight');
+    const del = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'message_deleted');
+    assert.ok(del, 'message_deleted must be emitted');
+    assert.equal(del.arguments[2].messageId, 'msg-inflight');
   });
 
   it('POST /queue/:entryId/steer immediate scopes cancel broadcast to steered cat only (P1 cloud review)', async () => {

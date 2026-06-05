@@ -8,7 +8,7 @@ created: 2026-05-07
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (reopened 2026-05-27 for Phase F `eval:capability-wakeup`) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27
+> **Status**: in-progress (Phase G `eval:task-outcome` v0) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27
 
 ## Architecture Ownership
 
@@ -233,6 +233,78 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 3. Implementation：trace adapter + evaluator + domain registry + scheduled invocation
 4. First weekly verdict cycle（real data 第一刀）
 5. L0 §8 v2 数据驱动 iterate（去掉低 miss-rate 条目 / 加新发现的高 miss-rate 场景）
+
+### Phase G（`eval:task-outcome` — L3 任务交付质量 v0）
+
+**核心设计**：
+- **Episode** 是评价对象（一整个任务生命周期），不是单条消息
+- **Verdict** 是分类不是分数：success / corrected_success / needs_investigation / harness_fix_needed / routing_failure / taste_mismatch / abandoned
+- **三信号层**：A1 世界真值（merge/post-merge rollback/test/build，自动零成本）+ A2 嵌入交互决策（act 携带可解释对象语义或 reason 时才算；纯无理由动作默认 proxy）+ Proxy（导航不判定）；这是可信度层，不与传感器类型刚性绑定
+- **执行频率**：daily（信号产生频率高于 capability-wakeup，需要更及时的观测窗口）
+
+#### v0 骨架（PR #2074, merged 2026-06-03）
+
+- [x] AC-G1: TaskOutcomeEpisode Zod schema 定义——含 episodeId、trigger、threadId、participants、artifacts、signals（a1WorldTruth / a2InteractionDecisions / proxy）、terminalState（含 in_progress）、verdict（nullable categorical）、createdAt
+- [x] AC-G2: Permission Cancel 记录——signal builder + store，字段含 toolName / paramsSummary / reason（should_not_do / wrong_direction / i_will_do_it / skip） / timestamp / catId / threadId / sessionId
+- [x] AC-G3: Magic Word 上下文记录——signal builder + store，字段含 word / timestamp / threadId / catId / 前后消息摘要（可选）
+- [x] AC-G4: A1 世界真值信号——signal builder + CiCdRouter.onPrLifecycle 生产接线（merge+success 自动 complete episode），字段含 type（merge / revert / test_pass / test_fail / build_pass / build_fail） / ref / outcome / timestamp
+- [x] AC-G5: SQLite-backed Episode Store——创建 / 查询 / 追加信号 / 更新终态 / 更新 verdict / 按 thread 列表 / 待 verdict 列表 / 获取活跃 episode
+- [x] AC-G6: API route handlers + session auth guard——handlePermissionCancel / handleMagicWord / handleA1WorldTruth / handleUpdateTerminalState / handleGetEpisode / handleListEpisodes（自动创建 episode if none active）+ 路由注册到 index.ts
+- [x] AC-G7: eval:task-outcome 域注册——扩展 domainId enum + sourceAdapter enum + DOMAIN_INSTRUCTIONS + YAML registry file（daily frequency）+ verdict handoff domainId
+- [x] AC-G8: 授权系统集成——authorization respond 路由在 deny 时触发 onPermissionCancel hook（best-effort，reason 默认 skip，结构化 reason 来自 AC-G10）
+- [x] AC-G9: Shared types——CANCEL_REASON_OPTIONS + CancelReasonValue + PermissionCancelEvent 导出到 @cat-cafe/shared 供前端使用
+- [x] AC-G9b: env-registry + .gitignore——TASK_OUTCOME_DB 注册 + task-outcome-episodes.sqlite* gitignore
+
+#### v0.5 信号接线（下一个 PR，一个 PR 搞定）
+
+- [ ] AC-G10: Cancel 理由浮层前端——cancel 后弹轻量浮层（可选：不该做/方向不对/我自己来/跳过），选择后调 POST /api/task-outcome/cancel 带结构化 reason
+- [ ] AC-G12: Magic Word 运行时检测 hook——在消息处理流程中检测 magic word 触发 → 调 POST /api/task-outcome/magic-word 记录（高权重 reason 采集）
+- [ ] AC-G13: Cancel burst proxy signal——短时间内连续 cancel ≥3 次 → 自动追加 proxy signal（中断动作聚合）
+- [ ] AC-G11: 端到端验证——team lead + Ragdoll一起：cancel → 选理由 → 绑 episode → magic word 检测 → eval hub 可见
+
+依赖：复用 F192 已有 Eval Domain Registry / Verdict Handoff / Re-eval Closure / Eval Hub 控制面。与 F222 Frustration Auto-Issue 的打通（confirmed issue → episode signal）标记为 v1。
+
+### Phase H（Verdict Publishing Pipeline — OQ-21 v1.x 收口 / Maine Coon R0 Path B）
+
+来源 OQ-21 PR #2092 merge 后 v1.x 收口（team lead 2026-06-05 directive: "继续完成最后一公里"）。Path B 由Maine Coon R0 narrowed：eval cat 产结构化 packet + 受控 MCP tool 提交，比 raw artifacts auto-export (Path A) scope 小但同样闭环 "eval cat 分析 → Hub 显示新 verdict"。
+
+**Why（愿景硬度）**：
+- 真实现状：OQ-21 PR #2092 merge 后，trigger-now 真叫醒 eval cat ✓，generate-now API ready ✓，但 eval cat 分析完后**无受控写出路径**——4.6 abandoned PR #2091 教 cat `git push origin main` 违反铁律 #2；当前 cat 只能产 verdict 在 thread 里飘，端到端"Hub 看到新 verdict"靠人工 commit
+- 价值：补完 OQ-21 cycle，eval cat 能 publish verdict 让 Hub 看见，无需人工 commit 中介
+- AC↔Why trace：每条 AC 都指向"eval cat → MCP tool → 受控 commit → Hub 可见"链路
+
+**Architecture cell**: harness-eval (extend); **Map delta**: extend manual-trigger/ with publish-verdict.ts + new MCP tool `cat_cafe_publish_verdict` in cat-cafe-mcp registration
+
+**Software-hardness (ADR-031)**:
+- Soft: eval cat DOMAIN_INSTRUCTIONS 升级指引调用 MCP tool（替代 abandoned R0 "git push" 教学）
+- Hard: MCP tool schema validation (VerdictHandoffPacket) + 受控 commit semantics（worktree write → auto-PR or branch commit, 待 Design Gate 定）
+- Eval: Phase H Eval Contract 下
+
+**AC（Design Gate locked, Maine Coon 2026-06-05 narrowing A 方案）**：
+- [ ] AC-H1: 新 MCP tool `cat_cafe_publish_verdict` 接受**完整** `VerdictHandoffPacket`（9 字段全填，server 不从 narrative 猜结构）+ domain；若 generator 需要 evidence bundle 必须显式带 sanitized bundle/provenance 或 source refs，**tool 不造 evidence**
+- [ ] AC-H2: 受控 commit 路径——tool 创建 branch `verdict/auto/{domainSlug}/{verdictId}` + commit verdict.md + bundle/ + 自动开 PR；返回 commit SHA + PR URL；**禁止 working tree only**（非长期 SOT）/ **禁止直推 main**（绕 review，OQ-21 R0 教训）
+- [ ] AC-H3: Auth model = **callback auth (invocationId + callbackToken)** — 不复用 generate-now 的 session+network+owner（那是 browser API model）；额外 **domain-level allowlist**：只有该 eval domain 注册的 eval cat / 受信 invocation 能 publish；v1 暂不进 agent-key allowlist
+- [ ] AC-H4: eval cat DOMAIN_INSTRUCTIONS 升级——所有 5 domain 指引调用此 MCP tool 而非 git push；提供 packet 模板/helper 降低 cat 填写成本（替代 PR #2091 abandoned 的"git push origin main"教学）
+- [ ] AC-H5: Tool returns commit SHA + PR URL 在 success response 给 eval cat 用于 traceability + audit chain
+- [ ] AC-H6: 两层 tests:
+  - Handler unit tests (fake git/generator) — input shape / packet validation / branch naming / commit semantics
+  - Deterministic e2e (NO real LLM) — mock eval cat callback-auth MCP call → publish_verdict → files written → `loadEvalHubSummary()` sees verdict → fake PR created
+  - **失败 fixture 必含**：unsupported domain / invalid packet / duplicate verdictId / missing or wrong callback auth / git or branch conflict
+- [ ] AC-H7: 仅支持已 wired generator 的 domain（v1.x = eval:a2a + eval:capability-wakeup）；其他 domain 返回 unsupported_generator (与 generate-now 对称)
+- [ ] AC-H8: idempotency + length + slug validation 复用 manual-trigger/generate-now.ts 模式（不重新发明）
+
+**Eval Contract (F192 mandate)**：
+- Primary Users + Activation Signal: eval cats publishing verdicts after analysis; tool call count per eval cycle
+- Friction Metric: tool error rate / invalid packet / commit failures / merge conflicts
+- Regression Fixture: success / unsupported domain / invalid packet / duplicate verdictId (idempotency)
+- Sunset Signal: 如果 Path A (raw artifacts auto-export from F153 telemetry) 完全自动化 → cat-mediated publish 可 sunset；或team lead明确"我们不要 cat-in-the-loop 了"
+
+**Scope 边界**：
+- v1.x scope: Path B (cat-mediated publish via MCP)
+- v2 scope: Path A (raw artifacts auto from F153 — F192 OQ-15 老 backlog，独立 Phase)
+- 不在 Phase H: audit log (OQ-21 v1.5 backlog) / error sanitize / rate limit
+
+依赖：F192 现有 Verdict Handoff Packet schema + manual-trigger/ generators + Maine Coon R0 narrowed direction 文档。
 
 ## 需求点 Checklist
 

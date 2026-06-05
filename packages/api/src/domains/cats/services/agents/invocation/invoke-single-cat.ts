@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent, type SessionRecord } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -69,6 +69,8 @@ import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
+import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
+import { OC_INSTRUCTIONS_ONLY_ENV } from '../providers/OpenCodeAgentService.js';
 import {
   deriveOpenCodeApiType,
   OC_API_KEY_ENV,
@@ -76,6 +78,7 @@ import {
   parseOpenCodeModel,
   safeProviderName,
   summarizeOpenCodeRuntimeConfigForDebug,
+  writeOpenCodeInstructionsOnlyConfig,
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-template.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
@@ -136,6 +139,7 @@ import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/Tran
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
+import { hasL0CompilerSeam } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
 import { completeCapsuleForSeal, type RouteStateContinuityCapsule } from './CollaborationContinuityCapsule.js';
 import type { ResumeFailureKind } from './invoke-helpers.js';
@@ -566,6 +570,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
 
+  // F198 Bug #3: a bg carrier has no stable per-conversation sessionId — the
+  // daemon forks a fresh UUID every `--bg --resume` round. Derive a stable
+  // chainKey anchor so sessionId resolution / resume mutex / session_init
+  // record reuse / done bookkeeping all route through it instead of the
+  // rotating cliSessionId. Non-bg services are untouched (usesChainKeyResume
+  // defaults false → bgChainKey stays undefined and every existing path runs).
+  const isBgCarrier = service.usesChainKeyResume?.() ?? false;
+  const bgChainKey = isBgCarrier ? `bg:${threadId}:${catId}` : undefined;
+
   const { invocationId, callbackToken } = await registry.create(
     userId,
     catId,
@@ -826,7 +839,25 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // The PATCH bind endpoint writes to sessionChainStore but not sessionManager,
     // so a freshly-bound session would be missed if we gate on sessionId being truthy.
     const sessionChainActive = isSessionChainEnabled(catId);
-    if (deps.sessionChainStore && sessionChainActive) {
+    if (isBgCarrier && bgChainKey && deps.sessionChainStore && sessionChainActive) {
+      // F198 Bug #3: bg resolves its resume target via the chainKey record's
+      // latestResumeSessionId (the daemon's previous fork UUID). bg reuses one
+      // record across daemon rotation instead of seal+create — but still
+      // respects an EXTERNAL seal (manual / threshold / reaper): a sealed record
+      // must NOT be resumed (mirrors the non-bg "no active → no resume" path).
+      try {
+        const bgRec = await preflightRace(
+          Promise.resolve(deps.sessionChainStore.getByChainKey(bgChainKey)),
+          'getByChainKey',
+          signal,
+        );
+        // Cloud review P1: only resume an ACTIVE bg record — start fresh if sealed.
+        sessionId = bgRec?.status === 'active' ? bgRec.latestResumeSessionId : undefined;
+      } catch {
+        // Fail-closed: start fresh if the chainKey read fails.
+        sessionId = undefined;
+      }
+    } else if (deps.sessionChainStore && sessionChainActive) {
       // Reaper: reconcile any sessions stuck in 'sealing' > 5 minutes (best-effort).
       if (deps.sessionSealer) {
         try {
@@ -891,10 +922,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // F118: Acquire per-cliSessionId mutex to prevent concurrent resume
-    if (sessionId) {
+    // F118: Acquire per-conversation mutex to prevent concurrent resume.
+    // F198 Bug #3: bg keys on the stable chainKey — sessionId rotates per daemon
+    // fork, so keying on it would let two `--resume` turns race. Non-bg keeps
+    // the cliSessionId key unchanged.
+    const mutexKey = isBgCarrier && bgChainKey ? bgChainKey : sessionId;
+    if (mutexKey) {
       try {
-        sessionMutexRelease = await sessionMutex.acquire(sessionId, signal);
+        sessionMutexRelease = await sessionMutex.acquire(mutexKey, signal);
       } catch (err) {
         // Abort while queued is not a runtime error — clean exit
         if (signal?.aborted) {
@@ -1322,6 +1357,54 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const mcpServerPath = configuredMcpServerPath
       ? resolve(process.cwd(), configuredMcpServerPath)
       : resolveDefaultClaudeMcpServerPath();
+
+    // F203 Phase I: compile L0 for OpenCode BEFORE the runtime config condition.
+    // OpenCodeAgentService.injectsL0Natively() = true, so the route layer does
+    // pack-only. We MUST ensure every OpenCode invocation path gets compiled L0
+    // in the runtime config's instructions array — otherwise the cat loses its
+    // identity/governance/roster post-compaction (砚砚 P1 guard).
+    //
+    // The L0 file is written into the per-invocation config dir (P2: no separate
+    // dir leak — cleaned up together with the runtime config in finally).
+    let openCodeL0InstructionPaths: string[] | undefined;
+    if (provider === 'opencode') {
+      try {
+        // Use service's injectable l0CompilerFn if available (test seam, like Claude/Codex),
+        // otherwise fall back to the subprocess compiler (production path).
+        // l0CompilerFn via typed guard (no `any` — L0InjectableAgentService in types.ts).
+        // hasL0CompilerSeam guarantees l0CompilerFn is a function (type guard checks typeof),
+        // but TS narrows to `L0CompilerFn | undefined`. Use `?? compileL0ViaSubprocess` as
+        // the undefined branch is unreachable post-guard — avoids biome noNonNullAssertion.
+        const compilerFn = (hasL0CompilerSeam(service) && service.l0CompilerFn) || compileL0ViaSubprocess;
+
+        const l0Content = await compilerFn({ catId: catId as string });
+        // Write compiled L0 into the runtime config dir (created below or reused).
+        const safeCatId = (catId as string).replace(/[^a-zA-Z0-9._-]+/g, '-');
+        const safeInvocationId = invocationId.replace(/[^a-zA-Z0-9._-]+/g, '-');
+        const configDir = join(projectRoot, '.cat-cafe', `oc-config-${safeCatId}-${safeInvocationId}`);
+        mkdirSync(configDir, { recursive: true });
+        const l0Path = join(configDir, 'system-prompt-l0.md');
+        writeFileSync(l0Path, l0Content, 'utf8');
+        // Resolve OPENCODE.md from project root (OpenCode-specific addendum: question deny, interaction channel).
+        const opencodeInstructionsPath = resolve(projectRoot, 'OPENCODE.md');
+        openCodeL0InstructionPaths = [l0Path, opencodeInstructionsPath];
+        log.debug(
+          { catId, invocationId, l0Path, opencodeInstructionsPath, l0Bytes: l0Content.length },
+          'Compiled L0 for OpenCode (F203 Phase I)',
+        );
+      } catch (err) {
+        // Fail-closed: L0 compilation failure = cat invocation without identity is dangerous.
+        // Log and throw — do not proceed with a naked invocation.
+        log.error(
+          { catId, invocationId, err: err instanceof Error ? err.message : String(err) },
+          'F203 Phase I: L0 compilation failed for OpenCode — fail-closed, aborting invocation',
+        );
+        throw new Error(
+          `F203 fail-closed: cannot compile L0 for OpenCode cat ${catId as string}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
     if (
       provider === 'opencode' &&
       resolvedAccount != null &&
@@ -1348,6 +1431,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         mcpServerPath,
+        // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.
+        instructions: openCodeL0InstructionPaths,
       } as const;
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
         projectRoot,
@@ -1373,6 +1458,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           runtimeConfigSummary: summarizeOpenCodeRuntimeConfigForDebug(runtimeConfigOptions),
         },
         'Prepared OpenCode runtime config',
+      );
+    } else if (provider === 'opencode' && openCodeL0InstructionPaths) {
+      // F203 Phase I safety net (砚砚 P1 three-path guard): when the full runtime
+      // config condition is NOT met (e.g. subscription mode, no resolvedAccount,
+      // known legacy model without MCP), we STILL need instructions in a config
+      // so the cat doesn't lose its L0 identity.
+      //
+      // P1-1 fix: use instructions-only config (no provider block) + signal
+      // OC_INSTRUCTIONS_ONLY_ENV so buildEnv does NOT clear native auth.
+      openCodeRuntimeConfigPath = writeOpenCodeInstructionsOnlyConfig(
+        projectRoot,
+        catId as string,
+        invocationId,
+        openCodeL0InstructionPaths,
+      );
+      callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
+      callbackEnv[OC_INSTRUCTIONS_ONLY_ENV] = '1';
+      log.info(
+        { catId, invocationId, openCodeConfigPath: openCodeRuntimeConfigPath },
+        'F203 Phase I: wrote instructions-only OpenCode config (fallback path, auth preserved)',
       );
     }
 
@@ -1481,7 +1586,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const recordActiveSessionUserVisibleOutput = async (): Promise<void> => {
       if (!deps.sessionChainStore || !sessionChainActive) return;
       try {
-        const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
+        // F198 Bug #3: bg looks up its record by the stable chainKey, not
+        // getActive (a sealed/rotated bg record must still be found).
+        const activeRec =
+          isBgCarrier && bgChainKey
+            ? await deps.sessionChainStore.getByChainKey(bgChainKey)
+            : await deps.sessionChainStore.getActive(catId, threadId);
         if (!activeRec) return;
         userVisibleOutputSessionIds.add(activeRec.id);
         if ((activeRec.messageCount ?? 0) !== 0) return;
@@ -1526,8 +1636,47 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           });
         }
 
-        // F24: Ensure SessionRecord exists for this session
-        if (deps.sessionChainStore && sessionChainActive) {
+        // F24 + F198 Bug #3: ensure a SessionRecord exists for this session.
+        if (isBgCarrier && bgChainKey && deps.sessionChainStore && sessionChainActive) {
+          // bg: look up the conversation by its stable chainKey. ACTIVE record →
+          // just update cliSessionId to the current daemon shortId (NO seal+create
+          // — that cascade is the multi-turn amnesia root cause). Missing (first
+          // round) OR externally sealed (cloud review P1: manual/threshold/reaper)
+          // → create a fresh record carrying the chainKey; the index re-points to
+          // it and the sealed record is NOT revived. (done bookkeeping still uses
+          // getByChainKey without a status filter for write tolerance.)
+          try {
+            const bgRec = await deps.sessionChainStore.getByChainKey(bgChainKey);
+            if (bgRec && bgRec.status === 'active') {
+              if (bgRec.cliSessionId !== msg.sessionId) {
+                await deps.sessionChainStore.update(bgRec.id, {
+                  cliSessionId: msg.sessionId,
+                  ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
+                  updatedAt: Date.now(),
+                });
+              } else if (params.continuityCapsule) {
+                await deps.sessionChainStore.update(bgRec.id, {
+                  continuityCapsule: params.continuityCapsule,
+                });
+              }
+            } else {
+              const newRec = await deps.sessionChainStore.create({
+                cliSessionId: msg.sessionId,
+                threadId,
+                catId,
+                userId,
+                chainKey: bgChainKey,
+              });
+              if (params.continuityCapsule) {
+                await deps.sessionChainStore.update(newRec.id, {
+                  continuityCapsule: params.continuityCapsule,
+                });
+              }
+            }
+          } catch {
+            // Best-effort — don't break the invocation chain
+          }
+        } else if (deps.sessionChainStore && sessionChainActive) {
           try {
             const existing = await deps.sessionChainStore.getActive(catId, threadId);
             if (existing) {
@@ -1723,7 +1872,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // This counter is critical for unseal safety: empty sessions (0 messages)
         // can be displaced, but sessions with user-visible output must not be
         // silently sealed or folded away before a final done event arrives.
-        if (deps.sessionChainStore && sessionChainActive) {
+        if (isBgCarrier && bgChainKey && deps.sessionChainStore && sessionChainActive) {
+          // F198 Bug #3: bg updates its chainKey record — messageCount (unless
+          // already counted this turn via recordActiveSessionUserVisibleOutput)
+          // + latestResumeSessionId (the daemon's new fork UUID from done
+          // metadata = the NEXT round's `--resume` target).
+          try {
+            const bgRec = await deps.sessionChainStore.getByChainKey(bgChainKey);
+            if (bgRec) {
+              const countThisTurn = !userVisibleOutputCountedSessionIds.has(bgRec.id);
+              const newCount = (bgRec.messageCount ?? 0) + 1;
+              const resumeSessionId = msg.metadata?.resumeSessionId;
+              const updateResume =
+                typeof resumeSessionId === 'string' && resumeSessionId !== bgRec.latestResumeSessionId;
+              await deps.sessionChainStore.update(bgRec.id, {
+                updatedAt: Date.now(),
+                ...(countThisTurn ? { messageCount: newCount } : {}),
+                ...(updateResume ? { latestResumeSessionId: resumeSessionId } : {}),
+              });
+              if (countThisTurn) {
+                sessionRounds.record(newCount, { [AGENT_ID]: catId });
+              }
+            }
+          } catch {
+            /* best-effort: messageCount miss won't break invocation */
+          }
+        } else if (deps.sessionChainStore && sessionChainActive) {
           try {
             const activeRec = await deps.sessionChainStore.getActive(catId, threadId);
             if (activeRec) {

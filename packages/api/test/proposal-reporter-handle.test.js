@@ -60,7 +60,11 @@ describe('F128 parallel reporter handle resolution', () => {
         await ctx.propose({
           userId: 'alice',
           threadId: source.id,
-          body: { initialMessage: '#ideate @kimi @gemini @codex 大家并行想', preferredCats: [] },
+          body: {
+            initialMessage: '#ideate @kimi @gemini @codex 大家并行想',
+            preferredCats: [],
+            reportingMode: 'final-only',
+          },
         })
       ).body,
     );
@@ -75,8 +79,8 @@ describe('F128 parallel reporter handle resolution', () => {
     assert.deepEqual(entries[0].targetCats, ['kimi', 'gemini', 'codex'], 'wake all router-resolved targets');
     assert.equal(entries[0].intent, 'ideate');
     assert.ok(!enqueued.includes('最后一棒猫'), 'parallel mode must NOT inherit serial rule');
-    assert.ok(enqueued.includes('并行模式 report-back owner'), 'must inject parallel reporter');
-    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');
+    const ownerLineMatch = enqueued.match(/report-back owner[^\n]*/);
     assert.ok(
       ownerLineMatch && ownerLineMatch[0].includes('kimi'),
       `reporter must name kimi; got ${ownerLineMatch?.[0]}`,
@@ -112,7 +116,7 @@ describe('F128 parallel reporter handle resolution', () => {
         await ctx.propose({
           userId: 'alice',
           threadId: source.id,
-          body: { initialMessage: '#ideate @砚砚 @宪宪 大家并行想想', preferredCats: [] },
+          body: { initialMessage: '#ideate @砚砚 @宪宪 大家并行想想', preferredCats: [], reportingMode: 'final-only' },
         })
       ).body,
     );
@@ -125,8 +129,8 @@ describe('F128 parallel reporter handle resolution', () => {
     const enqueued = entries[0].content;
 
     assert.ok(!enqueued.includes('最后一棒猫'), 'CJK alias path must NOT inherit serial rule');
-    assert.ok(enqueued.includes('并行模式 report-back owner'), 'must inject parallel reporter');
-    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');
+    const ownerLineMatch = enqueued.match(/report-back owner[^\n]*/);
     assert.ok(
       ownerLineMatch && ownerLineMatch[0].includes('codex'),
       `reporter must be canonical handle of resolved.targetCats[0]=codex; got ${ownerLineMatch?.[0]}`,
@@ -164,6 +168,7 @@ describe('F128 parallel reporter handle resolution', () => {
           body: {
             initialMessage: '#ideate @gpt-5.2 @gpt-5.4 大家想想 dotted handle',
             preferredCats: [],
+            reportingMode: 'final-only',
           },
         })
       ).body,
@@ -177,8 +182,8 @@ describe('F128 parallel reporter handle resolution', () => {
     const enqueued = entries[0].content;
 
     assert.ok(!enqueued.includes('最后一棒猫'), 'dotted handle path must NOT inherit serial rule');
-    assert.ok(enqueued.includes('并行模式 report-back owner'), 'must inject parallel reporter');
-    const ownerLineMatch = enqueued.match(/并行模式 report-back owner[^\n]*/);
+    assert.ok(enqueued.includes('report-back owner'), 'must inject parallel reporter');
+    const ownerLineMatch = enqueued.match(/report-back owner[^\n]*/);
     assert.ok(ownerLineMatch, 'must find owner line');
     assert.ok(
       ownerLineMatch[0].includes('gpt-5.2'),

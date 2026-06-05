@@ -104,12 +104,22 @@ EOF
 )"
 
 # 3. 注册 PR tracking（必做，Email Watcher / review 通知路由依赖）
-# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber, catId)
+# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber)
+#   开 PR 等 review 时用默认 intent='review'：CI-pass 静默（你不会被 CI 过了打扰，只等 review 意见）。
 # 注册后你会收到三类自动通知（F133 + F140）：
-#   - CI/CD 状态变化（pass/fail）→ github-ci connector
+#   - CI/CD 状态变化 → github-ci connector（fail 总唤醒；pass 仅 intent=merge 唤醒）
 #   - PR 冲突检测（CONFLICTING）→ github-conflict connector（urgent 唤醒）
 #   - Review feedback（comments + decisions）→ github-review-feedback connector
 # 详见 refs/pr-signals.md
+#
+# ⚠️ 进入"等 CI 绿就去 merge"阶段时（review 已过，或你是 maintainer 要合自己/别人的 PR）：
+#   重新调用 cat_cafe_register_pr_tracking(repoFullName, prNumber, intent='merge')
+#   翻成 merge intent —— 这样 CI 绿会唤醒你去 merge-gate，而不是默默过去。
+#   （re-register 是 upsert，不会丢失已有 CI/review 去重状态。）
+#   ⚠️ 时机契约（fingerprint 去重边界）：在 CI **还没绿之前**翻成 merge 才保证被唤醒。
+#     CiCdRouter 按 headSha:bucket 去重——若同一 head 的 CI-pass 已在 review intent 下投递过，
+#     之后再翻 merge **不会补发唤醒**。所以：若翻 intent 时 CI **已经绿了**，别等回调，直接
+#     `gh pr checks {PR}` 自查、继续 merge 流程（无新 head 时 CI 不会重跑、不会再有 pass 事件）。
 #
 # 收到冲突通知时（F140 Phase B）：
 # - 暂停当前工作，处理冲突优先（冲突是 merge blocker）

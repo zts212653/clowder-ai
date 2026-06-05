@@ -55,6 +55,25 @@ describe('CallbackPrincipal helpers', () => {
     assert.equal(result.threadId, 't1');
   });
 
+  test('resolvePrincipalThread() allows agent_key access to indexed system threads', async () => {
+    const { resolvePrincipalThread } = await import('../dist/routes/callback-scope-helpers.js');
+    const principal = { kind: 'agent_key', agentKeyId: 'ak_1', userId: 'u1', catId: 'codex', scope: 'user-bound' };
+    const result = await resolvePrincipalThread(principal, 'thread_eval_memory', {
+      threadStore: {
+        async get() {
+          return { id: 'thread_eval_memory', createdBy: 'system' };
+        },
+        async list() {
+          return [
+            { id: 'thread-source', createdBy: 'u1' },
+            { id: 'thread_eval_memory', createdBy: 'system' },
+          ];
+        },
+      },
+    });
+    assert.deepEqual(result, { ok: true, threadId: 'thread_eval_memory' });
+  });
+
   test('deriveCallbackActor() still works unchanged', async () => {
     const { deriveCallbackActor } = await import('../dist/routes/callback-scope-helpers.js');
     const record = {

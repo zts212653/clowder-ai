@@ -86,6 +86,12 @@ export {
   readFileSliceInputSchema,
 } from './file-tools.js';
 export {
+  createFinanceQueryHandler,
+  financeQueryInputSchema,
+  financeTools,
+  handleFinanceQuery,
+} from './finance-tools.js';
+export {
   gameActionTools,
   handleSubmitGameAction,
   submitGameActionInputSchema,
@@ -95,6 +101,13 @@ export {
   graphTools,
   handleGraphResolve,
 } from './graph-tools.js';
+export {
+  handlePreviewOpen,
+  handleWorkspaceNavigate,
+  hubActionTools,
+  previewOpenInputSchema,
+  workspaceNavigateInputSchema,
+} from './hub-action-tools.js';
 export {
   handleLibraryArchive,
   handleLibraryCreate,

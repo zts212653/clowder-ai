@@ -233,7 +233,7 @@ describe('refresh loop algorithm (F174-C)', () => {
 
 describe('split MCP server refresh lifecycle', () => {
   test('all split callback entrypoints start the callback-token refresh loop', () => {
-    const entrypoints = ['collab.ts', 'memory.ts', 'signals.ts', 'limb.ts'];
+    const entrypoints = ['collab.ts', 'memory.ts', 'signals.ts', 'limb.ts', 'finance.ts'];
 
     for (const entrypoint of entrypoints) {
       const source = readFileSync(join(__dirname, '..', 'src', entrypoint), 'utf-8');

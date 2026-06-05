@@ -10,6 +10,7 @@ import { hexToOklch } from '@/lib/color-utils';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
+import { setPendingCrossPostScroll } from '@/utils/crosspost-scroll-target';
 import { CatAvatar } from './CatAvatar';
 import { CliDiagnosticsPanel, isKnownReason } from './CliDiagnosticsPanel';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
@@ -507,6 +508,14 @@ export function ChatMessage({ message, getCatById, onEditCat, hideDiagnosticsPan
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
+                      const sourceInvocationId = message.extra?.crossPost?.sourceInvocationId;
+                      if (sourceInvocationId) {
+                        setPendingCrossPostScroll({
+                          threadId: sourceId,
+                          sourceInvocationId,
+                          senderCatId: message.catId,
+                        });
+                      }
                       pushThreadRouteWithHistory(sourceId, typeof window !== 'undefined' ? window : undefined);
                     }}
                     className="inline-flex items-center gap-1.5 border px-3 py-1 rounded-full bg-cafe-surface border-cafe text-cafe hover:bg-cafe-surface-sunken transition-colors cursor-pointer w-fit max-w-full"

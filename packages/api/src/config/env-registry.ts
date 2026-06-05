@@ -767,6 +767,14 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CAT_CAFE_THREAD_ID',
+    defaultValue: '(运行时注入)',
+    description: '当前 thread ID（由 API 进程注入 MCP Server 子进程 env，用于跨线程 affordance 抑制本 thread 提示）',
+    category: 'cli',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
     name: 'CAT_CAFE_CAT_ID',
     defaultValue: '(运行时注入)',
     description: '当前猫 ID（由 API 进程注入 MCP Server 子进程 env）',
@@ -1138,6 +1146,15 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: false,
   },
+  {
+    name: 'CAT_CAFE_AGY_CWD_ROOT',
+    defaultValue: '~/.cat-cafe/agy-cwd',
+    description:
+      'F210 cache-leak fix：无 agyProfile 时 AGY spawn cwd sandbox 根目录（每只 AGY 猫在此创建 <catId> 子目录），让 agy cwd-relative cache（cache/projects.json）落 sandbox 而非 repo root。',
+    category: 'gemini',
+    sensitive: false,
+    runtimeEditable: false,
+  },
 
   // --- kimi ---
   {
@@ -1504,6 +1521,13 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'WORLD_DB',
     defaultValue: '{repoRoot}/world.sqlite',
     description: 'F093 World Engine SQLite 数据库路径',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
+    name: 'TASK_OUTCOME_DB',
+    defaultValue: '{repoRoot}/task-outcome-episodes.sqlite',
+    description: 'F192 Phase G Task Outcome Episode SQLite 数据库路径',
     category: 'evidence',
     sensitive: false,
   },

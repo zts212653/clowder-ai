@@ -580,6 +580,8 @@ export async function triggerA2AInvocation(
         parentInvocationId: createResult.invocationId,
         callerTraceContext: opts.callerTraceContext,
         a2aTriggerMessageId: triggerMessage.id,
+        // F222 P1: A2A direct execution is not user-origin — suppress frustration detection
+        frustrationAutoIssueEligible: false,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

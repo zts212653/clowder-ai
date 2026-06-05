@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 
-const { preflightAgyProfile, resolveAgyProfile } = await import(
+const { preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } = await import(
   '../dist/domains/cats/services/agents/providers/agy-profile-manager.js'
 );
 
@@ -219,6 +219,97 @@ describe('agy-profile-manager', () => {
       rmSync(root, { recursive: true, force: true });
       rmSync(home, { recursive: true, force: true });
       rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects symlinked profile cwd sandbox before writing through the link (cloud P2)', () => {
+    const home = mkdtempSync(join(tmpdir(), 'agy-real-home-'));
+    const root = mkdtempSync(join(tmpdir(), 'agy-profile-root-'));
+    const worktree = mkdtempSync(join(tmpdir(), 'agy-profile-worktree-'));
+    const leakTarget = mkdtempSync(join(tmpdir(), 'agy-leak-target-'));
+    const savedHome = process.env.HOME;
+    process.env.HOME = home;
+    const profileHome = join(root, 'gemini35');
+
+    try {
+      mkdirSync(profileHome, { recursive: true });
+      // profile cwd 预置成 symlink → leakTarget：若不拒绝，mkdirSync(recursive) 跟随 link，
+      // AGY cwd-relative cache 会落 leakTarget（repo/真 HOME），泄漏修复被绕过。
+      symlinkSync(leakTarget, join(profileHome, 'cwd'), 'dir');
+
+      assert.throws(
+        () =>
+          resolveAgyProfile({
+            catId: 'gemini35',
+            expectedModel: 'Gemini 3.5 Flash (High)',
+            workingDirectory: worktree,
+            config: { enabled: true, homeRoot: root, model: 'Gemini 3.5 Flash (High)' },
+          }),
+        /cwd sandbox must not be a symlink/i,
+      );
+      assert.equal(existsSync(join(leakTarget, 'cache')), false, 'symlinked cwd 不得被穿透写入');
+    } finally {
+      if (savedHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = savedHome;
+      }
+      rmSync(root, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(leakTarget, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects symlinked no-profile cwd sandbox base before writing through the link (cloud P2)', () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'agy-cwd-root-'));
+    const leakTarget = mkdtempSync(join(tmpdir(), 'agy-leak-target-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-noprofile-workdir-'));
+    const savedEnv = process.env.CAT_CAFE_AGY_CWD_ROOT;
+    process.env.CAT_CAFE_AGY_CWD_ROOT = cwdRoot;
+
+    try {
+      // no-profile sandbox base = <root>/gemini 预置成 symlink → leakTarget（per-worktree 子目录会建在它下面）
+      symlinkSync(leakTarget, join(cwdRoot, 'gemini'), 'dir');
+
+      assert.throws(() => resolveAgySpawnCwd(null, 'gemini', workDir), /cwd sandbox base must not be a symlink/i);
+      assert.equal(existsSync(join(leakTarget, 'cache')), false, 'symlinked sandbox base 不得被穿透写入');
+    } finally {
+      if (savedEnv === undefined) {
+        delete process.env.CAT_CAFE_AGY_CWD_ROOT;
+      } else {
+        process.env.CAT_CAFE_AGY_CWD_ROOT = savedEnv;
+      }
+      rmSync(cwdRoot, { recursive: true, force: true });
+      rmSync(leakTarget, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('no-profile spawn cwd is unique per worktree (cloud P1 — preserve AGY conversation isolation)', () => {
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'agy-cwd-root-'));
+    const wtA = mkdtempSync(join(tmpdir(), 'agy-wt-a-'));
+    const wtB = mkdtempSync(join(tmpdir(), 'agy-wt-b-'));
+    const savedEnv = process.env.CAT_CAFE_AGY_CWD_ROOT;
+    process.env.CAT_CAFE_AGY_CWD_ROOT = cwdRoot;
+
+    try {
+      const a = resolveAgySpawnCwd(null, 'gemini', wtA);
+      const b = resolveAgySpawnCwd(null, 'gemini', wtB);
+      const aAgain = resolveAgySpawnCwd(null, 'gemini', wtA);
+      const base = join(cwdRoot, 'gemini');
+      assert.ok(a.startsWith(`${base}/`) && b.startsWith(`${base}/`), '两个 worktree 都在同一 cat base 下');
+      assert.notEqual(a, b, '不同 worktree → 不同 spawn cwd（避免 AGY conversation 命名空间串台）');
+      assert.equal(a, aAgain, '同一 worktree → 确定性同一 spawn cwd（resume/list 稳定）');
+    } finally {
+      if (savedEnv === undefined) {
+        delete process.env.CAT_CAFE_AGY_CWD_ROOT;
+      } else {
+        process.env.CAT_CAFE_AGY_CWD_ROOT = savedEnv;
+      }
+      rmSync(cwdRoot, { recursive: true, force: true });
+      rmSync(wtA, { recursive: true, force: true });
+      rmSync(wtB, { recursive: true, force: true });
     }
   });
 

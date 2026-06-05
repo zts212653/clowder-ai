@@ -56,11 +56,13 @@ function createMockThreadStore() {
   //    membership via the returned thread.userId)
   //  - getParticipants / addParticipants / updateParticipantActivity → no-op
   const threads = new Map();
+  const userThreadIndex = new Map();
   return {
     create(userId, title) {
       const thread = {
         id: `thread-${threads.size}`,
         userId,
+        createdBy: userId,
         title: title ?? '',
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -72,10 +74,11 @@ function createMockThreadStore() {
       return threads.get(id) ?? null;
     },
     list(userId) {
-      return [...threads.values()].filter((t) => t.userId === userId);
+      const indexed = userThreadIndex.get(userId);
+      return [...threads.values()].filter((t) => t.createdBy === userId || indexed?.has(t.id));
     },
     listByProject(userId) {
-      return [...threads.values()].filter((t) => t.userId === userId);
+      return this.list(userId);
     },
     getParticipants() {
       return [];
@@ -86,6 +89,14 @@ function createMockThreadStore() {
     addParticipants() {},
     updateParticipantActivity() {},
     updateTitle() {},
+    indexForUser(threadId, userId) {
+      let indexed = userThreadIndex.get(userId);
+      if (!indexed) {
+        indexed = new Set();
+        userThreadIndex.set(userId, indexed);
+      }
+      indexed.add(threadId);
+    },
     seed(thread) {
       threads.set(thread.id, thread);
       return thread;
@@ -188,6 +199,37 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
     });
 
     assert.equal(response.statusCode, 200, 'targetCats present → cross-post accepted');
+  });
+
+  test('accept cross-post to indexed system thread when targetCats provided', async () => {
+    threadStore.seed({
+      id: 'thread_eval_memory',
+      userId: 'system',
+      createdBy: 'system',
+      title: 'Memory Recall & Library Health Eval',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    threadStore.indexForUser('thread_eval_memory', 'user-1');
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', {
+      threadId: 'source-thread',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        threadId: 'thread_eval_memory',
+        content: 'system-thread relay with explicit targetCats',
+        targetCats: ['codex'],
+        clientMessageId: 'system-thread-targets-1',
+      },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
   });
 
   test('accept cross-post when content has line-start @', async () => {

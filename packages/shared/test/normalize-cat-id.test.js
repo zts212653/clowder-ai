@@ -34,6 +34,20 @@ const TEST_CAT_FIXTURES = {
     roleDescription: 'Code reviewer',
     personality: 'meticulous',
   },
+  gemini25: {
+    id: createCatId('gemini25'),
+    name: '暹罗猫',
+    displayName: '暹罗猫',
+    nickname: '烁烁',
+    avatar: '/avatars/gemini25.png',
+    color: { primary: '#42A5F5', secondary: '#BBDEFB' },
+    mentionPatterns: ['@gemini35', '@gemini-35', '@暹罗gemini35', '@gemini25', '@gemini-25', '@暹罗gemini25'],
+    clientId: 'google',
+    defaultModel: 'gemini-3.5-flash',
+    mcpSupport: true,
+    roleDescription: 'Creative visual designer',
+    personality: 'energetic',
+  },
 };
 
 /** Build a CatConfig from test fixtures + overrides */
@@ -56,6 +70,7 @@ describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
       }),
     );
     catRegistry.register('codex', makeCatConfig('codex'));
+    catRegistry.register('gemini25', makeCatConfig('gemini25'));
   });
   after(() => catRegistry.reset());
 
@@ -90,6 +105,21 @@ describe('normalizeCatId (F154 AC-A3, AC-A7)', () => {
     const r = normalizeCatId('@Codex');
     assert.equal(r.ok, true);
     assert.equal(r.catId, 'codex');
+  });
+
+  // --- Gemini 3.5 alias tests ---
+  it('gemini35 alias resolver → ok', () => {
+    const r1 = normalizeCatId('@gemini35');
+    assert.equal(r1.ok, true);
+    assert.equal(r1.catId, 'gemini25');
+
+    const r2 = normalizeCatId('gemini-35');
+    assert.equal(r2.ok, true);
+    assert.equal(r2.catId, 'gemini25');
+
+    const r3 = normalizeCatId('@gemini25');
+    assert.equal(r3.ok, true);
+    assert.equal(r3.catId, 'gemini25');
   });
 
   // --- Not found ---

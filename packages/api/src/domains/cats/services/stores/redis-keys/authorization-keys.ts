@@ -17,6 +17,9 @@ export const PendingReqKeys = {
   ALL: 'pending-reqs:all',
   /** SortedSet of waiting request IDs by createdAt: pending-reqs:waiting */
   WAITING: 'pending-reqs:waiting',
+  /** F222: SortedSet of denied request IDs per thread, scored by respondedAt.
+   *  Enables precise "recent denied in this thread" queries for cancel burst detection. */
+  threadDenied: (threadId: string) => `pending-reqs:denied:${threadId}`,
 } as const;
 
 export const AuthAuditKeys = {

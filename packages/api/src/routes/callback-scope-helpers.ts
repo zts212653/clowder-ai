@@ -1,6 +1,6 @@
 import { type AgentKeyRecord, type CallbackPrincipal, type CatId, createCatId } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 
 export interface CallbackActor {
   invocationId: string;
@@ -47,7 +47,7 @@ export async function resolveScopedThreadId(
   actor: Pick<CallbackActor, 'threadId' | 'userId'>,
   requestedThreadId: string | undefined,
   options: {
-    threadStore?: Pick<IThreadStore, 'get'>;
+    threadStore?: Pick<IThreadStore, 'get' | 'list'>;
     threadStoreMissingError?: string;
     accessDeniedError?: string;
   },
@@ -65,7 +65,7 @@ export async function resolveScopedThreadId(
   }
 
   const targetThread = await options.threadStore.get(requestedThreadId);
-  if (!targetThread || targetThread.createdBy !== actor.userId) {
+  if (!targetThread || !(await canAccessScopedThread(options.threadStore, targetThread, actor.userId))) {
     return {
       ok: false,
       statusCode: 403,
@@ -100,7 +100,7 @@ export async function resolvePrincipalThread(
   principal: CallbackPrincipal,
   requestedThreadId: string | undefined,
   options: {
-    threadStore?: Pick<IThreadStore, 'get'>;
+    threadStore?: Pick<IThreadStore, 'get' | 'list'>;
     threadStoreMissingError?: string;
     accessDeniedError?: string;
   },
@@ -117,7 +117,7 @@ export async function resolvePrincipalThread(
       };
     }
     const thread = await options.threadStore.get(requestedThreadId);
-    if (!thread || thread.createdBy !== principal.userId) {
+    if (!thread || !(await canAccessScopedThread(options.threadStore, thread, principal.userId))) {
       return {
         ok: false,
         statusCode: 403,
@@ -128,4 +128,17 @@ export async function resolvePrincipalThread(
   }
 
   return resolveScopedThreadId(principal, requestedThreadId, options);
+}
+
+async function canAccessScopedThread(
+  threadStore: Pick<IThreadStore, 'list'>,
+  targetThread: { id: string; createdBy: string },
+  userId: string,
+): Promise<boolean> {
+  if (targetThread.createdBy === userId) return true;
+  if (targetThread.createdBy !== 'system') return false;
+  if (targetThread.id === DEFAULT_THREAD_ID) return false;
+
+  const userVisibleThreads = await threadStore.list(userId);
+  return userVisibleThreads.some((thread) => thread.id === targetThread.id);
 }

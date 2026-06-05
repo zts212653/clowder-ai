@@ -13,16 +13,81 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { deriveCallbackActor, resolveScopedThreadId } from './callback-scope-helpers.js';
 
-const updateTaskSchema = z.object({
+// F193-E1: shared refine — single source for status-dependent dispatch gate validation.
+// dispatched → require both dispatchedThreadId AND dispatchedMessageId (trace IDs).
+// not_dispatched → require non-empty reason.
+// missing → only system-set (MCP handler), not cat-fillable via MCP schemas.
+// Exported for testing — real tests import this, not a copy.
+export function refineDispatchGate(gate: {
+  status: string;
+  dispatchedThreadId?: string;
+  dispatchedMessageId?: string;
+  reason?: string;
+}): boolean {
+  if (gate.status === 'dispatched') return !!gate.dispatchedThreadId && !!gate.dispatchedMessageId;
+  if (gate.status === 'not_dispatched') return !!gate.reason;
+  return true;
+}
+const REFINE_MSG = 'dispatched requires dispatchedThreadId AND dispatchedMessageId; not_dispatched requires reason.';
+
+const updateDispatchGateSchema = z
+  .object({
+    status: z.enum(['dispatched', 'not_dispatched']),
+    dispatchedThreadId: z.string().optional(),
+    dispatchedMessageId: z.string().optional(),
+    reason: z.string().optional(),
+    decidedAt: z.number().optional(),
+  })
+  .refine(refineDispatchGate, { message: REFINE_MSG })
+  .optional();
+
+/** @internal Exported for contract testing only — not part of public API */
+export const updateTaskSchema = z.object({
   taskId: z.string().min(1),
   status: z.enum(['todo', 'doing', 'blocked', 'done']).optional(),
   why: z.string().max(1000).optional(),
+  // F193-E1 P1-4: allow patching dispatchGate
+  dispatchGate: updateDispatchGateSchema,
 });
 
-const createTaskSchema = z.object({
+const suggestedCrossPostSchema = z
+  .object({
+    type: z.literal('cross_post'),
+    threadId: z.string().optional(),
+    featureId: z.string().optional(),
+    ownerCatId: z.string().optional(),
+    targetCats: z.array(z.string()).optional(),
+    reason: z.string().optional(),
+    source: z.enum(['dispatch_gate', 'search_evidence', 'list_recent', 'feat_index']),
+  })
+  .optional();
+
+// API create accepts 'missing' (system-set by MCP handler) + dispatched/not_dispatched (cat-set).
+// Same refine applies to dispatched/not_dispatched; 'missing' passes through (no trace IDs needed).
+const dispatchGateSchema = z
+  .object({
+    status: z.enum(['missing', 'dispatched', 'not_dispatched']),
+    dispatchedThreadId: z.string().optional(),
+    dispatchedMessageId: z.string().optional(),
+    reason: z.string().optional(),
+    suggestedAction: suggestedCrossPostSchema,
+    decidedAt: z.number().optional(),
+  })
+  .refine(refineDispatchGate, { message: REFINE_MSG })
+  .optional();
+
+/** @internal Exported for contract testing only — not part of public API */
+export const createTaskSchema = z.object({
   title: z.string().min(1).max(200),
   why: z.string().max(1000).optional().default(''),
   ownerCatId: z.string().min(1).optional(),
+  // F193 Phase E (dispatch gate)
+  relatedFeatureId: z
+    .string()
+    .regex(/^F\d+$/)
+    .optional(),
+  detectedFeatureIds: z.array(z.string()).optional(),
+  dispatchGate: dispatchGateSchema,
 });
 
 const listTasksQuerySchema = z.object({
@@ -53,7 +118,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { taskId, status, why } = parsed.data;
+    const { taskId, status, why, dispatchGate } = parsed.data;
 
     const existing = await taskStore.get(taskId);
     if (!existing) {
@@ -72,6 +137,8 @@ export function registerCallbackTaskRoutes(
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (why) updateData.why = why;
+    // F193-E1 P1-4: allow patching dispatchGate on existing tasks
+    if (dispatchGate) updateData.dispatchGate = dispatchGate;
 
     const updated = await taskStore.update(taskId, updateData);
     if (!updated) {
@@ -95,7 +162,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { title, why, ownerCatId } = parsed.data;
+    const { title, why, ownerCatId, relatedFeatureId, detectedFeatureIds, dispatchGate } = parsed.data;
 
     // F182 AC-C2: B class — validate ownerCatId is available (contract 400 on disabled)
     let resolvedOwnerCatId: CatId | null = null;
@@ -117,6 +184,10 @@ export function registerCallbackTaskRoutes(
       subjectKey: null,
       ownerCatId: resolvedOwnerCatId,
       userId: actor.userId,
+      // F193 Phase E (dispatch gate) — pass through to store
+      ...(relatedFeatureId ? { relatedFeatureId } : {}),
+      ...(detectedFeatureIds?.length ? { detectedFeatureIds } : {}),
+      ...(dispatchGate ? { dispatchGate } : {}),
     });
 
     socketManager.broadcastToRoom(`thread:${task.threadId}`, 'task_created', task);

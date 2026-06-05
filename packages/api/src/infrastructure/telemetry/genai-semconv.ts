@@ -20,6 +20,13 @@ export const OPERATION_NAME = 'operation.name';
 export const STATUS = 'status';
 export const STREAM_ERROR_PATH = 'cat_cafe.stream_error.path';
 export const TRIGGER = 'trigger';
+/**
+ * F192 build verdict 2026-06-03: thread-kind discriminator for C2 counters so
+ * `eval:a2a` attribution can separate eval-domain / connector-hub noise from
+ * real product-thread friction. Bounded values: 'eval_domain' | 'connector_hub'
+ * | 'product'.
+ */
+export const THREAD_SYSTEM_KIND = 'thread.system_kind';
 
 // --- Tool use span attributes ---
 export const TOOL_NAME = 'tool.name';

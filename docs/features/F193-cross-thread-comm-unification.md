@@ -8,7 +8,7 @@ created: 2026-05-07
 
 # F193: Cross-Thread Communication Unification
 
-> **Status**: done | **Owner**: Ragdoll(Opus 4.7) | **Priority**: P1 | **Completed**: 2026-05-09
+> **Status**: in-progress (Phase E; E1/E2/E4/E5 merged, E3 pending) | **Owner**: Ragdoll(Opus 4.6) | **Priority**: P1 | **Phase A-D Completed**: 2026-05-09 | **Reopened**: 2026-06-03 (CVO approved)
 
 ## Why
 
@@ -72,6 +72,7 @@ team lead第二轮原话（接收侧补充）：
 - [x] AC-A1: `crossPostMessageInputSchema` 补 `targetCats` 字段并在 handler 透传 — commit `7b7ca1b64`
 - [x] AC-A2: MCP handler 层 — invocation-token caller 调 `post_message` 传 `threadId` 时 reject，错误消息提示用 `cat_cafe_cross_post_message` — commit `85b94cf00` (impl) + `8fea021f1` (test hotfix LL-054)
 - [x] AC-A3: API route 层 — `CallbackPrincipal × threadId × targetCats` 组合校验，按下表 4 格允许/拒绝矩阵；违反 KD-1 时 400 + alternatives — 由 Tasks 2+3 在两层 union 覆盖（API 端点不区分 post vs cross_post tool 来源，所以矩阵的 invocation-token+threadId 拒绝在 MCP handler 层 enforce；API route 层 enforce cross-post 缺 routing 凭证）。
+  - 2026-06-05 PR #2103 tightened the system-thread override boundary: indexed system threads are writable through user-visible indexing, but `DEFAULT_THREAD_ID` / global lobby remains cross-thread fail-closed even though stores list it by convention.
 
   | Tool × Principal | `threadId` | `targetCats` / 行首 @ | 写入类型 |
   |---|---|---|---|
@@ -123,6 +124,54 @@ team lead第二轮原话（接收侧补充）：
 | Architecture cell | `transport` + `callback-auth` |
 | Map delta | **update required** |
 | Why | `transport` cell：`cross_post_message` 从残废工具升级为一等公民 + 接收侧 reply hint 是新的 transport 路径数据。`callback-auth` cell：principal-conditioned threadId 是 callback 认证边界的新规则。 |
+
+### Phase E: 发现即投递 — 跨 thread 信息流转改善（2026-06-03 reopened）
+
+> **背景**：三猫思辨（46/47/Maine Coon）收敛的短期方案。
+> **核心诊断**：猫发现跨 scope 问题时默认"记 TODO"不投递——根因是投递摩擦高
+> （5 步 vs 1 步）+ L0 文字和 Magic Word 同构会失效。需要 affordance 改造。
+
+**E1. dispatch gate（TODO 端强制二选一）** ✅ PR #2079 merged 2026-06-04
+TODO/毛线球/task 含 `F\d+` 且不等于当前 feature 时，强制猫选择：
+- `dispatched: thread_xxx`（已投递）
+- `not_dispatched_reason: ...`（说明为什么不投递）
+
+把隐性跳过变成显性决策。实现：`create_task` MCP schema + handler auto-extract F号 + `status: missing` 落库 + warning + `update_task` patch path。Maine Coon 3 轮 review。
+
+**E2. affordance hint（搜索端自动提示）** ✅ PR #2080 merged 2026-06-04
+`search_evidence` / `list_recent` / `feat_index` 返回非当前 thread 的结果时，
+payload 附带 `suggestedAction: { type: 'cross_post', threadId, featureId }` hint。
+让工具主动把投递动作放到猫面前。
+
+**Phase E E2 implementation status（2026-06-03）**:
+- [x] `search_evidence` / `/api/evidence/search` 读取当前 thread context，跨 thread 结果附 `suggestedAction`
+- [x] `list_recent` / `/api/library/recent` 仅对 `kind === 'thread'` 的跨 thread item 附 `suggestedAction`
+- [x] MCP text output 渲染稳定 `suggested_action: cat_cafe_cross_post_message(...)` 行，避免猫从自然语言里猜动作
+
+**E3. 共享环境异常外部化触发**
+SessionStart / shell hook 检测到 main 上有 unexpected 状态（untracked docs /
+意外 stash / 陌生 commit）→ 系统主动注入 prompt 提示溯源。不依赖猫记得检查。
+
+**E4. 降摩擦基建** ✅ PR #2080 merged 2026-06-04
+- commit / stash message 标准化带 `threadId`（溯源从"猜"变"读"）
+- `feat_index` 返回增加 owner catId（投递时不用另查）
+- cross-post 必须 `targetCats` + 行首 `@` 双保险（已有 F193 Phase A 约束）
+
+**Phase E E4 implementation status（2026-06-03）**:
+- [x] `feat_index` 返回 `owner` / `ownerCatId` / `suggestedAction`；无已知 thread 但 owner 可解析时保留 owner-derived action metadata
+- [x] `SuggestedCrossPostAction` 进入 shared type，E1/E2/E4 共用同一 shape
+- [x] commit / stash provenance 标准化为 `Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>`，文档化但不 hook-enforce
+
+**E5. F128 边界澄清（propose_thread vs cross_post_message）** ✅ `23501c27a` merged 2026-06-03
+- F128 `propose_thread` NOT FOR：已有归属 thread 的问题投递 → 用 `cross_post_message`
+- 判断顺序：先 `list_threads keyword=<关键词>` 查有没有 → 有就 cross_post → 没有才 propose
+- thread-orchestration / cross-thread-sync skill 互相指向
+
+**KD（三猫讨论收敛）**：
+- KD-E1: thread ≠ feat（thread = attention container，feat = responsibility unit）
+- KD-E2: 传球 ≠ 投递（任务责任转移 vs 信息事件传播）
+- KD-E3: L0 文字不能独立改变行为（和 Magic Word 同构）→ affordance 改造是核心
+- KD-E4: F128（新建 thread）和 F193（投递到已有 thread）是一个环：发现 → 有已有 thread？→ 有：cross_post / 没有：propose_thread
 
 ## Post-close Follow-up: Duplicate Legacy MCP Topology
 

@@ -4,7 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, RichBlock, SuggestedCrossPostAction } from '@cat-cafe/shared';
 import {
   catRegistry,
   createCatId,
@@ -113,6 +113,88 @@ function hasPlausibleLineStartMention(content: string): boolean {
     }
   }
   return false;
+}
+
+function resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations: string): CatId | undefined {
+  const segments = ownerWithoutAnnotations
+    .split(/[/／]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length < 2) return undefined;
+
+  const firstResolved = resolveCatTarget(segments[0]);
+  if (!('ok' in firstResolved)) return undefined;
+
+  const resolved = new Set<CatId>();
+  const unresolved: string[] = [];
+  for (const segment of segments) {
+    const result = resolveCatTarget(segment);
+    if ('ok' in result) {
+      resolved.add(result.ok);
+    } else {
+      unresolved.push(segment);
+    }
+  }
+
+  if (resolved.size !== 1) return undefined;
+  if (unresolved.some((segment) => /[@\u4E00-\u9FFF]/.test(segment))) return undefined;
+  return firstResolved.ok;
+}
+
+function resolveFeatureOwnerCatId(owner: string | undefined): string | undefined {
+  if (!owner) return undefined;
+  const trimmed = owner.trim();
+  if (!trimmed) return undefined;
+  const ownerWithoutAnnotations = trimmed
+    .replace(/\s*[（(][^()（）]*[）)]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/[+＋、，,；;]/.test(ownerWithoutAnnotations)) return undefined;
+  const slashSeparatedOwnerCatId = resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations);
+  if (slashSeparatedOwnerCatId) return slashSeparatedOwnerCatId;
+
+  const candidates = [
+    trimmed,
+    trimmed.match(/@[^\s,，、/+()（）]+/)?.[0],
+    ownerWithoutAnnotations,
+    ownerWithoutAnnotations.split(/\s+/)[0],
+  ].filter((value): value is string => Boolean(value && value.trim().length > 0));
+
+  for (const candidate of candidates) {
+    const resolved = resolveCatTarget(candidate);
+    if ('ok' in resolved) return resolved.ok;
+  }
+  return undefined;
+}
+
+function buildFeatIndexQueryHaystack(item: FeatIndexEntry): string {
+  const ownerCatId = resolveFeatureOwnerCatId(item.owner);
+  return [item.featId, item.name, item.status, item.owner, ownerCatId].filter(Boolean).join(' ').toLowerCase();
+}
+
+function buildFeatIndexSuggestedAction(
+  item: FeatIndexEntry,
+  threadId: string | undefined,
+  ownerCatId: string | undefined,
+  currentThreadId: string | undefined,
+): SuggestedCrossPostAction | undefined {
+  const targetThreadId = threadId?.trim();
+  const current = currentThreadId?.trim();
+  const owner = ownerCatId?.trim();
+  if (targetThreadId && current && targetThreadId === current) return undefined;
+  if (!targetThreadId && !owner) return undefined;
+  return {
+    type: 'cross_post',
+    ...(targetThreadId ? { threadId: targetThreadId } : {}),
+    featureId: item.featId,
+    ...(owner ? { ownerCatId: owner, targetCats: [owner] } : {}),
+    reason: targetThreadId
+      ? owner
+        ? `${item.featId} is owned by ${owner}; dispatch findings to the owning thread.`
+        : `${item.featId} has an owning thread; dispatch findings there if relevant.`
+      : `${item.featId} is owned by ${owner}; find the feature thread before dispatching findings.`,
+    source: 'feat_index',
+  };
 }
 
 function buildPostMessageRoutingMessage(
@@ -1917,7 +1999,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     if (normalizedQuery) {
       items = items.filter((item) => {
-        const haystack = `${item.featId} ${item.name} ${item.status}`.toLowerCase();
+        const haystack = buildFeatIndexQueryHaystack(item);
         return haystack.includes(normalizedQuery);
       });
     }
@@ -1925,13 +2007,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const requestedLimit = limit ?? 20;
     const sliced = items.slice(0, requestedLimit);
     return {
-      items: sliced.map((item) => ({
-        featId: item.featId,
-        name: item.name,
-        status: item.status,
-        ...(item.keyDecisions ? { keyDecisions: item.keyDecisions } : {}),
-        threadIds: threadIdsByFeatId.get(normalizeFeatId(item.featId)) ?? [],
-      })),
+      items: sliced.map((item) => {
+        const threadIds = threadIdsByFeatId.get(normalizeFeatId(item.featId)) ?? [];
+        const ownerCatId = resolveFeatureOwnerCatId(item.owner);
+        const suggestedAction = buildFeatIndexSuggestedAction(item, threadIds[0], ownerCatId, record.threadId);
+        return {
+          featId: item.featId,
+          name: item.name,
+          status: item.status,
+          ...(item.owner ? { owner: item.owner } : {}),
+          ...(ownerCatId ? { ownerCatId } : {}),
+          ...(item.keyDecisions ? { keyDecisions: item.keyDecisions } : {}),
+          threadIds,
+          ...(suggestedAction ? { suggestedAction } : {}),
+        };
+      }),
     };
   });
 
@@ -1945,6 +2035,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     prNumber: z.number().int().positive(),
     catId: z.string().min(1).optional(), // ignored — server uses record.catId
+    // F140: wake intent. 'review' (default) = waiting on review feedback → CI-pass stays silent.
+    // 'merge' = waiting on CI-green to merge → CI-pass wakes. Re-register (upsert) to flip it.
+    intent: z.enum(['review', 'merge']).optional(),
   });
 
   app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
@@ -1985,18 +2078,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const subjectKey = `pr:${repoFullName}#${prNumber}`;
     try {
+      // F140: resolve wake intent. Explicit wins; otherwise preserve an already-set intent (so an
+      // incidental re-register doesn't silently downgrade a deliberate 'merge'); default 'review'.
+      const existing = await taskStore.getBySubject(subjectKey);
+      const intent = parsed.data.intent ?? existing?.automationState?.intent ?? 'review';
+
       const task = await taskStore.upsertBySubject({
         kind: 'pr_tracking',
         subjectKey,
         threadId: record.threadId,
         title: `PR tracking: ${repoFullName}#${prNumber}`,
         ownerCatId: catId,
-        why: `Tracking PR ${repoFullName}#${prNumber} for review feedback, CI/CD, and conflict detection`,
+        why: `Tracking PR ${repoFullName}#${prNumber} (intent=${intent}): review feedback + conflicts always wake; CI-pass wakes only when intent=merge`,
         createdBy: catId,
         userId: record.userId,
       });
 
-      return { status: 'ok', threadId: record.threadId, task };
+      // Persist intent structurally (deep-merged — preserves ci/review/conflict cursors on re-register).
+      const withIntent = await taskStore.patchAutomationState(task.id, { intent });
+
+      return { status: 'ok', threadId: record.threadId, task: withIntent ?? task };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
         reply.status(409);

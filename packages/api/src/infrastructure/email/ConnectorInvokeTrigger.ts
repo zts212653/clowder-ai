@@ -369,6 +369,8 @@ export class ConnectorInvokeTrigger {
         cursorBoundaries,
         persistenceContext,
         parentInvocationId: createResult.invocationId,
+        // F222 P1: Connector-triggered execution is not user-origin — suppress frustration detection
+        frustrationAutoIssueEligible: false,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

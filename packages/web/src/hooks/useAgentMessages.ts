@@ -30,7 +30,7 @@ import {
   markReplacedInvocation,
   removeReplacedInvocation,
 } from './shared-replaced-invocations';
-import { formatVisibleSystemInfo } from './system-info-visible';
+import { formatAgyProgressDetail, formatVisibleSystemInfo } from './system-info-visible';
 import {
   clearActiveBubble as clearActiveBubbleLedger,
   clearAllActiveBubblesForThread as clearAllActiveBubblesForThreadLedger,
@@ -844,6 +844,13 @@ export function consumeBackgroundSystemInfo(
       // F118 AC-C3: Timeout diagnostics — consume silently in background threads.
       // Foreground uses pendingTimeoutDiagRef (React ref) to attach to error messages;
       // background threads don't have that mechanism, so we just suppress the raw JSON.
+      consumed = true;
+    } else if (parsed?.type === 'agy_trajectory_progress') {
+      // F210-H3: 累积进度到 thread 级 catStatusDetails（折叠单行 "AGY working · N steps · latest"），
+      // 由 ThreadCatStatus 显示；不渲染 system bubble（承接 H1-hotfix 避免 per-step 刷屏）。
+      if (msg.catId && msg.threadId) {
+        options.store.updateThreadCatStatus(msg.threadId, msg.catId, 'streaming', formatAgyProgressDetail(parsed));
+      }
       consumed = true;
     } else if (parsed?.type === 'governance_blocked') {
       const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
@@ -4550,6 +4557,18 @@ export function useAgentMessages() {
             // F118 AC-C3: Store diagnostics keyed by catId to prevent cross-cat mismatch
             if (msg.catId) {
               setPendingTimeoutDiag(msg.catId, parsed as Record<string, unknown>);
+            }
+            consumed = true;
+          } else if (parsed?.type === 'agy_trajectory_progress') {
+            // F210-H3: 累积进度到 thread 级 catStatusDetails（折叠单行 "AGY working · N steps · latest"），
+            // 由 ThreadCatStatus 显示；不渲染 system bubble（承接 H1-hotfix 避免 per-step 刷屏）。
+            if (msg.catId) {
+              const tid = msg.threadId ?? useChatStore.getState().currentThreadId;
+              if (tid) {
+                useChatStore
+                  .getState()
+                  .updateThreadCatStatus(tid, msg.catId, 'streaming', formatAgyProgressDetail(parsed));
+              }
             }
             consumed = true;
           } else if (parsed?.type === 'governance_blocked') {

@@ -35,6 +35,13 @@ export interface JobStateSnapshot {
   inFlight?: { tasks: number; queued: number; kinds: string[] };
   output?: { result?: string };
   sessionId?: string;
+  /**
+   * F198 Bug #3: conversation UUID for the NEXT `--bg --resume <uuid>` turn.
+   * The daemon (2.1.161) forks a fresh UUID on each resume and writes it
+   * directly to state.json, so the caller chains using this per-turn value
+   * (not the original session id). Spike 2026-06-03 confirmed the direct write.
+   */
+  resumeSessionId?: string;
   daemonShort?: string;
   cwd?: string;
   createdAt?: string;

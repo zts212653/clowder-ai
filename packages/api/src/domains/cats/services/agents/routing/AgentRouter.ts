@@ -31,7 +31,7 @@ import {
   ROUTING_TARGET_CATS,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { IntentResult } from '../../context/IntentParser.js';
-import { parseIntent, stripIntentTags } from '../../context/IntentParser.js';
+import { parseIntent, ROUTE_CONTROL_TAGS, stripIntentTags } from '../../context/IntentParser.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
@@ -80,11 +80,289 @@ const routeTracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const Z5_PAGE_SIZE = 50;
 const Z5_USER_MESSAGE_COUNT_LIMIT = 5;
 const Z5_TIME_WINDOW_MS = 60 * 60 * 1000; // 1h
+const MENTION_TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
+const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
+const QUOTE_BEFORE_MENTION_RE = /["'“”‘’]/;
+const DOMAIN_SUFFIX_START_RE = /[\p{L}\p{N}]/u;
+const BARE_URL_PREFIX_BEFORE_MENTION_RE = /(?:^|[^a-z0-9_-])(?:[a-z0-9-]+\.)+[a-z0-9-]+(?:\/[^\s@]*)*\/$/i;
+const DOMAIN_LIKE_UNKNOWN_HANDLE_RE = /^[a-z0-9_-]+(?:\.[a-z0-9-]+)+$/i;
+const ASCII_WORD_RE = /[a-z0-9]/i;
+const QUOTE_SPAN_PAIRS: readonly [string, string][] = [
+  ['"', '"'],
+  ['“', '”'],
+  ['‘', '’'],
+  ['「', '」'],
+  ['『', '』'],
+];
+const LINE_START_MENTION_PREFIX_RE = /^[ \t]*(?:(?:>\s*)|(?:[-*+][ \t]+)|(?:\d+[.)][ \t]+))*/;
+const ROUTE_CONTROL_TAG_RE = new RegExp(
+  `^#(?:${ROUTE_CONTROL_TAGS.map((tag) => escapeRegExp(tag)).join('|')})\\b`,
+  'i',
+);
 
 /** Parsed mention with position for ordering */
 interface ParsedMention {
   catId: CatId;
   position: number;
+}
+
+interface MentionPattern {
+  pattern: string;
+  catId: CatId;
+}
+
+function getRouteLineStart(line: string): number | null {
+  let cursor = line.match(LINE_START_MENTION_PREFIX_RE)?.[0].length ?? 0;
+
+  while (true) {
+    while (line[cursor] === ' ' || line[cursor] === '\t') cursor++;
+    const tag = line.slice(cursor).match(ROUTE_CONTROL_TAG_RE)?.[0];
+    if (!tag) break;
+    cursor += tag.length;
+  }
+
+  while (line[cursor] === ' ' || line[cursor] === '\t') cursor++;
+  return line[cursor] === '@' ? cursor : null;
+}
+
+function findLineEnd(message: string, offset: number): number {
+  let lineEnd = offset;
+  while (lineEnd < message.length && message[lineEnd] !== '\r' && message[lineEnd] !== '\n') lineEnd++;
+  return lineEnd;
+}
+
+function getNextLineOffset(message: string, lineEnd: number): number | null {
+  if (lineEnd >= message.length) return null;
+  return message[lineEnd] === '\r' && message[lineEnd + 1] === '\n' ? lineEnd + 2 : lineEnd + 1;
+}
+
+function forEachRouteCandidateInLine(
+  line: string,
+  offset: number,
+  visit: (line: string, offset: number, candidate: number) => void,
+): void {
+  const routeStart = getRouteLineStart(line);
+  if (routeStart === null) return;
+
+  let candidate = routeStart;
+  while (candidate >= 0) {
+    if (candidate === routeStart || MENTION_TOKEN_BOUNDARY_RE.test(line[candidate - 1] ?? '')) {
+      visit(line, offset, candidate);
+    }
+    candidate = line.indexOf('@', candidate + 1);
+  }
+}
+
+function forEachRouteLineMentionCandidate(
+  message: string,
+  visit: (line: string, offset: number, candidate: number) => void,
+) {
+  let offset = 0;
+  while (offset <= message.length) {
+    const lineEnd = findLineEnd(message, offset);
+    const line = message.slice(offset, lineEnd);
+    forEachRouteCandidateInLine(line, offset, visit);
+    const nextOffset = getNextLineOffset(message, lineEnd);
+    if (nextOffset === null) break;
+    offset = nextOffset;
+  }
+}
+
+function pushRegexSpans(message: string, regex: RegExp, spans: Array<[number, number]>): void {
+  for (const match of message.matchAll(regex)) {
+    if (typeof match.index === 'number') spans.push([match.index, match.index + match[0].length]);
+  }
+}
+
+function pushQuoteSpans(message: string, spans: Array<[number, number]>): void {
+  for (const [open, close] of QUOTE_SPAN_PAIRS) {
+    let offset = 0;
+    while (offset < message.length) {
+      const start = message.indexOf(open, offset);
+      if (start < 0) break;
+      const end = message.indexOf(close, start + open.length);
+      if (end < 0) break;
+      spans.push([start, end + close.length]);
+      offset = end + close.length;
+    }
+  }
+}
+
+function isStraightSingleQuoteOpener(message: string, pos: number): boolean {
+  const previous = message[pos - 1];
+  if (previous === undefined) return true;
+  return !ASCII_WORD_RE.test(previous);
+}
+
+function isStraightSingleQuoteCloser(message: string, pos: number): boolean {
+  const next = message[pos + 1];
+  if (next === undefined) return true;
+  return !ASCII_WORD_RE.test(next);
+}
+
+function pushStraightSingleQuoteSpans(message: string, spans: Array<[number, number]>): void {
+  let offset = 0;
+  while (offset < message.length) {
+    const start = message.indexOf("'", offset);
+    if (start < 0) break;
+    if (!isStraightSingleQuoteOpener(message, start)) {
+      offset = start + 1;
+      continue;
+    }
+
+    let closed = false;
+    let search = start + 1;
+    while (search < message.length) {
+      const end = message.indexOf("'", search);
+      if (end < 0) break;
+      if (isStraightSingleQuoteCloser(message, end)) {
+        spans.push([start, end + 1]);
+        offset = end + 1;
+        closed = true;
+        break;
+      }
+      search = end + 1;
+    }
+
+    if (!closed) offset = start + 1;
+  }
+}
+
+function buildMentionExclusionSpans(message: string): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  pushRegexSpans(message, /```[\s\S]*?```/g, spans);
+  pushRegexSpans(message, /`[^`\n]+`/g, spans);
+  pushRegexSpans(message, /^[ \t]*>[^\n]*/gm, spans);
+  pushQuoteSpans(message, spans);
+  pushStraightSingleQuoteSpans(message, spans);
+  return spans;
+}
+
+function isInsideSpan(pos: number, spans: readonly [number, number][]): boolean {
+  return spans.some(([start, end]) => pos >= start && pos < end);
+}
+
+function isUserMentionLeftBoundary(message: string, pos: number): boolean {
+  if (pos === 0) return true;
+  const prev = message[pos - 1];
+  if (!prev) return true;
+  return !HANDLE_CONTINUATION_RE.test(prev) && !QUOTE_BEFORE_MENTION_RE.test(prev);
+}
+
+function isMentionEndBoundary(message: string, end: number): boolean {
+  const next = message[end];
+  if (!next) return true;
+  if (next === '.') {
+    const suffixStart = message[end + 1];
+    if (suffixStart !== undefined && DOMAIN_SUFFIX_START_RE.test(suffixStart)) return false;
+  }
+  if (MENTION_TOKEN_BOUNDARY_RE.test(next)) return true;
+  return !HANDLE_CONTINUATION_RE.test(next);
+}
+
+function isUrlishMentionToken(message: string, pos: number): boolean {
+  const tokenStart =
+    Math.max(message.lastIndexOf(' ', pos), message.lastIndexOf('\n', pos), message.lastIndexOf('\t', pos)) + 1;
+  const nextSpace = message.slice(pos).search(/\s/);
+  const tokenEnd = nextSpace < 0 ? message.length : pos + nextSpace;
+  const token = message.slice(tokenStart, tokenEnd);
+  if (token.includes('://')) return true;
+  if (token.toLowerCase().startsWith('www.')) return true;
+  const beforeMention = message.slice(0, pos);
+  return BARE_URL_PREFIX_BEFORE_MENTION_RE.test(beforeMention);
+}
+
+function forEachUserMentionCandidate(message: string, visit: (candidate: number) => void) {
+  const excluded = buildMentionExclusionSpans(message);
+  let candidate = message.indexOf('@');
+  while (candidate >= 0) {
+    if (
+      !isInsideSpan(candidate, excluded) &&
+      isUserMentionLeftBoundary(message, candidate) &&
+      !isUrlishMentionToken(message, candidate)
+    ) {
+      visit(candidate);
+    }
+    candidate = message.indexOf('@', candidate + 1);
+  }
+}
+
+function findMentionPatternAt(
+  message: string,
+  pos: number,
+  patterns: readonly MentionPattern[],
+): MentionPattern | null {
+  for (const entry of patterns) {
+    if (!message.startsWith(entry.pattern, pos)) continue;
+    if (!isMentionEndBoundary(message, pos + entry.pattern.length)) continue;
+    return entry;
+  }
+  return null;
+}
+
+function hasDomainSuffixedMentionPatternAt(message: string, pos: number, patterns: readonly MentionPattern[]): boolean {
+  return patterns.some((entry) => {
+    if (!message.startsWith(entry.pattern, pos)) return false;
+    const suffixStart = pos + entry.pattern.length;
+    const suffixNext = message[suffixStart + 1];
+    return message[suffixStart] === '.' && suffixNext !== undefined && DOMAIN_SUFFIX_START_RE.test(suffixNext);
+  });
+}
+
+function recordRouteLineMentions(
+  message: string,
+  patterns: readonly MentionPattern[],
+  seenCats: Set<string>,
+  mentions: ParsedMention[],
+  routingWarnings: CatRoutingError[],
+): void {
+  const excluded = buildMentionExclusionSpans(message);
+  forEachRouteLineMentionCandidate(message, (_line, lineOffset, candidate) => {
+    const position = lineOffset + candidate;
+    if (isInsideSpan(position, excluded)) return;
+    const matched = findMentionPatternAt(message, position, patterns);
+    if (matched) recordResolvedMention(matched.catId, position, seenCats, mentions, routingWarnings);
+  });
+}
+
+function recordResolvedMention(
+  catId: CatId,
+  position: number,
+  seenCats: Set<string>,
+  mentions: ParsedMention[],
+  routingWarnings: CatRoutingError[],
+): void {
+  const key = catId as string;
+  const resolved = resolveCatTarget(key);
+  if ('error' in resolved) {
+    if (!seenCats.has(key)) {
+      seenCats.add(key);
+      routingWarnings.push(resolved.error);
+    }
+    return;
+  }
+
+  if (!seenCats.has(key)) {
+    seenCats.add(key);
+    mentions.push({ catId, position });
+  }
+}
+
+function recordUnknownMentionWarning(
+  message: string,
+  position: number,
+  seenCats: Set<string>,
+  routingWarnings: CatRoutingError[],
+): void {
+  const handle = message.slice(position + 1).match(/^([a-z0-9_.-]+)/)?.[1];
+  if (!handle) return;
+  if (DOMAIN_LIKE_UNKNOWN_HANDLE_RE.test(handle)) return;
+  const key = `@unknown:${handle}`;
+  const resolved = resolveCatTarget(handle);
+  if ('error' in resolved && !seenCats.has(key)) {
+    seenCats.add(key);
+    routingWarnings.push(resolved.error);
+  }
 }
 
 /**
@@ -216,6 +494,10 @@ export interface AgentRouterOptions {
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup */
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
+  /** F222: Frustration auto-issue store */
+  frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
+  /** F222: Pending request store — cancel burst detection */
+  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
 }
 
 /**
@@ -270,7 +552,65 @@ export class AgentRouter {
   /** F093 */
   private worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   private worldStore?: import('../../../../world/interfaces.js').IWorldStore;
+  /** F222 */
+  private frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
+  private pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   private speechMentionRe: RegExp;
+
+  /**
+   * F222 Phase B: Collect the most recent TEXT_FRUSTRATION_WINDOW user messages
+   * from a thread using Z5-style reverse-iterate paging, then run keyword detection.
+   * Shared by both route() and routeExecution() (cloud P1 fix).
+   *
+   * Uses SYSTEM_USER_IDS (not just 'system') to exclude scheduler/connector noise (cloud P2 fix).
+   */
+  private async collectAndDetectTextFrustration(
+    threadId: string,
+    detectTextFrustration: (msgs: string[]) => { matched: boolean; matchedKeywords: string[]; matchCount: number },
+  ): Promise<{ matched: boolean; matchedKeywords: string[]; matchCount: number; recentUserMessages: string[] }> {
+    const { TEXT_FRUSTRATION_WINDOW } = await import('../../frustration/text-frustration-keywords.js');
+    const PAGE_SIZE = 50;
+    const MAX_PAGES = 10;
+    const userMsgs: string[] = [];
+    type MsgLike = {
+      catId?: string | null;
+      userId?: string;
+      content?: string;
+      id?: string;
+      timestamp?: number;
+      deliveredAt?: number;
+    };
+    let cursorScore = Infinity;
+    let cursorId: string | undefined;
+    let isFirstPage = true;
+    for (let page = 0; page < MAX_PAGES && userMsgs.length < TEXT_FRUSTRATION_WINDOW; page++) {
+      const batch: MsgLike[] = isFirstPage
+        ? ((await this.messageStore.getByThread(threadId, PAGE_SIZE)) as MsgLike[])
+        : ((await this.messageStore.getByThreadBefore(threadId, cursorScore, PAGE_SIZE, cursorId)) as MsgLike[]);
+      isFirstPage = false;
+      if (batch.length === 0) break;
+      const first = batch[0]!;
+      const dAt = typeof first.deliveredAt === 'number' ? first.deliveredAt : 0;
+      const ts = typeof first.timestamp === 'number' ? first.timestamp : 0;
+      const firstScore = dAt > 0 ? dAt : ts;
+      if (firstScore > 0 && firstScore < cursorScore) {
+        cursorScore = firstScore;
+        cursorId = first.id;
+      }
+      for (let i = batch.length - 1; i >= 0 && userMsgs.length < TEXT_FRUSTRATION_WINDOW; i--) {
+        const m = batch[i]!;
+        // Cloud P2 fix: exclude all system users (scheduler, system, etc.), not just 'system'
+        if (!m.catId && !SYSTEM_USER_IDS.has(m.userId ?? '')) {
+          userMsgs.push(typeof m.content === 'string' ? m.content : '');
+        }
+      }
+    }
+    const detection = detectTextFrustration(userMsgs);
+    return {
+      ...detection,
+      recentUserMessages: userMsgs.slice(0, 3).map((m) => m.slice(0, 200)),
+    };
+  }
 
   private rebuildRuntimeCaches(agentRegistry: AgentRegistry): void {
     this.services = {};
@@ -315,6 +655,8 @@ export class AgentRouter {
     this.dismissTracker = options.dismissTracker;
     this.worldContextProvider = options.worldContextProvider;
     this.worldStore = options.worldStore;
+    this.frustrationIssueStore = options.frustrationIssueStore;
+    this.pendingRequestStore = options.pendingRequestStore;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -519,10 +861,11 @@ export class AgentRouter {
    * Raw variant returns ParsedMention[] with position info for order-aware merging.
    */
   private parseMentionsRaw(message: string): { mentions: ParsedMention[]; routing_warnings: CatRoutingError[] } {
-    const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
+    const lowerMessage = message.toLowerCase();
+    const speechRouteMessage = this.normalizeSpeechMentions(message).toLowerCase();
 
     // 1. Collect all mentionPatterns → catId, sorted by length descending
-    const allPatterns: Array<{ pattern: string; catId: CatId }> = [];
+    const allPatterns: MentionPattern[] = [];
     const allConfigs = catRegistry.getAllConfigs();
     for (const config of Object.values(allConfigs)) {
       for (const pattern of config.mentionPatterns) {
@@ -531,60 +874,30 @@ export class AgentRouter {
     }
     allPatterns.sort((a, b) => b.pattern.length - a.pattern.length); // longest first
 
-    // 2-4. Match with consumed intervals
-    const consumed: Array<[number, number]> = []; // [start, end)
+    // 2-4. User-authored messages accept explicit @mentions anywhere in prose.
+    // A2A/callback handoffs still use the stricter line-start parser in a2a-mentions.ts.
     const mentions: ParsedMention[] = [];
     const seenCats = new Set<string>();
     const routing_warnings: CatRoutingError[] = [];
 
-    for (const { pattern, catId } of allPatterns) {
-      let searchFrom = 0;
-      while (searchFrom < lowerMessage.length) {
-        const pos = lowerMessage.indexOf(pattern, searchFrom);
-        if (pos === -1) break;
-
-        const end = pos + pattern.length;
-        const charAfter = lowerMessage[end];
-        const isEndBoundary = !charAfter || /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/.test(charAfter);
-        const isConsumed = consumed.some(([s, e]) => pos >= s && pos < e);
-
-        if (isEndBoundary && !isConsumed) {
-          consumed.push([pos, end]);
-          // F182 KD-10: resolver check at match-time (not isCatAvailable)
-          const resolved = resolveCatTarget(catId as string);
-          if ('error' in resolved) {
-            if (!seenCats.has(catId as string)) {
-              seenCats.add(catId as string);
-              routing_warnings.push(resolved.error);
-            }
-          } else if (!seenCats.has(catId as string)) {
-            seenCats.add(catId as string);
-            mentions.push({ catId, position: pos });
-          } else {
-            const existing = mentions.find((m) => m.catId === catId);
-            if (existing && pos < existing.position) existing.position = pos;
-          }
-        }
-        searchFrom = pos + 1;
+    // Explicit @mentions are user-authored route tokens and may appear anywhere in prose.
+    forEachUserMentionCandidate(lowerMessage, (pos) => {
+      const matched = findMentionPatternAt(lowerMessage, pos, allPatterns);
+      if (matched) {
+        recordResolvedMention(matched.catId, pos, seenCats, mentions, routing_warnings);
+        return;
       }
-    }
+      // P2 (codex review 6949db49): an explicit @handle that matched NO registered cat is an
+      // unknown handle (e.g. @kimi). Without this, parseAllMentions returns empty mentions + empty
+      // warnings, so the caller silently falls back to the default cat with zero user feedback.
+      if (hasDomainSuffixedMentionPatternAt(lowerMessage, pos, allPatterns)) return;
+      recordUnknownMentionWarning(lowerMessage, pos, seenCats, routing_warnings);
+    });
 
-    // P2 (codex review 6949db49): a line-start @handle that matched NO registered cat is an
-    // unknown handle (e.g. @kimi). Without this, parseAllMentions returns empty mentions + empty
-    // warnings, so the caller silently falls back to the default cat with zero user feedback.
-    // Scoped to line-start handles (F046: a leading @ is a routing intent) and excludes spans
-    // already consumed by a registered-cat match — avoids flagging mid-line @ (emails, code refs).
-    const lineStartHandleRe = /(?:^|\n)[ \t]*(?:[>*+-]+[ \t]*)?@([a-z0-9_.-]+)/gi;
-    for (const m of lowerMessage.matchAll(lineStartHandleRe)) {
-      const handle = m[1];
-      if (!handle) continue;
-      const atPos = (m.index ?? 0) + m[0].lastIndexOf('@');
-      if (consumed.some(([s, e]) => atPos >= s && atPos < e)) continue;
-      const resolved = resolveCatTarget(handle);
-      if ('error' in resolved && !seenCats.has(`@unknown:${handle}`)) {
-        seenCats.add(`@unknown:${handle}`);
-        routing_warnings.push(resolved.error);
-      }
+    // Speech aliases like "at 砚砚" stay limited to route-line syntax; otherwise ordinary
+    // prose such as "look at codex docs" would become an implicit route.
+    if (speechRouteMessage !== lowerMessage) {
+      recordRouteLineMentions(speechRouteMessage, allPatterns, seenCats, mentions, routing_warnings);
     }
 
     mentions.sort((a, b) => a.position - b.position);
@@ -609,23 +922,24 @@ export class AgentRouter {
     threadId: string,
   ): Promise<{ cats: CatId[]; matchPosition: number } | null> {
     const lowerMessage = this.normalizeSpeechMentions(message).toLowerCase();
-
-    // Reuse parseMentions' token boundary regex
-    const boundaryRe = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
+    const excluded = buildMentionExclusionSpans(lowerMessage);
 
     /** Find first boundary-valid match position, or -1 if not found */
     const findMatchPosition = (pattern: string): number => {
       const lowerPattern = pattern.toLowerCase();
-      let searchFrom = 0;
-      while (searchFrom < lowerMessage.length) {
-        const pos = lowerMessage.indexOf(lowerPattern, searchFrom);
-        if (pos === -1) return -1;
-        const end = pos + lowerPattern.length;
-        const charAfter = lowerMessage[end];
-        if (!charAfter || boundaryRe.test(charAfter)) return pos;
-        searchFrom = pos + 1;
-      }
-      return -1;
+      let found = -1;
+      forEachRouteLineMentionCandidate(lowerMessage, (line, lineOffset, candidate) => {
+        if (found >= 0) return;
+        const candidatePosition = lineOffset + candidate;
+        if (isInsideSpan(candidatePosition, excluded)) return;
+        if (!line.startsWith(lowerPattern, candidate)) return;
+        const end = candidate + lowerPattern.length;
+        const charAfter = line[end];
+        if (!charAfter || MENTION_TOKEN_BOUNDARY_RE.test(charAfter)) {
+          found = candidatePosition;
+        }
+      });
+      return found;
     };
 
     // Build all group patterns sorted longest-first for correct priority
@@ -928,6 +1242,8 @@ export class AgentRouter {
       ...(this.skillLoadEventLog ? { skillLoadEventLog: this.skillLoadEventLog } : {}),
       ...(this.worldContextProvider ? { worldContextProvider: this.worldContextProvider } : {}),
       ...(this.worldStore ? { worldStore: this.worldStore } : {}),
+      ...(this.frustrationIssueStore ? { frustrationIssueStore: this.frustrationIssueStore } : {}),
+      ...(this.pendingRequestStore ? { pendingRequestStore: this.pendingRequestStore } : {}),
     };
   }
 
@@ -1003,6 +1319,58 @@ export class AgentRouter {
       ...(contentBlocks ? { contentBlocks } : {}),
     });
 
+    // F222 Phase B+C: Text frustration + retry burst detection
+    if (this.frustrationIssueStore) {
+      try {
+        const { detectTextFrustration } = await import('../../frustration/text-frustration-keywords.js');
+        const detection = await this.collectAndDetectTextFrustration(resolvedThreadId, detectTextFrustration);
+        const { evaluate } = await import('../../frustration/FrustrationDetector.js');
+        const frustDeps = {
+          frustrationIssueStore: this.frustrationIssueStore,
+          messageStore: this.messageStore,
+          socketManager: this.socketManager as
+            | import('../../../../../infrastructure/websocket/index.js').SocketManager
+            | undefined,
+        };
+        const baseSigCtx = { threadId: resolvedThreadId, userId, catId: (targetCats[0] ?? 'unknown') as string };
+
+        // Signal: text_frustration (Phase B)
+        if (detection.matched) {
+          await evaluate(
+            {
+              signal: {
+                type: 'text_frustration' as const,
+                matchedKeywords: detection.matchedKeywords,
+                matchCount: detection.matchCount,
+                recentUserMessages: detection.recentUserMessages,
+              },
+              ...baseSigCtx,
+            },
+            frustDeps,
+          );
+        }
+
+        // Signal: retry_burst (Phase C AC-C2) — same message sent ≥3 times
+        const { detectRetryBurst } = await import('../../frustration/retry-burst-detector.js');
+        const retryResult = detectRetryBurst(message, detection.recentUserMessages);
+        if (retryResult.matched) {
+          await evaluate(
+            {
+              signal: {
+                type: 'retry_burst' as const,
+                matchCount: retryResult.matchCount,
+                repeatedPrefix: retryResult.repeatedPrefix,
+              },
+              ...baseSigCtx,
+            },
+            frustDeps,
+          );
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
     const strategyDeps = this.getStrategyDeps();
     const routeOptions = {
       contentBlocks,
@@ -1068,6 +1436,10 @@ export class AgentRouter {
       callerTraceContext?: CallerTraceContext;
       /** Explicit A2A trigger message ID for queue-dispatched stream reply threading */
       a2aTriggerMessageId?: string;
+      /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
+       *  true/undefined = user-origin (eligible, default for backward compat).
+       *  false = agent/connector-origin (A2A handoff) — suppress detection. */
+      frustrationAutoIssueEligible?: boolean;
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -1107,6 +1479,58 @@ export class AgentRouter {
       await this.threadStore.updateLastActive(threadId);
     }
 
+    // F222 Phase B+C: Text frustration + retry burst detection (production path)
+    // F222 P1: Skip for A2A/connector origins — only detect frustration on user-driven routes
+    if (this.frustrationIssueStore && options?.frustrationAutoIssueEligible !== false) {
+      try {
+        const { detectTextFrustration } = await import('../../frustration/text-frustration-keywords.js');
+        const detection = await this.collectAndDetectTextFrustration(threadId, detectTextFrustration);
+        const { evaluate } = await import('../../frustration/FrustrationDetector.js');
+        const frustDeps = {
+          frustrationIssueStore: this.frustrationIssueStore,
+          messageStore: this.messageStore,
+          socketManager: this.socketManager as
+            | import('../../../../../infrastructure/websocket/index.js').SocketManager
+            | undefined,
+        };
+        const baseSigCtx = { threadId, userId, catId: (targetCats[0] ?? 'unknown') as string };
+
+        if (detection.matched) {
+          await evaluate(
+            {
+              signal: {
+                type: 'text_frustration' as const,
+                matchedKeywords: detection.matchedKeywords,
+                matchCount: detection.matchCount,
+                recentUserMessages: detection.recentUserMessages,
+              },
+              ...baseSigCtx,
+            },
+            frustDeps,
+          );
+        }
+
+        // Signal: retry_burst (Phase C AC-C2)
+        const { detectRetryBurst } = await import('../../frustration/retry-burst-detector.js');
+        const retryResult = detectRetryBurst(message, detection.recentUserMessages);
+        if (retryResult.matched) {
+          await evaluate(
+            {
+              signal: {
+                type: 'retry_burst' as const,
+                matchCount: retryResult.matchCount,
+                repeatedPrefix: retryResult.repeatedPrefix,
+              },
+              ...baseSigCtx,
+            },
+            frustDeps,
+          );
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
     const strategyDeps = this.getStrategyDeps();
     const routeOptions = {
       contentBlocks: options?.contentBlocks,
@@ -1127,6 +1551,10 @@ export class AgentRouter {
       ...(options?.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       ...(options?.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
       routeSpan,
+      // F222 P1: thread provenance flag so route-serial/route-parallel can gate detection
+      ...(options?.frustrationAutoIssueEligible !== undefined
+        ? { frustrationAutoIssueEligible: options.frustrationAutoIssueEligible }
+        : {}),
     };
 
     try {

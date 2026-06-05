@@ -9,7 +9,9 @@
  * (future); v1 only sees public/internal collections.
  */
 
+import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -41,6 +43,7 @@ interface RecentItem {
   filesRead?: number;
   filesModified?: number;
   verified?: boolean;
+  suggestedAction?: SuggestedCrossPostAction;
 }
 
 interface SelectionGroup {
@@ -68,6 +71,8 @@ export async function handleListRecent(input: {
   if (input.since) params.set('since', input.since);
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.kinds && input.kinds.length > 0) params.set('kinds', input.kinds.join(','));
+  const currentThreadId = process.env['CAT_CAFE_THREAD_ID']?.trim();
+  if (currentThreadId) params.set('currentThreadId', currentThreadId);
 
   const qs = params.toString();
   const url = `${API_URL}/api/library/recent${qs ? `?${qs}` : ''}`;
@@ -109,6 +114,11 @@ function formatRecent(data: RecentResponse, since: string): string {
         if (parts.length > 0) line += ` {${parts.join(', ')}}`;
       }
       lines.push(line);
+      if (item.suggestedAction) {
+        lines.push(
+          ...formatSuggestedCrossPostActionLines(item.suggestedAction, { indent: '    ', detailIndent: '    ' }),
+        );
+      }
     }
   }
   if (data.groups && data.groups.length > 1) {

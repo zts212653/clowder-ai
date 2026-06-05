@@ -314,10 +314,10 @@ Evidence:
     assert.ok(summary.domains, 'domains field must exist');
     assert.equal(
       summary.domains.length,
-      4,
-      'should have 4 registered domains (eval:a2a + eval:memory + eval:sop + eval:capability-wakeup)',
+      5,
+      'should have 5 registered domains (eval:a2a + eval:memory + eval:sop + eval:capability-wakeup + eval:task-outcome)',
     );
-    assert.equal(summary.counts.registeredDomains, 4);
+    assert.equal(summary.counts.registeredDomains, 5);
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
     assert.ok(a2aDomain, 'eval:a2a must appear in domains');

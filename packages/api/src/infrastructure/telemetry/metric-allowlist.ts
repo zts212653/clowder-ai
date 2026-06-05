@@ -19,6 +19,7 @@ import {
   OPERATION_NAME,
   STATUS,
   STREAM_ERROR_PATH,
+  THREAD_SYSTEM_KIND,
   TRIGGER,
 } from './genai-semconv.js';
 
@@ -31,6 +32,7 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   STATUS,
   STREAM_ERROR_PATH,
   TRIGGER,
+  THREAD_SYSTEM_KIND,
   CALLBACK_TOOL,
   CALLBACK_REASON,
 ]);

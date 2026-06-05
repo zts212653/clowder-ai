@@ -12,7 +12,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
 
 # F128: Cat-Proposed Thread Creation — 猫猫提议创建 Thread
 
-> **Status**: done | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2
+> **Status**: active (Phase Y merged 2026-06-04, PR #2098) | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2
 > **Design correction (2026-05-22)**: supersedes direct `cat_cafe_create_thread` with Proposal-First flow per ADR-035.
 
 ## Why
@@ -124,6 +124,58 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - [x] AC-X2: No `any` types
 - [x] AC-X3: `MCP_TOOLS_SECTION` updated; `thread-orchestration` skill rewritten for propose-first
 - [x] AC-X4: `pnpm check` + `pnpm lint` + all affected tests green
+
+### Phase Y: Reporting Mode 分型 ✅ merged (PR #2098, squash `914fce810`, 2026-06-04)（Maine Coon cross-post 提出 + CVO 委托猫讨论达成一致）
+
+> **Source**: Maine Coon cross-post — 守门猫 Repo Inbox PR triage 场景里，当前 F128 默认让所有 propose 出去的 thread 回报主 thread (`proposal-enrich-header.ts:61` 并行 + `:66` 串行硬写"最后一棒回报"进 initialMessage)，triage 类任务被回报 noise 拉回。
+> **Why**: thread 之间的关系不是一刀切——按"源 thread 是否背负任务"分型，4 种关系应有 4 种 reporting mode。
+
+#### 4 种 mode 语义
+
+| Mode | 语义 | 推荐场景 |
+|------|------|---------|
+| `none` (UI: `autonomous`) | 球权完全释放，源 thread 不默认持有回执责任；"不强制回报"≠"禁止上报"——下游遇 CVO 决策 / 跨 feature 冲突 / 共享文件争用 / blocking dep / 不可逆风险仍按家规主动 cross-post | Repo Inbox / PR triage / 分发 |
+| `final-only` | 下游自治，最后一棒回报一次 summary | Feature work fork |
+| `state-transitions` | 下游每个 phase boundary 回报（≈当前隐式默认） | Bug investigation / Research |
+| `blocking-ack` | 下游必须等源 thread ack 才能继续；持球在**被阻塞的下游 thread** 不是源 thread；下游发 `[BLOCKING]` ack 请求 + 自己 `cat_cafe_hold_ball` 等 ack/超时，源 thread 不背 polling 责任；未来若加结构化 ack 回调 + EYES>0 走事件驱动不续 hold（KD-27 一致） | 等 review / 等 CVO / blocking handoff |
+
+#### Default 决策
+
+**Default = `none`（UI: `autonomous` / `no-required-report`）** — Ragdoll（Opus-48）+ Maine Coon（GPT-5.5）2026-06-04 收敛。
+
+收敛论证（两条核心）：
+1. **`final-only` 不解决 silent deadlock**：`final-only` 的"最后回报"也是下游主动发；下游真卡死/崩溃时既不闭环也不发 final summary → 对真正的 silent deadlock 同样无能为力。silent deadlock 的真解药是 `blocking-ack`（带 timeout）或源 thread 主动 poll，不是 `final-only`。去掉 safety 维度后，`final-only` vs `none` 退化为纯"例行 summary noise vs 静默"权衡。
+2. **该权衡里 `none` 占优**：C-Y2 已保证关键上报（CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突）在 `none` 下照常发生 → 关键路径不丢，`none` 只省"例行 phase 回报"；`none` 零额外副作用；强制回报的 noise（triage 把 summary 拉回守门猫）正是 `final-only` 的失败模式 = Maine Coon提此 feature 的初始痛点。
+
+#### Design Constraint（实施时必须满足）
+
+- **C-Y1**: Dynamic mode 切换 v1 不支持 — mode 是 thread contract，动态改产生历史语义歧义 + 状态迁移 UI/审计成本。要换就 propose 新 thread / 显式 handoff contract
+- **C-Y2**: `none` 允许下游主动 cross-post — "不强制回报"≠"禁止上报"
+- **C-Y3**: `blocking-ack` 持球边界 — 持球在**下游**（被阻塞的猫）不是源 thread；下游 `hold_ball` + 发 `[BLOCKING]` ack 请求；源 thread 不背 polling 责任
+- **C-Y4**: 命名 UI 分离 — `none` 可 UI 显示成 `autonomous` 减少误读（spec 时统一决定内部字段是否同步改名）
+- **C-Y5**: `none`/`autonomous` 的 header 不得出现"最后一棒回报主 Thread"/"顺序 → 回到主 Thread"文案；改写为"无强制回报；遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突按家规主动 cross-post"（Maine Coon review guard：`proposal-enrich-header.ts:61/:66` 旧硬写默认正是 Phase Y 要拆掉的，不能反过来变成保留 report-back 的理由）
+- **C-Y6**: `#ideate` 与 `reportingMode` **正交** — `#ideate` 只决定并行 wake-all vs 串行接龙；report-back owner 由 `reportingMode` 决定。`#ideate + none` 不注入 reporter owner；`#ideate + final-only/state-transitions` 才指定汇总 owner（Maine Coon review guard：防止实现把"并行=必回报"耦死）
+
+#### Acceptance Criteria
+
+- [x] AC-Y1: `cat_cafe_propose_thread` 支持 `reportingMode?: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack'` 入参（不传时按 default 走）
+- [x] AC-Y2: `proposal-enrich-header.ts` 当前硬写的 report-back 文案（`:61` 并行 + `:66` 串行）拆 4 套 Reporting Protocol 段，按 reportingMode 选注入
+- [x] AC-Y3: `thread-orchestration` skill 加 mode 选择指南 + 推荐场景表（含 C-Y1~C-Y6 design constraint）
+- [x] AC-Y4: 测试覆盖 4 种模式（含 default fallback + edge cases；blocking-ack hold_ball 边界 C-Y3）
+- [x] AC-Y5: 旧 `appendApprovedInitialMessage` 调用方（PR #2067 引入的 dispatch path）按新 enrich-header signature 同步
+- [x] AC-Y6: Default 决议写入 → **`Default reportingMode = 'none'`（UI: `autonomous` / `no-required-report`）**（Ragdoll Opus-48 + Maine Coon GPT-5.5 2026-06-04 达成一致，见上 Default 决策段）
+
+#### Open Questions（已收敛）
+
+- ~~OQ-Y1: `blocking-ack` 是否复用 `hold_ball`？~~ → 复用 + 边界 C-Y3
+- ~~OQ-Y2: Dynamic mode 切换？~~ → v1 不支持（C-Y1）
+- ~~OQ-Y3: `none` 是否允许下游主动 cross-post？~~ → 允许（C-Y2）
+
+#### Reviewer
+
+- 提议/实施猫：Ragdoll（Opus-47 立项 + Opus-48 接手 default 收敛与实施）
+- 设计 input：Maine Coon（Codex GPT-5.5）— design constraint C-Y1~C-Y6 来源（C-Y5/C-Y6 为 default 收敛时补充的实现 review guard）
+- CVO sign-off：landy（立项 + 委托猫讨论 default，2026-06-04）
 
 ## Maintainer Review 结论（2026-03-19，已被 2026-05-22 产品修正补充）
 

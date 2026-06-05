@@ -3,7 +3,7 @@
  * Split out of RedisProposalStore.ts to keep both files under the 350-line hard limit (AC-X1).
  */
 
-import type { CatId, ProposalApproveOverrides, ProposalStatus, ThreadProposal } from '@cat-cafe/shared';
+import type { CatId, ProposalApproveOverrides, ProposalStatus, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
 import type { FinalizeApprovalInput } from '../ports/ProposalStore.js';
 
 /**
@@ -83,6 +83,7 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
   ];
   if (proposal.initialMessage) fields.push('initialMessage', proposal.initialMessage);
   if (proposal.cardMessageId) fields.push('cardMessageId', proposal.cardMessageId);
+  if (proposal.reportingMode) fields.push('reportingMode', proposal.reportingMode);
   return fields;
 }
 
@@ -104,6 +105,7 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
     createdAt: parseInt(data.createdAt!, 10),
   };
   if (initialMessage) proposal.initialMessage = initialMessage;
+  if (data.reportingMode) proposal.reportingMode = data.reportingMode as ReportingMode;
   if (data.approvedBy) proposal.approvedBy = data.approvedBy;
   if (data.approvedAt) proposal.approvedAt = parseInt(data.approvedAt, 10);
   if (data.createdThreadId) proposal.createdThreadId = data.createdThreadId;

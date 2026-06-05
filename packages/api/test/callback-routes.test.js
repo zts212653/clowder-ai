@@ -1555,6 +1555,287 @@ describe('Callback Routes', () => {
     assert.deepEqual(f043.threadIds, [threadB.id]);
   });
 
+  test('GET feat-index returns owner-derived suggested cross-post action when feature has a thread', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F193', name: 'Cross Thread Comm', status: 'in-progress', owner: '布偶猫' },
+    ];
+
+    const backlogF193 = await backlogStore.create({
+      userId: 'user-1',
+      title: '[F193] Cross Thread Comm',
+      summary: 'feature f193',
+      priority: 'p1',
+      tags: ['feature:f193', 'status:in-progress'],
+      createdBy: 'user',
+    });
+    const owningThread = threadStore.create('user-1', 'F193 owning thread');
+    threadStore.linkBacklogItem(owningThread.id, backlogF193.id);
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F193',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F193',
+      name: 'Cross Thread Comm',
+      status: 'in-progress',
+      owner: '布偶猫',
+      ownerCatId: 'opus',
+      threadIds: [owningThread.id],
+      suggestedAction: {
+        type: 'cross_post',
+        threadId: owningThread.id,
+        featureId: 'F193',
+        ownerCatId: 'opus',
+        targetCats: ['opus'],
+        reason: 'F193 is owned by opus; dispatch findings to the owning thread.',
+        source: 'feat_index',
+      },
+    });
+  });
+
+  test('GET feat-index suppresses suggested cross-post action for the current thread', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F193', name: 'Cross Thread Comm', status: 'in-progress', owner: '布偶猫' },
+    ];
+
+    const backlogF193 = await backlogStore.create({
+      userId: 'user-1',
+      title: '[F193] Cross Thread Comm',
+      summary: 'feature f193',
+      priority: 'p1',
+      tags: ['feature:f193', 'status:in-progress'],
+      createdBy: 'user',
+    });
+    const currentThread = threadStore.create('user-1', 'F193 owning thread');
+    threadStore.linkBacklogItem(currentThread.id, backlogF193.id);
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex', currentThread.id);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F193',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F193',
+      name: 'Cross Thread Comm',
+      status: 'in-progress',
+      owner: '布偶猫',
+      ownerCatId: 'opus',
+      threadIds: [currentThread.id],
+    });
+  });
+
+  test('GET feat-index keeps owner-derived suggested action metadata when no feature thread is known', async () => {
+    featIndexProvider = async () => [{ featId: 'F194', name: 'Owner Only Feature', status: 'spec', owner: '布偶猫' }];
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F194',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F194',
+      name: 'Owner Only Feature',
+      status: 'spec',
+      owner: '布偶猫',
+      ownerCatId: 'opus',
+      threadIds: [],
+      suggestedAction: {
+        type: 'cross_post',
+        featureId: 'F194',
+        ownerCatId: 'opus',
+        targetCats: ['opus'],
+        reason: 'F194 is owned by opus; find the feature thread before dispatching findings.',
+        source: 'feat_index',
+      },
+    });
+  });
+
+  test('GET feat-index keeps single owner metadata when owner annotations contain separators', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F195', name: 'Annotated Owner Feature', status: 'spec', owner: '布偶猫 (Opus 4.6, leader)' },
+    ];
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F195',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F195',
+      name: 'Annotated Owner Feature',
+      status: 'spec',
+      owner: '布偶猫 (Opus 4.6, leader)',
+      ownerCatId: 'opus',
+      threadIds: [],
+      suggestedAction: {
+        type: 'cross_post',
+        featureId: 'F195',
+        ownerCatId: 'opus',
+        targetCats: ['opus'],
+        reason: 'F195 is owned by opus; find the feature thread before dispatching findings.',
+        source: 'feat_index',
+      },
+    });
+  });
+
+  test('GET feat-index resolves slash-separated single owner aliases', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F191', name: 'Architecture Governance', status: 'done', owner: '缅因猫/砚砚' },
+    ];
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F191',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F191',
+      name: 'Architecture Governance',
+      status: 'done',
+      owner: '缅因猫/砚砚',
+      ownerCatId: 'codex',
+      threadIds: [],
+      suggestedAction: {
+        type: 'cross_post',
+        featureId: 'F191',
+        ownerCatId: 'codex',
+        targetCats: ['codex'],
+        reason: 'F191 is owned by codex; find the feature thread before dispatching findings.',
+        source: 'feat_index',
+      },
+    });
+  });
+
+  test('GET feat-index does not route slash-separated different owners to one cat', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F127', name: 'Slash Pair Feature', status: 'spec', owner: '布偶猫/缅因猫' },
+    ];
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F127',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F127',
+      name: 'Slash Pair Feature',
+      status: 'spec',
+      owner: '布偶猫/缅因猫',
+      threadIds: [],
+    });
+  });
+
+  test('GET feat-index does not route multi-owner features to a single owner when feature has a thread', async () => {
+    featIndexProvider = async () => [
+      {
+        featId: 'F125',
+        name: 'Alpha Test Channel',
+        status: 'in-progress',
+        owner: '缅因猫(gpt52) + 布偶猫(opus)',
+      },
+    ];
+
+    const backlogF125 = await backlogStore.create({
+      userId: 'user-1',
+      title: '[F125] Alpha Test Channel',
+      summary: 'feature f125',
+      priority: 'p1',
+      tags: ['feature:f125', 'status:in-progress'],
+      createdBy: 'user',
+    });
+    const owningThread = threadStore.create('user-1', 'F125 owning thread');
+    threadStore.linkBacklogItem(owningThread.id, backlogF125.id);
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F125',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F125',
+      name: 'Alpha Test Channel',
+      status: 'in-progress',
+      owner: '缅因猫(gpt52) + 布偶猫(opus)',
+      threadIds: [owningThread.id],
+      suggestedAction: {
+        type: 'cross_post',
+        threadId: owningThread.id,
+        featureId: 'F125',
+        reason: 'F125 has an owning thread; dispatch findings there if relevant.',
+        source: 'feat_index',
+      },
+    });
+  });
+
+  test('GET feat-index skips owner-only suggested action for multi-owner features without a known thread', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F126', name: 'Owner Pair Feature', status: 'spec', owner: '布偶猫 + 缅因猫' },
+    ];
+
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/feat-index?featId=F126',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.deepEqual(body.items[0], {
+      featId: 'F126',
+      name: 'Owner Pair Feature',
+      status: 'spec',
+      owner: '布偶猫 + 缅因猫',
+      threadIds: [],
+    });
+  });
+
   test('GET feat-index degrades gracefully when threadStore enrichment fails', async () => {
     featIndexProvider = async () => [{ featId: 'F043', name: 'MCP Unification', status: 'spec' }];
     threadStore = {
@@ -1631,6 +1912,38 @@ describe('Callback Routes', () => {
     const byStatusBody = JSON.parse(byStatus.body);
     assert.equal(byStatusBody.items.length, 1);
     assert.equal(byStatusBody.items[0].featId, 'F046');
+  });
+
+  test('GET feat-index supports query fuzzy match over owner metadata', async () => {
+    featIndexProvider = async () => [
+      { featId: 'F193', name: 'Cross Thread Comm', status: 'in-progress', owner: '布偶猫' },
+      { featId: 'F191', name: 'Architecture Governance', status: 'done', owner: '缅因猫/砚砚' },
+    ];
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
+
+    const byOwner = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/feat-index?query=${encodeURIComponent('布偶猫')}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(byOwner.statusCode, 200);
+    const byOwnerBody = JSON.parse(byOwner.body);
+    assert.equal(byOwnerBody.items.length, 1);
+    assert.equal(byOwnerBody.items[0].featId, 'F193');
+    assert.equal(byOwnerBody.items[0].ownerCatId, 'opus');
+
+    const byOwnerCatId = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/feat-index?query=opus`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(byOwnerCatId.statusCode, 200);
+    const byOwnerCatIdBody = JSON.parse(byOwnerCatId.body);
+    assert.equal(byOwnerCatIdBody.items.length, 1);
+    assert.equal(byOwnerCatIdBody.items[0].featId, 'F193');
   });
 
   test('GET feat-index validates limit max=100', async () => {
@@ -2614,6 +2927,61 @@ describe('Callback Routes', () => {
     assert.equal(found.threadId, 'thread-pr');
   });
 
+  // F140: wake intent — default 'review' (quiet), explicit 'merge', and re-register preserves it.
+
+  test('POST register-pr-tracking defaults intent to review and persists it structurally', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 101 },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.task.automationState.intent, 'review', 'absent intent persists as review');
+  });
+
+  test('POST register-pr-tracking accepts intent=merge', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 102, intent: 'merge' },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(JSON.parse(response.body).task.automationState.intent, 'merge');
+  });
+
+  test('POST register-pr-tracking re-register without intent preserves a prior merge intent', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    // 1) register with merge intent
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 103, intent: 'merge' },
+    });
+    // 2) re-register WITHOUT intent — must not silently downgrade to review
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 103 },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(
+      JSON.parse(response.body).task.automationState.intent,
+      'merge',
+      'intent-less re-register preserves merge',
+    );
+  });
+
   test('POST register-pr-tracking rejects invalid credentials', async () => {
     const app = await createApp();
 
@@ -2715,6 +3083,10 @@ describe('Callback Routes', () => {
         const error = new Error('subject ownership conflict');
         error.code = 'TASK_SUBJECT_OWNERSHIP_CONFLICT';
         throw error;
+      },
+      // F140: handler persists intent via patchAutomationState after a successful upsert.
+      async patchAutomationState(_taskId, patch) {
+        return { id: 'task-user-a', automationState: patch };
       },
     };
 

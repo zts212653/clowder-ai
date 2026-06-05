@@ -71,6 +71,7 @@ export class RedisProposalStore implements IProposalStore {
       createdBy: input.createdBy,
       createdAt: now,
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
+      ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
     };
 
     const key = ProposalKeys.detail(proposal.proposalId);

@@ -8,8 +8,10 @@ import {
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
   fileSliceTools,
+  financeTools,
   gameActionTools,
   graphTools,
+  hubActionTools,
   libraryLifecycleTools,
   limbTools,
   perspectiveTools,
@@ -60,6 +62,8 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'signal_list_studies',
   // Shell exec (F061 Bug-F workaround — read-only whitelist enforced at tool level)
   'cat_cafe_shell_exec',
+  // F207 Phase B0: finance fact queries are read-only and credential-safe at wrapper boundary.
+  'cat_cafe_finance_query',
 ]);
 
 /**
@@ -73,6 +77,10 @@ export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_get_thread_context',
   'cat_cafe_list_threads',
   'cat_cafe_register_external_runtime_session',
+  // F223: first-party Hub UX actions are callback-authenticated writes that
+  // persistent agent-key MCP clients need when invocation credentials are absent.
+  'cat_cafe_workspace_navigate',
+  'cat_cafe_preview_open',
 ]);
 
 const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
@@ -90,6 +98,7 @@ function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
 const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
   ...externalRuntimeSessionCallbackTools,
+  ...hubActionTools,
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,
@@ -111,6 +120,7 @@ const memoryTools: readonly ToolDef[] = applyReadonlyFilter([
 ]);
 
 const signalTools: readonly ToolDef[] = applyReadonlyFilter([...signalsTools, ...signalStudyTools]);
+const financeNodeTools: readonly ToolDef[] = applyReadonlyFilter([...financeTools]);
 
 function registerTools(server: McpServer, tools: readonly ToolDef[]): void {
   for (const tool of tools) {
@@ -147,10 +157,15 @@ export function registerAudioToolset(server: McpServer): void {
   registerTools(server, audioNodeTools);
 }
 
+export function registerFinanceToolset(server: McpServer): void {
+  registerTools(server, financeNodeTools);
+}
+
 export function registerFullToolset(server: McpServer): void {
   registerCollabToolset(server);
   registerMemoryToolset(server);
   registerSignalToolset(server);
   registerLimbToolset(server);
   registerAudioToolset(server);
+  registerFinanceToolset(server);
 }

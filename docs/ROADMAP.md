@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-05-26（feature truth hygiene：F088/F101 active，F179 done）
+> 维护者：三猫 | 最后更新：2026-06-04（feature truth hygiene：F128 active）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -39,6 +39,7 @@ created: 2026-02-26
 | F119 | 谁是卧底 — 坏猫战术推理游戏 #2 | spec | Ragdoll | internal | [F119](features/F119-who-is-spy-game.md) |
 | F124 | Apple Ecosystem × Cat Café 语音交互系统 — iOS/watchOS/AirPods | spec | Ragdoll | internal | [F124](features/F124-apple-ecosystem-voice-interaction.md) |
 | F126 | 四肢控制面 — Cat Café Limb Control Plane | in-progress | Ragdoll | internal | [F126](features/F126-limb-control-plane.md) |
+| F128 | Cat-Proposed Thread Creation — 猫猫提议创建 Thread | in-progress | 三猫 | community [#82](https://github.com/zts212653/clowder-ai/issues/82) [#85](https://github.com/zts212653/clowder-ai/pull/85) | [F128](features/F128-cat-create-thread.md) |
 | F129 | Pack System — Multi-Agent 共创世界的 Mod 生态 | in-progress | Ragdoll | internal | [F129](features/F129-pack-system-multi-agent-mod.md) |
 | F138 | Cat Café Video Studio — AI 视频制作管线 | spec | 金渐层 | internal | [F138](features/F138-video-studio.md) |
 | F143 | Hostable Agent Runtime — 统一宿主抽象 | spec | Ragdoll | internal | [F143](features/F143-hostable-agent-runtime.md) |
@@ -64,5 +65,9 @@ created: 2026-02-26
 | F205 | MediaHub Video Provider Plugins — 视频生成/分析插件 | spec | community @mindfn + maintainers | community [#689](https://github.com/zts212653/clowder-ai/pull/689) | [F205](features/F205-video-provider-plugins.md) |
 | F207 | AI Family Office — 个人投资学习基建（画像/知识/数据/分析/决策五层） | spec | Ragdoll | internal | [F207](features/F207-personal-finance-infra.md) |
 | F208 | Capability Profile Routing — 能力画像档案 + 认知路由 | spec | Ragdoll | internal | [F208](features/F208-capability-profile-routing.md) |
+| F193 | Cross-Thread Communication Unification (Phase E: 发现即投递) | in-progress | Ragdoll (Opus 4.6) | internal | [F193](features/F193-cross-thread-comm-unification.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
-| F217 | Merge Gate Integrity — 检查覆盖 + 强制力 + 元守护（根治 6 类 gate 失效）| spec | Ragdoll Opus 4.8 | internal | [F217](features/F217-merge-gate-integrity.md) |
+| F219 | 核心引擎技术债盘点 + 架构演进（routeSerial 等核心调用链）| spec | Ragdoll Opus 4.8 | internal | [F219](features/F219-tech-debt-architecture-evolution.md) |
+| F220 | A2A 协作的可观测·可靠·可恢复（启动中占位可见 + 卡死根因 + force-reset 逃生口 UI）| spec | Ragdoll Opus-4.8（驱动 thread_mpxf7fdx5gonafzh）| internal | [F220](features/F220-a2a-collab-reliability.md) |
+| F23-followup | F23 Phase 2 — dir-size 5 个目录真拆（utils/config/providers 快线 + invocation/routes 跟 F219 协调）| in-progress | Ragdoll/Opus-4.7 | internal | [F23 § Phase 2](features/F023-directory-corrosion-defense.md) |
+| F224 | A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）| spec | Ragdoll Opus-4.8 | community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834) | [F224](features/F224-a2a-session-message-reliability.md) |

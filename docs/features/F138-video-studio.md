@@ -204,7 +204,7 @@ brief → asset ingest → video-spec → voice-script → TTS(+timestamps) → 
 - [ ] AC-1d: 用管线跑通 showcase 60s 精华版视频
 - [ ] AC-1e: 用同一套管线跑通第 2 支视频（验证复用性）
 - [ ] AC-1f: 至少 1 支视频上传 B 站
-- [ ] AC-1g: `pnpm video:new <slug> --type --style` scaffold 命令可用（一键生成 voice-script / asset-markers / video-spec 草稿）（garden-skills 吸收 P0）
+- [x] AC-1g: `pnpm video:new <slug> --type --style` scaffold 命令可用（一键生成 voice-script / asset-markers / video-spec 草稿）（garden-skills 吸收 P0）✅ 2026-06-02 PR #2032
 - [ ] AC-1h: beat_ledger 派生校验可用——从 video-spec 编译，校验 beat 数 = 画面段落数 = caption cue 数（garden-skills 约束思想，不新增并列真相源）
 - [ ] AC-1i: style-recipes 具名风格参考库落入 `cat-cafe-skills/refs/style-recipes/`，video-forge / ppt-forge / 前端共用
 - [ ] AC-1j: `knowledge-explainer` Remotion 模板——每 beat 必须有视觉证明（CSS/SVG/Canvas/动效），不允许纯文字念稿，progressive reveal

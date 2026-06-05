@@ -29,6 +29,51 @@ export function compareQueueEntries(
   return a.createdAt - b.createdAt;
 }
 
+/** Format an elapsed duration (ms) as a compact label: `45s` / `12m` / `1h03m`. */
+export function formatElapsed(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  if (totalMin < 60) return `${totalMin}m`;
+  const h = Math.floor(totalMin / 60);
+  return `${h}h${String(totalMin % 60).padStart(2, '0')}m`;
+}
+
+/**
+ * A2A queue visibility (2026-06-02): derive what the queue is waiting behind from the live
+ * activeInvocations map. Returns null when nothing is active (queue is draining, not blocked).
+ *
+ * Per-cat slot semantics (QueueProcessor uses a `threadId:catId` slot mutex): a queued entry
+ * waits on ITS target cat's slot, NOT just any active turn. So we PREFER the oldest active
+ * invocation whose catId a visible queued entry actually targets — this avoids the 砚砚-P1 bug
+ * where a longer-running non-target cat (e.g. codex) would be shown as the blocker when the
+ * visible queued entry is really waiting on a different cat (e.g. opus). Only when NO target
+ * cat is active do we fall back to the oldest active turn (thread-level block, e.g. a
+ * broadcast entry queued because the thread is busy) — that fallback can never misattribute a
+ * target-cat blocker, since by definition no target cat is active in that branch.
+ *
+ * Pure: `now` injected for testing.
+ */
+export function computeQueueWaitInfo(
+  activeInvocations: Record<string, { catId: string; mode?: string; startedAt?: number }> | undefined,
+  queuedTargetCatIds: Iterable<string> = [],
+  now: number = Date.now(),
+): { catId: string; elapsedLabel: string | null } | null {
+  const slots = Object.values(activeInvocations ?? {});
+  if (slots.length === 0) return null;
+  const targets = new Set(queuedTargetCatIds);
+  const targeted = targets.size > 0 ? slots.filter((s) => targets.has(s.catId)) : [];
+  const candidates = targeted.length > 0 ? targeted : slots;
+  let oldest = candidates[0];
+  for (const s of candidates) {
+    if ((s.startedAt ?? Number.POSITIVE_INFINITY) < (oldest.startedAt ?? Number.POSITIVE_INFINITY)) oldest = s;
+  }
+  return {
+    catId: oldest.catId,
+    elapsedLabel: oldest.startedAt ? formatElapsed(Math.max(0, now - oldest.startedAt)) : null,
+  };
+}
+
 interface QueuePanelProps {
   threadId: string;
 }
@@ -41,6 +86,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const queuePauseReason = useChatStore((s) => s.queuePauseReason);
   const messages = useChatStore((s) => s.messages);
   const setQueue = useChatStore((s) => s.setQueue);
+  const activeInvocations = useChatStore((s) => s.activeInvocations);
   const addToast = useToastStore((s) => s.addToast);
 
   const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
@@ -57,6 +103,20 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         )
         .sort(compareQueueEntries),
     [queue],
+  );
+
+  // A2A queue visibility: explain WHY entries are queued (waiting behind the active turn) so the
+  // user can tell "waiting for the current turn" apart from "stuck". Passes the visible queued
+  // entries' target cats so the wait reason attributes the RIGHT cat (per-cat slot), not just the
+  // oldest active turn. Recomputed when activeInvocations/visibleEntries change; elapsed reflects
+  // the last store update (acceptable for v1 — no per-second tick).
+  const waitInfo = useMemo(
+    () =>
+      computeQueueWaitInfo(
+        activeInvocations,
+        visibleEntries.flatMap((e) => e.targetCats),
+      ),
+    [activeInvocations, visibleEntries],
   );
 
   const handleRemove = useCallback(
@@ -239,6 +299,16 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
 
       {queuePaused && (
         <div className="px-3 py-1.5 text-xs text-conn-amber-text border-b border-conn-amber-ring/60">{pauseLabel}</div>
+      )}
+
+      {!queuePaused && waitInfo && visibleEntries.length > 0 && (
+        <div
+          className="px-3 py-1.5 text-xs text-cafe-muted border-b"
+          style={{ borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
+        >
+          等待 <span className="font-medium text-cafe-secondary">{waitInfo.catId}</span> 当前回合
+          {waitInfo.elapsedLabel ? `（已运行 ${waitInfo.elapsedLabel}）` : ''}
+        </div>
       )}
 
       {!isCollapsed && (

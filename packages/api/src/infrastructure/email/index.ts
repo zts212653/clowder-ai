@@ -1,11 +1,4 @@
 export {
-  CiCdCheckPoller,
-  type CiCdCheckPollerOptions,
-  computeAggregateBucket,
-  normalizeBucket,
-  normalizePrState,
-} from './CiCdCheckPoller.js';
-export {
   buildCiMessageContent,
   type CiBucket,
   CiCdRouter,
@@ -26,17 +19,17 @@ export {
   type ConnectorInvokeTriggerOptions,
 } from './ConnectorInvokeTrigger.js';
 export {
+  computeAggregateBucket,
+  fetchPrCiStatus,
+  normalizeBucket,
+  normalizePrState,
+} from './ci-status-fetcher.js';
+export {
   type ConnectorDeliveryDeps,
   type ConnectorDeliveryInput,
   type ConnectorDeliveryResult,
   deliverConnectorMessage,
 } from './deliver-connector-message.js';
-export {
-  type GithubCiBootstrapOptions,
-  isGithubCiPollerRunning,
-  startGithubCiPoller,
-  stopGithubCiPoller,
-} from './github-ci-bootstrap.js';
 export {
   buildReviewFeedbackContent,
   type PrFeedbackComment,

@@ -226,7 +226,7 @@ describe('SystemPromptBuilder', () => {
       mcpAvailable: true,
       promptTags: ['critique'],
     });
-    assert.ok(prompt.length < 6100, `Full runtime prompt is ${prompt.length} chars, expected < 6100`);
+    assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -615,7 +615,7 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 6100, `Full runtime prompt is ${prompt.length} chars, expected < 6100`);
+      assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -1213,7 +1213,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
       ],
     });
-    assert.ok(prompt.length < 6100, `Full runtime prompt is ${prompt.length} chars, expected < 6100`);
+    assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---
@@ -1629,7 +1629,8 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    assert.ok(prompt.length < 6200, `Prompt with SOP hint is ${prompt.length} chars, expected < 6200`);
+    // 6200→6500: decision funnel §17 projection adds ~250 chars (four-cat discussion 2026-06-01)
+    assert.ok(prompt.length < 6500, `Prompt with SOP hint is ${prompt.length} chars, expected < 6500`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1676,7 +1677,8 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    assert.ok(prompt.length < 6200, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6200`);
+    // 6200→6500: decision funnel §17 projection adds ~250 chars (four-cat discussion 2026-06-01)
+    assert.ok(prompt.length < 6500, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6500`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {

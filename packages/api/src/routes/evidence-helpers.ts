@@ -1,6 +1,7 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 
+import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
 import type { EntityMatch, EvidenceDrillDown } from '../domains/memory/interfaces.js';
 
 export interface EvidenceFreshness {
@@ -73,6 +74,8 @@ export interface EvidenceResult {
   sourcePath?: string;
   /** DF-3: explainability — scoring breakdown (only with explain=true) */
   rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
+  /** F193 Phase E: read-side affordance for cross-thread dispatch. */
+  suggestedAction?: SuggestedCrossPostAction;
 }
 
 /** F163: Boost source attribution (search-path reranking, not injection) */

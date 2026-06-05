@@ -3,7 +3,8 @@ name: cross-thread-sync
 description: >
   跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
   Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
-  Not for: 跨猫工作交接（用 cross-cat-handoff）。
+  Not for: 跨猫工作交接（用 cross-cat-handoff）、需要新建 thread 时（用 propose_thread / thread-orchestration）。
+  Boundary with F128: 发现跨 scope 问题 → 先 list_threads 查有没有已有 thread → 有 = 本 skill（cross_post）→ 没有 = propose_thread。
   Output: cross-post 通知 + 争用协调完成。
 triggers:
   - "通知另一个 session"

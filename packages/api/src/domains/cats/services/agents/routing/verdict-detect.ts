@@ -19,15 +19,19 @@
  * - 中文：修改建议 / 放行 / 打回
  *
  * 故意不收录："通过"（"测试通过"类日常说法过多）、"approved by"（和"approve"重复）。
+ *
+ * Each pattern carries a stable telemetry name so the C2 counter can attribute which
+ * keyword fired (F192 build verdict 2026-06-03: owner needs keyword-overload visibility
+ * to decide whether to tune VERDICT_PATTERNS vs bypass specific thread kinds).
  */
-const VERDICT_PATTERNS: readonly RegExp[] = [
-  /\bLGTM\b/i,
-  /\bapprove(d|s)?\b/i,
-  /\breject(ed|s)?\b/i,
-  /\bP[12]\b/,
-  /修改建议/,
-  /放行/,
-  /打回/,
+const VERDICT_PATTERNS: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
+  { name: 'lgtm', pattern: /\bLGTM\b/i },
+  { name: 'approve', pattern: /\bapprove(d|s)?\b/i },
+  { name: 'reject', pattern: /\breject(ed|s)?\b/i },
+  { name: 'p1p2', pattern: /\bP[12]\b/ },
+  { name: 'modify_suggestion', pattern: /修改建议/ },
+  { name: 'approve_cn', pattern: /放行/ },
+  { name: 'reject_cn', pattern: /打回/ },
 ] as const;
 
 /**
@@ -39,7 +43,24 @@ const VERDICT_PATTERNS: readonly RegExp[] = [
  */
 export function hasReviewVerdict(text: string): boolean {
   if (!text) return false;
-  return VERDICT_PATTERNS.some((pattern) => pattern.test(text));
+  return VERDICT_PATTERNS.some(({ pattern }) => pattern.test(text));
+}
+
+/**
+ * Return the stable name of the first verdict keyword that matches, or `null` if none.
+ *
+ * Used as a telemetry attribute on the C2 verdict counters so an eval operator can
+ * slice friction ratios by which keyword overloaded — e.g. distinguish a "p1p2"-driven
+ * spike (review-discussion vocab) from a "放行"-driven one (real verdict-without-pass).
+ * Pattern iteration order is the order in VERDICT_PATTERNS; do not rely on a particular
+ * "most specific match" — it returns the first hit.
+ */
+export function detectMatchedVerdictKeyword(text: string): string | null {
+  if (!text) return null;
+  for (const { name, pattern } of VERDICT_PATTERNS) {
+    if (pattern.test(text)) return name;
+  }
+  return null;
 }
 
 /**

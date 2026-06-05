@@ -61,6 +61,245 @@ describe('GET /api/library/recent — scope validation', () => {
     assert.equal(res.statusCode, 200);
   });
 
+  it('attaches suggested cross-post action for real thread-* ids encoded as evidence anchors', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-thread-other',
+                    title: 'Other thread',
+                    kind: 'thread',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=threads&currentThreadId=thread-current&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.deepEqual(body.items[0].suggestedAction, {
+      type: 'cross_post',
+      threadId: 'thread-other',
+      reason: 'Recent item is another thread; dispatch relevant findings back to that thread.',
+      source: 'list_recent',
+    });
+  });
+
+  it('normalizes synthetic thread anchors before suggesting cross-post action', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-default',
+                    title: 'Default thread',
+                    kind: 'thread',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=threads&currentThreadId=thread-current&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.items[0].suggestedAction.threadId, 'default');
+  });
+
+  it('suppresses same-thread suggestions after normalizing synthetic thread anchors', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-default',
+                    title: 'Default thread',
+                    kind: 'thread',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=threads&currentThreadId=default&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.items[0].suggestedAction, undefined);
+  });
+
+  it('normalizes evidence_docs thread anchors before suggesting cross-post action', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-thread_other',
+                    title: 'Other thread',
+                    kind: 'thread',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=threads&currentThreadId=thread_current&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.items[0].suggestedAction.threadId, 'thread_other');
+  });
+
+  it('suppresses same-thread suggestions after normalizing evidence_docs thread anchors', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-thread_current',
+                    title: 'Current thread',
+                    kind: 'thread',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=threads&currentThreadId=thread_current&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.items[0].suggestedAction, undefined);
+  });
+
+  it('does not attach suggested cross-post action for non-thread items with thread-like anchors', async () => {
+    const manifests = [{ id: 'project:cat-cafe', sensitivity: 'internal', kind: 'project' }];
+    const store = {
+      getDb() {
+        return {
+          prepare() {
+            return {
+              all() {
+                return [
+                  {
+                    anchor: 'thread-looking-feature-anchor',
+                    title: 'Feature doc',
+                    kind: 'feature',
+                    updatedAt: '2026-05-10T12:00:00.000Z',
+                  },
+                ];
+              },
+            };
+          },
+        };
+      },
+    };
+    app = Fastify();
+    await app.register(libraryRoutes, {
+      catalog: { list: () => manifests, get: (id) => manifests.find((m) => m.id === id) },
+      stores: new Map([['project:cat-cafe', store]]),
+    });
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/library/recent?scope=docs&currentThreadId=thread-current&since=7d',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.items[0].suggestedAction, undefined);
+  });
+
   it('rejects malformed since=tomorrow with 400 (砚砚 cloud-7 P2)', async () => {
     await setup();
     const res = await app.inject({ method: 'GET', url: '/api/library/recent?since=tomorrow' });

@@ -139,6 +139,11 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = _savedGlobalRoot;
   }
 
+  // F203 Phase I: mock L0 compiler for OpenCode tests.
+  // Real subprocess compiler can't see in-process catRegistry registrations,
+  // so test services must use this instead of compileL0ViaSubprocess.
+  const dummyL0CompilerFn = async ({ catId }) => `# Dummy L0 for ${catId}\nTest-only stub.`;
+
   function makeDeps() {
     let counter = 0;
     return {
@@ -208,6 +213,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('injects per-cat GIT_AUTHOR_NAME/GIT_COMMITTER_NAME into callbackEnv (email inherited)', async () => {
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -243,6 +249,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const deps = { ...makeDeps(), taskProgressStore: store };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -277,6 +284,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('emits invocationId on task_progress system_info payloads', async () => {
     const deps = makeDeps();
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -326,6 +334,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const deps = { ...makeDeps(), taskProgressStore: store };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -365,6 +374,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const deps = { ...makeDeps(), taskProgressStore: store };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -414,6 +424,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const deps = { ...makeDeps(), taskProgressStore: store };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -456,6 +467,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const ac = new AbortController();
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -515,6 +527,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const ac = new AbortController();
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -586,6 +599,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const deps = { ...makeDeps(), taskProgressStore: store };
     const ac = new AbortController();
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'system_info',
@@ -746,6 +760,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionChainStore = new SessionChainStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-sess-abc', timestamp: Date.now() };
         yield { type: 'text', catId: 'opus', content: 'hello', timestamp: Date.now() };
@@ -782,6 +797,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const runtimeSessionStore = new RuntimeSessionStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -854,6 +870,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -926,6 +943,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1003,6 +1021,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'text',
@@ -1084,6 +1103,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       lifecycle: { state: 'sealed', startedAt: 1000, lastObservedAt: 1000, sealReason: 'tool_conflict' },
     });
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1183,6 +1203,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1257,6 +1278,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1335,6 +1357,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1396,6 +1419,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       lifecycle: { state: 'active', startedAt: 1000, lastObservedAt: 1000 },
     });
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1467,6 +1491,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       reconcileAllStuck: async () => 0,
     };
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1533,6 +1558,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-continuity', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -1570,6 +1596,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'new-cli', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -1618,6 +1645,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     // Second invocation: ACP yields a DIFFERENT sessionId with ephemeralSession=true
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'session_init',
@@ -1656,6 +1684,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionChainStore = new SessionChainStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-health', timestamp: Date.now() };
         yield { type: 'text', catId: 'opus', content: 'answer', timestamp: Date.now() };
@@ -1712,6 +1741,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionChainStore = new SessionChainStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-fallback', timestamp: Date.now() };
         yield {
@@ -1760,6 +1790,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
   it('F24: no context_health when model is unknown and no contextWindowSize', async () => {
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'done',
@@ -1807,6 +1838,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionChainStore = new SessionChainStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-update-health', timestamp: Date.now() };
         yield {
@@ -1852,6 +1884,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionChainStore = new SessionChainStore();
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-last-turn', timestamp: Date.now() };
         yield {
@@ -1913,6 +1946,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
   it('F24-fix: falls back to inputTokens when lastTurnInputTokens is absent', async () => {
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'done',
@@ -1967,6 +2001,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Use codex to test totalTokens fallback path.
     // (F053: gemini now also has sessionChain=true, either cat would work here.)
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'done',
@@ -2015,6 +2050,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('F24: marks source as approx when usedTokens falls back to totalTokens despite exact window', async () => {
     // Use codex (sessionChain enabled) to test approx source detection.
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield {
           type: 'done',
@@ -2124,6 +2160,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const sessionStores = [];
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options);
         invokeCount++;
@@ -2189,6 +2226,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -2236,6 +2274,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -2303,6 +2342,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let invokeCount = 0;
     const sealRequests = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         if (invokeCount === 1) {
@@ -2399,6 +2439,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let invokeCount = 0;
     const sessionDeletes = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield { type: 'error', catId: 'opus', error: 'upstream timeout', timestamp: Date.now() };
@@ -2624,6 +2665,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('transient CLI self-heal: retries once when Claude exits code 1 before any stream output', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         if (invokeCount === 1) {
@@ -2667,6 +2709,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('transient CLI self-heal: does not retry when stream already produced text', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield { type: 'text', catId: 'opus', content: 'partial-output', timestamp: Date.now() };
@@ -2701,6 +2744,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('transient CLI self-heal: does NOT retry when Codex error carries context-window overflow (prevents duplicate user turn)', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield {
@@ -2739,6 +2783,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('resume failure stats: emits missing_session count after gemini self-heal success', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, _options) {
         invokeCount++;
         if (invokeCount === 1) {
@@ -2785,6 +2830,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('resume failure stats: emits auth count and does not retry', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield {
@@ -2825,6 +2871,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('resume failure stats: emits cli_exit count for transient resume bootstrap exit', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         if (invokeCount === 1) {
@@ -2870,6 +2917,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('retries gemini invoke on transient resume bootstrap exit', async () => {
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         if (invokeCount === 1) {
@@ -2952,6 +3000,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     // Service that triggers seal: 91% fill → opus threshold (90%)
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'old-sess', timestamp: Date.now() };
         yield { type: 'text', catId: 'opus', content: 'answer', timestamp: Date.now() };
@@ -3005,6 +3054,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -3100,6 +3150,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -3191,6 +3242,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -3250,6 +3302,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -3312,6 +3365,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const optionsSeen = [];
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push({ ...options });
         invokeCount++;
@@ -3373,6 +3427,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let transcriptWritten = false;
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'gemini', sessionId: 'gem-sess-1', timestamp: Date.now() };
         yield { type: 'text', catId: 'gemini', content: 'hello', timestamp: Date.now() };
@@ -3443,6 +3498,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let sessionRecordCreated = false;
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'opus-sess-1', timestamp: Date.now() };
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -3484,6 +3540,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const promptsSeen = [];
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt, options) {
         promptsSeen.push(prompt);
         optionsSeen.push({ ...options });
@@ -3518,6 +3575,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('F-BLOAT: injects systemPrompt on new session (no sessionId)', async () => {
     const promptsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt, _options) {
         promptsSeen.push(prompt);
         yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
@@ -3554,6 +3612,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('F053: Gemini (sessionChain=true) skips systemPrompt on resume like other cats', async () => {
     const promptsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt, _options) {
         promptsSeen.push(prompt);
         yield { type: 'text', catId: 'gemini', content: 'hi', timestamp: Date.now() };
@@ -3592,6 +3651,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const originalConfigs = catRegistry.getAllConfigs();
     const promptsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt) {
         promptsSeen.push(prompt);
         yield { type: 'text', catId: 'runtime-spark', content: 'runtime ok', timestamp: Date.now() };
@@ -3648,6 +3708,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let storedSession;
     let callCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt, options) {
         promptsSeen.push(prompt);
         optionsSeen.push({ ...options });
@@ -3729,6 +3790,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const promptsSeen = [];
     let callNum = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(prompt, _options) {
         promptsSeen.push(prompt);
         callNum++;
@@ -3821,6 +3883,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let invokeCount = 0;
     const sessionDeletes = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield {
@@ -3897,6 +3960,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -3958,6 +4022,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4042,6 +4107,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4134,6 +4200,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -4223,6 +4290,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4301,6 +4369,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4367,6 +4436,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4426,6 +4496,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -4502,6 +4573,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
@@ -4573,6 +4645,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     let invokeCount = 0;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         invokeCount++;
         yield { type: 'done', catId: boundCatId, timestamp: Date.now() };
@@ -4642,6 +4715,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
@@ -4719,6 +4793,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenConfigPath;
     let seenRuntimeConfig;
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -4801,6 +4876,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -4883,6 +4959,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -4963,6 +5040,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -5054,6 +5132,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -5153,6 +5232,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       let seenRuntimeConfig;
       const optionsSeen = [];
       const service = {
+        l0CompilerFn: dummyL0CompilerFn,
         async *invoke(_prompt, options) {
           optionsSeen.push(options ?? {});
           seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -5213,6 +5293,172 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     },
   );
 
+  // F203 Phase I AC-I4: subscription/unresolved OpenCode path gets instructions-only L0 config
+  it('F203-I: OpenCode subscription path → instructions-only config + no API key injection', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f203-subscription-oc-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    // Create a subscription-mode profile (no API key)
+    const subscriptionProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'claude-subscription',
+      mode: 'subscription',
+      authType: 'subscription',
+      protocol: 'anthropic',
+      baseUrl: '',
+      apiKey: '',
+      models: ['claude-opus-4-6'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig);
+    const boundCatId = 'opencode-subscription-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: subscriptionProfile.id,
+      defaultModel: 'anthropic/claude-opus-4-6',
+    });
+
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test subscription opencode path',
+          userId: 'user-f203-subscription',
+          threadId: 'thread-f203-subscription',
+          isLastCat: true,
+        }),
+      );
+
+      const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+      // F203 Phase I: subscription path must get instructions-only config for L0
+      assert.ok(callbackEnv.OPENCODE_CONFIG, 'subscription path must get OPENCODE_CONFIG for L0 instructions');
+      assert.strictEqual(
+        callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY,
+        '1',
+        'subscription path must signal instructions-only',
+      );
+      // Subscription mode: no API key injection
+      assert.strictEqual(
+        callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE,
+        'subscription',
+        'must pass subscription profile mode',
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+  });
+
+  // F203 Phase I: compile fail-closed — throwing l0CompilerFn aborts invocation
+  it('F203-I: OpenCode compile failure → fail-closed, service.invoke never called', async () => {
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const root = await mkdtemp(join(tmpdir(), 'f203-fail-closed-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+    const anthropicProfile = await createProviderProfile(root, {
+      provider: 'anthropic',
+      name: 'claude-api-fail-closed',
+      mode: 'api_key',
+      authType: 'api_key',
+      protocol: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: 'sk-ant-fail-closed-key',
+      models: ['claude-opus-4-6'],
+      setActive: false,
+    });
+
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('opencode')?.config;
+    assert.ok(originalConfig);
+    const boundCatId = 'opencode-fail-closed-test';
+    catRegistry.register(boundCatId, {
+      ...originalConfig,
+      id: boundCatId,
+      mentionPatterns: [`@${boundCatId}`],
+      clientId: 'opencode',
+      accountRef: anthropicProfile.id,
+      defaultModel: 'anthropic/claude-opus-4-6',
+    });
+
+    let invokedService = false;
+    const service = {
+      // Throwing l0CompilerFn — simulates compile failure
+      l0CompilerFn: async () => {
+        throw new Error('deliberate L0 compile failure');
+      },
+      async *invoke() {
+        invokedService = true;
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      // invokeSingleCat catches internal errors and yields them as events
+      // (it doesn't reject — it's an async generator with internal error handling).
+      const msgs = await collect(
+        invokeSingleCat(deps, {
+          catId: boundCatId,
+          service,
+          prompt: 'test compile failure',
+          userId: 'user-f203-fail-closed',
+          threadId: 'thread-f203-fail-closed',
+          isLastCat: true,
+        }),
+      );
+      // Verify error event contains F203 fail-closed message
+      const errorMsgs = msgs.filter(
+        (m) =>
+          m.type === 'error' ||
+          (m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('F203')),
+      );
+      const allContent = msgs.map((m) => m.error || m.content || '').join('\n');
+      assert.ok(
+        allContent.includes('F203 fail-closed') || allContent.includes('deliberate L0 compile failure'),
+        `must contain F203 fail-closed or compile error in events, got: ${msgs.map((m) => m.type).join(',')}`,
+      );
+      // service.invoke() must NOT have been called — no naked invocation
+      assert.strictEqual(invokedService, false, 'service.invoke must not run when L0 compile fails');
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) {
+        catRegistry.register(id, config);
+      }
+      await rmWithRetry(root);
+    }
+  });
+
   it('fix(#280): known legacy model without provider skips runtime config', async () => {
     const mod = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
     mod._resetOpenCodeKnownModels(new Set(['anthropic/claude-opus-4-6']));
@@ -5249,9 +5495,17 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
-        assert.equal(options?.callbackEnv?.OPENCODE_CONFIG, undefined);
+        // F203 Phase I: known legacy model without provider STILL gets OPENCODE_CONFIG
+        // for L0 instructions (instructions-only fallback path). Before F203 this was undefined.
+        assert.ok(
+          options?.callbackEnv?.OPENCODE_CONFIG,
+          'F203: known legacy model must get instructions-only config for L0',
+        );
+        // Verify it's an instructions-only config (no provider auth clearing)
+        assert.equal(options?.callbackEnv?.CAT_CAFE_OC_INSTRUCTIONS_ONLY, '1');
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -5285,7 +5539,10 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     }
 
     const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-    assert.equal(callbackEnv.OPENCODE_CONFIG, undefined);
+    // F203 Phase I: known legacy model now gets instructions-only config for L0.
+    // Before F203 this was undefined; now it always has a config path.
+    assert.ok(callbackEnv.OPENCODE_CONFIG, 'F203: must get instructions-only config');
+    assert.equal(callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY, '1', 'must signal instructions-only');
     assert.equal(callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE, undefined);
   });
 
@@ -5328,6 +5585,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     let seenRuntimeConfig;
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
@@ -5410,6 +5668,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
@@ -5494,6 +5753,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-approx-no-seal', timestamp: Date.now() };
         yield {
@@ -5622,6 +5882,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-no-seal', timestamp: Date.now() };
         yield {
@@ -5751,6 +6012,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'opus', sessionId: 'cli-exact-handoff-seal', timestamp: Date.now() };
         yield {
@@ -5815,6 +6077,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('configures cat invocation stall auto-kill to leave room for slow upstream responses', async () => {
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -5847,6 +6110,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   it('F101: game thread projectPath (games/*) does not trigger governance gate', async () => {
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
@@ -5933,6 +6197,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
 
     const optionsSeen = [];
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
@@ -6013,6 +6278,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     };
 
     const service = {
+      l0CompilerFn: dummyL0CompilerFn,
       async *invoke() {
         yield { type: 'session_init', catId: 'gemini', sessionId: 'cli-gemini-cumul', timestamp: Date.now() };
         yield {

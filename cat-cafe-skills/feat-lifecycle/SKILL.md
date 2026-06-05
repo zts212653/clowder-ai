@@ -75,7 +75,7 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
    **从标准模板创建**：复制 `cat-cafe-skills/refs/feature-doc-template.md` 中「模板正文」部分，替换占位符（`{NNN}`/`{Feature Name}`/`{YYYY-MM-DD}` 等）。模板包含 Dashboard parser 所需的全部硬性格式。
 
-   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + What + AC + Dependencies 必须保留。
+   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + Current State + What + AC + Dependencies 必须保留（全新能力的 Current State 写 "N/A（无既有基线）"，不是删段）。
 
    并在 spec 中补一节：`## 需求点 Checklist`（模板见 `cat-cafe-skills/refs/requirements-checklist-template.md`）
 
@@ -93,7 +93,25 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
    **Gotcha**: 只在有 threadId 的会话中创建。铲屎官在非 thread 环境立项（如 BACKLOG 批量整理）时跳过此步。
 
-**检查**：聚合文件创建 ✓ frontmatter 完整 ✓ BACKLOG 索引 ✓ 关联文档双向链接 ✓ 已 commit ✓ 毛线球任务创建 ✓
+### 立项愿景硬度自检（F216→F219 教训）🔴
+
+> **为什么**：F216 立项 Why 写"降 complexity"，AC 却落成"修 bug + 可测性"，两者执行中悄悄分叉，直到 close 前愿景守护才发现 gap。根因是**立项时愿景表述不够硬 + 交接丢上下文**（铲屎官 2026-06-02）。这是 LL-067（后半段被前半段工程量吃）/ LL-069（scope 跟"自我解读"走不跟 spec 走）在**立项时刻**的前置防线——审计时才抓分叉太晚，立项就钉死。
+
+Step 2 写完 spec，Why / 现状 / AC 逐条过这道自检：
+
+| 维度 | 硬要求 | 反模式（F216 踩过） |
+|------|--------|--------------------|
+| **愿景 Why** | 用**价值**语言一句话说清要解决什么 | 用"技术动作"冒充愿景（"重构 X" ❌；"X 每加功能就 7 轮 review" ✅） |
+| **真实现状** | 带**实测证据**（complexity / 行数 / 复现 / hotfix 频次），不美化 | "感觉这块乱"（给数据不给感觉，`feedback_no_classifier`） |
+| **完成判据 AC** | 每条能 **trace 回 Why** + **非作者可复核**（命令/数字/截图） | 重构类 AC 落成"提了可测性就算"（F216 AC-B2：complexity 没降也宣布达成） |
+
+**两条硬规则**：
+1. **AC↔Why 同源**——每条 AC 指得回 Why 的某诉求；指不回 = 删 AC 或补 Why。AC 覆盖不了 Why = 愿景虚高。
+2. **Handoff 重写愿景**——从别的 thread/feat 交接立项时，**用本 feat 自己的语言重写 Why**，不继承上游模糊表述（交接丢上下文是 F216 分叉直接成因）。
+
+承载点：现状写进模板 `## Current State / 现状基线` 段；AC↔Why 自检见模板 `## Acceptance Criteria` 段顶部 comment（均在 feature-doc-template「模板正文」内，随复制进入新 spec）。自检不过 → 回 Step 2 改 spec，不进 Step 3。
+
+**检查**：聚合文件创建 ✓ frontmatter 完整 ✓ BACKLOG 索引 ✓ 关联文档双向链接 ✓ 愿景硬度自检 ✓ 已 commit ✓ 毛线球任务创建 ✓
 
 ## 讨论 (Discussion)
 

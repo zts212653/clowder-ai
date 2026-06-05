@@ -8,6 +8,7 @@ import { CardBlock } from './CardBlock';
 import { ChecklistBlock } from './ChecklistBlock';
 import { DiffBlock } from './DiffBlock';
 import { FileBlock } from './FileBlock';
+import { FrustrationIssueCard, isFrustrationIssueCardBlock } from './FrustrationIssueCard';
 import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
@@ -29,6 +30,10 @@ function RichBlockRenderer({
     case 'card': {
       // F128: proposal cards have dedicated approval-card renderer
       if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
+      // F222: frustration auto-issue cards with trusted provenance get dedicated renderer
+      if (isFrustrationIssueCardBlock(block, messageSource)) {
+        return <FrustrationIssueCard block={block} messageId={messageId} />;
+      }
       // F174 D2b-1: cards tagged with meta.kind = 'callback_auth_failure' get the
       // dedicated in-context observability renderer ("明厨亮灶" — entity carries its
       // own state). Plain cards continue to use the default CardBlock.

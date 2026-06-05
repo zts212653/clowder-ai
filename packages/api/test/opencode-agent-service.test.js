@@ -286,6 +286,116 @@ describe('OpenCodeAgentService', () => {
     }
   });
 
+  // F203 Phase I: instructions-only config preserves native auth
+  test('F203-I: OPENCODE_CONFIG + OC_INSTRUCTIONS_ONLY preserves ANTHROPIC_API_KEY', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      apiKey: 'sk-native-key',
+    });
+    const promise = collect(
+      service.invoke('Test', {
+        callbackEnv: {
+          OPENCODE_CONFIG: '/tmp/instructions-only.json',
+          CAT_CAFE_OC_INSTRUCTIONS_ONLY: '1',
+          CAT_CAFE_ANTHROPIC_API_KEY: 'sk-native-key',
+        },
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    // With OC_INSTRUCTIONS_ONLY_ENV=1, buildEnv must NOT clear auth.
+    // ANTHROPIC_API_KEY should survive (from apiKey constructor arg or callbackEnv).
+    assert.strictEqual(
+      opts.env.ANTHROPIC_API_KEY,
+      'sk-native-key',
+      'instructions-only config must preserve ANTHROPIC_API_KEY',
+    );
+    assert.strictEqual(
+      opts.env.OPENCODE_CONFIG,
+      '/tmp/instructions-only.json',
+      'OPENCODE_CONFIG must be passed through',
+    );
+  });
+
+  // F203 Phase I: full custom-provider config STILL clears native auth (regression guard)
+  test('F203-I: OPENCODE_CONFIG without OC_INSTRUCTIONS_ONLY still clears auth', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-parent-should-clear';
+
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+    });
+    try {
+      const promise = collect(
+        service.invoke('Test', {
+          callbackEnv: {
+            OPENCODE_CONFIG: '/tmp/full-provider-config.json',
+            // NO OC_INSTRUCTIONS_ONLY — this is a full custom provider config
+          },
+        }),
+      );
+      emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+      await promise;
+
+      const opts = spawnFn.mock.calls[0].arguments[2];
+      // Full custom-provider config: auth MUST be cleared (clowder-ai#223 behavior preserved)
+      assert.strictEqual(opts.env.ANTHROPIC_API_KEY, undefined, 'full provider config must clear ANTHROPIC_API_KEY');
+    } finally {
+      if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
+    }
+  });
+
+  // F203 Phase I: subscription + instructions-only → subscription clears auth (priority)
+  test('F203-I: subscription + OC_INSTRUCTIONS_ONLY → subscription still clears inherited auth', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-inherited-should-clear';
+
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+    });
+    try {
+      const promise = collect(
+        service.invoke('Test', {
+          callbackEnv: {
+            OPENCODE_CONFIG: '/tmp/instructions-only.json',
+            CAT_CAFE_OC_INSTRUCTIONS_ONLY: '1',
+            CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
+          },
+        }),
+      );
+      emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+      await promise;
+
+      const opts = spawnFn.mock.calls[0].arguments[2];
+      // Instructions-only skips the OPENCODE_CONFIG auth clear block,
+      // but subscription mode still independently clears inherited auth.
+      assert.strictEqual(
+        opts.env.ANTHROPIC_API_KEY,
+        undefined,
+        'subscription must clear inherited ANTHROPIC_API_KEY even with instructions-only',
+      );
+      assert.strictEqual(opts.env.OPENCODE_CONFIG, '/tmp/instructions-only.json', 'OPENCODE_CONFIG must survive');
+    } finally {
+      if (previousAnthropicApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousAnthropicApiKey;
+    }
+  });
+
   test('baseUrl passed via ANTHROPIC_BASE_URL env', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

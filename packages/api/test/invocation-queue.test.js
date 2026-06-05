@@ -1373,4 +1373,29 @@ describe('InvocationQueue', () => {
     const d = queue.dequeue('t1', 'u1');
     assert.equal(d.callerTraceContext, undefined);
   });
+
+  // findProcessingByCat (2026-06-02 Steer 抢占 tombstone support)
+  describe('findProcessingByCat', () => {
+    it('finds the processing entry targeting a cat (across users)', () => {
+      queue.enqueue(entry({ userId: 'u1', targetCats: ['opus'] }));
+      queue.markProcessing('t1', 'u1'); // → processing
+      queue.enqueue(entry({ userId: 'u2', targetCats: ['codex'] }));
+      queue.markProcessing('t1', 'u2');
+      const found = queue.findProcessingByCat('t1', 'opus');
+      assert.ok(found);
+      assert.equal(found.targetCats[0], 'opus');
+      assert.equal(found.status, 'processing');
+    });
+
+    it('returns null when the cat has no processing entry (only queued)', () => {
+      queue.enqueue(entry({ targetCats: ['opus'] })); // queued, not processing
+      assert.equal(queue.findProcessingByCat('t1', 'opus'), null);
+    });
+
+    it('returns null for a different cat', () => {
+      queue.enqueue(entry({ targetCats: ['opus'] }));
+      queue.markProcessing('t1', 'u1');
+      assert.equal(queue.findProcessingByCat('t1', 'codex'), null);
+    });
+  });
 });

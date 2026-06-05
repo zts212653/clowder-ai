@@ -76,6 +76,10 @@ export class RedisTaskStore implements ITaskStore {
       updatedAt: now,
       automationState: input.automationState,
       userId: input.userId,
+      // F193 Phase E (dispatch gate)
+      ...(input.relatedFeatureId ? { relatedFeatureId: input.relatedFeatureId } : {}),
+      ...(input.detectedFeatureIds?.length ? { detectedFeatureIds: input.detectedFeatureIds } : {}),
+      ...(input.dispatchGate ? { dispatchGate: input.dispatchGate } : {}),
     };
 
     await this.writeTask(task);
@@ -263,6 +267,8 @@ export class RedisTaskStore implements ITaskStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+      // F193-E1 P1-4: allow patching dispatchGate
+      ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
       updatedAt: Date.now(),
     };
 
@@ -407,15 +413,6 @@ export class RedisTaskStore implements ITaskStore {
     );
   }
 
-  private async removeTaskArtifacts(task: TaskItem): Promise<void> {
-    const cleanup = this.redis.multi();
-    cleanup.del(TaskKeys.detail(task.id));
-    cleanup.zrem(TaskKeys.thread(task.threadId), task.id);
-    cleanup.zrem(TaskKeys.kind(task.kind), task.id);
-    await cleanup.exec();
-    await this.applyThreadTtl(task.threadId);
-  }
-
   private mergeAutomationState(
     existing: AutomationState | undefined,
     patch: Partial<AutomationState>,
@@ -480,6 +477,10 @@ export class RedisTaskStore implements ITaskStore {
     if (task.automationState) {
       out.automationState = JSON.stringify(task.automationState);
     }
+    // F193 Phase E (dispatch gate)
+    if (task.relatedFeatureId) out.relatedFeatureId = task.relatedFeatureId;
+    if (task.detectedFeatureIds?.length) out.detectedFeatureIds = JSON.stringify(task.detectedFeatureIds);
+    if (task.dispatchGate) out.dispatchGate = JSON.stringify(task.dispatchGate);
     return out;
   }
 
@@ -498,13 +499,31 @@ export class RedisTaskStore implements ITaskStore {
       updatedAt: parseInt(data.updatedAt ?? '0', 10),
       userId: data.userId || undefined,
     };
+    // Hydrate JSON-serialized nested objects
+    let hydrated = base;
     if (data.automationState) {
       try {
-        return { ...base, automationState: JSON.parse(data.automationState) };
+        hydrated = { ...hydrated, automationState: JSON.parse(data.automationState) };
       } catch {
-        return base;
+        /* ignore */
       }
     }
-    return base;
+    // F193 Phase E (dispatch gate)
+    if (data.relatedFeatureId) hydrated = { ...hydrated, relatedFeatureId: data.relatedFeatureId };
+    if (data.detectedFeatureIds) {
+      try {
+        hydrated = { ...hydrated, detectedFeatureIds: JSON.parse(data.detectedFeatureIds) };
+      } catch {
+        /* ignore */
+      }
+    }
+    if (data.dispatchGate) {
+      try {
+        hydrated = { ...hydrated, dispatchGate: JSON.parse(data.dispatchGate) };
+      } catch {
+        /* ignore */
+      }
+    }
+    return hydrated;
   }
 }

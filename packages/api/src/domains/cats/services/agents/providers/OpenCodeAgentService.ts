@@ -23,7 +23,7 @@ import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
-import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import type { AgentMessage, AgentServiceOptions, L0InjectableAgentService, MessageMetadata } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
@@ -42,6 +42,8 @@ interface OpenCodeAgentServiceOptions {
   spawnFn?: SpawnFn;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
+  /** F203 Phase I: test seam — replaces the real L0 compiler subprocess (like Claude/Codex services). */
+  l0CompilerFn?: (options: { catId: string; outPath?: string }) => Promise<string>;
 }
 
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
@@ -94,7 +96,10 @@ export function summarizeOpenCodeEnvForDebug(env: Record<string, string | null> 
   };
 }
 
-export class OpenCodeAgentService implements AgentService {
+/** F203 Phase I: env var signaling that OPENCODE_CONFIG is instructions-only (no custom provider). */
+export const OC_INSTRUCTIONS_ONLY_ENV = 'CAT_CAFE_OC_INSTRUCTIONS_ONLY';
+
+export class OpenCodeAgentService implements L0InjectableAgentService {
   readonly catId: CatId;
   private readonly model: string;
   private readonly apiKey: string | undefined;
@@ -102,6 +107,8 @@ export class OpenCodeAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
+  /** F203 Phase I: injectable L0 compiler (test seam, like Claude/Codex services). */
+  readonly l0CompilerFn: import('../../types.js').L0CompilerFn | undefined;
 
   constructor(options?: OpenCodeAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('opencode');
@@ -110,6 +117,21 @@ export class OpenCodeAgentService implements AgentService {
     this.baseUrl = options?.baseUrl;
     this.spawnFn = options?.spawnFn;
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
+    this.l0CompilerFn = options?.l0CompilerFn;
+  }
+
+  /**
+   * F203 Phase I — OpenCode injects L0 via runtime config `instructions` array.
+   * OpenCode loads instructions files every turn into `role: "system"` messages,
+   * making them compression-immune (S8 spike: sst/opencode@v1.15.13).
+   *
+   * IMPORTANT: When this returns true, the route layer switches to pack-only
+   * static identity (no full prepend). The caller (invoke-single-cat) MUST ensure
+   * every OpenCode invocation path generates a runtime config with `instructions`
+   * containing the compiled L0 file. See AC-I3/I4 guards.
+   */
+  injectsL0Natively(): boolean {
+    return true;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -360,7 +382,11 @@ export class OpenCodeAgentService implements AgentService {
     // clowder-ai#223: When OPENCODE_CONFIG is set (custom provider via runtime config file),
     // credentials are injected via {env:CAT_CAFE_OC_*} substitution in the config.
     // Clear anthropic env vars to prevent opencode from using the builtin anthropic provider.
-    if (callbackEnv?.OPENCODE_CONFIG) {
+    //
+    // F203 Phase I exception: instructions-only configs (no custom provider block) must NOT
+    // clear auth — the cat still needs native Anthropic or subscription credentials.
+    // The `OC_INSTRUCTIONS_ONLY_ENV` signal distinguishes L0-only from full custom-provider.
+    if (callbackEnv?.OPENCODE_CONFIG && !callbackEnv?.[OC_INSTRUCTIONS_ONLY_ENV]) {
       env[ANTHROPIC_API_KEY_ENV] = null;
       env[ANTHROPIC_BASE_URL_ENV] = null;
       env[OPENCODE_API_KEY_ENV] = null;

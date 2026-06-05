@@ -375,6 +375,109 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('query=mcp'));
   });
 
+  test('handleFeatIndex renders suggested cross-post action', async () => {
+    const { handleFeatIndex } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            featId: 'F193',
+            name: 'Cross Thread Comm',
+            status: 'in-progress',
+            owner: '布偶猫',
+            ownerCatId: 'opus',
+            threadIds: ['thread-f193'],
+            suggestedAction: {
+              type: 'cross_post',
+              threadId: 'thread-f193',
+              featureId: 'F193',
+              ownerCatId: 'opus',
+              targetCats: ['opus'],
+              reason: 'F193 is owned by opus; dispatch findings to the owning thread.',
+              source: 'feat_index',
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await handleFeatIndex({ featId: 'F193' });
+
+    assert.equal(result.isError, undefined);
+    const text = result.content[0].text;
+    assert.ok(text.includes('F193 — Cross Thread Comm'));
+    assert.ok(text.includes('owner: 布偶猫 (opus)'));
+    assert.ok(text.includes('cat_cafe_cross_post_message(threadId="thread-f193", targetCats=["opus"]'));
+    assert.ok(text.includes('reason: F193 is owned by opus'));
+  });
+
+  test('handleFeatIndex preserves keyDecisions in formatted output', async () => {
+    const { handleFeatIndex } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            featId: 'F043',
+            name: 'MCP Unification',
+            status: 'spec',
+            keyDecisions: ['Keep raw feature decisions visible', 'Do not hide routing contract changes'],
+          },
+        ],
+      }),
+    });
+
+    const result = await handleFeatIndex({ featId: 'F043' });
+
+    assert.equal(result.isError, undefined);
+    const text = result.content[0].text;
+    assert.ok(text.includes('F043 — MCP Unification'));
+    assert.ok(text.includes('key decisions:'));
+    assert.ok(text.includes('- Keep raw feature decisions visible'));
+    assert.ok(text.includes('- Do not hide routing contract changes'));
+  });
+
+  test('handleFeatIndex renders owner-only suggested cross-post action guidance', async () => {
+    const { handleFeatIndex } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            featId: 'F194',
+            name: 'Owner Only Feature',
+            status: 'spec',
+            owner: '布偶猫',
+            ownerCatId: 'opus',
+            threadIds: [],
+            suggestedAction: {
+              type: 'cross_post',
+              featureId: 'F194',
+              ownerCatId: 'opus',
+              targetCats: ['opus'],
+              reason: 'F194 is owned by opus; find the feature thread before dispatching findings.',
+              source: 'feat_index',
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await handleFeatIndex({ featId: 'F194' });
+
+    assert.equal(result.isError, undefined);
+    const text = result.content[0].text;
+    assert.ok(text.includes('F194 — Owner Only Feature'));
+    assert.ok(text.includes('owner: 布偶猫 (opus)'));
+    assert.ok(text.includes('cat_cafe_cross_post_message(threadId="<feature-thread-id>", targetCats=["opus"]'), text);
+    assert.ok(text.includes('routing: find the feature thread before sending'));
+    assert.ok(text.includes('reason: F194 is owned by opus'));
+  });
+
   test('handles API error response', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 

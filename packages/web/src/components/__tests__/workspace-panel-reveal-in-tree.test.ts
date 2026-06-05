@@ -34,6 +34,9 @@ vi.mock('@/components/MarkdownContent', () => ({
 vi.mock('@/components/workspace/ChangesPanel', () => ({ ChangesPanel: () => null }));
 vi.mock('@/components/workspace/GitPanel', () => ({ GitPanel: () => null }));
 vi.mock('@/components/workspace/TerminalTab', () => ({ TerminalTab: () => null }));
+vi.mock('@/components/workspace/BrowserPanel', () => ({
+  BrowserPanel: () => React.createElement('div', { 'data-testid': 'browser-panel' }),
+}));
 vi.mock('@/components/workspace/JsxPreview', () => ({ JsxPreview: () => null }));
 vi.mock('@/components/workspace/LinkedRootsManager', () => ({
   LinkedRootsManager: () => null,
@@ -56,6 +59,13 @@ vi.mock('@/components/workspace/WorkspaceTree', () => ({
 
 /* ---- Tree fixtures ---- */
 type TreeNode = { name: string; path: string; type: 'file' | 'directory'; children?: TreeNode[] };
+type WorkspaceFileFixture = {
+  path: string;
+  content: string;
+  size: number;
+  modified?: string;
+};
+type MockWorkspaceValue = Record<string, unknown> & { file: WorkspaceFileFixture | null };
 
 const FULL_TREE: TreeNode[] = [
   {
@@ -107,7 +117,7 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
   const fetchSubtree = vi.fn();
   const setOpenFile = vi.fn();
 
-  const workspaceValue = {
+  const workspaceValue: MockWorkspaceValue = {
     worktrees: [{ id: 'main', branch: 'main', root: '/tmp/repo', isBare: false, isMain: true }],
     worktreeId: 'main',
     tree: treeOverride ?? FULL_TREE,
@@ -150,6 +160,76 @@ function setupWithSearchResults(treeOverride?: TreeNode[]) {
   });
   mocks.usePersistedState.mockImplementation((_key: string, init: unknown) => [init, vi.fn()]);
   return { setSearchResults, fetchSubtree, setOpenFile, workspaceValue };
+}
+
+function setupWithMutableStore(initialStore: Record<string, unknown>) {
+  const store: Record<string, unknown> = {
+    workspaceWorktreeId: 'main',
+    workspaceOpenFilePath: null,
+    workspaceOpenFileLine: null,
+    workspaceOpenTabs: [],
+    currentProjectPath: '/tmp/repo',
+    currentThreadId: 'thread-f223',
+    rightPanelMode: 'workspace',
+    workspaceMode: 'dev',
+    pendingPreviewAutoOpen: null,
+    consumePreviewAutoOpen: vi.fn(() => {
+      const pending = store.pendingPreviewAutoOpen;
+      store.pendingPreviewAutoOpen = null;
+      return pending;
+    }),
+    setWorkspaceWorktreeId: vi.fn((id: string | null) => {
+      store.workspaceWorktreeId = id;
+    }),
+    setWorkspaceOpenFile: vi.fn(),
+    setWorkspaceRevealPath: vi.fn((path: string | null) => {
+      store.workspaceRevealPath = path;
+    }),
+    setWorkspaceMode: vi.fn((mode: string) => {
+      store.workspaceMode = mode;
+    }),
+    setRightPanelMode: vi.fn(),
+    setPendingChatInsert: vi.fn(),
+    enablePresentationLock: vi.fn(),
+    disablePresentationLock: vi.fn(),
+    setPresentationLockViewport: vi.fn(),
+    presentationLock: null,
+    workspaceScrollTop: null,
+    workspaceRevealPath: null,
+    _workspaceFileSetAt: { ts: 0, threadId: null },
+    ...initialStore,
+  };
+
+  const workspaceValue: MockWorkspaceValue = {
+    worktrees: [{ id: 'main', branch: 'main', root: '/tmp/repo', isBare: false, isMain: true }],
+    worktreeId: 'main',
+    tree: FULL_TREE,
+    file: null,
+    searchResults: [],
+    loading: false,
+    searchLoading: false,
+    error: null,
+    search: vi.fn(),
+    setSearchResults: vi.fn(),
+    fetchFile: vi.fn(),
+    fetchTree: vi.fn(),
+    fetchSubtree: vi.fn(),
+    fetchWorktrees: vi.fn(),
+    revealInFinder: vi.fn(),
+  };
+
+  mocks.useWorkspace.mockImplementation(() => workspaceValue);
+  mocks.useFileManagement.mockReturnValue({
+    createFile: vi.fn(),
+    createDir: vi.fn(),
+    deleteItem: vi.fn(),
+    renameItem: vi.fn(),
+    uploadFile: vi.fn(),
+  });
+  mocks.useChatStore.mockImplementation((sel: (s: Record<string, unknown>) => unknown) => sel(store));
+  mocks.usePersistedState.mockImplementation((_key: string, init: unknown) => [init, vi.fn()]);
+
+  return { store, workspaceValue };
 }
 
 /* ---- Tests ---- */
@@ -246,5 +326,87 @@ describe('WorkspacePanel reveal-in-tree', () => {
     expect(expanded).toContain('packages');
     expect(expanded).toContain('packages/web');
     // packages/web/src not yet expanded because it wasn't in the tree yet — will expand on next tree update
+  });
+
+  it('switches back to Files view when a workspace open file arrives after browser auto-open', async () => {
+    const { store, workspaceValue } = setupWithMutableStore({
+      pendingPreviewAutoOpen: { port: 5173, path: '/' },
+    });
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).not.toBeNull();
+
+    store.workspaceOpenFilePath = 'packages/web/src/App.tsx';
+    store.workspaceOpenTabs = ['packages/web/src/App.tsx'];
+    workspaceValue.file = {
+      path: 'packages/web/src/App.tsx',
+      content: 'export function App() {}',
+      size: 24,
+      modified: new Date().toISOString(),
+    };
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
+  });
+
+  it('keeps preview auto-open on mount when a selected file already exists', async () => {
+    const { workspaceValue } = setupWithMutableStore({
+      workspaceOpenFilePath: 'packages/web/src/App.tsx',
+      workspaceOpenTabs: ['packages/web/src/App.tsx'],
+      pendingPreviewAutoOpen: { port: 5173, path: '/' },
+    });
+    workspaceValue.file = {
+      path: 'packages/web/src/App.tsx',
+      content: 'export function App() {}',
+      size: 24,
+      modified: new Date().toISOString(),
+    };
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).not.toBeNull();
+  });
+
+  it('switches to Files view when the selected file is reopened after preview auto-open', async () => {
+    const { store, workspaceValue } = setupWithMutableStore({
+      workspaceOpenFilePath: 'packages/web/src/App.tsx',
+      workspaceOpenTabs: ['packages/web/src/App.tsx'],
+      pendingPreviewAutoOpen: { port: 5173, path: '/' },
+      _workspaceFileSetAt: { ts: 0, threadId: 'thread-f223' },
+    });
+    workspaceValue.file = {
+      path: 'packages/web/src/App.tsx',
+      content: 'export function App() {}',
+      size: 24,
+      modified: new Date().toISOString(),
+    };
+    const { WorkspacePanel } = await import('@/components/WorkspacePanel');
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).not.toBeNull();
+
+    store.workspaceOpenFileLine = 42;
+    store._workspaceFileSetAt = { ts: 1000, threadId: 'thread-f223' };
+
+    await act(async () => {
+      root.render(React.createElement(WorkspacePanel));
+    });
+
+    expect(container.querySelector('[data-testid="browser-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workspace-tree"]')).not.toBeNull();
   });
 });

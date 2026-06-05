@@ -96,7 +96,8 @@ export function sortAndGroupThreads(threads: Thread[], unreadIds?: Set<string>):
   }
 
   // 2. Regular threads grouped by project (each group sorted)
-  const regular = threads.filter((t) => !t.pinned && !t.favorited && t.id !== 'default');
+  // Pinned threads still appear in their project group — pinned is additive, not exclusive
+  const regular = threads.filter((t) => !t.favorited && t.id !== 'default');
   const projectGroups = groupByProject(regular, unreadIds);
   for (const [projectPath, projectThreads] of projectGroups) {
     groups.push({
@@ -107,9 +108,10 @@ export function sortAndGroupThreads(threads: Thread[], unreadIds?: Set<string>):
     });
   }
 
-  // 3. Favorites (unread first, then by lastActiveAt desc, excluding pinned)
+  // 3. Favorites (unread first, then by lastActiveAt desc)
+  // Pinned threads can also appear here if favorited — pinned is additive
   const favorited = threads
-    .filter((t) => t.favorited && !t.pinned && t.id !== 'default')
+    .filter((t) => t.favorited && t.id !== 'default')
     .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
   if (favorited.length > 0) {
     groups.push({ type: 'favorites', label: '收藏', threads: favorited });
@@ -150,8 +152,9 @@ export function sortAndGroupThreadsWithWorkspace(
   }
 
   // F095 Phase G + F192 livefix: System threads (IM Hub + eval domains) — dedicated section
+  // Pinned system threads still appear here — pinned is additive, not exclusive
   const systemThreads = threads
-    .filter((t) => (!!t.systemKind || !!t.connectorHubState) && t.id !== 'default' && !t.pinned)
+    .filter((t) => (!!t.systemKind || !!t.connectorHubState) && t.id !== 'default')
     .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
   if (systemThreads.length > 0) {
     groups.push({ type: 'system', label: '系统', threads: systemThreads });
@@ -165,7 +168,8 @@ export function sortAndGroupThreadsWithWorkspace(
   }
 
   // 3. Project groups split into active/archived (excluding system threads)
-  const regular = threads.filter((t) => !t.pinned && !t.favorited && t.id !== 'default' && !systemIds.has(t.id));
+  // Pinned threads still appear in their project group — pinned is additive
+  const regular = threads.filter((t) => !t.favorited && t.id !== 'default' && !systemIds.has(t.id));
   const projectGroupEntries = groupByProject(regular, unreadIds);
   const allProjectGroups: ThreadGroup[] = projectGroupEntries.map(([projectPath, projectThreads]) => ({
     type: 'project' as const,
@@ -196,9 +200,9 @@ export function sortAndGroupThreadsWithWorkspace(
     });
   }
 
-  // 4. Favorites
+  // 4. Favorites — pinned threads can also appear here if favorited
   const favorited = threads
-    .filter((t) => t.favorited && !t.pinned && t.id !== 'default')
+    .filter((t) => t.favorited && t.id !== 'default')
     .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
   if (favorited.length > 0) {
     groups.push({ type: 'favorites', label: '收藏', threads: favorited });

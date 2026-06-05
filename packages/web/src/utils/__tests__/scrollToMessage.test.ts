@@ -54,4 +54,17 @@ describe('scrollToMessage', () => {
     // Should not throw
     scrollToMessage('nonexistent-id');
   });
+
+  it('returns true when the target element is found (lets callers retry until DOM is ready)', () => {
+    const el = document.createElement('div');
+    el.setAttribute('data-message-id', 'msg-789');
+    el.scrollIntoView = vi.fn();
+    document.body.appendChild(el);
+
+    expect(scrollToMessage('msg-789')).toBe(true);
+  });
+
+  it('returns false when no matching element exists', () => {
+    expect(scrollToMessage('missing-id')).toBe(false);
+  });
 });

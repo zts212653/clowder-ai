@@ -62,6 +62,10 @@ export interface RouteStrategyDeps {
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  /** F222: Frustration auto-issue store (optional, fail-open) */
+  frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
+  /** F222: Pending request store — used for cancel burst detection (listRecentDenied) */
+  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F093: World context provider for world-building mode (optional, fail-open) */
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup (optional, fail-open) */
@@ -150,6 +154,11 @@ export interface RouteOptions {
   completeA2ASlots?: ((threadId: string, catIds: readonly CatId[], controller: AbortController) => void) | undefined;
   /** F153 Phase E: Root route span — invocation spans become children of this. */
   routeSpan?: import('@opentelemetry/api').Span | undefined;
+  /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
+   *  true/undefined = user-origin (eligible, default for backward compat).
+   *  false = agent/connector-origin (A2A handoff, connector trigger) — suppress
+   *  frustration detection to avoid surfacing system-internal errors as user-facing issues. */
+  frustrationAutoIssueEligible?: boolean | undefined;
 }
 
 export interface IncrementalContextResult {

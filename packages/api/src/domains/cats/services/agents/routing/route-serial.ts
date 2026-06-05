@@ -23,6 +23,8 @@ import {
   ROUTE_HAS_A2A_HANDOFF,
   ROUTE_TOTAL_CATS_INVOKED,
   ROUTE_TOTAL_TOKENS,
+  THREAD_SYSTEM_KIND,
+  TRIGGER,
 } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   a2aDispatchCount,
@@ -107,7 +109,7 @@ import {
 } from './route-helpers.js';
 import { resolveRoutingDecisions } from './routing-decision.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
-import { shouldWarnVerdictWithoutPass } from './verdict-detect.js';
+import { detectMatchedVerdictKeyword, shouldWarnVerdictWithoutPass } from './verdict-detect.js';
 import { shouldWarnVoidHold } from './void-hold-detect.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
@@ -1359,8 +1361,20 @@ export async function* routeSerial(
         // against a real `c2.checked` base instead of fabricating a 100% ratio. phaseHHit
         // turns are excluded — a format error short-circuits the check (AC-H5), so they
         // were never evaluated.
+        // C2 telemetry labels (F192 2026-06-03 build verdict): every C2 counter carries
+        // `thread.system_kind` (the OTel label value behind `THREAD_SYSTEM_KIND`) so
+        // attribution can distinguish eval-domain noise from real product-thread friction.
+        // The verdict fire counters additionally carry `trigger` (`TRIGGER` semconv,
+        // reusing the existing key — values are instrument-scoped) to spot keyword
+        // overload — e.g. a `p1p2`-driven spike (review-discussion vocab) vs a `放行`-driven
+        // one (real verdict-without-pass). All emitted attribute keys are in F152
+        // metric-allowlist or the OTel SDK silently drops them (砚砚 PR #2058 R1 catch).
+        const c2BaseAttr: Record<string, string> = {
+          [AGENT_ID]: catId as string,
+          [THREAD_SYSTEM_KIND]: routeThread?.systemKind ?? 'product',
+        };
         if (!phaseHHit) {
-          c2ExitChecked.add(1, { 'agent.id': catId as string });
+          c2ExitChecked.add(1, c2BaseAttr);
         }
         if (
           !phaseHHit &&
@@ -1388,8 +1402,12 @@ export async function* routeSerial(
               timestamp: Date.now(),
               source: hintSource,
             });
-            c2VerdictHintEmitted.add(1, { 'agent.id': catId as string });
-            c2VerdictWithoutPassCount.add(1, { 'agent.id': catId as string });
+            const verdictFireAttr: Record<string, string> = {
+              ...c2BaseAttr,
+              [TRIGGER]: detectMatchedVerdictKeyword(storedContent) ?? 'unknown',
+            };
+            c2VerdictHintEmitted.add(1, verdictFireAttr);
+            c2VerdictWithoutPassCount.add(1, verdictFireAttr);
             if (deps.socketManager) {
               deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
                 threadId,
@@ -1412,7 +1430,7 @@ export async function* routeSerial(
         // C2 void-hold denominator (PR #1941 P2): count every void-hold evaluation so
         // attribution grades void_hold_hint against c2.void_hold_checked, NOT the
         // verdict-check count c2.checked (different guard → wrong ratio / suppression).
-        c2VoidHoldChecked.add(1, { 'agent.id': catId as string });
+        c2VoidHoldChecked.add(1, c2BaseAttr);
         if (
           shouldWarnVoidHold({
             text: storedContent,
@@ -1440,7 +1458,7 @@ export async function* routeSerial(
               timestamp: Date.now(),
               source: hintSource,
             });
-            c2VoidHoldHintEmitted.add(1, { 'agent.id': catId as string });
+            c2VoidHoldHintEmitted.add(1, c2BaseAttr);
             if (deps.socketManager) {
               deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
                 threadId,
@@ -2251,6 +2269,90 @@ export async function* routeSerial(
           });
         } catch (err) {
           log.error({ catId: catId as string, err }, 'messageStore.append (error system msg) failed');
+        }
+      }
+
+      // F222: Frustration auto-issue — detect CLI error + cancel burst signals.
+      // Non-blocking: errors in frustration detection must not interrupt the route pipeline.
+      // F222 P1: Skip for A2A/connector origins — only detect frustration on user-driven routes.
+      if (deps.frustrationIssueStore && options.frustrationAutoIssueEligible !== false) {
+        const frustrationDeps = {
+          frustrationIssueStore: deps.frustrationIssueStore,
+          messageStore: deps.messageStore,
+          socketManager: deps.socketManager as
+            | import('../../../../../infrastructure/websocket/index.js').SocketManager
+            | undefined,
+        };
+        try {
+          const { evaluate } = await import('../../frustration/FrustrationDetector.js');
+
+          // Signal 1: CLI error (P1-1 original implementation)
+          if (collectedCliDiagnostics?.reasonCode) {
+            await evaluate(
+              {
+                signal: { type: 'cli_error', diagnostics: collectedCliDiagnostics },
+                threadId,
+                userId,
+                catId: catId as string,
+                invocationId: ownInvocationId,
+              },
+              frustrationDeps,
+            );
+          }
+
+          // Signal 2: Cancel burst — query PendingRequestStore for recent denied
+          // permission requests. This is the precise "user actively cancelled" signal,
+          // distinct from generic tool execution errors. (R2 P1 fix: tool_result.status
+          // === 'error' was too broad — included MCP failures, stream interrupts, etc.)
+          if (deps.pendingRequestStore) {
+            const { CANCEL_WINDOW_MS } = await import('../../frustration/FrustrationDetector.js');
+            const recentDenied = await deps.pendingRequestStore.listRecentDenied(
+              threadId,
+              Date.now() - CANCEL_WINDOW_MS,
+            );
+            if (recentDenied.length >= 3) {
+              await evaluate(
+                {
+                  signal: {
+                    type: 'cancel_burst',
+                    recentDenials: recentDenied.map((r) => ({
+                      action: r.action,
+                      timestamp: r.respondedAt ?? r.createdAt,
+                    })),
+                  },
+                  threadId,
+                  userId,
+                  catId: catId as string,
+                  invocationId: ownInvocationId,
+                },
+                frustrationDeps,
+              );
+            }
+          }
+
+          // Signal 3: A2A timeout — cat invoked but produced no visible output AND
+          // elapsed > threshold. Spec AC-C1: "超过阈值（如 60s）未响应".
+          // P1 fix: exclude instant crashes/parse errors — only genuine timeouts.
+          const A2A_TIMEOUT_THRESHOLD_MS = 60_000;
+          const elapsedMs = Date.now() - invocationStartedAt;
+          if (!catProducedOutput && hadProviderError && elapsedMs >= A2A_TIMEOUT_THRESHOLD_MS) {
+            await evaluate(
+              {
+                signal: {
+                  type: 'a2a_timeout',
+                  targetCatId: catId as string,
+                  elapsedMs,
+                },
+                threadId,
+                userId,
+                catId: catId as string,
+                invocationId: ownInvocationId,
+              },
+              frustrationDeps,
+            );
+          }
+        } catch {
+          // Non-blocking: frustration detection failure must not break routing
         }
       }
 

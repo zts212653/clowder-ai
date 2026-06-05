@@ -380,6 +380,41 @@ describe('GitHubRepoWebhookHandler', () => {
     assert.ok(result.reason.includes('draft'));
   });
 
+  it('skips OWNER PRs — repo owner actions should not trigger community intake', async () => {
+    const { deps } = createMockDeps();
+    const handler = new GitHubRepoWebhookHandler(CONFIG, deps);
+    const body = makePRPayload('opened', { author_association: 'OWNER' });
+    const { headers, raw } = makeHeaders('pull_request', 'delivery-owner-pr', body);
+
+    const result = await handler.handleWebhook(body, headers, raw);
+
+    assert.equal(result.kind, 'skipped');
+    assert.ok(result.reason.includes('OWNER'));
+  });
+
+  it('skips OWNER issues', async () => {
+    const { deps } = createMockDeps();
+    const handler = new GitHubRepoWebhookHandler(CONFIG, deps);
+    const body = {
+      action: 'opened',
+      repository: { full_name: 'zts212653/clowder-ai' },
+      sender: { login: 'repoowner', id: 11111 },
+      issue: {
+        number: 99,
+        title: 'Internal tracking',
+        html_url: 'https://github.com/zts212653/clowder-ai/issues/99',
+        user: { login: 'repoowner', id: 11111 },
+        author_association: 'OWNER',
+      },
+    };
+    const { headers, raw } = makeHeaders('issues', 'delivery-owner-issue', body);
+
+    const result = await handler.handleWebhook(body, headers, raw);
+
+    assert.equal(result.kind, 'skipped');
+    assert.ok(result.reason.includes('OWNER'));
+  });
+
   it('creates new inbox thread on first event for a repo (KD-14)', async () => {
     const { deps, boundThreads } = createMockDeps();
     const handler = new GitHubRepoWebhookHandler(CONFIG, deps);

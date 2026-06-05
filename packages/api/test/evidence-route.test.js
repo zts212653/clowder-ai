@@ -75,6 +75,140 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.results[1].authority, 'candidate');
   });
 
+  it('attaches suggested cross-post action for non-current thread hits', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread:cross-feature',
+          kind: 'thread',
+          status: 'active',
+          title: 'Cross-feature discussion',
+          summary: 'Important finding from another thread',
+          updatedAt: '2026-01-01T00:00:00Z',
+          passages: [
+            {
+              passageId: 'p1',
+              content: 'finding',
+              threadId: 'thread-other',
+              messageId: 'msg-1',
+            },
+          ],
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=finding&scope=threads&currentThreadId=thread-current',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.deepEqual(body.results[0].suggestedAction, {
+      type: 'cross_post',
+      threadId: 'thread-other',
+      reason: 'Search result came from another thread; dispatch relevant findings back to that thread.',
+      source: 'search_evidence',
+    });
+  });
+
+  it('does not attach cross-post action for current-thread hits', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread:same-feature',
+          kind: 'thread',
+          status: 'active',
+          title: 'Same-thread discussion',
+          summary: 'Already in current thread',
+          updatedAt: '2026-01-01T00:00:00Z',
+          passages: [{ passageId: 'p1', content: 'finding', threadId: 'thread-current' }],
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=finding&scope=threads&currentThreadId=thread-current',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0].suggestedAction, undefined);
+  });
+
+  it('normalizes synthetic thread anchors before attaching evidence cross-post action', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread-default',
+          kind: 'thread',
+          status: 'active',
+          title: 'Default thread',
+          summary: 'Indexed thread without passage metadata',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=finding&scope=threads&currentThreadId=thread-current',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0].suggestedAction.threadId, 'default');
+  });
+
+  it('suppresses current-thread evidence action after normalizing synthetic anchors', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread-default',
+          kind: 'thread',
+          status: 'active',
+          title: 'Default thread',
+          summary: 'Indexed current thread without passage metadata',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=finding&scope=threads&currentThreadId=default',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0].suggestedAction, undefined);
+  });
+
+  it('does not use synthetic thread anchor fallback for non-thread evidence', async () => {
+    await setup({
+      search: async () => [
+        {
+          anchor: 'thread-looking-feature-anchor',
+          kind: 'feature',
+          status: 'active',
+          title: 'Feature doc with thread-looking anchor',
+          summary: 'Non-thread evidence should stay inert without explicit thread metadata',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=finding&currentThreadId=thread-current',
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.results[0].suggestedAction, undefined);
+  });
+
   it('Phase E: confidence reflects rank position, not authority', async () => {
     await setup({
       search: async () =>

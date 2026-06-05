@@ -19,6 +19,7 @@ import type {
   SearchOptions,
 } from '../domains/memory/interfaces.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
+import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
   type BoostSource,
   type EvidenceResult,
@@ -43,6 +44,7 @@ const searchSchema = z.object({
   activeFeatureIds: z.string().optional(),
   truthSourceRef: z.string().optional(),
   recentArtifactRefs: z.string().optional(),
+  currentThreadId: z.string().optional(),
 });
 
 export type {
@@ -109,6 +111,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       activeFeatureIds: rawFeatureIds,
       truthSourceRef,
       recentArtifactRefs: rawArtifactRefs,
+      currentThreadId,
     } = parseResult.data;
 
     const effectiveLimit = limit ?? 5;
@@ -193,6 +196,16 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
 
       const results: EvidenceResult[] = reranked.items.map((item, index) => {
         const drillDown = sanitizeEvidenceDrillDown(item.drillDown);
+        const suggestedAction = buildThreadCrossPostSuggestion(
+          extractThreadIdFromEvidenceResult({
+            passages: item.passages,
+            drillDown,
+            anchor: item.kind === 'thread' ? item.anchor : undefined,
+          }),
+          currentThreadId,
+          'search_evidence',
+          'Search result came from another thread; dispatch relevant findings back to that thread.',
+        );
         return {
           title: item.title,
           anchor: item.anchor,
@@ -208,6 +221,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           ...(item.entityMatches ? { entityMatches: item.entityMatches } : {}),
           ...(drillDown ? { drillDown } : {}),
           ...(explain && item.rankingFactors ? { rankingFactors: item.rankingFactors } : {}),
+          ...(suggestedAction ? { suggestedAction } : {}),
         };
       });
       // F163 AC-A3: report always_on injection sources in response envelope

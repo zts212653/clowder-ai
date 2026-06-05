@@ -1,4 +1,4 @@
-import type { CatId } from '@cat-cafe/shared';
+import type { CatId, ReportingMode } from '@cat-cafe/shared';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
@@ -67,6 +67,8 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
    *     collapsing to the first target would discard explicit user intent).
    */
   preferredCats?: readonly CatId[];
+  /** F128 Phase Y: reporting mode from the proposal record (undefined → enrich default none, AC-Y6). */
+  reportingMode?: ReportingMode;
   messageStore: IMessageStore;
 }
 
@@ -83,6 +85,7 @@ export async function appendApprovedInitialMessage({
   sourceThreadId,
   sourceThreadTitle,
   preferredCats,
+  reportingMode,
   messageStore,
   router,
   invocationQueue,
@@ -96,6 +99,8 @@ export async function appendApprovedInitialMessage({
       preferredCats,
       rawInitialMessage,
       null,
+      primaryMentionHandleForCatId,
+      reportingMode,
     );
     const stored = await messageStore.append({
       userId,
@@ -184,6 +189,8 @@ export async function appendApprovedInitialMessage({
     preferredCats,
     rawInitialMessage,
     parallelReporterHandle,
+    primaryMentionHandleForCatId,
+    reportingMode,
   );
 
   if (targetCats.length === 0) {

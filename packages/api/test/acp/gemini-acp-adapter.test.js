@@ -1815,6 +1815,7 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
       CAT_CAFE_API_URL: 'http://localhost:3004',
       CAT_CAFE_INVOCATION_ID: 'inv-123',
       CAT_CAFE_CALLBACK_TOKEN: 'tok-abc',
+      CAT_CAFE_THREAD_ID: 'thread-acp-123',
       CAT_CAFE_USER_ID: 'user-1',
       CAT_CAFE_CAT_ID: 'gemini',
       CAT_CAFE_SIGNAL_USER: 'gemini',
@@ -1835,12 +1836,14 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.equal(collabEnvMap.CAT_CAFE_API_URL, 'http://localhost:3004');
     assert.equal(collabEnvMap.CAT_CAFE_INVOCATION_ID, 'inv-123');
     assert.equal(collabEnvMap.CAT_CAFE_CALLBACK_TOKEN, 'tok-abc');
+    assert.equal(collabEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
     assert.equal(collabEnvMap.EXISTING, 'keep', 'Existing env entries should be preserved');
 
     // cat-cafe-memory should also get callback env
     const memory = servers.find((s) => s.name === 'cat-cafe-memory');
     const memoryEnvMap = Object.fromEntries(memory.env.map((e) => [e.name, e.value]));
     assert.equal(memoryEnvMap.CAT_CAFE_API_URL, 'http://localhost:3004');
+    assert.equal(memoryEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
 
     // playwright (non cat-cafe) should be unchanged
     const pw = servers.find((s) => s.name === 'playwright');

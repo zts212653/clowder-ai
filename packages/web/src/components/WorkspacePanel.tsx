@@ -159,6 +159,7 @@ export function WorkspacePanel() {
   const closeTab = useChatStore((s) => s.closeWorkspaceTab);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const scrollToLine = useChatStore((s) => s.workspaceOpenFileLine);
+  const workspaceFileSetAt = useChatStore((s) => s._workspaceFileSetAt);
   const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
@@ -195,6 +196,8 @@ export function WorkspacePanel() {
   const [previewPort, setPreviewPort] = useState<number | undefined>();
   const [previewPath, setPreviewPath] = useState<string>('/');
   const [focusedPane, setFocusedPane] = useState<'browser' | 'changes' | 'file' | 'git' | 'terminal' | null>(null);
+  const previousOpenFilePathRef = useRef(openFilePath);
+  const previousWorkspaceFileSetTsRef = useRef(workspaceFileSetAt.ts);
 
   // Keep parent state in sync with BrowserPanel navigation (focus mode state preservation)
   const handleBrowserNavigate = useCallback((port: number, path: string) => {
@@ -226,6 +229,18 @@ export function WorkspacePanel() {
       setViewMode('browser');
     }
   }, [pendingPreviewAutoOpen, consumePreviewAutoOpen]);
+
+  useEffect(() => {
+    const previousOpenFilePath = previousOpenFilePathRef.current;
+    const previousWorkspaceFileSetTs = previousWorkspaceFileSetTsRef.current;
+    previousOpenFilePathRef.current = openFilePath;
+    previousWorkspaceFileSetTsRef.current = workspaceFileSetAt.ts;
+
+    const freshOpenForCurrentThread =
+      workspaceFileSetAt.ts !== previousWorkspaceFileSetTs &&
+      (!workspaceFileSetAt.threadId || workspaceFileSetAt.threadId === currentThreadId);
+    if (openFilePath && (openFilePath !== previousOpenFilePath || freshOpenForCurrentThread)) setViewMode('files');
+  }, [currentThreadId, openFilePath, workspaceFileSetAt.threadId, workspaceFileSetAt.ts]);
   const [portDiscoveryToast, setPortDiscoveryToast] = useState<{ port: number; framework?: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchMode, setSearchMode] = useState<'content' | 'filename' | 'all'>('all');

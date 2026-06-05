@@ -304,6 +304,54 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 0);
   });
 
+  it('immediate startup watchdog releases slot when routeExecution never starts provider events', async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
+    await app.close();
+    deps = buildDeps({ invocationStartupWatchdogMs: 50 });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+
+    let capturedSignal;
+    deps.router.routeExecution.mock.mockImplementation(
+      async function* (_userId, _content, _threadId, _messageId, _cats, _intent, options) {
+        capturedSignal = options.signal;
+        await new Promise(() => {});
+      },
+    );
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '@opus', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).status, 'processing');
+
+    t.mock.timers.tick(51);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(capturedSignal?.aborted, true, 'watchdog should abort the stuck invocation');
+    assert.equal(capturedSignal?.reason, 'startup_timeout');
+    assert.ok(deps.invocationTracker.completeAll.mock.calls.length > 0, 'watchdog should release tracker slot');
+
+    const failedUpdate = deps.invocationRecordStore.update.mock.calls.find(
+      (c) => c.arguments[0] === 'inv-stub' && c.arguments[1]?.status === 'failed',
+    );
+    assert.ok(failedUpdate, 'watchdog should mark the invocation record failed');
+
+    const completion = deps.queueProcessor.onInvocationComplete.mock.calls.find(
+      (c) => c.arguments[0] === 'thread-1' && c.arguments[1] === 'opus' && c.arguments[2] === 'failed',
+    );
+    assert.ok(completion, 'watchdog should notify queue processor so queued work is not stuck');
+  });
+
   it('default broadcast with queued leftovers but no active invocation → executes immediately', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.queueProcessor = {

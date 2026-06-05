@@ -14,7 +14,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -144,6 +144,29 @@ function parseYamlTopLevelList(content, sectionName) {
 
 function readYamlTopLevelList(relPath, sectionName) {
   return parseYamlTopLevelList(readFileSync(resolve(ROOT, relPath), 'utf-8'), sectionName);
+}
+
+function readJsonFile(relPath) {
+  return JSON.parse(readFileSync(resolve(ROOT, relPath), 'utf-8'));
+}
+
+function loadWorkspacePackageRootsByName() {
+  const packagesDir = resolve(ROOT, 'packages');
+  const rootsByName = new Map();
+
+  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const packageRoot = `packages/${entry.name}`;
+    const packageJsonPath = resolve(ROOT, packageRoot, 'package.json');
+    if (!existsSync(packageJsonPath)) continue;
+
+    const packageJson = readJsonFile(`${packageRoot}/package.json`);
+    if (typeof packageJson.name === 'string') {
+      rootsByName.set(packageJson.name, packageRoot);
+    }
+  }
+
+  return rootsByName;
 }
 
 function parseYamlTransformTargets(content) {
@@ -686,14 +709,78 @@ excluded:
       }
     });
 
-    it('sync-manifest exports root package operational helper scripts', () => {
+    it('sync-manifest exports workspace dependency closure for managed package roots', () => {
+      const managedRoots = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_roots'));
+      const workspaceRootsByName = loadWorkspacePackageRootsByName();
+
+      for (const root of managedRoots) {
+        if (!root.startsWith('packages/')) continue;
+
+        const packageJsonPath = `${root}/package.json`;
+        if (!existsSync(resolve(ROOT, packageJsonPath))) continue;
+
+        const packageJson = readJsonFile(packageJsonPath);
+        const dependencyGroups = [
+          packageJson.dependencies ?? {},
+          packageJson.devDependencies ?? {},
+          packageJson.peerDependencies ?? {},
+          packageJson.optionalDependencies ?? {},
+        ];
+
+        for (const dependencies of dependencyGroups) {
+          for (const [dependencyName, dependencySpec] of Object.entries(dependencies)) {
+            if (typeof dependencySpec !== 'string' || !dependencySpec.startsWith('workspace:')) continue;
+
+            const dependencyRoot = workspaceRootsByName.get(dependencyName);
+            assert.ok(
+              dependencyRoot,
+              `${root} depends on workspace package ${dependencyName}, but packages/* does not contain it`,
+            );
+            assert.ok(
+              managedRoots.has(dependencyRoot),
+              `sync-manifest should export ${dependencyRoot} because managed root ${root} depends on ${dependencyName}`,
+            );
+          }
+        }
+      }
+    });
+
+    it('sync-manifest exports public root package helper script targets', () => {
       const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
-      const requiredScripts = ['scripts/cleanup-stale-dev-processes.mjs'];
+      const requiredScripts = [
+        'scripts/cleanup-stale-dev-processes.mjs',
+        'scripts/video-forge/new-project.mjs',
+        'scripts/check-skill-first-party-surfaces.test.mjs',
+        'scripts/check-skill-first-party-surfaces.mjs',
+        'scripts/check-skill-first-party-surfaces.allowlist.json',
+      ];
 
       for (const scriptPath of requiredScripts) {
         assert.ok(
           managedScripts.includes(scriptPath),
           `sync-manifest should export ${scriptPath} because public package.json exposes it`,
+        );
+      }
+    });
+
+    it('sync-manifest exports release-desktop reusable workflow closure', () => {
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const releaseDesktop = readFileSync(resolve(ROOT, '.github/workflows/release-desktop.yml'), 'utf-8');
+      const workflowRefs = Array.from(
+        releaseDesktop.matchAll(/uses:\s+\.\/(\.github\/workflows\/[A-Za-z0-9_.-]+\.yml)/g),
+        (match) => match[1],
+      );
+
+      assert.notEqual(
+        workflowRefs.length,
+        0,
+        'release-desktop.yml should reference reusable workflows so this guard verifies a real closure',
+      );
+
+      for (const workflowPath of workflowRefs) {
+        assert.ok(
+          managedFiles.includes(workflowPath),
+          `sync-manifest should export ${workflowPath} because release-desktop.yml uses it`,
         );
       }
     });
@@ -744,12 +831,20 @@ excluded:
         'public package.json should strip source-only run-checks.test.mjs from check:pre-merge-gate',
       );
       assert.ok(
+        content.includes('"pnpm check:skills:surfaces"'),
+        'public package.json should run the exported skill surface guard in pnpm check',
+      );
+      assert.ok(
         content.includes('delete pkg.scripts["check:architecture-ownership"]'),
         'public package.json should not expose check:architecture-ownership without exporting its script target',
       );
       assert.ok(
         content.includes('delete pkg.scripts["test:architecture-ownership"]'),
         'public package.json should not expose test:architecture-ownership without exporting its script target',
+      );
+      assert.ok(
+        content.includes('"check:f223-action-tracking"'),
+        'public package.json should drop source-only F223 action tracking because its inventory truth source is not exported',
       );
     });
 
@@ -1542,17 +1637,27 @@ describe(
   'Public-facing skill docs avoid home-only API defaults',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
-    it('workspace-navigator uses API_SERVER_PORT env instead of hardcoded 3002 fallbacks', () => {
+    it('workspace-navigator uses typed MCP instead of raw API port guidance', () => {
       const content = readFileSync(resolve(ROOT, 'cat-cafe-skills/workspace-navigator/SKILL.md'), 'utf-8');
       assert.doesNotMatch(
         content,
         /API_SERVER_PORT=3004|API_SERVER_PORT:-3004/,
         'workspace-navigator should not hardcode the home-only API default in public-facing usage guidance',
       );
+      assert.doesNotMatch(
+        content,
+        /API_PORT=/,
+        'workspace-navigator should not require cats to hand-manage first-party API ports',
+      );
+      assert.doesNotMatch(
+        content,
+        /curl\s+-X\s+POST[\s\S]{0,200}\/api\/workspace\/navigate/,
+        'workspace-navigator should not use raw curl as the first-party Hub action main path',
+      );
       assert.match(
         content,
-        /API_PORT="\$\{API_SERVER_PORT:\?set API_SERVER_PORT before calling Navigate API\}"/,
-        'workspace-navigator should teach readers to source the API port from the runtime environment',
+        /cat_cafe_workspace_navigate\(\{/,
+        'workspace-navigator should teach the typed MCP main path',
       );
     });
   },

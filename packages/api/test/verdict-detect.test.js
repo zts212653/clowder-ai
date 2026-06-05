@@ -11,6 +11,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
+  detectMatchedVerdictKeyword,
   hasHoldBallCall,
   hasReviewVerdict,
   shouldWarnVerdictWithoutPass,
@@ -60,6 +61,78 @@ describe('F167 C2 AC-C7: hasReviewVerdict', () => {
   test('does NOT trigger on "P3" / "P4" (only P1/P2)', () => {
     assert.equal(hasReviewVerdict('P3 suggestion only'), false);
     assert.equal(hasReviewVerdict('P0 blocker'), false);
+  });
+});
+
+describe('F167 C2 AC-C7: detectMatchedVerdictKeyword (F192 build verdict 2026-06-03)', () => {
+  // The label name is the *telemetry attribute value* the C2 counters emit. Locked in
+  // here so a downstream eval (Prometheus query, attribution) can rely on a stable
+  // vocabulary when slicing fires by trigger keyword.
+  test('returns "lgtm" for LGTM (case-insensitive)', () => {
+    assert.equal(detectMatchedVerdictKeyword('LGTM, ready to merge'), 'lgtm');
+    assert.equal(detectMatchedVerdictKeyword('lgtm'), 'lgtm');
+  });
+
+  test('returns "approve" for approve / approved', () => {
+    assert.equal(detectMatchedVerdictKeyword('I approve this change'), 'approve');
+    assert.equal(detectMatchedVerdictKeyword('approved by reviewer'), 'approve');
+  });
+
+  test('returns "reject" for reject / rejected', () => {
+    assert.equal(detectMatchedVerdictKeyword('reject this'), 'reject');
+    assert.equal(detectMatchedVerdictKeyword('rejected due to spec mismatch'), 'reject');
+  });
+
+  test('returns "p1p2" for P1 or P2 (the overloaded review-discussion vocab)', () => {
+    assert.equal(detectMatchedVerdictKeyword('P1: logic bug'), 'p1p2');
+    assert.equal(detectMatchedVerdictKeyword('found P2 in handler'), 'p1p2');
+  });
+
+  test('returns "modify_suggestion" for 修改建议', () => {
+    assert.equal(detectMatchedVerdictKeyword('修改建议：重命名 foo'), 'modify_suggestion');
+  });
+
+  test('returns "approve_cn" for 放行', () => {
+    assert.equal(detectMatchedVerdictKeyword('这 PR 可以放行'), 'approve_cn');
+  });
+
+  test('returns "reject_cn" for 打回', () => {
+    assert.equal(detectMatchedVerdictKeyword('打回重做'), 'reject_cn');
+  });
+
+  test('returns null when no keyword matches', () => {
+    assert.equal(detectMatchedVerdictKeyword('hello world'), null);
+    assert.equal(detectMatchedVerdictKeyword(''), null);
+    assert.equal(detectMatchedVerdictKeyword('approximately 50 ms'), null);
+    assert.equal(detectMatchedVerdictKeyword('P3 only'), null);
+  });
+
+  test('returns the FIRST match (iteration order, not "most specific")', () => {
+    // Locks the contract: if the text matches multiple patterns, the result is the
+    // first one in VERDICT_PATTERNS order. Future reorderings would need to update
+    // this test and consider how downstream label aggregations would shift.
+    assert.equal(detectMatchedVerdictKeyword('LGTM but also P1 finding'), 'lgtm');
+    assert.equal(detectMatchedVerdictKeyword('approve with P2 nit'), 'approve');
+  });
+
+  test('hasReviewVerdict and detectMatchedVerdictKeyword agree on positives', () => {
+    // Consistency between the boolean gate (route-serial uses) and the keyword
+    // detector (counter label): same inputs should never disagree on whether the
+    // verdict pattern matched.
+    const samples = [
+      'LGTM',
+      'approve this',
+      'reject',
+      'P1 finding',
+      '修改建议: rename',
+      '放行',
+      '打回',
+      'hello world',
+      'P3 only',
+    ];
+    for (const text of samples) {
+      assert.equal(hasReviewVerdict(text), detectMatchedVerdictKeyword(text) !== null, `mismatch on: ${text}`);
+    }
   });
 });
 

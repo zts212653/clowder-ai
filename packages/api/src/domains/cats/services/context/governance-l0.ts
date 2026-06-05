@@ -163,6 +163,7 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     'fallback 层数检测协议',
     '创意-实现解耦协议',
     '## 0. 身份契约',
+    '## 17. 决策漏斗',
   ]) {
     assertPresent(markdown, anchor);
   }
@@ -206,6 +207,12 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '- 46 hotfix 止血：fix/hotfix/quick fix/minimal fix/band-aid/temp/workaround → hotfix；跨猫 review 铁律：hotfix PR 必须跨族或同族不同个体 review，不允许 self-merge；2 周升级 review 三选一。',
     `- ${fallbackProtocolLabel}：同一文件新增 ≥3 层 fallback → 坐标系自检、替代方案评估、说明每层为何不能去掉。`,
     `- ${creativeProtocolLabel}：发现问题 ≠ 动手实现；记录 + handoff；白名单外代码改动需要 Dry Run Gate。`,
+    '',
+    '### 决策漏斗（越宏观越关注，越细节越放手）',
+    '- SOP 流程推进不是决策，是执行。SOP 写了下一步就照做，不问。能翻代码解决的不要问人。',
+    '- 三层：宏观 CVO 拍板 / 中间猫猫讨论 / 细节+流程猫猫自治（详见 `decision-matrix.md`）',
+    '- 可逆性：≤1 commit 回滚 + 不影响外部用户/数据/契约 + 不碰硬排除（愿景/权限/生产数据/Redis 圣域/新外部依赖/契约/显著成本）→ 自决 + 事后通报',
+    '- CVO 升级必带 Decision Packet：给价值取舍题不给技术 A/B 题；缺 Packet = 打回',
   ].join('\n');
 }
 
