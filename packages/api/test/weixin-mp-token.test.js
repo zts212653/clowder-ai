@@ -86,4 +86,35 @@ describe('WeixinMpTokenManager Redis cache resilience', () => {
     redisAvailable = false;
     assert.equal(await manager.getAccessToken(), 'redis-token');
   });
+
+  it('clears Redis and in-memory fallback tokens when invalidated', async () => {
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return tokenResponse('fresh-token');
+    };
+
+    let cached = 'redis-token';
+    let deletedKey = null;
+    const redis = {
+      get: async () => cached,
+      setex: async (_key, _ttl, token) => {
+        cached = token;
+      },
+      del: async (key) => {
+        deletedKey = key;
+        cached = null;
+      },
+    };
+    const manager = new WeixinMpTokenManager(redis, {
+      WEIXIN_MP_APP_ID: 'appid',
+      WEIXIN_MP_APP_SECRET: 'secret',
+    });
+
+    assert.equal(await manager.getAccessToken(), 'redis-token');
+    await manager.invalidateAccessToken();
+    assert.equal(deletedKey, 'weixin-mp:access-token:appid');
+    assert.equal(await manager.getAccessToken(), 'fresh-token');
+    assert.equal(fetchCalls, 1);
+  });
 });

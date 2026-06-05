@@ -48,6 +48,20 @@ export class WeixinMpTokenManager {
     return this.refresh();
   }
 
+  async invalidateAccessToken(): Promise<void> {
+    const appId = this.pluginConfig.WEIXIN_MP_APP_ID;
+    this.memToken = undefined;
+    this.memExpiresAt = 0;
+    this.memAppId = undefined;
+
+    if (!appId || !this.redis) return;
+    try {
+      await this.redis.del(`${REDIS_KEY_PREFIX}${appId}`);
+    } catch {
+      /* Redis is an optional cache; memory has already been invalidated. */
+    }
+  }
+
   private async refresh(): Promise<string> {
     const appId = this.pluginConfig.WEIXIN_MP_APP_ID;
     const appSecret = this.pluginConfig.WEIXIN_MP_APP_SECRET;

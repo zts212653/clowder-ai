@@ -4,6 +4,7 @@ import type { WeixinMpTokenManager } from './weixin-mp-token.js';
 const BASE = 'https://api.weixin.qq.com/cgi-bin';
 const TIMEOUT = 30_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const TOKEN_AUTH_ERROR_CODES = new Set([40001, 40014, 42001]);
 
 interface WxApiResponse {
   readonly errcode?: number;
@@ -57,6 +58,17 @@ interface DraftListResponse extends WxApiResponse {
   readonly item?: readonly DraftItem[];
 }
 
+class WeixinMpApiError extends Error {
+  constructor(
+    readonly errcode: number,
+    readonly errmsg = '',
+    prefix = 'WeChat API error',
+  ) {
+    super(`${prefix}: ${errcode} ${errmsg}`);
+    this.name = 'WeixinMpApiError';
+  }
+}
+
 export interface ArticleInput {
   readonly title: string;
   readonly content: string;
@@ -81,6 +93,14 @@ export function deriveImageUploadMetadata(
   return { mimeType, fileName: `${baseName}.${extension}` };
 }
 
+async function readWxApiResponse<T extends WxApiResponse>(res: Response, errorPrefix?: string): Promise<T> {
+  const data = (await res.json()) as T;
+  if (data.errcode && data.errcode !== 0) {
+    throw new WeixinMpApiError(data.errcode, data.errmsg ?? '', errorPrefix);
+  }
+  return data;
+}
+
 async function wxPost<T extends WxApiResponse>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
@@ -88,66 +108,82 @@ async function wxPost<T extends WxApiResponse>(url: string, body: unknown): Prom
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT),
   });
-  const data = (await res.json()) as T;
-  if (data.errcode && data.errcode !== 0) {
-    throw new Error(`WeChat API error: ${data.errcode} ${data.errmsg ?? ''}`);
-  }
-  return data;
+  return readWxApiResponse<T>(res);
+}
+
+function isTokenAuthError(error: unknown): boolean {
+  return error instanceof WeixinMpApiError && TOKEN_AUTH_ERROR_CODES.has(error.errcode);
 }
 
 export class WeixinMpClient {
   constructor(private readonly tokenMgr: WeixinMpTokenManager) {}
 
-  async uploadArticleImage(imageUrl: string): Promise<string> {
+  private async withAccessTokenRetry<T>(request: (token: string) => Promise<T>): Promise<T> {
     const token = await this.tokenMgr.getAccessToken();
+    try {
+      return await request(token);
+    } catch (error) {
+      if (!isTokenAuthError(error)) throw error;
+      await this.tokenMgr.invalidateAccessToken();
+      const refreshedToken = await this.tokenMgr.getAccessToken();
+      return request(refreshedToken);
+    }
+  }
+
+  private wxPostWithToken<T extends WxApiResponse>(path: string, body: unknown): Promise<T> {
+    return this.withAccessTokenRetry((token) => wxPost<T>(`${BASE}/${path}?access_token=${token}`, body));
+  }
+
+  async uploadArticleImage(imageUrl: string): Promise<string> {
     const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
     const contentType = imgRes.contentType;
     const metadata = deriveImageUploadMetadata(contentType);
     const blob = new Blob([imgRes.body], { type: metadata.mimeType });
 
-    const form = new FormData();
-    form.append('media', blob, metadata.fileName);
+    const data = await this.withAccessTokenRetry(async (token) => {
+      const form = new FormData();
+      form.append('media', blob, metadata.fileName);
 
-    const res = await fetch(`${BASE}/media/uploadimg?access_token=${token}`, {
-      method: 'POST',
-      body: form,
-      signal: AbortSignal.timeout(TIMEOUT),
+      const res = await fetch(`${BASE}/media/uploadimg?access_token=${token}`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+      return readWxApiResponse<UploadImgResponse>(res, 'Upload failed');
     });
-    const data = (await res.json()) as UploadImgResponse;
     if (!data.url) throw new Error(`Upload failed: ${data.errcode ?? 'no url'} ${data.errmsg ?? ''}`);
     return data.url;
   }
 
   async addMaterial(imageUrl: string): Promise<{ mediaId: string; url: string }> {
-    const token = await this.tokenMgr.getAccessToken();
     const imgRes = await fetchExternalUrlPinned(imageUrl, { timeoutMs: TIMEOUT, maxBytes: MAX_IMAGE_BYTES });
     const contentType = imgRes.contentType;
     const metadata = deriveImageUploadMetadata(contentType, 'cover');
     const blob = new Blob([imgRes.body], { type: metadata.mimeType });
 
-    const form = new FormData();
-    form.append('media', blob, metadata.fileName);
+    const data = await this.withAccessTokenRetry(async (token) => {
+      const form = new FormData();
+      form.append('media', blob, metadata.fileName);
 
-    const res = await fetch(`${BASE}/material/add_material?access_token=${token}&type=image`, {
-      method: 'POST',
-      body: form,
-      signal: AbortSignal.timeout(TIMEOUT),
+      const res = await fetch(`${BASE}/material/add_material?access_token=${token}&type=image`, {
+        method: 'POST',
+        body: form,
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+      return readWxApiResponse<AddMaterialResponse>(res, 'Material upload failed');
     });
-    const data = (await res.json()) as AddMaterialResponse;
     if (!data.media_id) throw new Error(`Material upload failed: ${data.errcode ?? 'no id'} ${data.errmsg ?? ''}`);
     return { mediaId: data.media_id, url: data.url ?? '' };
   }
 
   async createDraft(articles: readonly ArticleInput[]): Promise<string> {
-    const token = await this.tokenMgr.getAccessToken();
-    const data = await wxPost<DraftAddResponse>(`${BASE}/draft/add?access_token=${token}`, { articles });
+    const data = await this.wxPostWithToken<DraftAddResponse>('draft/add', { articles });
     if (!data.media_id) throw new Error('Draft creation failed: no media_id returned');
     return data.media_id;
   }
 
   async publishDraft(mediaId: string): Promise<string> {
-    const token = await this.tokenMgr.getAccessToken();
-    const data = await wxPost<PublishResponse>(`${BASE}/freepublish/submit?access_token=${token}`, {
+    const data = await this.wxPostWithToken<PublishResponse>('freepublish/submit', {
       media_id: mediaId,
     });
     if (!data.publish_id) throw new Error('Publish failed: no publish_id returned');
@@ -155,15 +191,13 @@ export class WeixinMpClient {
   }
 
   async getPublishStatus(publishId: string): Promise<PublishStatusResponse> {
-    const token = await this.tokenMgr.getAccessToken();
-    return wxPost<PublishStatusResponse>(`${BASE}/freepublish/get?access_token=${token}`, {
+    return this.wxPostWithToken<PublishStatusResponse>('freepublish/get', {
       publish_id: publishId,
     });
   }
 
   async listDrafts(offset = 0, count = 10): Promise<DraftListResponse> {
-    const token = await this.tokenMgr.getAccessToken();
-    return wxPost<DraftListResponse>(`${BASE}/draft/batchget?access_token=${token}`, {
+    return this.wxPostWithToken<DraftListResponse>('draft/batchget', {
       offset,
       count,
       no_content: 1,
