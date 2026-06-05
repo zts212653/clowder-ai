@@ -90,6 +90,16 @@ describe('validateExternalUrl', () => {
     assert.throws(() => validateExternalUrl('http://[::ffff:169.254.169.254]/meta'), /private/);
   });
 
+  it('rejects IPv4-compatible IPv6 private IP literals', () => {
+    assert.throws(() => validateExternalUrl('http://[::127.0.0.1]/secret'), /private/);
+    assert.throws(() => validateExternalUrl('http://[::7f00:1]/secret'), /private/);
+  });
+
+  it('rejects IPv4-translated IPv6 private IP literals', () => {
+    assert.throws(() => validateExternalUrl('http://[::ffff:0:127.0.0.1]/secret'), /private/);
+    assert.throws(() => validateExternalUrl('http://[::ffff:0:7f00:1]/secret'), /private/);
+  });
+
   it('rejects site-local IPv6 addresses', () => {
     assert.throws(() => validateExternalUrl('http://[fec0::1]/secret'), /private/);
     assert.throws(() => validateExternalUrl('http://[feff::1]/secret'), /private/);

@@ -27,6 +27,9 @@ const IPV6_FULL_MASK = (1n << 128n) - 1n;
 const NON_PUBLIC_IPV6_CIDRS = [
   '::/128', // unspecified
   '::1/128', // loopback
+  '::/96', // deprecated IPv4-compatible addresses
+  '::ffff:0:0/96', // IPv4-mapped addresses
+  '::ffff:0:0:0/96', // IPv4-translated addresses
   '64:ff9b::/96', // IPv4/IPv6 translation
   '64:ff9b:1::/48', // local-use IPv4/IPv6 translation
   '100::/64', // discard-only
