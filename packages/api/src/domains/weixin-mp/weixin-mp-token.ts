@@ -1,5 +1,5 @@
-import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createHash } from 'node:crypto';
+import type { RedisClient } from '@cat-cafe/shared/utils';
 
 const REDIS_KEY_PREFIX = 'weixin-mp:access-token:';
 const WX_TOKEN_URL = 'https://api.weixin.qq.com/cgi-bin/token';
