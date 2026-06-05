@@ -117,6 +117,26 @@ describe('planBackfill', () => {
     assert.equal(plan.summary.orphanCandidates, 0);
   });
 
+  test('treats empty usageByCat as backfillable', () => {
+    const now = Date.now();
+    const messages = [makeMessage('inv-empty', 'opus', { inputTokens: 100, outputTokens: 10 })];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-empty',
+        createdAt: now - DAY_MS,
+        usageByCat: {},
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
+    assert.equal(plan.entries.length, 1);
+    assert.equal(plan.entries[0].invocationId, 'inv-empty');
+    assert.equal(plan.summary.succeededTotal, 1);
+    assert.equal(plan.summary.orphanCandidates, 1);
+    assert.equal(plan.summary.recoverable, 1);
+  });
+
   test('skips records outside the window cutoff', () => {
     const now = Date.now();
     const messages = [makeMessage('inv-1', 'opus', { inputTokens: 100, outputTokens: 10 })];

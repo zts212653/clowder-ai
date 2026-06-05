@@ -62,6 +62,8 @@ export interface UpdateInvocationInput {
   error?: string;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
   expectedStatus?: InvocationStatus;
+  /** CAS guard: update only if usageByCat is missing or an empty object. Returns null on mismatch. */
+  expectedUsageByCatAbsent?: boolean;
   /** F8: Per-cat token usage (key = catId) */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
   /** Issue #845 backfill: override the usageRecordedAt timestamp (epoch ms).
@@ -181,6 +183,13 @@ export class InvocationRecordStore implements IInvocationRecordStore {
 
     // CAS guard: reject if current status doesn't match expected
     if (input.expectedStatus !== undefined && record.status !== input.expectedStatus) {
+      return null;
+    }
+    if (
+      input.expectedUsageByCatAbsent === true &&
+      record.usageByCat !== undefined &&
+      Object.keys(record.usageByCat).length > 0
+    ) {
       return null;
     }
 

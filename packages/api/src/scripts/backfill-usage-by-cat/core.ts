@@ -163,7 +163,8 @@ function planOrphan(
  *
  * Decision rules:
  *   1. Only `status === 'succeeded'` records are considered.
- *   2. Records that already have `usageByCat` are skipped (idempotent re-run).
+ *   2. Records that already have non-empty `usageByCat` are skipped
+ *      (idempotent re-run). Empty `{}` is treated as still backfillable.
  *   3. `createdAt < cutoffMs` is skipped (window guard).
  *   4. Records whose related messages contain no `metadata.usage` are reported
  *      as unrecoverable (not in the entries list) so the operator sees how
@@ -192,7 +193,7 @@ export function planBackfill(
   for (const invocation of invocations) {
     if (invocation.status !== 'succeeded') continue;
     succeededTotal += 1;
-    if (invocation.usageByCat) continue; // already populated
+    if (invocation.usageByCat && Object.keys(invocation.usageByCat).length > 0) continue; // already populated
     if (invocation.createdAt < options.cutoffMs) continue; // outside window
     orphanCandidates += 1;
 

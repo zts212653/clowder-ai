@@ -129,9 +129,9 @@ interface ApplyStats {
 async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore): Promise<ApplyStats> {
   // 砚砚 cloud review P1-B: never overwrite a usageByCat that arrived between
   // the planning scan and this loop. For each entry we (a) re-read the current
-  // record, (b) run the pure decideApplyOutcome predicate, and (c) pass
-  // expectedStatus='succeeded' so the underlying CAS on update() still guards
-  // against the narrow window between our re-read and the store's atomic write.
+  // record, (b) run the pure decideApplyOutcome predicate, and (c) pass both
+  // expectedStatus='succeeded' and expectedUsageByCatAbsent=true so the store's
+  // atomic update guards the narrow window between our re-read and write.
   const stats: ApplyStats = { applied: 0, skippedMissing: 0, skippedStatus: 0, skippedPopulated: 0, failed: 0 };
   for (const entry of plan.entries) {
     try {
@@ -156,9 +156,10 @@ async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore):
         usageByCat: entry.usageByCat,
         usageRecordedAt: entry.usageRecordedAt,
         // CAS — fail closed if status flipped between our re-read and the store's
-        // atomic Lua transaction. Better to leave the record alone than to
-        // collide with a writer that legitimately moved it past 'succeeded'.
+        // atomic Lua transaction, or if usageByCat was populated by a concurrent
+        // writer. Better to leave the record alone than clobber live usage.
         expectedStatus: 'succeeded',
+        expectedUsageByCatAbsent: true,
       });
       if (updated) {
         stats.applied += 1;
@@ -166,7 +167,7 @@ async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore):
         stats.failed += 1;
         console.warn(
           `[backfill-usage] update returned null for ${entry.invocationId} ` +
-            '(CAS mismatch — status changed during apply)',
+            '(CAS mismatch — status changed or usageByCat populated during apply)',
         );
       }
     } catch (err) {

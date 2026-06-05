@@ -95,4 +95,46 @@ describe('InvocationRecordStore usageRecordedAt semantics (#845)', () => {
     });
     assert.equal(updated.usageRecordedAt, newAnchor);
   });
+
+  it('expectedUsageByCatAbsent rejects non-empty existing usageByCat', () => {
+    const store = newStore();
+    const id = createAndRun(store);
+    const originalAnchor = 1_700_000_000_000;
+    store.update(id, {
+      status: 'succeeded',
+      usageByCat: { opus: { inputTokens: 10, outputTokens: 1 } },
+      usageRecordedAt: originalAnchor,
+    });
+
+    const updated = store.update(id, {
+      usageByCat: { codex: { inputTokens: 20, outputTokens: 2 } },
+      usageRecordedAt: originalAnchor + 24 * 60 * 60 * 1000,
+      expectedUsageByCatAbsent: true,
+    });
+
+    assert.equal(updated, null);
+    const record = store.get(id);
+    assert.deepEqual(record.usageByCat, { opus: { inputTokens: 10, outputTokens: 1 } });
+    assert.equal(record.usageRecordedAt, originalAnchor);
+  });
+
+  it('expectedUsageByCatAbsent allows empty existing usageByCat', () => {
+    const store = newStore();
+    const id = createAndRun(store);
+    store.update(id, {
+      status: 'succeeded',
+      usageByCat: {},
+      usageRecordedAt: 1_700_000_000_000,
+    });
+
+    const updated = store.update(id, {
+      usageByCat: { opus: { inputTokens: 20, outputTokens: 2 } },
+      usageRecordedAt: 1_700_000_001_000,
+      expectedUsageByCatAbsent: true,
+    });
+
+    assert.ok(updated);
+    assert.deepEqual(updated.usageByCat, { opus: { inputTokens: 20, outputTokens: 2 } });
+    assert.equal(updated.usageRecordedAt, 1_700_000_001_000);
+  });
 });
