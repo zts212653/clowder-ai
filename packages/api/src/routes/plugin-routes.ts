@@ -315,7 +315,7 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
       }
 
       try {
-        const result = await handle.invoke(manifest.healthCheck.limbCommand, {});
+        const result = await limbRegistry.invoke(nodeId, manifest.healthCheck.limbCommand, {}, { catId: operator });
         if (!result.success) {
           return { ok: false, status: 'error', error: result.error ?? 'Health check invoke failed' };
         }

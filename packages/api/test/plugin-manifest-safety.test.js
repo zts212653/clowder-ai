@@ -2266,7 +2266,12 @@ describe('plugin routes safety', () => {
       limbRegistry: {
         getNodeHandle(nodeId) {
           if (nodeId !== 'yaml-node') return null;
-          return { invoke: async () => ({ success: true, data: { status: 'online' } }) };
+          return {};
+        },
+        invoke: async (nodeId, command) => {
+          assert.equal(nodeId, 'yaml-node');
+          assert.equal(command, 'check_status');
+          return { success: true, data: { status: 'online' } };
         },
       },
       pluginsDir,
@@ -2351,7 +2356,12 @@ describe('plugin routes safety', () => {
       limbRegistry: {
         getNodeHandle(nodeId) {
           if (nodeId !== 'persisted-node') return null;
-          return { invoke: async () => ({ success: true, data: { status: 'online' } }) };
+          return {};
+        },
+        invoke: async (nodeId, command) => {
+          assert.equal(nodeId, 'persisted-node');
+          assert.equal(command, 'check_status');
+          return { success: true, data: { status: 'online' } };
         },
       },
       pluginsDir,
@@ -2370,6 +2380,82 @@ describe('plugin routes safety', () => {
       });
       assert.equal(res.statusCode, 200, res.payload);
       assert.deepEqual(JSON.parse(res.payload), { ok: true, status: 'online' });
+    } finally {
+      await app.close();
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+      if (previousConfigRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+      else process.env.CAT_CAFE_CONFIG_ROOT = previousConfigRoot;
+    }
+  });
+
+  it('runs limb health checks through registry auth gates instead of direct node invoke', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+    process.env.DEFAULT_OWNER_USER_ID = 'owner-user';
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-route-health-'));
+    const projectRoot = join(root, 'project');
+    const pluginsDir = join(root, 'plugins');
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(pluginsDir, 'test-plugin', 'limbs'), { recursive: true });
+    process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
+    writeFileSync(
+      join(pluginsDir, 'test-plugin', 'limbs', 'node.yaml'),
+      [
+        'nodeId: yaml-node',
+        'displayName: YAML Node',
+        'platform: test',
+        'capabilities:',
+        '  - cap: publish',
+        '    commands: [publish_now]',
+        '    authLevel: gated',
+      ].join('\n'),
+    );
+    let invokeCalled = 0;
+    const limbRegistry = new LimbRegistry();
+    await limbRegistry.register({
+      nodeId: 'yaml-node',
+      displayName: 'YAML Node',
+      platform: 'test',
+      capabilities: [{ cap: 'publish', commands: ['publish_now'], authLevel: 'gated' }],
+      invoke: async () => {
+        invokeCalled += 1;
+        return { success: true, data: { status: 'online' } };
+      },
+    });
+    const app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const raw = request.headers['x-test-session-user'];
+      if (typeof raw === 'string' && raw.trim()) request.sessionUserId = raw.trim();
+    });
+    const deps = createRouteDeps({
+      healthCheck: { limbCommand: 'publish_now' },
+      resources: [{ type: 'limb', path: 'limbs/node.yaml' }],
+    });
+    registerPluginRoutes(app, {
+      pluginRegistry: deps.pluginRegistry,
+      pluginActivator: deps.pluginActivator,
+      limbRegistry,
+      pluginsDir,
+    });
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/plugins/test-plugin/test',
+        headers: {
+          host: 'localhost:3004',
+          origin: 'http://localhost:5173',
+          'x-test-session-user': 'owner-user',
+        },
+        remoteAddress: '127.0.0.1',
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      const payload = JSON.parse(res.payload);
+      assert.equal(payload.ok, false);
+      assert.equal(payload.status, 'error');
+      assert.match(payload.error, /requires approval/);
+      assert.equal(invokeCalled, 0, 'gated health-check command must not execute the node handler');
     } finally {
       await app.close();
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
@@ -2416,11 +2502,10 @@ describe('plugin routes safety', () => {
       limbRegistry: {
         getNodeHandle(nodeId) {
           if (nodeId !== 'yaml-node') return null;
-          return {
-            invoke: async () => {
-              throw new Error('adapter timeout');
-            },
-          };
+          return {};
+        },
+        invoke: async () => {
+          throw new Error('adapter timeout');
         },
       },
       pluginsDir,
