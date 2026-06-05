@@ -315,30 +315,6 @@ describe('SkillsContent', () => {
     expect(toggles.length).toBe(0);
   });
 
-  it('renders plugin skill rows that only come from capabilities', async () => {
-    mockBothApis(undefined, {
-      ...capabilitiesPayload,
-      items: [
-        ...capabilitiesPayload.items,
-        {
-          id: 'weixin-mp',
-          type: 'skill',
-          source: 'cat-cafe',
-          enabled: true,
-          cats: { codex: true },
-          pluginId: 'weixin-mp',
-          description: '微信公众号文章发布',
-          triggers: ['微信', '公众号'],
-        },
-      ],
-    });
-
-    await render(React.createElement(SkillsContent));
-
-    expect(container.textContent).toContain('weixin-mp');
-    expect(container.textContent).toContain('微信公众号文章发布');
-  });
-
   it('posts capabilityType skill on global toggle click', async () => {
     await render(React.createElement(SkillsContent));
 

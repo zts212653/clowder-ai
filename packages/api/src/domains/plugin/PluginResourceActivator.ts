@@ -17,7 +17,7 @@ import { classifyMountPath } from '../../skills/skill-sync-engine.js';
 import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
-import { readPluginConfig, resolvePluginEnv } from './plugin-config-store.js';
+import { resolvePluginEnv } from './plugin-config-store.js';
 import type { ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
 
 export interface ActivationResult {
