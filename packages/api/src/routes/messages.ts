@@ -55,6 +55,7 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
@@ -316,6 +317,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // F39: Delivery mode
     let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
 
+    // #699: Reply-to (quote) reference
+    let replyTo: string | undefined;
+
     if (request.isMultipart()) {
       // Parse multipart: text fields + image files
       const parsed = await parseMultipart(request, uploadDir);
@@ -336,6 +340,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (parsed.deliveryMode) {
         deliveryMode = parsed.deliveryMode;
       }
+      // #699: Extract replyTo from multipart
+      if (parsed.replyTo) {
+        replyTo = parsed.replyTo;
+      }
     } else {
       // JSON mode (backwards compatible)
       const parseResult = sendMessageSchema.safeParse(request.body);
@@ -350,6 +358,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         whisperVisibility = 'whisper';
         whisperRecipients = parseResult.data.whisperTo as CatId[] | undefined;
       }
+      // #699: Extract replyTo from JSON body
+      replyTo = parseResult.data.replyTo;
     }
 
     const userId = resolveUserId(request, {
@@ -399,6 +409,34 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         detail: '请稍后重试，或新建一个对话继续',
         code: 'THREAD_DELETING',
       };
+    }
+
+    // #699 P1-2: Validate replyTo — must exist in same thread, not deleted, and delivered
+    if (replyTo) {
+      const replyTarget = await opts.messageStore.getById(replyTo);
+      if (
+        !replyTarget ||
+        replyTarget.deletedAt ||
+        replyTarget.threadId !== resolvedThreadId ||
+        !isDelivered(replyTarget)
+      ) {
+        replyTo = undefined;
+      } else if (replyTarget.visibility === 'whisper') {
+        // #699: Prevent public replies from quoting hidden whispers.
+        // hydrateReplyPreview fetches raw content without visibility checks,
+        // so a public reply's preview would leak whisper content to non-recipients.
+        if (whisperVisibility !== 'whisper') {
+          // Public message replying to a whisper → drop replyTo
+          replyTo = undefined;
+        } else {
+          // Whisper replying to a whisper → ensure all new recipients can see the parent
+          const parentRecipients = new Set(replyTarget.whisperTo ?? []);
+          const newRecipients = whisperRecipients ?? [];
+          if (newRecipients.some((catId) => !parentRecipients.has(catId))) {
+            replyTo = undefined;
+          }
+        }
+      }
     }
 
     // F101: /game command interception — start game directly, skip AI routing
@@ -625,6 +663,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             ...(whisperVisibility && whisperRecipients
               ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
               : {}),
+            ...(replyTo ? { replyTo } : {}),
           });
           storedUserMessageId = userMessage.id;
 
@@ -746,6 +785,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   ...(whisperVisibility && whisperRecipients
                     ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
                     : {}),
+                  ...(replyTo ? { replyTo } : {}),
                 });
                 toctouUserMessageId = toctouUserMessage.id;
                 const queueEntryId = enqueueResult.entry?.id;
@@ -845,6 +885,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           ...(whisperVisibility && whisperRecipients
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
             : {}),
+          ...(replyTo ? { replyTo } : {}),
         });
 
         // ③ Backfill InvocationRecord.userMessageId

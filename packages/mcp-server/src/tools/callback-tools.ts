@@ -681,6 +681,22 @@ export async function handleGetThreadContext(input: {
   );
 }
 
+/** #699: Look up a single message by ID with optional surrounding context. */
+export async function handleGetMessage(input: {
+  messageId: string;
+  contextCount?: number | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/get-message',
+    {
+      messageId: input.messageId,
+      ...(input.contextCount ? { contextCount: String(input.contextCount) } : {}),
+    },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
 export async function handleListThreads(input: {
   limit?: number | undefined;
   activeSince?: number | undefined;
@@ -1528,6 +1544,26 @@ export const callbackTools = [
     handler: handleGetThreadContext,
   },
   // D15: cat_cafe_search_messages removed — superseded by search_evidence + get_thread_context
+  {
+    name: 'cat_cafe_get_message',
+    description:
+      'Look up a single message by its messageId. Use when you receive a message with replyTo — ' +
+      'call this to read the original quoted message and its surrounding context. ' +
+      'Returns the message content, sender, timestamp, and optionally N nearby messages for context. ' +
+      'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10).',
+    inputSchema: {
+      messageId: z.string().min(1).describe('The exact message ID to look up'),
+      contextCount: z
+        .number()
+        .int()
+        .min(0)
+        .max(10)
+        .optional()
+        .describe('Number of messages before and after to include for context (0-10, default 0)'),
+      agentKeyCatId: agentKeyCatIdSchema,
+    },
+    handler: handleGetMessage,
+  },
   {
     name: 'cat_cafe_get_thread_cats',
     description:

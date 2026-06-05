@@ -40,7 +40,12 @@ import {
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
+import {
+  canViewMessage,
+  isSystemUserMessage,
+  resolveVisibleReplyParent,
+  type Viewer,
+} from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -783,10 +788,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       let validatedReplyTo: string | undefined;
       if (replyTo) {
-        const parentMsg = await messageStore.getById(replyTo);
-        if (parentMsg && parentMsg.threadId === effectiveThreadId) {
-          validatedReplyTo = replyTo;
-        }
+        // #699: atomic fetch + visibility gate — callback replies are always public.
+        const senderViewer: Viewer = { type: 'cat', catId: createCatId(principal.catId) };
+        const parent = await resolveVisibleReplyParent(messageStore, replyTo, {
+          threadId: effectiveThreadId,
+          viewer: senderViewer,
+          publicReply: true,
+        });
+        if (parent) validatedReplyTo = replyTo;
       }
 
       const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
@@ -1227,15 +1236,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const effectiveReplyTo = replyTo ?? autoFilledReplyTo;
     if (effectiveReplyTo) {
-      const parentMsg = await messageStore.getById(effectiveReplyTo);
-      if (parentMsg && parentMsg.threadId === effectiveThreadId) {
+      // #699: atomic fetch + visibility gate — A2A replies are always public.
+      const actorViewer: Viewer = { type: 'cat', catId: createCatId(actor.catId) };
+      const parent = await resolveVisibleReplyParent(messageStore, effectiveReplyTo, {
+        threadId: effectiveThreadId,
+        viewer: actorViewer,
+        publicReply: true,
+      });
+      if (parent) {
         validatedReplyTo = effectiveReplyTo;
       } else if (replyTo) {
         // Only warn for explicit replyTo failures — auto-fill mismatches are expected
         // (e.g. cross-thread A2A where trigger is in a different thread)
         app.log.warn(
-          { replyTo, effectiveThreadId, parentThreadId: parentMsg?.threadId },
-          '[callbacks/post-message] replyTo rejected: not found or wrong thread',
+          { replyTo, effectiveThreadId },
+          '[callbacks/post-message] replyTo rejected: not found or not eligible',
         );
       }
     }
@@ -1903,6 +1918,111 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }),
       ...(workflowSop ? { workflowSop } : {}),
     };
+  });
+
+  // #699: Look up a single message by ID with optional surrounding context
+  const getMessageQuerySchema = z.object({
+    messageId: z.string().min(1),
+    contextCount: z.coerce.number().int().min(0).max(10).optional(),
+  });
+
+  app.get('/api/callbacks/get-message', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = getMessageQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query parameters', details: parsed.error.issues };
+    }
+
+    const { messageId, contextCount } = parsed.data;
+    const message = await messageStore.getById(messageId);
+    if (!message || message.deletedAt) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
+    // #699 P1-1: Enforce visibility — userId scope, delivery status, whisper filtering
+    if (!isDelivered(message)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    if (message.userId !== principal.userId && !isSystemUserMessage(message)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    // Align with thread-context: debug = cats see all (user viewer), play = cats see own (cat viewer)
+    let needsPlayFilter = false;
+    if (message.threadId && threadStore) {
+      const thread = await threadStore.get(message.threadId);
+      needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
+    }
+    const viewer: Viewer = needsPlayFilter ? { type: 'cat', catId: principal.catId } : { type: 'user' };
+    if (!canViewMessage(message, viewer)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    // Play mode: hide other cats' stream messages (cross-cat thinking isolation)
+    if (needsPlayFilter && message.origin === 'stream' && message.catId && message.catId !== principal.catId) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const projectMsg = (m: typeof message) => {
+      const imagePaths = extractImagePaths(m.contentBlocks, uploadDir);
+      const imageUrls = extractImageUrls(m.contentBlocks);
+      return {
+        id: m.id,
+        userId: m.userId,
+        catId: m.catId,
+        content: m.content,
+        ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+        ...(imagePaths.length > 0 ? { imagePaths } : {}),
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+        timestamp: m.timestamp,
+        threadId: m.threadId,
+      };
+    };
+
+    const result: { message: ReturnType<typeof projectMsg>; context?: ReturnType<typeof projectMsg>[] } = {
+      message: projectMsg(message),
+    };
+
+    const effectiveContextCount = contextCount ?? 0;
+    if (effectiveContextCount > 0 && message.threadId) {
+      const principalUserId = principal.userId;
+      const before = await messageStore.getByThreadBefore(
+        message.threadId,
+        message.timestamp,
+        effectiveContextCount,
+        message.id,
+        principalUserId,
+      );
+      const after = await messageStore.getByThreadAfter(
+        message.threadId,
+        message.id,
+        effectiveContextCount,
+        principalUserId,
+      );
+      // #699 P1-1b: Apply same visibility predicate to context items as target
+      const contextMsgs = [...before, ...after]
+        .filter((m) => {
+          if (m.id === messageId) return false;
+          if (m.deletedAt) return false;
+          if (!isDelivered(m)) return false;
+          if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
+          if (!canViewMessage(m, viewer)) return false;
+          if (needsPlayFilter && m.origin === 'stream' && m.catId && m.catId !== principal.catId) return false;
+          return true;
+        })
+        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+      result.context = contextMsgs.map(projectMsg);
+    }
+
+    return result;
   });
 
   app.get('/api/callbacks/list-threads', async (request, reply) => {

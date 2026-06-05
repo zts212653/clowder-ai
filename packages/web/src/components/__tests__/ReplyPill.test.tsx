@@ -11,6 +11,7 @@ vi.mock('@/hooks/useCoCreatorConfig', () => ({
     name: '始皇帝',
     aliases: ['秦始皇'],
     mentionPatterns: ['@owner', '@me'],
+    color: { primary: '#D4A76A', secondary: '#FFF8F0' },
   }),
 }));
 
@@ -71,6 +72,19 @@ describe('ReplyPill', () => {
     );
     expect(html).toContain('<button');
     expect(html).toContain('cursor-pointer');
+  });
+
+  it('uses co-creator color for user reply (senderCatId=null)', () => {
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ senderCatId: null, content: '用户消息' }}
+        replyToId="msg-456"
+        getCatById={mockGetCatById}
+      />,
+    );
+    // Co-creator warm gold from useCoCreatorConfig mock, NOT unknown cat purple
+    expect(html).toContain('#D4A76A');
+    expect(html).not.toContain('#9B7EBD');
   });
 
   it('uses fallback color for unknown cat', () => {

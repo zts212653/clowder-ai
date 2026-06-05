@@ -60,6 +60,7 @@ export function useSendMessage(activeThreadId?: string) {
       overrideThreadId?: string,
       whisper?: WhisperOptions,
       deliveryMode?: DeliveryMode,
+      replyToId?: string,
     ) => {
       const activeThread = activeThreadId ?? useChatStore.getState().currentThreadId;
       const threadId = overrideThreadId ?? activeThread;
@@ -71,11 +72,28 @@ export function useSendMessage(activeThreadId?: string) {
       setUploadError(null);
       setUploadStatus(hasImages ? 'uploading' : 'idle');
 
+      // #699: Capture replyToMessage BEFORE any await — ChatInput calls clearReplyTo()
+      // immediately after onSend, so the store will be cleared by the time processCommand yields.
+      const capturedReplyTarget = replyToId ? useChatStore.getState().replyToMessage : undefined;
+
       const wasCommand = await processCommand(content, threadId);
       if (wasCommand) return;
 
       const clientMessageId = createClientId();
       const optimisticMessageId = `user-${clientMessageId}`;
+
+      // #699: Build optimistic replyPreview from captured data (not store — already cleared)
+      let replyPreview: ChatMessageData['replyPreview'] | undefined;
+      if (replyToId && capturedReplyTarget) {
+        const PREVIEW_MAX = 80;
+        replyPreview = {
+          senderCatId: capturedReplyTarget.senderCatId,
+          content:
+            capturedReplyTarget.content.length > PREVIEW_MAX
+              ? capturedReplyTarget.content.slice(0, PREVIEW_MAX)
+              : capturedReplyTarget.content,
+        };
+      }
 
       // Create user message
       const userMsg: ChatMessageData = {
@@ -84,6 +102,7 @@ export function useSendMessage(activeThreadId?: string) {
         content,
         timestamp: Date.now(),
         ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
+        ...(replyToId ? { replyTo: replyToId, ...(replyPreview ? { replyPreview } : {}) } : {}),
       };
       if (images && images.length > 0) {
         userMsg.contentBlocks = [
@@ -155,6 +174,7 @@ export function useSendMessage(activeThreadId?: string) {
               formData.append('whisperTo', catId);
             }
           }
+          if (replyToId) formData.append('replyTo', replyToId);
           for (const img of images) {
             formData.append('images', img);
           }
@@ -180,6 +200,7 @@ export function useSendMessage(activeThreadId?: string) {
               idempotencyKey: clientMessageId,
               ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
               ...deliveryModePayload,
+              ...(replyToId ? { replyTo: replyToId } : {}),
             }),
           });
           if (!res.ok) {

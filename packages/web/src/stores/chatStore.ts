@@ -1006,6 +1006,11 @@ export interface ChatState {
   // ── F079: Vote modal ──
   showVoteModal: boolean;
   setShowVoteModal: (show: boolean) => void;
+
+  // ── #699: Reply-to (quote) state (threadId scoped for split-pane safety) ──
+  replyToMessage: { id: string; content: string; senderCatId: string | null; threadId: string } | null;
+  setReplyTo: (msg: { id: string; content: string; senderCatId: string | null; threadId: string }) => void;
+  clearReplyTo: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -1452,6 +1457,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   showVoteModal: false,
   setShowVoteModal: (show) => set({ showVoteModal: show }),
+
+  // ── #699: Reply-to (quote) state ──
+  replyToMessage: null,
+  setReplyTo: (msg) => set({ replyToMessage: msg }),
+  clearReplyTo: () => set({ replyToMessage: null }),
 
   // ── Active-thread actions ──
 
@@ -2138,6 +2148,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [state.currentThreadId]: saved,
         },
         ...flattened,
+        // #699: Clear reply-to when switching threads
+        replyToMessage: null,
       };
     }),
 
