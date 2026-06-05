@@ -117,4 +117,33 @@ describe('WeixinMpTokenManager Redis cache resilience', () => {
     assert.equal(await manager.getAccessToken(), 'fresh-token');
     assert.equal(fetchCalls, 1);
   });
+
+  it('bypasses Redis once after invalidation when Redis delete fails', async () => {
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return tokenResponse('fresh-token');
+    };
+
+    let cached = 'stale-token';
+    const redis = {
+      get: async () => cached,
+      setex: async (_key, _ttl, token) => {
+        cached = token;
+      },
+      del: async () => {
+        throw new Error('redis delete denied');
+      },
+    };
+    const manager = new WeixinMpTokenManager(redis, {
+      WEIXIN_MP_APP_ID: 'appid',
+      WEIXIN_MP_APP_SECRET: 'secret',
+    });
+
+    assert.equal(await manager.getAccessToken(), 'stale-token');
+    await manager.invalidateAccessToken();
+    assert.equal(await manager.getAccessToken(), 'fresh-token');
+    assert.equal(fetchCalls, 1);
+    assert.equal(cached, 'fresh-token');
+  });
 });

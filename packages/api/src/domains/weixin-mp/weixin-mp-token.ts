@@ -16,6 +16,7 @@ export class WeixinMpTokenManager {
   private memToken: string | undefined;
   private memExpiresAt = 0;
   private memAppId: string | undefined;
+  private skipRedisOnceAppId: string | undefined;
 
   constructor(
     private readonly redis: RedisClient | undefined,
@@ -29,9 +30,21 @@ export class WeixinMpTokenManager {
     if (this.memAppId !== appId) {
       this.memToken = undefined;
       this.memExpiresAt = 0;
+      if (this.skipRedisOnceAppId !== appId) {
+        this.skipRedisOnceAppId = undefined;
+      }
     }
 
-    if (this.redis) {
+    if (this.memToken && Date.now() < this.memExpiresAt) {
+      return this.memToken;
+    }
+
+    const skipRedis = this.skipRedisOnceAppId === appId;
+    if (skipRedis) {
+      this.skipRedisOnceAppId = undefined;
+    }
+
+    if (this.redis && !skipRedis) {
       try {
         const cached = await this.redis.get(`${REDIS_KEY_PREFIX}${appId}`);
         if (cached) {
@@ -41,9 +54,6 @@ export class WeixinMpTokenManager {
       } catch {
         /* Redis is an optional cache; fall back to in-memory/fresh token. */
       }
-    }
-    if (this.memToken && Date.now() < this.memExpiresAt) {
-      return this.memToken;
     }
     return this.refresh();
   }
@@ -58,6 +68,7 @@ export class WeixinMpTokenManager {
     try {
       await this.redis.del(`${REDIS_KEY_PREFIX}${appId}`);
     } catch {
+      this.skipRedisOnceAppId = appId;
       /* Redis is an optional cache; memory has already been invalidated. */
     }
   }
