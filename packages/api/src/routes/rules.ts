@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -301,11 +301,10 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       }
       try {
         const content = await readFile(skillPath, 'utf-8');
-        const displayPath = await realpath(skillPath).catch(() => skillPath);
         return {
           name,
           content,
-          path: displayPath,
+          path: skillPath,
           consumption: CONSUMPTION.skillOnDemand('SKILL.md is loaded only when that skill is selected or invoked.'),
         };
       } catch {

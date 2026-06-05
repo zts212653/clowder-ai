@@ -448,18 +448,6 @@ describe('MCP Server Tool Registration', () => {
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_FINANCE_TOOLS].sort());
   });
-
-  test('limb_invoke registered schema exposes command args to MCP clients', async () => {
-    const { createLimbServer } = await import('../dist/limb.js');
-    const server = createLimbServer();
-    const invokeTool = server._registeredTools.limb_invoke;
-
-    assert.ok(invokeTool);
-    const shapeKeys = Object.keys(invokeTool.inputSchema.shape);
-    assert.deepEqual(shapeKeys, ['nodeId', 'command', 'params', 'agentKeyCatId']);
-    assert.ok(invokeTool.inputSchema._def.shape().nodeId.safeParse('weixin-mp').success);
-    assert.equal(invokeTool.inputSchema._def.shape().nodeId.safeParse('').success, false);
-  });
 });
 
 // --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---

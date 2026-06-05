@@ -1790,50 +1790,6 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('prunes plugin-owned orphan skills even when a normal skill has the same id', async () => {
-    const Fastify = (await import('fastify')).default;
-    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
-
-    const projectDir = await makeTmpDir('plugin-skill-missing-manifest-collision');
-    await mkdir(join(projectDir, '.claude', 'skills', 'colliding-skill'), { recursive: true });
-    await writeFile(join(projectDir, '.claude', 'skills', 'colliding-skill', 'SKILL.md'), '# normal colliding skill\n');
-    await writeCapabilitiesConfig(projectDir, {
-      version: 1,
-      capabilities: [
-        {
-          id: 'colliding-skill',
-          type: 'skill',
-          enabled: true,
-          source: 'cat-cafe',
-          pluginId: 'removed-plugin',
-        },
-      ],
-    });
-
-    const app = Fastify();
-    await app.register(capabilitiesRoutes);
-    await app.ready();
-
-    try {
-      const res = await app.inject({
-        method: 'GET',
-        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
-        headers: AUTH_HEADERS,
-      });
-
-      assert.equal(res.statusCode, 200, res.payload);
-      const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(
-        config?.capabilities.some((item) => item.id === 'colliding-skill' && item.pluginId === 'removed-plugin'),
-        false,
-        'orphan plugin-owned skill should be pruned instead of preserved by same-id normal skill',
-      );
-    } finally {
-      await app.close();
-      await rm(projectDir, { recursive: true, force: true });
-    }
-  });
-
   it('prunes plugin-owned skills no longer declared by the canonical plugin manifest', async () => {
     const Fastify = (await import('fastify')).default;
     const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');

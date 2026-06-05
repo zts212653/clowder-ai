@@ -237,7 +237,7 @@ function isDeclaredPluginSkill(
   if (!cap.pluginId) return false;
   if (declaredPluginSkillIds === null) return true;
   const declaredIds = declaredPluginSkillIds.get(cap.pluginId);
-  if (!declaredIds) return false;
+  if (!declaredIds) return allSkillNames.has(cap.id);
   return declaredIds.has(cap.id);
 }
 

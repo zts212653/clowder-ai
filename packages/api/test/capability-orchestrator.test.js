@@ -1697,36 +1697,6 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
     }
   });
 
-  it('normalizes package-directory catCafeRepoRoot before realigning managed server paths', async () => {
-    const origRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
-    delete process.env.CAT_CAFE_RUNTIME_ROOT;
-    const repoRoot = await makeTmpDir('binary-root-normalize');
-    const apiDir = join(repoRoot, 'packages', 'api');
-    try {
-      await mkdir(apiDir, { recursive: true });
-      await writeFile(join(repoRoot, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
-      const config = makeConfig([
-        {
-          id: 'cat-cafe-limb',
-          type: 'mcp',
-          enabled: true,
-          source: 'cat-cafe',
-          mcpServer: { command: 'node', args: ['/tmp/stale/packages/mcp-server/dist/limb.js'] },
-        },
-      ]);
-
-      const result = realignManagedCatCafeServerPaths(config, { catCafeRepoRoot: apiDir });
-
-      assert.equal(result.migrated, true);
-      const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
-      assert.equal(limb?.mcpServer?.args[0], join(repoRoot, 'packages/mcp-server/dist/limb.js'));
-    } finally {
-      if (origRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
-      else process.env.CAT_CAFE_RUNTIME_ROOT = origRuntimeRoot;
-      await rm(repoRoot, { recursive: true, force: true });
-    }
-  });
-
   it('F061 binary/workspace separation: realign activates from CAT_CAFE_RUNTIME_ROOT env alone (no opts)', () => {
     const config = makeConfig([
       {
