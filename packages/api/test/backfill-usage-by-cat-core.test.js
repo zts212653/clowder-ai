@@ -148,6 +148,49 @@ describe('planBackfill', () => {
     assert.equal(plan.summary.orphanCandidates, 0);
   });
 
+  test('uses usage anchor, not createdAt, for the backfill window cutoff', () => {
+    const now = Date.now();
+    const oldCreatedAt = now - 30 * DAY_MS;
+    const retriedSucceededAt = now - DAY_MS;
+    const messages = [makeMessage('inv-retry', 'opus', { inputTokens: 100, outputTokens: 10 })];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-retry',
+        createdAt: oldCreatedAt,
+        updatedAt: retriedSucceededAt,
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
+    assert.equal(plan.entries.length, 1);
+    assert.equal(plan.entries[0].invocationId, 'inv-retry');
+    assert.equal(plan.entries[0].usageRecordedAt, retriedSucceededAt);
+    assert.equal(plan.summary.orphanCandidates, 1);
+  });
+
+  test('uses existing usageRecordedAt as the usage anchor when present', () => {
+    const now = Date.now();
+    const oldCreatedAt = now - 30 * DAY_MS;
+    const existingUsageAnchor = now - 2 * DAY_MS;
+    const messages = [makeMessage('inv-empty', 'opus', { inputTokens: 100, outputTokens: 10 })];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-empty',
+        createdAt: oldCreatedAt,
+        updatedAt: now - DAY_MS,
+        usageByCat: {},
+        usageRecordedAt: existingUsageAnchor,
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: now - 7 * DAY_MS });
+    assert.equal(plan.entries.length, 1);
+    assert.equal(plan.entries[0].usageRecordedAt, existingUsageAnchor);
+    assert.equal(plan.entries[0].date, new Date(existingUsageAnchor).toISOString().slice(0, 10));
+  });
+
   test('recoverable: aggregates messages, anchors usageRecordedAt to invocation.updatedAt', () => {
     const now = Date.now();
     const invCreatedAt = now - 2 * DAY_MS;

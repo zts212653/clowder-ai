@@ -19,9 +19,9 @@ export interface BackfillPlanEntry {
    *  aggregator buckets by). Mirrors the live writer's "usage arrived at this time"
    *  semantics — NOT the invocation's createdAt. */
   date: string;
-  /** epoch ms — usageRecordedAt override pinned to the live-writer anchor:
-   *  `invocation.updatedAt`, the closest persisted analog to the succeeded
-   *  update time used by live writers.
+  /** epoch ms — usageRecordedAt override pinned to the usage anchor:
+   *  `invocation.usageRecordedAt ?? invocation.updatedAt`, matching the
+   *  daily aggregator's bucket semantics.
    *  Never `invocation.createdAt` (would mis-bucket cross-midnight runs). */
   usageRecordedAt: number;
   /** queue-* / connector-* / mm-* / other — classification by idempotency prefix */
@@ -50,7 +50,7 @@ export interface BackfillPlan {
 }
 
 export interface BackfillPlanOptions {
-  /** Cutoff in ms; invocations with createdAt < cutoff are ignored. */
+  /** Cutoff in ms; invocations with usage anchor < cutoff are ignored. */
   cutoffMs: number;
   /** Current time for the daily-window guard (defaults to Date.now()). */
   nowMs?: number;
@@ -71,6 +71,10 @@ function classifySource(idempotencyKey: string | undefined): string {
 
 function toDateString(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
+}
+
+function usageAnchorMs(invocation: InvocationRecord): number {
+  return invocation.usageRecordedAt ?? invocation.updatedAt;
 }
 
 /**
@@ -133,11 +137,11 @@ function planOrphan(
   const aggregate = aggregateUsageFromMessages(relatedMessages);
   if (!aggregate) return { kind: 'unrecoverable' };
 
-  // Anchor to live-writer semantics: live writers stamp usageRecordedAt at the
+  // Anchor to the same field the daily report uses: existing usageRecordedAt
+  // when present, otherwise updatedAt as the closest persisted analog to the
   // succeeded update. Stream-persisted message timestamps are invocation start
-  // times, so they cannot be used as completion anchors. updatedAt is the
-  // closest persisted analog for historical orphan records.
-  const usageRecordedAt = invocation.updatedAt;
+  // times, so they cannot be used as completion anchors.
+  const usageRecordedAt = usageAnchorMs(invocation);
   return {
     kind: 'entry',
     entry: {
@@ -160,13 +164,14 @@ function planOrphan(
  *   1. Only `status === 'succeeded'` records are considered.
  *   2. Records that already have non-empty `usageByCat` are skipped
  *      (idempotent re-run). Empty `{}` is treated as still backfillable.
- *   3. `createdAt < cutoffMs` is skipped (window guard).
+ *   3. Usage anchor (`usageRecordedAt ?? updatedAt`) before `cutoffMs` is
+ *      skipped (window guard).
  *   4. Records whose related messages contain no `metadata.usage` are reported
  *      as unrecoverable (not in the entries list) so the operator sees how
  *      many orphans cannot be repaired.
- *   5. `usageRecordedAt` mirrors the *live writer* semantics: the moment usage
- *      was written on success. For historical orphans this is represented by
- *      `invocation.updatedAt`. We deliberately do NOT use message timestamps:
+ *   5. `usageRecordedAt` mirrors the daily report bucket anchor:
+ *      `invocation.usageRecordedAt ?? invocation.updatedAt`. We deliberately
+ *      do NOT use message timestamps:
  *      stream-persisted assistant messages are stamped at invocation start.
  *      We deliberately do NOT use `invocation.createdAt`: a long invocation
  *      that started before UTC midnight and finished after would otherwise
@@ -188,7 +193,7 @@ export function planBackfill(
     if (invocation.status !== 'succeeded') continue;
     succeededTotal += 1;
     if (invocation.usageByCat && Object.keys(invocation.usageByCat).length > 0) continue; // already populated
-    if (invocation.createdAt < options.cutoffMs) continue; // outside window
+    if (usageAnchorMs(invocation) < options.cutoffMs) continue; // outside usage window
     orphanCandidates += 1;
 
     const outcome = planOrphan(invocation, messageIndex);
