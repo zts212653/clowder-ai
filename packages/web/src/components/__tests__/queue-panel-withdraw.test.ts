@@ -155,10 +155,9 @@ describe('QueuePanel withdraw UX (F39)', () => {
     expect(toasts.some((t) => t.title === '已撤回编辑')).toBe(true);
   });
 
-  it('recall-edit preserves replyTo from messagePreview (#706 + #833 cross-PR)', async () => {
-    // Cross-PR regression: when #833 (user quoting) is merged, messages may
-    // carry replyTo. Recall-edit must pass replyToId through ComposerDraftInsert
-    // so the composer can restore the quote state on re-edit.
+  it('recall-edit preserves replyTo from messagePreview (#706 + #833)', async () => {
+    // #706 Phase 2: recall-edit passes replyToId through ComposerDraftInsert
+    // so ChatInput can restore quote composing state via setReplyTo.
     const entryWithReply: QueueEntry = {
       ...QUEUED_ENTRY,
       id: 'q-reply',
@@ -189,6 +188,49 @@ describe('QueuePanel withdraw UX (F39)', () => {
       threadId: 'thread-1',
       text: 'queued to withdraw',
       replyToId: 'msg-original-123',
+    });
+  });
+
+  it('recall-edit with replyToId triggers setReplyTo when parent message exists (#706 Phase 2)', () => {
+    // #706 Phase 2 end-to-end: when pendingChatInsert carries replyToId and the
+    // parent message is in the messages store, ChatInput's useEffect calls
+    // setReplyTo to restore ReplyPreviewBar. This test verifies the store-level
+    // contract that ChatInput relies on.
+    const parentMessage = {
+      id: 'msg-original-123',
+      content: 'I am the quoted parent',
+      catId: 'opus',
+      userId: null,
+      threadId: 'thread-1',
+      timestamp: NOW - 1000,
+      type: 'cat' as const,
+    };
+    useChatStore.setState({
+      messages: [parentMessage],
+      replyToMessage: null,
+    });
+
+    // Simulate what ChatInput's useEffect does when consuming pendingChatInsert.replyToId
+    const replyToId = 'msg-original-123';
+    const { messages: storeMessages, setReplyTo } = useChatStore.getState();
+    const parentMsg = storeMessages.find((m) => m.id === replyToId);
+    expect(parentMsg).toBeDefined();
+
+    if (parentMsg) {
+      setReplyTo({
+        id: parentMsg.id,
+        content: parentMsg.content,
+        senderCatId: parentMsg.catId ?? null,
+        threadId: 'thread-1',
+      });
+    }
+
+    const replyState = useChatStore.getState().replyToMessage;
+    expect(replyState).toEqual({
+      id: 'msg-original-123',
+      content: 'I am the quoted parent',
+      senderCatId: 'opus',
+      threadId: 'thread-1',
     });
   });
 

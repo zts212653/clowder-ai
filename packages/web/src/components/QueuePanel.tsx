@@ -190,10 +190,14 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           ...(replyToId ? { replyToId } : {}),
         });
         const hasImages = imageUrls.length > 0;
+        const hasQuote = !!replyToId;
+        const parts = ['已回填文字'];
+        if (hasImages) parts.push('图片');
+        if (hasQuote) parts.push('引用');
         addToast({
           type: 'success',
           title: '已撤回编辑',
-          message: hasImages ? '已回填文字和图片到输入框' : '已回填到输入框',
+          message: `${parts.join('、')}到输入框`,
           threadId,
           duration: 2500,
         });

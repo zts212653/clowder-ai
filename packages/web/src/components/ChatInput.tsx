@@ -119,10 +119,8 @@ export function ChatInput({
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
   // F63-AC15: consume pendingChatInsert (ComposerDraftInsert) from workspace (thread-guarded)
-  // #706: restores text, image attachments, and replyToId from recall-edit
-  // TODO(#833): When user-quoting merges, consume pendingChatInsert.replyToId here
-  // to restore the quote composing state (e.g. setReplyTo(insert.replyToId)).
-  // replyToPreview can be used directly to render ReplyPreviewBar without hydrate.
+  // #706: restores text, image attachments, and quote state from recall-edit
+  // Phase 2 (#833 merged): replyToId → setReplyTo() restores ReplyPreviewBar
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
@@ -169,6 +167,22 @@ export function ChatInput({
           setIsPreparingImages(false);
         }
       })();
+    }
+    // #706 Phase 2: Restore quote composing state from recall-edit.
+    // Looks up the quoted parent in the client message store; if found,
+    // calls setReplyTo so ReplyPreviewBar renders and the re-sent message
+    // still carries replyTo.
+    if (pendingChatInsert.replyToId) {
+      const { messages: storeMessages, setReplyTo } = useChatStore.getState();
+      const parentMsg = storeMessages.find((m) => m.id === pendingChatInsert.replyToId);
+      if (parentMsg) {
+        setReplyTo({
+          id: parentMsg.id,
+          content: parentMsg.content,
+          senderCatId: parentMsg.catId ?? null,
+          threadId,
+        });
+      }
     }
     setPendingChatInsert(null);
     textareaRef.current?.focus();
