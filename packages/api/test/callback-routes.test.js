@@ -3208,6 +3208,106 @@ describe('Callback Routes', () => {
     assert.equal(stored.ownerCatId, 'opencode', 'stored task must have authoritative catId');
   });
 
+  test('POST register-issue-tracking seeds cursor from current issue comments', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    const cursorCalls = [];
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueCommentCursor: async (repoFullName, issueNumber) => {
+        cursorCalls.push({ repoFullName, issueNumber });
+        return 1234;
+      },
+    });
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-issue');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 861,
+        instructions: 'Watch for maintainer updates',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(cursorCalls, [{ repoFullName: 'zts212653/cat-cafe', issueNumber: 861 }]);
+
+    const body = JSON.parse(response.body);
+    assert.equal(body.task.automationState.issue.lastCommentCursor, 1234);
+    assert.equal(body.task.automationState.trackingInstructions, 'Watch for maintainer updates');
+
+    const stored = taskStore.getBySubject('issue:zts212653/cat-cafe#861');
+    assert.equal(stored.automationState.issue.lastCommentCursor, 1234);
+  });
+
+  test('POST register-issue-tracking preserves existing cursor on re-register', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    let cursorCalls = 0;
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueCommentCursor: async () => {
+        cursorCalls++;
+        return 9999;
+      },
+    });
+
+    const firstInvocation = await registry.create('user-1', 'opus', 'thread-issue-1');
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: {
+        'x-invocation-id': firstInvocation.invocationId,
+        'x-callback-token': firstInvocation.callbackToken,
+      },
+      payload: { repoFullName: 'zts212653/cat-cafe', issueNumber: 862 },
+    });
+
+    const task = taskStore.getBySubject('issue:zts212653/cat-cafe#862');
+    taskStore.patchAutomationState(task.id, { issue: { lastCommentCursor: 55, lastNotifiedAt: 1000 } });
+
+    const secondInvocation = await registry.create('user-1', 'opus', 'thread-issue-2');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: {
+        'x-invocation-id': secondInvocation.invocationId,
+        'x-callback-token': secondInvocation.callbackToken,
+      },
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 862,
+        instructions: 'Updated instructions',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(cursorCalls, 1, 're-register must not refetch and overwrite an existing cursor');
+
+    const updated = taskStore.getBySubject('issue:zts212653/cat-cafe#862');
+    assert.equal(updated.threadId, 'thread-issue-2');
+    assert.equal(updated.automationState.issue.lastCommentCursor, 55);
+    assert.equal(updated.automationState.issue.lastNotifiedAt, 1000);
+    assert.equal(updated.automationState.trackingInstructions, 'Updated instructions');
+  });
+
   test('POST unregister-tracking rejects legacy task delete when caller thread cannot prove ownership', async () => {
     const app = await createApp();
 

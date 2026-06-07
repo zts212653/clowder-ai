@@ -1717,6 +1717,19 @@ async function main(): Promise<void> {
       env: buildGhCliEnv({ token: getGitHubToken() }),
     };
   };
+  const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> => {
+    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
+    const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+      ghToken: getGitHubToken(),
+    });
+    let cursor = 0;
+    for (const comment of comments as { id?: unknown }[]) {
+      if (typeof comment.id === 'number' && Number.isFinite(comment.id) && comment.id > cursor) {
+        cursor = comment.id;
+      }
+    }
+    return cursor;
+  };
 
   // F202: Plugin framework — discovery + config + resource activation
   {
@@ -1883,6 +1896,7 @@ async function main(): Promise<void> {
     validateRepo,
     validatePr,
     validateIssue,
+    fetchIssueCommentCursor,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,

@@ -467,6 +467,8 @@ export interface CallbackRoutesOptions {
   validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
   /** F220 followup: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
+  /** F220-D: seeds issue tracking from the current highest issue comment ID. */
+  fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -734,6 +736,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validateRepo,
     validatePr,
     validateIssue,
+    fetchIssueCommentCursor,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -2326,6 +2329,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const subjectKey = `issue:${repoFullName}#${issueNumber}`;
+    const existingTask = await taskStore.getBySubject(subjectKey);
+    const existingIssueCursor = existingTask?.automationState?.issue?.lastCommentCursor;
+    let seededIssueCursor: number | undefined;
+    if (existingIssueCursor === undefined) {
+      if (!fetchIssueCommentCursor) {
+        reply.status(503);
+        return { error: 'Issue comment cursor fetcher not configured' };
+      }
+      try {
+        seededIssueCursor = await fetchIssueCommentCursor(repoFullName, issueNumber);
+      } catch {
+        reply.status(503);
+        return { error: 'Issue comment cursor unavailable — try again later' };
+      }
+    }
+
+    const automationState = {
+      ...(instructions ? { trackingInstructions: instructions } : {}),
+      ...(seededIssueCursor !== undefined ? { issue: { lastCommentCursor: seededIssueCursor } } : {}),
+    };
     try {
       const task = await taskStore.upsertBySubject({
         kind: 'issue_tracking',
@@ -2336,7 +2359,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         why: `Tracking issue ${repoFullName}#${issueNumber} for comment notifications`,
         createdBy: catId,
         userId: record.userId,
-        automationState: instructions ? { trackingInstructions: instructions } : undefined,
+        automationState: Object.keys(automationState).length > 0 ? automationState : undefined,
       });
 
       return { status: 'ok', threadId: record.threadId, task };
