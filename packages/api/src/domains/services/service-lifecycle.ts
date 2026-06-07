@@ -161,7 +161,8 @@ export function isServiceProcessCommand(
   const runtimeScripts = resolveServiceRuntimeScriptPaths(manifest, platform).map((scriptPath) =>
     normalizePath(scriptPath),
   );
-  const isPythonExecutable = /^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(basename(executable ?? ''));
+  const executableName = basename(executable ?? '').toLowerCase();
+  const isPythonExecutable = /^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(executableName);
   if (isPythonExecutable && runtimeScripts.includes(tokens[commandIndex + 1] ?? '')) {
     return true;
   }
