@@ -229,6 +229,10 @@ describe('AC-A7: QueueProcessor slot-aware — opus completion dequeues only opu
     // Complete opus → should try to auto-dequeue
     await processor.onInvocationComplete('t1', 'opus', 'succeeded');
 
+    // executeEntry is fire-and-forget with async gaps (emitQueueUpdated enrichment).
+    // Wait for it to reach routeExecution before asserting.
+    await new Promise((r) => setTimeout(r, 50));
+
     // Verify router was called (auto-dequeued an entry)
     assert.ok(deps.router.routeExecution.mock.calls.length > 0, 'auto-dequeue triggered execution');
   });

@@ -111,7 +111,7 @@ export interface ConnectorRouterOptions {
       contentBlocks?: readonly MessageContent[],
       policy?: unknown,
       sender?: { id: string; name?: string },
-    ): 'dispatched' | 'enqueued' | 'full';
+    ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
   readonly socketManager?:
     | {
@@ -308,7 +308,7 @@ export class ConnectorRouter {
             source: fwdSource,
             timestamp: fwdTimestamp,
           });
-          const triggerOutcome = invokeTrigger.trigger(
+          const triggerOutcome = await invokeTrigger.trigger(
             fwdThreadId,
             targetCatId,
             this.opts.defaultUserId,
@@ -361,7 +361,7 @@ export class ConnectorRouter {
               source: askSource,
               timestamp: askTimestamp,
             });
-            const triggerOutcome = invokeTrigger.trigger(
+            const triggerOutcome = await invokeTrigger.trigger(
               askThreadId,
               askCatId,
               this.opts.defaultUserId,
@@ -470,7 +470,7 @@ export class ConnectorRouter {
     });
 
     // 5. Trigger cat invocation (use parsed targetCatId)
-    invokeTrigger.trigger(
+    await invokeTrigger.trigger(
       binding.threadId,
       targetCatId,
       this.opts.defaultUserId,
@@ -529,7 +529,7 @@ export class ConnectorRouter {
           }
         } else if (att.type === 'image') {
           parts.push(`${originalText} ${downloaded.localUrl}`);
-          contentBlocks.push({ type: 'image', url: downloaded.absPath });
+          contentBlocks.push({ type: 'image', url: downloaded.localUrl });
         } else {
           parts.push(`${originalText} ${downloaded.localUrl}`);
         }

@@ -122,7 +122,7 @@ export async function handleTriggerNow(
   // 真 wake — call late-bound invokeTrigger (砚砚 R0 P1: NOT just messageStore.append).
   // Cloud codex R2 P2: capture TriggerOutcome — 'full' = queue at capacity,
   // invocation silently dropped; surface as 503.
-  const outcome = trigger.trigger(
+  const outcome = await trigger.trigger(
     invocation.targetThreadId,
     invocation.evalCat.catId,
     input.userId,

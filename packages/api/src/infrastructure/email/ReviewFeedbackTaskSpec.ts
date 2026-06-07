@@ -230,15 +230,22 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               suggestedSkill,
               coalesceKey: `${subjectKey}:review-feedback:${coalesceTargetCatId}`,
             };
-            opts.invokeTrigger.trigger(
-              routeResult.threadId,
-              routeResult.catId as CatId,
-              task.userId ?? '',
-              routeResult.content,
-              routeResult.messageId,
-              undefined,
-              policy,
-            );
+            void opts.invokeTrigger
+              .trigger(
+                routeResult.threadId,
+                routeResult.catId as CatId,
+                task.userId ?? '',
+                routeResult.content,
+                routeResult.messageId,
+                undefined,
+                policy,
+              )
+              .catch((err) =>
+                opts.log.warn(
+                  { err },
+                  `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
+                ),
+              );
           } catch {
             opts.log.warn(
               `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,

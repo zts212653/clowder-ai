@@ -118,7 +118,9 @@ export function ChatInput({
   const imageLifecycleStatus = deriveImageLifecycleStatus(isPreparingImages, uploadStatus);
   const sendTemporarilyDisabled = isImageLifecycleBlockingSend(imageLifecycleStatus);
 
-  // F63-AC15: consume pendingChatInsert from workspace (thread-guarded)
+  // F63-AC15: consume pendingChatInsert (ComposerDraftInsert) from workspace (thread-guarded)
+  // #706: restores text, image attachments, and quote state from recall-edit
+  // Phase 2 (#833 merged): replyToId → setReplyTo() restores ReplyPreviewBar
   const pendingChatInsert = useChatStore((s) => s.pendingChatInsert);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const setThreadHasDraft = useChatStore((s) => s.setThreadHasDraft);
@@ -129,6 +131,59 @@ export function ChatInput({
       const separator = prev && !prev.endsWith('\n') ? '\n' : '';
       return prev + separator + pendingChatInsert.text;
     });
+    // #706: Restore images from recalled queue message.
+    // Writes to threadImageDrafts directly so files survive unmount if the user
+    // switches threads while fetches are in-flight.
+    if (pendingChatInsert.imageUrls?.length) {
+      const urls = pendingChatInsert.imageUrls;
+      const targetThreadId = pendingChatInsert.threadId;
+      void (async () => {
+        setIsPreparingImages(true);
+        try {
+          const restored: File[] = [];
+          for (const url of urls) {
+            if (restored.length >= 5) break;
+            try {
+              const res = await apiFetch(url);
+              if (!res.ok) continue; // Skip images that return non-2xx (stale/cleaned-up uploads)
+              const blob = await res.blob();
+              const ext = url.split('.').pop() ?? 'png';
+              const name = `recalled-${Date.now()}-${restored.length}.${ext}`;
+              restored.push(new File([blob], name, { type: blob.type || `image/${ext}` }));
+            } catch {
+              // Best-effort: skip images that fail to fetch
+            }
+          }
+          if (restored.length > 0) {
+            // Persist to module-level draft so data survives component unmount
+            const existing = threadImageDrafts.get(targetThreadId) ?? [];
+            const merged = [...existing, ...restored].slice(0, 5);
+            threadImageDrafts.set(targetThreadId, merged);
+            setThreadHasDraft(targetThreadId, true);
+            // Also update local state if still mounted on the same thread
+            setImages((prev) => [...prev, ...restored].slice(0, 5));
+          }
+        } finally {
+          setIsPreparingImages(false);
+        }
+      })();
+    }
+    // #706 Phase 2: Restore quote composing state from recall-edit.
+    // Always calls setReplyTo when replyToId is present so the re-sent
+    // message preserves its quote relationship. If the parent message
+    // isn't loaded in the client store (e.g. after a page reload with
+    // partial history), falls back to a placeholder — the replyTo ID
+    // is still sent to the server on submit.
+    if (pendingChatInsert.replyToId) {
+      const { messages: storeMessages, setReplyTo } = useChatStore.getState();
+      const parentMsg = storeMessages.find((m) => m.id === pendingChatInsert.replyToId);
+      setReplyTo({
+        id: pendingChatInsert.replyToId,
+        content: parentMsg?.content ?? '(原消息未加载)',
+        senderCatId: parentMsg?.catId ?? null,
+        threadId,
+      });
+    }
     setPendingChatInsert(null);
     textareaRef.current?.focus();
   }, [pendingChatInsert, setPendingChatInsert, threadId]);

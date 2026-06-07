@@ -60,12 +60,13 @@ function buildDeps(overrides = {}) {
         invocationId: 'inv-stub',
       })),
       update: mock.fn(async () => {}),
+      get: mock.fn(async () => null),
     },
     invocationQueue,
     queueProcessor: {
       clearPause: mock.fn(),
       onInvocationComplete: mock.fn(async () => {}),
-      enqueueContinuation: mock.fn(() => ({ outcome: 'enqueued' })),
+      enqueueContinuation: mock.fn(async () => ({ outcome: 'enqueued' })),
     },
     threadStore: {
       get: mock.fn(async () => ({

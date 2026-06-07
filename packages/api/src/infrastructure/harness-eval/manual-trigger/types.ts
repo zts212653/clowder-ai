@@ -19,7 +19,13 @@ import type { IThreadStore } from '../../../domains/cats/services/stores/ports/T
 export type InvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
 export interface InvokeTriggerLike {
-  trigger(threadId: string, catId: string, userId: string, reason: string, messageId: string): InvokeTriggerOutcome;
+  trigger(
+    threadId: string,
+    catId: string,
+    userId: string,
+    reason: string,
+    messageId: string,
+  ): InvokeTriggerOutcome | Promise<InvokeTriggerOutcome>;
 }
 
 /**

@@ -19,8 +19,10 @@ import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
 import type { PersistenceContext } from '../../domains/cats/services/agents/routing/route-helpers.js';
 import type { IInvocationRecordStore } from '../../domains/cats/services/stores/ports/InvocationRecordStore.js';
+import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import { mergeTokenUsage, type TokenUsage } from '../../domains/cats/services/types.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
+import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
 import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
@@ -39,6 +41,8 @@ export interface ConnectorInvokeTriggerOptions {
   readonly threadMetaLookup?: (threadId: string) => ThreadMeta | undefined | Promise<ThreadMeta | undefined>;
   /** Per-cat outbound deliver timeout in ms (default 10000). Prevents hanging deliver from blocking cleanup. */
   readonly deliverTimeoutMs?: number;
+  /** #706: MessageStore for queue enrichment (messagePreview in queue_updated SSE). */
+  readonly messageStore?: IMessageStore;
   readonly log: FastifyBaseLogger;
 }
 
@@ -97,7 +101,7 @@ export class ConnectorInvokeTrigger {
    * @param message   The connector message content (used as invocation trigger)
    * @param messageId The stored connector message ID (for InvocationRecord backfill)
    */
-  trigger(
+  async trigger(
     threadId: string,
     catId: CatId,
     userId: string,
@@ -106,7 +110,7 @@ export class ConnectorInvokeTrigger {
     contentBlocks?: readonly MessageContent[],
     policy?: ConnectorTriggerPolicy,
     sender?: { id: string; name?: string },
-  ): TriggerOutcome {
+  ): Promise<TriggerOutcome> {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
 
@@ -161,7 +165,7 @@ export class ConnectorInvokeTrigger {
     return 'dispatched';
   }
 
-  private enqueueWhileActive(
+  private async enqueueWhileActive(
     threadId: string,
     catId: CatId,
     userId: string,
@@ -172,7 +176,7 @@ export class ConnectorInvokeTrigger {
     sourceCategory?: string,
     suggestedSkill?: string,
     coalesceKey?: string,
-  ): 'full' | 'enqueued' {
+  ): Promise<'full' | 'enqueued'> {
     const { invocationQueue, socketManager, log } = this.opts;
 
     if (invocationQueue.hasEntryWithMessageId(threadId, messageId)) {
@@ -205,11 +209,15 @@ export class ConnectorInvokeTrigger {
     });
 
     if (result.outcome === 'full') {
+      const fullQueue = await enrichQueueEntries(
+        invocationQueue.list(threadId, userId),
+        this.opts.messageStore ?? null,
+      );
       socketManager.emitToUser(userId, 'queue_full_warning', {
         threadId,
         source: 'connector',
         queueSize: invocationQueue.size(threadId, userId),
-        queue: invocationQueue.list(threadId, userId),
+        queue: fullQueue,
       });
       socketManager.broadcastAgentMessage(
         {
@@ -228,11 +236,14 @@ export class ConnectorInvokeTrigger {
       invocationQueue.backfillMessageId(threadId, userId, result.entry.id, messageId);
     }
 
-    socketManager.emitToUser(userId, 'queue_updated', {
+    await emitQueueUpdated(
+      socketManager,
+      userId,
       threadId,
-      queue: invocationQueue.list(threadId, userId),
-      action: result.outcome,
-    });
+      invocationQueue.list(threadId, userId),
+      this.opts.messageStore ?? null,
+      result.outcome,
+    );
     log.info(
       { threadId, catId, outcome: result.outcome },
       '[ConnectorInvokeTrigger] Queued (active invocation running)',

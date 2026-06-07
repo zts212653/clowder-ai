@@ -163,8 +163,8 @@ describe('ConnectorRouter media handling', () => {
     assert.ok(Array.isArray(contentBlocks), 'contentBlocks should be an array');
     assert.ok(contentBlocks.length > 0, 'contentBlocks should not be empty');
     assert.equal(contentBlocks[0].type, 'image');
-    // R2-P1-1: must use absPath (real filesystem path), not localUrl (HTTP route)
-    assert.equal(contentBlocks[0].url, '/tmp/photo.jpg');
+    // #706: contentBlocks must use localUrl (public HTTP route), not absPath (filesystem leak)
+    assert.equal(contentBlocks[0].url, '/api/connector-media/photo.jpg');
   });
 
   it('P1-1: voice attachment does not produce image contentBlocks', async () => {

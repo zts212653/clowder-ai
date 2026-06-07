@@ -205,6 +205,28 @@ describe('ChatInput draft persistence', () => {
     expect(getTextarea().value).toBe('');
   });
 
+  it('consumes pending chat insert into the matching thread composer', async () => {
+    const onSend = vi.fn();
+
+    act(() => {
+      root.render(React.createElement(ChatInput, { threadId: 'thread-RECALL', onSend }));
+    });
+    act(() => {
+      typeInto(getTextarea(), 'current draft');
+    });
+
+    await act(async () => {
+      useChatStore.getState().setPendingChatInsert({
+        threadId: 'thread-RECALL',
+        text: 'recalled queued message',
+      });
+      await Promise.resolve();
+    });
+
+    expect(getTextarea().value).toBe('current draft\nrecalled queued message');
+    expect(useChatStore.getState().pendingChatInsert).toBeNull();
+  });
+
   it('restores image preview when remounting with same threadId', async () => {
     const onSend = vi.fn();
     const fakeImage = makeImageFile('photo.png');

@@ -101,15 +101,17 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
             reason: 'github_pr_conflict',
             sourceCategory: 'conflict',
           };
-          opts.invokeTrigger.trigger(
-            routeResult.threadId,
-            routeResult.catId as CatId,
-            workItem.task.userId ?? '',
-            routeResult.content,
-            routeResult.messageId,
-            undefined,
-            policy,
-          );
+          void opts.invokeTrigger
+            .trigger(
+              routeResult.threadId,
+              routeResult.catId as CatId,
+              workItem.task.userId ?? '',
+              routeResult.content,
+              routeResult.messageId,
+              undefined,
+              policy,
+            )
+            .catch((err) => opts.log.warn({ err }, '[conflict-check] trigger failed (best-effort)'));
           opts.log.info(`[conflict-check] Triggered ${routeResult.catId} for PR conflict`);
         }
       },

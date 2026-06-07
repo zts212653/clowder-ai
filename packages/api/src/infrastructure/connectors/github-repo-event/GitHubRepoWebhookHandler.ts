@@ -32,7 +32,13 @@ export interface GitHubRepoHandlerDeps {
   };
   readonly deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   readonly invokeTrigger: {
-    trigger(threadId: string, catId: CatId, userId: string, message: string, messageId: string): void;
+    trigger(
+      threadId: string,
+      catId: CatId,
+      userId: string,
+      message: string,
+      messageId: string,
+    ): void | Promise<unknown>;
   };
   readonly dedup: RedisDeliveryDedup;
   readonly deliveryDeps?: ConnectorDeliveryDeps;
@@ -142,13 +148,15 @@ export class GitHubRepoWebhookHandler {
       });
 
       // 12. Trigger cat (KD-17)
-      this.deps.invokeTrigger.trigger(
-        threadId,
-        this.config.inboxCatId as CatId,
-        this.config.defaultUserId,
-        content,
-        delivered.messageId,
-      );
+      void Promise.resolve(
+        this.deps.invokeTrigger.trigger(
+          threadId,
+          this.config.inboxCatId as CatId,
+          this.config.defaultUserId,
+          content,
+          delivered.messageId,
+        ),
+      ).catch(() => {});
     } catch (err) {
       // Safe rollback: message not delivered — allow GitHub retry
       await this.deps.dedup.rollback(deliveryId);

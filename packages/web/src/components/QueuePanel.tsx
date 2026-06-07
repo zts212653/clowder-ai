@@ -84,9 +84,9 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
   const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
   const queuePauseReason = useChatStore((s) => s.queuePauseReason);
-  const messages = useChatStore((s) => s.messages);
   const setQueue = useChatStore((s) => s.setQueue);
   const activeInvocations = useChatStore((s) => s.activeInvocations);
+  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
   const [steerEntryId, setSteerEntryId] = useState<string | null>(null);
@@ -133,20 +133,80 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           setQueue(threadId, prevQueue);
           addToast({
             type: 'error',
-            title: '撤回失败',
-            message: data?.error ?? '撤回失败，请重试',
+            title: '删除失败',
+            message: data?.error ?? '删除失败，请重试',
             threadId,
             duration: 5000,
           });
           return;
         }
-        addToast({ type: 'success', title: '已取消', message: '已从队列撤回', threadId, duration: 2500 });
+        addToast({ type: 'success', title: '已删除', message: '已从队列删除', threadId, duration: 2500 });
       } catch {
         setQueue(threadId, prevQueue);
-        addToast({ type: 'error', title: '撤回失败', message: '撤回失败，请重试', threadId, duration: 5000 });
+        addToast({ type: 'error', title: '删除失败', message: '删除失败，请重试', threadId, duration: 5000 });
       }
     },
     [addToast, queue, setQueue, threadId],
+  );
+
+  const handleRecallEdit = useCallback(
+    async (entryId: string) => {
+      const entry = queue.find((e) => e.id === entryId);
+      if (!entry) return;
+
+      // #706: Extract image URLs from server-enriched messagePreview (already in queue data).
+      // No need to read from DELETE response — the data is available before the request.
+      const imageUrls = (entry.messagePreview?.contentBlocks ?? [])
+        .filter((b) => b.type === 'image' && b.url)
+        .map((b) => b.url!);
+
+      const prevQueue = queue;
+      setQueue(
+        threadId,
+        prevQueue.filter((e) => e.id !== entryId),
+      );
+
+      try {
+        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setQueue(threadId, prevQueue);
+          addToast({
+            type: 'error',
+            title: '撤回编辑失败',
+            message: data?.error ?? '撤回编辑失败，请重试',
+            threadId,
+            duration: 5000,
+          });
+          return;
+        }
+
+        // #706 + #833 cross-PR: preserve replyToId so recall-edit restores quote state
+        const replyToId = entry.messagePreview?.replyTo;
+        setPendingChatInsert({
+          threadId,
+          text: entry.content,
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          ...(replyToId ? { replyToId } : {}),
+        });
+        const hasImages = imageUrls.length > 0;
+        const hasQuote = !!replyToId;
+        const parts = ['已回填文字'];
+        if (hasImages) parts.push('图片');
+        if (hasQuote) parts.push('引用');
+        addToast({
+          type: 'success',
+          title: '已撤回编辑',
+          message: `${parts.join('、')}到输入框`,
+          threadId,
+          duration: 2500,
+        });
+      } catch {
+        setQueue(threadId, prevQueue);
+        addToast({ type: 'error', title: '撤回编辑失败', message: '撤回编辑失败，请重试', threadId, duration: 5000 });
+      }
+    },
+    [addToast, queue, setPendingChatInsert, setQueue, threadId],
   );
 
   const handleContinue = useCallback(async () => {
@@ -316,11 +376,8 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
           <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
             <div className="max-h-40 overflow-y-auto flex flex-col gap-0.5 p-1">
               {visibleEntries.map((entry, idx) => {
-                const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-                const imageCount = allMsgIds.reduce((count, msgId) => {
-                  const msg = messages.find((m) => m.id === msgId);
-                  return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
-                }, 0);
+                // #706: Compute image count from server-enriched messagePreview
+                const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
                 return (
                   <SortableQueueEntryRow
                     key={entry.id}
@@ -330,6 +387,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
                     imageCount={imageCount}
                     ownerName={coCreator.name}
                     onRemove={handleRemove}
+                    onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}
                   />
                 );

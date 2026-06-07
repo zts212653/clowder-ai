@@ -166,13 +166,19 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
           });
           if (ctx.invokeTrigger && messageId) {
             const triggerUserId = config.defaultUserId ?? 'default-user';
-            ctx.invokeTrigger.trigger(
-              invocation.targetThreadId,
-              invocation.evalCat.catId,
-              triggerUserId,
-              `${config.triggerReasonPrefix}: ${invocation.domainId}`,
-              messageId,
-            );
+            try {
+              void Promise.resolve(
+                ctx.invokeTrigger.trigger(
+                  invocation.targetThreadId,
+                  invocation.evalCat.catId,
+                  triggerUserId,
+                  `${config.triggerReasonPrefix}: ${invocation.domainId}`,
+                  messageId,
+                ),
+              ).catch(() => {});
+            } catch {
+              // Best-effort: sync trigger throw should not fail the eval task
+            }
           }
         }
       },

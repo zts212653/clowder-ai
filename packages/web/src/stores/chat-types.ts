@@ -544,6 +544,29 @@ export interface QueueEntry {
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
   position?: number;
+  /** #706: Server-enriched message preview for QueuePanel display + recall-edit.
+   *  Attached by emitQueueUpdated() at push time via messageStore join. */
+  messagePreview?: {
+    contentBlocks?: ReadonlyArray<{ type: string; url?: string; text?: string; alt?: string }>;
+    replyTo?: string;
+  };
+}
+
+/** #706: Typed composer draft for recall-edit and cross-feature insert.
+ *  Carries all state needed to restore the composer to a previous message's state.
+ *  Consumed by ChatInput — when pendingChatInsert is set, the composer restores
+ *  text, images, and (after #833) the quoted reply context. */
+export interface ComposerDraftInsert {
+  threadId: string;
+  text: string;
+  imageUrls?: string[];
+  /** Message ID of the quoted parent — maps to messagePreview.replyTo from queue enrichment.
+   *  After #833 merge: ChatInput consumes this to restore quote composing state. */
+  replyToId?: string;
+  /** Pre-resolved reply preview — avoids an extra hydrate when restoring quote UI.
+   *  Populated from backend-enriched messagePreview (visibility-filtered by
+   *  resolveVisibleReplyParent on the server side). */
+  replyToPreview?: ReplyPreview;
 }
 
 /** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */

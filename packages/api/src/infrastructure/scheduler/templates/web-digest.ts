@@ -55,11 +55,17 @@ export const webDigestTemplate: TaskTemplate = {
               content: triggerContent,
               userId: 'scheduler',
             });
-            ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
-              reason: 'scheduled_web_digest_browser_fetch',
-              sourceCategory: 'scheduled',
-              suggestedSkill: 'browser-automation',
-            });
+            try {
+              void Promise.resolve(
+                ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
+                  reason: 'scheduled_web_digest_browser_fetch',
+                  sourceCategory: 'scheduled',
+                  suggestedSkill: 'browser-automation',
+                }),
+              ).catch(() => {});
+            } catch {
+              // Best-effort: sync trigger throw should not fail the web digest
+            }
             return;
           }
           const header = result.title || url;

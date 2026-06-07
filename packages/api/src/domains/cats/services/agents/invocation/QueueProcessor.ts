@@ -8,6 +8,7 @@
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
+import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
 import { hydrateReplyPreview, type IMessageStore } from '../../stores/ports/MessageStore.js';
 import {
   accumulateTextAggregate,
@@ -307,13 +308,13 @@ export class QueueProcessor {
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
   }
 
-  enqueueContinuation(input: {
+  async enqueueContinuation(input: {
     threadId: string;
     userId: string;
     catId: string;
     capsule?: CollaborationContinuityCapsuleV1 | null;
     excludeEntryId?: string;
-  }): { outcome: ContinuationEnqueueOutcome; entry?: QueueEntry } {
+  }): Promise<{ outcome: ContinuationEnqueueOutcome; entry?: QueueEntry }> {
     const { threadId, userId, catId, capsule, excludeEntryId } = input;
     if (!capsule) {
       this.deps.log.warn({ threadId, catId }, '[QueueProcessor] continuation skipped: missing capsule');
@@ -385,11 +386,14 @@ export class QueueProcessor {
 
     recent.push(now);
     this.setContinuationWindow(key, recent);
-    this.deps.socketManager.emitToUser(userId, 'queue_updated', {
+    await emitQueueUpdated(
+      this.deps.socketManager,
+      userId,
       threadId,
-      queue: this.deps.queue.list(threadId, userId),
-      action: 'continuation_enqueued',
-    });
+      this.deps.queue.list(threadId, userId),
+      this.deps.messageStore,
+      'continuation_enqueued',
+    );
     return { outcome: 'enqueued', entry: result.entry };
   }
 
@@ -509,7 +513,7 @@ export class QueueProcessor {
       const epoch = (this.pauseEpoch.get(sk) ?? 0) + 1;
       this.pauseEpoch.set(sk, epoch);
       this.pausedSlots.set(sk, status);
-      this.emitPausedToQueuedUsers(threadId, status);
+      await this.emitPausedToQueuedUsers(threadId, status);
 
       // #595: auto-recover paused slot after delay — prevents indefinite stuck state
       setTimeout(() => {
@@ -866,11 +870,7 @@ export class QueueProcessor {
       let intentModeBroadcast = false;
 
       // 6. Emit queue_updated (processing)
-      socketManager.emitToUser(userId, 'queue_updated', {
-        threadId,
-        queue: queue.list(threadId, userId),
-        action: 'processing',
-      });
+      await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), messageStore, 'processing');
 
       // F098-D: Mark queued messages as delivered (set deliveredAt = now)
       // F117: Collect full message objects for frontend bubble rendering
@@ -1258,23 +1258,19 @@ export class QueueProcessor {
           queue.removeProcessedAcrossUsers(threadId, bid);
         }
         for (const continuationCapsule of continuationCapsules.values()) {
-          this.enqueueContinuation({
+          void this.enqueueContinuation({
             threadId,
             userId,
             catId: continuationCapsule.catId,
             capsule: continuationCapsule,
-          });
+          }).catch((err) => log.warn({ err, threadId }, 'enqueueContinuation failed (best-effort)'));
         }
       } else {
         for (const bid of batchedEntryIds) {
           queue.rollbackProcessing(threadId, bid);
         }
       }
-      socketManager.emitToUser(userId, 'queue_updated', {
-        threadId,
-        queue: queue.list(threadId, userId),
-        action: 'completed',
-      });
+      await emitQueueUpdated(socketManager, userId, threadId, queue.list(threadId, userId), messageStore, 'completed');
       // F122B B6: Fire completion hook (one-shot) and clean up
       const completeHook = this.entryCompleteHooks.get(entry.id);
       if (completeHook) {
@@ -1463,15 +1459,16 @@ export class QueueProcessor {
   }
 
   /** Emit queue_paused to each user who has queued entries for this thread. */
-  private emitPausedToQueuedUsers(threadId: string, reason: 'canceled' | 'failed'): void {
+  private async emitPausedToQueuedUsers(threadId: string, reason: 'canceled' | 'failed'): Promise<void> {
     const users = this.deps.queue.listUsersForThread(threadId);
     for (const userId of users) {
       const userQueue = this.deps.queue.list(threadId, userId);
       if (!userQueue.some((e) => e.status === 'queued')) continue;
+      const enriched = await enrichQueueEntries(userQueue, this.deps.messageStore);
       this.deps.socketManager.emitToUser(userId, 'queue_paused', {
         threadId,
         reason,
-        queue: userQueue,
+        queue: enriched,
       });
     }
   }

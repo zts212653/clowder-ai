@@ -94,6 +94,7 @@ interface StreamingHookLike {
 }
 
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
+import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
@@ -630,11 +631,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       // Queue full → 429, no message written (no ghost message)
       if (enqueueResult.outcome === 'full') {
+        const fullQueue = await enrichQueueEntries(
+          opts.invocationQueue.list(resolvedThreadId, userId),
+          opts.messageStore,
+        );
         opts.socketManager.emitToUser(userId, 'queue_full_warning', {
           threadId: resolvedThreadId,
           source: 'user',
           queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-          queue: opts.invocationQueue.list(resolvedThreadId, userId),
+          queue: fullQueue,
         });
         reply.status(429);
         return {
@@ -684,11 +689,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
 
       // Emit queue update to this user only (privacy: scopeKey isolation)
-      opts.socketManager.emitToUser(userId, 'queue_updated', {
-        threadId: resolvedThreadId,
-        queue: opts.invocationQueue.list(resolvedThreadId, userId),
-        action: enqueueResult.outcome,
-      });
+      await emitQueueUpdated(
+        opts.socketManager,
+        userId,
+        resolvedThreadId,
+        opts.invocationQueue.list(resolvedThreadId, userId),
+        opts.messageStore,
+        enqueueResult.outcome,
+      );
 
       tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
@@ -727,11 +735,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       // F39 bugfix: Notify frontend that force-cancel happened (clear stale queue UI)
       if (opts.invocationQueue) {
-        opts.socketManager.emitToUser(userId, 'queue_updated', {
-          threadId: resolvedThreadId,
-          queue: opts.invocationQueue.list(resolvedThreadId, userId),
-          action: 'force_cleared',
-        });
+        await emitQueueUpdated(
+          opts.socketManager,
+          userId,
+          resolvedThreadId,
+          opts.invocationQueue.list(resolvedThreadId, userId),
+          opts.messageStore,
+          'force_cleared',
+        );
       }
       // Fall through to immediate execution below
     }
@@ -758,11 +769,15 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               intent: intent.intent,
             });
             if (enqueueResult.outcome === 'full') {
+              const toctouFullQueue = await enrichQueueEntries(
+                opts.invocationQueue.list(resolvedThreadId, userId),
+                opts.messageStore,
+              );
               opts.socketManager.emitToUser(userId, 'queue_full_warning', {
                 threadId: resolvedThreadId,
                 source: 'user',
                 queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-                queue: opts.invocationQueue.list(resolvedThreadId, userId),
+                queue: toctouFullQueue,
               });
               reply.status(429);
               return { error: '消息队列已满', code: 'QUEUE_FULL' };
@@ -800,11 +815,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                 throw err;
               }
             }
-            opts.socketManager.emitToUser(userId, 'queue_updated', {
-              threadId: resolvedThreadId,
-              queue: opts.invocationQueue.list(resolvedThreadId, userId),
-              action: enqueueResult.outcome,
-            });
+            await emitQueueUpdated(
+              opts.socketManager,
+              userId,
+              resolvedThreadId,
+              opts.invocationQueue.list(resolvedThreadId, userId),
+              opts.messageStore,
+              enqueueResult.outcome,
+            );
             tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
             reply.status(202);
             return {
@@ -1309,12 +1327,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             routeChainTracker.succeed(createResult.invocationId);
 
             for (const continuationCapsule of continuationCapsules.values()) {
-              opts.queueProcessor?.enqueueContinuation({
-                threadId: resolvedThreadId,
-                userId,
-                catId: continuationCapsule.catId,
-                capsule: continuationCapsule,
-              });
+              void opts.queueProcessor
+                ?.enqueueContinuation({
+                  threadId: resolvedThreadId,
+                  userId,
+                  catId: continuationCapsule.catId,
+                  capsule: continuationCapsule,
+                })
+                .catch((err) =>
+                  log.warn({ err, threadId: resolvedThreadId }, 'enqueueContinuation failed (best-effort)'),
+                );
             }
 
             // Push notification: cat(s) finished responding
