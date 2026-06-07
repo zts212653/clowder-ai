@@ -204,15 +204,22 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               sourceCategory: 'issue',
               coalesceKey: `${subjectKey}:issue-comment:${coalesceTargetCatId}`,
             };
-            opts.invokeTrigger.trigger(
-              routeResult.threadId,
-              routeResult.catId as CatId,
-              task.userId ?? '',
-              routeResult.content,
-              routeResult.messageId,
-              undefined,
-              policy,
-            );
+            void opts.invokeTrigger
+              .trigger(
+                routeResult.threadId,
+                routeResult.catId as CatId,
+                task.userId ?? '',
+                routeResult.content,
+                routeResult.messageId,
+                undefined,
+                policy,
+              )
+              .catch((err) =>
+                opts.log.warn(
+                  `[issue-comment] trigger failed for ${signal.repoFullName}#${signal.issueNumber} (best-effort)`,
+                  err,
+                ),
+              );
           } catch {
             opts.log.warn(
               `[issue-comment] trigger failed for ${signal.repoFullName}#${signal.issueNumber} (best-effort)`,

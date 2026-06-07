@@ -256,6 +256,63 @@ describe('AC-D3: IssueCommentTaskSpec', () => {
     assert.strictEqual(result.run, true);
     assert.ok(result.workItems?.length > 0, 'should have work items');
   });
+
+  test('execute catches async trigger rejections as best-effort warnings', async () => {
+    assert.ok(createIssueCommentTaskSpec, 'createIssueCommentTaskSpec should be importable');
+    const store = new TaskStore();
+    const task = store.upsertBySubject({
+      kind: 'issue_tracking',
+      threadId: 't1',
+      subjectKey: 'issue:o/r#42',
+      title: 'Issue #42',
+      why: 'track',
+      createdBy: 'cat1',
+      userId: 'u1',
+    });
+
+    let cursorCommitted = false;
+    const warnings = [];
+    const unhandled = [];
+    const onUnhandled = (reason) => {
+      unhandled.push(reason);
+    };
+    const spec = createIssueCommentTaskSpec({
+      taskStore: store,
+      issueCommentRouter: {
+        route: async () => ({ kind: 'notified', threadId: 't1', catId: 'cat1', messageId: 'm1', content: 'test' }),
+      },
+      fetchComments: async () => [],
+      fetchIssueState: async () => 'open',
+      invokeTrigger: {
+        trigger: () => Promise.reject(new Error('queue busy')),
+      },
+      log: { info: () => {}, error: () => {}, warn: (...args) => warnings.push(args) },
+    });
+
+    process.once('unhandledRejection', onUnhandled);
+    try {
+      await spec.run.execute(
+        {
+          task,
+          repoFullName: 'o/r',
+          issueNumber: 42,
+          newComments: [{ id: 100, author: 'alice', body: 'New comment', createdAt: '2026-01-01T00:00:00Z' }],
+          commitCursor: async () => {
+            cursorCommitted = true;
+          },
+        },
+        'issue:o/r#42',
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.removeListener('unhandledRejection', onUnhandled);
+    }
+
+    assert.strictEqual(cursorCommitted, true);
+    assert.strictEqual(unhandled.length, 0, 'trigger rejection should not escape as unhandledRejection');
+    assert.strictEqual(warnings.length, 1);
+    assert.match(String(warnings[0][0]), /trigger failed/);
+  });
 });
 
 // ── AC-D4: Auto-close on issue closed ─────────────────────────────
