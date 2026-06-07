@@ -139,6 +139,31 @@ describe('ConnectorBubble theme', () => {
     expect(html).toContain('<svg');
   });
 
+  it('renders issue comment connector with GitHub icon instead of raw fallback text', () => {
+    const message: ChatMessage = {
+      id: 'm-issue-comment',
+      type: 'connector',
+      content: '**Issue Comments — Issue #861**',
+      timestamp: Date.now(),
+      source: {
+        connector: 'github-issue-comment',
+        label: 'Issue Comment',
+        icon: 'github',
+        url: 'https://github.com/zts212653/clowder-ai/issues/861',
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const html = container.innerHTML;
+    expect(html).toContain('var(--color-github-issue-comment-surface');
+    expect(html).toContain('var(--color-github-issue-comment-bubble');
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('>github<');
+  });
+
   it('registered github triage still uses registry SVG icon (not legacy emoji)', () => {
     const message: ChatMessage = {
       id: 'm-triage',

@@ -293,12 +293,12 @@ MCP 工具（异步汇报；token 有效期有限）：
 
 **四肢控制面（Limb — 插件/设备能力调用）：**
 - limb_list_available: 列出当前在线节点及能力（含插件提供的服务型节点）
-- limb_invoke: 调用节点能力（nodeId + command + params）。nodeId 从 limb_list_available 获取，不要猜
+- limb_invoke: 调用节点能力；nodeId 从 limb_list_available 获取，不要猜
 
 **协作工具：**
 - cat_cafe_post_message: 本 thread 异步（agent-key 才传 threadId）
 - cat_cafe_cross_post_message: 跨 thread（targetCats/行首@二选一）。最小路径：list_threads → cross_post_message(threadId, targetCats, content) → get_thread_context 验证
-- cat_cafe_register_pr_tracking: PR tracking
+cat_cafe_register_pr_tracking/cat_cafe_register_issue_tracking/cat_cafe_unregister_tracking
 - cat_cafe_get_pending_mentions: @提及
 - cat_cafe_get_thread_context: thread 上下文
 - cat_cafe_list_threads: thread 摘要

@@ -53,6 +53,8 @@ export interface ReviewFeedbackTaskSpecOptions {
    * Both predicates return `skip` — OR'd together in gate().
    */
   readonly isNoiseComment?: (comment: PrFeedbackComment) => boolean;
+  /** F220-B: Override task ID for plugin-scoped schedule instances */
+  readonly id?: string;
 }
 
 export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
@@ -103,7 +105,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
   }
 
   return {
-    id: 'review-feedback',
+    id: opts.id ?? 'review-feedback',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
@@ -209,6 +211,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             threadId: task.threadId,
             catId: task.ownerCatId ?? '',
             userId: task.userId ?? '',
+            trackingInstructions: task.automationState?.trackingInstructions,
           },
         );
 

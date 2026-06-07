@@ -278,7 +278,7 @@ describe('parsePluginManifest security', () => {
     assert.equal(manifest.resources[1].type, 'skill');
   });
 
-  it('filters out deferred schedule resource type', () => {
+  it('parses schedule resource with factoryId and name', () => {
     tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
     const yamlPath = writeTmpManifest(
       tmpDir,
@@ -289,14 +289,52 @@ describe('parsePluginManifest security', () => {
         'version: 1.0.0',
         'resources:',
         '  - type: schedule',
-        '    path: cron.yml',
+        '    name: my-poller',
+        '    factoryId: test.my-poller',
         '  - type: skill',
         '    path: skills/test',
       ].join('\n'),
     );
     const manifest = parsePluginManifest(yamlPath);
-    assert.equal(manifest.resources.length, 1, 'schedule should be filtered');
-    assert.equal(manifest.resources[0].type, 'skill');
+    assert.equal(manifest.resources.length, 2, 'schedule should be parsed as first-class resource');
+    assert.equal(manifest.resources[0].type, 'schedule');
+    assert.equal(manifest.resources[0].factoryId, 'test.my-poller');
+    assert.equal(manifest.resources[0].name, 'my-poller');
+    assert.equal(manifest.resources[1].type, 'skill');
+  });
+
+  it('rejects schedule resource without factoryId', () => {
+    tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
+    const yamlPath = writeTmpManifest(
+      tmpDir,
+      'test-plugin',
+      [
+        'id: test-plugin',
+        'name: Test',
+        'version: 1.0.0',
+        'resources:',
+        '  - type: schedule',
+        '    name: my-poller',
+      ].join('\n'),
+    );
+    assert.throws(() => parsePluginManifest(yamlPath), /factoryId/);
+  });
+
+  it('rejects schedule resource without name', () => {
+    tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
+    const yamlPath = writeTmpManifest(
+      tmpDir,
+      'test-plugin',
+      [
+        'id: test-plugin',
+        'name: Test',
+        'version: 1.0.0',
+        'resources:',
+        '  - type: schedule',
+        '    factoryId: test.poller',
+      ].join('\n'),
+    );
+    assert.throws(() => parsePluginManifest(yamlPath), /name/);
   });
 
   it('rejects unknown resource types instead of silently dropping them', () => {

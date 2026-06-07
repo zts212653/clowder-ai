@@ -52,7 +52,7 @@ export interface ConnectorTriggerPolicy {
   /** optional reason for diagnostics */
   readonly reason?: string;
   /** F175: origin category for visual grouping */
-  readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a';
+  readonly sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
   /** F140 Phase C: hint which Skill to auto-load (not a hard constraint — cat can override) */
   readonly suggestedSkill?: string;
   /**
@@ -202,7 +202,7 @@ export class ConnectorInvokeTrigger {
       intent: 'execute',
       priority,
       ...(sourceCategory
-        ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' }
+        ? { sourceCategory: sourceCategory as 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue' }
         : {}),
       ...(sender ? { senderMeta: sender } : {}),
       ...(suggestedSkill ? { suggestedSkill } : {}),

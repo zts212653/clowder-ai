@@ -8,6 +8,7 @@ import type { CatId, CatRoutingError, RichBlock, SuggestedCrossPostAction } from
 import {
   catRegistry,
   createCatId,
+  isTrackingKind,
   normalizeRichBlock,
   normalizeSopDefinitionId,
   resolveWorkflowSopSkill,
@@ -462,6 +463,10 @@ export interface CallbackRoutesOptions {
   deliveryCursorStore?: DeliveryCursorStore;
   /** Phase D: validates GitHub repo exists before PR tracking registration */
   validateRepo?: (repoFullName: string) => Promise<boolean>;
+  /** F220 followup: validates specific PR exists (number-level validation) */
+  validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
+  /** F220 followup: validates specific issue exists (number-level validation) */
+  validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
@@ -702,6 +707,16 @@ async function buildThreadIdsByFeatId(
   return mapped;
 }
 
+function canUnregisterTrackingTask(
+  task: { readonly userId?: string; readonly threadId: string },
+  record: { readonly userId?: string; readonly threadId?: string },
+): boolean {
+  if (task.userId) {
+    return Boolean(record.userId && task.userId === record.userId);
+  }
+  return Boolean(record.threadId && task.threadId === record.threadId);
+}
+
 export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async (app, opts) => {
   const {
     registry,
@@ -717,6 +732,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     invocationTracker,
     deliveryCursorStore,
     validateRepo,
+    validatePr,
+    validateIssue,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -2158,6 +2175,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .min(1)
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     prNumber: z.number().int().positive(),
+    // F220 Phase C (AC-C1): tracking instructions appended to trigger messages
+    instructions: z.string().max(2000).optional(),
     catId: z.string().min(1).optional(), // ignored — server uses record.catId
     // F140: wake intent. 'review' (default) = waiting on review feedback → CI-pass stays silent.
     // 'merge' = waiting on CI-green to merge → CI-pass wakes. Re-register (upsert) to flip it.
@@ -2180,7 +2199,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const record = requireCallbackAuth(request, reply);
     if (!record) return;
 
-    const { repoFullName, prNumber } = parsed.data;
+    const { repoFullName, prNumber, instructions } = parsed.data;
 
     // Use authoritative catId from invocation record, not caller payload.
     const catId = record.catId;
@@ -2200,6 +2219,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    // F220 followup: validate specific PR exists (number-level, not just repo)
+    if (validatePr) {
+      let prOk: boolean;
+      try {
+        prOk = await validatePr(repoFullName, prNumber);
+      } catch {
+        reply.status(503);
+        return { error: 'PR validation unavailable — try again later' };
+      }
+      if (!prOk) {
+        reply.status(422);
+        return { error: `PR ${repoFullName}#${prNumber} does not exist or is not accessible` };
+      }
+    }
+
     const subjectKey = `pr:${repoFullName}#${prNumber}`;
     try {
       // F140: resolve wake intent. Explicit wins; otherwise preserve an already-set intent (so an
@@ -2216,6 +2250,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         why: `Tracking PR ${repoFullName}#${prNumber} (intent=${intent}): review feedback + conflicts always wake; CI-pass wakes only when intent=merge`,
         createdBy: catId,
         userId: record.userId,
+        // F220 Phase C (AC-C1): store user-provided tracking instructions
+        automationState: instructions ? { trackingInstructions: instructions } : undefined,
       });
 
       // Persist intent structurally (deep-merged — preserves ci/review/conflict cursors on re-register).
@@ -2229,6 +2265,132 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
       throw error;
     }
+  });
+
+  // F220 Phase D (AC-D3): Register issue tracking
+  const registerIssueTrackingSchema = z.object({
+    repoFullName: z
+      .string()
+      .min(1)
+      .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
+    issueNumber: z.number().int().positive(),
+    instructions: z.string().max(2000).optional(),
+  });
+
+  app.post('/api/callbacks/register-issue-tracking', async (request, reply) => {
+    if (!taskStore) {
+      reply.status(503);
+      return { error: 'Task store not configured' };
+    }
+
+    const parsed = registerIssueTrackingSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const { repoFullName, issueNumber, instructions } = parsed.data;
+    const catId = record.catId;
+
+    // F220 Phase D P2-fix: validate repo exists and is accessible (mirrors PR tracking at L1975)
+    if (validateRepo) {
+      let repoOk: boolean;
+      try {
+        repoOk = await validateRepo(repoFullName);
+      } catch {
+        reply.status(503);
+        return { error: 'Repository validation unavailable — try again later' };
+      }
+      if (!repoOk) {
+        reply.status(422);
+        return { error: `Repository ${repoFullName} does not exist or is not accessible` };
+      }
+    }
+
+    // F220 followup: validate specific issue exists (number-level, not just repo)
+    if (validateIssue) {
+      let issueOk: boolean;
+      try {
+        issueOk = await validateIssue(repoFullName, issueNumber);
+      } catch {
+        reply.status(503);
+        return { error: 'Issue validation unavailable — try again later' };
+      }
+      if (!issueOk) {
+        reply.status(422);
+        return { error: `Issue ${repoFullName}#${issueNumber} does not exist or is not accessible` };
+      }
+    }
+
+    const subjectKey = `issue:${repoFullName}#${issueNumber}`;
+    try {
+      const task = await taskStore.upsertBySubject({
+        kind: 'issue_tracking',
+        subjectKey,
+        threadId: record.threadId,
+        title: `Issue tracking: ${repoFullName}#${issueNumber}`,
+        ownerCatId: catId,
+        why: `Tracking issue ${repoFullName}#${issueNumber} for comment notifications`,
+        createdBy: catId,
+        userId: record.userId,
+        automationState: instructions ? { trackingInstructions: instructions } : undefined,
+      });
+
+      return { status: 'ok', threadId: record.threadId, task };
+    } catch (error) {
+      if (isSubjectOwnershipConflictError(error)) {
+        reply.status(409);
+        return { error: `Issue ${repoFullName}#${issueNumber} already registered by another user` };
+      }
+      throw error;
+    }
+  });
+
+  // F220 Phase C (AC-C3): Unregister tracking task by subjectKey
+  const unregisterTrackingSchema = z.object({
+    subjectKey: z.string().min(1),
+  });
+
+  app.post('/api/callbacks/unregister-tracking', async (request, reply) => {
+    if (!taskStore) {
+      reply.status(503);
+      return { error: 'Task store not configured' };
+    }
+
+    const parsed = unregisterTrackingSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    const record = requireCallbackAuth(request, reply);
+    if (!record) return;
+
+    const task = await taskStore.getBySubject(parsed.data.subjectKey);
+    if (!task) {
+      reply.status(404);
+      return { error: `No tracking task for subject: ${parsed.data.subjectKey}` };
+    }
+
+    // Kind guard: only tracking tasks can be unregistered via this endpoint
+    if (!isTrackingKind(task.kind)) {
+      reply.status(400);
+      return { error: `Task is not a tracking task (kind: ${task.kind}), cannot unregister via this endpoint` };
+    }
+
+    // Ownership check: only the registering user can unregister. Legacy/backfilled
+    // tracking tasks may not have userId, so fail closed unless the callback is
+    // scoped to the same thread that owns the task.
+    if (!canUnregisterTrackingTask(task, record)) {
+      reply.status(403);
+      return { error: 'Not authorized to unregister this tracking task' };
+    }
+
+    await taskStore.delete(task.id);
+    return { status: 'ok', deleted: { id: task.id, subjectKey: parsed.data.subjectKey } };
   });
 
   // F174 Phase C: refresh-token endpoint — keep tokens alive in long sessions

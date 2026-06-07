@@ -456,7 +456,7 @@ describe('F190 typography guard — no hardcoded font sizes in console scope', (
     'settings/RulesPromptsContent.tsx',
     'settings/SkillPreviewModal.tsx',
     'settings/InstallPreviewModal.tsx',
-    'settings/GithubConfigPanel.tsx',
+    'settings/PluginConfigPanel.tsx',
     'settings/PushServiceConfig.tsx',
     'hub-cat-editor-fields.tsx',
     'hub-cat-editor-voice.tsx',
@@ -667,7 +667,7 @@ describe('#723 cross-page typography consistency', () => {
       'settings/capability-settings-ui.tsx',
       'settings/primitives/SettingsCollapsibleCard.tsx',
       'settings/primitives/SettingsRow.tsx',
-      'settings/GithubConfigPanel.tsx',
+      'settings/PluginConfigPanel.tsx',
     ]) {
       const src = readSrc(file);
       expect(src).not.toContain('console-divider-t');

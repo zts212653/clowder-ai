@@ -56,7 +56,7 @@ describe('PluginsContent GitHub configuration', () => {
     vi.clearAllMocks();
   });
 
-  it('opens editable GitHub config fields and saves via connector path', async () => {
+  it('opens editable GitHub config fields and saves via plugin path', async () => {
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugins') {
         return jsonResponse({
@@ -69,18 +69,7 @@ describe('PluginsContent GitHub configuration', () => {
               iconBg: '#24292e',
               status: 'configured',
               hasHealthCheck: false,
-              config: [],
-              resources: [],
-            },
-          ],
-        });
-      }
-      if (url === '/api/connector/status') {
-        return jsonResponse({
-          platforms: [
-            {
-              id: 'github',
-              fields: [
+              config: [
                 {
                   envName: 'GITHUB_TOKEN',
                   label: 'Personal Access Token',
@@ -89,16 +78,17 @@ describe('PluginsContent GitHub configuration', () => {
                 },
                 {
                   envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-                  label: 'Noise 过滤 Bot 列表',
+                  label: 'Noise Bot Login List',
                   sensitive: false,
                   currentValue: 'chatgpt-codex-connector[bot]',
                 },
               ],
+              resources: [],
             },
           ],
         });
       }
-      if (url === '/api/config/secrets' && init?.method === 'POST') {
+      if (url === '/api/plugins/github/config' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
       return jsonResponse({}, 404);
@@ -134,7 +124,7 @@ describe('PluginsContent GitHub configuration', () => {
     });
 
     const save = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('保存 GitHub 配置'),
+      button.textContent?.includes('保存配置'),
     );
     expect(save).toBeTruthy();
 
@@ -143,7 +133,7 @@ describe('PluginsContent GitHub configuration', () => {
     });
     await flushEffects();
 
-    const saveCall = mockApiFetch.mock.calls.find((call) => call[0] === '/api/config/secrets');
+    const saveCall = mockApiFetch.mock.calls.find((call) => call[0] === '/api/plugins/github/config');
     expect(saveCall).toBeTruthy();
     expect(JSON.parse((saveCall?.[1] as { body: string }).body)).toEqual({
       updates: [

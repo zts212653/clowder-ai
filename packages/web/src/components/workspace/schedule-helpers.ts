@@ -67,7 +67,7 @@ export interface ScheduleTask {
   dynamicTaskId?: string;
 }
 
-export type DisplayCategory = 'pr' | 'repo' | 'thread' | 'system' | 'external';
+export type DisplayCategory = 'pr' | 'repo' | 'thread' | 'system' | 'external' | 'issue';
 
 export const CATEGORY_STYLES: Record<DisplayCategory, string> = {
   pr: 'bg-blue-100 text-blue-700',
@@ -75,6 +75,7 @@ export const CATEGORY_STYLES: Record<DisplayCategory, string> = {
   thread: 'bg-violet-100 text-violet-700',
   system: 'bg-amber-100 text-amber-700',
   external: 'bg-purple-100 text-purple-700',
+  issue: 'bg-orange-100 text-orange-700',
 };
 
 export const CATEGORY_LABELS: Record<DisplayCategory, string> = {
@@ -83,6 +84,7 @@ export const CATEGORY_LABELS: Record<DisplayCategory, string> = {
   thread: 'Thread',
   system: 'System',
   external: 'External',
+  issue: 'Issue',
 };
 
 export function fallbackCategory(taskId: string): DisplayCategory {

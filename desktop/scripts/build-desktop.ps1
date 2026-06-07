@@ -497,6 +497,9 @@ if (-not $SkipPortableZip) {
     # Guide registry + flow definitions — bootcamp/guide features
     Copy-ToStaging (Join-Path $ProjectRoot "guides") "guides"
 
+    # Plugin manifests/resources — PluginRegistry scans this tree at runtime.
+    Copy-ToStaging (Join-Path $ProjectRoot "plugins") "plugins"
+
     # Agent CLI hook templates
     $hooksSource = Join-Path $ProjectRoot ".claude\hooks\user-level"
     if (Test-Path $hooksSource) {

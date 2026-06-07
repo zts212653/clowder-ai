@@ -1,0 +1,42 @@
+id: github
+name: GitHub
+version: 1.0.0
+description: "GitHub PR tracking, CI/CD monitoring, conflict detection, and repository scanning"
+icon: github
+docsUrl: "https://cli.github.com/manual/gh_auth_login"
+setupSteps:
+  - "Log in with the GitHub CLI (`gh auth login`) on the machine running Cat Cafe"
+  - "Optional: configure a token only for plugin-managed child processes that explicitly consume it"
+  - "Optional: configure Noise Bot list to reduce setup-only comment noise"
+
+config:
+  - envName: GITHUB_TOKEN
+    label: "Personal Access Token"
+    sensitive: true
+    required: false
+  - envName: GITHUB_SETUP_NOISE_BOT_LOGINS
+    label: "Noise Bot Login List"
+    sensitive: false
+    required: false
+  - envName: GITHUB_MCP_PAT
+    label: "MCP Token"
+    sensitive: true
+    required: false
+
+resources:
+  - type: schedule
+    name: cicd-check
+    factoryId: github.cicd-check
+  - type: schedule
+    name: conflict-check
+    factoryId: github.conflict-check
+  - type: schedule
+    name: review-feedback
+    factoryId: github.review-feedback
+  - type: schedule
+    name: repo-scan
+    factoryId: github.repo-scan
+    optional: true
+  - type: schedule
+    name: issue-tracking
+    factoryId: github.issue-tracking

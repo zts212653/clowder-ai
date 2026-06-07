@@ -68,4 +68,20 @@ describe('createGitHubFeedbackFilter (post-E.2 cutover — Rule A only)', () => 
     assert.equal(filter.isSelfAuthored('chatgpt-codex-connector[bot]'), false);
     assert.equal(filter.isSelfAuthored('alice'), false);
   });
+
+  it('reads self login lazily so runtime token/login changes do not freeze the echo filter', async () => {
+    const { createGitHubFeedbackFilter } = await import('../../dist/infrastructure/email/github-feedback-filter.js');
+    let selfLogin;
+    const filter = createGitHubFeedbackFilter({ getSelfGitHubLogin: () => selfLogin });
+
+    assert.equal(filter.shouldSkipComment({ author: 'zts212653' }), false);
+
+    selfLogin = 'zts212653';
+    assert.equal(filter.shouldSkipComment({ author: 'zts212653' }), true);
+    assert.equal(filter.shouldSkipReview({ author: 'zts212653' }), true);
+
+    selfLogin = 'mindfn';
+    assert.equal(filter.shouldSkipComment({ author: 'zts212653' }), false);
+    assert.equal(filter.shouldSkipComment({ author: 'mindfn' }), true);
+  });
 });

@@ -3208,6 +3208,56 @@ describe('Callback Routes', () => {
     assert.equal(stored.ownerCatId, 'opencode', 'stored task must have authoritative catId');
   });
 
+  test('POST unregister-tracking rejects legacy task delete when caller thread cannot prove ownership', async () => {
+    const app = await createApp();
+
+    taskStore.create({
+      kind: 'pr_tracking',
+      threadId: 'thread-owner',
+      subjectKey: 'pr:zts212653/cat-cafe#404',
+      title: 'Legacy PR tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    const attacker = await registry.create('user-attacker', 'codex', 'thread-attacker');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/unregister-tracking',
+      headers: { 'x-invocation-id': attacker.invocationId, 'x-callback-token': attacker.callbackToken },
+      payload: { subjectKey: 'pr:zts212653/cat-cafe#404' },
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.ok(taskStore.getBySubject('pr:zts212653/cat-cafe#404'), 'legacy task must remain registered');
+  });
+
+  test('POST unregister-tracking allows same-thread cleanup for legacy task without userId', async () => {
+    const app = await createApp();
+
+    taskStore.create({
+      kind: 'pr_tracking',
+      threadId: 'thread-owner',
+      subjectKey: 'pr:zts212653/cat-cafe#405',
+      title: 'Legacy PR tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    const owner = await registry.create('user-owner', 'opus', 'thread-owner');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/unregister-tracking',
+      headers: { 'x-invocation-id': owner.invocationId, 'x-callback-token': owner.callbackToken },
+      payload: { subjectKey: 'pr:zts212653/cat-cafe#405' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#405'), null);
+  });
+
   // ---- F052: cross-thread identity isolation ----
 
   test('F052: cross-thread post stores extra.crossPost metadata', async () => {

@@ -8,6 +8,7 @@ const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   ci: 'CI',
   review: 'Review',
   conflict: 'Conflict',
+  issue: 'Issue',
   scheduled: 'Scheduled',
   a2a: 'A2A',
 };

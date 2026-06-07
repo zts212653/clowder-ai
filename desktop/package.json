@@ -118,6 +118,10 @@
       {
         "from": "../assets/system-prompts",
         "to": "assets/system-prompts"
+      },
+      {
+        "from": "../plugins",
+        "to": "plugins"
       }
     ],
     "asar": false,

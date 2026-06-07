@@ -19,6 +19,10 @@ export interface PluginHealthCheck {
 /** Plugin resource declaration */
 export interface PluginResourceDef {
   type: 'skill' | 'mcp' | 'limb' | 'schedule';
+  /** F220: Factory ID for schedule resources (white-list reference, no arbitrary scripts) */
+  factoryId?: string;
+  /** F220 followup: optional resources don't count toward 'partial' status when deps are missing */
+  optional?: boolean;
   path?: string;
   name?: string;
   command?: string;

@@ -53,16 +53,22 @@ describe('PluginsContent — GitHub plugin config', () => {
     expect(mockFetch).not.toHaveBeenCalledWith('/api/services');
   });
 
-  it('renders expandable GitHub token config', async () => {
+  it('renders expandable GitHub token config via plugin framework', async () => {
     mockFetch.mockImplementation(async (path: string) => {
-      if (path === '/api/connector/status') {
+      if (path === '/api/plugins') {
         return {
           ok: true,
           json: async () => ({
-            platforms: [
+            plugins: [
               {
                 id: 'github',
-                fields: [
+                name: 'GitHub',
+                version: '1.0.0',
+                icon: 'github',
+                iconBg: '#24292e',
+                status: 'configured',
+                hasHealthCheck: false,
+                config: [
                   {
                     envName: 'GITHUB_TOKEN',
                     label: 'Personal Access Token',
@@ -70,6 +76,7 @@ describe('PluginsContent — GitHub plugin config', () => {
                     currentValue: null,
                   },
                 ],
+                resources: [],
               },
             ],
           }),
@@ -90,6 +97,6 @@ describe('PluginsContent — GitHub plugin config', () => {
     });
 
     expect(container.textContent).toContain('Personal Access Token');
-    expect(container.querySelector('input[name="GITHUB_TOKEN"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="field-GITHUB_TOKEN"]')).toBeTruthy();
   });
 });

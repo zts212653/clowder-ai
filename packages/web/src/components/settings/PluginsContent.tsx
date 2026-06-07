@@ -10,7 +10,6 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
-import { GithubConfigPanel } from './GithubConfigPanel';
 import { PluginConfigPanel } from './PluginConfigPanel';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
@@ -27,14 +26,11 @@ const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
   id: 'github',
   name: 'GitHub',
   version: '1.0.0',
-  description: '内置插件 · PR 追踪、Review 投递、CI/CD 监控与 Token 配置',
+  description: '内置插件 · PR 追踪、Review 投递、CI/CD 监控与 GitHub CLI 认证',
   icon: 'key',
   iconBg: '#24292e',
-  docsUrl: 'https://github.com/settings/tokens',
-  setupSteps: [
-    '在 GitHub 创建 Personal Access Token，需要 repo 权限',
-    'Token 用于 PR 追踪、Review 路由、CI/CD 状态同步',
-  ],
+  docsUrl: 'https://cli.github.com/manual/gh_auth_login',
+  setupSteps: ['在运行 Cat Cafe 的机器上执行 gh auth login', '可选：仅在需要显式覆盖 gh 登录态时配置插件 token'],
   status: 'configured',
   configured: true,
   config: [],
@@ -132,12 +128,7 @@ export function PluginsContent() {
               </div>
             </button>
 
-            {isExpanded &&
-              (plugin.id === 'github' ? (
-                <GithubConfigPanel />
-              ) : (
-                <PluginConfigPanel plugin={plugin} onUpdated={fetchPlugins} />
-              ))}
+            {isExpanded && <PluginConfigPanel plugin={plugin} onUpdated={fetchPlugins} />}
           </article>
         );
       })}

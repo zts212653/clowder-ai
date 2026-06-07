@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-06-04（feature truth hygiene：F128 active）
+> 维护者：三猫 | 最后更新：2026-06-05（rebase: F220 + main sync）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -68,7 +68,7 @@ created: 2026-02-26
 | F193 | Cross-Thread Communication Unification (Phase E: 发现即投递) | in-progress | Ragdoll (Opus 4.6) | internal | [F193](features/F193-cross-thread-comm-unification.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
 | F219 | 核心引擎技术债盘点 + 架构演进（routeSerial 等核心调用链）| spec | Ragdoll Opus 4.8 | internal | [F219](features/F219-tech-debt-architecture-evolution.md) |
-| F220 | A2A 协作的可观测·可靠·可恢复（启动中占位可见 + 卡死根因 + force-reset 逃生口 UI）| spec | Ragdoll Opus-4.8（驱动 thread_mpxf7fdx5gonafzh）| internal | [F220](features/F220-a2a-collab-reliability.md) |
+| F220 | GitHub Plugin Schedule Resource — 定时任务插件化重构 | in-progress | Ragdoll | community [#844](https://github.com/zts212653/clowder-ai/issues/844) | [F220](features/F220-github-plugin-schedule-resource.md) |
 | F23-followup | F23 Phase 2 — dir-size 5 个目录真拆（utils/config/providers 快线 + invocation/routes 跟 F219 协调）| in-progress | Ragdoll/Opus-4.7 | internal | [F23 § Phase 2](features/F023-directory-corrosion-defense.md) |
 | F224 | A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）| spec | Ragdoll Opus-4.8 | community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834) | [F224](features/F224-a2a-session-message-reliability.md) |
 | F225 | Cat-Initiated Session Handoff — 猫主导的 session 接力（猫主动提议封印 + 铲屎官 gate + 同 thread 续接注入交接留言）| spec | Ragdoll Opus-4.8 | internal | [F225](features/F225-cat-initiated-session-handoff.md) |

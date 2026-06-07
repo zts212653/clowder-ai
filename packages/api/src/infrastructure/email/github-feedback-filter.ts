@@ -17,8 +17,15 @@
  */
 
 export interface GitHubFeedbackFilterOptions {
-  /** Authenticated GitHub login (resolved at startup via `gh api /user`). undefined = filter disabled for self. */
+  /** Authenticated GitHub login. undefined = filter disabled for self. */
   readonly selfGitHubLogin?: string;
+  /**
+   * Late-bound authenticated GitHub login.
+   *
+   * Prefer this when credentials can change at runtime (for example plugin config
+   * panel updates) so the echo filter does not freeze the startup identity.
+   */
+  readonly getSelfGitHubLogin?: () => string | undefined;
 }
 
 export interface GitHubFeedbackFilter {
@@ -31,7 +38,12 @@ export interface GitHubFeedbackFilter {
 }
 
 export function createGitHubFeedbackFilter(opts: GitHubFeedbackFilterOptions): GitHubFeedbackFilter {
-  const isSelfAuthored = (author: string): boolean => opts.selfGitHubLogin != null && author === opts.selfGitHubLogin;
+  const getSelfGitHubLogin = (): string | undefined =>
+    opts.getSelfGitHubLogin ? opts.getSelfGitHubLogin() : opts.selfGitHubLogin;
+  const isSelfAuthored = (author: string): boolean => {
+    const selfGitHubLogin = getSelfGitHubLogin();
+    return selfGitHubLogin != null && author === selfGitHubLogin;
+  };
 
   return {
     isSelfAuthored,

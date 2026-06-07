@@ -218,7 +218,7 @@ class ServiceManager {
     // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
     // uses plain directory symlinks.
     const linkType = IS_WIN ? 'junction' : 'dir';
-    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'scripts'];
+    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'plugins', 'scripts'];
 
     // Helper: remove a junction or symlink. On Windows, NTFS junctions are
     // directory reparse points — fs.unlinkSync calls DeleteFileW which fails
