@@ -8,7 +8,7 @@
 
 | 类型 | ConnectorSource | 优先级 | 触发条件 |
 |------|----------------|--------|----------|
-| CI/CD 状态 | `github-ci` | fail=urgent, pass=normal | CI checks 完成（F133） |
+| CI/CD 状态 | `github-ci` | fail=urgent（总唤醒）；pass=normal**仅 intent=merge 唤醒**，intent=review 只投消息 | CI checks 完成（F133）。intent 见 cicd-tracking.md / register_pr_tracking |
 | PR 冲突 | `github-conflict` | urgent | `mergeStateStatus` 变为 CONFLICTING（F140） |
 | Review Feedback | `github-review-feedback` | changes_requested=urgent, 其余=normal | 新 comments / review decisions（F140） |
 

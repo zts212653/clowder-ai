@@ -234,4 +234,66 @@ describe('TaskStore', () => {
       assert.equal(store.get(tasks[0].id), null);
     });
   });
+
+  // --- F193 Phase E: dispatch gate ---
+
+  describe('dispatch gate (F193-E1)', () => {
+    it('persists relatedFeatureId when provided', () => {
+      const task = store.create(makeInput({ relatedFeatureId: 'F193' }));
+      assert.equal(task.relatedFeatureId, 'F193');
+      const retrieved = store.get(task.id);
+      assert.equal(retrieved.relatedFeatureId, 'F193');
+    });
+
+    it('persists detectedFeatureIds when provided', () => {
+      const task = store.create(makeInput({ detectedFeatureIds: ['F128', 'F193'] }));
+      assert.deepStrictEqual(task.detectedFeatureIds, ['F128', 'F193']);
+    });
+
+    it('persists dispatchGate with status missing', () => {
+      const gate = {
+        status: 'missing',
+        suggestedAction: {
+          type: 'cross_post',
+          featureId: 'F193',
+          reason: 'Task references F193',
+          source: 'dispatch_gate',
+        },
+      };
+      const task = store.create(makeInput({ dispatchGate: gate }));
+      assert.equal(task.dispatchGate.status, 'missing');
+      assert.equal(task.dispatchGate.suggestedAction.featureId, 'F193');
+      assert.equal(task.dispatchGate.suggestedAction.source, 'dispatch_gate');
+    });
+
+    it('persists dispatchGate with status dispatched', () => {
+      const gate = {
+        status: 'dispatched',
+        dispatchedThreadId: 'thread_f193',
+        dispatchedMessageId: 'msg-123',
+        decidedAt: Date.now(),
+      };
+      const task = store.create(makeInput({ dispatchGate: gate }));
+      assert.equal(task.dispatchGate.status, 'dispatched');
+      assert.equal(task.dispatchGate.dispatchedThreadId, 'thread_f193');
+    });
+
+    it('persists dispatchGate with status not_dispatched + reason', () => {
+      const gate = {
+        status: 'not_dispatched',
+        reason: 'Will fix in this thread as part of current scope',
+        decidedAt: Date.now(),
+      };
+      const task = store.create(makeInput({ dispatchGate: gate }));
+      assert.equal(task.dispatchGate.status, 'not_dispatched');
+      assert.equal(task.dispatchGate.reason, 'Will fix in this thread as part of current scope');
+    });
+
+    it('omits dispatch gate fields when not provided', () => {
+      const task = store.create(makeInput());
+      assert.equal(task.relatedFeatureId, undefined);
+      assert.equal(task.detectedFeatureIds, undefined);
+      assert.equal(task.dispatchGate, undefined);
+    });
+  });
 });

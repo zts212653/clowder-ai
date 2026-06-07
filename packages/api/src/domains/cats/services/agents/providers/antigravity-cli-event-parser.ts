@@ -15,6 +15,12 @@ export interface AntigravityCliPlainTextInput {
   stderr?: string;
   resumed?: boolean;
   agyLogText?: string;
+  /**
+   * F210 H2b: resumed turn 从 trajectory SQLite 提取的本轮 final answer text。
+   * 非空时**替换** stdout 重放（根治 `agy --print --conversation` 累加重放 `[1]→[1,2]→[1,2,3]`）；
+   * 空 / 缺省 / 提取失败时保留现有 stdout（fail-open，绝不输出截断/错误回复）。
+   */
+  resumedFinalText?: string | null;
 }
 
 export function classifyAntigravityCliPlainText(input: AntigravityCliPlainTextInput): AntigravityCliPlainTextResult {
@@ -57,13 +63,27 @@ export function classifyAntigravityCliPlainText(input: AntigravityCliPlainTextIn
     };
   }
 
+  const resumedFinalText = input.resumed ? input.resumedFinalText?.trim() : undefined;
+  const hasResumedFinal = Boolean(resumedFinalText && resumedFinalText.length > 0);
+
   if (trimmedStdout.length === 0) {
+    // F210 H2b (云端 codex P2): resumed turn stdout 为空但 trajectory 提取到有效 final →
+    // 用 final（不当 empty 丢弃有效回复）；非 resumed / 无 final → empty。
+    if (hasResumedFinal) {
+      return { kind: 'text', content: resumedFinalText as string, textMode: 'replace' };
+    }
     return { kind: 'empty' };
   }
 
-  return input.resumed
-    ? { kind: 'text', content: trimmedStdout, textMode: 'replace' }
-    : { kind: 'text', content: trimmedStdout };
+  if (input.resumed) {
+    // F210 H2b: trajectory 提取到本轮 final answer → 替换 stdout 重放；否则 fail-open 保留 stdout。
+    return {
+      kind: 'text',
+      content: hasResumedFinal ? (resumedFinalText as string) : trimmedStdout,
+      textMode: 'replace',
+    };
+  }
+  return { kind: 'text', content: trimmedStdout };
 }
 
 export function extractAntigravityCliConversationId(logText: string): string | null {

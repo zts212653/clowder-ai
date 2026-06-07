@@ -10,6 +10,7 @@ created: 2026-03-26
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25
 > **Post-completion hardening**: 2026-05-07 — Review Feedback backlog guard（merged/closed 自收敛 + stale commit 过滤 + 同 PR/target-cat queue coalesce）
+> **Post-completion**: 2026-06-03 — PR-tracking wake intent（PR #2070）：`register_pr_tracking` 加 `intent: review|merge`，CI-pass 仅 intent=merge 唤醒；删 approval 推断 + dead poller
 
 ## 三层架构定位
 
@@ -161,6 +162,21 @@ team lead补充：
 - Review feedback gate 独立查询 PR metadata：`merged/closed` 直接把 pr_tracking task 标 `done`，不再 fetch/投递 feedback
 - `PrFeedbackComment` / `PrReviewDecision` 带 `commitId`，当 GitHub item 的 `commitId !== current headSha` 时视为 stale，推进 cursor 但不通知
 - Connector trigger 增加 policy `coalesceKey`，F140 review-feedback 以 `subjectKey + target cat` coalesce；同一 PR/同一 owner 在 active thread 下只保留一个 queued invocation，同时保留 urgent 升级和 in-flight follow-up 重新排队语义
+
+### Post-completion: PR-tracking wake intent ✅ completed 2026-06-03（PR #2070）
+
+> **根因**：F217 把 Actions 留开 + 两个 guard workflow（pr-followup-guard / shared-state-guard）仍产生 check-run，私人仓 PR 上重新出现 `github-ci` 事件。但 `register_pr_tracking` 把 review feedback + CI/CD + conflict 写死成三合一、**没有 intent**：猫"喊 review 等反馈"和"等 CI 绿去 merge"被塞进同一个 tracking，系统分不清 CI-pass 是噪音还是动作信号。team lead点名两类被误伤的场景：开源仓 outbound PR 等 CI 绿 merge、owner 盯别人 PR 等 CI 绿代 merge。
+
+> **错层教训**：本次最初 4 轮（R1-R4）试图在 CI-green 那刻**推断** intent（用 approval-state：`isHeadApproved` + stale-head 绑定 + in-place-DISMISSED 现查 + transport 重试），每轮 reviewer 抓的新 edge case 都是这个错抽象的症状——「补锅匠」战术勤劳、战略卡在错的层。Maine Coon（GPT-5.5/5.4）把根因拉回 intent 模型后，整套 approval 推断删除、edge case 蒸发。
+
+**修复**：
+- `register_pr_tracking`（schema + callbacks handler + MCP tool）加 optional `intent: 'review' | 'merge'`（默认 `review`），结构化持久到 `task.automationState.intent`；re-register 不指定时保留已有 intent（deep-merge 不丢 ci/review cursors）。**intent 是任务意图、不是 repo 类型**（私人仓可 merge、开源仓可只 review）。
+- `CiCdCheckTaskSpec` CI-pass：`intent==='merge'` 才唤醒（normal → merge-gate），否则静默；CI fail 两种 intent 都 urgent 唤醒。一次查表，删除 approval 推断（`isHeadApproved` / retry-marker / `fetchPrReviews`）。
+- 删遗留 dead poller（`CiCdCheckPoller` + `github-ci-bootstrap`），util 迁 `ci-status-fetcher`。
+- 文档收敛：`cicd-tracking.md` / `pr-signals.md` / `merge-gate` / opensource-ops（outbound / hotfix）/ repo-inbox / mcp-callbacks 对齐 intent 语义；开源/owner-merge 路径显式 `intent='merge'`；merge-gate 写清 fingerprint 时机契约（翻 merge 要在 CI 没绿前，已绿则 `gh pr checks` 自查）。
+- **后续噪音收口（2026-06-04，team lead）**：
+  - `cancelled` run 不再误判 failure（PR #2087）——push 新 commit 时 GitHub 自动取消旧 run，`computeAggregateBucket` 原把 `cancelled` 当 fail → superseded-run 假 CI-fail 唤醒。改：按 GitHub success 态口径（success/skipped/neutral），`cancelled` 既非 fail 也非 success；`pass` 需至少一个真 positive，`cancelled`-only → `pending`（不当假绿灯）。
+  - cat-cafe 私人仓两个 PR guard workflow（`pr-followup-guard` / `shared-state-guard`）已 `gh workflow disable`——与本地 `pnpm gate`（`check:followup-tails` + `preflight-shared-state`）重复、且制造 CI 噪音；F217 已定私人仓不靠 server-side gate。桌面构建/发布 workflow 保留。可逆（`gh workflow enable`）。
 
 ## Acceptance Criteria
 

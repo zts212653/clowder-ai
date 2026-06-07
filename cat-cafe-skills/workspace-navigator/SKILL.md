@@ -23,7 +23,7 @@ triggers:
 
 # Workspace Navigator
 
-铲屎官说"帮我打开XXX"时，你要**自己找到路径，然后调 API 让 Hub 右面板自动导航到那里**。铲屎官不会给你精确路径——这是你的活。
+铲屎官说"帮我打开XXX"时，你要**自己找到路径，然后用 `cat_cafe_workspace_navigate` 让 Hub 右面板自动导航到那里**。铲屎官不会给你精确路径——这是你的活。
 
 ## 核心工作流（三步走）
 
@@ -36,10 +36,13 @@ Step 1: 意图解析 — 铲屎官想看什么？
 Step 2: 路径搜索 — 用你的工具找到精确路径
   用 glob/grep/read 找到文件的相对路径（相对于 worktree 根目录）
 
-Step 3: 调 API — 让 Hub 前端导航
-  curl -X POST http://localhost:3003/api/workspace/navigate \
-    -H "Content-Type: application/json" \
-    -d '{"path": "找到的相对路径", "action": "open", "worktreeId": "目标worktree"}'
+Step 3: 调 typed MCP — 让 Hub 前端导航
+  cat_cafe_workspace_navigate({
+    path: "找到的相对路径",
+    action: "open",
+    worktreeId: "目标worktree",
+    threadId: "当前 threadId（有就传）"
+  })
 ```
 
 ## Step 2 详解：意图→路径匹配策略
@@ -50,7 +53,7 @@ Step 3: 调 API — 让 Hub 前端导航
 
 | 铲屎官说的 | 搜索策略 | 示例命令 |
 |-----------|----------|---------|
-| "打开日志" / "看日志" | **快捷方式：右侧状态面板底部「运行日志 → 查看日志」按钮**。也可用 Navigate API | 按钮会自动打开最新 .log 文件 |
+| "打开日志" / "看日志" | **快捷方式：右侧状态面板底部「运行日志 → 查看日志」按钮**。也可用 `cat_cafe_workspace_navigate` | 按钮会自动打开最新 .log 文件 |
 | "看审计日志" | 审计日志在 `packages/api/data/audit/` 下 | `glob("packages/api/data/audit/**")` |
 | "打开 F131 的文档" | Feature 文档在 `docs/features/` 下 | `glob("docs/features/F131*")` |
 | "看看 F131 的设计图" | Pencil 设计文件 | `glob("**/*F131*.pen")` 或 `glob("designs/*F131*")` |
@@ -81,9 +84,9 @@ Step 3: 调 API — 让 Hub 前端导航
 - 例：`packages/api/data/logs/api/2026-03-21.log`，不是 `/home/user/2026-03-21.log`
 - 目录路径末尾带不带 `/` 都行
 
-## Step 3 详解：调用 Navigate API
+## Step 3 详解：调用 `cat_cafe_workspace_navigate`
 
-### API 参数
+### 工具参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
@@ -100,37 +103,15 @@ Step 3: 调 API — 让 Hub 前端导航
 | 文件（如 `docs/features/F131-workspace-navigator.md`） | `open` | 打开文件查看器显示文件内容 |
 | 不确定 | `reveal` | 安全默认——展开到那里让铲屎官自己看 |
 
-### 获取 API 端口
-
-Cat Cafe API 端口**不要写死**，通过以下方式确定：
-
-1. **优先读运行态 env**：直接用 `API_SERVER_PORT`
-2. **没有 env 时按关系推导**：`API port = Frontend port + 1`
-3. **验证**：`curl -s http://localhost:${API_PORT}/api/workspace/worktrees` 能返回 JSON 即可
-
-> 注意：不同 profile / 发布通道的默认端口不一样。`3001` 是 Hub 前端（Next.js），**不是** API 后端；Navigate API 始终走 Fastify 的 `API_SERVER_PORT`。
-
 ### 调用示例
 
-```bash
-# 先拿当前运行态的 API 端口；没有就先去看 .env / 启动日志，不要写死
-API_PORT="${API_SERVER_PORT:?set API_SERVER_PORT before calling Navigate API}"
+| 场景 | 调用 |
+|------|------|
+| 打开日志目录 | `cat_cafe_workspace_navigate({ path: "packages/api/data/logs/api/", action: "reveal", worktreeId: "cat-cafe-runtime" })` |
+| 打开 Feature 文档 | `cat_cafe_workspace_navigate({ path: "docs/features/F131-workspace-navigator.md", action: "open", worktreeId: "cat-cafe" })` |
+| 打开到某一行 | `cat_cafe_workspace_navigate({ path: "packages/web/src/stores/chatStore.ts", action: "open", worktreeId: "cat-cafe", line: 1273 })` |
 
-# 打开日志目录
-curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
-  -H "Content-Type: application/json" \
-  -d '{"path": "packages/api/data/logs/api/", "action": "reveal", "worktreeId": "cat-cafe-runtime"}'
-
-# 打开 Feature 文档
-curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
-  -H "Content-Type: application/json" \
-  -d '{"path": "docs/features/F131-workspace-navigator.md", "action": "open", "worktreeId": "cat-cafe"}'
-
-# 跨 worktree 打开 runtime 日志
-curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
-  -H "Content-Type: application/json" \
-  -d '{"path": "packages/api/data/logs/api/", "action": "reveal", "worktreeId": "cat-cafe-runtime"}'
-```
+如果 MCP 工具不可用，先说明工具面缺失并按 F223 追踪；不要把手写第一方 `curl localhost` 当主路径。
 
 ## 什么时候主动用
 
@@ -142,13 +123,13 @@ curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
 
 ## 面板快捷入口（F130）
 
-右侧状态面板底部有内置快捷按钮，不需要走 Navigate API：
+右侧状态面板底部有内置快捷按钮，不需要走 `cat_cafe_workspace_navigate`：
 
 | 按钮 | 位置 | 效果 |
 |------|------|------|
 | **运行日志 → 查看日志** | 右侧状态面板，AuditExplorerPanel 下方 | 自动展开到 `packages/api/data/logs/api/` 并打开最新 `.log` 文件 |
 
-铲屎官说"看日志"时，**告诉铲屎官点右侧面板的按钮**比你调 API 更快。你也可以用 Navigate API 代替。
+铲屎官说"看日志"时，**告诉铲屎官点右侧面板的按钮**比你调工具更快。你也可以用 `cat_cafe_workspace_navigate` 代替。
 
 ## 不要做的事
 
@@ -171,7 +152,7 @@ curl -X POST http://localhost:${API_PORT}/api/workspace/navigate \
 
 | 现象 | 原因 | 修法 |
 |------|------|------|
-| 右侧无反应 | API 没跑 / 路径不存在 | 先 `curl localhost:3003/healthz` 确认 API；检查路径是否存在 |
+| 右侧无反应 | Hub/API 没跑 / 路径不存在 / MCP callback 未配置 | 检查工具返回错误；确认路径存在 |
 | 打开了错误的文件 | glob 匹配到了多个，选了错的 | 列出所有匹配让铲屎官确认 |
-| worktree 切换失败 | worktreeId 不存在 | `curl localhost:3003/api/workspace/worktrees` 查看可用列表 |
+| worktree 切换失败 | worktreeId 不存在 | 查看当前 Workspace worktree 列表或改传正确 worktreeId |
 | 面板没自动打开 | Socket 连接可能断了 | 刷新 Hub 页面重试 |

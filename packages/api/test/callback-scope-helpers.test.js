@@ -4,6 +4,7 @@ import { describe, test } from 'node:test';
 const { deriveCallbackActor, resolveBoundThreadScope, resolveScopedThreadId } = await import(
   '../dist/routes/callback-scope-helpers.js'
 );
+const { DEFAULT_THREAD_ID } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 
 describe('callback-scope-helpers', () => {
   const record = {
@@ -80,5 +81,63 @@ describe('callback-scope-helpers', () => {
       },
     });
     assert.deepEqual(result, { ok: true, threadId: 'thread-b' });
+  });
+
+  test('resolveScopedThreadId allows indexed system thread overrides', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-eval-memory', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-eval-memory', createdBy: 'system' };
+        },
+        async list() {
+          return [
+            { id: 'thread-a', createdBy: 'user-1' },
+            { id: 'thread-eval-memory', createdBy: 'system' },
+          ];
+        },
+      },
+    });
+    assert.deepEqual(result, { ok: true, threadId: 'thread-eval-memory' });
+  });
+
+  test('resolveScopedThreadId rejects unindexed system thread overrides', async () => {
+    const result = await resolveScopedThreadId(record, 'thread-eval-memory', {
+      threadStore: {
+        async get() {
+          return { id: 'thread-eval-memory', createdBy: 'system' };
+        },
+        async list() {
+          return [{ id: 'thread-a', createdBy: 'user-1' }];
+        },
+      },
+      accessDeniedError: 'Thread access denied',
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      statusCode: 403,
+      error: 'Thread access denied',
+    });
+  });
+
+  test('resolveScopedThreadId rejects default lobby overrides even when store lists it by convention', async () => {
+    const result = await resolveScopedThreadId(record, DEFAULT_THREAD_ID, {
+      threadStore: {
+        async get() {
+          return { id: DEFAULT_THREAD_ID, createdBy: 'system' };
+        },
+        async list() {
+          return [
+            { id: 'thread-a', createdBy: 'user-1' },
+            { id: DEFAULT_THREAD_ID, createdBy: 'system' },
+          ];
+        },
+      },
+      accessDeniedError: 'Thread access denied',
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      statusCode: 403,
+      error: 'Thread access denied',
+    });
   });
 });

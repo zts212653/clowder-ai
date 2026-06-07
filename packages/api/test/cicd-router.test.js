@@ -315,6 +315,77 @@ describe('CiCdRouter', () => {
     });
   });
 
+  // ── F192 Phase G: onPrLifecycle callback ────────────────────────
+
+  describe('F192 Phase G: onPrLifecycle callback', () => {
+    it('emits merge event on merged PR', async () => {
+      const events = [];
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        onPrLifecycle: (e) => events.push(e),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(events[0].type, 'merge');
+      assert.strictEqual(events[0].outcome, 'success');
+      assert.strictEqual(events[0].threadId, 'thread-abc');
+      assert.strictEqual(events[0].ref, 'PR#42');
+    });
+
+    it('does NOT emit on closed PR (closed ≠ revert)', async () => {
+      const events = [];
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        onPrLifecycle: (e) => events.push(e),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      await router.route(makePollResult({ prState: 'closed' }));
+
+      assert.strictEqual(events.length, 0, 'closed PR must not emit A1 signal');
+    });
+
+    it('does NOT emit on open PR', async () => {
+      const events = [];
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        onPrLifecycle: (e) => events.push(e),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      await router.route(makePollResult({ prState: 'open', aggregateBucket: 'pass' }));
+
+      assert.strictEqual(events.length, 0);
+    });
+  });
+
   // ── AC-A10: patchCiState does not reset registeredAt ────────────
 
   describe('patchCiState preservation (AC-A10)', () => {

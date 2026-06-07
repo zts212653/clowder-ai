@@ -18,6 +18,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
@@ -28,6 +30,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
+  'cat_cafe_workspace_navigate',
+  'cat_cafe_preview_open',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
   // F211 Phase B: IDE-direct external runtime session registration
@@ -118,6 +122,8 @@ const EXPECTED_TOOLS = [
   // F195 Phase C3: Advisory mode tools
   'cat_cafe_audio_set_advisory_mode',
   'cat_cafe_audio_set_talking_points',
+  // F207 Phase B0: finance fact layer
+  'cat_cafe_finance_query',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -125,6 +131,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_get_pending_mentions',
   'cat_cafe_ack_mentions',
   'cat_cafe_get_thread_context',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
   'cat_cafe_get_thread_cats',
   'cat_cafe_list_threads',
   'cat_cafe_feat_index',
@@ -134,6 +142,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
+  'cat_cafe_workspace_navigate',
+  'cat_cafe_preview_open',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
@@ -207,6 +217,9 @@ const EXPECTED_SIGNAL_TOOLS = [
 // F193 Phase C: limb tools (布偶猫专属能力 namespace) get their own server.
 const EXPECTED_LIMB_TOOLS = ['limb_list_available', 'limb_invoke', 'limb_pair_list', 'limb_pair_approve'];
 
+// F207 Phase B0: finance fact tools get their own read-only data-plane server.
+const EXPECTED_FINANCE_TOOLS = ['cat_cafe_finance_query'];
+
 function assertUnique(values, label) {
   assert.equal(new Set(values).size, values.length, `${label} must not contain duplicate tool names`);
 }
@@ -218,6 +231,7 @@ describe('MCP Server Tool Registration', () => {
     assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
     assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
     assertUnique(EXPECTED_LIMB_TOOLS, 'EXPECTED_LIMB_TOOLS');
+    assertUnique(EXPECTED_FINANCE_TOOLS, 'EXPECTED_FINANCE_TOOLS');
   });
 
   test('all expected tools are registered via createServer()', async () => {
@@ -314,6 +328,20 @@ describe('MCP Server Tool Registration', () => {
     assert.ok(listTool.inputSchema._def.shape().agentKeyCatId.isOptional());
   });
 
+  test('Hub action tools expose agentKeyCatId for shared persistent MCP identity', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+
+    const workspaceTool = server._registeredTools.cat_cafe_workspace_navigate;
+    const previewTool = server._registeredTools.cat_cafe_preview_open;
+    assert.ok(workspaceTool, 'workspace_navigate tool should exist');
+    assert.ok(previewTool, 'preview_open tool should exist');
+    assert.ok(Object.keys(workspaceTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(workspaceTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+    assert.ok(Object.keys(previewTool.inputSchema.shape).includes('agentKeyCatId'));
+    assert.ok(previewTool.inputSchema._def.shape().agentKeyCatId.isOptional());
+  });
+
   test('deprecated file tools are not registered', async () => {
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
@@ -362,6 +390,14 @@ describe('MCP Server Tool Registration', () => {
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_LIMB_TOOLS].sort());
   });
+
+  test('F207 AC-B5: createFinanceServer registers only finance fact tool surface', async () => {
+    const { createFinanceServer } = await import('../dist/finance.js');
+    const server = createFinanceServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_FINANCE_TOOLS].sort());
+  });
 });
 
 // --- F061 Phase 2: READONLY_ALLOWED_TOOLS whitelist ---
@@ -375,6 +411,8 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_create_task',
   'cat_cafe_create_rich_block',
   'cat_cafe_generate_document',
+  'cat_cafe_workspace_navigate',
+  'cat_cafe_preview_open',
   'cat_cafe_request_permission',
   'cat_cafe_register_pr_tracking',
   'cat_cafe_register_external_runtime_session',
@@ -427,6 +465,8 @@ const EXPECTED_READONLY_TOOLS = [
   'signal_list_studies',
   // F061 Bug-F workaround: read-only shell exec whitelist enforced at handler level
   'cat_cafe_shell_exec',
+  // F207 Phase B0: read-only finance fact layer wrapper
+  'cat_cafe_finance_query',
 ];
 
 describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
@@ -467,7 +507,12 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
       const { createServer } = await import(${JSON.stringify(distIndexUrl)});
       const server = createServer();
       const names = Object.keys(server._registeredTools);
-      if (!names.includes('cat_cafe_post_message') || !names.includes('cat_cafe_get_thread_context')) {
+      if (
+        !names.includes('cat_cafe_post_message') ||
+        !names.includes('cat_cafe_get_thread_context') ||
+        !names.includes('cat_cafe_workspace_navigate') ||
+        !names.includes('cat_cafe_preview_open')
+      ) {
         console.error(JSON.stringify(names.sort()));
         process.exit(1);
       }

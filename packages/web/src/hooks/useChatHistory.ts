@@ -11,12 +11,14 @@ import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { crossesUserTurnBoundary } from '@/stores/turn-boundary';
 import { apiFetch } from '@/utils/api-client';
+import { resolveCrossPostScrollTarget } from '@/utils/crosspost-scroll-target';
 import {
   loadThreadMessages as loadCachedMessages,
   loadThreadActiveState,
   saveThreadMessages as saveMessagesSnapshot,
   saveThreadActiveState,
 } from '@/utils/offline-store';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 
 type SavedScrollState = {
   top: number;
@@ -491,6 +493,7 @@ export function useChatHistory(threadId: string) {
     updateThreadCatStatus,
     setQueue,
     setQueuePaused,
+    isOfflineSnapshot,
   } = useChatStore();
   const { setTasks } = useTaskStore();
 
@@ -573,6 +576,29 @@ export function useChatHistory(threadId: string) {
       };
 
       restoreFrameRef.current = requestAnimationFrame(apply);
+    },
+    [cancelPendingRestore],
+  );
+
+  // F052: after a cross-post jump, retry scrolling to the source bubble until the message
+  // DOM has rendered (thread switch remounts + paginates async). Gives up after
+  // MAX_RESTORE_FRAMES so a paged-out source can't spin forever — the caller already fell
+  // back to default scroll-restore in that case. Stale-guarded by threadIdRef like scheduleRestore.
+  const scheduleScrollToMessage = useCallback(
+    (messageId: string) => {
+      // A cross-post jump preempts the default scroll-restore so the two raf loops don't fight
+      // over scrollTop (restore pulls to cached offset, this pulls to the target bubble).
+      cancelPendingRestore();
+      const scheduledForThread = threadIdRef.current;
+      let framesRemaining = MAX_RESTORE_FRAMES;
+      const tick = () => {
+        if (threadIdRef.current !== scheduledForThread) return;
+        if (scrollToMessage(messageId)) return;
+        framesRemaining -= 1;
+        if (framesRemaining <= 0) return;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
     },
     [cancelPendingRestore],
   );
@@ -1250,6 +1276,9 @@ export function useChatHistory(threadId: string) {
     // Initial load (includes remount after thread switch — prevCountRef resets to 0).
     // clowder-ai#27: check module-level Map for a saved position before scrolling to bottom.
     if (prevCount === 0) {
+      // Default scroll-restore. A pending cross-post jump is handled by the dedicated effect
+      // below (it runs after this one and cancels this restore on a hit) — kept separate so the
+      // jump survives the IDB-snapshot → fresh-API two-phase load (砚砚 R1 P1).
       scheduleRestore(scrollPositionsByThread.get(threadId) ?? { top: 0, anchor: 'bottom' });
       return;
     }
@@ -1277,6 +1306,18 @@ export function useChatHistory(threadId: string) {
       }
     }
   }, [messages, scheduleRestore, threadId]);
+
+  // F052 + 砚砚 R1 P1: resolve a pending cross-post scroll across BOTH the tentative IDB-snapshot
+  // phase and the authoritative fresh-API phase. Kept independent of the scroll-restore effect
+  // above so it re-runs when isOfflineSnapshot flips true→false (fresh page replaces the stale
+  // snapshot). A hit scrolls + consumes; a miss only gives up once authoritative
+  // (isOfflineSnapshot=false), so a stale-snapshot miss keeps the jump alive for the fresh page.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    if (useChatStore.getState().currentThreadId !== threadId) return;
+    const targetId = resolveCrossPostScrollTarget(threadId, messages, { authoritative: !isOfflineSnapshot });
+    if (targetId) scheduleScrollToMessage(targetId);
+  }, [messages, threadId, isOfflineSnapshot, scheduleScrollToMessage]);
 
   useEffect(() => {
     let rafId: number | null = null;

@@ -359,8 +359,72 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
           reply.status(409);
           return { error: '当前调用无法取消，无法立即执行', code: 'INVOCATION_CANCEL_FAILED' };
         }
+        // Real invocation just cancelled → free its slot so processNext can start the steered entry.
         queueProcessor.clearPause(threadId, steerCatId);
         queueProcessor.releaseSlot(threadId, steerCatId);
+      } else {
+        // 2026-06-02 fix (Steer 无法抢占 — race-safe, 云端 codex R3 P1): tracker has NO live
+        // invocation for steerCatId, but its processingSlot may still be occupied by an executeEntry
+        // stuck in the PRE-START window (processingSlots.set runs before `await
+        // invocationRecordStore.create` + startAll — a window bounded by a Redis `eval`, NOT by any
+        // constant). Force-releasing that slot by age would double-start the cat once create returns.
+        // Instead, mirror callback-a2a-trigger:194-217: TOMBSTONE the in-flight entry. executeEntry
+        // re-checks entry presence right after startAll (QueueProcessor.ts F216-c3 guard) and
+        // self-aborts before routeExecution, then frees its own slot; the promoted steered entry runs
+        // via tryAutoExecute. Race-safe: no slot is force-released, no liveness heuristic.
+        const inflight = invocationQueue.findProcessingByCat(threadId, steerCatId);
+        // 云端 R4 P1-b: cross-user guard — mirror the has()=true `activeUserId !== guard.userId`
+        // rejection. In a public/system thread another user can hold this cat's pre-start slot;
+        // one user must NOT interrupt another user's in-flight entry by steering their own.
+        if (inflight && inflight.userId !== guard.userId) {
+          reply.status(409);
+          return { error: '当前有其他用户的调用在执行，无法立即执行', code: 'INVOCATION_ACTIVE' };
+        }
+        if (inflight) {
+          // An occupied slot with has()=false is ALWAYS "executeEntry pending in the pre-start
+          // (create-await) window" — steer cannot distinguish a slow-but-live create from a hung
+          // one (云端 R3–R6: NO age threshold is sound, since create awaits an unbounded Redis eval).
+          // So force-releasing is never sound (would double-start if create later resumes). The only
+          // sound action is TOMBSTONE: executeEntry self-aborts at its post-startAll guard when create
+          // returns, then the promoted entry runs via tryAutoExecute. A truly-hung create (dead Redis)
+          // is recovered by the 75-min zombie sweep / force-reset endpoint — not by steer.
+          // 云端 R7 P1: collect the tombstoned entry's message ids BEFORE removing it.
+          const tombstonedMsgIds = [inflight.messageId, ...(inflight.mergedMessageIds ?? [])].filter(
+            Boolean,
+          ) as string[];
+          queueProcessor.clearPause(threadId, steerCatId);
+          invocationQueue.removeProcessedAcrossUsers(threadId, inflight.id); // tombstone → self-abort
+          // 云端 R7 P1: mirror the withdraw/clear F117 cleanup — the tombstoned in-flight entry's
+          // executeEntry self-aborts BEFORE its markDelivered block, so without this the original
+          // user message stays permanently 'queued' (undelivered + excluded from context) even though
+          // its queue entry is gone. Mark it canceled + emit message_deleted.
+          if (messageStore) {
+            for (const msgId of tombstonedMsgIds) {
+              await messageStore.markCanceled(msgId);
+              socketManager.emitToUser(guard.userId, 'message_deleted', {
+                messageId: msgId,
+                threadId,
+                deletedBy: guard.userId,
+              });
+            }
+          }
+          invocationQueue.promote(threadId, guard.userId, entryId);
+          socketManager.emitToUser(guard.userId, 'queue_updated', {
+            threadId,
+            queue: invocationQueue.list(threadId, guard.userId),
+            action: 'steer_immediate',
+          });
+          reply.status(202);
+          return {
+            ok: true,
+            deferred: true,
+            code: 'PREEMPT_PENDING_PRESTART',
+            message: '目标正在启动中，已请求中断，插队消息将在当前调用退出后立即执行',
+          };
+        }
+        // No in-flight processing entry occupies the slot → nothing unsafe to clear here.
+        // Fall through to the normal promote + processNext (starts if the slot is genuinely free).
+        queueProcessor.clearPause(threadId, steerCatId);
       }
 
       invocationQueue.promote(threadId, guard.userId, entryId);

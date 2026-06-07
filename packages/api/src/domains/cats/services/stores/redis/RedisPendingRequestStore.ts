@@ -117,6 +117,18 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
 
     if (ok === 0) return null;
 
+    // F222: Index denied requests per-thread for cancel burst detection.
+    // zadd AFTER the Lua CAS succeeds — non-atomic with the status transition
+    // but acceptable: a missed zadd only means one denial isn't counted for the
+    // burst threshold (fail-open, not fail-closed). The threadId is read from
+    // the hash which was just updated by the Lua script.
+    if (decision === 'denied') {
+      const threadId = await this.redis.hget(key, 'threadId');
+      if (threadId) {
+        await this.redis.zadd(PendingReqKeys.threadDenied(threadId), String(now), requestId);
+      }
+    }
+
     // Re-read full record from Redis to return complete state
     return this.get(requestId);
   }
@@ -147,6 +159,32 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
     return records.sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  /** F222: List recently denied requests in a thread since a given timestamp.
+   *  Uses per-thread denied zset (score=respondedAt) for precise, efficient lookup. */
+  async listRecentDenied(threadId: string, sinceMs: number): Promise<PendingRequestRecord[]> {
+    // zrangebyscore on the per-thread denied index — score = respondedAt, so
+    // sinceMs..+inf gives us exactly "denied after sinceMs in this thread".
+    const ids = await this.redis.zrangebyscore(PendingReqKeys.threadDenied(threadId), String(sinceMs), '+inf');
+    if (ids.length === 0) return [];
+
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) {
+      pipeline.hgetall(PendingReqKeys.detail(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+
+    const records: PendingRequestRecord[] = [];
+    for (const [err, data] of results) {
+      if (err || !data || typeof data !== 'object') continue;
+      const d = data as Record<string, string>;
+      if (!d.requestId) continue;
+      records.push(this.hydrateRecord(d));
+    }
+
+    return records.sort((a, b) => (a.respondedAt ?? 0) - (b.respondedAt ?? 0));
+  }
+
   private async evictIfFull(): Promise<void> {
     const count = await this.redis.zcard(PendingReqKeys.ALL);
     if (count < this.maxRecords) return;
@@ -157,15 +195,25 @@ export class RedisPendingRequestStore implements IPendingRequestStore {
       const oldest = allIds[0]!;
       const isWaiting = await this.redis.zscore(PendingReqKeys.WAITING, oldest);
       if (isWaiting === null) {
-        // Resolved — safe to evict
-        await this.redis.del(PendingReqKeys.detail(oldest));
+        // Resolved — safe to evict. Clean up denied index too (F222 R4 fix).
+        await this.cleanupEvictedRecord(oldest);
         await this.redis.zrem(PendingReqKeys.ALL, oldest);
         return;
       }
       // All are waiting — evict oldest anyway
-      await this.redis.del(PendingReqKeys.detail(oldest));
+      await this.cleanupEvictedRecord(oldest);
       await this.redis.zrem(PendingReqKeys.ALL, oldest);
       await this.redis.zrem(PendingReqKeys.WAITING, oldest);
+    }
+  }
+
+  /** F222 R4: On eviction, also remove from per-thread denied zset if applicable. */
+  private async cleanupEvictedRecord(requestId: string): Promise<void> {
+    // Read threadId + status before deleting the hash
+    const [status, threadId] = await this.redis.hmget(PendingReqKeys.detail(requestId), 'status', 'threadId');
+    await this.redis.del(PendingReqKeys.detail(requestId));
+    if (status === 'denied' && threadId) {
+      await this.redis.zrem(PendingReqKeys.threadDenied(threadId), requestId);
     }
   }
 

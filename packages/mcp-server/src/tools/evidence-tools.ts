@@ -6,7 +6,9 @@
  * 不依赖 callback 鉴权 — evidence 路由是公开 GET。
  */
 
+import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
@@ -107,6 +109,8 @@ export async function handleSearchEvidence(input: {
   if (input.dateTo) params.set('dateTo', input.dateTo);
   if (input.contextWindow != null) params.set('contextWindow', String(input.contextWindow));
   if (input.threadId) params.set('threadId', input.threadId);
+  const currentThreadId = process.env['CAT_CAFE_THREAD_ID']?.trim();
+  if (currentThreadId) params.set('currentThreadId', currentThreadId);
   params.set('dimension', dimension);
   if (input.collections) params.set('collections', input.collections);
   if (input.explain) params.set('explain', 'true');
@@ -139,6 +143,7 @@ export async function handleSearchEvidence(input: {
         drillDown?: EvidenceDrillDown;
         sourcePath?: string;
         rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
+        suggestedAction?: SuggestedCrossPostAction;
         passages?: Array<{
           docAnchor?: string;
           passageId: string;
@@ -227,6 +232,9 @@ export async function handleSearchEvidence(input: {
       }
       if (r.drillDown) {
         lines.push(...formatDrillDownLines(r.drillDown));
+      }
+      if (r.suggestedAction) {
+        lines.push(...formatSuggestedCrossPostActionLines(r.suggestedAction, { indent: '  ', detailIndent: '    ' }));
       }
       if (r.rankingFactors) {
         const factors = Object.entries(r.rankingFactors)

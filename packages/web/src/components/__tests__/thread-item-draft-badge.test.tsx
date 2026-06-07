@@ -57,6 +57,14 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
+    name: 'ME',
+    aliases: [],
+    mentionPatterns: ['@co-creator'],
+    color: { primary: '#D4A76A', secondary: '#FFF8F0' },
+  }),
+}));
 
 type OnSend = (content: string, images?: File[], whisper?: WhisperOptions, deliveryMode?: DeliveryMode) => void;
 
@@ -207,7 +215,7 @@ describe('ThreadItem draft badge', () => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
-    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined, undefined);
     expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
   });
 

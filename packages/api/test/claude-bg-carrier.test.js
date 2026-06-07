@@ -23,8 +23,9 @@ import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
  * Captures the env that was passed to spawn() for assertion.
  */
 function buildFakeSpawn({ stdout = '', stderr = '', exitCode = 0, errorOnSpawn = null }) {
-  const fn = function fakeSpawn(_cmd, _args, opts) {
+  const fn = function fakeSpawn(_cmd, args, opts) {
     fn.lastEnv = opts?.env ?? {};
+    fn.lastArgs = args ?? [];
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -40,14 +41,18 @@ function buildFakeSpawn({ stdout = '', stderr = '', exitCode = 0, errorOnSpawn =
     return child;
   };
   fn.lastEnv = null;
+  fn.lastArgs = null;
   return fn;
 }
 
 /** Helper: write a fake job state.json + timeline.jsonl under a custom jobsDir. */
-function seedJobState(jobsDir, shortId, { state, output, timelineLines }) {
+function seedJobState(jobsDir, shortId, { state, output, timelineLines, resumeSessionId }) {
   const jobDir = join(jobsDir, shortId);
   mkdirSync(jobDir, { recursive: true });
-  writeFileSync(join(jobDir, 'state.json'), JSON.stringify({ state, output, daemonShort: shortId }));
+  writeFileSync(
+    join(jobDir, 'state.json'),
+    JSON.stringify({ state, output, daemonShort: shortId, ...(resumeSessionId ? { resumeSessionId } : {}) }),
+  );
   if (timelineLines) {
     writeFileSync(join(jobDir, 'timeline.jsonl'), timelineLines.join('\n') + '\n');
   }
@@ -620,5 +625,88 @@ test('codex round-9 P2: success-path done metadata reports effectiveModel, not c
     done?.metadata?.model,
     'claude-opus-4-7',
     'success-path done must NOT fall back to constructor model when override active',
+  );
+});
+
+// ── F198 Bug #3: session resume + chainKey signal ──────────────────────────
+// Spike 2026-06-03 (宪宪/opus-48): real `claude --bg --resume <uuid>` 3-turn run
+// confirmed resume restores the conversation (no replay/cross-talk, unlike
+// agy/F210) and daemon state.json exposes resumeSessionId (a fresh fork UUID
+// each turn). Carrier must: (a) signal usesChainKeyResume() so the consumer
+// anchors on a stable chainKey, (b) pass --resume for a valid-UUID sessionId,
+// (c) surface state.resumeSessionId on the done event to chain the next turn.
+
+const BUG3_UUID = 'd061424f-044d-4323-9fce-079b7b3d4c38';
+
+test('F198 Bug #3: usesChainKeyResume() is true (consumer anchors on chainKey)', () => {
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: buildFakeSpawn({}),
+    model: 'claude-test-model',
+  });
+  assert.equal(service.usesChainKeyResume(), true);
+});
+
+test('F198 Bug #3: startJob passes --resume <uuid> for a valid-UUID sessionId', async () => {
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+  });
+  await service.startJob('hi', { sessionId: BUG3_UUID });
+  const idx = fakeSpawn.lastArgs.indexOf('--resume');
+  assert.ok(idx >= 0, 'must pass --resume when sessionId is a valid UUID');
+  assert.equal(fakeSpawn.lastArgs[idx + 1], BUG3_UUID, '--resume value must be the conversation UUID');
+});
+
+test('F198 Bug #3: startJob omits --resume for fresh start (no sessionId)', async () => {
+  // Regression guard: adding resume must NOT break the fresh-start path.
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+  });
+  await service.startJob('hi');
+  assert.ok(!fakeSpawn.lastArgs.includes('--resume'), 'fresh start must NOT pass --resume');
+});
+
+test('F198 Bug #3: startJob ignores a non-UUID sessionId (daemon rejects bad ids)', async () => {
+  // The 8-hex daemon shortId is NOT a full UUID; forwarding it would make the
+  // resumed daemon error out.
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · abcd1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+  });
+  await service.startJob('hi', { sessionId: 'abcd1234' });
+  assert.ok(!fakeSpawn.lastArgs.includes('--resume'), 'non-UUID sessionId must NOT be forwarded as --resume');
+});
+
+test('F198 Bug #3: invoke done metadata carries resumeSessionId from state.json', async () => {
+  const RESUME_UUID = 'aced1234-3a77-4b91-8e1f-d2f6e9e954ef';
+  const tmpJobsDir = mkdtempSync(join(tmpdir(), 'bg-chainkey-jobs-'));
+  seedJobState(tmpJobsDir, 'beef1234', {
+    state: 'done',
+    output: { result: 'ok' },
+    resumeSessionId: RESUME_UUID,
+  });
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · beef1234\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+    jobsDir: tmpJobsDir,
+  });
+  const msgs = [];
+  for await (const msg of service.invoke('hi')) msgs.push(msg);
+  const done = msgs.find((m) => m.type === 'done');
+  assert.ok(done, 'must emit done');
+  assert.equal(
+    done.metadata?.resumeSessionId,
+    RESUME_UUID,
+    'done metadata must carry resumeSessionId so invoke-single-cat can chain the next turn',
   );
 });

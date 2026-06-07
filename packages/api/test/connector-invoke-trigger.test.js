@@ -28,7 +28,7 @@ function noopLog() {
  */
 function mockRouter(opts = {}) {
   const calls =
-    /** @type {Array<{userId: string, message: string, threadId: string, userMessageId: string, targetCats: string[], intent: object}>} */ ([]);
+    /** @type {Array<{userId: string, message: string, threadId: string, userMessageId: string, targetCats: string[], intent: object, options?: object}>} */ ([]);
   const ackCalls = /** @type {Array<{userId: string, threadId: string}>} */ ([]);
 
   return {
@@ -37,7 +37,7 @@ function mockRouter(opts = {}) {
     /** @type {any} */
     router: {
       async *routeExecution(userId, message, threadId, userMessageId, targetCats, intent, options) {
-        calls.push({ userId, message, threadId, userMessageId, targetCats, intent });
+        calls.push({ userId, message, threadId, userMessageId, targetCats, intent, options });
 
         if (opts.throwError) throw opts.throwError;
 
@@ -256,6 +256,19 @@ describe('ConnectorInvokeTrigger', () => {
     assert.strictEqual(routerMock.calls[0].threadId, 'thread-1');
     assert.strictEqual(routerMock.calls[0].userMessageId, 'msg-1');
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['opus']);
+  });
+
+  it('F222 P1: connector direct routeExecution passes frustrationAutoIssueEligible=false', async () => {
+    const trigger = createTrigger();
+    trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'Review msg', 'msg-f222');
+    await waitForTrigger();
+
+    assert.strictEqual(routerMock.calls.length, 1);
+    assert.strictEqual(
+      routerMock.calls[0].options?.frustrationAutoIssueEligible,
+      false,
+      'connector direct execution must suppress frustration detection',
+    );
   });
 
   it('broadcasts agent messages to WebSocket room', async () => {

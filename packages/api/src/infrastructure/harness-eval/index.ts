@@ -66,6 +66,25 @@ export type {
 } from './sop/sop-trace-adapter.js';
 // SOP trace + evaluation
 export { buildSopTrace } from './sop/sop-trace-adapter.js';
+// Task outcome (F192 Phase G)
+export type {
+  AssembledEpisode,
+  CancelReason,
+  PermissionCancelInput,
+  StoredEpisode,
+  TaskOutcomeEpisode,
+  TaskOutcomeVerdict,
+} from './task-outcome/index.js';
+export {
+  CANCEL_REASONS,
+  handleA1WorldTruth,
+  handleGetEpisode,
+  handleListEpisodes,
+  handleMagicWord,
+  handlePermissionCancel,
+  TaskOutcomeEpisodeStore,
+  VERDICT_CLASSES,
+} from './task-outcome/index.js';
 export type { HandoffDecision, VerdictHandoffPacket } from './verdict-handoff.js';
 // Verdict handoff
 export { assertCanCrossThreadHandoff, parseVerdictHandoffPacket } from './verdict-handoff.js';

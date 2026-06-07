@@ -194,18 +194,20 @@ function stripReservedSystemConfigs(args: string[], catId: string): string[] {
  */
 // F193 Phase C: split-only. Legacy `cat-cafe` (all-in-one via
 // registerFullToolset) is no longer auto-provisioned because it exposes
-// limb tools that `cat-cafe-limb` now hosts directly — keeping both would
-// duplicate the limb tool surface in Codex sessions (cloud round 6 P1).
+// tool surfaces now hosted directly by split servers — keeping both would
+// duplicate split tool surfaces in Codex sessions (cloud round 6 P1).
 const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-collab', 'collab.js'],
   ['cat-cafe-memory', 'memory.js'],
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
+  ['cat-cafe-finance', 'finance.js'],
 ] as const;
 const CAT_CAFE_MCP_CALLBACK_ENV_KEYS = [
   'CAT_CAFE_API_URL',
   'CAT_CAFE_INVOCATION_ID',
   'CAT_CAFE_CALLBACK_TOKEN',
+  'CAT_CAFE_THREAD_ID',
   'CAT_CAFE_USER_ID',
   'CAT_CAFE_CAT_ID',
   'CAT_CAFE_SIGNAL_USER',

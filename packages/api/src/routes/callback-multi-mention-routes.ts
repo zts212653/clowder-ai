@@ -241,7 +241,13 @@ async function dispatchToTarget(
         invocationId,
         [targetCatId],
         intent,
-        { signal: controller.signal, parentInvocationId: invocationId },
+        {
+          signal: controller.signal,
+          parentInvocationId: invocationId,
+          // F222 P1: Multi-mention fallback dispatch is callback-authenticated cat-to-cat
+          // work (callerCatId = record.catId), consistent with queue path source:'agent'.
+          frustrationAutoIssueEligible: false,
+        },
       )) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

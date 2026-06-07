@@ -259,6 +259,18 @@ export type {
   CreateExternalProjectInput,
   ExternalProject,
 } from './external-project.js';
+// F222: Frustration Auto-Issue types
+export type {
+  CreateFrustrationIssueInput,
+  FrustrationContextMessage,
+  FrustrationContextToolCall,
+  FrustrationIssue,
+  FrustrationIssueContext,
+  FrustrationIssueId,
+  FrustrationIssueStatus,
+  FrustrationSignalType,
+} from './frustration-issue.js';
+export { createFrustrationIssue, generateFrustrationIssueId } from './frustration-issue.js';
 // Game engine types (F101)
 export type {
   ActionDefinition,
@@ -463,6 +475,7 @@ export type {
 export type {
   ProposalApproveOverrides,
   ProposalStatus,
+  ReportingMode,
   ThreadProposal,
 } from './proposal.js';
 // Reflux types (F076 Phase 2 — 回流)
@@ -578,12 +591,21 @@ export type {
   CiAutomationState,
   ConflictAutomationState,
   CreateTaskInput,
+  DispatchGateState,
   ReviewAutomationState,
+  SuggestedCrossPostAction,
+  SuggestedCrossPostActionSource,
   TaskItem,
   TaskKind,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';
+export { extractFeatureIds } from './task.js';
+// F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
+// (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
+export type { CancelReasonValue, PermissionCancelEvent } from './task-outcome.js';
+// Task Outcome types (F192 Phase G)
+export { CANCEL_REASON_OPTIONS } from './task-outcome.js';
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,

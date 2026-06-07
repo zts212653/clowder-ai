@@ -723,6 +723,182 @@ describe('AntigravityBridge session persistence (G0)', () => {
     }
   });
 
+  test('F211-REG11: an IDLE runtime-store cascade ending in error without terminal text is REPLACED', async () => {
+    // Live repro 2026-06-04: Antigravity can report CASCADE_RUN_STATUS_IDLE after a stream/error tail
+    // that produced no terminal planner answer for the latest user turn. Reusing that cascade accepts no
+    // useful follow-up work and pollForSteps later stalls at IDLE. It must be treated like a dirty terminal
+    // boundary and replaced via REG2 fresh-cascade bootstrap.
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-idle-error-tail',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-replacement');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 4,
+      trajectory: {
+        steps: [
+          { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+          { type: 'CORTEX_STEP_TYPE_MCP_TOOL', status: 'CORTEX_STEP_STATUS_ERROR' },
+          { type: 'CORTEX_STEP_TYPE_CHECKPOINT', status: 'CORTEX_STEP_STATUS_DONE' },
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: { error: { userErrorMessage: '连接中断' } },
+          },
+        ],
+      },
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+
+    assert.equal(id, 'cascade-replacement', 'dirty IDLE error tail must not be reused');
+    assert.equal(bridge.startCascade.mock.callCount(), 1, 'must spin a fresh cascade for the follow-up');
+  });
+
+  test('F211-REG11: an IDLE runtime-store cascade ending in client stream error planner tail is REPLACED', async () => {
+    // Cloud Codex P1: some Antigravity stream interruptions produce only a planner response with
+    // STOP_REASON_CLIENT_STREAM_ERROR, without a separate ERROR_MESSAGE step. That shape is still a
+    // dirty non-answer boundary and must not be reused for the follow-up.
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-idle-stream-error-tail',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-replacement');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 2,
+      trajectory: {
+        steps: [
+          { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: { stopReason: 'STOP_REASON_CLIENT_STREAM_ERROR' },
+          },
+        ],
+      },
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+
+    assert.equal(id, 'cascade-replacement', 'IDLE client-stream-error planner tail must not be reused');
+    assert.equal(bridge.startCascade.mock.callCount(), 1, 'must spin a fresh cascade for the follow-up');
+  });
+
+  test('F211-REG11: an IDLE runtime-store cascade with terminal planner text before an error tail is reused', async () => {
+    // Assistant-prefill/error tails can arrive after a real terminal planner answer. That is noisy, but
+    // still a valid continuation boundary. Do not regress to replacing healthy answered turns.
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-answered-then-error',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-should-not-start');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 3,
+      trajectory: {
+        steps: [
+          { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            plannerResponse: { response: 'I have a terminal answer.' },
+          },
+          {
+            type: 'CORTEX_STEP_TYPE_ERROR_MESSAGE',
+            status: 'CORTEX_STEP_STATUS_DONE',
+            errorMessage: {
+              error: { userErrorMessage: 'assistant message prefill: conversation must end with a user message' },
+            },
+          },
+        ],
+      },
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+
+    assert.equal(id, 'cascade-answered-then-error', 'answered IDLE turn remains a valid continuation target');
+    assert.equal(bridge.startCascade.mock.callCount(), 0, 'must not replace a cascade that already answered');
+  });
+
+  test('F211-REG11: an IDLE runtime-store cascade with a generating planner response is REPLACED', async () => {
+    // Live repro sibling: the status gate can read IDLE while the latest planner response is still
+    // GENERATING. That is not a clean next-turn boundary; follow-ups can stall behind the half-open turn.
+    const storePath = tempStorePath();
+    cleanupPaths.push(storePath);
+    const runtimeSessionStore = createRuntimeSessionStoreProbe();
+    runtimeSessionStore.getActiveByThreadCat = mock.fn(async () =>
+      runtimeMetadata({
+        sessionId: 'session-runtime',
+        runtimeSessionId: 'cascade-idle-generating',
+        threadId: 'thread-1',
+        catId: 'antig-opus',
+      }),
+    );
+    const bridge = new AntigravityBridge(
+      { port: 1234, csrfToken: 'test', useTls: false },
+      { sessionStorePath: storePath, runtimeSessionStore },
+    );
+
+    mock.method(bridge, 'startCascade', async () => 'cascade-replacement');
+    mock.method(bridge, 'getTrajectory', async () => ({
+      status: 'CASCADE_RUN_STATUS_IDLE',
+      numTotalSteps: 2,
+      trajectory: {
+        steps: [
+          { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'CORTEX_STEP_STATUS_GENERATING',
+            plannerResponse: { response: 'partial answer still streaming' },
+          },
+        ],
+      },
+    }));
+
+    const id = await bridge.getOrCreateSession('thread-1', 'antig-opus');
+
+    assert.equal(id, 'cascade-replacement', 'IDLE + generating planner is not a clean reuse boundary');
+    assert.equal(bridge.startCascade.mock.callCount(), 1, 'must replace the half-open IDLE cascade');
+  });
+
   test('F211-REG5: a cascade that becomes unreachable DURING the drain is REPLACED, not reused — cloud P2', async () => {
     // Cloud Codex P2: a RUNNING cascade can respond to the initial probe but vanish / lose its LS
     // connection during the best-effort drain — drainCascade then returns skipped_runtime_unreachable.

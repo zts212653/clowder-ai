@@ -170,13 +170,16 @@ docs/discussions/**/sources/*.pdf
 # Playwright MCP cache
 .playwright-mcp/
 
-# SQLite runtime databases (Hindsight evidence store + World Engine)
+# SQLite runtime databases (Hindsight evidence store + World Engine + Task Outcome)
 evidence.sqlite
 evidence.sqlite-shm
 evidence.sqlite-wal
 world.sqlite
 world.sqlite-shm
 world.sqlite-wal
+task-outcome-episodes.sqlite
+task-outcome-episodes.sqlite-shm
+task-outcome-episodes.sqlite-wal
 
 # Antigravity smoke test outputs
 .cat-cafe-antigravity-*-smoke.json

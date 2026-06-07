@@ -27,6 +27,8 @@ export interface IPendingRequestStore {
     reason?: string,
   ): PendingRequestRecord | null | Promise<PendingRequestRecord | null>;
   listWaiting(threadId?: string): PendingRequestRecord[] | Promise<PendingRequestRecord[]>;
+  /** F222: List recently denied requests in a thread since a given timestamp. */
+  listRecentDenied(threadId: string, sinceMs: number): PendingRequestRecord[] | Promise<PendingRequestRecord[]>;
 }
 
 const DEFAULT_MAX = 1000;
@@ -103,6 +105,18 @@ export class PendingRequestStore implements IPendingRequestStore {
       result.push(rec);
     }
     return result.sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /** F222: List recently denied requests in a thread since a given timestamp. */
+  listRecentDenied(threadId: string, sinceMs: number): PendingRequestRecord[] {
+    const result: PendingRequestRecord[] = [];
+    for (const rec of this.records.values()) {
+      if (rec.status !== 'denied') continue;
+      if (rec.threadId !== threadId) continue;
+      if (!rec.respondedAt || rec.respondedAt < sinceMs) continue;
+      result.push(rec);
+    }
+    return result.sort((a, b) => (a.respondedAt ?? 0) - (b.respondedAt ?? 0));
   }
 
   get size(): number {

@@ -313,6 +313,8 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 
 commit body 补一行 `Why:` 说明决策理由。
 
+跨 thread / 跨 feature 调查产生的 commit 或 stash，按 `refs/commit-signatures.md` 追加 `Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>` footer；拿不到字段就省略，不猜、不用 hook 自动改写。
+
 ## 6. 技术债务与 P3 处置
 
 - 发现新债务 → 登记 `docs/TECH-DEBT.md`（不是 BACKLOG！）

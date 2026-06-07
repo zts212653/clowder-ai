@@ -266,6 +266,64 @@ function hasGeneratingPlannerResponse(steps: TrajectoryStep[]): boolean {
   );
 }
 
+function latestUserInputIndex(steps: TrajectoryStep[]): number {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    if (steps[index]?.type === 'CORTEX_STEP_TYPE_USER_INPUT') return index;
+  }
+  return -1;
+}
+
+function isNonEmptyText(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function hasTerminalPlannerTextInLatestTurn(steps: TrajectoryStep[]): boolean {
+  const userInputIndex = latestUserInputIndex(steps);
+  const latestTurnSteps = userInputIndex >= 0 ? steps.slice(userInputIndex + 1) : steps;
+  return latestTurnSteps.some((step) => {
+    if (step.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') return false;
+    if (step.status !== 'CORTEX_STEP_STATUS_DONE' && step.status !== 'FINISHED' && step.status !== 'DONE') {
+      return false;
+    }
+    if (step.plannerResponse?.stopReason === 'STOP_REASON_CLIENT_STREAM_ERROR') return false;
+    if (isNonEmptyText(step.plannerResponse?.modifiedResponse)) return true;
+    return isNonEmptyText(step.plannerResponse?.response);
+  });
+}
+
+function latestTurnHasErrorMessage(steps: TrajectoryStep[]): boolean {
+  const userInputIndex = latestUserInputIndex(steps);
+  const latestTurnSteps = userInputIndex >= 0 ? steps.slice(userInputIndex + 1) : steps;
+  return latestTurnSteps.some((step) => step.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
+}
+
+function latestTurnHasClientStreamErrorPlanner(steps: TrajectoryStep[]): boolean {
+  const userInputIndex = latestUserInputIndex(steps);
+  const latestTurnSteps = userInputIndex >= 0 ? steps.slice(userInputIndex + 1) : steps;
+  return latestTurnSteps.some(
+    (step) =>
+      step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE' &&
+      step.plannerResponse?.stopReason === 'STOP_REASON_CLIENT_STREAM_ERROR',
+  );
+}
+
+function idleCascadeReuseBlockerReason(trajectory: CascadeTrajectory): string | undefined {
+  if (trajectory.status !== 'CASCADE_RUN_STATUS_IDLE') return undefined;
+  const steps = trajectory.trajectory?.steps;
+  if (!Array.isArray(steps)) return undefined;
+  if (steps.length === 0) return undefined;
+  // This is intentionally all-steps, not latest-turn: any half-open planner means the cascade is not reuse-clean.
+  if (hasGeneratingPlannerResponse(steps)) return 'idle_generating_planner_response';
+  const lacksTerminalPlannerText = !hasTerminalPlannerTextInLatestTurn(steps);
+  if (latestTurnHasClientStreamErrorPlanner(steps) && lacksTerminalPlannerText) {
+    return 'idle_client_stream_error_without_terminal_planner_text';
+  }
+  if (latestTurnHasErrorMessage(steps) && lacksTerminalPlannerText) {
+    return 'idle_error_without_terminal_planner_text';
+  }
+  return undefined;
+}
+
 function trajectoryTimestampMs(trajectory: CascadeTrajectory): number | undefined {
   const updatedAt = trajectory.updatedAt;
   if (typeof updatedAt === 'number' && Number.isFinite(updatedAt)) return updatedAt;
@@ -1189,7 +1247,10 @@ export class AntigravityBridge {
           // DONE, or any unrecognized status) is NOT continuable — reusing it would pin the follow-up to
           // a dead cascade (cloud P1 #10) — as does an unreachable cascade (getTrajectory throws, below).
           let reuseCascadeId: string | undefined;
-          const continuable = traj.status === 'CASCADE_RUN_STATUS_IDLE' || traj.status === 'CASCADE_RUN_STATUS_RUNNING';
+          const idleReuseBlocker = idleCascadeReuseBlockerReason(traj);
+          const continuable =
+            (traj.status === 'CASCADE_RUN_STATUS_IDLE' && idleReuseBlocker === undefined) ||
+            traj.status === 'CASCADE_RUN_STATUS_RUNNING';
           if (continuable) {
             if (this.getInFlightCount(active.runtimeSessionId) > 0) {
               // A native tool result is in flight for ANY continuable state — IDLE (a pushToolResult
@@ -1228,8 +1289,9 @@ export class AntigravityBridge {
           }
           // Not a valid continuation target — a reachable but terminal/unknown status (cloud P1 #10) or a
           // cascade that became unreachable during the drain (cloud P2) → replace (REG2 fresh + bootstrap).
+          const notContinuableReason = idleReuseBlocker === undefined ? `status ${traj.status}` : idleReuseBlocker;
           log.info(
-            `runtime-store cascade ${active.runtimeSessionId} not continuable (status ${traj.status}) for ${key}, creating new`,
+            `runtime-store cascade ${active.runtimeSessionId} not continuable (${notContinuableReason}) for ${key}, creating new`,
           );
           runtimeStoreReplacementTarget = active;
         } catch {
@@ -1250,8 +1312,11 @@ export class AntigravityBridge {
       if (!cascadeId) continue;
       try {
         const traj = await this.getTrajectory(cascadeId);
-        if (traj.status !== 'CASCADE_RUN_STATUS_IDLE') {
-          log.info(`cascade ${cascadeId} stuck in ${traj.status} for ${key}, creating new`);
+        const idleReuseBlocker = idleCascadeReuseBlockerReason(traj);
+        const notContinuableReason =
+          traj.status === 'CASCADE_RUN_STATUS_IDLE' ? idleReuseBlocker : `status ${traj.status}`;
+        if (notContinuableReason !== undefined) {
+          log.info(`cascade ${cascadeId} stuck in ${notContinuableReason} for ${key}, creating new`);
           continue;
         }
         if (!this.runtimeSessionStore && this.legacyJsonSessionStore && this.sessionMap.get(key) !== cascadeId) {

@@ -115,7 +115,13 @@ function finishExit(proc, code) {
   });
 }
 
-const CAT_CAFE_SPLIT_SERVER_IDS = ['cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals', 'cat-cafe-limb'];
+const CAT_CAFE_SPLIT_SERVER_IDS = [
+  'cat-cafe-collab',
+  'cat-cafe-memory',
+  'cat-cafe-signals',
+  'cat-cafe-limb',
+  'cat-cafe-finance',
+];
 // F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
 // L5 startup cleanup (writeCodexMcpConfig + deprecated-managed-servers registry)
 // removes user-config legacy entries; L4 per-invocation only writes split servers.
@@ -247,7 +253,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
     const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
     mkdirSync(mcpDistDir, { recursive: true });
-    for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js']) {
+    for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
       writeFileSync(join(mcpDistDir, entrypoint), '// stub');
     }
 
@@ -265,6 +271,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
             CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
             CAT_CAFE_INVOCATION_ID: 'inv-test-1',
             CAT_CAFE_CALLBACK_TOKEN: 'tok-test-1',
+            CAT_CAFE_THREAD_ID: 'thread-test-1',
             CAT_CAFE_USER_ID: 'user-test-1\nline2',
             CAT_CAFE_CAT_ID: 'codex',
             CAT_CAFE_SIGNAL_USER: 'codex',
@@ -284,6 +291,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         ['cat-cafe-memory', 'memory.js'],
         ['cat-cafe-signals', 'signals.js'],
         ['cat-cafe-limb', 'limb.js'],
+        ['cat-cafe-finance', 'finance.js'],
       ];
       for (const [serverId, entrypoint] of splitServers) {
         assert.ok(args.includes(`mcp_servers.${serverId}.command="node"`), `must inject ${serverId} command`);
@@ -318,6 +326,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         assert.ok(
           args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_CALLBACK_TOKEN="tok-test-1"`),
           `must inject CAT_CAFE_CALLBACK_TOKEN on ${serverId}`,
+        );
+        assert.ok(
+          args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_THREAD_ID="thread-test-1"`),
+          `must inject CAT_CAFE_THREAD_ID on ${serverId}`,
         );
         assert.ok(
           args.includes(`mcp_servers.${serverId}.env.CAT_CAFE_USER_ID="user-test-1\\nline2"`),

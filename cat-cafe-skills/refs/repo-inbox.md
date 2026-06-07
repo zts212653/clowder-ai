@@ -13,6 +13,7 @@ GitHub 仓库事件（新 PR、新 Issue、draft→ready）通过 webhook 自动
 - 收到通知后必须打开 GitHub 原对象做首反，不能只看标题 / 摘要。
 - 没有“自动处理”字段也要做 Read → Ground → Gate → Route → Record。
 - 守门 thread 的职责是判断和路由；是否深度 review / merge / intake 由首反 verdict 和接球 owner 决定。
+- **守门 thread 默认不修 bug**：Repo Inbox 首反可以读 issue、打标签、公开回复、发 Direction Card、propose/cross-post 到工程 thread；不要在本 thread 直接开 worktree / 写修复 / 跑 merge-gate。只有铲屎官明确说“就在这个 thread 修/合”，或 P0 安全/数据事故需要立即止血时，才允许本 thread 进入实现。
 - GitHub `#NNN` issue / PR 锚点优先于 Fxxx / 技术域归类；先匹配已有 issue / PR / owner，再判断是否需要新 thread。
 
 ## 通知格式
@@ -90,6 +91,19 @@ If not, we can pick it up from our side.
 {猫猫签名}
 ```
 
+#### Step 1.3: Inbox Implementation Boundary — 首反和修复分离
+
+守门 thread 的默认产出是 **公开首反 + 路由建议**，不是实现。
+
+| 来稿类型 | 守门 thread 可做 | 守门 thread 不做 |
+|---------|------------------|------------------|
+| 陌生 / 普通 reporter 的 bug report | 读原文、判断是否有效、打 `bug/triaged/needs-info/accepted`、公开回复 reporter、发 Direction Card | 直接开 worktree 修 bug |
+| 活跃 contributor / collaborator 的 bug report | 先问是否计划自提 PR；Direction Card 走 `ask-author-pr-intent` | 抢先内部修复，挤掉作者 PR 空间 |
+| 已有 active PR | 路由为 `review-existing-pr` / `merge-gate` | 重新实现同一个问题 |
+| 无明显 owner 的有效 bug | 给铲屎官 2-3 个路由建议，或 propose 独立 bugfix thread | 在守门 thread 自己长期 hold / 修复 |
+
+例外：铲屎官当轮明确授权“在这个 thread 修/合”，或 P0 安全/数据事故需要立即止血。例外也要在 Direction Card / 收口消息里写明原因。
+
 ### Step 2: Ground — 基础合法性
 
 | 检查 | 不通过处置 |
@@ -120,7 +134,7 @@ If not, we can pick it up from our side.
 
 | 场景 | 守门动作 | 后续 owner |
 |------|----------|------------|
-| 明确 bug issue，无现有 PR | 标 `bug` / `triaged`，发 Direction Card（下一步=`fix`）；需要修复则 propose/cross-post 到工程 thread | 接球 thread 负责实现修复 |
+| 明确 bug issue，无现有 PR | 陌生/普通 reporter：可先公开确认/追问信息；标 `bug` / `triaged`；发 Direction Card（下一步=`route-fix`）；需要修复则 propose/cross-post 到工程 thread，或给铲屎官 2-3 个路由建议 | 接球 thread 负责实现修复；守门 thread 不直接修 |
 | 明确 bug issue，**已有社区 PR 在修** | 标 `bug` / `triaged`，发 Direction Card（下一步=`review-existing-pr`）；cross-post **必须写明"review PR #xxx，不是重新实现"** | 接球 thread 负责 review 该 PR，不重写 |
 | 明确 bug issue，作者高概率自提 PR | 标 `bug` / `triaged`，公开问作者是否自提 PR；Direction Card 下一步=`ask-author-pr-intent` | 当前守门 thread 等作者意图，或指定 intake owner |
 | bug 明确是 `#NNN` issue / PR follow-up | 先打开 referenced issue / PR；若 PR active，路由为 review / merge-gate；若无 PR/owner，propose 窄 thread | PR owner / reviewer thread，或新建 issue/PR thread |
@@ -142,6 +156,7 @@ If not, we can pick it up from our side.
 - 已经 cross-post / propose-thread 分发后，外部作者 / CI / GitHub bot / review 的 hold 或事件驱动由接球 thread 负责。
 - 守门 thread 只记录 `target thread / owner / next action / report-back`，不要继续替下游 hold。
 - 只有当守门 thread 明确保留 owner 时，才由守门 thread 自己 `hold_ball` 或转事件驱动。
+- 明确保留 owner 只适用于信息追问、作者意图等待、或铲屎官明确授权的本 thread 修复；普通 bugfix 不因“当前猫看懂了”就留在守门 thread 实现。
 
 #### Direction Card（F168 台账联动）
 
@@ -165,6 +180,8 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 | `prNumber` | 通知 `source.meta.number` |
 
 > **catId / threadId 由服务端自动解析**：API 从调用猫的 invocation record 取 `catId` 和 `threadId`，不接受 payload 覆盖。即：谁调用 `register_pr_tracking`，PR 就归谁追踪。
+
+> **wake intent（F140）**：WELCOME 阶段 owner 是在**审 / triage** 这个 incoming PR，用默认 `intent='review'`（CI-pass 静默，不被打扰）。等你决定"**CI 绿就用 owner 权限 merge 这个 PR**"时，再 `register_pr_tracking(..., intent='merge')` 翻一下，CI 全绿才会唤醒你去 merge（时机契约见 merge-gate skill）。
 
 注册后 F139 调度框架自动激活 `conflict-check` + `review-feedback` poller，PR 进入 F140 追踪层。
 
@@ -199,6 +216,7 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 | 看见 eval / scheduler / UI 关键词就直接投 Fxxx thread，跳过 `#NNN` 关联 PR | follow-up bug 被派错 owner，已有 PR review 链断裂 | 先打开 body/comment 里的 `#NNN`；active PR / issue owner 优先于 broad feature thread |
 | 社区 PR 已经在修 issue，handoff 却写“请修复” | 下游猫重做实现，社区作者贡献被绕过 | active linked PR 的下一步是 review / merge-gate；只有 PR 不可用才自修 |
 | 活跃 contributor 刚提 issue，就立刻内部派工 | 抢掉作者自提 PR 的空间，后续重复实现 | 先问作者是否打算 PR；Direction Card 走 `external-wait` + `ask-author-pr-intent` |
+| 守门 thread 看到有效 bug 就直接开修 | Inbox 变成工程 thread，铲屎官失去路由控制，容易和 feature/thread owner 撞车 | 先公开首反 + Direction Card；实现交给独立 bugfix thread / feature owner；无明显 owner 时给铲屎官路由建议 |
 | WELCOME 后只给 verdict，不给 owner / route | 球权掉地上 | Direction Card 必填 route、owner、next action、report-back |
 | 分发给下游 thread 后继续在守门 thread hold | 双 owner、重复轮询、死锁 | 谁接球谁 hold；守门 thread 只保留路由记录 |
 | PR 还没 accepted issue 就深度 code review | 方向错也浪费 reviewer | 先 issue-first；无 accepted issue 不进代码 review |

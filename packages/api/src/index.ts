@@ -84,6 +84,7 @@ import { createAuthorizationAuditStore } from './domains/cats/services/stores/fa
 import { createAuthorizationRuleStore } from './domains/cats/services/stores/factories/AuthorizationRuleStoreFactory.js';
 import { createBacklogStore } from './domains/cats/services/stores/factories/BacklogStoreFactory.js';
 import { createCommunityIssueStore } from './domains/cats/services/stores/factories/CommunityIssueStoreFactory.js';
+import { createFrustrationIssueStore } from './domains/cats/services/stores/factories/FrustrationIssueStoreFactory.js';
 import { createLabelStore } from './domains/cats/services/stores/factories/LabelStoreFactory.js';
 import { createMemoryStore } from './domains/cats/services/stores/factories/MemoryStoreFactory.js';
 import { createMessageStore } from './domains/cats/services/stores/factories/MessageStoreFactory.js';
@@ -163,6 +164,7 @@ import {
   externalRuntimeSessionsRoutes,
   featureDocDetailRoutes,
   firstRunQuestRoutes,
+  frustrationIssueRoutes,
   governanceStatusRoute,
   guideActionRoutes,
   intentCardRoutes,
@@ -474,6 +476,9 @@ async function main(): Promise<void> {
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
   const proposalStore = createProposalStore(redis);
+  const frustrationIssueStore = createFrustrationIssueStore(redis);
+  // F222: Create early so it's available for both AgentRouter (cancel burst detection) and AuthorizationManager
+  const authPendingStore = createPendingRequestStore(redis);
   // F155 B-4/B-6: Guide state is runtime-only (in-memory, resets on restart)
   const { InMemoryGuideSessionStore } = await import('./domains/guides/GuideSessionRepository.js');
   const guideSessionStore = new InMemoryGuideSessionStore();
@@ -1349,6 +1354,8 @@ async function main(): Promise<void> {
     dismissTracker,
     worldContextProvider,
     worldStore,
+    frustrationIssueStore,
+    pendingRequestStore: authPendingStore,
   });
 
   // F39: Message queue delivery
@@ -1427,6 +1434,32 @@ async function main(): Promise<void> {
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
+    // F192 Phase G AC-G12: magic word detection → task outcome signal
+    onMagicWordDetected: (hits: Array<{ word: string }>, threadId: string, catId: string | null) => {
+      try {
+        for (const hit of hits) {
+          const ep =
+            taskOutcomeStore.getActiveEpisode(threadId) ??
+            taskOutcomeStore.createEpisode({
+              trigger: 'cat_initiated',
+              threadId,
+              participants: catId ? [catId] : [],
+            });
+          taskOutcomeStore.appendSignal(ep.episodeId, {
+            category: 'a2',
+            record: {
+              type: 'magic_word',
+              word: hit.word,
+              timestamp: new Date().toISOString(),
+              threadId,
+              catId: catId ?? 'unknown',
+            },
+          });
+        }
+      } catch {
+        // Best-effort: don't fail message processing
+      }
+    },
   };
   await app.register(messagesRoutes, messagesOpts);
   await app.register(queueRoutes, {
@@ -1506,12 +1539,38 @@ async function main(): Promise<void> {
     checkReadiness,
   });
   // F192 Phase E-hub: harness eval verdict lifecycle surface.
+  // F192 OQ-21: late-bound holder for ConnectorInvokeTrigger — eval-hub routes
+  // register before invokeTrigger is created (line ~2600). Manual trigger route
+  // resolves the live trigger at request time via this holder, so the provider
+  // returns null until index.ts wires it after invokeTrigger construction.
+  const invokeTriggerHolder: {
+    current: ConnectorInvokeTrigger | null;
+    get(): ConnectorInvokeTrigger | null;
+  } = {
+    current: null,
+    get() {
+      return this.current;
+    },
+  };
+
   const { evalHubRoutes } = await import('./routes/eval-hub.js');
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
     redis: redisClient ?? undefined,
+    invokeTriggerProvider: invokeTriggerHolder,
+    messageStore,
   });
+
+  // F192 Phase G: Task Outcome Episode — L3 eval signals.
+  const { TaskOutcomeEpisodeStore } = await import('./infrastructure/harness-eval/task-outcome/task-outcome-store.js');
+  const taskOutcomeDbPath = process.env.TASK_OUTCOME_DB ?? resolve(repoRoot, 'task-outcome-episodes.sqlite');
+  const taskOutcomeStore = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
+  // AC-G13: Cancel burst detector (in-memory, per-process)
+  const { CancelBurstDetector } = await import('./infrastructure/harness-eval/task-outcome/cancel-burst-detector.js');
+  const cancelBurstDetector = new CancelBurstDetector({ threshold: 3, windowMs: 60_000 });
+  const { taskOutcomeRoutes } = await import('./routes/task-outcome.js');
+  await app.register(taskOutcomeRoutes, { store: taskOutcomeStore });
 
   // F153: Prompt X-Ray debug routes
   const { promptCaptureRoutes } = await import('./routes/prompt-captures.js');
@@ -1710,7 +1769,7 @@ async function main(): Promise<void> {
 
   // Authorization system — 猫猫动态权限 (Redis-backed when available)
   const authRuleStore = createAuthorizationRuleStore(redis);
-  const authPendingStore = createPendingRequestStore(redis);
+  // authPendingStore created earlier (line ~480) for F222 cancel burst detection
   const authAuditStore = createAuthorizationAuditStore(redis);
   const authManager = new AuthorizationManager({
     ruleStore: authRuleStore,
@@ -1724,6 +1783,57 @@ async function main(): Promise<void> {
     ruleStore: authRuleStore,
     auditStore: authAuditStore,
     socketManager,
+    onPermissionCancel: (input) => {
+      try {
+        // taskOutcomeStore is created earlier in this file (F192 Phase G).
+        // AC-G10: use structured cancel reason from frontend popup if valid enum,
+        // otherwise default to 'skip' (auth free-text reason is not a cancel category).
+        const VALID_REASONS = ['should_not_do', 'wrong_direction', 'i_will_do_it', 'skip'];
+        const cancelReason =
+          input.cancelReason && VALID_REASONS.includes(input.cancelReason) ? input.cancelReason : 'skip';
+        taskOutcomeStore.appendSignal(
+          (
+            taskOutcomeStore.getActiveEpisode(input.threadId) ??
+            taskOutcomeStore.createEpisode({
+              trigger: 'cat_initiated',
+              threadId: input.threadId,
+              participants: input.catId ? [input.catId] : [],
+            })
+          ).episodeId,
+          {
+            category: 'a2',
+            record: {
+              type: 'permission_cancel',
+              toolName: input.toolName,
+              paramsSummary: input.paramsSummary,
+              reason: cancelReason,
+              timestamp: new Date().toISOString(),
+              catId: input.catId,
+              threadId: input.threadId,
+            },
+          },
+        );
+
+        // AC-G13: Check for cancel burst (≥3 cancels in 1 minute)
+        const burstResult = cancelBurstDetector.record(input.threadId, Date.now());
+        if (burstResult.burst) {
+          const ep = taskOutcomeStore.getActiveEpisode(input.threadId);
+          if (ep) {
+            taskOutcomeStore.appendSignal(ep.episodeId, {
+              category: 'proxy',
+              record: {
+                type: 'cancel_burst',
+                value: burstResult.count,
+                timestamp: new Date().toISOString(),
+                threadId: input.threadId,
+              },
+            });
+          }
+        }
+      } catch {
+        // Best-effort: don't break authorization flow
+      }
+    },
   });
   await app.register(threadsRoutes, {
     threadStore,
@@ -1758,6 +1868,9 @@ async function main(): Promise<void> {
     invocationQueue,
     queueProcessor,
   });
+  // F222: Frustration auto-issue routes
+  await app.register(frustrationIssueRoutes, { frustrationIssueStore });
+
   // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
   const { RedisConnectorThreadBindingStore } = await import(
     './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
@@ -2566,6 +2679,13 @@ async function main(): Promise<void> {
   // F139 Phase 4b: late-bind invokeTrigger so templates can wake cats
   taskRunnerV2.setInvokeTrigger(invokeTrigger);
 
+  // F192 OQ-21: late-bind invokeTrigger for manual eval trigger endpoint.
+  // eval-hub routes registered at line ~1543 (before invokeTrigger existed);
+  // the holder pattern lets `POST /api/eval-domains/:domainId/trigger-now`
+  // resolve the live trigger at request time. Without this bind, the route
+  // returns 503 instead of waking the eval cat.
+  invokeTriggerHolder.current = invokeTrigger;
+
   // F167 Phase M: late-bind busy checker for pre-fire defer (hold_ball activation).
   // Same thread-busy signal as delivery-batch-done (messages.ts:1822 /
   // ConnectorInvokeTrigger.ts:692): active invocation OR queued/processing slot.
@@ -2596,6 +2716,33 @@ async function main(): Promise<void> {
           threadId,
         );
       },
+      // F192 Phase G: wire PR merge/close events to task-outcome episodes
+      onPrLifecycle: (event) => {
+        try {
+          const ep =
+            taskOutcomeStore.getActiveEpisode(event.threadId) ??
+            taskOutcomeStore.createEpisode({
+              trigger: 'cat_initiated',
+              threadId: event.threadId,
+              participants: [],
+            });
+          taskOutcomeStore.appendSignal(ep.episodeId, {
+            category: 'a1',
+            record: {
+              type: event.type,
+              ref: event.ref,
+              outcome: event.outcome,
+              timestamp: new Date().toISOString(),
+            },
+          });
+          // Auto-complete on merge+success (same logic as handleA1WorldTruth)
+          if (ep.terminalState === 'in_progress' && event.type === 'merge' && event.outcome === 'success') {
+            taskOutcomeStore.updateTerminalState(ep.episodeId, 'completed');
+          }
+        } catch {
+          // Best-effort: don't break CI/CD routing
+        }
+      },
     });
 
     // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)
@@ -2610,8 +2757,6 @@ async function main(): Promise<void> {
       deliveryDeps,
       log: app.log,
     });
-
-    taskRunnerV2.register(createCiCdCheckTaskSpec({ taskStore, cicdRouter, invokeTrigger, log: app.log }));
 
     // F140: conflict-check with ConflictRouter + urgent trigger
     const checkMergeable = async (repo: string, pr: number) => {
@@ -2649,6 +2794,8 @@ async function main(): Promise<void> {
     // #798: fetchPaginated extracted to infrastructure/github/fetch-paginated.ts for testability
     const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
     const fetchPaginated = (endpoint: string, sinceId?: number) => fetchPaginatedFn(endpoint, { sinceId });
+
+    taskRunnerV2.register(createCiCdCheckTaskSpec({ taskStore, cicdRouter, invokeTrigger, log: app.log }));
 
     taskRunnerV2.register(
       createReviewFeedbackTaskSpec({

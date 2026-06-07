@@ -24,6 +24,7 @@ import { resolveCollectionScanner } from '../domains/memory/scanner-resolver.js'
 import { ensureVectorTable } from '../domains/memory/schema.js';
 import { computeFromThreads } from '../domains/memory/ToolUsageMetricsAggregator.js';
 import { VectorStore } from '../domains/memory/VectorStore.js';
+import { buildThreadCrossPostSuggestion, extractThreadIdFromRecentAnchor } from './cross-thread-affordance.js';
 
 export interface LibraryRoutesOptions {
   catalog: LibraryCatalog;
@@ -593,6 +594,7 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
       limit?: string;
       kinds?: string;
       verified?: string;
+      currentThreadId?: string;
     };
     const since = qs.since?.trim() || '7d';
     // 砚砚 cloud-7 P2: validate `since` format. parseSinceToIso falls back to
@@ -631,7 +633,17 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     const callerCollections: string[] | undefined = undefined;
     const resolver = new RecentBrowseResolver(opts.catalog, opts.stores);
     const result = await resolver.list({ scope, since, limit, kinds, callerCollections, verified });
-    const response: Record<string, unknown> = { items: result.items };
+    const currentThreadId = qs.currentThreadId?.trim();
+    const items = result.items.map((item) => {
+      const suggestedAction = buildThreadCrossPostSuggestion(
+        item.kind === 'thread' ? extractThreadIdFromRecentAnchor(item.anchor) : undefined,
+        currentThreadId,
+        'list_recent',
+        'Recent item is another thread; dispatch relevant findings back to that thread.',
+      );
+      return suggestedAction ? { ...item, suggestedAction } : item;
+    });
+    const response: Record<string, unknown> = { items };
     if (result.groups) response.groups = result.groups;
     if (result.nudge) response.nudge = result.nudge;
     return response;

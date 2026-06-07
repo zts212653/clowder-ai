@@ -146,7 +146,8 @@ export const externalRuntimeSessionReadTools = [
   {
     name: 'cat_cafe_list_external_runtime_sessions',
     description:
-      'List orphan or IDE-direct external runtime sessions by runtime, cat, and recent activity. ' +
+      'List orphan, dispatched, or IDE-direct external runtime sessions by runtime, cat, and recent activity. ' +
+      'Use when an external runtime session looks lost, detached from the current thread, or needs cross-runtime drilldown. ' +
       'Use before reading digest/events when there is no normal Cat Cafe thread yet.',
     inputSchema: listExternalRuntimeSessionsInputSchema,
     handler: handleListExternalRuntimeSessions,
@@ -155,6 +156,7 @@ export const externalRuntimeSessionReadTools = [
     name: 'cat_cafe_read_external_runtime_session',
     description:
       'Read one external runtime session metadata record and drilldown pointers. ' +
+      'Use after list when you need the sessionId, runtime binding, digest pointer, or handoff event path for an external runtime session. ' +
       'After this, use cat_cafe_read_session_digest or cat_cafe_read_session_events with the returned sessionId.',
     inputSchema: readExternalRuntimeSessionInputSchema,
     handler: handleReadExternalRuntimeSession,

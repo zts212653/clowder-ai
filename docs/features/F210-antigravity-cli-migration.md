@@ -305,6 +305,38 @@ Phase G AGY profile E2E smoke runner source: `docs/features/assets/F210/phase-g-
 | KD-13 | Profiled AGY runs must be verification-first and fail closed | AGY still lacks a documented per-call model selector; Cat Cafe can only run unattended profile cats when isolated settings/trust/model status are verified and wrong/missing model runs cannot record resumable sessions | 2026-05-31 |
 | KD-14 | Do not ship AGY local language-server API as the production interactive carrier in 1.0.3 | The API can observe state but a complete API-created send/stream/cancel/model-select lifecycle is not proven; `agy --print` profile sandboxes remain the production path, and PTY/tmux is manual takeover only | 2026-06-01 |
 
+## Open Spike: Streamable Trajectory（2026-06-01, Ragdoll/Opus-4.8）
+
+延续 Phase C 的 resume-replay 认知（`textMode: replace` 只压住单条回复内重放，多轮 resume 仍**累加历史**）+ Phase G 的 local-API 线，但换了角度和数据源：**只读观测面 + 本地 SQLite**，区别于 KD-14 拒绝的 local-API **写控制面**（send/model/cancel）。动机有二：(a) runtime Siamese多轮 resume 实测累加重放（A=[1]→B=[1,2]→C=[1,2,3]，三篇论文真翻译但重复段是历史文本回放）；(b) `agy --print` 阻塞执行使长任务全程黑盒，需 streamable。
+
+[实测 2026-06-01] 真跑 agy 确认：agy 每次起**临时 LS 子进程**（独立 `appDataDir=~/.gemini/antigravity-cli`，跑完即关，**非** IDE 常驻 LS），把 cascade trajectory **逐 step 写入本地 SQLite** `<appDataDir>/conversations/<uuid>.db` 的 `steps` 表（`idx` 递增 + `step_type`/`status` 明文 integer + `step_payload`/`render_info` proto blob）。poll 该表 `WHERE idx > :cursor ORDER BY idx` 即可做 **step 级 streamable**，并按 `idx` 游标取增量，**顺带根治多轮 resume 重放**（输出来源从全量 stdout 改为 trajectory 增量）。
+
+- 完整 spike（命门 / 三次路径修正 / steps 表实证 / L1-L2 方案 / 8 个开放问题）：`docs/features/assets/F210/streamable-trajectory-spike-2026-06-01.md`
+- 落地分层：**L1** 明文 `idx/step_type/status` → 进度流（无需解码，立即可用）；**L2** 解 `step_payload` proto（逆向 schema 或 `ConvertTrajectoryToMarkdown` RPC）→ tool call 名/参数/内容
+- 与 F211 关系：同思维（trajectory 增量）不同数据源——F211 孟加拉猫走「连 LS」（REG9 status-poll / REG10 push），本 spike 走「读 SQLite」；F211 实测的 read-RPC delta 字段静默忽略坑被 SQLite `idx` 游标绕开
+### Owner 讨论结论（Maine Coon/GPT-5.5, 2026-06-01）
+
+Maine Coon（F210 owner）拍板：**SQLite 直读可扛，挂新 Phase H，不并回 Phase G**。关键纠正 + 拆分：
+
+- **数据源**：选 SQLite 直读（本地 / 无鉴权 / `idx` 天然游标 / 可 TDD）；临时 LS RPC 仅作 L2 fallback；log tail 仅用于发现 `cascadeId`。
+- **关键纠正（解耦）**：L1 进度 ≠ 根治重放。**H1 只加 progress side-channel，最终回复仍走 stdout**，不在 H1 承诺"废 stdout"；根治重放归 **H2**（届时把最终输出源从 stdout 切到 trajectory 文本，重放自然消失）。
+- **fail-open 硬约束**：SQLite 读做能力探测（db / `steps` 表 / `idx`·`step_type`·`status` 列存在），不满足就**禁用 progress、保留现有 stdout 行为**；只读连接 + `busy_timeout` + `idx > cursor` poll + 进程退出后 final poll 一次。
+- **UI 文案**：H1 不硬标 step_type（8/9/14/15/23/98），未知显示中性"AGY trajectory step #N running/completed"，枚举坐实后（H3）再加语义标签。
+
+**Phase H 拆分**：
+- **H1** ✅ **merged（PR #2044, squash `0fa2f27f0`, 2026-06-02）**：`AgyTrajectoryObserver`（SQLite 增量 poll，retry/incompatible 三态 fail-open）+ `resolveAgyTrajectoryDbPath` + `observeAgyProgress`（依赖注入可测 generator）+ 接入 `invokeAntigravityCLI`（agyConsumeTask 后台消费 + 并发 merge loop，liveness/progress 实时 side-channel）。实时写假设已 spike 坐实（steps 1→10 横跨 25s）。Maine Coon跨族 review（2 本地 P1：startup race + liveness real-time；2 云端 P1/P2：consumer rejection + nonblocking poll，全修）+ 云端 codex 0 major。68 测试全绿。
+  - **H1-hotfix** ✅ **merged（PR #2047, squash `b30da6f9e2`, 2026-06-02）**：H1 后端 emit per-step `agy_trajectory_progress` side-channel，但前端两 render path（`handleAgentMessage` 主路径 + `consumeBackgroundSystemInfo` 后台）都没识别 → fallback 渲染原始 JSON 成 system bubble，N-step 任务刷 N 个 bubble。修：两 path 各加 `agy_trajectory_progress → consumed=true` 静默消费（仿 timeout_diagnostics）。red→green（含 active path 复现）+ liveness 零回归 + gate PASS。gpt52 跨族 review 0 P1 + 云端 codex 0 major。**alpha 验收 gap 教训**：H1 单测+review 全绿但前端集成无人 review、无 runtime alpha 验收，merge 后team lead重启 production 才暴露刷屏。**遗留 non-blocking 测试缺口**（gpt52 标）：新 agy 红测只覆盖 active path，background path 靠 code inspection + 类比 timeout suppression 既有覆盖 → **H2 补 background path 专门红测**。
+- **H2**（Maine Coon拍 H2a/H2b 拆分，2026-06-02）：trajectory 内容提取，替换 resumed stdout final text；红测复现 `[1]→[1,2]→[1,2,3]` 只输出本轮（根治重放）。proto 解码首选逆向 schema，备选趁临时 LS 活着调 `ConvertTrajectoryToMarkdown`（fallback，生命周期不可靠）。
+  - **H2a-locator** ✅ **merged（PR #2048, squash `7154e0c538`, 2026-06-02）**：抽 `AgyTrajectoryLocator`（fresh log 走原 resolver；resume 空 log 扫 `conversations/*.db` 只接受 invocationStart 后新建单候选；0/多/无 appDataDir → fail-open 不猜）+ `listAgyConversationDbs` fs 扫描 + `resolveAgyAppDataDir`（effective child HOME）+ observeAgyProgress/GeminiAgentService 接入。**修 B spike confirmed 的 H1 resume progress P2 gap**（agy resume 不写 log + 另起新 cascade db → 旧 observer resume turn 零 progress）。Maine Coon APPROVE + Re-confirm + 云端 codex 0 major（云端抓真 P2：appDataDir 派生漏 accountEnv.HOME，已修）。locator 单元 5 + resume scan + fs 2 red→green + 真数据 dogfood，全 78/78 + gate 绿。**carryover 到 H2b/extractor**：invocationStartMs missing-watermark guard + trajectory_meta 多候选消歧 + H1 background path 专门红测。
+  - **H2b/extractor** ✅ **merged（PR #2056, squash `ad49f9c87c`, 2026-06-02）**：手写 minimal proto wire-format parser（不引 protobufjs）解 step_payload 顶层 field 20→1 (final)/8 (fallback)，排除 3 (thinking)；`readAgyTrajectorySteps`（只读 SQLite）+ `extractAgyFinalTextFromSteps`（取最后 final）+ `classifyAntigravityCliPlainText` resumed 替换 + `GeminiAgentService` 接入（resumed turn locator→db read→extractor→替换 stdout 重放）。**根治 resume 累加重放**（`[1]→[1,2]→[1,2,3]` 只输出本轮）。全 fail-open（varint/size bounds + 无 db/无 final/解析失败 → 保留 stdout）。carryover 收齐（invocationStartMs guard + trajectory_meta 保守 fail-open）。Maine Coon APPROVE + Re-confirm（真实 AGY DB dogfood 216/598/1814/1957 chars final 正确抽）+ 云端 codex 抓 2 真 P2 全修（accountEnv.HOME / empty stdout 丢 final）。95/95 + gate 绿。**遗留**：无 live resume golden fixture（AGY resume §8.5 上游串台 bug），真实 resume 替换待 alpha/dogfood。
+  - **H2b 遗留 AGY 上游 bug（§8.5）**：live resume 时 agy 把任务当 agent 任务跑（thinking 串台，输出诡异），不是干净累加重放。extractor 逻辑已验证正确（fresh fixture + 真实 DB dogfood），但端到端真实 resume 替换需 AGY resume 行为正常时才能验。
+- **H3** ✅ **merged（PR #2063, squash `aa941f6cd4`, 2026-06-02）**：step_type 粗标签（15=assistant activity / 14·98=lifecycle / 23=metadata / 9=operation activity 不硬标 tool call / unknown=neutral）+ 折叠单行 agy 进度 UI（`formatAgyProgressDetail` "AGY working · N steps · latest" → thread 级 catStatusDetails → ThinkingIndicator chat 区单行 + ThreadCatStatus tooltip，复用现有不加新组件，不刷 bubble，done/cancel workingCats 过滤自动折叠）。Maine Coon APPROVE + 云端 codex 0 major。后端 22 + 前端 20 测 + gate 绿。**遗留**：live AGY browser dogfood 待 alpha 验真实 UI；cache leak（gemini/gemini25 未配 agyProfile → repo root 泄漏 cache/projects.json）= F210 P2 follow-up（bug report 已 commit）。
+- **H4** ✅ **merged（PR #2097, squash `ddba3696e`, 2026-06-04）**：**AGY trajectory tool-call 渲染 + 卡片对齐**。从 SQLite `step_payload` 中通过 Protobuf 解码提取出工具名、工具 CallId 和参数，并在进程结束前实时 yield 为 `tool_use`/`tool_result`，对齐 Claude/Codex 的大猫卡片及工具列表折叠渲染。因二次裁判 review 指出的 P1（observer cursor 原地更新丢失）、P2（YAML frontmatter / any 移除 / Biome format 尾巴）等已通过 follow-up PR #2099 全部修复，并通过全量本地门禁测试（GATE PASSED，commit SHA: `e927d377`）。
+
+**关键 AC**：progress side-channel 不得影响现有最终答复语义；SQLite 任何失败必须降级回当前 stdout 路径。
+
+> 下一步：opus-4.8 开 worktree 从 H1 红测起。Phase H 正式定义 / AC 编号待 owner Maine Coon在主 doc Phase 区补（本节为讨论结论速记）。
+
 ## Review Gate
 
 - Kickoff review: `@antig-opus` reviews this spec for Antigravity product facts and missing recon points.

@@ -83,7 +83,8 @@ interface ThinkingIndicatorProps {
 export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps) {
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const effectiveThreadId = threadId ?? currentThreadId;
-  const { targetCats, catStatuses, catInvocations, activeInvocations } = useThreadLiveness(effectiveThreadId);
+  const { targetCats, catStatuses, catStatusDetails, catInvocations, activeInvocations } =
+    useThreadLiveness(effectiveThreadId);
   const { getCatById } = useCatData();
 
   // Derive display+cancel target from the same truth source (activeInvocations)
@@ -205,14 +206,17 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
     );
   }
 
-  // Default: normal thinking/streaming indicator
+  // Default: normal thinking/streaming indicator.
+  // F210 H3: agy trajectory 进度（catStatusDetails）覆盖默认"回复中/思考中"，让 agy 长任务过程在
+  // chat 区单行可见（折叠，不刷屏；done 后该 cat 不在 streaming/pending → 此分支不渲染）。
+  const agyProgress = catStatusDetails?.[catId];
   return (
     <div className="px-5 py-2 border-b border-cafe bg-cafe-surface-elevated">
       <div className="flex items-center gap-2">
         <span className="text-sm leading-none animate-bounce">🐾</span>
         <span className="text-sm text-cafe-secondary">
           {name}
-          {status === 'streaming' ? '回复中' : '思考中'}
+          {agyProgress ? ` · ${agyProgress}` : status === 'streaming' ? '回复中' : '思考中'}
         </span>
         {/* #738: animated typing dots */}
         <span className="flex items-center gap-0.5">

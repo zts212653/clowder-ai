@@ -47,16 +47,19 @@ Step 1: 确认目标服务器在跑
   → 200/301/304 = 可以继续
   → 000/connection refused = 服务器没起来，先启动再说
 
-Step 2: 调用 auto-open API
-  curl -X POST http://localhost:API_PORT/api/preview/auto-open \
-    -H "Content-Type: application/json" \
-    -d '{"port": PORT}'
+Step 2: 调用 typed MCP
+  cat_cafe_preview_open({
+    port: PORT,
+    path: "/",
+    worktreeId: "当前 worktreeId（有就传）",
+    threadId: "当前 threadId（有就传）"
+  })
 
 Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
   → 如果没反应，检查 Step 1 是否真的返回了 200
 ```
 
-#### API 参数
+#### 工具参数
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
@@ -70,7 +73,7 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 
 | 现象 | 原因 | 修法 |
 |------|------|------|
-| 右侧无反应 | 目标服务器没在跑 | 先 `curl localhost:PORT` 确认 |
+| 右侧无反应 | 目标服务器没在跑 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再看工具返回错误 |
 | `{"error":"Proxy error","message":"socket hang up"}` | 目标服务器已退出 | 重启服务器，再刷新 Browser panel |
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
@@ -113,8 +116,9 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 
 ## 不要做的事
 
-- **不要跳过 Step 1（验证服务器）直接调 auto-open** — 服务器没跑 = proxy error
+- **不要跳过 Step 1（验证服务器）直接调 `cat_cafe_preview_open`** — 服务器没跑 = proxy error
 - **不要用 Playwright / Chrome MCP / `open` 命令打开系统浏览器** — F120 是 Hub 内嵌预览，走 iframe，不走系统浏览器
+- **不要手写 `/api/preview/auto-open` 的 `curl`** — 主路径是 `cat_cafe_preview_open`
 - 不要手动去构造 gateway URL（让 Hub 前端处理）
 - 不要尝试预览外部 URL（只支持 localhost）
 - 不要预览 Cat Cafe 自身服务端口（会被端口验证拦截）

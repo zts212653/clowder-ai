@@ -11,13 +11,13 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 const log = createModuleLogger('context-transport');
 
 import { estimateTokens } from '../../../../../utils/token-counter.js';
-import { formatMessage } from '../../context/ContextAssembler.js';
+import { buildMessageMap, formatMessage } from '../../context/ContextAssembler.js';
 import { checkContextBudget, type DegradationResult } from '../../orchestration/DegradationPolicy.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread } from '../../stores/ports/ThreadStore.js';
-import { canViewMessage } from '../../stores/visibility.js';
+import { canViewMessage, resolveVisibleReplyParent } from '../../stores/visibility.js';
 import type { AgentMessage, AgentService } from '../../types.js';
 import type { InvocationDeps } from '../invocation/invoke-single-cat.js';
 import { extractRecentArtifacts, mergeLedger } from './artifact-tracking.js';
@@ -62,6 +62,10 @@ export interface RouteStrategyDeps {
   skillLoadEventLog?: import('../../tool-usage/SkillLoadEventLog.js').SkillLoadEventLog;
   /** F148 Phase F: Task store for navigation context (optional, fail-open) */
   taskStore?: import('../../stores/ports/TaskStore.js').ITaskStore;
+  /** F222: Frustration auto-issue store (optional, fail-open) */
+  frustrationIssueStore?: import('../../stores/ports/FrustrationIssueStore.js').IFrustrationIssueStore;
+  /** F222: Pending request store — used for cancel burst detection (listRecentDenied) */
+  pendingRequestStore?: import('../../stores/ports/PendingRequestStore.js').IPendingRequestStore;
   /** F093: World context provider for world-building mode (optional, fail-open) */
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup (optional, fail-open) */
@@ -150,6 +154,11 @@ export interface RouteOptions {
   completeA2ASlots?: ((threadId: string, catIds: readonly CatId[], controller: AbortController) => void) | undefined;
   /** F153 Phase E: Root route span — invocation spans become children of this. */
   routeSpan?: import('@opentelemetry/api').Span | undefined;
+  /** F222 P1: Whether this route is eligible for frustration auto-issue detection.
+   *  true/undefined = user-origin (eligible, default for backward compat).
+   *  false = agent/connector-origin (A2A handoff, connector trigger) — suppress
+   *  frustration detection to avoid surfacing system-internal errors as user-facing issues. */
+  frustrationAutoIssueEligible?: boolean | undefined;
 }
 
 export interface IncrementalContextResult {
@@ -795,6 +804,7 @@ export async function assembleIncrementalContext(
       recentArtifacts,
       rankedSources,
       storedLedgerArtifacts,
+      viewer,
     );
   }
 
@@ -822,12 +832,38 @@ export async function assembleIncrementalContext(
   }
 
   const truncateLimit = budget.maxContentLengthPerMsg;
+  // #699: Build map from full relevant set for inline reply-to preview.
+  // Cursor gap fix: messages replying to older content (before cursor) need
+  // a targeted fetch so the inline preview can resolve the parent.
+  // Uses resolveVisibleReplyParent — atomic fetch + visibility gate.
+  const replyParentOpts = {
+    threadId,
+    viewer,
+    hideOtherCatStreams: (thinkingMode ?? 'play') === 'play',
+  };
+  const baseMap = new Map(buildMessageMap(relevant));
+  const missingReplyIds = [
+    ...new Set(capped.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+  ];
+  if (missingReplyIds.length > 0) {
+    const resolved = await Promise.all(
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOpts)),
+    );
+    for (const msg of resolved) {
+      if (msg) baseMap.set(msg.id, msg);
+    }
+  }
+  const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
   const lines = capped.map((m) => {
     // F22: Digest rich blocks into compact summaries for context
     const contentWithDigest = digestRichBlocks(m);
     const cleanContent = sanitizeInjectedContent(contentWithDigest);
     const normalized: StoredMessage = cleanContent === m.content ? m : { ...m, content: cleanContent };
-    const rendered = formatMessage(normalized, { truncate: truncateLimit });
+    const rendered = formatMessage(normalized, {
+      truncate: truncateLimit,
+      messageMap,
+      sanitizeContent: sanitizeInjectedContent,
+    });
     return `[${m.id}] ${rendered}`;
   });
 
@@ -938,6 +974,7 @@ async function assembleSmartWindowContext(
   recentArtifacts: import('./artifact-tracking.js').RecentArtifact[],
   rankedSources: import('./source-ranking.js').RankedSource[],
   preReadStoredArtifacts: import('./artifact-tracking.js').RecentArtifact[],
+  viewer: { type: 'cat'; catId: CatId } | { type: 'user' },
 ): Promise<IncrementalContextResult> {
   const budget = getCatContextBudget(catId as string);
   const truncateLimit = budget.maxContentLengthPerMsg;
@@ -1086,11 +1123,32 @@ async function assembleSmartWindowContext(
   const scrubbedBurst = scrubToolPayloads(burst);
 
   // 6. Format burst messages
+  // #699: Build map from full relevant set for inline reply-to preview.
+  // Cursor gap fix: burst messages may reply to content from the omitted window —
+  // uses resolveVisibleReplyParent — atomic fetch + visibility gate.
+  const replyParentOptsCold = { threadId, viewer, hideOtherCatStreams: true };
+  const baseMap = new Map(buildMessageMap(relevant));
+  const missingReplyIds = [
+    ...new Set(scrubbedBurst.filter((m) => m.replyTo && !baseMap.has(m.replyTo)).map((m) => m.replyTo!)),
+  ];
+  if (missingReplyIds.length > 0) {
+    const resolved = await Promise.all(
+      missingReplyIds.map((id) => resolveVisibleReplyParent(deps.messageStore, id, replyParentOptsCold)),
+    );
+    for (const msg of resolved) {
+      if (msg) baseMap.set(msg.id, msg);
+    }
+  }
+  const messageMap: ReadonlyMap<string, StoredMessage> = baseMap;
   const burstLines = scrubbedBurst.map((m) => {
     const contentWithDigest = digestRichBlocks(m);
     const cleanContent = sanitizeInjectedContent(contentWithDigest);
     const normalized: StoredMessage = cleanContent === m.content ? m : { ...m, content: cleanContent };
-    const rendered = formatMessage(normalized, { truncate: truncateLimit });
+    const rendered = formatMessage(normalized, {
+      truncate: truncateLimit,
+      messageMap,
+      sanitizeContent: sanitizeInjectedContent,
+    });
     return `[${m.id}] ${rendered}`;
   });
 

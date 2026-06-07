@@ -207,6 +207,34 @@ skills:
     sop_step: null
     merged_from: ["systematic-debugging"]
 
+  # ── Code as Harness（用代码修自己 / 建新能力） ──
+  code-as-harness:
+    description: >
+      检测摩擦信号 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或沉淀新 harness。
+      Fix（确认重复→hook/lint/guard）+ Build（反复出现的新任务→规划新 skill）。
+      Use when: 铲屎官不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
+      Not for: 一次性批评（搜证据未发现重复）、玩笑式笨猫、首次代码 bug（用 debugging）、
+      review 反馈（用 receive-review）、一次性新任务（直接做不建 harness）。
+      Output: Rich block 诊断卡 + 可选 F128 新 thread 提议 + 根因分类。
+      GOTCHA: 必须先搜证据确认重复才弹卡。"又"是高频词不能字面匹配。一次性新任务先做再沉淀。
+    triggers:
+      - "又忘了"
+      - "多少次了"
+      - "每次都"
+      - "怎么还"
+      - "总是忘"
+      - "又失忆"
+      - "反复出现的新任务"
+    not_for:
+      - "一次性批评"
+      - "笨猫哈哈"
+      - "首次代码 bug"
+      - "review 反馈"
+      - "一次性新任务"
+    output: "Rich block 诊断卡 / F128 thread 提议 / 根因分类"
+    next: ["debugging", "deep-research", "writing-skills", "self-evolution"]
+    sop_step: null
+
   # ── 质量门禁 ──
   quality-gate:
     description: >

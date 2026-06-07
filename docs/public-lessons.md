@@ -1453,3 +1453,15 @@ created: 2026-02-26
 - 药方二：**Same-template scan**: spec 提到 "stderr log" 时，grep `'CLI stderr` literal 字符串，每个 hit 都核对契约 — abnormal-exit + timeout + success-exit 三个分支都该 sweep。我只 sweep 了一个。
 - 药方三：**Sibling-branch reminder**: cli-spawn 有 4 个 yield 分支（success / abnormal / timeout / cancel），改任一分支的 contract 时，必须对照同 file 其他分支看是否同 template、是否需要同改。这是 "audit-by-file-structure" 的具体落地。
 - 关联：F212 Phase F | PR #2011 + PR #2016 | LL-066（biome --unsafe 同型）| LL-068（同概念多处定义） | Maine Coon R2 post-merge BLOCKING catch
+
+### LL-070: Security hotfix 必须带「开源用户实际部署场景」影响分析
+- 状态：confirmed
+- 更新时间：2026-06-03
+- 现象：clowder-ai#835 的 hotfix（PR #2077，commit `354a9377c`，F163 admin + prompt-captures owner gate）在 cat-cafe / clowder-ai 双仓 merge 后，铲屎官 push back："开源社区用户大概率是自己 Mac 部署 + Tailscale 手机连 Mac 玩猫，这个情况你们别影响人家了，或者如果有影响必须写文档和 RN"。复盘发现：commit body / PR body / 没有 RN 条目，**完全没写**开源用户 Mac + Tailscale 远程访问场景下要怎么配 `DEFAULT_OWNER_USER_ID` 才能继续用 admin/debug 工具。即使实测"普通玩猫 0 影响"，"开发者 debug" 和 "手机调 admin" 场景 silent fail，用户撞墙才知道。
+- 根因：47/Maine Coon review 时只测 source 仓 happy path（单用户 localhost），**没显式枚举开源用户实际部署画像**（Mac + Tailscale / Mac + 反代 / NAS / 远程 SSH）。「单用户 localhost 模式 0 影响」是真的，但不等于「开源用户 0 影响」——后者用 Tailscale 把手机 IP 变成 100.x.x.x 非 loopback，新 guard 在 owner env 未配置时直接 403。
+- 元层：之前 LL-035 / LL-045 都是 "source 仓改动 → opensource 用户被打脸" 的不同变体。本条把 **opensource impact analysis** 升级为 hotfix lane 的固定章节，强制 commit body / PR body / RN 至少出现一次。
+- 药方一：**Hotfix 三件套**：commit message 必须含「(a) 受影响 endpoint 清单 + (b) 默认环境（localhost）影响评估 + (c) 开源典型部署画像影响评估」。三选一空 = reviewer block。
+- 药方二：**开源典型部署画像**至少枚举：① 单用户 Mac localhost ② Mac + Tailscale 手机远程 ③ Mac + 反代/cloudflared ④ NAS / Docker ⑤ 多用户共享部署。逐一标 ✅0 影响 / ⚠️有影响（说明配置方法） / ❌阻塞（说明 workaround）。
+- 药方三：**RN 必须有"Compatibility & Upgrade Notes"章节**：所有引入新鉴权 / 改变 endpoint 行为的 hotfix，RN 必须有 "Existing Users Action Required" 子段，写明：(a) 哪些场景默认 OK、(b) 哪些场景需要新配置（含 env var 名 + 示例）、(c) 哪些是不可迁移要 workaround。
+- 药方四：**Opensource-ops skill 加 reflex**：hotfix lane 输出 commit message 前必须自检"开源用户三件套"在 body 里出现；缺一项 = LL-070 block。
+- 关联：clowder-ai#835 | PR #2077 (cat-cafe) | PR #853 (clowder-ai) | LL-035 / LL-045（source→opensource 漂移历史） | feedback_archetype_over_font_size（reviewer 与愿景冲突时 push back）

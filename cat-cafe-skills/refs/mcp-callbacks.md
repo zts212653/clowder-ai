@@ -1,171 +1,52 @@
 # MCP Callbacks HTTP API Reference
 
-> 降级自 `using-mcp-callbacks` skill。纯 API 参考，按需查阅。
+> 降级自 `using-mcp-callbacks` skill。按需查阅。
+
+## 主路径
+
+猫猫默认使用 `cat_cafe_*` MCP 工具，不手写 Cat Café 第一方 callback HTTP。
+
+HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 skill 主路径。只有在工具目录缺失、agent-key / invocation credentials 故障诊断、或维护 callback server 本身时，才查 route 名称；这种场景需要在 PR / handoff 里说明为什么不能走 MCP。
+
+## Tool Mapping
+
+| 需求 | MCP tool | 底层 route（维护者参考） |
+|------|----------|--------------------------|
+| 发当前 thread 中途消息 | `cat_cafe_post_message` | `POST /api/callbacks/post-message` |
+| 跨 thread 通知 | `cat_cafe_cross_post_message` | `POST /api/callbacks/post-message` with target thread fields |
+| 读 thread 上下文 | `cat_cafe_get_thread_context` | `GET /api/callbacks/thread-context` |
+| 查当前 thread 猫列表 | `cat_cafe_get_thread_cats` | `GET /api/callbacks/thread-cats` |
+| 找 thread | `cat_cafe_list_threads` | `GET /api/callbacks/list-threads` |
+| 查 feature index | `cat_cafe_feat_index` | `GET /api/callbacks/feat-index` |
+| 查 pending mentions | `cat_cafe_get_pending_mentions` | `GET /api/callbacks/pending-mentions` |
+| ack mentions | `cat_cafe_ack_mentions` | `POST /api/callbacks/ack-mentions` |
+| 建毛线球任务 | `cat_cafe_create_task` | `POST /api/callbacks/create-task` |
+| 更新任务状态 | `cat_cafe_update_task` | `POST /api/callbacks/update-task` |
+| 列任务 | `cat_cafe_list_tasks` | `GET /api/callbacks/list-tasks` |
+| 注册 PR tracking | `cat_cafe_register_pr_tracking` | `POST /api/callbacks/register-pr-tracking` |
+| 搜证据 | `cat_cafe_search_evidence` | `GET /api/callbacks/search-evidence` |
+| 写长期记忆 | `cat_cafe_retain_memory_callback` | `POST /api/callbacks/retain-memory` |
+| 请求权限 | `cat_cafe_request_permission` | `POST /api/callbacks/request-permission` |
+| 查权限请求状态 | `cat_cafe_check_permission_status` | `GET /api/callbacks/permission-status` |
+| 创建 rich block | `cat_cafe_create_rich_block` | `POST /api/callbacks/create-rich-block` |
+| 提交游戏行动 | `cat_cafe_submit_game_action` | `POST /api/callbacks/submit-game-action` |
+| 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |
+| 开多猫 vote | `cat_cafe_start_vote` | `POST /api/callbacks/start-vote` |
 
 ## Credentials
 
-环境变量在 spawn 时自动注入：
-- `$CAT_CAFE_INVOCATION_ID` — 当前 invocation ID
-- `$CAT_CAFE_CALLBACK_TOKEN` — 短期 auth token (~10 min)
+MCP 工具会从 invocation credentials 或 agent-key sidecar 自动处理认证。不要把 `$CAT_CAFE_INVOCATION_ID` / `$CAT_CAFE_CALLBACK_TOKEN` 拼进 skill 示例里。
 
-**提示**：@ 队友用文本方式（行首 `@句柄`）更简单，不需要 HTTP。
+常见失败：
 
-## Endpoints
-
-### Post Message
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/post-message \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "消息内容" '{invocationId:$i,callbackToken:$t,content:$c}')"
-```
-
-post-message 始终发到当前 invocation 的 thread。跨 thread 发消息请用 `cross-post-message`（需传 `threadId`）。
-
-### Get Thread Context
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"
-```
-
-可选 query 参数：
-- `catId`：`user` 或具体猫句柄（如 `codex`、`gpt52`、`opus`）
-- `keyword`：按消息 `content` 做大小写不敏感匹配
-
-示例：
-```bash
-# 看 @codex 的消息
-curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&catId=codex"
-
-# 按关键词检索
-curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&keyword=review"
-
-# 组合过滤
-curl "$CAT_CAFE_API_URL/api/callbacks/thread-context?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&catId=gpt52&keyword=search"
-```
-
-### List Threads
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/list-threads?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"
-```
-
-可选 query 参数：
-- `limit`：返回数量上限（默认 20，最大 200）
-- `activeSince`：Unix 毫秒时间戳，仅返回此时间后活跃的 threads
-
-示例：
-```bash
-# 最近 10 个 thread
-curl "$CAT_CAFE_API_URL/api/callbacks/list-threads?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&limit=10"
-
-# 查看最近一天活跃 thread
-SINCE=$(node -e "process.stdout.write(String(Date.now()-24*60*60*1000))")
-curl "$CAT_CAFE_API_URL/api/callbacks/list-threads?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&activeSince=$SINCE"
-```
-
-### Feat Index
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/feat-index?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"
-```
-
-可选 query 参数：
-- `limit`：返回数量上限（默认 20，最大 100）
-- `featId`：按 feature ID 精确匹配（case-insensitive，如 `f043` 匹配 `F043`）
-- `query`：按 `featId + name + status` 做大小写不敏感模糊匹配
-
-示例：
-```bash
-# 精确查某个 feature
-curl "$CAT_CAFE_API_URL/api/callbacks/feat-index?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&featId=F043"
-
-# 按关键字模糊查（会匹配 featId/name/status）
-curl "$CAT_CAFE_API_URL/api/callbacks/feat-index?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&query=F04"
-```
-
-### Get Pending @Mentions
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/pending-mentions?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"
-```
-
-### Update Task Status
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/update-task \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg tid "任务ID" --arg s "doing" '{invocationId:$i,callbackToken:$t,taskId:$tid,status:$s}')"
-```
-
-### List Tasks
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/list-tasks?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"
-```
-
-可选 query 参数：
-- `threadId`：仅查看特定 thread 的任务
-- `catId`：仅查看 owner 为该猫的任务
-- `status`：仅查看指定状态（`todo|doing|blocked|done`）
-
-### Register PR Tracking
-
-Call after `gh pr create` so PR review notifications route to the current thread.
-
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/register-pr-tracking \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg repo "zts212653/cat-cafe" --argjson pr 100 --arg catId "opus" '{invocationId:$i,callbackToken:$t,repoFullName:$repo,prNumber:$pr,catId:$catId}')"
-```
-
-### Search Evidence (Hindsight)
-```bash
-curl "$CAT_CAFE_API_URL/api/callbacks/search-evidence?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN&q=查询&limit=5"
-```
-
-### Reflect (Hindsight)
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/reflect \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg q "反思问题" '{invocationId:$i,callbackToken:$t,query:$q}')"
-```
-
-### Retain Memory (Hindsight)
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/retain-memory \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg c "结论" '{invocationId:$i,callbackToken:$t,content:$c,tags:["project:cat-cafe"]}')"
-```
-
-### Request Permission
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/request-permission \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg a "git_commit" --arg r "原因" '{invocationId:$i,callbackToken:$t,action:$a,reason:$r}')"
-```
-Returns `granted` / `denied` / `pending`（pending 需轮询 permission-status）。
-
-### Create Rich Block
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/create-rich-block \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" '{invocationId:$i,callbackToken:$t,block:{id:"b1",kind:"card",v:1,title:"标题",bodyMarkdown:"内容",tone:"info"}}')"
-```
-**注意**：字段是 `"kind"` 不是 `"type"`！必须有 `"v": 1`。
-
-### Submit Game Action (F101)
-```bash
-curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/submit-game-action \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg gid "游戏ID" --argjson round 1 --arg phase "night_wolf" --argjson seat 3 --arg action "kill" --argjson target 5 --arg nonce "唯一字符串" '{invocationId:$i,callbackToken:$t,gameId:$gid,round:$round,phase:$phase,seat:$seat,action:$action,target:$target,nonce:$nonce}')"
-```
-
-参数说明：
-- `gameId`：游戏 UUID
-- `round`：当前轮次
-- `phase`：当前阶段（`night_wolf`/`night_witch`/`night_seer`/`night_guard`/`day_vote`/`day_discuss`/`day_last_words`）
-- `seat`：你的座位号
-- `action`：行动类型（`kill`/`guard`/`divine`/`vote`/`speak`/`last_words`/`heal`/`poison`）
-- `target`（可选）：目标座位号
-- `text`（可选）：发言内容
-- `nonce`：唯一字符串，防重复提交
+| 现象 | 处理 |
+|------|------|
+| invocation callback 401 | 当前 callback token 过期；用本轮可用 MCP 工具重试，或在最终回复里用行首 `@` 路由 |
+| shared Antigravity MCP 缺凭证 | 传 `agentKeyCatId`，让工具选择对应猫的 sidecar key |
+| 工具目录完全没有对应能力 | 按 F223 追踪 execution surface 缺口，不把 HTTP route 当主路径 |
 
 ## Notes
 
-- 仅用于异步场景（mid-task progress）。正常回复直接输出文本。
-- `$CAT_CAFE_API_URL` 自动设置（通常 `http://127.0.0.1:3004`）。
-- HTTP 不可用时可用 `cc_rich` 文本 fallback。
+- 正常回复直接输出文本；只有中途进度、跨 thread 通知、任务状态等需要 callback MCP。
+- Rich block 主路径是 `cat_cafe_create_rich_block`；字段仍是 `kind` / `v` / `id`。
+- 维护 callback server 时请读 `packages/mcp-server/src/tools/callback-tools.ts` 和 `packages/api/src/routes/callbacks.ts`，不要从 skill 文档复制 HTTP 示例。

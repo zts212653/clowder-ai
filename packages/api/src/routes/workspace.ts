@@ -37,6 +37,7 @@ import {
   registerWorktrees,
   removeLinkedRoot,
   resolveWorkspacePath,
+  resolveWorktreeIdByPath,
   WorkspaceSecurityError,
 } from '../domains/workspace/workspace-security.js';
 
@@ -46,6 +47,57 @@ const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB image preview
 const MAX_SEARCH_RESULTS = 100;
 const MAX_TREE_DEPTH = 5;
 const MAX_CONTENT_SEARCH_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per searchable text file
+
+export type ResolveWorktreeIdByPathForNavigate = (root: string) => Promise<string>;
+
+export interface WorktreeCanonicalizationFallbackProbe {
+  reason: 'resolve_failed';
+  requestedWorktreeId: string;
+  errorName: string;
+  errorMessage: string;
+  errorCode?: string;
+}
+
+export interface WorktreeCanonicalizationProbe {
+  worktreeId: string;
+  canonicalized: boolean;
+  fallback?: WorktreeCanonicalizationFallbackProbe;
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!error) return undefined;
+  if (typeof error !== 'object') return undefined;
+  if (!('code' in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+export async function canonicalizeNavigateWorktreeId(
+  requestedWorktreeId: string,
+  root: string,
+  resolver: ResolveWorktreeIdByPathForNavigate = resolveWorktreeIdByPath,
+): Promise<WorktreeCanonicalizationProbe> {
+  try {
+    const resolvedWorktreeId = await resolver(root);
+    return {
+      worktreeId: resolvedWorktreeId,
+      canonicalized: resolvedWorktreeId !== requestedWorktreeId,
+    };
+  } catch (error) {
+    const errorCode = getErrorCode(error);
+    return {
+      worktreeId: requestedWorktreeId,
+      canonicalized: false,
+      fallback: {
+        reason: 'resolve_failed',
+        requestedWorktreeId,
+        errorName: error instanceof Error ? error.name : 'Error',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        ...(errorCode ? { errorCode } : {}),
+      },
+    };
+  }
+}
 
 const CONTENT_SEARCH_EXTENSIONS = new Set([
   '.ts',
@@ -280,6 +332,7 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
 interface WorkspaceRouteOpts {
   socketEmit?: (event: string, data: unknown, room: string) => void;
   auditLog?: EventAuditLog;
+  resolveWorktreeIdByPathForNavigate?: ResolveWorktreeIdByPathForNavigate;
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (app, opts) => {
@@ -792,8 +845,29 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       return { error: 'worktreeId and path required' };
     }
 
+    let canonicalWorktreeId = worktreeId;
+    let canonicalizationProbe: WorktreeCanonicalizationProbe = {
+      worktreeId,
+      canonicalized: false,
+    };
     try {
       const root = await getWorktreeRoot(worktreeId);
+      canonicalizationProbe = await canonicalizeNavigateWorktreeId(
+        worktreeId,
+        root,
+        opts.resolveWorktreeIdByPathForNavigate,
+      );
+      canonicalWorktreeId = canonicalizationProbe.worktreeId;
+      if (canonicalizationProbe.fallback) {
+        request.log.warn(
+          {
+            worktreeId,
+            canonicalWorktreeId,
+            canonicalizeFallback: canonicalizationProbe.fallback,
+          },
+          'workspace navigate worktreeId canonicalization fallback',
+        );
+      }
       const resolved = await resolveWorkspacePath(root, filePath);
       await stat(resolved);
     } catch (e) {
@@ -809,9 +883,16 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       return { error: 'Internal error' };
     }
 
-    const eventData = { path: filePath, worktreeId, action, line, threadId, eventId: randomUUID() };
-    if (worktreeId) {
-      opts.socketEmit?.('workspace:navigate', eventData, `worktree:${worktreeId}`);
+    const eventData = {
+      path: filePath,
+      worktreeId: canonicalWorktreeId,
+      action,
+      line,
+      threadId,
+      eventId: randomUUID(),
+    };
+    if (canonicalWorktreeId) {
+      opts.socketEmit?.('workspace:navigate', eventData, `worktree:${canonicalWorktreeId}`);
       opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
     } else {
       opts.socketEmit?.('workspace:navigate', eventData, 'workspace:global');
@@ -822,7 +903,10 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         type: AuditEventTypes.WORKSPACE_NAVIGATE,
         threadId,
         data: {
-          worktreeId,
+          worktreeId: canonicalWorktreeId,
+          requestedWorktreeId: worktreeId,
+          worktreeIdCanonicalized: canonicalizationProbe.canonicalized,
+          ...(canonicalizationProbe.fallback ? { canonicalizeFallback: canonicalizationProbe.fallback } : {}),
           path: filePath,
           action,
           line,
@@ -831,6 +915,13 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       })
       .catch(() => {});
 
-    return { ok: true, path: filePath, action };
+    return {
+      ok: true,
+      path: filePath,
+      action,
+      worktreeId: canonicalWorktreeId,
+      worktreeIdCanonicalized: canonicalizationProbe.canonicalized,
+      ...(canonicalizationProbe.fallback ? { canonicalizeFallback: true } : {}),
+    };
   });
 };

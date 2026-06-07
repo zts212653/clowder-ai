@@ -265,6 +265,73 @@ describe('RepoScanTaskSpec', () => {
         [5, 1],
       );
     });
+
+    it('filters out OWNER PRs and issues — repo owner actions should not trigger community intake', async () => {
+      const ownerPr = {
+        number: 50,
+        title: 'sync: cat-cafe → clowder-ai',
+        html_url: 'https://github.com/r/p/pull/50',
+        user: 'repoowner',
+        author_association: 'OWNER',
+        draft: false,
+      };
+      const ownerIssue = {
+        number: 60,
+        title: 'internal tracking issue',
+        html_url: 'https://github.com/r/p/issues/60',
+        user: 'repoowner',
+        author_association: 'OWNER',
+      };
+      const communityPr = {
+        number: 51,
+        title: 'feat: community contribution',
+        html_url: 'https://github.com/r/p/pull/51',
+        user: 'contributor',
+        author_association: 'CONTRIBUTOR',
+        draft: false,
+      };
+      const { opts } = createOpts({
+        fetchOpenPRs: async () => [ownerPr, communityPr],
+        fetchOpenIssues: async () => [ownerIssue],
+      });
+      const spec = createRepoScanTaskSpec(opts);
+      const result = await spec.admission.gate(gateCtx());
+
+      // Only community PR should come through; OWNER PR and issue should be silently skipped
+      assert.equal(result.run, true);
+      assert.equal(result.workItems.length, 1);
+      assert.equal(result.workItems[0].signal.number, 51);
+      assert.equal(result.workItems[0].signal.authorAssociation, 'CONTRIBUTOR');
+    });
+
+    it('returns run=false when all items are from OWNER', async () => {
+      const { opts } = createOpts({
+        fetchOpenPRs: async () => [
+          {
+            number: 70,
+            title: 'Owner PR',
+            html_url: 'https://github.com/r/p/pull/70',
+            user: 'owner',
+            author_association: 'OWNER',
+            draft: false,
+          },
+        ],
+        fetchOpenIssues: async () => [
+          {
+            number: 80,
+            title: 'Owner issue',
+            html_url: 'https://github.com/r/p/issues/80',
+            user: 'owner',
+            author_association: 'OWNER',
+          },
+        ],
+      });
+      const spec = createRepoScanTaskSpec(opts);
+      const result = await spec.admission.gate(gateCtx());
+
+      assert.equal(result.run, false);
+      assert.ok(result.reason.includes('no unnotified'));
+    });
   });
 
   // ── Execute tests ──

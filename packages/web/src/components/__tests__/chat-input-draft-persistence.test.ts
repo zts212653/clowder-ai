@@ -24,6 +24,14 @@ vi.mock('@/components/icons/AttachIcon', () => ({
   AttachIcon: () => React.createElement('span', null, 'attach'),
 }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
+vi.mock('@/hooks/useCoCreatorConfig', () => ({
+  useCoCreatorConfig: () => ({
+    name: 'ME',
+    aliases: [],
+    mentionPatterns: ['@co-creator'],
+    color: { primary: '#D4A76A', secondary: '#FFF8F0' },
+  }),
+}));
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     cats: [
@@ -186,7 +194,7 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('will be sent', undefined, undefined, undefined, undefined);
 
     // Unmount and remount — draft should be gone
     act(() => root.unmount());
@@ -263,7 +271,7 @@ describe('ChatInput draft persistence', () => {
     act(() => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('msg with image', [fakeImage], undefined, undefined, undefined);
     expect(getPreviewImage('pic.png')).toBeNull();
 
     act(() => root.unmount());

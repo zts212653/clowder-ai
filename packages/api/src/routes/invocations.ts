@@ -212,6 +212,8 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             cursorBoundaries,
             persistenceContext,
             parentInvocationId: id,
+            // F222 P1: User-initiated retry → eligible for frustration detection
+            frustrationAutoIssueEligible: true,
           },
         )) {
           if (msg.type === 'done' && msg.errorCode) {

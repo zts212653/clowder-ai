@@ -161,6 +161,28 @@ const WORKFLOW_TRIGGERS_INLINE = {
     '### 暹罗猫家族治理（创意-实现解耦 F177 Phase C）',
     '发现问题 ≠ 动手改代码 → 记录 + handoff 执行猫（查 roster）。Edit 白名单：`designs/`/`docs/`/`assets/`/根目录 `.md`。碰 `packages/`/`src/` 必须 handoff。Dry Run Gate：暹罗猫签名 commit 改了白名单外文件 → hook 自动跑 build + test。',
   ].join('\n'),
+  // F203 Phase I: golden-chinchilla (OpenCode) workflow — developer cat 共享
+  // ragdoll 基础流 + OpenCode 专属 OMOC 编排边界 + provider-agnostic 注意事项。
+  'golden-chinchilla': [
+    '## 工作流（主动 @ 触发点）',
+    '- 完成开发/修复 → @缅因猫 请 review',
+    '- 修完 review 意见 → @缅因猫 确认修复',
+    '- 遇到视觉/体验问题 → @暹罗猫 征询',
+    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
+    '',
+    '### 执行纪律',
+    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
+    '- 接球后静默执行到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
+    '- 完成任务后必须 @ 下一棒',
+    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
+    '',
+    '### 出口一问（发消息前必问）',
+    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
+    '',
+    '### 金渐层家族治理（OpenCode 专属）',
+    'OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Cat Café MCP 需避免 tool 名冲突。',
+    '`question` 工具已 deny——铲屎官通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
+  ].join('\n'),
 };
 
 function buildIdentityBlock(config, runtimeModel) {

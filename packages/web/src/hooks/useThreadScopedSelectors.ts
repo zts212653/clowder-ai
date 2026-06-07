@@ -32,6 +32,8 @@ const EMPTY_CAT_INVOCATIONS: Readonly<Record<string, CatInvocationInfo>> = Objec
 export interface ThreadLiveness {
   hasActive: boolean;
   catStatuses: Record<string, CatStatusType>;
+  /** F210 H3: per-cat agy 进度文案（折叠单行 "AGY working · N steps · latest"），ThinkingIndicator 显示。 */
+  catStatusDetails: Record<string, string>;
   activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
   catInvocations: Record<string, CatInvocationInfo>;
   intentMode: 'execute' | 'ideate' | null;
@@ -41,6 +43,7 @@ export interface ThreadLiveness {
 const DEFAULT_LIVENESS: ThreadLiveness = {
   hasActive: false,
   catStatuses: EMPTY_CAT_STATUSES as Record<string, CatStatusType>,
+  catStatusDetails: EMPTY_CAT_STATUSES as unknown as Record<string, string>,
   activeInvocations: EMPTY_ACTIVE_INVOCATIONS as Record<string, { catId: string; mode: string; startedAt?: number }>,
   catInvocations: EMPTY_CAT_INVOCATIONS as Record<string, CatInvocationInfo>,
   intentMode: null,
@@ -76,6 +79,7 @@ export function selectThreadLiveness(state: ChatState, threadId: string | null):
     return {
       hasActive: state.hasActiveInvocation ?? false,
       catStatuses: state.catStatuses ?? DEFAULT_LIVENESS.catStatuses,
+      catStatusDetails: state.catStatusDetails ?? DEFAULT_LIVENESS.catStatusDetails,
       activeInvocations: state.activeInvocations ?? DEFAULT_LIVENESS.activeInvocations,
       catInvocations: state.catInvocations ?? DEFAULT_LIVENESS.catInvocations,
       intentMode: state.intentMode ?? null,
@@ -87,6 +91,7 @@ export function selectThreadLiveness(state: ChatState, threadId: string | null):
   return {
     hasActive: ts.hasActiveInvocation ?? false,
     catStatuses: ts.catStatuses ?? DEFAULT_LIVENESS.catStatuses,
+    catStatusDetails: ts.catStatusDetails ?? DEFAULT_LIVENESS.catStatusDetails,
     activeInvocations: ts.activeInvocations ?? DEFAULT_LIVENESS.activeInvocations,
     catInvocations: ts.catInvocations ?? DEFAULT_LIVENESS.catInvocations,
     intentMode: ts.intentMode ?? null,

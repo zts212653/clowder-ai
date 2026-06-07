@@ -227,11 +227,11 @@ export async function* routeParallel(
           const f163Flags = freezeFlags();
           alwaysOnInjectionMode = f163Flags.alwaysOnInjection;
           if (alwaysOnInjectionMode !== 'off') {
-            const queryAlwaysOn = (
-              deps.evidenceStore as { queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }> }
-            ).queryAlwaysOn;
-            if (queryAlwaysOn) {
-              const docs = queryAlwaysOn();
+            const evStore = deps.evidenceStore as {
+              queryAlwaysOn?: () => Array<{ anchor: string; title: string; summary: string }>;
+            };
+            if (typeof evStore.queryAlwaysOn === 'function') {
+              const docs = evStore.queryAlwaysOn();
               if (docs.length > 0) alwaysOnDocs = docs;
             }
           }
@@ -1291,6 +1291,64 @@ export async function* routeParallel(
           });
         } catch (err) {
           log.error({ catId: msg.catId, err }, 'messageStore.append (error system msg) failed');
+        }
+      }
+
+      // F222 Phase B AC-B2: Mirror route-serial's frustration detection for parallel mode.
+      // Non-blocking: detection failure must not interrupt the parallel route pipeline.
+      // F222 P1: Skip for A2A/connector origins — only detect frustration on user-driven routes.
+      if (deps.frustrationIssueStore && options.frustrationAutoIssueEligible !== false) {
+        const cliDiag = catCliDiagnostics.get(msg.catId);
+        try {
+          const { evaluate } = await import('../../frustration/FrustrationDetector.js');
+          const frustrationDeps = {
+            frustrationIssueStore: deps.frustrationIssueStore,
+            messageStore: deps.messageStore,
+            socketManager: deps.socketManager as
+              | import('../../../../../infrastructure/websocket/index.js').SocketManager
+              | undefined,
+          };
+
+          // Signal 1: CLI error
+          if (cliDiag?.reasonCode) {
+            await evaluate(
+              {
+                signal: { type: 'cli_error', diagnostics: cliDiag },
+                threadId,
+                userId,
+                catId: msg.catId as string,
+              },
+              frustrationDeps,
+            );
+          }
+
+          // Signal 2: Cancel burst (via PendingRequestStore)
+          if (deps.pendingRequestStore) {
+            const { CANCEL_WINDOW_MS } = await import('../../frustration/FrustrationDetector.js');
+            const recentDenied = await deps.pendingRequestStore.listRecentDenied(
+              threadId,
+              Date.now() - CANCEL_WINDOW_MS,
+            );
+            if (recentDenied.length >= 3) {
+              await evaluate(
+                {
+                  signal: {
+                    type: 'cancel_burst',
+                    recentDenials: recentDenied.map((r) => ({
+                      action: r.action,
+                      timestamp: r.respondedAt ?? r.createdAt,
+                    })),
+                  },
+                  threadId,
+                  userId,
+                  catId: msg.catId as string,
+                },
+                frustrationDeps,
+              );
+            }
+          }
+        } catch {
+          // Non-blocking
         }
       }
 

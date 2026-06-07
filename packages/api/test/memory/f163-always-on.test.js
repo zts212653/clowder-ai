@@ -93,6 +93,42 @@ describe('F163 always_on injection', () => {
     const results = store.queryAlwaysOn();
     assert.deepEqual(results, []);
   });
+
+  it('queryAlwaysOn works when called via type-cast on store object (#746 regression)', async () => {
+    // Regression: route-serial.ts / route-parallel.ts / evidence.ts used to extract
+    // queryAlwaysOn as a detached reference, losing `this` binding.
+    // The fix calls the method on the casted object to preserve `this`.
+    await store.upsert([
+      {
+        anchor: 'docs/SOP.md',
+        kind: 'plan',
+        status: 'active',
+        title: 'SOP',
+        summary: 'Core rules',
+        authority: 'constitutional',
+        activation: 'always_on',
+        updatedAt: '2026-01-01',
+      },
+    ]);
+
+    // Simulate the FIXED pattern used in route-serial/parallel/evidence.ts
+    const evStore = store;
+    if (typeof evStore.queryAlwaysOn === 'function') {
+      const docs = evStore.queryAlwaysOn();
+      assert.equal(docs.length, 1, 'should return always_on docs via casted object call');
+      assert.equal(docs[0].anchor, 'docs/SOP.md');
+    } else {
+      assert.fail('queryAlwaysOn should be a function on the store');
+    }
+
+    // Prove the OLD detached pattern would fail (this binding lost)
+    const detached = store.queryAlwaysOn;
+    assert.throws(
+      () => detached(),
+      (err) => err instanceof TypeError,
+      'detached call without binding must throw TypeError (proves the bug existed)',
+    );
+  });
 });
 
 describe('F163 SystemPromptBuilder always_on injection', () => {

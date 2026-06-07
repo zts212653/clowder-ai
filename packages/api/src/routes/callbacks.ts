@@ -4,7 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CatId, CatRoutingError, RichBlock } from '@cat-cafe/shared';
+import type { CatId, CatRoutingError, RichBlock, SuggestedCrossPostAction } from '@cat-cafe/shared';
 import {
   catRegistry,
   createCatId,
@@ -40,7 +40,12 @@ import {
 } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
+import {
+  canViewMessage,
+  isSystemUserMessage,
+  resolveVisibleReplyParent,
+  type Viewer,
+} from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
@@ -113,6 +118,88 @@ function hasPlausibleLineStartMention(content: string): boolean {
     }
   }
   return false;
+}
+
+function resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations: string): CatId | undefined {
+  const segments = ownerWithoutAnnotations
+    .split(/[/／]/)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  if (segments.length < 2) return undefined;
+
+  const firstResolved = resolveCatTarget(segments[0]);
+  if (!('ok' in firstResolved)) return undefined;
+
+  const resolved = new Set<CatId>();
+  const unresolved: string[] = [];
+  for (const segment of segments) {
+    const result = resolveCatTarget(segment);
+    if ('ok' in result) {
+      resolved.add(result.ok);
+    } else {
+      unresolved.push(segment);
+    }
+  }
+
+  if (resolved.size !== 1) return undefined;
+  if (unresolved.some((segment) => /[@\u4E00-\u9FFF]/.test(segment))) return undefined;
+  return firstResolved.ok;
+}
+
+function resolveFeatureOwnerCatId(owner: string | undefined): string | undefined {
+  if (!owner) return undefined;
+  const trimmed = owner.trim();
+  if (!trimmed) return undefined;
+  const ownerWithoutAnnotations = trimmed
+    .replace(/\s*[（(][^()（）]*[）)]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/[+＋、，,；;]/.test(ownerWithoutAnnotations)) return undefined;
+  const slashSeparatedOwnerCatId = resolveSlashSeparatedOwnerCatId(ownerWithoutAnnotations);
+  if (slashSeparatedOwnerCatId) return slashSeparatedOwnerCatId;
+
+  const candidates = [
+    trimmed,
+    trimmed.match(/@[^\s,，、/+()（）]+/)?.[0],
+    ownerWithoutAnnotations,
+    ownerWithoutAnnotations.split(/\s+/)[0],
+  ].filter((value): value is string => Boolean(value && value.trim().length > 0));
+
+  for (const candidate of candidates) {
+    const resolved = resolveCatTarget(candidate);
+    if ('ok' in resolved) return resolved.ok;
+  }
+  return undefined;
+}
+
+function buildFeatIndexQueryHaystack(item: FeatIndexEntry): string {
+  const ownerCatId = resolveFeatureOwnerCatId(item.owner);
+  return [item.featId, item.name, item.status, item.owner, ownerCatId].filter(Boolean).join(' ').toLowerCase();
+}
+
+function buildFeatIndexSuggestedAction(
+  item: FeatIndexEntry,
+  threadId: string | undefined,
+  ownerCatId: string | undefined,
+  currentThreadId: string | undefined,
+): SuggestedCrossPostAction | undefined {
+  const targetThreadId = threadId?.trim();
+  const current = currentThreadId?.trim();
+  const owner = ownerCatId?.trim();
+  if (targetThreadId && current && targetThreadId === current) return undefined;
+  if (!targetThreadId && !owner) return undefined;
+  return {
+    type: 'cross_post',
+    ...(targetThreadId ? { threadId: targetThreadId } : {}),
+    featureId: item.featId,
+    ...(owner ? { ownerCatId: owner, targetCats: [owner] } : {}),
+    reason: targetThreadId
+      ? owner
+        ? `${item.featId} is owned by ${owner}; dispatch findings to the owning thread.`
+        : `${item.featId} has an owning thread; dispatch findings there if relevant.`
+      : `${item.featId} is owned by ${owner}; find the feature thread before dispatching findings.`,
+    source: 'feat_index',
+  };
 }
 
 function buildPostMessageRoutingMessage(
@@ -701,10 +788,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       let validatedReplyTo: string | undefined;
       if (replyTo) {
-        const parentMsg = await messageStore.getById(replyTo);
-        if (parentMsg && parentMsg.threadId === effectiveThreadId) {
-          validatedReplyTo = replyTo;
-        }
+        // #699: atomic fetch + visibility gate — callback replies are always public.
+        const senderViewer: Viewer = { type: 'cat', catId: createCatId(principal.catId) };
+        const parent = await resolveVisibleReplyParent(messageStore, replyTo, {
+          threadId: effectiveThreadId,
+          viewer: senderViewer,
+          publicReply: true,
+        });
+        if (parent) validatedReplyTo = replyTo;
       }
 
       const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
@@ -1145,15 +1236,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const effectiveReplyTo = replyTo ?? autoFilledReplyTo;
     if (effectiveReplyTo) {
-      const parentMsg = await messageStore.getById(effectiveReplyTo);
-      if (parentMsg && parentMsg.threadId === effectiveThreadId) {
+      // #699: atomic fetch + visibility gate — A2A replies are always public.
+      const actorViewer: Viewer = { type: 'cat', catId: createCatId(actor.catId) };
+      const parent = await resolveVisibleReplyParent(messageStore, effectiveReplyTo, {
+        threadId: effectiveThreadId,
+        viewer: actorViewer,
+        publicReply: true,
+      });
+      if (parent) {
         validatedReplyTo = effectiveReplyTo;
       } else if (replyTo) {
         // Only warn for explicit replyTo failures — auto-fill mismatches are expected
         // (e.g. cross-thread A2A where trigger is in a different thread)
         app.log.warn(
-          { replyTo, effectiveThreadId, parentThreadId: parentMsg?.threadId },
-          '[callbacks/post-message] replyTo rejected: not found or wrong thread',
+          { replyTo, effectiveThreadId },
+          '[callbacks/post-message] replyTo rejected: not found or not eligible',
         );
       }
     }
@@ -1823,6 +1920,111 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     };
   });
 
+  // #699: Look up a single message by ID with optional surrounding context
+  const getMessageQuerySchema = z.object({
+    messageId: z.string().min(1),
+    contextCount: z.coerce.number().int().min(0).max(10).optional(),
+  });
+
+  app.get('/api/callbacks/get-message', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = getMessageQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid query parameters', details: parsed.error.issues };
+    }
+
+    const { messageId, contextCount } = parsed.data;
+    const message = await messageStore.getById(messageId);
+    if (!message || message.deletedAt) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
+    // #699 P1-1: Enforce visibility — userId scope, delivery status, whisper filtering
+    if (!isDelivered(message)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    if (message.userId !== principal.userId && !isSystemUserMessage(message)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    // Align with thread-context: debug = cats see all (user viewer), play = cats see own (cat viewer)
+    let needsPlayFilter = false;
+    if (message.threadId && threadStore) {
+      const thread = await threadStore.get(message.threadId);
+      needsPlayFilter = !!thread && (thread.thinkingMode ?? 'debug') === 'play';
+    }
+    const viewer: Viewer = needsPlayFilter ? { type: 'cat', catId: principal.catId } : { type: 'user' };
+    if (!canViewMessage(message, viewer)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+    // Play mode: hide other cats' stream messages (cross-cat thinking isolation)
+    if (needsPlayFilter && message.origin === 'stream' && message.catId && message.catId !== principal.catId) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
+    const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    const projectMsg = (m: typeof message) => {
+      const imagePaths = extractImagePaths(m.contentBlocks, uploadDir);
+      const imageUrls = extractImageUrls(m.contentBlocks);
+      return {
+        id: m.id,
+        userId: m.userId,
+        catId: m.catId,
+        content: m.content,
+        ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+        ...(imagePaths.length > 0 ? { imagePaths } : {}),
+        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+        timestamp: m.timestamp,
+        threadId: m.threadId,
+      };
+    };
+
+    const result: { message: ReturnType<typeof projectMsg>; context?: ReturnType<typeof projectMsg>[] } = {
+      message: projectMsg(message),
+    };
+
+    const effectiveContextCount = contextCount ?? 0;
+    if (effectiveContextCount > 0 && message.threadId) {
+      const principalUserId = principal.userId;
+      const before = await messageStore.getByThreadBefore(
+        message.threadId,
+        message.timestamp,
+        effectiveContextCount,
+        message.id,
+        principalUserId,
+      );
+      const after = await messageStore.getByThreadAfter(
+        message.threadId,
+        message.id,
+        effectiveContextCount,
+        principalUserId,
+      );
+      // #699 P1-1b: Apply same visibility predicate to context items as target
+      const contextMsgs = [...before, ...after]
+        .filter((m) => {
+          if (m.id === messageId) return false;
+          if (m.deletedAt) return false;
+          if (!isDelivered(m)) return false;
+          if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
+          if (!canViewMessage(m, viewer)) return false;
+          if (needsPlayFilter && m.origin === 'stream' && m.catId && m.catId !== principal.catId) return false;
+          return true;
+        })
+        .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
+      result.context = contextMsgs.map(projectMsg);
+    }
+
+    return result;
+  });
+
   app.get('/api/callbacks/list-threads', async (request, reply) => {
     const principal = requireCallbackPrincipal(request, reply);
     if (!principal) return;
@@ -1917,7 +2119,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     if (normalizedQuery) {
       items = items.filter((item) => {
-        const haystack = `${item.featId} ${item.name} ${item.status}`.toLowerCase();
+        const haystack = buildFeatIndexQueryHaystack(item);
         return haystack.includes(normalizedQuery);
       });
     }
@@ -1925,13 +2127,21 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const requestedLimit = limit ?? 20;
     const sliced = items.slice(0, requestedLimit);
     return {
-      items: sliced.map((item) => ({
-        featId: item.featId,
-        name: item.name,
-        status: item.status,
-        ...(item.keyDecisions ? { keyDecisions: item.keyDecisions } : {}),
-        threadIds: threadIdsByFeatId.get(normalizeFeatId(item.featId)) ?? [],
-      })),
+      items: sliced.map((item) => {
+        const threadIds = threadIdsByFeatId.get(normalizeFeatId(item.featId)) ?? [];
+        const ownerCatId = resolveFeatureOwnerCatId(item.owner);
+        const suggestedAction = buildFeatIndexSuggestedAction(item, threadIds[0], ownerCatId, record.threadId);
+        return {
+          featId: item.featId,
+          name: item.name,
+          status: item.status,
+          ...(item.owner ? { owner: item.owner } : {}),
+          ...(ownerCatId ? { ownerCatId } : {}),
+          ...(item.keyDecisions ? { keyDecisions: item.keyDecisions } : {}),
+          threadIds,
+          ...(suggestedAction ? { suggestedAction } : {}),
+        };
+      }),
     };
   });
 
@@ -1945,6 +2155,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     prNumber: z.number().int().positive(),
     catId: z.string().min(1).optional(), // ignored — server uses record.catId
+    // F140: wake intent. 'review' (default) = waiting on review feedback → CI-pass stays silent.
+    // 'merge' = waiting on CI-green to merge → CI-pass wakes. Re-register (upsert) to flip it.
+    intent: z.enum(['review', 'merge']).optional(),
   });
 
   app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
@@ -1985,18 +2198,26 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const subjectKey = `pr:${repoFullName}#${prNumber}`;
     try {
+      // F140: resolve wake intent. Explicit wins; otherwise preserve an already-set intent (so an
+      // incidental re-register doesn't silently downgrade a deliberate 'merge'); default 'review'.
+      const existing = await taskStore.getBySubject(subjectKey);
+      const intent = parsed.data.intent ?? existing?.automationState?.intent ?? 'review';
+
       const task = await taskStore.upsertBySubject({
         kind: 'pr_tracking',
         subjectKey,
         threadId: record.threadId,
         title: `PR tracking: ${repoFullName}#${prNumber}`,
         ownerCatId: catId,
-        why: `Tracking PR ${repoFullName}#${prNumber} for review feedback, CI/CD, and conflict detection`,
+        why: `Tracking PR ${repoFullName}#${prNumber} (intent=${intent}): review feedback + conflicts always wake; CI-pass wakes only when intent=merge`,
         createdBy: catId,
         userId: record.userId,
       });
 
-      return { status: 'ok', threadId: record.threadId, task };
+      // Persist intent structurally (deep-merged — preserves ci/review/conflict cursors on re-register).
+      const withIntent = await taskStore.patchAutomationState(task.id, { intent });
+
+      return { status: 'ok', threadId: record.threadId, task: withIntent ?? task };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
         reply.status(409);

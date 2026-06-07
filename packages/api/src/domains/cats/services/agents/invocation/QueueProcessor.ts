@@ -714,10 +714,20 @@ export class QueueProcessor {
 
     // Mutex check — per-slot (before mutating queue state)
     if (this.processingSlots.has(sk)) {
+      // 2026-06-02: observability — this silent !started is the source of a QUEUE_BUSY that gives
+      // no clue why. Log the busy source so future "can't steer/dequeue" is diagnosable from logs.
+      this.deps.log.info(
+        { event: 'queue_not_started', threadId, entryCat, reason: 'processing_slot_busy' },
+        '[QueueProcessor] processNext skipped: processingSlot busy',
+      );
       return { started: false };
     }
     // Fix: skip if cat already has an active invocation via CLI/messages.ts (same guard as above)
     if (this.deps.invocationTracker.has(threadId, entryCat)) {
+      this.deps.log.info(
+        { event: 'queue_not_started', threadId, entryCat, reason: 'tracker_active' },
+        '[QueueProcessor] processNext skipped: invocationTracker active',
+      );
       return { started: false };
     }
 
@@ -840,6 +850,17 @@ export class QueueProcessor {
       await invocationRecordStore.update(invocationId, {
         status: 'running',
       });
+
+      // F220 Phase 1: queued execution needs the same earliest liveness signal
+      // as direct /api/messages execution. intent_mode stays deferred until the
+      // first CLI event (#768); spawn_started is only "process is being spawned".
+      if (!controller.signal.aborted) {
+        socketManager.broadcastToRoom(`thread:${threadId}`, 'spawn_started', {
+          threadId,
+          targetCats,
+          invocationId,
+        });
+      }
 
       // 5. intent_mode deferred to first CLI event (#768: avoid "replying" when CLI never starts)
       let intentModeBroadcast = false;
@@ -1015,6 +1036,9 @@ export class QueueProcessor {
           ...(invocationId ? { parentInvocationId: invocationId } : {}),
           ...(entry.a2aTriggerMessageId ? { a2aTriggerMessageId: entry.a2aTriggerMessageId } : {}),
           ...(entry.callerTraceContext ? { callerTraceContext: entry.callerTraceContext } : {}),
+          // F222 P1: Only user-originated queue entries trigger frustration detection.
+          // Whitelist (not blacklist) — agent + connector sources both suppressed.
+          frustrationAutoIssueEligible: entry.source === 'user',
         },
       )) {
         if (controller.signal.aborted) {

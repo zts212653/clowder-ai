@@ -34,6 +34,20 @@ export interface AssembledContext {
 const DEFAULT_MAX_MESSAGES = 20;
 const DEFAULT_MAX_CONTENT_LENGTH = 1500;
 const DEFAULT_MAX_TOTAL_TOKENS = 2000;
+/** #699: Max chars for inline reply-to preview (saves agents a get_message tool call) */
+const REPLY_PREVIEW_LENGTH = 60;
+
+/**
+ * Build a lookup map from message array for O(1) replyTo resolution.
+ * Used by formatMessage to inline reply-to previews.
+ */
+export function buildMessageMap(messages: readonly StoredMessage[]): ReadonlyMap<string, StoredMessage> {
+  const map = new Map<string, StoredMessage>();
+  for (const m of messages) {
+    map.set(m.id, m);
+  }
+  return map;
+}
 
 /**
  * Get display name for a message sender.
@@ -76,7 +90,14 @@ function truncateHeadTail(content: string, limit: number): string {
  */
 export function formatMessage(
   msg: StoredMessage,
-  options?: { truncate?: number; formatTime?: (epochMs: number) => string },
+  options?: {
+    truncate?: number;
+    formatTime?: (epochMs: number) => string;
+    /** #699: Message lookup map for inline reply-to preview */
+    messageMap?: ReadonlyMap<string, StoredMessage>;
+    /** #699 P2: Sanitizer for parent content before inlining preview (prevents injection via quoted text) */
+    sanitizeContent?: (content: string) => string;
+  },
 ): string {
   // Default formatter: UTC (formatPromptTime) for prompt injection — cats need
   // to align with external UTC sources. Non-prompt consumers (e.g. user-facing
@@ -88,11 +109,26 @@ export function formatMessage(
   const crossPostTag = msg.extra?.crossPost?.sourceThreadId
     ? ` ← from thread:${msg.extra.crossPost.sourceThreadId.slice(0, 8)}`
     : '';
+
+  // #699: Inline reply-to preview — saves agents a get_message tool call.
+  // Only resolves when messageMap is provided and the parent is in scope.
+  let replyPrefix = '';
+  if (msg.replyTo && options?.messageMap) {
+    const parent = options.messageMap.get(msg.replyTo);
+    if (parent) {
+      const parentSender = parent.source ? parent.source.label : getSenderName(parent.catId);
+      const sanitized = options?.sanitizeContent ? options.sanitizeContent(parent.content) : parent.content;
+      const raw = sanitized.replaceAll('\n', ' ');
+      const preview = raw.length > REPLY_PREVIEW_LENGTH ? `${raw.slice(0, REPLY_PREVIEW_LENGTH)}…` : raw;
+      replyPrefix = `[↩ ${parentSender}: ${preview}] `;
+    }
+  }
+
   let content = msg.content;
   if (options?.truncate && content.length > options.truncate) {
     content = truncateHeadTail(content, options.truncate);
   }
-  return `[${time} ${sender}${crossPostTag}] ${content}`;
+  return `[${time} ${sender}${crossPostTag}] ${replyPrefix}${content}`;
 }
 
 /**
@@ -108,13 +144,20 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   // F117: exclude undelivered messages (queued/canceled) from prompt context
   // Also exclude system-generated messages (userId='system') — these are display-only
   // (e.g. persisted error badges) and must not re-enter the prompt as "铲屎官" messages.
+  // #699: exclude briefing messages (origin='briefing') — non-routing internal artifacts
+  // that must not appear in prompt context or reply preview maps (consistent with
+  // isEligibleReplyParent and incremental context paths which already exclude them).
   // Defense: also exclude legacy error messages that were incorrectly persisted with
   // userId=user by route-parallel.ts (context poisoning bug, fixed in PR #992).
   // Only filter cat messages (catId !== null) starting with [错误] — user messages are legit.
   // All 6 known contaminated records start with [错误] (no partial-text-before-error exists
   // in practice, since stream_idle_stall means zero text was produced before the error).
   const deliveredMessages = messages.filter(
-    (m) => isDelivered(m) && m.userId !== 'system' && !(m.catId && m.content?.startsWith('[错误]')),
+    (m) =>
+      isDelivered(m) &&
+      m.userId !== 'system' &&
+      m.origin !== 'briefing' &&
+      !(m.catId && m.content?.startsWith('[错误]')),
   );
 
   if (deliveredMessages.length === 0) {
@@ -124,8 +167,13 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
   // Take the most recent N messages (messages are already chronological from store)
   const recent = deliveredMessages.length > maxMessages ? deliveredMessages.slice(-maxMessages) : deliveredMessages;
 
+  // #699: Build message map for inline reply-to preview resolution.
+  // Use deliveredMessages (not raw input) so system/undelivered/error parents
+  // can't leak into prompt via formatMessage's inline preview.
+  const messageMap = buildMessageMap(deliveredMessages);
+
   // Format all messages, then apply token budget from most-recent backward
-  const formatted = recent.map((m) => formatMessage(m, { truncate: maxContentLength }));
+  const formatted = recent.map((m) => formatMessage(m, { truncate: maxContentLength, messageMap }));
 
   // Estimate overhead for header + separator
   const overheadTokens = estimateTokens('[对话历史 - 最近 99 条]\n[/对话历史]');

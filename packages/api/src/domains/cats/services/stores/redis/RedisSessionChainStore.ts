@@ -21,9 +21,11 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
 
 /**
  * Lua: atomic create session record.
- * KEYS[1] = active key, KEYS[2] = chain key, KEYS[3] = detail key, KEYS[4] = cli key
+ * KEYS[1] = active key, KEYS[2] = chain key, KEYS[3] = detail key,
+ * KEYS[4] = cli key, KEYS[5] = chainKey index key (F198; dummy when no chainKey)
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
- * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag
+ * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag,
+ * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
@@ -39,6 +41,10 @@ redis.call('HSET', KEYS[3],
   'catId', ARGV[4], 'userId', ARGV[5], 'seq', tostring(seq),
   'status', 'active', 'messageCount', '0',
   'createdAt', ARGV[6], 'updatedAt', ARGV[6])
+if ARGV[8] ~= '' then
+  redis.call('HSET', KEYS[3], 'chainKey', ARGV[8])
+  ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[5], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[5], ARGV[1])`}
+end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
@@ -76,16 +82,21 @@ export class RedisSessionChainStore implements ISessionChainStore {
       const id = randomUUID();
       const now = String(Date.now());
       const activeKey = SessionChainKeys.active(input.catId, input.threadId);
-      const chainKey = SessionChainKeys.chain(input.catId, input.threadId);
+      const chainSetKey = SessionChainKeys.chain(input.catId, input.threadId);
       const detailKey = SessionChainKeys.detail(id);
+      // F198 Bug #3: chainKey index key. When input has no chainKey we still
+      // pass a placeholder 5th key to keep numkeys fixed; the Lua guards on
+      // ARGV[8] !== '' so the placeholder is never written.
+      const chainKeyIndexKey = SessionChainKeys.byChainKey(input.chainKey ?? '__none__');
 
       const result = (await this.redis.eval(
         CREATE_LUA,
-        4,
+        5,
         activeKey,
-        chainKey,
+        chainSetKey,
         detailKey,
         cliKey,
+        chainKeyIndexKey,
         id,
         input.cliSessionId,
         input.threadId,
@@ -93,6 +104,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         input.userId,
         now,
         input.reuseExistingCliSession ? '1' : '0',
+        input.chainKey ?? '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -115,6 +127,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         messageCount: 0,
         createdAt: parseInt(now, 10),
         updatedAt: parseInt(now, 10),
+        ...(input.chainKey ? { chainKey: input.chainKey } : {}),
       };
     }
 
@@ -257,6 +270,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.consecutiveRestoreFailures !== undefined) {
       pairs.push('consecutiveRestoreFailures', String(patch.consecutiveRestoreFailures));
     }
+    if (patch.latestResumeSessionId !== undefined) {
+      pairs.push('latestResumeSessionId', patch.latestResumeSessionId);
+    }
 
     await this.redis.hset(detailKey, ...pairs);
     if (deleteFields.length > 0) {
@@ -268,6 +284,14 @@ export class RedisSessionChainStore implements ISessionChainStore {
   async getByCliSessionId(cliSessionId: string): Promise<SessionRecord | null> {
     const id = await this.redis.get(SessionChainKeys.byCli(cliSessionId));
     if (!id) return null;
+    return this.get(id);
+  }
+
+  async getByChainKey(chainKey: string): Promise<SessionRecord | null> {
+    const id = await this.redis.get(SessionChainKeys.byChainKey(chainKey));
+    if (!id) return null;
+    // No status filter (unlike getActive): a sealed record stays reachable so
+    // a concurrent done write during a seal edge keeps its state.
     return this.get(id);
   }
 
@@ -331,6 +355,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(compressionCount !== undefined ? { compressionCount } : {}),
       ...(continuityCapsule !== undefined && continuityCapsule !== null ? { continuityCapsule } : {}),
       ...(consecutiveRestoreFailures !== undefined ? { consecutiveRestoreFailures } : {}),
+      ...(data.chainKey ? { chainKey: data.chainKey } : {}),
+      ...(data.latestResumeSessionId ? { latestResumeSessionId: data.latestResumeSessionId } : {}),
       createdAt: parseInt(data.createdAt!, 10),
       updatedAt: parseInt(data.updatedAt!, 10),
     };

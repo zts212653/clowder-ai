@@ -455,6 +455,22 @@ export class InvocationQueue {
     return null;
   }
 
+  /**
+   * Find the in-flight (processing) entry occupying a cat's per-cat slot in a thread, across all
+   * users. 2026-06-02 (Steer 无法抢占): steer-immediate uses this to locate the entry whose
+   * executeEntry holds the slot, so it can tombstone it (removeProcessedAcrossUsers) instead of
+   * force-releasing the slot — the tombstone makes executeEntry self-abort at its post-startAll
+   * guard, which is race-safe through the pre-start (create-await) window. Returns null if none.
+   */
+  findProcessingByCat(threadId: string, catId: string): QueueEntry | null {
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      const entry = q.find((e) => e.status === 'processing' && (e.targetCats[0] ?? 'unknown') === catId);
+      if (entry) return entry;
+    }
+    return null;
+  }
+
   /** Get unique userIds that have entries (any status) for this thread. */
   listUsersForThread(threadId: string): string[] {
     const users: string[] = [];

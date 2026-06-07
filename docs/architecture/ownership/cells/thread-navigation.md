@@ -23,6 +23,7 @@ static_scan_hints: [ThreadLabel, ILabelStore, LabelStore, labels, pin, favorite,
 cited_by:
   - {feature: F187, date: 2026-05-07, delta: new cell}
   - {feature: F191, date: 2026-05-07, delta: trial result}
+  - {feature: F193, date: 2026-06-03, delta: "Phase E extends feat_index with owner catId and feature-thread suggested cross-post actions"}
 ---
 
 # Thread Navigation / Metadata

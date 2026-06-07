@@ -64,13 +64,16 @@ describe('CiCdCheckTaskSpec', () => {
     assert.equal(result.workItems[1].subjectKey, 'pr:c/d#42');
   });
 
-  // ── F140 Phase C: CI pass now triggers cat (not just CI fail) ──
+  // ── F140 Phase C 部分回退：CI pass 由 tracking 的 wake intent 分流（显式声明，不猜 approval）──
+  // intent=review（默认）→ CI pass 静默（猫等 review，pass 是噪音，只留 thread 消息）。
+  // intent=merge → CI pass 唤醒（猫等 CI 绿去 merge，pass 是动作信号 → merge-gate）。
+  // CI fail 两种 intent 都 urgent 唤醒。intent 是显式任务意图，不是 repo 类型。
 
-  it('execute triggers invokeTrigger for CI pass with normal priority', async () => {
-    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
-    const triggered = [];
-    const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' })];
-    const spec = createCiCdCheckTaskSpec({
+  /** Build a CI-pass spec over a task whose tracking intent is `intent` (undefined → field absent). */
+  function passSpec(createCiCdCheckTaskSpec, triggered, intent) {
+    const overrides = intent === undefined ? {} : { automationState: { intent } };
+    const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' }, overrides)];
+    return createCiCdCheckTaskSpec({
       taskStore: mockTaskStore(tasks),
       cicdRouter: {
         route: async () => ({
@@ -82,14 +85,44 @@ describe('CiCdCheckTaskSpec', () => {
           content: 'CI passed',
         }),
       },
-      fetchPrStatus: async () => ({ checks: [], headSha: 'sha1', prNumber: 1, repoFullName: 'a/b' }),
+      fetchPrStatus: async () => ({
+        checks: [],
+        headSha: 'sha1',
+        prNumber: 1,
+        repoFullName: 'a/b',
+        aggregateBucket: 'pass',
+      }),
       invokeTrigger: { trigger: (...args) => triggered.push(args) },
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });
+  }
+
+  it('execute stays SILENT for CI pass with intent=review (review-wait noise)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = passSpec(createCiCdCheckTaskSpec, triggered, 'review');
     const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
     assert.equal(gateResult.run, true);
     await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
-    assert.equal(triggered.length, 1);
+    assert.equal(triggered.length, 0, 'intent=review → CI pass must not wake (noise)');
+  });
+
+  it('execute stays SILENT for CI pass when intent is absent (defaults to review)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = passSpec(createCiCdCheckTaskSpec, triggered, undefined); // no intent → default review
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+    assert.equal(triggered.length, 0, 'absent intent defaults to review → silent');
+  });
+
+  it('execute WAKES for CI pass with intent=merge (action signal → merge-gate)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = passSpec(createCiCdCheckTaskSpec, triggered, 'merge');
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+    assert.equal(triggered.length, 1, 'intent=merge → CI pass must wake');
     const policy = triggered[0][6];
     assert.equal(policy.priority, 'normal');
     assert.equal(policy.reason, 'github_ci_pass');

@@ -39,6 +39,13 @@ export interface CiCdRouterOptions {
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly log: FastifyBaseLogger;
   readonly notifySkip?: (threadId: string, reason: string) => void;
+  /** F192 Phase G: emit A1 world truth signal when PR merges/reverts */
+  readonly onPrLifecycle?: (event: {
+    type: 'merge' | 'revert';
+    ref: string;
+    outcome: 'success' | 'failure';
+    threadId: string;
+  }) => void;
 }
 
 export class CiCdRouter {
@@ -71,6 +78,23 @@ export class CiCdRouter {
       await taskStore.update(task.id, { status: 'done' });
       await taskStore.patchAutomationState(task.id, { ci: { prState: poll.prState } });
       log.info(`[CiCdRouter] PR ${poll.repoFullName}#${poll.prNumber} ${poll.prState} — task marked done`);
+
+      // F192 Phase G: emit A1 world truth signal on merge only.
+      // 'closed' = PR abandoned without merge — NOT a code revert.
+      // Code reverts are separate git events (revert commits), not PR lifecycle.
+      if (poll.prState === 'merged' && this.opts.onPrLifecycle) {
+        try {
+          this.opts.onPrLifecycle({
+            type: 'merge',
+            ref: `PR#${poll.prNumber}`,
+            outcome: 'success',
+            threadId: task.threadId,
+          });
+        } catch {
+          // Best-effort: don't break CI/CD routing
+        }
+      }
+
       return { kind: 'skipped', reason: `PR ${poll.prState}` };
     }
 

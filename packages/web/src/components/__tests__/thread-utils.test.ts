@@ -68,7 +68,7 @@ describe('sortAndGroupThreads', () => {
     expect(last.threads.map((t) => t.id)).toEqual(['f2', 'f1']); // lastActiveAt 5000 before 1000
   });
 
-  it('pinned + favorited thread appears in pinned only', () => {
+  it('pinned + favorited thread appears in pinned and favorites (pinned is additive)', () => {
     const threads = [
       makeThread({
         id: 'both',
@@ -86,7 +86,23 @@ describe('sortAndGroupThreads', () => {
     expect(pinnedGroup).toBeDefined();
     expect(pinnedGroup?.threads).toHaveLength(1);
     expect(pinnedGroup?.threads[0].id).toBe('both');
-    expect(favGroup).toBeUndefined(); // should not appear in favorites
+    // Pinned is additive — thread now also appears in favorites
+    expect(favGroup).toBeDefined();
+    expect(favGroup?.threads).toHaveLength(1);
+    expect(favGroup?.threads[0].id).toBe('both');
+  });
+
+  it('pinned-only thread appears in both pinned and its project group', () => {
+    const threads = [
+      makeThread({ id: 'pinned-t', pinned: true, pinnedAt: 100, projectPath: '/proj/x', lastActiveAt: 5000 }),
+      makeThread({ id: 'regular', projectPath: '/proj/x', lastActiveAt: 1000 }),
+    ];
+    const groups = sortAndGroupThreads(threads);
+    const pinnedGroup = groups.find((g) => g.type === 'pinned');
+    const projGroup = groups.find((g) => g.type === 'project');
+    expect(pinnedGroup?.threads.map((t) => t.id)).toEqual(['pinned-t']);
+    expect(projGroup?.threads.map((t) => t.id)).toContain('pinned-t');
+    expect(projGroup?.threads.map((t) => t.id)).toContain('regular');
   });
 
   it('order is pinned → project → favorites', () => {
@@ -293,7 +309,7 @@ const DAY = 86400_000;
 describe('sortAndGroupThreadsWithWorkspace', () => {
   it('produces groups in order: pinned → recent → active projects → archived → favorites', () => {
     const threads = [
-      makeThread({ id: 'p1', pinned: true, lastActiveAt: NOW }),
+      makeThread({ id: 'p1', pinned: true, projectPath: '/proj/active', lastActiveAt: NOW }),
       makeThread({ id: 't1', projectPath: '/proj/active', lastActiveAt: NOW - 2 * DAY }),
       makeThread({ id: 't2', projectPath: '/proj/old', lastActiveAt: NOW - 30 * DAY }),
       makeThread({ id: 'f1', favorited: true, lastActiveAt: NOW - 1 * DAY }),
@@ -420,6 +436,53 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     // eval thread should NOT appear in recent
     const recent = groups.find((g) => g.type === 'recent');
     expect(recent?.threads.find((t) => t.id === 'eval-thread')).toBeUndefined();
+  });
+
+  it('pinned system thread appears in BOTH pinned and system sections (pinned is additive)', () => {
+    const threads = [
+      makeThread({
+        id: 'pinned-system',
+        title: 'A2A Harness Eval',
+        systemKind: 'eval_domain',
+        pinned: true,
+        lastActiveAt: NOW,
+      }),
+      makeThread({ id: 'regular-system', title: 'IM Hub', systemKind: 'connector_hub', lastActiveAt: NOW - DAY }),
+      makeThread({ id: 'regular', title: 'Chat', lastActiveAt: NOW - 2 * DAY }),
+    ];
+    const groups = sortAndGroupThreadsWithWorkspace(
+      threads,
+      undefined,
+      new Set(),
+      { activeCutoffMs: 7 * DAY, recentLimit: 8 },
+      NOW,
+    );
+    const pinned = groups.find((g) => g.type === 'pinned');
+    const system = groups.find((g) => g.type === 'system');
+    expect(pinned).toBeDefined();
+    expect(pinned?.threads.map((t) => t.id)).toEqual(['pinned-system']);
+    expect(system).toBeDefined();
+    expect(system?.threads.map((t) => t.id)).toContain('pinned-system');
+    expect(system?.threads.map((t) => t.id)).toContain('regular-system');
+  });
+
+  it('pinned regular thread appears in both pinned and its project group', () => {
+    const threads = [
+      makeThread({ id: 'pinned-proj', pinned: true, projectPath: '/proj/alpha', lastActiveAt: NOW }),
+      makeThread({ id: 'regular-proj', projectPath: '/proj/alpha', lastActiveAt: NOW - DAY }),
+    ];
+    const groups = sortAndGroupThreadsWithWorkspace(
+      threads,
+      undefined,
+      new Set(),
+      { activeCutoffMs: 7 * DAY, recentLimit: 8 },
+      NOW,
+    );
+    const pinned = groups.find((g) => g.type === 'pinned');
+    const project = groups.find((g) => g.type === 'project' && g.projectPath === '/proj/alpha');
+    expect(pinned?.threads.map((t) => t.id)).toEqual(['pinned-proj']);
+    expect(project?.threads.map((t) => t.id)).toContain('pinned-proj');
+    expect(project?.threads.map((t) => t.id)).toContain('regular-proj');
   });
 
   it('groups both connector_hub and eval_domain threads into system section', () => {

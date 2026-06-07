@@ -39,6 +39,29 @@ test('AGENTS.md ≤ 65 lines (AC-D2)', () => {
   assert.ok(lineCount(md) <= MAX_LINES, `AGENTS.md must be ≤ ${MAX_LINES} lines, got ${lineCount(md)}`);
 });
 
+// F203 Phase H — GEMINI.md 污染收口守护。
+// repo root GEMINI.md 被 Gemini CLI / AGY CLI 当 workspace context 读（Antigravity
+// IDE 的 Global Rules 读的是 home ~/.gemini/GEMINI.md，非本文件；IDE Workspace Rules
+// 读 .agents/rules）。它曾是 2026-02-28 的烁烁化石身份（Phase D 瘦身把它漏了），导致
+// AGY workspace 选任意猫都被灌成"烁烁"。退役为 provider-neutral 指针：身份由 runtime
+// 注入，文件本身不是 identity 真相源。守护 ≤65 行 + 不复活化石身份 + 保留真相源指针。
+test('GEMINI.md ≤ 65 lines (F203 Phase H)', () => {
+  const md = read('GEMINI.md');
+  assert.ok(lineCount(md) <= MAX_LINES, `GEMINI.md must be ≤ ${MAX_LINES} lines, got ${lineCount(md)}`);
+});
+
+test('GEMINI.md is a provider-neutral pointer (no fossilized cat identity)', () => {
+  const md = read('GEMINI.md');
+  assert.ok(!md.includes('你是 **暹罗猫/烁烁'), 'GEMINI.md must not hardcode 烁烁 identity (provider-neutral)');
+  assert.ok(!md.includes('gpt-5.3-codex'), 'GEMINI.md must not carry stale model label (gpt-5.3-codex)');
+});
+
+test('GEMINI.md keeps pointer to truth sources + runtime-injection note', () => {
+  const md = read('GEMINI.md');
+  assert.ok(md.includes('cat-config.json'), 'GEMINI.md must point to roster truth source (cat-config.json)');
+  assert.ok(md.includes('runtime'), 'GEMINI.md must note identity is injected by runtime');
+});
+
 test('CLAUDE.md keeps harness-specific anchors L0 does NOT cover', () => {
   const md = read('CLAUDE.md');
   // C4 terse 铁律 (harness 第一读 P0 安全) / C7 闭环 / C8 布偶猫专属 dev 规则
@@ -109,4 +132,20 @@ test('AGENTS.md keeps 1-line pointers to truth sources', () => {
   for (const ptr of ['docs/SOP.md', 'memory-routing-partial.md']) {
     assert.ok(md.includes(ptr), `AGENTS.md must keep pointer to: "${ptr}"`);
   }
+});
+
+// F203 Phase H — AGENTS.md AGY-safe 守护。
+// AGENTS.md 是 Codex harness 第一读，但 AGY CLI 把它当 workspace context 读（同
+// repo-root GEMINI.md 被 AGY 读）。若写死"你是缅因猫/砚砚"身份句，AGY 跑任意猫都被
+// 灌成砚砚。改法（保留 Codex harness，去身份污染）：去身份句 + runtime-identity 硬边界。
+test('AGENTS.md is Codex-harness-scoped, not AGY identity pollution (F203 Phase H)', () => {
+  const md = read('AGENTS.md');
+  // 不能写死 Codex 身份句（否则 AGY workspace context 读到 → 串砚砚身份）
+  assert.ok(!md.includes('你是 **缅因猫/砚砚'), 'AGENTS.md must not hardcode Codex identity (AGY-safe)');
+  // 必须声明 runtime-identity 硬边界：非 @codex runtime 读到不采纳 Codex 身份
+  assert.ok(md.includes('不要采纳 Codex 身份'), 'AGENTS.md must tell non-Codex runtimes not to adopt Codex identity');
+  assert.ok(
+    md.includes('runtime identity') || md.includes('runtime Identity'),
+    'AGENTS.md must scope itself to runtime identity = @codex',
+  );
 });

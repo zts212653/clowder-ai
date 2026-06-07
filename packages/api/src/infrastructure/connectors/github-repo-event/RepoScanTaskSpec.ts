@@ -20,6 +20,8 @@ import type { RepoInboxSignal } from './types.js';
 
 const CONNECTOR_ID = 'github-repo-event';
 const DEFAULT_MAX_WORK_ITEMS_PER_RUN = 5;
+/** Repo owner's own PRs/issues should not trigger community intake. */
+const SKIP_AUTHOR_ASSOCIATIONS = new Set(['OWNER']);
 
 export interface GhPrItem {
   number: number;
@@ -113,6 +115,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
             const prs = await opts.fetchOpenPRs(repo);
             for (const pr of prs) {
               if (pr.draft) continue;
+              if (SKIP_AUTHOR_ASSOCIATIONS.has(pr.author_association)) continue;
               if (await opts.reconciliationDedup.isNotified(repo, 'pr', pr.number)) continue;
               repoWorkItems.push({
                 signal: {
@@ -133,6 +136,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
 
             const issues = await opts.fetchOpenIssues(repo);
             for (const issue of issues) {
+              if (SKIP_AUTHOR_ASSOCIATIONS.has(issue.author_association)) continue;
               if (await opts.reconciliationDedup.isNotified(repo, 'issue', issue.number)) continue;
               repoWorkItems.push({
                 signal: {

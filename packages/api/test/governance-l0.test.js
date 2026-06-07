@@ -49,6 +49,11 @@ describe('governance-l0 compiler (#747)', () => {
     assert.ok(l0.includes('只在 main 改'));
     assert.ok(l0.includes('fallback 层数检测'));
     assert.ok(l0.includes('创意-实现解耦'));
+    // Decision funnel projection (four-cat discussion 2026-06-01)
+    assert.ok(l0.includes('决策漏斗'), 'missing decision funnel section');
+    assert.ok(l0.includes('能翻代码解决的不要问人'), 'missing self-resolve reflex');
+    assert.ok(l0.includes('Decision Packet'), 'missing Decision Packet anchor');
+    assert.ok(l0.includes('SOP 流程推进不是决策'), 'missing SOP execution anchor');
   });
 
   it('guards hard-projected compact phrases against shared-rules drift (opus review P2)', () => {
@@ -72,10 +77,17 @@ describe('governance-l0 compiler (#747)', () => {
       '同一文件',
       '新增 ≥3 层',
       '发现问题 ≠ 动手实现',
+      // Decision funnel drift guards
+      '能翻代码解决的不要问人',
+      'SOP 流程推进不是决策',
     ]) {
       assert.ok(normalizedSource.includes(phrase), `source fixture missing guard phrase: ${phrase}`);
       assert.ok(normalizedL0.includes(phrase), `compiled governance L0 drifted from shared-rules phrase: ${phrase}`);
     }
+
+    // Decision Packet is hardcoded output (not projected from shared-rules source),
+    // guard it independently (sonnet review W2)
+    assert.ok(normalizedL0.includes('Decision Packet'), 'compiled L0 missing hardcoded Decision Packet anchor');
   });
 
   it('fails closed when numbered P/W headings are duplicated or missing (cloud P2)', () => {
@@ -90,6 +102,11 @@ describe('governance-l0 compiler (#747)', () => {
       () => compileGovernanceL0FromMarkdown(duplicateWorldview),
       /duplicate W heading W2|missing W heading W5/,
     );
+  });
+
+  it('fails closed when decision funnel §17 is removed from shared-rules', () => {
+    const withoutFunnel = sharedRules.replace('## 17. 决策漏斗', '## 17. REMOVED');
+    assert.throws(() => compileGovernanceL0FromMarkdown(withoutFunnel), /决策漏斗/);
   });
 
   it('accepts public-sanitized family labels in governance protocol headings (outbound sync)', () => {

@@ -94,6 +94,16 @@ function mockSessionsResponse(sessions: unknown[]) {
   });
 }
 
+/** Sealed section is default-collapsed; click the toggle to expand it. */
+function expandSealed() {
+  const toggle = container.querySelector('[data-testid="sealed-toggle"]') as HTMLElement | null;
+  if (toggle) {
+    act(() => {
+      toggle.click();
+    });
+  }
+}
+
 describe('F24: SessionChainPanel', () => {
   it('renders panel with bind section even when API returns empty sessions (F33)', async () => {
     mockSessionsResponse([]);
@@ -102,7 +112,7 @@ describe('F24: SessionChainPanel', () => {
     // Panel should render (F33: always visible for external session binding)
     expect(container.querySelector('section')).not.toBeNull();
     // No session cards, but bind section available
-    expect(container.textContent).toContain('0 sessions');
+    expect(container.textContent).toContain('0 total');
     expect(container.textContent).toContain('绑定外部 Session');
   });
 
@@ -121,7 +131,8 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('2 sessions');
+    expect(container.textContent).toContain('1 active');
+    expect(container.textContent).toContain('2 total');
   });
 
   it('collapses repeated 0-msg tool_conflict retry corpses into one summary (F201-churn)', async () => {
@@ -153,6 +164,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
     // F201-churn: 4 empty (0-msg) tool_conflict retry corpses collapse into ONE summary,
     // leaving only the real sealed session as a full card. Transparency preserved via the
     // summary's visible count; the UI no longer litters one corpse card per F201 retry.
@@ -190,6 +202,7 @@ describe('F24: SessionChainPanel', () => {
     mockSessionsResponse([fragment(1), fragment(2), fragment(3)]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
     expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
     const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
     expect(summary).not.toBeNull();
@@ -224,6 +237,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
     expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(0);
     const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
     expect(summary).not.toBeNull();
@@ -246,6 +260,7 @@ describe('F24: SessionChainPanel', () => {
     mockSessionsResponse([sealingCorpseLike(1), sealingCorpseLike(2)]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
     expect(container.querySelector('[data-testid="session-card-retry-collapsed"]')).toBeNull();
     expect(container.querySelectorAll('[data-testid="session-card-sealed"]').length).toBe(2);
   });
@@ -376,11 +391,12 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    expect(container.textContent).toContain('Sealed');
+    expandSealed();
     expect(container.textContent).toContain('Session #1');
     expect(container.textContent).toContain('Session #2');
     expect(container.textContent).toContain('compact');
     expect(container.textContent).toContain('threshold');
-    expect(container.textContent).toContain('Sealed');
     // Both sealed sessions should have clickable ID buttons
     expect(container.querySelector('button[title*="seal_aaa111"]')).not.toBeNull();
     expect(container.querySelector('button[title*="seal_bbb222"]')).not.toBeNull();
@@ -392,6 +408,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
     expect(container.textContent).toContain('sealing');
   });
 
@@ -590,18 +607,18 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     // Should not crash; panel still renders (F33: bind section always present)
-    expect(container.textContent).toContain('0 sessions');
+    expect(container.textContent).toContain('0 total');
     expect(container.textContent).not.toContain('Session #');
   });
 
-  it('renders singular "session" for count of 1', async () => {
+  it('renders active and total counts in header', async () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('1 session');
-    expect(container.textContent).not.toContain('1 sessions');
+    expect(container.textContent).toContain('1 active');
+    expect(container.textContent).toContain('1 total');
   });
 
   it('keeps stale data visible on thread switch when fetch fails (stale-while-revalidate)', async () => {
@@ -636,6 +653,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-A');
     await flushFetch();
+    expandSealed();
     expect(container.textContent).toContain('Session #1');
 
     // Switch to thread-B, but fetch throws — stale data stays visible
@@ -662,6 +680,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
+    expandSealed();
 
     const findUnsealBtn = () => {
       const buttons = Array.from(container.querySelectorAll('button'));
@@ -704,7 +723,7 @@ describe('F24: SessionChainPanel', () => {
 
     // New data visible, old data gone
     expect(container.textContent).toContain('缅因猫');
-    expect(container.textContent).toContain('1 session');
+    expect(container.textContent).toContain('1 total');
   });
 
   it('reuses per-thread session cache immediately when revisiting a thread during revalidate', async () => {
@@ -963,6 +982,7 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
+      expandSealed();
       const card = container.querySelector(
         '[data-testid="session-card-sealed"][data-cat-id="opus-47"]',
       ) as HTMLElement | null;
@@ -1189,6 +1209,80 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
 
       expect(container.textContent).toContain('err');
+    });
+  });
+
+  describe('collapse toggle', () => {
+    it('active Session Chain: click header hides active cards, click again restores', async () => {
+      mockSessionsResponse([
+        { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+
+      // Default: expanded — active card visible
+      expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
+      expect(container.textContent).toContain('Session #1');
+      // Header shows counts
+      expect(container.textContent).toContain('1 active');
+
+      // Click Session Chain header to collapse
+      const chainHeader = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('Session Chain'),
+      );
+      expect(chainHeader).toBeTruthy();
+      act(() => {
+        chainHeader?.click();
+      });
+
+      // Collapsed: active card hidden, but header/count still visible
+      expect(container.querySelector('[data-testid="session-card-active"]')).toBeNull();
+      expect(container.textContent).toContain('1 active');
+      expect(container.textContent).toContain('Session Chain');
+
+      // Click again to expand
+      act(() => {
+        chainHeader?.click();
+      });
+
+      // Restored: active card visible again
+      expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
+      expect(container.textContent).toContain('Session #1');
+    });
+
+    it('Sealed section: default collapsed, click expands, click collapses', async () => {
+      mockSessionsResponse([
+        {
+          id: 'seal1',
+          catId: 'opus',
+          seq: 0,
+          status: 'sealed',
+          messageCount: 10,
+          createdAt: Date.now() - 60000,
+          sealedAt: Date.now(),
+          sealReason: 'compact',
+        },
+      ]);
+      renderPanel('thread-1');
+      await flushFetch();
+
+      // Default: collapsed — sealed card hidden, but toggle visible
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).toBeNull();
+      expect(container.textContent).toContain('Sealed');
+
+      // Click to expand
+      expandSealed();
+
+      // Expanded: sealed card visible
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).not.toBeNull();
+      expect(container.textContent).toContain('Session #1');
+      expect(container.textContent).toContain('compact');
+
+      // Click to collapse again
+      expandSealed(); // toggles back
+
+      // Collapsed again
+      expect(container.querySelector('[data-testid="session-card-sealed"]')).toBeNull();
     });
   });
 });

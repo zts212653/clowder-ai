@@ -3,25 +3,24 @@
  * All endpoints require session auth (localhost-only by default).
  */
 
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { getPromptCaptureStore } from '../infrastructure/debug/prompt-capture-bridge.js';
 import { isPromptCaptureEnabled } from '../infrastructure/debug/prompt-capture-store.js';
+import { requirePrivilegedRouteOwner } from '../utils/privileged-route-guard.js';
 
-function requireSession(
-  request: import('fastify').FastifyRequest,
-  reply: import('fastify').FastifyReply,
-): string | null {
-  const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
-  if (!userId) {
-    reply.status(401).send({ error: 'Session required' });
-    return null;
-  }
-  return userId;
+const PROMPT_CAPTURE_GATE = {
+  surface: 'Prompt capture debug routes',
+  ownerErrorMessage: 'Prompt captures can only be accessed by the configured owner',
+};
+
+function requirePromptCaptureOwner(request: FastifyRequest, reply: FastifyReply) {
+  return requirePrivilegedRouteOwner(request, reply, PROMPT_CAPTURE_GATE);
 }
 
 export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
   app.get('/api/debug/prompt-captures/status', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+    const gate = requirePromptCaptureOwner(request, reply);
+    if (!gate.ok) return gate.response;
     const store = getPromptCaptureStore();
     return {
       enabled: isPromptCaptureEnabled(),
@@ -34,8 +33,9 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Querystring: { threadId?: string; invocationId?: string; limit?: string } }>(
     '/api/debug/prompt-captures',
     async (request, reply) => {
-      const userId = requireSession(request, reply);
-      if (!userId) return;
+      const gate = requirePromptCaptureOwner(request, reply);
+      if (!gate.ok) return gate.response;
+      const { userId } = gate;
       const store = getPromptCaptureStore();
       const limit = Math.min(parseInt(request.query.limit ?? '20', 10) || 20, 100);
 
@@ -50,8 +50,9 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.get<{ Params: { captureId: string } }>('/api/debug/prompt-captures/:captureId', async (request, reply) => {
-    const userId = requireSession(request, reply);
-    if (!userId) return;
+    const gate = requirePromptCaptureOwner(request, reply);
+    if (!gate.ok) return gate.response;
+    const { userId } = gate;
     const { captureId } = request.params;
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(captureId)) {
       return reply.status(400).send({ error: 'Invalid captureId format' });
@@ -64,7 +65,8 @@ export const promptCaptureRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/api/debug/prompt-captures/prune', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
+    const gate = requirePromptCaptureOwner(request, reply);
+    if (!gate.ok) return gate.response;
     const removed = getPromptCaptureStore().prune();
     return { removed };
   });

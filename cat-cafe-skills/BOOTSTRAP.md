@@ -3,7 +3,7 @@
 <EXTREMELY_IMPORTANT>
 你已加载 Cat Café Skills。路由规则定义在 `cat-cafe-skills/manifest.yaml`。
 
-## Skills 列表（41 个）
+## Skills 列表（42 个）
 
 ### 开发流程链
 ```
@@ -22,6 +22,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `writing-plans` | 写实施计划 | ① impl |
 | `worktree` | 创建隔离开发环境 | ① impl |
 | `tdd` | 写测试+实现（红绿重构） | ① impl |
+| `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `request-review` | 发 review 请求给 reviewer | ③ |
@@ -67,7 +68,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/vision-evidence-workflow.md` | 前端截图/录屏证据流程（B1） |
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |
 | `refs/f190-frontend-lessons.md` | F190 Console intake 的前端案例与红区教训 |
-| `refs/mcp-callbacks.md` | HTTP callback API 参考 |
+| `refs/mcp-callbacks.md` | MCP callback surface 映射与 legacy HTTP fallback 边界 |
 | `refs/rich-blocks.md` | Rich block 创建指南 |
 | `refs/ppt-density-playbook.md` | PPT 密度填充手法（9 种手段 + 量化门禁） |
 | `refs/ppt-visual-review.md` | PPT 视觉审查 Gate（D1 布局+D2 审美） |

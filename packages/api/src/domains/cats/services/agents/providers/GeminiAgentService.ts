@@ -21,7 +21,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { type AgyProfileConfig, type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -41,7 +41,15 @@ import { readJsonlTail } from '../../../../../utils/jsonl-tail-reader.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
-import { type AgyProfile, preflightAgyProfile, resolveAgyProfile } from './agy-profile-manager.js';
+import { type AgyProfile, preflightAgyProfile, resolveAgyProfile, resolveAgySpawnCwd } from './agy-profile-manager.js';
+import { extractAgyFinalTextFromSteps, parseAgyStepTools, readAgyTrajectorySteps } from './agy-trajectory-extractor.js';
+import {
+  type AgyProgressEvent,
+  listAgyConversationDbs,
+  locateAgyTrajectoryDb,
+  observeAgyProgress,
+  resolveAgyAppDataDir,
+} from './agy-trajectory-observer.js';
 import {
   classifyAntigravityCliPlainText,
   extractAntigravityCliConversationId,
@@ -639,8 +647,15 @@ export class GeminiAgentService implements AgentService {
   }
 
   private async *invokeAntigravityCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
+    const yieldedToolCallIds = new Set<string>();
+    const yieldedToolResults = new Set<string>();
     const requestedModelOverride = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE;
-    const workingDirectory = options?.workingDirectory ?? process.cwd();
+    // F210 cache-leak fix (cloud P2)：normalize 成绝对路径。spawn cwd 现在是独立 sandbox（与
+    // workingDirectory 解耦），若 workingDirectory 是相对路径（AgentServiceOptions 不强制绝对，
+    // 直连 caller/测试可传 `.`），`--add-dir workingDirectory` 会相对 sandbox cwd 解析 → AGY 授权
+    // 错目录、tool use 落到 workspace 外。resolve() 让 --add-dir + profile trust 都拿绝对路径
+    // （`.` → process.cwd()，与改动前 cwd=workingDirectory 的语义一致）。
+    const workingDirectory = resolve(options?.workingDirectory ?? process.cwd());
     let metadata: MessageMetadata = {
       provider: 'google',
       model: 'account-selected (antigravity-cli)',
@@ -701,7 +716,7 @@ export class GeminiAgentService implements AgentService {
 
     const timeoutMs = resolveCliTimeoutMs(undefined);
     const printTimeout = formatAgyPrintTimeout(timeoutMs);
-    const agyLogPath = join(tmpdir(), `cat-cafe-agy-${randomUUID()}.log`);
+    const agyLogPath = options?.agyLogPathOverride ?? join(tmpdir(), `cat-cafe-agy-${randomUUID()}.log`);
     const args: string[] = ['--add-dir', workingDirectory];
     if (agyProfile?.autoApprove) {
       args.push('--dangerously-skip-permissions');
@@ -865,11 +880,36 @@ export class GeminiAgentService implements AgentService {
         }
       }
 
+      // F210 H2a (B spike §8.3): capture invocation start BEFORE spawn so a resume-turn cascade db
+      // (created after spawn) is newer than this watermark; appDataDir derived from the SAME effective
+      // child HOME passed to AGY (childEnv.HOME — merges agyProfile/accountEnv/callbackEnv), because
+      // resume-turn log is empty (agy doesn't write --log-file on resume) and the scan fallback in
+      // locateAgyTrajectoryDb needs appDataDir independently of the log. 云端 codex P2: 不能用进程
+      // homedir()，否则 accountEnv 提供 HOME 时会扫错目录、resume 永久零 progress。
+      const agyInvocationStartMs = Date.now();
+      const agyAppDataDir = resolveAgyAppDataDir(childEnv);
+      // F210 cache-leak fix (砚砚 cwd sandbox 方向)：spawn cwd 与 workingDirectory 解耦。AGY 写
+      // cwd-relative cache（`cache/projects.json`）到 spawn cwd——cwd=repo root 时泄漏到 worktree
+      // （实证 2026-06-03）。agyProfile 时 spawn cwd 指向 profile cwd sandbox（cwd-relative cache 落
+      // profile 不 repo）；workspace 仍由上方 `args = ['--add-dir', workingDirectory]` 显式授权。
+      const agySpawnCwd = resolveAgySpawnCwd(agyProfile, this.catId, workingDirectory);
+      // F210 cache-leak diagnostics (砚砚 可选项)：把隔离后的 spawn cwd 写进 metadata，
+      // runtime 日志 / 重启验证可直接确认 cwd 已 sandbox、不落 repo root。
+      metadata = {
+        ...metadata,
+        diagnostics: {
+          ...(metadata.diagnostics ?? {}),
+          antigravityCli: {
+            ...((metadata.diagnostics?.antigravityCli as Record<string, unknown> | undefined) ?? {}),
+            spawnCwd: agySpawnCwd,
+          },
+        },
+      };
       const cliOpts = {
         command: agyCommand,
         args,
         outputMode: 'plainText' as const,
-        cwd: workingDirectory,
+        cwd: agySpawnCwd,
         timeoutMs,
         ...(childEnv ? { env: childEnv } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -882,36 +922,145 @@ export class GeminiAgentService implements AgentService {
         ? options.spawnCliOverride(cliOpts)
         : spawnCli(cliOpts, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
 
-      try {
-        for await (const event of events) {
-          if (isCliPlainTextResult(event)) {
-            stdout = event.stdout;
-            stderr = event.stderr;
-            exitCode = event.exitCode;
-            exitSignal = event.signal;
-            continue;
+      // F210-H1b: agy `--print` (plainText) blocks until the process ends, so consume the spawn
+      // stream in a background task while a side-channel progress observer polls the trajectory
+      // SQLite. The final reply is still decided by the stdout handling below — progress is a pure
+      // side-channel (system_info), and observeAgyProgress is fail-open (SQLite unavailable → zero
+      // output), so this never changes final-answer semantics.
+      let agyFinished = false;
+      // F210-H1b (cloud P1): capture a consumer rejection immediately so the background task never
+      // rejects without a handler during the merge-loop wait. Re-thrown after the buffer drains so
+      // the existing top-level catch yields a normal error+done.
+      let consumerError: unknown = null;
+      const sideChannelBuffer: AgentMessage[] = [];
+      const agyConsumeTask = (async () => {
+        try {
+          for await (const event of events) {
+            if (isCliPlainTextResult(event)) {
+              stdout = event.stdout;
+              stderr = event.stderr;
+              exitCode = event.exitCode;
+              exitSignal = event.signal;
+              continue;
+            }
+            if (isCliTimeout(event)) {
+              timeoutEvent = event;
+              continue;
+            }
+            if (isCliError(event)) {
+              cliErrorEvent = event;
+              continue;
+            }
+            if (isLivenessWarning(event)) {
+              sideChannelBuffer.push({
+                type: 'system_info' as const,
+                catId: this.catId,
+                content: JSON.stringify({ type: 'liveness_warning', ...event }),
+                timestamp: Date.now(),
+              });
+            }
           }
-          if (isCliTimeout(event)) {
-            timeoutEvent = event;
-            continue;
+        } catch (err) {
+          consumerError = err;
+        } finally {
+          if (options?.signal) {
+            options.signal.removeEventListener('abort', abortHandler);
           }
-          if (isCliError(event)) {
-            cliErrorEvent = event;
-            continue;
-          }
-          if (isLivenessWarning(event)) {
+          agyFinished = true;
+        }
+      })();
+
+      const progressGen = observeAgyProgress({
+        readLog: () => readAntigravityLogText(agyLogPath),
+        isAgyDone: () => agyFinished,
+        sleep: (ms) =>
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, ms);
+          }),
+        // F210 H2a (B spike §8.3): resume turn 的 log 为空，靠扫 conversations/*.db 定位本轮
+        // 新建 cascade db（只认 invocationStart 后的单一候选；0/多 → fail-open）。
+        appDataDir: agyAppDataDir,
+        invocationStartMs: agyInvocationStartMs,
+        listConversationDbs: listAgyConversationDbs,
+        ...(options?.signal ? { signal: options.signal } : {}),
+      });
+      // Merge loop: drain the side-channel buffer (liveness) on a timer so it stays real-time even
+      // when progress yields nothing (fail-open / no new step). Buffering liveness until AGY
+      // completion would be worse than the pre-H1b real-time behavior (砚砚 P1-2). race(progress,
+      // timer) keeps both side channels live without one starving the other.
+      const SIDE_CHANNEL_DRAIN_MS = 200;
+      const progressIter = progressGen[Symbol.asyncIterator]();
+      let progressNext: Promise<IteratorResult<AgyProgressEvent>> | null = progressIter.next();
+      while (progressNext !== null || sideChannelBuffer.length > 0) {
+        while (sideChannelBuffer.length > 0) {
+          yield sideChannelBuffer.shift()!;
+        }
+        if (progressNext === null) break;
+        const settled = await Promise.race([
+          progressNext.then((res) => ({ kind: 'progress' as const, res })),
+          new Promise<{ kind: 'timer' }>((resolve) => {
+            setTimeout(() => resolve({ kind: 'timer' }), SIDE_CHANNEL_DRAIN_MS);
+          }),
+        ]);
+        if (settled.kind === 'progress') {
+          if (settled.res.done) {
+            progressNext = null;
+          } else {
+            const progress = settled.res.value;
             yield {
               type: 'system_info' as const,
               catId: this.catId,
-              content: JSON.stringify({ type: 'liveness_warning', ...event }),
+              content: JSON.stringify({
+                type: 'agy_trajectory_progress',
+                idx: progress.idx,
+                stepType: progress.stepType,
+                status: progress.status,
+                label: progress.label,
+              }),
               timestamp: Date.now(),
             };
+            if (progress.payload) {
+              const toolInfo = parseAgyStepTools(progress.payload, progress.idx);
+              if (toolInfo && toolInfo.toolName && toolInfo.toolCallId) {
+                const { toolName, toolCallId, toolInput, toolResultOutput } = toolInfo;
+                if (!yieldedToolCallIds.has(toolCallId)) {
+                  yieldedToolCallIds.add(toolCallId);
+                  yield {
+                    type: 'tool_use',
+                    catId: this.catId,
+                    toolName,
+                    toolInput,
+                    toolUseId: toolCallId,
+                    metadata,
+                    timestamp: Date.now(),
+                  };
+                }
+                if (progress.status === 3 && !yieldedToolResults.has(toolCallId)) {
+                  yieldedToolResults.add(toolCallId);
+                  yield {
+                    type: 'tool_result',
+                    catId: this.catId,
+                    toolName,
+                    content: toolResultOutput ?? '',
+                    toolUseId: toolCallId,
+                    toolResultStatus: 'ok',
+                    metadata,
+                    timestamp: Date.now(),
+                  };
+                }
+              }
+            }
+            progressNext = progressIter.next();
           }
         }
-      } finally {
-        if (options?.signal) {
-          options.signal.removeEventListener('abort', abortHandler);
-        }
+        // timer winner → loop back to drain the buffer; progressNext promise stays pending (reused).
+      }
+      await agyConsumeTask;
+      while (sideChannelBuffer.length > 0) {
+        yield sideChannelBuffer.shift()!;
+      }
+      if (consumerError) {
+        throw consumerError instanceof Error ? consumerError : new Error(String(consumerError));
       }
 
       const agyLogText = readAntigravityLogText(agyLogPath);
@@ -934,11 +1083,28 @@ export class GeminiAgentService implements AgentService {
           },
         };
       }
+      // F210 H2b: resumed turn 从 trajectory 提取本轮 final answer 替换 stdout 重放（根治
+      // `agy --print --conversation` 累加重放）。agy resume log 为空 → locator 走扫描定位 resume
+      // 新 cascade db；任何环节失败（无 db / 无 final）→ resumedFinalText=null，classify fail-open
+      // 保留现有 stdout。
+      let resumedFinalText: string | null = null;
+      if (options?.sessionId) {
+        const dbPath = locateAgyTrajectoryDb({
+          logText: agyLogText,
+          appDataDir: agyAppDataDir,
+          invocationStartMs: agyInvocationStartMs,
+          listConversationDbs: listAgyConversationDbs,
+        });
+        if (dbPath) {
+          resumedFinalText = extractAgyFinalTextFromSteps(readAgyTrajectorySteps(dbPath));
+        }
+      }
       const parsedPlainText = classifyAntigravityCliPlainText({
         stdout,
         stderr,
         resumed: Boolean(options?.sessionId),
         agyLogText,
+        resumedFinalText,
       });
       const canRecordFreshConversation =
         !emittedSessionInit &&

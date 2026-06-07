@@ -35,6 +35,22 @@ export interface SessionRecord {
   continuityCapsule?: unknown;
   /** F118 AC-C6: Consecutive restore failures for overflow circuit breaker */
   consecutiveRestoreFailures?: number;
+  /**
+   * F198 Bug #3 chainKey: stable conversation-level anchor.
+   * For bg carrier: `bg:${threadId}:${catId}` — persists across daemon
+   * rotation (the daemon forks a fresh sessionId UUID every `--bg --resume`
+   * round, so cliSessionId is NOT a stable conversation identity).
+   * For other providers (-p / codex / gemini): undefined (cliSessionId is
+   * already stable per-conversation, no derivation needed).
+   */
+  chainKey?: string;
+  /**
+   * F198 Bug #3: latest fork sessionId emitted by the bg carrier (daemon
+   * writes it to state.resumeSessionId after each `--bg --resume` turn).
+   * Used as the next-round `--resume` target. bg-only — undefined for
+   * other providers.
+   */
+  latestResumeSessionId?: string;
   readonly createdAt: number;
   updatedAt: number;
   sealedAt?: number;

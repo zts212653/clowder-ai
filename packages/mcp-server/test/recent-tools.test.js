@@ -14,6 +14,7 @@ describe('MCP List Recent Tool (AC-F2)', () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+    delete process.env.CAT_CAFE_THREAD_ID;
     originalFetch = globalThis.fetch;
   });
 
@@ -40,6 +41,47 @@ describe('MCP List Recent Tool (AC-F2)', () => {
     assert.equal(parsed.searchParams.get('since'), '24h');
     assert.equal(parsed.searchParams.get('limit'), '10');
     assert.equal(parsed.searchParams.get('kinds'), 'feature,decision');
+  });
+
+  test('handleListRecent forwards current thread and renders suggested cross-post action', async () => {
+    const { handleListRecent } = await import('../dist/tools/recent-tools.js');
+    process.env.CAT_CAFE_THREAD_ID = 'thread-current';
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              anchor: 'thread-other',
+              title: 'Other thread',
+              kind: 'thread',
+              updatedAt: '2026-05-10T11:00:00Z',
+              source: 'project:cafe',
+              suggestedAction: {
+                type: 'cross_post',
+                threadId: 'thread-other',
+                reason: 'Recent item is another thread; dispatch relevant findings back to that thread.',
+                source: 'list_recent',
+              },
+            },
+          ],
+        }),
+      };
+    };
+
+    const result = await handleListRecent({ scope: 'threads', since: '7d' });
+
+    assert.equal(result.isError, undefined);
+    const parsed = new URL(String(capturedUrl));
+    assert.equal(parsed.searchParams.get('currentThreadId'), 'thread-current');
+    const text = result.content[0].text;
+    assert.ok(text.includes('suggested_action: cat_cafe_cross_post_message(threadId="thread-other"'));
+    assert.ok(text.includes('content="@target-cat\\n..."'));
+    assert.ok(text.includes('routing: replace @target-cat with the cat handle to wake in the target thread'));
+    assert.ok(text.includes('reason: Recent item is another thread'));
   });
 
   test('renders items with date/anchor/title/kind/source + cross-reference footer', async () => {

@@ -4,7 +4,7 @@
  * record across the propose-approve flow.
  */
 
-import type { CatId, ProposalApproveOverrides, ThreadProposal } from '@cat-cafe/shared';
+import type { CatId, ProposalApproveOverrides, ReportingMode, ThreadProposal } from '@cat-cafe/shared';
 import { generateProposalId } from '@cat-cafe/shared';
 
 export interface CreateProposalInput {
@@ -17,6 +17,8 @@ export interface CreateProposalInput {
   preferredCats: CatId[];
   projectPath: string;
   initialMessage?: string;
+  /** F128 Phase Y: reporting mode for the created thread (default none if omitted, AC-Y6). */
+  reportingMode?: ReportingMode;
   createdBy: string;
   /**
    * Optional explicit proposalId. When supplied, the store uses this value instead of
@@ -125,6 +127,7 @@ export class InMemoryProposalStore implements IProposalStore {
       createdBy: input.createdBy,
       createdAt: now,
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
+      ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
     return cloneProposal(proposal);

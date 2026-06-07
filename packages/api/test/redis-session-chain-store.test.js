@@ -21,7 +21,13 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
   let store;
   let connected = false;
 
-  const SESSION_PATTERNS = ['session:*', 'session-chain:*', 'session-active:*', 'session-cli:*'];
+  const SESSION_PATTERNS = [
+    'session:*',
+    'session-chain:*',
+    'session-active:*',
+    'session-cli:*',
+    'session-by-chainkey:*',
+  ];
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'RedisSessionChainStore');
@@ -293,5 +299,55 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(reopened.sealReason, undefined);
     assert.equal(reopened.sealedAt, undefined);
     assert.equal((await store.getActive('opus', 'thread-1'))?.id, record.id);
+  });
+
+  // ── F198 Bug #3: chainKey stable conversation anchor (Redis-backed) ──
+
+  it('create() persists chainKey and getByChainKey() reads it back', async () => {
+    const created = await store.create({ ...BASE_INPUT, chainKey: 'bg:thread-1:opus' });
+    assert.equal(created.chainKey, 'bg:thread-1:opus');
+    const found = await store.getByChainKey('bg:thread-1:opus');
+    assert.ok(found, 'should find record by chainKey');
+    assert.equal(found.id, created.id);
+    assert.equal(found.chainKey, 'bg:thread-1:opus');
+  });
+
+  it('getByChainKey() returns null for an unknown chainKey', async () => {
+    await store.create({ ...BASE_INPUT, chainKey: 'bg:thread-1:opus' });
+    assert.equal(await store.getByChainKey('bg:thread-2:opus'), null);
+  });
+
+  it('getByChainKey() returns the record even after it is sealed (write tolerance)', async () => {
+    const created = await store.create({ ...BASE_INPUT, chainKey: 'bg:thread-1:opus' });
+    await store.update(created.id, { status: 'sealed' });
+    const found = await store.getByChainKey('bg:thread-1:opus');
+    assert.ok(found, 'sealed record must still be reachable by chainKey');
+    assert.equal(found.id, created.id);
+    assert.equal(found.status, 'sealed');
+  });
+
+  it('getByChainKey() survives cliSessionId rotation (daemon fork)', async () => {
+    // bg daemon forks a fresh sessionId every --resume round; chainKey must
+    // remain the stable anchor so the same record is reused, not re-created.
+    const created = await store.create({
+      ...BASE_INPUT,
+      cliSessionId: 'daemon-short-1',
+      chainKey: 'bg:thread-1:opus',
+    });
+    await store.update(created.id, { cliSessionId: 'daemon-short-2' });
+    await store.update(created.id, { cliSessionId: 'daemon-short-3' });
+    const found = await store.getByChainKey('bg:thread-1:opus');
+    assert.ok(found, 'chainKey index must survive cliSessionId rotation');
+    assert.equal(found.id, created.id);
+    assert.equal(found.cliSessionId, 'daemon-short-3');
+  });
+
+  it('update() persists latestResumeSessionId across hydration', async () => {
+    const created = await store.create({ ...BASE_INPUT, chainKey: 'bg:thread-1:opus' });
+    const uuid = '7c77a04d-1111-2222-3333-444455556666';
+    await store.update(created.id, { latestResumeSessionId: uuid });
+    const reread = await store.get(created.id);
+    assert.equal(reread.latestResumeSessionId, uuid);
+    assert.equal((await store.getByChainKey('bg:thread-1:opus')).latestResumeSessionId, uuid);
   });
 });

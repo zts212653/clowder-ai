@@ -53,3 +53,18 @@ export function formatVisibleSystemInfo(parsed: Record<string, unknown>): Visibl
 
   return null;
 }
+
+/**
+ * F210 H3 (砚砚 scope): 折叠单行 agy trajectory 进度文案，写入 catStatusDetails（per-cat），
+ * 由 ThreadCatStatus 显示，**不**渲染为 system bubble（避免 per-step 刷屏，承接 H1-hotfix 的
+ * 静默消费）。文案保守："AGY working · N steps · latest"，N=idx+1，latest 取后端 neutralLabel
+ * 的语义部分（H3 后端 step_type 粗标签）。
+ */
+export function formatAgyProgressDetail(parsed: Record<string, unknown>): string {
+  const idx = Number(parsed.idx);
+  const steps = Number.isFinite(idx) && idx >= 0 ? idx + 1 : 1;
+  const label = typeof parsed.label === 'string' ? parsed.label : '';
+  const semantic = label.match(/\(([^)]+)\)/)?.[1]; // 后端 "(assistant activity)" 等语义标签
+  const latest = semantic ?? 'activity';
+  return `AGY working · ${steps} step${steps > 1 ? 's' : ''} · ${latest}`;
+}

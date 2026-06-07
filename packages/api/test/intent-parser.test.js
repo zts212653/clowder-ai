@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { parseIntent, stripIntentTags } = await import('../dist/domains/cats/services/context/IntentParser.js');
+const { parseIntent, stripIntentTags, ROUTE_CONTROL_TAGS } = await import(
+  '../dist/domains/cats/services/context/IntentParser.js'
+);
 
 describe('parseIntent', () => {
   it('explicit #ideate → ideate', () => {
@@ -90,5 +92,15 @@ describe('stripIntentTags', () => {
   it('trims result', () => {
     const result = stripIntentTags('#ideate 开始');
     assert.equal(result, '开始');
+  });
+});
+
+describe('ROUTE_CONTROL_TAGS', () => {
+  it('exports every tag that route-line detection must accept', () => {
+    assert.deepEqual([...ROUTE_CONTROL_TAGS].sort(), ['critique', 'execute', 'ideate']);
+
+    for (const tag of ROUTE_CONTROL_TAGS) {
+      assert.equal(stripIntentTags(`#${tag} body`), 'body', `#${tag} should be stripped by IntentParser`);
+    }
   });
 });

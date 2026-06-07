@@ -13,6 +13,7 @@ describe('MCP Evidence Tools', () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:3004';
+    delete process.env.CAT_CAFE_THREAD_ID;
     originalFetch = globalThis.fetch;
   });
 
@@ -57,6 +58,50 @@ describe('MCP Evidence Tools', () => {
     assert.equal(parsed.searchParams.get('scope'), 'docs');
     assert.equal(parsed.searchParams.get('mode'), 'hybrid');
     assert.equal(parsed.searchParams.get('dimension'), 'project');
+  });
+
+  test('handleSearchEvidence forwards current thread and renders suggested cross-post action', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    process.env.CAT_CAFE_THREAD_ID = 'thread-current';
+
+    /** @type {string | URL | undefined} */
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({
+          degraded: false,
+          results: [
+            {
+              title: 'Other thread hit',
+              anchor: 'thread:other',
+              snippet: 'finding',
+              confidence: 'high',
+              sourceType: 'discussion',
+              suggestedAction: {
+                type: 'cross_post',
+                threadId: 'thread-other',
+                reason: 'Search result came from another thread; dispatch relevant findings back to that thread.',
+                source: 'search_evidence',
+              },
+            },
+          ],
+        }),
+      };
+    };
+
+    const result = await handleSearchEvidence({ query: 'finding', scope: 'threads' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl, 'expected fetch to be called');
+    const parsed = new URL(String(capturedUrl));
+    assert.equal(parsed.searchParams.get('currentThreadId'), 'thread-current');
+    const text = result.content[0].text;
+    assert.ok(text.includes('suggested_action: cat_cafe_cross_post_message(threadId="thread-other"'));
+    assert.ok(text.includes('content="@target-cat\\n..."'));
+    assert.ok(text.includes('routing: replace @target-cat with the cat handle to wake in the target thread'));
+    assert.ok(text.includes('reason: Search result came from another thread'));
   });
 
   test('handleSearchEvidence preserves explicit dimension overrides', async () => {

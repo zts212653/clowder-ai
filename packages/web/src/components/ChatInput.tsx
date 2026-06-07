@@ -21,6 +21,7 @@ import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
+import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { hasPendingThreadDraft, syncDraftToStorage, threadDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
@@ -33,7 +34,13 @@ const MAX_IMAGE_DRAFT_THREADS = 5;
 interface ChatInputProps {
   /** Thread ID for draft persistence — drafts are saved per-thread */
   threadId?: string;
-  onSend: (content: string, images?: File[], whisper?: WhisperOptions, deliveryMode?: DeliveryMode) => void;
+  onSend: (
+    content: string,
+    images?: File[],
+    whisper?: WhisperOptions,
+    deliveryMode?: DeliveryMode,
+    replyToId?: string,
+  ) => void;
   onStop?: () => void;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -57,6 +64,12 @@ export function ChatInput({
   const catOptions = useMemo(() => buildCatOptions(cats), [cats]);
   // F108 Scene 2: whisper-eligible cats (CatData[] for WhisperCatSelector)
   const whisperCats = useMemo(() => cats.filter((c) => c.roster?.available !== false), [cats]);
+
+  // #699: Reply-to (quote) state — thread-scoped to prevent split-pane leaks
+  const rawReplyToMessage = useChatStore((s) => s.replyToMessage);
+  const clearReplyTo = useChatStore((s) => s.clearReplyTo);
+  // Only surface the reply when it belongs to this ChatInput's thread
+  const replyToMessage = rawReplyToMessage?.threadId === threadId ? rawReplyToMessage : null;
 
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
@@ -159,16 +172,29 @@ export function ChatInput({
           whisperMode && whisperTargets.size > 0
             ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
             : undefined;
-        onSend(trimmed, images.length > 0 ? images : undefined, whisper, deliveryMode);
+        onSend(trimmed, images.length > 0 ? images : undefined, whisper, deliveryMode, replyToMessage?.id);
         setInput('');
         ghostRef.current = null;
         setGhostSuggestion(null);
         setImages([]);
         setShowMentions(false);
         setShowGameMenu(false);
+        // Only clear reply if it belongs to this thread (preserve other thread's reply in split-pane)
+        if (replyToMessage) clearReplyTo();
       }
     },
-    [input, disabled, onSend, images, sendTemporarilyDisabled, whisperMode, whisperTargets, addHistoryEntry],
+    [
+      input,
+      disabled,
+      onSend,
+      images,
+      sendTemporarilyDisabled,
+      whisperMode,
+      whisperTargets,
+      addHistoryEntry,
+      replyToMessage,
+      clearReplyTo,
+    ],
   );
 
   const handleSend = useCallback(() => doSend(undefined), [doSend]);
@@ -646,6 +672,9 @@ export function ChatInput({
       )}
 
       <ImagePreview files={images} onRemove={handleRemoveImage} />
+
+      {/* #699: Reply preview bar — matches ReplyPill styling with sender theme color */}
+      {replyToMessage && <ReplyPreviewBar replyToMessage={replyToMessage} cats={cats} onClear={clearReplyTo} />}
 
       <input
         ref={fileInputRef}

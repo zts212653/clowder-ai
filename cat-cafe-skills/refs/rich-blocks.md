@@ -64,8 +64,8 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 
 ## 创建方式
 
-1. **HTTP Callback（推荐）** — 见 `refs/mcp-callbacks.md` create-rich-block 端点
-2. **MCP Tool** — `cat_cafe_create_rich_block`
+1. **MCP Tool（推荐）** — `cat_cafe_create_rich_block`
+2. **Callback surface reference** — 见 `refs/mcp-callbacks.md` 的工具映射表；不要手写第一方 HTTP callback 作为主路径
 3. **Inline Text（fallback）**：
 ````
 ```cc_rich
@@ -73,7 +73,7 @@ Codex `image_gen` 和 Antigravity 生成的图片现已**自动发布**：
 ```
 ````
 
-优先用 HTTP callback。`cc_rich` 仅在 HTTP 不可用时使用。
+优先用 `cat_cafe_create_rich_block`。`cc_rich` 仅在 MCP/callback surface 不可用时使用。
 
 ### interactive 类型
 

@@ -184,7 +184,12 @@ export async function generateScriptViaThread(
       userMsg.id,
       targetCats,
       intent,
-      { signal: controller.signal, parentInvocationId: createResult.invocationId },
+      {
+        signal: controller.signal,
+        parentInvocationId: createResult.invocationId,
+        // F222 P1: System-internal podcast generation is not user-origin
+        frustrationAutoIssueEligible: false,
+      },
     )) {
       if (msg.type === 'text' && msg.content) {
         fullText += msg.content;

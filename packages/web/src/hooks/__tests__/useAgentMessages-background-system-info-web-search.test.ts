@@ -60,6 +60,37 @@ describe('consumeBackgroundSystemInfo web_search', () => {
     expect(result.consumed).toBe(true);
   });
 
+  // F210 H3: background path agy_trajectory_progress → 累积到 thread 级 catStatusDetails（折叠单行），
+  // 不渲染 raw JSON system bubble（承接 H1-hotfix）。砚砚 scope：active+background 都覆盖。
+  it('consumes agy_trajectory_progress → updateThreadCatStatus detail, no raw bubble (H3 background)', () => {
+    const options = createMockOptions();
+    const msg = {
+      type: 'system_info',
+      catId: 'gemini',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'agy_trajectory_progress',
+        idx: 4,
+        stepType: 15,
+        status: 1,
+        label: 'AGY trajectory step #4 (assistant activity) running',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith(
+      'thread-1',
+      'gemini',
+      'streaming',
+      expect.stringContaining('AGY working · 5 steps · assistant activity'),
+    );
+    // 不刷 system bubble（per-step）
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+  });
+
   it('consumes invocation_created and resets stale taskProgress for that cat', () => {
     const options = createMockOptions({
       getThreadState: vi.fn(() => ({

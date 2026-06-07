@@ -7,9 +7,10 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import Database from 'better-sqlite3';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 const { GeminiAgentService } = await import('../dist/domains/cats/services/agents/providers/GeminiAgentService.js');
@@ -501,6 +502,189 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.equal(args.includes('--model'), false, 'agy 1.0.1 has no verified --model flag');
   });
 
+  test('F210-H1b: yields trajectory progress side-channel while preserving final stdout text', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    // Seed an AGY appDataDir with a cascade trajectory SQLite store (3 steps already written).
+    const appDataDir = mkdtempSync(join(tmpdir(), 'agy-traj-int-'));
+    const uuid = 'abcdef12-3456-7890-abcd-ef1234567890';
+    mkdirSync(join(appDataDir, 'conversations'));
+    const tdb = new Database(join(appDataDir, 'conversations', `${uuid}.db`));
+    tdb.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const ins = tdb.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+    ins.run(0, 14, 3);
+    ins.run(1, 9, 3);
+    ins.run(2, 15, 3);
+    tdb.close();
+
+    // Seed the AGY --log-file the observer reads (carries appDataDir + cascade uuid).
+    const logPath = join(appDataDir, 'agy.log');
+    writeFileSync(logPath, `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const promise = collect(service.invoke('Say hi', { workingDirectory: workDir, agyLogPathOverride: logPath }));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await promise;
+
+    const progress = msgs.filter(
+      (m) => m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('agy_trajectory_progress'),
+    );
+    assert.ok(progress.length >= 1, 'should yield trajectory progress side-channel events');
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'AGY_FINAL_REPLY', 'final text must equal agy stdout — semantics unchanged');
+
+    rmSync(appDataDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210-H4: yields tool_use and tool_result messages extracted from trajectory payload', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const appDataDir = mkdtempSync(join(tmpdir(), 'agy-traj-tool-'));
+    const uuid = 'abcdef12-3456-7890-abcd-ef1234567890';
+    mkdirSync(join(appDataDir, 'conversations'));
+    const tdb = new Database(join(appDataDir, 'conversations', `${uuid}.db`));
+    tdb.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+
+    // 辅助编码
+    const encodeVarint = (val) => {
+      const buf = [];
+      let temp = val;
+      while (temp >= 0x80) {
+        buf.push((temp & 0x7f) | 0x80);
+        temp = temp >>> 7;
+      }
+      buf.push(temp & 0x7f);
+      return Buffer.from(buf);
+    };
+    const encodeLengthDelimited = (fieldNum, content) => {
+      const tag = (fieldNum << 3) | 2;
+      const tagBuf = encodeVarint(tag);
+      const contentBuf = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
+      const lenBuf = encodeVarint(contentBuf.length);
+      return Buffer.concat([tagBuf, lenBuf, contentBuf]);
+    };
+
+    // 拼装一个包含 list_dir 调用的 payload 并嵌套于 field 5 中
+    const innerBytes = Buffer.concat([
+      encodeLengthDelimited(2, 'list_dir'),
+      encodeLengthDelimited(12, '99999999-9999-9999-9999-999999999999'),
+      encodeLengthDelimited(3, '{"DirectoryPath":"/tmp"}'),
+    ]);
+    const payloadBytes = encodeLengthDelimited(5, innerBytes);
+
+    const ins = tdb.prepare('INSERT INTO steps (idx, step_type, status, step_payload) VALUES (?, ?, ?, ?)');
+    ins.run(0, 9, 3, payloadBytes); // idx 0: completed tool step
+    tdb.close();
+
+    const logPath = join(appDataDir, 'agy.log');
+    writeFileSync(logPath, `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const promise = collect(service.invoke('Say hi', { workingDirectory: workDir, agyLogPathOverride: logPath }));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await promise;
+
+    const toolUse = msgs.find((m) => m.type === 'tool_use');
+    const toolResult = msgs.find((m) => m.type === 'tool_result');
+
+    assert.ok(toolUse, 'should yield tool_use message');
+    assert.equal(toolUse.toolName, 'list_dir');
+    assert.equal(toolUse.toolUseId, '99999999-9999-9999-9999-999999999999');
+    assert.deepEqual(toolUse.toolInput, { DirectoryPath: '/tmp' });
+
+    assert.ok(toolResult, 'should yield tool_result message');
+    assert.equal(toolResult.toolName, 'list_dir');
+    assert.equal(toolResult.toolUseId, '99999999-9999-9999-9999-999999999999');
+
+    rmSync(appDataDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210-H1b P1-2: liveness warning flushes in real time even when progress is fail-open', async () => {
+    const service = new GeminiAgentService({ adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+    const start = Date.now();
+    let plainTextEmittedAt = 0;
+    // Emit a liveness warning immediately, keep "running" 400ms, then finish.
+    const spawnCliOverride = () =>
+      (async function* () {
+        yield { __livenessWarning: true, level: 'suspected_stall', state: 'idle-silent', silenceDurationMs: 1000 };
+        await new Promise((r) => setTimeout(r, 400));
+        plainTextEmittedAt = Date.now() - start;
+        yield { __cliPlainText: true, stdout: 'FINAL_AFTER_STALL', stderr: '', exitCode: 0, signal: null };
+      })();
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-live-'));
+    let livenessYieldedAt = -1;
+    const msgs = [];
+    // no resolvable DB → observeAgyProgress is fail-open (zero progress). Liveness must NOT be
+    // buffered until agy completion (that would be worse than the pre-H1b real-time behavior).
+    for await (const m of service.invoke('hi', {
+      workingDirectory: workDir,
+      spawnCliOverride,
+      agyLogPathOverride: join(workDir, 'nonexistent-agy.log'),
+    })) {
+      msgs.push(m);
+      if (livenessYieldedAt < 0 && m.type === 'system_info' && String(m.content).includes('liveness_warning')) {
+        livenessYieldedAt = Date.now() - start;
+      }
+    }
+    assert.ok(livenessYieldedAt >= 0, 'liveness warning must be yielded');
+    assert.ok(
+      livenessYieldedAt < plainTextEmittedAt,
+      `liveness must flush mid-run (@${livenessYieldedAt}ms), not buffered to agy completion (@${plainTextEmittedAt}ms)`,
+    );
+    const text = msgs.find((m) => m.type === 'text');
+    assert.equal(text?.content, 'FINAL_AFTER_STALL', 'final text unchanged');
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210-H1b cloud-P1: consumer spawn rejection handled without unhandled rejection', async () => {
+    const rejections = [];
+    const onRej = (reason) => rejections.push(reason);
+    process.on('unhandledRejection', onRej);
+    try {
+      const service = new GeminiAgentService({ adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+      const workDir = mkdtempSync(join(tmpdir(), 'agy-boom-'));
+      // Consumer throws mid-stream (after a non-terminal event) while progress is still polling
+      // a non-existent DB (fail-open sleep window) — the unhandled-rejection window from the old code.
+      const spawnCliOverride = () =>
+        (async function* () {
+          yield { __livenessWarning: true, level: 'suspected_stall', state: 'idle-silent' };
+          await new Promise((r) => setTimeout(r, 30));
+          throw new Error('AGY_SPAWN_BOOM');
+        })();
+      const msgs = await collect(
+        service.invoke('hi', {
+          workingDirectory: workDir,
+          spawnCliOverride,
+          agyLogPathOverride: join(workDir, 'none.log'),
+        }),
+      );
+      assert.ok(
+        msgs.find((m) => m.type === 'done'),
+        'invoke must yield done even when the spawn consumer throws',
+      );
+      assert.ok(
+        msgs.find((m) => m.type === 'error' && String(m.error).includes('AGY_SPAWN_BOOM')),
+        'consumer error must surface as a normal error message',
+      );
+      await new Promise((r) => setTimeout(r, 60)); // let any stray unhandled rejection surface
+      assert.equal(rejections.length, 0, 'consumer rejection must be handled — no unhandledRejection');
+      rmSync(workDir, { recursive: true, force: true });
+    } finally {
+      process.off('unhandledRejection', onRej);
+    }
+  });
+
   test('filters user-provided AGY yolo flags without sandbox proof', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
@@ -533,12 +717,18 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     const proc = createMockProcess();
     const profileRoot = mkdtempSync(join(tmpdir(), 'agy-service-profile-root-'));
     const workDir = mkdtempSync(join(tmpdir(), 'agy-service-workdir-'));
-    const spawnFn = mock.fn((_command, args) => {
+    const spawnFn = mock.fn((_command, args, opts) => {
       const logPath = args[args.indexOf('--log-file') + 1];
       writeFileSync(
         logPath,
         'I0531 01:14:59.518377 model.go:42] Propagating selected model override to backend: label="Gemini 3.5 Flash (High)"\n',
       );
+      // F210 cache-leak regression: 模拟 AGY 写 cwd-relative cache/projects.json 到 spawn cwd
+      // （实证 2026-06-03 真跑行为）。spawn cwd 必须是 profile sandbox，不能是 workDir/repo root。
+      if (opts?.cwd) {
+        mkdirSync(join(opts.cwd, 'cache'), { recursive: true });
+        writeFileSync(join(opts.cwd, 'cache', 'projects.json'), '{}');
+      }
       return proc;
     });
     const service = new GeminiAgentService({
@@ -562,6 +752,27 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
       assert.ok(args.includes('--dangerously-skip-permissions'), 'sandboxed profile should enable yolo');
       assert.equal(call.arguments[2].env.HOME, join(profileRoot, 'gemini'));
 
+      // F210 cache-leak fix: spawn cwd = profile cwd sandbox 下 per-worktree 子目录（cloud P1：AGY 按 cwd
+      // scope conversation 命名空间，每 worktree 唯一）。cwd-relative cache 落 profile 不 repo；
+      // workspace 仍由 --add-dir workDir 授权。
+      const cwdBase = join(profileRoot, 'gemini', 'cwd');
+      const spawnCwd = call.arguments[2].cwd;
+      assert.ok(
+        spawnCwd.startsWith(`${cwdBase}/`) && spawnCwd !== cwdBase,
+        `spawn cwd 应是 profile cwd base 下 per-worktree 子目录，实际 ${spawnCwd}`,
+      );
+      assert.equal(
+        done?.metadata?.diagnostics?.antigravityCli?.spawnCwd,
+        spawnCwd,
+        'diagnostics.antigravityCli.spawnCwd 应暴露隔离后的 spawn cwd',
+      );
+      assert.ok(
+        args.includes('--add-dir') && args.includes(workDir),
+        'workspace 仍由 --add-dir workingDirectory 显式授权',
+      );
+      assert.ok(existsSync(join(spawnCwd, 'cache', 'projects.json')), 'cwd-relative cache 落 profile sandbox');
+      assert.ok(!existsSync(join(workDir, 'cache', 'projects.json')), 'workDir(repo) 不得生成 cache/projects.json');
+
       const settingsPath = join(profileRoot, 'gemini', '.gemini', 'antigravity-cli', 'settings.json');
       const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
       assert.equal(settings.model, 'Gemini 3.5 Flash (High)');
@@ -570,6 +781,86 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
       rmSync(profileRoot, { recursive: true, force: true });
       rmSync(workDir, { recursive: true, force: true });
     }
+  });
+
+  test('no AGY profile: spawn cwd is deterministic sandbox, cwd-relative cache never leaks into repo (F210 cache-leak)', async () => {
+    // production gemini/gemini25 当前就是 no-agyProfile 路径——cwd-relative cache 必须落默认 sandbox 而非 repo root。
+    const proc = createMockProcess();
+    const cwdRoot = mkdtempSync(join(tmpdir(), 'agy-cwd-root-'));
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-noprofile-workdir-'));
+    const prevEnv = process.env.CAT_CAFE_AGY_CWD_ROOT;
+    process.env.CAT_CAFE_AGY_CWD_ROOT = cwdRoot;
+    const spawnFn = mock.fn((_command, _args, opts) => {
+      // 模拟 AGY 写 cwd-relative cache/projects.json 到 spawn cwd（实证 2026-06-03 真跑行为）
+      if (opts?.cwd) {
+        mkdirSync(join(opts.cwd, 'cache'), { recursive: true });
+        writeFileSync(join(opts.cwd, 'cache', 'projects.json'), '{}');
+      }
+      return proc;
+    });
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+      // 无 agyProfile：复现 production gemini 默认路径
+    });
+
+    try {
+      const promise = collect(service.invoke('noprofile prompt', { workingDirectory: workDir }));
+      emitPlainText(proc, 'AGY_NOPROFILE_OK\n');
+      const collected = await promise;
+
+      const call = spawnFn.mock.calls[0];
+      const args = call.arguments[1];
+      // service catId 默认 'gemini' → base = <root>/gemini，spawn cwd = base 下 per-worktree 子目录（cloud P1）
+      const base = join(cwdRoot, 'gemini');
+      const spawnCwd = call.arguments[2].cwd;
+      assert.ok(
+        spawnCwd.startsWith(`${base}/`) && spawnCwd !== base,
+        `no-profile spawn cwd 应是 base 下 per-worktree 子目录，实际 ${spawnCwd}`,
+      );
+      const done = collected.find((m) => m.type === 'done');
+      assert.equal(
+        done?.metadata?.diagnostics?.antigravityCli?.spawnCwd,
+        spawnCwd,
+        'diagnostics.antigravityCli.spawnCwd 应暴露隔离后的 spawn cwd',
+      );
+      assert.ok(
+        args.includes('--add-dir') && args.includes(workDir),
+        'workspace 仍由 --add-dir workingDirectory 显式授权',
+      );
+      assert.ok(existsSync(join(spawnCwd, 'cache', 'projects.json')), 'cwd-relative cache 落默认 sandbox');
+      assert.ok(!existsSync(join(workDir, 'cache', 'projects.json')), 'workDir(repo) 不得生成 cache/projects.json');
+    } finally {
+      if (prevEnv === undefined) delete process.env.CAT_CAFE_AGY_CWD_ROOT;
+      else process.env.CAT_CAFE_AGY_CWD_ROOT = prevEnv;
+      rmSync(cwdRoot, { recursive: true, force: true });
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('normalizes relative workingDirectory to absolute for --add-dir (cloud P2: relative path vs sandbox cwd)', async () => {
+    // cloud P2：spawn cwd 现在是独立 sandbox，若 workingDirectory 是相对路径（如 "."），
+    // 透传给 --add-dir 会相对 sandbox cwd 解析 → AGY 授权错目录。必须 normalize 成绝对路径。
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+    });
+
+    const promise = collect(service.invoke('relative cwd', { workingDirectory: '.' }));
+    emitPlainText(proc, 'AGY_REL_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const addDirIdx = args.indexOf('--add-dir');
+    assert.ok(addDirIdx >= 0, 'must pass --add-dir');
+    const addDirVal = args[addDirIdx + 1];
+    assert.notEqual(addDirVal, '.', '不能透传相对路径（会相对 sandbox cwd 解析 → 授权错目录）');
+    assert.equal(addDirVal, resolve('.'), '--add-dir 必须是绝对路径（resolve(".") = process.cwd()）');
+    assert.ok(addDirVal.startsWith('/'), 'normalize 后必须是绝对路径');
   });
 
   test('fails closed when AGY observed model differs from the configured profile model', async () => {
@@ -857,7 +1148,13 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.equal(spawnFn.mock.callCount(), 0);
     assert.equal(capturedOpts?.outputMode, 'plainText');
     assert.ok(capturedOpts?.command === 'agy' || capturedOpts?.command.endsWith('/agy'));
-    assert.equal(capturedOpts?.cwd, '/tmp/agy-override');
+    // F210 cache-leak fix: spawn cwd 不再是 workingDirectory（AGY 写 cwd-relative cache/projects.json
+    // 会泄漏到 repo），而是默认 sandbox 下 per-worktree 子目录（无 agyProfile，catId='gemini'，cloud P1）。
+    assert.notEqual(capturedOpts?.cwd, '/tmp/agy-override', 'spawn cwd 不应是 workingDirectory（cache leak）');
+    assert.ok(
+      capturedOpts?.cwd?.includes('/.cat-cafe/agy-cwd/gemini/'),
+      `spawn cwd 应是默认 cwd sandbox 下 per-worktree 子目录，实际 ${capturedOpts?.cwd}`,
+    );
     assert.equal(capturedOpts?.invocationId, 'inv-agy-override');
     assert.equal(capturedOpts?.cliSessionId, 'cli-agy-override');
   });

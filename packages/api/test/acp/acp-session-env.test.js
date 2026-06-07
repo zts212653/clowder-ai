@@ -13,6 +13,7 @@ const CALLBACK_ENV = {
   CAT_CAFE_API_URL: 'http://localhost:3004',
   CAT_CAFE_INVOCATION_ID: 'inv-abc',
   CAT_CAFE_CALLBACK_TOKEN: 'tok-xyz',
+  CAT_CAFE_THREAD_ID: 'thread-abc',
   CAT_CAFE_USER_ID: 'user-1',
   CAT_CAFE_CAT_ID: 'gemini',
   CAT_CAFE_SIGNAL_USER: 'gemini',
@@ -31,10 +32,12 @@ describe('materializeSessionMcpServers', () => {
     const collabEnv = Object.fromEntries(result[0].env.map((e) => [e.name, e.value]));
     assert.equal(collabEnv.CAT_CAFE_API_URL, 'http://localhost:3004');
     assert.equal(collabEnv.CAT_CAFE_CALLBACK_TOKEN, 'tok-xyz');
+    assert.equal(collabEnv.CAT_CAFE_THREAD_ID, 'thread-abc');
 
     const memoryEnv = Object.fromEntries(result[1].env.map((e) => [e.name, e.value]));
     assert.equal(memoryEnv.KEEP, 'yes', 'Existing env preserved');
     assert.equal(memoryEnv.CAT_CAFE_INVOCATION_ID, 'inv-abc');
+    assert.equal(memoryEnv.CAT_CAFE_THREAD_ID, 'thread-abc');
   });
 
   it('injects into exact "cat-cafe" name (not just cat-cafe-* prefixed)', () => {
@@ -46,6 +49,7 @@ describe('materializeSessionMcpServers', () => {
     const envMap = Object.fromEntries(result[0].env.map((e) => [e.name, e.value]));
     assert.equal(envMap.CAT_CAFE_API_URL, 'http://localhost:3004');
     assert.equal(envMap.CAT_CAFE_INVOCATION_ID, 'inv-abc');
+    assert.equal(envMap.CAT_CAFE_THREAD_ID, 'thread-abc');
     assert.equal(envMap.EXISTING, 'keep', 'Existing env preserved');
   });
 
@@ -134,6 +138,7 @@ describe('callbackEnvDiagnostic', () => {
     assert.equal(diag.hasApiUrl, true);
     assert.equal(diag.hasInvocationId, true);
     assert.equal(diag.hasCallbackToken, true);
+    assert.equal(diag.hasThreadId, true);
   });
 
   it('reports missing keys as false', () => {
@@ -141,6 +146,7 @@ describe('callbackEnvDiagnostic', () => {
     assert.equal(diag.hasApiUrl, false);
     assert.equal(diag.hasInvocationId, false);
     assert.equal(diag.hasCallbackToken, false);
+    assert.equal(diag.hasThreadId, false);
   });
 
   it('handles undefined', () => {

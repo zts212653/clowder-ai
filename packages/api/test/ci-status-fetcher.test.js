@@ -1,4 +1,8 @@
 // @ts-check
+// Pure helper coverage for CI status interpretation. These utils used to live in the
+// (now-deleted) CiCdCheckPoller; they're the single source of truth in ci-status-fetcher,
+// consumed by CiCdCheckTaskSpec. The poller's stale "CI pass → trigger" contract tests were
+// dropped with it — the live CI-pass/-fail wake contract is covered by cicd-check-spec.test.js.
 
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
@@ -6,147 +10,7 @@ import {
   computeAggregateBucket,
   normalizeBucket,
   normalizePrState,
-} from '../dist/infrastructure/email/CiCdCheckPoller.js';
-
-// ─── Integration: CI failure triggers urgent policy (KD-4) ─────────
-
-describe('CiCdCheckPoller trigger policy', () => {
-  it('CI failure uses urgent priority (KD-4: aligned with github-review)', async () => {
-    /** @type {import('../dist/infrastructure/email/ConnectorInvokeTrigger.js').ConnectorTriggerPolicy | undefined} */
-    let capturedPolicy;
-    const mockTrigger = {
-      trigger: (_threadId, _catId, _userId, _content, _messageId, _contentBlocks, policy) => {
-        capturedPolicy = policy;
-      },
-    };
-
-    const mockRouter = {
-      route: async () => ({
-        kind: 'notified',
-        threadId: 'thread_1',
-        catId: 'opus',
-        messageId: 'msg_1',
-        bucket: 'fail',
-        content: 'CI failed',
-      }),
-    };
-
-    const mockStore = {
-      listAll: async () => [
-        {
-          repoFullName: 'org/repo',
-          prNumber: 1,
-          threadId: 'thread_1',
-          catId: 'opus',
-          userId: 'user_1',
-          registeredAt: Date.now(),
-          ciTrackingEnabled: true,
-        },
-      ],
-    };
-
-    const mockLog = {
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      debug: () => {},
-    };
-
-    const { CiCdCheckPoller } = await import('../dist/infrastructure/email/CiCdCheckPoller.js');
-
-    const poller = new CiCdCheckPoller({
-      prTrackingStore: mockStore,
-      cicdRouter: mockRouter,
-      invokeTrigger: mockTrigger,
-      log: mockLog,
-    });
-
-    poller.fetchPrStatus = async () => ({
-      repoFullName: 'org/repo',
-      prNumber: 1,
-      headSha: 'abc123',
-      prState: 'open',
-      aggregateBucket: 'fail',
-      checks: [{ name: 'ci', bucket: 'fail' }],
-    });
-
-    await poller.pollAll();
-
-    assert.ok(capturedPolicy, 'trigger should have been called with a policy');
-    assert.strictEqual(capturedPolicy.priority, 'urgent', 'CI failure must use urgent priority (KD-4)');
-    assert.strictEqual(capturedPolicy.reason, 'github_ci_failure');
-  });
-
-  it('CI success triggers invocation with normal priority (F140 Phase C)', async () => {
-    let triggerCalled = false;
-    let triggerPolicy = null;
-    const mockTrigger = {
-      trigger: (...args) => {
-        triggerCalled = true;
-        triggerPolicy = args[6]; // policy is 7th arg
-      },
-    };
-
-    const mockRouter = {
-      route: async () => ({
-        kind: 'notified',
-        threadId: 'thread_1',
-        catId: 'opus',
-        messageId: 'msg_1',
-        bucket: 'pass',
-        content: 'CI passed',
-      }),
-    };
-
-    const mockStore = {
-      listAll: async () => [
-        {
-          repoFullName: 'org/repo',
-          prNumber: 1,
-          threadId: 'thread_1',
-          catId: 'opus',
-          userId: 'user_1',
-          registeredAt: Date.now(),
-          ciTrackingEnabled: true,
-        },
-      ],
-    };
-
-    const mockLog = {
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      debug: () => {},
-    };
-
-    const { CiCdCheckPoller } = await import('../dist/infrastructure/email/CiCdCheckPoller.js');
-
-    const poller = new CiCdCheckPoller({
-      prTrackingStore: mockStore,
-      cicdRouter: mockRouter,
-      invokeTrigger: mockTrigger,
-      log: mockLog,
-    });
-
-    poller.fetchPrStatus = async () => ({
-      repoFullName: 'org/repo',
-      prNumber: 1,
-      headSha: 'abc123',
-      prState: 'open',
-      aggregateBucket: 'pass',
-      checks: [{ name: 'ci', bucket: 'pass' }],
-    });
-
-    await poller.pollAll();
-
-    // F140 Phase C: CI pass now triggers with normal priority (was: no trigger)
-    assert.strictEqual(triggerCalled, true, 'CI success should trigger invocation (normal priority)');
-    assert.strictEqual(triggerPolicy.priority, 'normal');
-    assert.strictEqual(triggerPolicy.reason, 'github_ci_pass');
-  });
-});
-
-// ─── Unit tests for pure helper functions ──────────────────────────
+} from '../dist/infrastructure/email/ci-status-fetcher.js';
 
 describe('normalizePrState', () => {
   it('returns merged when mergedAt is set', () => {
@@ -240,8 +104,28 @@ describe('computeAggregateBucket', () => {
     assert.strictEqual(computeAggregateBucket(rollup), 'fail');
   });
 
-  it('cancelled conclusion counts as failure', () => {
+  it('cancelled conclusion alone is NOT a failure but also NOT a green light → pending', () => {
+    // A cancelled run is a superseded non-result: not a failure (no false CI-fail), but also not a
+    // success (GitHub success states = success/skipped/neutral, not cancelled). With no real positive
+    // result, the PR is not green → pending (never falsely wakes a merge-gate). [砚砚 review P1]
     const rollup = [{ status: 'COMPLETED', conclusion: 'cancelled', __typename: 'CheckRun' }];
+    assert.strictEqual(computeAggregateBucket(rollup), 'pending');
+  });
+
+  it('cancelled alongside a passing re-run aggregates to pass (not fail)', () => {
+    // Common case: a run was superseded (cancelled) and the re-run passed.
+    const rollup = [
+      { status: 'COMPLETED', conclusion: 'cancelled', __typename: 'CheckRun' },
+      { status: 'COMPLETED', conclusion: 'success', __typename: 'CheckRun' },
+    ];
+    assert.strictEqual(computeAggregateBucket(rollup), 'pass');
+  });
+
+  it('a real failure still wins over a cancelled run', () => {
+    const rollup = [
+      { status: 'COMPLETED', conclusion: 'cancelled', __typename: 'CheckRun' },
+      { status: 'COMPLETED', conclusion: 'failure', __typename: 'CheckRun' },
+    ];
     assert.strictEqual(computeAggregateBucket(rollup), 'fail');
   });
 

@@ -3,7 +3,7 @@ name: worktree
 description: >
   创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
   Use when: 开始任何代码修改、新功能开发、bug fix。
-  Not for: 纯文档修改（≤5 行）、不涉及代码的讨论。
+  Not for: 纯文档修改（≤5 行）、不涉及代码/脚本/API/第一方执行面的讨论。
   Output: 隔离的 worktree + 正确的 Redis/环境配置。
 triggers:
   - "开始开发"
@@ -14,7 +14,7 @@ renamed-from: using-git-worktrees
 
 # Worktree
 
-开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。
+开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使是 ≤5 行，也不按“纯文档免验证”处理：至少 commit 前跑 `pnpm check`；非 trivial 行为改动仍应开 worktree。
 
 ## 开工前 Recall（F102 记忆系统）🔴
 
@@ -169,6 +169,28 @@ git worktree prune
 git worktree list             # 列出所有 worktree
 git branch --merged main      # 哪些分支已合入
 ```
+
+## Commit / Stash 溯源 Footer（F193 Phase E）
+
+当当前 worktree 的改动来自跨 thread 投递、跨 feature 调查、或你预期后续猫需要反查来源 thread 时，在 commit body 或 stash message 末尾加：
+
+```text
+Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>
+```
+
+示例：
+
+```text
+Why: Add read-side affordance so search/list_recent results show where to cross-post.
+
+[Maine Coon/GPT-5.5🐾]
+Thread-Context: threadId=thread_mpl0np23o7syhxl5 invocationId=0001780508313338 catId=codex
+```
+
+规则：
+- 只在有明确 thread context 时写；拿不到 `invocationId` 就省略该键，不要猜。
+- 不通过 hook 自动改写或拒绝提交；这是降摩擦溯源字段，不是新门禁。
+- stash 只写 tracked 临时现场；多 session 工作目录里仍禁止 `git stash -u`，避免清掉别人未跟踪产物。
 
 ## Codex `apply_patch` 陷阱（开发猫必读）
 

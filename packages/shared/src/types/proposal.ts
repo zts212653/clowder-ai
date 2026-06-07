@@ -17,6 +17,19 @@ import type { CatId } from './ids.js';
 export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
 
 /**
+ * F128 Phase Y reporting modes — the contract for whether (and how) a sub-thread
+ * reports back to its source thread. Default is `none` (autonomous, AC-Y6).
+ * Fixed at proposal time — dynamic switching is NOT supported (C-Y1).
+ *
+ * - `none` (UI: autonomous): source thread holds no receipt responsibility;
+ *   critical events still escalate per house rules (C-Y2).
+ * - `final-only`: one summary on completion.
+ * - `state-transitions`: report at each phase boundary.
+ * - `blocking-ack`: downstream waits for source-thread ack at each blocker (C-Y3).
+ */
+export type ReportingMode = 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
+
+/**
  * A thread proposal created by a cat, awaiting user decision.
  */
 export interface ThreadProposal {
@@ -34,6 +47,13 @@ export interface ThreadProposal {
   parentThreadId: string; // defaults to sourceThreadId at create time
   preferredCats: CatId[]; // empty array if none
   initialMessage?: string;
+  /**
+   * F128 Phase Y: how this sub-thread reports back to its source thread.
+   * Optional for backward-compat with pre-Phase-Y proposals; readers treat
+   * `undefined` as the default `none` (autonomous). Fixed at create time — NOT
+   * editable via ProposalApproveOverrides (C-Y1: no dynamic switching).
+   */
+  reportingMode?: ReportingMode;
   projectPath: string;
 
   // Audit — creation

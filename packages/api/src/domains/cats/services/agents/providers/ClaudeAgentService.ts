@@ -133,6 +133,35 @@ function removeL0TempDir(l0Path: string | undefined): void {
 }
 
 /**
+ * #840: write the append-system-prompt payload (pack blocks + briefing) to a
+ * temp file so it can be passed via `--append-system-prompt-file <path>`.
+ *
+ * Root cause: inline `--append-system-prompt <text>` puts the whole payload on
+ * the spawn command line. Windows `CreateProcess` caps the command line at
+ * 32,767 chars; A2A handoffs and large memory briefings exceed it and produce
+ * `spawn ENAMETOOLONG`. Linux ARG_MAX is larger but the same risk class.
+ *
+ * The file is dropped in a fresh `mkdtemp` dir so cleanup can `rmSync` the
+ * whole directory the same way `removeL0TempDir` does for L0.
+ */
+function writeAppendPromptToTempFile(content: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-append-prompt-'));
+  const path = join(dir, 'append-system-prompt.md');
+  writeFileSync(path, content, 'utf8');
+  return path;
+}
+
+function removeAppendPromptTempDir(path: string | undefined): void {
+  if (!path) return;
+  const promptDir = dirname(path);
+  try {
+    rmSync(promptDir, { recursive: true, force: true });
+  } catch (err) {
+    log.warn({ err, promptDir }, 'Failed to remove Claude append-prompt temp directory');
+  }
+}
+
+/**
  * Build env overrides for spawning the `claude` CLI.
  *
  * F198: exported as the single source of truth for Claude carrier env logic.
@@ -293,13 +322,29 @@ export class ClaudeAgentService implements AgentService {
     // ClaudeBgCarrierService reuses the same rules (single source of truth).
     const { effectiveModel, useEnvModelOverride } = resolveClaudeModelSelection(options?.callbackEnv, this.model);
     const isApiKeyMode = options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'api_key';
+    // #840 R2 (砚砚 review 2026-06-02): the main prompt must NOT ride argv.
+    // A2A briefings + memory + image hints push `effectivePrompt` past the
+    // Windows CreateProcess 32K cap → spawn ENAMETOOLONG. Mirrors the
+    // CodexAgentService pattern (cross-thread-context-contamination incident
+    // 2026-05-29): prompt is streamed via stdin instead. `-p` keeps print
+    // mode; `--input-format text` (Claude's default) reads positional prompt
+    // from stdin when no argv positional is provided.
+    //
+    // Side benefit: also prevents prompt content from leaking via
+    // `ps -o command=` / /proc/<pid>/cmdline like the Codex carrier.
+    // Only pass --model for known Anthropic models. For third-party models
+    // (e.g. glm-5 via BigModel/DashScope), ANTHROPIC_MODEL env var is set in
+    // buildClaudeEnvOverrides() and --model must be omitted so the CLI honours it.
+    // Empty model (OAuth without explicit model) → let CLI use its default.
+    const modelArgs = !useEnvModelOverride && effectiveModel ? ['--model', effectiveModel] : [];
+
     const args: string[] = [
       '-p',
-      effectivePrompt,
       '--output-format',
       'stream-json',
       '--include-partial-messages',
       '--verbose',
+      ...modelArgs,
       '--effort',
       getCatEffort(this.catId as string, undefined, 'anthropic'),
       '--permission-mode',
@@ -311,14 +356,6 @@ export class ClaudeAgentService implements AgentService {
       // Enable Chrome MCP integration (built-in, requires Chrome + extension running)
       '--chrome',
     ];
-
-    // Only pass --model for known Anthropic models. For third-party models
-    // (e.g. glm-5 via BigModel/DashScope), ANTHROPIC_MODEL env var is set in
-    // buildClaudeEnvOverrides() and --model must be omitted so the CLI honours it.
-    // Empty model (OAuth without explicit model) → let CLI use its default.
-    if (!useEnvModelOverride && effectiveModel) {
-      args.splice(6, 0, '--model', effectiveModel);
-    }
 
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -367,12 +404,18 @@ export class ClaudeAgentService implements AgentService {
     };
 
     let l0Path: string | undefined;
+    let appendPromptPath: string | undefined;
     try {
       l0Path = await this.compileL0ToTempFile();
       args.push('--system-prompt-file', l0Path);
       // Route layer passes pack-only systemPrompt for native-L0 providers.
       // Keep it as an append layer, but never use it as the carrier's L0 source.
-      if (options?.systemPrompt) args.push('--append-system-prompt', options.systemPrompt);
+      // #840: route through file carrier (not inline argv) to avoid ENAMETOOLONG
+      // when A2A briefings push the command line past Windows' 32,767-char cap.
+      if (options?.systemPrompt) {
+        appendPromptPath = writeAppendPromptToTempFile(options.systemPrompt);
+        args.push('--append-system-prompt-file', appendPromptPath);
+      }
 
       // User-defined CLI args from the member editor (#567).
       // User flags win when they overlap with ordinary system-injected flags,
@@ -448,6 +491,8 @@ export class ClaudeAgentService implements AgentService {
       const cliOpts = {
         command: claudeCommand,
         args,
+        // #840 R2: main prompt moves off argv to stdin (see args comment above).
+        stdinInput: effectivePrompt,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: envOverrides,
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -692,6 +737,7 @@ export class ClaudeAgentService implements AgentService {
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } finally {
       removeL0TempDir(l0Path);
+      removeAppendPromptTempDir(appendPromptPath);
     }
   }
 }

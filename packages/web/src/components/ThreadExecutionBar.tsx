@@ -6,7 +6,9 @@ import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { catColorVar } from '@/lib/cat-slug';
 import type { CatInvocationInfo } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { ForceResetDialog } from './ForceResetDialog';
 import { deriveActiveCats } from './status-helpers';
 
 type ActiveInvocationSlots = Record<string, { catId: string; mode: string; startedAt?: number }>;
@@ -23,12 +25,15 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
   const {
     activeInvocations,
     catInvocations,
+    catStatuses,
     hasActive: hasActiveInvocation,
     intentMode,
     targetCats,
   } = useThreadLiveness(effectiveThreadId);
   const { getCatById } = useCatData();
   const [, setTick] = useState(0);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const activeCats = deriveActiveCats({
     targetCats,
@@ -74,33 +79,125 @@ export function ThreadExecutionBar({ threadId }: ThreadExecutionBarProps) {
     await Promise.all(activeCats.map(({ catId }) => handleStopCat(catId)));
   }, [effectiveThreadId, activeCats, handleStopCat]);
 
+  // F220 Phase 3: 升级态判定 — 任一活跃猫疑似卡死（liveness warning）→ 入口上浮变醒目。
+  const stalled = activeCats.some(({ catId }) => {
+    const s = catStatuses[catId];
+    return s === 'suspected_stall' || s === 'alive_but_silent';
+  });
+
+  // F220 Phase 3: 确认后调 force-reset 端点（只清运行态，LL-048 不碰持久化）→ toast → 关弹窗。
+  const handleForceReset = useCallback(async () => {
+    if (!effectiveThreadId) return;
+    setResetting(true);
+    try {
+      await apiFetch(`/api/threads/${effectiveThreadId}/force-reset`, { method: 'POST' });
+      useToastStore.getState().addToast({
+        type: 'success',
+        title: '已重置',
+        message: '对话已解放，可以发新消息了',
+        duration: 4000,
+      });
+      setResetDialogOpen(false);
+    } finally {
+      setResetting(false);
+    }
+  }, [effectiveThreadId]);
+
   if (activeCats.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-4 py-1.5 text-xs console-divider-b">
-      <span className="text-cafe-muted font-medium shrink-0">执行中</span>
-      {activeCats.map(({ catId, startedAt }) => {
-        const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
-        return (
-          <CatStatusChip
-            key={catId}
-            catId={catId}
-            label={info.label}
-            color={info.color}
-            startedAt={startedAt}
-            onStop={handleStopCat}
-          />
-        );
-      })}
-      {activeCats.length > 1 && (
+    <div className="console-divider-b">
+      <div className="flex items-center gap-2 px-4 py-1.5 text-xs">
+        <span className="text-cafe-muted font-medium shrink-0">执行中</span>
+        {activeCats.map(({ catId, startedAt }) => {
+          const info = catDisplayMap.get(catId) ?? { label: catId, color: 'var(--cafe-accent)' };
+          return (
+            <CatStatusChip
+              key={catId}
+              catId={catId}
+              label={info.label}
+              color={info.color}
+              startedAt={startedAt}
+              onStop={handleStopCat}
+            />
+          );
+        })}
+        {activeCats.length > 1 && (
+          <button
+            type="button"
+            onClick={handleStopAll}
+            className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
+          >
+            全部停止
+          </button>
+        )}
+      </div>
+      <ForceResetEntry escalated={stalled} onClick={() => setResetDialogOpen(true)} />
+      <ForceResetDialog
+        open={resetDialogOpen}
+        busy={resetting}
+        onCancel={() => setResetDialogOpen(false)}
+        onConfirm={handleForceReset}
+      />
+    </div>
+  );
+}
+
+function TriangleAlertIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
+/** F220 Phase 3: force-reset 入口。默认低调（dashed-top + 灰 + 小，藏面板底）；
+ *  escalated（疑似卡死）时上浮变醒目（critical-surface 底 + 警告色）。 */
+function ForceResetEntry({ escalated, onClick }: { escalated: boolean; onClick: () => void }) {
+  if (escalated) {
+    return (
+      <div className="px-4 pb-1.5">
         <button
           type="button"
-          onClick={handleStopAll}
-          className="ml-auto text-xs text-cafe-muted hover:text-conn-red-text transition-colors shrink-0"
+          data-testid="force-reset-entry"
+          data-escalated="true"
+          onClick={onClick}
+          className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-opacity hover:opacity-90"
+          style={{
+            backgroundColor: 'var(--semantic-critical-surface)',
+            color: 'var(--semantic-critical)',
+            border: '1px solid color-mix(in srgb, var(--semantic-critical) 30%, transparent)',
+          }}
         >
-          全部停止
+          <TriangleAlertIcon className="w-3.5 h-3.5" />
+          卡住了？强制重置
         </button>
-      )}
+      </div>
+    );
+  }
+  return (
+    <div className="px-4 pb-1.5">
+      <button
+        type="button"
+        data-testid="force-reset-entry"
+        data-escalated="false"
+        onClick={onClick}
+        className="flex items-center gap-1.5 w-full pt-1.5 border-t border-dashed border-cafe text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
+      >
+        <TriangleAlertIcon className="w-3 h-3 opacity-70" />
+        卡住了？强制重置
+      </button>
     </div>
   );
 }
@@ -148,7 +245,7 @@ function CatStatusChip({
         className="ml-0.5 text-cafe-muted hover:text-conn-red-text transition-colors"
         aria-label={`Stop ${catId}`}
       >
-        <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+        <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
           <path
             fillRule="evenodd"
             d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"

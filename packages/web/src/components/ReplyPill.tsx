@@ -2,7 +2,7 @@
 
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { resolveSender } from '@/lib/resolve-sender';
 
 interface ReplyPillProps {
   replyPreview: { senderCatId: string | null; content: string; deleted?: true };
@@ -18,10 +18,9 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
   const coCreator = useCoCreatorConfig();
   const { senderCatId, content, deleted } = replyPreview;
 
-  const cat = senderCatId ? getCatById(senderCatId) : undefined;
-  const senderLabel = deleted ? '' : cat ? `@${cat.displayName}` : senderCatId ? `@${senderCatId}` : coCreator.name;
+  const sender = resolveSender(senderCatId, getCatById, coCreator);
+  const senderLabel = deleted ? '' : sender.label;
   const previewText = deleted ? '消息已删除' : content;
-  const color = cat?.color.primary ?? UNKNOWN_CAT_COLOR.primary;
 
   const handleClick = () => {
     const target = document.querySelector(`[data-message-id="${CSS.escape(replyToId)}"]`);
@@ -36,7 +35,7 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
       type="button"
       onClick={handleClick}
       className="text-micro font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap max-w-[200px] truncate cursor-pointer hover:opacity-80 transition-opacity"
-      style={{ backgroundColor: `${color}20`, color }}
+      style={{ backgroundColor: `${sender.color}20`, color: sender.color }}
       title={deleted ? '消息已删除' : `${senderLabel}: ${content}`}
     >
       ↩ {senderLabel}

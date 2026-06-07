@@ -63,6 +63,24 @@ test('resolveTargetsAndIntent supports at without spaces', async () => {
   assert.deepEqual(result.targetCats, ['codex']);
 });
 
+test('resolveTargetsAndIntent does not activate speech-style aliases in ordinary prose', async () => {
+  const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+  const router = new AgentRouter(
+    await migrateRouterOpts({
+      claudeService: createNoopService('opus'),
+      codexService: createNoopService('codex'),
+      geminiService: createNoopService('gemini'),
+      registry: createNoopRegistry(),
+      messageStore: createNoopMessageStore(),
+    }),
+  );
+
+  const result = await router.resolveTargetsAndIntent('please look at codex docs before changing this', 'thread-voice');
+  assert.equal(result.hasMentions, false);
+  assert.deepEqual(result.targetCats, ['opus']);
+  assert.deepEqual(result.routing_warnings, []);
+});
+
 test('resolveTargetsAndIntent supports 艾特 prefix', async () => {
   const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
   const router = new AgentRouter(

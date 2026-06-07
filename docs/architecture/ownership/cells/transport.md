@@ -18,6 +18,7 @@ static_scan_hints: [ConnectorRouter, MessageEnvelope, Adapter, BindingStore, Out
 cited_by:
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-07, delta: cross_post_message becomes first-class with targetCats routing + AC-A4 cross-post fail-closed when no routing creds}
+  - {feature: F193, date: 2026-06-03, delta: "Phase E defines SuggestedCrossPostAction as the structured affordance contract for discovery tools"}
 ---
 
 # Transport Plane

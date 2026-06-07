@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -14,6 +15,15 @@ export interface AgyProfile {
   readonly catId: string;
   readonly profileId: string;
   readonly homePath: string;
+  /**
+   * F210 cache-leak fix (砚砚 拍 cwd sandbox 方向)：agy spawn cwd 的 **per-profile base**（profile HOME
+   * 下专用子目录）。实际 spawn cwd 由 `resolveAgySpawnCwd` 在此 base 下再按 workingDirectory 派生
+   * per-worktree 子目录（`<cwdPath>/<workspaceKey>`，cloud P1：AGY 按 cwd scope conversation 命名空间，
+   * 不能多 worktree 共用同一 cwd）。AGY 写 cwd-relative cache（`cache/projects.json`）到 spawn cwd——
+   * cwd=repo root 时泄漏到 worktree（实证 2026-06-03）。cwd-relative cache 落 profile 而非 repo；
+   * workspace 仍通过 `--add-dir workingDirectory` 显式授权。
+   */
+  readonly cwdPath: string;
   readonly settingsPath: string;
   readonly expectedModel: string;
   readonly trustedWorkspaces: readonly string[];
@@ -132,6 +142,7 @@ export function resolveAgyProfile(input: ResolveAgyProfileInput): AgyProfile | n
   const homePath = resolveUnder(homeRoot, profileId);
   const settingsDir = join(homePath, '.gemini', 'antigravity-cli');
   const settingsPath = join(settingsDir, 'settings.json');
+  const cwdPath = join(homePath, 'cwd');
   const unsafeReason = getUnsafeAgyProfileTargetReason(homeRoot, homePath, settingsPath);
   if (unsafeReason) {
     throw new Error(unsafeReason);
@@ -141,6 +152,7 @@ export function resolveAgyProfile(input: ResolveAgyProfileInput): AgyProfile | n
   const trustedWorkspaces = uniqueResolvedPaths([...(config.trustedWorkspaces ?? []), input.workingDirectory]);
 
   mkdirSync(settingsDir, { recursive: true });
+  mkdirSync(cwdPath, { recursive: true }); // F210 cache-leak: agy spawn cwd sandbox（cwd-relative cache 落此）
   const currentSettings = readSettings(settingsPath);
   const nextSettings = {
     ...currentSettings,
@@ -153,11 +165,61 @@ export function resolveAgyProfile(input: ResolveAgyProfileInput): AgyProfile | n
     catId: input.catId,
     profileId,
     homePath,
+    cwdPath,
     settingsPath,
     expectedModel,
     trustedWorkspaces,
     autoApprove: config.autoApprove !== false,
   };
+}
+
+/**
+ * F210 cache-leak fix (砚砚 拍 cwd sandbox 方向)：解析 agy spawn cwd（与 workingDirectory 解耦）。
+ * AGY 写 cwd-relative cache（`cache/projects.json`）到 spawn cwd——必须是 sandbox 而非 repo root
+ * （实证 2026-06-03）。
+ *
+ * **per-worktree 隔离（cloud P1）**：AGY 按 cwd scope conversation/project 命名空间（实证 H2a：
+ * `cache/projects.json` 是 cwd-relative project registry）。若所有 worktree 共用 per-cat sandbox，
+ * 多 repo 会串台 AGY history（resume/list 错乱）。所以 sandbox 必须**每个 workingDirectory 唯一**——
+ * 用绝对 workingDirectory 的 sha256 hash 作 per-worktree 子目录键。
+ *
+ * 布局：`<base>/<workspaceKey>`，base =
+ * - 有 agyProfile：`agyProfile.cwdPath`（profile HOME 下的 per-profile base）
+ * - 无 agyProfile（production gemini/gemini25 当前路径）：`<root>/<sanitized-catId>`，
+ *   root 默认 `~/.cat-cafe/agy-cwd`，可经 `CAT_CAFE_AGY_CWD_ROOT` override（mirror `CAT_CAFE_AGY_PROFILE_ROOT`）。
+ *
+ * symlink fail-closed（cloud P2）：base + sandbox 都拒绝已存在 symlink——mkdirSync(recursive) 会跟随
+ * symlink 把 cwd-relative cache 写回 repo/真 HOME，绕过本修复。
+ *
+ * **为什么把 process cwd 挪到 sandbox 不破坏 AGY 工作区**（refute 静态 reviewer 把 process cwd 与
+ * AGY active workspace 混为一谈，砚砚 probe 实测 2026-06-03）：AGY 的 active workspace 绑定到
+ * `--add-dir workingDirectory`，**不是** process cwd。实测 `cd <sandbox> && agy --add-dir <work>`：
+ * AGY tool `pwd` 回 `<work>`、能读 `<work>` 文件、`<work>/GEMINI.md` 指令照常加载；只有内部 cwd-relative
+ * `cache/projects.json` 落 sandbox。所以三件事同时成立：active workspace=worktree（--add-dir 授权）、
+ * cwd-relative cache 落 sandbox、conversation scope 由 per-worktree sandbox 隔离。GeminiAgentService 始终
+ * 传 `--add-dir <absolute workingDirectory>`，不要删。
+ */
+export function resolveAgySpawnCwd(agyProfile: AgyProfile | null, catId: string, workingDirectory: string): string {
+  const workspaceKey = createHash('sha256').update(resolve(workingDirectory)).digest('hex').slice(0, 16);
+  const base = agyProfile
+    ? agyProfile.cwdPath
+    : resolveUnder(
+        resolve(expandHomePath(process.env.CAT_CAFE_AGY_CWD_ROOT ?? join(homedir(), '.cat-cafe', 'agy-cwd'))),
+        sanitizeProfileId(catId),
+      );
+  const sandbox = join(base, workspaceKey);
+  for (const [label, path] of [
+    ['cwd sandbox base', base],
+    ['cwd sandbox', sandbox],
+  ] as const) {
+    if (isExistingSymlink(path)) {
+      throw new Error(
+        `AGY ${label} must not be a symlink (would redirect cwd-relative cache outside the sandbox): ${path}`,
+      );
+    }
+  }
+  mkdirSync(sandbox, { recursive: true });
+  return sandbox;
 }
 
 function isRealUserAntigravitySettingsPath(path: string): boolean {
@@ -178,6 +240,9 @@ function getUnsafeAgyProfileTargetReason(
     ['.gemini directory', geminiDir],
     ['settings directory', settingsDir],
     ['settings file', settingsPath],
+    // F210 cache-leak hardening (cloud P2)：cwd sandbox 也必须拒绝 symlink——mkdirSync(recursive) 会
+    // 跟随已存在的 symlink，spawn cwd 指向 link target（repo/真 HOME），cwd-relative cache 仍泄漏。
+    ['cwd sandbox', join(homePath, 'cwd')],
   ] as const) {
     if (isExistingSymlink(path)) {
       return `AGY profile ${label} must not be a symlink: ${path}`;

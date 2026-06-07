@@ -55,6 +55,7 @@ import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftSto
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
@@ -101,6 +102,7 @@ import { sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
 
 const STREAM_START_TIMEOUT_MS = 5_000;
+const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
 
 /**
  * Dependencies injected via Fastify plugin options.
@@ -134,6 +136,8 @@ export interface MessagesRoutesOptions {
   invocationQueue?: InvocationQueue;
   /** F39: Queue processor for auto-dequeue on invocation complete */
   queueProcessor?: QueueProcessor;
+  /** Test/diagnostic override for releasing invocations that never produce a provider/session event. */
+  invocationStartupWatchdogMs?: number;
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
@@ -144,9 +148,34 @@ export interface MessagesRoutesOptions {
   streamingHook?: StreamingHookLike;
   /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
   holdBallCancelDeps?: HoldBallCancelDeps;
+  /** F192 Phase G AC-G12: callback when magic words detected in user message */
+  onMagicWordDetected?: (hits: Array<{ word: string }>, threadId: string, catId: string | null) => void;
 }
 
 const log = createModuleLogger('routes/messages');
+
+/**
+ * F192 Phase G AC-G12: detect magic words in user message content.
+ * Best-effort, fire-and-forget — failures are silently swallowed.
+ * Called from both queued and immediate message paths.
+ */
+async function tryDetectMagicWords(
+  content: string | null | undefined,
+  threadId: string,
+  targetCats: string[],
+  onMagicWordDetected?: MessagesRoutesOptions['onMagicWordDetected'],
+): Promise<void> {
+  if (!onMagicWordDetected || !content) return;
+  try {
+    const { detectMagicWords } = await import('../infrastructure/harness-eval/task-outcome/magic-word-detector.js');
+    const hits = detectMagicWords(content);
+    if (hits.length > 0) {
+      onMagicWordDetected(hits, threadId, targetCats[0] ?? null);
+    }
+  } catch {
+    // Best-effort: don't fail message send if detection throws
+  }
+}
 
 /**
  * F-invocation-stale-recovery P1-2: Format routing_warnings for user-visible system_info broadcast.
@@ -288,6 +317,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // F39: Delivery mode
     let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
 
+    // #699: Reply-to (quote) reference
+    let replyTo: string | undefined;
+
     if (request.isMultipart()) {
       // Parse multipart: text fields + image files
       const parsed = await parseMultipart(request, uploadDir);
@@ -308,6 +340,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (parsed.deliveryMode) {
         deliveryMode = parsed.deliveryMode;
       }
+      // #699: Extract replyTo from multipart
+      if (parsed.replyTo) {
+        replyTo = parsed.replyTo;
+      }
     } else {
       // JSON mode (backwards compatible)
       const parseResult = sendMessageSchema.safeParse(request.body);
@@ -322,6 +358,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         whisperVisibility = 'whisper';
         whisperRecipients = parseResult.data.whisperTo as CatId[] | undefined;
       }
+      // #699: Extract replyTo from JSON body
+      replyTo = parseResult.data.replyTo;
     }
 
     const userId = resolveUserId(request, {
@@ -371,6 +409,34 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         detail: '请稍后重试，或新建一个对话继续',
         code: 'THREAD_DELETING',
       };
+    }
+
+    // #699 P1-2: Validate replyTo — must exist in same thread, not deleted, and delivered
+    if (replyTo) {
+      const replyTarget = await opts.messageStore.getById(replyTo);
+      if (
+        !replyTarget ||
+        replyTarget.deletedAt ||
+        replyTarget.threadId !== resolvedThreadId ||
+        !isDelivered(replyTarget)
+      ) {
+        replyTo = undefined;
+      } else if (replyTarget.visibility === 'whisper') {
+        // #699: Prevent public replies from quoting hidden whispers.
+        // hydrateReplyPreview fetches raw content without visibility checks,
+        // so a public reply's preview would leak whisper content to non-recipients.
+        if (whisperVisibility !== 'whisper') {
+          // Public message replying to a whisper → drop replyTo
+          replyTo = undefined;
+        } else {
+          // Whisper replying to a whisper → ensure all new recipients can see the parent
+          const parentRecipients = new Set(replyTarget.whisperTo ?? []);
+          const newRecipients = whisperRecipients ?? [];
+          if (newRecipients.some((catId) => !parentRecipients.has(catId))) {
+            replyTo = undefined;
+          }
+        }
+      }
     }
 
     // F101: /game command interception — start game directly, skip AI routing
@@ -597,8 +663,12 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             ...(whisperVisibility && whisperRecipients
               ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
               : {}),
+            ...(replyTo ? { replyTo } : {}),
           });
           storedUserMessageId = userMessage.id;
+
+          // F192 Phase G AC-G12: detect magic words (queued path)
+          void tryDetectMagicWords(content, resolvedThreadId, targetCats, opts.onMagicWordDetected);
 
           const queueEntryId = enqueueResult.entry?.id;
           if (queueEntryId) {
@@ -715,6 +785,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                   ...(whisperVisibility && whisperRecipients
                     ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
                     : {}),
+                  ...(replyTo ? { replyTo } : {}),
                 });
                 toctouUserMessageId = toctouUserMessage.id;
                 const queueEntryId = enqueueResult.entry?.id;
@@ -814,12 +885,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           ...(whisperVisibility && whisperRecipients
             ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
             : {}),
+          ...(replyTo ? { replyTo } : {}),
         });
 
         // ③ Backfill InvocationRecord.userMessageId
         await opts.invocationRecordStore.update(createResult.invocationId, {
           userMessageId: storedUserMessage.id,
         });
+
+        // F192 Phase G AC-G12: detect magic words (immediate path)
+        void tryDetectMagicWords(content, resolvedThreadId, targetCats, opts.onMagicWordDetected);
       } catch (preExecErr) {
         // Release slots — we haven't entered background coroutine yet
         opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
@@ -857,6 +932,21 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
         // F088 ISSUE-15: Hoisted so catch/abort branches can clean up streaming sessions
         let streamStartPromise: Promise<void> | undefined;
+        let firstRouteEventSeen = false;
+        let startupWatchdogFired = false;
+        let startupTimeoutFailureRecorded = false;
+        let queueCompletionNotified = false;
+
+        const notifyQueueCompletion = (status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user') => {
+          if (queueCompletionNotified) return;
+          queueCompletionNotified = true;
+          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, status).catch((err) => {
+            log.error(
+              { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus: status },
+              '[messages] onInvocationComplete failed — queued messages may be stuck (#595)',
+            );
+          });
+        };
 
         // F148 fix: Hoisted so abort/catch branches can ack completed cats' cursors
         const cursorBoundaries = new Map<string, string>();
@@ -866,6 +956,53 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         // (root cause of bubble-still-split symptom). Without this signal, finally would
         // fallback failed even on success. start→succeeded/failed → finally CAS terminal.
         routeChainTracker.start(createResult.invocationId);
+
+        const markStartupTimeoutFailed = async () => {
+          if (startupTimeoutFailureRecorded) return;
+          startupTimeoutFailureRecorded = true;
+          finalStatus = 'failed';
+          routeChainTracker.fail(createResult.invocationId);
+          await opts.invocationRecordStore?.update(createResult.invocationId, {
+            status: 'failed',
+            error: 'Invocation startup timed out before provider/session initialized',
+          });
+          opts.socketManager.broadcastAgentMessage(
+            {
+              type: 'system_info',
+              catId: targetCats[0] ?? getDefaultCatId(),
+              content: JSON.stringify({
+                type: 'invocation_startup_timeout',
+                message: '猫猫启动超时，已释放卡住的调用。',
+                invocationId: createResult.invocationId,
+              }),
+              timestamp: Date.now(),
+            },
+            resolvedThreadId,
+          );
+          await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
+        };
+
+        const startupWatchdogMs = opts.invocationStartupWatchdogMs ?? INVOCATION_STARTUP_WATCHDOG_MS;
+        const startupWatchdog: ReturnType<typeof setTimeout> | undefined =
+          startupWatchdogMs > 0
+            ? setTimeout(() => {
+                if (firstRouteEventSeen || controller?.signal.aborted) return;
+                startupWatchdogFired = true;
+                controller?.abort('startup_timeout');
+                opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
+                notifyQueueCompletion('failed');
+                void markStartupTimeoutFailed().catch((err) => {
+                  log.warn(
+                    { err, invocationId: createResult.invocationId },
+                    '[messages] startup watchdog failed to mark invocation failed',
+                  );
+                });
+              }, startupWatchdogMs)
+            : undefined;
+
+        const clearStartupWatchdog = () => {
+          if (startupWatchdog) clearTimeout(startupWatchdog);
+        };
 
         try {
           await opts.invocationRecordStore?.update(createResult.invocationId, {
@@ -958,8 +1095,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               cursorBoundaries,
               persistenceContext,
               parentInvocationId: createResult.invocationId,
+              // F222 P1: user direct entry → eligible for frustration auto-issue
+              frustrationAutoIssueEligible: true,
             },
           )) {
+            if (!firstRouteEventSeen) {
+              firstRouteEventSeen = true;
+              clearStartupWatchdog();
+            }
             if (controller?.signal.aborted) {
               break;
             }
@@ -1067,19 +1210,23 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           // every target cat singly cancelled → canceled. A single-cat cancel no longer aborts the
           // batch gate, so raw controller.signal.aborted only covers the whole-invocation case.
           // (completeAll runs in finally, AFTER this, so cancel tombstones are still visible here.)
-          const aggFinalStatus = opts.invocationTracker?.resolveFinalStatus
-            ? opts.invocationTracker.resolveFinalStatus(resolvedThreadId, targetCats, {
-                aborted: controller?.signal.aborted ?? false,
-                reason: controller?.signal.reason as string | undefined,
-              })
-            : controller?.signal.aborted
-              ? // Fallback (tracker without resolveFinalStatus): whole-invocation abort → reason
-                // decides canceled_by_user vs canceled (matches resolveFinalStatus semantics).
-                controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
-                ? 'canceled_by_user'
-                : 'canceled'
-              : 'succeeded';
-          if (aggFinalStatus !== 'succeeded') {
+          const aggFinalStatus = startupWatchdogFired
+            ? 'failed'
+            : opts.invocationTracker?.resolveFinalStatus
+              ? opts.invocationTracker.resolveFinalStatus(resolvedThreadId, targetCats, {
+                  aborted: controller?.signal.aborted ?? false,
+                  reason: controller?.signal.reason as string | undefined,
+                })
+              : controller?.signal.aborted
+                ? // Fallback (tracker without resolveFinalStatus): whole-invocation abort → reason
+                  // decides canceled_by_user vs canceled (matches resolveFinalStatus semantics).
+                  controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
+                  ? 'canceled_by_user'
+                  : 'canceled'
+                : 'succeeded';
+          if (aggFinalStatus === 'failed') {
+            await markStartupTimeoutFailed();
+          } else if (aggFinalStatus !== 'succeeded') {
             finalStatus = aggFinalStatus;
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'canceled',
@@ -1214,7 +1361,9 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           }
         } catch (err) {
           // F39 bugfix: detect abort (cancel/force) vs real failure
-          if (controller?.signal.aborted) {
+          if (startupWatchdogFired) {
+            await markStartupTimeoutFailed();
+          } else if (controller?.signal.aborted) {
             finalStatus =
               controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
                 ? 'canceled_by_user'
@@ -1275,6 +1424,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } // end else (non-abort error)
         } finally {
+          clearStartupWatchdog();
           clearInterval(heartbeatInterval);
           opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
           // F194 Phase Z3 (AC-Z3): defensive terminal write. If routeExecution silently exited
@@ -1301,12 +1451,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           }
           routeChainTracker.release(createResult.invocationId);
           // F39: Notify queue processor for auto-dequeue chain
-          opts.queueProcessor?.onInvocationComplete(resolvedThreadId, primaryCat, finalStatus).catch((err) => {
-            log.error(
-              { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus },
-              '[messages] onInvocationComplete failed — queued messages may be stuck (#595)',
-            );
-          });
+          notifyQueueCompletion(finalStatus);
         }
       })();
     } else {

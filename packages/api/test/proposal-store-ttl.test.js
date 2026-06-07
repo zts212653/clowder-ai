@@ -118,3 +118,93 @@ describe('RedisProposalStore — TTL contract (iron law #5 / LL-048)', () => {
     assert.equal(expireOps.length, 0, 'NaN ttlSeconds must be treated as no-ttl');
   });
 });
+
+// F128 Phase Y — reportingMode persistence (serialize → hydrate round-trip).
+// Pins the Redis-backed contract that InMemory store tests can't catch
+// (feedback_inmemory_store_tests_miss_redis_behavior): serialize HSET, hydrate
+// read-back, and back-compat for pre-Phase-Y hashes missing the field.
+function createStoreMockRedis() {
+  /** @type {Map<string, Record<string, string>>} */
+  const hashes = new Map();
+  function makePipeline() {
+    const pipeline = {
+      hset(key, ...args) {
+        const h = hashes.get(key) ?? {};
+        for (let i = 0; i < args.length; i += 2) h[String(args[i])] = String(args[i + 1]);
+        hashes.set(key, h);
+        return pipeline;
+      },
+      expire() {
+        return pipeline;
+      },
+      zadd() {
+        return pipeline;
+      },
+      async exec() {
+        return [];
+      },
+    };
+    return pipeline;
+  }
+  return {
+    hashes,
+    multi: makePipeline,
+    pipeline: makePipeline,
+    async hgetall(key) {
+      return hashes.get(key) ?? {};
+    },
+  };
+}
+
+describe('RedisProposalStore — reportingMode persistence (F128 Phase Y)', () => {
+  it('create with reportingMode → HSET writes it → get() hydrates it back', async () => {
+    const redis = createStoreMockRedis();
+    const store = new RedisProposalStore(/** @type {any} */ (redis));
+    const created = await store.create(baseInput({ reportingMode: 'final-only' }));
+    const hash = redis.hashes.get(`proposal:${created.proposalId}`);
+    assert.equal(hash?.reportingMode, 'final-only', 'serialize must HSET reportingMode');
+    const got = await store.get(created.proposalId);
+    assert.equal(got?.reportingMode, 'final-only', 'hydrate must read reportingMode back');
+  });
+
+  it('create WITHOUT reportingMode → field absent → get() hydrates undefined (default none via enrich)', async () => {
+    const redis = createStoreMockRedis();
+    const store = new RedisProposalStore(/** @type {any} */ (redis));
+    const created = await store.create(baseInput());
+    const hash = redis.hashes.get(`proposal:${created.proposalId}`);
+    assert.equal(hash?.reportingMode, undefined, 'no reportingMode → field not written (back-compat)');
+    const got = await store.get(created.proposalId);
+    assert.equal(got?.reportingMode, undefined, 'missing field hydrates to undefined (enrich applies default none)');
+  });
+
+  it('legacy hash without reportingMode → get() returns undefined (pre-Phase-Y back-compat)', async () => {
+    const redis = createStoreMockRedis();
+    const store = new RedisProposalStore(/** @type {any} */ (redis));
+    redis.hashes.set('proposal:legacy_1', {
+      proposalId: 'legacy_1',
+      status: 'pending',
+      sourceThreadId: 'thread_src',
+      sourceInvocationId: 'inv_0',
+      sourceCatId: 'opus',
+      title: 'legacy',
+      reason: 'pre Phase Y',
+      parentThreadId: 'thread_src',
+      preferredCats: '[]',
+      projectPath: '/tmp',
+      createdBy: 'alice',
+      createdAt: '1700000000000',
+    });
+    const got = await store.get('legacy_1');
+    assert.equal(got?.reportingMode, undefined, 'legacy proposal has no reportingMode → undefined → default none');
+  });
+
+  it('all 4 reporting modes round-trip through serialize → hydrate', async () => {
+    for (const mode of /** @type {const} */ (['none', 'final-only', 'state-transitions', 'blocking-ack'])) {
+      const redis = createStoreMockRedis();
+      const store = new RedisProposalStore(/** @type {any} */ (redis));
+      const created = await store.create(baseInput({ reportingMode: mode, createdBy: `u_${mode}` }));
+      const got = await store.get(created.proposalId);
+      assert.equal(got?.reportingMode, mode, `${mode} must round-trip`);
+    }
+  });
+});

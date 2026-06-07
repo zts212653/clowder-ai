@@ -21,10 +21,16 @@ export interface IntentResult {
 }
 
 /** Known intent tags (case-insensitive) */
-const INTENT_TAGS = new Set(['ideate', 'execute']);
+export const INTENT_TAGS = ['ideate', 'execute'] as const satisfies readonly Intent[];
 
 /** Known prompt tags (case-insensitive) */
-const PROMPT_TAGS = new Set(['critique']);
+export const PROMPT_TAGS = ['critique'] as const;
+
+/** Tags that can appear before a route-line @mention */
+export const ROUTE_CONTROL_TAGS = [...INTENT_TAGS, ...PROMPT_TAGS] as const;
+
+const INTENT_TAG_SET = new Set<string>(INTENT_TAGS);
+const PROMPT_TAG_SET = new Set<string>(PROMPT_TAGS);
 
 /** Match #tag patterns in message text */
 const TAG_PATTERN = /#(\w+)/gi;
@@ -36,9 +42,9 @@ export function parseIntent(message: string, targetCatCount: number): IntentResu
 
   for (const match of message.matchAll(TAG_PATTERN)) {
     const tag = match[1]?.toLowerCase();
-    if (INTENT_TAGS.has(tag)) {
+    if (INTENT_TAG_SET.has(tag)) {
       explicitIntent = tag as Intent;
-    } else if (PROMPT_TAGS.has(tag)) {
+    } else if (PROMPT_TAG_SET.has(tag)) {
       promptTags.push(tag);
     }
   }
@@ -57,7 +63,7 @@ export function stripIntentTags(message: string): string {
   return message
     .replace(TAG_PATTERN, (full, tag) => {
       const lower = (tag as string).toLowerCase();
-      if (INTENT_TAGS.has(lower) || PROMPT_TAGS.has(lower)) {
+      if (INTENT_TAG_SET.has(lower) || PROMPT_TAG_SET.has(lower)) {
         return '';
       }
       return full;

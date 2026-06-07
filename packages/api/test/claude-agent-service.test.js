@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -15,6 +15,7 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 const { ClaudeAgentService, pickGitBashPathFromWhere, resolveDefaultClaudeMcpServerPath } = await import(
   '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js'
 );
+const { getCatEffort } = await import('../dist/config/cat-config-loader.js');
 
 ensureFakeCliOnPath('claude');
 
@@ -158,6 +159,164 @@ test('F203 AC-C5: -p carrier advertises native L0 injection to route layer', () 
   const service = createClaudeAgentService({ model: 'claude-test-model' });
 
   assert.equal(service.injectsL0Natively(), true);
+});
+
+// --- #840 ENAMETOOLONG fix: route append-system-prompt via file carrier ---
+
+test('#840: long systemPrompt is passed via --append-system-prompt-file, not inline argv', async () => {
+  const proc = createMockProcess();
+  // Read the append-prompt file at the moment spawn is invoked — cleanup
+  // happens in the finally block AFTER spawn completes, so reading the path
+  // post-await would miss the file.
+  let capturedAppendPath;
+  let capturedAppendContent;
+  const spawnFn = mock.fn((_cmd, args) => {
+    const idx = args.indexOf('--append-system-prompt-file');
+    if (idx >= 0) {
+      capturedAppendPath = args[idx + 1];
+      try {
+        capturedAppendContent = readFileSync(capturedAppendPath, 'utf8');
+      } catch {
+        capturedAppendContent = undefined;
+      }
+    }
+    return proc;
+  });
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+  });
+
+  // Simulate a long pack/briefing payload that would push CreateProcess
+  // command line past the Windows 32,767-char limit (ENAMETOOLONG).
+  const longPayload = `## pack briefing\n${'C:\\Users\\Administrator\\claude\\projects\\D--clowder-ai-packages-api\\memory\\MEMORY.md\n'.repeat(500)}`;
+
+  const promise = collect(service.invoke('hi', { systemPrompt: longPayload }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+
+  // The long payload must NEVER appear inline in argv (root cause of ENAMETOOLONG).
+  assert.ok(
+    !args.includes(longPayload),
+    'long systemPrompt must not be passed as inline argv (would trigger ENAMETOOLONG on Windows)',
+  );
+  // No bare `--append-system-prompt <text>` carrier.
+  assert.ok(
+    !args.includes('--append-system-prompt'),
+    'inline --append-system-prompt flag must not be used for systemPrompt',
+  );
+
+  // Instead, it must go through --append-system-prompt-file <path>.
+  const appendFileIdx = args.indexOf('--append-system-prompt-file');
+  assert.ok(
+    appendFileIdx >= 0,
+    `--append-system-prompt-file must be present: ${args.filter((a) => a.startsWith('--')).join(' ')}`,
+  );
+  assert.ok(typeof capturedAppendPath === 'string' && capturedAppendPath.length > 0, 'captured path during spawn');
+
+  // File content captured at spawn time must equal the systemPrompt.
+  assert.equal(capturedAppendContent, longPayload, 'append-system-prompt file content must equal systemPrompt');
+});
+
+test('#840: append-system-prompt temp file is removed after successful invocation', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+  });
+
+  const promise = collect(service.invoke('hi', { systemPrompt: 'short pack' }));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const appendFileIdx = args.indexOf('--append-system-prompt-file');
+  assert.ok(appendFileIdx >= 0);
+  const appendPath = args[appendFileIdx + 1];
+
+  assert.equal(existsSync(appendPath), false, 'append temp file removed after success');
+  assert.equal(existsSync(dirname(appendPath)), false, 'append temp dir removed after success');
+});
+
+test('#840: empty systemPrompt does not produce any append-system-prompt flag', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn,
+    model: 'claude-test-model',
+  });
+
+  const promise = collect(service.invoke('hi'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  assert.ok(!args.includes('--append-system-prompt'));
+  assert.ok(!args.includes('--append-system-prompt-file'));
+});
+
+// --- #840 R2 finding (砚砚): main prompt must not ride argv either ---
+
+test('#840 R2: long main prompt is delivered via stdin, not as argv element (-p carrier)', async () => {
+  // 砚砚 dynamic probe on PR head: invoke('x'.repeat(50000), {}) had
+  // promptArgIndex=1, promptArgLength=50012, hasAppendFile=false. The Claude
+  // CLI accepts `-p` with stdin (verified: `echo prompt | claude -p` → exit 0,
+  // unrelated auth-only error). Move the main prompt off argv too.
+  const proc = createMockProcess();
+  // Use spawnCliOverride seam so we observe the cli-spawn-level options
+  // (stdinInput) directly, not just the raw argv list.
+  let capturedCliOpts;
+  const spawnCliOverride = (cliOpts) => {
+    capturedCliOpts = cliOpts;
+    // Return a minimal async iterable that yields a success result and ends,
+    // so invoke() can complete the finally block without hanging.
+    return (async function* () {
+      yield { type: 'result', subtype: 'success' };
+    })();
+  };
+  const service = createClaudeAgentService({
+    catId: 'opus-47',
+    spawnFn: createMockSpawnFn(proc), // not actually invoked when spawnCliOverride is set
+    model: 'claude-test-model',
+  });
+
+  const longPrompt = `## A2A briefing\n${'x'.repeat(50000)}`;
+  await collect(service.invoke(longPrompt, { spawnCliOverride }));
+
+  assert.ok(capturedCliOpts, 'spawnCliOverride was called');
+  const args = capturedCliOpts.args;
+
+  // Long prompt must NEVER appear as an argv element (root of ENAMETOOLONG).
+  assert.ok(
+    !args.some((a) => typeof a === 'string' && a.length > 1000),
+    `no argv element should be larger than 1KB; offenders: ${args
+      .filter((a) => typeof a === 'string' && a.length > 1000)
+      .map((a) => a.slice(0, 40))
+      .join(' / ')}`,
+  );
+  assert.ok(!args.includes(longPrompt), 'long prompt must not appear inline in argv');
+
+  // -p flag must still be present (we still want print mode).
+  const pIdx = args.indexOf('-p');
+  assert.ok(pIdx >= 0, '-p flag still present');
+
+  // After -p there must NOT be the prompt as a positional argument
+  // (it should now flow via stdinInput instead). The next token must either
+  // be another flag (starts with '-') or be absent.
+  // NOTE: arg at -p+1 might be `effectivePrompt` historically; assert it isn't
+  // the long prompt.
+  const tokenAfterP = args[pIdx + 1];
+  assert.notEqual(tokenAfterP, longPrompt, 'token after -p must not be the long prompt');
+
+  // stdinInput must carry the full prompt content.
+  assert.equal(typeof capturedCliOpts.stdinInput, 'string', 'stdinInput is set on cliOpts');
+  assert.equal(capturedCliOpts.stdinInput, longPrompt, 'stdinInput equals the full prompt');
 });
 
 test('F203 AC-C5: -p carrier reports L0 compile failure without spawning claude and removes temp dir', async () => {
@@ -1203,7 +1362,7 @@ test('F24-fix: lastTurnInputTokens resets when final message_start has no usage 
 test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
 
   const promise = collect(
     service.invoke('hello', {
@@ -1233,7 +1392,7 @@ test('third-party model (glm-5): omits --model flag and injects ANTHROPIC_MODEL 
 test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROPIC_MODEL env var', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = createClaudeAgentService({ spawnFn });
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
 
   const promise = collect(
     service.invoke('hello', {
@@ -1259,4 +1418,29 @@ test('native Anthropic model (claude-sonnet-4-6): keeps --model flag, no ANTHROP
   assert.equal(args[modelIdx + 1], 'claude-sonnet-4-6');
   // ANTHROPIC_MODEL must NOT be set (native model goes through --model)
   assert.ok(!spawnOpts.env.ANTHROPIC_MODEL, 'ANTHROPIC_MODEL env var must not be set for native Anthropic model');
+});
+
+test('native Anthropic model keeps --effort value adjacent when --model is inserted', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ catId: 'opus', spawnFn, model: 'claude-opus-4-6' });
+
+  const promise = collect(service.invoke('hello'));
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const args = spawnFn.mock.calls[0].arguments[1];
+  const effortIdx = args.indexOf('--effort');
+  const modelIdx = args.indexOf('--model');
+  const expectedEffort = getCatEffort('opus', undefined, 'anthropic');
+
+  assert.ok(effortIdx >= 0, '--effort flag must be present');
+  assert.equal(
+    args[effortIdx + 1],
+    expectedEffort,
+    `--effort must be followed by configured effort, argv: ${args.join(' ')}`,
+  );
+  assert.ok(modelIdx >= 0, '--model flag must be present for native Anthropic model');
+  assert.notEqual(modelIdx, effortIdx + 1, '--model must not split the --effort flag/value pair');
+  assert.equal(args[modelIdx + 1], 'claude-opus-4-6');
 });
