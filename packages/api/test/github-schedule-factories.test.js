@@ -786,4 +786,47 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     assert.ok(!entries.some((e) => e.id.includes('repo-scan')));
     assert.ok(entries.some((e) => e.id.includes('cicd-check')));
   });
+
+  test('builds scheduler override migrations for legacy GitHub poller IDs', async () => {
+    const { buildGitHubMigrationEntries, buildGitHubScheduleOverrideMigrations } = await import(
+      '../dist/domains/plugin/github-schedule-factories.js'
+    );
+    const manifest = {
+      resources: [
+        { type: 'schedule', name: 'cicd-check' },
+        { type: 'schedule', name: 'conflict-check' },
+        { type: 'schedule', name: 'issue-tracking' },
+        { type: 'schedule', name: 'review-feedback' },
+      ],
+    };
+
+    const entries = buildGitHubMigrationEntries(manifest, {});
+    const migrations = buildGitHubScheduleOverrideMigrations(entries, [
+      { taskId: 'cicd-check', enabled: false, updatedBy: 'opus', updatedAt: '2026-02-19T08:00:00.000Z' },
+      { taskId: 'review-feedback', enabled: false, updatedBy: 'lang', updatedAt: '2026-02-19T08:00:00.000Z' },
+      { taskId: 'conflict-check', enabled: false, updatedBy: 'old', updatedAt: '2026-02-19T08:00:00.000Z' },
+      {
+        taskId: 'schedule:github:conflict-check',
+        enabled: true,
+        updatedBy: 'new',
+        updatedAt: '2026-02-19T08:00:00.000Z',
+      },
+      { taskId: 'issue-tracking', enabled: false, updatedBy: 'stray', updatedAt: '2026-02-19T08:00:00.000Z' },
+    ]);
+
+    assert.deepStrictEqual(migrations, [
+      {
+        legacyTaskId: 'cicd-check',
+        taskId: 'schedule:github:cicd-check',
+        enabled: false,
+        updatedBy: 'opus',
+      },
+      {
+        legacyTaskId: 'review-feedback',
+        taskId: 'schedule:github:review-feedback',
+        enabled: false,
+        updatedBy: 'lang',
+      },
+    ]);
+  });
 });

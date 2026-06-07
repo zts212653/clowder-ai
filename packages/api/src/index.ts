@@ -1831,18 +1831,24 @@ async function main(): Promise<void> {
           markGitHubScheduleMigrationDone,
           buildGitHubMigrationEntries,
           buildGitHubMigrationEnv,
+          buildGitHubScheduleOverrideMigrations,
         } = await import('./domains/plugin/github-schedule-factories.js');
         if (shouldRunGitHubScheduleMigration(root, existingCaps)) {
           // P2-1 fix: gate repo-scan on both env vars AND runtime deps (Redis).
           // Without Redis, factory construction fails at rehydration, leaving
           // capabilities.json with "enabled" but no running task.
           const hasRepoScanRuntimeDeps = !!(githubDeps as Record<string, unknown>).reconciliationDedup;
-          const entries: import('@cat-cafe/shared').CapabilityEntry[] = buildGitHubMigrationEntries(
+          const entries = buildGitHubMigrationEntries(
             githubManifest,
             buildGitHubMigrationEnv(getGitHubPluginEnv()),
             { repoScanDepsAvailable: hasRepoScanRuntimeDeps },
           );
           if (entries.length > 0) {
+            const overrideMigrations = buildGitHubScheduleOverrideMigrations(entries, globalControlStore.listOverrides());
+            for (const override of overrideMigrations) {
+              globalControlStore.setTaskOverride(override.taskId, override.enabled, override.updatedBy);
+            }
+
             // P2-cloud: spread existingCaps to preserve governancePack and other top-level fields
             const updatedCaps: import('@cat-cafe/shared').CapabilitiesConfig = {
               ...(existingCaps ?? { version: 1 as const, capabilities: [] }),
@@ -1851,7 +1857,10 @@ async function main(): Promise<void> {
             };
             await writeCapabilitiesConfig(root, updatedCaps);
             markGitHubScheduleMigrationDone(root);
-            app.log.info(`[api] F220-B migration: auto-enabled ${entries.length} GitHub schedule resources`);
+            app.log.info(
+              `[api] F220-B migration: auto-enabled ${entries.length} GitHub schedule resources ` +
+                `and migrated ${overrideMigrations.length} scheduler overrides`,
+            );
           }
         }
       }

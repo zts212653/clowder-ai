@@ -246,6 +246,34 @@ export function markGitHubScheduleMigrationDone(projectRoot: string): void {
 
 /** Repo-scan env deps that must be present for the schedule to actually run. */
 const REPO_SCAN_REQUIRED_ENV = ['GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'] as const;
+const LEGACY_GITHUB_SCHEDULE_TASK_IDS = new Map([
+  ['cicd-check', 'cicd-check'],
+  ['conflict-check', 'conflict-check'],
+  ['repo-scan', 'repo-scan'],
+  ['review-feedback', 'review-feedback'],
+]);
+
+export interface GitHubMigrationScheduleEntry {
+  id: string;
+  type: 'schedule';
+  enabled: boolean;
+  source: 'cat-cafe';
+  pluginId: 'github';
+  scheduleTaskId: string;
+}
+
+export interface GitHubMigrationTaskOverride {
+  taskId: string;
+  enabled: boolean;
+  updatedBy: string;
+}
+
+export interface GitHubScheduleOverrideMigration {
+  legacyTaskId: string;
+  taskId: string;
+  enabled: boolean;
+  updatedBy: string;
+}
 
 export function buildGitHubMigrationEnv(
   pluginEnv: Record<string, string | undefined>,
@@ -269,14 +297,7 @@ export function buildGitHubMigrationEntries(
   manifest: { resources: { type: string; name?: string }[] },
   env: Record<string, string | undefined> = process.env,
   opts?: { repoScanDepsAvailable?: boolean },
-): {
-  id: string;
-  type: 'schedule';
-  enabled: boolean;
-  source: 'cat-cafe';
-  pluginId: 'github';
-  scheduleTaskId: string;
-}[] {
+): GitHubMigrationScheduleEntry[] {
   const hasRepoScanEnvDeps = REPO_SCAN_REQUIRED_ENV.every((k) => !!env[k]);
   // Gate on both env vars AND runtime deps (Redis).
   // Without Redis, repo-scan factory construction fails at rehydration,
@@ -297,4 +318,42 @@ export function buildGitHubMigrationEntries(
       pluginId: 'github' as const,
       scheduleTaskId: `schedule:github:${r.name}`,
     }));
+}
+
+function resourceNameFromMigrationEntry(entry: Pick<GitHubMigrationScheduleEntry, 'id' | 'scheduleTaskId'>): string {
+  const idPrefix = 'plugin:github:';
+  if (entry.id.startsWith(idPrefix)) return entry.id.slice(idPrefix.length);
+
+  const taskPrefix = 'schedule:github:';
+  if (entry.scheduleTaskId.startsWith(taskPrefix)) return entry.scheduleTaskId.slice(taskPrefix.length);
+
+  return '';
+}
+
+export function buildGitHubScheduleOverrideMigrations(
+  entries: readonly Pick<GitHubMigrationScheduleEntry, 'id' | 'scheduleTaskId'>[],
+  overrides: readonly GitHubMigrationTaskOverride[] = [],
+): GitHubScheduleOverrideMigration[] {
+  const overridesByTaskId = new Map(overrides.map((override) => [override.taskId, override]));
+  const migrations: GitHubScheduleOverrideMigration[] = [];
+
+  for (const entry of entries) {
+    if (overridesByTaskId.has(entry.scheduleTaskId)) continue;
+
+    const resourceName = resourceNameFromMigrationEntry(entry);
+    const legacyTaskId = LEGACY_GITHUB_SCHEDULE_TASK_IDS.get(resourceName);
+    if (!legacyTaskId) continue;
+
+    const legacyOverride = overridesByTaskId.get(legacyTaskId);
+    if (!legacyOverride) continue;
+
+    migrations.push({
+      legacyTaskId,
+      taskId: entry.scheduleTaskId,
+      enabled: legacyOverride.enabled,
+      updatedBy: legacyOverride.updatedBy,
+    });
+  }
+
+  return migrations;
 }
