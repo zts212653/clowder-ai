@@ -2331,8 +2331,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const subjectKey = `issue:${repoFullName}#${issueNumber}`;
     const existingTask = await taskStore.getBySubject(subjectKey);
     const existingIssueCursor = existingTask?.automationState?.issue?.lastCommentCursor;
+    const shouldSeedIssueCursor = existingIssueCursor === undefined || existingTask?.status === 'done';
     let seededIssueCursor: number | undefined;
-    if (existingIssueCursor === undefined) {
+    if (shouldSeedIssueCursor) {
       if (!fetchIssueCommentCursor) {
         reply.status(503);
         return { error: 'Issue comment cursor fetcher not configured' };

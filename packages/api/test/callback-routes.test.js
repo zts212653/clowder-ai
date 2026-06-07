@@ -3343,6 +3343,60 @@ describe('Callback Routes', () => {
     assert.equal(updated.automationState.trackingInstructions, 'Updated instructions');
   });
 
+  test('POST register-issue-tracking reseeds cursor when reactivating a done tracker', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    const cursorValues = [55, 777];
+    const cursorCalls = [];
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueCommentCursor: async (repoFullName, issueNumber) => {
+        cursorCalls.push({ repoFullName, issueNumber });
+        return cursorValues.shift();
+      },
+    });
+
+    const firstInvocation = await registry.create('user-1', 'opus', 'thread-issue-old');
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: {
+        'x-invocation-id': firstInvocation.invocationId,
+        'x-callback-token': firstInvocation.callbackToken,
+      },
+      payload: { repoFullName: 'zts212653/cat-cafe', issueNumber: 864 },
+    });
+
+    const oldTask = taskStore.getBySubject('issue:zts212653/cat-cafe#864');
+    taskStore.update(oldTask.id, { status: 'done' });
+
+    const secondInvocation = await registry.create('user-1', 'opus', 'thread-issue-new');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: {
+        'x-invocation-id': secondInvocation.invocationId,
+        'x-callback-token': secondInvocation.callbackToken,
+      },
+      payload: { repoFullName: 'zts212653/cat-cafe', issueNumber: 864 },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(cursorCalls.length, 2, 'reactivating done tracking must seed from the current cursor');
+
+    const updated = taskStore.getBySubject('issue:zts212653/cat-cafe#864');
+    assert.equal(updated.status, 'todo');
+    assert.equal(updated.threadId, 'thread-issue-new');
+    assert.equal(updated.automationState.issue.lastCommentCursor, 777);
+  });
+
   test('POST register-issue-tracking allows empty instructions to clear stored instructions', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const app = Fastify();
