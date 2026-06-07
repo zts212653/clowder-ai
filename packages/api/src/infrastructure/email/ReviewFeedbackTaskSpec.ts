@@ -57,6 +57,10 @@ export interface ReviewFeedbackTaskSpecOptions {
   readonly id?: string;
 }
 
+function resolveCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
+  return Math.max(memoryCursor ?? 0, persistedCursor ?? 0);
+}
+
 export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
   // In-memory cursors: highest seen comment ID and review ID per PR
   const commentCursors = new Map<string, number>();
@@ -132,9 +136,17 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               continue;
             }
 
-            // #406: Seed from persisted automationState.review on first access (survives restart)
-            const commentCursor = commentCursors.get(prKey) ?? task.automationState?.review?.lastCommentCursor ?? 0;
-            const reviewCursor = reviewCursors.get(prKey) ?? task.automationState?.review?.lastDecisionCursor ?? 0;
+            // #406: Seed from persisted automationState.review on first access (survives restart).
+            // Cursor sources are monotonic: re-registration may reseed persisted state
+            // while a long-lived poller still has an older in-memory value.
+            const commentCursor = resolveCursor(
+              commentCursors.get(prKey),
+              task.automationState?.review?.lastCommentCursor,
+            );
+            const reviewCursor = resolveCursor(
+              reviewCursors.get(prKey),
+              task.automationState?.review?.lastDecisionCursor,
+            );
 
             // #798: Pass cursor to fetch for per-page client-side filtering (eliminates maxBuffer crash)
             const [comments, reviews] = await Promise.all([

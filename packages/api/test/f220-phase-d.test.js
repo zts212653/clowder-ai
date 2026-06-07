@@ -405,6 +405,57 @@ describe('P2-cloud: process pending comments before closing', () => {
   });
 });
 
+// ── P2-cloud: reseeded cursors beat stale in-memory cursors ───────
+
+describe('P2-cloud: reseeded issue cursors', () => {
+  test('gate prefers reactivated stored cursor over stale in-memory cursor', async () => {
+    assert.ok(createIssueCommentTaskSpec, 'createIssueCommentTaskSpec should be importable');
+    const store = new TaskStore();
+    const task = store.upsertBySubject({
+      kind: 'issue_tracking',
+      threadId: 't1',
+      subjectKey: 'issue:o/r#90',
+      title: 'Issue #90',
+      why: 'track',
+      createdBy: 'cat1',
+      userId: 'u1',
+    });
+    store.patchAutomationState(task.id, { issue: { lastCommentCursor: 50 } });
+
+    const sinceIds = [];
+    const mockRouter = {
+      route: async () => ({ kind: 'notified', threadId: 't1', catId: 'cat1', messageId: 'm1', content: 'test' }),
+    };
+    const mockLog = { info: () => {}, error: () => {}, warn: () => {} };
+
+    const spec = createIssueCommentTaskSpec({
+      taskStore: store,
+      issueCommentRouter: mockRouter,
+      fetchComments: async (_repoFullName, _issueNumber, sinceId) => {
+        sinceIds.push(sinceId);
+        return sinceId === 50
+          ? [{ id: 60, author: 'maintainer', body: 'before close', createdAt: '2026-01-01T00:00:00Z' }]
+          : [];
+      },
+      fetchIssueState: async () => 'open',
+      log: mockLog,
+    });
+
+    const first = await spec.admission.gate();
+    assert.strictEqual(first.run, true);
+    await first.workItems[0].signal.commitCursor();
+
+    // register_issue_tracking reseeds done trackers before upsert reopens them.
+    store.update(task.id, { status: 'done' });
+    store.patchAutomationState(task.id, { issue: { lastCommentCursor: 100 } });
+    store.update(task.id, { status: 'todo' });
+
+    const second = await spec.admission.gate();
+    assert.strictEqual(second.run, false);
+    assert.deepStrictEqual(sinceIds, [50, 100]);
+  });
+});
+
 // ── Schedule factory registration ─────────────────────────────────
 
 describe('Issue tracking schedule factory', () => {

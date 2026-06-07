@@ -37,6 +37,10 @@ export interface IssueCommentTaskSpecOptions {
   readonly id?: string;
 }
 
+function resolveCommentCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
+  return Math.max(memoryCursor ?? 0, persistedCursor ?? 0);
+}
+
 export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): TaskSpec_P1<IssueCommentSignal> {
   const commentCursors = new Map<string, number>();
 
@@ -97,7 +101,10 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             // pending comments are delivered before auto-close — P2-cloud fix)
             const issueState = await opts.fetchIssueState(repoFullName, issueNumber);
 
-            const commentCursor = commentCursors.get(issueKey) ?? task.automationState?.issue?.lastCommentCursor ?? 0;
+            const commentCursor = resolveCommentCursor(
+              commentCursors.get(issueKey),
+              task.automationState?.issue?.lastCommentCursor,
+            );
             const comments = await opts.fetchComments(repoFullName, issueNumber, commentCursor);
             const allNewComments = comments.filter((c) => c.id > commentCursor);
 

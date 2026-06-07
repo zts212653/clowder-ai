@@ -801,6 +801,49 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(result.workItems[0].signal.newDecisions.length, 0);
   });
 
+  it('gate prefers advanced persisted cursors over stale in-memory cursors (#406 sibling)', async () => {
+    const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
+    const { router } = stubRouter();
+    const taskWithCursors = mockTask(
+      { repoFullName: 'owner/repo', prNumber: 43, catId: 'opus', threadId: 'th-1', userId: 'u-1' },
+      {
+        automationState: {
+          review: { lastCommentCursor: 5, lastDecisionCursor: 3 },
+        },
+      },
+    );
+    const commentSinceIds = [];
+    const reviewSinceIds = [];
+    const spec = createReviewFeedbackTaskSpec({
+      taskStore: mockTaskStore([taskWithCursors]),
+      fetchComments: async (_repoFullName, _prNumber, sinceId) => {
+        commentSinceIds.push(sinceId);
+        return sinceId === 5
+          ? [{ id: 7, author: 'alice', body: 'new comment', createdAt: '2026-01-02', commentType: 'conversation' }]
+          : [];
+      },
+      fetchReviews: async (_repoFullName, _prNumber, sinceId) => {
+        reviewSinceIds.push(sinceId);
+        return sinceId === 3
+          ? [{ id: 4, author: 'bob', state: 'COMMENTED', body: 'new review', submittedAt: '2026-01-02' }]
+          : [];
+      },
+      reviewFeedbackRouter: router,
+      log: noopLog,
+    });
+
+    const first = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(first.run, true);
+    await first.workItems[0].signal.commitCursor();
+
+    taskWithCursors.automationState = { review: { lastCommentCursor: 10, lastDecisionCursor: 9 } };
+
+    const second = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 2 });
+    assert.equal(second.run, false);
+    assert.deepEqual(commentSinceIds, [5, 10]);
+    assert.deepEqual(reviewSinceIds, [3, 9]);
+  });
+
   it('gate excludes done tasks — no work items, no fetch (#406 regression)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const { router } = stubRouter();
