@@ -125,15 +125,17 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           sourceCategory: 'ci',
           suggestedSkill: 'merge-gate',
         };
-        opts.invokeTrigger.trigger(
-          routeResult.threadId,
-          routeResult.catId as CatId,
-          signal.task.userId ?? '',
-          routeResult.content,
-          routeResult.messageId,
-          undefined,
-          policy,
-        );
+        void opts.invokeTrigger
+          .trigger(
+            routeResult.threadId,
+            routeResult.catId as CatId,
+            signal.task.userId ?? '',
+            routeResult.content,
+            routeResult.messageId,
+            undefined,
+            policy,
+          )
+          .catch((err) => opts.log.warn({ err }, '[cicd-check] merge-gate trigger failed (best-effort)'));
         opts.log.info(`[cicd-check] CI pass → wake ${routeResult.catId} (intent=merge → merge-gate)`);
       },
     },
