@@ -2254,7 +2254,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         createdBy: catId,
         userId: record.userId,
         // F220 Phase C (AC-C1): store user-provided tracking instructions
-        automationState: instructions ? { trackingInstructions: instructions } : undefined,
+        automationState: instructions !== undefined ? { trackingInstructions: instructions } : undefined,
       });
 
       // Persist intent structurally (deep-merged — preserves ci/review/conflict cursors on re-register).
@@ -2346,7 +2346,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const automationState = {
-      ...(instructions ? { trackingInstructions: instructions } : {}),
+      ...(instructions !== undefined ? { trackingInstructions: instructions } : {}),
       ...(seededIssueCursor !== undefined ? { issue: { lastCommentCursor: seededIssueCursor } } : {}),
     };
     try {

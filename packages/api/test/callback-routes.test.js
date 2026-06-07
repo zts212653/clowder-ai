@@ -2982,6 +2982,41 @@ describe('Callback Routes', () => {
     );
   });
 
+  test('POST register-pr-tracking allows empty instructions to clear stored instructions', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 104,
+        instructions: 'Old guidance',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers,
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 104,
+        instructions: '',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.task.automationState.trackingInstructions, '');
+
+    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#104');
+    assert.equal(stored.automationState.trackingInstructions, '');
+  });
+
   test('POST register-pr-tracking rejects invalid credentials', async () => {
     const app = await createApp();
 
@@ -3306,6 +3341,57 @@ describe('Callback Routes', () => {
     assert.equal(updated.automationState.issue.lastCommentCursor, 55);
     assert.equal(updated.automationState.issue.lastNotifiedAt, 1000);
     assert.equal(updated.automationState.trackingInstructions, 'Updated instructions');
+  });
+
+  test('POST register-issue-tracking allows empty instructions to clear stored instructions', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueCommentCursor: async () => 456,
+    });
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-issue');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 863,
+        instructions: 'Old issue guidance',
+      },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers,
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 863,
+        instructions: '',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+
+    const body = JSON.parse(response.body);
+    assert.equal(body.task.automationState.trackingInstructions, '');
+    assert.equal(body.task.automationState.issue.lastCommentCursor, 456);
+
+    const stored = taskStore.getBySubject('issue:zts212653/cat-cafe#863');
+    assert.equal(stored.automationState.trackingInstructions, '');
+    assert.equal(stored.automationState.issue.lastCommentCursor, 456);
   });
 
   test('POST unregister-tracking rejects legacy task delete when caller thread cannot prove ownership', async () => {
