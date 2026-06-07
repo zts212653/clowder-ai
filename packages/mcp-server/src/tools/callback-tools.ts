@@ -1120,7 +1120,7 @@ export async function handleRegisterPrTracking(input: {
       callbackPost('/api/callbacks/register-pr-tracking', {
         repoFullName: input.repoFullName,
         prNumber: input.prNumber,
-        ...(input.instructions ? { instructions: input.instructions } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
         ...(input.catId ? { catId: input.catId } : {}),
         ...(input.intent ? { intent: input.intent } : {}),
       }),
@@ -1150,7 +1150,7 @@ export async function handleRegisterIssueTracking(input: {
       callbackPost('/api/callbacks/register-issue-tracking', {
         repoFullName: input.repoFullName,
         issueNumber: input.issueNumber,
-        ...(input.instructions ? { instructions: input.instructions } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
       }),
     policy: { kind: 'none' },
   });

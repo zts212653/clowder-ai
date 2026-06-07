@@ -34,6 +34,33 @@ async function withMockedCallbackPost(fn) {
   }
 }
 
+async function withCapturedCallbackPosts(fn) {
+  const callbackToolsMod = await import('../dist/tools/callback-tools.js');
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({
+      url: String(url),
+      body: JSON.parse(String(init?.body ?? '{}')),
+    });
+    return {
+      ok: true,
+      status: 200,
+      headers: new Map(),
+      text: async () => JSON.stringify({ status: 'ok' }),
+      json: async () => ({ status: 'ok' }),
+    };
+  };
+  process.env.CAT_CAFE_API_URL = 'http://localhost:3003';
+  process.env.CAT_CAFE_INVOCATION_ID = 'test-inv';
+  process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-tok';
+  try {
+    return await fn(callbackToolsMod, requests);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', () => {
   test('post_message with kind:none surfaces structured failure (no degrade)', async () => {
     await withMockedCallbackPost(async ({ handlePostMessage }) => {
@@ -62,6 +89,28 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
       assert.ok(result.isError);
       const text = result.content[0].text;
       assert.ok(text.includes('[degrade]') && text.includes('reason=expired'));
+    });
+  });
+
+  test('register_pr_tracking forwards empty instructions so stored guidance can be cleared', async () => {
+    await withCapturedCallbackPosts(async ({ handleRegisterPrTracking }, requests) => {
+      const result = await handleRegisterPrTracking({ repoFullName: 'a/b', prNumber: 1, instructions: '' });
+
+      assert.equal(result.isError, undefined);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, 'http://localhost:3003/api/callbacks/register-pr-tracking');
+      assert.deepEqual(requests[0].body, { repoFullName: 'a/b', prNumber: 1, instructions: '' });
+    });
+  });
+
+  test('register_issue_tracking forwards empty instructions so stored guidance can be cleared', async () => {
+    await withCapturedCallbackPosts(async ({ handleRegisterIssueTracking }, requests) => {
+      const result = await handleRegisterIssueTracking({ repoFullName: 'a/b', issueNumber: 2, instructions: '' });
+
+      assert.equal(result.isError, undefined);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, 'http://localhost:3003/api/callbacks/register-issue-tracking');
+      assert.deepEqual(requests[0].body, { repoFullName: 'a/b', issueNumber: 2, instructions: '' });
     });
   });
 
