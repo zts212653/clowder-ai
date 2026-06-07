@@ -1717,6 +1717,8 @@ async function main(): Promise<void> {
       env: buildGhCliEnv({ token: getGitHubToken() }),
     };
   };
+  const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
+  templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
   const maxGithubId = (items: { id?: unknown }[]): number => {
     let cursor = 0;
     for (const item of items) {
