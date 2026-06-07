@@ -4,7 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { CatId, CatRoutingError, RichBlock, SuggestedCrossPostAction } from '@cat-cafe/shared';
+import type { AutomationState, CatId, CatRoutingError, RichBlock, SuggestedCrossPostAction } from '@cat-cafe/shared';
 import {
   catRegistry,
   createCatId,
@@ -467,6 +467,8 @@ export interface CallbackRoutesOptions {
   validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
   /** F220 followup: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
+  /** F220 PR tracking: seeds review/CI boundaries so registration starts from current GitHub state. */
+  fetchPrTrackingBoundary?: (repoFullName: string, prNumber: number) => Promise<Pick<AutomationState, 'review' | 'ci'>>;
   /** F220-D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F043 P1: feat_index provider override for tests */
@@ -736,6 +738,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validateRepo,
     validatePr,
     validateIssue,
+    fetchPrTrackingBoundary,
     fetchIssueCommentCursor,
     featIndexProvider,
     queueProcessor,
@@ -2243,6 +2246,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       // incidental re-register doesn't silently downgrade a deliberate 'merge'); default 'review'.
       const existing = await taskStore.getBySubject(subjectKey);
       const intent = parsed.data.intent ?? existing?.automationState?.intent ?? 'review';
+      const shouldSeedPrBoundary = !existing || existing.status === 'done';
+      let seededPrBoundary: Pick<AutomationState, 'review' | 'ci'> | undefined;
+      if (shouldSeedPrBoundary) {
+        if (!fetchPrTrackingBoundary) {
+          reply.status(503);
+          return { error: 'PR tracking boundary fetcher not configured' };
+        }
+        try {
+          seededPrBoundary = await fetchPrTrackingBoundary(repoFullName, prNumber);
+        } catch {
+          reply.status(503);
+          return { error: 'PR tracking boundary unavailable — try again later' };
+        }
+      }
+
+      const automationState = {
+        ...(instructions !== undefined ? { trackingInstructions: instructions } : {}),
+        ...(seededPrBoundary ?? {}),
+      };
 
       const task = await taskStore.upsertBySubject({
         kind: 'pr_tracking',
@@ -2254,7 +2276,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         createdBy: catId,
         userId: record.userId,
         // F220 Phase C (AC-C1): store user-provided tracking instructions
-        automationState: instructions !== undefined ? { trackingInstructions: instructions } : undefined,
+        automationState: Object.keys(automationState).length > 0 ? automationState : undefined,
       });
 
       // Persist intent structurally (deep-merged — preserves ci/review/conflict cursors on re-register).

@@ -1717,18 +1717,58 @@ async function main(): Promise<void> {
       env: buildGhCliEnv({ token: getGitHubToken() }),
     };
   };
+  const maxGithubId = (items: { id?: unknown }[]): number => {
+    let cursor = 0;
+    for (const item of items) {
+      if (typeof item.id === 'number' && Number.isFinite(item.id) && item.id > cursor) {
+        cursor = item.id;
+      }
+    }
+    return cursor;
+  };
+  const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
+    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
+    const [reviewComments, issueComments, reviews, ciStatus] = await Promise.all([
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/issues/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() }),
+    ]);
+    return {
+      review: {
+        lastCommentCursor: maxGithubId([
+          ...(reviewComments as { id?: unknown }[]),
+          ...(issueComments as { id?: unknown }[]),
+        ]),
+        lastDecisionCursor: maxGithubId(reviews as { id?: unknown }[]),
+      },
+      ...(ciStatus
+        ? {
+            ci: {
+              headSha: ciStatus.headSha,
+              ...(ciStatus.aggregateBucket === 'pending'
+                ? {}
+                : {
+                    lastFingerprint: `${ciStatus.headSha}:${ciStatus.aggregateBucket}`,
+                    lastBucket: ciStatus.aggregateBucket,
+                  }),
+            },
+          }
+        : {}),
+    };
+  };
   const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> => {
     const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
     const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
       ghToken: getGitHubToken(),
     });
-    let cursor = 0;
-    for (const comment of comments as { id?: unknown }[]) {
-      if (typeof comment.id === 'number' && Number.isFinite(comment.id) && comment.id > cursor) {
-        cursor = comment.id;
-      }
-    }
-    return cursor;
+    return maxGithubId(comments as { id?: unknown }[]);
   };
 
   // F202: Plugin framework — discovery + config + resource activation
@@ -1906,6 +1946,7 @@ async function main(): Promise<void> {
     validateRepo,
     validatePr,
     validateIssue,
+    fetchPrTrackingBoundary,
     fetchIssueCommentCursor,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,

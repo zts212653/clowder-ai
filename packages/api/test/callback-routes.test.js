@@ -83,6 +83,10 @@ describe('Callback Routes', () => {
       evidenceStore,
       reflectionService,
       markerQueue,
+      fetchPrTrackingBoundary: async () => ({
+        review: { lastCommentCursor: 0, lastDecisionCursor: 0 },
+        ci: { headSha: 'test-head' },
+      }),
     };
     if (backlogStore !== undefined) {
       options.backlogStore = backlogStore;
@@ -3015,6 +3019,82 @@ describe('Callback Routes', () => {
 
     const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#104');
     assert.equal(stored.automationState.trackingInstructions, '');
+  });
+
+  test('POST register-pr-tracking seeds PR feedback and CI boundaries after unregister/re-register', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    const boundaryCalls = [];
+    const boundaries = [
+      {
+        review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
+        ci: { headSha: 'sha-old', lastFingerprint: 'sha-old:pass', lastBucket: 'pass' },
+      },
+      {
+        review: { lastCommentCursor: 110, lastDecisionCursor: 220 },
+        ci: { headSha: 'sha-current', lastFingerprint: 'sha-current:fail', lastBucket: 'fail' },
+      },
+    ];
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchPrTrackingBoundary: async (repoFullName, prNumber) => {
+        boundaryCalls.push({ repoFullName, prNumber });
+        return boundaries.shift();
+      },
+    });
+
+    const firstInvocation = await registry.create('user-1', 'opus', 'thread-pr-old');
+    const firstHeaders = {
+      'x-invocation-id': firstInvocation.invocationId,
+      'x-callback-token': firstInvocation.callbackToken,
+    };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: firstHeaders,
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+    });
+    assert.equal(first.statusCode, 200);
+    assert.equal(JSON.parse(first.body).task.automationState.review.lastCommentCursor, 10);
+    assert.equal(JSON.parse(first.body).task.automationState.review.lastDecisionCursor, 20);
+    assert.equal(JSON.parse(first.body).task.automationState.ci.lastFingerprint, 'sha-old:pass');
+
+    const unregister = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/unregister-tracking',
+      headers: firstHeaders,
+      payload: { subjectKey: 'pr:zts212653/cat-cafe#105' },
+    });
+    assert.equal(unregister.statusCode, 200);
+
+    const secondInvocation = await registry.create('user-1', 'opus', 'thread-pr-new');
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: {
+        'x-invocation-id': secondInvocation.invocationId,
+        'x-callback-token': secondInvocation.callbackToken,
+      },
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+    });
+    assert.equal(second.statusCode, 200);
+    assert.deepEqual(boundaryCalls, [
+      { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+      { repoFullName: 'zts212653/cat-cafe', prNumber: 105 },
+    ]);
+
+    const updated = taskStore.getBySubject('pr:zts212653/cat-cafe#105');
+    assert.equal(updated.threadId, 'thread-pr-new');
+    assert.equal(updated.automationState.review.lastCommentCursor, 110);
+    assert.equal(updated.automationState.review.lastDecisionCursor, 220);
+    assert.equal(updated.automationState.ci.lastFingerprint, 'sha-current:fail');
   });
 
   test('POST register-pr-tracking rejects invalid credentials', async () => {
