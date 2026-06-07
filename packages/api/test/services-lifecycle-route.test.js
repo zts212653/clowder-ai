@@ -2476,6 +2476,29 @@ describe('service lifecycle write routes', () => {
     assert.equal(isServiceProcessCommand('python /tmp/scripts/services/tts-api.py --port 9879', manifest), false);
   });
 
+  it('matches macOS Python.app service-owned API processes by exact runtime script identity', () => {
+    const manifest = {
+      id: 'embedding-model',
+      scripts: { start: 'scripts/services/embed-server.sh' },
+    };
+    const resolvedScript = resolveServiceScriptPath('scripts/services/embed-server.sh');
+    const apiScript = resolvedScript.replace(/embed-server\.sh$/, 'embed-api.py');
+    const pythonAppExecutable =
+      '/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python';
+
+    assert.equal(
+      isServiceProcessCommand(
+        `${pythonAppExecutable} ${apiScript} --model mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ --port 9880`,
+        manifest,
+      ),
+      true,
+    );
+    assert.equal(
+      isServiceProcessCommand(`${pythonAppExecutable} /tmp/scripts/services/embed-api.py --port 9880`, manifest),
+      false,
+    );
+  });
+
   it('matches Windows PowerShell service processes by exact script identity', () => {
     const manifest = {
       id: 'whisper-stt',
