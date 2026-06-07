@@ -768,7 +768,7 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     assert.strictEqual(e.scheduleTaskId, 'schedule:github:cicd-check');
   });
 
-  test('excludes repo-scan when env deps present but Redis deps unavailable (P2-1)', async () => {
+  test('persists repo-scan pending when env deps exist but Redis deps are unavailable', async () => {
     const { buildGitHubMigrationEntries } = await import('../dist/domains/plugin/github-schedule-factories.js');
     const manifest = {
       resources: [
@@ -782,9 +782,61 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
       { GITHUB_REPO_ALLOWLIST: 'org/repo', GITHUB_REPO_INBOX_CAT_ID: 'cat-1' },
       { repoScanDepsAvailable: false },
     );
-    assert.strictEqual(entries.length, 1, 'should exclude repo-scan when Redis deps unavailable');
-    assert.ok(!entries.some((e) => e.id.includes('repo-scan')));
+    assert.strictEqual(entries.length, 2, 'should preserve repo-scan as pending for later completion');
+    const repoScan = entries.find((e) => e.id.includes('repo-scan'));
+    assert.ok(repoScan, 'repo-scan entry should be present');
+    assert.strictEqual(repoScan.enabled, false, 'pending repo-scan must not be reported enabled');
+    assert.strictEqual(repoScan.migrationPendingReason, 'runtime-deps-unavailable');
     assert.ok(entries.some((e) => e.id.includes('cicd-check')));
+  });
+
+  test('promotes pending repo-scan migration entry once Redis deps become available', async () => {
+    const { buildGitHubMigrationEntries, promotePendingGitHubMigrationEntries } = await import(
+      '../dist/domains/plugin/github-schedule-factories.js'
+    );
+    const manifest = {
+      resources: [
+        { type: 'schedule', name: 'cicd-check' },
+        { type: 'schedule', name: 'repo-scan' },
+      ],
+    };
+    const env = { GITHUB_REPO_ALLOWLIST: 'org/repo', GITHUB_REPO_INBOX_CAT_ID: 'cat-1' };
+    const pendingCaps = {
+      version: 1,
+      capabilities: buildGitHubMigrationEntries(manifest, env, { repoScanDepsAvailable: false }),
+    };
+
+    const result = promotePendingGitHubMigrationEntries(pendingCaps, manifest, env, { repoScanDepsAvailable: true });
+
+    assert.strictEqual(result.changed, true);
+    const repoScan = result.config.capabilities.find((e) => e.id === 'plugin:github:repo-scan');
+    assert.ok(repoScan, 'repo-scan entry should still exist');
+    assert.strictEqual(repoScan.enabled, true);
+    assert.strictEqual(repoScan.migrationPendingReason, undefined);
+  });
+
+  test('keeps pending repo-scan disabled until Redis deps are available', async () => {
+    const { buildGitHubMigrationEntries, promotePendingGitHubMigrationEntries } = await import(
+      '../dist/domains/plugin/github-schedule-factories.js'
+    );
+    const manifest = {
+      resources: [
+        { type: 'schedule', name: 'cicd-check' },
+        { type: 'schedule', name: 'repo-scan' },
+      ],
+    };
+    const env = { GITHUB_REPO_ALLOWLIST: 'org/repo', GITHUB_REPO_INBOX_CAT_ID: 'cat-1' };
+    const pendingCaps = {
+      version: 1,
+      capabilities: buildGitHubMigrationEntries(manifest, env, { repoScanDepsAvailable: false }),
+    };
+
+    const result = promotePendingGitHubMigrationEntries(pendingCaps, manifest, env, { repoScanDepsAvailable: false });
+
+    assert.strictEqual(result.changed, false);
+    const repoScan = result.config.capabilities.find((e) => e.id === 'plugin:github:repo-scan');
+    assert.strictEqual(repoScan.enabled, false);
+    assert.strictEqual(repoScan.migrationPendingReason, 'runtime-deps-unavailable');
   });
 
   test('builds scheduler override migrations for legacy GitHub poller IDs', async () => {

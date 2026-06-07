@@ -1872,13 +1872,16 @@ async function main(): Promise<void> {
           buildGitHubMigrationEntries,
           buildGitHubMigrationEnv,
           buildGitHubScheduleOverrideMigrations,
+          promotePendingGitHubMigrationEntries,
         } = await import('./domains/plugin/github-schedule-factories.js');
+        const hasRepoScanRuntimeDeps = !!(githubDeps as Record<string, unknown>).reconciliationDedup;
+        const migrationEnv = buildGitHubMigrationEnv(getGitHubPluginEnv());
+        let latestCaps = existingCaps;
         if (shouldRunGitHubScheduleMigration(root, existingCaps)) {
           // P2-1 fix: gate repo-scan on both env vars AND runtime deps (Redis).
           // Without Redis, factory construction fails at rehydration, leaving
           // capabilities.json with "enabled" but no running task.
-          const hasRepoScanRuntimeDeps = !!(githubDeps as Record<string, unknown>).reconciliationDedup;
-          const entries = buildGitHubMigrationEntries(githubManifest, buildGitHubMigrationEnv(getGitHubPluginEnv()), {
+          const entries = buildGitHubMigrationEntries(githubManifest, migrationEnv, {
             repoScanDepsAvailable: hasRepoScanRuntimeDeps,
           });
           if (entries.length > 0) {
@@ -1897,12 +1900,26 @@ async function main(): Promise<void> {
               capabilities: [...(existingCaps?.capabilities ?? []), ...entries],
             };
             await writeCapabilitiesConfig(root, updatedCaps);
+            latestCaps = updatedCaps;
             markGitHubScheduleMigrationDone(root);
+            const enabledEntryCount = entries.filter((entry) => entry.enabled).length;
+            const pendingEntryCount = entries.length - enabledEntryCount;
             app.log.info(
-              `[api] F220-B migration: auto-enabled ${entries.length} GitHub schedule resources ` +
+              `[api] F220-B migration: enabled ${enabledEntryCount} GitHub schedule resources ` +
+                `${pendingEntryCount > 0 ? `and left ${pendingEntryCount} pending ` : ''}` +
                 `and migrated ${overrideMigrations.length} scheduler overrides`,
             );
           }
+        }
+        const pendingPromotion = promotePendingGitHubMigrationEntries(
+          latestCaps ?? { version: 1 as const, capabilities: [] },
+          githubManifest,
+          migrationEnv,
+          { repoScanDepsAvailable: hasRepoScanRuntimeDeps },
+        );
+        if (pendingPromotion.changed) {
+          await writeCapabilitiesConfig(root, pendingPromotion.config);
+          app.log.info('[api] F220-B migration: enabled pending GitHub repo-scan schedule after deps became available');
         }
       }
 

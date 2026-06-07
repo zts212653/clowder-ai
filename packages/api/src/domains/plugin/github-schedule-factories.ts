@@ -246,6 +246,7 @@ export function markGitHubScheduleMigrationDone(projectRoot: string): void {
 
 /** Repo-scan env deps that must be present for the schedule to actually run. */
 const REPO_SCAN_REQUIRED_ENV = ['GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'] as const;
+const REPO_SCAN_PENDING_REASON = 'runtime-deps-unavailable' as const;
 const LEGACY_GITHUB_SCHEDULE_TASK_IDS = new Map([
   ['cicd-check', 'cicd-check'],
   ['conflict-check', 'conflict-check'],
@@ -260,6 +261,7 @@ export interface GitHubMigrationScheduleEntry {
   source: 'cat-cafe';
   pluginId: 'github';
   scheduleTaskId: string;
+  migrationPendingReason?: typeof REPO_SCAN_PENDING_REASON;
 }
 
 export interface GitHubMigrationTaskOverride {
@@ -286,38 +288,86 @@ export function buildGitHubMigrationEnv(
   };
 }
 
+function hasRepoScanEnvDeps(env: Record<string, string | undefined>): boolean {
+  return REPO_SCAN_REQUIRED_ENV.every((k) => !!env[k]);
+}
+
+function buildGitHubMigrationEntry(
+  resourceName: string,
+  opts: { enabled: boolean; migrationPendingReason?: typeof REPO_SCAN_PENDING_REASON } = { enabled: true },
+): GitHubMigrationScheduleEntry {
+  return {
+    id: `plugin:github:${resourceName}`,
+    type: 'schedule',
+    enabled: opts.enabled,
+    source: 'cat-cafe',
+    pluginId: 'github',
+    scheduleTaskId: `schedule:github:${resourceName}`,
+    ...(opts.migrationPendingReason ? { migrationPendingReason: opts.migrationPendingReason } : {}),
+  };
+}
+
 /**
- * Build capability entries for the one-time migration, skipping schedules
- * whose runtime deps aren't available (e.g., repo-scan without its env vars).
+ * Build capability entries for the one-time migration.
  *
- * This avoids persisting "enabled" for a schedule that will fail on rehydration,
- * which would leave the Settings UI showing a ghost "enabled" state.
+ * Repo-scan is omitted when old env deps are absent, preserved as disabled/pending
+ * when env deps exist but Redis deps do not, and enabled once all deps are available.
+ * This avoids a ghost "enabled" UI while still completing old repo-scan installs later.
  */
 export function buildGitHubMigrationEntries(
   manifest: { resources: { type: string; name?: string }[] },
   env: Record<string, string | undefined> = process.env,
   opts?: { repoScanDepsAvailable?: boolean },
 ): GitHubMigrationScheduleEntry[] {
-  const hasRepoScanEnvDeps = REPO_SCAN_REQUIRED_ENV.every((k) => !!env[k]);
+  const repoScanEnvDepsAvailable = hasRepoScanEnvDeps(env);
   // Gate on both env vars AND runtime deps (Redis).
   // Without Redis, repo-scan factory construction fails at rehydration,
   // leaving capabilities.json with "enabled" but no running task (P2-1).
-  const hasRepoScanDeps = hasRepoScanEnvDeps && opts?.repoScanDepsAvailable !== false;
+  const hasRepoScanDeps = repoScanEnvDepsAvailable && opts?.repoScanDepsAvailable !== false;
 
-  return manifest.resources
-    .filter((r) => r.type === 'schedule' && r.name)
-    .filter((r) => {
-      if (r.name === 'repo-scan' && !hasRepoScanDeps) return false;
-      return true;
-    })
-    .map((r) => ({
-      id: `plugin:github:${r.name}`,
-      type: 'schedule' as const,
-      enabled: true,
-      source: 'cat-cafe' as const,
-      pluginId: 'github' as const,
-      scheduleTaskId: `schedule:github:${r.name}`,
-    }));
+  return manifest.resources.flatMap((r) => {
+    const resourceName = r.name;
+    if (r.type !== 'schedule' || !resourceName) return [];
+    if (resourceName !== 'repo-scan') return [buildGitHubMigrationEntry(resourceName)];
+    if (hasRepoScanDeps) return [buildGitHubMigrationEntry(resourceName)];
+    if (repoScanEnvDepsAvailable) {
+      return [
+        buildGitHubMigrationEntry(resourceName, {
+          enabled: false,
+          migrationPendingReason: REPO_SCAN_PENDING_REASON,
+        }),
+      ];
+    }
+    return [];
+  });
+}
+
+export function promotePendingGitHubMigrationEntries(
+  config: CapabilitiesConfig,
+  manifest: { resources: { type: string; name?: string }[] },
+  env: Record<string, string | undefined> = process.env,
+  opts?: { repoScanDepsAvailable?: boolean },
+): { changed: boolean; config: CapabilitiesConfig } {
+  const manifestHasRepoScan = manifest.resources.some((r) => r.type === 'schedule' && r.name === 'repo-scan');
+  if (!manifestHasRepoScan || !hasRepoScanEnvDeps(env) || opts?.repoScanDepsAvailable === false) {
+    return { changed: false, config };
+  }
+
+  const next = structuredClone(config);
+  const repoScan = next.capabilities.find(
+    (entry) =>
+      entry.id === 'plugin:github:repo-scan' &&
+      entry.type === 'schedule' &&
+      entry.pluginId === 'github' &&
+      (entry as GitHubMigrationScheduleEntry).migrationPendingReason === REPO_SCAN_PENDING_REASON,
+  ) as GitHubMigrationScheduleEntry | undefined;
+
+  if (!repoScan) return { changed: false, config };
+
+  repoScan.enabled = true;
+  repoScan.scheduleTaskId = repoScan.scheduleTaskId ?? 'schedule:github:repo-scan';
+  delete repoScan.migrationPendingReason;
+  return { changed: true, config: next };
 }
 
 function resourceNameFromMigrationEntry(entry: Pick<GitHubMigrationScheduleEntry, 'id' | 'scheduleTaskId'>): string {
