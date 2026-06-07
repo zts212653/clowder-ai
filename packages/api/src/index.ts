@@ -1838,13 +1838,14 @@ async function main(): Promise<void> {
           // Without Redis, factory construction fails at rehydration, leaving
           // capabilities.json with "enabled" but no running task.
           const hasRepoScanRuntimeDeps = !!(githubDeps as Record<string, unknown>).reconciliationDedup;
-          const entries = buildGitHubMigrationEntries(
-            githubManifest,
-            buildGitHubMigrationEnv(getGitHubPluginEnv()),
-            { repoScanDepsAvailable: hasRepoScanRuntimeDeps },
-          );
+          const entries = buildGitHubMigrationEntries(githubManifest, buildGitHubMigrationEnv(getGitHubPluginEnv()), {
+            repoScanDepsAvailable: hasRepoScanRuntimeDeps,
+          });
           if (entries.length > 0) {
-            const overrideMigrations = buildGitHubScheduleOverrideMigrations(entries, globalControlStore.listOverrides());
+            const overrideMigrations = buildGitHubScheduleOverrideMigrations(
+              entries,
+              globalControlStore.listOverrides(),
+            );
             for (const override of overrideMigrations) {
               globalControlStore.setTaskOverride(override.taskId, override.enabled, override.updatedBy);
             }
