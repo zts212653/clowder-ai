@@ -325,6 +325,11 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 > **Current state (2026-06-02)**: Slice J-A 已由 clowder-ai#763/#774 intake 落地；Slice J-B 已由 clowder-ai#825 / cat-cafe#2052 intake 落地。F153 顶层仍保持 `in-progress`，因为 Phase G 尚未关闭。
 > **Promoted from**: Phase H Backlog item "MCP call spans + tool execution duration spans"
 > **Discussion**: 2026-05-22，Design Gate（Ragdoll + Maine Coon/codex GPT-5.5 + gpt52/GPT-5.4 + Ragdoll/Sonnet 4.6）— Sonnet 提了 "Hybrid A+C" 替代方案（transformer 内 UUID 状态机 + 栈 fallback），与 codex/gpt52 的"明确降级"立场冲突，最终采纳 codex/gpt52 的明确降级路线（KD-41），Sonnet 提案 rejected
+> **Implementation PRs**:
+> - Spec: clowder-ai#755 (merged 2026-05-22)
+> - Slice J-A foundation (ToolSpanTracker + call site, AC-J1/J3/J4/J5/J6): clowder-ai#763 (merged 2026-05-25)
+> - Slice J-A AC-J2 (wire DARE + Codex + CatAgent native tool ids): clowder-ai#774 (merged 2026-05-28)
+> - Slice J-B (Persist + hydrate + provider matrix, AC-J7/J8/J9 + R6 toolName decoupling KD-43): clowder-ai#825 (merged 2026-06-02, commit `f06d0d00`)
 
 #### 问题
 
@@ -553,3 +558,4 @@ UI 必须显示 `—` 而非 `0`，否则会让"重启前的数据"看起来像"
 | KD-40 | Phase J: 移除 `span-helpers.ts` 本地 `isMcpTool`，统一走 `tool-usage/classify.ts` | Maine Coon独有 finding：本地 `isMcpTool` 当前识别 `cat_cafe_` / `mcp__` / `signal_`，**漏 Codex `mcp:` 前缀**，导致 Codex MCP tool 误判 basic；`tool-usage/classify.ts` 已正确处理 `mcp:` 格式 | 2026-05-22 |
 | KD-41 | Phase J: provider 支持矩阵必须文档化，不允许"至少 X 其他 fallback"模糊口径 | gpt52 finding：模糊 AC 容易把 Phase J 做成局部真实；每个 provider 必须明确列 start/end/id/status 四件套支持，不支持的明确降级（不开 span 或标 fallback） | 2026-05-22 |
 | KD-42 | Prompt X-Ray 不能把 `params.systemPrompt` 等同于真实系统提示词 | F203 将 L0 identity 移到 native system channel；runtime 证明确实会 capture user/effective prompt，但 `System` tab 可为空，F153 Phase G 需要补 native channel coverage 或 UI 明示 partial | 2026-05-26 |
+| KD-43 | Phase J Slice J-B: `StoredToolEvent` 持久化 native `toolName` 数据字段，与 UI `label` 解耦；hydrate 优先用 `toolName`，label 解析仅为 legacy fallback | 砚砚 R5→R6 把"non-blocking P3 / track separately"升级为 P1：`label` 是 UI 显示文本（含 catId 前缀 + arrow + 可能本地化），把它当作 hydrate data contract 会让 label 格式或文案改动 silently degrade trace 到 `unknown` 或错的工具名。修在 J-B PR #825 内完成（3 个新 regression test 覆盖：toolName preferred / legacy label fallback / malformed last-resort） | 2026-06-02 |
