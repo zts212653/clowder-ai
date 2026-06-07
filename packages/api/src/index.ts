@@ -2460,7 +2460,9 @@ async function main(): Promise<void> {
     threadStore,
     registry: commandRegistry,
   });
-  await app.register(signalsRoutes);
+  await app.register(signalsRoutes, {
+    getGitHubApiToken: () => getGitHubEnvValue('GITHUB_MCP_PAT'),
+  });
   await app.register(signalStudyRoutes, { threadStore });
   await app.register(signalCollectionRoutes);
   await app.register(signalPodcastRoutes, {
