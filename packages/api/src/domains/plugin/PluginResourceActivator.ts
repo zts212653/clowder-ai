@@ -453,7 +453,7 @@ export class PluginResourceActivator {
         // F220: capture stale schedule taskId before type transition (mirrors limb pattern)
         staleScheduleTaskIdToClean =
           existing.type === 'schedule' && resource.type !== 'schedule' && existing.enabled
-            ? existing.scheduleTaskId
+            ? scheduleTaskIdForCapability(manifest.id, existing)
             : undefined;
 
         existing.type = resource.type as CapabilityEntry['type'];

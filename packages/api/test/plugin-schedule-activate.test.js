@@ -515,6 +515,48 @@ describe('PluginResourceActivator — schedule resources', () => {
     assert.strictEqual(entry?.scheduleTaskId, undefined);
   });
 
+  it('P2-cloud-9: type transition unregisters fallback task ID when legacy schedule lacks scheduleTaskId', async () => {
+    const capStore = makeCapabilitiesStore();
+    const taskRunner = makeTaskRunner();
+    const { activator } = makeActivator({ capStore, taskRunner });
+
+    await capStore.write({
+      version: 1,
+      capabilities: [
+        {
+          id: 'plugin:test-plugin:my-poller',
+          type: 'schedule',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'test-plugin',
+        },
+      ],
+    });
+    taskRunner.register(makeStubFactory('test.poller').createTaskSpec('schedule:test-plugin:my-poller', {}));
+
+    const mcpManifest = makeMinimalManifest({
+      resources: [
+        {
+          type: 'mcp',
+          name: 'my-poller',
+          command: 'node',
+          args: ['server.js'],
+        },
+      ],
+    });
+
+    const result = await activator.enablePlugin(mcpManifest);
+
+    assert.strictEqual(result.status, 'success');
+    assert.ok(
+      taskRunner.unregistered.includes('schedule:test-plugin:my-poller'),
+      'legacy schedule capability without scheduleTaskId must unregister fallback task ID on type transition',
+    );
+    const entry = capStore.get()?.capabilities.find((c) => c.pluginId === 'test-plugin');
+    assert.strictEqual(entry?.type, 'mcp');
+    assert.strictEqual(entry?.scheduleTaskId, undefined);
+  });
+
   it('P2-cloud-2: schedule task IDs are unambiguous across plugins with hyphenated names', async () => {
     // Plugin "a-b" schedule "c" and plugin "a" schedule "b-c" must produce distinct taskIds.
     // With hyphen concatenation both would be "plugin-a-b-c" → collision.
