@@ -192,10 +192,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
   });
 
   it('recall-edit with replyToId triggers setReplyTo when parent message exists (#706 Phase 2)', () => {
-    // #706 Phase 2 end-to-end: when pendingChatInsert carries replyToId and the
-    // parent message is in the messages store, ChatInput's useEffect calls
-    // setReplyTo to restore ReplyPreviewBar. This test verifies the store-level
-    // contract that ChatInput relies on.
+    // #706 Phase 2: parent in store → full preview content
     const parentMessage = {
       id: 'msg-original-123',
       content: 'I am the quoted parent',
@@ -210,28 +207,55 @@ describe('QueuePanel withdraw UX (F39)', () => {
       replyToMessage: null,
     });
 
-    // Simulate what ChatInput's useEffect does when consuming pendingChatInsert.replyToId
+    // Simulate ChatInput's useEffect logic
     const replyToId = 'msg-original-123';
     const { messages: storeMessages, setReplyTo } = useChatStore.getState();
     const parentMsg = storeMessages.find((m) => m.id === replyToId);
-    expect(parentMsg).toBeDefined();
 
-    if (parentMsg) {
-      setReplyTo({
-        id: parentMsg.id,
-        content: parentMsg.content,
-        senderCatId: parentMsg.catId ?? null,
-        threadId: 'thread-1',
-      });
-    }
+    setReplyTo({
+      id: replyToId,
+      content: parentMsg?.content ?? '(原消息未加载)',
+      senderCatId: parentMsg?.catId ?? null,
+      threadId: 'thread-1',
+    });
 
-    const replyState = useChatStore.getState().replyToMessage;
-    expect(replyState).toEqual({
+    expect(useChatStore.getState().replyToMessage).toEqual({
       id: 'msg-original-123',
       content: 'I am the quoted parent',
       senderCatId: 'opus',
       threadId: 'thread-1',
     });
+  });
+
+  it('recall-edit with replyToId still sets replyTo when parent not in store (#706 Phase 2 fallback)', () => {
+    // #706 Phase 2 edge case: parent message not loaded (e.g. page reload
+    // with partial history). replyTo ID must still be preserved so the
+    // re-sent message keeps its quote relationship on the server.
+    useChatStore.setState({
+      messages: [], // parent not in store
+      replyToMessage: null,
+    });
+
+    const replyToId = 'msg-not-loaded-456';
+    const { messages: storeMessages, setReplyTo } = useChatStore.getState();
+    const parentMsg = storeMessages.find((m) => m.id === replyToId);
+
+    setReplyTo({
+      id: replyToId,
+      content: parentMsg?.content ?? '(原消息未加载)',
+      senderCatId: parentMsg?.catId ?? null,
+      threadId: 'thread-1',
+    });
+
+    const replyState = useChatStore.getState().replyToMessage;
+    expect(replyState).toEqual({
+      id: 'msg-not-loaded-456',
+      content: '(原消息未加载)',
+      senderCatId: null,
+      threadId: 'thread-1',
+    });
+    // Key: replyState.id is set → onSend will pass it as replyTo
+    expect(replyState?.id).toBe('msg-not-loaded-456');
   });
 
   it('rolls back queue state and does not queue composer insert when recall-edit fails', async () => {

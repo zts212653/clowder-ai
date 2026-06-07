@@ -169,20 +169,20 @@ export function ChatInput({
       })();
     }
     // #706 Phase 2: Restore quote composing state from recall-edit.
-    // Looks up the quoted parent in the client message store; if found,
-    // calls setReplyTo so ReplyPreviewBar renders and the re-sent message
-    // still carries replyTo.
+    // Always calls setReplyTo when replyToId is present so the re-sent
+    // message preserves its quote relationship. If the parent message
+    // isn't loaded in the client store (e.g. after a page reload with
+    // partial history), falls back to a placeholder — the replyTo ID
+    // is still sent to the server on submit.
     if (pendingChatInsert.replyToId) {
       const { messages: storeMessages, setReplyTo } = useChatStore.getState();
       const parentMsg = storeMessages.find((m) => m.id === pendingChatInsert.replyToId);
-      if (parentMsg) {
-        setReplyTo({
-          id: parentMsg.id,
-          content: parentMsg.content,
-          senderCatId: parentMsg.catId ?? null,
-          threadId,
-        });
-      }
+      setReplyTo({
+        id: pendingChatInsert.replyToId,
+        content: parentMsg?.content ?? '(原消息未加载)',
+        senderCatId: parentMsg?.catId ?? null,
+        threadId,
+      });
     }
     setPendingChatInsert(null);
     textareaRef.current?.focus();
