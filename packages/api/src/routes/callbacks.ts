@@ -2259,6 +2259,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           reply.status(503);
           return { error: 'PR tracking boundary unavailable — try again later' };
         }
+        if (!seededPrBoundary.review || !seededPrBoundary.ci?.headSha) {
+          reply.status(503);
+          return { error: 'PR tracking boundary unavailable — try again later' };
+        }
       }
 
       const automationState = {

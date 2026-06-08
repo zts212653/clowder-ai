@@ -3097,6 +3097,36 @@ describe('Callback Routes', () => {
     assert.equal(updated.automationState.ci.lastFingerprint, 'sha-current:fail');
   });
 
+  test('POST register-pr-tracking rejects boundary seeding when CI cursor is unavailable', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchPrTrackingBoundary: async () => ({
+        review: { lastCommentCursor: 10, lastDecisionCursor: 20 },
+      }),
+    });
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { repoFullName: 'zts212653/cat-cafe', prNumber: 106 },
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.match(JSON.parse(response.body).error, /PR tracking boundary unavailable/);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#106'), null);
+  });
+
   test('POST register-pr-tracking rejects invalid credentials', async () => {
     const app = await createApp();
 
