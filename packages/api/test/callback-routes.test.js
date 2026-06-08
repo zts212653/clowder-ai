@@ -3203,6 +3203,45 @@ describe('Callback Routes', () => {
     assert.equal(entry.threadId, 'thread-A');
   });
 
+  test('POST register-pr-tracking rejects legacy task takeover when caller thread cannot prove ownership', async () => {
+    const app = await createApp();
+
+    taskStore.create({
+      kind: 'pr_tracking',
+      threadId: 'thread-owner',
+      subjectKey: 'pr:zts212653/cat-cafe#406',
+      title: 'Legacy PR tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    const attacker = await registry.create('user-attacker', 'codex', 'thread-attacker');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': attacker.invocationId, 'x-callback-token': attacker.callbackToken },
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 406,
+        instructions: 'reroute notifications',
+      },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(response.body, /already registered by another user/);
+
+    const entry = taskStore.getBySubject('pr:zts212653/cat-cafe#406');
+    assert.equal(entry.threadId, 'thread-owner', 'legacy task must stay on its original thread');
+    assert.equal(entry.ownerCatId, 'opus', 'legacy task owner must not be overwritten');
+    assert.equal(entry.userId, undefined, 'failed takeover must not stamp attacker userId');
+    assert.equal(
+      entry.automationState?.trackingInstructions,
+      undefined,
+      'failed takeover must not update instructions',
+    );
+  });
+
   test('POST register-pr-tracking converts atomic store ownership conflicts into 409', async () => {
     taskStore = {
       getBySubject() {
@@ -3556,6 +3595,57 @@ describe('Callback Routes', () => {
     const stored = taskStore.getBySubject('issue:zts212653/cat-cafe#863');
     assert.equal(stored.automationState.trackingInstructions, '');
     assert.equal(stored.automationState.issue.lastCommentCursor, 456);
+  });
+
+  test('POST register-issue-tracking rejects legacy task takeover when caller thread cannot prove ownership', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueCommentCursor: async () => 456,
+    });
+
+    taskStore.create({
+      kind: 'issue_tracking',
+      threadId: 'thread-owner',
+      subjectKey: 'issue:zts212653/cat-cafe#865',
+      title: 'Legacy issue tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    const attacker = await registry.create('user-attacker', 'codex', 'thread-attacker');
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: { 'x-invocation-id': attacker.invocationId, 'x-callback-token': attacker.callbackToken },
+      payload: {
+        repoFullName: 'zts212653/cat-cafe',
+        issueNumber: 865,
+        instructions: 'reroute issue notifications',
+      },
+    });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(response.body, /already registered by another user/);
+
+    const entry = taskStore.getBySubject('issue:zts212653/cat-cafe#865');
+    assert.equal(entry.threadId, 'thread-owner', 'legacy task must stay on its original thread');
+    assert.equal(entry.ownerCatId, 'opus', 'legacy task owner must not be overwritten');
+    assert.equal(entry.userId, undefined, 'failed takeover must not stamp attacker userId');
+    assert.equal(
+      entry.automationState?.trackingInstructions,
+      undefined,
+      'failed takeover must not update instructions',
+    );
   });
 
   test('POST unregister-tracking rejects legacy task delete when caller thread cannot prove ownership', async () => {

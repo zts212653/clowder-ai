@@ -47,6 +47,22 @@ export function isSubjectOwnershipConflictError(
   );
 }
 
+export function assertSubjectUpdateOwnership(
+  subjectKey: string,
+  existing: Pick<TaskItem, 'threadId' | 'userId'>,
+  input: Pick<CreateTaskInput, 'threadId' | 'userId'>,
+): void {
+  if (existing.userId && input.userId && existing.userId === input.userId) return;
+  if (!existing.userId && input.userId && existing.threadId === input.threadId) return;
+  if (!existing.userId && !input.userId) return;
+
+  throw createSubjectOwnershipConflict(
+    subjectKey,
+    existing.userId ?? `thread:${existing.threadId}`,
+    input.userId ?? `thread:${input.threadId}`,
+  );
+}
+
 /**
  * Common interface for task stores (in-memory and Redis).
  * #320: Extended with kind/subject-based queries for unified PR tracking.
@@ -138,9 +154,7 @@ export class TaskStore implements ITaskStore {
     if (existingId) {
       const existing = this.tasks.get(existingId);
       if (existing) {
-        if (existing.userId && input.userId && existing.userId !== input.userId) {
-          throw createSubjectOwnershipConflict(sk, existing.userId, input.userId);
-        }
+        assertSubjectUpdateOwnership(sk, existing, input);
         const updated: TaskItem = {
           ...existing,
           threadId: input.threadId,

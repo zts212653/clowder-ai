@@ -17,7 +17,7 @@ import type { AutomationState, CatId, CreateTaskInput, TaskItem, TaskKind, Updat
 import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
-import { createSubjectOwnershipConflict, type ITaskStore } from '../ports/TaskStore.js';
+import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry
@@ -197,9 +197,7 @@ export class RedisTaskStore implements ITaskStore {
       return task;
     }
 
-    if (existing.userId && input.userId && existing.userId !== input.userId) {
-      throw createSubjectOwnershipConflict(sk, existing.userId, input.userId);
-    }
+    assertSubjectUpdateOwnership(sk, existing, input);
 
     const updated: TaskItem = {
       ...existing,

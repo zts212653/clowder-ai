@@ -139,6 +139,39 @@ describe('TaskStore', () => {
       assert.equal(reopened.threadId, 'thread-2');
       assert.equal(reopened.status, 'todo');
     });
+
+    it('rejects cross-thread claims of legacy subject tasks when caller has a userId', () => {
+      const original = store.create(
+        makeInput({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#43',
+          threadId: 'thread-owner',
+          title: 'Legacy PR tracking',
+          ownerCatId: 'opus',
+        }),
+      );
+
+      assert.throws(
+        () =>
+          store.upsertBySubject(
+            makeInput({
+              kind: 'pr_tracking',
+              subjectKey: 'pr:owner/repo#43',
+              threadId: 'thread-attacker',
+              title: 'Hijacked PR tracking',
+              ownerCatId: 'codex',
+              userId: 'user-attacker',
+            }),
+          ),
+        /already owned by another user/,
+      );
+
+      const entry = store.getBySubject('pr:owner/repo#43');
+      assert.equal(entry.id, original.id);
+      assert.equal(entry.threadId, 'thread-owner');
+      assert.equal(entry.ownerCatId, 'opus');
+      assert.equal(entry.userId, undefined);
+    });
   });
 
   describe('delete', () => {
