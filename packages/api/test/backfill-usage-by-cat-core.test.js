@@ -254,6 +254,62 @@ describe('planBackfill', () => {
     assert.notEqual(entry.date, '2026-05-30', 'must NOT bucket onto the start day');
   });
 
+  test('derives completion anchor from message duration when updatedAt was shifted by later maintenance', () => {
+    const invocationStart = Date.UTC(2026, 4, 30, 23, 50, 0); // 2026-05-30 23:50 UTC
+    const invocationDurationMs = 25 * 60 * 1000;
+    const invocationFinished = Date.UTC(2026, 4, 31, 0, 15, 0); // 2026-05-31 00:15 UTC
+    const maintenanceRepairAt = Date.UTC(2026, 5, 7, 12, 0, 0); // later userId repair touched updatedAt
+    const messages = [
+      makeMessage(
+        'inv-maintained',
+        'opus',
+        { inputTokens: 100, outputTokens: 10, durationMs: invocationDurationMs },
+        { timestamp: invocationStart },
+      ),
+    ];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-maintained',
+        createdAt: invocationStart,
+        updatedAt: maintenanceRepairAt,
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: Date.UTC(2026, 4, 1, 0, 0, 0) });
+    assert.equal(plan.entries.length, 1);
+    const [entry] = plan.entries;
+    assert.equal(entry.usageRecordedAt, invocationFinished);
+    assert.equal(entry.date, '2026-05-31');
+    assert.notEqual(entry.usageRecordedAt, maintenanceRepairAt, 'maintenance updatedAt must not become usage date');
+  });
+
+  test('uses duration-derived completion anchor for the cutoff window, not maintenance updatedAt', () => {
+    const invocationStart = Date.UTC(2026, 4, 30, 23, 50, 0);
+    const invocationDurationMs = 25 * 60 * 1000;
+    const maintenanceRepairAt = Date.UTC(2026, 5, 7, 12, 0, 0);
+    const messages = [
+      makeMessage(
+        'inv-old-maintained',
+        'opus',
+        { inputTokens: 100, outputTokens: 10, durationMs: invocationDurationMs },
+        { timestamp: invocationStart },
+      ),
+    ];
+    const messageIndex = indexMessagesByInvocation(messages);
+    const invocations = [
+      makeInvocation({
+        id: 'inv-old-maintained',
+        createdAt: invocationStart,
+        updatedAt: maintenanceRepairAt,
+      }),
+    ];
+
+    const plan = planBackfill(invocations, messageIndex, { cutoffMs: Date.UTC(2026, 5, 1, 0, 0, 0) });
+    assert.deepEqual(plan.entries, []);
+    assert.equal(plan.summary.orphanCandidates, 0);
+  });
+
   test('falls back to invocation.updatedAt when messages have no usable timestamp', () => {
     // Defensive path: legacy messages or imports may lack timestamps. We still must
     // produce a non-NaN anchor; updatedAt is the closest analog to succeeded time.

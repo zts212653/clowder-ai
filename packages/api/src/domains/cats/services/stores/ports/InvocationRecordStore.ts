@@ -68,9 +68,9 @@ export interface UpdateInvocationInput {
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
   /** Issue #845 backfill: override the usageRecordedAt timestamp (epoch ms).
    *  Live writers should NEVER set this — let the store stamp Date.now() so day bucketing
-   *  stays honest. Only the backfill script sets it, anchoring to the live-writer
-   *  bucket: `invocation.usageRecordedAt ?? invocation.updatedAt`. Never
-   *  `invocation.createdAt` (would mis-bucket
+   *  stays honest. Only the backfill script sets it, anchoring to existing
+   *  usageRecordedAt, a duration-derived message completion time, or legacy
+   *  updatedAt fallback. Never `invocation.createdAt` (would mis-bucket
    *  cross-midnight runs onto the start day instead of the finish day). */
   usageRecordedAt?: number;
 }
@@ -200,8 +200,7 @@ export class InvocationRecordStore implements IInvocationRecordStore {
       record.usageByCat = input.usageByCat;
       // F128: stamp usageRecordedAt only on first write (stable for daily bucketing).
       // Issue #845 backfill: explicit input.usageRecordedAt overrides — anchored to the
-      // usage bucket (invocation.usageRecordedAt ?? invocation.updatedAt), so
-      // recovered usage lands on the same day the live writer would have written.
+      // stable historical completion signal chosen by the planner.
       if (input.usageRecordedAt != null) {
         record.usageRecordedAt = input.usageRecordedAt;
       } else if (record.usageRecordedAt == null) {

@@ -19,9 +19,9 @@ export interface BackfillPlanEntry {
    *  aggregator buckets by). Mirrors the live writer's "usage arrived at this time"
    *  semantics — NOT the invocation's createdAt. */
   date: string;
-  /** epoch ms — usageRecordedAt override pinned to the usage anchor:
-   *  `invocation.usageRecordedAt ?? invocation.updatedAt`, matching the
-   *  daily aggregator's bucket semantics.
+  /** epoch ms — usageRecordedAt override pinned to a stable usage anchor:
+   *  existing `invocation.usageRecordedAt`, else a duration-derived message
+   *  completion time, else the legacy `invocation.updatedAt` fallback.
    *  Never `invocation.createdAt` (would mis-bucket cross-midnight runs). */
   usageRecordedAt: number;
   /** queue-* / connector-* / mm-* / other — classification by idempotency prefix */
@@ -73,8 +73,15 @@ function toDateString(epochMs: number): string {
   return new Date(epochMs).toISOString().slice(0, 10);
 }
 
-function usageAnchorMs(invocation: InvocationRecord): number {
+function fallbackUsageAnchorMs(invocation: InvocationRecord): number {
   return invocation.usageRecordedAt ?? invocation.updatedAt;
+}
+
+function messageCompletionAnchorMs(msg: StoredMessage): number | null {
+  const durationMs = msg.metadata?.usage?.durationMs;
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) return null;
+  if (!Number.isFinite(msg.timestamp)) return null;
+  return msg.timestamp + durationMs;
 }
 
 /**
@@ -100,24 +107,35 @@ export function indexMessagesByInvocation(messages: readonly StoredMessage[]): M
 }
 
 /**
- * Aggregate the per-cat usage from a non-empty set of contributing messages.
- * Returns `null` when none of them carries usable `metadata.usage` (the orphan
- * is unrecoverable).
+ * Aggregate the per-cat usage and any stable completion anchor from a non-empty
+ * set of contributing messages. Returns `null` when none of them carries usable
+ * `metadata.usage` (the orphan is unrecoverable).
  */
-function aggregateUsageFromMessages(
-  messages: readonly StoredMessage[],
-): { usageByCat: Record<string, TokenUsage>; messageCount: number } | null {
+function aggregateUsageFromMessages(messages: readonly StoredMessage[]): {
+  usageByCat: Record<string, TokenUsage>;
+  messageCount: number;
+  completionAnchorMs?: number;
+} | null {
   const aggregated = new Map<string, TokenUsage>();
   let messageCount = 0;
+  let completionAnchorMs: number | undefined;
   for (const msg of messages) {
     if (!msg.catId) continue;
     const usage = msg.metadata?.usage;
     if (!usage) continue;
     aggregated.set(msg.catId, mergeTokenUsage(aggregated.get(msg.catId), usage));
     messageCount += 1;
+    const candidate = messageCompletionAnchorMs(msg);
+    if (candidate != null && (completionAnchorMs == null || candidate > completionAnchorMs)) {
+      completionAnchorMs = candidate;
+    }
   }
   if (aggregated.size === 0) return null;
-  return { usageByCat: Object.fromEntries(aggregated), messageCount };
+  return {
+    usageByCat: Object.fromEntries(aggregated),
+    messageCount,
+    ...(completionAnchorMs != null ? { completionAnchorMs } : {}),
+  };
 }
 
 type OrphanOutcome = { kind: 'entry'; entry: BackfillPlanEntry } | { kind: 'unrecoverable' };
@@ -137,11 +155,11 @@ function planOrphan(
   const aggregate = aggregateUsageFromMessages(relatedMessages);
   if (!aggregate) return { kind: 'unrecoverable' };
 
-  // Anchor to the same field the daily report uses: existing usageRecordedAt
-  // when present, otherwise updatedAt as the closest persisted analog to the
-  // succeeded update. Stream-persisted message timestamps are invocation start
-  // times, so they cannot be used as completion anchors.
-  const usageRecordedAt = usageAnchorMs(invocation);
+  // Anchor to the most stable persisted completion signal available. Existing
+  // usageRecordedAt wins; otherwise durationMs lets us recover completion from
+  // stream-start message timestamps. updatedAt remains a legacy fallback only,
+  // because maintenance repairs can move it after the invocation completed.
+  const usageRecordedAt = invocation.usageRecordedAt ?? aggregate.completionAnchorMs ?? invocation.updatedAt;
   return {
     kind: 'entry',
     entry: {
@@ -164,18 +182,18 @@ function planOrphan(
  *   1. Only `status === 'succeeded'` records are considered.
  *   2. Records that already have non-empty `usageByCat` are skipped
  *      (idempotent re-run). Empty `{}` is treated as still backfillable.
- *   3. Usage anchor (`usageRecordedAt ?? updatedAt`) before `cutoffMs` is
- *      skipped (window guard).
+ *   3. Planned usage anchor before `cutoffMs` is skipped (window guard).
  *   4. Records whose related messages contain no `metadata.usage` are reported
  *      as unrecoverable (not in the entries list) so the operator sees how
  *      many orphans cannot be repaired.
- *   5. `usageRecordedAt` mirrors the daily report bucket anchor:
- *      `invocation.usageRecordedAt ?? invocation.updatedAt`. We deliberately
- *      do NOT use message timestamps:
- *      stream-persisted assistant messages are stamped at invocation start.
- *      We deliberately do NOT use `invocation.createdAt`: a long invocation
- *      that started before UTC midnight and finished after would otherwise
- *      backfill onto the wrong day relative to the live writer's behavior.
+ *   5. `usageRecordedAt` mirrors the invocation completion day as closely as
+ *      the historical data allows: existing `usageRecordedAt`, else
+ *      `message.timestamp + metadata.usage.durationMs`, else legacy `updatedAt`
+ *      fallback when no duration signal exists. We deliberately do NOT use
+ *      bare message timestamps, because stream-persisted assistant messages are
+ *      stamped at invocation start. We deliberately do NOT use `createdAt`: a
+ *      long invocation that started before UTC midnight and finished after
+ *      would otherwise backfill onto the wrong day.
  */
 export function planBackfill(
   invocations: readonly InvocationRecord[],
@@ -193,14 +211,16 @@ export function planBackfill(
     if (invocation.status !== 'succeeded') continue;
     succeededTotal += 1;
     if (invocation.usageByCat && Object.keys(invocation.usageByCat).length > 0) continue; // already populated
-    if (usageAnchorMs(invocation) < options.cutoffMs) continue; // outside usage window
-    orphanCandidates += 1;
 
     const outcome = planOrphan(invocation, messageIndex);
     if (outcome.kind === 'unrecoverable') {
+      if (fallbackUsageAnchorMs(invocation) < options.cutoffMs) continue; // outside usage window
+      orphanCandidates += 1;
       unrecoverable += 1;
       continue;
     }
+    if (outcome.entry.usageRecordedAt < options.cutoffMs) continue; // outside usage window
+    orphanCandidates += 1;
     entries.push(outcome.entry);
     byDate[outcome.entry.date] = (byDate[outcome.entry.date] ?? 0) + 1;
     bySource[outcome.entry.source] = (bySource[outcome.entry.source] ?? 0) + 1;
