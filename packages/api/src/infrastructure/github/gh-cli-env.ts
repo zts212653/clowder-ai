@@ -21,7 +21,7 @@ export function resolveGhCliToken(options: ResolveGhCliTokenOptions = {}): strin
   }
 
   const env = options.baseEnv ?? process.env;
-  return cleanToken(env.GITHUB_TOKEN) ?? cleanToken(env.GH_TOKEN);
+  return cleanToken(env.GH_TOKEN) ?? cleanToken(env.GITHUB_TOKEN);
 }
 
 /**

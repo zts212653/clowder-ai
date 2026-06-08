@@ -67,7 +67,7 @@ describe('buildGhCliEnv', () => {
     assert.equal(token, 'ambient-gh-token');
   });
 
-  it('keeps GITHUB_TOKEN precedence over GH_TOKEN in process env fallback', () => {
+  it('keeps GH_TOKEN precedence over GITHUB_TOKEN in process env fallback', () => {
     const token = resolveGhCliToken({
       pluginEnv: {},
       baseEnv: {
@@ -76,7 +76,7 @@ describe('buildGhCliEnv', () => {
       },
     });
 
-    assert.equal(token, 'ambient-github-token');
+    assert.equal(token, 'ambient-gh-token');
   });
 
   it('explicit plugin token tombstone suppresses process env token fallback', () => {
