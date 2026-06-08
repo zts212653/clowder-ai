@@ -18,7 +18,7 @@ export function GuideOverlayCompletion({
   return (
     <div className="fixed inset-0 z-[var(--guide-z-overlay)] flex items-center justify-center">
       <div
-        className="fixed inset-0 bg-[var(--console-overlay-light)]"
+        className="fixed inset-0 bg-[var(--console-overlay-light)] backdrop-blur-sm"
         onClick={completionPersisted || completionFailed ? onDismiss : undefined}
       />
       <div className="relative z-10 rounded-2xl border border-[var(--guide-hud-border)] bg-[var(--guide-hud-bg)] p-8 text-center shadow-2xl">

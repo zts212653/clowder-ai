@@ -22,6 +22,17 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 
+const projectRoot = resolve(import.meta.dirname, '../../..');
+const projectOpenCodeConfigPath = join(projectRoot, 'opencode.json');
+const projectOpenCodeInstructionsPath = join(projectRoot, 'OPENCODE.md');
+const hasProjectOpenCodeRuntimeFiles =
+  existsSync(projectOpenCodeConfigPath) && existsSync(projectOpenCodeInstructionsPath);
+const projectRuntimeInvariantOptions = hasProjectOpenCodeRuntimeFiles
+  ? {}
+  : {
+      skip: 'public checkout does not include local OpenCode runtime config files; committed template tests still run',
+    };
+
 // ── AC-I3: OpenCodeAgentService.injectsL0Natively() ──
 
 describe('F203 Phase I — OpenCodeAgentService L0 marker', () => {
@@ -147,10 +158,8 @@ describe('F203 Phase I — golden-chinchilla workflow triggers', () => {
 // ── AC-I6: permission/plugin/compaction not broken ──
 
 describe('F203 Phase I — OpenCode runtime invariants (AC-I6)', () => {
-  test('project opencode.json still has permission.question=deny', () => {
-    const projectRoot = resolve(import.meta.dirname, '../../..');
-    const configPath = join(projectRoot, 'opencode.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  test('project opencode.json still has permission.question=deny', projectRuntimeInvariantOptions, () => {
+    const config = JSON.parse(readFileSync(projectOpenCodeConfigPath, 'utf8'));
 
     assert.strictEqual(
       config.permission?.question,
@@ -159,29 +168,23 @@ describe('F203 Phase I — OpenCode runtime invariants (AC-I6)', () => {
     );
   });
 
-  test('project opencode.json still has OMOC plugin', () => {
-    const projectRoot = resolve(import.meta.dirname, '../../..');
-    const configPath = join(projectRoot, 'opencode.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  test('project opencode.json still has OMOC plugin', projectRuntimeInvariantOptions, () => {
+    const config = JSON.parse(readFileSync(projectOpenCodeConfigPath, 'utf8'));
 
     const plugins = config.plugin ?? config.plugins ?? [];
     const hasOmoc = plugins.some((p) => typeof p === 'string' && p.includes('oh-my-opencode'));
     assert.ok(hasOmoc, 'OMOC plugin must be preserved in project opencode.json');
   });
 
-  test('project opencode.json still has compaction config', () => {
-    const projectRoot = resolve(import.meta.dirname, '../../..');
-    const configPath = join(projectRoot, 'opencode.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  test('project opencode.json still has compaction config', projectRuntimeInvariantOptions, () => {
+    const config = JSON.parse(readFileSync(projectOpenCodeConfigPath, 'utf8'));
 
     assert.ok(config.compaction, 'compaction config must be preserved');
     assert.strictEqual(config.compaction.auto, true, 'compaction.auto must remain true');
   });
 
-  test('OPENCODE.md still exists and contains interaction channel rules', () => {
-    const projectRoot = resolve(import.meta.dirname, '../../..');
-    const mdPath = join(projectRoot, 'OPENCODE.md');
-    const content = readFileSync(mdPath, 'utf8');
+  test('OPENCODE.md still exists and contains interaction channel rules', projectRuntimeInvariantOptions, () => {
+    const content = readFileSync(projectOpenCodeInstructionsPath, 'utf8');
 
     assert.ok(content.includes('question'), 'OPENCODE.md must document question tool deny');
     assert.ok(content.includes('cat_cafe_create_rich_block'), 'OPENCODE.md must document rich block alternative');

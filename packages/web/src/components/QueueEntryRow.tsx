@@ -58,9 +58,7 @@ function QueueEntryRow({
       : ownerName;
 
   return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isPaused ? 'bg-conn-amber-bg/60' : ''} ${isAgent ? 'bg-[var(--color-cocreator-surface)]' : ''} ${isUrgent ? 'bg-conn-red-bg/40' : ''}`}
-    >
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isPaused ? 'bg-conn-amber-bg/60' : ''}`}>
       {/* Drag handle */}
       <button
         className="p-0.5 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing shrink-0 touch-none"

@@ -203,7 +203,7 @@ export function McpConfigModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] px-4 backdrop-blur-sm"
       data-testid="mcp-config-modal"
     >
       <button type="button" aria-label="关闭" className="absolute inset-0 cursor-default" onClick={onClose} />

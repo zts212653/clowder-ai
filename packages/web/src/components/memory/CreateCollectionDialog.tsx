@@ -89,7 +89,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
 
   return (
     <div
-      className="fixed inset-0 bg-[var(--console-overlay-light)] flex items-center justify-center z-50"
+      className="fixed inset-0 bg-[var(--console-overlay-light)] backdrop-blur-sm flex items-center justify-center z-50"
       data-testid="create-collection-dialog"
     >
       <form

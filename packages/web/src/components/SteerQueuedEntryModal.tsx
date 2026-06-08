@@ -29,7 +29,7 @@ export function SteerQueuedEntryModal({
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close, keyboard Escape handled via useEffect
     <div
       role="presentation"
-      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-50"
+      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm flex items-center justify-center z-50"
       onClick={(e) => {
         if (modalRef.current && !modalRef.current.contains(e.target as Node)) onCancel();
       }}

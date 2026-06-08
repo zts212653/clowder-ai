@@ -54,7 +54,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-[100]"
+      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm flex items-center justify-center z-[100]"
       onClick={onCancel}
     >
       <div

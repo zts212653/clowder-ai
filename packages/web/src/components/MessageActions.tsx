@@ -41,7 +41,10 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
   const canAct = (isUser || isAssistant) && !message.isStreaming;
   // #699: Reply is available on all message types (not just user/assistant)
   const canReply = !message.isStreaming;
-  const toolbarPositionClass = isUser ? 'top-8' : 'top-1';
+  /* Toolbar position: float ABOVE the bubble, horizontally aligned to the
+   * bubble start (past the avatar). -translate-y-full pushes it above the
+   * wrapper; left-10/right-10 clears the avatar (w-8 + gap-2 ≈ 40px). */
+  const toolbarPositionClass = isUser ? '-top-1 -translate-y-full right-10' : '-top-1 -translate-y-full left-10';
 
   const handleSoftDelete = useCallback(() => setDialog({ type: 'soft-delete' }), []);
 
@@ -165,7 +168,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
 
       {canReply && (
         <div
-          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} right-1 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
+          className={`opacity-0 group-hover:opacity-100 absolute ${toolbarPositionClass} z-10 flex gap-0.5 transition-opacity bg-cafe-surface/90 rounded-lg shadow-sm border border-cafe px-1 py-0.5`}
         >
           {/* #699: Reply (quote) button — available for all message types */}
           <button
@@ -281,7 +284,7 @@ export function MessageActions({ message, threadId, children }: MessageActionsPr
       {/* Edit: inline textarea */}
       {dialog.type === 'edit' && (
         <div
-          className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-50"
+          className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm flex items-center justify-center z-50"
           onClick={close}
         >
           <div

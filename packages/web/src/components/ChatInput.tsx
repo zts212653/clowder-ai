@@ -789,7 +789,7 @@ export function ChatInput({
           disabled={disabled || sendTemporarilyDisabled}
           className={`hidden md:block p-3 rounded-xl transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
             whisperMode
-              ? 'text-cafe-accent bg-accent-50 ring-1 ring-cafe-accent'
+              ? 'text-cafe-accent bg-accent-50'
               : 'text-cafe-muted hover:text-cafe-accent hover:bg-cafe-surface'
           }`}
           aria-label="Whisper mode"

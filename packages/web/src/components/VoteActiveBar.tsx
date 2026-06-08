@@ -78,7 +78,7 @@ export function VoteActiveBar({ threadId, onEnd }: { threadId: string; onEnd: ()
 
   return (
     <div className="px-4 py-2 bg-conn-amber-bg border-b border-conn-amber-ring flex items-center gap-3 text-sm">
-      <BallotIcon className="w-5 h-5 flex-shrink-0 text-conn-amber-text" />
+      <BallotIcon className="w-5 h-5 flex-shrink-0 text-conn-amber-text" color="currentColor" />
       <span className="font-medium text-conn-amber-text truncate flex-1">投票进行中: {vote.question}</span>
       <span className="text-conn-amber-text flex-shrink-0">
         {progressText} · 剩余 {remaining}

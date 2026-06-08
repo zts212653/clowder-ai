@@ -232,8 +232,8 @@ export {
 // Connector types (F97 外部信息源抽象)
 export type {
   ConnectorDefinition,
+  ConnectorIconSpec,
   ConnectorSource,
-  ConnectorTailwindTheme,
   ConnectorThreadBinding,
   OutboundDeliveryTarget,
   ReplyPreview,

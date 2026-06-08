@@ -50,7 +50,7 @@ describe('MessageActions position', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('places user-message action toolbar below header to avoid timestamp/avatar overlap', async () => {
+  it('floats user-message toolbar above the bubble, clearing the avatar', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
@@ -70,12 +70,13 @@ describe('MessageActions position', () => {
       );
     });
 
-    const toolbar = container.querySelector('div.absolute.right-1');
+    const toolbar = container.querySelector('div.absolute.right-10');
     expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('top-8');
+    expect(toolbar?.className).toContain('-top-1');
+    expect(toolbar?.className).toContain('-translate-y-full');
   });
 
-  it('keeps assistant toolbar compact near top edge', async () => {
+  it('floats assistant toolbar above the bubble, aligned left past avatar', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
@@ -96,8 +97,9 @@ describe('MessageActions position', () => {
       );
     });
 
-    const toolbar = container.querySelector('div.absolute.right-1');
+    const toolbar = container.querySelector('div.absolute.left-10');
     expect(toolbar).not.toBeNull();
-    expect(toolbar?.className).toContain('top-1');
+    expect(toolbar?.className).toContain('-top-1');
+    expect(toolbar?.className).toContain('-translate-y-full');
   });
 });

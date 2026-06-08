@@ -15,7 +15,7 @@
  * F088 Multi-Platform Chat Gateway
  */
 
-import type { CatId, ConnectorSource, MessageContent } from '@cat-cafe/shared';
+import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent } from '@cat-cafe/shared';
 import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
@@ -44,6 +44,11 @@ function emitConnectorMessage(
       timestamp: msg.timestamp,
     },
   });
+}
+
+function connectorSourceIcon(def: ConnectorDefinition | undefined): string {
+  if (!def) return 'message';
+  return def.icon.type === 'png' ? def.icon.src : def.icon.iconId;
 }
 
 export type RouteResult =
@@ -288,7 +293,7 @@ export class ConnectorRouter {
           const fwdSource: ConnectorSource = {
             connector: connectorId,
             label: def2?.displayName ?? connectorId,
-            icon: def2?.icon ?? 'message',
+            icon: connectorSourceIcon(def2),
           };
           const mentionPatterns = this.getMentionPatterns();
           const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
@@ -341,7 +346,7 @@ export class ConnectorRouter {
             const askSource: ConnectorSource = {
               connector: connectorId,
               label: def2?.displayName ?? connectorId,
-              icon: def2?.icon ?? 'message',
+              icon: connectorSourceIcon(def2),
               ...(sender ? { sender } : {}),
             };
             const askCatId = cmdResult.targetCatId as CatId;
@@ -431,7 +436,7 @@ export class ConnectorRouter {
         chatType === 'group'
           ? `${def?.displayName ?? connectorId}群聊 · ${chatName || externalChatId.slice(-8)}`
           : (def?.displayName ?? connectorId),
-      icon: def?.icon ?? 'message',
+      icon: connectorSourceIcon(def),
       ...(sender ? { sender } : {}),
     };
 
@@ -611,7 +616,7 @@ export class ConnectorRouter {
       userId: this.opts.defaultUserId,
       catId: null,
       content: commandText,
-      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? 'message' },
+      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: connectorSourceIcon(def) },
       mentions: [],
       timestamp: now,
     });
@@ -631,7 +636,7 @@ export class ConnectorRouter {
     emitConnectorMessage(socketManager, threadId, {
       id: cmdMsg.id,
       content: commandText,
-      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: def?.icon ?? 'message' },
+      source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: connectorSourceIcon(def) },
       timestamp: now,
     });
     emitConnectorMessage(socketManager, threadId, {

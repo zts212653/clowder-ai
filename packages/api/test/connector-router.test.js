@@ -197,6 +197,8 @@ describe('ConnectorRouter', () => {
     assert.equal(messageStore.messages.length, 1);
     assert.equal(messageStore.messages[0].source.connector, 'feishu');
     assert.equal(messageStore.messages[0].source.label, '飞书');
+    assert.equal(typeof messageStore.messages[0].source.icon, 'string');
+    assert.equal(messageStore.messages[0].source.icon, '/images/connectors/feishu.png');
   });
 
   it('triggers cat invocation', async () => {

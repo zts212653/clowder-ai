@@ -108,7 +108,7 @@ export function BrakeModal() {
   const alertBadge = CAT_ALERT_BADGE[level];
 
   return (
-    <div className="fixed inset-0 bg-[var(--console-overlay-medium)] flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-[var(--console-overlay-medium)] backdrop-blur-sm flex items-center justify-center z-50 p-4">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: modal content trap */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: Escape handled globally */}
       <div

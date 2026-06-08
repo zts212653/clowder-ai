@@ -8,6 +8,7 @@ import { useAuthorization } from '@/hooks/useAuthorization';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
+import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { godAction, submitAction } from '@/hooks/useGameApi';
 import { reconnectGame } from '@/hooks/useGameReconnect';
@@ -49,6 +50,7 @@ import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProject
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { HubCatEditor } from './HubCatEditor';
+import { HubCoCreatorEditor } from './HubCoCreatorEditor';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { PawIcon } from './icons/PawIcon';
 import { MessageActions } from './MessageActions';
@@ -165,6 +167,8 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
+  const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
+  const coCreator = useCoCreatorConfig();
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
@@ -610,6 +614,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   });
 
   const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
+  const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
   // F212 follow-up — UI-layer dedup for adjacent identical CliDiagnostics panels.
   // Compute once per messages change; map is keyed by messageId.
   const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
@@ -622,13 +627,14 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
             message={msg}
             getCatById={getCatById}
             onEditCat={handleEditCat}
+            onEditCoCreator={handleEditCoCreator}
             hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}
             dedupCount={dedupInfo?.dedupCount}
           />
         </MessageActions>
       );
     },
-    [threadId, getCatById, handleEditCat, cliDedupMap],
+    [threadId, getCatById, handleEditCat, handleEditCoCreator, cliDedupMap],
   );
 
   const { cancelInvocation, syncRooms, socketConnected } = useSocket(socketCallbacks, threadId);
@@ -818,7 +824,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       {sidebarOpen && !isDesktop && (
         <>
           <div
-            className="fixed inset-0 bg-[var(--console-overlay-backdrop)] z-20"
+            className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm z-20"
             onClick={closeSidebar}
             aria-hidden="true"
           />
@@ -1177,7 +1183,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
       />
       {showFirstRunQuestPrompt &&
         createPortal(
-          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4">
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm">
             <div
               className="w-full max-w-md rounded-2xl border border-conn-amber-ring bg-[var(--console-card-bg)] p-6 shadow-2xl"
               onClick={(event) => event.stopPropagation()}
@@ -1225,6 +1231,12 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           }}
         />
       )}
+      <HubCoCreatorEditor
+        open={coCreatorEditorOpen}
+        coCreator={coCreator}
+        onClose={() => setCoCreatorEditorOpen(false)}
+        onSaved={() => setCoCreatorEditorOpen(false)}
+      />
       {/* Bootcamp guide overlay: intro phase tips + lifecycle tips (phase-7.5 uses guide engine) */}
       {(() => {
         if (showFirstRunQuestPrompt || showQuestWizard) return null;

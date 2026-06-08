@@ -210,7 +210,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm"
       onClick={handleClose}
     >
       <div

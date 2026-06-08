@@ -1447,6 +1447,51 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
     }
   });
 
+  it('console modal scrims consistently blur the page behind them', () => {
+    const modalOverlayFiles = [
+      'Lightbox.tsx',
+      'VoteConfigModal.tsx',
+      'MessageActions.tsx',
+      'UnifiedAuthModal.tsx',
+      'BrakeModal.tsx',
+      'HubListModal.tsx',
+      'memory/CreateCollectionDialog.tsx',
+      'ConfirmDialog.tsx',
+      'mission-control/ImportProjectModal.tsx',
+      'BootcampListModal.tsx',
+      'MobileStatusSheet.tsx',
+      'ChatContainer.tsx',
+      'first-run-quest/BootcampGuideOverlay.tsx',
+      'HubCoCreatorEditor.tsx',
+      'FirstRunQuestWizard.tsx',
+      'settings/InstallPreviewModal.tsx',
+      'settings/SkillPreviewModal.tsx',
+      'guide-overlay/GuideOverlayCompletion.tsx',
+      'HubCatEditor.tsx',
+      'McpConfigModal.tsx',
+      'SteerQueuedEntryModal.tsx',
+      'ThreadSidebar/DirectoryPickerModal.tsx',
+      'ThreadSidebar/ThreadSidebar.tsx',
+      'ThreadSidebar/ThreadOrganizerModal.tsx',
+    ];
+
+    for (const file of modalOverlayFiles) {
+      const src = readSrc(file);
+      const overlayClassNames = [
+        ...src.matchAll(
+          /className=(?:"([^"]*bg-\[var\(--console-overlay-(?:backdrop|medium|light|heavy)\)\][^"]*)"|\{`([^`]*bg-\[var\(--console-overlay-(?:backdrop|medium|light|heavy)\)\][^`]*)`\})/g,
+        ),
+      ]
+        .map((match) => match[1] ?? match[2])
+        .filter((className) => className.includes('inset-0'));
+
+      expect(overlayClassNames, `${file} should declare at least one console overlay scrim`).not.toHaveLength(0);
+      for (const className of overlayClassNames) {
+        expect(className, `${file} overlay scrim should include backdrop-blur-sm`).toContain('backdrop-blur-sm');
+      }
+    }
+  });
+
   it('HubQuotaBoardTab: rounded-xl + standard shadow, no heavy shadow', () => {
     const src = readSrc('HubQuotaBoardTab.tsx');
     expect(src).not.toContain('rounded-2xl');

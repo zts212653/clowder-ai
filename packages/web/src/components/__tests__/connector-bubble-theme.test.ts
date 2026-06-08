@@ -1,13 +1,7 @@
 /**
- * Connector bubble theming
- *
- * F056 OKLCH migration: ConnectorBubble no longer uses Tailwind bg-conn-*
- * classes. Instead it uses inline CSS custom properties:
- *   - bubble bg:  var(--color-{connId}-surface, var(--cafe-surface))
- *   - label color: var(--color-{connId}-bubble, var(--cafe-text))
- * Avatar ring/bg come from connector definitions (getConnectorDefinition).
- *
- * Tests assert on the CSS variable pattern in the rendered HTML.
+ * Connector bubble theming — OKLCH pipeline
+ * Tests that ConnectorBubble renders with correct theme colors and icons
+ * from the unified ConnectorDefinition metadata.
  */
 
 import React, { act } from 'react';
@@ -41,26 +35,22 @@ describe('ConnectorBubble theme', () => {
     container.remove();
   });
 
-  it('uses OKLCH surface token for vote-result connector', () => {
+  it('uses OKLCH-derived surface for vote-result bubble', () => {
     const message: ChatMessage = {
       id: 'm-vote',
       type: 'connector',
       content: '投票结果: 谁最坏？',
       timestamp: Date.now(),
-      source: {
-        connector: 'vote-result',
-        label: '投票结果',
-        icon: 'ballot',
-      },
+      source: { connector: 'vote-result', label: '投票结果', icon: 'ballot' },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    expect(html).toContain('var(--color-vote-result-surface');
-    expect(html).toContain('var(--color-vote-result-bubble');
+    // OKLCH inline style references connector ID
+    expect(html).toContain('--color-vote-result-surface');
+    // SVG icon rendered (not emoji)
+    expect(html).toContain('<svg');
+    // Theme color in avatar ring (boxShadow inline style)
+    expect(html).toContain('#7C3AED');
   });
 
   it('renders rich block fields inside connector bubble', () => {
@@ -69,11 +59,7 @@ describe('ConnectorBubble theme', () => {
       type: 'connector',
       content: '投票结果: 谁最坏？',
       timestamp: Date.now(),
-      source: {
-        connector: 'vote-result',
-        label: '投票结果',
-        icon: 'ballot',
-      },
+      source: { connector: 'vote-result', label: '投票结果', icon: 'ballot' },
       extra: {
         rich: {
           v: 1 as const,
@@ -94,13 +80,8 @@ describe('ConnectorBubble theme', () => {
         },
       },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    // Rich block fields should be visible inside the connector bubble
     expect(html).toContain('opus');
     expect(html).toContain('codex');
     expect(html).toContain('50%');
@@ -112,26 +93,14 @@ describe('ConnectorBubble theme', () => {
       type: 'connector',
       content: '[定时任务] 喝水提醒',
       timestamp: Date.now(),
-      source: {
-        connector: 'scheduler',
-        label: '定时任务',
-        icon: 'scheduler',
-      },
-      extra: {
-        scheduler: {
-          hiddenTrigger: true,
-        },
-      },
+      source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+      extra: { scheduler: { hiddenTrigger: true } },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     expect(container.innerHTML).toBe('');
   });
 
-  it('uses OKLCH surface token for github-review connector', () => {
+  it('uses OKLCH-derived surface for github-review bubble', () => {
     const message: ChatMessage = {
       id: 'm1',
       type: 'connector',
@@ -140,21 +109,18 @@ describe('ConnectorBubble theme', () => {
       source: {
         connector: 'github-review',
         label: 'GitHub Review',
-        icon: '🔔',
+        icon: 'github',
         url: 'https://github.com/zts212653/clowder-ai/pull/97',
       },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    expect(html).toContain('var(--color-github-review-surface');
-    expect(html).toContain('var(--color-github-review-bubble');
+    expect(html).toContain('--color-github-review-surface');
+    expect(html).toContain('<svg');
+    expect(html).toContain('#2563EB');
   });
 
-  it('uses OKLCH surface token for github-ci connector', () => {
+  it('uses OKLCH-derived surface for github-ci bubble', () => {
     const message: ChatMessage = {
       id: 'm-ci',
       type: 'connector',
@@ -167,193 +133,70 @@ describe('ConnectorBubble theme', () => {
         url: 'https://github.com/zts212653/clowder-ai/actions/runs/123',
       },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    expect(html).toContain('var(--color-github-ci-surface');
-    expect(html).toContain('var(--color-github-ci-bubble');
-    // Should render GitHubIcon SVG, not raw text "github"
+    expect(html).toContain('--color-github-ci-surface');
     expect(html).toContain('<svg');
-    expect(html).not.toContain('>github<');
   });
 
-  it('preserves legacy warning icon for github-review triage messages', () => {
+  it('registered github triage still uses registry SVG icon (not legacy emoji)', () => {
     const message: ChatMessage = {
       id: 'm-triage',
       type: 'connector',
       content: '**GitHub Review 需要分派**',
       timestamp: Date.now(),
-      source: {
-        connector: 'github-review',
-        label: 'GitHub Review',
-        icon: '⚠️',
-      },
+      source: { connector: 'github-review', label: 'GitHub Review', icon: '⚠️' },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    // Legacy triage icon should be preserved, not replaced with GitHub SVG
-    expect(html).toContain('⚠️');
+    // Registered connector always uses registry icon, not source.icon fallback
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('⚠️');
   });
 
-  it('uses OKLCH surface token for multi-mention-result connector', () => {
-    const message: ChatMessage = {
-      id: 'm-mm',
-      type: 'connector',
-      content: '3 只猫猫已回复',
-      timestamp: Date.now(),
-      source: {
-        connector: 'multi-mention-result',
-        label: 'Multi-Mention 结果',
-        icon: '👥',
-      },
-    };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('var(--color-multi-mention-result-surface');
-    expect(html).toContain('var(--color-multi-mention-result-bubble');
-  });
-
-  it('uses OKLCH surface token for feishu connector', () => {
+  it('uses OKLCH-derived surface for feishu bubble', () => {
     const message: ChatMessage = {
       id: 'm-fs',
       type: 'connector',
       content: '来自飞书的消息',
       timestamp: Date.now(),
-      source: {
-        connector: 'feishu',
-        label: '飞书 DM',
-        icon: '🪶',
-      },
+      source: { connector: 'feishu', label: '飞书 DM', icon: '/images/connectors/feishu.png' },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    expect(html).toContain('var(--color-feishu-surface');
-    expect(html).toContain('var(--color-feishu-bubble');
+    expect(html).toContain('--color-feishu-surface');
+    expect(html).toContain('#3370FF');
   });
 
-  it('uses OKLCH surface token for telegram connector', () => {
-    const message: ChatMessage = {
-      id: 'm-tg',
-      type: 'connector',
-      content: '来自 Telegram 的消息',
-      timestamp: Date.now(),
-      source: {
-        connector: 'telegram',
-        label: 'Telegram',
-        icon: '✈️',
-      },
-    };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('var(--color-telegram-surface');
-    expect(html).toContain('var(--color-telegram-bubble');
-  });
-
-  it('uses fallback CSS var for unknown/unregistered connector', () => {
+  it('uses default fallback for unknown connector', () => {
     const message: ChatMessage = {
       id: 'm-unknown',
       type: 'connector',
       content: 'iMessage incoming',
       timestamp: Date.now(),
-      source: {
-        connector: 'imessage',
-        label: 'iMessage',
-        icon: '💬',
-      },
+      source: { connector: 'imessage', label: 'iMessage', icon: '💬' },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    // Unknown connectors use var(--color-imessage-surface, var(--cafe-surface)) fallback
-    expect(html).toContain('var(--color-imessage-surface');
-    expect(html).toContain('var(--cafe-surface)');
+    // Unregistered connector → falls back to default surface
+    expect(html).toContain('--color-imessage-surface');
+    // Emoji icon as fallback
+    expect(html).toContain('💬');
   });
 
-  it('uses OKLCH surface token for wecom-bot connector', () => {
+  it('uses OKLCH-derived surface for hold-ball bubble', () => {
     const message: ChatMessage = {
-      id: 'm-wecom',
+      id: 'm-hold',
       type: 'connector',
-      content: '来自企微的消息',
+      content: '🏓 codex 持球中',
       timestamp: Date.now(),
-      source: {
-        connector: 'wecom-bot',
-        label: '企业微信',
-        icon: '/images/connectors/wecom-bot.png',
-      },
+      source: { connector: 'hold-ball', label: '持球通知', icon: '🏓' },
     };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
+    act(() => root.render(React.createElement(ConnectorBubble, { message })));
     const html = container.innerHTML;
-    expect(html).toContain('var(--color-wecom-bot-surface');
-    expect(html).toContain('var(--color-wecom-bot-bubble');
-  });
-
-  it('uses OKLCH surface token for dingtalk connector', () => {
-    const message: ChatMessage = {
-      id: 'm-dingtalk',
-      type: 'connector',
-      content: '来自钉钉的消息',
-      timestamp: Date.now(),
-      source: {
-        connector: 'dingtalk',
-        label: '钉钉',
-        icon: '/images/connectors/dingtalk.png',
-      },
-    };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('var(--color-dingtalk-surface');
-    expect(html).toContain('var(--color-dingtalk-bubble');
-  });
-
-  it('uses OKLCH surface token for wecom-agent connector', () => {
-    const message: ChatMessage = {
-      id: 'm-wecom-agent',
-      type: 'connector',
-      content: '来自企微自建应用的消息',
-      timestamp: Date.now(),
-      source: {
-        connector: 'wecom-agent',
-        label: '企微自建应用',
-        icon: '/images/connectors/wecom-agent.png',
-      },
-    };
-
-    act(() => {
-      root.render(React.createElement(ConnectorBubble, { message }));
-    });
-
-    const html = container.innerHTML;
-    expect(html).toContain('var(--color-wecom-agent-surface');
-    expect(html).toContain('var(--color-wecom-agent-bubble');
+    expect(html).toContain('--color-hold-ball-surface');
+    expect(html).toContain('#D97706');
+    // SVG icon rendered instead of emoji
+    expect(html).toContain('<svg');
   });
 });

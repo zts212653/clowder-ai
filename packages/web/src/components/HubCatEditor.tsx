@@ -543,7 +543,7 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm"
       onClick={requestClose}
       data-bootcamp-host="cat-editor-modal"
     >

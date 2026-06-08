@@ -129,7 +129,7 @@ export function HubCoCreatorEditor({ open, coCreator, onClose, onSaved }: HubCoC
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div

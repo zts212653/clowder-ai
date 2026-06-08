@@ -371,7 +371,7 @@ export function InstallPreviewModal({
 
   return (
     <div
-      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] flex items-center justify-center z-[100] p-4"
+      className="fixed inset-0 bg-[var(--console-overlay-backdrop)] backdrop-blur-sm flex items-center justify-center z-[100] p-4"
       onClick={onCancel}
     >
       <div

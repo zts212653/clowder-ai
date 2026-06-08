@@ -44,7 +44,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] backdrop-blur-sm"
       onClick={onClose}
     >
       <div

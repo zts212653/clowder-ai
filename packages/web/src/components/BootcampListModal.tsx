@@ -116,7 +116,7 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-medium)] backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

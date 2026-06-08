@@ -10,21 +10,21 @@ describe('connector dark mode themes', () => {
     expect(tailwindConfig.darkMode).toEqual(['selector', '[data-theme="dark"]']);
   });
 
-  it('all connectors with tailwindTheme use semantic conn-* tokens (not hardcoded colors)', () => {
+  it('all connectors have a valid themeColor hex', () => {
     const defs = getAllConnectorDefinitions();
     for (const def of defs) {
-      if (!def.tailwindTheme) continue;
-      const theme = def.tailwindTheme;
-      const allSlots = [theme.avatar, theme.label, theme.labelLink, theme.bubble];
+      expect(def.themeColor, `${def.id} must have a themeColor`).toMatch(/^#[0-9a-fA-F]{6}$/);
+    }
+  });
 
-      // Every slot should reference conn- semantic tokens, not raw Tailwind colors
-      for (const slot of allSlots) {
-        expect(slot, `${def.id} tailwindTheme should use conn-* tokens`).toContain('conn-');
-      }
-
-      // No raw Tailwind bg/text/border colors (e.g., bg-blue-100, text-slate-700)
-      for (const slot of allSlots) {
-        expect(slot, `${def.id} should not have hardcoded dark: variants`).not.toMatch(/\bdark:/);
+  it('all connectors have a structured icon spec', () => {
+    const defs = getAllConnectorDefinitions();
+    for (const def of defs) {
+      expect(def.icon, `${def.id} must have an icon spec`).toBeDefined();
+      if (def.icon.type === 'svg') {
+        expect(typeof def.icon.iconId, `${def.id} svg icon must have iconId`).toBe('string');
+      } else {
+        expect(def.icon.src, `${def.id} png icon must have src`).toMatch(/^\//);
       }
     }
   });

@@ -88,7 +88,7 @@ export function ThreadOrganizerModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <button
         type="button"
-        className="absolute inset-0 bg-[var(--console-overlay-medium)] cursor-default"
+        className="absolute inset-0 bg-[var(--console-overlay-medium)] backdrop-blur-sm cursor-default"
         tabIndex={-1}
         aria-label="关闭面板"
         onClick={onClose}
