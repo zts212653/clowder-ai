@@ -104,6 +104,11 @@ export interface OpenCodeRuntimeConfigOptions {
   defaultModel?: string;
   apiType?: OpenCodeApiType;
   hasBaseUrl?: boolean;
+  /**
+   * Native-auth OpenCode accounts (OAuth/subscription) must not receive
+   * provider auth placeholders that point at unset CAT_CAFE_OC_* env vars.
+   */
+  omitProviderAuth?: boolean;
   /** Absolute path to Clowder AI MCP server entry (packages/mcp-server/dist/index.js). */
   mcpServerPath?: string;
   /**
@@ -166,6 +171,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     defaultModel,
     apiType = 'openai',
     hasBaseUrl = false,
+    omitProviderAuth = false,
     mcpServerPath,
     instructions,
   } = options;
@@ -192,8 +198,8 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
         npm: NPM_ADAPTER_FOR_API_TYPE[apiType] ?? NPM_ADAPTER_FOR_API_TYPE.openai,
         models: modelsMap,
         options: {
-          ...(hasBaseUrl ? { baseURL: `{env:${OC_BASE_URL_ENV}}` } : {}),
-          apiKey: `{env:${OC_API_KEY_ENV}}`,
+          ...(!omitProviderAuth && hasBaseUrl ? { baseURL: `{env:${OC_BASE_URL_ENV}}` } : {}),
+          ...(!omitProviderAuth ? { apiKey: `{env:${OC_API_KEY_ENV}}` } : {}),
         },
       },
     },

@@ -60,6 +60,8 @@ export function parseCpuTime(raw: string): number {
 export class ProcessLivenessProbe {
   readonly config: ProbeConfig;
   private readonly pid: number;
+  /** Whether CPU sampling is available (false on Windows — no `ps`). */
+  readonly cpuSamplingAvailable: boolean;
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastActivityAt: number;
   private prevCpuTimeMs = 0;
@@ -75,6 +77,7 @@ export class ProcessLivenessProbe {
     this.pid = pid;
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.lastActivityAt = Date.now();
+    this.cpuSamplingAvailable = process.platform !== 'win32';
   }
 
   /** Notify that output was received — resets silence tracking */
@@ -154,8 +157,9 @@ export class ProcessLivenessProbe {
     }
 
     // Windows: `ps` is not available. Use process.kill(pid, 0) for liveness
-    // and skip CPU sampling. Conservative: assume idle (cpuGrowing = false)
-    // so that idle-silent → stall detection still works on Windows.
+    // and skip CPU sampling. cpuGrowing stays false (idle-silent state).
+    // #854: emitSilenceWarnings skips suspected_stall when !cpuSamplingAvailable,
+    // so stall auto-kill won't fire and CLI_TIMEOUT_MS is the binding constraint.
     if (process.platform === 'win32') {
       this.cpuGrowing = false;
       this.emitSilenceWarnings();
@@ -206,7 +210,10 @@ export class ProcessLivenessProbe {
   /** Emit soft/stall warnings based on silence duration (shared by Windows and Unix paths) */
   private emitSilenceWarnings(): void {
     const silenceMs = Date.now() - this.lastActivityAt;
-    if (silenceMs >= this.config.stallWarningMs && !this.stallWarningEmitted) {
+    // #854: Only emit suspected_stall when CPU sampling is available.
+    // On Windows we can't distinguish idle from busy, so we can't "suspect"
+    // a stall — CLI_TIMEOUT_MS is the binding constraint instead.
+    if (silenceMs >= this.config.stallWarningMs && !this.stallWarningEmitted && this.cpuSamplingAvailable) {
       this.stallWarningEmitted = true;
       this.warningQueue.push(this.makeWarning('suspected_stall', silenceMs));
     } else if (silenceMs >= this.config.softWarningMs && !this.softWarningEmitted) {

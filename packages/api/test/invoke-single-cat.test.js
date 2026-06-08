@@ -5294,12 +5294,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
   );
 
   // F203 Phase I AC-I4: subscription/unresolved OpenCode path gets instructions-only L0 config
-  it('F203-I: OpenCode subscription path → instructions-only config + no API key injection', async () => {
+  it('F203-I: OpenCode subscription path → full runtime config (MCP + L0) + no API key injection', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f203-subscription-oc-'));
     const apiDir = join(root, 'packages', 'api');
     await mkdir(apiDir, { recursive: true });
     await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    const mcpDir = join(root, 'packages', 'mcp-server', 'dist');
+    await mkdir(mcpDir, { recursive: true });
+    await writeFile(join(mcpDir, 'index.js'), '// stub mcp server', 'utf-8');
 
     // Create a subscription-mode profile (no API key)
     const subscriptionProfile = await createProviderProfile(root, {
@@ -5328,10 +5331,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     });
 
     const optionsSeen = [];
+    let seenRuntimeConfig;
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
       async *invoke(_prompt, options) {
         optionsSeen.push(options ?? {});
+        const configPath = options?.callbackEnv?.OPENCODE_CONFIG;
+        if (configPath) {
+          seenRuntimeConfig = JSON.parse(await readFile(configPath, 'utf-8'));
+        }
         yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
       },
     };
@@ -5352,19 +5360,36 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       );
 
       const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
-      // F203 Phase I: subscription path must get instructions-only config for L0
-      assert.ok(callbackEnv.OPENCODE_CONFIG, 'subscription path must get OPENCODE_CONFIG for L0 instructions');
+      // Non-api_key auth gets full runtime config (MCP + L0 + model routing)
+      // but signals instructions-only so buildEnv preserves native auth
+      assert.ok(callbackEnv.OPENCODE_CONFIG, 'subscription path must get OPENCODE_CONFIG with MCP + L0');
       assert.strictEqual(
         callbackEnv.CAT_CAFE_OC_INSTRUCTIONS_ONLY,
         '1',
-        'subscription path must signal instructions-only',
+        'non-api_key must signal instructions-only to preserve native auth',
       );
-      // Subscription mode: no API key injection
+      // Non-api_key: no credential injection (auth handled natively by OpenCode)
+      assert.strictEqual(callbackEnv.CAT_CAFE_OC_API_KEY, undefined, 'no API key for non-api_key auth');
       assert.strictEqual(
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE,
         'subscription',
         'must pass subscription profile mode',
       );
+      const runtimeConfig = seenRuntimeConfig;
+      assert.ok(runtimeConfig, 'fake service must observe runtime config before cleanup');
+      assert.equal(runtimeConfig.model, 'anthropic/claude-opus-4-6', 'model routing must stay in runtime config');
+      assert.ok(runtimeConfig.provider?.anthropic, 'provider routing must stay in runtime config');
+      assert.equal(
+        runtimeConfig.provider.anthropic.options.apiKey,
+        undefined,
+        'non-api_key runtime config must not reference missing CAT_CAFE_OC_API_KEY',
+      );
+      assert.equal(
+        runtimeConfig.provider.anthropic.options.baseURL,
+        undefined,
+        'non-api_key runtime config must not reference missing CAT_CAFE_OC_BASE_URL',
+      );
+      assert.ok(runtimeConfig.mcp?.['cat-cafe'], 'MCP config must still be present for subscription path');
     } finally {
       process.chdir(previousCwd);
       catRegistry.reset();

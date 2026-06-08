@@ -308,6 +308,32 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
   });
 
+  test('#871: non-api_key runtime config can omit provider auth placeholders', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      hasBaseUrl: true,
+      mcpServerPath: '/absolute/path/to/packages/mcp-server/dist/index.js',
+      omitProviderAuth: true,
+    });
+
+    assert.equal(config.model, 'anthropic/claude-opus-4-6');
+    assert.ok(config.provider.anthropic, 'model/provider routing must still be present');
+    assert.equal(
+      config.provider.anthropic.options.apiKey,
+      undefined,
+      'OAuth/native-auth runtime config must not reference missing CAT_CAFE_OC_API_KEY',
+    );
+    assert.equal(
+      config.provider.anthropic.options.baseURL,
+      undefined,
+      'OAuth/native-auth runtime config must not reference missing CAT_CAFE_OC_BASE_URL',
+    );
+    assert.ok(config.mcp?.['cat-cafe'], 'MCP injection must still be present');
+  });
+
   test('mcp section is absent when mcpServerPath is not provided', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'maas',

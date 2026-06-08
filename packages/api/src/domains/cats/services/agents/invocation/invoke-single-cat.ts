@@ -1405,10 +1405,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    // authType is either 'api_key' or 'oauth' — both need runtime config (MCP +
+    // L0 + model routing). The only difference is credential injection below.
+    const isApiKey = resolvedAccount?.authType === 'api_key';
     if (
       provider === 'opencode' &&
       resolvedAccount != null &&
-      resolvedAccount.authType === 'api_key' &&
       effectiveModel &&
       effectiveProviderName &&
       (hasExplicitOcProvider || !getOpenCodeKnownModels().has(effectiveModel) || mcpServerPath)
@@ -1430,6 +1432,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         defaultModel: effectiveModel,
         apiType,
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
+        omitProviderAuth: !isApiKey,
         mcpServerPath,
         // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.
         instructions: openCodeL0InstructionPaths,
@@ -1441,8 +1444,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         runtimeConfigOptions,
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
-      if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
-      if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+      // Credentials: only for api_key auth.
+      // OAuth users authenticate through OpenCode's native flow; their runtime
+      // config omits provider auth placeholders and signals buildEnv to preserve
+      // native auth instead of clearing it for the custom provider config path.
+      if (isApiKey) {
+        if (resolvedAccount.apiKey) callbackEnv[OC_API_KEY_ENV] = resolvedAccount.apiKey;
+        if (resolvedAccount.baseUrl) callbackEnv[OC_BASE_URL_ENV] = resolvedAccount.baseUrl;
+      } else {
+        callbackEnv[OC_INSTRUCTIONS_ONLY_ENV] = '1';
+      }
       log.debug(
         {
           catId,
@@ -1573,7 +1584,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       // F118 Phase B: Enable liveness probe for all CLI providers.
       // #774: stallAutoKill clears truly stuck idle-silent CLIs before F216's 10m stale-processing guard.
-      // Leave room for async ps sampling + deferred kill probes, while avoiding the 5m slow-API false kills.
+      // #854: Windows cannot sample CPU; suppress suspected_stall there so CLI_TIMEOUT_MS stays binding.
       livenessProbe: { stallAutoKill: true, stallWarningMs: CAT_INVOCATION_STALL_AUTO_KILL_MS },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
       parentSpan: invocationSpan,
