@@ -253,3 +253,33 @@ test('AC-G10: in-flight failure does not poison cache — next call may retry', 
   assert.equal(out, 'RECOVERED-L0');
   assert.equal(goodSpawn.calls.length, 1);
 });
+
+test('AC-G10: clearL0Cache during in-flight compile prevents stale result from repopulating cache', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const pending = [];
+  const controlledSpawn = function fakeSpawn(cmd, args, opts) {
+    controlledSpawn.calls.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    pending.push(child);
+    return child;
+  };
+  controlledSpawn.calls = [];
+
+  const oldCompile = compileL0ViaSubprocess({ catId: 'clear-race-cat', cwd: root, spawnFn: controlledSpawn });
+  assert.equal(controlledSpawn.calls.length, 1);
+  assert.equal(pending.length, 1);
+
+  clearL0Cache('clear-race-cat');
+
+  pending[0].stdout.emit('data', Buffer.from('STALE-L0'));
+  pending[0].emit('close', 0);
+  assert.equal(await oldCompile, 'STALE-L0', 'the already-started caller still receives its own compile result');
+
+  const freshSpawn = buildFakeSpawn({ stdout: 'FRESH-L0' });
+  const out = await compileL0ViaSubprocess({ catId: 'clear-race-cat', cwd: root, spawnFn: freshSpawn });
+  assert.equal(out, 'FRESH-L0');
+  assert.equal(freshSpawn.calls.length, 1, 'post-clear caller must respawn instead of reading stale cache');
+});

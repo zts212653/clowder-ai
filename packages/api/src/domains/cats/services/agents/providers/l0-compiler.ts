@@ -41,15 +41,42 @@ const l0Cache = new Map<string, string>();
 // subprocess invocation; the in-flight entry is removed once the Promise
 // settles, after which the result is in l0Cache for any subsequent reads.
 const l0InflightPromises = new Map<string, Promise<string>>();
+const l0CacheGenerations = new Map<string, number>();
+let l0GlobalGeneration = 0;
+
+function bumpL0Generation(catId?: string): void {
+  if (catId) {
+    l0CacheGenerations.set(catId, (l0CacheGenerations.get(catId) ?? 0) + 1);
+    return;
+  }
+  l0GlobalGeneration += 1;
+  l0CacheGenerations.clear();
+}
+
+function getL0Generation(catId: string): { global: number; cat: number } {
+  return {
+    global: l0GlobalGeneration,
+    cat: l0CacheGenerations.get(catId) ?? 0,
+  };
+}
+
+function isL0GenerationCurrent(catId: string, generation: { global: number; cat: number }): boolean {
+  const current = getL0Generation(catId);
+  return current.global === generation.global && current.cat === generation.cat;
+}
 
 /** Clear cached L0 for one cat or all cats (call on hot-reload / re-sync). */
 export function clearL0Cache(catId?: string): void {
   if (catId) {
     l0Cache.delete(catId);
-    // Also drop any in-flight promise — next call will re-spawn fresh.
+    bumpL0Generation(catId);
+    // Also drop any in-flight promise — next call will re-spawn fresh. The
+    // generation guard prevents the older promise from repopulating l0Cache
+    // when it eventually resolves after this clear.
     l0InflightPromises.delete(catId);
   } else {
     l0Cache.clear();
+    bumpL0Generation();
     l0InflightPromises.clear();
   }
 }
@@ -144,7 +171,7 @@ export interface CompileL0Options {
  *   exits non-zero, or produces empty output (fail-closed).
  */
 export async function compileL0ViaSubprocess(options: CompileL0Options): Promise<string> {
-  const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
+  const { catId, outPath } = options;
 
   // Cache hit — skip subprocess entirely
   const cached = l0Cache.get(catId);
@@ -165,14 +192,17 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
     return result;
   }
 
-  const compilePromise = doCompileL0(options);
+  const compileGeneration = getL0Generation(catId);
+  const compilePromise = doCompileL0(options, compileGeneration);
   l0InflightPromises.set(catId, compilePromise);
   try {
     return await compilePromise;
   } finally {
     // Always clean up the in-flight entry once settled — subsequent calls
     // will read from l0Cache (on success) or re-attempt (on failure).
-    l0InflightPromises.delete(catId);
+    if (l0InflightPromises.get(catId) === compilePromise) {
+      l0InflightPromises.delete(catId);
+    }
   }
 }
 
@@ -180,7 +210,10 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
  * Internal compile path — separated from `compileL0ViaSubprocess` so the
  * in-flight dedup wrapper can install the Promise without recursing.
  */
-async function doCompileL0(options: CompileL0Options): Promise<string> {
+async function doCompileL0(
+  options: CompileL0Options,
+  compileGeneration: { global: number; cat: number },
+): Promise<string> {
   const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   if (!scriptPath) {
@@ -232,6 +265,8 @@ async function doCompileL0(options: CompileL0Options): Promise<string> {
     }
   }
 
-  l0Cache.set(catId, result);
+  if (isL0GenerationCurrent(catId, compileGeneration)) {
+    l0Cache.set(catId, result);
+  }
   return result;
 }
