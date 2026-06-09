@@ -221,6 +221,168 @@ test('F153: API routes registered in index.ts', () => {
   assert.ok(src.includes('promptCaptureRoutes'), 'Should register prompt capture routes');
 });
 
+// ── AC-G10 (Phase G native L0 closure / KD-44): backward + new field tests ──
+
+test('AC-G10: PromptCapture without native L0 fields round-trips (backward compat)', async () => {
+  const { PromptCaptureStore } = await import('../dist/infrastructure/debug/prompt-capture-store.js');
+  const dir = join(testDir, 'ac-g10-legacy');
+  const store = new PromptCaptureStore({ baseDir: dir });
+
+  // Legacy shape — pre-AC-G10 captures never had nativeSystemPrompt /
+  // totalTokenEstimate / captureDiagnostics. Must still load cleanly.
+  const capture = makeCapture();
+  store.captureSync(capture);
+  const result = store.read(capture.captureId);
+  assert.ok(result);
+  assert.equal(result.nativeSystemPrompt, undefined, 'legacy capture must not invent native fields');
+  assert.equal(result.totalTokenEstimate, undefined);
+  assert.equal(result.captureDiagnostics, undefined);
+});
+
+test('AC-G10: PromptCapture with native L0 fields persists + reads back', async () => {
+  const { PromptCaptureStore } = await import('../dist/infrastructure/debug/prompt-capture-store.js');
+  const dir = join(testDir, 'ac-g10-native');
+  const store = new PromptCaptureStore({ baseDir: dir });
+
+  const capture = makeCapture({
+    nativeSystemPrompt: 'COMPILED-L0-IDENTITY-RULES-GO-HERE',
+    nativeSystemPromptSource: 'f203-l0',
+    nativeSystemTokenEstimate: 1234,
+    totalTokenEstimate: 1234 + 12, // nativeEst + msg tokenEstimate from makeCapture
+  });
+  store.captureSync(capture);
+  const result = store.read(capture.captureId);
+  assert.ok(result);
+  assert.equal(result.nativeSystemPrompt, 'COMPILED-L0-IDENTITY-RULES-GO-HERE');
+  assert.equal(result.nativeSystemPromptSource, 'f203-l0');
+  assert.equal(result.nativeSystemTokenEstimate, 1234);
+  assert.equal(result.totalTokenEstimate, 1246);
+});
+
+test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=true (test fetcher)', async () => {
+  // Force PROMPT_CAPTURE on for this test
+  const prevEnv = process.env.PROMPT_CAPTURE;
+  process.env.PROMPT_CAPTURE = 'on';
+  try {
+    const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
+      '../dist/infrastructure/debug/prompt-capture-bridge.js'
+    );
+    const _store = getPromptCaptureStore();
+    const invocationId = `g10-native-${randomUUID()}`;
+    capturePromptIfEnabled({
+      catId: 'opus',
+      invocationId,
+      threadId: 'g10-thread',
+      userId: 'g10-user',
+      model: 'claude-opus-4-6',
+      systemPrompt: 'pack-system',
+      userPrompt: 'hi',
+      effectivePrompt: 'pack-system\n\n---\n\nhi',
+      injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
+      nativeL0Provider: true,
+      nativeL0Fetcher: async () => 'TEST-COMPILED-L0',
+    });
+    // Capture is fire-and-forget async; poll the listByInvocation index.
+    let captures = [];
+    for (let i = 0; i < 50 && captures.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      captures = _store.listByInvocation(invocationId);
+    }
+    assert.equal(captures.length, 1, 'capture must be persisted within poll window');
+    const detail = _store.read(captures[0].captureId);
+    assert.ok(detail);
+    assert.equal(detail.nativeSystemPrompt, 'TEST-COMPILED-L0');
+    assert.equal(detail.nativeSystemPromptSource, 'f203-l0');
+    assert.ok((detail.nativeSystemTokenEstimate ?? 0) > 0);
+    assert.equal(detail.totalTokenEstimate, detail.tokenEstimate + (detail.nativeSystemTokenEstimate ?? 0));
+    assert.equal(detail.captureDiagnostics, undefined, 'clean path must not record diagnostics');
+  } finally {
+    process.env.PROMPT_CAPTURE = prevEnv ?? '';
+  }
+});
+
+test('AC-G10: capture bridge records captureDiagnostics when native L0 fetcher rejects (fail-safe)', async () => {
+  const prevEnv = process.env.PROMPT_CAPTURE;
+  process.env.PROMPT_CAPTURE = 'on';
+  try {
+    const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
+      '../dist/infrastructure/debug/prompt-capture-bridge.js'
+    );
+    const _store = getPromptCaptureStore();
+    const invocationId = `g10-fail-${randomUUID()}`;
+    capturePromptIfEnabled({
+      catId: 'opus',
+      invocationId,
+      threadId: 'g10-fail-thread',
+      userId: 'g10-fail-user',
+      model: 'claude-opus-4-6',
+      systemPrompt: 'pack-system',
+      userPrompt: 'hi',
+      effectivePrompt: 'pack-system\n\n---\n\nhi',
+      injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
+      nativeL0Provider: true,
+      // Fetcher fails — bridge must still write capture, just without native fields.
+      nativeL0Fetcher: async () => {
+        throw new Error('L0 compile blew up in test');
+      },
+    });
+    let captures = [];
+    for (let i = 0; i < 50 && captures.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      captures = _store.listByInvocation(invocationId);
+    }
+    assert.equal(captures.length, 1, 'capture must be persisted even when native fetch fails');
+    const detail = _store.read(captures[0].captureId);
+    assert.ok(detail);
+    assert.equal(detail.nativeSystemPrompt, undefined, 'native fetch failure must not invent prompt');
+    assert.ok(detail.captureDiagnostics);
+    assert.equal(detail.captureDiagnostics.length, 1);
+    assert.match(detail.captureDiagnostics[0], /native-l0-fetch-failed.*L0 compile blew up/);
+  } finally {
+    process.env.PROMPT_CAPTURE = prevEnv ?? '';
+  }
+});
+
+test('AC-G10: nativeL0Provider=false (non-F203 provider) — native fields stay absent', async () => {
+  const prevEnv = process.env.PROMPT_CAPTURE;
+  process.env.PROMPT_CAPTURE = 'on';
+  try {
+    const { capturePromptIfEnabled, getPromptCaptureStore } = await import(
+      '../dist/infrastructure/debug/prompt-capture-bridge.js'
+    );
+    const _store = getPromptCaptureStore();
+    const invocationId = `g10-nonnative-${randomUUID()}`;
+    capturePromptIfEnabled({
+      catId: 'gemini',
+      invocationId,
+      threadId: 'g10-nonnative-thread',
+      userId: 'g10-nonnative-user',
+      model: 'gemini-pro',
+      systemPrompt: 'full-system-via-pack',
+      userPrompt: 'hi',
+      effectivePrompt: 'full-system-via-pack\n\n---\n\nhi',
+      injectionDecision: { isResume: false, canSkipOnResume: true, forceReinjection: false, injected: true },
+      nativeL0Provider: false,
+      // No fetcher — confirms bridge never tries to call it.
+    });
+    let captures = [];
+    for (let i = 0; i < 50 && captures.length === 0; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      captures = _store.listByInvocation(invocationId);
+    }
+    assert.equal(captures.length, 1);
+    const detail = _store.read(captures[0].captureId);
+    assert.ok(detail);
+    assert.equal(detail.nativeSystemPrompt, undefined);
+    assert.equal(detail.nativeSystemPromptSource, undefined);
+    assert.equal(detail.nativeSystemTokenEstimate, undefined);
+    assert.equal(detail.totalTokenEstimate, detail.tokenEstimate, 'no native L0 → total === msg estimate');
+    assert.equal(detail.captureDiagnostics, undefined);
+  } finally {
+    process.env.PROMPT_CAPTURE = prevEnv ?? '';
+  }
+});
+
 // Cleanup
 test('F153: cleanup test dir', () => {
   rmSync(testDir, { recursive: true, force: true });

@@ -295,6 +295,12 @@ interface PromptCaptureData {
   };
   promptBytes: number;
   tokenEstimate: number;
+  // AC-G10 (Phase G native L0 closure / KD-44)
+  nativeSystemPrompt?: string;
+  nativeSystemPromptSource?: 'f203-l0';
+  nativeSystemTokenEstimate?: number;
+  totalTokenEstimate?: number;
+  captureDiagnostics?: readonly string[];
 }
 
 type InspectorTab = 'system' | 'user' | 'effective' | 'meta';
@@ -357,7 +363,10 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
           <span>·</span>
           <span>{(selected.promptBytes / 1024).toFixed(1)} KB</span>
           <span>·</span>
-          <span>~{selected.tokenEstimate} tokens</span>
+          {/* AC-G10: prefer totalTokenEstimate (msg + native L0) so F203
+              providers no longer silently under-count. Pre-AC-G10 captures
+              omit totalTokenEstimate → fallback to tokenEstimate (msg only). */}
+          <span>~{selected.totalTokenEstimate ?? selected.tokenEstimate} tokens</span>
         </div>
       </div>
 
@@ -381,15 +390,49 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
       <div className="mt-2 max-h-[300px] overflow-y-auto">
         {tab === 'system' && (
           <>
+            {/* AC-G10 (砚砚 Design Gate position 3): zoned display. Native L0
+                section first (provider's actual system-role channel), then
+                message-system / pack appendix. Resume amber banner only
+                applies to the message-system path — native L0 is sent every
+                turn for F203 providers regardless of `injected` flag. */}
+            {selected.nativeSystemPrompt && (
+              <PromptSection
+                content={selected.nativeSystemPrompt}
+                label={`Native L0 (system role)${
+                  selected.nativeSystemPromptSource ? ` · ${selected.nativeSystemPromptSource}` : ''
+                }`}
+                className="mb-2"
+              />
+            )}
             {!selected.injectionDecision.injected && (
               <div className="mb-2 rounded bg-conn-amber-bg px-2 py-1 text-micro text-conn-amber-text">
-                Resume — system prompt was not injected this turn
+                {selected.nativeSystemPrompt
+                  ? 'Resume — message-system pack not appended this turn (Native L0 still sent via system-role channel)'
+                  : 'Resume — system prompt was not injected this turn'}
               </div>
             )}
             <PromptSection
               content={selected.systemPrompt}
-              label={selected.injectionDecision.injected ? 'System Prompt' : 'System Prompt (not sent)'}
+              label={
+                selected.nativeSystemPrompt
+                  ? selected.injectionDecision.injected
+                    ? 'Message system prompt (pack appendix)'
+                    : 'Message system prompt (pack appendix · not sent this turn)'
+                  : selected.injectionDecision.injected
+                    ? 'System Prompt'
+                    : 'System Prompt (not sent)'
+              }
             />
+            {selected.captureDiagnostics && selected.captureDiagnostics.length > 0 && (
+              <div className="mt-2 rounded border border-conn-amber-ring bg-conn-amber-bg p-2 text-micro text-conn-amber-text">
+                <div className="mb-1 font-medium">Capture diagnostics</div>
+                <ul className="ml-3 list-disc space-y-0.5">
+                  {selected.captureDiagnostics.map((d, i) => (
+                    <li key={`${d}-${i}`}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </>
         )}
         {tab === 'user' && (
@@ -409,11 +452,15 @@ function PromptInspector({ invocationId, catId }: { invocationId?: string; catId
 
 function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
   const injected = capture.injectionDecision.injected;
+  // AC-G10: include native L0 length when present so F203 providers no
+  // longer silently under-display total prompt size in the bar.
+  const nativeLen = capture.nativeSystemPrompt?.length ?? 0;
   const sysLen = injected ? capture.systemPrompt.length : 0;
   const userLen = capture.userPrompt.length;
   const missionLen = capture.missionPrefix?.length ?? 0;
-  const total = capture.effectivePrompt.length || 1;
+  const total = nativeLen + capture.effectivePrompt.length || 1;
 
+  const nativePct = (nativeLen / total) * 100;
   const sysPct = (sysLen / total) * 100;
   const missionPct = (missionLen / total) * 100;
   const userPct = (userLen / total) * 100;
@@ -421,6 +468,13 @@ function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
   return (
     <div>
       <div className="flex h-2 overflow-hidden rounded-full bg-cafe-surface-elevated">
+        {nativePct > 0 && (
+          <div
+            className="bg-conn-purple-text"
+            style={{ width: `${nativePct}%` }}
+            title={`Native L0: ${nativePct.toFixed(0)}%`}
+          />
+        )}
         <div className="bg-conn-blue-text" style={{ width: `${sysPct}%` }} title={`System: ${sysPct.toFixed(0)}%`} />
         {missionPct > 0 && (
           <div
@@ -432,6 +486,12 @@ function PromptTokenBar({ capture }: { capture: PromptCaptureData }) {
         <div className="bg-conn-green-text" style={{ width: `${userPct}%` }} title={`User: ${userPct.toFixed(0)}%`} />
       </div>
       <div className="mt-0.5 flex gap-3 text-micro text-cafe-muted">
+        {nativePct > 0 && (
+          <span>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-purple-text" /> Native L0{' '}
+            {nativePct.toFixed(0)}%
+          </span>
+        )}
         <span>
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-conn-blue-text" /> System {sysPct.toFixed(0)}%
         </span>
@@ -513,10 +573,39 @@ function PromptMeta({ capture }: { capture: PromptCaptureData }) {
             <span className="text-cafe-muted">bytes:</span> {capture.promptBytes.toLocaleString()}
           </div>
           <div>
-            <span className="text-cafe-muted">tokens (est):</span> ~{capture.tokenEstimate.toLocaleString()}
+            <span className="text-cafe-muted">tokens · message (est):</span> ~{capture.tokenEstimate.toLocaleString()}
           </div>
+          {/* AC-G10 (砚砚 立场 4): split token breakdown — Hub showed
+              tokenEstimate as if it were total before, which silently
+              under-counted F203 providers. Now native L0 + total are
+              shown separately so the gap is visible. */}
+          {capture.nativeSystemTokenEstimate !== undefined && (
+            <div>
+              <span className="text-cafe-muted">tokens · native L0 (est):</span> ~
+              {capture.nativeSystemTokenEstimate.toLocaleString()}
+              {capture.nativeSystemPromptSource ? (
+                <span className="ml-1 text-cafe-muted">({capture.nativeSystemPromptSource})</span>
+              ) : null}
+            </div>
+          )}
+          {capture.totalTokenEstimate !== undefined && capture.totalTokenEstimate !== capture.tokenEstimate && (
+            <div>
+              <span className="text-cafe-muted">tokens · total (est):</span> ~
+              {capture.totalTokenEstimate.toLocaleString()}
+            </div>
+          )}
         </div>
       </div>
+      {capture.captureDiagnostics && capture.captureDiagnostics.length > 0 && (
+        <div>
+          <div className="font-medium text-cafe-muted">Capture Diagnostics</div>
+          <ul className="ml-3 list-disc space-y-0.5">
+            {capture.captureDiagnostics.map((d, i) => (
+              <li key={`${d}-${i}`}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
