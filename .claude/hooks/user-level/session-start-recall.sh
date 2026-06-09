@@ -79,7 +79,7 @@ fi
 
 # 6. 检查根目录其他杂物（未跟踪且未 ignore 的文件）
 ROOT_CLUTTER=$(git ls-files --others --exclude-standard -- ':!.*' ':!packages/' ':!docs/' ':!assets/' ':!scripts/' ':!cat-cafe-skills/' ':!designs/' ':!desktop/' 2>/dev/null \
-  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|\.npmrc|\.nvmrc|\.node-version|\.editorconfig|\.prettierrc|Makefile|Dockerfile|Procfile|turbo\.json|\.tool-versions)' \
+  | grep -vE '^(package\.json|pnpm-workspace\.yaml|pnpm-lock\.yaml|tsconfig|biome|README|LICENSE|CLAUDE|AGENTS|GEMINI|KIMI|BACKLOG|\.npmrc|\.nvmrc|\.node-version|\.editorconfig|\.prettierrc|Makefile|Dockerfile|Procfile|turbo\.json|\.tool-versions)' \
   | head -10)
 if [ -n "$ROOT_CLUTTER" ]; then
   WARNINGS="${WARNINGS}
