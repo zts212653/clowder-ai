@@ -235,6 +235,34 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(record.status, 'queued');
   });
 
+  it('expectedUsageByCatAbsent rejects populated usageByCat atomically', async () => {
+    const { invocationId } = await store.create({
+      threadId: 'thread-1',
+      userId: 'user-1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'usage-absent-guard-key',
+    });
+    await store.update(invocationId, { status: 'running' });
+    await store.update(invocationId, {
+      status: 'succeeded',
+      usageByCat: { opus: { inputTokens: 10, outputTokens: 1 } },
+      usageRecordedAt: 1_700_000_000_000,
+    });
+
+    const result = await store.update(invocationId, {
+      usageByCat: { codex: { inputTokens: 20, outputTokens: 2 } },
+      usageRecordedAt: 1_700_000_001_000,
+      expectedStatus: 'succeeded',
+      expectedUsageByCatAbsent: true,
+    });
+
+    assert.equal(result, null);
+    const record = await store.get(invocationId);
+    assert.deepEqual(record.usageByCat, { opus: { inputTokens: 10, outputTokens: 1 } });
+    assert.equal(record.usageRecordedAt, 1_700_000_000_000);
+  });
+
   it('concurrent CAS update: only one wins (Lua atomic)', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-1',

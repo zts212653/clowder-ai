@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { type CatData, useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 
 interface CatDailyUsage {
@@ -31,35 +32,37 @@ interface DailyUsageReport {
   grandTotal: UsageTotals;
 }
 
-const CAT_LABELS: Record<string, string> = {
-  opus: '布偶猫 Opus',
-  sonnet: '布偶猫 Sonnet',
-  'opus-45': '布偶猫 Opus 4.5',
-  codex: '缅因猫 Codex',
-  gpt52: '缅因猫 GPT-5.4',
-  spark: '缅因猫 Spark',
-  gemini: '暹罗猫 Gemini',
-  gemini25: '暹罗猫 Gemini 2.5',
-  dare: '狸花猫',
-  antigravity: '孟加拉猫',
-  'antig-opus': '孟加拉猫 Opus',
-  opencode: '金渐层',
-};
-
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function catLabel(catId: string): string {
-  return CAT_LABELS[catId] ?? catId;
+/**
+ * Issue #845: derive label from runtime catRegistry (via useCatData) instead of a
+ * hardcoded table. Prefers "{breedDisplayName} {variantLabel}" (e.g. "布偶猫 4.6"),
+ * falls back to displayName, then raw catId. Avoids the previous drift where
+ * `gpt52` was labeled "GPT-5.4" but actually ran `gpt-5.5`.
+ */
+export function buildCatLabel(catId: string, cat: CatData | undefined): string {
+  if (!cat) return catId;
+  if (cat.breedDisplayName && cat.variantLabel) {
+    return `${cat.breedDisplayName} ${cat.variantLabel}`;
+  }
+  return cat.displayName ?? catId;
 }
 
 export function DailyUsageSection() {
+  const { cats: catRegistry } = useCatData();
   const [report, setReport] = useState<DailyUsageReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const catById = useMemo(() => {
+    const map = new Map<string, CatData>();
+    for (const cat of catRegistry) map.set(cat.id, cat);
+    return map;
+  }, [catRegistry]);
 
   const fetchUsage = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -85,6 +88,13 @@ export function DailyUsageSection() {
 
   const days = report?.daily ?? [];
   const grandTotal = report?.grandTotal;
+
+  // Issue #845: clarify "次调用" vs sum of per-cat participations.
+  // Multi-cat invocations count once toward day.total.invocations, but each
+  // cat participation increments its own count — so per-cat counts can sum
+  // to more than the day total. Show the math in a tooltip rather than hiding it.
+  const invocationCountTitle =
+    '次调用 = 当日 invocation 记录数；下方每只猫的次数是各自参与次数。多猫调用让各猫之和 ≥ 总次数。';
 
   return (
     <section className="console-list-card rounded-xl shadow-[0_8px_22px_rgba(43,33,26,0.04)] p-4 space-y-3">
@@ -112,10 +122,12 @@ export function DailyUsageSection() {
           <div key={day.date} className="border-t border-cafe-subtle pt-2 space-y-1">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-cafe-secondary">{day.date}</span>
-              <span className="text-cafe-muted">{day.total.invocations} 次调用</span>
+              <span className="text-cafe-muted cursor-help" title={invocationCountTitle}>
+                {day.total.invocations} 次调用
+              </span>
             </div>
             {cats.map(([catId, usage]) => (
-              <CatUsageRow key={catId} catId={catId} usage={usage} />
+              <CatUsageRow key={catId} catId={catId} usage={usage} cat={catById.get(catId)} />
             ))}
           </div>
         );
@@ -123,7 +135,9 @@ export function DailyUsageSection() {
 
       {grandTotal && grandTotal.invocations > 0 && (
         <div className="border-t-2 border-cafe pt-2 flex items-center justify-between text-xs text-cafe-secondary">
-          <span className="font-semibold text-cafe-secondary">7 日合计 {grandTotal.invocations} 次</span>
+          <span className="font-semibold text-cafe-secondary cursor-help" title={invocationCountTitle}>
+            7 日合计 {grandTotal.invocations} 次
+          </span>
           <span className="flex gap-3">
             <span className="font-semibold text-cafe-secondary">
               总 {formatTokens(grandTotal.inputTokens + grandTotal.outputTokens)}
@@ -140,11 +154,27 @@ export function DailyUsageSection() {
   );
 }
 
-function CatUsageRow({ catId, usage }: { catId: string; usage: CatDailyUsage }) {
+function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsage; cat: CatData | undefined }) {
+  const label = buildCatLabel(catId, cat);
+  // Issue #845 (砚砚 P2 fix): show the catId's *current* defaultModel as a hint,
+  // NOT as a historical attribution. The aggregated TokenUsage has no per-record
+  // model field — a single catId may have run multiple model versions over time.
+  // The "当前默认" prefix + tooltip keep the semantics explicit so the user never
+  // mistakes the inline label for a per-day model. A follow-up issue tracks the
+  // proper (catId, model) double-key schema.
+  const model = cat?.defaultModel;
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="font-medium text-cafe-secondary truncate">{catLabel(catId)}</span>
+        <span className="font-medium text-cafe-secondary truncate">{label}</span>
+        {model && (
+          <span
+            className="text-cafe-muted text-[10px] truncate italic"
+            title={`${catId} 当前默认模型：${model}。历史聚合按 catId 分桶，不区分模型版本。`}
+          >
+            当前默认 {model}
+          </span>
+        )}
         <span className="text-cafe-muted">{usage.participations}次</span>
       </div>
       <div className="flex items-center gap-3 text-cafe-secondary shrink-0">

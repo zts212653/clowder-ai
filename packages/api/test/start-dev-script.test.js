@@ -1172,7 +1172,9 @@ test('api_launch_command output is actually executable: pnpm gets invoked with N
     const result = spawnSync(
       'bash',
       [
-        '-lc',
+        '--noprofile',
+        '--norc',
+        '-c',
         `set -e
 source "${scriptPath}" --source-only >/dev/null 2>&1
 trap - EXIT INT TERM
@@ -1255,7 +1257,9 @@ test('frontend_launch_command dev mode overrides inherited production NODE_ENV',
     const result = spawnSync(
       'bash',
       [
-        '-lc',
+        '--noprofile',
+        '--norc',
+        '-c',
         `set -e
 source "${scriptPath}" --source-only >/dev/null 2>&1
 trap - EXIT INT TERM

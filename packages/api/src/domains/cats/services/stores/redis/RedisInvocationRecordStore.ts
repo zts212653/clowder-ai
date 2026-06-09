@@ -62,7 +62,8 @@ return {'created', ARGV[1]}
  * ARGV[2] = newStatus ("" if no status change)
  * ARGV[3] = expectedThreadId (matches snapshot used to derive KEYS[2])
  * ARGV[4] = expectedUserId (matches snapshot used to derive KEYS[2])
- * ARGV[5..N] = field/value pairs to HSET (always includes updatedAt)
+ * ARGV[5] = expectedUsageByCatAbsent ("1" if usageByCat must be missing/empty)
+ * ARGV[6..N] = field/value pairs to HSET (always includes updatedAt)
  *
  * Returns:
  *   1  = success
@@ -96,6 +97,14 @@ if currentThreadId ~= ARGV[3] or currentUserId ~= ARGV[4] then
   return -3
 end
 
+local expectedUsageByCatAbsent = ARGV[5]
+if expectedUsageByCatAbsent == '1' then
+  local currentUsageByCat = redis.call('HGET', KEYS[1], 'usageByCat')
+  if currentUsageByCat and currentUsageByCat ~= '' and currentUsageByCat ~= '{}' then
+    return 0
+  end
+end
+
 -- State machine guard: validate transition when newStatus is provided.
 -- Self-transitions (newStatus == current) are rejected for terminal states
 -- because succeeded/canceled have empty allow-sets, matching isValidTransition().
@@ -115,7 +124,7 @@ end
 
 -- Apply field/value pairs
 local fields = {}
-for i = 5, #ARGV, 2 do
+for i = 6, #ARGV, 2 do
   fields[#fields + 1] = ARGV[i]
   fields[#fields + 1] = ARGV[i + 1]
 end
@@ -258,6 +267,7 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
         input.status ?? '',
         before.threadId,
         before.userId,
+        input.expectedUsageByCatAbsent === true ? '1' : '',
         ...pairs,
       )) as number;
 
@@ -277,9 +287,15 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.usageByCat !== undefined) {
       pairs.push('usageByCat', JSON.stringify(input.usageByCat));
-      // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics)
-      const existing = await this.redis.hget(key, 'usageRecordedAt');
-      if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+      // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics).
+      // Issue #845 backfill: explicit input.usageRecordedAt overrides — anchored to the
+      // stable historical completion signal chosen by the planner.
+      if (input.usageRecordedAt != null) {
+        pairs.push('usageRecordedAt', String(input.usageRecordedAt));
+      } else {
+        const existing = await this.redis.hget(key, 'usageRecordedAt');
+        if (!existing) pairs.push('usageRecordedAt', String(Date.now()));
+      }
     }
     return pairs;
   }
