@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 
-describe('F220 Phase C: trackingInstructions in AutomationState', () => {
+describe('F202 Phase 2C: trackingInstructions in AutomationState', () => {
   test('upsertBySubject stores trackingInstructions in automationState', () => {
     const store = new TaskStore();
     const task = store.upsertBySubject({

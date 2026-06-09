@@ -1,5 +1,5 @@
 /**
- * F220 Phase C: PR Tracking Enhancement — TDD tests
+ * F202 Phase 2C: PR Tracking Enhancement — TDD tests
  *
  * AC-C1: register_pr_tracking supports instructions param
  * AC-C2: trigger messages contain trackingInstructions
@@ -468,7 +468,7 @@ describe('Followup: optional resource support', () => {
 
 describe('Followup: plugin.yaml optional field parsing', () => {
   test('parsePluginManifest preserves optional: true on resources', () => {
-    const tmpDir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'f220-test-'));
+    const tmpDir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'f202-phase2-test-'));
     const yamlPath = nodePath.join(tmpDir, 'plugin.yaml');
     nodeFs.writeFileSync(
       yamlPath,
@@ -495,7 +495,7 @@ resources:
   });
 
   test('parsePluginManifest rejects backslash in schedule name (P2-2)', () => {
-    const tmpDir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'f220-test-'));
+    const tmpDir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'f202-phase2-test-'));
     const yamlPath = nodePath.join(tmpDir, 'plugin.yaml');
     nodeFs.writeFileSync(
       yamlPath,

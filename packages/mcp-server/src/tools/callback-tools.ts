@@ -1082,7 +1082,7 @@ export async function handleCheckPermissionStatus(input: { requestId: string }):
 export const registerPrTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   prNumber: z.number().int().positive().describe('PR number'),
-  // F220 Phase C (AC-C1): tracking instructions appended to trigger messages
+  // F202 Phase 2C (AC-C1): tracking instructions appended to trigger messages
   instructions: z
     .string()
     .max(2000)
@@ -1128,7 +1128,7 @@ export async function handleRegisterPrTracking(input: {
   });
 }
 
-// F220 Phase D (AC-D3): Register issue tracking
+// F202 Phase 2D (AC-D3): Register issue tracking
 export const registerIssueTrackingInputSchema = {
   repoFullName: z.string().min(1).describe('Repository full name in owner/repo format (e.g. "zts212653/cat-cafe")'),
   issueNumber: z.number().int().positive().describe('Issue number'),
@@ -1156,7 +1156,7 @@ export async function handleRegisterIssueTracking(input: {
   });
 }
 
-// F220 Phase C (AC-C3): Unregister tracking task by subjectKey
+// F202 Phase 2C (AC-C3): Unregister tracking task by subjectKey
 export const unregisterTrackingInputSchema = {
   subjectKey: z
     .string()

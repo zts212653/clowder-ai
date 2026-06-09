@@ -87,7 +87,7 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
   target.add(subjectKey);
   if (subjectKey.startsWith('pr:')) target.add(`pr-${subjectKey.slice(3)}`);
   if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
-  // F220 Phase D: issue subject keys have no legacy alias format
+  // F202 Phase 2D: issue subject keys have no legacy alias format
 }
 
 type DeliveryThreadResolutionCode = 'STALE_INVOCATION';

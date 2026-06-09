@@ -47,7 +47,7 @@ describe('buildConnectorStatus', () => {
     assert.equal(weixin.configured, false);
     assert.equal(weixin.fields.length, 0);
 
-    // F220-B: GitHub moved to plugin framework — no longer in CONNECTOR_PLATFORMS
+    // F202-2B: GitHub moved to plugin framework — no longer in CONNECTOR_PLATFORMS
     const github = result.find((p) => p.id === 'github');
     assert.equal(github, undefined);
   });
@@ -227,6 +227,6 @@ describe('buildConnectorStatus', () => {
     assert.equal(wecomAgent.configured, false);
   });
 
-  // F220-B: "marks GitHub plugin as configured" test removed — GitHub config
+  // F202-2B: "marks GitHub plugin as configured" test removed — GitHub config
   // moved to plugin framework (plugin-config-store), no longer in connector-hub.
 });

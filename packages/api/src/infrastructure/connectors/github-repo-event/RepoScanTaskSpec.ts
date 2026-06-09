@@ -66,7 +66,7 @@ export interface RepoScanTaskSpecOptions {
   pollIntervalMs?: number;
   maxWorkItemsPerRun?: number;
   skipHistoricalOnFirstRun?: boolean;
-  /** F220-B: Override task ID for plugin-scoped schedule instances */
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
   id?: string;
 }
 

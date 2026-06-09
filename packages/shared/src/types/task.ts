@@ -21,10 +21,10 @@ export { extractFeatureIds } from './cross-thread-affordance.js';
 export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
 
 /**
- * Task kind discriminator (#320, F220-D).
+ * Task kind discriminator (#320, F202-2D).
  * - work: manual tasks created by cats/humans
  * - pr_tracking: automated PR tasks (review-feedback, cicd-check, conflict-check)
- * - issue_tracking: automated GitHub issue comment tracking (F220 Phase D)
+ * - issue_tracking: automated GitHub issue comment tracking (F202 Phase 2D)
  */
 export type TaskKind = 'work' | 'pr_tracking' | 'issue_tracking';
 
@@ -70,14 +70,14 @@ export interface ReviewAutomationState {
  */
 export type PrTrackingIntent = 'review' | 'merge';
 
-/** Issue comment automation state for issue_tracking tasks (F220 Phase D) */
+/** Issue comment automation state for issue_tracking tasks (F202 Phase 2D) */
 export interface IssueAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastNotifiedAt?: number;
   readonly issueState?: 'open' | 'closed';
 }
 
-/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F220-D) */
+/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D) */
 export interface AutomationState {
   readonly ci?: CiAutomationState;
   readonly conflict?: ConflictAutomationState;
@@ -86,7 +86,7 @@ export interface AutomationState {
   readonly closedAt?: number;
   /** F140: wake intent for this tracked PR (defaults to 'review' when absent). */
   readonly intent?: PrTrackingIntent;
-  /** F220 Phase C: user-provided instructions appended to trigger messages. Task preference, not system override. */
+  /** F202 Phase 2C: user-provided instructions appended to trigger messages. Task preference, not system override. */
   readonly trackingInstructions?: string;
 }
 

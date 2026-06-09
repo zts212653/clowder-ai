@@ -192,7 +192,7 @@ export function buildCiMessageContent(poll: CiPollResult, trackingInstructions?:
     lines.push('', '请检查 CI 失败原因并修复。');
   }
 
-  // F220 Phase C (AC-C2): append user-provided tracking instructions
+  // F202 Phase 2C (AC-C2): append user-provided tracking instructions
   if (trackingInstructions) {
     lines.push('', '📌 **Tracking Instructions**', trackingInstructions);
   }

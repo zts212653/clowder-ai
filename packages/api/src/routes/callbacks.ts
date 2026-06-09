@@ -463,13 +463,13 @@ export interface CallbackRoutesOptions {
   deliveryCursorStore?: DeliveryCursorStore;
   /** Phase D: validates GitHub repo exists before PR tracking registration */
   validateRepo?: (repoFullName: string) => Promise<boolean>;
-  /** F220 followup: validates specific PR exists (number-level validation) */
+  /** F202 Phase 2 follow-up: validates specific PR exists (number-level validation) */
   validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
-  /** F220 followup: validates specific issue exists (number-level validation) */
+  /** F202 Phase 2 follow-up: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
-  /** F220 PR tracking: seeds review/CI boundaries so registration starts from current GitHub state. */
+  /** F202 Phase 2 PR tracking: seeds review/CI boundaries so registration starts from current GitHub state. */
   fetchPrTrackingBoundary?: (repoFullName: string, prNumber: number) => Promise<Pick<AutomationState, 'review' | 'ci'>>;
-  /** F220-D: seeds issue tracking from the current highest issue comment ID. */
+  /** F202-2D: seeds issue tracking from the current highest issue comment ID. */
   fetchIssueCommentCursor?: (repoFullName: string, issueNumber: number) => Promise<number>;
   /** F043 P1: feat_index provider override for tests */
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
@@ -2181,7 +2181,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .min(1)
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     prNumber: z.number().int().positive(),
-    // F220 Phase C (AC-C1): tracking instructions appended to trigger messages
+    // F202 Phase 2C (AC-C1): tracking instructions appended to trigger messages
     instructions: z.string().max(2000).optional(),
     catId: z.string().min(1).optional(), // ignored — server uses record.catId
     // F140: wake intent. 'review' (default) = waiting on review feedback → CI-pass stays silent.
@@ -2225,7 +2225,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    // F220 followup: validate specific PR exists (number-level, not just repo)
+    // F202 Phase 2 follow-up: validate specific PR exists (number-level, not just repo)
     if (validatePr) {
       let prOk: boolean;
       try {
@@ -2279,7 +2279,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         why: `Tracking PR ${repoFullName}#${prNumber} (intent=${intent}): review feedback + conflicts always wake; CI-pass wakes only when intent=merge`,
         createdBy: catId,
         userId: record.userId,
-        // F220 Phase C (AC-C1): store user-provided tracking instructions
+        // F202 Phase 2C (AC-C1): store user-provided tracking instructions
         automationState: Object.keys(automationState).length > 0 ? automationState : undefined,
       });
 
@@ -2296,7 +2296,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
   });
 
-  // F220 Phase D (AC-D3): Register issue tracking
+  // F202 Phase 2D (AC-D3): Register issue tracking
   const registerIssueTrackingSchema = z.object({
     repoFullName: z
       .string()
@@ -2324,7 +2324,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     const { repoFullName, issueNumber, instructions } = parsed.data;
     const catId = record.catId;
 
-    // F220 Phase D P2-fix: validate repo exists and is accessible (mirrors PR tracking at L1975)
+    // F202 Phase 2D P2-fix: validate repo exists and is accessible (mirrors PR tracking at L1975)
     if (validateRepo) {
       let repoOk: boolean;
       try {
@@ -2339,7 +2339,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    // F220 followup: validate specific issue exists (number-level, not just repo)
+    // F202 Phase 2 follow-up: validate specific issue exists (number-level, not just repo)
     if (validateIssue) {
       let issueOk: boolean;
       try {
@@ -2399,7 +2399,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
   });
 
-  // F220 Phase C (AC-C3): Unregister tracking task by subjectKey
+  // F202 Phase 2C (AC-C3): Unregister tracking task by subjectKey
   const unregisterTrackingSchema = z.object({
     subjectKey: z.string().min(1),
   });

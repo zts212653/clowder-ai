@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * F220 Phase B: GitHub Schedule Factories — unit + integration tests
+ * F202 Phase 2B: GitHub Schedule Factories — unit + integration tests
  *
  * Covers:
  * - plugin.yaml manifest parsing (AC-B1)
@@ -78,7 +78,7 @@ function makeGitHubDeps(overrides = {}) {
     deliveryDeps: { messageStore: {}, socketManager: {} },
     fetchOpenPRs: async () => [],
     fetchOpenIssues: async () => [],
-    // F220 Phase D: issue-tracking deps
+    // F202 Phase 2D: issue-tracking deps
     issueCommentRouter: stubRouter,
     fetchIssueComments: async () => [],
     fetchIssueState: async () => 'open',
@@ -89,7 +89,7 @@ function makeGitHubDeps(overrides = {}) {
 
 // --- Task 1: Custom ID propagation ---
 
-describe('TaskSpec factory custom id (F220-B Task 1)', () => {
+describe('TaskSpec factory custom id (F202-2B Task 1)', () => {
   test('createCiCdCheckTaskSpec uses custom id when provided', () => {
     const spec = createCiCdCheckTaskSpec({
       taskStore: stubTaskStore,
@@ -234,7 +234,7 @@ describe('plugins/github/plugin.yaml (AC-B1)', () => {
     const noiseField = manifest.config.find((c) => c.envName === 'GITHUB_SETUP_NOISE_BOT_LOGINS');
     assert.strictEqual(noiseField?.required, false);
 
-    // Schedule resources (4 original + 1 issue-tracking from F220-D)
+    // Schedule resources (4 original + 1 issue-tracking from F202-2D)
     assert.strictEqual(manifest.resources.length, 5);
     for (const r of manifest.resources) {
       assert.strictEqual(r.type, 'schedule');
@@ -255,7 +255,7 @@ describe('plugins/github/plugin.yaml (AC-B1)', () => {
 
 // --- Task 3: Factory registration + task creation ---
 
-describe('GitHub schedule factory registration (F220-B Task 3)', () => {
+describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
   test('registerGitHubScheduleFactories registers all 5 factories', () => {
     const registry = new ScheduleFactoryRegistry();
     registerGitHubScheduleFactories(registry);
@@ -589,9 +589,9 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
 // --- Plugin config env resolution ---
 
 test('resolvePluginEnv reads plugin config store without mutating process.env', async () => {
-  const tmpDir = join(tmpdir(), `f220-env-resolve-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `f202-phase2-env-resolve-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
-  const testEnvKey = `F220_TEST_RESOLVE_${Date.now()}`;
+  const testEnvKey = `F202_PHASE2_TEST_RESOLVE_${Date.now()}`;
   const previous = process.env[testEnvKey];
   try {
     const { writePluginConfig, loadAllPluginConfigs, resolvePluginEnv } = await import(
@@ -623,9 +623,9 @@ test('resolvePluginEnv reads plugin config store without mutating process.env', 
 });
 
 test('resolvePluginEnv falls back to process.env when plugin config is absent', async () => {
-  const tmpDir = join(tmpdir(), `f220-env-fallback-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `f202-phase2-env-fallback-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
-  const testEnvKey = `F220_TEST_FALLBACK_${Date.now()}`;
+  const testEnvKey = `F202_PHASE2_TEST_FALLBACK_${Date.now()}`;
   const previous = process.env[testEnvKey];
   try {
     const { loadAllPluginConfigs, resolvePluginEnv } = await import('../dist/domains/plugin/plugin-config-store.js');
@@ -654,9 +654,9 @@ test('resolvePluginEnv falls back to process.env when plugin config is absent', 
 });
 
 test('resolvePluginEnv treats an explicitly cleared plugin config value as absent without mutating process.env', async () => {
-  const tmpDir = join(tmpdir(), `f220-env-clear-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `f202-phase2-env-clear-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
-  const testEnvKey = `F220_TEST_CLEAR_${Date.now()}`;
+  const testEnvKey = `F202_PHASE2_TEST_CLEAR_${Date.now()}`;
   const previous = process.env[testEnvKey];
   try {
     const { writePluginConfig, loadAllPluginConfigs, resolvePluginEnv } = await import(

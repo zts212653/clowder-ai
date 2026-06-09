@@ -1640,7 +1640,7 @@ async function main(): Promise<void> {
     }
   };
 
-  // F220 followup: validate specific PR exists (number-level, not just repo)
+  // F202 Phase 2 follow-up: validate specific PR exists (number-level, not just repo)
   const validatePr = async (repoFullName: string, prNumber: number): Promise<boolean> => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
@@ -1660,7 +1660,7 @@ async function main(): Promise<void> {
     }
   };
 
-  // F220 followup: validate specific issue exists (number-level, not just repo)
+  // F202 Phase 2 follow-up: validate specific issue exists (number-level, not just repo)
   // P2-cloud: also reject PR numbers — GitHub Issues API returns PRs with .pull_request set
   const validateIssue = async (repoFullName: string, issueNumber: number): Promise<boolean> => {
     const { execFile } = await import('node:child_process');
@@ -1701,7 +1701,7 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
-  // F220-B: Hoisted for late-binding GitHub schedule rehydration (closure set inside F202 block)
+  // F202-2B: Hoisted for late-binding GitHub schedule rehydration (closure set inside F202 block)
   let rehydrateGitHubSchedules: ((githubDeps: Record<string, unknown>) => Promise<void>) | undefined;
   let getGitHubPluginEnv: () => Record<string, string | undefined> = () => ({});
   const getGitHubEnvValue = (key: string): string | undefined => {
@@ -1805,12 +1805,12 @@ async function main(): Promise<void> {
 
     const limbAdapterRegistry = new Map<string, (yamlPath: string) => Promise<ILimbNode>>();
 
-    // F220: Schedule factory registry + GitHub factories
+    // F202 Phase 2: Schedule factory registry + GitHub factories
     const scheduleFactoryRegistry = new ScheduleFactoryRegistry();
     const { registerGitHubScheduleFactories } = await import('./domains/plugin/github-schedule-factories.js');
     registerGitHubScheduleFactories(scheduleFactoryRegistry);
 
-    // F220-B: Mutable deps ref — starts with just log, populated with full GitHub deps later
+    // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
 
     const pluginActivator = new PluginResourceActivator({
@@ -1835,13 +1835,13 @@ async function main(): Promise<void> {
         }
         return factory(limbYamlPath);
       },
-      // F220: schedule resource activation deps
+      // F202 Phase 2: schedule resource activation deps
       scheduleFactoryRegistry,
       taskRunner: {
         registerPostStart: (task) => taskRunnerV2.registerPostStart(task),
         unregister: (taskId) => taskRunnerV2.unregister(taskId),
       },
-      // F220-B: Mutable deps ref — populated via rehydrateGitHubSchedules after GitHub services created
+      // F202-2B: Mutable deps ref — populated via rehydrateGitHubSchedules after GitHub services created
       scheduleFactoryDeps:
         scheduleFactoryDeps as import('./domains/plugin/ScheduleFactoryRegistry.js').ScheduleFactoryDeps,
     });
@@ -1856,7 +1856,7 @@ async function main(): Promise<void> {
       log: app.log,
     });
 
-    // F220-B: Schedule rehydration deferred — GitHub factories need deps created later.
+    // F202-2B: Schedule rehydration deferred — GitHub factories need deps created later.
     // Closure captures F202 scope; called after GitHub services are created (before taskRunnerV2.start).
     rehydrateGitHubSchedules = async (githubDeps: Record<string, unknown>) => {
       // Populate the mutable deps ref (also updates pluginActivator's reference)
@@ -1907,7 +1907,7 @@ async function main(): Promise<void> {
             const enabledEntryCount = entries.filter((entry) => entry.enabled).length;
             const pendingEntryCount = entries.length - enabledEntryCount;
             app.log.info(
-              `[api] F220-B migration: enabled ${enabledEntryCount} GitHub schedule resources ` +
+              `[api] F202-2B migration: enabled ${enabledEntryCount} GitHub schedule resources ` +
                 `${pendingEntryCount > 0 ? `and left ${pendingEntryCount} pending ` : ''}` +
                 `and migrated ${overrideMigrations.length} scheduler overrides`,
             );
@@ -1921,7 +1921,7 @@ async function main(): Promise<void> {
         );
         if (pendingPromotion.changed) {
           await writeCapabilitiesConfig(root, pendingPromotion.config);
-          app.log.info('[api] F220-B migration: enabled pending GitHub repo-scan schedule after deps became available');
+          app.log.info('[api] F202-2B migration: enabled pending GitHub repo-scan schedule after deps became available');
         }
       }
 
@@ -2947,7 +2947,7 @@ async function main(): Promise<void> {
   // once-task instead of delivering a stale wake ("history replay").
   taskRunnerV2.setBusyChecker((threadId) => invocationTracker.has(threadId) || queueProcessor.isThreadBusy(threadId));
 
-  // F220-B: GitHub schedule deps + rehydration (replaces hardcoded task registrations)
+  // F202-2B: GitHub schedule deps + rehydration (replaces hardcoded task registrations)
   // Router/service creation stays here — same deps available as before.
   // Task registration moved to plugin framework via rehydrateGitHubSchedules closure.
   {
@@ -3008,7 +3008,7 @@ async function main(): Promise<void> {
       log: app.log,
     });
 
-    // F220 Phase D: Issue comment tracking
+    // F202 Phase 2D: Issue comment tracking
     const issueCommentRouter = new IssueCommentRouter({
       deliveryDeps,
       log: app.log,
@@ -3109,7 +3109,7 @@ async function main(): Promise<void> {
       );
     };
 
-    // F220 Phase D: Issue comment fetchers (parallel to PR comment fetchers)
+    // F202 Phase 2D: Issue comment fetchers (parallel to PR comment fetchers)
     const fetchIssueComments = async (repoFullName: string, issueNumber: number, sinceId?: number) => {
       await refreshGitHubSelfLogin();
       const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, sinceId);
@@ -3210,7 +3210,7 @@ async function main(): Promise<void> {
       };
     }
 
-    // F220-B: Populate factory deps + rehydrate schedule resources via plugin framework
+    // F202-2B: Populate factory deps + rehydrate schedule resources via plugin framework
     if (rehydrateGitHubSchedules) {
       await rehydrateGitHubSchedules({
         taskStore,
@@ -3227,14 +3227,14 @@ async function main(): Promise<void> {
         isEchoComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
         isEchoReview: (r: { author: string }) => feedbackFilter.shouldSkipReview(r),
         isNoiseComment: setupNoiseFilter,
-        // F220 Phase D: issue comment tracking deps
+        // F202 Phase 2D: issue comment tracking deps
         issueCommentRouter,
         fetchIssueComments,
         fetchIssueState,
         isEchoIssueComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
         ...repoScanDeps,
       });
-      app.log.info('[api] F220-B: GitHub schedule resources rehydrated via plugin framework');
+      app.log.info('[api] F202-2B: GitHub schedule resources rehydrated via plugin framework');
     }
   }
 

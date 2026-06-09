@@ -260,7 +260,7 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
       { text: '授权成功后自动连接，无需重启服务' },
     ],
   },
-  // F220-B: GitHub moved to plugin framework (plugins/github/plugin.yaml).
+  // F202-2B: GitHub moved to plugin framework (plugins/github/plugin.yaml).
   // Config managed via plugin-config-store, not connector-hub.
 ];
 

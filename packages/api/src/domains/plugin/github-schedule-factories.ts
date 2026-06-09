@@ -1,5 +1,5 @@
 /**
- * F220 Phase B: GitHub Schedule Factories
+ * F202 Phase 2B: GitHub Schedule Factories
  *
  * Wraps GitHub poller TaskSpec factories as ScheduleFactory implementations
  * for registration in ScheduleFactoryRegistry. Each factory extracts typed deps from the
@@ -74,7 +74,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   deliveryDeps?: ConnectorDeliveryDeps;
   fetchOpenPRs?: (repo: string) => Promise<GhPrItem[]>;
   fetchOpenIssues?: (repo: string) => Promise<GhIssueItem[]>;
-  // F220 Phase D: issue comment tracking deps
+  // F202 Phase 2D: issue comment tracking deps
   issueCommentRouter?: IssueCommentRouter;
   fetchIssueComments?: (repoFullName: string, issueNumber: number, sinceId?: number) => Promise<IssueComment[]>;
   fetchIssueState?: (repoFullName: string, issueNumber: number) => Promise<'open' | 'closed'>;
@@ -84,7 +84,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
 /** Cast ScheduleFactoryDeps to GitHubScheduleDeps with runtime validation */
 function asGitHub(deps: ScheduleFactoryDeps): GitHubScheduleDeps {
   const d = deps as GitHubScheduleDeps;
-  if (!d.taskStore) throw new Error('[F220] GitHub schedule factory requires taskStore in deps');
+  if (!d.taskStore) throw new Error('[F202-2] GitHub schedule factory requires taskStore in deps');
   return d;
 }
 
@@ -150,17 +150,17 @@ const repoScanFactory: ScheduleFactory = {
     // repo-scan needs redis-dependent deps — validate before construction
     if (!d.repoAllowlist || !d.inboxCatId || !d.defaultUserId) {
       throw new Error(
-        '[F220] github.repo-scan requires repoAllowlist, inboxCatId, defaultUserId in deps. ' +
+        '[F202-2] github.repo-scan requires repoAllowlist, inboxCatId, defaultUserId in deps. ' +
           'Set GITHUB_REPO_ALLOWLIST and GITHUB_REPO_INBOX_CAT_ID environment variables.',
       );
     }
     if (!d.reconciliationDedup || !d.bindingStore || !d.deliverFn || !d.deliveryDeps) {
       throw new Error(
-        '[F220] github.repo-scan requires redis-dependent deps (reconciliationDedup, bindingStore, deliverFn, deliveryDeps)',
+        '[F202-2] github.repo-scan requires redis-dependent deps (reconciliationDedup, bindingStore, deliverFn, deliveryDeps)',
       );
     }
     if (!d.fetchOpenPRs || !d.fetchOpenIssues) {
-      throw new Error('[F220] github.repo-scan requires fetchOpenPRs and fetchOpenIssues in deps');
+      throw new Error('[F202-2] github.repo-scan requires fetchOpenPRs and fetchOpenIssues in deps');
     }
     return createRepoScanTaskSpec({
       id: instanceId,
@@ -185,10 +185,10 @@ const issueTrackingFactory: ScheduleFactory = {
   createTaskSpec(instanceId, deps) {
     const d = asGitHub(deps);
     if (!d.issueCommentRouter) {
-      throw new Error('[F220] github.issue-tracking requires issueCommentRouter in deps');
+      throw new Error('[F202-2] github.issue-tracking requires issueCommentRouter in deps');
     }
     if (!d.fetchIssueComments || !d.fetchIssueState) {
-      throw new Error('[F220] github.issue-tracking requires fetchIssueComments and fetchIssueState in deps');
+      throw new Error('[F202-2] github.issue-tracking requires fetchIssueComments and fetchIssueState in deps');
     }
     return createIssueCommentTaskSpec({
       id: instanceId,
@@ -212,9 +212,9 @@ export function registerGitHubScheduleFactories(registry: ScheduleFactoryRegistr
   registry.register(issueTrackingFactory);
 }
 
-// --- F220-B Migration helpers (P2-1 fix) ---
+// --- F202-2B Migration helpers (P2-1 fix) ---
 
-const MIGRATION_MARKER_PATH = '.cat-cafe/f220-github-schedule-migrated';
+const MIGRATION_MARKER_PATH = '.cat-cafe/f202-phase2-github-schedule-migrated';
 
 /**
  * Determine if the one-time GitHub schedule migration should run.

@@ -1,5 +1,5 @@
 /**
- * F220 Phase D: IssueCommentRouter — format + deliver GitHub issue comment notifications.
+ * F202 Phase 2D: IssueCommentRouter — format + deliver GitHub issue comment notifications.
  *
  * Mirrors ReviewFeedbackRouter pattern: route(signal, tracking) → connector message.
  * AC-D-security: External comment bodies wrapped in [UNTRUSTED EXTERNAL CONTENT].

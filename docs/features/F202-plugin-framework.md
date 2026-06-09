@@ -1,15 +1,15 @@
 ---
 feature_ids: [F202]
-related_features: [F041, F126, F129, F146, F190]
-topics: [plugin-framework, capability-registry, settings, resource-activation, community-pr]
+related_features: [F041, F126, F129, F133, F139, F140, F141, F146, F190]
+topics: [plugin-framework, capability-registry, settings, resource-activation, schedule-resource, github, community-pr]
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
 ---
 
-# F202: Plugin Framework — local discovery, config, and resource activation
+# F202: Plugin Framework — local discovery, config, resource activation, and schedule resources
 
-> **Status**: in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -51,12 +51,23 @@ Phase 1 covers:
 - Add Settings UI for plugin status, configuration, enable/disable, and test affordances.
 - Rehydrate enabled plugin limb resources during API startup.
 
+Phase 2 covers:
+
+- Make `schedule` a first-class plugin resource type with manifest validation, capability metadata, activation, deactivation, and startup rehydration.
+- Add a whitelist `ScheduleFactoryRegistry` so repository-local plugins can reference owned task factories without arbitrary script execution.
+- Migrate the existing GitHub system pollers (`cicd-check`, `review-feedback`, `conflict-check`, and `repo-scan`) from hardcoded API startup registration into `plugins/github/plugin.yaml`.
+- Move GitHub plugin configuration to the F202 plugin config boundary while preserving scoped fallback to existing GitHub CLI / env behavior during migration.
+- Add PR/issue tracking ergonomics that naturally belong to the GitHub plugin migration slice: tracking instructions, generic unregister by subject key, and issue comment tracking.
+- Bundle plugin manifests/resources into desktop packaging so packaged installs discover the same repository-local plugins as source installs.
+
 ## Non-Goals
 
 - Remote plugin installation, signing, marketplace trust, and network policy are not Phase 1.
 - `weixin-mp` migration is a follow-up slice and must not be bundled into Phase 1.
 - Arbitrary same-power script execution is not part of the plugin contract.
 - Plugin framework does not replace F041/F126/F146; it sits on top of their ownership and activation boundaries.
+- The conflicting standalone feature-number anchor from clowder-ai#844/#846 is not valid for GitHub plugin schedule work; GitHub schedule/resource work is F202 Phase 2.
+- A full GitHub Issue Inbox / community triage product surface is not Phase 2 unless explicitly split and accepted under F141/F133 follow-up or a new feature anchor.
 
 ## Acceptance Criteria
 
@@ -95,15 +106,52 @@ Phase 1 covers:
 - [x] AC-E3: Phase 1 must pass API build/lint and focused plugin manifest/config tests.
 - [x] AC-E4: Before merge, maintainers explicitly decide whether Phase 1 is accepted as an implementation slice or should be split further.
 
+### AC-F: Phase 2 Schedule Resource Contract
+
+- [ ] AC-F1: `parsePluginManifest` validates `type: schedule` resources with `name` and `factoryId`, and rejects unsafe names or unknown resource shapes before activation.
+- [ ] AC-F2: Schedule capabilities carry stable plugin ownership metadata and a deterministic runtime task id that cannot collide across plugins.
+- [ ] AC-F3: Enable/disable is transactional: failed schedule activation does not persist a misleading enabled state, and failed disable does not silently leave ghost tasks running.
+- [ ] AC-F4: Startup rehydration registers only enabled, validated schedule resources and validates factory-owned task ids before registering them.
+- [ ] AC-F5: Schedule factories are whitelist-owned by plugin id; no plugin can bind another plugin's factory or load arbitrary same-power scripts.
+
+### AC-G: Phase 2 GitHub Plugin Migration
+
+- [ ] AC-G1: `plugins/github/plugin.yaml` declares the GitHub schedule resources and config fields for the existing GitHub integration.
+- [ ] AC-G2: GitHub CI/review/conflict/repo-scan pollers are registered through F202 schedule resources, not hardcoded in API startup.
+- [ ] AC-G3: Disabling the GitHub plugin stops its plugin-owned pollers; re-enabling restores them without losing scheduler governance overrides.
+- [ ] AC-G4: GitHub token/noise/MCP config resolves through plugin config first, with scoped fallback to existing env / GitHub CLI auth and no broad token leakage into unrelated child processes.
+- [ ] AC-G5: Migration handles optional repo-scan runtime dependencies explicitly, using disabled/pending state rather than reporting an enabled poller that is not running.
+- [ ] AC-G6: Desktop builds include plugin manifests/resources and verify the plugin mirror on first launch.
+
+### AC-H: Phase 2 Tracking Ergonomics
+
+- [ ] AC-H1: PR tracking can store user-provided task instructions without overriding system/developer/harness instructions.
+- [ ] AC-H2: `unregister_tracking` can remove PR and issue trackers by subject key without deleting unrelated tasks.
+- [ ] AC-H3: Issue tracking routes new issue comments to the owning thread, seeds cursors at registration/reactivation, and auto-closes tracking when the GitHub issue closes.
+- [ ] AC-H4: GitHub PR/issue bodies and comments are explicitly marked or delimited as untrusted external content before they are routed to cats.
+- [ ] AC-H5: Existing PR tracking tasks remain backward compatible after the migration.
+
 ## Intake Timeline
 
 | Date | Event |
 |------|-------|
 | 2026-05-31 | clowder-ai#686 absorbed into cat-cafe via cat-cafe#1999 (squash `11b24d60334789a3f95d12be355d3ddbd196309c`). Intake ledger advanced to clowder-ai merge `60d1dbbfcbf84954000fcfcdbd645fd20948aa5d`. |
 | 2026-05-31 | Post-merge follow-ups opened: cat-cafe#2000 for P2 deferral re-ranking, cat-cafe#2001 for `eval:capability-wakeup` with the new limb/plugin surface. Architecture ownership cell `plugin` added in this doc sync. |
+| 2026-06-08 | Maintainer decision: clowder-ai#844/#846 is re-anchored from its conflicting standalone feature number to F202 Phase 2. The source-truth plan lives here; the open PR must retitle/rewrite body/docs/roadmap before merge review continues. |
+
+## Open Questions
+
+1. Should plugin manifests eventually be publishable packages, or remain repository-local only?
+2. Where does remote/community plugin trust live: F146 marketplace control plane, a future F202 phase, or both?
+3. How should plugin-owned limb resources declare platform-specific adapters without creating same-power arbitrary code execution?
+4. What is the migration plan for future non-GitHub integrations after the GitHub Phase 2 precedent?
 
 ## Current Maintainer Position
 
-Phase 1 is accepted and absorbed as the trusted, repository-local plugin framework slice. Remaining work is follow-up governance: re-rank the upstream P2 deferrals under the Cat Cafe rubric (cat-cafe#2000), run the `eval:capability-wakeup` regression with the new limb/plugin surface (cat-cafe#2001), and scope any remote marketplace/signing work as a later F202/F146 design slice.
+Phase 1 is accepted and absorbed as the trusted, repository-local plugin framework slice.
+
+Phase 2 is accepted as the correct home for schedule resources and the existing GitHub integration migration. The clowder-ai#844/#846 direction is welcome only after the conflicting standalone anchor is removed and replaced with `F202 Phase 2` in title, body, feature docs, roadmap text, and commits that would enter source truth.
+
+Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
 
 [Maine Coon/GPT-5.5🐾]

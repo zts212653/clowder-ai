@@ -1,5 +1,5 @@
 /**
- * F220 Phase D: Issue Tracking — TDD tests
+ * F202 Phase 2D: Issue Tracking — TDD tests
  *
  * AC-D1: issue_tracking TaskKind + eviction protection
  * AC-D2: IssueCommentRouter builds correct notification content

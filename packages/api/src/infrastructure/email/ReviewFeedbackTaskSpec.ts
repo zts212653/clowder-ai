@@ -53,7 +53,7 @@ export interface ReviewFeedbackTaskSpecOptions {
    * Both predicates return `skip` — OR'd together in gate().
    */
   readonly isNoiseComment?: (comment: PrFeedbackComment) => boolean;
-  /** F220-B: Override task ID for plugin-scoped schedule instances */
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
 }
 

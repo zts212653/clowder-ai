@@ -1,5 +1,5 @@
 /**
- * F220 Phase D: IssueCommentTaskSpec — poll GitHub issue comments for issue_tracking tasks.
+ * F202 Phase 2D: IssueCommentTaskSpec — poll GitHub issue comments for issue_tracking tasks.
  *
  * Mirrors ReviewFeedbackTaskSpec pattern:
  * Gate: list issue_tracking tasks → fetch comments → filter by cursor → workItems.

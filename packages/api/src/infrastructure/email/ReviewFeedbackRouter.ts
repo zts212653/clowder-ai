@@ -118,7 +118,7 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
     lines.push('', '--- Review Decisions ---');
     for (const d of signal.newDecisions) {
       const emoji = decisionEmoji(d.state);
-      // F220 Phase C (AC-C4): wrap external content as untrusted
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted
       const bodySnippet = d.body
         ? ` — [UNTRUSTED EXTERNAL CONTENT] ${d.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`
         : '';
@@ -132,7 +132,7 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
     lines.push('', `--- Inline Comments (${inline.length}) ---`);
     for (const c of inline) {
       const location = c.filePath ? `\`${c.filePath}${c.line ? `:${c.line}` : ''}\`` : '';
-      // F220 Phase C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
       const bodySnippet = `[UNTRUSTED EXTERNAL CONTENT] ${c.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`;
       lines.push(`💬 **${c.author}** ${location}: ${bodySnippet}`);
     }
@@ -143,7 +143,7 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
   if (conversation.length > 0) {
     lines.push('', `--- PR Conversation (${conversation.length}) ---`);
     for (const c of conversation) {
-      // F220 Phase C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
       const bodySnippet = `[UNTRUSTED EXTERNAL CONTENT] ${c.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`;
       lines.push(`💬 **${c.author}**: ${bodySnippet}`);
     }
@@ -163,7 +163,7 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
     lines.push('- 操作: 阅读评论内容，需要回复则回复，需要修改则按 `receive-review` 模式处理');
   }
 
-  // F220 Phase C (AC-C2): append user-provided tracking instructions
+  // F202 Phase 2C (AC-C2): append user-provided tracking instructions
   if (trackingInstructions) {
     lines.push('', '📌 **Tracking Instructions**', trackingInstructions);
   }

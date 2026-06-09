@@ -39,7 +39,7 @@ export interface CiCdCheckTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
-  /** F220-B: Override task ID for plugin-scoped schedule instances */
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
 }
 

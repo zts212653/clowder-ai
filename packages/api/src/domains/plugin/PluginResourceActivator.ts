@@ -31,7 +31,7 @@ export interface ActivatePluginResult {
 
 export type LimbAdapterFactory = (pluginId: string, limbYamlPath: string) => Promise<ILimbNode>;
 
-/** Minimal TaskRunner interface for schedule resource activation (F220) */
+/** Minimal TaskRunner interface for schedule resource activation (F202 Phase 2) */
 export interface ScheduleTaskRunner {
   /** Register a builtin task that may arrive after start() — does NOT mark as dynamic */
   registerPostStart(task: TaskSpec_P1): void;
@@ -46,11 +46,11 @@ export interface PluginResourceActivatorDeps {
   writeCapabilities: (config: CapabilitiesConfig) => Promise<void>;
   withCapabilityLock: <T>(fn: () => Promise<T>) => Promise<T>;
   limbAdapterFactory?: LimbAdapterFactory;
-  /** F220: Schedule factory registry (required for schedule resources) */
+  /** F202 Phase 2: Schedule factory registry (required for schedule resources) */
   scheduleFactoryRegistry?: ScheduleFactoryRegistry;
-  /** F220: TaskRunner for registering/unregistering schedule tasks */
+  /** F202 Phase 2: TaskRunner for registering/unregistering schedule tasks */
   taskRunner?: ScheduleTaskRunner;
-  /** F220: Dependencies injected into schedule factory createTaskSpec */
+  /** F202 Phase 2: Dependencies injected into schedule factory createTaskSpec */
   scheduleFactoryDeps?: ScheduleFactoryDeps;
 }
 
@@ -160,7 +160,7 @@ export class PluginResourceActivator {
       }
     }
 
-    // F220 followup: optional resources that fail don't block 'success' status
+    // F202 Phase 2 follow-up: optional resources that fail don't block 'success' status
     const allRequiredOk = results.every((r, i) => r.ok || !!manifest.resources[i]?.optional);
     const someOk = results.some((r) => r.ok);
     return {
@@ -450,7 +450,7 @@ export class PluginResourceActivator {
         const staleLimbNodeId =
           existing.type === 'limb' && resource.type !== 'limb' && existing.enabled ? existing.limbNodeId : undefined;
 
-        // F220: capture stale schedule taskId before type transition (mirrors limb pattern)
+        // F202 Phase 2: capture stale schedule taskId before type transition (mirrors limb pattern)
         staleScheduleTaskIdToClean =
           existing.type === 'schedule' && resource.type !== 'schedule' && existing.enabled
             ? scheduleTaskIdForCapability(manifest.id, existing)
@@ -506,7 +506,7 @@ export class PluginResourceActivator {
           /* best-effort: node may already be gone */
         }
       }
-      // F220: unregister stale schedule task only after config write succeeds
+      // F202 Phase 2: unregister stale schedule task only after config write succeeds
       if (staleScheduleTaskIdToClean && this.deps.taskRunner) {
         try {
           this.deps.taskRunner.unregister(staleScheduleTaskIdToClean);
@@ -574,7 +574,7 @@ export class PluginResourceActivator {
           if (cap.type === 'limb' && cap.enabled && cap.limbNodeId) {
             limbNodeIds.push(cap.limbNodeId);
           }
-          // F220: collect orphaned schedule tasks for post-lock unregistration
+          // F202 Phase 2: collect orphaned schedule tasks for post-lock unregistration
           if (cap.type === 'schedule' && cap.enabled) {
             const taskId = scheduleTaskIdForCapability(manifest.id, cap);
             if (taskId) scheduleTaskIds.push(taskId);
@@ -588,7 +588,7 @@ export class PluginResourceActivator {
     for (const nodeId of limbNodeIds) {
       this.deps.limbRegistry.deregister(nodeId);
     }
-    // F220: unregister orphaned schedule tasks (outside the lock — same pattern as limb)
+    // F202 Phase 2: unregister orphaned schedule tasks (outside the lock — same pattern as limb)
     for (const taskId of scheduleTaskIds) {
       this.deps.taskRunner?.unregister(taskId);
     }
@@ -753,7 +753,7 @@ export class PluginResourceActivator {
   }
 }
 
-// ─── F220: Schedule resource rehydration (startup recovery) ──────────
+// ─── F202 Phase 2: Schedule resource rehydration (startup recovery) ──────────
 
 export interface PluginScheduleRehydrationDeps {
   capabilities: CapabilitiesConfig | null;
@@ -794,7 +794,7 @@ export async function rehydrateEnabledPluginSchedules(deps: PluginScheduleRehydr
       const reason = existing
         ? `owned by plugin '${existing.pluginId}', not owned by plugin '${manifest.id}'`
         : 'not registered';
-      deps.log?.warn(`[F220] Skip rehydration for factory '${scheduleResource.factoryId}' (${reason})`);
+      deps.log?.warn(`[F202-2] Skip rehydration for factory '${scheduleResource.factoryId}' (${reason})`);
       continue;
     }
 
@@ -805,14 +805,14 @@ export async function rehydrateEnabledPluginSchedules(deps: PluginScheduleRehydr
       // Defensive: factory must return a spec with the expected ID (mirrors activation path)
       if (taskSpec.id !== taskId) {
         deps.log?.warn(
-          `[F220] Factory '${scheduleResource.factoryId}' returned mismatched task ID on rehydration: expected '${taskId}', got '${taskSpec.id}' — skipping`,
+          `[F202-2] Factory '${scheduleResource.factoryId}' returned mismatched task ID on rehydration: expected '${taskId}', got '${taskSpec.id}' — skipping`,
         );
         continue;
       }
       deps.taskRunner.register(taskSpec);
-      deps.log?.info(`[F220] Rehydrated schedule '${scheduleResource.name}' for plugin '${manifest.id}'`);
+      deps.log?.info(`[F202-2] Rehydrated schedule '${scheduleResource.name}' for plugin '${manifest.id}'`);
     } catch (err) {
-      deps.log?.warn(`[F220] Failed to rehydrate schedule for '${manifest.id}': ${(err as Error).message}`);
+      deps.log?.warn(`[F202-2] Failed to rehydrate schedule for '${manifest.id}': ${(err as Error).message}`);
     }
   }
 }

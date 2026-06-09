@@ -74,7 +74,7 @@ export function computeSubjectPreview(
       return null;
     }
     case 'issue': {
-      // F220 Phase D: issue tracking uses `issue:owner/repo#N` format
+      // F202 Phase 2D: issue tracking uses `issue:owner/repo#N` format
       if (key.startsWith('issue:')) return key.slice(6);
       return null;
     }
@@ -174,7 +174,7 @@ export class TaskRunnerV2 {
   }
 
   /**
-   * F220: Register a builtin task that may arrive after start() (e.g., plugin schedule activation).
+   * F202 Phase 2: Register a builtin task that may arrive after start() (e.g., plugin schedule activation).
    * Unlike registerDynamic, this does NOT mark the task in dynamicTaskIds, so it reports
    * as source: 'builtin' and won't be targeted by SchedulePanel's dynamic PATCH/DELETE.
    */

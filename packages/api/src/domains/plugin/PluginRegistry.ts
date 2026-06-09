@@ -105,7 +105,7 @@ export class PluginRegistry {
 
     if (capEntries.length === 0) return allConfigured ? 'configured' : 'not_configured';
 
-    // F220 followup: optional resources don't block 'enabled' status — only required resources must be active
+    // F202 Phase 2 follow-up: optional resources don't block 'enabled' status — only required resources must be active
     const requiredResources = manifest.resources.filter((r) => !r.optional);
     const allRequiredEnabled =
       requiredResources.length > 0 &&

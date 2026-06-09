@@ -23,7 +23,7 @@ export function parsePrSubjectKey(key: string): { repoFullName: string; prNumber
   return { repoFullName, prNumber };
 }
 
-/** F220 Phase D: issue tracking subject key */
+/** F202 Phase 2D: issue tracking subject key */
 export function issueSubjectKey(repoFullName: string, issueNumber: number): string {
   return `issue:${repoFullName}#${issueNumber}`;
 }

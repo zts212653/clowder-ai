@@ -1,5 +1,5 @@
 /**
- * F220: Schedule Factory Registry — white-list map of factoryId → TaskSpec factory.
+ * F202 Phase 2: Schedule Factory Registry — white-list map of factoryId → TaskSpec factory.
  *
  * Plugin schedule resources declare a `factoryId` in plugin.yaml.
  * At activation time, the PluginResourceActivator looks up the factory here

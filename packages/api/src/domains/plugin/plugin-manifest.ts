@@ -184,7 +184,7 @@ export function parsePluginManifest(yamlPath: string): PluginManifest {
         throw new Error(`MCP resource in ${yamlPath} must have a 'command' field`);
       }
 
-      // F220: schedule resource validation — factoryId + name required
+      // F202 Phase 2: schedule resource validation — factoryId + name required
       const rawFactoryId = rr['factoryId'];
       if (rawFactoryId != null && typeof rawFactoryId !== 'string') {
         throw new Error(`Invalid resource factoryId in ${yamlPath}: must be a string`);
@@ -205,7 +205,7 @@ export function parsePluginManifest(yamlPath: string): PluginManifest {
         }
       }
 
-      // F220 followup: parse optional flag for resources
+      // F202 Phase 2 follow-up: parse optional flag for resources
       const optional = rr['optional'] === true;
 
       resources.push({
