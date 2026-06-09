@@ -67,7 +67,7 @@ export interface PromptCapture {
    */
   tokenEstimate: number;
 
-  // ── AC-G10 (Phase G native L0 closure / KD-43) ────────────────────
+  // ── AC-G10 (Phase G native L0 closure / KD-44) ────────────────────
   /**
    * The compiled L0 system prompt delivered via the provider's native
    * system-role channel — Claude `--system-prompt-file <l0Path>` or Codex

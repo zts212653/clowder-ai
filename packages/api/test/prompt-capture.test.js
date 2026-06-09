@@ -221,7 +221,7 @@ test('F153: API routes registered in index.ts', () => {
   assert.ok(src.includes('promptCaptureRoutes'), 'Should register prompt capture routes');
 });
 
-// ── AC-G10 (Phase G native L0 closure / KD-43): backward + new field tests ──
+// ── AC-G10 (Phase G native L0 closure / KD-44): backward + new field tests ──
 
 test('AC-G10: PromptCapture without native L0 fields round-trips (backward compat)', async () => {
   const { PromptCaptureStore } = await import('../dist/infrastructure/debug/prompt-capture-store.js');

@@ -1545,7 +1545,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       userPrompt: prompt,
       effectivePrompt,
       injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
-      // AC-G10 (Phase G native L0 closure / KD-43): if this provider injects
+      // AC-G10 (Phase G native L0 closure / KD-44): if this provider injects
       // L0 via a native system-role channel (Claude `--system-prompt-file` /
       // Codex `-c developer_instructions=`), the bridge will best-effort
       // fetch the compiled L0 and stamp it onto `nativeSystemPrompt`. Hot

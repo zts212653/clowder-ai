@@ -295,7 +295,7 @@ interface PromptCaptureData {
   };
   promptBytes: number;
   tokenEstimate: number;
-  // AC-G10 (Phase G native L0 closure / KD-43)
+  // AC-G10 (Phase G native L0 closure / KD-44)
   nativeSystemPrompt?: string;
   nativeSystemPromptSource?: 'f203-l0';
   nativeSystemTokenEstimate?: number;

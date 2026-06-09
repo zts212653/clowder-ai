@@ -2,7 +2,7 @@
  * F153 Prompt X-Ray: Thin bridge between invoke-single-cat and PromptCaptureStore.
  * Fire-and-forget — never blocks invocation.
  *
- * AC-G10 (Phase G native L0 closure / KD-43): when the caller flags an F203
+ * AC-G10 (Phase G native L0 closure / KD-44): when the caller flags an F203
  * native-L0 provider, this bridge asynchronously fetches the compiled L0 via
  * `compileL0ViaSubprocess` and stamps `nativeSystemPrompt` onto the capture
  * before persisting. Fetch failures are recorded in `captureDiagnostics` —

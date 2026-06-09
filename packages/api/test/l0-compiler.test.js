@@ -185,7 +185,7 @@ test('L0 template includes limb tool quick index', () => {
   assert.match(content, /limb_invoke/, 'L0 template must mention limb_invoke');
 });
 
-// --- AC-G10 (Phase G native L0 closure / KD-43): in-flight Promise dedup ---
+// --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---
 
 test('AC-G10: concurrent cold-cache compileL0ViaSubprocess calls collapse to single spawn (in-flight dedup)', async () => {
   clearL0Cache();
