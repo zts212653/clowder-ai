@@ -73,6 +73,11 @@ export function computeSubjectPreview(
       if (key.startsWith('repo:')) return key.slice(5);
       return null;
     }
+    case 'issue': {
+      // F202 Phase 2D: issue tracking uses `issue:owner/repo#N` format
+      if (key.startsWith('issue:')) return key.slice(6);
+      return null;
+    }
     case 'external': {
       return key;
     }
@@ -163,6 +168,18 @@ export class TaskRunnerV2 {
     this.dynamicTaskIds.set(task.id, dynamicDefId);
     // If runner is already started, schedule timer immediately — but defer first tick
     // so that user-registered tasks don't fire at t=0 (bug: "注册上就出触发了")
+    if (this.started) {
+      this.scheduleTask(task, /* deferFirstTick */ true);
+    }
+  }
+
+  /**
+   * F202 Phase 2: Register a builtin task that may arrive after start() (e.g., plugin schedule activation).
+   * Unlike registerDynamic, this does NOT mark the task in dynamicTaskIds, so it reports
+   * as source: 'builtin' and won't be targeted by SchedulePanel's dynamic PATCH/DELETE.
+   */
+  registerPostStart(task: AnyTaskSpec): void {
+    this.register(task);
     if (this.started) {
       this.scheduleTask(task, /* deferFirstTick */ true);
     }

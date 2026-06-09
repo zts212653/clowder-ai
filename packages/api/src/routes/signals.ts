@@ -86,7 +86,11 @@ function toSignalTier(value: string | undefined): SignalTier | undefined {
   return Number(value) as SignalTier;
 }
 
-export const signalsRoutes: FastifyPluginAsync = async (app) => {
+interface SignalsRoutesOptions {
+  readonly getGitHubApiToken?: (() => string | undefined) | undefined;
+}
+
+export const signalsRoutes: FastifyPluginAsync<SignalsRoutesOptions> = async (app, opts) => {
   const paths = resolveSignalPaths();
   const articleQuery = new SignalArticleQueryService({ paths });
 
@@ -312,6 +316,7 @@ export const signalsRoutes: FastifyPluginAsync = async (app) => {
     const summary = await runSignalFetchScheduler({
       sourceId: params.id,
       paths,
+      getGitHubApiToken: opts.getGitHubApiToken,
       createEmailService: noopEmail,
       createInAppService: noopInApp,
     });

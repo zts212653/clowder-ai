@@ -200,7 +200,7 @@ describe('QueuePanel withdraw UX (F39)', () => {
       userId: null,
       threadId: 'thread-1',
       timestamp: NOW - 1000,
-      type: 'cat' as const,
+      type: 'assistant' as const,
     };
     useChatStore.setState({
       messages: [parentMessage],

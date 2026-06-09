@@ -311,6 +311,56 @@ describe('runSignalFetchScheduler', () => {
     );
   });
 
+  it('passes plugin GitHub API token resolver into the default API fetcher', async () => {
+    const originalPat = process.env.GITHUB_MCP_PAT;
+    delete process.env.GITHUB_MCP_PAT;
+    const originalFetch = globalThis.fetch;
+    let capturedHeaders;
+    globalThis.fetch = async (_url, options) => {
+      capturedHeaders = options?.headers;
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        async json() {
+          return [];
+        },
+      };
+    };
+
+    try {
+      const summary = await runSignalFetchScheduler({
+        dryRun: true,
+        getGitHubApiToken: () => 'plugin-config-token',
+        loadSources: async () => ({
+          version: 1,
+          sources: [
+            createSource({
+              id: 'github-api-source',
+              url: 'https://api.github.com/repos/zts212653/clowder-ai/releases',
+              fetch: { method: 'api', headers: { Accept: 'application/json' } },
+              schedule: { frequency: 'daily' },
+            }),
+          ],
+        }),
+        loadNotifications: async () => createNotificationsConfig(),
+        loadKnownUrls: async () => [],
+        now: () => new Date('2026-02-19T08:00:00.000Z'),
+      });
+
+      assert.equal(summary.errors.length, 0);
+      assert.equal(capturedHeaders.Authorization, 'Bearer plugin-config-token');
+      assert.equal(process.env.GITHUB_MCP_PAT, undefined, 'plugin resolver must not mutate process.env');
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalPat === undefined) {
+        delete process.env.GITHUB_MCP_PAT;
+      } else {
+        process.env.GITHUB_MCP_PAT = originalPat;
+      }
+    }
+  });
+
   it('respects source schedule frequency for automatic source selection', async () => {
     const fetchCalls = [];
 

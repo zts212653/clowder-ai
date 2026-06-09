@@ -18,8 +18,8 @@ const { fetchPaginated } = await import('../dist/infrastructure/github/fetch-pag
 function mockExecFile(pages) {
   let callCount = 0;
   const calls = [];
-  const fn = async (_file, args, _opts) => {
-    calls.push(args);
+  const fn = async (_file, args, opts) => {
+    calls.push({ args, opts });
     const pageData = pages[callCount++] ?? [];
     const stdout = pageData.map((item) => JSON.stringify(item)).join('\n');
     return { stdout: stdout || '' };
@@ -108,8 +108,76 @@ describe('fetchPaginated', () => {
 
     await fetchPaginated('/repos/o/r/issues/1/comments', { execFileAsync: fn });
 
-    assert.ok(calls()[0][1].includes('per_page=100&page=1'));
-    assert.ok(calls()[1][1].includes('per_page=100&page=2'));
+    assert.ok(calls()[0].args[1].includes('per_page=100&page=1'));
+    assert.ok(calls()[1].args[1].includes('per_page=100&page=2'));
+  });
+
+  it('strips GitHub token env from the gh child process so gh uses its own auth store', async () => {
+    const page1 = [{ id: 1 }];
+    const { fn, calls } = mockExecFile([page1]);
+    const beforeGithubToken = process.env.GITHUB_TOKEN;
+    const beforeGhToken = process.env.GH_TOKEN;
+    process.env.GITHUB_TOKEN = 'ambient-token-that-gh-must-not-see';
+    process.env.GH_TOKEN = 'ambient-gh-token-that-gh-must-not-see';
+    try {
+      const items = await fetchPaginated('/repos/o/r/issues/1/comments', { execFileAsync: fn });
+
+      assert.equal(items.length, 1);
+      assert.equal(calls()[0].opts.env.GITHUB_TOKEN, undefined);
+      assert.equal(calls()[0].opts.env.GH_TOKEN, undefined);
+      assert.equal(process.env.GITHUB_TOKEN, 'ambient-token-that-gh-must-not-see');
+      assert.equal(process.env.GH_TOKEN, 'ambient-gh-token-that-gh-must-not-see');
+    } finally {
+      if (beforeGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = beforeGithubToken;
+      if (beforeGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = beforeGhToken;
+    }
+  });
+
+  it('passes an explicitly resolved token only to the gh child process', async () => {
+    const page1 = [{ id: 1 }];
+    const { fn, calls } = mockExecFile([page1]);
+    const beforeGithubToken = process.env.GITHUB_TOKEN;
+    const beforeGhToken = process.env.GH_TOKEN;
+    process.env.GITHUB_TOKEN = 'ambient-token-that-should-be-overridden';
+    process.env.GH_TOKEN = 'ambient-gh-token-that-must-not-win';
+    try {
+      const items = await fetchPaginated('/repos/o/r/issues/1/comments', {
+        execFileAsync: fn,
+        ghToken: ' explicit-plugin-token ',
+      });
+
+      assert.equal(items.length, 1);
+      assert.equal(calls()[0].opts.env.GITHUB_TOKEN, 'explicit-plugin-token');
+      assert.equal(calls()[0].opts.env.GH_TOKEN, undefined);
+      assert.equal(process.env.GITHUB_TOKEN, 'ambient-token-that-should-be-overridden');
+      assert.equal(process.env.GH_TOKEN, 'ambient-gh-token-that-must-not-win');
+    } finally {
+      if (beforeGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = beforeGithubToken;
+      if (beforeGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = beforeGhToken;
+    }
+  });
+
+  it('treats an empty explicit token as absent and falls back to gh auth store', async () => {
+    const page1 = [{ id: 1 }];
+    const { fn, calls } = mockExecFile([page1]);
+    const beforeGithubToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'ambient-token-that-gh-must-not-see';
+    try {
+      const items = await fetchPaginated('/repos/o/r/issues/1/comments', {
+        execFileAsync: fn,
+        ghToken: '   ',
+      });
+
+      assert.equal(items.length, 1);
+      assert.equal(calls()[0].opts.env.GITHUB_TOKEN, undefined);
+    } finally {
+      if (beforeGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = beforeGithubToken;
+    }
   });
 
   it('items without id field treated as id=0 for cursor filtering', async () => {

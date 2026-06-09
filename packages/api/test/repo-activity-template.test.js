@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
-import { repoActivityTemplate } from '../dist/infrastructure/scheduler/templates/repo-activity.js';
+import {
+  createRepoActivityTemplate,
+  repoActivityTemplate,
+} from '../dist/infrastructure/scheduler/templates/repo-activity.js';
 
 describe('repoActivityTemplate', () => {
   it('gate returns run:true with thread workItem when repo + deliveryThreadId set', async () => {
@@ -94,6 +97,41 @@ describe('repoActivityTemplate', () => {
       assert.equal(delivered.threadId, 'th-1');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('execute uses injected GitHub token resolver without mutating process.env', async () => {
+    const originalToken = process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+    const originalFetch = globalThis.fetch;
+    let capturedHeaders;
+    globalThis.fetch = mock.fn(async (_url, options) => {
+      capturedHeaders = options?.headers;
+      return {
+        ok: true,
+        json: async () => [],
+      };
+    });
+    try {
+      const deliverMock = mock.fn(async () => 'msg-token');
+      const template = createRepoActivityTemplate({ getGitHubToken: () => 'plugin-config-token' });
+      const spec = template.createSpec('ra-token', {
+        trigger: { type: 'interval', ms: 3600_000 },
+        params: { repo: 'owner/private-repo' },
+        deliveryThreadId: 'th-token',
+      });
+
+      await spec.run.execute({ repo: 'owner/private-repo', since: null }, 'thread-th-token', {
+        assignedCatId: 'opus',
+        deliver: deliverMock,
+      });
+
+      assert.equal(capturedHeaders?.Authorization, 'Bearer plugin-config-token');
+      assert.equal(process.env.GITHUB_TOKEN, undefined, 'resolver must not write into process.env');
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (originalToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = originalToken;
     }
   });
 

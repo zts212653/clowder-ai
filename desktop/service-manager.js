@@ -218,7 +218,7 @@ class ServiceManager {
     // Windows uses NTFS junctions (no admin needed, absolute paths). macOS
     // uses plain directory symlinks.
     const linkType = IS_WIN ? 'junction' : 'dir';
-    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'scripts'];
+    const mirrors = ['.claude', 'assets', 'cat-cafe-skills', 'docs', 'guides', 'packages', 'plugins', 'scripts'];
 
     // Helper: remove a junction or symlink. On Windows, NTFS junctions are
     // directory reparse points — fs.unlinkSync calls DeleteFileW which fails
@@ -302,7 +302,10 @@ class ServiceManager {
     // even though the link entry and target both exist (observed on first
     // launch after installer on clean machines). Removing and recreating
     // the junction resolves it — so retry once if the probe fails.
-    const criticalProbes = [{ mirror: 'cat-cafe-skills', probe: path.join('refs', 'shared-rules.md') }];
+    const criticalProbes = [
+      { mirror: 'cat-cafe-skills', probe: path.join('refs', 'shared-rules.md') },
+      { mirror: 'plugins', probe: path.join('github', 'plugin.yaml') },
+    ];
     for (const { mirror, probe } of criticalProbes) {
       const probePath = path.join(projectDir, mirror, probe);
       const src = path.join(this.root, mirror);

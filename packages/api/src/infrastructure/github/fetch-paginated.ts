@@ -14,15 +14,18 @@
  * support `since`/`direction` params, so we still scan all pages
  * client-side. A future optimization could use GraphQL `last:N`.
  */
+import { buildGhCliEnv } from './gh-cli-env.js';
 
 export interface FetchPaginatedOptions {
   /** Items with id > sinceId are collected. 0 or omitted = collect all. */
   sinceId?: number;
+  /** Optional token resolved by the caller; when absent, gh uses its own auth store. */
+  ghToken?: string;
   /** Override for testing — replaces real execFile */
   execFileAsync?: (
     file: string,
     args: string[],
-    opts: { timeout: number; maxBuffer: number },
+    opts: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv },
   ) => Promise<{ stdout: string }>;
 }
 
@@ -36,10 +39,10 @@ export interface FetchPaginatedOptions {
  */
 // biome-ignore lint/suspicious/noExplicitAny: GitHub API JSON responses are untyped; callers cast inline
 export async function fetchPaginated(endpoint: string, options: FetchPaginatedOptions = {}): Promise<any[]> {
-  const { sinceId, execFileAsync: execOverride } = options;
+  const { sinceId, ghToken, execFileAsync: execOverride } = options;
   const execFn =
     execOverride ??
-    (async (file: string, args: string[], opts: { timeout: number; maxBuffer: number }) => {
+    (async (file: string, args: string[], opts: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv }) => {
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
       return promisify(execFile)(file, args, opts);
@@ -54,6 +57,7 @@ export async function fetchPaginated(endpoint: string, options: FetchPaginatedOp
     const { stdout } = await execFn('gh', ['api', `${endpoint}?per_page=100&page=${page}`, '--jq', '.[]'], {
       timeout: 15_000,
       maxBuffer: 2 * 1024 * 1024,
+      env: buildGhCliEnv({ token: ghToken }),
     });
     if (!stdout.trim()) break; // empty page = no more data
 

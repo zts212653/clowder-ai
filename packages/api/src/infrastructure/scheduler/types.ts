@@ -63,10 +63,10 @@ export interface ActorSpec {
 }
 
 /** Phase 2.5: Display contract — task declares its own display metadata (KD-8) */
-export type DisplayCategory = 'pr' | 'repo' | 'thread' | 'system' | 'external';
+export type DisplayCategory = 'pr' | 'repo' | 'thread' | 'system' | 'external' | 'issue';
 
 /** Phase 2.5: Subject kind for subjectPreview computation (KD-9) */
-export type SubjectKind = 'pr' | 'repo' | 'thread' | 'external' | 'none';
+export type SubjectKind = 'pr' | 'repo' | 'thread' | 'external' | 'none' | 'issue';
 
 /** Phase 2.5: Static display metadata declared by each task (AC-E1) */
 export interface TaskDisplayMeta {

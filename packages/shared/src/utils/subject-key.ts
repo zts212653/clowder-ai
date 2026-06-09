@@ -23,6 +23,22 @@ export function parsePrSubjectKey(key: string): { repoFullName: string; prNumber
   return { repoFullName, prNumber };
 }
 
+/** F202 Phase 2D: issue tracking subject key */
+export function issueSubjectKey(repoFullName: string, issueNumber: number): string {
+  return `issue:${repoFullName}#${issueNumber}`;
+}
+
+export function parseIssueSubjectKey(key: string): { repoFullName: string; issueNumber: number } | null {
+  if (!key.startsWith('issue:')) return null;
+  const rest = key.slice(6); // "owner/repo#42"
+  const hashIdx = rest.lastIndexOf('#');
+  if (hashIdx < 0) return null;
+  const repoFullName = rest.slice(0, hashIdx);
+  const issueNumber = parseInt(rest.slice(hashIdx + 1), 10);
+  if (!repoFullName || Number.isNaN(issueNumber)) return null;
+  return { repoFullName, issueNumber };
+}
+
 export function threadSubjectKey(threadId: string): string {
   return `thread:${threadId}`;
 }

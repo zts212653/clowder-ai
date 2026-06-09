@@ -57,6 +57,7 @@ export interface SignalFetchSchedulerOptions {
   readonly dryRun?: boolean | undefined;
   readonly paths?: SignalPaths | undefined;
   readonly now?: (() => Date) | undefined;
+  readonly getGitHubApiToken?: (() => string | undefined) | undefined;
   readonly fetchers?: readonly Fetcher[] | undefined;
   readonly loadSources?: ((paths: SignalPaths) => Promise<SignalSourceConfig>) | undefined;
   readonly loadNotifications?: ((paths: SignalPaths) => Promise<SignalNotificationConfig>) | undefined;
@@ -84,8 +85,12 @@ function createDefaultInAppSink(paths: SignalPaths): InAppNotificationSink {
   };
 }
 
-function createDefaultFetchers(): readonly Fetcher[] {
-  return [new RssFetcher(), new ApiFetcher(), new WebpageFetcher()];
+function createDefaultFetchers(options: Pick<SignalFetchSchedulerOptions, 'getGitHubApiToken'>): readonly Fetcher[] {
+  return [
+    new RssFetcher(),
+    new ApiFetcher(undefined, { getGitHubPat: options.getGitHubApiToken }),
+    new WebpageFetcher(),
+  ];
 }
 
 function resolveSchedulerServices(
@@ -144,7 +149,7 @@ export async function runSignalFetchScheduler(
   const dryRun = options.dryRun ?? false;
   const loadSources = options.loadSources ?? ((currentPaths) => loadSignalSources(currentPaths));
   const loadNotifications = options.loadNotifications ?? ((currentPaths) => loadSignalNotifications(currentPaths));
-  const fetchers = options.fetchers ?? createDefaultFetchers();
+  const fetchers = options.fetchers ?? createDefaultFetchers(options);
 
   const sourceConfig = await loadSources(paths);
   const selectedSources = selectSources(sourceConfig, options.sourceId, schedulerNow);

@@ -592,6 +592,7 @@ export type {
   ConflictAutomationState,
   CreateTaskInput,
   DispatchGateState,
+  IssueAutomationState,
   ReviewAutomationState,
   SuggestedCrossPostAction,
   SuggestedCrossPostActionSource,
@@ -600,7 +601,7 @@ export type {
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';
-export { extractFeatureIds } from './task.js';
+export { extractFeatureIds, isTrackingKind } from './task.js';
 // F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
 // (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
 export type { CancelReasonValue, PermissionCancelEvent } from './task-outcome.js';

@@ -357,6 +357,43 @@ describe('RedisTaskStore unit behavior', () => {
     assert.equal(reopened.status, 'todo');
   });
 
+  it('rejects cross-thread claims of legacy subject tasks when caller has a userId', async () => {
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 60 });
+
+    const original = await store.create({
+      kind: 'pr_tracking',
+      subjectKey: 'pr:owner/repo#43',
+      threadId: 'thread-owner',
+      title: 'Legacy PR tracking',
+      why: 'legacy task without userId',
+      createdBy: 'opus',
+      ownerCatId: 'opus',
+    });
+
+    await assert.rejects(
+      () =>
+        store.upsertBySubject({
+          kind: 'pr_tracking',
+          subjectKey: 'pr:owner/repo#43',
+          threadId: 'thread-attacker',
+          title: 'Hijacked PR tracking',
+          why: 'take over subject',
+          createdBy: 'codex',
+          ownerCatId: 'codex',
+          userId: 'user-attacker',
+        }),
+      /already owned by another user/,
+    );
+
+    const entry = await store.getBySubject('pr:owner/repo#43');
+    assert.equal(entry.id, original.id);
+    assert.equal(entry.threadId, 'thread-owner');
+    assert.equal(entry.ownerCatId, 'opus');
+    assert.equal(entry.userId, undefined);
+  });
+
   it('does not leave a TTL on the shared thread index when active PR tracking exists', async () => {
     const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
     const { TaskKeys } = await import('../dist/domains/cats/services/stores/redis-keys/task-keys.js');

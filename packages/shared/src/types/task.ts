@@ -21,11 +21,17 @@ export { extractFeatureIds } from './cross-thread-affordance.js';
 export type TaskStatus = 'todo' | 'doing' | 'blocked' | 'done';
 
 /**
- * Task kind discriminator (#320).
+ * Task kind discriminator (#320, F202-2D).
  * - work: manual tasks created by cats/humans
  * - pr_tracking: automated PR tasks (review-feedback, cicd-check, conflict-check)
+ * - issue_tracking: automated GitHub issue comment tracking (F202 Phase 2D)
  */
-export type TaskKind = 'work' | 'pr_tracking';
+export type TaskKind = 'work' | 'pr_tracking' | 'issue_tracking';
+
+/** Tracking kinds that receive eviction/TTL protection when active (status !== 'done'). */
+export function isTrackingKind(kind: TaskKind): kind is 'pr_tracking' | 'issue_tracking' {
+  return kind === 'pr_tracking' || kind === 'issue_tracking';
+}
 
 /** CI/CD automation state for pr_tracking tasks */
 export interface CiAutomationState {
@@ -64,14 +70,24 @@ export interface ReviewAutomationState {
  */
 export type PrTrackingIntent = 'review' | 'merge';
 
-/** Composite automation state embedded in pr_tracking tasks (#320 KD-14) */
+/** Issue comment automation state for issue_tracking tasks (F202 Phase 2D) */
+export interface IssueAutomationState {
+  readonly lastCommentCursor?: number;
+  readonly lastNotifiedAt?: number;
+  readonly issueState?: 'open' | 'closed';
+}
+
+/** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D) */
 export interface AutomationState {
   readonly ci?: CiAutomationState;
   readonly conflict?: ConflictAutomationState;
   readonly review?: ReviewAutomationState;
+  readonly issue?: IssueAutomationState;
   readonly closedAt?: number;
   /** F140: wake intent for this tracked PR (defaults to 'review' when absent). */
   readonly intent?: PrTrackingIntent;
+  /** F202 Phase 2C: user-provided instructions appended to trigger messages. Task preference, not system override. */
+  readonly trackingInstructions?: string;
 }
 
 export interface TaskItem {

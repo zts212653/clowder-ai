@@ -39,13 +39,15 @@ export interface CiCdCheckTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
+  readonly id?: string;
 }
 
 export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpec_P1<CiCdCheckSignal> {
   const fetchPrStatus = opts.fetchPrStatus ?? ((repo: string, pr: number) => fetchPrCiStatus(repo, pr, opts.log));
 
   return {
-    id: 'cicd-check',
+    id: opts.id ?? 'cicd-check',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {

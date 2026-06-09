@@ -122,12 +122,15 @@ import {
 } from './infrastructure/connectors/connector-gateway-bootstrap.js';
 import { restartConnectorGateway } from './infrastructure/connectors/connector-gateway-lifecycle.js';
 import { createConnectorReloadSubscriber } from './infrastructure/connectors/connector-reload-subscriber.js';
+import { IssueCommentRouter } from './infrastructure/email/IssueCommentRouter.js';
 import {
   CiCdRouter,
   ConflictRouter,
   ConnectorInvokeTrigger,
+  fetchPrCiStatus,
   ReviewFeedbackRouter,
 } from './infrastructure/email/index.js';
+import { buildGhCliEnv, resolveGhCliToken } from './infrastructure/github/gh-cli-env.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
@@ -1625,7 +1628,7 @@ async function main(): Promise<void> {
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
     try {
-      await execFileAsync('gh', ['repo', 'view', repoFullName, '--json', 'name'], { timeout: 10_000 });
+      await execFileAsync('gh', ['repo', 'view', repoFullName, '--json', 'name'], getGitHubExecOptions(10_000));
       return true;
     } catch (err: unknown) {
       // gh ran but repo not found/no access → process exit code is a number
@@ -1633,6 +1636,49 @@ async function main(): Promise<void> {
         return false;
       }
       // Infrastructure failure (gh not found, timeout, auth broken) → propagate
+      throw err;
+    }
+  };
+
+  // F202 Phase 2 follow-up: validate specific PR exists (number-level, not just repo)
+  const validatePr = async (repoFullName: string, prNumber: number): Promise<boolean> => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    try {
+      await execFileAsync(
+        'gh',
+        ['api', `repos/${repoFullName}/pulls/${prNumber}`, '--jq', '.number'],
+        getGitHubExecOptions(10_000),
+      );
+      return true;
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
+        return false;
+      }
+      throw err;
+    }
+  };
+
+  // F202 Phase 2 follow-up: validate specific issue exists (number-level, not just repo)
+  // P2-cloud: also reject PR numbers — GitHub Issues API returns PRs with .pull_request set
+  const validateIssue = async (repoFullName: string, issueNumber: number): Promise<boolean> => {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    const execFileAsync = promisify(execFile);
+    try {
+      const { stdout } = await execFileAsync(
+        'gh',
+        ['api', `repos/${repoFullName}/issues/${issueNumber}`, '--jq', '.pull_request != null'],
+        getGitHubExecOptions(10_000),
+      );
+      // If .pull_request is set, this is a PR not a pure issue — reject
+      if (stdout.trim() === 'true') return false;
+      return true;
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err && typeof (err as Record<string, unknown>).code === 'number') {
+        return false;
+      }
       throw err;
     }
   };
@@ -1655,13 +1701,86 @@ async function main(): Promise<void> {
   const limbPairingStore = new LimbPairingStore();
   registerLimbNodeRoutes(app, { limbRegistry, pairingStore: limbPairingStore });
 
+  // F202-2B: Hoisted for late-binding GitHub schedule rehydration (closure set inside F202 block)
+  let rehydrateGitHubSchedules: ((githubDeps: Record<string, unknown>) => Promise<void>) | undefined;
+  let getGitHubPluginEnv: () => Record<string, string | undefined> = () => ({});
+  const getGitHubEnvValue = (key: string): string | undefined => {
+    const pluginEnv = getGitHubPluginEnv();
+    return Object.prototype.hasOwnProperty.call(pluginEnv, key) ? pluginEnv[key] : process.env[key];
+  };
+  const getGitHubToken = (): string | undefined => {
+    return resolveGhCliToken({ pluginEnv: getGitHubPluginEnv() });
+  };
+  const getGitHubExecOptions = (timeout: number): { timeout: number; env?: NodeJS.ProcessEnv } => {
+    return {
+      timeout,
+      env: buildGhCliEnv({ token: getGitHubToken() }),
+    };
+  };
+  const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
+  templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
+  const maxGithubId = (items: { id?: unknown }[]): number => {
+    let cursor = 0;
+    for (const item of items) {
+      if (typeof item.id === 'number' && Number.isFinite(item.id) && item.id > cursor) {
+        cursor = item.id;
+      }
+    }
+    return cursor;
+  };
+  const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
+    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
+    const [reviewComments, issueComments, reviews, ciStatus] = await Promise.all([
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/issues/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() }),
+    ]);
+    return {
+      review: {
+        lastCommentCursor: maxGithubId([
+          ...(reviewComments as { id?: unknown }[]),
+          ...(issueComments as { id?: unknown }[]),
+        ]),
+        lastDecisionCursor: maxGithubId(reviews as { id?: unknown }[]),
+      },
+      ...(ciStatus
+        ? {
+            ci: {
+              headSha: ciStatus.headSha,
+              ...(ciStatus.aggregateBucket === 'pending'
+                ? {}
+                : {
+                    lastFingerprint: `${ciStatus.headSha}:${ciStatus.aggregateBucket}`,
+                    lastBucket: ciStatus.aggregateBucket,
+                  }),
+            },
+          }
+        : {}),
+    };
+  };
+  const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> => {
+    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
+    const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+      ghToken: getGitHubToken(),
+    });
+    return maxGithubId(comments as { id?: unknown }[]);
+  };
+
   // F202: Plugin framework — discovery + config + resource activation
   {
     const { join } = await import('node:path');
     const { PluginRegistry } = await import('./domains/plugin/PluginRegistry.js');
-    const { PluginResourceActivator, rehydrateEnabledPluginLimbs } = await import(
+    const { PluginResourceActivator, rehydrateEnabledPluginLimbs, rehydrateEnabledPluginSchedules } = await import(
       './domains/plugin/PluginResourceActivator.js'
     );
+    const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
@@ -1671,7 +1790,7 @@ async function main(): Promise<void> {
 
     const monorepoRoot = findMonorepoRoot(process.cwd());
     const pluginsDir = join(monorepoRoot, 'plugins');
-    const { loadAllPluginConfigs } = await import('./domains/plugin/plugin-config-store.js');
+    const { loadAllPluginConfigs, resolvePluginEnv } = await import('./domains/plugin/plugin-config-store.js');
     const pluginRegistry = new PluginRegistry(pluginsDir);
     pluginRegistry.scan();
     const scannedManifests = pluginRegistry.getAllManifests();
@@ -1679,8 +1798,20 @@ async function main(): Promise<void> {
     app.log.info(
       `[api] F202: PluginRegistry scanned ${scannedManifests.length} plugin(s), loaded ${loadedEnvKeys} config key(s)`,
     );
+    getGitHubPluginEnv = () => {
+      const githubManifest = pluginRegistry.getManifest('github');
+      return githubManifest ? resolvePluginEnv([githubManifest]) : {};
+    };
 
     const limbAdapterRegistry = new Map<string, (yamlPath: string) => Promise<ILimbNode>>();
+
+    // F202 Phase 2: Schedule factory registry + GitHub factories
+    const scheduleFactoryRegistry = new ScheduleFactoryRegistry();
+    const { registerGitHubScheduleFactories } = await import('./domains/plugin/github-schedule-factories.js');
+    registerGitHubScheduleFactories(scheduleFactoryRegistry);
+
+    // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
+    const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
 
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
@@ -1704,6 +1835,15 @@ async function main(): Promise<void> {
         }
         return factory(limbYamlPath);
       },
+      // F202 Phase 2: schedule resource activation deps
+      scheduleFactoryRegistry,
+      taskRunner: {
+        registerPostStart: (task) => taskRunnerV2.registerPostStart(task),
+        unregister: (taskId) => taskRunnerV2.unregister(taskId),
+      },
+      // F202-2B: Mutable deps ref — populated via rehydrateGitHubSchedules after GitHub services created
+      scheduleFactoryDeps:
+        scheduleFactoryDeps as import('./domains/plugin/ScheduleFactoryRegistry.js').ScheduleFactoryDeps,
     });
 
     const startupCaps = await readCapabilitiesConfig(resolveActiveProjectRoot());
@@ -1715,6 +1855,90 @@ async function main(): Promise<void> {
       limbRegistry,
       log: app.log,
     });
+
+    // F202-2B: Schedule rehydration deferred — GitHub factories need deps created later.
+    // Closure captures F202 scope; called after GitHub services are created (before taskRunnerV2.start).
+    rehydrateGitHubSchedules = async (githubDeps: Record<string, unknown>) => {
+      // Populate the mutable deps ref (also updates pluginActivator's reference)
+      Object.assign(scheduleFactoryDeps, githubDeps);
+
+      // Migration: auto-enable GitHub schedule resources on first startup after Phase B migration
+      // Uses marker file to prevent re-enable after explicit disable (P2-1 fix)
+      const root = resolveActiveProjectRoot();
+      const githubManifest = pluginRegistry.getManifest('github');
+      if (githubManifest) {
+        const existingCaps = await readCapabilitiesConfig(root);
+        const {
+          shouldRunGitHubScheduleMigration,
+          markGitHubScheduleMigrationDone,
+          buildGitHubMigrationEntries,
+          buildGitHubMigrationEnv,
+          buildGitHubScheduleOverrideMigrations,
+          promotePendingGitHubMigrationEntries,
+        } = await import('./domains/plugin/github-schedule-factories.js');
+        const hasRepoScanRuntimeDeps = !!(githubDeps as Record<string, unknown>).reconciliationDedup;
+        const migrationEnv = buildGitHubMigrationEnv(getGitHubPluginEnv());
+        let latestCaps = existingCaps;
+        if (shouldRunGitHubScheduleMigration(root, existingCaps)) {
+          // P2-1 fix: gate repo-scan on both env vars AND runtime deps (Redis).
+          // Without Redis, factory construction fails at rehydration, leaving
+          // capabilities.json with "enabled" but no running task.
+          const entries = buildGitHubMigrationEntries(githubManifest, migrationEnv, {
+            repoScanDepsAvailable: hasRepoScanRuntimeDeps,
+          });
+          if (entries.length > 0) {
+            const overrideMigrations = buildGitHubScheduleOverrideMigrations(
+              entries,
+              globalControlStore.listOverrides(),
+            );
+            for (const override of overrideMigrations) {
+              globalControlStore.setTaskOverride(override.taskId, override.enabled, override.updatedBy);
+            }
+
+            // P2-cloud: spread existingCaps to preserve governancePack and other top-level fields
+            const updatedCaps: import('@cat-cafe/shared').CapabilitiesConfig = {
+              ...(existingCaps ?? { version: 1 as const, capabilities: [] }),
+              version: 1 as const,
+              capabilities: [...(existingCaps?.capabilities ?? []), ...entries],
+            };
+            await writeCapabilitiesConfig(root, updatedCaps);
+            latestCaps = updatedCaps;
+            markGitHubScheduleMigrationDone(root);
+            const enabledEntryCount = entries.filter((entry) => entry.enabled).length;
+            const pendingEntryCount = entries.length - enabledEntryCount;
+            app.log.info(
+              `[api] F202-2B migration: enabled ${enabledEntryCount} GitHub schedule resources ` +
+                `${pendingEntryCount > 0 ? `and left ${pendingEntryCount} pending ` : ''}` +
+                `and migrated ${overrideMigrations.length} scheduler overrides`,
+            );
+          }
+        }
+        const pendingPromotion = promotePendingGitHubMigrationEntries(
+          latestCaps ?? { version: 1 as const, capabilities: [] },
+          githubManifest,
+          migrationEnv,
+          { repoScanDepsAvailable: hasRepoScanRuntimeDeps },
+        );
+        if (pendingPromotion.changed) {
+          await writeCapabilitiesConfig(root, pendingPromotion.config);
+          app.log.info(
+            '[api] F202-2B migration: enabled pending GitHub repo-scan schedule after deps became available',
+          );
+        }
+      }
+
+      // Rehydrate all enabled schedule resources (includes any migrated GitHub entries)
+      const caps = await readCapabilitiesConfig(resolveActiveProjectRoot());
+      await rehydrateEnabledPluginSchedules({
+        capabilities: caps,
+        pluginRegistry,
+        scheduleFactoryRegistry,
+        taskRunner: taskRunnerV2,
+        scheduleFactoryDeps:
+          scheduleFactoryDeps as import('./domains/plugin/ScheduleFactoryRegistry.js').ScheduleFactoryDeps,
+        log: app.log,
+      });
+    };
 
     registerPluginRoutes(app, { pluginRegistry, pluginActivator, limbRegistry, pluginsDir });
   }
@@ -1741,6 +1965,10 @@ async function main(): Promise<void> {
     invocationTracker,
     deliveryCursorStore,
     validateRepo,
+    validatePr,
+    validateIssue,
+    fetchPrTrackingBoundary,
+    fetchIssueCommentCursor,
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
@@ -2304,7 +2532,9 @@ async function main(): Promise<void> {
     threadStore,
     registry: commandRegistry,
   });
-  await app.register(signalsRoutes);
+  await app.register(signalsRoutes, {
+    getGitHubApiToken: () => getGitHubEnvValue('GITHUB_MCP_PAT'),
+  });
   await app.register(signalStudyRoutes, { threadStore });
   await app.register(signalCollectionRoutes);
   await app.register(signalPodcastRoutes, {
@@ -2636,43 +2866,68 @@ async function main(): Promise<void> {
   // F140: Feedback filter (Rule A self-authored only post-E.2 cutover)
   const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
   const { createSetupNoiseFilter } = await import('./infrastructure/email/setup-noise-filter.js');
-  let selfGitHubLogin: string | undefined = process.env.GITHUB_SELF_LOGIN?.trim() || undefined;
-  if (!selfGitHubLogin) {
+  const { createGitHubSelfLoginResolver } = await import('./infrastructure/github/self-login-resolver.js');
+  const resolveGitHubSelfLogin = async (): Promise<string | undefined> => {
     const { execFile } = await import('node:child_process');
     const { promisify } = await import('node:util');
     const execFileAsync = promisify(execFile);
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const { stdout } = await execFileAsync('gh', ['api', '/user', '--jq', '.login'], { timeout: 10_000 });
-        selfGitHubLogin = stdout.trim() || undefined;
-        if (selfGitHubLogin) break;
+        const { stdout } = await execFileAsync('gh', ['api', '/user', '--jq', '.login'], getGitHubExecOptions(10_000));
+        const login = stdout.trim();
+        if (login) return login;
       } catch {
         if (attempt === 0) await new Promise((r) => setTimeout(r, 3_000));
       }
     }
-  }
-  if (selfGitHubLogin) {
-    app.log.info(`[api] F140: feedback filter self=${selfGitHubLogin}`);
-  } else {
-    app.log.error('[api] F140: self-filter DISABLED — set GITHUB_SELF_LOGIN env as fallback');
-  }
-  const feedbackFilter = createGitHubFeedbackFilter({ selfGitHubLogin });
+    return undefined;
+  };
+  const selfLoginResolver = createGitHubSelfLoginResolver({
+    getConfiguredLogin: () => getGitHubEnvValue('GITHUB_SELF_LOGIN'),
+    getTokenFingerprint: () => getGitHubToken(),
+    resolveLogin: resolveGitHubSelfLogin,
+  });
+  let loggedSelfGitHubLogin: string | undefined | null = null;
+  const logGitHubSelfLoginState = (login: string | undefined): void => {
+    if (login) {
+      if (loggedSelfGitHubLogin !== login) {
+        app.log.info(`[api] F140: feedback filter self=${login}`);
+      }
+      loggedSelfGitHubLogin = login;
+      return;
+    }
+    if (loggedSelfGitHubLogin !== undefined) {
+      app.log.error('[api] F140: self-filter DISABLED — set GITHUB_SELF_LOGIN env as fallback');
+    }
+    loggedSelfGitHubLogin = undefined;
+  };
+  const refreshGitHubSelfLogin = async (): Promise<string | undefined> => {
+    const login = await selfLoginResolver.refreshIfNeeded();
+    logGitHubSelfLoginState(login);
+    return login;
+  };
+  await refreshGitHubSelfLogin();
+  const feedbackFilter = createGitHubFeedbackFilter({ getSelfGitHubLogin: () => selfLoginResolver.getCurrent() });
 
   // F140 Phase E.2 cutover: setup-noise bot allowlist env name切换
   // GITHUB_SETUP_NOISE_BOT_LOGINS (new, post-E.2 semantics) takes precedence;
+  // P2-3 fix: pass a thunk so the filter reflects runtime config changes
+  // (e.g. GITHUB_SETUP_NOISE_BOT_LOGINS updated via plugin config panel)
+  // without requiring a server restart.
   // GITHUB_AUTHORITATIVE_REVIEW_LOGINS (legacy E.1 借壳) falls back for
   // backward compat — will be removed in a follow-up release.
-  const setupNoiseBotLogins = (
-    process.env.GITHUB_SETUP_NOISE_BOT_LOGINS ||
-    process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS ||
-    'chatgpt-codex-connector[bot]'
-  )
-    .split(',')
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-  app.log.info(`[api] F140: setup-noise bot logins=${setupNoiseBotLogins.join(', ')}`);
+  const getSetupNoiseBotLogins = (): readonly string[] =>
+    (
+      getGitHubEnvValue('GITHUB_SETUP_NOISE_BOT_LOGINS') ||
+      process.env.GITHUB_AUTHORITATIVE_REVIEW_LOGINS ||
+      'chatgpt-codex-connector[bot]'
+    )
+      .split(',')
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+  app.log.info(`[api] F140: setup-noise bot logins=${getSetupNoiseBotLogins().join(', ')}`);
 
-  const setupNoiseFilter = createSetupNoiseFilter(setupNoiseBotLogins);
+  const setupNoiseFilter = createSetupNoiseFilter(getSetupNoiseBotLogins);
 
   // F140 Phase E.3 cleanup (2026-04-25): email/IMAP watcher source files removed.
   // Polling (ReviewFeedbackTaskSpec) is the sole truth source for review feedback.
@@ -2694,12 +2949,10 @@ async function main(): Promise<void> {
   // once-task instead of delivering a stale wake ("history replay").
   taskRunnerV2.setBusyChecker((threadId) => invocationTracker.has(threadId) || queueProcessor.isThreadBusy(threadId));
 
-  // F139: Register PR-related TaskSpecs into unified scheduler
+  // F202-2B: GitHub schedule deps + rehydration (replaces hardcoded task registrations)
+  // Router/service creation stays here — same deps available as before.
+  // Task registration moved to plugin framework via rehydrateGitHubSchedules closure.
   {
-    const { createCiCdCheckTaskSpec } = await import('./infrastructure/email/CiCdCheckTaskSpec.js');
-    const { createConflictCheckTaskSpec } = await import('./infrastructure/email/ConflictCheckTaskSpec.js');
-    const { createReviewFeedbackTaskSpec } = await import('./infrastructure/email/ReviewFeedbackTaskSpec.js');
-
     const deliveryDeps = { messageStore, socketManager };
 
     const cicdRouter = new CiCdRouter({
@@ -2746,15 +2999,19 @@ async function main(): Promise<void> {
       },
     });
 
-    // F140: ConflictRouter (state-transition dedup + KD-9 fingerprint reset)
     const conflictRouter = new ConflictRouter({
       taskStore,
       deliveryDeps,
       log: app.log,
     });
 
-    // F140: ReviewFeedbackRouter (three-section aggregated messages)
     const reviewFeedbackRouter = new ReviewFeedbackRouter({
+      deliveryDeps,
+      log: app.log,
+    });
+
+    // F202 Phase 2D: Issue comment tracking
+    const issueCommentRouter = new IssueCommentRouter({
       deliveryDeps,
       log: app.log,
     });
@@ -2767,132 +3024,128 @@ async function main(): Promise<void> {
       const { stdout } = await execFileAsync(
         'gh',
         ['pr', 'view', String(pr), '-R', repo, '--json', 'mergeable,headRefOid'],
-        { timeout: 15_000 },
+        getGitHubExecOptions(15_000),
       );
       const data = JSON.parse(stdout);
-      // Use `mergeable` (CONFLICTING/MERGEABLE/UNKNOWN) — not `mergeStateStatus` (DIRTY/CLEAN/...)
-      // ConflictRouter checks for exact string 'CONFLICTING'
       return { mergeState: data.mergeable ?? 'UNKNOWN', headSha: data.headRefOid ?? '' };
     };
 
     const { ConflictAutoExecutor } = await import('./infrastructure/email/ConflictAutoExecutor.js');
     const autoExecutor = new ConflictAutoExecutor({ log: app.log });
 
-    taskRunnerV2.register(
-      createConflictCheckTaskSpec({
-        taskStore,
-        checkMergeable,
-        conflictRouter,
-        invokeTrigger,
-        autoExecutor,
-        log: app.log,
-      }),
-    );
-
-    // F140: review-feedback with ReviewFeedbackRouter (KD-11 replaces review-comments)
-    // feedbackFilter created above — Rule A only post-E.2 cutover (self-authored skip)
-
-    // #798: fetchPaginated extracted to infrastructure/github/fetch-paginated.ts for testability
     const { fetchPaginated: fetchPaginatedFn } = await import('./infrastructure/github/fetch-paginated.js');
-    const fetchPaginated = (endpoint: string, sinceId?: number) => fetchPaginatedFn(endpoint, { sinceId });
+    const fetchPaginated = (endpoint: string, sinceId?: number) =>
+      fetchPaginatedFn(endpoint, { sinceId, ghToken: getGitHubToken() });
 
-    taskRunnerV2.register(createCiCdCheckTaskSpec({ taskStore, cicdRouter, invokeTrigger, log: app.log }));
+    const fetchPrMetadata = async (repo: string, pr: number) => {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      try {
+        const { stdout } = await execFileAsync(
+          'gh',
+          ['pr', 'view', String(pr), '-R', repo, '--json', 'headRefOid,state,mergedAt'],
+          getGitHubExecOptions(15_000),
+        );
+        const data = JSON.parse(stdout) as { headRefOid?: string; state?: string; mergedAt?: string | null };
+        const prState =
+          data.mergedAt || data.state === 'MERGED' ? 'merged' : data.state === 'CLOSED' ? 'closed' : 'open';
+        return { headSha: data.headRefOid ?? '', prState };
+      } catch (error) {
+        app.log.warn(
+          { repo, pr, err: error },
+          '[api] review-feedback metadata lookup failed; continuing without PR metadata',
+        );
+        return null;
+      }
+    };
 
-    taskRunnerV2.register(
-      createReviewFeedbackTaskSpec({
-        taskStore,
-        fetchPrMetadata: async (repo, pr) => {
-          const { execFile } = await import('node:child_process');
-          const { promisify } = await import('node:util');
-          const execFileAsync = promisify(execFile);
-          try {
-            const { stdout } = await execFileAsync(
-              'gh',
-              ['pr', 'view', String(pr), '-R', repo, '--json', 'headRefOid,state,mergedAt'],
-              { timeout: 15_000 },
-            );
-            const data = JSON.parse(stdout) as { headRefOid?: string; state?: string; mergedAt?: string | null };
-            const prState =
-              data.mergedAt || data.state === 'MERGED' ? 'merged' : data.state === 'CLOSED' ? 'closed' : 'open';
-            return { headSha: data.headRefOid ?? '', prState };
-          } catch (error) {
-            app.log.warn(
-              { repo, pr, err: error },
-              '[api] review-feedback metadata lookup failed; continuing without PR metadata',
-            );
-            return null;
-          }
-        },
-        fetchComments: async (repo, pr, sinceId) => {
-          const [reviewComments, issueComments] = await Promise.all([
-            fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
-            fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
-          ]);
-          return [...reviewComments, ...issueComments].map(
-            (c: {
-              id: number;
-              body: string;
-              created_at: string;
-              user?: { login: string };
-              commit_id?: string;
-              path?: string;
-              line?: number;
-              pull_request_review_id?: number;
-            }) => ({
-              id: c.id,
-              author: c.user?.login ?? 'unknown',
-              body: c.body,
-              createdAt: c.created_at,
-              ...(c.commit_id ? { commitId: c.commit_id } : {}),
-              commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
-              ...(c.path ? { filePath: c.path } : {}),
-              ...(c.line ? { line: c.line } : {}),
-            }),
-          );
-        },
-        fetchReviews: async (repo, pr, sinceId) => {
-          const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
-          return reviews.map(
-            (r: {
-              id: number;
-              user?: { login: string };
-              state: string;
-              body: string;
-              submitted_at: string;
-              commit_id?: string;
-            }) => ({
-              id: r.id,
-              author: r.user?.login ?? 'unknown',
-              state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
-              body: r.body,
-              submittedAt: r.submitted_at,
-              ...(r.commit_id ? { commitId: r.commit_id } : {}),
-            }),
-          );
-        },
-        reviewFeedbackRouter,
-        invokeTrigger,
-        log: app.log,
-        // F140 Phase E.2 cutover: Rule A only (self-authored skip). Authoritative bot
-        // review feedback is now delivered through this polling channel — Rule B dropped.
-        isEchoComment: (c) => feedbackFilter.shouldSkipComment(c),
-        isEchoReview: (r) => feedbackFilter.shouldSkipReview(r),
-        // F140 Phase E.1: bot setup-only conversation noise (polling-side)
-        isNoiseComment: setupNoiseFilter,
-      }),
-    );
-    app.log.info('[api] F139/F140: cicd-check, conflict-check, review-feedback specs registered');
-  }
+    const fetchComments = async (repo: string, pr: number, sinceId?: number) => {
+      await refreshGitHubSelfLogin();
+      const [reviewComments, issueComments] = await Promise.all([
+        fetchPaginated(`/repos/${repo}/pulls/${pr}/comments`, sinceId),
+        fetchPaginated(`/repos/${repo}/issues/${pr}/comments`, sinceId),
+      ]);
+      return [...reviewComments, ...issueComments].map(
+        (c: {
+          id: number;
+          body: string;
+          created_at: string;
+          user?: { login: string };
+          commit_id?: string;
+          path?: string;
+          line?: number;
+          pull_request_review_id?: number;
+        }) => ({
+          id: c.id,
+          author: c.user?.login ?? 'unknown',
+          body: c.body,
+          createdAt: c.created_at,
+          ...(c.commit_id ? { commitId: c.commit_id } : {}),
+          commentType: c.pull_request_review_id ? ('inline' as const) : ('conversation' as const),
+          ...(c.path ? { filePath: c.path } : {}),
+          ...(c.line ? { line: c.line } : {}),
+        }),
+      );
+    };
 
-  // F141 Phase B: Reconciliation scan —补偿 webhook 漏掉的 open PRs/Issues
-  {
-    const ghRepoAllowlist = process.env.GITHUB_REPO_ALLOWLIST;
-    const ghInboxCatId = process.env.GITHUB_REPO_INBOX_CAT_ID;
+    const fetchReviews = async (repo: string, pr: number, sinceId?: number) => {
+      await refreshGitHubSelfLogin();
+      const reviews = await fetchPaginated(`/repos/${repo}/pulls/${pr}/reviews`, sinceId);
+      return reviews.map(
+        (r: {
+          id: number;
+          user?: { login: string };
+          state: string;
+          body: string;
+          submitted_at: string;
+          commit_id?: string;
+        }) => ({
+          id: r.id,
+          author: r.user?.login ?? 'unknown',
+          state: r.state as 'APPROVED' | 'CHANGES_REQUESTED' | 'DISMISSED' | 'COMMENTED',
+          body: r.body,
+          submittedAt: r.submitted_at,
+          ...(r.commit_id ? { commitId: r.commit_id } : {}),
+        }),
+      );
+    };
+
+    // F202 Phase 2D: Issue comment fetchers (parallel to PR comment fetchers)
+    const fetchIssueComments = async (repoFullName: string, issueNumber: number, sinceId?: number) => {
+      await refreshGitHubSelfLogin();
+      const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, sinceId);
+      return comments.map((c: { id: number; body: string; created_at: string; user?: { login: string } }) => ({
+        id: c.id,
+        author: c.user?.login ?? 'unknown',
+        body: c.body,
+        createdAt: c.created_at,
+      }));
+    };
+
+    const fetchIssueState = async (repoFullName: string, issueNumber: number): Promise<'open' | 'closed'> => {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execFileAsync = promisify(execFile);
+      try {
+        const { stdout } = await execFileAsync(
+          'gh',
+          ['api', `/repos/${repoFullName}/issues/${issueNumber}`, '--jq', '.state'],
+          getGitHubExecOptions(15_000),
+        );
+        return stdout.trim() === 'closed' ? 'closed' : 'open';
+      } catch (error) {
+        app.log.warn({ repoFullName, issueNumber, err: error }, '[api] issue state lookup failed; assuming open');
+        return 'open';
+      }
+    };
+
+    // Repo-scan deps (conditional on env vars + redis)
+    const ghRepoAllowlist = getGitHubEnvValue('GITHUB_REPO_ALLOWLIST');
+    const ghInboxCatId = getGitHubEnvValue('GITHUB_REPO_INBOX_CAT_ID');
+    let repoScanDeps: Record<string, unknown> = {};
 
     if (ghRepoAllowlist && ghInboxCatId && redisClient) {
-      const { createRepoScanTaskSpec } = await import(
-        './infrastructure/connectors/github-repo-event/RepoScanTaskSpec.js'
-      );
       const { ReconciliationDedup } = await import(
         './infrastructure/connectors/github-repo-event/ReconciliationDedup.js'
       );
@@ -2905,13 +3158,11 @@ async function main(): Promise<void> {
         redisClient as import('./infrastructure/connectors/github-repo-event/ReconciliationDedup.js').ReconciliationRedisLike,
       );
 
-      const allowlist = ghRepoAllowlist.split(',').map((r: string) => r.trim());
-
       const fetchGhApi = async (args: string[]): Promise<string> => {
         const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
         const execFileAsync = promisify(execFile);
-        const { stdout } = await execFileAsync('gh', args, { timeout: 30_000 });
+        const { stdout } = await execFileAsync('gh', args, getGitHubExecOptions(30_000));
         return stdout;
       };
 
@@ -2948,22 +3199,44 @@ async function main(): Promise<void> {
       const { getOwnerUserId } = await import('./config/cat-config-loader.js');
       const effectiveUserId = getOwnerUserId();
 
-      taskRunnerV2.register(
-        createRepoScanTaskSpec({
-          repoAllowlist: allowlist,
-          inboxCatId: ghInboxCatId,
-          defaultUserId: effectiveUserId,
-          reconciliationDedup,
-          bindingStore: new RedisConnectorThreadBindingStore(redisClient),
-          deliverFn: deliverConnectorMessage,
-          deliveryDeps: { messageStore, socketManager },
-          invokeTrigger,
-          fetchOpenPRs,
-          fetchOpenIssues,
-          log: app.log,
-        }),
-      );
-      app.log.info('[api] F141 Phase B: repo-scan spec registered');
+      repoScanDeps = {
+        repoAllowlist: ghRepoAllowlist.split(',').map((r: string) => r.trim()),
+        inboxCatId: ghInboxCatId,
+        defaultUserId: effectiveUserId,
+        reconciliationDedup,
+        bindingStore: new RedisConnectorThreadBindingStore(redisClient),
+        deliverFn: deliverConnectorMessage,
+        deliveryDeps: { messageStore, socketManager },
+        fetchOpenPRs,
+        fetchOpenIssues,
+      };
+    }
+
+    // F202-2B: Populate factory deps + rehydrate schedule resources via plugin framework
+    if (rehydrateGitHubSchedules) {
+      await rehydrateGitHubSchedules({
+        taskStore,
+        cicdRouter,
+        fetchPrStatus: (repo: string, pr: number) => fetchPrCiStatus(repo, pr, app.log, { ghToken: getGitHubToken() }),
+        conflictRouter,
+        reviewFeedbackRouter,
+        invokeTrigger,
+        checkMergeable,
+        autoExecutor,
+        fetchPrMetadata,
+        fetchComments,
+        fetchReviews,
+        isEchoComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
+        isEchoReview: (r: { author: string }) => feedbackFilter.shouldSkipReview(r),
+        isNoiseComment: setupNoiseFilter,
+        // F202 Phase 2D: issue comment tracking deps
+        issueCommentRouter,
+        fetchIssueComments,
+        fetchIssueState,
+        isEchoIssueComment: (c: { author: string }) => feedbackFilter.shouldSkipComment(c),
+        ...repoScanDeps,
+      });
+      app.log.info('[api] F202-2B: GitHub schedule resources rehydrated via plugin framework');
     }
   }
 

@@ -4,10 +4,15 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { buildGhCliEnv } from '../github/gh-cli-env.js';
 import type { CiBucket, CiCheckDetail, CiPollResult } from './CiCdRouter.js';
 
 const execFileAsync = promisify(execFile);
 const GH_TIMEOUT_MS = 15_000;
+
+export interface FetchPrCiStatusOptions {
+  readonly ghToken?: string;
+}
 
 type MinimalLog = {
   warn: (...args: unknown[]) => void;
@@ -18,13 +23,14 @@ export async function fetchPrCiStatus(
   repoFullName: string,
   prNumber: number,
   log: MinimalLog,
+  options: FetchPrCiStatusOptions = {},
 ): Promise<CiPollResult | null> {
   let prViewJson: string;
   try {
     const { stdout } = await execFileAsync(
       'gh',
       ['pr', 'view', String(prNumber), '-R', repoFullName, '--json', 'headRefOid,state,mergedAt,statusCheckRollup'],
-      { timeout: GH_TIMEOUT_MS },
+      { timeout: GH_TIMEOUT_MS, env: buildGhCliEnv({ token: options.ghToken }) },
     );
     prViewJson = stdout;
   } catch (err) {
@@ -55,13 +61,18 @@ export async function fetchPrCiStatus(
 
   let checks: CiCheckDetail[] = [];
   if (aggregateBucket !== 'pending') {
-    checks = await fetchCheckDetails(repoFullName, prNumber, log);
+    checks = await fetchCheckDetails(repoFullName, prNumber, log, options);
   }
 
   return { repoFullName, prNumber, headSha: prView.headRefOid, prState, aggregateBucket, checks };
 }
 
-async function fetchCheckDetails(repoFullName: string, prNumber: number, log: MinimalLog): Promise<CiCheckDetail[]> {
+async function fetchCheckDetails(
+  repoFullName: string,
+  prNumber: number,
+  log: MinimalLog,
+  options: FetchPrCiStatusOptions,
+): Promise<CiCheckDetail[]> {
   for (const requiredFlag of ['--required', '']) {
     try {
       const args = [
@@ -75,7 +86,10 @@ async function fetchCheckDetails(repoFullName: string, prNumber: number, log: Mi
       ];
       if (requiredFlag) args.push(requiredFlag);
 
-      const { stdout } = await execFileAsync('gh', args, { timeout: GH_TIMEOUT_MS });
+      const { stdout } = await execFileAsync('gh', args, {
+        timeout: GH_TIMEOUT_MS,
+        env: buildGhCliEnv({ token: options.ghToken }),
+      });
       const parsed: Array<{ name: string; bucket: string; link?: string; workflow?: string; description?: string }> =
         JSON.parse(stdout);
 

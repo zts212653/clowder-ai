@@ -149,6 +149,33 @@ describe('ApiFetcher', () => {
     }
   });
 
+  it('injects provided GitHub token resolver for api.github.com URLs', async () => {
+    const originalPat = process.env.GITHUB_MCP_PAT;
+    delete process.env.GITHUB_MCP_PAT;
+    try {
+      let capturedHeaders;
+      const fetcher = new ApiFetcher(
+        async (_url, options) => {
+          capturedHeaders = options?.headers;
+          return createJsonResponse([]);
+        },
+        { getGitHubPat: () => 'plugin-config-token' },
+      );
+
+      await fetcher.fetch(createSource());
+
+      assert.ok(capturedHeaders, 'headers must be passed to fetch');
+      assert.equal(capturedHeaders.Authorization, 'Bearer plugin-config-token');
+      assert.equal(process.env.GITHUB_MCP_PAT, undefined, 'plugin resolver must not mutate process.env');
+    } finally {
+      if (originalPat === undefined) {
+        delete process.env.GITHUB_MCP_PAT;
+      } else {
+        process.env.GITHUB_MCP_PAT = originalPat;
+      }
+    }
+  });
+
   it('does NOT inject PAT for lookalike GitHub URLs (hostname spoofing)', async () => {
     const originalPat = process.env.GITHUB_MCP_PAT;
     process.env.GITHUB_MCP_PAT = 'ghp_test_token_123';

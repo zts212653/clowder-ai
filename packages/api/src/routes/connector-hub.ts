@@ -260,30 +260,8 @@ export const CONNECTOR_PLATFORMS: PlatformDef[] = [
       { text: '授权成功后自动连接，无需重启服务' },
     ],
   },
-  {
-    id: 'github',
-    name: 'GitHub',
-    nameEn: 'GitHub',
-    fields: [
-      { envName: 'GITHUB_TOKEN', label: 'Personal Access Token', sensitive: true },
-      {
-        envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-        label: 'Noise 过滤 Bot 列表',
-        sensitive: false,
-        optional: true,
-        defaultValue: 'chatgpt-codex-connector[bot]',
-        restartRequired: true,
-      },
-      { envName: 'GITHUB_MCP_PAT', label: 'MCP 专用 Token', sensitive: true, optional: true },
-    ],
-    docsUrl:
-      'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens',
-    steps: [
-      { text: '创建 GitHub Personal Access Token（需 repo + notifications 权限）' },
-      { text: '填写 Token 后自动启用 PR Tracking、Review Router、CI/CD Monitor' },
-      { text: '可选：配置 Noise 过滤 Bot 列表以减少 setup-only 评论噪音' },
-    ],
-  },
+  // F202-2B: GitHub moved to plugin framework (plugins/github/plugin.yaml).
+  // Config managed via plugin-config-store, not connector-hub.
 ];
 
 /** Mask a sensitive value: show only that it is set, no suffix. Aligns with env-registry *** policy. */

@@ -48,8 +48,8 @@ export interface CatCapabilityOverride {
 export interface CapabilityEntry {
   /** Unique capability ID (usually MCP server name) */
   id: string;
-  /** Type of capability (F126: 'limb' for device/hardware nodes) */
-  type: 'mcp' | 'skill' | 'limb';
+  /** Type of capability (F126: 'limb' for device/hardware nodes; F202 Phase 2: 'schedule' for plugin-managed tasks) */
+  type: 'mcp' | 'skill' | 'limb' | 'schedule';
   /** Global enabled state */
   enabled: boolean;
   /** Per-cat overrides (only stores differences from global) */
@@ -68,6 +68,8 @@ export interface CapabilityEntry {
   pluginId?: string;
   /** F202: Limb node ID (for type: 'limb') — enables deregistration when YAML is unreadable */
   limbNodeId?: string;
+  /** F202 Phase 2: Runtime task ID assigned by TaskRunnerV2 (schedule resources only) */
+  scheduleTaskId?: string;
 }
 
 /** Sanitized MCP server details included in the capability board payload. */

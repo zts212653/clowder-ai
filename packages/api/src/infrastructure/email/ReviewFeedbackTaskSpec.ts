@@ -53,6 +53,12 @@ export interface ReviewFeedbackTaskSpecOptions {
    * Both predicates return `skip` — OR'd together in gate().
    */
   readonly isNoiseComment?: (comment: PrFeedbackComment) => boolean;
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
+  readonly id?: string;
+}
+
+function resolveCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
+  return Math.max(memoryCursor ?? 0, persistedCursor ?? 0);
 }
 
 export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions): TaskSpec_P1<ReviewFeedbackSignal> {
@@ -103,7 +109,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
   }
 
   return {
-    id: 'review-feedback',
+    id: opts.id ?? 'review-feedback',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
@@ -130,9 +136,17 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               continue;
             }
 
-            // #406: Seed from persisted automationState.review on first access (survives restart)
-            const commentCursor = commentCursors.get(prKey) ?? task.automationState?.review?.lastCommentCursor ?? 0;
-            const reviewCursor = reviewCursors.get(prKey) ?? task.automationState?.review?.lastDecisionCursor ?? 0;
+            // #406: Seed from persisted automationState.review on first access (survives restart).
+            // Cursor sources are monotonic: re-registration may reseed persisted state
+            // while a long-lived poller still has an older in-memory value.
+            const commentCursor = resolveCursor(
+              commentCursors.get(prKey),
+              task.automationState?.review?.lastCommentCursor,
+            );
+            const reviewCursor = resolveCursor(
+              reviewCursors.get(prKey),
+              task.automationState?.review?.lastDecisionCursor,
+            );
 
             // #798: Pass cursor to fetch for per-page client-side filtering (eliminates maxBuffer crash)
             const [comments, reviews] = await Promise.all([
@@ -209,6 +223,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             threadId: task.threadId,
             catId: task.ownerCatId ?? '',
             userId: task.userId ?? '',
+            trackingInstructions: task.automationState?.trackingInstructions,
           },
         );
 

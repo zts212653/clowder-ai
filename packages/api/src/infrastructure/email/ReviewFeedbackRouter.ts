@@ -60,13 +60,13 @@ export class ReviewFeedbackRouter {
 
   async route(
     signal: ReviewFeedbackSignal,
-    tracking: { threadId: string; catId: string; userId: string },
+    tracking: { threadId: string; catId: string; userId: string; trackingInstructions?: string },
   ): Promise<ReviewFeedbackRouteResult> {
     if (signal.newComments.length === 0 && signal.newDecisions.length === 0) {
       return { kind: 'skipped', reason: 'no new feedback' };
     }
 
-    const content = buildReviewFeedbackContent(signal);
+    const content = buildReviewFeedbackContent(signal, tracking.trackingInstructions);
 
     const source: ConnectorSource = {
       connector: 'github-review-feedback',
@@ -100,7 +100,7 @@ export class ReviewFeedbackRouter {
 
 // ── Message Formatting (OQ-2: three-section aggregation) ───────────
 
-export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string {
+export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackingInstructions?: string): string {
   const lines: string[] = [];
 
   // F140 Phase E.1: prepend severity header when comments/decisions contain
@@ -118,7 +118,10 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string
     lines.push('', '--- Review Decisions ---');
     for (const d of signal.newDecisions) {
       const emoji = decisionEmoji(d.state);
-      const bodySnippet = d.body ? ` — ${d.body.slice(0, 120)}` : '';
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted
+      const bodySnippet = d.body
+        ? ` — [UNTRUSTED EXTERNAL CONTENT] ${d.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`
+        : '';
       lines.push(`${emoji} **${d.author}**: ${d.state}${bodySnippet}`);
     }
   }
@@ -129,7 +132,8 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string
     lines.push('', `--- Inline Comments (${inline.length}) ---`);
     for (const c of inline) {
       const location = c.filePath ? `\`${c.filePath}${c.line ? `:${c.line}` : ''}\`` : '';
-      const bodySnippet = c.body.slice(0, 120);
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
+      const bodySnippet = `[UNTRUSTED EXTERNAL CONTENT] ${c.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`;
       lines.push(`💬 **${c.author}** ${location}: ${bodySnippet}`);
     }
   }
@@ -139,7 +143,8 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string
   if (conversation.length > 0) {
     lines.push('', `--- PR Conversation (${conversation.length}) ---`);
     for (const c of conversation) {
-      const bodySnippet = c.body.slice(0, 120);
+      // F202 Phase 2C (AC-C4): wrap external content as untrusted — flatten newlines to prevent escape
+      const bodySnippet = `[UNTRUSTED EXTERNAL CONTENT] ${c.body.slice(0, 120).replace(/[\r\n]+/g, ' ')}`;
       lines.push(`💬 **${c.author}**: ${bodySnippet}`);
     }
   }
@@ -156,6 +161,11 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal): string
     lines.push('- 操作: PR 已被批准，检查 CI 和冲突状态，准备 merge');
   } else {
     lines.push('- 操作: 阅读评论内容，需要回复则回复，需要修改则按 `receive-review` 模式处理');
+  }
+
+  // F202 Phase 2C (AC-C2): append user-provided tracking instructions
+  if (trackingInstructions) {
+    lines.push('', '📌 **Tracking Instructions**', trackingInstructions);
   }
 
   return lines.join('\n');

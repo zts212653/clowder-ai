@@ -29,6 +29,8 @@ export interface ConflictCheckTaskSpecOptions {
     warn: (...args: unknown[]) => void;
   };
   readonly pollIntervalMs?: number;
+  /** F202-2B: Override task ID for plugin-scoped schedule instances */
+  readonly id?: string;
 }
 
 interface ConflictWorkItem {
@@ -38,7 +40,7 @@ interface ConflictWorkItem {
 
 export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions): TaskSpec_P1<ConflictWorkItem> {
   return {
-    id: 'conflict-check',
+    id: opts.id ?? 'conflict-check',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 5 * 60 * 1000 },
     admission: {

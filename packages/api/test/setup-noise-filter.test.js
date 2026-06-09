@@ -124,3 +124,49 @@ test('setup-noise: bot without setup sentence (other content) → false', () => 
     false,
   );
 });
+
+// ── P2-3: Dynamic bot login resolution (thunk) ──────────────────────
+
+test('setup-noise: thunk — reflects runtime bot login changes (P2-3)', () => {
+  const currentBots = ['bot-a'];
+  const filter = createSetupNoiseFilter(() => [...currentBots]);
+
+  const setupBody = 'To use Codex here, create an environment for this repo.';
+
+  // Initially bot-a is in the list
+  assert.equal(
+    filter({ author: 'bot-a', body: setupBody, commentType: 'conversation' }),
+    true,
+    'bot-a should match initially',
+  );
+
+  // Runtime change: remove bot-a, add bot-b
+  currentBots.length = 0;
+  currentBots.push('bot-b');
+
+  // After change: bot-a should no longer match
+  assert.equal(
+    filter({ author: 'bot-a', body: setupBody, commentType: 'conversation' }),
+    false,
+    'bot-a should NOT match after runtime removal',
+  );
+
+  // bot-b should now match
+  assert.equal(
+    filter({ author: 'bot-b', body: setupBody, commentType: 'conversation' }),
+    true,
+    'bot-b should match after runtime addition',
+  );
+});
+
+test('setup-noise: static array still works (backward compat)', () => {
+  const filter = createSetupNoiseFilter(['static-bot']);
+  assert.equal(
+    filter({
+      author: 'static-bot',
+      body: 'To use Codex here, create an environment for this repo.',
+      commentType: 'conversation',
+    }),
+    true,
+  );
+});

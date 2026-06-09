@@ -7,6 +7,7 @@
  */
 
 import type { AutomationState, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
+import { isTrackingKind } from '@cat-cafe/shared';
 import { generateSortableId } from './MessageStore.js';
 
 const MAX_TASKS = 500;
@@ -43,6 +44,22 @@ export function isSubjectOwnershipConflictError(
     error !== null &&
     'code' in error &&
     (error as { code?: string }).code === SUBJECT_OWNERSHIP_CONFLICT_CODE
+  );
+}
+
+export function assertSubjectUpdateOwnership(
+  subjectKey: string,
+  existing: Pick<TaskItem, 'threadId' | 'userId'>,
+  input: Pick<CreateTaskInput, 'threadId' | 'userId'>,
+): void {
+  if (existing.userId && input.userId && existing.userId === input.userId) return;
+  if (!existing.userId && input.userId && existing.threadId === input.threadId) return;
+  if (!existing.userId && !input.userId) return;
+
+  throw createSubjectOwnershipConflict(
+    subjectKey,
+    existing.userId ?? `thread:${existing.threadId}`,
+    input.userId ?? `thread:${input.threadId}`,
   );
 }
 
@@ -137,18 +154,18 @@ export class TaskStore implements ITaskStore {
     if (existingId) {
       const existing = this.tasks.get(existingId);
       if (existing) {
-        if (existing.userId && input.userId && existing.userId !== input.userId) {
-          throw createSubjectOwnershipConflict(sk, existing.userId, input.userId);
-        }
+        assertSubjectUpdateOwnership(sk, existing, input);
         const updated: TaskItem = {
           ...existing,
           threadId: input.threadId,
           title: input.title,
           ownerCatId: input.ownerCatId ?? existing.ownerCatId,
-          status: existing.kind === 'pr_tracking' && existing.status === 'done' ? 'todo' : existing.status,
+          status: isTrackingKind(existing.kind) && existing.status === 'done' ? 'todo' : existing.status,
           why: input.why,
           userId: input.userId ?? existing.userId,
-          automationState: input.automationState ?? existing.automationState,
+          automationState: input.automationState
+            ? this.mergeAutomationState(existing.automationState, input.automationState)
+            : existing.automationState,
           updatedAt: Date.now(),
         };
         this.tasks.set(existingId, updated);
@@ -174,25 +191,28 @@ export class TaskStore implements ITaskStore {
     const existing = this.tasks.get(taskId);
     if (!existing) return null;
 
-    const merged: AutomationState = {
-      ...existing.automationState,
-      ...patch,
-      ci: patch.ci ? { ...existing.automationState?.ci, ...patch.ci } : existing.automationState?.ci,
-      conflict: patch.conflict
-        ? { ...existing.automationState?.conflict, ...patch.conflict }
-        : existing.automationState?.conflict,
-      review: patch.review
-        ? { ...existing.automationState?.review, ...patch.review }
-        : existing.automationState?.review,
-    };
-
     const updated: TaskItem = {
       ...existing,
-      automationState: merged,
+      automationState: this.mergeAutomationState(existing.automationState, patch),
       updatedAt: Date.now(),
     };
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  /** Shallow-merge automation state preserving sub-object cursors (ci/review/conflict/issue). */
+  private mergeAutomationState(
+    existing: AutomationState | undefined,
+    patch: Partial<AutomationState>,
+  ): AutomationState {
+    return {
+      ...existing,
+      ...patch,
+      ci: patch.ci ? { ...existing?.ci, ...patch.ci } : existing?.ci,
+      conflict: patch.conflict ? { ...existing?.conflict, ...patch.conflict } : existing?.conflict,
+      review: patch.review ? { ...existing?.review, ...patch.review } : existing?.review,
+      issue: patch.issue ? { ...existing?.issue, ...patch.issue } : existing?.issue,
+    };
   }
 
   update(taskId: string, input: UpdateTaskInput): TaskItem | null {
@@ -276,6 +296,6 @@ export class TaskStore implements ITaskStore {
   }
 
   private isProtectedFromFallbackEviction(task: TaskItem): boolean {
-    return task.kind === 'pr_tracking' && task.status !== 'done';
+    return isTrackingKind(task.kind) && task.status !== 'done';
   }
 }

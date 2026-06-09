@@ -87,6 +87,7 @@ function addSubjectKeyWithAliases(target: Set<string>, subjectKey: string): void
   target.add(subjectKey);
   if (subjectKey.startsWith('pr:')) target.add(`pr-${subjectKey.slice(3)}`);
   if (subjectKey.startsWith('pr-')) target.add(`pr:${subjectKey.slice(3)}`);
+  // F202 Phase 2D: issue subject keys have no legacy alias format
 }
 
 type DeliveryThreadResolutionCode = 'STALE_INVOCATION';
@@ -180,6 +181,8 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       if (t.subjectKey.startsWith('pr:') || t.subjectKey.startsWith('pr-')) activeThreadSubjectKinds.add('pr');
       else if (t.subjectKey.startsWith('thread:') || t.subjectKey.startsWith('thread-')) {
         activeThreadSubjectKinds.add('thread');
+      } else if (t.subjectKey.startsWith('issue:')) {
+        activeThreadSubjectKinds.add('issue');
       }
     }
     // Also match thread-prefixed subject keys (dynamic/thread-scoped tasks)
