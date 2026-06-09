@@ -34,10 +34,51 @@ const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
 // startup via warmL0Cache() and invalidated on hot-reload via clearL0Cache().
 const l0Cache = new Map<string, string>();
 
+// In-flight Promise dedup — Phase G AC-G10 (砚砚 Design Gate position 1).
+// Without this, two concurrent calls on a cold cache (e.g. invoke provider
+// + Prompt X-Ray capture inside the same invocation hot path) both spawn
+// subprocesses. The dedup map collapses concurrent compiles onto a single
+// subprocess invocation; the in-flight entry is removed once the Promise
+// settles, after which the result is in l0Cache for any subsequent reads.
+const l0InflightPromises = new Map<string, Promise<string>>();
+const l0CacheGenerations = new Map<string, number>();
+let l0GlobalGeneration = 0;
+
+function bumpL0Generation(catId?: string): void {
+  if (catId) {
+    l0CacheGenerations.set(catId, (l0CacheGenerations.get(catId) ?? 0) + 1);
+    return;
+  }
+  l0GlobalGeneration += 1;
+  l0CacheGenerations.clear();
+}
+
+function getL0Generation(catId: string): { global: number; cat: number } {
+  return {
+    global: l0GlobalGeneration,
+    cat: l0CacheGenerations.get(catId) ?? 0,
+  };
+}
+
+function isL0GenerationCurrent(catId: string, generation: { global: number; cat: number }): boolean {
+  const current = getL0Generation(catId);
+  return current.global === generation.global && current.cat === generation.cat;
+}
+
 /** Clear cached L0 for one cat or all cats (call on hot-reload / re-sync). */
 export function clearL0Cache(catId?: string): void {
-  if (catId) l0Cache.delete(catId);
-  else l0Cache.clear();
+  if (catId) {
+    l0Cache.delete(catId);
+    bumpL0Generation(catId);
+    // Also drop any in-flight promise — next call will re-spawn fresh. The
+    // generation guard prevents the older promise from repopulating l0Cache
+    // when it eventually resolves after this clear.
+    l0InflightPromises.delete(catId);
+  } else {
+    l0Cache.clear();
+    bumpL0Generation();
+    l0InflightPromises.clear();
+  }
 }
 
 /** Number of cached entries (test/diagnostic). */
@@ -130,7 +171,7 @@ export interface CompileL0Options {
  *   exits non-zero, or produces empty output (fail-closed).
  */
 export async function compileL0ViaSubprocess(options: CompileL0Options): Promise<string> {
-  const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
+  const { catId, outPath } = options;
 
   // Cache hit — skip subprocess entirely
   const cached = l0Cache.get(catId);
@@ -139,6 +180,41 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
     return cached;
   }
 
+  // In-flight dedup — collapse concurrent cold-cache callers onto a single
+  // subprocess. The first caller installs the Promise; subsequent callers
+  // await the same one. Per-call `outPath` is honored: any caller that
+  // passed `outPath` writes the resolved L0 to that path before returning.
+  // Phase G AC-G10 — see comment block at l0InflightPromises declaration.
+  const inflight = l0InflightPromises.get(catId);
+  if (inflight) {
+    const result = await inflight;
+    if (outPath) writeFileSync(outPath, result, 'utf8');
+    return result;
+  }
+
+  const compileGeneration = getL0Generation(catId);
+  const compilePromise = doCompileL0(options, compileGeneration);
+  l0InflightPromises.set(catId, compilePromise);
+  try {
+    return await compilePromise;
+  } finally {
+    // Always clean up the in-flight entry once settled — subsequent calls
+    // will read from l0Cache (on success) or re-attempt (on failure).
+    if (l0InflightPromises.get(catId) === compilePromise) {
+      l0InflightPromises.delete(catId);
+    }
+  }
+}
+
+/**
+ * Internal compile path — separated from `compileL0ViaSubprocess` so the
+ * in-flight dedup wrapper can install the Promise without recursing.
+ */
+async function doCompileL0(
+  options: CompileL0Options,
+  compileGeneration: { global: number; cat: number },
+): Promise<string> {
+  const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   if (!scriptPath) {
     throw new Error(
@@ -189,6 +265,8 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
     }
   }
 
-  l0Cache.set(catId, result);
+  if (isL0GenerationCurrent(catId, compileGeneration)) {
+    l0Cache.set(catId, result);
+  }
   return result;
 }

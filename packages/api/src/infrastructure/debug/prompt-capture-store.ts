@@ -32,6 +32,13 @@ export interface PromptCapture {
   model: string;
   capturedAt: number;
 
+  /**
+   * The message-system / pack prompt fed via the user-message channel.
+   * For non-F203 providers (Gemini, DARE, etc.) this is the full system prompt.
+   * For F203 native providers (Claude / Codex) this is the pack appendix
+   * delivered via `--append-system-prompt` / message body — the real system
+   * role content lives in `nativeSystemPrompt`.
+   */
   systemPrompt: string;
   missionPrefix?: string;
   userPrompt: string;
@@ -41,11 +48,57 @@ export interface PromptCapture {
     isResume: boolean;
     canSkipOnResume: boolean;
     forceReinjection: boolean;
+    /**
+     * Whether the message-system prompt was injected this turn. Note: this
+     * field describes the `systemPrompt` (pack/message-system) path only. It
+     * is NOT the truth source for whether a native L0 was sent — F203
+     * providers always inject L0 via native channel regardless of this flag.
+     * See `nativeSystemPrompt` for native channel truth.
+     */
     injected: boolean;
   };
 
   promptBytes: number;
+  /**
+   * Approximate token count for the message-channel content
+   * (`effectivePrompt`). Backward-compatible field — pre-AC-G10 captures
+   * carry only this estimate, which sometimes under-counted F203 providers
+   * because the native L0 was not visible.
+   */
   tokenEstimate: number;
+
+  // ── AC-G10 (Phase G native L0 closure / KD-44) ────────────────────
+  /**
+   * The compiled L0 system prompt delivered via the provider's native
+   * system-role channel — Claude `--system-prompt-file <l0Path>` or Codex
+   * `-c developer_instructions=<l0_toml>`. Absent for providers that do not
+   * inject L0 natively (Gemini, DARE, CatAgent etc.). Captured best-effort:
+   * if the L0 compile lookup fails at capture time, this field stays
+   * `undefined` and a `captureDiagnostics` entry records the reason — the
+   * invocation hot path is never blocked.
+   */
+  nativeSystemPrompt?: string;
+  /**
+   * Source tag for `nativeSystemPrompt`. Only one source today (`f203-l0`
+   * via `compileL0ViaSubprocess`); future native-injection sources can
+   * declare themselves here without breaking Hub UI rendering.
+   */
+  nativeSystemPromptSource?: 'f203-l0';
+  /** Approximate token count for `nativeSystemPrompt` (when present). */
+  nativeSystemTokenEstimate?: number;
+  /**
+   * Sum of `tokenEstimate + nativeSystemTokenEstimate`. Hub uses this to
+   * report the true on-wire prompt size for F203 providers (pre-AC-G10
+   * Hub reported only `tokenEstimate` and silently under-counted). When
+   * `nativeSystemPrompt` is absent this equals `tokenEstimate`.
+   */
+  totalTokenEstimate?: number;
+  /**
+   * Best-effort diagnostic notes from the capture pipeline (e.g. native L0
+   * fetch failure). Never thrown — always recorded for Hub debug surface.
+   * Absent / empty when capture ran cleanly.
+   */
+  captureDiagnostics?: readonly string[];
 }
 
 export interface CaptureIndexEntry {

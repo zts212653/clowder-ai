@@ -184,3 +184,102 @@ test('L0 template includes limb tool quick index', () => {
   assert.match(content, /limb_list_available/, 'L0 template must mention limb_list_available');
   assert.match(content, /limb_invoke/, 'L0 template must mention limb_invoke');
 });
+
+// --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---
+
+test('AC-G10: concurrent cold-cache compileL0ViaSubprocess calls collapse to single spawn (in-flight dedup)', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  // Slow fake spawn — emits stdout + close after a microtask delay so two
+  // concurrent callers can both reach the in-flight check before settle.
+  function buildSlowSpawn(stdoutPayload) {
+    const fn = function fakeSpawn(cmd, args, opts) {
+      fn.calls.push({ cmd, args, opts });
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      // Two-tick delay so the second caller installs await before close.
+      setImmediate(() => {
+        setImmediate(() => {
+          child.stdout.emit('data', Buffer.from(stdoutPayload));
+          child.emit('close', 0);
+        });
+      });
+      return child;
+    };
+    fn.calls = [];
+    return fn;
+  }
+  const spawnFn = buildSlowSpawn('DEDUP-L0-OUTPUT');
+  const [out1, out2, out3] = await Promise.all([
+    compileL0ViaSubprocess({ catId: 'dedup-cat', cwd: root, spawnFn }),
+    compileL0ViaSubprocess({ catId: 'dedup-cat', cwd: root, spawnFn }),
+    compileL0ViaSubprocess({ catId: 'dedup-cat', cwd: root, spawnFn }),
+  ]);
+  assert.equal(out1, 'DEDUP-L0-OUTPUT');
+  assert.equal(out2, 'DEDUP-L0-OUTPUT');
+  assert.equal(out3, 'DEDUP-L0-OUTPUT');
+  assert.equal(spawnFn.calls.length, 1, 'three concurrent cold-cache calls must share one subprocess invocation');
+});
+
+test('AC-G10: post-dedup the cache holds result — subsequent calls do not respawn', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const spawnFn = buildFakeSpawn({ stdout: 'CACHED-AFTER-DEDUP' });
+  // Pair of concurrent calls — installs cache after settle.
+  await Promise.all([
+    compileL0ViaSubprocess({ catId: 'post-dedup-cat', cwd: root, spawnFn }),
+    compileL0ViaSubprocess({ catId: 'post-dedup-cat', cwd: root, spawnFn }),
+  ]);
+  assert.equal(spawnFn.calls.length, 1);
+  // Third call sequentially — must hit cache, not spawn again.
+  const result = await compileL0ViaSubprocess({ catId: 'post-dedup-cat', cwd: root, spawnFn });
+  assert.equal(result, 'CACHED-AFTER-DEDUP');
+  assert.equal(spawnFn.calls.length, 1, 'cache hit after dedup must skip subprocess');
+});
+
+test('AC-G10: in-flight failure does not poison cache — next call may retry', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  // First spawn fails with non-zero exit.
+  const failingSpawn = buildFakeSpawn({ stderr: 'first call fails', exitCode: 2 });
+  await assert.rejects(
+    () => compileL0ViaSubprocess({ catId: 'retry-cat', cwd: root, spawnFn: failingSpawn }),
+    /retry-cat|exit|2/,
+  );
+  // Second spawn succeeds — confirms cache was not populated by the failure.
+  const goodSpawn = buildFakeSpawn({ stdout: 'RECOVERED-L0' });
+  const out = await compileL0ViaSubprocess({ catId: 'retry-cat', cwd: root, spawnFn: goodSpawn });
+  assert.equal(out, 'RECOVERED-L0');
+  assert.equal(goodSpawn.calls.length, 1);
+});
+
+test('AC-G10: clearL0Cache during in-flight compile prevents stale result from repopulating cache', async () => {
+  clearL0Cache();
+  const root = seedRepoRoot();
+  const pending = [];
+  const controlledSpawn = function fakeSpawn(cmd, args, opts) {
+    controlledSpawn.calls.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    pending.push(child);
+    return child;
+  };
+  controlledSpawn.calls = [];
+
+  const oldCompile = compileL0ViaSubprocess({ catId: 'clear-race-cat', cwd: root, spawnFn: controlledSpawn });
+  assert.equal(controlledSpawn.calls.length, 1);
+  assert.equal(pending.length, 1);
+
+  clearL0Cache('clear-race-cat');
+
+  pending[0].stdout.emit('data', Buffer.from('STALE-L0'));
+  pending[0].emit('close', 0);
+  assert.equal(await oldCompile, 'STALE-L0', 'the already-started caller still receives its own compile result');
+
+  const freshSpawn = buildFakeSpawn({ stdout: 'FRESH-L0' });
+  const out = await compileL0ViaSubprocess({ catId: 'clear-race-cat', cwd: root, spawnFn: freshSpawn });
+  assert.equal(out, 'FRESH-L0');
+  assert.equal(freshSpawn.calls.length, 1, 'post-clear caller must respawn instead of reading stale cache');
+});

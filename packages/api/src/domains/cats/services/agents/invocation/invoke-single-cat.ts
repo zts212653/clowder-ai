@@ -1545,6 +1545,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       userPrompt: prompt,
       effectivePrompt,
       injectionDecision: { isResume, canSkipOnResume, forceReinjection, injected: injectSystemPrompt },
+      // AC-G10 (Phase G native L0 closure / KD-44): if this provider injects
+      // L0 via a native system-role channel (Claude `--system-prompt-file` /
+      // Codex `-c developer_instructions=`), the bridge will best-effort
+      // fetch the compiled L0 and stamp it onto `nativeSystemPrompt`. Hot
+      // path stays non-blocking — the bridge handles fetch async + fail-safe
+      // (see comment block in prompt-capture-bridge.ts).
+      nativeL0Provider: service.injectsL0Natively?.() ?? false,
     });
 
     // F089 Phase 2+3: Create tmux spawn override for agent-in-pane execution
