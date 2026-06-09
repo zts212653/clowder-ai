@@ -1921,7 +1921,9 @@ async function main(): Promise<void> {
         );
         if (pendingPromotion.changed) {
           await writeCapabilitiesConfig(root, pendingPromotion.config);
-          app.log.info('[api] F202-2B migration: enabled pending GitHub repo-scan schedule after deps became available');
+          app.log.info(
+            '[api] F202-2B migration: enabled pending GitHub repo-scan schedule after deps became available',
+          );
         }
       }
 
