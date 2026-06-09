@@ -54,6 +54,11 @@ import {
 import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
 import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
+import {
+  ManagedSkillWritebackConflictError,
+  mountManagedSkillSymlinks,
+  unmountManagedSkillSymlinks,
+} from '../utils/managed-skill-writeback.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -996,6 +1001,30 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         if (body.enabled === cap.enabled) {
           cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
           if (cap.overrides.length === 0) delete cap.overrides;
+        }
+      }
+
+      if (body.scope === 'global' && cap.type === 'skill' && cap.source === 'cat-cafe') {
+        try {
+          const disabledSkillNames = config.capabilities
+            .filter(
+              (entry) => entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId && !entry.enabled,
+            )
+            .map((entry) => entry.id);
+
+          if (body.enabled) {
+            await mountManagedSkillSymlinks(projectRoot, cap.id, CAT_CAFE_SKILLS_SRC, { disabledSkillNames });
+          } else {
+            await unmountManagedSkillSymlinks(projectRoot, cap.id, CAT_CAFE_SKILLS_SRC, {
+              disabledSkillNames,
+            });
+          }
+        } catch (err) {
+          if (err instanceof ManagedSkillWritebackConflictError) {
+            reply.status(409);
+            return { error: err.message };
+          }
+          throw err;
         }
       }
 

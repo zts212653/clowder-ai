@@ -8,7 +8,7 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -1600,6 +1600,272 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       },
     });
   }
+
+  function localOwnerHeaders() {
+    return {
+      ...OWNER_SESSION_HEADERS,
+      host: 'localhost:3004',
+      origin: 'http://localhost:3003',
+    };
+  }
+
+  async function seedManagedSkillProject(skillId = 'debugging', enabled = true) {
+    const projectDir = await makeTmpDir('patch-managed-skill');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: skillId, type: 'skill', enabled, source: 'cat-cafe' }],
+    });
+    return projectDir;
+  }
+
+  function patchSkillCapability(app, projectDir, skillId, enabled, scope = 'global') {
+    return app.inject({
+      method: 'PATCH',
+      url: '/api/capabilities',
+      headers: localOwnerHeaders(),
+      payload: {
+        projectPath: projectDir,
+        capabilityId: skillId,
+        capabilityType: 'skill',
+        scope,
+        ...(scope === 'cat' ? { catId: 'codex' } : {}),
+        enabled,
+      },
+    });
+  }
+
+  it('removes managed cat-cafe skill symlinks on global disable', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await seedManagedSkillProject(skillId, true);
+    const linkPath = join(projectDir, '.codex', 'skills', skillId);
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(dirname(linkPath), { recursive: true });
+      await symlink(join(sourceSkillsDir, skillId), linkPath);
+
+      const res = await patchSkillCapability(app, projectDir, skillId, false);
+
+      assert.equal(res.statusCode, 200, res.payload);
+      await assert.rejects(() => lstat(linkPath), /ENOENT/);
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('converts legacy directory-level mounts before disabling managed skills', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const disabledSkill = 'debugging';
+    const keptSkill = 'tdd';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await makeTmpDir('patch-managed-skill-legacy-root');
+    const codexSkillsDir = join(projectDir, '.codex', 'skills');
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(dirname(codexSkillsDir), { recursive: true });
+      await symlink(sourceSkillsDir, codexSkillsDir);
+      await writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [
+          { id: disabledSkill, type: 'skill', enabled: true, source: 'cat-cafe' },
+          { id: keptSkill, type: 'skill', enabled: true, source: 'cat-cafe' },
+        ],
+      });
+
+      const res = await patchSkillCapability(app, projectDir, disabledSkill, false);
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const rootStat = await lstat(codexSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy provider root should become a real directory');
+      assert.equal(rootStat.isSymbolicLink(), false, 'legacy provider root symlink should be removed');
+      await assert.rejects(() => lstat(join(codexSkillsDir, disabledSkill)), /ENOENT/);
+      assert.equal(await realpath(join(codexSkillsDir, keptSkill)), await realpath(join(sourceSkillsDir, keptSkill)));
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities.find((cap) => cap.id === disabledSkill)?.enabled, false);
+      assert.equal(config?.capabilities.find((cap) => cap.id === keptSkill)?.enabled, true);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('creates managed cat-cafe skill symlinks on global enable', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await seedManagedSkillProject(skillId, false);
+    const app = await buildSessionApp();
+
+    try {
+      const res = await patchSkillCapability(app, projectDir, skillId, true);
+
+      assert.equal(res.statusCode, 200, res.payload);
+      for (const provider of ['.claude', '.codex', '.gemini', '.kimi']) {
+        const linkPath = join(projectDir, provider, 'skills', skillId);
+        const stat = await lstat(linkPath);
+        assert.equal(stat.isSymbolicLink(), true, `${provider} skill path should be a symlink`);
+        assert.equal(await realpath(linkPath), await realpath(join(sourceSkillsDir, skillId)));
+      }
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, true);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('converts legacy directory-level mounts before enabling managed skills', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const enabledSkill = 'debugging';
+    const stillDisabledSkill = 'tdd';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await makeTmpDir('patch-managed-skill-enable-legacy-root');
+    const codexSkillsDir = join(projectDir, '.codex', 'skills');
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(dirname(codexSkillsDir), { recursive: true });
+      await symlink(sourceSkillsDir, codexSkillsDir);
+      await writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [
+          { id: enabledSkill, type: 'skill', enabled: false, source: 'cat-cafe' },
+          { id: stillDisabledSkill, type: 'skill', enabled: false, source: 'cat-cafe' },
+        ],
+      });
+
+      const res = await patchSkillCapability(app, projectDir, enabledSkill, true);
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const rootStat = await lstat(codexSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy provider root should become a real directory');
+      assert.equal(rootStat.isSymbolicLink(), false, 'legacy provider root symlink should be removed');
+      assert.equal(
+        await realpath(join(codexSkillsDir, enabledSkill)),
+        await realpath(join(sourceSkillsDir, enabledSkill)),
+      );
+      await assert.rejects(() => lstat(join(codexSkillsDir, stillDisabledSkill)), /ENOENT/);
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities.find((cap) => cap.id === enabledSkill)?.enabled, true);
+      assert.equal(config?.capabilities.find((cap) => cap.id === stillDisabledSkill)?.enabled, false);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('preserves user-owned skill paths when enabling managed skills', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const projectDir = await seedManagedSkillProject(skillId, false);
+    const localSkillDir = join(projectDir, '.codex', 'skills', skillId);
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(localSkillDir, { recursive: true });
+      await writeFile(join(localSkillDir, 'SKILL.md'), '# user debugging\n');
+
+      const res = await patchSkillCapability(app, projectDir, skillId, true);
+
+      assert.equal(res.statusCode, 409, res.payload);
+      assert.match(res.payload, /not a managed Cat Cafe skill symlink/);
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false);
+      assert.equal((await lstat(localSkillDir)).isDirectory(), true);
+      for (const provider of ['.claude', '.gemini', '.kimi']) {
+        await assert.rejects(
+          () => lstat(join(projectDir, provider, 'skills', skillId)),
+          /ENOENT/,
+          `${provider} must not get a partial managed symlink when another provider has a user-owned conflict`,
+        );
+      }
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('does not mutate symlinks when toggling external skills', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const projectDir = await makeTmpDir('patch-external-skill');
+    const externalSource = join(projectDir, 'external-skill-source', skillId);
+    const linkPath = join(projectDir, '.codex', 'skills', skillId);
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(externalSource, { recursive: true });
+      await writeFile(join(externalSource, 'SKILL.md'), '# external debugging\n');
+      await mkdir(dirname(linkPath), { recursive: true });
+      await symlink(externalSource, linkPath);
+      await writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'external' }],
+      });
+
+      const res = await patchSkillCapability(app, projectDir, skillId, false);
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(await realpath(linkPath), await realpath(externalSource));
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('does not mutate symlinks for per-cat skill overrides', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await seedManagedSkillProject(skillId, true);
+    const linkPath = join(projectDir, '.codex', 'skills', skillId);
+    const app = await buildSessionApp();
+
+    try {
+      await mkdir(dirname(linkPath), { recursive: true });
+      await symlink(join(sourceSkillsDir, skillId), linkPath);
+
+      const res = await patchSkillCapability(app, projectDir, skillId, false, 'cat');
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(await realpath(linkPath), await realpath(join(sourceSkillsDir, skillId)));
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, true);
+      assert.deepEqual(config?.capabilities[0]?.overrides, [{ catId: 'codex', enabled: false }]);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
 
   it('rejects trusted header identity without a real session', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
