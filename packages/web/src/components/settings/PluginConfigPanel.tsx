@@ -202,7 +202,7 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
                 r.enabled ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
               }`}
             >
-              {r.type}
+              {r.name ?? r.type}
             </span>
           ))}
         </div>
