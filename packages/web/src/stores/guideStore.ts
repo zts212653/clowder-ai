@@ -124,7 +124,16 @@ export const useGuideStore = create<GuideState>((set, get) => ({
     });
   },
 
-  exitGuide: () => set({ session: null, completionPersisted: false, completionFailed: false }),
+  exitGuide: () => {
+    const { session, completedGuides } = get();
+    if (!session) {
+      set({ session: null, completionPersisted: false, completionFailed: false });
+      return;
+    }
+    const key = session.threadId ? `${session.threadId}::${session.flow.id}` : null;
+    const nextCompleted = key ? new Set([...completedGuides, key]) : completedGuides;
+    set({ session: null, completionPersisted: false, completionFailed: false, completedGuides: nextCompleted });
+  },
 
   markCompletionPersisted: (sessionId) =>
     set((state) => {

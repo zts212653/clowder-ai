@@ -17,7 +17,7 @@ const MOCK_FLOW: OrchestrationFlow = {
 
 describe('guideStore', () => {
   beforeEach(() => {
-    useGuideStore.setState({ session: null });
+    useGuideStore.setState({ session: null, completedGuides: new Set<string>(), pendingStart: null });
   });
 
   it('starts a guide session with correct initial state', () => {
@@ -99,5 +99,53 @@ describe('guideStore', () => {
     expect(s.flow).toEqual(MOCK_FLOW);
     expect(s.flow.name).toBe('Test Flow');
     expect(s.flow.description).toBe('A test flow');
+  });
+
+  // #877: exitGuide must record the dismissed guide into completedGuides so the
+  // ChatContainer trigger guard blocks the same guide from re-firing on the next
+  // keystroke (otherwise the overlay re-appears in an infinite loop).
+  describe('exitGuide records completedGuides (re-trigger guard)', () => {
+    it('adds `threadId::flowId` to completedGuides on exit', () => {
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      useGuideStore.getState().exitGuide();
+      const { session, completedGuides } = useGuideStore.getState();
+      expect(session).toBeNull();
+      expect(completedGuides.has('thread-1::test-flow')).toBe(true);
+    });
+
+    it('control_exit server event records the completion key for the matching session', () => {
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      useGuideStore.getState().reduceServerEvent({
+        action: 'control_exit',
+        guideId: 'test-flow',
+        threadId: 'thread-1',
+      });
+      const { session, completedGuides } = useGuideStore.getState();
+      expect(session).toBeNull();
+      expect(completedGuides.has('thread-1::test-flow')).toBe(true);
+    });
+
+    it('preserves previously completed keys when exiting another guide', () => {
+      useGuideStore.setState({ completedGuides: new Set(['thread-0::other-flow']) });
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      useGuideStore.getState().exitGuide();
+      const { completedGuides } = useGuideStore.getState();
+      expect(completedGuides.has('thread-0::other-flow')).toBe(true);
+      expect(completedGuides.has('thread-1::test-flow')).toBe(true);
+    });
+
+    it('does not record a key when the session has no threadId', () => {
+      useGuideStore.getState().startGuide(MOCK_FLOW); // threadId defaults to null
+      useGuideStore.getState().exitGuide();
+      const { session, completedGuides } = useGuideStore.getState();
+      expect(session).toBeNull();
+      expect(completedGuides.size).toBe(0);
+    });
+
+    it('is a safe no-op on completedGuides when there is no active session', () => {
+      useGuideStore.getState().exitGuide();
+      expect(useGuideStore.getState().session).toBeNull();
+      expect(useGuideStore.getState().completedGuides.size).toBe(0);
+    });
   });
 });
