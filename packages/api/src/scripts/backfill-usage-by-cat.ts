@@ -118,21 +118,32 @@ function parseArgs(argv: readonly string[]): CliArgs {
   };
 }
 
-interface ApplyStats {
+export interface ApplyStats {
   applied: number;
   skippedMissing: number;
   skippedStatus: number;
   skippedPopulated: number;
+  skippedCas: number;
   failed: number;
 }
 
-async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore): Promise<ApplyStats> {
+export async function applyPlan(
+  plan: BackfillPlan,
+  store: Pick<RedisInvocationRecordStore, 'get' | 'update'>,
+): Promise<ApplyStats> {
   // 砚砚 cloud review P1-B: never overwrite a usageByCat that arrived between
   // the planning scan and this loop. For each entry we (a) re-read the current
   // record, (b) run the pure decideApplyOutcome predicate, and (c) pass both
   // expectedStatus='succeeded' and expectedUsageByCatAbsent=true so the store's
   // atomic update guards the narrow window between our re-read and write.
-  const stats: ApplyStats = { applied: 0, skippedMissing: 0, skippedStatus: 0, skippedPopulated: 0, failed: 0 };
+  const stats: ApplyStats = {
+    applied: 0,
+    skippedMissing: 0,
+    skippedStatus: 0,
+    skippedPopulated: 0,
+    skippedCas: 0,
+    failed: 0,
+  };
   for (const entry of plan.entries) {
     try {
       const current = await store.get(entry.invocationId);
@@ -164,9 +175,9 @@ async function applyPlan(plan: BackfillPlan, store: RedisInvocationRecordStore):
       if (updated) {
         stats.applied += 1;
       } else {
-        stats.failed += 1;
+        stats.skippedCas += 1;
         console.warn(
-          `[backfill-usage] update returned null for ${entry.invocationId} ` +
+          `[backfill-usage] skip ${entry.invocationId}: update returned null ` +
             '(CAS mismatch — status changed or usageByCat populated during apply)',
         );
       }
@@ -222,6 +233,7 @@ export async function runBackfill(argv: readonly string[]): Promise<number> {
           `skipped(missing): ${stats.skippedMissing}, ` +
           `skipped(status): ${stats.skippedStatus}, ` +
           `skipped(populated): ${stats.skippedPopulated}, ` +
+          `skipped(cas): ${stats.skippedCas}, ` +
           `failed: ${stats.failed}`,
       );
       return stats.failed === 0 ? 0 : 2;

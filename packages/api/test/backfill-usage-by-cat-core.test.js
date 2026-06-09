@@ -12,6 +12,7 @@ import { describe, test } from 'node:test';
 const { indexMessagesByInvocation, planBackfill, formatBackfillPreview, decideApplyOutcome } = await import(
   '../dist/scripts/backfill-usage-by-cat/core.js'
 );
+const { applyPlan } = await import('../dist/scripts/backfill-usage-by-cat.js');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -385,7 +386,7 @@ describe('planBackfill', () => {
 // time applyPlan reaches each entry, a concurrent writer may have populated
 // usageByCat or moved the record off 'succeeded'. decideApplyOutcome MUST NOT
 // return 'apply' in those windows.
-describe('decideApplyOutcome — apply-time race-safe guard', () => {
+describe('apply-time race-safe guard', () => {
   function makeEntry(overrides = {}) {
     return {
       invocationId: 'inv-1',
@@ -454,5 +455,37 @@ describe('decideApplyOutcome — apply-time race-safe guard', () => {
     const out = decideApplyOutcome(makeEntry(), makeRecord());
     assert.equal(out.kind, 'apply');
     assert.equal(out.reason, undefined);
+  });
+
+  test('CAS mismatch after pre-read is skipped, not failed', async () => {
+    const updateCalls = [];
+    const store = {
+      get: async () => makeRecord(),
+      update: async (id, input) => {
+        updateCalls.push({ id, input });
+        return null;
+      },
+    };
+    const plan = {
+      entries: [makeEntry()],
+      summary: {
+        totalInvocations: 1,
+        succeededTotal: 1,
+        orphanCandidates: 1,
+        recoverable: 1,
+        unrecoverable: 0,
+        byDate: { '2026-06-02': 1 },
+        bySource: { queue: 1 },
+      },
+    };
+
+    const stats = await applyPlan(plan, store);
+
+    assert.equal(stats.applied, 0);
+    assert.equal(stats.skippedCas, 1);
+    assert.equal(stats.failed, 0);
+    assert.equal(updateCalls.length, 1);
+    assert.equal(updateCalls[0].input.expectedStatus, 'succeeded');
+    assert.equal(updateCalls[0].input.expectedUsageByCatAbsent, true);
   });
 });
