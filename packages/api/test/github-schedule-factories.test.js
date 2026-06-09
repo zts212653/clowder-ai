@@ -689,7 +689,7 @@ test('resolvePluginEnv treats an explicitly cleared plugin config value as absen
 });
 
 describe('buildGitHubMigrationEntries (P2-B)', () => {
-  test('excludes repo-scan when env deps are missing', async () => {
+  test('persists repo-scan pending when env deps are missing at first migration', async () => {
     const { buildGitHubMigrationEntries } = await import('../dist/domains/plugin/github-schedule-factories.js');
 
     const manifest = {
@@ -701,10 +701,14 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
       ],
     };
 
-    // No repo-scan env vars → only 3 entries
+    // No repo-scan env vars at upgrade time: keep a disabled/pending row so
+    // adding env later + restart can promote it after the one-time marker exists.
     const entries = buildGitHubMigrationEntries(manifest, {});
-    assert.strictEqual(entries.length, 3, 'should exclude repo-scan when deps missing');
-    assert.ok(!entries.some((e) => e.id.includes('repo-scan')), 'repo-scan must not appear');
+    assert.strictEqual(entries.length, 4, 'should keep repo-scan pending when deps are missing');
+    const repoScan = entries.find((e) => e.id === 'plugin:github:repo-scan');
+    assert.ok(repoScan, 'repo-scan pending entry should be present');
+    assert.strictEqual(repoScan.enabled, false, 'pending repo-scan must not be reported enabled');
+    assert.strictEqual(repoScan.migrationPendingReason, 'deps-unavailable');
     assert.ok(entries.some((e) => e.id.includes('cicd-check')));
     assert.ok(entries.some((e) => e.id.includes('conflict-check')));
     assert.ok(entries.some((e) => e.id.includes('review-feedback')));
@@ -786,7 +790,7 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     const repoScan = entries.find((e) => e.id.includes('repo-scan'));
     assert.ok(repoScan, 'repo-scan entry should be present');
     assert.strictEqual(repoScan.enabled, false, 'pending repo-scan must not be reported enabled');
-    assert.strictEqual(repoScan.migrationPendingReason, 'runtime-deps-unavailable');
+    assert.strictEqual(repoScan.migrationPendingReason, 'deps-unavailable');
     assert.ok(entries.some((e) => e.id.includes('cicd-check')));
   });
 
@@ -807,6 +811,35 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     };
 
     const result = promotePendingGitHubMigrationEntries(pendingCaps, manifest, env, { repoScanDepsAvailable: true });
+
+    assert.strictEqual(result.changed, true);
+    const repoScan = result.config.capabilities.find((e) => e.id === 'plugin:github:repo-scan');
+    assert.ok(repoScan, 'repo-scan entry should still exist');
+    assert.strictEqual(repoScan.enabled, true);
+    assert.strictEqual(repoScan.migrationPendingReason, undefined);
+  });
+
+  test('promotes repo-scan that was pending because env deps were absent at first migration', async () => {
+    const { buildGitHubMigrationEntries, promotePendingGitHubMigrationEntries } = await import(
+      '../dist/domains/plugin/github-schedule-factories.js'
+    );
+    const manifest = {
+      resources: [
+        { type: 'schedule', name: 'cicd-check' },
+        { type: 'schedule', name: 'repo-scan' },
+      ],
+    };
+    const pendingCaps = {
+      version: 1,
+      capabilities: buildGitHubMigrationEntries(manifest, {}),
+    };
+
+    const result = promotePendingGitHubMigrationEntries(
+      pendingCaps,
+      manifest,
+      { GITHUB_REPO_ALLOWLIST: 'org/repo', GITHUB_REPO_INBOX_CAT_ID: 'cat-1' },
+      { repoScanDepsAvailable: true },
+    );
 
     assert.strictEqual(result.changed, true);
     const repoScan = result.config.capabilities.find((e) => e.id === 'plugin:github:repo-scan');
@@ -836,7 +869,7 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     assert.strictEqual(result.changed, false);
     const repoScan = result.config.capabilities.find((e) => e.id === 'plugin:github:repo-scan');
     assert.strictEqual(repoScan.enabled, false);
-    assert.strictEqual(repoScan.migrationPendingReason, 'runtime-deps-unavailable');
+    assert.strictEqual(repoScan.migrationPendingReason, 'deps-unavailable');
   });
 
   test('builds scheduler override migrations for legacy GitHub poller IDs', async () => {

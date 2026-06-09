@@ -246,7 +246,7 @@ export function markGitHubScheduleMigrationDone(projectRoot: string): void {
 
 /** Repo-scan env deps that must be present for the schedule to actually run. */
 const REPO_SCAN_REQUIRED_ENV = ['GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'] as const;
-const REPO_SCAN_PENDING_REASON = 'runtime-deps-unavailable' as const;
+const REPO_SCAN_PENDING_REASON = 'deps-unavailable' as const;
 const LEGACY_GITHUB_SCHEDULE_TASK_IDS = new Map([
   ['cicd-check', 'cicd-check'],
   ['conflict-check', 'conflict-check'],
@@ -310,9 +310,10 @@ function buildGitHubMigrationEntry(
 /**
  * Build capability entries for the one-time migration.
  *
- * Repo-scan is omitted when old env deps are absent, preserved as disabled/pending
- * when env deps exist but Redis deps do not, and enabled once all deps are available.
- * This avoids a ghost "enabled" UI while still completing old repo-scan installs later.
+ * Repo-scan is preserved as disabled/pending whenever required env/runtime deps
+ * are incomplete, and enabled once all deps are available. This avoids a ghost
+ * "enabled" UI while still allowing old installs to add env later and complete
+ * after the one-time migration marker exists.
  */
 export function buildGitHubMigrationEntries(
   manifest: { resources: { type: string; name?: string }[] },
@@ -330,15 +331,12 @@ export function buildGitHubMigrationEntries(
     if (r.type !== 'schedule' || !resourceName) return [];
     if (resourceName !== 'repo-scan') return [buildGitHubMigrationEntry(resourceName)];
     if (hasRepoScanDeps) return [buildGitHubMigrationEntry(resourceName)];
-    if (repoScanEnvDepsAvailable) {
-      return [
-        buildGitHubMigrationEntry(resourceName, {
-          enabled: false,
-          migrationPendingReason: REPO_SCAN_PENDING_REASON,
-        }),
-      ];
-    }
-    return [];
+    return [
+      buildGitHubMigrationEntry(resourceName, {
+        enabled: false,
+        migrationPendingReason: REPO_SCAN_PENDING_REASON,
+      }),
+    ];
   });
 }
 
