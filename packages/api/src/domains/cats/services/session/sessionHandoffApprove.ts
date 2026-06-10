@@ -150,8 +150,11 @@ export async function recoverStaleHandoffProposal(
     }
   }
 
-  // Post-commit recover-forward (idempotent): enqueue continuation if missing, then finalize.
-  if (proposal.sealedSessionId && !proposal.continuationEntryId) {
+  // Post-commit recover-forward (idempotent): recreate/verify the continuation queue entry, then
+  // finalize. continuationEntryId is persisted with the proposal, but InvocationQueue itself is
+  // process-local; after a process crash the old entry id is only diagnostic. Re-enqueueing is safe
+  // because enqueueContinuation is keyed by proposalId and dedupes any still-active entry.
+  if (proposal.sealedSessionId && proposal.status === 'approving') {
     const cont = await deps.enqueueContinuation({
       proposalId,
       sourceSessionId: proposal.sourceSessionId,
@@ -161,7 +164,7 @@ export async function recoverStaleHandoffProposal(
     });
     proposal = (await store.recordCheckpoint(proposalId, { continuationEntryId: cont.entryId }))!;
   }
-  if (proposal.continuationEntryId && proposal.status === 'approving') {
+  if (proposal.sealedSessionId && proposal.status === 'approving') {
     await store.finalizeApproval(proposalId);
   }
   return { recovered: true, outcome: 'completed' };

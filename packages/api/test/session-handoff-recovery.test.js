@@ -75,9 +75,11 @@ describe('recoverStaleHandoffProposal (crash-window backfill)', () => {
     assert.equal(enqueueCount, 0, 'never enqueue when seal did not happen');
   });
 
-  it('crash AFTER enqueue BEFORE finalize → finalize, no double enqueue', async () => {
+  it('crash AFTER enqueue checkpoint BEFORE finalize → recreate volatile queue entry, then finalize', async () => {
     const { session, prop } = crashedAfterClaim();
-    // post-commit state already has sealedSessionId + continuationEntryId
+    // Post-commit state already has sealedSessionId + continuationEntryId. The entry id is a
+    // Redis-backed checkpoint, but the actual InvocationQueue entry is process-local; after a
+    // process crash, recovery must recreate it instead of trusting the stale id.
     handoffStore.recordCheckpoint(prop.proposalId, {
       sealedSessionId: session.id,
       sealAcceptedAt: 200,
@@ -90,7 +92,8 @@ describe('recoverStaleHandoffProposal (crash-window backfill)', () => {
     );
     assert.equal(res.recovered, true);
     assert.equal(handoffStore.get(prop.proposalId).status, 'approved');
-    assert.equal(enqueueCount, 0, 'no re-enqueue when continuationEntryId already present (idempotent)');
+    assert.equal(enqueueCount, 1, 're-enqueues because continuationEntryId is not a durable queue entry');
+    assert.equal(handoffStore.get(prop.proposalId).continuationEntryId, 'e2', 'refreshes the active queue entry id');
   });
 
   it('P1 (砚砚): crash AFTER claim BEFORE note checkpoint (no checkpoint) → expire, NOT completed', async () => {

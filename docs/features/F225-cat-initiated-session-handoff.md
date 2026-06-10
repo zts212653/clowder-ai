@@ -78,12 +78,12 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 4. `requestSeal`：**rejected**（session 已非 active）→ 仍属 pre-commit，fail/expire、note 作废；**accepted** → 记 `sealedSessionId` + `sealAcceptedAt`，**自此禁止 rollback/expire**。⚠️ accepted（session 侧已 sealing）与记 checkpoint（proposal 侧）**非原子**——靠预写的 `catHandoffNote.proposalId` 让 commit point 可从 session 侧反推（见 Recovery），堵中间 crash window
 
 **Post-commit（只 recover-forward，idempotent）**：
-5. enqueue 同 thread 同 catId continuation，带 idempotency key（`proposalId` / `sourceSessionId`）→ 记 `continuationEntryId`
+5. enqueue 同 thread 同 catId continuation，带 idempotency key（`proposalId` / `sourceSessionId`）→ 记 `continuationEntryId`（仅作观测/响应字段，不作 crash-safe queue 存在证明）
 6. finalize approved
 
 **Recovery（stale approving proposal 按 checkpoint 续跑）**：
 - proposal 有 `handoffNotePersistedAt` 但**无** `sealedSessionId` → **不能直接判 pre-commit**（commit 动作在 session 侧、checkpoint 在 proposal 侧，非原子，存在 crash window）。必须 **cross-check session 侧**：若 `sourceSessionId` 已 `sealing/sealed` + `sealReason='cat_initiated_handoff'` + 匹配 note 的 `proposalId` → commit point 实际已过 → **backfill** `sealedSessionId`/`sealAcceptedAt` → 续跑 enqueue/finalize；若 session 仍 `active` → 真 pre-commit，fail/expire。
-- 有 `sealedSessionId` 未 enqueue（无 `continuationEntryId`）→ idempotent enqueue；已 enqueue 未 finalize → finalize。idempotency key（`proposalId`/`sourceSessionId`）防重放重复唤醒。
+- 有 `sealedSessionId` 且仍在 `approving` → **总是** idempotent enqueue/verify continuation，再 finalize。`continuationEntryId` 指向进程内 `InvocationQueue` entry；进程 crash 后旧 entry 会丢，recovery 不能信任该字段跳过 re-enqueue。idempotency key（`proposalId`/`sourceSessionId`）防同进程重放重复唤醒。
 
 **stale note 注入约束**：`catHandoffNote` 注入受 `sealReason='cat_initiated_handoff'` + 对应 approved/recovering proposal 约束。note 已写但 seal rejected / 被别的 seal（如 threshold）抢先 → stale note **不**随那个 seal 注入。
 
@@ -149,7 +149,7 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 |------|------|
 | 留言丢失（finalize best-effort 不保证写盘） | typed `catHandoffNote` 在 seal **前**独立持久化成功才 `requestSeal`；不依赖 `finalize` 写盘（KD-4） |
 | 续接 session 没注入留言（默认 extractive 读不到 generative digest） | always-keep block 注入，不依赖 `bootstrapDepth`；FX-3 在 extractive/compress 模式断言可见（KD-4） |
-| 半封印孤儿（commit point 后 enqueue/finalize 失败，session 已封但续接没唤醒） | commit-point 模型：`requestSeal accepted` 后只 recover-forward；checkpoint 字段 + continuation idempotency key，crash recovery 按 checkpoint 续跑（KD-8 / AC-B4） |
+| 半封印孤儿（commit point 后 enqueue/finalize 失败，session 已封但续接没唤醒） | commit-point 模型：`requestSeal accepted` 后只 recover-forward；checkpoint 字段 + continuation idempotency key；recovery 对 `approving`+`sealedSessionId` 总是 re-enqueue/verify，因为 `continuationEntryId` 不是 durable queue proof（KD-8 / AC-B4） |
 | stale note 误注入（note 已写被 threshold seal 抢先） | note 注入受 sealReason + approved proposal 约束（KD-8 / AC-B5） |
 | replay 重复 seal/唤醒 | claim CAS + continuation idempotency key（`proposalId`/`sourceSessionId`）（KD-8 / AC-B4） |
 | 晚 approve 封错后续 session | approve 时校验 `sourceSessionId` 仍是同 (user,thread,cat,seq) active session（KD-6） |
