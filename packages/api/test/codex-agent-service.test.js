@@ -903,6 +903,77 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     );
   });
 
+  test('suppresses exit code 1 after transient reconnect diagnostics when output completed', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('review this after reconnect'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 1/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'Reconnecting... 2/5 (stream disconnected before completion)',
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Recovered answer.' },
+      })}\n`,
+    );
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    const sysInfos = msgs.filter((m) => m.type === 'system_info');
+    assert.equal(errors.length, 0, 'transient reconnect diagnostics should not defeat exit-code-1 suppression');
+    assert.equal(sysInfos.length, 2, 'reconnect status should still stream to UI');
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'Recovered answer.'),
+      'completed answer should still be yielded',
+    );
+  });
+
+  test('does NOT suppress exit code 1 when substantive output is followed by compact failure', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+    const promise = collect(service.invoke('continue this'));
+
+    proc.stdout.write(`${JSON.stringify({ type: 'thread.started', thread_id: 'tx' })}\n`);
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'Partial answer before compact.' },
+      })}\n`,
+    );
+    proc.stdout.write(
+      `${JSON.stringify({
+        type: 'error',
+        message: 'remote compaction failed: compact_error=stream disconnected before completion',
+      })}\n`,
+    );
+    finishExit(proc, 1);
+
+    const msgs = await promise;
+    const errors = msgs.filter((m) => m.type === 'error');
+    assert.equal(errors.length, 1, 'compact failure must yield an error even after substantive output');
+    assert.ok(errors[0].error.includes('code: 1'));
+    assert.ok(
+      errors[0].error.includes('stream disconnected before completion'),
+      'error should retain sanitized compact diagnostics',
+    );
+  });
+
   test('does NOT suppress exit code 1 when only thread.started (no substantive output)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);

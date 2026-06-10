@@ -251,6 +251,61 @@ describe('F183 Phase B1.2 — adaptIncomingToBubbleEvent', () => {
     expect(event?.type).not.toBe('done');
   });
 
+  // #814: explicit post_message callbacks → invocationless (no stable key merge)
+  describe('#814: explicit post_message produces invocationless event', () => {
+    it('strips canonicalInvocationId when isExplicitPost is true', () => {
+      const event = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'post_message content',
+          origin: 'callback',
+          messageId: 'pm-id-1',
+          invocationId: 'inv-parent',
+          turnInvocationId: 'inv-turn',
+          extra: { isExplicitPost: true },
+        }),
+        { sourcePath: 'callback' },
+      );
+
+      expect(event).toBeDefined();
+      expect(event?.canonicalInvocationId).toBeUndefined();
+      expect(event?.chainInvocationId).toBeUndefined();
+      expect(event?.type).toBe('callback_final');
+      expect(event?.bubbleKind).toBe('assistant_text');
+      expect(event?.payload?.content).toBe('post_message content');
+    });
+
+    it('preserves canonicalInvocationId for non-explicit callbacks', () => {
+      const event = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'normal callback',
+          origin: 'callback',
+          invocationId: 'inv-parent',
+          turnInvocationId: 'inv-turn',
+        }),
+        { sourcePath: 'callback' },
+      );
+
+      expect(event?.canonicalInvocationId).toBe('inv-turn');
+      expect(event?.chainInvocationId).toBe('inv-parent');
+    });
+
+    it('propagates isExplicitPost in payload', () => {
+      const event = adaptIncomingToBubbleEvent(
+        baseMsg({
+          type: 'text',
+          content: 'explicit',
+          origin: 'callback',
+          extra: { isExplicitPost: true },
+        }),
+        { sourcePath: 'callback' },
+      );
+
+      expect(event?.payload?.isExplicitPost).toBe(true);
+    });
+  });
+
   // F194 Phase Z3 R2 (砚砚 catch 2026-05-09 18:22): bubble identity SoT = turn id, not parent.
   describe('F194 Phase Z3 R2: dual id (canonical=turn, chain=parent)', () => {
     it('uses turnInvocationId as canonical when both present (parent moves to chainInvocationId)', () => {

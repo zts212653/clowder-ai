@@ -158,6 +158,29 @@ describe('SessionContinuationCoordinator', () => {
       assert.equal(calls[0].capsule, consumed.capsule, 'must restore the consumed capsule');
     });
 
+    it('failed + consumed token restores even when strategy lookup fails (cloud P2)', async () => {
+      const calls = [];
+      const coord = new SessionContinuationCoordinator({
+        threadStore: {
+          getMemberSessionStrategy: () => {
+            throw new Error('simulated Redis memberSS lookup failure');
+          },
+          setPendingContinuation: (threadId, catId, userId, capsule) =>
+            calls.push({ threadId, catId, userId, capsule }),
+        },
+      });
+      const consumed = { capsule: makeCapsule(), threadId: 't1', catId: 'opus', userId: 'u1' };
+      await coord.commitInvocationOutcome({
+        finalStatus: 'failed',
+        threadId: 't1',
+        catId: 'opus',
+        userId: 'u1',
+        consumedContinuation: consumed,
+      });
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].capsule, consumed.capsule, 'lookup failure must not drop consumed continuation');
+    });
+
     it('failed + consumed + NEW produced → new capsule wins over restore (砚砚 P1)', async () => {
       const { calls, threadStore } = captureStore();
       const coord = new SessionContinuationCoordinator({ threadStore });

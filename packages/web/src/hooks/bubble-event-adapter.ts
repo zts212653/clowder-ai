@@ -97,6 +97,9 @@ export function adaptIncomingToBubbleEvent(
   // + reducer 不识别 → B1.2.2 wire 进 active stream 后 replace 会被当 append（content
   // 累加 = 重复显示）。
   if (msg.textMode) payload.textMode = msg.textMode;
+  // #814: Propagate isExplicitPost so chatStore findAssistantDuplicate can
+  // skip merge for live socket events (not just hydration).
+  if (msg.extra?.isExplicitPost) payload.isExplicitPost = true;
 
   // F194 Phase Z3 (砚砚 R2 P1-1): bubble identity SoT = per-cat-turn id (msg.turnInvocationId);
   // chain/parent id (msg.invocationId) lives alongside as `chainInvocationId` for liveness/queue/cancel.
@@ -104,13 +107,18 @@ export function adaptIncomingToBubbleEvent(
   // Legacy/single-cat (turn absent): canonical falls back to parent (only id available).
   const turnId = msg.turnInvocationId;
   const chainId = msg.invocationId;
-  const canonicalInvocationId = turnId ?? chainId;
+  // #814 root fix: explicit post_message callbacks must be invocationless.
+  // Omitting canonicalInvocationId prevents ALL stable key merge paths
+  // (ADR-033 #4: invocationless events don't participate in stable key lookup).
+  // This is the single point of truth — no downstream guards needed.
+  const isExplicitPost = msg.extra?.isExplicitPost === true;
+  const canonicalInvocationId = isExplicitPost ? undefined : (turnId ?? chainId);
   return {
     type: eventType,
     threadId: msg.threadId,
     actorId: msg.catId,
-    canonicalInvocationId,
-    ...(chainId && turnId && chainId !== turnId ? { chainInvocationId: chainId } : {}),
+    ...(canonicalInvocationId ? { canonicalInvocationId } : {}),
+    ...(!isExplicitPost && chainId && turnId && chainId !== turnId ? { chainInvocationId: chainId } : {}),
     bubbleKind: kind,
     originPhase: phase,
     sourcePath: options.sourcePath,

@@ -484,6 +484,100 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(options.queueHasQueuedMessages('thread-x'), false);
   });
 
+  it('immediate direct execution applies pending continuation before routeExecution', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-pending',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-pending', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const consumedContinuation = { threadId: 'thread-1', catId: 'opus', userId: 'user-1', capsule };
+    deps.sessionContinuationCoordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({
+        content: `CONTINUATION\n\n${content}`,
+        consumedContinuation,
+        sessionPolicy: 'resume',
+      })),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '用户继续', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.sessionContinuationCoordinator.prepareInvocationContext.mock.calls.length, 1);
+    assert.deepEqual(deps.sessionContinuationCoordinator.prepareInvocationContext.mock.calls[0].arguments[0], {
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+      content: '用户继续',
+    });
+    assert.equal(deps.router.routeExecution.mock.calls[0].arguments[1], 'CONTINUATION\n\n用户继续');
+
+    assert.equal(deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length, 1);
+    const commitInput = deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls[0].arguments[0];
+    assert.equal(commitInput.finalStatus, 'succeeded');
+    assert.equal(commitInput.consumedContinuation, consumedContinuation);
+  });
+
+  it('immediate direct execution restores consumed continuation through coordinator on failure', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-pending-fail',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-pending-fail', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const consumedContinuation = { threadId: 'thread-1', catId: 'opus', userId: 'user-1', capsule };
+    deps.sessionContinuationCoordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({
+        content: `CONTINUATION\n\n${content}`,
+        consumedContinuation,
+        sessionPolicy: 'resume',
+      })),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      throw new Error('route failed');
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '用户继续失败', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length, 1);
+    const commitInput = deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls[0].arguments[0];
+    assert.equal(commitInput.finalStatus, 'failed');
+    assert.equal(commitInput.consumedContinuation, consumedContinuation);
+  });
+
   it('immediate execution schedules continuation when route emits seal capsule and succeeds', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     const capsule = completeCapsuleForSeal(
@@ -525,6 +619,104 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(call.userId, 'user-1');
     assert.equal(call.catId, 'opus');
     assert.equal(call.capsule.seal.sessionId, 'sess-1');
+  });
+
+  it('immediate success persists produced continuation even when it was already queued', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-seal-queued',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-queued', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.sessionContinuationCoordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({ content, sessionPolicy: 'resume' })),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 seal 并排队', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 1);
+    assert.equal(deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length, 1);
+    const commitInput = deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls[0].arguments[0];
+    assert.equal(commitInput.finalStatus, 'succeeded');
+    assert.deepEqual(Array.from(commitInput.producedCapsules ?? []), [capsule]);
+  });
+
+  it('immediate success does not auto-enqueue produced continuation for reborn sessions', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false);
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 'thread-1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-reborn-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-reborn', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    deps.sessionContinuationCoordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({ content, sessionPolicy: 'reborn' })),
+      resolveSessionStrategy: mock.fn(async () => 'reborn'),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+    deps.router.routeExecution.mock.mockImplementation(async function* () {
+      yield {
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '触发 reborn seal', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.deepEqual(deps.sessionContinuationCoordinator.resolveSessionStrategy.mock.calls[0].arguments, [
+      'thread-1',
+      'opus',
+      'user-1',
+    ]);
+    assert.equal(deps.queueProcessor.enqueueContinuation.mock.calls.length, 0);
+    assert.equal(deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls.length, 1);
+    const commitInput = deps.sessionContinuationCoordinator.commitInvocationOutcome.mock.calls[0].arguments[0];
+    assert.equal(commitInput.finalStatus, 'succeeded');
+    assert.deepEqual(Array.from(commitInput.producedCapsules ?? []), [capsule]);
   });
 
   it('immediate multi-cat execution schedules continuation for the capsule owner cat', async () => {

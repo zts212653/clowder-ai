@@ -851,7 +851,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
       const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
       const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
-      const extraParts = { ...richExtra, ...targetCatsExtra };
+      // #814: Mark as explicit post_message so frontend TD112 dedup does not
+      // merge this into the cat's CLI stream bubble.
+      const extraParts = { isExplicitPost: true as const, ...richExtra, ...targetCatsExtra };
       const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
 
       const hasA2AMentions = !!(mentions.length > 0 && router && invocationRecordStore && effectiveThreadId);
@@ -915,7 +917,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
                 origin: 'callback',
                 messageId: duplicateMsg.id,
                 invocationId: duplicateMsg.id,
-                ...(validExplicitTargets.length ? { extra: { targetCats: validExplicitTargets } } : {}),
+                // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
+                extra: {
+                  isExplicitPost: true,
+                  ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+                },
                 ...(duplicateMsg.mentionsUser ? { mentionsUser: true } : {}),
                 ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
                 ...(replyPreview ? { replyPreview } : {}),
@@ -1011,7 +1017,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             origin: 'callback',
             messageId: storedMsg.id,
             invocationId: storedMsg.id,
-            ...(validExplicitTargets.length ? { extra: { targetCats: validExplicitTargets } } : {}),
+            // #814: Always include isExplicitPost in broadcast so frontend TD112 dedup skips merge
+            extra: {
+              isExplicitPost: true,
+              ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+            },
             ...(mentionsUser ? { mentionsUser } : {}),
             ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
             ...(replyPreview ? { replyPreview } : {}),
@@ -1265,7 +1275,9 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
-    const extraParts = { ...richExtra, ...crossPostExtra, ...targetCatsExtra };
+    // #814: Mark as explicit post_message so frontend TD112 dedup does not
+    // merge this into the cat's CLI stream bubble.
+    const extraParts = { isExplicitPost: true as const, ...richExtra, ...crossPostExtra, ...targetCatsExtra };
     const extra = Object.keys(extraParts).length > 0 ? extraParts : undefined;
 
     // F121: Validate replyTo — must exist in the same thread
@@ -1388,16 +1400,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               origin: 'callback',
               messageId: duplicateMsg.id,
               ...stampVisibleTurn(effectiveInvId, invocationId),
-              ...(isCrossThread || validExplicitTargets.length
-                ? {
-                    extra: {
-                      ...(isCrossThread
-                        ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
-                        : {}),
-                      ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
-                    },
-                  }
-                : {}),
+              // #814: Always include isExplicitPost so frontend TD112 dedup skips merge
+              extra: {
+                isExplicitPost: true,
+                ...(isCrossThread
+                  ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
+                  : {}),
+                ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+              },
               ...(duplicateMsg.mentionsUser ? { mentionsUser: true } : {}),
               ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
               ...(replyPreview ? { replyPreview } : {}),
@@ -1497,16 +1507,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
           ...stampVisibleTurn(effectiveInvId, invocationId),
           // F52+F098-C1: Include crossPost + targetCats in real-time broadcast
-          ...(isCrossThread || validExplicitTargets.length
-            ? {
-                extra: {
-                  ...(isCrossThread
-                    ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
-                    : {}),
-                  ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
-                },
-              }
-            : {}),
+          // #814: Always include isExplicitPost so frontend TD112 dedup skips merge
+          extra: {
+            isExplicitPost: true,
+            ...(isCrossThread
+              ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: effectiveInvId } }
+              : {}),
+            ...(validExplicitTargets.length ? { targetCats: validExplicitTargets } : {}),
+          },
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
           ...(replyPreview ? { replyPreview } : {}),

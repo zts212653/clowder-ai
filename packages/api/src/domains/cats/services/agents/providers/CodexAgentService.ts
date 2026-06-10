@@ -128,6 +128,25 @@ function withRecentDiagnostics(base: string, recentErrors: string[]): string {
   return `${base}\n最近流错误:\n${lines.join('\n')}`;
 }
 
+function hasNonSuppressibleCodexExitOneDiagnostics(
+  event: {
+    message?: string;
+    cliDiagnostics?: { publicSummary?: string; safeExcerpt?: string };
+  },
+  recentErrors: string[],
+): boolean {
+  const diagnosticText = [
+    event.message,
+    event.cliDiagnostics?.publicSummary,
+    event.cliDiagnostics?.safeExcerpt,
+    ...recentErrors,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join('\n');
+
+  return /remote compaction failed|compact_error/i.test(diagnosticText);
+}
+
 function toTomlString(value: string): string {
   const escaped = value.replace(/[\u0000-\u001f\u007f"\\]/g, (char) => {
     switch (char) {
@@ -752,7 +771,12 @@ export class CodexAgentService implements AgentService {
           // Codex CLI 0.98+ returns exit code 1 after successful completion.
           // Suppress the error ONLY if we saw substantive output (item.completed).
           // thread.started alone is NOT enough — that just means session init.
-          if (event.exitCode === 1 && event.signal === null && sawSubstantiveOutput) {
+          if (
+            event.exitCode === 1 &&
+            event.signal === null &&
+            sawSubstantiveOutput &&
+            !hasNonSuppressibleCodexExitOneDiagnostics(event, recentStreamErrors)
+          ) {
             log.warn(
               {},
               `[codex] Codex CLI exited with code 1 after substantive output (suppressing as Codex 0.98+ quirk)`,

@@ -175,6 +175,21 @@ export interface Thread {
   preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
   /** F187: User-defined label IDs for thread categorization. */
   labels?: string[];
+  /** #813: Per-cat pending continuation capsule — written at session seal,
+   *  consumed at next invocation start. Passive/lazy session renewal. */
+  pendingContinuation?: Record<string, PendingContinuationEntry>;
+  /** #836: Per-cat session strategy override at thread member level.
+   *  'resume' (default) = normal session continuation / bootstrap / continuation capsule.
+   *  'reborn' = force new session every invocation, skip bootstrap digest, skip continuation. */
+  memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
+}
+
+/** #813: Pending continuation state per cat. Written by seal, consumed at next invocation. */
+export interface PendingContinuationEntry {
+  /** The serialized continuation capsule (CollaborationContinuityCapsuleV1). */
+  capsule: Record<string, unknown>;
+  /** Unix ms when the seal wrote this entry. */
+  createdAt: number;
 }
 
 /**
@@ -391,6 +406,37 @@ export interface IThreadStore {
   ): void | Promise<void>;
   /** F187: Update thread labels (replaces entire array). */
   updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
+  /** #836: Update per-cat session strategy for a thread member. `null` clears. */
+  updateMemberSessionStrategy(
+    threadId: string,
+    catId: string,
+    strategy: 'resume' | 'reborn' | null,
+  ): void | Promise<void>;
+  /** F224: Coordinator-facing strategy read. Undefined means default resume. */
+  getMemberSessionStrategy?(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): 'resume' | 'reborn' | undefined | Promise<'resume' | 'reborn' | undefined>;
+  /** #836: Check if a cat uses reborn session strategy in this thread.
+   *  Must be used instead of reading thread.memberSessionStrategy directly,
+   *  because Redis stores strategy in separate hash fields (memberSS:<catId>)
+   *  that are NOT hydrated by get().
+   *  Optional for backward compat with test mocks — absent = never reborn. */
+  isRebornSession?(threadId: string, catId: string): boolean | Promise<boolean>;
+  /** #813: Write pending continuation state for a cat+user (passive seal). */
+  setPendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+    entry: PendingContinuationEntry,
+  ): void | Promise<void>;
+  /** #813: Consume (read + delete) pending continuation for a cat+user. Returns null if none. */
+  consumePendingContinuation(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): PendingContinuationEntry | null | Promise<PendingContinuationEntry | null>;
   /**
    * Ensure a thread with a specific ID exists. If it doesn't exist, create it
    * with the given title and createdBy='system'. If it already exists, no-op.
@@ -829,6 +875,70 @@ export class ThreadStore implements IThreadStore {
   updateLabels(threadId: string, labelIds: string[]): void {
     const thread = this.get(threadId);
     if (thread) thread.labels = labelIds;
+  }
+
+  updateMemberSessionStrategy(threadId: string, catId: string, strategy: 'resume' | 'reborn' | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (strategy === null || strategy === 'resume') {
+      // null or default: remove override
+      if (thread.memberSessionStrategy) {
+        delete thread.memberSessionStrategy[catId];
+        if (Object.keys(thread.memberSessionStrategy).length === 0) {
+          delete thread.memberSessionStrategy;
+        }
+      }
+    } else {
+      if (!thread.memberSessionStrategy) thread.memberSessionStrategy = {};
+      thread.memberSessionStrategy[catId] = strategy;
+      // #836 P2: Clear stale pending continuations when switching to reborn.
+      // Capsules sealed before the reborn period contain pre-reborn session
+      // context; if reborn is later cleared back to resume, consuming them
+      // would resume from stale state instead of the post-reborn session.
+      if (strategy === 'reborn' && thread.pendingContinuation) {
+        const prefix = `${catId}:`;
+        for (const key of Object.keys(thread.pendingContinuation)) {
+          if (key.startsWith(prefix)) {
+            delete thread.pendingContinuation[key];
+          }
+        }
+        if (Object.keys(thread.pendingContinuation).length === 0) {
+          delete thread.pendingContinuation;
+        }
+      }
+    }
+  }
+
+  /** #836: Check if cat uses reborn strategy in this thread. */
+  getMemberSessionStrategy(threadId: string, catId: string, _userId: string): 'resume' | 'reborn' | undefined {
+    const thread = this.get(threadId);
+    return thread?.memberSessionStrategy?.[catId];
+  }
+
+  isRebornSession(threadId: string, catId: string): boolean {
+    const thread = this.get(threadId);
+    return thread?.memberSessionStrategy?.[catId] === 'reborn';
+  }
+
+  setPendingContinuation(threadId: string, catId: string, userId: string, entry: PendingContinuationEntry): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (!thread.pendingContinuation) thread.pendingContinuation = {};
+    const scopeKey = `${catId}:${userId}`;
+    thread.pendingContinuation[scopeKey] = entry;
+  }
+
+  consumePendingContinuation(threadId: string, catId: string, userId: string): PendingContinuationEntry | null {
+    const thread = this.get(threadId);
+    const scopeKey = `${catId}:${userId}`;
+    if (!thread?.pendingContinuation?.[scopeKey]) return null;
+    const entry = thread.pendingContinuation[scopeKey]!;
+    delete thread.pendingContinuation[scopeKey];
+    // Clean up empty container
+    if (Object.keys(thread.pendingContinuation).length === 0) {
+      delete thread.pendingContinuation;
+    }
+    return entry;
   }
 
   updateLastActive(threadId: string): void {

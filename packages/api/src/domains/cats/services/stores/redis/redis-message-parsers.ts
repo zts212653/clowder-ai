@@ -58,6 +58,7 @@ export function safeParseExtra(raw: string | undefined):
         };
       };
       targetCats?: string[];
+      isExplicitPost?: boolean;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing';
     }
@@ -82,6 +83,7 @@ export function safeParseExtra(raw: string | undefined):
         };
       };
       targetCats?: string[];
+      isExplicitPost?: boolean;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
       systemKind?: 'a2a_routing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
@@ -138,6 +140,11 @@ export function safeParseExtra(raw: string | undefined):
     // #481: Preserve targetCats sub-field through Redis round-trip
     if (Array.isArray(parsed.targetCats)) {
       result.targetCats = parsed.targetCats;
+      hasField = true;
+    }
+
+    if (parsed.isExplicitPost === true) {
+      result.isExplicitPost = true;
       hasField = true;
     }
 

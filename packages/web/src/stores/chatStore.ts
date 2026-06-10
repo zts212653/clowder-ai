@@ -485,6 +485,11 @@ function fireOwnerMentionNotification(msg: ChatMessage) {
 function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage): number {
   if (incoming.type !== 'assistant' || !incoming.catId) return -1;
 
+  // #814: Explicit post_message callbacks are independent messages — never merge.
+  // post_message is a cat-initiated separate communication (e.g., @mention to another cat),
+  // not a duplicate of the same response arriving via stream+callback paths.
+  if (incoming.origin === 'callback' && incoming.extra?.isExplicitPost) return -1;
+
   const incomingInvId = getBubbleInvocationId(incoming);
 
   // Phase 1: Hard rule — scan ALL same-cat assistants for exact invocationId match.
@@ -493,6 +498,11 @@ function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage):
     for (let i = messages.length - 1; i >= 0; i--) {
       const existing = messages[i]!;
       if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
+      // #814: explicit post_message is standalone — never match as merge target,
+      // even though it carries stream.invocationId for #573 correlation.
+      // Without this guard, a stream chunk arriving after F5/hydration would
+      // match the hydrated explicit post by invocationId and overwrite it.
+      if (existing.extra?.isExplicitPost) continue;
       const existingInvId = getBubbleInvocationId(existing);
       if (existingInvId === incomingInvId) {
         if (existing.id !== incoming.id && crossesUserTurnBoundary(messages, existing, incoming)) continue;

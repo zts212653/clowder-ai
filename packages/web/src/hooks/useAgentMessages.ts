@@ -172,6 +172,10 @@ interface AgentMsg {
   extra?: {
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
+    /** #814: True when message originated from an explicit post_message callback */
+    isExplicitPost?: boolean;
+    /** F098-C1: Explicit target cats from post_message (direction pills) */
+    targetCats?: string[];
   };
   /** F121: Reply-to message ID */
   replyTo?: string;
@@ -253,6 +257,10 @@ function sameInvocationForCat(candidate: string | undefined, expected: string, c
  */
 function sameBubbleStableKey(message: ChatMessage | undefined, expected: string, catId: string): boolean {
   if (!message) return false;
+  // #814: explicit post_message bubbles are standalone. They may retain stream
+  // identity after hydration for correlation, but must never be recovered,
+  // finalized, or replaced by stream stable-key paths.
+  if (message.extra?.isExplicitPost) return false;
   const turn = message.extra?.stream?.turnInvocationId;
   // F194 Phase Z3 R5 P1-1 (砚砚): turn-bearing bubble matches ONLY against turn (parent reserved
   // for liveness/cancel; same-parent multi-turn must NOT cross-match via parent fallback).
@@ -323,7 +331,13 @@ export interface BackgroundAgentMessage {
     cliDiagnostics?: CliDiagnostics;
   };
   /** F52: Cross-thread origin metadata */
-  extra?: { crossPost?: { sourceThreadId: string; sourceInvocationId?: string } };
+  extra?: {
+    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    /** #814: True when message originated from an explicit post_message callback */
+    isExplicitPost?: boolean;
+    /** F098-C1: Explicit target cats from post_message (direction pills) */
+    targetCats?: string[];
+  };
   /** F057-C2: Whether this message mentions the user (@user / @铲屎官) */
   mentionsUser?: boolean;
   /** F121: Reply-to message ID */
@@ -476,6 +490,10 @@ function recoverBackgroundStreamingMessage(
 }
 
 function getStreamStableInvocationKey(message: ChatMessage): string | undefined {
+  // #814: explicit post_message is standalone — never match by stable key,
+  // so stream events from the same invocation can't replace this bubble.
+  // stream block is still preserved for #573 correlation after F5/hydration.
+  if (message.extra?.isExplicitPost) return undefined;
   const invocationId = message.extra?.stream?.invocationId;
   if (typeof invocationId !== 'string' || invocationId.length === 0) return undefined;
   const turnInvocationId = message.extra?.stream?.turnInvocationId;
@@ -1518,10 +1536,19 @@ export function handleBackgroundAgentMessage(
     let finalMsgId: string | undefined;
 
     if (msg.origin === 'callback') {
-      if (deferBackgroundCallbackIfStreamOpen(msg, options)) {
+      // #814 P2: explicit post_message must bypass stream-open deferral. The deferral
+      // stores callbacks keyed by thread/cat/invocation (no messageId), so multiple
+      // explicit posts from the same invocation overwrite each other and are delayed
+      // until stream end. Explicit posts are standalone — apply them immediately.
+      if (!msg.extra?.isExplicitPost && deferBackgroundCallbackIfStreamOpen(msg, options)) {
         return;
       }
-      const replacementTarget = findBackgroundCallbackReplacementTarget(msg, options);
+      // #814: explicit post_message is a standalone message — skip replacement target
+      // lookup to avoid replacing existing stream bubble or marking the invocation as
+      // replaced, which would kill subsequent stream chunks (symmetric with active path).
+      const replacementTarget = msg.extra?.isExplicitPost
+        ? null
+        : findBackgroundCallbackReplacementTarget(msg, options);
       if (replacementTarget) {
         const cbId = msg.messageId ?? replacementTarget.id;
         if (cbId !== replacementTarget.id) {
@@ -1559,7 +1586,14 @@ export function handleBackgroundAgentMessage(
 
         const sidePatch: Partial<ChatMessage> = {
           ...(msg.metadata ? { metadata: msg.metadata } : {}),
-          ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+          ...(msg.extra?.crossPost || msg.extra?.isExplicitPost
+            ? {
+                extra: {
+                  ...(msg.extra.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+                  ...(msg.extra.isExplicitPost ? { isExplicitPost: true as const } : {}),
+                },
+              }
+            : {}),
           ...(msg.mentionsUser ? { mentionsUser: true } : {}),
           ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
           ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
@@ -1637,7 +1671,15 @@ export function handleBackgroundAgentMessage(
             catId: msg.catId,
             content: msg.content,
             ...(msg.metadata ? { metadata: msg.metadata } : {}),
-            ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+            ...(msg.extra?.crossPost || msg.extra?.isExplicitPost || msg.extra?.targetCats
+              ? {
+                  extra: {
+                    ...(msg.extra.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+                    ...(msg.extra.isExplicitPost ? { isExplicitPost: true as const } : {}),
+                    ...(msg.extra.targetCats ? { targetCats: msg.extra.targetCats } : {}),
+                  },
+                }
+              : {}),
             ...(msg.mentionsUser ? { mentionsUser: true } : {}),
             ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
             ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
@@ -1648,7 +1690,15 @@ export function handleBackgroundAgentMessage(
           // Side-fields after reducer success (reducer 不 model 这些)
           const sidePatch: Partial<ChatMessage> = {
             ...(msg.metadata ? { metadata: msg.metadata } : {}),
-            ...(msg.extra?.crossPost ? { extra: { crossPost: msg.extra.crossPost } } : {}),
+            ...(msg.extra?.crossPost || msg.extra?.isExplicitPost || msg.extra?.targetCats
+              ? {
+                  extra: {
+                    ...(msg.extra.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+                    ...(msg.extra.isExplicitPost ? { isExplicitPost: true as const } : {}),
+                    ...(msg.extra.targetCats ? { targetCats: msg.extra.targetCats } : {}),
+                  },
+                }
+              : {}),
             ...(msg.mentionsUser ? { mentionsUser: true } : {}),
             ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
             ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
@@ -1660,13 +1710,18 @@ export function handleBackgroundAgentMessage(
         // #586 Bug 1 (TD112): Callback created new bubble without finding a stream
         // placeholder. Mark invocation as replaced so late background stream chunks
         // are suppressed instead of spawning a duplicate bubble.
+        // #814: explicit post_message is standalone — must NOT mark invocation as
+        // replaced, otherwise subsequent stream chunks from the same invocation get
+        // killed (symmetric with active-path guard in applyActiveExplicitCallbackNow).
         // F194 Phase Z3 R16 (cloud Codex P1): suppression key prefers turn id when
         // present so siblings under same parent chain don't cross-suppress.
-        const bgInvocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
-        const bgSuppressionKey = msg.turnInvocationId ?? bgInvocationId;
-        if (bgSuppressionKey) {
-          // F173 A.6 — shared module Map.
-          markReplacedInvocation(msg.threadId, msg.catId, bgSuppressionKey);
+        if (!msg.extra?.isExplicitPost) {
+          const bgInvocationId = msg.invocationId ?? getThreadInvocationId(msg, options);
+          const bgSuppressionKey = msg.turnInvocationId ?? bgInvocationId;
+          if (bgSuppressionKey) {
+            // F173 A.6 — shared module Map.
+            markReplacedInvocation(msg.threadId, msg.catId, bgSuppressionKey);
+          }
         }
         finalMsgId = cbId;
       }
@@ -2844,10 +2899,15 @@ export function useAgentMessages() {
     (msg: AgentMsg): void => {
       if (!msg.invocationId) return;
       const invocationId = msg.invocationId;
-      // F194 Phase Z3 R8 P1-1: pass turn-priority expected
-      const replacementTarget =
-        findCallbackReplacementTarget(msg.catId, msg.turnInvocationId ?? invocationId) ??
-        findInvocationlessRichPlaceholder(msg.catId);
+      const isExplicitPost = msg.extra?.isExplicitPost === true;
+      // #814: explicit post_message is a standalone message — it doesn't replace
+      // any existing stream bubble, so skip replacement target lookup entirely.
+      // Finding a target would cause deleteActive/clearFinalized/markReplacedInvocation
+      // which would kill subsequent stream chunks from the same invocation.
+      const replacementTarget = isExplicitPost
+        ? null
+        : (findCallbackReplacementTarget(msg.catId, msg.turnInvocationId ?? invocationId) ??
+          findInvocationlessRichPlaceholder(msg.catId));
       // F194 Phase Z3 R3 P1-2: callback bubble id 用 turn-priority (turnInvocationId ?? invocationId)
       const bubbleIdSeed = msg.turnInvocationId ?? invocationId;
       const finalId =
@@ -2886,6 +2946,10 @@ export function useAgentMessages() {
         const turnInvocationIdForFallback = msg.turnInvocationId;
         const extraForAdd = {
           ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+          // #814: propagate isExplicitPost so chatStore.findAssistantDuplicate
+          // skips merge for explicit post_message callbacks in fallback path.
+          ...(msg.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
+          ...(msg.extra?.targetCats ? { targetCats: msg.extra.targetCats } : {}),
           stream: {
             invocationId,
             ...(turnInvocationIdForFallback && turnInvocationIdForFallback !== invocationId
@@ -2911,6 +2975,8 @@ export function useAgentMessages() {
 
       const extraForPatch = {
         ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+        ...(msg.extra?.isExplicitPost ? { isExplicitPost: true as const } : {}),
+        ...(msg.extra?.targetCats ? { targetCats: msg.extra.targetCats } : {}),
       };
       if (
         msg.metadata ||
@@ -2931,9 +2997,14 @@ export function useAgentMessages() {
         deleteActive(msg.catId);
         clearFinalized(msg.catId);
       }
-      // F194 Phase Z3 R16 (cloud Codex P1): suppression key uses turn id when present so
-      // sibling turns under the same parent chain don't get cross-suppressed.
-      markReplacedInvocation(threadIdForCallback, msg.catId, msg.turnInvocationId ?? invocationId);
+      // #814: explicit post_message is standalone — must NOT mark the invocation
+      // as replaced, otherwise subsequent stream chunks from the same invocation
+      // get dropped by isInvocationReplaced guard.
+      if (!isExplicitPost) {
+        // F194 Phase Z3 R16 (cloud Codex P1): suppression key uses turn id when present so
+        // sibling turns under the same parent chain don't get cross-suppressed.
+        markReplacedInvocation(threadIdForCallback, msg.catId, msg.turnInvocationId ?? invocationId);
+      }
     },
     [
       addMessage,
@@ -3471,7 +3542,14 @@ export function useAgentMessages() {
           const hasExplicitInvocationId = !!msg.invocationId;
           if (hasExplicitInvocationId && msg.invocationId) {
             const callbackThreadId = msg.threadId ?? useChatStore.getState().currentThreadId;
-            if (isActiveCallbackStillStreaming(msg.catId, msg.turnInvocationId ?? msg.invocationId)) {
+            // #814 P2: explicit post_message must bypass stream-open deferral.
+            // The pending map keys by thread/cat/invocation (no messageId), so multiple
+            // explicit posts from the same invocation overwrite each other. Explicit
+            // posts are standalone bubbles — apply them immediately even while streaming.
+            if (
+              !msg.extra?.isExplicitPost &&
+              isActiveCallbackStillStreaming(msg.catId, msg.turnInvocationId ?? msg.invocationId)
+            ) {
               deferPendingCallback(
                 {
                   ...msg,
@@ -3590,6 +3668,7 @@ export function useAgentMessages() {
             // F194 Phase Z3 R3 P1-3: invocationless callback add 也写完整 dual id
             const extraForAdd = {
               ...(msg.extra?.crossPost ? { crossPost: msg.extra.crossPost } : {}),
+              ...(msg.extra?.targetCats ? { targetCats: msg.extra.targetCats } : {}),
               ...(hasExplicitInvocationId && msg.invocationId
                 ? {
                     stream: {

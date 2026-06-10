@@ -18,6 +18,7 @@ import {
   readFeatureDocDependencies,
   readFeatureDocStatuses,
 } from './backlog-doc-import.js';
+import { sanitizeThreadForResponse } from './threads.js';
 
 export interface BacklogRoutesOptions {
   backlogStore: IBacklogStore;
@@ -295,7 +296,13 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
       );
     }
     const refreshedThread = await threadStore.get(threadId);
-    return { statusCode: 200 as const, payload: { item: dispatched, thread: refreshedThread } };
+    return {
+      statusCode: 200 as const,
+      payload: {
+        item: dispatched,
+        thread: refreshedThread ? sanitizeThreadForResponse(refreshedThread, userId) : null,
+      },
+    };
   }
 
   app.post('/api/backlog/items', async (request, reply) => {
@@ -533,7 +540,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     }
 
     if (existing.status === 'dispatched') {
-      const thread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+      const rawThread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+      const thread = rawThread ? sanitizeThreadForResponse(rawThread, userId) : null;
       return {
         item: existing,
         ...(thread ? { thread } : {}),
@@ -704,7 +712,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
 
       const phase = parsed.data.threadPhase as ThreadPhase;
       if (existing.status === 'dispatched') {
-        const thread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+        const rawThread = existing.dispatchedThreadId ? await threadStore.get(existing.dispatchedThreadId) : null;
+        const thread = rawThread ? sanitizeThreadForResponse(rawThread, userId) : null;
         return { item: existing, ...(thread ? { thread } : {}) };
       }
 

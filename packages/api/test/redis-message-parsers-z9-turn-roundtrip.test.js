@@ -69,4 +69,27 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
     assert.equal(parsed?.stream?.invocationId, 'first-in-chain-id');
     assert.equal(parsed?.stream?.turnInvocationId, 'first-in-chain-id');
   });
+
+  it('round-trip: explicit post flag survives alongside stream identity', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+
+    const input = {
+      isExplicitPost: true,
+      stream: {
+        invocationId: 'explicit-parent',
+        turnInvocationId: 'explicit-turn',
+      },
+    };
+
+    const serialized = serializeExtra(input);
+    const parsed = safeParseExtra(serialized);
+
+    assert.equal(parsed?.isExplicitPost, true);
+    assert.deepEqual(parsed?.stream, {
+      invocationId: 'explicit-parent',
+      turnInvocationId: 'explicit-turn',
+    });
+  });
 });

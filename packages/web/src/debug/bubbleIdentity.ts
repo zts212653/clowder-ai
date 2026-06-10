@@ -26,6 +26,10 @@ export interface BubbleIdentityDescriptor {
  * cancel 按钮消失 + 第 3 个 opus 失踪（铲屎官 catch 2026-05-09 17:32, 砚砚 root cause analysis）。
  */
 export function getBubbleInvocationId(msg: ChatMessage): string | undefined {
+  // #814: explicit post_message is a standalone bubble. It may preserve
+  // extra.stream for correlation/hydration metadata, but it must not expose a
+  // stable stream identity to merge, projection, or invariant code.
+  if (msg.extra?.isExplicitPost) return undefined;
   if (msg.extra?.stream?.turnInvocationId) return msg.extra.stream.turnInvocationId;
   if (msg.extra?.stream?.invocationId) return msg.extra.stream.invocationId;
   if (msg.id.startsWith('draft-')) return msg.id.slice('draft-'.length);

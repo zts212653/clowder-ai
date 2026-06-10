@@ -872,6 +872,49 @@ export class InvocationQueue {
     return false;
   }
 
+  /**
+   * #815: Find queued A2A trigger entries whose target cats are all active.
+   * Scoped to a single userId — prompt context assembly is per-user, so
+   * consuming another user's A2A entry would silently lose their trigger.
+   * Returns candidates without removing them — caller performs async
+   * delivery-status filtering, then calls `consumeEntriesById` to remove.
+   */
+  findSubsumedA2ACandidates(threadId: string, userId: string, activeCatSet: Set<string>): QueueEntry[] {
+    const q = this.queues.get(this.scopeKey(threadId, userId));
+    if (!q) return [];
+    const candidates: QueueEntry[] = [];
+    for (const e of q) {
+      if (e.status !== 'queued') continue;
+      if (e.sourceCategory !== 'a2a') continue;
+      if (!e.targetCats.every((cat) => activeCatSet.has(cat))) continue;
+      candidates.push(e);
+    }
+    return candidates;
+  }
+
+  /**
+   * #815: Remove specific entries by ID. Returns removed entries.
+   * Used after async filtering of A2A candidates by delivery status.
+   */
+  consumeEntriesById(entryIds: Set<string>): QueueEntry[] {
+    const consumed: QueueEntry[] = [];
+    for (const q of this.queues.values()) {
+      for (let i = q.length - 1; i >= 0; i--) {
+        if (entryIds.has(q[i]!.id)) {
+          this.originalContents.delete(q[i]!.id);
+          consumed.push(q.splice(i, 1)[0]!);
+        }
+      }
+    }
+    if (consumed.length > 0) {
+      this.log.info(
+        { count: consumed.length, entryIds: consumed.map((e) => e.id) },
+        '#815: consumed A2A entries by ID',
+      );
+    }
+    return consumed;
+  }
+
   // ── Internal helpers ──
 
   private findEntry(threadId: string, userId: string, entryId: string): QueueEntry | undefined {

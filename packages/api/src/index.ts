@@ -35,6 +35,7 @@ import { configEventBus } from './config/config-event-bus.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
 import { assertStorageReady } from './config/storage-guard.js';
+import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
 import { InvocationQueue } from './domains/cats/services/agents/invocation/InvocationQueue.js';
 import {
@@ -47,6 +48,7 @@ import type {
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
   resolveAcpBootstrapArgs,
   resolveAcpBootstrapCommand,
@@ -1381,6 +1383,29 @@ async function main(): Promise<void> {
 
   // F39: Message queue delivery
   const invocationQueue = new InvocationQueue();
+  const sessionContinuationCoordinator = new SessionContinuationCoordinator({
+    threadStore: {
+      getMemberSessionStrategy: async (threadId, catId, userId) => {
+        if (threadStore.getMemberSessionStrategy) {
+          return (await threadStore.getMemberSessionStrategy(threadId, catId, userId)) ?? undefined;
+        }
+        if (threadStore.isRebornSession && (await threadStore.isRebornSession(threadId, catId))) {
+          return 'reborn';
+        }
+        return undefined;
+      },
+      consumePendingContinuation: async (threadId, catId, userId) => {
+        const entry = await threadStore.consumePendingContinuation(threadId, catId, userId);
+        return (entry?.capsule as unknown as CollaborationContinuityCapsuleV1 | undefined) ?? null;
+      },
+      setPendingContinuation: async (threadId, catId, userId, capsule) => {
+        await threadStore.setPendingContinuation(threadId, catId, userId, {
+          capsule: capsule as unknown as Record<string, unknown>,
+          createdAt: Date.now(),
+        });
+      },
+    },
+  });
   const queueProcessor = new QueueProcessor({
     queue: invocationQueue,
     invocationTracker,
@@ -1389,6 +1414,9 @@ async function main(): Promise<void> {
     socketManager,
     messageStore,
     log: app.log,
+    threadStore:
+      threadStore as unknown as import('./domains/cats/services/agents/invocation/QueueProcessor.js').ThreadStoreLike,
+    sessionContinuationCoordinator,
   });
   socketManager.setQueueProcessor(queueProcessor);
 
@@ -1451,6 +1479,7 @@ async function main(): Promise<void> {
     draftStore,
     invocationQueue,
     queueProcessor,
+    sessionContinuationCoordinator,
     taskProgressStore, // F194 AC-B7: cleared on zombie reconcile
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),

@@ -957,6 +957,31 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       try {
         const thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
         if (thread?.createdAt) threadCreatedAt = thread.createdAt;
+        // #836: Reborn session strategy — force new session every invocation.
+        // Uses store lookup (isRebornSession) instead of thread field because
+        // Redis stores strategy in separate hash fields not hydrated by get().
+        // Optional chaining: test mocks may omit isRebornSession (absent = false).
+        // Best-effort: a transient Redis failure must not skip workspace resolution
+        // below — wrap in its own try/catch, defaulting to non-reborn.
+        let isReborn = false;
+        try {
+          isReborn = threadStore.isRebornSession
+            ? await preflightRace(
+                Promise.resolve(threadStore.isRebornSession(threadId, catId as string)),
+                'isRebornSession',
+                signal,
+              )
+            : false;
+        } catch (rebornErr) {
+          log.warn(
+            { catId, threadId, err: rebornErr },
+            '#836: isRebornSession lookup failed pre-invoke, defaulting to non-reborn',
+          );
+        }
+        if (isReborn) {
+          sessionId = undefined;
+          log.info({ catId, threadId }, '#836: reborn session strategy — forcing new session');
+        }
         if (thread?.projectPath && thread.projectPath !== 'default') {
           // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
           // categorization only — they are not real filesystem directories. Skip them

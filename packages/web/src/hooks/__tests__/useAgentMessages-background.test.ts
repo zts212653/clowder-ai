@@ -2414,5 +2414,38 @@ describe('background thread socket handling', () => {
       const ts = useChatStore.getState().getThreadState('thread-bg-ledger');
       expect(ledger?.id).toBe(ts.messages[0].id);
     });
+
+    it('does not bind bgStreamRefs to hydrated explicit posts that still carry stream identity', () => {
+      const now = Date.now();
+      useChatStore.getState().replaceThreadMessages('thread-bg-explicit-hydrated', [
+        {
+          id: 'msg-explicit-post',
+          type: 'assistant',
+          catId: 'opus',
+          content: 'standalone explicit post',
+          origin: 'callback',
+          extra: {
+            isExplicitPost: true,
+            stream: { invocationId: 'inv-hydrated-explicit' },
+          },
+          timestamp: now,
+        },
+      ]);
+
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg-explicit-hydrated',
+        content: 'stream chunk',
+        invocationId: 'inv-hydrated-explicit',
+        timestamp: now + 1,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg-explicit-hydrated');
+      expect(ts.messages.find((m) => m.id === 'msg-explicit-post')?.content).toBe('standalone explicit post');
+      const streamBubble = ts.messages.find((m) => m.origin === 'stream');
+      expect(streamBubble?.content).toBe('stream chunk');
+      expect(testBgStreamRefs.get('thread-bg-explicit-hydrated::opus')?.id).toBe(streamBubble?.id);
+    });
   });
 });

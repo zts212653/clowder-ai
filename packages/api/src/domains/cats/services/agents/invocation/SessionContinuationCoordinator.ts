@@ -95,6 +95,18 @@ export class SessionContinuationCoordinator {
     return (await this.deps.threadStore.getMemberSessionStrategy(threadId, catId, userId)) ?? 'resume';
   }
 
+  private async resolveSessionStrategyForCommit(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): Promise<SessionStrategy> {
+    try {
+      return await this.resolveSessionStrategy(threadId, catId, userId);
+    } catch {
+      return 'resume';
+    }
+  }
+
   /**
    * #813 + #836：单猫 invocation 开始前的 continuation 决策 + content 改写。
    * - **reborn（per-cat via resolveSessionStrategy）**：跳过 consume，原 content 直接跑。
@@ -115,8 +127,9 @@ export class SessionContinuationCoordinator {
     }
 
     const continuationPrompt = formatContinuationPrompt(capsule);
+    const contentAlreadyCarriesThisContinuation = content.startsWith(continuationPrompt);
     return {
-      content: `${continuationPrompt}\n\n${content}`,
+      content: contentAlreadyCarriesThisContinuation ? content : `${continuationPrompt}\n\n${content}`,
       consumedContinuation: { capsule, threadId, catId, userId },
       sessionPolicy,
     };
@@ -148,7 +161,7 @@ export class SessionContinuationCoordinator {
       }
       // #836 per-cat（砚砚 re-review）：按 capsule 自身 cat 判 strategy，reborn 跳过这一个——
       // 不按 commit input 整体判，否则混合 resume/reborn 多猫场景会错存 reborn / 错丢 resume。
-      if ((await this.resolveSessionStrategy(capsule.threadId, capsule.catId, userId)) === 'reborn') {
+      if ((await this.resolveSessionStrategyForCommit(capsule.threadId, capsule.catId, userId)) === 'reborn') {
         continue;
       }
       // 砚砚 P1#2：存到 capsule 自身携带的 (threadId, catId)，不是 commit input 的 catId。
@@ -174,7 +187,7 @@ export class SessionContinuationCoordinator {
     if (consumedContinuation) {
       // #836 per-cat（砚砚 re-review）：按 token 自身 cat 判 strategy，reborn 则不 restore。
       if (
-        (await this.resolveSessionStrategy(
+        (await this.resolveSessionStrategyForCommit(
           consumedContinuation.threadId,
           consumedContinuation.catId,
           consumedContinuation.userId,

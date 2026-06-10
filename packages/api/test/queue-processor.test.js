@@ -232,6 +232,43 @@ describe('QueueProcessor', () => {
     assert.equal(pausedCall.arguments[2].reason, 'canceled');
   });
 
+  it('failed + unrelated auto-continuation → pauses failed cat queued work', async () => {
+    const queuedWork = enqueueEntry(deps.queue, { targetCats: ['opus'], source: 'user', content: 'opus queued work' });
+    deps.queue.backfillMessageId('t1', 'u1', queuedWork.id, 'msg-opus-work');
+    const codexCapsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'codex',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-codex-seal',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-codex', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const continuation = await processor.enqueueContinuation({
+      threadId: 't1',
+      userId: 'u1',
+      catId: 'codex',
+      capsule: codexCapsule,
+    });
+    assert.equal(continuation.outcome, 'enqueued');
+
+    await processor.onInvocationComplete('t1', 'opus', 'failed');
+
+    assert.equal(processor.isPaused('t1', 'opus'), true, 'unrelated continuation must not bypass failed opus pause');
+    assert.equal(
+      deps.invocationTracker.startAll.mock.calls.length,
+      0,
+      'unrelated codex continuation should not be started by opus failure cleanup',
+    );
+    const pausedCall = deps.socketManager.emitToUser.mock.calls.find((c) => c.arguments[1] === 'queue_paused');
+    assert.ok(pausedCall, 'should emit queue_paused for failed opus work');
+    assert.equal(pausedCall.arguments[2].reason, 'failed');
+  });
+
   it('failed + stale user queued entry → #595 auto-recovery starts dispatch after pause delay', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const entry = enqueueEntry(deps.queue, { source: 'user' });
@@ -564,8 +601,128 @@ describe('QueueProcessor', () => {
     );
   });
 
-  it('threshold seal capsule in queued execution enqueues and starts bounded same-cat continuation', async () => {
+  it('#815: does not consume delivered historical A2A entries outside the current invocation context', async () => {
+    const active = enqueueEntry(deps.queue, { targetCats: ['opus'], content: 'current user work' });
+    deps.queue.backfillMessageId('t1', 'u1', active.id, 'current-user-msg');
+    const historicalA2A = enqueueEntry(deps.queue, {
+      source: 'agent',
+      sourceCategory: 'a2a',
+      targetCats: ['opus'],
+      autoExecute: true,
+      content: 'historical handoff',
+    });
+    deps.queue.backfillMessageId('t1', 'u1', historicalA2A.id, 'historical-a2a-msg');
+    deps.messageStore.getById = mock.fn(async (id) => {
+      if (id === 'historical-a2a-msg') {
+        return { id, deliveryStatus: 'delivered', content: 'historical handoff', mentions: [] };
+      }
+      return null;
+    });
+
+    const processing = deps.queue.markProcessing('t1', 'u1');
+    assert.equal(processing.id, active.id);
+
+    const status = await processor.executeEntry(processing);
+
+    assert.equal(status, 'succeeded');
+    assert.ok(
+      deps.queue.list('t1', 'u1').some((entry) => entry.id === historicalA2A.id),
+      'historical delivered A2A trigger was not in this invocation context and must stay queued',
+    );
+  });
+
+  it('uses SessionContinuationCoordinator to prepare context and commit outcome', async () => {
+    const routeContents = [];
+    const coordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({
+        content: `prepared:${content}`,
+        sessionPolicy: 'resume',
+      })),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+    const coordinatorDeps = stubDeps({
+      sessionContinuationCoordinator: coordinator,
+      router: {
+        routeExecution: mock.fn(async function* (_userId, content) {
+          routeContents.push(content);
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const coordinatorProcessor = new QueueProcessor(coordinatorDeps);
+    const active = enqueueEntry(coordinatorDeps.queue, { targetCats: ['opus'], content: 'work' });
+    coordinatorDeps.queue.backfillMessageId('t1', 'u1', active.id, 'current-user-msg');
+    const processing = coordinatorDeps.queue.markProcessing('t1', 'u1');
+
+    const status = await coordinatorProcessor.executeEntry(processing);
+
+    assert.equal(status, 'succeeded');
+    assert.equal(coordinator.prepareInvocationContext.mock.calls.length, 1);
+    assert.deepEqual(coordinator.prepareInvocationContext.mock.calls[0].arguments[0], {
+      threadId: 't1',
+      catId: 'opus',
+      userId: 'u1',
+      content: 'work',
+    });
+    assert.deepEqual(routeContents, ['prepared:work']);
+    assert.equal(coordinator.commitInvocationOutcome.mock.calls.length, 1);
+    assert.equal(coordinator.commitInvocationOutcome.mock.calls[0].arguments[0].finalStatus, 'succeeded');
+  });
+
+  it('persists produced continuation even when it was already auto-queued', async () => {
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-queued-produced',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-queued-produced', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const coordinator = {
+      prepareInvocationContext: mock.fn(async ({ content }) => ({ content, sessionPolicy: 'resume' })),
+      commitInvocationOutcome: mock.fn(async () => {}),
+    };
+    const coordinatorDeps = stubDeps({
+      sessionContinuationCoordinator: coordinator,
+      router: {
+        routeExecution: mock.fn(async function* () {
+          yield {
+            type: 'system_info',
+            catId: 'opus',
+            content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const coordinatorProcessor = new QueueProcessor(coordinatorDeps);
+    const active = enqueueEntry(coordinatorDeps.queue, { targetCats: ['opus'], content: 'work' });
+    coordinatorDeps.queue.backfillMessageId('t1', 'u1', active.id, 'current-user-msg');
+    const processing = coordinatorDeps.queue.markProcessing('t1', 'u1');
+
+    const status = await coordinatorProcessor.executeEntry(processing);
+
+    assert.equal(status, 'succeeded');
+    assert.equal(coordinator.commitInvocationOutcome.mock.calls.length, 1);
+    const commitInput = coordinator.commitInvocationOutcome.mock.calls[0].arguments[0];
+    assert.deepEqual(Array.from(commitInput.producedCapsules ?? []), [capsule]);
+    const queuedContinuation = coordinatorDeps.queue
+      .list('t1', 'u1')
+      .find((entry) => entry.sourceCategory === 'continuation');
+    assert.ok(queuedContinuation, 'continuation should still be auto-queued');
+  });
+
+  it('threshold seal capsule in queued execution starts bounded same-cat continuation without pending duplicate', async () => {
     let routeCalls = 0;
+    let pendingContinuation = null;
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
         threadId: 't1',
@@ -599,6 +756,17 @@ describe('QueueProcessor', () => {
         }),
         ackCollectedCursors: mock.fn(async () => {}),
       },
+      threadStore: {
+        isRebornSession: mock.fn(async () => false),
+        setPendingContinuation: mock.fn(async (_threadId, _catId, _userId, entry) => {
+          pendingContinuation = entry;
+        }),
+        consumePendingContinuation: mock.fn(async () => {
+          const pending = pendingContinuation;
+          pendingContinuation = null;
+          return pending;
+        }),
+      },
     });
     const sealProcessor = new QueueProcessor(sealDeps);
     const entry = enqueueEntry(sealDeps.queue, { targetCats: ['opus'], content: 'initial work' });
@@ -611,7 +779,99 @@ describe('QueueProcessor', () => {
 
     assert.equal(routeCalls, 2, 'second route call should be the continuation');
     assert.match(routeContents[1], /previous session was sealed/i);
+    assert.equal(
+      (routeContents[1].match(/Continue the same structured work from the sealed session/g) ?? []).length,
+      1,
+      'queued continuation must not duplicate the bootstrap prompt',
+    );
+    assert.equal(
+      sealDeps.threadStore.setPendingContinuation.mock.calls.length,
+      1,
+      'auto-queued continuation must also be persisted as durable pending state',
+    );
+    assert.equal(
+      sealDeps.threadStore.consumePendingContinuation.mock.calls.length,
+      2,
+      'initial and continuation executions still check pending storage; the queued capsule supplies the continuation',
+    );
     assert.ok(sealDeps.invocationTracker.startAll.mock.calls.length >= 2);
+  });
+
+  it('threshold seal capsule survives lost in-memory continuation queue entry via pending storage', async () => {
+    let routeCalls = 0;
+    let pendingContinuation = null;
+    const routeContents = [];
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-lost-queue-entry',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-lost-queue-entry', sessionSeq: 1, reason: 'threshold' },
+      },
+    );
+    const sealDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* (_userId, content) {
+          routeCalls++;
+          routeContents.push(content);
+          if (routeCalls === 1) {
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+              timestamp: Date.now(),
+            };
+          } else {
+            yield { type: 'text', catId: 'opus', content: 'resumed from durable pending', timestamp: Date.now() };
+          }
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+      threadStore: {
+        isRebornSession: mock.fn(async () => false),
+        setPendingContinuation: mock.fn(async (_threadId, _catId, _userId, entry) => {
+          pendingContinuation = entry;
+        }),
+        consumePendingContinuation: mock.fn(async () => {
+          const pending = pendingContinuation;
+          pendingContinuation = null;
+          return pending;
+        }),
+      },
+    });
+    const sealProcessor = new QueueProcessor(sealDeps);
+    const initial = enqueueEntry(sealDeps.queue, { targetCats: ['opus'], content: 'initial work' });
+    sealDeps.queue.backfillMessageId('t1', 'u1', initial.id, 'msg-1');
+    const initialProcessing = sealDeps.queue.markProcessing('t1', 'u1');
+
+    const initialStatus = await sealProcessor.executeEntry(initialProcessing);
+    assert.equal(initialStatus, 'succeeded');
+    assert.equal(sealDeps.threadStore.setPendingContinuation.mock.calls.length, 1);
+
+    const queuedContinuation = sealDeps.queue.list('t1', 'u1').find((entry) => entry.sourceCategory === 'continuation');
+    assert.ok(queuedContinuation, 'continuation wake-up entry should be queued before simulated process loss');
+    sealDeps.queue.remove('t1', 'u1', queuedContinuation.id);
+
+    const followup = enqueueEntry(sealDeps.queue, { targetCats: ['opus'], content: 'follow-up work' });
+    sealDeps.queue.backfillMessageId('t1', 'u1', followup.id, 'msg-2');
+    const followupProcessing = sealDeps.queue.markProcessing('t1', 'u1');
+
+    const followupStatus = await sealProcessor.executeEntry(followupProcessing);
+    assert.equal(followupStatus, 'succeeded');
+    assert.equal(routeCalls, 2);
+    assert.match(routeContents[1], /previous session was sealed/i);
+    assert.match(routeContents[1], /follow-up work/);
+    assert.equal(
+      (routeContents[1].match(/Continue the same structured work from the sealed session/g) ?? []).length,
+      1,
+      'durable pending restore must inject the continuation prompt exactly once',
+    );
   });
 
   it('threshold seal capsule in queued multi-cat execution resumes the capsule owner cat', async () => {
@@ -739,7 +999,10 @@ describe('QueueProcessor', () => {
     );
   });
 
-  it('threshold seal capsule does not enqueue continuation when execution fails afterward', async () => {
+  it('threshold seal capsule in failed queued execution still starts continuation', async () => {
+    let routeCalls = 0;
+    const routeContents = [];
+    let pendingContinuation = null;
     const capsule = completeCapsuleForSeal(
       buildCapsuleFromRouteState({
         threadId: 't1',
@@ -755,16 +1018,33 @@ describe('QueueProcessor', () => {
     );
     const failDeps = stubDeps({
       router: {
-        routeExecution: mock.fn(async function* () {
-          yield {
-            type: 'system_info',
-            catId: 'opus',
-            content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
-            timestamp: Date.now(),
-          };
-          throw new Error('route failed after seal notice');
+        routeExecution: mock.fn(async function* (_userId, content) {
+          routeCalls++;
+          routeContents.push(content);
+          if (routeCalls === 1) {
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+              timestamp: Date.now(),
+            };
+            throw new Error('route failed after seal notice');
+          }
+          yield { type: 'text', catId: 'opus', content: 'continued', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
         }),
         ackCollectedCursors: mock.fn(async () => {}),
+      },
+      threadStore: {
+        isRebornSession: mock.fn(async () => false),
+        setPendingContinuation: mock.fn(async (_threadId, _catId, _userId, entry) => {
+          pendingContinuation = entry;
+        }),
+        consumePendingContinuation: mock.fn(async () => {
+          const pending = pendingContinuation;
+          pendingContinuation = null;
+          return pending;
+        }),
       },
     });
     const failProcessor = new QueueProcessor(failDeps);
@@ -776,8 +1056,92 @@ describe('QueueProcessor', () => {
 
     await new Promise((r) => setTimeout(r, 150));
 
-    assert.equal(failDeps.queue.list('t1', 'u1').length, 0, 'failed execution must not leave continuation queued');
-    assert.equal(failDeps.router.routeExecution.mock.calls.length, 1, 'must not start continuation after failure');
+    assert.equal(routeCalls, 2, 'second route call should be the continuation even after failure');
+    assert.match(routeContents[1], /previous session was sealed/i);
+    assert.equal(
+      (routeContents[1].match(/Continue the same structured work from the sealed session/g) ?? []).length,
+      1,
+      'stored pending continuation and queued continuation must not duplicate the bootstrap prompt',
+    );
+  });
+
+  it('threshold seal capsule after user stop stores pending but does not auto-run continuation', async () => {
+    let routeCalls = 0;
+    let pendingContinuation = null;
+    const capsule = completeCapsuleForSeal(
+      buildCapsuleFromRouteState({
+        threadId: 't1',
+        catId: 'opus',
+        mode: 'independent',
+        a2aEnabled: true,
+      }),
+      {
+        invocationId: 'inv-first',
+        createdAt: Date.now(),
+        seal: { sessionId: 'sess-user-stop', sessionSeq: 1, reason: 'user-stop-after-seal' },
+      },
+    );
+    const stopDeps = stubDeps({
+      invocationTracker: {
+        start: mock.fn(() => new AbortController()),
+        startAll: mock.fn(() => new AbortController()),
+        complete: mock.fn(),
+        completeAll: mock.fn(),
+        completeSlot: mock.fn(),
+        has: mock.fn(() => false),
+        resolveFinalStatus: mock.fn(() => 'canceled_by_user'),
+      },
+      router: {
+        routeExecution: mock.fn(async function* () {
+          routeCalls++;
+          if (routeCalls === 1) {
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({ type: 'session_seal_requested', continuityCapsule: capsule }),
+              timestamp: Date.now(),
+            };
+          } else {
+            yield { type: 'text', catId: 'opus', content: 'unexpected auto continuation', timestamp: Date.now() };
+          }
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+      threadStore: {
+        isRebornSession: mock.fn(async () => false),
+        setPendingContinuation: mock.fn(async (_threadId, _catId, _userId, entry) => {
+          pendingContinuation = entry;
+        }),
+        consumePendingContinuation: mock.fn(async () => {
+          const pending = pendingContinuation;
+          pendingContinuation = null;
+          return pending;
+        }),
+      },
+    });
+    const stopProcessor = new QueueProcessor(stopDeps);
+    const entry = enqueueEntry(stopDeps.queue, { targetCats: ['opus'], content: 'initial work' });
+    stopDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    const result = await stopProcessor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    assert.equal(routeCalls, 1, 'user stop must not immediately auto-run the produced continuation');
+    assert.equal(
+      stopDeps.threadStore.setPendingContinuation.mock.calls.length,
+      1,
+      'capsule remains available for resume',
+    );
+    assert.equal(
+      stopDeps.queue
+        .list('t1', 'u1')
+        .some((queued) => queued.sourceCategory === 'continuation' && queued.autoExecute === true),
+      false,
+      'user-stopped capsule must not be queued as autoExecute continuation',
+    );
   });
 
   it('enqueueContinuation pins seal work ahead of queued user work without dropping either', async () => {

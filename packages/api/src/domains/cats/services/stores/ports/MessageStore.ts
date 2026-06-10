@@ -96,6 +96,8 @@ export interface StoredMessage {
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
     rich?: RichMessageExtra;
+    /** #814/F224: explicit post_message callback bubble; history hydration must not merge it into stream output. */
+    isExplicitPost?: boolean;
     /** F081 + F194 Phase Z3 dual id:
      *    - `invocationId` = parent/chain invocation (legacy field, liveness/queue/cancel SoT)
      *    - `turnInvocationId` = per-cat-turn invocation (Z3 new — bubble identity SoT for frontend

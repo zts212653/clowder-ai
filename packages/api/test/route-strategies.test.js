@@ -850,14 +850,41 @@ describe('routeSerial A2A worklist', () => {
     assert.equal(deferred.priority, 'normal', 'deferred entry priority must be normal');
   });
 
-  it('does not defer A2A enqueue when signal is aborted (cloud P1-1)', async () => {
+  it('defers A2A enqueue when signal is aborted without user reason (#813 seal recovery)', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const ac = new AbortController();
     const deps = createMockDeps({
       opus: {
         async *invoke() {
           yield { type: 'text', catId: 'opus', content: '完成\n@缅因猫 帮忙', timestamp: Date.now() };
-          ac.abort();
+          ac.abort(); // no reason → seal/context-exhaustion case
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: createMockService('codex', 'should not run inline'),
+    });
+
+    const deferredEntries = [];
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'test', 'user1', 'thread1', {
+      queueHasQueuedMessages: () => true,
+      deferA2AEnqueue: (entry) => deferredEntries.push(entry),
+      signal: ac.signal,
+    })) {
+      messages.push(msg);
+    }
+
+    assert.equal(deferredEntries.length, 1, 'abort without user reason must defer @mention for seal recovery');
+  });
+
+  it('does not defer A2A enqueue when signal is aborted by user_cancel (P2 gate)', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const ac = new AbortController();
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '完成\n@缅因猫 帮忙', timestamp: Date.now() };
+          ac.abort('user_cancel'); // user explicitly stopped the flow
           yield { type: 'done', catId: 'opus', timestamp: Date.now() };
         },
       },
@@ -874,7 +901,7 @@ describe('routeSerial A2A worklist', () => {
       messages.push(msg);
     }
 
-    assert.equal(deferredEntries.length, 0, 'deferred enqueue must not fire when signal is aborted');
+    assert.equal(deferredEntries.length, 0, 'user_cancel abort must suppress A2A recovery');
   });
 
   it('does not defer A2A enqueue for cat already in pendingTail (cloud P1-2)', async () => {

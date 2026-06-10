@@ -27,6 +27,18 @@ describe('bubbleIdentity', () => {
     expect(getBubbleInvocationId(msg)).toBe('inv-1');
   });
 
+  it('does not expose stable invocation identity for explicit posts', () => {
+    const msg = makeAssistantMessage({
+      extra: {
+        isExplicitPost: true,
+        stream: { invocationId: 'inv-explicit' },
+      },
+    });
+
+    expect(getBubbleInvocationId(msg)).toBeUndefined();
+    expect(getBubbleIdentityKey(msg)).toBeUndefined();
+  });
+
   it('falls back to draft message id for invocationId', () => {
     const msg = makeAssistantMessage({
       id: 'draft-inv-2',

@@ -69,6 +69,31 @@ describe('GET /api/messages', () => {
     assert.equal(body.messages[1].content, 'hi there');
   });
 
+  it('preserves explicit post flag with stream identity in history response', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'standalone post',
+      mentions: [],
+      timestamp: 2000,
+      threadId: 'thread-explicit',
+      extra: {
+        isExplicitPost: true,
+        stream: { invocationId: 'inv-parent', turnInvocationId: 'turn-explicit' },
+      },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages?threadId=thread-explicit' });
+    const body = JSON.parse(res.body);
+
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].extra?.isExplicitPost, true);
+    assert.deepEqual(body.messages[0].extra?.stream, {
+      invocationId: 'inv-parent',
+      turnInvocationId: 'turn-explicit',
+    });
+  });
+
   it('maps canonical system messages to type=system', async () => {
     messageStore.append({
       userId: 'system',

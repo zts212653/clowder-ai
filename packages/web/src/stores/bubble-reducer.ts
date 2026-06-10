@@ -50,6 +50,10 @@ export interface BubbleEvent {
  * dual-id message but reducer compares `extra.stream.invocationId` (parent) ≠ event.canonical (turn).
  */
 export function getStableInvocationKey(msg: ChatMessage): string | undefined {
+  // #814: explicit post_message is standalone — never match by stable key,
+  // so stream events from the same invocation can't replace this bubble.
+  // stream block is still preserved for #573 correlation after F5/hydration.
+  if (msg.extra?.isExplicitPost) return undefined;
   return msg.extra?.stream?.turnInvocationId ?? msg.extra?.stream?.invocationId;
 }
 
@@ -516,6 +520,9 @@ function reduceCallbackFinal(messages: ChatMessage[], event: BubbleEvent): ChatM
     }
   }
 
+  // #814: explicit post_message callbacks are invocationless (adapter strips
+  // canonicalInvocationId) → ADR-033 #4 prevents findExistingByStableKey from
+  // matching. No additional guard needed here — invocationless path above handles it.
   const existing = findExistingByStableKey(messages, event);
   if (existing) {
     const next = [...messages];

@@ -1398,4 +1398,169 @@ describe('InvocationQueue', () => {
       assert.equal(queue.findProcessingByCat('t1', 'codex'), null);
     });
   });
+
+  // ── #815: findSubsumedA2ACandidates userId scoping ──
+
+  describe('#815: findSubsumedA2ACandidates userId isolation', () => {
+    it('returns A2A candidates only from the specified userId queue', () => {
+      // User A's A2A entry
+      queue.enqueue(
+        entry({
+          userId: 'userA',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          targetCats: ['opus'],
+          content: 'userA trigger',
+          autoExecute: true,
+        }),
+      );
+      // User B's A2A entry for same cat
+      queue.enqueue(
+        entry({
+          userId: 'userB',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          targetCats: ['opus'],
+          content: 'userB trigger',
+          autoExecute: true,
+        }),
+      );
+
+      const activeCats = new Set(['opus']);
+      const candidatesA = queue.findSubsumedA2ACandidates('t1', 'userA', activeCats);
+      const candidatesB = queue.findSubsumedA2ACandidates('t1', 'userB', activeCats);
+
+      assert.equal(candidatesA.length, 1);
+      assert.equal(candidatesA[0].content, 'userA trigger');
+      assert.equal(candidatesB.length, 1);
+      assert.equal(candidatesB[0].content, 'userB trigger');
+    });
+
+    it('does not return A2A entries from other users when consuming', () => {
+      queue.enqueue(
+        entry({
+          userId: 'userA',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          targetCats: ['opus'],
+          autoExecute: true,
+        }),
+      );
+      queue.enqueue(
+        entry({
+          userId: 'userB',
+          source: 'agent',
+          sourceCategory: 'a2a',
+          targetCats: ['opus'],
+          autoExecute: true,
+        }),
+      );
+
+      const activeCats = new Set(['opus']);
+      // Find and consume only userA's entries
+      const candidates = queue.findSubsumedA2ACandidates('t1', 'userA', activeCats);
+      assert.equal(candidates.length, 1);
+
+      const consumed = queue.consumeEntriesById(new Set([candidates[0].id]));
+      assert.equal(consumed.length, 1);
+
+      // userB's entry should still be there
+      const remainingB = queue.findSubsumedA2ACandidates('t1', 'userB', activeCats);
+      assert.equal(remainingB.length, 1);
+    });
+
+    it('skips entries whose targetCats are not all active', () => {
+      queue.enqueue(
+        entry({
+          source: 'agent',
+          sourceCategory: 'a2a',
+          targetCats: ['opus', 'codex'],
+          autoExecute: true,
+        }),
+      );
+
+      // Only opus is active, but entry targets [opus, codex]
+      const candidates = queue.findSubsumedA2ACandidates('t1', 'u1', new Set(['opus']));
+      assert.equal(candidates.length, 0);
+
+      // Both active → found
+      const candidates2 = queue.findSubsumedA2ACandidates('t1', 'u1', new Set(['opus', 'codex']));
+      assert.equal(candidates2.length, 1);
+    });
+
+    it('skips non-a2a entries', () => {
+      // User entry (not a2a) — different targetCats to prevent merge
+      queue.enqueue(entry({ targetCats: ['codex'] }));
+      // A2A entry — queued, should match
+      queue.enqueue(entry({ source: 'agent', sourceCategory: 'a2a', targetCats: ['opus'], autoExecute: true }));
+
+      // Only the A2A entry matches, not the user entry
+      const candidates = queue.findSubsumedA2ACandidates('t1', 'u1', new Set(['opus', 'codex']));
+      assert.equal(candidates.length, 1);
+      assert.equal(candidates[0].sourceCategory, 'a2a');
+    });
+
+    it('skips processing entries', () => {
+      const a2aResult = queue.enqueue(
+        entry({ source: 'agent', sourceCategory: 'a2a', targetCats: ['opus'], autoExecute: true }),
+      );
+      queue.markProcessing('t1', 'u1', a2aResult.entry.id);
+
+      const candidates = queue.findSubsumedA2ACandidates('t1', 'u1', new Set(['opus']));
+      assert.equal(candidates.length, 0); // processing → skipped
+    });
+
+    it('returns empty for non-existent userId', () => {
+      queue.enqueue(entry({ source: 'agent', sourceCategory: 'a2a', targetCats: ['opus'], autoExecute: true }));
+      const candidates = queue.findSubsumedA2ACandidates('t1', 'nonexistent', new Set(['opus']));
+      assert.equal(candidates.length, 0);
+    });
+  });
+
+  // ── #815: consumeEntriesById ──
+
+  describe('#815: consumeEntriesById', () => {
+    it('removes only entries with matching IDs', () => {
+      const r1 = queue.enqueue(
+        entry({ source: 'agent', sourceCategory: 'a2a', targetCats: ['opus'], autoExecute: true, content: 'a' }),
+      );
+      const r2 = queue.enqueue(
+        entry({ source: 'agent', sourceCategory: 'a2a', targetCats: ['codex'], autoExecute: true, content: 'b' }),
+      );
+
+      const consumed = queue.consumeEntriesById(new Set([r1.entry.id]));
+      assert.equal(consumed.length, 1);
+      assert.equal(consumed[0].content, 'a');
+
+      // r2 should still be in queue
+      const remaining = queue.list('t1', 'u1');
+      assert.equal(remaining.length, 1);
+      assert.equal(remaining[0].id, r2.entry.id);
+    });
+  });
+
+  // findProcessingByCat (2026-06-02 Steer 抢占 tombstone support)
+  describe('findProcessingByCat', () => {
+    it('finds the processing entry targeting a cat (across users)', () => {
+      queue.enqueue(entry({ userId: 'u1', targetCats: ['opus'] }));
+      queue.markProcessing('t1', 'u1'); // → processing
+      queue.enqueue(entry({ userId: 'u2', targetCats: ['codex'] }));
+      queue.markProcessing('t1', 'u2');
+      const found = queue.findProcessingByCat('t1', 'opus');
+      assert.ok(found);
+      assert.equal(found.targetCats[0], 'opus');
+      assert.equal(found.status, 'processing');
+    });
+
+    it('returns null when the cat has no processing entry (only queued)', () => {
+      queue.enqueue(entry({ targetCats: ['opus'] })); // queued, not processing
+      assert.equal(queue.findProcessingByCat('t1', 'opus'), null);
+    });
+
+    it('returns null for a different cat', () => {
+      queue.enqueue(entry({ targetCats: ['opus'] }));
+      queue.markProcessing('t1', 'u1');
+      assert.equal(queue.findProcessingByCat('t1', 'codex'), null);
+    });
+  });
 });
