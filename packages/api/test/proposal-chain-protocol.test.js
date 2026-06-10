@@ -60,15 +60,14 @@ describe('F128 chain protocol injection', () => {
     const geminiIdx = orderLine.indexOf('gemini');
     const codexIdx = orderLine.indexOf('codex');
     assert.ok(kimiIdx >= 0 && geminiIdx > kimiIdx && codexIdx > geminiIdx, 'order must follow preferredCats');
-    // F128 Phase Y: default reportingMode is now none (autonomous, AC-Y6). The serial
-    // chain order no longer ends at 主 Thread (C-Y5) — that tail is only added for
-    // final-only / state-transitions modes.
-    assert.ok(!orderLine.includes('回到主 Thread'), 'C-Y5: default none chain order does NOT return to 主 Thread');
+    // F128 Phase AA (AC-AA1): default reportingMode is now final-only. The serial
+    // chain order ends with "→ 回到主 Thread" (default final-only returns results).
+    assert.ok(orderLine.includes('回到主 Thread'), 'AC-AA1: default final-only chain order DOES return to 主 Thread');
 
     assert.ok(enqueued.includes('行首独立一行'), 'must instruct cats to use line-start @-mention for handoff');
     assert.ok(
       enqueued.includes('cat_cafe_cross_post_message'),
-      'default none still mentions cross_post for critical-event escalation (C-Y2)',
+      'default final-only mentions cross_post for report-back',
     );
     assert.ok(
       enqueued.includes('ideate'),

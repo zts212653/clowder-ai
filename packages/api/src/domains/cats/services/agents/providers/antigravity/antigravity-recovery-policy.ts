@@ -127,11 +127,12 @@ function terminalTransientReason(ctx: AntigravityRecoveryContext): string | null
   if (!hasRetryBudget(ctx)) return 'retry_budget_exhausted';
   const { dispatchState } = ctx;
   const readOnlyToolActivityRetryEligible = dispatchState.readOnlyToolActivityRetryEligible === true;
+  const retrySafeToolActivity = readOnlyToolActivityRetryEligible || dispatchState.toolishRetryEligible === true;
   if (dispatchState.hasCooccurringUpstreamError) return 'cooccurring_upstream_error';
   if (dispatchState.hasResolvedToolishStep && !readOnlyToolActivityRetryEligible) return 'resolved_toolish_step_seen';
   if (dispatchState.hasNativeDispatch) return 'native_dispatch_seen';
-  if (dispatchState.hasAttemptToolActivity && !readOnlyToolActivityRetryEligible) return 'tool_activity_seen';
-  if (dispatchState.hasBatchToolActivity && !readOnlyToolActivityRetryEligible) return 'tool_activity_seen';
+  if (dispatchState.hasAttemptToolActivity && !retrySafeToolActivity) return 'tool_activity_seen';
+  if (dispatchState.hasBatchToolActivity && !retrySafeToolActivity) return 'tool_activity_seen';
   if (
     dispatchState.hasDispatchRelevantStep &&
     !dispatchState.toolishRetryEligible &&

@@ -1,3 +1,4 @@
+import { extractC2VerdictWithoutPassSamples, type PerFireSample } from './c2-sample-evidence.js';
 import type {
   EvalMetricsHistoryResponse,
   EvalTraceSpan,
@@ -22,6 +23,13 @@ export interface ComponentHealth {
   componentName: string;
   activationCounts: Record<string, number | null>;
   frictionCounts: Record<string, number | null>;
+  /**
+   * F192 Phase D — per-fire sample evidence keyed by friction metric name.
+   * Currently only `c2.verdict_without_pass_count` is sampled (per verdict
+   * 2026-06-08-eval-a2a-c2-sample-evidence-build scope). Other components
+   * populate empty objects until their respective fire events are emitted.
+   */
+  frictionSamples: Record<string, PerFireSample[]>;
   falsePositiveCandidates: string[];
   bypassCandidates: string[];
   confidence: 'high' | 'medium' | 'low' | 'no-data';
@@ -123,6 +131,7 @@ function buildL1(metrics: Record<string, number>): ComponentHealth {
     componentName: 'WorklistRegistry (ping-pong breaker)',
     activationCounts,
     frictionCounts: {},
+    frictionSamples: {},
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence: hasCounters ? 'medium' : 'no-data',
@@ -161,6 +170,7 @@ function buildC1(spans: EvalTraceSpan[], metrics: Record<string, number>): Compo
     componentName: 'hold_ball (MCP tool)',
     activationCounts: { hold_ball_calls: holdBallCalls },
     frictionCounts,
+    frictionSamples: {},
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence: hasData ? (hasCounters ? 'medium' : 'low') : 'no-data',
@@ -193,7 +203,7 @@ function sumMetricByPrefix(metrics: Record<string, number>, prefix: string): num
   return found ? sum : null;
 }
 
-function buildC2(metrics: Record<string, number>): ComponentHealth {
+function buildC2(spans: EvalTraceSpan[], metrics: Record<string, number>): ComponentHealth {
   const hintCount = sumMetricByPrefix(metrics, 'cat_cafe_a2a_inline_action_hint_emitted');
   const verdictHint = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_verdict_hint_emitted');
   const voidHoldHint = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_void_hold_hint_emitted');
@@ -202,6 +212,15 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
   const voidHoldChecked = sumMetricByPrefix(metrics, 'cat_cafe_a2a_c2_void_hold_checked');
   const hasSplitCounters = verdictHint != null || voidHoldHint != null || verdictWithoutPass != null;
   const hasData = hasSplitCounters || (hintCount != null && hintCount > 0);
+
+  // F192 Phase D — per-fire sample evidence for verdict_without_pass fires.
+  // Extracted regardless of `hasSplitCounters`: if events exist but counters are
+  // (somehow) missing, samples are still surfaced so attribution can still drill down.
+  const verdictWithoutPassSamples = extractC2VerdictWithoutPassSamples(spans);
+  const frictionSamples: Record<string, PerFireSample[]> = {};
+  if (verdictWithoutPassSamples.length > 0) {
+    frictionSamples['c2.verdict_without_pass_count'] = verdictWithoutPassSamples;
+  }
 
   const activationCounts: Record<string, number | null> = {
     'hint_emitted (mixed routing+verdict)': hintCount,
@@ -238,6 +257,7 @@ function buildC2(metrics: Record<string, number>): ComponentHealth {
     componentName: 'exit-check (forced-pass guard)',
     activationCounts,
     frictionCounts,
+    frictionSamples,
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence: hasData ? (hasSplitCounters ? 'medium' : 'low') : 'no-data',
@@ -256,6 +276,7 @@ function buildRouteSerial(metrics: Record<string, number>, hasTraceData: boolean
     componentName: 'route-serial (A2A handoff routing)',
     activationCounts: activation,
     frictionCounts: friction,
+    frictionSamples: {},
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence,
@@ -284,7 +305,7 @@ export function generateF167Snapshot(input: F167EvalInput): RuntimeEvalSnapshot 
   const components = [
     buildL1(input.metrics),
     buildC1(input.traces.spans, input.metrics),
-    buildC2(input.metrics),
+    buildC2(input.traces.spans, input.metrics),
     buildRouteSerial(input.metrics, hasTraceData),
   ];
 

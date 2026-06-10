@@ -73,6 +73,18 @@ function makeErrorMessage(extra: ChatMessageType['extra'] = {}): ChatMessageType
   } as ChatMessageType;
 }
 
+function makeSystemInfoMessage(extra: ChatMessageType['extra'] = {}): ChatMessageType {
+  return {
+    id: 'msg-sys',
+    type: 'system',
+    variant: 'info',
+    catId: 'opus',
+    content: 'OpenCode CLI 完成但无文字输出（见 cliDiagnostics 详情）',
+    timestamp: Date.now(),
+    extra,
+  } as ChatMessageType;
+}
+
 describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -138,6 +150,24 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
     // Banner shows humanized summary, not the raw bubble content
     expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain('API 认证失败');
+  });
+
+  it('system_info silent_completion + cliDiagnostics → CliDiagnosticsPanel mounts without error variant', () => {
+    const diag: CliDiagnostics = {
+      reasonCode: 'silent_completion',
+      publicSummary: 'CLI 完成但无文字输出',
+      publicHint: '展开详细诊断',
+      debugRef: { command: 'opencode', exitCode: 0, signal: null, invocationId: 'inv-silent' },
+      safeExcerpt: JSON.stringify({ eventCount: 1, eventTypes: ['step_start'], stderrPresent: false }),
+      excerptSource: 'cc_structured',
+    };
+    render(makeSystemInfoMessage({ cliDiagnostics: diag }));
+
+    expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain(
+      'CLI 完成但无文字输出',
+    );
+    expect(container.textContent).not.toContain('Error: CLI 异常退出');
   });
 
   it('classified cliDiagnostics (reasonCode present) takes precedence over timeoutDiagnostics', () => {

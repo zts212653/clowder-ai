@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
-import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { generateA2aLiveVerdict } from '../a2a/eval-a2a-live-verdict.js';
 import { loadDomains, loadEvalHubSummary } from '../hub/eval-hub-read-model.js';
+import { resolveSafeRawPath } from '../safe-path.js';
 import type { HandlerError, ManualTriggerDeps } from './types.js';
 
 // Cloud codex R10 P1 + 砚砚收敛 A: length limits for user-supplied fields.
@@ -40,33 +41,7 @@ export interface GenerateNowSuccess {
   note: string;
 }
 
-/**
- * Resolve a user-supplied raw artifact basename against an allowlist directory.
- *
- * Defense in depth:
- *  1. Reject empty / "." / ".." early.
- *  2. Reject any name where `basename(name) !== name` (catches `subdir/foo`,
- *     `../foo`, `/etc/passwd`, etc).
- *  3. After resolve+relative, ensure the path is still inside the allowed dir.
- */
-function resolveSafeRawPath(
-  allowedDir: string,
-  name: string,
-): { ok: true; path: string } | { ok: false; reason: string } {
-  if (!name || name === '.' || name === '..') {
-    return { ok: false, reason: 'must be a non-empty filename, not "." or ".."' };
-  }
-  if (basename(name) !== name) {
-    return { ok: false, reason: 'must be a simple basename (no path separators)' };
-  }
-  const absoluteAllowed = resolve(allowedDir);
-  const resolved = resolve(absoluteAllowed, name);
-  const rel = relative(absoluteAllowed, resolved);
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
-    return { ok: false, reason: 'resolved path escapes allowlist directory' };
-  }
-  return { ok: true, path: resolved };
-}
+// resolveSafeRawPath extracted to ../safe-path.ts and shared with publish-verdict.
 
 /**
  * F192 OQ-21: Manually generate a live verdict for eval:a2a using existing

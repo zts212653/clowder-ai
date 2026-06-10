@@ -4,6 +4,8 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { EmbeddingService } from './EmbeddingService.js';
+import type { IEventMemoryStore } from './EventMemoryStore.js';
+import { EventMemoryStore } from './EventMemoryStore.js';
 import { loadEntitySeeds } from './entity-seeds.js';
 import { loadExternalCollections, resolveCollectionStorePath } from './external-collections.js';
 import { GlobalIndexBuilder } from './GlobalIndexBuilder.js';
@@ -33,6 +35,10 @@ export interface MemoryServices {
   evidenceStore: IEvidenceStore;
   /** Phase G: direct store access for summary compaction task (getDb()) */
   store: SqliteEvidenceStore;
+  /** F227: typed event index (magic-word / cognitive-transition events). */
+  eventMemoryStore: IEventMemoryStore;
+  /** Resolved runtime event-memory DB path (trusted config, may be absolute). */
+  eventMemoryDbPath: string;
   markerQueue: IMarkerQueue;
   reflectionService: IReflectionService;
   knowledgeResolver: IKnowledgeResolver;
@@ -96,6 +102,27 @@ export function computeChildExcludes(parentRoot: string, children: Array<{ root:
     }
   }
   return excludes;
+}
+
+/**
+ * F227: build the typed Event Memory store. Separated from createMemoryServices to
+ * keep that factory's cognitive complexity bounded. :memory: passes through (tests).
+ */
+function resolveEventMemoryDbPath(config: MemoryConfig, sqlitePath: string): string {
+  return (
+    process.env.EVENT_MEMORY_DB ??
+    (config.sqlitePath === ':memory:' ? ':memory:' : join(dirname(resolve(sqlitePath)), 'event-memory.sqlite'))
+  );
+}
+
+async function buildEventMemoryStore(config: MemoryConfig, sqlitePath: string): Promise<EventMemoryStore> {
+  const path = resolveEventMemoryDbPath(config, sqlitePath);
+  if (path !== ':memory:') {
+    mkdirSync(dirname(path), { recursive: true });
+  }
+  const store = new EventMemoryStore(path);
+  await store.initialize();
+  return store;
 }
 
 export async function createMemoryServices(config: MemoryConfig): Promise<MemoryServices> {
@@ -253,9 +280,15 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
 
   const knowledgeResolver = new KnowledgeResolver({ projectStore: store, globalStore, catalog, stores });
 
+  // F227: typed Event Memory store (magic-word truth source, LL-048 fail-loud).
+  const eventMemoryStore = await buildEventMemoryStore(config, sqlitePath);
+  const eventMemoryDbPath = resolveEventMemoryDbPath(config, sqlitePath);
+
   return {
     evidenceStore: store,
     store,
+    eventMemoryStore,
+    eventMemoryDbPath,
     markerQueue,
     reflectionService,
     knowledgeResolver,

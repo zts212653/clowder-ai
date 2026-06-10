@@ -2,15 +2,15 @@
 /**
  * F128 Phase Y P1-2 — proposal card MUST surface reportingMode.
  *
- * reportingMode is a create-time contract, fixed and NOT editable on approve
- * (C-Y1). The user approves the card, so the card MUST show which reporting
- * contract they are signing off on (default `none` → shown as autonomous, C-Y4).
+ * reportingMode is part of the approval contract. The proposal card MUST show
+ * which contract the cat proposed, and the frontend lets the user override it
+ * before creation (post-creation dynamic switching is still unsupported).
  */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { buildProposalCardBlock } = await import('../dist/routes/callback-propose-thread-routes.js');
+const { buildProposalCardBlock } = await import('../dist/routes/proposal-card-block.js');
 
 function baseProposal(overrides = {}) {
   return {
@@ -36,11 +36,13 @@ function modeField(card) {
 }
 
 describe('F128 proposal card — reportingMode visibility (Phase Y P1-2)', () => {
-  it('default (no reportingMode) → card surfaces 回报模式 = autonomous', () => {
+  // AC-AA1: default is now final-only (supersedes Phase Y default none/autonomous).
+  it('default (no reportingMode) → card surfaces 回报模式 = final-only（默认）', () => {
     const card = buildProposalCardBlock(/** @type {any} */ (baseProposal()));
     const field = modeField(card);
     assert.ok(field, 'card must surface a 回报模式 field even when proposal omits reportingMode');
-    assert.ok(field.value.includes('autonomous'), `default none must show as autonomous; got ${field.value}`);
+    assert.ok(field.value.includes('final-only'), `AC-AA1: default must show final-only; got ${field.value}`);
+    assert.ok(field.value.includes('默认'), `AC-AA1: default must include 默认 label; got ${field.value}`);
   });
 
   it('explicit final-only → card surfaces final-only', () => {

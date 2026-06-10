@@ -260,17 +260,45 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
     assert.equal(spec.display.category, 'system');
   });
 
-  it('weekly gate includes eval:sop but excludes daily domains', async () => {
+  it('weekly gate includes enabled weekly domains (capability-wakeup), excludes daily + sunset sop', async () => {
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const result = await spec.admission.gate();
     assert.equal(result.run, true);
 
     const domainIds = result.workItems.map((w) => w.subjectKey);
-    assert.ok(domainIds.includes('eval:sop'), 'eval:sop (weekly) must appear in weekly gate');
+    assert.ok(
+      domainIds.includes('eval:capability-wakeup'),
+      'eval:capability-wakeup (weekly + enabled) must appear in weekly gate',
+    );
+    // Sunset 2026-06-06: eval:sop is `enabled: false` in its yaml — weekly cron
+    // must silently skip it so no invocation message lands in thread_eval_sop.
+    assert.ok(!domainIds.includes('eval:sop'), 'eval:sop (sunset, enabled: false) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:a2a'), 'eval:a2a (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:memory'), 'eval:memory (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:task-outcome'), 'eval:task-outcome (daily) must NOT appear in weekly gate');
+  });
+
+  it('weekly gate silently drops sunset domains via `enabled: false` filter', async () => {
+    // Direct verification of the sunset flag mechanism: even though eval:sop has
+    // frequency: weekly in its yaml, the loadRegisteredDomains filter excludes
+    // entries with enabled === false. This is the load-bearing assertion for the
+    // F192 silent-fire fix — flipping eval:sop back to `enabled: true` (or
+    // removing the field) is the only knob to re-enable cron pickup.
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+    const result = await spec.admission.gate();
+
+    if (!result.run) {
+      // Acceptable terminal state: ALL weekly domains sunset → nothing to gate.
+      assert.equal(result.reason, 'no registered eval domains');
+      return;
+    }
+
+    const domainIds = result.workItems.map((w) => w.subjectKey);
+    assert.ok(
+      !domainIds.includes('eval:sop'),
+      `sunset eval:sop must not appear in weekly gate, got: ${JSON.stringify(domainIds)}`,
+    );
   });
 
   it('weekly gate returns run=false when no weekly domains exist', async () => {
@@ -282,12 +310,15 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
   });
 
   it('weekly execute delivers message with "Weekly eval" trigger reason', async () => {
+    // Post-sunset (2026-06-06): eval:sop is no longer the test subject for
+    // weekly cron execute because it's `enabled: false`. eval:capability-wakeup
+    // is the remaining enabled weekly domain — switch to it.
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const gateResult = await spec.admission.gate();
     assert.equal(gateResult.run, true);
-    const sopItem = gateResult.workItems.find((w) => w.subjectKey === 'eval:sop');
-    assert.ok(sopItem);
+    const cwItem = gateResult.workItems.find((w) => w.subjectKey === 'eval:capability-wakeup');
+    assert.ok(cwItem, 'eval:capability-wakeup should be present (weekly + enabled)');
 
     const deliverMock = mock.fn(async () => 'msg_weekly_001');
     const triggerMock = mock.fn();
@@ -297,17 +328,17 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
       invokeTrigger: { trigger: triggerMock },
     };
 
-    await spec.run.execute(sopItem.signal, sopItem.subjectKey, ctx);
+    await spec.run.execute(cwItem.signal, cwItem.subjectKey, ctx);
 
     assert.equal(deliverMock.mock.callCount(), 1);
     const deliverCall = deliverMock.mock.calls[0].arguments[0];
-    assert.equal(deliverCall.threadId, 'thread_eval_sop');
+    assert.equal(deliverCall.threadId, 'thread_eval_capability_wakeup');
     assert.equal(deliverCall.userId, 'scheduler');
-    assert.ok(deliverCall.content.includes('eval:sop'), 'content should mention domain');
+    assert.ok(deliverCall.content.includes('eval:capability-wakeup'), 'content should mention domain');
 
     assert.equal(triggerMock.mock.callCount(), 1);
     const triggerArgs = triggerMock.mock.calls[0].arguments;
-    assert.equal(triggerArgs[0], 'thread_eval_sop');
+    assert.equal(triggerArgs[0], 'thread_eval_capability_wakeup');
     assert.ok(triggerArgs[3].includes('Weekly eval'), 'trigger reason should say Weekly');
   });
 });

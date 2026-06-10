@@ -170,6 +170,54 @@ test('LocalTraceExporter: redacted fan-out — sees redacted attributes after Re
   provider.shutdown();
 });
 
+test('LocalTraceExporter: redacts span EVENT attributes (F192 Phase D — events join class C/B/D)', () => {
+  // F192 sample-evidence build verdict (2026-06-08): per-fire sample evidence emits
+  // raw `messageId` / `invocationId` / `threadId` on span EVENT attributes; the
+  // RedactingSpanProcessor must redact these the same way it redacts span attributes,
+  // or raw IDs leak into LocalTraceStore and out via /api/telemetry/traces.
+  const store = new LocalTraceStore({ maxSpans: 100 });
+  const localExporter = new LocalTraceExporter(store);
+  const noopProcessor = {
+    onStart() {},
+    onEnd() {},
+    shutdown: () => Promise.resolve(),
+    forceFlush: () => Promise.resolve(),
+  };
+  const provider = createProvider(new RedactingSpanProcessor(noopProcessor), new SimpleSpanProcessor(localExporter));
+  const tracer = provider.getTracer('test');
+
+  const span = tracer.startSpan('c2.exit-check');
+  span.addEvent('c2.verdict_without_pass_fired', {
+    messageId: 'raw-msg-id-abc', // Class C → HMAC
+    invocationId: 'raw-inv-id-xyz', // Class C → HMAC
+    threadId: 'raw-thread-id-123', // Class C → HMAC
+    prompt: 'Tell me a secret', // Class B → hash+length
+    'agent.id': 'ragdoll', // Class D → passthrough
+    trigger: 'reject', // Class D → passthrough
+  });
+  span.end();
+
+  const dto = store.query({})[0];
+  assert.equal(dto.events.length, 1);
+  const ev = dto.events[0];
+
+  // Class C: id keys must be HMAC'd, not raw
+  assert.notEqual(ev.attributes.messageId, 'raw-msg-id-abc', 'messageId must be HMAC redacted');
+  assert.notEqual(ev.attributes.invocationId, 'raw-inv-id-xyz', 'invocationId must be HMAC redacted');
+  assert.notEqual(ev.attributes.threadId, 'raw-thread-id-123', 'threadId must be HMAC redacted');
+  assert.ok(typeof ev.attributes.messageId === 'string' && ev.attributes.messageId.length > 0);
+
+  // Class B: prompt hashed
+  assert.ok(String(ev.attributes.prompt).startsWith('[hash:'));
+  assert.ok(String(ev.attributes.prompt).includes('len:'));
+
+  // Class D: labels passthrough
+  assert.equal(ev.attributes['agent.id'], 'ragdoll');
+  assert.equal(ev.attributes.trigger, 'reject');
+
+  provider.shutdown();
+});
+
 test('LocalTraceExporter: DTO deep-copies attributes (no shared references)', () => {
   const store = new LocalTraceStore({ maxSpans: 100 });
   const exporter = new LocalTraceExporter(store);

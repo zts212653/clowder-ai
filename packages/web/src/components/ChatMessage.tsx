@@ -237,6 +237,7 @@ export function ChatMessage({
 
     const isLegacyError = !message.variant && message.content.trim().startsWith('Error:');
     const isError = message.variant === 'error' || isLegacyError;
+    const canRenderCliDiagnostics = isError || (message.type === 'system' && Boolean(message.extra?.cliDiagnostics));
     const isTool = message.variant === 'tool';
     const isFollowup = message.variant === 'a2a_followup';
 
@@ -247,7 +248,7 @@ export function ChatMessage({
     //   3. Unclassified CLI error, no timeout → CLI panel unknown-icon fallback
     // The `isKnownReason` membership check (not truthy) is the key defense against
     // persisted/newer/malformed reasonCode strings hijacking the timeout view.
-    if (isError && isKnownReason(message.extra?.cliDiagnostics?.reasonCode)) {
+    if (canRenderCliDiagnostics && isKnownReason(message.extra?.cliDiagnostics?.reasonCode)) {
       // F212 follow-up — UI-layer dedup: if this is a subsequent duplicate of an adjacent
       // dedup group, hide the panel (group head already rendered it with a ×N badge). We
       // still render an empty wrapping div with data-message-id so MessageNavigator dots,
@@ -281,7 +282,7 @@ export function ChatMessage({
     }
 
     // F212 Phase B precedence step 3: unclassified cliDiagnostics with no timeout.
-    if (isError && message.extra?.cliDiagnostics) {
+    if (canRenderCliDiagnostics && message.extra?.cliDiagnostics) {
       // F212 follow-up — UI-layer dedup (mirrors the classified-path branch above):
       // preserve data-message-id anchor so navigation/scroll targets resolve.
       if (hideDiagnosticsPanel) return <div data-message-id={message.id} aria-hidden="true" className="h-0" />;
@@ -324,7 +325,7 @@ export function ChatMessage({
     if (isConnectorSystemNotice(message)) {
       return <SystemNoticeBar message={message} />;
     }
-    return <ConnectorBubble message={message} />;
+    return <ConnectorBubble message={message} threadId={currentThreadId} />;
   }
 
   if (isUser) {

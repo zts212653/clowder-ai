@@ -1,15 +1,5 @@
-/**
- * F128 User-side proposal endpoints.
- *
- * POST /api/proposals/:proposalId/approve  — create thread + mark proposal approved
- * POST /api/proposals/:proposalId/reject   — mark proposal rejected
- * GET  /api/proposals/pending              — list user's pending proposals
- *
- * All routes require user auth via X-Cat-Cafe-User. The cat-side propose
- * route lives in callback-propose-thread-routes.ts.
- */
+/** F128 user-side proposal endpoints. Cat-side propose lives in callback-propose-thread-routes.ts. */
 
-import type { CatId } from '@cat-cafe/shared';
 import { catIdSchema } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -18,10 +8,11 @@ import type { QueueProcessor } from '../domains/cats/services/agents/invocation/
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IProposalStore } from '../domains/cats/services/stores/ports/ProposalStore.js';
-import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IThreadStore, Thread } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { appendApprovedInitialMessage } from './proposal-approve-dispatch.js';
+import { resolveApproveOverrides } from './proposal-approve-overrides.js';
 import { handleApproveStaleClaim, handleRejectStaleClaim } from './proposal-stale-recovery.js';
 
 export interface ProposalRoutesOptions {
@@ -32,6 +23,14 @@ export interface ProposalRoutesOptions {
   router?: Pick<AgentRouter, 'resolveTargetsAndIntent'>;
   invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
   queueProcessor?: Pick<QueueProcessor, 'processNext'>;
+  /** F192: Record proposal rejection as task outcome A2 signal. */
+  onProposalReject?: (input: {
+    proposalId: string;
+    catId: string;
+    threadId: string;
+    proposalTitle?: string;
+    rejectionReason?: string;
+  }) => void;
 }
 
 const approveBodySchema = z
@@ -40,6 +39,10 @@ const approveBodySchema = z
     parentThreadId: z.string().min(1).optional(),
     preferredCats: z.array(catIdSchema()).max(10).optional(),
     initialMessage: z.string().max(4000).nullable().optional(),
+    // F128: let the user re-home the child thread at approve time. Validated against allowed
+    // roots (validateProjectPath) — supplied-but-invalid → 400 (fail loud, never silent default).
+    projectPath: z.string().min(1).max(500).optional(),
+    reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
   })
   .strict();
 
@@ -54,7 +57,7 @@ const proposalParamsSchema = z.object({
 });
 
 export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (app, opts) => {
-  const { proposalStore, threadStore, messageStore, socketManager } = opts;
+  const { proposalStore, threadStore, messageStore, socketManager, onProposalReject } = opts;
 
   app.post('/api/proposals/:proposalId/approve', async (request, reply) => {
     const paramsParse = proposalParamsSchema.safeParse(request.params);
@@ -113,19 +116,22 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       // kind === 'cleared' → fall through; claimForApproval below will re-claim.
     }
 
-    const overrides = bodyParse.data;
-    const finalTitle = overrides.title ?? proposal.title;
-    let finalParentThreadId = overrides.parentThreadId ?? proposal.parentThreadId;
-    if (overrides.parentThreadId && overrides.parentThreadId !== proposal.parentThreadId) {
-      const parent = await threadStore.get(overrides.parentThreadId);
-      if (!parent || parent.createdBy !== userId) {
-        reply.status(403);
-        return { error: 'parentThreadId does not belong to the current user' };
-      }
-      finalParentThreadId = overrides.parentThreadId;
+    // Resolve + validate the user's approve-time edits (parentThreadId ownership, projectPath
+    // validity) BEFORE claiming — a rejected override must not leave the proposal in `approving`.
+    const resolution = await resolveApproveOverrides(proposal, bodyParse.data, userId, threadStore);
+    if (!resolution.ok) {
+      reply.status(resolution.status);
+      return { error: resolution.error };
     }
-    const finalPreferredCats = (overrides.preferredCats ?? proposal.preferredCats) as CatId[];
-    const finalInitialMessage = resolveInitialMessage(proposal.initialMessage, overrides.initialMessage);
+    const {
+      finalTitle,
+      finalParentThreadId,
+      finalPreferredCats,
+      finalInitialMessage,
+      finalProjectPath,
+      finalReportingMode,
+      finalizeOverrides,
+    } = resolution.resolved;
 
     // Atomic claim — guards against concurrent approve/reject leaving an orphan thread.
     const claimed = await proposalStore.claimForApproval({ proposalId: proposal.proposalId, approvedBy: userId });
@@ -136,9 +142,9 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
 
     // Stage 1: create the thread. Only this step is allowed to rollback the claim,
     // because nothing user-visible has been committed yet.
-    let thread;
+    let thread: Thread;
     try {
-      thread = await threadStore.create(userId, finalTitle, proposal.projectPath, finalParentThreadId, {
+      thread = await threadStore.create(userId, finalTitle, finalProjectPath, finalParentThreadId, {
         createdFromProposalId: proposal.proposalId,
         sourceThreadId: proposal.sourceThreadId,
         approvedBy: userId,
@@ -153,7 +159,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     // between create and finalize, the next stale-claim recovery sees this field and re-finalizes
     // against the existing thread — preventing duplicate threads on retry.
     try {
-      await proposalStore.recordCreatedThread(proposal.proposalId, thread.id);
+      await proposalStore.recordCreatedThread(proposal.proposalId, thread.id, finalizeOverrides);
     } catch {
       // best-effort persist; failure here only weakens crash recovery, doesn't break the
       // happy path. Finalize below still writes createdThreadId atomically.
@@ -165,12 +171,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     const finalized = await proposalStore.finalizeApproval({
       proposalId: proposal.proposalId,
       createdThreadId: thread.id,
-      overrides: {
-        title: finalTitle,
-        parentThreadId: finalParentThreadId,
-        preferredCats: finalPreferredCats,
-        initialMessage: finalInitialMessage === undefined ? null : finalInitialMessage,
-      },
+      overrides: finalizeOverrides,
     });
     if (!finalized) {
       // Should not happen — we hold the approving claim. Surface as 500; thread is intentionally
@@ -180,7 +181,10 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     }
 
     // Stage 3: best-effort side effects. Failures become warnings, not 500s.
-    const warnings: string[] = [];
+    const warnings: string[] =
+      finalProjectPath === 'default'
+        ? ['子 thread 将进入未分类（projectPath=default）；请选择项目或明确保留未分类']
+        : [];
     if (finalPreferredCats.length > 0) {
       try {
         await threadStore.updatePreferredCats(thread.id, finalPreferredCats);
@@ -207,8 +211,10 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
           sourceThreadId: proposal.sourceThreadId,
           sourceThreadTitle: sourceThread?.title,
           preferredCats: finalPreferredCats,
-          // C-Y1: reportingMode is fixed at create time (not in approve overrides).
-          reportingMode: proposal.reportingMode,
+          reportingMode: finalReportingMode,
+          // Phase AA (AC-AA4/AA5): source cat attribution + crossPost metadata
+          sourceCatId: proposal.sourceCatId,
+          sourceInvocationId: proposal.sourceInvocationId,
           messageStore,
           router: opts.router,
           invocationQueue: opts.invocationQueue,
@@ -263,7 +269,7 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
       return { error: 'Proposal already approved', status: proposal.status };
     }
     if (proposal.status === 'approving') {
-      const outcome = await handleRejectStaleClaim({ proposal, proposalStore, reply });
+      const outcome = await handleRejectStaleClaim({ proposal, proposalStore, threadStore, reply });
       if (outcome.kind === 'in_flight') {
         return {
           error: 'Proposal is being approved — wait for the in-flight approve to settle',
@@ -288,6 +294,21 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     }
 
     socketManager.emitToUser(userId, 'proposal_updated', marked);
+
+    // F192: Record proposal rejection as task outcome eval signal
+    if (onProposalReject) {
+      try {
+        onProposalReject({
+          proposalId: proposal.proposalId,
+          catId: proposal.sourceCatId,
+          threadId: proposal.sourceThreadId,
+          proposalTitle: proposal.title,
+          rejectionReason: bodyParse.data.rejectionReason,
+        });
+      } catch {
+        // Best-effort: don't fail the rejection response if signal recording fails
+      }
+    }
 
     return { proposalId: marked.proposalId, status: marked.status };
   });
@@ -325,12 +346,3 @@ export const proposalRoutes: FastifyPluginAsync<ProposalRoutesOptions> = async (
     return { proposals };
   });
 };
-
-function resolveInitialMessage(
-  fromProposal: string | undefined,
-  override: string | null | undefined,
-): string | undefined {
-  if (override === undefined) return fromProposal;
-  if (override === null) return undefined;
-  return override;
-}

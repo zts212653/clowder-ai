@@ -346,4 +346,95 @@ describe('F167 Runtime Eval Snapshot', () => {
     assert.equal(c2.frictionCounts['c2.verdict_without_pass_count'], 9);
     assert.equal(c2.frictionCounts['c2.void_hold_hint_emitted'], 4);
   });
+
+  it('C2 frictionSamples populated from span events (F192 Phase D per-fire evidence)', () => {
+    const baseSpan = {
+      traceId: 'trace-1',
+      spanId: 's-x',
+      name: 'cat_cafe.route',
+      startTimeMs: 0,
+      endTimeMs: 0,
+      durationMs: 0,
+      status: { code: 0 },
+      attributes: {},
+      events: [],
+    };
+    const spans = [
+      {
+        ...baseSpan,
+        spanId: 's-a',
+        events: [
+          {
+            name: 'c2.verdict_without_pass_fired',
+            timeMs: 1000,
+            attributes: {
+              messageId: 'hash-msg-a',
+              invocationId: 'hash-inv-a',
+              threadId: 'hash-thread-a',
+              'agent.id': 'codex',
+              'thread.system_kind': 'product',
+              trigger: 'reject',
+            },
+          },
+        ],
+      },
+      {
+        ...baseSpan,
+        spanId: 's-b',
+        events: [
+          {
+            name: 'c2.verdict_without_pass_fired',
+            timeMs: 2000,
+            attributes: {
+              messageId: 'hash-msg-b',
+              invocationId: 'hash-inv-b',
+              threadId: 'hash-thread-b',
+              'agent.id': 'opus',
+              'thread.system_kind': 'product',
+              trigger: 'p1p2',
+            },
+          },
+        ],
+      },
+    ];
+
+    const snapshot = generateF167Snapshot({
+      ...emptyInput,
+      traces: { spans, count: 2 },
+      metrics: { cat_cafe_a2a_c2_verdict_without_pass_count: 2, cat_cafe_a2a_c2_exit_checked: 17 },
+      traceStats: {
+        spanCount: 2,
+        maxSpans: 10000,
+        maxAgeMs: 86400000,
+        oldestStoredAt: Date.now() - 3600000,
+        newestStoredAt: Date.now(),
+      },
+    });
+
+    const c2 = snapshot.components.find((c) => c.componentId === 'C2');
+    const samples = c2.frictionSamples['c2.verdict_without_pass_count'];
+    assert.ok(Array.isArray(samples) && samples.length === 2, 'frictionSamples must surface both fires');
+    // firedAt desc: 2000 > 1000
+    assert.equal(samples[0].spanId, 's-b');
+    assert.equal(samples[0].trigger, 'p1p2');
+    assert.equal(samples[0].agentId, 'opus');
+    assert.equal(samples[0].messageIdHash, 'hash-msg-b');
+    assert.equal(samples[1].spanId, 's-a');
+    assert.equal(samples[1].trigger, 'reject');
+    // Sister buckets stay empty
+    assert.deepEqual(snapshot.components.find((c) => c.componentId === 'L1').frictionSamples, {});
+    assert.deepEqual(snapshot.components.find((c) => c.componentId === 'C1').frictionSamples, {});
+    assert.deepEqual(snapshot.components.find((c) => c.componentId === 'route-serial').frictionSamples, {});
+  });
+
+  it('C2 frictionSamples empty when spans have no matching events (data-driven, no fabrication)', () => {
+    const snapshot = generateF167Snapshot({
+      ...emptyInput,
+      metrics: { cat_cafe_a2a_c2_verdict_without_pass_count: 3, cat_cafe_a2a_c2_exit_checked: 17 },
+    });
+    const c2 = snapshot.components.find((c) => c.componentId === 'C2');
+    // Counters say 3 fires happened, but no span events emitted them →
+    // frictionSamples empty (attribution will mark sampleCoverage.complete=false later).
+    assert.deepEqual(c2.frictionSamples, {});
+  });
 });

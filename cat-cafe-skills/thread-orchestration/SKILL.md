@@ -56,7 +56,8 @@ triggers:
     title: "简洁描述任务目标",
     reason: "为什么这个子任务值得自己一个 thread（必填）",
     preferredCats: ["执行猫", "review猫"],
-    reportingMode: "final-only"  // 可选回报契约: none(默认)/final-only/state-transitions/blocking-ack，见下表
+    projectPath: "/abs/path/to/repo",  // 当前 thread 是 default/未分类/eval/lobby 且子任务要做 repo 实现时必填
+    reportingMode: "final-only"  // 可选回报契约: none/final-only(默认)/state-transitions/blocking-ack，见下表
   )
 ```
 
@@ -68,22 +69,35 @@ triggers:
 
 **提议后**：继续主 thread 的工作，等用户批准。批准后用户会在新 thread 里出现，此时再 cross_post 给被分配的猫。
 
-#### reportingMode — 回报契约分型（F128 Phase Y）
+#### projectPath — 项目归属
 
-决定子 thread 是否/如何回报主 thread。不传 = `none`（autonomous）。
+不传 `projectPath` = 继承当前/parent thread 的项目。若当前 thread 本身是 `default` / 未分类 / eval / lobby，而子 thread 要做 repo 或实现工作，必须显式传绝对路径；只有纯 eval/meta/无需项目归属的 thread 才可留空并进入未分类。
+
+#### reportingMode — 回报契约分型（F128 Phase Y → Phase AA）
+
+决定子 thread 是否/如何回报主 thread。**不传 = `final-only`（做完把结果带回来）**。
+
+> **Phase AA 更新（2026-06-07）**：默认从 `none` 改为 `final-only`。大多数 propose 是"开一个子 thread 做事，做完把结果带回来"。选择模式前先问自己：**这个子 thread 做完后，源 thread 是否需要结果回来？**
 
 | Mode | 语义 | 何时用 |
 |------|------|--------|
-| `none`（默认 / autonomous） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | Repo Inbox / PR triage / 分发——踢出去就让下游自闭环 |
-| `final-only` | 子 thread 自治，**完成时**回报一次 summary | Feature work fork——要最终结果、不要过程噪音 |
+| `final-only`（**默认**） | 子 thread 自治，**完成时**回报一次 summary | Feature work fork / 大多数情况——要最终结果、不要过程噪音 |
+| `none`（autonomous，显式 opt-in） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | Repo Inbox / PR triage / 分发——踢出去就让下游自闭环 |
 | `state-transitions` | 每个 phase boundary（阶段完成 / 重要决策 / 状态切换）回报 | Bug 调查 / Research——主 thread 要跟过程 |
 | `blocking-ack` | 子 thread **遇阻塞点**（at each blocker，非每步）才等主 thread ack 再继续；持球在**子 thread**（被阻塞方）自己 `hold_ball` + 发 `[BLOCKING]`，主 thread 不背 polling | 等 review / 等 CVO / blocking handoff |
 
+**场景化选择指南**（AC-AA2）：
+- 做完后源 thread 需要结果回来？→ **`final-only`**（默认，不用填）
+- 交给下游自治闭环，源 thread 不需要回来？→ **`none`**（显式写 `reportingMode: 'none'`）
+- 需要阶段性状态推送？→ **`state-transitions`**
+- 遇阻塞必须等源 thread ack？→ **`blocking-ack`**
+
 **约束**：
 - mode 是 thread contract，创建后**不可动态切换**（要换就 propose 新 thread）。
-- `none` ≠ 禁止上报——关键事件永远按家规 cross_post。
+- `none` ≠ 禁止上报——关键事件永远按家规 cross_post。**即使 `none` 下主动上报也必须携带 `targetCats` 或行首 `@sourceHandle`**，避免消息存了但没人醒。
 - `#ideate`（并行 wake-all）与 reportingMode **正交**：`#ideate` 只决定并行 vs 串行接龙；report-back owner 由 reportingMode 决定。`#ideate + none` 不指定汇总 owner；`#ideate + final-only/state-transitions` 才指定第一棒为汇总 owner。
 - 下面 Step 5「汇聚」铁律默认针对需回报的 mode（`final-only` / `state-transitions` / `blocking-ack`）；`none` 模式下子 thread 自闭环，不走 Step 5 强制回报。
+- **回报时路由必须包含 routing credentials**：server 会自动注入 `threadId` + `targetCats`/`@sourceHandle` 到首条消息 header（AC-AA6），照着发即可。
 
 ### Step 3: 选猫 — 按任务性质匹配能力
 
@@ -106,7 +120,7 @@ triggers:
   )
 ```
 
-> **回报要求按 reportingMode**：propose 时若设了 `final-only` / `state-transitions` / `blocking-ack`，server enrich 会自动注入对应的 report-back 规则进首条消息，无需手写"完成后请回报"；`none`（默认/autonomous）则不要写强制回报指令——下游自闭环。
+> **回报要求按 reportingMode**：`final-only`（默认）/ `state-transitions` / `blocking-ack` 下 server enrich 会自动注入对应的 report-back 规则 + 路由凭证（threadId + @handle）进首条消息，无需手写"完成后请回报"；`none`（autonomous/opt-in）则不要写强制回报指令——下游自闭环。
 
 **铁律**：每个子 thread 的**第一条消息**必须包含 `## 主 Thread` header（定位父 thread 用）。是否要求回报由 reportingMode 决定，不再无条件汇报。
 
@@ -124,7 +138,7 @@ thread 内的执行遵循已有 skill：
 
 ### Step 5: 汇聚 — 确认门禁 + 串行推进（仅需回报 mode）
 
-> **前提**：Step 5 适用于 `final-only` / `state-transitions` / `blocking-ack`。`none`（autonomous，默认）下子 thread 自闭环——不通知、不等确认、自主 commit，跳过整个 Step 5。
+> **前提**：Step 5 适用于 `final-only` / `state-transitions` / `blocking-ack`。`none`（autonomous，显式 opt-in）下子 thread 自闭环——不通知、不等确认、自主 commit，跳过整个 Step 5。
 
 **铁律（需回报 mode）：子 thread 达到里程碑时，必须立刻通知主 thread 并等待确认。**
 
@@ -134,8 +148,9 @@ thread 内的执行遵循已有 skill：
 
 ```
 → cat_cafe_cross_post_message(
-    threadId: "<main_thread_id>",     ← 从第一条消息的 ## 主 Thread 获取
-    content: "## [子任务名] — 待确认 commit\n\n| 子项 | 状态 | 关键产出 |\n|------|------|---------|\n| ... | ✅ | 一句话 |\n\n验证：测试 X/X pass, lint 0 errors\n请确认是否 commit + push"
+    threadId: "<main_thread_id>",     ← 从首条消息的 ## 主 Thread → 路由目标 获取
+    targetCats: ["<source_cat_id>"],   ← 唤醒源猫（或 content 行首 @sourceHandle）
+    content: "@sourceHandle ## [子任务名] — 待确认 commit\n\n| 子项 | 状态 | 关键产出 |\n|------|------|---------|\n| ... | ✅ | 一句话 |\n\n验证：测试 X/X pass, lint 0 errors\n请确认是否 commit + push"
   )
 ```
 
@@ -189,7 +204,8 @@ A 完成 → 通知主 thread → 确认 commit → A merge
 子 thread = 战场（做 + review；等确认仅需回报 mode）— 仅在用户批准 proposal 后存在
 Proposal = 卡片（cat 提议 → 用户审核/编辑/批准 → 后端创建 thread）
 第一条消息 = 必须含 ## 主 Thread（ID + 标题）
-reportingMode = 回报契约（none 默认自闭环 / final-only / state-transitions / blocking-ack）
+reportingMode = 回报契约（final-only 默认 / none 自闭环 / state-transitions / blocking-ack）
+projectPath = 项目归属（default parent 发 repo/实现子任务时必填；不传=继承 parent）
 Worktree = 隔离（不冲突）
 汇报 = 按 reportingMode（none 自闭环不回报；需回报 mode 才及时 + 等确认，不让 team lead 追也不越权 commit）
 ```

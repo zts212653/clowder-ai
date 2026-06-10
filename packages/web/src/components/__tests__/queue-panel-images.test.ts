@@ -60,17 +60,17 @@ describe('QueuePanel image indicator (F39 Bug 2)', () => {
   });
 
   it('shows image count when associated message has image contentBlocks', () => {
+    // #706: image count now comes from server-enriched messagePreview, not client messages store
     useChatStore.setState({
-      queue: [QUEUE_ENTRY_BASE],
-      messages: [
+      queue: [
         {
-          id: 'msg-1',
-          type: 'user' as const,
-          content: 'hello with image',
-          contentBlocks: [{ type: 'image' as const, url: 'https://example.com/cat.png' }],
-          timestamp: NOW,
+          ...QUEUE_ENTRY_BASE,
+          messagePreview: {
+            contentBlocks: [{ type: 'image', url: 'https://example.com/cat.png' }],
+          },
         },
       ],
+      messages: [],
     });
 
     act(() => {
@@ -85,21 +85,22 @@ describe('QueuePanel image indicator (F39 Bug 2)', () => {
   });
 
   it('shows count for multiple images', () => {
+    // #706: image count from messagePreview.contentBlocks (server-enriched)
     useChatStore.setState({
-      queue: [{ ...QUEUE_ENTRY_BASE, content: 'multi-image' }],
-      messages: [
+      queue: [
         {
-          id: 'msg-1',
-          type: 'user' as const,
+          ...QUEUE_ENTRY_BASE,
           content: 'multi-image',
-          contentBlocks: [
-            { type: 'image' as const, url: 'https://example.com/a.png' },
-            { type: 'image' as const, url: 'https://example.com/b.png' },
-            { type: 'text' as const, text: 'some text' },
-          ],
-          timestamp: NOW,
+          messagePreview: {
+            contentBlocks: [
+              { type: 'image', url: 'https://example.com/a.png' },
+              { type: 'image', url: 'https://example.com/b.png' },
+              { type: 'text', text: 'some text' },
+            ],
+          },
         },
       ],
+      messages: [],
     });
 
     act(() => {
@@ -112,17 +113,17 @@ describe('QueuePanel image indicator (F39 Bug 2)', () => {
     expect(html).toContain('>2<');
   });
 
-  it('does not show image indicator when message has no images', () => {
+  it('does not show image indicator when messagePreview has no images', () => {
+    // #706: no imagePreview → imageCount = 0 → no icon
     useChatStore.setState({
-      queue: [{ ...QUEUE_ENTRY_BASE, content: 'text only' }],
-      messages: [
+      queue: [
         {
-          id: 'msg-1',
-          type: 'user' as const,
+          ...QUEUE_ENTRY_BASE,
           content: 'text only',
-          timestamp: NOW,
+          messagePreview: { contentBlocks: [{ type: 'text', text: 'text only' }] },
         },
       ],
+      messages: [],
     });
 
     act(() => {
@@ -151,6 +152,7 @@ describe('QueuePanel image indicator (F39 Bug 2)', () => {
   });
 
   it('counts images from merged messages too (Cloud R2 P2)', () => {
+    // #706: server enrichment merges all contentBlocks (primary + merged) into messagePreview at emit time
     useChatStore.setState({
       queue: [
         {
@@ -158,27 +160,17 @@ describe('QueuePanel image indicator (F39 Bug 2)', () => {
           content: 'merged entry',
           messageId: 'msg-1',
           mergedMessageIds: ['msg-2'],
+          messagePreview: {
+            // Server has already merged contentBlocks from msg-1 + msg-2
+            contentBlocks: [
+              { type: 'image', url: 'https://example.com/a.png' },
+              { type: 'image', url: 'https://example.com/b.png' },
+              { type: 'image', url: 'https://example.com/c.png' },
+            ],
+          },
         },
       ],
-      messages: [
-        {
-          id: 'msg-1',
-          type: 'user' as const,
-          content: 'first',
-          contentBlocks: [{ type: 'image' as const, url: 'https://example.com/a.png' }],
-          timestamp: NOW,
-        },
-        {
-          id: 'msg-2',
-          type: 'user' as const,
-          content: 'merged follow-up',
-          contentBlocks: [
-            { type: 'image' as const, url: 'https://example.com/b.png' },
-            { type: 'image' as const, url: 'https://example.com/c.png' },
-          ],
-          timestamp: NOW + 1,
-        },
-      ],
+      messages: [],
     });
 
     act(() => {

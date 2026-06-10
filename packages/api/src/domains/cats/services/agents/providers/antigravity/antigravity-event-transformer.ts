@@ -2,6 +2,7 @@ import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { AgentMessage, MessageMetadata } from '../../../types.js';
 import type { TrajectoryStep } from './AntigravityBridge.js';
+import { normalizeAntigravityToolCall } from './antigravity-tool-call-normalizer.js';
 
 const log = createModuleLogger('antigravity-event-transformer');
 
@@ -85,6 +86,10 @@ function formatAntigravityUpstreamError(message: string): string {
   );
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function metadataString(step: TrajectoryStep, key: string): string | undefined {
   const value = step.metadata?.[key];
   return typeof value === 'string' && value.trim() ? value : undefined;
@@ -157,7 +162,7 @@ export function classifyStep(step: TrajectoryStep): StepBucket {
 
   // Shape-based fallback for unknown types (e.g. GREP_SEARCH, FILE_EDIT, TERMINAL_COMMAND)
   if (step.toolResult?.success === false) return 'tool_error';
-  if (step.toolCall || step.toolResult) return 'tool_pending';
+  if (normalizeAntigravityToolCall(step) || step.toolResult) return 'tool_pending';
 
   return 'unknown_activity'; // unknown type, no tool data — logged but not sent to frontend
 }
@@ -225,24 +230,25 @@ export function transformTrajectorySteps(
             timestamp: Date.now(),
           });
         }
-        if (step.toolCall) {
+        const toolCall = normalizeAntigravityToolCall(step);
+        if (toolCall) {
           messages.push({
             type: 'system_info',
             catId,
-            content: JSON.stringify({ type: 'tool_activity', toolName: step.toolCall.toolName }),
+            content: JSON.stringify({ type: 'tool_activity', toolName: toolCall.toolName }),
             metadata,
             timestamp: Date.now(),
           });
           let parsedInput: Record<string, unknown> | undefined;
           try {
-            parsedInput = step.toolCall.input ? JSON.parse(step.toolCall.input) : undefined;
+            parsedInput = toolCall.input ? JSON.parse(toolCall.input) : undefined;
           } catch {
-            parsedInput = step.toolCall.input ? { raw: step.toolCall.input } : undefined;
+            parsedInput = toolCall.input ? { raw: toolCall.input } : undefined;
           }
           messages.push({
             type: 'tool_use',
             catId,
-            toolName: step.toolCall.toolName,
+            toolName: toolCall.toolName,
             toolInput: parsedInput,
             metadata,
             timestamp: Date.now(),

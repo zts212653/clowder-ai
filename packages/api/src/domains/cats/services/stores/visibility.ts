@@ -81,6 +81,17 @@ export function canQuoteInPublicReply(parent: StoredMessage): boolean {
   return true;
 }
 
+/**
+ * #699 P1 (gpt52 intake review, cat-cafe#2111): system / briefing messages are
+ * internal, non-routable content that must never be quoted as a reply parent or
+ * returned via get-message. Single source of truth shared by isEligibleReplyParent,
+ * POST /api/messages replyTo validation, and the get-message route — so no path can
+ * forget the exclusion (the "fetch + gate" invariant in this file's header).
+ */
+export function isInternalNonQuotableParent(msg: Pick<StoredMessage, 'userId' | 'origin'>): boolean {
+  return msg.userId === 'system' || msg.origin === 'briefing';
+}
+
 export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEligibilityOptions): boolean {
   // Must be same thread
   if (parent.threadId !== opts.threadId) return false;
@@ -88,10 +99,9 @@ export function isEligibleReplyParent(parent: StoredMessage, opts: ReplyParentEl
   if (!isDelivered(parent)) return false;
   // Must not be deleted
   if (parent.deletedAt) return false;
-  // System-generated messages are display-only — never valid parents for inline preview
-  if (parent.userId === 'system') return false;
-  // Briefing messages are non-routing
-  if (parent.origin === 'briefing') return false;
+  // System-generated / briefing messages are internal, non-routable — never valid parents
+  // (shared with POST /api/messages replyTo + get-message via isInternalNonQuotableParent)
+  if (isInternalNonQuotableParent(parent)) return false;
   // Whisper visibility
   if (!canViewMessage(parent, opts.viewer)) return false;
   // Play-mode: hide other cats' stream (thinking) messages

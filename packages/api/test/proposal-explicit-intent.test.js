@@ -64,9 +64,8 @@ describe('F128 explicit intent override (round-5)', () => {
           body: {
             initialMessage: '#ideate 大家分别说说自己的看法',
             preferredCats: ['kimi', 'gemini', 'codex'],
-            // F128 Phase Y: report-back owner is named only for final-only/state-transitions
-            // (C-Y6). #ideate alone (default none) is autonomous — no owner. This test pins
-            // the parallel reporter contract, so it opts into final-only explicitly.
+            // F128: report-back owner is named only for final-only/state-transitions (C-Y6).
+            // This test pins that parallel reporter contract explicitly.
             reportingMode: 'final-only',
           },
         })

@@ -6,6 +6,7 @@ import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { ActivityBar } from './ActivityBar';
 import { ThreadSidebar } from './ThreadSidebar';
+import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
 const CHROMELESS_ROUTES = ['/story-export', '/pixel-brawl', '/showcase'];
@@ -62,6 +63,10 @@ function AppShellContent({ children }: AppShellProps) {
         </div>
       )}
       <div className="flex-1 min-w-0 overflow-y-auto">{children}</div>
+      {/* F226: presentation surface floating window — mounted at AppShell root (outside route
+          children) so the float survives both workspace mode-tab switches AND full-page route
+          changes (/memory, /settings, /mission-hub). KD-1. */}
+      <FloatingPresentationSurfaceHost />
     </div>
   );
 }

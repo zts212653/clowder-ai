@@ -30,6 +30,14 @@ export interface EvalDomainScheduleOpts {
   listDynamicTasks?: () => LegacyScheduledTaskLike[];
   /** OQ-20: Redis client for reading evalCat overrides (community users may assign different cats). */
   redis?: import('ioredis').Redis;
+  /**
+   * cloud R6 P2 (PR-2): runtime-wired publish-verdict domain set. Bootstrap (index.ts)
+   * passes `new Set(Object.keys(verdictGenerators))` here so the scheduled daily/weekly
+   * runner gates publish instructions on actual runtime support (no Redis → cw generator
+   * skipped → cw cats see base instructions, NOT 501-bound publish path). Omit/undefined
+   * → legacy default (all known-wireable domains get publish instructions in invocation).
+   */
+  wiredPublishDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>;
 }
 
 /** @deprecated Use EvalDomainScheduleOpts — kept for backward compat. */
@@ -143,12 +151,18 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
           }
         }
 
-        const invocation = buildEvalCatInvocation({
-          domain: effectiveDomain,
-          trendRefs: [],
-          verdictRefs: [],
-          legacyCleanup: { status: legacyStatus },
-        });
+        const invocation = buildEvalCatInvocation(
+          {
+            domain: effectiveDomain,
+            trendRefs: [],
+            verdictRefs: [],
+            legacyCleanup: { status: legacyStatus },
+          },
+          // cloud R6 P2 (PR-2): gate scheduled invocation's publish instructions on
+          // actual runtime support so weekly cw scheduled eval doesn't tell cat to
+          // publish when bootstrap skipped cw generator wire (501 from handler).
+          { wiredPublishDomains: config.wiredPublishDomains },
+        );
         if (ctx.deliver) {
           const content = [
             `## Eval Domain: ${invocation.domainId}`,
@@ -200,8 +214,15 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
 function loadRegisteredDomains(harnessFeedbackRoot: string, frequency: 'daily' | 'weekly'): EvalDomainRegistryEntry[] {
   const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
   if (!existsSync(domainsDir)) return [];
-  return readdirSync(domainsDir, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith('.yaml'))
-    .map((e) => parseEvalDomainRegistryFile(parseYaml(readFileSync(join(domainsDir, e.name), 'utf8'))))
-    .filter((d) => d.frequency === frequency);
+  return (
+    readdirSync(domainsDir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.yaml'))
+      .map((e) => parseEvalDomainRegistryFile(parseYaml(readFileSync(join(domainsDir, e.name), 'utf8'))))
+      .filter((d) => d.frequency === frequency)
+      // Sunset flag: domains marked `enabled: false` in their YAML are silently
+      // skipped by the scheduled cron (no invocation message lands in the domain
+      // thread). Re-enable by removing the field or setting `enabled: true`.
+      // See EvalDomainRegistryEntry schema docs for rationale.
+      .filter((d) => d.enabled !== false)
+  );
 }

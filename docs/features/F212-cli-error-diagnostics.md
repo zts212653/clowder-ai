@@ -8,7 +8,7 @@ created: 2026-05-25
 
 # F212: CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示
 
-> **Status**: done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1
+> **Status**: done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Phase G done**: 2026-06-09 (PR #2150 merged a22164f58) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1
 
 ## Why
 
@@ -173,6 +173,39 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 
 **与 F215 / F210 边界**：F215 是 malformed tool-call 检测 + 接力兜底（模型行为），F210 是 Antigravity migration（runtime 切换），都与 F212 平行。Phase F 只动 `cli-spawn.ts` + `cli-diagnostics.ts` + 对应 web 文案，不碰 F215 / F210 路径。
 
+### Phase G: Silent-stdout observability follow-up（2026-06-08 Maine Coon cross-thread packet 自 clowder-ai#875）
+
+**触发**：社区 issue clowder-ai#875 — OpenCode + DeepSeek 用户撞到 silent-stdout case：fresh OpenCode CLI 直接 reproduce — NDJSON stream 只有 1 个 `{"type":"step_start"}` event，无 text，无 explicit error。新 API key/新猫 rebind 不解决。当前 Cat Cafe surface 给用户 generic `"{catName} completed without textual output."`（route-serial:2165 + route-parallel:1193），**所有诊断证据丢失**：event count、event 类型、model/provider、session id prefix、exit status、stderr presence 都拿不到。Maine Coon跨 thread 投递完整 packet + verify scope。
+
+**根因（verified in main `92433bcc0`）**：
+1. `OpenCodeAgentService.ts:322` — `textEventCount === 0` 只 backend `log.warn`，**不 yield 任何 cliDiagnostics surface** 给前端
+2. `ClaudeAgentService.ts:721` — sibling same pattern，同病同治
+3. `route-serial.ts:2165` + `route-parallel.ts:1193` — fallback collapse 到 generic message，丢失所有诊断证据
+4. F212 当前 scope 只覆盖 stderr-error 路径（Phase A-D + E + F），**silent-stdout 路径完全 lossy**
+
+**Scope（不动 OpenCode/DeepSeek upstream，只动 Cat Cafe diagnostics surface）**：
+1. 触发条件: `eventCount > 0 && textEventCount === 0`
+2. Track + surface safe fields:
+   - `eventCount` (total events received)
+   - `eventTypes` (unique set seen, e.g. `['step_start']`)
+   - `model` / provider name
+   - `sessionId` prefix (前 8 char only, 不暴露 full session id)
+   - exit status (如有)
+   - stderr presence (boolean) + safe excerpt if available (走现有 sanitizer)
+3. 安全边界（保持 F212 安全约束）: no provider secrets, no full session id, no prompt/body content, no absolute paths
+4. Frontend: 既有 `CliDiagnosticsPanel` 自动 render 新 reasonCode `silent_completion`，不需新组件
+
+**Sibling sweep 覆盖（LL-069 应用）**：
+- ✅ `OpenCodeAgentService.ts:322`（primary anchor from packet）
+- ✅ `ClaudeAgentService.ts:721`（sibling same pattern）
+- ✅ Codex / Antigravity / Gemini / Dare / CatAgent grep 确认无 `textEventCount === 0` 同 pattern（不同 event tracking model，不在 Phase G scope）
+
+**修复（与 Phase F/E 同 surface 机制）**：
+1. **扩 reasonCode**：加 `silent_completion`（"CLI 完成但无文字输出 — 通常是 step_start-only event stream，常见于 OpenCode/DeepSeek upstream issue"）
+2. **新 helper `buildSilentCompletionDiagnostic`**（`cli-diagnostics.ts`）：输入 `{eventCount, eventTypes, model, sessionIdPrefix, exitStatus, stderrPresent, stderrExcerpt?}`，返回 structured `CliDiagnostics`
+3. **OpenCode + Claude no-text branch**: track `Set<string>` of unique event types during stream，textEventCount===0 时 build diagnostic + yield `type: 'system_info'` event with `metadata.cliDiagnostics`（observability-only，不走 provider error path；cloud R1 P1 修正）
+4. **REASON_TEXT entry**: publicSummary `"CLI 完成但无文字输出"`, publicHint 解释 step_start-only pattern + 建议（换猫 / 换 model / 直接跑 CLI 看 raw output）
+
 ## Acceptance Criteria
 
 ### Phase A（Backend cliDiagnostics + Sanitizer）— ✅ merged PR #1907 (2026-05-27)
@@ -218,6 +251,16 @@ Maine Coon当时挡掉过同样的 `stderrTail` 直传方案：
 - [x] AC-F5: classifier unknown + `stderrEmpty===false` 时 publicHint 提示用户调 `/api/config/env-summary` 看 `paths.dataDirs.runtimeLogs` 再用 invocationId 搜，**不在 payload 里塞 absolute path`（Maine Coon跨族 push back 守 F212 no-path-leak 安全边界）。
 - [x] AC-F6: 红测先行（先红后绿）：unit tests in `cli-diagnostics.test.js` (helper shape + hint variants + backward-compat); integration tests in `cli-spawn.test.js` (3 tests using `diagnosticLogger` stub assert real log payloads + 2 tests assert publicHint via `__cliError` yield). 137/137 pass.
 - [ ] AC-F7: 跨族 review + 云端 review — Maine Coon @codex R1 BLOCKING (2 P1s caught, both fixed at `6b1bfb82d`) → R2 pending. 云端 codex R1 P2 cwd leak (双源 same as Maine Coon P1-2, both fixed) → R2 P2 spec checkbox staleness (this update fixes it) → R3 pending. Phase F merge 不 reopen F212 status（仍 done），同 Phase E follow-up pattern.
+
+### Phase G（Silent-stdout observability）— merged PR #2150 (2026-06-09)
+
+- [x] AC-G1: 加 reasonCode `silent_completion` 到 `CliErrorReasonCode` union (`packages/shared/src/types/cli-diagnostics.ts`) + `REASON_TEXT` entry (publicSummary "CLI 完成但无文字输出" + publicHint 解释 step_start-only pattern + 建议路径)
+- [x] AC-G2: 新 helper `buildSilentCompletionDiagnostic` 在 `packages/api/src/utils/cli-diagnostics.ts`，输入 `{eventCount, eventTypes (string[]), model, sessionIdPrefix (前 8 char), exitStatus?, stderrPresent (boolean), stderrExcerpt?}`，返回 structured `CliDiagnostics`。安全边界：no full session id (只前 8 char) / no provider secrets / no prompt content / stderrExcerpt 走 sanitizer + generic absolute path scrub；eventTypes/model/stderr evidence 全部 bounded
+- [x] AC-G3: `OpenCodeAgentService.ts:322` no-text branch — track unique event types during stream（`Set<string>` of `result.type`），`textEventCount === 0` 时 build diagnostic + yield `type: 'system_info'` event with `metadata.cliDiagnostics`（cloud R1 P1 修正：silent_completion 不走 provider error path；tool-only turn 不误报）
+- [x] AC-G4: `ClaudeAgentService.ts:721` sibling same fix — track unique types + yield diagnostic event（LL-069 应用：sibling sweep from spec text 明示）；Claude result A2 `{subtype:'success', is_error:true}` 优先产出 `tool_call_parse_failed`，不误归 silent_completion
+- [x] AC-G5: 红测先行：fixture 1 用 step_start-only NDJSON (Maine Coon packet 第一 regression case) — OpenCode + Claude 两 providers 各一份；fixture 2 验证 sessionIdPrefix 只暴露前 8 char（full session id 不 leak）；fixture 3 验证 stderrExcerpt 不暴露 raw paths/tokens（走 sanitizer + generic path scrub）；fixture 4 验证 tool-only / Claude A2 result-error 不误报 silent_completion
+- [x] AC-G6: route-serial.ts:2165 + route-parallel.ts:1193 generic fallback — cliDiagnostics path dominates generic message；新增 serial/parallel route tests 证明 `silent_completion` system_info 不产生 provider error row / persisted `Error:`，前端 `ChatMessage` 可渲染 system_info 上的 cliDiagnostics
+- [x] AC-G7: 跨族 review (@codex) + 云端 codex review — Maine Coon R1/R2 blocking review（hint safeExcerpt vs debugRef）+ cloud codex 多轮 P1/P2（tool-only, exitCode, bounded evidence, successful-exit stderr, error-path, Claude A2 result-error）全部修复；`pnpm gate` 全绿；PR #2150 squash merged at `a22164f58`
 
 ## Dependencies
 

@@ -2590,3 +2590,117 @@ describe('service lifecycle write routes', () => {
     assert.match(result.output ?? '', /started/);
   });
 });
+
+describe('deep health probe (zombie detection)', () => {
+  it('kills zombie process when shallow health passes but deep health fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const killed = [];
+    let scriptRan = false;
+    const zombieAlive = { value: true };
+    const ttsStartScript = resolveServiceScriptPath('scripts/services/tts-server.sh');
+    const configs = new Map([
+      ['mlx-tts', { installed: true, enabled: true, selectedModel: 'mlx-community/Kokoro-82M-bf16' }],
+    ]);
+    const app = await buildApp({
+      fetchHealth: async (url) => {
+        // Zombie deep health always fails (synthesis broken)
+        if (url.includes('/health/deep') && zombieAlive.value) {
+          return { ok: false, status: 503, error: 'synthesis probe failed: Broken pipe' };
+        }
+        // After zombie is killed and script runs, new process is healthy
+        if (!zombieAlive.value && scriptRan) {
+          return { ok: true, status: 200, error: null };
+        }
+        // Zombie shallow health passes
+        if (zombieAlive.value) {
+          return { ok: true, status: 200, error: null };
+        }
+        // Between kill and restart — no process
+        return { ok: false, status: 503, error: 'unreachable' };
+      },
+      lifecycle: {
+        serviceConfig: {
+          get: (id) => configs.get(id) ?? { enabled: false },
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async (port) => {
+          if (port === 9879 && zombieAlive.value) return [55852];
+          return [];
+        },
+        readProcessCommand: async (pid) => (pid === 55852 ? `/bin/bash ${ttsStartScript}` : ''),
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+          if (pid === 55852) zombieAlive.value = false;
+        },
+        runScript: async () => {
+          scriptRan = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/mlx-tts/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.payload}`);
+      assert.deepEqual(killed, [{ pid: 55852, signal: 'SIGTERM' }], 'zombie process should be killed');
+      assert.equal(scriptRan, true, 'start script should run after killing zombie');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('returns already-running when both shallow and deep health pass', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const killed = [];
+    const ttsStartScript = resolveServiceScriptPath('scripts/services/tts-server.sh');
+    const configs = new Map([
+      ['mlx-tts', { installed: true, enabled: true, selectedModel: 'mlx-community/Kokoro-82M-bf16' }],
+    ]);
+    const app = await buildApp({
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+      lifecycle: {
+        serviceConfig: {
+          get: (id) => configs.get(id) ?? { enabled: false },
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        findPidsByPort: async (port) => (port === 9879 ? [55852] : []),
+        readProcessCommand: async (pid) => (pid === 55852 ? `/bin/bash ${ttsStartScript}` : ''),
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+        },
+        runScript: async () => ({ code: 0, output: 'started' }),
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/mlx-tts/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.ok, true);
+      assert.match(body.message, /already running/i);
+      assert.deepEqual(killed, [], 'should NOT kill healthy process');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+});

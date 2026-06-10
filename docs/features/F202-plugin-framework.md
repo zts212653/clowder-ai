@@ -139,13 +139,6 @@ Phase 2 covers:
 | 2026-05-31 | Post-merge follow-ups opened: cat-cafe#2000 for P2 deferral re-ranking, cat-cafe#2001 for `eval:capability-wakeup` with the new limb/plugin surface. Architecture ownership cell `plugin` added in this doc sync. |
 | 2026-06-08 | Maintainer decision: clowder-ai#844/#846 is re-anchored from its conflicting standalone feature number to F202 Phase 2. The source-truth plan lives here; the open PR must retitle/rewrite body/docs/roadmap before merge review continues. |
 
-## Open Questions
-
-1. Should plugin manifests eventually be publishable packages, or remain repository-local only?
-2. Where does remote/community plugin trust live: F146 marketplace control plane, a future F202 phase, or both?
-3. How should plugin-owned limb resources declare platform-specific adapters without creating same-power arbitrary code execution?
-4. What is the migration plan for future non-GitHub integrations after the GitHub Phase 2 precedent?
-
 ## Current Maintainer Position
 
 Phase 1 is accepted and absorbed as the trusted, repository-local plugin framework slice.

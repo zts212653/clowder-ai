@@ -66,7 +66,7 @@ export class GovernanceBootstrapService {
   async bootstrap(targetProject: string, opts: BootstrapOptions): Promise<BootstrapReport> {
     const actions: BootstrapAction[] = [];
     const packVersion = GOVERNANCE_PACK_VERSION;
-    const checksum = computePackChecksum();
+    const checksum = computePackChecksum('external');
 
     // 1. Managed blocks in provider instruction files
     for (const [provider, filename] of Object.entries(PROVIDER_FILES) as [Provider, string][]) {
@@ -135,7 +135,7 @@ export class GovernanceBootstrapService {
     dryRun: boolean,
   ): Promise<BootstrapAction> {
     const filePath = resolve(targetProject, filename);
-    const block = getGovernanceManagedBlock(provider);
+    const block = getGovernanceManagedBlock(provider, 'external');
     let existingContent = '';
 
     try {

@@ -879,7 +879,11 @@ export function consumeBackgroundSystemInfo(
         },
       });
       consumed = true;
-    } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+    } else if (
+      parsed?.type === 'strategy_allow_compress' ||
+      parsed?.type === 'resume_failure_stats' ||
+      parsed?.type === 'tool_activity'
+    ) {
       // Internal telemetry — suppress to avoid raw JSON bubbles in background threads
       consumed = true;
     } else if (parsed?.type === 'session_seal_requested') {
@@ -2097,7 +2101,14 @@ export function handleBackgroundAgentMessage(
 
     const result = consumeBackgroundSystemInfo(msg, existing, options);
     if (!result.consumed) {
-      addBackgroundSystemMessage(msg, options, result.content, result.variant);
+      const bgCliDiag = msg.metadata?.cliDiagnostics;
+      addBackgroundSystemMessage(
+        msg,
+        options,
+        result.content,
+        result.variant,
+        bgCliDiag ? { cliDiagnostics: bgCliDiag } : undefined,
+      );
     }
   }
 }
@@ -4598,7 +4609,11 @@ export function useAgentMessages() {
               },
             });
             consumed = true;
-          } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+          } else if (
+            parsed?.type === 'strategy_allow_compress' ||
+            parsed?.type === 'resume_failure_stats' ||
+            parsed?.type === 'tool_activity'
+          ) {
             // Internal telemetry — suppress to avoid raw JSON bubbles
             consumed = true;
           } else if (parsed?.type === 'silent_completion') {
@@ -4681,12 +4696,14 @@ export function useAgentMessages() {
           /* not JSON, use raw content */
         }
         if (!consumed) {
+          const sysCliDiag = msg.metadata?.cliDiagnostics;
           addMessage({
             id: `sysinfo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             type: 'system',
             variant: sysVariant,
             content: sysContent,
             timestamp: Date.now(),
+            ...(sysCliDiag ? { extra: { cliDiagnostics: sysCliDiag } } : {}),
           });
         }
       } else if (msg.type === 'error') {

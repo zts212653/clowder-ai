@@ -8,7 +8,7 @@ created: 2026-06-05
 
 # F225: Cat-Initiated Session Handoff — 猫主导的 session 接力
 
-> **Status**: spec | **Owner**: Ragdoll（Opus 4.8） | **Priority**: P2
+> **Status**: in-progress（**硬层** done + dogfood；**软层**（L0 §8 反射 + `context-self-management` skill + `context_management_hint` **prompt-injection** delivery）**+ eval 注册**（capability-wakeup #14）done，merged PR #2178；**待**：真实 warn session 观测 hint 是否 fire + eval activation 数据，闭 KD-1 三层后再 close） | **Owner**: Ragdoll（Opus 4.8） | **Priority**: P2
 
 Architecture cell: `identity-runtime-session`（`identity-session` cell 的 subcell，F211 owns）
 Map delta: update required — 新增"猫主动提议"作为一种 session boundary **触发源** + 新 `sealReason: 'cat_initiated_handoff'` + 新 typed `SessionRecord.catHandoffNote`（或独立 SessionHandoffStore）+ 新 `SessionHandoffProposal` 类型，扩展 identity-runtime-session 的 lifecycle registration / seal reason / proposal 谱系。owner 不变。
@@ -92,30 +92,30 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC ① trace 回 Why 的某诉求 ② 非作者可复核（命令/数字/截图）。 -->
 
 ### Phase A（提议 + Gate）
-- [ ] AC-A1: 新 MCP tool `cat_cafe_propose_session_handoff` 注册；猫调用时附五件套留言 → 生成 proposal + 确认卡推到 thread（复核：MCP tool list + 卡片 JSON/截图）。〔→ Why 缺口1+2〕
-- [ ] AC-A2: team lead gate 双路径生效——reject/expire 不 seal（session 继续）、approve 才进封印（复核：两条路径各一条测试）。〔→ Why 缺口2〕
-- [ ] AC-A3: proposal 用 discriminated 类型（`SessionHandoffProposal` / union），复用 `claimForApproval` CAS 思路但**不复用 `ThreadProposal` shape**、不走旧建-thread approve route（复核：类型独立 + kind-specific dispatcher）。〔→ Maine Coon P1-2〕
-- [ ] AC-A4: 硬滥用边界——每个 active session 最多 1 个 pending handoff proposal + per `(user,thread,cat)` 冷却/小时上限，reject/expire 后释放（复核：超限被拒一条测试）。〔→ Maine Coon P2〕
+- [x] AC-A1: 新 MCP tool `cat_cafe_propose_session_handoff` 注册；猫调用时附五件套留言 → 生成 proposal + 确认卡推到 thread（复核：MCP tool list + 卡片 JSON/截图）。〔→ Why 缺口1+2〕
+- [x] AC-A2: team lead gate 双路径生效——reject/expire 不 seal（session 继续）、approve 才进封印（复核：两条路径各一条测试）。〔→ Why 缺口2〕
+- [x] AC-A3: proposal 用 discriminated 类型（`SessionHandoffProposal` / union），复用 `claimForApproval` CAS 思路但**不复用 `ThreadProposal` shape**、不走旧建-thread approve route（复核：类型独立 + kind-specific dispatcher）。〔→ Maine Coon P1-2〕
+- [x] AC-A4: 硬滥用边界——每个 active session 最多 1 个 pending handoff proposal + per `(user,thread,cat)` 冷却/小时上限，reject/expire 后释放（复核：超限被拒一条测试）。〔→ Maine Coon P2〕
 
 ### Phase B（封印 + 续接 + 注入）
-- [ ] AC-B1: approve 后当前 session 被 seal，`sealReason='cat_initiated_handoff'`（复核：`SessionRecord.sealReason` 断言 + `list_session_chain`）。〔→ Why 缺口1〕
-- [ ] AC-B2: 五件套留言走 typed 字段 + always-keep 注入，**extractive/compress 默认模式下续接 session 第一眼可见**（复核：未配 generative 时断言续接 prompt 含五件套内容）。〔→ Why 高保真留言 + Maine Coon P1-1〕
-- [ ] AC-B3: 续接 session 同 thread 同 catId、seq+1（复核：`list_session_chain` 断言 seq 递增 + catId/threadId 一致）。〔→ Why 同 thread 同 catId 续接〕
-- [ ] AC-B4: approve 两阶段——commit point（`requestSeal accepted`）**前**失败（note 持久化失败 / requestSeal rejected / session 已变 / replay）→ fail/expire 不 seal；commit point **后**失败（enqueue/finalize）→ **recover-forward**（按 checkpoint idempotent 续跑），不留半封印孤儿（复核：commit point 前后各失败路径一条测试 + recovery 测试）。〔→ Maine Coon R2 commit-point〕
-- [ ] AC-B5: stale note 隔离——`catHandoffNote` 仅在 `sealReason='cat_initiated_handoff'` + 对应 approved/recovering proposal 时注入；note 已写但被别的 seal（如 threshold）抢先 → 不随该 seal 注入（复核：threshold-seal-steals 一条测试）。〔→ Maine Coon R2 stale note〕
-- [ ] AC-B6: crash window 闭合——`requestSeal accepted`（session 已 sealing）之后、proposal checkpoint（`sealedSessionId`）写入之前崩 → recovery 从 session 侧反推（已 sealing/sealed + `cat_initiated_handoff` + note.proposalId 匹配）backfill checkpoint，enqueue continuation **恰好一次**，不误判 pre-commit、不留孤儿（复核：crash-between-accept-and-checkpoint recovery 测试）。〔→ Maine Coon R3 crash window〕
+- [x] AC-B1: approve 后当前 session 被 seal，`sealReason='cat_initiated_handoff'`（复核：`SessionRecord.sealReason` 断言 + `list_session_chain`）。〔→ Why 缺口1〕
+- [x] AC-B2: 五件套留言走 typed 字段 + always-keep 注入，**extractive/compress 默认模式下续接 session 第一眼可见**（复核：未配 generative 时断言续接 prompt 含五件套内容）。〔→ Why 高保真留言 + Maine Coon P1-1〕
+- [x] AC-B3: 续接 session 同 thread 同 catId、seq+1（复核：`list_session_chain` 断言 seq 递增 + catId/threadId 一致）。〔→ Why 同 thread 同 catId 续接〕
+- [x] AC-B4: approve 两阶段——commit point（`requestSeal accepted`）**前**失败（note 持久化失败 / requestSeal rejected / session 已变 / replay）→ fail/expire 不 seal；commit point **后**失败（enqueue/finalize）→ **recover-forward**（按 checkpoint idempotent 续跑），不留半封印孤儿（复核：commit point 前后各失败路径一条测试 + recovery 测试）。〔→ Maine Coon R2 commit-point〕
+- [x] AC-B5: stale note 隔离——`catHandoffNote` 仅在 `sealReason='cat_initiated_handoff'` + 对应 approved/recovering proposal 时注入；note 已写但被别的 seal（如 threshold）抢先 → 不随该 seal 注入（复核：threshold-seal-steals 一条测试）。〔→ Maine Coon R2 stale note〕
+- [x] AC-B6: crash window 闭合——`requestSeal accepted`（session 已 sealing）之后、proposal checkpoint（`sealedSessionId`）写入之前崩 → recovery 从 session 侧反推（已 sealing/sealed + `cat_initiated_handoff` + note.proposalId 匹配）backfill checkpoint，enqueue continuation **恰好一次**，不误判 pre-commit、不留孤儿（复核：crash-between-accept-and-checkpoint recovery 测试）。〔→ Maine Coon R3 crash window〕
 
 ## 需求点 Checklist
 
-- [ ] 猫能在干净断点**主动**发起 handoff（不依赖 context 满 / 阈值）
-- [ ] 提议附**结构化五件套**留言（done/worktree_branch/commits/next_steps/gotchas）
-- [ ] team lead **gate**：approve 才 seal，reject/expire 当前 session 继续
-- [ ] approve 后封印当前 session（`cat_initiated_handoff` reason）
-- [ ] 五件套留言**高保真**注入续接 session 第一眼，**extractive/compress 默认模式下也可见**（不靠 generative）
-- [ ] 留言在 seal **前**独立持久化成功（不依赖 best-effort finalize）
-- [ ] approve 事务原子（失败 fail/expire，replay 防护）
-- [ ] 续接 = 同 thread 同 catId（"未来的自己"），非新 thread
-- [ ] 与 compress 模式正交共存（不破坏现有被动压缩路径）
+- [x] 猫能在干净断点**主动**发起 handoff（不依赖 context 满 / 阈值）
+- [x] 提议附**结构化五件套**留言（done/worktree_branch/commits/next_steps/gotchas）
+- [x] team lead **gate**：approve 才 seal，reject/expire 当前 session 继续
+- [x] approve 后封印当前 session（`cat_initiated_handoff` reason）
+- [x] 五件套留言**高保真**注入续接 session 第一眼，**extractive/compress 默认模式下也可见**（不靠 generative）
+- [x] 留言在 seal **前**独立持久化成功（不依赖 best-effort finalize）
+- [x] approve 事务原子（失败 fail/expire，replay 防护）
+- [x] 续接 = 同 thread 同 catId（"未来的自己"），非新 thread
+- [x] 与 compress 模式正交共存（不破坏现有被动压缩路径）
 
 ## Dependencies
 
@@ -169,6 +169,14 @@ Why: session 边界目前只能由 `shouldTakeAction`（context_health / 阈值�
 | KD-7 | 硬滥用边界：≤1 pending/active session + per (user,thread,cat) cooldown | gate 只挡 seal 挡不住卡片刷屏；continuation 有 5/h 限流但 propose route 没有（Maine Coon P2，`QueueProcessor.ts:169`） | 2026-06-05 |
 | KD-8 | approve 用 commit-point 模型：`requestSeal accepted` = commit point，之后只 recover-forward + checkpoint 字段 + continuation idempotency key | `requestSeal accepted` 不可逆（置 sealing + 清 active pointer，`SessionSealer.ts:103`/`SessionChainStore.ts:199`），commit point 后 rollback 会留半封印孤儿；F128 同范式（`proposal-routes.ts:162`）（Maine Coon R2 P1） | 2026-06-05 |
 | KD-9 | commit 标记可从 session 侧反推：`catHandoffNote` 预写带 `proposalId`；recovery 对"有 note 无 `sealedSessionId`"必 cross-check session 状态，已 sealing/sealed + 匹配则 backfill 再续跑 | commit 动作（session 侧 sealing）与 checkpoint（proposal 侧）非原子，中间 crash 让 recovery 误判 pre-commit 留孤儿（Maine Coon R3 P1） | 2026-06-05 |
+
+## 软层 + Eval 层（2026-06-09 设计收敛 — 补完 KD-1 的"软+硬+eval"三层）
+
+- **KD-10 — trigger 锚客观系统信号，不靠猫自我感知 context %。** 猫对自己 token 占用无可靠内省（CVO："我怕你 40% 就报警'我脏了'"）。系统 `shouldTakeAction(fillRatio)` 的 `warn` band 是客观信号（阈值可配）→ 落地加 derived `context_management_hint`（仅 `action.type==='warn'` 触发；经 **prompt-injection** 注入下轮 prompt——cloud review 纠正 system_info 到不了 cat，见 memo §12）。
+- **KD-11 — handoff vs compress 是判断不是二元 trigger。** compress ≠ 坏事：干一半**连贯**任务 + 没压过 → 压缩反而保 in-flight 线索；"脏"=话题漂移（a→g 一堆不相关事）。三轴：context%（系统 warn）/ 断点 vs 中途（猫自检）/ 脏+压缩次数（猫+系统）。**系统给 WHEN，猫给 WHAT。**
+- **KD-12 — 编码 = L0 极简反射（~2 行）+ `context-self-management` skill（~30 行清单非教程）。** 不教猫怎么判漂移（LLM 本能），给清单不给结论（KD-8 线内）。skill 含三问 + 2×2 矩阵 + **冲刺模式**（中途+已压多轮 → 聚焦到断点再 handoff，warn→action 窗口=预算，F24 auto-seal 兜底）。
+- **KD-13 — cross-runtime 优雅降级；compression hook 覆盖参差，设计不依赖 hook。** （2026-06-09 Maine Coon source-audit 刷新三月旧记忆，推翻"只有 Claude 有 hook"）：Claude 有成熟 `PreCompact`（`f24-pre-compact.sh` 维护精确 `compressionCount`）；**Gemini CLI 有 `PreCompress`**（可接但本机 `~/.gemini` 未装）；Codex 有 SessionStart/UserPromptSubmit/PermissionRequest、Antigravity 有 PreToolUse/PostToolUse/PreInvocation/Stop，但二者**均无 compression hook**。即"只有 Claude 有 hook"是过时表述——但 `compressionCount` via PreCompact 确实 **Claude-as-wired specific**，非 Claude 猫当前拿不到精确压缩计数。**故 cat-facing 注入不依赖 hook**（hook 仅作 per-runtime 补充探针：有 PreCompact/PreCompress→更准，没有→token-drop 降级）；注入 channel 用 **prompt-injection**（cloud review P1 纠正 system_info 到不了 cat，见 memo §12）；`fillConfidence` 分层（`exact_token`/`approx_token`/`bytes_health`/`unavailable`），unavailable runtime 退到纯断点+漂移自检；`compressionCount` 是漂移锚（不并进 fillConfidence，两正交轴，详见 memo §10）。**实现期 drop `recentlyCompressed`**（timing 上它在 warn 恒 false，详见 memo §11）——hint 最终 `{ severity, fillConfidence, compressionCount }`。非 Claude 猫无持久压缩锚，退到纯线/树+断点自检（runtime-agnostic 持久压缩计数是未来增强）。
+- **Eval 层（capability-wakeup，CVO 第①问"属于 capability 得上 eval"）**：F225 是 capability → 接 F192 `eval:capability-wakeup`——activation（warn+干净断点时 propose_session_handoff 调用率）+ friction（续接 session 第一 invocation 是否引用五件套）+ sunset（连续 N 周 0 调用 → 唤醒路径无效，重评）。
 
 ## Review Gate
 

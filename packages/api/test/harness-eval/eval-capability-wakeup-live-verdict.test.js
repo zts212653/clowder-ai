@@ -90,7 +90,11 @@ describe('eval:capability-wakeup live verdict generator', () => {
     const root = mkdtempSync(join(tmpdir(), 'f192-capability-live-'));
     const harnessFeedbackRoot = join(root, 'docs/harness-feedback');
     const verdictId = '2026-05-29-eval-capability-wakeup-live-verdict';
-    const trials = buildTrials();
+    const trials = buildTrials().map((trial, index) => ({
+      ...trial,
+      family: index === 0 ? 'maine-coon' : 'ragdoll',
+      catId: index === 0 ? 'codex' : 'opus',
+    }));
 
     const result = generateCapabilityWakeupLiveVerdict({
       verdictId,
@@ -116,6 +120,7 @@ describe('eval:capability-wakeup live verdict generator', () => {
     const snapshot = JSON.parse(readFileSync(join(harnessFeedbackRoot, 'bundles', verdictId, 'snapshot.json'), 'utf8'));
     assert.equal(snapshot.components[0].id, 'rich-messaging');
     assert.equal(snapshot.components[0].frictionCounts.cognitive_count, 2);
+    assert.equal(Object.hasOwn(snapshot.components[0], 'byFamily'), false);
     assert.equal(snapshot.window.startMs, 1700000000000);
     assert.equal(snapshot.window.endMs, 1700000060000);
     assert.equal(snapshot.window.durationHours, 0.017);
@@ -135,6 +140,11 @@ describe('eval:capability-wakeup live verdict generator', () => {
     );
     const trialsBytes = readFileSync(join(root, 'generated', 'capability-wakeup', verdictId, 'trials.json'));
     const summaryBytes = readFileSync(join(root, 'generated', 'capability-wakeup', verdictId, 'summary.json'));
+    const rawTrials = JSON.parse(trialsBytes.toString('utf8'));
+    assert.deepEqual(
+      rawTrials.trials.map((trial) => trial.family),
+      ['maine-coon', 'ragdoll'],
+    );
     assert.equal(provenance.rawInputs[0].sha256, createHash('sha256').update(trialsBytes).digest('hex'));
     assert.equal(provenance.rawInputs[1].sha256, createHash('sha256').update(summaryBytes).digest('hex'));
 
@@ -271,4 +281,6 @@ sla:
       `attribution:bundle/${verdictId}/eval-F203-workspace_navigator-2026-05-29:no-finding`,
     ]);
   });
+
+  // 砚砚 R8 P1 mirror tests extracted to eval-capability-wakeup-submitted-packet.test.js (350-line limit)
 });

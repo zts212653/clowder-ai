@@ -602,6 +602,11 @@ export async function* spawnCli(
     // LOG_CLI_STDERR + sanitized via shared helper. Previously this branch wrote raw stderr unconditionally.
     if (exitCode === 0 && exitSignal === null) {
       const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      const stderrTrimmed = stderrBuffer.trim();
+      options.onSuccessfulExitStderr?.({
+        stderrPresent: stderrTrimmed.length > 0,
+        ...(stderrTrimmed ? { stderrExcerpt: sanitizeCliStderr(stderrBuffer).slice(-500) } : {}),
+      });
       if (stderrForLog) {
         log.debug(
           {

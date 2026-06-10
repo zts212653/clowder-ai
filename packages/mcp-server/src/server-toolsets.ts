@@ -4,6 +4,7 @@ import {
   callbackMemoryTools,
   callbackTools,
   distillationTools,
+  eventMemoryTools,
   evidenceTools,
   externalRuntimeSessionCallbackTools,
   externalRuntimeSessionReadTools,
@@ -15,6 +16,7 @@ import {
   libraryLifecycleTools,
   limbTools,
   perspectiveTools,
+  publishVerdictTools,
   recentTools,
   richBlockRulesTools,
   scheduleTools,
@@ -74,22 +76,33 @@ export const READONLY_ALLOWED_TOOLS = new Set([
 export const AGENT_KEY_TOOLS = new Set([
   'cat_cafe_post_message',
   'cat_cafe_cross_post_message',
+  'cat_cafe_create_rich_block',
   'cat_cafe_get_thread_context',
-  // #699: Message lookup by ID
-  'cat_cafe_get_message',
   'cat_cafe_list_threads',
   'cat_cafe_register_external_runtime_session',
   // F223: first-party Hub UX actions are callback-authenticated writes that
   // persistent agent-key MCP clients need when invocation credentials are absent.
   'cat_cafe_workspace_navigate',
   'cat_cafe_preview_open',
+  // F227: teleport is a callback-authenticated navigation write
+  'cat_cafe_teleport',
+  // F227 Task 7: backfill is a callback-authenticated write (populates Event Memory)
+  'cat_cafe_backfill_events',
+  // F227 (cloud P2): list_events is a callback-backed READ — callbackGet fails closed
+  // without invocation/agent-key creds, so it belongs with the creds-gated tools, NOT
+  // the credential-free readonly whitelist (where it'd be visible-but-unusable).
+  'cat_cafe_list_events',
+  // #699: Message lookup by ID
+  'cat_cafe_get_message',
+  // F192 Phase H AC-H4 (砚砚 R9 P1): shared-MCP cats can publish verdicts.
+  'cat_cafe_publish_verdict',
 ]);
 
-const isReadonly = process.env['CAT_CAFE_READONLY'] === 'true';
+const isReadonly = process.env.CAT_CAFE_READONLY === 'true';
 const hasAgentKey = !!(
-  process.env['CAT_CAFE_AGENT_KEY_SECRET'] ||
-  process.env['CAT_CAFE_AGENT_KEY_FILE'] ||
-  process.env['CAT_CAFE_AGENT_KEY_FILES']
+  process.env.CAT_CAFE_AGENT_KEY_SECRET ||
+  process.env.CAT_CAFE_AGENT_KEY_FILE ||
+  process.env.CAT_CAFE_AGENT_KEY_FILES
 );
 
 function applyReadonlyFilter(tools: readonly ToolDef[]): readonly ToolDef[] {
@@ -101,6 +114,8 @@ const collabTools: readonly ToolDef[] = applyReadonlyFilter([
   ...callbackTools,
   ...externalRuntimeSessionCallbackTools,
   ...hubActionTools,
+  ...eventMemoryTools, // F227: cat_cafe_teleport
+  ...publishVerdictTools, // F192 Phase H AC-H4
   ...richBlockRulesTools,
   ...gameActionTools,
   ...scheduleTools,

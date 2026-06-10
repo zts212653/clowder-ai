@@ -28,6 +28,7 @@ describe('V19 migration — F200 recall_events + edge traversal columns', () => 
     assert.ok(cols.includes('mode'), 'has mode');
     assert.ok(cols.includes('scope'), 'has scope');
     assert.ok(cols.includes('candidates_json'), 'has candidates_json');
+    assert.ok(cols.includes('result_count'), 'has result_count');
     assert.ok(cols.includes('consumed_json'), 'has consumed_json');
     assert.ok(cols.includes('reformulated'), 'has reformulated');
     assert.ok(cols.includes('fell_back_to_grep'), 'has fell_back_to_grep');
@@ -88,9 +89,9 @@ describe('V19 migration — F200 recall_events + edge traversal columns', () => 
     db.close();
   });
 
-  it('CURRENT_SCHEMA_VERSION is 25', async () => {
+  it('CURRENT_SCHEMA_VERSION is 26', async () => {
     const { CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
-    assert.equal(CURRENT_SCHEMA_VERSION, 25);
+    assert.equal(CURRENT_SCHEMA_VERSION, 26);
   });
 
   it('can insert and read recall_events', async () => {

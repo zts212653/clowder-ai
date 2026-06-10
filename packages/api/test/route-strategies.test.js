@@ -2753,10 +2753,10 @@ function createDoneOnlyService(catId) {
 }
 
 /** Mock service that yields a visible system_info notice but no text */
-function createVisibleNoticeOnlyService(catId, content) {
+function createVisibleNoticeOnlyService(catId, content, metadata) {
   return {
     async *invoke() {
-      yield { type: 'system_info', catId, content, timestamp: Date.now() };
+      yield { type: 'system_info', catId, content, ...(metadata ? { metadata } : {}), timestamp: Date.now() };
       yield { type: 'done', catId, timestamp: Date.now() };
     },
   };
@@ -2804,6 +2804,52 @@ describe('routeSerial: done-only (no text, no error)', () => {
       messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
       false,
       'should not add a duplicate silent_completion after a visible notice',
+    );
+  });
+
+  it('keeps provider silent_completion system notice off the error path', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createVisibleNoticeOnlyService(
+          'codex',
+          JSON.stringify({ type: 'silent_completion', detail: 'No text' }),
+          {
+            cliDiagnostics: {
+              reasonCode: 'silent_completion',
+              publicSummary: 'CLI 完成但无文字输出',
+              publicHint: '展开详细诊断',
+              debugRef: { command: 'opencode', exitCode: 0, signal: null },
+            },
+          },
+        ),
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeSerial(deps, ['codex'], 'test', 'user1', 'thread1', {
+      thinkingMode: 'play',
+    })) {
+      messages.push(msg);
+    }
+
+    assert.equal(
+      messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      false,
+      'silent_completion diagnostic must not mark provider error',
+    );
+    assert.equal(
+      messages.filter((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion')
+        .length,
+      1,
+      'silent_completion diagnostic should remain user-visible as system_info',
+    );
+    assert.equal(
+      appendCalls.some((c) => c.userId === 'system' && c.content?.startsWith('Error:')),
+      false,
+      'route must not persist silent_completion as red system error',
     );
   });
 
@@ -2875,6 +2921,50 @@ describe('routeParallel: done-only (no text, no error)', () => {
       messages.some((m) => m.type === 'system_info' && m.content?.includes('completed without textual output')),
       false,
       'should not add a duplicate silent_completion after a visible notice',
+    );
+  });
+
+  it('keeps provider silent_completion system notice off the error path', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createMockDeps(
+      {
+        codex: createVisibleNoticeOnlyService(
+          'codex',
+          JSON.stringify({ type: 'silent_completion', detail: 'No text' }),
+          {
+            cliDiagnostics: {
+              reasonCode: 'silent_completion',
+              publicSummary: 'CLI 完成但无文字输出',
+              publicHint: '展开详细诊断',
+              debugRef: { command: 'opencode', exitCode: 0, signal: null },
+            },
+          },
+        ),
+      },
+      appendCalls,
+    );
+
+    const messages = [];
+    for await (const msg of routeParallel(deps, ['codex'], 'test', 'user1', 'thread1')) {
+      messages.push(msg);
+    }
+
+    assert.equal(
+      messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      false,
+      'silent_completion diagnostic must not mark provider error',
+    );
+    assert.equal(
+      messages.filter((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion')
+        .length,
+      1,
+      'silent_completion diagnostic should remain user-visible as system_info',
+    );
+    assert.equal(
+      appendCalls.some((c) => c.userId === 'system' && c.content?.startsWith('Error:')),
+      false,
+      'route must not persist silent_completion as red system error',
     );
   });
 });

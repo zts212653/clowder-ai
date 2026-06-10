@@ -45,9 +45,13 @@ import { type AgyProfile, preflightAgyProfile, resolveAgyProfile, resolveAgySpaw
 import { extractAgyFinalTextFromSteps, parseAgyStepTools, readAgyTrajectorySteps } from './agy-trajectory-extractor.js';
 import {
   type AgyProgressEvent,
+  createAgyResumeBaselineCursorResolver,
   listAgyConversationDbs,
   locateAgyTrajectoryDb,
   observeAgyProgress,
+  readAgyDbFileIdentity,
+  readAgyMaxStepIdx,
+  readAgyStepsPrefixFingerprint,
   resolveAgyAppDataDir,
 } from './agy-trajectory-observer.js';
 import {
@@ -888,6 +892,37 @@ export class GeminiAgentService implements AgentService {
       // homedir()，否则 accountEnv 提供 HOME 时会扫错目录、resume 永久零 progress。
       const agyInvocationStartMs = Date.now();
       const agyAppDataDir = resolveAgyAppDataDir(childEnv);
+      const resumeTrajectoryDbName = requestedSessionId ? `${requestedSessionId}.db` : null;
+      const resumeTrajectoryDbPath =
+        resumeTrajectoryDbName && basename(resumeTrajectoryDbName) === resumeTrajectoryDbName
+          ? join(agyAppDataDir, 'conversations', resumeTrajectoryDbName)
+          : null;
+      const resumeTrajectoryBaselineCursor =
+        resumeTrajectoryDbPath !== null ? readAgyMaxStepIdx(resumeTrajectoryDbPath) : null;
+      const resumeTrajectoryDbIdentity =
+        resumeTrajectoryDbPath !== null && resumeTrajectoryBaselineCursor !== null
+          ? readAgyDbFileIdentity(resumeTrajectoryDbPath)
+          : null;
+      const resumeTrajectoryBaselinePrefixFingerprintResult =
+        resumeTrajectoryDbPath !== null && resumeTrajectoryBaselineCursor !== null
+          ? readAgyStepsPrefixFingerprint(resumeTrajectoryDbPath, resumeTrajectoryBaselineCursor)
+          : null;
+      const resumeTrajectoryBaselinePrefixFingerprint =
+        resumeTrajectoryBaselinePrefixFingerprintResult?.status === 'ok'
+          ? resumeTrajectoryBaselinePrefixFingerprintResult.fingerprint
+          : null;
+      const initialCursorForDb =
+        resumeTrajectoryDbPath !== null &&
+        resumeTrajectoryBaselineCursor !== null &&
+        resumeTrajectoryDbIdentity !== null &&
+        resumeTrajectoryBaselinePrefixFingerprint !== null
+          ? createAgyResumeBaselineCursorResolver({
+              resumeDbPath: resumeTrajectoryDbPath,
+              baselineCursor: resumeTrajectoryBaselineCursor,
+              baselineIdentity: resumeTrajectoryDbIdentity,
+              baselinePrefixFingerprint: resumeTrajectoryBaselinePrefixFingerprint,
+            })
+          : undefined;
       // F210 cache-leak fix (砚砚 cwd sandbox 方向)：spawn cwd 与 workingDirectory 解耦。AGY 写
       // cwd-relative cache（`cache/projects.json`）到 spawn cwd——cwd=repo root 时泄漏到 worktree
       // （实证 2026-06-03）。agyProfile 时 spawn cwd 指向 profile cwd sandbox（cwd-relative cache 落
@@ -982,6 +1017,7 @@ export class GeminiAgentService implements AgentService {
         appDataDir: agyAppDataDir,
         invocationStartMs: agyInvocationStartMs,
         listConversationDbs: listAgyConversationDbs,
+        ...(initialCursorForDb ? { initialCursorForDb } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
       });
       // Merge loop: drain the side-channel buffer (liveness) on a timer so it stays real-time even

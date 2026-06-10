@@ -17,7 +17,7 @@ export interface CreateProposalInput {
   preferredCats: CatId[];
   projectPath: string;
   initialMessage?: string;
-  /** F128 Phase Y: reporting mode for the created thread (default none if omitted, AC-Y6). */
+  /** F128: reporting mode for the created thread (default final-only if omitted). */
   reportingMode?: ReportingMode;
   createdBy: string;
   /**
@@ -66,9 +66,11 @@ export interface IProposalStore {
    * if the process dies between create and finalize, the proposal records which
    * thread already exists — stale-claim recovery can then re-finalize instead of
    * rolling back (which would cause a duplicate thread on the next approve).
+   * Optional overrides are checkpointed with the thread id so stale recovery preserves the
+   * approval contract even if the process dies before finalizeApproval.
    * No-op if proposal status is not 'approving'.
    */
-  recordCreatedThread(proposalId: string, threadId: string): void | Promise<void>;
+  recordCreatedThread(proposalId: string, threadId: string, overrides?: ProposalApproveOverrides): void | Promise<void>;
   /** CAS approving → pending. Used when thread creation fails after claim. */
   rollbackClaim(proposalId: string): boolean | Promise<boolean>;
   /** CAS pending → rejected. Returns null if status is not pending (e.g. already approving/approved). */
@@ -166,18 +168,7 @@ export class InMemoryProposalStore implements IProposalStore {
     proposal.approvedAt = Date.now();
     proposal.createdThreadId = input.createdThreadId;
     delete proposal.claimedAt;
-    if (input.overrides?.title !== undefined) proposal.title = input.overrides.title;
-    if (input.overrides?.parentThreadId !== undefined) {
-      proposal.parentThreadId = input.overrides.parentThreadId;
-    }
-    if (input.overrides?.preferredCats !== undefined) {
-      proposal.preferredCats = [...input.overrides.preferredCats];
-    }
-    if (input.overrides?.initialMessage === null) {
-      delete proposal.initialMessage;
-    } else if (typeof input.overrides?.initialMessage === 'string') {
-      proposal.initialMessage = input.overrides.initialMessage;
-    }
+    applyInMemoryOverrides(proposal, input.overrides);
     return cloneProposal(proposal);
   }
 
@@ -190,10 +181,11 @@ export class InMemoryProposalStore implements IProposalStore {
     return true;
   }
 
-  recordCreatedThread(proposalId: string, threadId: string): void {
+  recordCreatedThread(proposalId: string, threadId: string, overrides?: ProposalApproveOverrides): void {
     const proposal = this.proposals.get(proposalId);
     if (!proposal || proposal.status !== 'approving') return;
     proposal.createdThreadId = threadId;
+    applyInMemoryOverrides(proposal, overrides);
   }
 
   markRejected(input: RejectProposalInput): ThreadProposal | null {
@@ -246,6 +238,17 @@ export class InMemoryProposalStore implements IProposalStore {
 
 function dedupKey(userId: string, clientRequestId: string): string {
   return `${userId}::${clientRequestId}`;
+}
+
+function applyInMemoryOverrides(proposal: ThreadProposal, overrides: ProposalApproveOverrides | undefined): void {
+  if (!overrides) return;
+  if (overrides.title !== undefined) proposal.title = overrides.title;
+  if (overrides.parentThreadId !== undefined) proposal.parentThreadId = overrides.parentThreadId;
+  if (overrides.preferredCats !== undefined) proposal.preferredCats = [...overrides.preferredCats];
+  if (overrides.projectPath !== undefined) proposal.projectPath = overrides.projectPath;
+  if (overrides.reportingMode !== undefined) proposal.reportingMode = overrides.reportingMode;
+  if (overrides.initialMessage === null) delete proposal.initialMessage;
+  else if (typeof overrides.initialMessage === 'string') proposal.initialMessage = overrides.initialMessage;
 }
 
 function cloneProposal(proposal: ThreadProposal): ThreadProposal {

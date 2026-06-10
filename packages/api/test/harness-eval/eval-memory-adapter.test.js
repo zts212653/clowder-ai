@@ -39,6 +39,7 @@ const healthyRecallMetrics = {
     tokenCostPerHit: 1200,
     consumedAnchorNotInPoolRate: 0.03,
     shadowConsumedMRR: null,
+    liveOnShadowSubsetMRR: null,
   },
   graph: {
     nonFirstSelectionRate: 0.18,
@@ -159,6 +160,7 @@ describe('eval-memory-adapter', () => {
               tokenCostPerHit: 0,
               consumedAnchorNotInPoolRate: 0,
               shadowConsumedMRR: null,
+              liveOnShadowSubsetMRR: null,
             },
             graph: { nonFirstSelectionRate: 0, traversalCompletion: 0 },
           },

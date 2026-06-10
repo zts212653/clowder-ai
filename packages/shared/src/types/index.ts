@@ -254,6 +254,21 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+// F227: Event Memory types (cognitive-transition event index)
+export {
+  COGNITIVE_TRANSITIONS,
+  type CognitiveTransition,
+  EVENT_CONFIDENCES,
+  EVENT_TRIGGERS,
+  type EventConfidence,
+  type EventMemoryId,
+  type EventMemoryRecord,
+  type EventTrigger,
+  generateEventId,
+  isEventMemoryRecord,
+  isValidOwnerUserId,
+  type StoredEventMemory,
+} from './event-memory.js';
 // External project types (F076 跨项目作战面板)
 export type {
   CreateExternalProjectInput,
@@ -507,11 +522,12 @@ export type {
   RichMediaGalleryBlock,
   RichMessageExtra,
 } from './rich.js';
-export { normalizeRichBlock } from './rich.js';
+export { isValidRichBlock, normalizeRichBlock } from './rich.js';
 // Session chain types (F24 Session Chain + Context Health)
 export type {
   ContextHealth,
   ContextHealthConfig,
+  ContextManagementHint,
   SealReason,
   SealResult,
   SessionRecord,
@@ -521,6 +537,12 @@ export type {
   SessionUsageSnapshot,
   StrategyAction,
 } from './session.js';
+// Session handoff proposal types (F225 Cat-Initiated Session Handoff)
+export type {
+  CatHandoffNote,
+  HandoffProposalStatus,
+  SessionHandoffProposal,
+} from './session-handoff-proposal.js';
 // Signals types (F21 Signal Hunter)
 export type {
   SignalArticle,

@@ -185,10 +185,45 @@ describe('F128 propose / approve / reject lifecycle', () => {
     const newThread = await ctx.threadStore.get(threadId);
     assert.equal(newThread.title, 'edited title');
     const msgs = await ctx.messageStore.getByThread(threadId);
-    const userMsg = msgs.find((m) => m.userId === 'alice' && m.catId === null);
-    assert.ok(userMsg);
+    // Phase AA (AC-AA4): seed message catId is now sourceCatId ('opus' from
+    // default test harness), not null. The user who approves is the userId.
+    const userMsg = msgs.find((m) => m.userId === 'alice' && m.content.includes('edited msg'));
+    assert.ok(userMsg, 'seed message must exist with user-edited content');
+    assert.equal(userMsg.catId, 'opus', 'AC-AA4: seed message catId = proposing cat, not null');
     // Server injects "## 主 Thread" header; edited message is at the start.
     assert.ok(userMsg.content.startsWith('edited msg'), 'thread first message should start with user-edited content');
     assert.ok(userMsg.content.includes('## 主 Thread'), 'thread first message should include parent header');
+  });
+
+  test('approve can override reportingMode to autonomous before creating the thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          body: {
+            initialMessage: 'handoff to child',
+            preferredCats: ['opus'],
+            reportingMode: 'final-only',
+          },
+        })
+      ).body,
+    );
+
+    const res = await ctx.approve('alice', proposalId, { reportingMode: 'none' });
+    assert.equal(res.statusCode, 200);
+    const { threadId } = JSON.parse(res.body);
+
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.reportingMode, 'none', 'approved proposal audit reflects the user override');
+
+    const msgs = await ctx.messageStore.getByThread(threadId);
+    const seed = msgs.find((m) => m.content.includes('handoff to child'));
+    assert.ok(seed, 'seed message must exist');
+    assert.ok(seed.content.includes('回报模式：autonomous'), 'override should drive the child-thread protocol');
+    assert.ok(!seed.content.includes('回报模式：final-only'), 'final-only proposal value must not leak after override');
+    assert.ok(seed.content.includes('无强制回报；接力完成即可'), 'serial chain tail should not force return');
   });
 });

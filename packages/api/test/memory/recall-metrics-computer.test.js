@@ -563,6 +563,261 @@ describe('RecallMetricsComputer', () => {
     assert.equal(report.extended.shadowConsumedMRR, null);
   });
 
+  // ── F200 B' regression: shadow vs live measurement asymmetry ─────────
+  // Background: eval:memory cron reported 6.7× shadow:live divergence which
+  // turned out to be `shadowConsumedMRR / consumedMRR` comparing two MRRs with
+  // DIFFERENT denominators (shadowRows.length subset vs rows.length full).
+  // Math: with shadow ranking == live ranking, ratio collapses to 1/c where c
+  // is the consumed-rate over the full window. Observed 0.090/0.603 ≈ 1/0.149.
+  // Fix: add `liveOnShadowSubsetMRR` mirror metric (same subset filter, live
+  // rank), so `shadowConsumedMRR / liveOnShadowSubsetMRR` is meaningful.
+
+  it("F200-B': liveOnShadowSubsetMRR provides denominator-matched live mirror", () => {
+    // 4 events constructed to expose the old cross-metric asymmetry:
+    // - r1: shadow + consumed, live rank 0 / shadow rank 1 (shadow worse)
+    // - r2: shadow + consumed, live rank 0 / shadow rank 0 (equal)
+    // - r3: NO consumed (abandoned)                           — dilutes live denom only
+    // - r4: consumed at live rank 1, NO shadow ranking       — dilutes live denom only
+    //
+    // OLD broken comparison (shadow vs core.consumedMRR):
+    //   shadowConsumedMRR    = (1/(1+1) + 1/(0+1)) / 2       = 0.75
+    //   core.consumedMRR     = (1 + 1 + 0 + 1/(1+1)) / 4     = 0.625
+    //   broken ratio         = 0.75 / 0.625                  = 1.2  (looks shadow 20% BETTER)
+    //
+    // NEW mirror comparison (shadow vs liveOnShadowSubsetMRR):
+    //   liveOnShadowSubsetMRR = (1/(0+1) + 1/(0+1)) / 2      = 1.0
+    //   correct ratio         = 0.75 / 1.0                   = 0.75 (shadow 25% WORSE — opposite!)
+    insertEvent(db, {
+      recall_id: 'r1',
+      candidates_json: JSON.stringify([
+        { anchor: 'A', rank: 0 },
+        { anchor: 'B', rank: 1 },
+      ]),
+      consumed_json: JSON.stringify([{ anchor: 'A', rank: 0, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([
+        { anchor: 'A', shadowRank: 1 },
+        { anchor: 'B', shadowRank: 0 },
+      ]),
+      'r1',
+    );
+    insertEvent(db, {
+      recall_id: 'r2',
+      candidates_json: JSON.stringify([{ anchor: 'X', rank: 0 }]),
+      consumed_json: JSON.stringify([{ anchor: 'X', rank: 0, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([{ anchor: 'X', shadowRank: 0 }]),
+      'r2',
+    );
+    insertEvent(db, {
+      recall_id: 'r3',
+      candidates_json: JSON.stringify([{ anchor: 'Y', rank: 0 }]),
+      consumed_json: '[]',
+      abandoned: 1,
+    });
+    insertEvent(db, {
+      recall_id: 'r4',
+      candidates_json: JSON.stringify([
+        { anchor: 'Z1', rank: 0 },
+        { anchor: 'Z2', rank: 1 },
+      ]),
+      consumed_json: JSON.stringify([{ anchor: 'Z2', rank: 1, method: 'Read' }]),
+    });
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+
+    // Backward-compat fields unchanged
+    assert.ok(
+      Math.abs(report.extended.shadowConsumedMRR - 0.75) < 1e-9,
+      `shadowConsumedMRR = (0.5+1.0)/2 = 0.75, got ${report.extended.shadowConsumedMRR}`,
+    );
+    assert.ok(
+      Math.abs(report.core.consumedMRR - 0.625) < 1e-9,
+      `core.consumedMRR = (1+1+0+0.5)/4 = 0.625, got ${report.core.consumedMRR}`,
+    );
+
+    // NEW mirror metric: live MRR on the same shadow subset
+    assert.equal(
+      report.extended.liveOnShadowSubsetMRR,
+      1.0,
+      'liveOnShadowSubsetMRR = (1/(0+1) + 1/(0+1))/2 = 1.0 — both subset rows consumed at live rank 0',
+    );
+
+    // Smoking gun: mirror comparison reveals shadow is worse on this subset,
+    // while the old cross-metric ratio would have suggested shadow is better.
+    assert.ok(
+      report.extended.shadowConsumedMRR < report.extended.liveOnShadowSubsetMRR,
+      'on shared subset, shadow MRR < live MRR (shadow is worse for r1)',
+    );
+  });
+
+  it("F200-B': identical shadow & live ranking ⇒ shadowConsumedMRR == liveOnShadowSubsetMRR", () => {
+    // Invariant: when shadow == live on every event, both mirror metrics are equal.
+    // (This is the property that lets the cron detect actual ranker divergence
+    // without the 1/c denominator-asymmetry false alarm.)
+    insertEvent(db, {
+      recall_id: 'r-id-1',
+      candidates_json: JSON.stringify([{ anchor: 'A', rank: 0 }]),
+      consumed_json: JSON.stringify([{ anchor: 'A', rank: 0, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([{ anchor: 'A', shadowRank: 0 }]),
+      'r-id-1',
+    );
+    insertEvent(db, {
+      recall_id: 'r-id-2',
+      candidates_json: JSON.stringify([
+        { anchor: 'B', rank: 0 },
+        { anchor: 'C', rank: 1 },
+        { anchor: 'D', rank: 2 },
+      ]),
+      consumed_json: JSON.stringify([{ anchor: 'D', rank: 2, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([
+        { anchor: 'B', shadowRank: 0 },
+        { anchor: 'C', shadowRank: 1 },
+        { anchor: 'D', shadowRank: 2 },
+      ]),
+      'r-id-2',
+    );
+    // Add a non-shadow abandoned event to dilute live consumedMRR denominator —
+    // the new mirror metric must NOT be affected.
+    insertEvent(db, {
+      recall_id: 'r-no-shadow',
+      candidates_json: JSON.stringify([{ anchor: 'N', rank: 0 }]),
+      consumed_json: '[]',
+      abandoned: 1,
+    });
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+
+    assert.ok(report.extended.shadowConsumedMRR !== null);
+    assert.ok(report.extended.liveOnShadowSubsetMRR !== null);
+    assert.ok(
+      Math.abs(report.extended.shadowConsumedMRR - report.extended.liveOnShadowSubsetMRR) < 1e-9,
+      `identical rankings ⇒ identical MRRs, got shadow=${report.extended.shadowConsumedMRR} live=${report.extended.liveOnShadowSubsetMRR}`,
+    );
+    // Old asymmetric comparison would still mislead because of the abandoned event
+    assert.ok(
+      report.core.consumedMRR < report.extended.liveOnShadowSubsetMRR,
+      'core.consumedMRR diluted by non-consumed event under-reports vs same-subset mirror',
+    );
+  });
+
+  it("F200-B': liveOnShadowSubsetMRR is null when no shadow subset exists", () => {
+    insertEvent(db, {
+      recall_id: 'r-no-shadow-1',
+      candidates_json: JSON.stringify([{ anchor: 'A', rank: 0 }]),
+      consumed_json: JSON.stringify([{ anchor: 'A', rank: 0, method: 'Read' }]),
+    });
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+    assert.equal(report.extended.shadowConsumedMRR, null);
+    assert.equal(report.extended.liveOnShadowSubsetMRR, null);
+  });
+
+  it("F200-B' regression (PR #2108 codex review): shadow miss must NOT mute live mirror", () => {
+    // Setup: shadow_ranking exists but OMITS the consumed anchor 'A'.
+    // - Shadow can't rank A → shadow contribution = 0 (correct: penalise shadow miss)
+    // - Live ranks A at 0 on the same row → live MUST contribute 1/(0+1)=1.0
+    // Pre-fix (PR #2108 HEAD b7f466b7): live was gated on shadow's finite rank,
+    // so live contribution was also 0 — incorrectly muting the live mirror signal.
+    // Post-fix: numerators are independent on the shared subset/denominator.
+    insertEvent(db, {
+      recall_id: 'r-shadow-miss',
+      candidates_json: JSON.stringify([{ anchor: 'A', rank: 0 }]),
+      consumed_json: JSON.stringify([{ anchor: 'A', rank: 0, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([{ anchor: 'B', shadowRank: 0 }]), // shadow only knows B, not A
+      'r-shadow-miss',
+    );
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+
+    assert.equal(report.core.consumedMRR, 1.0, 'live consumedMRR = 1/(0+1) = 1.0');
+    assert.equal(
+      report.extended.shadowConsumedMRR,
+      0,
+      'shadow cannot rank consumed anchor A → shadow contribution 0; denom = shadowRows.length = 1; shadowConsumedMRR = 0',
+    );
+    assert.equal(
+      report.extended.liveOnShadowSubsetMRR,
+      1.0,
+      'live MUST still contribute on this row: live ranks A at 0 → 1/(0+1) = 1.0. Pre-fix was incorrectly 0.',
+    );
+  });
+
+  it("F200-B' regression (codex non-blocker): mixed consumed ranks take min over non-negative", () => {
+    // Row has `[{anchor:'A', rank:-1}, {anchor:'B', rank:0}]`:
+    // user consumed A (not in pool, signal -1) AND B (in pool, top result).
+    // The top-pool consumption should still count — naïve `Math.min(-1, 0) = -1`
+    // would silently swallow the valid rank and report live mirror = 0.
+    // Fix: min over the non-negative subset → live MRR = 1/(0+1) = 1.0.
+    insertEvent(db, {
+      recall_id: 'r-mixed-ranks',
+      candidates_json: JSON.stringify([{ anchor: 'B', rank: 0 }]),
+      consumed_json: JSON.stringify([
+        { anchor: 'A', rank: -1, method: 'Read' },
+        { anchor: 'B', rank: 0, method: 'Read' },
+      ]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([{ anchor: 'B', shadowRank: 0 }]),
+      'r-mixed-ranks',
+    );
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+    assert.equal(
+      report.extended.liveOnShadowSubsetMRR,
+      1.0,
+      'mixed [-1, 0] → min over non-negative {0} → 1/(0+1) = 1.0; -1 alone would have swallowed the valid rank',
+    );
+    assert.equal(
+      report.extended.shadowConsumedMRR,
+      1.0,
+      'shadow ranks B at 0 → 1/(0+1) = 1.0 (matches live on this row)',
+    );
+  });
+
+  it("F200-B' regression: liveOnShadowSubsetMRR guards consumed rank < 0 (anchor not in live pool)", () => {
+    // c.rank = -1 signals "consumed anchor not in live candidate pool" (AC-C6).
+    // Without a guard, `1/(rank+1) = 1/0 = Infinity` would corrupt the metric.
+    // Treat as 0 contribution (live pool miss), mirroring how shadow handles its miss.
+    insertEvent(db, {
+      recall_id: 'r-neg-rank',
+      candidates_json: JSON.stringify([{ anchor: 'A', rank: 0 }]),
+      consumed_json: JSON.stringify([{ anchor: 'X', rank: -1, method: 'Read' }]),
+    });
+    db.prepare('UPDATE recall_events SET shadow_ranking_json = ? WHERE recall_id = ?').run(
+      JSON.stringify([{ anchor: 'A', shadowRank: 0 }]),
+      'r-neg-rank',
+    );
+
+    const computer = new RecallMetricsComputer(db);
+    const report = computer.computeMetrics({ days: 1 });
+
+    assert.ok(
+      Number.isFinite(report.extended.liveOnShadowSubsetMRR ?? 0),
+      'liveOnShadowSubsetMRR must remain finite when consumed rank is -1 (anchor not in pool)',
+    );
+    assert.equal(
+      report.extended.liveOnShadowSubsetMRR,
+      0,
+      'rank -1 means anchor missed live pool → 0 contribution; denom = 1; result = 0',
+    );
+    // Shadow side: shadow ranked A at 0, but consumed entry is X (not in shadow either) → shadow misses too.
+    assert.equal(report.extended.shadowConsumedMRR, 0, 'shadow has A only, consumed is X → shadow miss → 0');
+  });
+
   it('P1-3 regression: extended report uses grepFallbackRate field name', () => {
     insertEvent(db, {
       recall_id: 'r-fb1',

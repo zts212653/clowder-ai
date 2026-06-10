@@ -167,14 +167,18 @@ describe('RedisProposalStore — reportingMode persistence (F128 Phase Y)', () =
     assert.equal(got?.reportingMode, 'final-only', 'hydrate must read reportingMode back');
   });
 
-  it('create WITHOUT reportingMode → field absent → get() hydrates undefined (default none via enrich)', async () => {
+  it('create WITHOUT reportingMode → field absent → get() hydrates undefined (default final-only via enrich)', async () => {
     const redis = createStoreMockRedis();
     const store = new RedisProposalStore(/** @type {any} */ (redis));
     const created = await store.create(baseInput());
     const hash = redis.hashes.get(`proposal:${created.proposalId}`);
     assert.equal(hash?.reportingMode, undefined, 'no reportingMode → field not written (back-compat)');
     const got = await store.get(created.proposalId);
-    assert.equal(got?.reportingMode, undefined, 'missing field hydrates to undefined (enrich applies default none)');
+    assert.equal(
+      got?.reportingMode,
+      undefined,
+      'missing field hydrates to undefined (enrich applies default final-only)',
+    );
   });
 
   it('legacy hash without reportingMode → get() returns undefined (pre-Phase-Y back-compat)', async () => {
@@ -195,7 +199,11 @@ describe('RedisProposalStore — reportingMode persistence (F128 Phase Y)', () =
       createdAt: '1700000000000',
     });
     const got = await store.get('legacy_1');
-    assert.equal(got?.reportingMode, undefined, 'legacy proposal has no reportingMode → undefined → default none');
+    assert.equal(
+      got?.reportingMode,
+      undefined,
+      'legacy proposal has no reportingMode → undefined → default final-only',
+    );
   });
 
   it('all 4 reporting modes round-trip through serialize → hydrate', async () => {

@@ -11,10 +11,17 @@ interface EvalDomainSummary {
   frequency: string;
   evalCatId: string;
   evalCatHandle: string;
+  /**
+   * Sunset state. When false, domain.yaml has `enabled: false` — scheduled cron
+   * skips it and `nextCronFireAt` is omitted. UI shows a "Sunset" indicator
+   * instead of "下次评估" so operators don't see a misleading future fire time.
+   */
+  enabled: boolean;
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];
-  nextCronFireAt: string;
+  /** Next cron fire time. Omitted when `enabled === false` (sunset). */
+  nextCronFireAt?: string;
 }
 
 interface EvalHubSummary {
@@ -344,10 +351,23 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
             )}
           </p>
           {error && <p className="mt-1 text-xs text-conn-red-text">{error}</p>}
-          <p className="mt-0.5 text-xs text-cafe-muted">下次评估: {new Date(domain.nextCronFireAt).toLocaleString()}</p>
+          {(() => {
+            const line = deriveDomainScheduleLine(domain);
+            if (line.kind === 'sunset') {
+              return (
+                <p className="mt-0.5 text-xs text-cafe-muted" title="Sunset — domain.yaml has enabled: false">
+                  {line.text}
+                </p>
+              );
+            }
+            if (line.kind === 'next-eval') {
+              return <p className="mt-0.5 text-xs text-cafe-muted">{line.text}</p>;
+            }
+            return null;
+          })()}
         </div>
         <span className="inline-flex shrink-0 rounded-md bg-cafe-surface px-2.5 py-1 text-xs font-semibold text-[var(--console-button-emphasis)]">
-          {domain.hasVerdict && domain.latestVerdict ? VERDICT_LABELS[domain.latestVerdict] : '待首次评估'}
+          {deriveDomainStatusBadge(domain)}
         </span>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -370,13 +390,60 @@ function DomainCard({ domain, onCatUpdated }: { domain: EvalDomainSummary; onCat
   );
 }
 
-const VERDICT_LABELS: Record<EvalHubItem['verdict'] | 'stale', string> = {
+export const VERDICT_LABELS: Record<EvalHubItem['verdict'] | 'stale', string> = {
   keep_observe: '持续观察',
   fix: '需修复',
   build: '需新建',
   delete_sunset: '可下线',
   stale: '已过期',
 };
+
+// ---- Sunset-rendering helpers (extracted for vitest unit coverage) ----
+// Pattern follows evidence-search.test.ts: pull pure logic out of JSX so we
+// can vitest it without bringing in @testing-library/react / jsdom. Closes
+// gpt52 R2 residual test gap on sunset rendering branches.
+
+export type DomainScheduleLine =
+  | { kind: 'sunset'; text: string }
+  | { kind: 'next-eval'; text: string }
+  | { kind: 'none' };
+
+/**
+ * Decide the secondary line under the cat row in a domain card.
+ * - Sunset (enabled=false): "🌙 Sunset · 自动调度已停" — never lie about a
+ *   future cron fire (would mirror silent-fire on the operator surface).
+ * - Active + has nextCronFireAt: "下次评估: <locale string>".
+ * - Active + no nextCronFireAt: nothing (kind=none).
+ */
+export function deriveDomainScheduleLine(domain: { enabled: boolean; nextCronFireAt?: string }): DomainScheduleLine {
+  if (domain.enabled === false) {
+    return { kind: 'sunset', text: '🌙 Sunset · 自动调度已停 (yaml: enabled: false)' };
+  }
+  if (domain.nextCronFireAt) {
+    return {
+      kind: 'next-eval',
+      text: `下次评估: ${new Date(domain.nextCronFireAt).toLocaleString()}`,
+    };
+  }
+  return { kind: 'none' };
+}
+
+/**
+ * Decide the verdict-status badge text in a domain card.
+ * Sunset wins over verdict label / "待首次评估" — operators must see the
+ * domain is paused, not a stale verdict status.
+ */
+export function deriveDomainStatusBadge(domain: {
+  enabled: boolean;
+  hasVerdict: boolean;
+  latestVerdict?: EvalHubItem['verdict'];
+}): string {
+  if (domain.enabled === false) return 'Sunset';
+  if (domain.hasVerdict && domain.latestVerdict) {
+    return VERDICT_LABELS[domain.latestVerdict];
+  }
+  return '待首次评估';
+}
 
 function StatusBadge({ verdict, stale }: { verdict: EvalHubItem['verdict']; stale: boolean }) {
   const key = stale ? 'stale' : verdict;

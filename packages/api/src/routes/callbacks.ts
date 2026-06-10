@@ -43,6 +43,7 @@ import { type ITaskStore, isSubjectOwnershipConflictError } from '../domains/cat
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import {
   canViewMessage,
+  isInternalNonQuotableParent,
   isSystemUserMessage,
   resolveVisibleReplyParent,
   type Viewer,
@@ -73,6 +74,7 @@ import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import { registerCallbackMemoryRoutes } from './callback-memory-routes.js';
 import { getMultiMentionOrchestrator, registerMultiMentionRoutes } from './callback-multi-mention-routes.js';
+import { registerCallbackProposeSessionHandoffRoutes } from './callback-propose-session-handoff-routes.js';
 import { registerCallbackProposeThreadRoutes } from './callback-propose-thread-routes.js';
 import { registerCallbackQuestRoutes } from './callback-quest-routes.js';
 import { registerCallbackRuntimeSessionRoutes } from './callback-runtime-session-routes.js';
@@ -245,6 +247,14 @@ function sameStringArray(left: readonly string[] | undefined, right: readonly st
   return a.every((value, index) => value === b[index]);
 }
 
+function richBlocksFingerprintPart(blocks: readonly RichBlock[] | undefined): string {
+  return blocks && blocks.length > 0 ? JSON.stringify(blocks) : '';
+}
+
+function sameRichBlocks(left: readonly RichBlock[] | undefined, right: readonly RichBlock[] | undefined): boolean {
+  return richBlocksFingerprintPart(left) === richBlocksFingerprintPart(right);
+}
+
 type CallbackDuplicateCandidateStore = IMessageStore & {
   getByThreadIncludingQueued?: (
     threadId: string,
@@ -272,6 +282,7 @@ async function findRecentExactCallbackDuplicate(
     userId: string;
     catId: string;
     content: string;
+    richBlocks?: readonly RichBlock[] | undefined;
     mentions: readonly CatId[];
     mentionsUser?: boolean | undefined;
     replyTo?: string | undefined;
@@ -286,6 +297,7 @@ async function findRecentExactCallbackDuplicate(
     if (msg.origin !== 'callback') continue;
     if (msg.catId !== input.catId) continue;
     if (msg.content !== input.content) continue;
+    if (!sameRichBlocks(msg.extra?.rich?.blocks, input.richBlocks)) continue;
     if ((msg.replyTo ?? undefined) !== (input.replyTo ?? undefined)) continue;
     if (Boolean(msg.mentionsUser) !== Boolean(input.mentionsUser)) continue;
     if (!sameStringArray(msg.mentions, input.mentions)) continue;
@@ -296,7 +308,7 @@ async function findRecentExactCallbackDuplicate(
 
 /**
  * Stable fingerprint over the exact dimensions findRecentExactCallbackDuplicate compares
- * (thread/user/cat/content/replyTo/mentionsUser/mentions). Used as the key for the atomic
+ * (thread/user/cat/content/richBlocks/replyTo/mentionsUser/mentions). Used as the key for the atomic
  * content-dedup claim that closes the check-then-act race in the duplicate scan. Hashed so
  * the key stays bounded regardless of message length.
  */
@@ -305,6 +317,7 @@ function buildCallbackContentDedupFingerprint(input: {
   userId: string;
   catId: string;
   content: string;
+  richBlocks?: readonly RichBlock[] | undefined;
   mentions: readonly CatId[];
   mentionsUser?: boolean | undefined;
   replyTo?: string | undefined;
@@ -317,6 +330,7 @@ function buildCallbackContentDedupFingerprint(input: {
     input.mentionsUser ? '1' : '0',
     [...input.mentions].join(','),
     input.content,
+    richBlocksFingerprintPart(input.richBlocks),
   ].join('\u0000');
   return createHash('sha256').update(parts).digest('hex');
 }
@@ -345,6 +359,7 @@ async function claimCallbackContentOrDuplicate(
     userId: string;
     catId: string;
     content: string;
+    richBlocks?: readonly RichBlock[] | undefined;
     mentions: readonly CatId[];
     mentionsUser?: boolean | undefined;
     replyTo?: string | undefined;
@@ -359,6 +374,7 @@ async function claimCallbackContentOrDuplicate(
     userId: input.userId,
     catId: input.catId,
     content: input.content,
+    ...(input.richBlocks && input.richBlocks.length > 0 ? { richBlocks: input.richBlocks } : {}),
     mentions: input.mentions,
     ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -370,6 +386,7 @@ async function claimCallbackContentOrDuplicate(
     userId: input.userId,
     catId: input.catId,
     content: input.content,
+    ...(input.richBlocks && input.richBlocks.length > 0 ? { richBlocks: input.richBlocks } : {}),
     mentions: input.mentions,
     ...(input.mentionsUser ? { mentionsUser: input.mentionsUser } : {}),
     ...(input.replyTo ? { replyTo: input.replyTo } : {}),
@@ -451,6 +468,8 @@ export interface CallbackRoutesOptions {
   eventAuditLog?: Pick<EventAuditLog, 'append'>;
   /** F128: cat-side thread proposals (propose endpoint) */
   proposalStore?: import('../domains/cats/services/stores/ports/ProposalStore.js').IProposalStore;
+  /** F225: cat-initiated session handoff proposals (propose endpoint) */
+  handoffProposalStore?: import('../domains/cats/services/stores/ports/SessionHandoffProposalStore.js').ISessionHandoffProposalStore;
   /** F155 B-4: Independent guide session store */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
   /** AgentRegistry for thread-cats MCP callback */
@@ -782,7 +801,16 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
       }
 
-      const { cleanText: storedContent, blocks: richBlocks } = extractRichFromText(content);
+      const { cleanText: storedContent, blocks: extractedBlocks } = extractRichFromText(content);
+      let richBlocks = extractedBlocks;
+      const synthesizer = getVoiceBlockSynthesizer();
+      if (synthesizer && richBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
+        try {
+          richBlocks = await synthesizer.resolveVoiceBlocks(richBlocks, principal.catId);
+        } catch (err) {
+          app.log.error({ err }, '[agent-key/post-message] Voice block synthesis failed');
+        }
+      }
 
       const senderCatId = createCatId(principal.catId);
       // F182 AC-C1: use analyzeA2AMentions (captures routing_warnings for disabled cats)
@@ -836,6 +864,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
               userId: principal.userId,
               catId: principal.catId,
               content: storedContent,
+              ...(richBlocks.length > 0 ? { richBlocks } : {}),
               mentions,
               ...(mentionsUser ? { mentionsUser } : {}),
               ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -912,6 +941,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         userId: principal.userId,
         catId: principal.catId,
         content: storedContent,
+        ...(richBlocks.length > 0 ? { richBlocks } : {}),
         mentions,
         ...(mentionsUser ? { mentionsUser } : {}),
         ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -1307,6 +1337,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             userId: actor.userId,
             catId: actor.catId,
             content: storedContent,
+            ...(richBlocks.length > 0 ? { richBlocks } : {}),
             mentions,
             ...(mentionsUser ? { mentionsUser } : {}),
             ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -1391,6 +1422,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       userId: actor.userId,
       catId: actor.catId,
       content: storedContent,
+      ...(richBlocks.length > 0 ? { richBlocks } : {}),
       mentions,
       ...(mentionsUser ? { mentionsUser } : {}),
       ...(validatedReplyTo ? { replyTo: validatedReplyTo } : {}),
@@ -1970,6 +2002,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Message not found' };
     }
 
+    // #699 P1 (gpt52 intake review): align get-message with isEligibleReplyParent —
+    // system/briefing are internal, non-routable content, never retrievable here (no info leak).
+    if (isInternalNonQuotableParent(message)) {
+      reply.status(404);
+      return { error: 'Message not found' };
+    }
+
     // #699 P1-1: Enforce visibility — userId scope, delivery status, whisper filtering
     if (!isDelivered(message)) {
       reply.status(404);
@@ -2039,6 +2078,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .filter((m) => {
           if (m.id === messageId) return false;
           if (m.deletedAt) return false;
+          // #699 P1 (gpt52 intake review): exclude internal/non-routable (system/briefing) from context too
+          if (isInternalNonQuotableParent(m)) return false;
           if (!isDelivered(m)) return false;
           if (m.userId !== principalUserId && !isSystemUserMessage(m)) return false;
           if (!canViewMessage(m, viewer)) return false;
@@ -2813,6 +2854,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       registry,
       proposalStore: opts.proposalStore,
       threadStore: opts.threadStore,
+      messageStore: opts.messageStore,
+      socketManager,
+    });
+  }
+
+  // F225: Cat-initiated session handoff propose callback
+  if (opts.handoffProposalStore && opts.sessionChainStore) {
+    registerCallbackProposeSessionHandoffRoutes(app, {
+      registry,
+      handoffProposalStore: opts.handoffProposalStore,
+      sessionChainStore: opts.sessionChainStore,
       messageStore: opts.messageStore,
       socketManager,
     });

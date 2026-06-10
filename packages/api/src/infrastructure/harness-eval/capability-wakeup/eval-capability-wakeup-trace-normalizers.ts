@@ -1,5 +1,6 @@
 import { normalizeMcpToolName } from '../../../domains/cats/services/tool-usage/normalize-mcp-tool-name.js';
 import type {
+  CapabilityName,
   CapabilityPreviewAvailability,
   CapabilityTraceInput,
   NormalizedCapabilityUsageCandidate,
@@ -44,17 +45,21 @@ export function normalizeToolUsageCandidate(
   const worktreeId = typeof summary?.worktreeId === 'string' ? (summary.worktreeId as string) : undefined;
   const path = readPath(summary);
   const action = typeof summary?.action === 'string' ? (summary.action as string) : undefined;
-  if (normalizeMcpToolName(event.toolName).toLowerCase() === 'create_rich_block') {
+  const normalizedToolName = normalizeMcpToolName(event.toolName).toLowerCase();
+  const directCapability = MCP_TOOL_CAPABILITY[normalizedToolName];
+  if (directCapability) {
     return {
       source: 'tool',
       sourceId: `${event.invocationId}:${event.toolName}`,
-      capability: 'rich-messaging',
+      capability: directCapability,
       threadId: event.threadId,
       catId: event.catId,
       sessionId: event.sessionId,
       worktreeId,
       timestamp: event.timestamp,
-      successful: true,
+      action,
+      ...(path ? { path } : {}),
+      successful: toolEventSucceeded(event),
     };
   }
   if (command.includes('/api/workspace/navigate')) {
@@ -87,6 +92,33 @@ export function normalizeToolUsageCandidate(
   }
   return null;
 }
+
+const MCP_TOOL_CAPABILITY: Record<string, CapabilityName> = {
+  create_rich_block: 'rich-messaging',
+  workspace_navigate: 'workspace-navigator',
+  preview_open: 'browser-preview',
+  preview_auto_open: 'browser-preview',
+  imagegen: 'image-generation',
+  generate_image: 'image-generation',
+  run_perspective: 'expert-panel',
+  update_guide_state: 'guide-interaction',
+  get_available_guides: 'guide-interaction',
+  start_guide: 'guide-interaction',
+  guide_control: 'guide-interaction',
+  propose_thread: 'propose-thread',
+  list_external_runtime_sessions: 'external-runtime-sessions',
+  read_external_runtime_session: 'external-runtime-sessions',
+  register_external_runtime_session: 'external-runtime-sessions',
+  publish_verdict: 'eval-verdict',
+  search_evidence: 'memory-drilldown',
+  graph_resolve: 'memory-drilldown',
+  list_recent: 'memory-drilldown',
+  read_session_digest: 'memory-drilldown',
+  read_session_events: 'memory-drilldown',
+  read_invocation_detail: 'memory-drilldown',
+  update_workflow: 'update-workflow',
+  update_workflow_sop: 'update-workflow',
+};
 
 export function normalizeAuditCandidates(
   auditEvents: CapabilityTraceInput['auditEvents'],
@@ -186,6 +218,23 @@ function commandExecutionSucceeded(
   }
   if (summary.allowed === false || summary.ok === false) return false;
   return summary.allowed === true || isHttpSuccess(summary);
+}
+
+function toolEventSucceeded(event: CapabilityTraceInput['toolEvents'][number]): boolean {
+  const summary = event.summary as Record<string, unknown> | undefined;
+  if (event.status && event.status !== 'success') return false;
+  if (summaryIndicatesFailure(summary)) return false;
+  return true;
+}
+
+function summaryIndicatesFailure(summary: Record<string, unknown> | undefined): boolean {
+  if (!summary) return false;
+  if (summary.isError === true || summary.ok === false || summary.allowed === false) return true;
+  return hasNonEmptyString(summary.error) || hasNonEmptyString(summary.errorMessage);
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== '';
 }
 
 function isHttpSuccess(summary: Record<string, unknown>): boolean {

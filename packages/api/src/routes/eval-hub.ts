@@ -15,6 +15,13 @@ import {
   handleTriggerNow,
   type InvokeTriggerProvider,
 } from '../infrastructure/harness-eval/manual-trigger/index.js';
+import {
+  type GitPublisher,
+  handlePublishVerdict,
+  type VerdictGenerator,
+} from '../infrastructure/harness-eval/publish-verdict/publish-verdict.js';
+import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
+import { registerCallbackAuthHook, requireCallbackPrincipal } from './callback-auth-prehandler.js';
 
 export type {
   GenerateNowInput,
@@ -43,6 +50,29 @@ export interface EvalHubRoutesOptions {
   invokeTriggerProvider?: InvokeTriggerProvider;
   /** F192 OQ-21: message store for delivering invocation packet on manual trigger. */
   messageStore?: IMessageStore;
+  /** F192 Phase H: GitPublisher impl (real = git worktree + gh; tests inject mock). */
+  gitPublisher?: GitPublisher;
+  /**
+   * F192 Phase H: domain → verdict generator map. Real impl (e.g.
+   * `generateA2aLiveVerdict` for eval:a2a) wired here; tests inject mock.
+   * Missing entry for a domain → handler returns 501 unsupported_generator.
+   */
+  verdictGenerators?: Partial<Record<string, VerdictGenerator>>;
+  /** Runtime-configured task-outcome DB path (trusted bootstrap config). */
+  taskOutcomeDbPath?: string;
+  /** Runtime-configured event-memory DB path (trusted bootstrap config). */
+  eventMemoryDbPath?: string;
+  /**
+   * F192 Phase H AC-H4: CallbackAuthRegistry for MCP callback auth on
+   * publish-verdict route (cat-initiated, not session-initiated).
+   */
+  callbackRegistry?: CallbackAuthRegistry;
+  /**
+   * 砚砚 R9 P1: AgentKeyAuthRegistry for shared-MCP (Antigravity) publish path.
+   * Without this, agent-key-auth'd cats (persistent MCP) hit 401 on
+   * publish-verdict — same gap as F178/F223 (post_message, workspace_navigate).
+   */
+  agentKeyRegistry?: AgentKeyAuthRegistry;
 }
 
 function requireSession(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -55,6 +85,15 @@ function requireSession(request: FastifyRequest, reply: FastifyReply): string | 
 }
 
 export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (app, opts) => {
+  // F192 Phase H AC-H4 (砚砚 R4 P1 + cloud R4 P1): publish-verdict is called
+  // from MCP cat_cafe_publish_verdict via callbackPost — needs callback auth
+  // (invocationId + callbackToken), NOT session cookie. Register hook so
+  // request.callbackPrincipal is populated on routes that need it.
+  if (opts.callbackRegistry) {
+    // 砚砚 R9 P1: pass agentKeyRegistry so shared-MCP (agent-key) cats can publish.
+    registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
+  }
+
   app.get('/api/eval-hub/summary', async (request, reply) => {
     const userId = requireSession(request, reply);
     if (!userId) return;
@@ -183,6 +222,9 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         messageStore: opts.messageStore,
         threadStore: opts.threadStore,
         redis: opts.redis,
+        // cloud R5 P2 (PR-2): pass wired publish-verdict domain set so
+        // buildEvalCatInvocation omits publish instructions for unwired domains.
+        wiredPublishDomains: new Set(Object.keys(opts.verdictGenerators ?? {})),
       },
       { domainId, userId },
     );
@@ -241,6 +283,61 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         verdictId: body.verdictId as string | undefined,
         snapshotName: body.snapshotName as string | undefined,
         attributionName: body.attributionName as string | undefined,
+      },
+    );
+
+    if ('error' in result) {
+      return reply.status(result.status).send({ error: result.error, detail: result.detail });
+    }
+    return result;
+  });
+
+  // F192 Phase H AC-H4: eval cat publishes verdict via MCP cat_cafe_publish_verdict.
+  // 砚砚 R4 P1 + cloud R4 P1: route uses CALLBACK auth (invocationId + callbackToken),
+  // NOT browser session — MCP tools don't send session cookies. catId is derived
+  // from the server-trusted callback principal, NOT body (which is spoofable).
+  // Generator + GitPublisher injected at bootstrap (real impls), tests pass mocks.
+  app.post('/api/eval-domains/:domainId/publish-verdict', async (request, reply) => {
+    // 砚砚 R4 P1 #1 + R9 P1: requireCallbackPrincipal (NOT requireSession).
+    // Accept both invocation principals (per-call MCP) AND agent_key principals
+    // (shared persistent MCP — Antigravity). Both have server-trusted catId.
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+    if (principal.kind !== 'invocation' && principal.kind !== 'agent_key') {
+      return reply.status(403).send({ error: 'invocation_or_agent_key_principal_required' });
+    }
+
+    const { domainId } = request.params as { domainId: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    // Type validation: catId comes from server-trusted principal, not body.
+    if (body.sourceRefs !== undefined && (typeof body.sourceRefs !== 'object' || body.sourceRefs === null)) {
+      return reply.status(400).send({ error: 'sourceRefs must be an object if provided' });
+    }
+
+    // 砚砚 R4 P1 #2 + cloud R4 P1: inject real generator (handler's default throws).
+    const generator = opts.verdictGenerators?.[domainId];
+
+    const result = await handlePublishVerdict(
+      {
+        harnessFeedbackRoot: opts.harnessFeedbackRoot,
+        gitPublisher: opts.gitPublisher,
+        generator,
+        // 砚砚 R6 P1: pass redis so handler reads OQ-20 override (same instance
+        // as handleTriggerNow uses — symmetric wake/publish for override cats).
+        redis: opts.redis,
+        taskOutcomeDbPath: opts.taskOutcomeDbPath,
+        eventMemoryDbPath: opts.eventMemoryDbPath,
+      },
+      {
+        packet: body.packet,
+        domain: domainId,
+        catId: principal.catId,
+        ownerUserId: principal.userId,
+        // PR-2 (砚砚 R1 Q3): sourceRefs is a discriminated union (a2a vs capability-wakeup-trial-window);
+        // adapter discriminates by `kind` field. Cast through unknown — handler/adapter validate shape.
+        sourceRefs: (body.sourceRefs ??
+          {}) as unknown as import('../infrastructure/harness-eval/publish-verdict/types.js').VerdictSourceRefs,
       },
     );
 

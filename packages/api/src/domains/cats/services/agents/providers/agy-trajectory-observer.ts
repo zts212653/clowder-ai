@@ -11,6 +11,7 @@
  * - 中性文案：H1 不把 `step_type` 硬标成 tool call/思考；枚举坐实后（H3）再加语义标签。
  */
 
+import { createHash } from 'node:crypto';
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -35,11 +36,18 @@ export interface AgyPollResult {
   readonly cursor: number;
 }
 
+export interface AgyProgressObserver {
+  poll(cursor: number): AgyPollResult;
+  close(): void;
+}
+
 const REQUIRED_COLUMNS = ['idx', 'step_type', 'status'] as const;
 // F210-H1b (cloud P2): keep this small. better-sqlite3 is synchronous, so a long busy_timeout blocks
 // the API event loop while AGY's writer holds the lock. Progress is optional side-channel telemetry —
 // fail open fast and rely on the next poll's retry instead of stalling the event loop for seconds.
 const BUSY_TIMEOUT_MS = 50;
+const PREFIX_FINGERPRINT_MAX_SAMPLED_ROWS = 64;
+const PREFIX_FINGERPRINT_EDGE_SAMPLE_ROWS = 16;
 
 /**
  * AGY step status 是明文 integer。实测 status=3 出现在已完成 step；H1 保守只区分
@@ -99,6 +107,269 @@ export interface AgyDbCandidate {
   readonly birthtimeMs: number;
   /** 文件最后修改时间（ms epoch）。 */
   readonly mtimeMs: number;
+}
+
+export interface AgyDbFileIdentity {
+  readonly dev: number;
+  readonly ino: number;
+}
+
+export interface AgyDbChangeMarker {
+  readonly dev: number;
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+export interface AgyStepFingerprint {
+  readonly idx: number;
+  readonly stepType: number;
+  readonly status: number;
+  readonly payloadSha256: string | null;
+}
+
+export interface AgyStepsPrefixFingerprint {
+  readonly maxIdx: number;
+  /** Bounded sampled row count, not the full historical row count. */
+  readonly rowCount: number;
+  readonly digestSha256: string;
+}
+
+export type AgyStepFingerprintReadResult =
+  | { readonly status: 'ok'; readonly fingerprint: AgyStepFingerprint }
+  | { readonly status: 'missing' }
+  | { readonly status: 'unreadable' };
+
+export type AgyStepsPrefixFingerprintReadResult =
+  | { readonly status: 'ok'; readonly fingerprint: AgyStepsPrefixFingerprint }
+  | { readonly status: 'missing' }
+  | { readonly status: 'unreadable' };
+
+function stepPayloadSha256(payload: Buffer | null): string | null {
+  if (payload === null) return null;
+  return createHash('sha256').update(payload).digest('hex');
+}
+
+function closeDbQuietly(db: Database.Database | null): void {
+  try {
+    db?.close();
+  } catch {
+    /* best-effort */
+  }
+}
+
+export function readAgyDbFileIdentity(dbPath: string): AgyDbFileIdentity | null {
+  try {
+    const st = statSync(dbPath);
+    return { dev: st.dev, ino: st.ino };
+  } catch {
+    return null;
+  }
+}
+
+export function sameAgyDbFileIdentity(a: AgyDbFileIdentity, b: AgyDbFileIdentity): boolean {
+  // Node may expose birthtime as ctime or 0 on some filesystems; baseline-row content validates reuse.
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+export function readAgyDbChangeMarker(dbPath: string): AgyDbChangeMarker | null {
+  try {
+    const st = statSync(dbPath);
+    return { dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+export function sameAgyDbChangeMarker(a: AgyDbChangeMarker, b: AgyDbChangeMarker): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+}
+
+export function readAgyStepFingerprint(dbPath: string, idx: number): AgyStepFingerprintReadResult {
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    const row = db.prepare('SELECT idx, step_type, status, step_payload FROM steps WHERE idx = ?').get(idx) as
+      | {
+          idx: number;
+          step_type: number;
+          status: number;
+          step_payload: Buffer | null;
+        }
+      | undefined;
+    if (row === undefined) return { status: 'missing' };
+    if (
+      typeof row.idx !== 'number' ||
+      typeof row.step_type !== 'number' ||
+      typeof row.status !== 'number' ||
+      !Number.isFinite(row.idx) ||
+      !Number.isFinite(row.step_type) ||
+      !Number.isFinite(row.status)
+    ) {
+      return { status: 'unreadable' };
+    }
+    return {
+      status: 'ok',
+      fingerprint: {
+        idx: Math.trunc(row.idx),
+        stepType: Math.trunc(row.step_type),
+        status: Math.trunc(row.status),
+        payloadSha256: stepPayloadSha256(row.step_payload),
+      },
+    };
+  } catch {
+    return { status: 'unreadable' };
+  } finally {
+    closeDbQuietly(db);
+  }
+}
+
+export function sameAgyStepFingerprint(a: AgyStepFingerprint, b: AgyStepFingerprint): boolean {
+  return a.idx === b.idx && a.stepType === b.stepType && a.status === b.status && a.payloadSha256 === b.payloadSha256;
+}
+
+function buildAgyPrefixSampleIdxs(maxIdx: number): number[] {
+  const normalizedMaxIdx = Math.trunc(maxIdx);
+  if (!Number.isFinite(normalizedMaxIdx) || normalizedMaxIdx < 0) return [];
+
+  const totalRows = normalizedMaxIdx + 1;
+  if (totalRows <= PREFIX_FINGERPRINT_MAX_SAMPLED_ROWS) {
+    return Array.from({ length: totalRows }, (_, idx) => idx);
+  }
+
+  const out = new Set<number>();
+  for (let offset = 0; offset < PREFIX_FINGERPRINT_EDGE_SAMPLE_ROWS; offset += 1) {
+    out.add(offset);
+    out.add(normalizedMaxIdx - offset);
+  }
+
+  const targetInterior = PREFIX_FINGERPRINT_MAX_SAMPLED_ROWS - out.size;
+  for (let i = 1; i <= targetInterior; i += 1) {
+    out.add(Math.trunc((normalizedMaxIdx * i) / (targetInterior + 1)));
+  }
+
+  return [...out].sort((a, b) => a - b);
+}
+
+export function readAgyStepsPrefixFingerprint(dbPath: string, maxIdx: number): AgyStepsPrefixFingerprintReadResult {
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    const normalizedMaxIdx = Math.trunc(maxIdx);
+    const sampleIdxs = buildAgyPrefixSampleIdxs(normalizedMaxIdx);
+    if (sampleIdxs.length === 0) return { status: 'missing' };
+    const placeholders = sampleIdxs.map(() => '?').join(',');
+    const rows = db
+      .prepare(`SELECT idx, step_type, status, step_payload FROM steps WHERE idx IN (${placeholders}) ORDER BY idx`)
+      .all(...sampleIdxs) as Array<{
+      idx: number;
+      step_type: number;
+      status: number;
+      step_payload: Buffer | null;
+    }>;
+    if (rows.length !== sampleIdxs.length) return { status: 'missing' };
+
+    const digest = createHash('sha256');
+    digest.update(`samples:${sampleIdxs.join(',')}\0`);
+    let sawBaselineRow = false;
+    for (const row of rows) {
+      if (
+        typeof row.idx !== 'number' ||
+        typeof row.step_type !== 'number' ||
+        typeof row.status !== 'number' ||
+        !Number.isFinite(row.idx) ||
+        !Number.isFinite(row.step_type) ||
+        !Number.isFinite(row.status)
+      ) {
+        return { status: 'unreadable' };
+      }
+      const idx = Math.trunc(row.idx);
+      const stepType = Math.trunc(row.step_type);
+      const status = Math.trunc(row.status);
+      if (idx === normalizedMaxIdx) sawBaselineRow = true;
+      digest.update(`idx:${idx}\0step:${stepType}\0status:${status}\0`);
+      if (row.step_payload === null) {
+        digest.update('payload:null\0');
+      } else {
+        digest.update(`payload:${row.step_payload.length}\0`);
+        digest.update(row.step_payload);
+        digest.update('\0');
+      }
+    }
+    if (!sawBaselineRow) return { status: 'missing' };
+    return {
+      status: 'ok',
+      fingerprint: {
+        maxIdx: normalizedMaxIdx,
+        rowCount: rows.length,
+        digestSha256: digest.digest('hex'),
+      },
+    };
+  } catch {
+    return { status: 'unreadable' };
+  } finally {
+    closeDbQuietly(db);
+  }
+}
+
+export function sameAgyStepsPrefixFingerprint(a: AgyStepsPrefixFingerprint, b: AgyStepsPrefixFingerprint): boolean {
+  return a.maxIdx === b.maxIdx && a.rowCount === b.rowCount && a.digestSha256 === b.digestSha256;
+}
+
+export interface CreateAgyResumeBaselineCursorResolverOptions {
+  readonly resumeDbPath: string;
+  readonly baselineCursor: number;
+  readonly baselineIdentity: AgyDbFileIdentity;
+  readonly baselinePrefixFingerprint: AgyStepsPrefixFingerprint;
+  readonly readDbFileIdentity?: (dbPath: string) => AgyDbFileIdentity | null;
+  readonly readDbChangeMarker?: (dbPath: string) => AgyDbChangeMarker | null;
+  readonly readMaxStepIdx?: (dbPath: string) => number | null;
+  readonly readStepsPrefixFingerprint?: (dbPath: string, maxIdx: number) => AgyStepsPrefixFingerprintReadResult;
+}
+
+export function createAgyResumeBaselineCursorResolver(
+  options: CreateAgyResumeBaselineCursorResolverOptions,
+): (dbPath: string) => number | null | 'retry' {
+  const baselineCursor = Math.trunc(options.baselineCursor);
+  const readIdentity = options.readDbFileIdentity ?? readAgyDbFileIdentity;
+  const readMarker = options.readDbChangeMarker ?? readAgyDbChangeMarker;
+  const readMax = options.readMaxStepIdx ?? readAgyMaxStepIdx;
+  const readPrefix = options.readStepsPrefixFingerprint ?? readAgyStepsPrefixFingerprint;
+  let validatedMarker: AgyDbChangeMarker | null = null;
+
+  return (dbPath: string): number | null | 'retry' => {
+    if (dbPath !== options.resumeDbPath) return null;
+    const currentIdentity = readIdentity(dbPath);
+    if (currentIdentity === null) return 'retry';
+    if (!sameAgyDbFileIdentity(currentIdentity, options.baselineIdentity)) return null;
+
+    const markerBefore = readMarker(dbPath);
+    if (markerBefore === null) return 'retry';
+    if (validatedMarker !== null && sameAgyDbChangeMarker(markerBefore, validatedMarker)) {
+      return baselineCursor;
+    }
+
+    const currentMax = readMax(dbPath);
+    if (currentMax === null) return 'retry';
+    if (currentMax < baselineCursor) return null;
+
+    const currentPrefix = readPrefix(dbPath, baselineCursor);
+    if (currentPrefix.status === 'unreadable') return 'retry';
+    if (
+      currentPrefix.status === 'missing' ||
+      !sameAgyStepsPrefixFingerprint(currentPrefix.fingerprint, options.baselinePrefixFingerprint)
+    ) {
+      return null;
+    }
+
+    const markerAfter = readMarker(dbPath);
+    if (markerAfter === null) return 'retry';
+    if (!sameAgyDbChangeMarker(markerBefore, markerAfter)) return 'retry';
+    validatedMarker = markerAfter;
+    return baselineCursor;
+  };
 }
 
 export interface LocateAgyTrajectoryDbDeps {
@@ -170,6 +441,24 @@ export function listAgyConversationDbs(appDataDir: string): AgyDbCandidate[] {
     }
   }
   return out;
+}
+
+/**
+ * 读取当前 trajectory steps 的最大 idx，作为 resume 同库增量观测的 invocation baseline。
+ * fail-open：文件/表缺失/锁/损坏/空表 → null，调用方回落到普通 cursor=-1。
+ */
+export function readAgyMaxStepIdx(dbPath: string): number | null {
+  let db: Database.Database | null = null;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    const row = db.prepare('SELECT MAX(idx) AS maxIdx FROM steps').get() as { maxIdx: number | null } | undefined;
+    return typeof row?.maxIdx === 'number' && Number.isFinite(row.maxIdx) ? Math.trunc(row.maxIdx) : null;
+  } catch {
+    return null;
+  } finally {
+    closeDbQuietly(db);
+  }
 }
 
 export class AgyTrajectoryObserver {
@@ -310,6 +599,15 @@ export interface ObserveAgyProgressDeps {
   invocationStartMs?: number;
   /** DI：列 `<appDataDir>/conversations/*.db` 候选（resume 扫描）；默认空 → resume fail-open。 */
   listConversationDbs?: (appDataDir: string) => AgyDbCandidate[];
+  /**
+   * 可选 per-db 初始游标。用于 resume 到已有 conversation DB 时，只从 invocation start 前
+   * 记录的最大 idx 之后读；若 resume 另起新 cascade DB，返回 null/undefined 即从 -1 开始。
+   * 返回 'retry' 表示同路径 baseline 仍不可判定（例如 DB 刚重建为空/锁住），本轮不创建
+   * observer，下轮重新定位并判定，避免用陈旧高 cursor 跳掉本轮低 idx。
+   */
+  initialCursorForDb?: (dbPath: string) => number | null | undefined | 'retry';
+  /** DI：测试 final cleanup 等 lifecycle 行为；生产默认 AgyTrajectoryObserver。 */
+  createObserver?: (dbPath: string) => AgyProgressObserver;
 }
 
 /**
@@ -322,22 +620,61 @@ export interface ObserveAgyProgressDeps {
  */
 export async function* observeAgyProgress(deps: ObserveAgyProgressDeps): AsyncGenerator<AgyProgressEvent> {
   const pollIntervalMs = deps.pollIntervalMs ?? 500;
-  let observer: AgyTrajectoryObserver | null = null;
+  let observer: AgyProgressObserver | null = null;
+  let observerDbPath: string | null = null;
+  let baselineValidationActive = false;
+  let activeBaselineCursor: number | null = null;
   let cursor = -1;
 
-  const ensureObserver = (): AgyTrajectoryObserver | null => {
-    if (!observer) {
-      // carryover（砚砚 locator review non-blocking note）：扫描历史 db 必须有 invocationStart
-      // watermark；缺 watermark 时不扫（appDataDir 置 null → locator 仅走 fresh log path），
-      // 避免未来 caller 传 appDataDir 但漏 watermark 时误读历史库。
-      const hasWatermark = deps.invocationStartMs !== undefined;
-      const dbPath = locateAgyTrajectoryDb({
-        logText: deps.readLog(),
-        appDataDir: hasWatermark ? (deps.appDataDir ?? null) : null,
-        invocationStartMs: deps.invocationStartMs ?? 0,
-        listConversationDbs: deps.listConversationDbs ?? (() => []),
-      });
-      if (dbPath) observer = new AgyTrajectoryObserver(dbPath);
+  const closeObserver = (): void => {
+    observer?.close();
+    observer = null;
+    observerDbPath = null;
+    baselineValidationActive = false;
+    activeBaselineCursor = null;
+  };
+
+  const revalidateActiveBaseline = (): 'ok' | 'retry' | 'reset' => {
+    if (!observer || !observerDbPath || !baselineValidationActive) return 'ok';
+    if (activeBaselineCursor !== null && cursor > activeBaselineCursor) {
+      baselineValidationActive = false;
+      activeBaselineCursor = null;
+      return 'ok';
+    }
+    const currentBaseline = deps.initialCursorForDb?.(observerDbPath);
+    if (currentBaseline === 'retry') return 'retry';
+    if (typeof currentBaseline === 'number' && Number.isFinite(currentBaseline)) return 'ok';
+    closeObserver();
+    cursor = -1;
+    return 'reset';
+  };
+
+  const ensureObserver = (): AgyProgressObserver | null => {
+    const baselineState = revalidateActiveBaseline();
+    if (baselineState === 'retry') return null;
+    if (observer) return observer;
+
+    // carryover（砚砚 locator review non-blocking note）：扫描历史 db 必须有 invocationStart
+    // watermark；缺 watermark 时不扫（appDataDir 置 null → locator 仅走 fresh log path），
+    // 避免未来 caller 传 appDataDir 但漏 watermark 时误读历史库。
+    const hasWatermark = deps.invocationStartMs !== undefined;
+    const dbPath = locateAgyTrajectoryDb({
+      logText: deps.readLog(),
+      appDataDir: hasWatermark ? (deps.appDataDir ?? null) : null,
+      invocationStartMs: deps.invocationStartMs ?? 0,
+      listConversationDbs: deps.listConversationDbs ?? (() => []),
+    });
+    if (dbPath) {
+      const initialCursor = deps.initialCursorForDb?.(dbPath);
+      if (initialCursor === 'retry') return null;
+      if (typeof initialCursor === 'number' && Number.isFinite(initialCursor)) {
+        const normalizedInitialCursor = Math.trunc(initialCursor);
+        cursor = Math.max(cursor, normalizedInitialCursor);
+        baselineValidationActive = true;
+        activeBaselineCursor = normalizedInitialCursor;
+      }
+      observerDbPath = dbPath;
+      observer = deps.createObserver?.(dbPath) ?? new AgyTrajectoryObserver(dbPath);
     }
     return observer;
   };
@@ -355,10 +692,13 @@ export async function* observeAgyProgress(deps: ObserveAgyProgressDeps): AsyncGe
   }
 
   // final poll：agy 结束后捞最后写入但上一轮 poll 没覆盖的 step。
-  const finalObs = ensureObserver();
-  if (finalObs) {
-    const r = finalObs.poll(cursor);
-    if (r.enabled) yield* r.events;
-    finalObs.close();
+  try {
+    const finalObs = ensureObserver();
+    if (finalObs) {
+      const r = finalObs.poll(cursor);
+      if (r.enabled) yield* r.events;
+    }
+  } finally {
+    closeObserver();
   }
 }

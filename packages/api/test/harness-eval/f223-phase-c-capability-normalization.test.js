@@ -30,7 +30,7 @@ const TIER_1_CAPABILITIES = [
   { label: 'cat_cafe_update_workflow', wakeup: /cat_cafe_update_workflow/i, inventory: /cat_cafe_update_workflow/i },
 ];
 
-const F192_HARDCODED_CAPABILITY_SPLIT_THRESHOLD = 5;
+const F192_TIER_1_CAPABILITY_SPLIT_THRESHOLD = TIER_1_CAPABILITIES.length;
 
 function requireMappingBlock(typesSource, exportName) {
   const match = typesSource.match(new RegExp(`export const ${exportName}[\\s\\S]*?};`));
@@ -47,8 +47,8 @@ function assertPhaseCMappingGuard(typesSource) {
   );
 
   assert.ok(
-    mappedCapabilities.size <= F192_HARDCODED_CAPABILITY_SPLIT_THRESHOLD,
-    `F192 capability-wakeup mappings have ${mappedCapabilities.size} hardcoded capabilities; split classifier before adding more`,
+    mappedCapabilities.size <= F192_TIER_1_CAPABILITY_SPLIT_THRESHOLD,
+    `F192 capability-wakeup mappings have ${mappedCapabilities.size} hardcoded capabilities; split classifier before adding non-Tier-1 capability`,
   );
 }
 
@@ -97,27 +97,35 @@ describe('F223 Phase C capability normalization contract', () => {
     assert.match(externalRuntimeTools, /cat_cafe_read_external_runtime_session[\s\S]*Use after list/i);
   });
 
-  it('guards F192 capability-wakeup hardcoded capability mappings from growing past five', () => {
+  it('guards F192 capability-wakeup hardcoded capability mappings from growing past Tier 1 coverage', () => {
     const typesSource = readRepoFile(
       'packages/api/src/infrastructure/harness-eval/capability-wakeup/eval-capability-wakeup-types.ts',
     );
     assertPhaseCMappingGuard(typesSource);
   });
 
-  it('allows fourth and fifth F192 hardcoded mappings before the classifier split threshold', () => {
+  it('allows all 13 F192 Tier 1 mappings before the classifier split threshold', () => {
     assertPhaseCMappingGuard(`
       export const HOW_TO_PATH_HINTS = {
         'rich-messaging': 'cat-cafe-skills/rich-messaging/SKILL.md',
         'workspace-navigator': 'cat-cafe-skills/workspace-navigator/SKILL.md',
         'browser-preview': 'cat-cafe-skills/browser-preview/SKILL.md',
-        'new-capability-a': 'cat-cafe-skills/new-capability-a/SKILL.md',
-        'new-capability-b': 'cat-cafe-skills/new-capability-b/SKILL.md',
+        'image-generation': 'cat-cafe-skills/image-generation/SKILL.md',
+        'pencil-design': 'cat-cafe-skills/pencil-design/SKILL.md',
+        'guide-interaction': 'cat-cafe-skills/guide-interaction/SKILL.md',
+        'expert-panel': 'cat-cafe-skills/expert-panel/SKILL.md',
+        'propose-thread': 'cat-cafe-skills/thread-orchestration/SKILL.md',
+        'external-runtime-sessions': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+        'cli-diagnostics': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+        'eval-verdict': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+        'memory-drilldown': 'cat-cafe-skills/memory-navigation/SKILL.md',
+        'update-workflow': 'cat-cafe-skills/refs/capability-wakeup-index.md',
       };
       export const CAPABILITY_SKILL_IDS = {};
     `);
   });
 
-  it('fails once F192 hardcoded mappings exceed the Phase C threshold', () => {
+  it('fails once F192 hardcoded mappings exceed the Tier 1 threshold', () => {
     assert.throws(
       () =>
         assertPhaseCMappingGuard(`
@@ -125,13 +133,21 @@ describe('F223 Phase C capability normalization contract', () => {
             'rich-messaging': 'cat-cafe-skills/rich-messaging/SKILL.md',
             'workspace-navigator': 'cat-cafe-skills/workspace-navigator/SKILL.md',
             'browser-preview': 'cat-cafe-skills/browser-preview/SKILL.md',
-            'new-capability-a': 'cat-cafe-skills/new-capability-a/SKILL.md',
-            'new-capability-b': 'cat-cafe-skills/new-capability-b/SKILL.md',
-            'new-capability-c': 'cat-cafe-skills/new-capability-c/SKILL.md',
+            'image-generation': 'cat-cafe-skills/image-generation/SKILL.md',
+            'pencil-design': 'cat-cafe-skills/pencil-design/SKILL.md',
+            'guide-interaction': 'cat-cafe-skills/guide-interaction/SKILL.md',
+            'expert-panel': 'cat-cafe-skills/expert-panel/SKILL.md',
+            'propose-thread': 'cat-cafe-skills/thread-orchestration/SKILL.md',
+            'external-runtime-sessions': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+            'cli-diagnostics': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+            'eval-verdict': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+            'memory-drilldown': 'cat-cafe-skills/memory-navigation/SKILL.md',
+            'update-workflow': 'cat-cafe-skills/refs/capability-wakeup-index.md',
+            'new-capability-extra': 'cat-cafe-skills/new-capability-extra/SKILL.md',
           };
           export const CAPABILITY_SKILL_IDS = {};
         `),
-      /split classifier before adding more/,
+      /split classifier before adding non-Tier-1 capability/,
     );
   });
 

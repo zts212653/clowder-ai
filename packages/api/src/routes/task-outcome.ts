@@ -15,7 +15,6 @@ import {
   handleA1WorldTruth,
   handleGetEpisode,
   handleListEpisodes,
-  handleMagicWord,
   handlePermissionCancel,
   handleUpdateTerminalState,
 } from '../infrastructure/harness-eval/task-outcome/task-outcome-routes.js';
@@ -32,14 +31,6 @@ const cancelSchema = z.object({
   catId: z.string().min(1),
   threadId: z.string().min(1),
   sessionId: z.string().optional(),
-});
-
-const magicWordSchema = z.object({
-  word: z.string().min(1),
-  catId: z.string().min(1),
-  threadId: z.string().min(1),
-  precedingMessageSummary: z.string().max(500).optional(),
-  followingMessageSummary: z.string().max(500).optional(),
 });
 
 const terminalStateSchema = z.object({
@@ -76,14 +67,17 @@ export const taskOutcomeRoutes: FastifyPluginAsync<TaskOutcomeRoutesOptions> = a
     return handlePermissionCancel(store, parsed.data);
   });
 
-  app.post('/api/task-outcome/magic-word', async (request, reply) => {
-    if (!requireSession(request, reply)) return;
-    const parsed = magicWordSchema.safeParse(request.body);
-    if (!parsed.success) {
-      reply.status(400);
-      return { error: 'Invalid body', details: parsed.error.issues };
-    }
-    return handleMagicWord(store, parsed.data);
+  // F227 归一: DEPRECATED. Magic words are now captured automatically by Event
+  // Memory (onMagicWordDetected → Event store, the single source of truth). This
+  // manual route no longer writes any signal — it must not be a second truth-write
+  // path (砚砚 acceptance: deprecated + no inline truth).
+  app.post('/api/task-outcome/magic-word', async (_request, reply) => {
+    reply.status(410);
+    return {
+      error: 'deprecated',
+      message:
+        'POST /api/task-outcome/magic-word is deprecated (F227 归一). Magic words are auto-captured via Event Memory; this route no longer writes signals.',
+    };
   });
 
   app.post('/api/task-outcome/a1', async (request, reply) => {

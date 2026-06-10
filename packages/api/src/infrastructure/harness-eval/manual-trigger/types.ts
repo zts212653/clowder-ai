@@ -42,6 +42,14 @@ export interface ManualTriggerDeps {
   messageStore?: Pick<IMessageStore, 'append'>;
   threadStore?: IThreadStore;
   redis?: Redis;
+  /**
+   * cloud R5 P2 (PR-2): runtime-wired publish-verdict domain set. When provided,
+   * `buildEvalCatInvocation` omits publish instructions for unwired domains so
+   * cats don't waste a run producing a packet they can't publish (e.g. cw when
+   * Redis-backed ports unavailable → handler returns 501). Omit/undefined →
+   * legacy default (all known-wireable domains get publish instructions).
+   */
+  wiredPublishDomains?: ReadonlySet<string>;
 }
 
 export interface HandlerError {

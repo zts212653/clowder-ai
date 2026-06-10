@@ -866,3 +866,85 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
   });
 });
+
+describe('POST /api/messages magic word instrumentation (F227 砚砚 P1 — detect→callback→messageId)', () => {
+  let app;
+  let deps;
+  let magicWordCalls;
+
+  beforeEach(async () => {
+    magicWordCalls = [];
+    deps = buildDeps({
+      onMagicWordDetected: (hits, threadId, catId, messageId, ownerUserId, messageExcerpt) => {
+        magicWordCalls.push({ hits, threadId, catId, messageId, ownerUserId, messageExcerpt });
+      },
+    });
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+    app = Fastify();
+    await app.register(messagesRoutes, deps);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('fires onMagicWordDetected with the PERSISTED messageId (not guessed)', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => true); // queue path
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '这个方案是脚手架，得重写', threadId: 'thread-1', deliveryMode: 'queue' },
+    });
+    assert.equal(res.statusCode, 202);
+    const persistedMessageId = JSON.parse(res.body).userMessageId;
+
+    // tryDetectMagicWords is fire-and-forget (async dynamic import) — let it settle.
+    await new Promise((r) => setTimeout(r, 80));
+
+    assert.equal(magicWordCalls.length, 1, 'callback should fire exactly once');
+    const call = magicWordCalls[0];
+    assert.equal(call.hits[0].word, '脚手架');
+    assert.equal(call.threadId, 'thread-1');
+    // The whole point of the instrumentation-gap fix: messageId === persisted user message id
+    assert.equal(call.messageId, persistedMessageId);
+    assert.equal(call.ownerUserId, 'user-1', 'F227 P1: owner = the authenticated sender (queued path)');
+    assert.ok(call.messageExcerpt?.includes('脚手架'), 'excerpt carries 原话 context');
+  });
+
+  it('does not fire the callback when the message has no magic word', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => true);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '普通消息，没有触发词', threadId: 'thread-1', deliveryMode: 'queue' },
+    });
+    assert.equal(res.statusCode, 202);
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(magicWordCalls.length, 0);
+  });
+
+  it('fires on the IMMEDIATE path too with the persisted messageId (砚砚 R2 P1: both paths)', async () => {
+    deps.invocationTracker.has.mock.mockImplementation(() => false); // immediate path (no active invocation)
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+      payload: { content: '这个直接重写吧，脚手架', threadId: 'thread-1', deliveryMode: 'immediate' },
+    });
+    assert.equal(res.statusCode, 200);
+    const persistedMessageId = JSON.parse(res.body).userMessageId;
+
+    await new Promise((r) => setTimeout(r, 80));
+
+    assert.equal(magicWordCalls.length, 1, 'immediate path should also fire the callback');
+    assert.equal(magicWordCalls[0].hits[0].word, '脚手架');
+    assert.equal(magicWordCalls[0].messageId, persistedMessageId);
+    assert.equal(magicWordCalls[0].ownerUserId, 'user-1', 'F227 P1: owner = the authenticated sender (immediate path)');
+  });
+});

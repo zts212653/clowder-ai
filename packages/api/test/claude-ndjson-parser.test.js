@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { transformClaudeEvent } = await import('../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js');
+const { isResultErrorEvent, transformClaudeEvent } = await import(
+  '../dist/domains/cats/services/agents/providers/claude-ndjson-parser.js'
+);
 
 const CAT = 'opus';
 
@@ -233,6 +235,26 @@ test('result error_during_execution → error with errorSubtype in content', () 
   assert.equal(result.type, 'error');
   const parsed = JSON.parse(result.content);
   assert.equal(parsed.errorSubtype, 'error_during_execution');
+});
+
+test('result success + is_error:true → error using result text (Claude A2 shape)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    result: "The model's tool call could not be parsed (retry also failed).",
+    errors: null,
+  };
+  assert.equal(isResultErrorEvent(event), true, 'is_error:true is authoritative even when subtype is success');
+  const result = transformClaudeEvent(event, CAT, state);
+  assert.ok(result !== null);
+  assert.ok(!Array.isArray(result));
+  assert.equal(result.type, 'error');
+  assert.match(result.error, /could not be parsed/);
+  const parsed = JSON.parse(result.content);
+  assert.equal(parsed.errorSubtype, 'success');
+  assert.equal(parsed.isError, true);
 });
 
 // ─── Issue #24 — error.error should never be "Unknown error" when subtype is known ──

@@ -1,20 +1,22 @@
 ---
 cell_id: plugin
 title: Plugin Framework
-summary: Repository-local plugin manifests, configuration, owned resource activation, and plugin-facing Settings surfaces.
+summary: Repository-local plugin manifests, configuration, owned resource activation, schedule factory registration, and plugin-facing Settings surfaces.
 canonical_features: [F202]
 code_anchors:
   - packages/api/src/domains/plugin/PluginRegistry.ts
   - packages/api/src/domains/plugin/PluginResourceActivator.ts
+  - packages/api/src/domains/plugin/ScheduleFactoryRegistry.ts
   - packages/api/src/domains/plugin/plugin-manifest.ts
   - packages/api/src/domains/plugin/plugin-config-store.ts
   - packages/api/src/routes/plugin-routes.ts
   - packages/shared/src/types/plugin.ts
 doc_anchors:
   - docs/features/F202-plugin-framework.md
-static_scan_hints: [PluginRegistry, PluginResourceActivator, plugin.yaml, pluginId, plugin-owned, PluginConfigPanel]
+static_scan_hints: [PluginRegistry, PluginResourceActivator, ScheduleFactoryRegistry, plugin.yaml, pluginId, plugin-owned, factoryId, schedule, PluginConfigPanel]
 cited_by:
   - {feature: F202, date: 2026-05-31, delta: new cell}
+  - {feature: F202, date: 2026-06-08, delta: schedule resources}
 ---
 
 # Plugin Framework
@@ -23,7 +25,7 @@ cited_by:
 
 F202 owns the trusted, repository-local plugin layer: plugin manifest discovery,
 manifest validation, configuration persistence, plugin-owned capability records,
-and activation of declared skill, MCP, and limb resources.
+and activation of declared skill, MCP, limb, and schedule resources.
 
 ## Use This When
 
@@ -39,8 +41,10 @@ and activation of declared skill, MCP, and limb resources.
 
 - Keep plugin manifests declarative and repository-local unless a later feature
   defines remote package trust, signing, and network policy.
-- Route skill, MCP, and limb declarations through `PluginResourceActivator`
+- Route skill, MCP, limb, and schedule declarations through `PluginResourceActivator`
   instead of adding parallel writers.
+- Keep schedule factories behind `ScheduleFactoryRegistry`; plugin manifests may
+  name a whitelisted `factoryId`, not arbitrary executable code.
 - Preserve explicit plugin ownership metadata and reject cross-plugin ownership
   collisions.
 - Keep config writes inside the existing secret/update boundary; manifests do
@@ -59,5 +63,6 @@ and activation of declared skill, MCP, and limb resources.
 ## Static Scan Hints
 
 Watch for new or renamed `PluginRegistry`, `PluginResourceActivator`,
-`PluginConfigStore`, `plugin.yaml`, `pluginId`, `plugin-owned`,
-`PluginConfigPanel`, and direct writers to plugin-owned capability records.
+`ScheduleFactoryRegistry`, `PluginConfigStore`, `plugin.yaml`, `pluginId`,
+`plugin-owned`, `factoryId`, `schedule`, `PluginConfigPanel`, and direct writers
+to plugin-owned capability records.

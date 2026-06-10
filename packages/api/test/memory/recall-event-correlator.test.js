@@ -572,6 +572,34 @@ describe('RecallEventCorrelator', () => {
     assert.equal(candidates[0].anchor, 'B');
   });
 
+  it('persistBatch preserves reported hit count when candidates are empty', () => {
+    const events = [
+      makeEvent({
+        toolName: 'search_evidence',
+        timestamp: 1000,
+        turnIndex: 1,
+        summary: {
+          query: 'thread search without anchors',
+          resultCount: 8,
+        },
+      }),
+    ];
+
+    const correlator = new RecallEventCorrelator(db);
+    const results = correlator.correlateWindow(events);
+    assert.equal(results[0].resultCount, 8);
+    assert.deepEqual(results[0].candidates, []);
+
+    correlator.persistBatch(results);
+
+    const row = db
+      .prepare('SELECT result_count, candidates_json FROM recall_events WHERE query = ?')
+      .get('thread search without anchors');
+    assert.ok(row, 'row exists');
+    assert.equal(row.result_count, 8);
+    assert.deepEqual(JSON.parse(row.candidates_json), []);
+  });
+
   it('multiple consumed entries from different candidates', () => {
     const events = [
       makeEvent({

@@ -11,6 +11,10 @@ import {
   MANAGED_BLOCK_START,
 } from '../../dist/config/governance/governance-pack.js';
 
+const expectedFrontendPort = process.env.FRONTEND_PORT ?? '3003';
+const expectedApiPort = process.env.API_SERVER_PORT ?? '3004';
+const expectedRuntimePortsText = `frontend ${expectedFrontendPort} and API ${expectedApiPort}`;
+
 describe('GovernanceBootstrapService', () => {
   let catCafeRoot;
   let targetProject;
@@ -100,6 +104,21 @@ describe('GovernanceBootstrapService', () => {
     assert.ok(content.startsWith('# My Project'), 'existing content preserved');
     assert.ok(content.includes('Some existing content.'), 'existing content preserved');
     assert.ok(content.includes(MANAGED_BLOCK_START), 'managed block appended');
+  });
+
+  it('writes external-context port avoidance wording into external project files', async () => {
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    const content = await readFile(join(targetProject, 'CLAUDE.md'), 'utf-8');
+    assert.ok(content.includes('Cat Cafe runtime ports'), 'external project should see reserved runtime ports');
+    assert.ok(content.includes(`${expectedRuntimePortsText} are reserved by Cat Cafe`));
+    assert.ok(content.includes("Avoid using these ports for this project's dev servers."));
+    assert.ok(!content.includes('Public local defaults'), 'external project should not receive self-context defaults');
+    assert.ok(
+      !content.includes(`use ${expectedRuntimePortsText}`),
+      'external project must not be told to use Cat Cafe ports',
+    );
   });
 
   it('replaces existing managed block on re-bootstrap', async () => {

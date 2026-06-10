@@ -17,9 +17,9 @@ import type { CatId } from './ids.js';
 export type ProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
 
 /**
- * F128 Phase Y reporting modes — the contract for whether (and how) a sub-thread
- * reports back to its source thread. Default is `none` (autonomous, AC-Y6).
- * Fixed at proposal time — dynamic switching is NOT supported (C-Y1).
+ * F128 reporting modes — the contract for whether (and how) a sub-thread
+ * reports back to its source thread. Phase AA default is `final-only`; Phase AC
+ * lets the user override the proposed mode on the approval card before creation.
  *
  * - `none` (UI: autonomous): source thread holds no receipt responsibility;
  *   critical events still escalate per house rules (C-Y2).
@@ -48,10 +48,10 @@ export interface ThreadProposal {
   preferredCats: CatId[]; // empty array if none
   initialMessage?: string;
   /**
-   * F128 Phase Y: how this sub-thread reports back to its source thread.
+   * F128: how this sub-thread reports back to its source thread.
    * Optional for backward-compat with pre-Phase-Y proposals; readers treat
-   * `undefined` as the default `none` (autonomous). Fixed at create time — NOT
-   * editable via ProposalApproveOverrides (C-Y1: no dynamic switching).
+   * `undefined` as the default `final-only`. Editable only before creation via
+   * ProposalApproveOverrides; still immutable after approve creates the thread.
    */
   reportingMode?: ReportingMode;
   projectPath: string;
@@ -96,4 +96,16 @@ export interface ProposalApproveOverrides {
   parentThreadId?: string;
   preferredCats?: CatId[];
   initialMessage?: string | null;
+  /**
+   * F128: project ownership for the child thread, overridable at approve time. The route
+   * validates it (validateProjectPath → canonical real path) BEFORE claim; an invalid value
+   * is rejected with 400, never silently dropped. Omitted → keep the proposal's projectPath
+   * (which itself defaults to the source thread's at propose time).
+   */
+  projectPath?: string;
+  /**
+   * F128 Phase AC: final reporting contract chosen on the approval card. The child thread's
+   * injected protocol must use this final value, not necessarily the cat's proposal default.
+   */
+  reportingMode?: ReportingMode;
 }

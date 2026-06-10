@@ -202,16 +202,164 @@ export function normalizeRichBlock(raw: unknown): unknown {
 
   // type → kind alias
   if ('type' in obj && !('kind' in obj)) {
-    if (VALID_KINDS.includes(obj['type'] as string)) {
-      obj['kind'] = obj['type'];
-      delete obj['type'];
+    if (VALID_KINDS.includes(obj.type as string)) {
+      obj.kind = obj.type;
+      delete obj.type;
     }
   }
 
   // Auto-fill v: 1
   if (!('v' in obj) && 'kind' in obj) {
-    obj['v'] = 1;
+    obj.v = 1;
   }
 
   return obj;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object';
+}
+
+function hasOptionalString(obj: Record<string, unknown>, key: string): boolean {
+  return !(key in obj) || typeof obj[key] === 'string';
+}
+
+function hasOptionalBoolean(obj: Record<string, unknown>, key: string): boolean {
+  return !(key in obj) || typeof obj[key] === 'boolean';
+}
+
+function hasOptionalNumber(obj: Record<string, unknown>, key: string): boolean {
+  return !(key in obj) || typeof obj[key] === 'number';
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isTrimmedNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isValidCardField(value: unknown): boolean {
+  return isRecord(value) && typeof value.label === 'string' && typeof value.value === 'string';
+}
+
+function isValidChecklistItem(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.id === 'string' && typeof value.text === 'string' && hasOptionalBoolean(value, 'checked');
+}
+
+function isValidMediaItem(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.url !== 'string') return false;
+  if (!/^(\/|https?:\/\/|data:)/.test(value.url)) return false;
+  return hasOptionalString(value, 'alt') && hasOptionalString(value, 'caption');
+}
+
+function isValidInteractiveOption(value: unknown): boolean {
+  return isRecord(value) && isNonEmptyString(value.id) && isNonEmptyString(value.label);
+}
+
+function isValidCardBlock(obj: Record<string, unknown>): boolean {
+  const validTone = !('tone' in obj) || ['info', 'success', 'warning', 'danger'].includes(obj.tone as string);
+  const validFields = !('fields' in obj) || (Array.isArray(obj.fields) && obj.fields.every(isValidCardField));
+  return typeof obj.title === 'string' && hasOptionalString(obj, 'bodyMarkdown') && validTone && validFields;
+}
+
+function isValidDiffBlock(obj: Record<string, unknown>): boolean {
+  return typeof obj.filePath === 'string' && typeof obj.diff === 'string' && hasOptionalString(obj, 'languageHint');
+}
+
+function isValidChecklistBlock(obj: Record<string, unknown>): boolean {
+  return (
+    hasOptionalString(obj, 'title') &&
+    Array.isArray(obj.items) &&
+    obj.items.length > 0 &&
+    obj.items.every(isValidChecklistItem)
+  );
+}
+
+function isValidMediaGalleryBlock(obj: Record<string, unknown>): boolean {
+  return (
+    hasOptionalString(obj, 'title') &&
+    Array.isArray(obj.items) &&
+    obj.items.length > 0 &&
+    obj.items.every(isValidMediaItem)
+  );
+}
+
+function isValidAudioBlock(obj: Record<string, unknown>): boolean {
+  const hasUrlOrText = isTrimmedNonEmptyString(obj.url) || isTrimmedNonEmptyString(obj.text);
+  return (
+    hasUrlOrText &&
+    hasOptionalString(obj, 'title') &&
+    hasOptionalNumber(obj, 'durationSec') &&
+    hasOptionalString(obj, 'mimeType')
+  );
+}
+
+function isValidInteractiveBlock(obj: Record<string, unknown>): boolean {
+  const validTypes = ['select', 'multi-select', 'card-grid', 'confirm'];
+  const validMaxSelect = !('maxSelect' in obj) || (Number.isInteger(obj.maxSelect) && (obj.maxSelect as number) >= 1);
+  return (
+    typeof obj.interactiveType === 'string' &&
+    validTypes.includes(obj.interactiveType) &&
+    hasOptionalString(obj, 'title') &&
+    hasOptionalString(obj, 'description') &&
+    Array.isArray(obj.options) &&
+    obj.options.length > 0 &&
+    obj.options.every(isValidInteractiveOption) &&
+    validMaxSelect &&
+    hasOptionalBoolean(obj, 'allowRandom') &&
+    hasOptionalString(obj, 'messageTemplate') &&
+    hasOptionalBoolean(obj, 'disabled') &&
+    (!('selectedIds' in obj) || Array.isArray(obj.selectedIds)) &&
+    (!('groupId' in obj) || isNonEmptyString(obj.groupId))
+  );
+}
+
+function isValidHtmlWidgetBlock(obj: Record<string, unknown>): boolean {
+  const validHeight =
+    !('height' in obj) ||
+    (Number.isInteger(obj.height) && (obj.height as number) >= 50 && (obj.height as number) <= 2000);
+  return isNonEmptyString(obj.html) && obj.html.length <= 500_000 && hasOptionalString(obj, 'title') && validHeight;
+}
+
+function isValidFileBlock(obj: Record<string, unknown>): boolean {
+  if (!isTrimmedNonEmptyString(obj.url) || !isTrimmedNonEmptyString(obj.fileName)) return false;
+  if (!hasOptionalString(obj, 'mimeType')) return false;
+  if ('fileSize' in obj && (!Number.isInteger(obj.fileSize) || (obj.fileSize as number) < 0)) return false;
+  const url = obj.url.trim();
+  if (url.includes('..')) return false;
+  return url.startsWith('/uploads/') || url.startsWith('/api/') || url.startsWith('https://');
+}
+
+/**
+ * Validate kind-specific required fields for rich blocks before they enter
+ * Route B text extraction or MCP Route B fallback. Keep this aligned with the
+ * callback create-rich-block API schema, with the Route B URL safety checks for
+ * media/file blocks preserved.
+ */
+export function isValidRichBlock(b: unknown): b is RichBlock {
+  if (!isRecord(b) || !isNonEmptyString(b.id) || b.v !== 1) return false;
+
+  switch (b.kind) {
+    case 'card':
+      return isValidCardBlock(b);
+    case 'diff':
+      return isValidDiffBlock(b);
+    case 'checklist':
+      return isValidChecklistBlock(b);
+    case 'media_gallery':
+      return isValidMediaGalleryBlock(b);
+    case 'audio':
+      return isValidAudioBlock(b);
+    case 'interactive':
+      return isValidInteractiveBlock(b);
+    case 'html_widget':
+      return isValidHtmlWidgetBlock(b);
+    case 'file':
+      return isValidFileBlock(b);
+    default:
+      return false;
+  }
 }

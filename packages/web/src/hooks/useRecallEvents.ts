@@ -144,6 +144,12 @@ function isSearchEvidenceResultText(text: string): boolean {
   return hasLegacyEvidenceMetadata(text);
 }
 
+function isUnknownCountEvidenceFailure(text: string): boolean {
+  return /result exceeds maximum allowed tokens|maximum allowed tokens|Full result saved to|saved to .*\.txt/i.test(
+    text,
+  );
+}
+
 function findPendingSearchIndex(pendingSearches: RecallEvent[], resultQuery: ResultQueryMatch | undefined): number {
   if (resultQuery == null) return 0;
 
@@ -166,7 +172,12 @@ function applyResultToRecall(recall: RecallEvent, text: string, resultQuery?: Re
   if (recall.query === UNKNOWN_QUERY && resultQuery?.kind === 'exact') {
     recall.query = resultQuery.query;
   }
-  recall.resultCount = parseResultCountFromText(text) ?? 0;
+  const resultCount = parseResultCountFromText(text);
+  if (resultCount != null) {
+    recall.resultCount = resultCount;
+  } else if (!isUnknownCountEvidenceFailure(text)) {
+    recall.resultCount = 0;
+  }
   recall.results = parseTextResults(text);
 }
 

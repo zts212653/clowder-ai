@@ -11,11 +11,17 @@ import Database from 'better-sqlite3';
 
 const {
   AgyTrajectoryObserver,
+  createAgyResumeBaselineCursorResolver,
   observeAgyProgress,
   resolveAgyTrajectoryDbPath,
   locateAgyTrajectoryDb,
   listAgyConversationDbs,
+  readAgyMaxStepIdx,
+  readAgyStepFingerprint,
+  readAgyStepsPrefixFingerprint,
   resolveAgyAppDataDir,
+  sameAgyDbFileIdentity,
+  sameAgyStepsPrefixFingerprint,
 } = await import('../dist/domains/cats/services/agents/providers/agy-trajectory-observer.js');
 
 const STEPS_SCHEMA = `CREATE TABLE steps (
@@ -96,6 +102,94 @@ test('poll is incremental: cursor advances, only new steps returned', () => {
   assert.equal(r2.cursor, 1, 'cursor unchanged when no new steps');
   obs.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('readAgyStepFingerprint distinguishes missing baseline rows from unreadable DBs', () => {
+  const { dbPath, dir } = makeTrajectoryDb([{ idx: 0, step_type: 14, status: 3 }]);
+
+  const ok = readAgyStepFingerprint(dbPath, 0);
+  assert.equal(ok.status, 'ok');
+  assert.equal(ok.fingerprint.idx, 0);
+
+  assert.deepEqual(readAgyStepFingerprint(dbPath, 99), { status: 'missing' });
+  assert.deepEqual(readAgyStepFingerprint(join(dir, 'missing.db'), 0), { status: 'unreadable' });
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('readAgyStepsPrefixFingerprint detects baseline-row collision with changed prefix', () => {
+  const { dbPath, dir } = makeTrajectoryDb(Array.from({ length: 8 }, (_, idx) => ({ idx, step_type: 14, status: 3 })));
+  const baseline = readAgyStepsPrefixFingerprint(dbPath, 7);
+  assert.equal(baseline.status, 'ok');
+
+  const db = new Database(dbPath);
+  db.exec('DELETE FROM steps;');
+  const insert = db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+  for (let idx = 0; idx <= 6; idx += 1) insert.run(idx, 15, 3);
+  insert.run(7, 14, 3); // The baseline row matches; only the prefix reveals this is a rewrite.
+  db.close();
+
+  const current = readAgyStepsPrefixFingerprint(dbPath, 7);
+  assert.equal(current.status, 'ok');
+  assert.equal(
+    sameAgyStepsPrefixFingerprint(baseline.fingerprint, current.fingerprint),
+    false,
+    'single-row collision must not prove prefix continuity',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('readAgyStepsPrefixFingerprint uses bounded samples for large resume histories', () => {
+  const { dbPath, dir } = makeTrajectoryDb(
+    Array.from({ length: 200 }, (_, idx) => ({
+      idx,
+      step_type: idx % 2 === 0 ? 14 : 15,
+      status: 3,
+      step_payload: Buffer.alloc(1024, idx),
+    })),
+  );
+
+  const baseline = readAgyStepsPrefixFingerprint(dbPath, 199);
+  assert.equal(baseline.status, 'ok');
+  assert.ok(baseline.fingerprint.rowCount < 200, 'large histories must not hash every historical row');
+
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('createAgyResumeBaselineCursorResolver caches prefix validation while DB marker is unchanged', () => {
+  let prefixReads = 0;
+  let marker = { dev: 1, ino: 2, size: 100, mtimeMs: 10 };
+  const prefixFingerprint = { maxIdx: 7, rowCount: 8, digestSha256: 'old-prefix' };
+  const resolver = createAgyResumeBaselineCursorResolver({
+    resumeDbPath: '/db',
+    baselineCursor: 7,
+    baselineIdentity: { dev: 1, ino: 2 },
+    baselinePrefixFingerprint: prefixFingerprint,
+    readDbFileIdentity: () => ({ dev: 1, ino: 2 }),
+    readDbChangeMarker: () => marker,
+    readMaxStepIdx: () => 8,
+    readStepsPrefixFingerprint: () => {
+      prefixReads += 1;
+      return { status: 'ok', fingerprint: prefixFingerprint };
+    },
+  });
+
+  assert.equal(resolver('/other.db'), null);
+  assert.equal(resolver('/db'), 7);
+  assert.equal(resolver('/db'), 7);
+  assert.equal(prefixReads, 1, 'unchanged file marker should reuse successful prefix validation');
+
+  marker = { ...marker, size: 120 };
+  assert.equal(resolver('/db'), 7);
+  assert.equal(prefixReads, 2, 'changed marker requires a new prefix validation');
+});
+
+test('sameAgyDbFileIdentity ignores unreliable birthtime values', () => {
+  assert.equal(sameAgyDbFileIdentity({ dev: 1, ino: 2, birthtimeMs: 100 }, { dev: 1, ino: 2, birthtimeMs: 200 }), true);
+  assert.equal(
+    sameAgyDbFileIdentity({ dev: 1, ino: 2, birthtimeMs: 100 }, { dev: 1, ino: 3, birthtimeMs: 100 }),
+    false,
+  );
 });
 
 test('poll tracks active steps and returns status updates', () => {
@@ -207,6 +301,209 @@ test('observeAgyProgress yields new steps incrementally until agy done', async (
     'yields steps incrementally across polls',
   );
   db.close();
+  rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('observeAgyProgress applies per-db baseline cursor to avoid replaying historical resume steps', async () => {
+  const appDataDir = mkdtempSync(join(tmpdir(), 'agy-resume-baseline-'));
+  const uuid = '22222222-1234-1234-1234-1234567890ab';
+  const convDir = join(appDataDir, 'conversations');
+  mkdirSync(convDir);
+  const dbPath = join(convDir, `${uuid}.db`);
+  const db = new Database(dbPath);
+  db.exec(STEPS_SCHEMA);
+  const insert = (idx, ty, st) =>
+    db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(idx, ty, st);
+  insert(0, 14, 3); // historical step from an earlier turn in the same AGY conversation DB
+
+  const log = `appDataDir=${appDataDir}\nCreated conversation ${uuid}`;
+  let polls = 0;
+  const gen = observeAgyProgress({
+    readLog: () => log,
+    initialCursorForDb: (path) => (path === dbPath ? 0 : null),
+    isAgyDone: () => polls >= 2,
+    sleep: async () => {
+      polls += 1;
+      if (polls === 1) insert(1, 15, 3); // current turn step appended after invocation start
+    },
+    pollIntervalMs: 1,
+  });
+  const events = [];
+  for await (const e of gen) events.push(e);
+  assert.deepEqual(
+    events.map((e) => e.idx),
+    [1],
+    'resume progress must show only current-turn delta, not cumulative historical steps',
+  );
+  db.close();
+  rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('observeAgyProgress retries observer creation when same-path resume baseline is undecidable', async () => {
+  const appDataDir = mkdtempSync(join(tmpdir(), 'agy-resume-recreate-'));
+  const uuid = '22222222-2234-1234-1234-1234567890ab';
+  const convDir = join(appDataDir, 'conversations');
+  mkdirSync(convDir);
+  const dbPath = join(convDir, `${uuid}.db`);
+  let db = new Database(dbPath);
+  db.exec(STEPS_SCHEMA);
+  db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(7, 14, 3);
+  db.close();
+
+  const log = `appDataDir=${appDataDir}\nCreated conversation ${uuid}`;
+  let initialCursorChecks = 0;
+  let polls = 0;
+  const gen = observeAgyProgress({
+    readLog: () => log,
+    initialCursorForDb: () => {
+      initialCursorChecks += 1;
+      return initialCursorChecks === 1 ? 'retry' : null;
+    },
+    isAgyDone: () => polls >= 2,
+    sleep: async () => {
+      polls += 1;
+      if (polls === 1) {
+        rmSync(dbPath, { force: true });
+        db = new Database(dbPath);
+        db.exec(STEPS_SCHEMA);
+        db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(0, 15, 3);
+        db.close();
+      }
+    },
+    pollIntervalMs: 1,
+  });
+  const events = [];
+  for await (const e of gen) events.push(e);
+  assert.deepEqual(
+    events.map((e) => e.idx),
+    [0],
+    'undecidable baseline should retry before opening observer, then read recreated DB from idx 0',
+  );
+  assert.equal(initialCursorChecks, 2, 'baseline decision should be retried after the DB becomes decidable');
+  rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('observeAgyProgress revalidates a baseline after observer creation', async () => {
+  const appDataDir = mkdtempSync(join(tmpdir(), 'agy-resume-late-replace-'));
+  const uuid = '22222222-3234-1234-1234-1234567890ab';
+  const convDir = join(appDataDir, 'conversations');
+  mkdirSync(convDir);
+  const dbPath = join(convDir, `${uuid}.db`);
+  let db = new Database(dbPath);
+  db.exec(STEPS_SCHEMA);
+  db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(7, 14, 3);
+  db.close();
+
+  const log = `appDataDir=${appDataDir}\nCreated conversation ${uuid}`;
+  let initialCursorChecks = 0;
+  let polls = 0;
+  const gen = observeAgyProgress({
+    readLog: () => log,
+    initialCursorForDb: () => {
+      initialCursorChecks += 1;
+      return initialCursorChecks === 1 ? 7 : null;
+    },
+    isAgyDone: () => polls >= 3,
+    sleep: async () => {
+      polls += 1;
+      if (polls === 1) {
+        rmSync(dbPath, { force: true });
+        db = new Database(dbPath);
+        db.exec(STEPS_SCHEMA);
+        db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(0, 15, 3);
+        db.close();
+      }
+    },
+    pollIntervalMs: 1,
+  });
+  const events = [];
+  for await (const e of gen) events.push(e);
+  assert.deepEqual(
+    events.map((e) => e.idx),
+    [0],
+    'late same-path replacement must reset the stale baseline cursor and read current low idx',
+  );
+  assert.ok(initialCursorChecks >= 2, 'baseline must be revalidated after observer creation');
+  rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('observeAgyProgress closes an open observer when final baseline revalidation retries', async () => {
+  const appDataDir = mkdtempSync(join(tmpdir(), 'agy-final-retry-cleanup-'));
+  const uuid = '22222222-4234-1234-1234-1234567890ab';
+  const log = `appDataDir=${appDataDir}\nCreated conversation ${uuid}`;
+  let initialCursorChecks = 0;
+  let closeCount = 0;
+  let polls = 0;
+
+  const gen = observeAgyProgress({
+    readLog: () => log,
+    initialCursorForDb: () => {
+      initialCursorChecks += 1;
+      return initialCursorChecks === 1 ? 7 : 'retry';
+    },
+    isAgyDone: () => polls >= 1,
+    sleep: async () => {
+      polls += 1;
+    },
+    pollIntervalMs: 1,
+    createObserver: () => ({
+      poll: (cursor) => ({ enabled: true, events: [], cursor }),
+      close: () => {
+        closeCount += 1;
+      },
+    }),
+  });
+  const events = [];
+  for await (const e of gen) events.push(e);
+
+  assert.deepEqual(events, []);
+  assert.equal(initialCursorChecks, 2, 'final poll should revalidate the active baseline');
+  assert.equal(closeCount, 1, 'open observer must close even when final baseline revalidation retries');
+  rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('observeAgyProgress stops baseline revalidation after cursor advances beyond baseline', async () => {
+  const appDataDir = mkdtempSync(join(tmpdir(), 'agy-stop-baseline-revalidate-'));
+  const uuid = '22222222-5234-1234-1234-1234567890ab';
+  const log = `appDataDir=${appDataDir}\nCreated conversation ${uuid}`;
+  let initialCursorChecks = 0;
+  let pollCount = 0;
+  let sleeps = 0;
+
+  const gen = observeAgyProgress({
+    readLog: () => log,
+    initialCursorForDb: () => {
+      initialCursorChecks += 1;
+      return 7;
+    },
+    isAgyDone: () => sleeps >= 2,
+    sleep: async () => {
+      sleeps += 1;
+    },
+    pollIntervalMs: 1,
+    createObserver: () => ({
+      poll: (cursor) => {
+        pollCount += 1;
+        if (pollCount === 1) {
+          return {
+            enabled: true,
+            events: [{ idx: 8, stepType: 15, status: 3, label: 'AGY trajectory step #8 completed' }],
+            cursor: 8,
+          };
+        }
+        return { enabled: true, events: [], cursor };
+      },
+      close: () => {},
+    }),
+  });
+  const events = [];
+  for await (const e of gen) events.push(e);
+
+  assert.deepEqual(
+    events.map((e) => e.idx),
+    [8],
+  );
+  assert.equal(initialCursorChecks, 1, 'baseline revalidation should stop after current-turn progress is observed');
   rmSync(appDataDir, { recursive: true, force: true });
 });
 
@@ -379,6 +676,16 @@ test('listAgyConversationDbs returns [] when conversations dir missing (fail-ope
   const appDataDir = mkdtempSync(join(tmpdir(), 'agy-list-empty-'));
   assert.deepEqual(listAgyConversationDbs(appDataDir), []);
   rmSync(appDataDir, { recursive: true, force: true });
+});
+
+test('readAgyMaxStepIdx returns current max idx and fails open', () => {
+  const { dbPath, dir } = makeTrajectoryDb([
+    { idx: 0, step_type: 14, status: 3 },
+    { idx: 7, step_type: 15, status: 3 },
+  ]);
+  assert.equal(readAgyMaxStepIdx(dbPath), 7);
+  assert.equal(readAgyMaxStepIdx('/nonexistent/path/conv.db'), null);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // 云端 codex P2: appDataDir 必须用 spawn agy 的 effective child HOME（childEnv.HOME），

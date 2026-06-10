@@ -47,6 +47,7 @@ function serialize(issue: FrustrationIssue): string[] {
   if (issue.cardMessageId) pairs.push('cardMessageId', issue.cardMessageId);
   if (issue.confirmedAt) pairs.push('confirmedAt', String(issue.confirmedAt));
   if (issue.skippedAt) pairs.push('skippedAt', String(issue.skippedAt));
+  if (issue.falsePositiveAt) pairs.push('falsePositiveAt', String(issue.falsePositiveAt));
   return pairs;
 }
 
@@ -67,6 +68,7 @@ function hydrate(fields: Record<string, string>): FrustrationIssue | null {
     ...(fields.cardMessageId ? { cardMessageId: fields.cardMessageId } : {}),
     ...(fields.confirmedAt ? { confirmedAt: Number(fields.confirmedAt) } : {}),
     ...(fields.skippedAt ? { skippedAt: Number(fields.skippedAt) } : {}),
+    ...(fields.falsePositiveAt ? { falsePositiveAt: Number(fields.falsePositiveAt) } : {}),
   };
 }
 
@@ -132,6 +134,19 @@ export class RedisFrustrationIssueStore implements IFrustrationIssueStore {
     await pipeline.exec();
 
     return { ...issue, status: 'skipped', skippedAt: now };
+  }
+
+  async markFalsePositive(issueId: string): Promise<FrustrationIssue | null> {
+    const issue = await this.getById(issueId);
+    if (!issue || issue.status !== 'draft') return null;
+
+    const now = Date.now();
+    const pipeline = this.redis.multi();
+    pipeline.hset(FrustrationIssueKeys.detail(issueId), 'status', 'false_positive', 'falsePositiveAt', String(now));
+    pipeline.zrem(FrustrationIssueKeys.userDraft(issue.userId), issueId);
+    await pipeline.exec();
+
+    return { ...issue, status: 'false_positive', falsePositiveAt: now };
   }
 
   async setCardMessageId(issueId: string, cardMessageId: string): Promise<void> {

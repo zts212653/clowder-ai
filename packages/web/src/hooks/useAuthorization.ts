@@ -101,12 +101,18 @@ export function useAuthorization(threadId: string) {
   }, [fetchPending]);
 
   const respond = useCallback(
-    async (requestId: string, granted: boolean, scope: RespondScope, reason?: string) => {
+    async (requestId: string, granted: boolean, scope: RespondScope, reason?: string, withFeedback?: boolean) => {
       try {
         const res = await apiFetch('/api/authorization/respond', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, granted, scope, ...(reason ? { reason } : {}) }),
+          body: JSON.stringify({
+            requestId,
+            granted,
+            scope,
+            ...(reason ? { reason } : {}),
+            ...(withFeedback ? { withFeedback } : {}),
+          }),
         });
         if (res.ok) {
           // Optimistically remove from local list

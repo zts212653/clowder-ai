@@ -9,6 +9,7 @@ import { ChecklistBlock } from './ChecklistBlock';
 import { DiffBlock } from './DiffBlock';
 import { FileBlock } from './FileBlock';
 import { FrustrationIssueCard, isFrustrationIssueCardBlock } from './FrustrationIssueCard';
+import { HandoffProposalCard, isHandoffProposalCardBlock } from './HandoffProposalCard';
 import { HtmlWidgetBlock } from './HtmlWidgetBlock';
 import { InteractiveBlock } from './InteractiveBlock';
 import { InteractiveBlockGroup } from './InteractiveBlockGroup';
@@ -30,6 +31,9 @@ function RichBlockRenderer({
     case 'card': {
       // F128: proposal cards have dedicated approval-card renderer
       if (isProposalCardBlock(block)) return <ProposalCard block={block} messageId={messageId} />;
+      // F225: cat-initiated session handoff cards get a dedicated approve/reject renderer that wires
+      // the buttons to /api/session-handoff/:id/approve|reject (else they fall through to inert CardBlock).
+      if (isHandoffProposalCardBlock(block)) return <HandoffProposalCard block={block} messageId={messageId} />;
       // F222: frustration auto-issue cards with trusted provenance get dedicated renderer
       if (isFrustrationIssueCardBlock(block, messageSource)) {
         return <FrustrationIssueCard block={block} messageId={messageId} />;

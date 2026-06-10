@@ -41,6 +41,26 @@ const evalDomainRegistryEntrySchema = z.object({
     reevalWithinHours: z.number().int().positive('reevalWithinHours must be positive'),
   }),
   fixtures: z.array(evalDomainFixtureSchema).default([]),
+  /**
+   * Sunset flag. When `false`, `loadRegisteredDomains` skips this domain
+   * from scheduled eval cron pickup (no invocation message lands in the
+   * domain thread). Default `true`.
+   *
+   * Use this to silently retire a domain's auto-schedule without deleting
+   * the registry entry — preserves SLA / handoffTargetResolver / threadPolicy
+   * config for future re-enable (just remove the field or set `true`).
+   *
+   * Set to `false` when:
+   * - The domain's verdict generator isn't wired (cron fires would produce
+   *   empty invocations with no verdict — silent-broken).
+   * - The domain is being intentionally paused while rules / wiring are reworked.
+   *
+   * Set on 2026-06-06 for `eval:sop` (silent-fire root cause: missing
+   * sourceAdapter trace producer + missing publish_verdict generator wiring
+   * — F192 doc §323 "需先加 file-writer 层 ~100-150 行"). Re-enable when
+   * those gaps are closed.
+   */
+  enabled: z.boolean().default(true),
 });
 
 export type EvalDomainRegistryEntry = z.infer<typeof evalDomainRegistryEntrySchema>;

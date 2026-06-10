@@ -1,4 +1,5 @@
 import type { TrajectoryStep } from './AntigravityBridge.js';
+import { normalizeAntigravityToolCall } from './antigravity-tool-call-normalizer.js';
 
 function getPlannerText(step: TrajectoryStep): string | null {
   const planner = step.plannerResponse;
@@ -79,12 +80,7 @@ function fingerprintStep(step: TrajectoryStep): string {
           modelErrorMessage: step.errorMessage.error.modelErrorMessage,
         }
       : undefined,
-    toolCall: step.toolCall
-      ? {
-          toolName: step.toolCall.toolName,
-          input: step.toolCall.input,
-        }
-      : undefined,
+    toolCall: normalizeAntigravityToolCall(step),
     toolResult: step.toolResult
       ? {
           toolName: step.toolResult.toolName,

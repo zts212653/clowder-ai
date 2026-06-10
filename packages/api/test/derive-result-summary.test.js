@@ -75,11 +75,29 @@ describe('deriveResultSummary — graph_resolve anchor parsing (砚砚 cloud P2)
     assert.equal(result.topConfidence, 'low');
   });
 
+  test('search_evidence: successful results may contain failure words in hit titles', async () => {
+    const { deriveResultSummary } = await import('../dist/domains/cats/services/tool-usage/derive-result-summary.js');
+    const text = 'Found 1 result(s): [high] F999 — Failed callback handling retrospective';
+    const result = deriveResultSummary('search_evidence', text);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(result.resultCount, 1);
+    assert.equal(result.topConfidence, 'high');
+  });
+
   test('list_recent: parses since + count', async () => {
     const { deriveResultSummary } = await import('../dist/domains/cats/services/tool-usage/derive-result-summary.js');
     const text = 'Recent items (last 7d): 5 found';
     const result = deriveResultSummary('list_recent', text);
     assert.equal(result.since, '7d');
     assert.equal(result.resultCount, 5);
+  });
+
+  test('generic MCP errors: parses non-memory tool failure text', async () => {
+    const { deriveResultSummary } = await import('../dist/domains/cats/services/tool-usage/derive-result-summary.js');
+    const result = deriveResultSummary('publish_verdict', 'Callback failed (404): no_trials_in_window');
+
+    assert.equal(result.isError, true);
+    assert.equal(result.errorMessage, 'Callback failed (404): no_trials_in_window');
   });
 });

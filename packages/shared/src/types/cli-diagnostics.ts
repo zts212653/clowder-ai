@@ -9,7 +9,7 @@
  * data contract is shared.
  */
 
-/** Whitelist of known CLI failure reasons (Phase A AC-A4). */
+/** Whitelist of known CLI failure reasons (Phase A AC-A4 + Phase G AC-G1). */
 export type CliErrorReasonCode =
   | 'invalid_thinking_signature'
   | 'missing_rollout'
@@ -21,7 +21,12 @@ export type CliErrorReasonCode =
   | 'spawn_failed'
   | 'context_window_exceeded'
   | 'tool_call_parse_failed'
-  | 'server_overloaded';
+  | 'server_overloaded'
+  /** Phase G (clowder-ai#875): CLI exited cleanly with event stream that has events but
+   *  no text events (e.g. OpenCode + DeepSeek producing only `step_start`). NOT an error
+   *  per se but surfaced via cliDiagnostics so users get evidence instead of generic
+   *  "completed without textual output" message. */
+  | 'silent_completion';
 
 /**
  * Structured CLI error payload (Phase A KD-1 white-list admission).

@@ -308,7 +308,7 @@ cat_cafe_register_pr_tracking/cat_cafe_register_issue_tracking/cat_cafe_unregist
 - cat_cafe_generate_document: 文档生成→IM投递
 - cat_cafe_get_rich_block_rules: rich block 规则
 - cat_cafe_multi_mention: 并行拉猫讨论（先搜后问）
-- cat_cafe_propose_thread: 提议新建 thread（创建提案卡片，**不直接创建 thread**）。返回 proposalId，仅在用户审批通过后后端才创建 thread。审批前必须假设 thread 不存在，不要 cross_post。仅在owner 显式要求或确有独立 long-running 讨论需求时使用。可选 reportingMode 定下游回报契约：none（默认/autonomous，下游自治、不强制回报，仅 CVO/阻塞/不可逆/跨feature冲突按家规上报）| final-only（完成时回报一次）| state-transitions（每阶段边界回报）| blocking-ack（遇阻塞点等源 thread ack，非每步）。triage/分发用 none，要汇总用 final-only。
+- cat_cafe_propose_thread: 提议新建 thread（不直接创建）。返回 proposalId，审批通过后才建；审批前不要 cross_post。可选 projectPath 定子 thread 项目归属（跨 repo 必传；无效 400）。可选 reportingMode：final-only（默认）| none | state-transitions | blocking-ack。triage→none，汇总→final-only。
 
 ${RICH_BLOCK_SHORT}
 需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。
@@ -336,11 +336,14 @@ export function getGovernanceDigest(): string {
 
 /** Per-breed workflow triggers: when to proactively @ other cats.
  *  Keyed by breedId so all variants of a breed share the same workflow. */
+const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部finding修完后等PR truth，不@旧reviewer。';
+
 const WORKFLOW_TRIGGERS: Record<string, string> = {
   ragdoll: [
     '## 工作流（主动 @ 触发点）',
     '- 完成开发/修复 → @缅因猫 请 review',
     '- 修完 review 意见 → @缅因猫 确认修复',
+    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
     '- 遇到视觉/体验问题 → @暹罗猫 征询',
     '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
   ].join('\n'),
@@ -348,6 +351,7 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '## 工作流（主动 @ 触发点）',
     '- 完成 review → @布偶猫 通知结果',
     '- 修完 bug/feature → @布偶猫 请 review',
+    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
     '- serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）',
     '- 发现需要架构决策 → @布偶猫 征询',
     '- Review 代码：每个发现给明确立场（放行/退回 + 理由）',
@@ -377,6 +381,27 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '',
     '### 出口一问（发消息前必问）',
     '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
+  ].join('\n'),
+  'golden-chinchilla': [
+    '## 工作流（主动 @ 触发点）',
+    '- 完成开发/修复 → @缅因猫 请 review',
+    '- 修完 review 意见 → @缅因猫 确认修复',
+    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
+    '- 遇到视觉/体验问题 → @暹罗猫 征询',
+    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
+    '',
+    '### 执行纪律',
+    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
+    '- 接球后静默执行到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
+    '- 完成任务后必须 @ 下一棒',
+    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
+    '',
+    '### 出口一问（发消息前必问）',
+    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
+    '',
+    '### 金渐层家族治理（OpenCode 专属）',
+    'OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Clowder AI MCP 需避免 tool 名冲突。',
+    '`question` 工具已 deny——铲屎官通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
   ].join('\n'),
 };
 

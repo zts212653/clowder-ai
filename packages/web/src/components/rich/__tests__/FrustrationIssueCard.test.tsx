@@ -78,6 +78,7 @@ describe('FrustrationIssueCard', () => {
       root.render(<FrustrationIssueCard block={issueBlock} />);
     });
 
+    // UX-2: hydrated resolved state starts collapsed — badge visible, no action buttons
     await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
     expect(container.textContent).not.toContain('确认提交');
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/frustration-issues/fi_test_status/status');
@@ -167,6 +168,149 @@ describe('FrustrationIssueCard', () => {
     expect(container.textContent).not.toContain('确认提交');
     expect(container.textContent).not.toContain('Issue already confirmed');
   });
+
+  // ── UX-1: false positive button ────────────────────────────
+
+  it('marks issue as false positive via the button', async () => {
+    vi.mocked(apiFetch).mockImplementation((url, init) => {
+      const path = String(url);
+      if (path.endsWith('/status')) {
+        return Promise.resolve(okJson({ issue: { status: 'draft' } }));
+      }
+      if (path.endsWith('/false-positive') && init?.method === 'POST') {
+        return Promise.resolve(okJson({ issue: { status: 'false_positive' } }));
+      }
+      throw new Error(`Unexpected apiFetch call: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={issueBlock} />);
+    });
+
+    const fpButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('误报'),
+    );
+    expect(fpButton).toBeTruthy();
+
+    await act(async () => {
+      fpButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => expect(container.textContent).toContain('误报'));
+    expect(container.textContent).not.toContain('确认提交');
+  });
+
+  it('hydrates false_positive status from persisted issue', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      okJson({
+        issue: {
+          issueId: 'fi_test_status',
+          status: 'false_positive',
+        },
+      }),
+    );
+
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={issueBlock} />);
+    });
+
+    await vi.waitFor(() => expect(container.textContent).toContain('误报'));
+    expect(container.textContent).not.toContain('确认提交');
+    expect(container.textContent).not.toContain('跳过');
+  });
+
+  // ── UX-2: collapse behavior ───────────────────────────────
+
+  it('collapses to one-line summary after confirm action', async () => {
+    vi.mocked(apiFetch).mockImplementation((url, init) => {
+      const path = String(url);
+      if (path.endsWith('/status')) {
+        return Promise.resolve(okJson({ issue: { status: 'draft' } }));
+      }
+      if (path.endsWith('/confirm') && init?.method === 'POST') {
+        return Promise.resolve(okJson({ issue: { status: 'confirmed' } }));
+      }
+      throw new Error(`Unexpected apiFetch call: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={issueBlock} />);
+    });
+
+    const confirmButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('确认提交'),
+    );
+    expect(confirmButton).toBeTruthy();
+
+    await act(async () => {
+      confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // After confirm, card should collapse — body should not be visible
+    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
+    expect(container.textContent).not.toContain('模型工具调用解析失败');
+  });
+
+  it('expands collapsed card on click', async () => {
+    vi.mocked(apiFetch).mockImplementation((url, init) => {
+      const path = String(url);
+      if (path.endsWith('/status')) {
+        return Promise.resolve(okJson({ issue: { status: 'draft' } }));
+      }
+      if (path.endsWith('/skip') && init?.method === 'POST') {
+        return Promise.resolve(okJson({ issue: { status: 'skipped' } }));
+      }
+      throw new Error(`Unexpected apiFetch call: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={issueBlock} />);
+    });
+
+    // Skip to trigger collapse
+    const skipButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('跳过'),
+    );
+    await act(async () => {
+      skipButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    await vi.waitFor(() => expect(container.textContent).toContain('已跳过'));
+    // Body is hidden in collapsed state
+    expect(container.textContent).not.toContain('模型工具调用解析失败');
+
+    // Click the collapsed bar to expand
+    const expandButton = container.querySelector('button');
+    await act(async () => {
+      expandButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Now body should be visible again
+    await vi.waitFor(() => expect(container.textContent).toContain('模型工具调用解析失败'));
+    expect(container.textContent).toContain('已跳过');
+  });
+
+  it('hydrated resolved state starts collapsed', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(
+      okJson({
+        issue: {
+          issueId: 'fi_test_status',
+          status: 'confirmed',
+          userDescription: 'Already submitted',
+        },
+      }),
+    );
+
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={issueBlock} />);
+    });
+
+    // Should be collapsed: shows badge but not body
+    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
+    expect(container.textContent).not.toContain('模型工具调用解析失败');
+  });
+
+  // ── Existing race condition tests ─────────────────────────
 
   it('keeps confirmed hydration when a duplicate confirm conflict resolves later', async () => {
     let resolveStatus!: (response: Response) => void;

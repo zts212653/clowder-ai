@@ -51,6 +51,7 @@ function QueueEntryRow({
   const canRecallEdit = entry.source === 'user';
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
+  const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
   const sourceLabel = isAgent
     ? `${entry.callerCatId ?? '猫猫'} → ${entry.targetCats[0] ?? '猫猫'}`
@@ -59,7 +60,7 @@ function QueueEntryRow({
       : ownerName;
 
   return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${isPaused ? 'bg-conn-amber-bg/60' : ''}`}>
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
       {/* Drag handle */}
       <button
         className="p-0.5 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing shrink-0 touch-none"

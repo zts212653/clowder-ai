@@ -166,11 +166,12 @@ docs/discussions/exported-threads/
 
 # Large source PDFs (external storage preferred)
 docs/discussions/**/sources/*.pdf
+docs/competitor-research/**/*.pdf
 
 # Playwright MCP cache
 .playwright-mcp/
 
-# SQLite runtime databases (Hindsight evidence store + World Engine + Task Outcome)
+# SQLite runtime databases (Hindsight evidence store + World Engine + Task Outcome + Event Memory)
 evidence.sqlite
 evidence.sqlite-shm
 evidence.sqlite-wal
@@ -180,6 +181,10 @@ world.sqlite-wal
 task-outcome-episodes.sqlite
 task-outcome-episodes.sqlite-shm
 task-outcome-episodes.sqlite-wal
+event-memory.sqlite
+event-memory.sqlite-shm
+event-memory.sqlite-wal
+event-memory.sqlite.outbox.jsonl
 
 # Antigravity smoke test outputs
 .cat-cafe-antigravity-*-smoke.json

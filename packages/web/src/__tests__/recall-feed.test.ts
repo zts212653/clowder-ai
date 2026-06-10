@@ -165,6 +165,22 @@ describe('filterRecallEvents', () => {
     expect(recall[1].results![0].title).toBe('Second Result');
   });
 
+  it('does not report token-cap spill output as zero hits', () => {
+    const events: ToolEvent[] = [
+      makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"large history search"}'),
+      makeToolEvent(
+        'codex ← result',
+        'tool_result',
+        'Evidence search request failed: Error: result exceeds maximum allowed tokens. Full result saved to /tmp/cat-cafe/search-evidence-result.txt',
+      ),
+    ];
+    const recall = filterRecallEvents(events);
+    expect(recall).toHaveLength(1);
+    expect(recall[0].query).toBe('large history search');
+    expect(recall[0].resultCount).toBeUndefined();
+    expect(recall[0].results).toEqual([]);
+  });
+
   it('does not assign a later search result to an earlier stale pending search', () => {
     const events: ToolEvent[] = [
       makeToolEvent('codex → cat_cafe_search_evidence', 'tool_use', '{"query":"first"}'),

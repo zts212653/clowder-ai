@@ -32,6 +32,11 @@ const EXPECTED_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_workspace_navigate',
   'cat_cafe_preview_open',
+  // F227: generic teleport to a thread message
+  'cat_cafe_teleport',
+  // F227 Task 7: Event Memory timeline read + corpus backfill
+  'cat_cafe_list_events',
+  'cat_cafe_backfill_events',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_register_pr_tracking',
   'cat_cafe_register_issue_tracking',
@@ -57,6 +62,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_bootcamp_env_check',
   // F128: Cat-initiated thread proposal
   'cat_cafe_propose_thread',
+  // F225: Cat-initiated session handoff proposal
+  'cat_cafe_propose_session_handoff',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
@@ -126,6 +133,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_audio_set_talking_points',
   // F207 Phase B0: finance fact layer
   'cat_cafe_finance_query',
+  // F192 Phase H AC-H4: verdict publishing pipeline (eval cat → MCP → handler)
+  'cat_cafe_publish_verdict',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -146,6 +155,11 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_workspace_navigate',
   'cat_cafe_preview_open',
+  // F227: generic teleport to a thread message
+  'cat_cafe_teleport',
+  // F227 Task 7: Event Memory timeline read + corpus backfill
+  'cat_cafe_list_events',
+  'cat_cafe_backfill_events',
   'cat_cafe_get_rich_block_rules',
   'cat_cafe_request_permission',
   'cat_cafe_check_permission_status',
@@ -154,6 +168,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_unregister_tracking',
   // F211 Phase B: IDE-direct external runtime session registration
   'cat_cafe_register_external_runtime_session',
+  // F192 Phase H AC-H4: cat_cafe_publish_verdict registered in collab toolset
+  'cat_cafe_publish_verdict',
   // cat_cafe_guide_resolve legacy alias removed in F193 Phase D AC-D2
   'cat_cafe_update_guide_state',
   'cat_cafe_get_available_guides',
@@ -166,6 +182,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_bootcamp_env_check',
   // F128: Cat-initiated thread proposal
   'cat_cafe_propose_thread',
+  // F225: Cat-initiated session handoff proposal
+  'cat_cafe_propose_session_handoff',
   'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
@@ -417,6 +435,10 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_generate_document',
   'cat_cafe_workspace_navigate',
   'cat_cafe_preview_open',
+  // F227: generic teleport (write — agent-key gated, not in readonly)
+  'cat_cafe_teleport',
+  // F227 Task 7: backfill is a write (agent-key gated, not in readonly)
+  'cat_cafe_backfill_events',
   'cat_cafe_request_permission',
   'cat_cafe_register_pr_tracking',
   'cat_cafe_register_issue_tracking',
@@ -438,6 +460,8 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_register_scheduled_task',
   'cat_cafe_remove_scheduled_task',
   'cat_cafe_hold_ball', // callbackPost → writes scheduled task
+  // F192 Phase H AC-H4: publish verdict creates branch + commit + PR (write)
+  'cat_cafe_publish_verdict',
   'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
   'signal_mark_read',
   'signal_summarize',
@@ -517,7 +541,12 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         !names.includes('cat_cafe_post_message') ||
         !names.includes('cat_cafe_get_thread_context') ||
         !names.includes('cat_cafe_workspace_navigate') ||
-        !names.includes('cat_cafe_preview_open')
+        !names.includes('cat_cafe_preview_open') ||
+        // F227: teleport is agent-key gated — must be visible in readonly+agent-key
+        !names.includes('cat_cafe_teleport') ||
+        !names.includes('cat_cafe_create_rich_block') ||
+        // 砚砚 R9 P1: shared-MCP cats must see publish-verdict
+        !names.includes('cat_cafe_publish_verdict')
       ) {
         console.error(JSON.stringify(names.sort()));
         process.exit(1);

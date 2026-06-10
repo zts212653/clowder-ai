@@ -17,7 +17,7 @@
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import { buildCliDiagnostics } from '../../../../../utils/cli-diagnostics.js';
+import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -176,11 +176,18 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         'Invoking OpenCode CLI',
       );
 
+      const successfulExitStderr: { stderrPresent: boolean; stderrExcerpt?: string } = { stderrPresent: false };
+      const onSuccessfulExitStderr = (summary: { stderrPresent: boolean; stderrExcerpt?: string }): void => {
+        successfulExitStderr.stderrPresent = summary.stderrPresent;
+        if (summary.stderrExcerpt) successfulExitStderr.stderrExcerpt = summary.stderrExcerpt;
+      };
+
       const cliOpts = {
         command: opencodeCommand,
         args,
         ...(cwd ? { cwd } : {}),
         env: childEnv,
+        onSuccessfulExitStderr,
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -196,6 +203,18 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
       let eventCount = 0;
       let textEventCount = 0;
+      // F212 Phase G (AC-G3, clowder-ai#875): track unique event types so the
+      // silent_completion diagnostic can surface them when textEventCount===0.
+      const uniqueEventTypes = new Set<string>();
+      // F212 Phase G: skip silent_completion if ANY error event already yielded.
+      // Real errors (cli error, stream error, timeout, model_not_found, auth_failed,
+      // etc.) carry the actual reason; silent_completion would be a noisy duplicate.
+      // Track any error path, not just ones with cliDiagnostics.
+      let errorAlreadyYielded = false;
+      // F212 Phase G R1 P1 (cloud codex on 1d519e7f2): tool-only turns are valid task
+      // completions per F215 AC-B3. When the assistant emitted a tool_use event the work
+      // happened via tools — silent_completion would mislabel a legitimate path.
+      let toolUseEmitted = false;
 
       for await (const event of events) {
         eventCount++;
@@ -209,6 +228,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           typeof event === 'object' && event !== null && 'type' in event
             ? String((event as Record<string, unknown>).type)
             : '__unknown';
+        uniqueEventTypes.add(evtType);
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         if (isCliTimeout(event)) {
           yield {
@@ -235,6 +255,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
+          errorAlreadyYielded = true;
           continue;
         }
         // F118 Phase C: Forward liveness warnings to frontend with catId
@@ -267,12 +288,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
+          errorAlreadyYielded = true;
           continue;
         }
 
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
           if (result.type === 'text') textEventCount++;
+          if (result.type === 'tool_use') toolUseEmitted = true;
           // F212 Phase A AC-A8: enrich stream `error` event yield with cliDiagnostics so
           // frontend folded panel (Phase B) sees reasonCode / safeExcerpt / publicHint
           // even when CLI never exits non-zero (some providers emit error events then exit 0).
@@ -303,6 +326,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
               });
               yieldMetadata = { ...metadata, cliDiagnostics };
             }
+            errorAlreadyYielded = true;
           }
           // P2-1: Only emit the first session_init; subsequent step_start events
           // in multi-step runs are silently dropped to avoid duplicate session metrics.
@@ -319,11 +343,36 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         { catId: this.catId, totalEvents: eventCount, textEvents: textEventCount, sessionId: metadata.sessionId },
         'OpenCode CLI invocation completed',
       );
-      if (textEventCount === 0) {
+      // F212 Phase G (AC-G3, clowder-ai#875): surface silent_completion via cliDiagnostics.
+      // Only when eventCount > 0 (CLI actually produced events) AND no other diagnostic
+      // already surfaced (don't double-yield on cli error / stream error / timeout — they
+      // carry the REAL reasonCode like model_not_found or auth_failed, silent_completion
+      // would be a noisy duplicate). Yields BEFORE 'done' so caller sees structured evidence.
+      if (eventCount > 0 && textEventCount === 0 && !errorAlreadyYielded && !toolUseEmitted) {
         log.warn(
-          { catId: this.catId, totalEvents: eventCount },
-          'OpenCode CLI produced 0 text events — will show as silent_completion',
+          { catId: this.catId, totalEvents: eventCount, eventTypes: Array.from(uniqueEventTypes) },
+          'OpenCode CLI produced 0 text events — surfacing silent_completion diagnostic',
         );
+        const silentDiag = buildSilentCompletionDiagnostic({
+          command: 'opencode',
+          ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+          eventCount,
+          eventTypes: Array.from(uniqueEventTypes),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(metadata.sessionId ? { sessionId: metadata.sessionId } : {}),
+          stderrPresent: successfulExitStderr.stderrPresent,
+          ...(successfulExitStderr.stderrExcerpt ? { stderrExcerpt: successfulExitStderr.stderrExcerpt } : {}),
+        });
+        yield {
+          type: 'system_info',
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'silent_completion',
+            detail: 'OpenCode CLI 完成但无文字输出（见 cliDiagnostics 详情）',
+          }),
+          metadata: { ...metadata, cliDiagnostics: silentDiag },
+          timestamp: Date.now(),
+        };
       }
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };

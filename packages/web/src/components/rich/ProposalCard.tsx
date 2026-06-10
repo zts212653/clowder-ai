@@ -1,63 +1,64 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-
-type Status = 'pending' | 'approving' | 'approved' | 'rejected';
-
-interface ProposalSnapshot {
-  proposalId: string;
-  status: Status;
-  createdThreadId?: string;
-}
+import {
+  EditField,
+  formatReportingMode,
+  ProjectPathEdit,
+  ReportingModeEdit,
+  type ReportingModeEditValue,
+} from './ProposalCardFields';
+import {
+  extractProposalId,
+  isDefaultProjectOwnership,
+  type ProposalCardStatus,
+  type ProposalFieldEdits,
+  type ProposalSnapshot,
+  parsePreferredCats,
+  readField,
+  readProjectPathEdit,
+  readReportingModeEdit,
+} from './ProposalCardUtils';
 
 interface ProposalCardProps {
   block: RichCardBlock;
   messageId?: string;
 }
 
-interface ProposalFieldEdits {
-  title: string;
-  parentThreadId: string;
-  preferredCats: string;
-  initialMessage: string;
-}
-
-function extractProposalId(block: RichCardBlock): string | null {
-  const approveAction = block.actions?.find((a) => a.action === 'propose:approve');
-  const id = approveAction?.payload?.proposalId;
-  return typeof id === 'string' ? id : null;
-}
-
-function readField(block: RichCardBlock, label: string): string {
-  return block.fields?.find((f) => f.label === label)?.value ?? '';
-}
-
-function parsePreferredCats(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s !== '（未指定）');
+function selectExistingProjectPaths(state: ReturnType<typeof useChatStore.getState>): string[] {
+  const threads = state.threads ?? [];
+  return [...new Set(threads.map((t) => t.projectPath).filter((p): p is string => !!p && p !== 'default'))].sort();
 }
 
 export function ProposalCard({ block }: ProposalCardProps) {
   const proposalId = useMemo(() => extractProposalId(block), [block]);
-  const [status, setStatus] = useState<Status>('pending');
+  const [status, setStatus] = useState<ProposalCardStatus>('pending');
   const [resultThreadId, setResultThreadId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinOnApprove, setPinOnApprove] = useState(false);
+  const [effectiveReportingMode, setEffectiveReportingMode] = useState<ReportingModeEditValue>(() =>
+    readReportingModeEdit(block),
+  );
   const [edits, setEdits] = useState<ProposalFieldEdits>(() => ({
     title: block.title.replace(/^📥 提议新建 thread：/, ''),
     parentThreadId: readField(block, '父 Thread'),
     preferredCats: readField(block, '建议成员'),
     initialMessage: readField(block, '首条消息'),
+    projectPath: readProjectPathEdit(block),
+    reportingMode: readReportingModeEdit(block),
   }));
+  const projectOwnership = readField(block, '项目归属');
+  const reportingMode = formatReportingMode(effectiveReportingMode);
+  const needsProjectChoice = isDefaultProjectOwnership(projectOwnership);
+  const existingProjects = useChatStore(useShallow(selectExistingProjectPaths));
 
   // Mount: fetch real status so reload / multi-tab views don't drift to stale "pending".
   useEffect(() => {
@@ -71,6 +72,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
         if (data.proposal && !cancelled) {
           setStatus(data.proposal.status);
           if (data.proposal.createdThreadId) setResultThreadId(data.proposal.createdThreadId);
+          if (data.proposal.reportingMode) {
+            setEffectiveReportingMode(data.proposal.reportingMode);
+            setEdits((prev) => ({ ...prev, reportingMode: data.proposal.reportingMode ?? prev.reportingMode }));
+          }
         }
       } catch {
         // best-effort sync; keep the optimistic 'pending' if fetch fails
@@ -89,6 +94,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
       if (!detail || detail.proposalId !== proposalId) return;
       setStatus(detail.status);
       if (detail.createdThreadId) setResultThreadId(detail.createdThreadId);
+      if (detail.reportingMode) {
+        setEffectiveReportingMode(detail.reportingMode);
+        setEdits((prev) => ({ ...prev, reportingMode: detail.reportingMode ?? prev.reportingMode }));
+      }
     };
     window.addEventListener('cat-cafe:proposal-updated', handler);
     return () => {
@@ -106,6 +115,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
           parentThreadId: edits.parentThreadId.trim() || undefined,
           preferredCats: parsePreferredCats(edits.preferredCats),
           initialMessage: edits.initialMessage.trim() ? edits.initialMessage.trim() : null,
+          // F128: empty box = no override (keep the proposal's projectPath); a path re-homes the
+          // child thread. Backend validates + fail-loud rejects an invalid path (400).
+          projectPath: edits.projectPath.trim() || undefined,
+          reportingMode: edits.reportingMode,
         }
       : {};
     try {
@@ -117,6 +130,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
       const data = (await res.json()) as { threadId?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       const newThreadId = data.threadId ?? null;
+      setEffectiveReportingMode(editing ? edits.reportingMode : effectiveReportingMode);
       setResultThreadId(newThreadId);
       setStatus('approved');
       setEditing(false);
@@ -136,7 +150,6 @@ export function ProposalCard({ block }: ProposalCardProps) {
           // best-effort: pin failure should not block the approve success UX
         }
       }
-      // AC-F8: auto-navigate to the new thread
       if (newThreadId) {
         pushThreadRouteWithHistory(newThreadId, typeof window !== 'undefined' ? window : undefined);
       }
@@ -145,7 +158,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
     } finally {
       setLoading(false);
     }
-  }, [proposalId, editing, edits, pinOnApprove]);
+  }, [proposalId, editing, edits, effectiveReportingMode, pinOnApprove]);
 
   const reject = useCallback(async () => {
     if (!proposalId) return;
@@ -195,11 +208,25 @@ export function ProposalCard({ block }: ProposalCardProps) {
             <span className="text-cafe-muted">建议成员:</span>{' '}
             <span className="font-mono break-all">{edits.preferredCats || '（未指定）'}</span>
           </div>
+          <div className="sm:col-span-2">
+            <span className="text-cafe-muted">回报模式:</span> <span>{reportingMode}</span>
+          </div>
+          {projectOwnership && (
+            <div className="sm:col-span-2">
+              <span className="text-cafe-muted">项目归属:</span>{' '}
+              <span className="font-mono break-all">{projectOwnership}</span>
+            </div>
+          )}
           {edits.initialMessage && (
             <div className="sm:col-span-2">
               <span className="text-cafe-muted">首条消息:</span> <span>{edits.initialMessage}</span>
             </div>
           )}
+        </div>
+      )}
+      {needsProjectChoice && !editing && (
+        <div className="mt-2 rounded border border-[var(--semantic-warning)] bg-[var(--semantic-warning-surface)] px-2 py-1 text-xs text-cafe-secondary">
+          这个子 thread 会进入未分类。点“编辑”选择项目，或直接批准表示保留未分类。
         </div>
       )}
       {editing && (
@@ -209,6 +236,16 @@ export function ProposalCard({ block }: ProposalCardProps) {
             label="父 Thread"
             value={edits.parentThreadId}
             onChange={(v) => setEdits((p) => ({ ...p, parentThreadId: v }))}
+          />
+          <ProjectPathEdit
+            value={edits.projectPath}
+            onChange={(v) => setEdits((p) => ({ ...p, projectPath: v }))}
+            existingProjects={existingProjects}
+            defaultParent={needsProjectChoice}
+          />
+          <ReportingModeEdit
+            value={edits.reportingMode}
+            onChange={(v) => setEdits((p) => ({ ...p, reportingMode: v }))}
           />
           <EditField
             label="建议成员 (逗号分隔)"
@@ -236,7 +273,13 @@ export function ProposalCard({ block }: ProposalCardProps) {
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={loading} onClick={approve} className={btnPrimary}>
-              {loading ? '处理中...' : editing ? '批准（含编辑）' : '批准并创建'}
+              {loading
+                ? '处理中...'
+                : editing
+                  ? '批准（含编辑）'
+                  : needsProjectChoice
+                    ? '批准并创建（保留未分类）'
+                    : '批准并创建'}
             </button>
             <button type="button" disabled={loading} onClick={() => setEditing((v) => !v)} className={btnSecondary}>
               {editing ? '取消编辑' : '编辑'}
@@ -277,39 +320,6 @@ const btnSecondary =
   'text-xs px-3 py-1 rounded bg-cafe-surface-elevated hover:bg-[var(--console-hover-bg)] dark:hover:bg-gray-700 text-cafe-secondary border border-[var(--console-border-soft)] disabled:opacity-50 transition-colors';
 const btnDanger =
   'text-xs px-3 py-1 rounded bg-[var(--semantic-critical-surface)] hover:bg-red-200 dark:hover:bg-red-800/50 text-conn-red-text border border-[var(--semantic-critical)] disabled:opacity-50 transition-colors';
-
-function EditField({
-  label,
-  value,
-  onChange,
-  multiline,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  multiline?: boolean;
-}) {
-  return (
-    <label className="block">
-      <span className="text-cafe-muted">{label}:</span>{' '}
-      {multiline ? (
-        <textarea
-          className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 font-mono text-xs"
-          rows={2}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      ) : (
-        <input
-          type="text"
-          className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 font-mono text-xs"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      )}
-    </label>
-  );
-}
 
 export function isProposalCardBlock(block: RichCardBlock): boolean {
   return block.actions?.some((a) => a.action === 'propose:approve') ?? false;

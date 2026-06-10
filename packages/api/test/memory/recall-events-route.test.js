@@ -34,8 +34,8 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
       `INSERT INTO recall_events
         (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
          candidates_json, consumed_json, reformulated, fell_back_to_grep,
-         abandoned, next_graph_resolve_after_read, token_cost, timestamp, thread_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         abandoned, next_graph_resolve_after_read, token_cost, timestamp, thread_id, result_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
 
     // Seed recall events in owned and system threads. The non-default system event
@@ -57,6 +57,45 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
       0,
       1000,
       'thread-owned',
+      1,
+    );
+    insertRecallEvent.run(
+      'r-thread-results',
+      'opus',
+      'inv-thread-results',
+      'search_evidence',
+      'thread history',
+      'hybrid',
+      'threads',
+      '[]',
+      '[]',
+      0,
+      0,
+      0,
+      0,
+      0,
+      1003,
+      'thread-owned',
+      8,
+    );
+    insertRecallEvent.run(
+      'r-oversized',
+      'opus',
+      'inv-oversized',
+      'search_evidence',
+      'oversized search',
+      'hybrid',
+      'threads',
+      '[]',
+      '[]',
+      0,
+      0,
+      0,
+      0,
+      0,
+      1004,
+      'thread-owned',
+      null,
     );
     insertRecallEvent.run(
       'r-2',
@@ -75,6 +114,7 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
       0,
       1001,
       'thread-system',
+      1,
     );
     insertRecallEvent.run(
       'r-3',
@@ -93,6 +133,7 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
       0,
       1002,
       'thread-indexed-system',
+      1,
     );
 
     // Mock threadStore
@@ -136,9 +177,39 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
     assert.equal(res.statusCode, 200, 'owner gets 200');
     const body = res.json();
     assert.ok(Array.isArray(body.events), 'events is an array');
-    assert.equal(body.events.length, 1, 'one recall event');
-    assert.equal(body.events[0].query, 'F102');
-    assert.equal(body.events[0].results[0].anchor, 'F102');
+    assert.equal(body.events.length, 3, 'three recall events');
+    const docEvent = body.events.find((event) => event.query === 'F102');
+    assert.ok(docEvent, 'doc event present');
+    assert.equal(docEvent.results[0].anchor, 'F102');
+    assert.equal(docEvent.resultCount, 1);
+  });
+
+  it('200: returns reported hit count even when no candidate anchors were persisted', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/recall/events?threadId=thread-owned',
+      headers: AUTH_HEADER,
+    });
+    assert.equal(res.statusCode, 200, 'owner gets 200');
+    const body = res.json();
+    const event = body.events.find((item) => item.query === 'thread history');
+    assert.ok(event, 'thread-scope recall event present');
+    assert.equal(event.resultCount, 8, 'reported Found N count survives candidates_json=[]');
+    assert.deepEqual(event.results, [], 'no fake candidate rows are invented');
+  });
+
+  it('200: omits resultCount when historical rows have neither reported count nor candidates', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/recall/events?threadId=thread-owned',
+      headers: AUTH_HEADER,
+    });
+    assert.equal(res.statusCode, 200, 'owner gets 200');
+    const body = res.json();
+    const event = body.events.find((item) => item.query === 'oversized search');
+    assert.ok(event, 'oversized recall event present');
+    assert.equal('resultCount' in event, false, 'unknown count must not be displayed as 0');
+    assert.deepEqual(event.results, []);
   });
 
   it('200: default system thread is accessible by any user', async () => {

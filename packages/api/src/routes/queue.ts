@@ -421,11 +421,14 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
             }
           }
           invocationQueue.promote(threadId, guard.userId, entryId);
-          socketManager.emitToUser(guard.userId, 'queue_updated', {
+          await emitQueueUpdated(
+            socketManager,
+            guard.userId,
             threadId,
-            queue: invocationQueue.list(threadId, guard.userId),
-            action: 'steer_immediate',
-          });
+            invocationQueue.list(threadId, guard.userId),
+            messageStore,
+            'steer_immediate',
+          );
           reply.status(202);
           return {
             ok: true,
