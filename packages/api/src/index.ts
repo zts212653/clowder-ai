@@ -1622,6 +1622,9 @@ async function main(): Promise<void> {
   const { createTaskOutcomeGeneratorAdapter } = await import(
     './infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js'
   );
+  const { createSopGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/sop-generator-adapter.js'
+  );
 
   // F192 Phase H 收尾 PR-2 (砚砚 R1 P1 + Q5): capability-wakeup generator wires a real
   // CapabilityWakeupTrialProviderImpl with all 4 required ports (sessionStore /
@@ -1636,6 +1639,7 @@ async function main(): Promise<void> {
     >
   > = {
     'eval:a2a': createA2aGeneratorAdapter(),
+    'eval:sop': createSopGeneratorAdapter(),
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
   };
   if (toolEventLog && skillLoadEventLog) {
@@ -3485,6 +3489,9 @@ async function main(): Promise<void> {
     'eval:a2a' | 'eval:memory' | 'eval:sop' | 'eval:capability-wakeup' | 'eval:task-outcome'
   >(['eval:a2a']);
   wiredPublishDomains.add('eval:task-outcome');
+  // eval:sop has no runtime dependencies (unlike cw needing toolEventLog or memory
+  // needing markerQueue) — unconditionally wired like eval:a2a and eval:task-outcome.
+  wiredPublishDomains.add('eval:sop');
   if (toolEventLog && skillLoadEventLog) {
     wiredPublishDomains.add('eval:capability-wakeup');
   }

@@ -293,17 +293,16 @@ Evidence:
       'no-verdict domain still gets nextCronFireAt',
     );
 
-    // Sunset 2026-06-06 (F192 silent-fire fix): eval:sop has `enabled: false` in
-    // its yaml, so the summary must NOT publish nextCronFireAt (cron silently
-    // skips it — surfacing a future fire time would be the operator-facing
-    // mirror of the silent-fire bug the sunset is meant to fix).
+    // Re-enabled 2026-06-10 (F192 sop-wiring PR): eval:sop is now wired with
+    // live publish path (SopTrace producer + file-writer + verdictGenerator).
+    // Weekly domain → nextCronFireAt = next Sunday 03:00 UTC after fixture now.
     const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
     assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, false, 'sunset domain must carry enabled=false');
+    assert.equal(sopDomain.enabled, true, 're-enabled sop domain must carry enabled=true');
     assert.equal(
       sopDomain.nextCronFireAt,
-      undefined,
-      'sunset domain must NOT have nextCronFireAt (cron skips it, future time would mislead operators)',
+      '2026-05-24T03:00:00.000Z',
+      're-enabled weekly sop domain nextCronFireAt = next Sunday 03:00 UTC',
     );
 
     // Weekly + enabled: eval:capability-wakeup is the other weekly domain and
@@ -333,11 +332,11 @@ Evidence:
       assert.equal(typeof d.enabled, 'boolean', `${d.domainId} must have boolean enabled field`);
     }
 
-    // sunset: enabled=false + no nextCronFireAt
+    // re-enabled: enabled=true + has nextCronFireAt (weekly)
     const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
     assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, false);
-    assert.equal(sopDomain.nextCronFireAt, undefined);
+    assert.equal(sopDomain.enabled, true);
+    assert.ok(sopDomain.nextCronFireAt, 're-enabled weekly domain must have nextCronFireAt');
 
     // active: enabled=true + has nextCronFireAt
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');

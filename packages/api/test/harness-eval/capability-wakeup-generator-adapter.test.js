@@ -199,7 +199,8 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
   });
 
   it('happy path: passes packet+trials+domain to generator and returns artifact paths', async () => {
-    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'cw-adapter-happy-'));
+    const repoRoot = mkdtempSync(join(tmpdir(), 'cw-adapter-happy-repo-'));
+    const harnessFeedbackRoot = join(repoRoot, 'docs', 'harness-feedback');
     seedDomainRegistry(harnessFeedbackRoot);
     let resolveCalledWith = null;
     let resolveScope = null;
@@ -237,10 +238,10 @@ describe('createCapabilityWakeupGeneratorAdapter', () => {
     // and reviewers/main can't audit/replay.
     assert.ok(Array.isArray(result.extraStagedPaths), 'extraStagedPaths must be array');
     assert.equal(result.extraStagedPaths.length, 1, 'expected exactly one extra staged path (rawInputDir)');
-    assert.match(
+    assert.equal(
       result.extraStagedPaths[0],
-      /generated\/capability-wakeup\/vhp-cw-adapter-test$/,
-      'extra path must be raw input dir',
+      join(repoRoot, 'generated', 'capability-wakeup', 'vhp-cw-adapter-test'),
+      'extra path must be raw input dir inside the derived repo root',
     );
   });
 });

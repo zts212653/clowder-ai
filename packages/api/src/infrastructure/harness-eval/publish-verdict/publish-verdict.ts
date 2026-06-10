@@ -24,8 +24,10 @@ import {
   inferSourceRefsKind,
   isA2aSourceRefs,
   isMemorySourceRefs,
+  isSopSourceRefs,
   isTaskOutcomeSourceRefs,
   validateMemoryRecallSelector,
+  validateSopTraceSelector,
   validateSourceRefsFormat,
   validateTaskOutcomeSourceRefs,
 } from './validation.js';
@@ -197,6 +199,7 @@ export async function handlePublishVerdict(
   const EXPECTED_REFS_KIND_BY_DOMAIN: Partial<Record<string, string>> = {
     'eval:a2a': 'a2a-snapshot-attribution',
     'eval:capability-wakeup': 'capability-wakeup-trial-window',
+    'eval:sop': 'sop-trace-eval',
     'eval:task-outcome': 'task-outcome-snapshot',
     'eval:memory': 'memory-recall-snapshot',
   };
@@ -205,11 +208,14 @@ export async function handlePublishVerdict(
     return {
       status: 400,
       error: 'sourceRefs_kind_mismatch',
-      detail: `Domain '${packet.domainId}' expects sourceRefs.kind='${expectedKind}', got '${refsKind}'. Each domain has a specific evidence shape: eval:a2a → {snapshotName, attributionName}; eval:capability-wakeup → {kind:'capability-wakeup-trial-window', capability, windowStartMs, windowEndMs, sessionIds?}; eval:memory → {kind:'memory-recall-snapshot', windowDays, catId?, toolName?}; eval:task-outcome → {kind:'task-outcome-snapshot', windowStartMs, windowEndMs, databasePath?, evidenceCatId?}.`,
+      detail: `Domain '${packet.domainId}' expects sourceRefs.kind='${expectedKind}', got '${refsKind}'. Each domain has a specific evidence shape: eval:a2a → {snapshotName, attributionName}; eval:capability-wakeup → {kind:'capability-wakeup-trial-window', ...}; eval:memory → {kind:'memory-recall-snapshot', ...}; eval:sop → {kind:'sop-trace-eval', sopDefinitionId, trace}; eval:task-outcome → {kind:'task-outcome-snapshot', ...}.`,
     };
   }
 
-  if (isMemorySourceRefs(input.sourceRefs)) {
+  if (isSopSourceRefs(input.sourceRefs)) {
+    const selectorError = validateSopTraceSelector(input.sourceRefs);
+    if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
+  } else if (isMemorySourceRefs(input.sourceRefs)) {
     const selectorError = validateMemoryRecallSelector(input.sourceRefs);
     if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
   } else if (isA2aSourceRefs(input.sourceRefs)) {

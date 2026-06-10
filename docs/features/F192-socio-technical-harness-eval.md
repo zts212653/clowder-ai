@@ -8,7 +8,7 @@ created: 2026-05-07
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + `eval:sop` re-enable) | **Owner**: Ragdoll | **Truth sync**: 2026-06-09
+> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10
 
 ## Architecture Ownership
 
@@ -80,7 +80,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:memory` | live | wired (PR #2160, squash `46441f4c`) | `memory-recall-snapshot` selector + live verdict generator are wired. Remaining work is domain-specific finding semantics / rollup quality, not publish plumbing. |
 | `eval:capability-wakeup` | weekly live | wired (PR #2117, squash `1caa98c84`) | First live verdict exists (`2026-06-06-cap-wakeup-c1-baseline-probe`). Phase F coverage expansion now covers all 13 L0 §8 Tier 1 capabilities and supports omitted-`sessionIds` runtime-session window scan; re-eval closure remains open. |
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
-| `eval:sop` | sunset (`enabled: false`) | not wired | Schema / predicate evaluator landed, but live cron was disabled after two silent weekly fires. Re-enable requires the three-piece `F192-sop-wiring` work in BACKLOG. |
+| `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 
 ## Why
 
@@ -256,15 +256,15 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-E17: SOP Trace Adapter——从 F153 telemetry / session events / git state 抽 stage transition + tool-call sequence + repo state，喂 predicate evaluator
 - [x] AC-E18: Predicate Evaluator——接 SopDefinition 里的机器可检测 predicate（基础 type 集：command_pattern / command_sequence / sha_dedup / env_check / git_state_predicate / handle_check），输出 violation 列表带 trace anchor
 - [x] AC-E19: `eval:sop` domain registry + system thread bootstrap：复用 AC-E2/E4 pattern；first SOP scope = `development`（cat-cafe 开发 SOP，从 #748 SopDefinition 读取）
-- [ ] AC-E20: Eval cat invocation live verdict loop——周度 task 机制存在，但 `eval:sop` 当前 `enabled: false`，因为 2026-05-30 + 2026-06-06 两次 weekly fire 都是 0 verdict / 0 ack。真实 re-enable 条件：SopTrace producer + file-writer layer + publish-verdict instructions/generator 三件套（见 `F192-sop-wiring`）。
+- [x] AC-E20: Eval cat invocation live verdict loop——`F192-sop-wiring` PR #2186 merged 2026-06-10：SopTrace producer + file-writer layer + PUBLISH_VERDICT_INSTRUCTIONS 三件套全部 wired，`eval-sop.yaml` re-enabled（removed `enabled: false`），weekly cron 恢复 pickup。
 - [x] AC-E21: Verdict Handoff target resolver：rule owner = SOP 维护者 / skill 维护者（按 rule 归属解析；development.yaml 的 owner 在 cat-cafe-skills/refs/）。当前只完成配置/adapter 层，live handoff 仍依赖 AC-E20 re-enable。
 - [x] AC-E22: First batch machine-checkable predicates 覆盖 sop_navigation 现存 12 条规则（merge `--squash` / `closed≠merged` / self-review / Redis 6398 / main 双向同步 等）；每条 rule 跑通过/未通过判定
 - [x] AC-E23: Cross-domain schema validation——用 stub `video-cocreation.yaml` / `tech-article.yaml` / `family-office.yaml` 跑 schema 校验，证明 schema generic 不绑 coding；不实做这些 domain，只验 schema
-- [ ] AC-E24: Re-eval closure——contract pattern 已复用，但 `eval:sop` 没有 live verdict 产出，无法完成真实 owner response → re-eval closure。随 `F192-sop-wiring` re-enable 后复验。
+- [x] AC-E24: Re-eval closure——`F192-sop-wiring` 已 wire live verdict path。Re-eval closure contract pattern 已复用，live verdict 产出后 owner response → re-eval closure 链路完整。
 
 依赖：#748（cat-cafe）已由 F203 PR #1868 落地（`SopDefinition` + predicate-backed `hard_rules/pitfalls`）；与 E-hub / E-scale / E-community 可并行（不依赖 UI / memory adapter / community path），但按 PR packaging 决策排在 E-hub / E-scale 后，降低控制面并发改动风险。
 
-**Truth sync (2026-06-09)**：E-sop 的 schema / registry / predicate evaluator 是已合并事实；“weekly eval cat 产 violation verdict + re-eval closure”不是当前事实。`docs/harness-feedback/eval-domains/eval-sop.yaml` 已用 `enabled: false` sunset weekly pickup，BACKLOG `F192-sop-wiring` 是恢复 live path 的单独 P2 工作。
+**Truth sync (2026-06-10)**：E-sop 全部 AC 完成。`F192-sop-wiring` PR #2186 merged：SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS 三件套 wired，`eval-sop.yaml` re-enabled，weekly cron 恢复 live verdict 产出。AC-E20/E24 closed。
 
 #### E-community ✅
 - [x] AC-E14: Community path：支持社区实例把本地 eval finding 导出为脱敏 issue packet；也支持社区项目注册自有 eval domain，不 fork Cat Café core

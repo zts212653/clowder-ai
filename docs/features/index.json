@@ -1179,7 +1179,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure + `eval:sop` re-enable) | **Owner**: Ragdoll | **Truth sync**: 2026-06-09",
+      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1385,6 +1385,12 @@
       "name": "Multi-Project Skill Mount Management — 多项目 Skills 挂载管理",
       "status": "spec | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
       "file": "F228-multi-project-skill-mount-management.md"
+    },
+    {
+      "id": "F229",
+      "name": "猫猫球 — 前台猫常驻入口（Cat Ball Concierge）",
+      "status": "spec | **Owner**: Ragdoll (Fable-5) | **Priority**: P1",
+      "file": "F229-cat-ball-concierge.md"
     }
   ]
 }

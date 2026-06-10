@@ -133,11 +133,10 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     );
   });
 
-  // Only domains with a real wired generator should see publish instructions.
-  // Wired here: eval:a2a + eval:capability-wakeup + eval:memory + eval:task-outcome.
-  // Remaining (sop) stays on base instructions until its generator lands.
+  // All five domains now have wired generators and should see publish instructions.
+  // Wired: eval:a2a + eval:capability-wakeup + eval:memory + eval:task-outcome + eval:sop.
   it('only wired domains get publish-verdict directive (wired domains only)', () => {
-    for (const wiredDomain of ['eval:a2a', 'eval:capability-wakeup', 'eval:memory', 'eval:task-outcome']) {
+    for (const wiredDomain of ['eval:a2a', 'eval:capability-wakeup', 'eval:memory', 'eval:task-outcome', 'eval:sop']) {
       const packet = buildEvalCatInvocation({
         domain: { ...TEST_DOMAIN_BASE, domainId: wiredDomain, sourceAdapter: SOURCE_ADAPTER_FOR[wiredDomain] },
         trendRefs: [],
@@ -207,19 +206,18 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
       'task-outcome does NOT mention a2a refs',
     );
 
-    for (const domainId of ['eval:sop']) {
-      const packet = buildEvalCatInvocation({
-        domain: { ...TEST_DOMAIN_BASE, domainId, sourceAdapter: SOURCE_ADAPTER_FOR[domainId] },
-        trendRefs: [],
-        verdictRefs: [],
-        legacyCleanup: { status: 'not_checked' },
-      });
-      assert.doesNotMatch(
-        packet.instructions,
-        /cat_cafe_publish_verdict/,
-        `${domainId} must NOT have publish path (handler would 501; cat would loop)`,
-      );
-    }
+    const sop = buildEvalCatInvocation({
+      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:sop', sourceAdapter: 'sop-trace-eval' },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+    assert.match(sop.instructions, /sop-trace-eval/, 'sop selector kind');
+    assert.match(sop.instructions, /sopDefinitionId/, 'sop sopDefinitionId field');
+    assert.match(sop.instructions, /trace/, 'sop trace field');
+    assert.doesNotMatch(sop.instructions, /snapshotName.*attributionName/s, 'sop does NOT mention a2a refs');
+    assert.doesNotMatch(sop.instructions, /capability-wakeup-trial-window/, 'sop does NOT mention cw selector');
+    assert.doesNotMatch(sop.instructions, /memory-recall-snapshot/, 'sop does NOT mention memory selector');
   });
 
   // memory wire-up (砚砚 R1 P1 same gating as cw): wiredPublishDomains gates

@@ -40,12 +40,22 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
       // retries to hit "branch already exists" race).
       let prOpened = false;
       let pushSucceeded = false;
-      let worktreeCreated = false;
       let prUrl: string | null = null;
+      let branchExistedBefore = false;
 
       try {
         // 1. Fetch latest origin/main to ensure isolated worktree is current
         await exec('git', ['-C', deps.repoRoot, 'fetch', 'origin', 'main'], { timeout: 60_000 });
+
+        // Probe upfront so partial-failure cleanup never deletes a pre-existing branch.
+        try {
+          await exec('git', ['-C', deps.repoRoot, 'rev-parse', '--verify', `refs/heads/${opts.branchName}`], {
+            timeout: 10_000,
+          });
+          branchExistedBefore = true;
+        } catch {
+          branchExistedBefore = false;
+        }
 
         // 2. Create isolated worktree on a new branch from origin/main
         //    Atomic: fails if branch already exists (race protection)
@@ -54,7 +64,6 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
           ['-C', deps.repoRoot, 'worktree', 'add', '-b', opts.branchName, worktreePath, opts.sourceBase],
           { timeout: 60_000 },
         );
-        worktreeCreated = true;
 
         // 3. Run caller's stage callback (generator writes verdict artifacts)
         const { paths, commitMessage, prTitle, prBody, labels, afterPublish } = await opts.stage(worktreePath);
@@ -176,56 +185,61 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         }
         throw err;
       } finally {
-        // Cleanup: remove worktree (--force in case stage left dirty state)
-        if (worktreeCreated) {
-          try {
-            await exec('git', ['-C', deps.repoRoot, 'worktree', 'remove', '--force', worktreePath], {
-              timeout: 30_000,
-            });
-          } catch {
-            // Worktree state already cleaned by another path
-          }
+        // Cleanup: always attempt worktree removal. `git worktree add -b` can
+        // create the branch before failing the worktree setup; best-effort
+        // removal here keeps admin metadata from lingering across retries.
+        try {
+          await exec('git', ['-C', deps.repoRoot, 'worktree', 'remove', '--force', worktreePath], {
+            timeout: 30_000,
+          });
+        } catch {
+          // Worktree may never have registered or may already be gone.
+        }
 
-          // 砚砚 R4 P2 + cloud R12 P2: cleanup on failure so retries don't collide.
-          // If PR was opened, leave both branches (PR is the source).
-          // If push succeeded but gh failed → remote branch leaks → next retry's
-          // worktree-add succeeds locally but push -u rejects (non-fast-forward).
-          // Fix: also delete remote branch in this gap.
-          if (!prOpened) {
+        // 砚砚 R4 P2 + Day-6 cron bug: cleanup on failure so retries don't collide.
+        // If PR was opened, leave both branches (PR is the source).
+        // If push succeeded but gh failed → remote branch leaks → next retry's
+        // worktree-add succeeds locally but push -u rejects (non-fast-forward).
+        //
+        // Important: `git worktree add -b` can partially create the local branch
+        // even when the command throws. Delete only if the branch did NOT exist
+        // before this publish attempt, otherwise we might destroy a live branch.
+        if (!prOpened) {
+          if (!branchExistedBefore) {
             try {
               await exec('git', ['-C', deps.repoRoot, 'branch', '-D', opts.branchName], { timeout: 10_000 });
             } catch {
-              // Branch may not exist (rare) — best-effort cleanup
+              // Branch may not exist (or partial create never happened) — best-effort cleanup
             }
-            // 砚砚 R13/R14/R15 P2: probe with `gh pr list` (not `pr view`) — view
-            // exits 1 on "no PR" (the COMMON case after gh pr create transient fail),
-            // which would conflate "confirmed no PR" with "auth/network inconclusive".
-            // `gh pr list --head <branch> --state open --json state --limit 1` returns:
-            //   probe SUCCESS + empty array → confirmed no open PR, safe to delete
-            //   probe SUCCESS + non-empty array → PR is live, KEEP branch
-            //   probe FAILED (network/auth/etc.) → inconclusive, KEEP branch
-            //     (R14 P2: orphan branch noise < orphaning a live PR's source)
-            if (pushSucceeded) {
-              let safeToDelete = false;
+          }
+          // 砚砚 R13/R14/R15 P2: probe with `gh pr list` (not `pr view`) — view
+          // exits 1 on "no PR" (the COMMON case after gh pr create transient fail),
+          // which would conflate "confirmed no PR" with "auth/network inconclusive".
+          // `gh pr list --head <branch> --state open --json state --limit 1` returns:
+          //   probe SUCCESS + empty array → confirmed no open PR, safe to delete
+          //   probe SUCCESS + non-empty array → PR is live, KEEP branch
+          //   probe FAILED (network/auth/etc.) → inconclusive, KEEP branch
+          //     (R14 P2: orphan branch noise < orphaning a live PR's source)
+          if (pushSucceeded) {
+            let safeToDelete = false;
+            try {
+              const probe = await exec(
+                'gh',
+                ['pr', 'list', '--head', opts.branchName, '--state', 'open', '--json', 'state', '--limit', '1'],
+                { cwd: deps.repoRoot, timeout: 30_000 },
+              );
+              const parsed = JSON.parse(probe.stdout) as Array<{ state?: string }>;
+              if (Array.isArray(parsed) && parsed.length === 0) safeToDelete = true;
+            } catch {
+              // probe inconclusive → keep branch (conservative; orphan branch < deleted live PR source)
+            }
+            if (safeToDelete) {
               try {
-                const probe = await exec(
-                  'gh',
-                  ['pr', 'list', '--head', opts.branchName, '--state', 'open', '--json', 'state', '--limit', '1'],
-                  { cwd: deps.repoRoot, timeout: 30_000 },
-                );
-                const parsed = JSON.parse(probe.stdout) as Array<{ state?: string }>;
-                if (Array.isArray(parsed) && parsed.length === 0) safeToDelete = true;
+                await exec('git', ['-C', deps.repoRoot, 'push', '--delete', 'origin', opts.branchName], {
+                  timeout: 30_000,
+                });
               } catch {
-                // probe inconclusive → keep branch (conservative; orphan branch < deleted live PR source)
-              }
-              if (safeToDelete) {
-                try {
-                  await exec('git', ['-C', deps.repoRoot, 'push', '--delete', 'origin', opts.branchName], {
-                    timeout: 30_000,
-                  });
-                } catch {
-                  // Remote branch may not exist or network failed — best effort
-                }
+                // Remote branch may not exist or network failed — best effort
               }
             }
           }

@@ -190,10 +190,42 @@ The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits 
  * generator see publish instructions; per-domain instruction blob includes the
  * correct sourceRefs shape. sop keeps base instructions until its generator lands.
  */
+const PUBLISH_VERDICT_INSTRUCTIONS_SOP = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
+You must also supply \`sourceRefs\` (NOT part of packet, separate input field) as a replayable SOP trace selector:
+\`\`\`json
+{
+  "kind": "sop-trace-eval",
+  "sopDefinitionId": "development",
+  "trace": {
+    "sessionId": "sess-xxx",
+    "sopDefinitionId": "development",
+    "observedStage": "worktree",
+    "commands": [{"command": "git worktree add ...", "exitCode": 0}],
+    "envSnapshot": {"REDIS_URL": "redis://localhost:6398"},
+    "gitState": {"branch": "feat/x", "ahead": 0, "behind": 0, "clean": true},
+    "handles": {"author": "opus", "reviewer": "codex"},
+    "shaContext": {}
+  }
+}
+\`\`\`
+
+Fields:
+- \`kind\` — REQUIRED literal \`"sop-trace-eval"\`
+- \`sopDefinitionId\` — REQUIRED non-empty string matching a known SOP definition in the catalog (e.g. \`development\`)
+- \`trace\` — REQUIRED full SopTrace object with: sessionId (non-empty), sopDefinitionId (must match outer), observedStage (non-empty), commands (array), envSnapshot (record), gitState ({branch, ahead, behind, clean}), handles ({author?, reviewer?, guardian?}), shaContext (record)
+
+Tool resolves the selector by building a SopTrace from the embedded trace data, loading the SOP definition from the shared catalog, running \`evaluateSopDefinition(definition, trace)\`, and writing the results as bundle artifacts (snapshot.json, attribution.json, provenance.json) + raw inputs (trace.json, eval-results.json). Tool will NOT fabricate evidence — if the trace fails schema validation or the definition ID is unknown, publish fails.
+
+The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits + opens PR. Returns commit SHA + PR URL.
+
+**DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
+`;
+
 const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<EvalDomainRegistryEntry['domainId'], string>> = {
   'eval:a2a': PUBLISH_VERDICT_INSTRUCTIONS_A2A,
   'eval:capability-wakeup': PUBLISH_VERDICT_INSTRUCTIONS_CAPABILITY_WAKEUP,
   'eval:memory': PUBLISH_VERDICT_INSTRUCTIONS_MEMORY,
+  'eval:sop': PUBLISH_VERDICT_INSTRUCTIONS_SOP,
   'eval:task-outcome': PUBLISH_VERDICT_INSTRUCTIONS_TASK_OUTCOME,
 };
 

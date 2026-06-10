@@ -1,5 +1,6 @@
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
+import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 
@@ -97,11 +98,26 @@ export interface MemoryRecallSourceSelector {
 }
 
 /**
+ * F192 sop-wiring — replayable SOP trace selector. Eval cat builds the trace
+ * from session observation; generator replays evaluation via predicate evaluator
+ * and writes provenance artifacts. Trace is embedded (no persistent SOP trace
+ * store yet), so the selector carries the full SopTraceInput.
+ */
+export interface SopTraceSourceSelector {
+  kind: 'sop-trace-eval';
+  /** Which SOP definition to evaluate against (e.g. 'development'). */
+  sopDefinitionId: string;
+  /** The full trace data for deterministic replay. */
+  trace: SopTraceInput;
+}
+
+/**
  * F192 Phase H 收尾 PR-2 — `VerdictSourceRefs` is a discriminated union (砚砚 R1 Q3).
  * - a2a branch: `{snapshotName, attributionName}` (kind optional, default a2a)
  * - capability-wakeup branch: `CapabilityWakeupSourceSelector` (kind required)
  * - task-outcome branch: `TaskOutcomeSnapshotSourceRefs` (kind required, PR1 schema-only)
  * - memory branch: `MemoryRecallSourceSelector` (kind required, memory wire-up)
+ * - sop branch: `SopTraceSourceSelector` (kind required, sop-wiring)
  *
  * 砚砚 R1 P1 #2: generator MUST receive explicit `sources` (sanitized
  * evidence refs / replayable selector); tool NEVER fabricates evidence.
@@ -110,7 +126,8 @@ export type VerdictSourceRefs =
   | A2aSnapshotAttributionRefs
   | CapabilityWakeupSourceSelector
   | TaskOutcomeSnapshotSourceRefs
-  | MemoryRecallSourceSelector;
+  | MemoryRecallSourceSelector
+  | SopTraceSourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

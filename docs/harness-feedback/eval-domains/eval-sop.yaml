@@ -1,28 +1,17 @@
 ---
-# AUTO-SCHEDULE SUNSET — 2026-06-06
-# `enabled: false` silences the weekly cron pickup for this domain. No invocation
-# message lands in thread_eval_sop; SLA / handoffTargetResolver / threadPolicy
-# config is preserved here for future re-enable.
+# AUTO-SCHEDULE RE-ENABLED — 2026-06-10
+# All 3 re-enable conditions met by feat/f192-sop-wiring PR:
+#   1. SopTrace producer wired (eval cat builds SopTrace, embeds in sourceRefs,
+#      generator replays via buildSopTrace → evaluateSopDefinition)
+#   2. File-writer layer landed (eval-sop-live-verdict.ts writes
+#      snapshot.json + attribution.json + provenance.json → bundle,
+#      trace.json + eval-results.json → raw inputs, verdict.md)
+#   3. `eval:sop` added to PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN +
+#      verdictGenerators wired in index.ts — `cat_cafe_publish_verdict`
+#      no longer returns 501 for this domain.
 #
-# Root cause for sunset: silent-fire — cron fired empty 2 weeks in a row (5/30 + 6/6)
-# with 0 verdict, 0 ack. F192 doc §323 self-noted the wiring gap when domain landed
-# (5/27): "eval-sop-adapter.ts 只 build packet 对象，不写 disk。... 没有 snapshot
-# YAML + attribution YAML → bundle + verdict.md 资产管线。要进 publish-verdict 需先
-# 加 file-writer 层（~100-150 行独立工作）". The trace producer side of the pipeline
-# (SopTrace from session telemetry) was never wired either.
-#
-# Re-enable condition (remove `enabled: false` or set `enabled: true`):
-#   1. SopTrace producer wired (session telemetry → SopTrace pipeline)
-#   2. File-writer layer landed (SopEvalResult[] → snapshot/attribution YAMLs → bundle)
-#   3. `eval:sop` added to PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN in
-#      packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts so
-#      `cat_cafe_publish_verdict` no longer returns 501.
-#
-# See: docs/features/F192-socio-technical-harness-eval.md (sunset journal entry)
-#      docs/ROADMAP.md (P2: eval:sop wiring completion)
-#      thread_eval_sop messages 0001780801515905 (4.7 heartbeat) /
-#                              0001780801515935 (4.6 决议 C)
-enabled: false
+# Previous sunset: 2026-06-06 (silent-fire 2 weeks: 5/30 + 6/6, 0 verdict, 0 ack).
+# See: docs/features/F192-socio-technical-harness-eval.md (sunset/re-enable journal)
 
 domainId: eval:sop
 displayName: SOP Compliance Eval

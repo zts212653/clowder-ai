@@ -189,7 +189,7 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.frequency, 'weekly');
   });
 
-  it('loads the docs-backed eval:sop registry fixture (sunset 2026-06-06)', async () => {
+  it('loads the docs-backed eval:sop registry fixture (re-enabled 2026-06-10)', async () => {
     const raw = await readFile(
       new URL('../../../../docs/harness-feedback/eval-domains/eval-sop.yaml', import.meta.url),
       'utf8',
@@ -201,10 +201,9 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.sourceAdapter, 'sop-trace-eval');
     assert.equal(entry.frequency, 'weekly');
     assert.equal(entry.sla.reevalWithinHours, 336);
-    // Sunset flag — re-enable when SopTrace producer + file-writer +
-    // PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN['eval:sop'] are all wired.
-    // See yaml header for full re-enable condition.
-    assert.equal(entry.enabled, false, 'eval:sop is currently sunset; weekly cron must not pick it up');
+    // Re-enabled: SopTrace producer + file-writer +
+    // PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN['eval:sop'] all wired (F192 sop-wiring PR).
+    assert.equal(entry.enabled, true, 'eval:sop is re-enabled; weekly cron must pick it up');
   });
 
   // --- sunset flag (silent-fire fix 2026-06-06) ---

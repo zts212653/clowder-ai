@@ -260,7 +260,7 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
     assert.equal(spec.display.category, 'system');
   });
 
-  it('weekly gate includes enabled weekly domains (capability-wakeup), excludes daily + sunset sop', async () => {
+  it('weekly gate includes enabled weekly domains (capability-wakeup + sop), excludes daily', async () => {
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const result = await spec.admission.gate();
@@ -271,33 +271,26 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
       domainIds.includes('eval:capability-wakeup'),
       'eval:capability-wakeup (weekly + enabled) must appear in weekly gate',
     );
-    // Sunset 2026-06-06: eval:sop is `enabled: false` in its yaml — weekly cron
-    // must silently skip it so no invocation message lands in thread_eval_sop.
-    assert.ok(!domainIds.includes('eval:sop'), 'eval:sop (sunset, enabled: false) must NOT appear in weekly gate');
+    // Re-enabled 2026-06-10 by feat/f192-sop-wiring: all 3 wiring conditions met.
+    assert.ok(domainIds.includes('eval:sop'), 'eval:sop (re-enabled) must appear in weekly gate');
     assert.ok(!domainIds.includes('eval:a2a'), 'eval:a2a (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:memory'), 'eval:memory (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:task-outcome'), 'eval:task-outcome (daily) must NOT appear in weekly gate');
   });
 
-  it('weekly gate silently drops sunset domains via `enabled: false` filter', async () => {
-    // Direct verification of the sunset flag mechanism: even though eval:sop has
-    // frequency: weekly in its yaml, the loadRegisteredDomains filter excludes
-    // entries with enabled === false. This is the load-bearing assertion for the
-    // F192 silent-fire fix — flipping eval:sop back to `enabled: true` (or
-    // removing the field) is the only knob to re-enable cron pickup.
+  it('weekly gate includes re-enabled eval:sop (was sunset, now wired)', async () => {
+    // eval:sop was sunset 2026-06-06 (enabled: false) due to missing generator wiring.
+    // Re-enabled 2026-06-10 by feat/f192-sop-wiring: SopTrace producer + file-writer +
+    // PUBLISH_VERDICT_INSTRUCTIONS all wired. The enabled flag removal means weekly cron
+    // now picks up eval:sop alongside eval:capability-wakeup.
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
     const result = await spec.admission.gate();
 
-    if (!result.run) {
-      // Acceptable terminal state: ALL weekly domains sunset → nothing to gate.
-      assert.equal(result.reason, 'no registered eval domains');
-      return;
-    }
-
+    assert.ok(result.run, 'weekly gate should run with re-enabled eval:sop');
     const domainIds = result.workItems.map((w) => w.subjectKey);
     assert.ok(
-      !domainIds.includes('eval:sop'),
-      `sunset eval:sop must not appear in weekly gate, got: ${JSON.stringify(domainIds)}`,
+      domainIds.includes('eval:sop'),
+      `re-enabled eval:sop must appear in weekly gate, got: ${JSON.stringify(domainIds)}`,
     );
   });
 
