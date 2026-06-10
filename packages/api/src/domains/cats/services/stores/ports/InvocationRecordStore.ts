@@ -62,8 +62,17 @@ export interface UpdateInvocationInput {
   error?: string;
   /** CAS guard: update only if current status matches. Returns null on mismatch. */
   expectedStatus?: InvocationStatus;
+  /** CAS guard: update only if usageByCat is missing or an empty object. Returns null on mismatch. */
+  expectedUsageByCatAbsent?: boolean;
   /** F8: Per-cat token usage (key = catId) */
   usageByCat?: Record<string, import('../../types.js').TokenUsage>;
+  /** Issue #845 backfill: override the usageRecordedAt timestamp (epoch ms).
+   *  Live writers should NEVER set this — let the store stamp Date.now() so day bucketing
+   *  stays honest. Only the backfill script sets it, anchoring to existing
+   *  usageRecordedAt, a duration-derived message completion time, or legacy
+   *  updatedAt fallback. Never `invocation.createdAt` (would mis-bucket
+   *  cross-midnight runs onto the start day instead of the finish day). */
+  usageRecordedAt?: number;
 }
 
 /**
@@ -176,14 +185,27 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     if (input.expectedStatus !== undefined && record.status !== input.expectedStatus) {
       return null;
     }
+    if (
+      input.expectedUsageByCatAbsent === true &&
+      record.usageByCat !== undefined &&
+      Object.keys(record.usageByCat).length > 0
+    ) {
+      return null;
+    }
 
     if (input.status !== undefined) record.status = input.status;
     if (input.userMessageId !== undefined) record.userMessageId = input.userMessageId;
     if (input.error !== undefined) record.error = input.error;
     if (input.usageByCat !== undefined) {
       record.usageByCat = input.usageByCat;
-      // F128: stamp usageRecordedAt only on first write (stable for daily bucketing)
-      if (record.usageRecordedAt == null) record.usageRecordedAt = Date.now();
+      // F128: stamp usageRecordedAt only on first write (stable for daily bucketing).
+      // Issue #845 backfill: explicit input.usageRecordedAt overrides — anchored to the
+      // stable historical completion signal chosen by the planner.
+      if (input.usageRecordedAt != null) {
+        record.usageRecordedAt = input.usageRecordedAt;
+      } else if (record.usageRecordedAt == null) {
+        record.usageRecordedAt = Date.now();
+      }
     }
     record.updatedAt = Date.now();
 
