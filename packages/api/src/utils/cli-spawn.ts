@@ -139,12 +139,30 @@ export interface CliSpawnerDeps {
   spawnFn?: SpawnFn;
 }
 
+const CLI_SUPERVISOR_ENV_FILE_FLAGS = new Set(['--env-file', '--env-file-if-exists']);
+
+function sanitizeCliSupervisorExecArgv(execArgv: string[]): string[] {
+  const safeArgs: string[] = [];
+  for (let index = 0; index < execArgv.length; index += 1) {
+    const arg = execArgv[index];
+    if (CLI_SUPERVISOR_ENV_FILE_FLAGS.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--env-file=') || arg.startsWith('--env-file-if-exists=')) {
+      continue;
+    }
+    safeArgs.push(arg);
+  }
+  return safeArgs;
+}
+
 export function resolveCliSupervisorNodeArgs(moduleUrl = import.meta.url, execArgv = process.execArgv): string[] {
   const jsPath = fileURLToPath(new URL('./cli-supervisor.js', moduleUrl));
   if (existsSync(jsPath)) return [jsPath];
 
   const tsPath = fileURLToPath(new URL('./cli-supervisor.ts', moduleUrl));
-  if (existsSync(tsPath)) return [...execArgv, tsPath];
+  if (existsSync(tsPath)) return [...sanitizeCliSupervisorExecArgv(execArgv), tsPath];
 
   return [jsPath];
 }
