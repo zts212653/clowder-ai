@@ -12,7 +12,7 @@
  */
 import Database from 'better-sqlite3';
 
-import type { TaskOutcomeVerdict } from './task-outcome-episode.js';
+import { type TaskOutcomeVerdict, TERMINAL_DONE_STATES } from './task-outcome-episode.js';
 
 // ---- Public types ----
 
@@ -47,9 +47,25 @@ export interface AppendSignalInput {
   record: Record<string, unknown>;
 }
 
-// ---- Terminal states that are "done" (ready for verdict) ----
+export interface PendingEpisodeVerdictUpdate {
+  episodeId: string;
+  verdict: TaskOutcomeVerdict;
+}
 
-const TERMINAL_DONE_STATES = ['completed', 'abandoned', 'escalated_cvo', 'corrected_then_completed'];
+export interface PendingEpisodeVerdictUpdateFailure {
+  episodeId: string;
+  current: StoredEpisode | null;
+}
+
+export type PendingEpisodeVerdictUpdateResult =
+  | { ok: true }
+  | { ok: false; failure: PendingEpisodeVerdictUpdateFailure };
+
+class PendingEpisodeVerdictUpdateRollback extends Error {
+  constructor(readonly failure: PendingEpisodeVerdictUpdateFailure) {
+    super('pending_episode_verdict_update_failed');
+  }
+}
 
 // ---- Store ----
 
@@ -155,6 +171,43 @@ export class TaskOutcomeEpisodeStore {
 
   updateVerdict(episodeId: string, verdict: TaskOutcomeVerdict): void {
     this.db.prepare('UPDATE task_outcome_episodes SET verdict = ? WHERE episodeId = ?').run(verdict, episodeId);
+  }
+
+  updateVerdictIfPending(episodeId: string, verdict: TaskOutcomeVerdict): boolean {
+    const placeholders = TERMINAL_DONE_STATES.map(() => '?').join(', ');
+    const result = this.db
+      .prepare(
+        `UPDATE task_outcome_episodes
+         SET verdict = ?
+         WHERE episodeId = ?
+           AND verdict IS NULL
+           AND terminalState IN (${placeholders})`,
+      )
+      .run(verdict, episodeId, ...TERMINAL_DONE_STATES) as { changes: number };
+    return result.changes === 1;
+  }
+
+  updateVerdictsIfPending(updates: PendingEpisodeVerdictUpdate[]): PendingEpisodeVerdictUpdateResult {
+    const transaction = this.db.transaction((items: PendingEpisodeVerdictUpdate[]) => {
+      for (const update of items) {
+        if (!this.updateVerdictIfPending(update.episodeId, update.verdict)) {
+          throw new PendingEpisodeVerdictUpdateRollback({
+            episodeId: update.episodeId,
+            current: this.getEpisode(update.episodeId),
+          });
+        }
+      }
+    });
+
+    try {
+      transaction(updates);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof PendingEpisodeVerdictUpdateRollback) {
+        return { ok: false, failure: error.failure };
+      }
+      throw error;
+    }
   }
 
   listByThread(threadId: string): StoredEpisode[] {

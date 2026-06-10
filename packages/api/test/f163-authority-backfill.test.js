@@ -58,11 +58,10 @@ describe('pathToAuthority', () => {
 });
 
 describe('INDEXING_VERSION bump (P1 fix)', () => {
-  it('should be 4 to force authority and entity-mention backfill on existing docs', () => {
-    assert.equal(
-      INDEXING_VERSION,
-      4,
-      'INDEXING_VERSION must be bumped to 4 so existing docs get authority and entity mentions backfilled',
+  it('stays at or above 4 to force authority and entity-mention backfill on existing docs', () => {
+    assert.ok(
+      INDEXING_VERSION >= 4,
+      'INDEXING_VERSION must stay at or above 4 so existing docs get authority and entity mentions backfilled',
     );
   });
 });

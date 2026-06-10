@@ -15,6 +15,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   text_frustration: '用户反馈异常',
   a2a_timeout: '猫猫响应超时',
   retry_burst: '重复操作',
+  user_report: '用户主动反馈',
 };
 
 function buildSignalFields(issue: FrustrationIssue): Array<{ label: string; value: string }> {
@@ -51,6 +52,10 @@ function buildSignalFields(issue: FrustrationIssue): Array<{ label: string; valu
     if (issue.signalDetail.matchCount) {
       fields.push({ label: '重复次数', value: `${issue.signalDetail.matchCount} 次` });
     }
+  } else if (issue.signalType === 'user_report') {
+    if (issue.signalDetail.toolName) {
+      fields.push({ label: '被拒绝的操作', value: String(issue.signalDetail.toolName) });
+    }
   }
 
   return fields;
@@ -69,6 +74,8 @@ function buildBodyMarkdown(issue: FrustrationIssue): string {
     parts.push('**猫猫没有及时响应**，可能遇到了问题。');
   } else if (issue.signalType === 'retry_burst') {
     parts.push('**检测到重复发送相同消息**，之前的请求可能没有被正确处理。');
+  } else if (issue.signalType === 'user_report') {
+    parts.push('**你主动发起了问题反馈**，已采集当前上下文。请补充描述后提交。');
   }
   if (issue.context.errorLogs) {
     parts.push(`**日志摘要**:\n\`\`\`\n${issue.context.errorLogs.slice(0, 300)}\n\`\`\``);
@@ -96,7 +103,7 @@ export function buildFrustrationIssueCard(issue: FrustrationIssue): RichCardBloc
     id: `frustration-${issue.issueId}`,
     kind: 'card',
     v: 1,
-    title: '🔍 我注意到刚才可能出了问题',
+    title: issue.signalType === 'user_report' ? '📢 你的问题反馈' : '🔍 我注意到刚才可能出了问题',
     bodyMarkdown: buildBodyMarkdown(issue),
     tone: 'warning',
     fields: buildSignalFields(issue),

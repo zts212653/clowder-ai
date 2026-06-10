@@ -170,6 +170,7 @@ describe('isValidRichBlock', () => {
 
   it('validates checklist items shape', () => {
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: 'bad' }), false);
+    assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [] }), false);
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [{ id: 'i1' }] }), false);
     assert.equal(isValidRichBlock({ id: 'b1', kind: 'checklist', v: 1, items: [{ id: 'i1', text: 'OK' }] }), true);
   });

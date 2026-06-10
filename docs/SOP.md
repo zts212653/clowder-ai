@@ -110,6 +110,69 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 3. 类型检查通过
 4. 不涉及可测行为
 
+### Artifact-only PR merge-gate（F192 Phase H 收尾 PR-3 codified）
+
+> **核心问题**：F192 `cat_cafe_publish_verdict` 会为每次 scheduled eval 自动开 PR 归档 verdict 证据。这种 PR **不是代码 review request**，是 eval evidence artifact。让铲屎官 / 通用 reviewer 走 full merge-gate 验收 = 把 CVO 当 merge queue + 噪音灾难（PR #2114 实战暴露）。
+>
+> **解法**：满足以下 9 条硬条件 → 任一非作者猫走 artifact-only merge-gate，跳过 full `pnpm gate` + 跳过云端 review；cats 自决 squash merge。CVO 不在 reviewers / 不需 sign-off。
+>
+> **失败任一条 → 必须走 regular merge-gate**（reviewer + cloud + full gate）。
+
+#### 9 条硬条件
+
+1. **路径范围（domain-aware allowlist）**：PR diff 仅含以下任一允许路径：
+   - `docs/harness-feedback/` （所有 verdict 的 verdict.md + bundle JSON）
+   - `generated/capability-wakeup/<verdictId>/` （**仅 eval:capability-wakeup verdicts**；cw generator 的 replayed raw inputs `trials.json` + `summary.json`，被 provenance.json 引用，PR-2 R3 P1 cloud 锁住 staging）
+   - `generated/memory/<verdictId>/` （**仅 eval:memory verdicts**；memory generator 的 replayed raw inputs `recall-metrics.json` + `library-health.json`，被 provenance.json 引用，F192 memory wire-up cloud R8 P1 锁住 staging）
+   - 任何其他路径出现 → 退到 regular merge-gate
+   - **额外校验**：若包含 `generated/<domain-slug>/`，必须满足 PR 是 `verdict/auto/eval-<domain-slug>/<verdictId>` 分支 且 `<verdictId>` 匹配 PR title（防止 a2a/sop PR 借 generated/ 路径绕道；适用于 cw + memory）
+2. **零 code files**：无 `.ts` / `.tsx` / `.js` / `.mjs` / `.cjs` / `.py` / `.sh` 等
+3. **零 root artifacts**：复用 Step 0.5 Root Artifact Guard（无根目录 .png / .pen / 媒体文件）
+4. **mergeable + clean**：`mergeState == CLEAN` + `mergeable == MERGEABLE`
+5. **非 hotfix**：`scripts/check-hotfix-pattern.mjs` 返回 `hotfix=false`
+6. **PR title 模式匹配**：title 含 `verdict(` 前缀（如 `verdict(eval:a2a): 2026-06-06-...`）
+7. **PR body 模式匹配**：body 含字符串 `Verdict published via cat_cafe_publish_verdict MCP tool` —— 防止被滥用为通用 cat-merge 绕道
+8. **作者 ≠ merger**：保留 cross-individual 原则（生成方猫 = 发起 publish 的 eval cat；merger = 任一非生成方猫）
+9. **`evidence-only` label 必须 present**（cloud R6 P2 — 锁住 policy 判断）：PR 必须有 `evidence-only` label。`computePublishPolicy` 只对 `keep_observe` verdict 应用该 label；`fix` / `build` / `delete_sunset` verdict policy 返回 `regular_pr`（无 evidence-only label） → 必须走 regular merge-gate（owner action required）。**关键**：title 含 `verdict(` 前缀和 body 含 `cat_cafe_publish_verdict` 字符串只能证明 PR 是 publish-verdict 自动生成的，**不能证明该 PR 不需要 owner action**。`evidence-only` label 是 policy 显式判断"这条 verdict 无 actionable 内容"的唯一信号；缺失 → 必须走 regular merge-gate（哪怕 PR 是自动生成的）。
+
+#### 工作流
+
+```bash
+# 1. Detect: 收到 #N PR notification (autonomous via PR review feedback bot, or manual scan)
+gh pr view N --json title,body,headRefName,mergeable,mergeStateStatus,changedFiles --jq '.'
+
+# 2. Verify 9 conditions
+# Condition #1: paths only in docs/harness-feedback/ OR generated/capability-wakeup/<verdictId>/ OR generated/memory/<verdictId>/
+VERDICT_ID=$(gh pr view N --json title --jq '.title' | sed -E 's/.*verdict\([^)]+\): //; s/[[:space:]].*//')
+gh pr view N --json files --jq '.files[].path' \
+  | rg -v "^(docs/harness-feedback/|generated/capability-wakeup/${VERDICT_ID}/|generated/memory/${VERDICT_ID}/)" \
+  && echo "FAIL #1: paths outside artifact-allowlist"
+PR_NUMBER=N node scripts/check-hotfix-pattern.mjs N | jq -r '.hotfix'  # must be false
+# (title/body checks: gh pr view ... | grep)
+# Condition #9 (cloud R6 P2): require evidence-only label (policy classification check;
+# fix/build/delete_sunset verdicts intentionally lack this label → must walk regular gate)
+gh pr view N --json labels --jq '.labels[].name' | rg -q '^evidence-only$' \
+  || echo "FAIL #9: no evidence-only label — verdict has actionable verdict severity; walk regular merge-gate"
+
+# 3. If all 9 pass: squash merge
+gh pr merge N --squash --delete-branch
+
+# 4. NO Phase doc sync needed (artifact PR doesn't change feature spec)
+# NO worktree cleanup needed (artifact PR is auto-generated, no local worktree)
+```
+
+#### 决策标签（PR-3 publish-policy）
+
+cat_cafe_publish_verdict 自动给 artifact PR 加 labels：
+- `evidence-only`：所有 artifact-only PR 都有此 label（filterable）
+- `no-action-needed`：keep_observe + 无 actionable findings（rollup mechanism 落地前的 interim 标记）
+
+铲屎官 / CVO 在 PR list 可按 `evidence-only` label 过滤掉所有 artifact PR，不必每次看到都问"谁 merge"。
+
+#### Future Phase 占位
+
+PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merge。**真正解**是 rollup mechanism（daily/weekly batch PR 聚合 N 个 no-action verdict，或 runtime evidence store + 周期 flush archive PR）。独立 Phase 排期，等 PR-3 体感数据反馈后再 design。
+
 ## Reviewer 配对规则
 
 动态匹配自运行时猫配置（repo 根 `cat-template.json` + `.cat-cafe/cat-catalog.json` overlay）：

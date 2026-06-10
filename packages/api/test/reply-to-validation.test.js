@@ -133,6 +133,52 @@ describe('POST /api/messages — replyTo validation', () => {
     assert.equal(sent.replyTo, undefined, 'invalid replyTo should be dropped');
   });
 
+  // #699 P1 (gpt52 intake review #2111): system/briefing parents are internal,
+  // non-routable content — isEligibleReplyParent excludes them, the user-direct
+  // POST /api/messages path must too, else hydrateReplyPreview leaks their raw content.
+  test('silently drops replyTo referencing system message', async () => {
+    const thread = await createThread();
+    const sysMsg = messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'SYSTEM BADGE — internal',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: { content: 'reply to system', threadId: thread.id, replyTo: sysMsg.id },
+    });
+    assert.equal(res.statusCode, 200);
+    const sent = messageStore.getByThread(thread.id).find((m) => m.content === 'reply to system');
+    assert.ok(sent, 'message should be stored');
+    assert.equal(sent.replyTo, undefined, 'system replyTo should be dropped (non-quotable)');
+  });
+
+  test('silently drops replyTo referencing briefing message', async () => {
+    const thread = await createThread();
+    const briefingMsg = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'TOP SECRET BRIEFING',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+      origin: 'briefing',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages',
+      payload: { content: 'reply to briefing', threadId: thread.id, replyTo: briefingMsg.id },
+    });
+    assert.equal(res.statusCode, 200);
+    const sent = messageStore.getByThread(thread.id).find((m) => m.content === 'reply to briefing');
+    assert.ok(sent, 'message should be stored');
+    assert.equal(sent.replyTo, undefined, 'briefing replyTo should be dropped (non-quotable)');
+  });
+
   test('silently drops replyTo referencing message in different thread', async () => {
     const thread1 = await createThread('Thread 1');
     const thread2 = await createThread('Thread 2');

@@ -644,6 +644,79 @@ describe('Antigravity waiting approval', () => {
     );
   });
 
+  test('P1: busy-reuse retry preserves follow-up wait after old-tail stall', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    let callCount = 0;
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      sendMessage: mock.fn(async () => ({ stepsBefore: 0, wasBusy: true })),
+      getTrajectory: mock.fn(async () => ({ status: 'CASCADE_RUN_STATUS_IDLE', numTotalSteps: 2 })),
+      pollForSteps: mock.fn(
+        async function* (_cascadeId, fromStep, _timeoutMs, _intervalMs, _signal, expectFollowUpTurn) {
+          callCount++;
+          if (callCount === 1) {
+            assert.equal(fromStep, 0);
+            assert.equal(expectFollowUpTurn, true, 'first busy-reuse poll must wait for follow-up USER_INPUT');
+            yield {
+              steps: [
+                {
+                  type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                  status: 'DONE',
+                  plannerResponse: { response: 'old turn tail' },
+                },
+              ],
+              cursor: {
+                baselineStepCount: 0,
+                lastDeliveredStepCount: 2,
+                terminalSeen: false,
+                lastActivityAt: Date.now(),
+              },
+            };
+            throw new Error('Antigravity stall: no activity for 60213ms (steps=2, status=CASCADE_RUN_STATUS_IDLE)');
+          }
+          yield {
+            steps: [
+              {
+                type: 'CORTEX_STEP_TYPE_USER_INPUT',
+                status: 'DONE',
+                userInput: { items: [{ text: 'follow-up question' }] },
+              },
+              {
+                type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+                status: 'DONE',
+                plannerResponse: { response: 'follow-up answer' },
+              },
+            ],
+            cursor: {
+              baselineStepCount: 0,
+              lastDeliveredStepCount: 4,
+              terminalSeen: true,
+              lastActivityAt: Date.now(),
+            },
+          };
+        },
+      ),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('follow-up question'));
+
+    assert.equal(bridge.pollForSteps.mock.calls.length, 2);
+    assert.equal(bridge.pollForSteps.mock.calls[1].arguments[1], 2, 'retry still resumes from last delivered');
+    assert.equal(
+      bridge.pollForSteps.mock.calls[1].arguments[5],
+      true,
+      'retry must keep waiting for the follow-up USER_INPUT after old-tail progress',
+    );
+    assert.equal(
+      bridge.pollForSteps.mock.calls[1].arguments[6],
+      0,
+      'retry must still preserve the original replay baseline',
+    );
+    const texts = messages.filter((msg) => msg.type === 'text').map((msg) => msg.content);
+    assert.deepEqual(texts, ['old turn tail', 'follow-up answer']);
+  });
+
   test('AC-G1: keeps waiting across repeated stalls when trajectory still shows liveness', async () => {
     const resolveOutstandingSteps = mock.fn(async () => {});
     let pollCount = 0;

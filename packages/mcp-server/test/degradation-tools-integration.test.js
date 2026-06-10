@@ -158,7 +158,7 @@ describe('write-class tool degradation policy declarations (F174-E AC-E2/E5)', (
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'test-tok';
     try {
       const result = await callbackToolsMod.handleCreateRichBlock({
-        block: JSON.stringify({ id: 'rb-1', kind: 'text', v: 1, content: 'hello' }),
+        block: JSON.stringify({ id: 'rb-1', kind: 'card', v: 1, title: 'hello' }),
       });
       assert.ok(!result.isError, 'legacy 403 path should succeed via Route B');
       const parsed = JSON.parse(result.content[0].text);

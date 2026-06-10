@@ -678,4 +678,122 @@ describe('OpenCodeAgentService', () => {
       );
     }
   });
+
+  // F212 Phase G (AC-G3, clowder-ai#875): silent-stdout case where OpenCode produces
+  // only step_start events and no text. Reporter's direct OpenCode CLI checks proved
+  // this is upstream behavior (fresh CLI reproduces), so Cat Cafe responsibility is
+  // surfacing the diagnostic instead of swallowing it into generic message.
+  test('AC-G3: step_start-only NDJSON → yields system_info notice with silent_completion cliDiagnostics', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'deepseek-chat',
+    });
+    const promise = collect(service.invoke('Test silent', { invocationId: 'inv-silent-clowder-875' }));
+    proc.stderr.write('Warning: upstream stderr without text output\n');
+    // Emit only step_start — exactly the clowder-ai#875 reporter's NDJSON
+    emitOpenCodeEvents(proc, [STEP_START]);
+    const messages = await promise;
+
+    // Find the user-visible system notice carrying the silent_completion diagnostic.
+    const silentNotice = messages.find(
+      (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+    );
+    assert.ok(
+      silentNotice,
+      `expected system_info notice with silent_completion reasonCode; got types: ${messages.map((m) => m.type).join(',')}`,
+    );
+    assert.equal(JSON.parse(silentNotice.content).type, 'silent_completion');
+    assert.ok(
+      !messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+      'silent_completion is observability-only and MUST NOT travel as provider error',
+    );
+    assert.equal(silentNotice.metadata.cliDiagnostics.debugRef.invocationId, 'inv-silent-clowder-875');
+    assert.equal(
+      silentNotice.metadata.cliDiagnostics.debugRef.exitCode,
+      0,
+      'silent_completion preserves clean exit code',
+    );
+
+    const evidence = JSON.parse(silentNotice.metadata.cliDiagnostics.safeExcerpt);
+    assert.ok(
+      evidence.eventTypes.includes('step_start'),
+      `eventTypes should include step_start: ${JSON.stringify(evidence.eventTypes)}`,
+    );
+    assert.ok(evidence.eventCount >= 1, 'eventCount should be > 0');
+    assert.equal(evidence.model, 'deepseek-chat', 'model captured');
+    assert.equal(evidence.stderrPresent, true, 'successful-exit stderr presence is preserved');
+    assert.match(
+      evidence.stderrExcerpt,
+      /upstream stderr without text output/,
+      'successful-exit stderr excerpt is preserved for diagnostics',
+    );
+    // sessionId comes through session_init, then truncated to first 8 chars
+    if (evidence.sessionIdPrefix) {
+      assert.equal(
+        evidence.sessionIdPrefix.length,
+        8,
+        'sessionIdPrefix MUST be exactly 8 chars (no full session leak)',
+      );
+    }
+    // Done event still yielded so caller can complete
+    assert.ok(
+      messages.some((m) => m.type === 'done'),
+      'done event still yielded after diagnostic',
+    );
+  });
+
+  test('AC-G3: text event present → does NOT yield silent_completion (no false positive)', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('Say hello'));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    const messages = await promise;
+
+    const silentError = messages.find(
+      (m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+    );
+    assert.ok(!silentError, 'silent_completion MUST NOT fire when text event present');
+    const silentNotice = messages.find(
+      (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+    );
+    assert.ok(!silentNotice, 'silent_completion system_info MUST NOT fire when text event present');
+  });
+
+  // F212 Phase G R1 P1 (cloud codex catch on 1d519e7f2): tool-only turns are legitimate
+  // task completions per F215 AC-B3. Tool events that complete the user's request without
+  // a text response MUST NOT be flagged as silent_completion.
+  test('AC-G3 R1 P1: tool_use event without text → does NOT yield silent_completion', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('Use tools'));
+    // step_start + tool_use only — no TEXT_RESPONSE. Per F215 AC-B3 this is a valid
+    // tool-only completion path. silent_completion would mislabel it as a provider error.
+    emitOpenCodeEvents(proc, [STEP_START, TOOL_USE, STEP_FINISH]);
+    const messages = await promise;
+
+    const silentError = messages.find(
+      (m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+    );
+    assert.ok(
+      !silentError,
+      `silent_completion MUST NOT fire when tool_use event present (R1 P1 guard): types=${messages.map((m) => m.type).join(',')}`,
+    );
+    const silentNotice = messages.find(
+      (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+    );
+    assert.ok(
+      !silentNotice,
+      `silent_completion system_info MUST NOT fire when tool_use event present (R1 P1 guard): types=${messages.map((m) => m.type).join(',')}`,
+    );
+    // Verify the tool_use was actually yielded (sanity check on fixture)
+    assert.ok(
+      messages.some((m) => m.type === 'tool_use'),
+      'tool_use yield confirms event reached transformer',
+    );
+  });
 });

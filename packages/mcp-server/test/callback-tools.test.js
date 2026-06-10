@@ -1007,6 +1007,85 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('/api/callbacks/create-rich-block'));
   });
 
+  test('handleCreateRichBlock requires threadId for shared Antigravity agent-key auth', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: join(outboxDir, 'missing.secret') });
+
+    globalThis.fetch = async () => {
+      throw new Error('fetch must not be called without threadId');
+    };
+
+    const block = JSON.stringify({ id: 'agent-rb-missing-thread', kind: 'card', v: 1, title: 'Missing Thread' });
+    const result = await handleCreateRichBlock({ block, agentKeyCatId: 'gemini25' });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /threadId is required/);
+  });
+
+  test('handleCreateRichBlock routes shared Antigravity agent-key calls through post_message Route B', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    const keyPath = join(outboxDir, 'gemini25.secret');
+    writeFileSync(keyPath, 'gemini25-agent-key');
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: keyPath });
+
+    let capturedUrl;
+    let capturedHeaders;
+    let capturedBody;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedHeaders = options.headers;
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({ status: 'ok' }),
+      };
+    };
+
+    const block = JSON.stringify({ id: 'agent-rb-1', kind: 'card', v: 1, title: 'Agent Rich Block' });
+    const result = await handleCreateRichBlock({ block, threadId: 'thread-agent-rich', agentKeyCatId: 'gemini25' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/post-message'));
+    assert.ok(!capturedUrl.includes('/api/callbacks/create-rich-block'));
+    assert.equal(capturedHeaders['x-agent-key-secret'], 'gemini25-agent-key');
+    assert.equal(capturedBody.threadId, 'thread-agent-rich');
+    assert.match(capturedBody.content, /```cc_rich/);
+  });
+
+  test('handleCreateRichBlock rejects malformed agent-key rich blocks before Route B', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+
+    delete process.env.CAT_CAFE_INVOCATION_ID;
+    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: join(outboxDir, 'missing.secret') });
+
+    globalThis.fetch = async () => {
+      throw new Error('fetch must not be called for invalid rich block payloads');
+    };
+
+    const malformedBlocks = [
+      { id: 'agent-rb-invalid-card', kind: 'card', v: 1 },
+      { id: 'agent-rb-invalid-checklist', kind: 'checklist', v: 1, items: [] },
+    ];
+
+    for (const malformed of malformedBlocks) {
+      const result = await handleCreateRichBlock({
+        block: JSON.stringify(malformed),
+        threadId: 'thread-agent-rich',
+        agentKeyCatId: 'gemini25',
+      });
+
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /Invalid rich block/);
+    }
+  });
+
   test('handleCreateRichBlock falls back to Route B (post_message + cc_rich) when Route A fails', async () => {
     const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
 

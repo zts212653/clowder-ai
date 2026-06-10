@@ -270,4 +270,66 @@ describe('Task Outcome API Handlers (F192 Phase G)', () => {
       assert.equal(result.length, 2);
     });
   });
+
+  describe('handleGetEpisode magic_word_ref projection (F227 归一)', () => {
+    it('projects a stored magic_word_ref back to a magic_word a2 entry (F192 contract)', () => {
+      const ep = store.createEpisode({ trigger: 'cat_initiated', threadId: 'thread_x', participants: ['opus'] });
+      // F227 writer appends a lightweight ref pointing at the Event Memory truth source
+      store.appendSignal(ep.episodeId, {
+        category: 'a2',
+        record: {
+          type: 'magic_word_ref',
+          eventId: 'evt_1',
+          word: '脚手架',
+          timestamp: '2026-06-06T00:00:00.000Z',
+          threadId: 'thread_x',
+          catId: 'opus',
+        },
+      });
+      const assembled = handleGetEpisode(store, ep.episodeId);
+      assert.equal(assembled.signals.a2InteractionDecisions.length, 1);
+      const projected = assembled.signals.a2InteractionDecisions[0];
+      // contract: read-side still sees type:'magic_word' with word/timestamp/threadId/catId
+      assert.equal(projected.type, 'magic_word');
+      assert.equal(projected.word, '脚手架');
+      assert.equal(projected.threadId, 'thread_x');
+      assert.equal(projected.catId, 'opus');
+      // eventId preserved as the detail pointer into Event Memory
+      assert.equal(projected.eventId, 'evt_1');
+    });
+
+    it('leaves a legacy inline magic_word signal untouched (backward-compat union projection)', () => {
+      const ep = store.createEpisode({ trigger: 'cat_initiated', threadId: 'thread_y', participants: ['codex'] });
+      store.appendSignal(ep.episodeId, {
+        category: 'a2',
+        record: {
+          type: 'magic_word',
+          word: '绕路了',
+          timestamp: '2026-06-06T00:00:00.000Z',
+          threadId: 'thread_y',
+          catId: 'codex',
+        },
+      });
+      const assembled = handleGetEpisode(store, ep.episodeId);
+      assert.equal(assembled.signals.a2InteractionDecisions[0].type, 'magic_word');
+      assert.equal(assembled.signals.a2InteractionDecisions[0].word, '绕路了');
+    });
+
+    it('leaves permission_cancel a2 signals untouched', () => {
+      const ep = store.createEpisode({ trigger: 'cat_initiated', threadId: 'thread_z', participants: ['opus'] });
+      store.appendSignal(ep.episodeId, {
+        category: 'a2',
+        record: {
+          type: 'permission_cancel',
+          toolName: 'cat_cafe_hold_ball',
+          reason: 'skip',
+          timestamp: '2026-06-06T00:00:00.000Z',
+          catId: 'opus',
+          threadId: 'thread_z',
+        },
+      });
+      const assembled = handleGetEpisode(store, ep.episodeId);
+      assert.equal(assembled.signals.a2InteractionDecisions[0].type, 'permission_cancel');
+    });
+  });
 });

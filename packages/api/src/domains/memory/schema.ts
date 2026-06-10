@@ -66,7 +66,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 25;
+export const CURRENT_SCHEMA_VERSION = 26;
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -535,6 +535,7 @@ export function applyMigrations(db: Database.Database): void {
           mode TEXT,
           scope TEXT,
           candidates_json TEXT NOT NULL,
+          result_count INTEGER,
           consumed_json TEXT NOT NULL,
           reformulated INTEGER NOT NULL DEFAULT 0,
           fell_back_to_grep INTEGER NOT NULL DEFAULT 0,
@@ -732,6 +733,16 @@ export function applyMigrations(db: Database.Database): void {
       `);
     } catch {}
     db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(25, new Date().toISOString());
+  }
+
+  // V26: RecallFeed history — preserve reported hit count separately from
+  // candidates_json. Thread-scope search_evidence results can report Found N
+  // without anchor candidate rows, so candidates_json.length is not resultCount.
+  if (currentVersion < 26) {
+    try {
+      db.exec('ALTER TABLE recall_events ADD COLUMN result_count INTEGER');
+    } catch {}
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(26, new Date().toISOString());
   }
 }
 

@@ -72,7 +72,25 @@ interface GuideState {
   completedGuides: ReadonlySet<string>;
   startGuide: (flow: OrchestrationFlow, threadId?: string) => void;
   advanceStep: () => void;
-  exitGuide: () => void;
+  /**
+   * Clear the active guide session.
+   *
+   * Defaults to `{ recordCompletion: true }` — adds `threadId::flowId` to
+   * `completedGuides` so the ChatContainer trigger guard blocks the same guide
+   * from re-firing on the next input event (PR #877 fix).
+   *
+   * Callers that are NOT explicit dismissals (e.g. `useGuideEngine` thread-switch
+   * cleanup, `GuideErrorBoundary` auto-recovery) must pass `{ recordCompletion:
+   * false }` so the in-memory abort is not recorded as user-completed, otherwise
+   * the guide is permanently suppressed in that thread (cloud Codex P1 on PR
+   * #2166 HEAD 39b128bd).
+   *
+   * When `completionFailed=true` (set by `markCompletionFailed` after
+   * `/api/guide-actions/complete` fails), the key is also NOT written even with
+   * `recordCompletion: true`, because `useGuideEngine.rollbackCompletedGuide`
+   * has already removed it to allow retry.
+   */
+  exitGuide: (opts?: { recordCompletion?: boolean }) => void;
   setPhase: (phase: GuidePhase) => void;
   markCompletionPersisted: (sessionId: string) => void;
   markCompletionFailed: (sessionId: string) => void;
@@ -124,13 +142,23 @@ export const useGuideStore = create<GuideState>((set, get) => ({
     });
   },
 
-  exitGuide: () => {
-    const { session, completedGuides } = get();
+  exitGuide: (opts) => {
+    const { session, completedGuides, completionFailed } = get();
     if (!session) {
       set({ session: null, completionPersisted: false, completionFailed: false });
       return;
     }
-    const key = session.threadId ? `${session.threadId}::${session.flow.id}` : null;
+    // Defaults to recordCompletion=true: PR #877 re-trigger guard for explicit
+    // dismiss / control_exit / completion exit paths. Non-dismiss callers
+    // (useGuideEngine thread-switch, GuideErrorBoundary auto-recovery) must
+    // pass { recordCompletion: false } — see GuideState.exitGuide JSDoc.
+    const recordCompletion = opts?.recordCompletion !== false;
+    // Even with recordCompletion=true, suppress the write when completionFailed=true:
+    // useGuideEngine.rollbackCompletedGuide has already removed the key to allow retry;
+    // re-adding it via dismissWithReconciliation → exitGuide would undo the rollback
+    // and block ChatContainer's retry trigger.
+    const shouldWrite = recordCompletion && !completionFailed && session.threadId !== null;
+    const key = shouldWrite ? `${session.threadId}::${session.flow.id}` : null;
     const nextCompleted = key ? new Set([...completedGuides, key]) : completedGuides;
     set({ session: null, completionPersisted: false, completionFailed: false, completedGuides: nextCompleted });
   },

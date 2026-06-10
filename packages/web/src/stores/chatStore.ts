@@ -3,6 +3,7 @@ import { getBubbleInvocationId } from '@/debug/bubbleIdentity';
 import { isBubbleInvariantStrictModeOn, recordBubbleInvariantViolation } from '@/debug/bubbleInvariantDiagnostics';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { getCachedCats } from '@/hooks/useCatData';
+import { inferFileKind, inferRenderMode } from '@/lib/file-kind';
 import { saveThreadMessages as saveMessagesSnapshot, saveThreads as saveThreadsSnapshot } from '../utils/offline-store';
 import { findBubbleStoreInvariantViolations } from './bubble-invariants';
 import type {
@@ -14,6 +15,7 @@ import type {
   ComposerDraftInsert,
   GameState,
   PresentationLockSnapshot,
+  PresentationSurfaceState,
   QueueEntry,
   RichBlock,
   Thread,
@@ -31,7 +33,6 @@ export type {
   ChatMessage,
   ChatMessageMetadata,
   ChatMessagePatch,
-  ComposerDraftInsert,
   EvidenceData,
   EvidenceResultData,
   GameState,
@@ -988,6 +989,16 @@ export interface ChatState {
   setPresentationLockViewport: (scrollTop: number) => void;
   workspaceScrollTop: number | null;
 
+  // F226: Presentation Surface — file/md tear-off floating window
+  presentationSurface: PresentationSurfaceState | null;
+  detachToFloat: () => void;
+  dockBack: () => void;
+  closeFloat: () => void;
+  minimizeFloat: (minimized: boolean) => void;
+  setFloatPos: (pos: { x: number; y: number }) => void;
+  setFloatSize: (size: { width: number; height: number }) => void;
+  toggleMaximize: () => void;
+
   // Phase H + F139 + F160 + F168: Workspace mode
   workspaceMode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
   setWorkspaceMode: (mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community') => void;
@@ -1432,6 +1443,108 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     }),
   workspaceScrollTop: null,
+
+  // F226: Presentation Surface — file/md tear-off floating window
+  presentationSurface: null,
+  detachToFloat: () =>
+    set((state) => {
+      const filePath = state.workspaceOpenFilePath;
+      if (!filePath) return {};
+      const W = 420;
+      const H = 320;
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+      return {
+        presentationSurface: {
+          content: {
+            worktreeId: state.workspaceWorktreeId,
+            filePath,
+            tabs: state.workspaceOpenTabs,
+            fileKind: inferFileKind(filePath),
+            renderMode: inferRenderMode(filePath),
+            line: state.workspaceOpenFileLine,
+            // F226 云端 P2: snapshot the tracked presentation viewport (recorded by
+            // setPresentationLockViewport) so dock-back restores the reader's scroll position
+            // instead of jumping a long doc back to the top. Null when no viewport was tracked.
+            scrollTop: state.workspaceScrollTop,
+            title: filePath.split('/').pop() ?? filePath,
+          },
+          // 右下角默认位置（烁烁 UX：避免压住右侧 workspace mode tab 按钮条）
+          pos: { x: Math.max(16, vw - W - 24), y: Math.max(16, vh - H - 80) },
+          size: { width: W, height: H },
+          minimized: false,
+          maximized: false,
+          preMaximizeGeometry: null,
+        },
+      };
+    }),
+  // dock-back contract (砚砚 P1.2): switch docked back to dev + restore file snapshot
+  dockBack: () =>
+    set((state) => {
+      const surface = state.presentationSurface;
+      if (!surface) return {};
+      const c = surface.content;
+      return {
+        presentationSurface: null,
+        workspaceMode: 'dev' as const,
+        rightPanelMode: 'workspace' as const,
+        workspaceWorktreeId: c.worktreeId,
+        workspaceOpenFilePath: c.filePath,
+        workspaceOpenTabs: c.tabs,
+        workspaceOpenFileLine: c.line,
+        // F226 云端 P2: restore the snapped viewport so a long doc returns to where the presenter
+        // was (WorkspacePanel.restoreScrollTop consumes workspaceScrollTop while presentationLock holds).
+        workspaceScrollTop: c.scrollTop,
+        // F226 云端 P2: edit tokens are worktree-bound. dock-back restores worktreeId directly, so a
+        // token obtained in the interim worktree (while the docked panel was freed) must be cleared —
+        // normal worktree switches clear it (see setWorkspaceWorktreeId); otherwise edits / file-mgmt
+        // in the restored worktree fail with a stale token until the user forces a refresh.
+        workspaceEditToken: null,
+        workspaceEditTokenExpiry: null,
+      };
+    }),
+  // close/minimize must NOT mutate docked mode (砚砚 P1.2)
+  closeFloat: () => set((state) => (state.presentationSurface ? { presentationSurface: null } : {})),
+  minimizeFloat: (minimized) =>
+    set((state) =>
+      state.presentationSurface ? { presentationSurface: { ...state.presentationSurface, minimized } } : {},
+    ),
+  setFloatPos: (pos) =>
+    set((state) => (state.presentationSurface ? { presentationSurface: { ...state.presentationSurface, pos } } : {})),
+  setFloatSize: (size) =>
+    set((state) => (state.presentationSurface ? { presentationSurface: { ...state.presentationSurface, size } } : {})),
+  // F226 尺寸快捷: 一键适配 PPT (16:9 居中放大) ↔ 恢复手动尺寸。记 pre-maximize geometry → toggle 不用重新拖。
+  toggleMaximize: () =>
+    set((state) => {
+      const s = state.presentationSurface;
+      if (!s) return {};
+      if (s.maximized) {
+        // restore：回到 maximize 前的手动尺寸/位置
+        const pre = s.preMaximizeGeometry;
+        return {
+          presentationSurface: {
+            ...s,
+            maximized: false,
+            preMaximizeGeometry: null,
+            ...(pre ? { pos: pre.pos, size: pre.size } : {}),
+          },
+        };
+      }
+      // maximize：按 PPT 16:9 适配 viewport（~85%）并居中，一键看清 PPT 图
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+      const W = Math.round(Math.min(vw * 0.85, (vh * 0.85 * 16) / 9));
+      const H = Math.round((W * 9) / 16);
+      return {
+        presentationSurface: {
+          ...s,
+          maximized: true,
+          preMaximizeGeometry: { pos: s.pos, size: s.size },
+          pos: { x: Math.round((vw - W) / 2), y: Math.max(16, Math.round((vh - H) / 2)) },
+          size: { width: W, height: H },
+        },
+      };
+    }),
 
   // Phase H: Workspace mode
   workspaceMode: 'dev' as const,

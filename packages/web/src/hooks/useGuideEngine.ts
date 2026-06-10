@@ -105,7 +105,11 @@ export function useGuideEngine() {
   useEffect(() => {
     if (!session?.threadId) return;
     if (currentThreadId === session.threadId) return;
-    exitGuide();
+    // Defensive cleanup on thread switch — NOT a user dismissal. Don't record
+    // the guide as completed, or switching away during e.g. bootcamp-add-teammate
+    // would permanently suppress that guide in the original thread even though
+    // the user never dismissed or finished it (cloud Codex P1 on PR #2166).
+    exitGuide({ recordCompletion: false });
   }, [currentThreadId, exitGuide, session?.threadId]);
 
   useEffect(() => {

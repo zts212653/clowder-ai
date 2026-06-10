@@ -815,10 +815,17 @@ test('ignores system/hook and unknown event types', async () => {
   ]);
 
   const msgs = await promise;
-  // Only session_init + done (hook and unknown skipped)
-  assert.equal(msgs.length, 2);
-  assert.equal(msgs[0].type, 'session_init');
-  assert.equal(msgs[1].type, 'done');
+  // F212 Phase G (AC-G4): system/hook/unknown events trigger silent_completion diagnostic
+  // (eventCount>0, textEventCount=0). Was previously msgs.length === 2 (only session_init +
+  // done); now includes a silent_completion system_info notice surfacing event evidence.
+  const sessionInit = msgs.find((m) => m.type === 'session_init');
+  const done = msgs.find((m) => m.type === 'done');
+  const silent = msgs.find(
+    (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+  );
+  assert.ok(sessionInit, 'session_init still yielded');
+  assert.ok(done, 'done still yielded');
+  assert.ok(silent, 'silent_completion diagnostic surfaces (Phase G AC-G4 — was previously silent backend warn)');
 });
 
 test('all messages have catId opus', async () => {
@@ -1443,4 +1450,134 @@ test('native Anthropic model keeps --effort value adjacent when --model is inser
   assert.ok(modelIdx >= 0, '--model flag must be present for native Anthropic model');
   assert.notEqual(modelIdx, effortIdx + 1, '--model must not split the --effort flag/value pair');
   assert.equal(args[modelIdx + 1], 'claude-opus-4-6');
+});
+
+// F212 Phase G (AC-G4, clowder-ai#875 sibling sweep): ClaudeAgentService no-text branch
+// should mirror OpenCode AC-G3 fix — eventCount > 0 && textEventCount === 0 yields
+// silent_completion diagnostic notice. LL-069 sibling-sweep regression guard.
+test('AC-G4: Claude eventCount>0 + textEvents=0 → yields silent_completion system_info diagnostic (sibling sweep)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    catId: 'opus',
+    spawnFn,
+    model: 'claude-opus-4-7',
+  });
+  const promise = collect(service.invoke('Test silent', { invocationId: 'inv-claude-silent' }));
+  proc.stderr.write('Warning: Claude stderr without text output\n');
+  // Emit a system event (counts toward eventCount) but no assistant/text event
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'ses_claudefake' },
+    { type: 'result', subtype: 'success' },
+  ]);
+  const messages = await promise;
+
+  const silentNotice = messages.find(
+    (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+  );
+  assert.ok(
+    silentNotice,
+    `Claude AC-G4: expected silent_completion system_info; types: ${messages.map((m) => m.type).join(',')}`,
+  );
+  assert.equal(JSON.parse(silentNotice.content).type, 'silent_completion');
+  assert.ok(
+    !messages.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+    'silent_completion is observability-only and MUST NOT travel as provider error',
+  );
+  assert.equal(silentNotice.metadata.cliDiagnostics.debugRef.invocationId, 'inv-claude-silent');
+  assert.equal(
+    silentNotice.metadata.cliDiagnostics.debugRef.exitCode,
+    0,
+    'silent_completion preserves clean exit code',
+  );
+  const evidence = JSON.parse(silentNotice.metadata.cliDiagnostics.safeExcerpt);
+  assert.ok(evidence.eventCount >= 1, 'Claude evidence eventCount > 0');
+  assert.ok(evidence.eventTypes.length > 0, 'Claude evidence has event types');
+  assert.equal(evidence.stderrPresent, true, 'Claude successful-exit stderr presence is preserved');
+  assert.match(
+    evidence.stderrExcerpt,
+    /Claude stderr without text output/,
+    'Claude successful-exit stderr excerpt is preserved for diagnostics',
+  );
+  // Done event still yielded
+  assert.ok(
+    messages.some((m) => m.type === 'done'),
+    'done event still yielded after Claude diagnostic',
+  );
+});
+
+// F212 Phase G R1 P1 (cloud codex catch on 1d519e7f2 sibling sweep): Claude tool-only
+// turns are legitimate per F215 AC-B3. assistant event with tool_use content block then
+// result:success without text is NOT silent_completion.
+test('AC-G4 R1 P1: Claude assistant tool_use block + result success → does NOT yield silent_completion', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    catId: 'opus',
+    spawnFn,
+    model: 'claude-opus-4-7',
+  });
+  const promise = collect(service.invoke('Use tools'));
+  // Assistant event with tool_use content block (F215 AC-B3 pure-tool-use pattern)
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'ses_toolonly' },
+    {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'echo hi' } }],
+      },
+    },
+    { type: 'result', subtype: 'success' },
+  ]);
+  const messages = await promise;
+
+  const silentError = messages.find(
+    (m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+  );
+  assert.ok(
+    !silentError,
+    `Claude silent_completion MUST NOT fire when assistant emitted tool_use block (R1 P1 sibling guard): types=${messages.map((m) => m.type).join(',')}`,
+  );
+  const silentNotice = messages.find(
+    (m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion',
+  );
+  assert.ok(
+    !silentNotice,
+    `Claude silent_completion system_info MUST NOT fire when assistant emitted tool_use block (R1 P1 sibling guard): types=${messages.map((m) => m.type).join(',')}`,
+  );
+});
+
+test('AC-G4 cloud P2: Claude result is_error:true surfaces tool_call_parse_failed, not silent_completion', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    catId: 'opus',
+    spawnFn,
+    model: 'claude-opus-4-7',
+  });
+  const promise = collect(service.invoke('Malformed tool call', { invocationId: 'inv-claude-a2' }));
+  emitClaudeEvents(proc, [
+    { type: 'system', subtype: 'init', session_id: 'ses_result_error' },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: "The model's tool call could not be parsed (retry also failed).",
+      errors: null,
+    },
+  ]);
+  const messages = await promise;
+
+  const resultError = messages.find((m) => m.type === 'error' && /could not be parsed/.test(m.error ?? ''));
+  assert.ok(
+    resultError,
+    `Claude result is_error:true must yield the actual result error; types=${messages.map((m) => m.type).join(',')}`,
+  );
+  assert.equal(resultError.metadata?.cliDiagnostics?.reasonCode, 'tool_call_parse_failed');
+  assert.match(resultError.metadata?.cliDiagnostics?.safeExcerpt ?? '', /could not be parsed/);
+  assert.equal(resultError.metadata?.cliDiagnostics?.debugRef.invocationId, 'inv-claude-a2');
+  assert.ok(
+    !messages.some((m) => m.type === 'system_info' && m.metadata?.cliDiagnostics?.reasonCode === 'silent_completion'),
+    'silent_completion MUST NOT fire when Claude result carries is_error:true',
+  );
 });

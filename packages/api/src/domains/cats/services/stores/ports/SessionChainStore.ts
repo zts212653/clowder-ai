@@ -37,6 +37,7 @@ export type SessionRecordPatch = Partial<
     | 'continuityCapsule'
     | 'consecutiveRestoreFailures'
     | 'latestResumeSessionId'
+    | 'catHandoffNote'
   >
 > & {
   sealReason?: SessionRecord['sealReason'] | null;
@@ -217,6 +218,7 @@ export class SessionChainStore implements ISessionChainStore {
     if (patch.consecutiveRestoreFailures !== undefined)
       record.consecutiveRestoreFailures = patch.consecutiveRestoreFailures;
     if (patch.latestResumeSessionId !== undefined) record.latestResumeSessionId = patch.latestResumeSessionId;
+    if (patch.catHandoffNote !== undefined) record.catHandoffNote = patch.catHandoffNote;
     record.updatedAt = patch.updatedAt ?? Date.now();
 
     return record;

@@ -2,6 +2,8 @@
 name: schedule-tasks
 description: >
   定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
+  ⚠️ ROUTING: 定时/schedule/cron 需求优先用本 skill（Cat Café 本地定时任务），
+  不要用另一个叫 `schedule` 的 skill（那是云端 remote-agent，用途不同）。
   Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
   Not for: 已有 builtin 任务的手动触发。
   Output: 注册/管理定时任务，任务到点唤醒猫执行。

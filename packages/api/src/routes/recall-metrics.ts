@@ -223,7 +223,7 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
     const rows = opts.evidenceDb
       .prepare(
         `SELECT recall_id, cat_id, tool_name, query, mode, scope,
-              candidates_json, timestamp
+              candidates_json, result_count, timestamp
        FROM recall_events
        WHERE thread_id = ?
        ORDER BY timestamp DESC
@@ -237,23 +237,28 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
       mode: string | null;
       scope: string | null;
       candidates_json: string;
+      result_count: number | null;
       timestamp: number;
     }>;
 
     return {
-      events: rows.map((r) => ({
-        id: r.recall_id,
-        query: r.query,
-        mode: r.mode ?? undefined,
-        scope: r.scope ?? undefined,
-        timestamp: r.timestamp,
-        resultCount: (JSON.parse(r.candidates_json || '[]') as unknown[]).length,
-        results: (JSON.parse(r.candidates_json || '[]') as Array<{ anchor: string; docKind?: string }>).map((c) => ({
-          title: c.anchor,
-          anchor: c.anchor,
-          sourceType: c.docKind,
-        })),
-      })),
+      events: rows.map((r) => {
+        const candidates = JSON.parse(r.candidates_json || '[]') as Array<{ anchor: string; docKind?: string }>;
+        const resultCount = r.result_count ?? (candidates.length > 0 ? candidates.length : undefined);
+        return {
+          id: r.recall_id,
+          query: r.query,
+          mode: r.mode ?? undefined,
+          scope: r.scope ?? undefined,
+          timestamp: r.timestamp,
+          ...(resultCount != null ? { resultCount } : {}),
+          results: candidates.map((c) => ({
+            title: c.anchor,
+            anchor: c.anchor,
+            sourceType: c.docKind,
+          })),
+        };
+      }),
     };
   });
 };

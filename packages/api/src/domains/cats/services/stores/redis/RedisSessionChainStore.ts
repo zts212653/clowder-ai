@@ -12,7 +12,14 @@
  * Pass bare keys only.
  */
 
-import type { CatId, ContextHealth, SessionRecord, SessionStatus, SessionUsageSnapshot } from '@cat-cafe/shared';
+import type {
+  CatHandoffNote,
+  CatId,
+  ContextHealth,
+  SessionRecord,
+  SessionStatus,
+  SessionUsageSnapshot,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { CreateSessionInput, ISessionChainStore, SessionRecordPatch } from '../ports/SessionChainStore.js';
 import { SessionChainKeys } from '../redis-keys/session-chain-keys.js';
@@ -273,6 +280,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
     if (patch.latestResumeSessionId !== undefined) {
       pairs.push('latestResumeSessionId', patch.latestResumeSessionId);
     }
+    if (patch.catHandoffNote !== undefined) {
+      pairs.push('catHandoffNote', JSON.stringify(patch.catHandoffNote));
+    }
 
     await this.redis.hset(detailKey, ...pairs);
     if (deleteFields.length > 0) {
@@ -332,6 +342,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);
     const continuityCapsule =
       data.continuityCapsule !== undefined ? safeParseJson<unknown>(data.continuityCapsule) : undefined;
+    const catHandoffNote =
+      data.catHandoffNote !== undefined ? safeParseJson<CatHandoffNote>(data.catHandoffNote) : undefined;
     const sealReason = data.sealReason as SessionRecord['sealReason'] | undefined;
     const sealedAt = data.sealedAt ? parseInt(data.sealedAt, 10) : undefined;
     const compressionCount = data.compressionCount ? parseInt(data.compressionCount, 10) : undefined;
@@ -354,6 +366,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       ...(sealedAt ? { sealedAt } : {}),
       ...(compressionCount !== undefined ? { compressionCount } : {}),
       ...(continuityCapsule !== undefined && continuityCapsule !== null ? { continuityCapsule } : {}),
+      ...(catHandoffNote !== undefined && catHandoffNote !== null ? { catHandoffNote } : {}),
       ...(consecutiveRestoreFailures !== undefined ? { consecutiveRestoreFailures } : {}),
       ...(data.chainKey ? { chainKey: data.chainKey } : {}),
       ...(data.latestResumeSessionId ? { latestResumeSessionId: data.latestResumeSessionId } : {}),

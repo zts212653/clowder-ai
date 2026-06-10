@@ -354,3 +354,133 @@ describe('F222: evaluate — full pipeline', () => {
     assert.equal(second, null, 'second trigger should be deduped');
   });
 });
+
+// ── shouldTrigger: user_report (UX-3) ─────────────────────────
+
+describe('F222 UX-3: shouldTrigger — user_report', () => {
+  it('always triggers (no threshold)', () => {
+    assert.equal(
+      shouldTrigger({
+        type: 'user_report',
+        toolName: 'git_push',
+        cancelReason: 'wrong_direction',
+      }),
+      true,
+    );
+  });
+
+  it('triggers even with empty toolName', () => {
+    assert.equal(
+      shouldTrigger({
+        type: 'user_report',
+        toolName: '',
+      }),
+      true,
+    );
+  });
+});
+
+// ── evaluate: user_report (UX-3) ──────────────────────────────
+
+describe('F222 UX-3: evaluate — user_report', () => {
+  function createMockMessageStore(messages = []) {
+    return {
+      getByThread: () => messages,
+      append: (msg) => ({ id: 'msg_mock', ...msg }),
+    };
+  }
+
+  it('creates draft issue for user_report signal', async () => {
+    const { InMemoryFrustrationIssueStore } = await import(
+      '../../dist/domains/cats/services/stores/memory/InMemoryFrustrationIssueStore.js'
+    );
+    const store = new InMemoryFrustrationIssueStore();
+
+    const result = await evaluate(
+      {
+        signal: {
+          type: 'user_report',
+          toolName: 'git_push',
+          cancelReason: 'wrong_direction',
+        },
+        threadId: 'thread_ur1',
+        userId: 'user_report_test',
+        catId: 'cat-opus',
+      },
+      { frustrationIssueStore: store, messageStore: createMockMessageStore() },
+    );
+
+    assert.ok(result, 'should create issue');
+    assert.equal(result.status, 'draft');
+    assert.equal(result.signalType, 'user_report');
+    assert.equal(result.signalDetail.toolName, 'git_push');
+    assert.equal(result.signalDetail.cancelReason, 'wrong_direction');
+  });
+
+  it('card title says user report, not auto-detection', async () => {
+    const mockIssue = {
+      issueId: 'fi_ur_test',
+      status: 'draft',
+      threadId: 'thread_t1',
+      userId: 'user_u1',
+      catId: 'cat-test',
+      signalType: 'user_report',
+      signalDetail: { toolName: 'git_push' },
+      context: { recentMessages: [] },
+      createdAt: Date.now(),
+    };
+    const card = buildFrustrationIssueCard(mockIssue);
+    assert.ok(card.title.includes('问题反馈'), 'title should mention user feedback');
+    assert.ok(!card.title.includes('可能出了问题'), 'should NOT use auto-detection wording');
+  });
+
+  it('card fields include rejected tool name', () => {
+    const mockIssue = {
+      issueId: 'fi_ur_field',
+      status: 'draft',
+      threadId: 'thread_t1',
+      userId: 'user_u1',
+      catId: 'cat-test',
+      signalType: 'user_report',
+      signalDetail: { toolName: 'dangerous_rm' },
+      context: { recentMessages: [] },
+      createdAt: Date.now(),
+    };
+    const card = buildFrustrationIssueCard(mockIssue);
+    const fieldLabels = card.fields.map((f) => f.label);
+    assert.ok(fieldLabels.includes('被拒绝的操作'));
+    const toolField = card.fields.find((f) => f.label === '被拒绝的操作');
+    assert.equal(toolField.value, 'dangerous_rm');
+  });
+
+  it('P1 regression: consecutive user_report in same thread is NOT deduped', async () => {
+    const { InMemoryFrustrationIssueStore } = await import(
+      '../../dist/domains/cats/services/stores/memory/InMemoryFrustrationIssueStore.js'
+    );
+    const store = new InMemoryFrustrationIssueStore();
+    const deps = { frustrationIssueStore: store, messageStore: createMockMessageStore() };
+
+    const first = await evaluate(
+      {
+        signal: { type: 'user_report', toolName: 'git_push' },
+        threadId: 'thread_nodedup',
+        userId: 'u',
+        catId: 'c',
+      },
+      deps,
+    );
+    assert.ok(first, 'first user_report should create issue');
+
+    const second = await evaluate(
+      {
+        signal: { type: 'user_report', toolName: 'rm_file' },
+        threadId: 'thread_nodedup',
+        userId: 'u',
+        catId: 'c',
+      },
+      deps,
+    );
+    assert.ok(second, 'second user_report in same thread must NOT be deduped');
+    assert.notEqual(first.issueId, second.issueId, 'should be separate issues');
+  });
+});

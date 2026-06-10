@@ -20,6 +20,17 @@ export interface RecallMetricsReport {
     tokenCostPerHit: number;
     consumedAnchorNotInPoolRate: number;
     shadowConsumedMRR: number | null;
+    /**
+     * Live MRR computed on the SAME subset as `shadowConsumedMRR`
+     * (i.e. rows where `shadowRanking !== null && consumed.length > 0`).
+     *
+     * Why: `shadowConsumedMRR` divides by the shadow-subset size while
+     * `core.consumedMRR` divides by the full row count, so comparing the two
+     * collapses to ~1/c (consumed-rate). Use `shadowConsumedMRR /
+     * liveOnShadowSubsetMRR` for an apples-to-apples shadow-vs-live ratio.
+     * (F200 B' — 6.7× false-alarm root cause.)
+     */
+    liveOnShadowSubsetMRR: number | null;
   };
   graph: {
     nonFirstSelectionRate: number;
@@ -315,6 +326,7 @@ export class RecallMetricsComputer {
       }
     }
 
+    const shadow = this.computeShadowComparison(rows);
     return {
       readthroughAt3: readthroughDenom > 0 ? readthroughSum / readthroughDenom : 0,
       firstConsumedRankMedian: median,
@@ -323,20 +335,66 @@ export class RecallMetricsComputer {
       grepFallbackRate: withCandidates.length > 0 ? fallbackAfterHigh / withCandidates.length : 0,
       tokenCostPerHit: totalConsumed > 0 ? totalTokens / totalConsumed : 0,
       consumedAnchorNotInPoolRate: totalConsumedEntries > 0 ? consumedNotInPool / totalConsumedEntries : 0,
-      shadowConsumedMRR: this.computeShadowMRR(rows),
+      shadowConsumedMRR: shadow.shadowConsumedMRR,
+      liveOnShadowSubsetMRR: shadow.liveOnShadowSubsetMRR,
     };
   }
 
-  private computeShadowMRR(rows: ParsedRow[]): number | null {
+  /**
+   * Compute shadow MRR and a denominator-matched live MRR mirror on the same
+   * shadow subset (`shadowRanking !== null && consumed.length > 0`).
+   *
+   * Both metrics share the same denominator (`shadowRows.length`). The two
+   * numerators are INDEPENDENT (each side's "miss" only affects its own sum):
+   *   - `shadowConsumedMRR`: 1/(rank+1) on rows where shadow can rank a
+   *     consumed anchor; 0 contribution when shadow ranking omits the
+   *     consumed anchor (penalise shadow recall miss).
+   *   - `liveOnShadowSubsetMRR`: 1/(rank+1) on the same row using the LIVE
+   *     consumed rank (`c.rank`); 0 contribution when `c.rank < 0` (anchor
+   *     not in live candidate pool, see `consumedAnchorNotInPoolRate` /
+   *     AC-C6); otherwise always contributes regardless of shadow.
+   *
+   * Independent numerators ensure a shadow miss does not mute the live
+   * mirror signal on the same row (PR #2108 codex review blocker). The
+   * shared denominator keeps `shadowConsumedMRR / liveOnShadowSubsetMRR`
+   * apples-to-apples and free of the 1/c dilution that
+   * `shadowConsumedMRR / core.consumedMRR` suffers from.
+   */
+  private computeShadowComparison(rows: ParsedRow[]): {
+    shadowConsumedMRR: number | null;
+    liveOnShadowSubsetMRR: number | null;
+  } {
     const shadowRows = rows.filter((r) => r.shadowRanking !== null && r.consumed.length > 0);
-    if (shadowRows.length === 0) return null;
-    let sum = 0;
+    if (shadowRows.length === 0) {
+      return { shadowConsumedMRR: null, liveOnShadowSubsetMRR: null };
+    }
+    let shadowSum = 0;
+    let liveSum = 0;
     for (const r of shadowRows) {
+      // Shadow contribution: gated on shadow being able to rank a consumed anchor.
       const rankMap = new Map(r.shadowRanking!.map((s) => [s.anchor, s.shadowRank]));
       const firstShadowRank = Math.min(...r.consumed.map((c) => rankMap.get(c.anchor) ?? Infinity));
-      if (Number.isFinite(firstShadowRank)) sum += 1 / (firstShadowRank + 1);
+      if (Number.isFinite(firstShadowRank)) {
+        shadowSum += 1 / (firstShadowRank + 1);
+      }
+      // Live mirror contribution: INDEPENDENT of shadow (PR #2108 codex review).
+      // Min over NON-NEGATIVE ranks only — `c.rank = -1` signals "anchor not in
+      // live candidate pool" (AC-C6). On rows with mixed `[{rank:-1}, {rank:0}]`
+      // entries, the user's top-pool consumption (rank 0) should still count —
+      // taking `Math.min` blindly would let `-1` swallow the valid rank. Skip
+      // the row entirely if all consumed entries are -1 (avoids 1/0 = Infinity
+      // and mirrors how shadow treats its own miss). Same semantics as shadow's
+      // `Math.min(..., Infinity)` which naturally picks the smallest finite rank.
+      const liveRanks = r.consumed.map((c) => c.rank).filter((rank) => rank >= 0);
+      if (liveRanks.length > 0) {
+        const firstLiveRank = Math.min(...liveRanks);
+        liveSum += 1 / (firstLiveRank + 1);
+      }
     }
-    return sum / shadowRows.length;
+    return {
+      shadowConsumedMRR: shadowSum / shadowRows.length,
+      liveOnShadowSubsetMRR: liveSum / shadowRows.length,
+    };
   }
 
   private computeGraph(rows: ParsedRow[]): RecallMetricsReport['graph'] {
@@ -373,6 +431,7 @@ export class RecallMetricsComputer {
         tokenCostPerHit: 0,
         consumedAnchorNotInPoolRate: 0,
         shadowConsumedMRR: null,
+        liveOnShadowSubsetMRR: null,
       },
       graph: { nonFirstSelectionRate: 0, traversalCompletion: 0 },
     };

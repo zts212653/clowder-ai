@@ -32,7 +32,7 @@ declare module 'fastify' {
   }
 }
 
-interface CallbackAuthRegistry {
+export interface CallbackAuthRegistry {
   verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
   /**
    * F174 D2b-1: pure record read, ignoring TTL. Used by the in-context
@@ -44,7 +44,7 @@ interface CallbackAuthRegistry {
   peekRecord?(invocationId: string): Promise<InvocationRecord | null>;
 }
 
-interface AgentKeyAuthRegistry {
+export interface AgentKeyAuthRegistry {
   verify(secret: string): Promise<AgentKeyVerifyResult>;
 }
 

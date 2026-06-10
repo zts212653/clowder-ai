@@ -22,6 +22,7 @@ import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -488,6 +489,12 @@ export class ClaudeAgentService implements AgentService {
         'Invoking Claude CLI',
       );
 
+      const successfulExitStderr: { stderrPresent: boolean; stderrExcerpt?: string } = { stderrPresent: false };
+      const onSuccessfulExitStderr = (summary: { stderrPresent: boolean; stderrExcerpt?: string }): void => {
+        successfulExitStderr.stderrPresent = summary.stderrPresent;
+        if (summary.stderrExcerpt) successfulExitStderr.stderrExcerpt = summary.stderrExcerpt;
+      };
+
       const cliOpts = {
         command: claudeCommand,
         args,
@@ -495,6 +502,7 @@ export class ClaudeAgentService implements AgentService {
         stdinInput: effectivePrompt,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
         env: envOverrides,
+        onSuccessfulExitStderr,
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
         ...(options?.cliSessionId ? { cliSessionId: options.cliSessionId } : {}),
@@ -510,6 +518,12 @@ export class ClaudeAgentService implements AgentService {
 
       let eventCount = 0;
       let textEventCount = 0;
+      // F212 Phase G (AC-G4, clowder-ai#875 sibling sweep): track unique event types
+      // so silent_completion diagnostic surfaces them when textEventCount===0.
+      const uniqueEventTypes = new Set<string>();
+      // F212 Phase G: skip silent_completion when any error event already yielded (mirror
+      // OpenCode AC-G3 guard — any real error path carries the actual reason).
+      let errorAlreadyYielded = false;
       // F215: Track assistant event presence and content blocks (reset per assistant event).
       //
       // hasAssistantEvent: model generated a response (needed to distinguish "empty invocation" from "malformed").
@@ -535,6 +549,7 @@ export class ClaudeAgentService implements AgentService {
           typeof event === 'object' && event !== null && 'type' in event
             ? String((event as Record<string, unknown>).type)
             : '__unknown';
+        uniqueEventTypes.add(evtType);
         log.debug({ catId: this.catId, eventIndex: eventCount, type: evtType }, 'CLI event received');
         // F215: Inspect assistant events for content blocks (before transformClaudeEvent runs).
         // Reset per-turn tracking on each new assistant event so multi-turn tool-using sessions are handled
@@ -585,6 +600,7 @@ export class ClaudeAgentService implements AgentService {
             metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
+          errorAlreadyYielded = true;
           continue;
         }
         // F118 Phase C: Forward liveness warnings to frontend with catId
@@ -621,6 +637,7 @@ export class ClaudeAgentService implements AgentService {
             metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };
+          errorAlreadyYielded = true;
           continue;
         }
 
@@ -668,7 +685,28 @@ export class ClaudeAgentService implements AgentService {
           if (result.type === 'text') {
             textEventCount++;
           }
-          yield { ...result, metadata };
+          // F212 Phase G: any yielded error event suppresses subsequent silent_completion
+          const resultErrorText = result.type === 'error' && typeof result.error === 'string' ? result.error : '';
+          const resultMetadata =
+            fromResultError && resultErrorText
+              ? {
+                  ...metadata,
+                  cliDiagnostics: buildCliDiagnostics({
+                    rawText: resultErrorText,
+                    structuredErrorText: resultErrorText,
+                    debugRef: {
+                      command: 'claude',
+                      exitCode: null,
+                      signal: null,
+                      ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+                    },
+                  }),
+                }
+              : metadata;
+          if (result.type === 'error') {
+            errorAlreadyYielded = true;
+          }
+          yield { ...result, metadata: resultMetadata };
         }
       }
 
@@ -718,11 +756,46 @@ export class ClaudeAgentService implements AgentService {
           metadata,
           timestamp: Date.now(),
         };
-      } else if (textEventCount === 0) {
+      } else if (
+        eventCount > 0 &&
+        textEventCount === 0 &&
+        !errorAlreadyYielded &&
+        // F212 Phase G R1 P1 (cloud codex on 1d519e7f2): tool-only turns are valid task
+        // completions per F215 AC-B3 (pure tool_use). When the assistant produced a
+        // tool_use block, there's no "silent" problem — the work happened via tools.
+        // Match isMalformedToolCall's positive-tool-use sense: hasAssistantEvent + has
+        // tool_use block = legitimate, skip silent_completion.
+        !(hasAssistantEvent && lastAssistantHasToolUseBlock)
+      ) {
+        // F212 Phase G (AC-G4, clowder-ai#875 sibling sweep): surface silent_completion
+        // via cliDiagnostics instead of just backend warn. Mirrors OpenCodeAgentService
+        // AC-G3 fix exactly — LL-069 spec-text-driven sweep ensures sibling parity. Guard
+        // mirrors OpenCode: skip when other diagnostic already surfaced (model_not_found,
+        // timeout, etc.) — those carry real reasonCode, silent_completion would be dup.
         log.warn(
-          { catId: this.catId, totalEvents: eventCount },
-          'Claude CLI produced 0 text events — will show as silent_completion',
+          { catId: this.catId, totalEvents: eventCount, eventTypes: Array.from(uniqueEventTypes) },
+          'Claude CLI produced 0 text events — surfacing silent_completion diagnostic',
         );
+        const silentDiag = buildSilentCompletionDiagnostic({
+          command: 'claude',
+          ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
+          eventCount,
+          eventTypes: Array.from(uniqueEventTypes),
+          ...(metadata.model ? { model: metadata.model } : {}),
+          ...(metadata.sessionId ? { sessionId: metadata.sessionId } : {}),
+          stderrPresent: successfulExitStderr.stderrPresent,
+          ...(successfulExitStderr.stderrExcerpt ? { stderrExcerpt: successfulExitStderr.stderrExcerpt } : {}),
+        });
+        yield {
+          type: 'system_info',
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'silent_completion',
+            detail: 'Claude CLI 完成但无文字输出（见 cliDiagnostics 详情）',
+          }),
+          metadata: { ...metadata, cliDiagnostics: silentDiag },
+          timestamp: Date.now(),
+        };
       }
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };
     } catch (err) {

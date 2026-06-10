@@ -157,6 +157,60 @@ describe('F167 Phase J AC-J1: DELETE /api/callbacks/hold-ball/:taskId', () => {
     assert.equal(deps._broadcasts[0].event, 'connector_message');
   });
 
+  test('200 with withFeedback=1 — cancels hold and emits feedback callback', async () => {
+    const task = makeHoldTask('hold-ball-feedback', 'thread-feedback', 'opus');
+    const deps = makeStubDeps([task], { 'thread-feedback': 'test-user' });
+    const feedbackCalls = [];
+    deps.onHoldBallCancelFeedback = (input) => feedbackCalls.push(input);
+    const app = await createApp(deps);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/api/callbacks/hold-ball/hold-ball-feedback?withFeedback=1',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(deps._unregistered, ['hold-ball-feedback']);
+    assert.deepEqual(deps._removed, ['hold-ball-feedback']);
+    assert.equal(feedbackCalls.length, 1);
+    assert.deepEqual(feedbackCalls[0], {
+      taskId: 'hold-ball-feedback',
+      threadId: 'thread-feedback',
+      userId: 'test-user',
+      catId: 'opus',
+    });
+  });
+
+  test('200 feedback report for stale hold task — emits feedback without live task', async () => {
+    const deps = makeStubDeps([], { 'thread-feedback': 'test-user' });
+    const feedbackCalls = [];
+    deps.onHoldBallCancelFeedback = (input) => feedbackCalls.push(input);
+    const app = await createApp(deps);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/hold-ball/feedback',
+      headers: { 'x-cat-cafe-user': 'test-user' },
+      payload: {
+        threadId: 'thread-feedback',
+        taskId: 'hold-ball-stale',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'ok');
+    assert.equal(body.feedback, true);
+    assert.equal(feedbackCalls.length, 1);
+    assert.deepEqual(feedbackCalls[0], {
+      taskId: 'hold-ball-stale',
+      threadId: 'thread-feedback',
+      userId: 'test-user',
+      catId: 'unknown',
+    });
+  });
+
   test('404 on non-existent taskId', async () => {
     const deps = makeStubDeps([]);
     const app = await createApp(deps);

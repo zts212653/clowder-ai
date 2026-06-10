@@ -558,6 +558,23 @@ describe(
       );
     });
 
+    it('governance tests use sanitized frontend/API fallback ports after sync', () => {
+      const packTest = sanitizeFixture(
+        'packages/api/test/governance/governance-pack.test.js',
+        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-pack.test.js'), 'utf-8'),
+      );
+      const bootstrapTest = sanitizeFixture(
+        'packages/api/test/governance/governance-bootstrap.test.js',
+        readFileSync(resolve(ROOT, 'packages/api/test/governance/governance-bootstrap.test.js'), 'utf-8'),
+      );
+
+      for (const content of [packTest, bootstrapTest]) {
+        assert.doesNotMatch(content, /frontend 3001 and API 3002/);
+        assert.match(content, /FRONTEND_PORT \?\? '3003'/);
+        assert.match(content, /API_SERVER_PORT \?\? '3004'/);
+      }
+    });
+
     it('sync-to-opensource.sh runs sanitizer over CommonJS test files', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf-8');
       assert.ok(

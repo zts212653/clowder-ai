@@ -50,6 +50,8 @@ export interface RecallEvent {
   mode?: string;
   scope?: string;
   candidates: RecallCandidate[];
+  /** Reported search hit count from tool_result text, distinct from parsed candidates. */
+  resultCount?: number;
   consumed: ConsumedEntry[];
   reformulated: boolean;
   fellBackToGrep: boolean;

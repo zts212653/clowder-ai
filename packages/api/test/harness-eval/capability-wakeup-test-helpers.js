@@ -12,7 +12,14 @@ export function transcriptEvent(eventNo, invocationId, event) {
   };
 }
 
-export function toolEvent({ invocationId, toolName, summary = {}, turnIndex = 0, timestamp = Date.now() }) {
+export function toolEvent({
+  invocationId,
+  toolName,
+  summary = {},
+  turnIndex = 0,
+  timestamp = Date.now(),
+  status = 'success',
+}) {
   return {
     invocationId,
     sessionId: 'session-cap',
@@ -21,7 +28,7 @@ export function toolEvent({ invocationId, toolName, summary = {}, turnIndex = 0,
     toolName,
     timestamp,
     turnIndex,
-    status: 'success',
+    status,
     summary,
   };
 }

@@ -11,6 +11,7 @@ import {
   DEVELOPMENT_SOP_STAGE_IDS,
   extractFeatureIds,
   isCallbackAuthFailureReason,
+  isValidRichBlock,
   normalizeRichBlock,
   SOP_DEFINITION_IDS,
 } from '@cat-cafe/shared';
@@ -953,6 +954,12 @@ export const createRichBlockInputSchema = {
     .string()
     .min(1)
     .describe('JSON string of the rich block object. Must include id, kind, v:1, and kind-specific fields.'),
+  threadId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('Target thread ID. Required for agent-key auth because persistent MCP has no invocation thread.'),
+  agentKeyCatId: agentKeyCatIdSchema,
 };
 
 /**
@@ -964,7 +971,11 @@ export const createRichBlockInputSchema = {
  * legacy 403 / "not configured" path predates Phase A typed reasons and
  * stays inline (preserves pre-Phase-A behavior, marks DEGRADED:true).
  */
-export async function handleCreateRichBlock(input: { block: string }): Promise<ToolResult> {
+export async function handleCreateRichBlock(input: {
+  block: string;
+  threadId?: string | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(input.block);
@@ -978,13 +989,24 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
   if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || !('kind' in parsed)) {
     return errorResult('Block must include id and kind fields');
   }
+  if (!isValidRichBlock(parsed)) {
+    return errorResult('Invalid rich block: block does not match required fields for its kind');
+  }
   const block = parsed;
+  const hasInvocationCreds = !!process.env.CAT_CAFE_INVOCATION_ID && !!process.env.CAT_CAFE_CALLBACK_TOKEN;
+  const hasAgentKeyCreds = !!(
+    process.env.CAT_CAFE_AGENT_KEY_SECRET ||
+    process.env.CAT_CAFE_AGENT_KEY_FILE ||
+    process.env.CAT_CAFE_AGENT_KEY_FILES
+  );
 
   const ccRichText = `\`\`\`cc_rich\n${JSON.stringify({ v: 1, blocks: [block] })}\n\`\`\``;
-  const runRouteB = async (): Promise<ToolResult> => {
+  const runRouteB = async (meta: { route: string; degraded: boolean }): Promise<ToolResult> => {
     const fallback = await handlePostMessage({
       content: ccRichText,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
       clientMessageId: randomUUID(),
+      agentKeyCatId: input.agentKeyCatId,
     });
     if (!fallback.isError) {
       // Cloud Codex P2 (PR #1384): legacy 403/not-configured branch returns
@@ -993,12 +1015,25 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
       // (legacy + framework custom degrade) get consistent telemetry. The
       // framework's markDegraded is idempotent so re-tagging on the custom
       // path is harmless.
-      return successResult(JSON.stringify({ status: 'ok', route: 'B_fallback', DEGRADED: true }));
+      return successResult(
+        JSON.stringify({
+          status: 'ok',
+          route: meta.route,
+          ...(meta.degraded ? { DEGRADED: true } : {}),
+        }),
+      );
     }
     return errorResult(
       `Rich block creation failed (callback token expired or missing). As a workaround, include this in your message text:\n\n${ccRichText}`,
     );
   };
+
+  if (!hasInvocationCreds && hasAgentKeyCreds) {
+    if (!input.threadId) {
+      return errorResult('threadId is required for create_rich_block when using agent-key auth.');
+    }
+    return runRouteB({ route: 'B_agent_key', degraded: false });
+  }
 
   // Phase E: framework handles primary call + auth-degradable fallback.
   // For the legacy 403/not-configured path (pre-Phase-A), inspect the
@@ -1008,14 +1043,18 @@ export async function handleCreateRichBlock(input: { block: string }): Promise<T
   return withDegradation({
     toolName: 'create_rich_block',
     primary: async () => {
-      const result = await callbackPost('/api/callbacks/create-rich-block', { block }, { enableOutbox: true });
+      const result = await callbackPost(
+        '/api/callbacks/create-rich-block',
+        { block, ...(input.threadId ? { threadId: input.threadId } : {}) },
+        { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
+      );
       if (!result.isError) return result;
       const errorText = result.content[0]?.type === 'text' ? result.content[0].text : '';
       const isLegacyConfigFailure = /\(403\)/.test(errorText) || /not configured/i.test(errorText);
-      if (isLegacyConfigFailure) return runRouteB(); // legacy compat path returns success directly
+      if (isLegacyConfigFailure) return runRouteB({ route: 'B_fallback', degraded: true }); // legacy compat path returns success directly
       return result; // framework continues with auth-reason inspection
     },
-    policy: { kind: 'custom', degrade: async () => runRouteB() },
+    policy: { kind: 'custom', degrade: async () => runRouteB({ route: 'B_fallback', degraded: true }) },
   });
 }
 
@@ -1445,14 +1484,24 @@ export const proposeThreadInputSchema = {
     .string()
     .max(4000)
     .optional()
-    .describe('Optional first message body that will be posted by the user into the new thread on approve'),
+    .describe(
+      'Optional first message body posted as the source cat (AC-AA4 source attribution) into the new thread on approve. Server injects routing credentials (threadId + @handle) into the header so downstream cats can cross-post back.',
+    ),
   reportingMode: z
     .enum(['none', 'final-only', 'state-transitions', 'blocking-ack'])
     .optional()
     .describe(
-      'Optional F128 reporting contract for the sub-thread. none (default/autonomous): downstream self-governs, no required report-back (only escalate CVO/blocker/irreversible/cross-feature conflict per house rules). final-only: report a summary once on completion. state-transitions: report at each phase boundary. blocking-ack: wait for source-thread ack at each blocker. Triage/dispatch → none; fork-and-return needing a summary → final-only.',
+      'Optional F128 reporting contract for the sub-thread (AC-AA1: default is final-only). final-only (default): report a summary once on completion via cross_post with routing credentials. none (autonomous): downstream self-governs, no required report-back (only escalate CVO/blocker/irreversible/cross-feature conflict per house rules). state-transitions: report at each phase boundary. blocking-ack: wait for source-thread ack at each blocker. Triage/dispatch → none; fork-and-return needing a summary → final-only.',
     ),
   parentThreadId: z.string().min(1).optional().describe('Optional parent thread ID. Defaults to the current thread.'),
+  projectPath: z
+    .string()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe(
+      'Optional absolute project directory the child thread belongs to (e.g. "/home/user/clowder-ai"). This decides the working directory cats use when invoked in the new thread. Omit to inherit THIS thread\'s project; if THIS thread is default/未分类/eval/lobby and the child will do repo or implementation work, set projectPath explicitly. Invalid/non-existent paths are rejected (400), never silently defaulted. The user can also change it on the approval card.',
+    ),
   clientRequestId: z
     .string()
     .min(1)
@@ -1468,6 +1517,7 @@ export async function handleProposeThread(input: {
   initialMessage?: string | undefined;
   reportingMode?: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack' | undefined;
   parentThreadId?: string | undefined;
+  projectPath?: string | undefined;
   clientRequestId?: string | undefined;
 }): Promise<ToolResult> {
   // P2-1: always send an idempotency key — auto-generate when the caller didn't supply one,
@@ -1481,6 +1531,7 @@ export async function handleProposeThread(input: {
   if (input.initialMessage) body.initialMessage = input.initialMessage;
   if (input.reportingMode) body.reportingMode = input.reportingMode;
   if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
+  if (input.projectPath) body.projectPath = input.projectPath;
 
   const result = await callbackPost('/api/callbacks/propose-thread', body);
   if (!result.isError) {
@@ -1490,6 +1541,78 @@ export async function handleProposeThread(input: {
         return errorResult(
           'Proposal was NOT created: this invocation has been superseded by a newer one (stale_ignored).',
         );
+      }
+    } catch {
+      // parse failure is fine
+    }
+  }
+  return result;
+}
+
+// ============ F225: Cat-Initiated Session Handoff ============
+
+export const proposeSessionHandoffInputSchema = {
+  done: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe('五件套·已完成：这个 session 你做完了什么（让续接的你一眼看清进展，别重新摸索）'),
+  nextSteps: z.string().min(1).max(2000).describe('五件套·下一步：续接的你从哪里继续、第一步具体做什么'),
+  worktreeBranch: z
+    .string()
+    .max(200)
+    .optional()
+    .describe('五件套·worktree/分支（可选）：当前工作的 worktree 路径或分支名'),
+  commits: z
+    .array(z.string().min(1).max(100))
+    .max(50)
+    .optional()
+    .describe('五件套·commits（可选）：相关 commit SHA 列表'),
+  gotchas: z
+    .string()
+    .max(2000)
+    .optional()
+    .describe('五件套·坑/注意（可选）：续接的你最容易踩的坑、不可逆点、待验证假设'),
+  clientRequestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Optional idempotency key. Resending with the same value returns the same proposalId.'),
+};
+
+export async function handleProposeSessionHandoff(input: {
+  done: string;
+  nextSteps: string;
+  worktreeBranch?: string | undefined;
+  commits?: string[] | undefined;
+  gotchas?: string | undefined;
+  clientRequestId?: string | undefined;
+}): Promise<ToolResult> {
+  // P2 (云端): always send an idempotency key — auto-generate when the caller didn't supply one —
+  // so callbackPost transport retries (408/429/5xx) resolve back to the original proposal instead of
+  // tripping the A4 ≤1-pending gate and misreporting "NOT created" (mirrors F128 handleProposeThread).
+  const body: Record<string, unknown> = {
+    done: input.done,
+    nextSteps: input.nextSteps,
+    clientRequestId: input.clientRequestId ?? randomUUID(),
+  };
+  if (input.worktreeBranch) body.worktreeBranch = input.worktreeBranch;
+  if (input.commits?.length) body.commits = input.commits;
+  if (input.gotchas) body.gotchas = input.gotchas;
+
+  const result = await callbackPost('/api/callbacks/propose-session-handoff', body);
+  if (!result.isError) {
+    try {
+      const data = JSON.parse((result.content[0] as { text: string }).text);
+      if (data?.status === 'stale_ignored') {
+        return errorResult(
+          'Handoff proposal NOT created: this invocation was superseded by a newer one (stale_ignored).',
+        );
+      }
+      if (data?.status === 'rejected') {
+        // A4 gate / no-active-session — surface the reason so the cat reacts instead of retry-spamming.
+        return errorResult(`Handoff proposal NOT created (${data.reason}): ${data.message ?? ''}`);
       }
     } catch {
       // parse failure is fine
@@ -1663,7 +1786,10 @@ export const callbackTools = [
       'Use when you need to notify a different thread about something relevant. ' +
       'NOT for: posting to your own current thread (use post_message instead). ' +
       'Output: message appears in the target thread as a new message visible to all participants. ' +
-      'GOTCHA: Requires threadId — use list_threads or feat_index to find the right thread first.',
+      'ROUTING: You MUST include routing credentials to wake the target cat — either set `targetCats` array with the recipient catId(s), OR put a line-start `@handle` in content. ' +
+      'Messages without routing (no targetCats, no line-start @) will be REJECTED (F193 AC-A4). ' +
+      'GOTCHA: Requires threadId — use list_threads or feat_index to find the right thread first. ' +
+      'TIP: The sub-thread "## 主 Thread" header includes exact routing credentials (threadId + targetCats/handle) — copy them directly.',
     inputSchema: crossPostMessageInputSchema,
     handler: handleCrossPostMessage,
   },
@@ -1845,10 +1971,25 @@ export const callbackTools = [
       'WRITING @-mentions in `initialMessage`: use the SAME stable handle you use in the current thread (e.g. `@砚砚`, `@opus46`, `@gemini`) — NOT the raw catId form like `@cat-rcs85pvn`. ' +
       'Server normalizes known catIds to stable handles defensively, but always prefer the handle form so the proposal card reads naturally to the user. ' +
       'preferredCats accepts catIds (returned by cat_cafe_get_thread_cats). DISPATCH MODEL: when the user approves, the server wakes ONLY the FIRST cat in preferredCats (the chain starter). Subsequent cats are woken by the chain-driven @-mentions cats write in their own replies. ORDER preferredCats EXACTLY as you want the chain to start (e.g. for 接龙/轮转, put the first 棒 cat first). ' +
-      'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract — default none (autonomous: downstream self-governs, no required report-back); pick final-only / state-transitions if you need a summary back to the source thread. When a reporting mode is set, write the chain order into `initialMessage` so the woken cat knows who to @ next. Server auto-injects a "## 主 Thread" header with the mode-appropriate report-back rule so cats can locate the parent. ' +
+      'FORK-AND-RETURN pattern (thread-orchestration skill Step 5c): use `reportingMode` to set the report-back contract. Ask yourself: "做完后源 thread 是否需要结果回来？" — YES (most cases) → omit reportingMode or set `final-only` (default); NO, downstream self-governs → set `none`; need phase updates → `state-transitions`; need blocking ack → `blocking-ack`. Server auto-injects a "## 主 Thread" header with routing credentials (threadId + targetCats/handle) so the last cat knows exactly where and whom to cross-post to. ' +
+      'PROJECT OWNERSHIP: if the current/source thread is default/未分类/eval/lobby but the child will do repo or implementation work, pass `projectPath` explicitly. Omit only when the child should inherit the current project, or when it is intentionally meta/eval/unclassified. ' +
       'INTENT — default vs #ideate: by default dispatch wakes only the first preferredCat (serial chain-starter). If you genuinely want PARALLEL independent ideation (everyone replies at once, no chain), tag the message with `#ideate`. With #ideate, dispatch wakes ALL preferredCats simultaneously.',
     inputSchema: proposeThreadInputSchema,
     handler: handleProposeThread,
+  },
+  // F225: Cat-initiated session handoff (user approves before the current session is sealed + continued)
+  {
+    name: 'cat_cafe_propose_session_handoff',
+    description:
+      'Propose handing off your CURRENT session to a fresh continuation of yourself, at a clean breakpoint. ' +
+      'Use when you just hit a natural seam — last commit landed, tests green, next step is clear — and context is getting heavy: ' +
+      'instead of letting compression silently lossy-summarize you mid-task, you proactively seal HERE and carry a high-fidelity handoff note to the next session. ' +
+      'Returns a proposalId, NOT a sealed session — the seal only happens after the owner approves the confirmation card (reject/expire = current session keeps running, nothing is sealed). ' +
+      'Write the 五件套 note for the FUTURE you (same thread, same cat, seq+1): done (what you finished) + nextSteps (where to resume) required; worktreeBranch / commits / gotchas optional. ' +
+      'The note is injected always-keep into the continuation bootstrap (visible even under the extractive/compress default), so the next you starts with full intent rather than a lossy digest. ' +
+      'Use sparingly — only at genuinely clean breakpoints, never to escape a hard task mid-flight. Orthogonal to compression: compress is the lossy fallback, handoff is the graceful relay.',
+    inputSchema: proposeSessionHandoffInputSchema,
+    handler: handleProposeSessionHandoff,
   },
   // ============ F155: Guide Engine ============
   {

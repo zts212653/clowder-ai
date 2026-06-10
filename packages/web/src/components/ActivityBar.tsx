@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { lazy, Suspense, useCallback, useState } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useCallbackAuthAggregate, useCallbackAuthAvailable } from '@/stores/callbackAuthStore';
+import { useChatStore } from '@/stores/chatStore';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
@@ -202,6 +203,45 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
   );
 }
 
+function ClapperboardIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
+      <title>演示浮窗</title>
+      <path
+        d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="m6.2 5.3 3.1 3.9M12.4 3.4l3.1 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** F226: global presentation-surface toggle — visible across all routes so the
+ *  float can be collapsed/recalled even from Memory Hub / Settings (spec Phase A). */
+function PresentationRailToggle() {
+  const surface = useChatStore((s) => s.presentationSurface);
+  const minimizeFloat = useChatStore((s) => s.minimizeFloat);
+  if (!surface) return null;
+  const minimized = surface.minimized;
+  return (
+    <button
+      type="button"
+      onClick={() => minimizeFloat(!minimized)}
+      className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
+        minimized
+          ? 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
+          : 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+      }`}
+      title={minimized ? '召回演示浮窗（还原讲稿）' : '收起演示浮窗'}
+      data-testid="presentation-rail-toggle"
+    >
+      <ClapperboardIcon className="h-5 w-5" />
+    </button>
+  );
+}
+
 export function ActivityBar({ className }: ActivityBarProps) {
   const pathname = usePathname() ?? '/';
   const router = useRouter();
@@ -247,6 +287,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        <PresentationRailToggle />
         <ThemeMenu onEditTheme={() => setTunerOpen(true)} />
         <Suspense
           fallback={

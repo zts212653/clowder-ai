@@ -175,6 +175,82 @@ describe('F222: frustration-issue-routes', () => {
     assert.equal(res.statusCode, 409);
   });
 
+  // ── POST /false-positive (UX-1) ─────────────────────────────
+
+  it('POST false-positive: 200 + status=false_positive', async () => {
+    const issue = await seedDraft();
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/frustration-issues/${issue.issueId}/false-positive`,
+      headers: { [USER_HEADER]: DEFAULT_USER },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.ok, true);
+    assert.equal(body.issue.status, 'false_positive');
+    assert.ok(body.issue.falsePositiveAt > 0);
+  });
+
+  it('POST false-positive: 404 for nonexistent', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/frustration-issues/fi_nope/false-positive',
+      headers: { [USER_HEADER]: DEFAULT_USER },
+    });
+    assert.equal(res.statusCode, 404);
+  });
+
+  it('POST false-positive: 409 for already-confirmed issue', async () => {
+    const issue = await seedDraft();
+    await store.confirm({ issueId: issue.issueId });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/frustration-issues/${issue.issueId}/false-positive`,
+      headers: { [USER_HEADER]: DEFAULT_USER },
+    });
+    assert.equal(res.statusCode, 409);
+  });
+
+  it('POST false-positive: 403 for wrong user', async () => {
+    const issue = await seedDraft('user_alice');
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/frustration-issues/${issue.issueId}/false-positive`,
+      headers: { [USER_HEADER]: 'user_bob' },
+    });
+    assert.equal(res.statusCode, 403);
+  });
+
+  it('false_positive issues excluded from pending list', async () => {
+    const d1 = await seedDraft();
+    const d2 = await seedDraft();
+    await store.markFalsePositive(d1.issueId);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/frustration-issues/pending',
+      headers: { [USER_HEADER]: DEFAULT_USER },
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(body.issues.length, 1);
+    assert.equal(body.issues[0].issueId, d2.issueId);
+  });
+
+  it('GET list with status=false_positive filter', async () => {
+    const d1 = await seedDraft();
+    await seedDraft();
+    await store.markFalsePositive(d1.issueId);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/frustration-issues?status=false_positive',
+      headers: { [USER_HEADER]: DEFAULT_USER },
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(body.issues.length, 1);
+    assert.equal(body.issues[0].status, 'false_positive');
+  });
+
   // ── GET /pending ───────────────────────────────────────────
 
   it('GET pending: returns draft issues for user', async () => {

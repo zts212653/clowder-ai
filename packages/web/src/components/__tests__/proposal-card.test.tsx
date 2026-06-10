@@ -25,9 +25,18 @@ vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
   pushThreadRouteWithHistory: (...args: unknown[]) => navigateMock(...args),
 }));
 
-const pinMock = vi.fn();
+const chatStoreState = vi.hoisted(() => ({
+  threads: [] as Array<{ id: string; projectPath?: string }>,
+  updateThreadPin: vi.fn(),
+}));
+const pinMock = chatStoreState.updateThreadPin;
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: { getState: () => ({ updateThreadPin: pinMock }) },
+  useChatStore: Object.assign(
+    (selector?: (state: typeof chatStoreState) => unknown) => (selector ? selector(chatStoreState) : chatStoreState),
+    {
+      getState: () => chatStoreState,
+    },
+  ),
 }));
 
 import { ProposalCard } from '@/components/rich/ProposalCard';
@@ -104,6 +113,11 @@ describe('ProposalCard', () => {
     const button = [...container.querySelectorAll('button')].find((node) => node.textContent?.includes(label));
     if (!button) throw new Error(`Missing button: ${label}`);
     return button as HTMLButtonElement;
+  }
+
+  function readRequestBody(call: unknown[] | undefined): Record<string, unknown> {
+    if (!call) throw new Error('Missing request call');
+    return JSON.parse((call[1] as { body: string }).body) as Record<string, unknown>;
   }
 
   it('renders title, body, prefilled fields, and pending action buttons', async () => {
@@ -185,8 +199,7 @@ describe('ProposalCard', () => {
     });
     // The last call must include the edited title in its JSON body
     const approveCall = apiFetchMock.mock.calls.find(([url]) => String(url).endsWith('/approve'));
-    expect(approveCall).toBeTruthy();
-    const sentBody = JSON.parse((approveCall![1] as { body: string }).body);
+    const sentBody = readRequestBody(approveCall);
     expect(sentBody.title).toBe('edited title');
   });
 
@@ -230,8 +243,7 @@ describe('ProposalCard', () => {
       await Promise.resolve();
     });
     const approveCall = apiFetchMock.mock.calls.find(([url]) => String(url).endsWith('/approve'));
-    expect(approveCall).toBeTruthy();
-    const sentBody = JSON.parse((approveCall![1] as { body: string }).body);
+    const sentBody = readRequestBody(approveCall);
     expect(sentBody.pinned).toBeUndefined();
   });
 
@@ -271,8 +283,7 @@ describe('ProposalCard', () => {
       ([url, opts]) =>
         String(url) === '/api/threads/thread_pin_patch' && (opts as { method?: string })?.method === 'PATCH',
     );
-    expect(patchCall).toBeTruthy();
-    const patchBody = JSON.parse((patchCall![1] as { body: string }).body);
+    const patchBody = readRequestBody(patchCall);
     expect(patchBody.pinned).toBe(true);
     // P2 fix: local store must also be updated for immediate sidebar UX
     expect(pinMock).toHaveBeenCalledWith('thread_pin_patch', true);

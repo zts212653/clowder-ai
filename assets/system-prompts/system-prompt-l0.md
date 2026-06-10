@@ -53,6 +53,8 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
    - 修完 → `@reviewer`
    - merge 完 → `@愿景守护猫`（非作者非 reviewer）
 
+   **merge-gate source provenance 反射**：外部 gate（cloud/GitHub/CI/PR）的外部 finding 修完后等 PR truth，不 @ 本地旧 reviewer；仅非 cloud delta/scope/cloud 不可用/本地 blocking 才 @。
+
    **跨 thread 协作特例**：撞 cross-feature 问题且 owner = 你的 `catId`（平行世界自己，§1）时，**不用本 thread `@句柄` 假装路由**——行首 `@` 只投递到当前 thread，不跨 thread。先 `cat_cafe_list_threads keyword=<F号>` 找 thread 坐标，再 `cat_cafe_cross_post_message(threadId, targetCats, content)` 投递证据 / 复现 / 期望动作，让平行 thread 接自己的球。
 2. **等外部条件**（云端 codex / GitHub bot / PR check / CI / 长 build / 外部 webhook——这些不是本地猫，**不可投射成本地 @句柄**）：
    - **2a 轮询模式**（无回调覆盖）→ 调用 `cat_cafe_hold_ball(...)` + 定时唤醒检查
@@ -116,7 +118,8 @@ Baseline 检测点：safety / parallel calls / Skill loading / Schedule / compre
 - 外部 runtime 会话像丢了 → `cat_cafe_list_external_runtime_sessions` / `cat_cafe_read_external_runtime_session`（F211）
 - CLI 只显"退出了" → 读 `cliDiagnostics` / debugRef，不猜 stderr（F212）
 - SOP / harness "修了 vs sunset"判断 → 走 Eval Hub / Verdict Handoff 闭环（F192）
-- 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（`session_events` / `invocation_detail`），不单刀
+- 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
+- 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
 - co-creator重复不满 → `code-as-harness`（搜证据确认重复→诊断→代码修；新任务做过 ≥2 次→Build mode 建 skill）
 

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
@@ -99,6 +102,138 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.status, 'ok');
+  });
+
+  test('post-message with agent-key synthesizes text-only audio rich blocks before storing', async () => {
+    const { initVoiceBlockSynthesizer } = await import('../dist/domains/cats/services/tts/VoiceBlockSynthesizer.js');
+    const cacheDir = mkdtempSync(path.join(os.tmpdir(), 'cat-cafe-agent-key-audio-'));
+    initVoiceBlockSynthesizer(
+      {
+        getDefault: () => ({
+          id: 'mock',
+          model: 'test',
+          synthesize: async () => ({
+            audio: Buffer.from('fake-audio-data'),
+            format: 'wav',
+            metadata: { provider: 'mock', model: 'test', voice: 'test' },
+          }),
+        }),
+      },
+      cacheDir,
+    );
+
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const richPayload = JSON.stringify({
+      v: 1,
+      blocks: [{ id: 'voice-agent-key', kind: 'audio', v: 1, text: 'agent-key voice message' }],
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-agent-key-secret': secret },
+      payload: {
+        content: `\`\`\`cc_rich\n${richPayload}\n\`\`\``,
+        threadId: ownedThreadId,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.status, 'ok');
+
+    const messages = await messageStore.getByThread(ownedThreadId);
+    const block = messages[0].extra.rich.blocks[0];
+    assert.equal(block.kind, 'audio');
+    assert.equal(block.text, 'agent-key voice message');
+    assert.match(block.url, /^\/api\/tts\/audio\/.+\.wav$/);
+    assert.equal(block.mimeType, 'audio/wav');
+  });
+
+  test('post-message with agent-key does not deduplicate distinct rich-block-only payloads', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+    const richContent = (id, title) => {
+      const richPayload = JSON.stringify({
+        v: 1,
+        blocks: [{ id, kind: 'card', v: 1, title }],
+      });
+      return `\`\`\`cc_rich\n${richPayload}\n\`\`\``;
+    };
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: {
+        content: richContent('first-card', 'First card'),
+        threadId: ownedThreadId,
+      },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: {
+        content: richContent('second-card', 'Second card'),
+        threadId: ownedThreadId,
+      },
+    });
+
+    assert.equal(first.statusCode, 200);
+    assert.equal(second.statusCode, 200);
+    assert.equal(JSON.parse(first.body).status, 'ok');
+    assert.equal(JSON.parse(second.body).status, 'ok');
+
+    const messages = await messageStore.getByThread(ownedThreadId);
+    assert.equal(messages.length, 2, 'different rich-block-only payloads must persist as separate messages');
+    assert.deepEqual(
+      messages.map((msg) => msg.extra.rich.blocks[0].id),
+      ['first-card', 'second-card'],
+    );
+  });
+
+  test('post-message with agent-key does not deduplicate plain text after same-text rich payload', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+    const richPayload = JSON.stringify({
+      v: 1,
+      blocks: [{ id: 'hello-card', kind: 'card', v: 1, title: 'hello' }],
+    });
+
+    const rich = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: {
+        content: `hello\n\n\`\`\`cc_rich\n${richPayload}\n\`\`\``,
+        threadId: ownedThreadId,
+      },
+    });
+    const plain = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers,
+      payload: {
+        content: 'hello',
+        threadId: ownedThreadId,
+      },
+    });
+
+    assert.equal(rich.statusCode, 200);
+    assert.equal(plain.statusCode, 200);
+    assert.equal(JSON.parse(rich.body).status, 'ok');
+    assert.equal(JSON.parse(plain.body).status, 'ok');
+
+    const messages = await messageStore.getByThread(ownedThreadId);
+    assert.equal(messages.length, 2, 'plain text must not be swallowed by a same-text rich callback');
+    assert.equal(messages[0].content, 'hello');
+    assert.equal(messages[0].extra.rich.blocks[0].id, 'hello-card');
+    assert.equal(messages[1].content, 'hello');
+    assert.equal(messages[1].extra?.rich, undefined);
   });
 
   // Regression (byte-identical duplicate bug): the shared Antigravity MCP posts via this agent-key

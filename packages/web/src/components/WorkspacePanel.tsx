@@ -10,6 +10,7 @@ import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 import { CommunityPanel } from './CommunityPanel';
+import { EventTimeline } from './event-memory/EventTimeline';
 import { RecallFeed } from './memory/RecallFeed';
 import { TaskBoardPanel } from './TaskBoardPanel';
 import { useConfirm } from './useConfirm';
@@ -179,6 +180,9 @@ export function WorkspacePanel() {
   const disablePresentationLock = useChatStore((s) => s.disablePresentationLock);
   const setPresentationLockViewport = useChatStore((s) => s.setPresentationLockViewport);
   const workspaceScrollTop = useChatStore((s) => s.workspaceScrollTop);
+  // F226: presentation surface — tear-off current file into a floating window
+  const detachToFloat = useChatStore((s) => s.detachToFloat);
+  const presentationSurface = useChatStore((s) => s.presentationSurface);
   const { createFile, createDir, deleteItem, renameItem, uploadFile } = useFileManagement();
 
   const viewportRestoreKey = `${currentThreadId}:${openFilePath}`;
@@ -190,6 +194,8 @@ export function WorkspacePanel() {
   );
 
   const [viewMode, setViewMode] = useState<'files' | 'changes' | 'git' | 'terminal' | 'browser'>('files');
+  // F227: recall mode sub-tab — 记忆流 (RecallFeed) vs 拉闸记录 (EventTimeline)
+  const [recallTab, setRecallTab] = useState<'feed' | 'events'>('feed');
   // Phase H: Workspace mode switcher (dev tools vs knowledge feed)
   const workspaceMode = useChatStore((s) => s.workspaceMode);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
@@ -618,6 +624,32 @@ export function WorkspacePanel() {
                   )}
                 </svg>
               </button>
+              {/* F226: detach current file into a floating window (dev mode only — 烁烁 P2-2) */}
+              {workspaceMode === 'dev' && (
+                <button
+                  type="button"
+                  onClick={detachToFloat}
+                  disabled={!openFilePath || !!presentationSurface}
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-cafe-interactive/40 hover:text-cafe-interactive hover:bg-cafe-surface-sunken/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                  title="浮出文档窗口 — 讲稿浮起来，右侧腾出来切定时任务/记忆/毛线球"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M5 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2M9 2h5v5M14 2 7 9"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
               {presentationLock && (
                 <span className="text-micro font-medium px-1.5 py-0.5 rounded-full bg-cafe-accent/15 text-cafe-accent">
                   Locked
@@ -813,8 +845,27 @@ export function WorkspacePanel() {
 
           {/* Knowledge / Schedule / Tasks / Dev mode routing */}
           {workspaceMode === 'recall' ? (
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <RecallFeed />
+            <div className="flex-1 min-h-0 flex flex-col">
+              {/* F227: 记忆流 vs 拉闸记录 (Event Memory timeline) */}
+              <div className="flex gap-1 px-3 py-1.5 border-b border-cafe-subtle/40">
+                {(['feed', 'events'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setRecallTab(tab)}
+                    className={`px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
+                      recallTab === tab
+                        ? 'bg-cafe-accent/10 text-cafe-accent border border-cafe-accent/30'
+                        : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+                    }`}
+                  >
+                    {tab === 'feed' ? '记忆流' : '拉闸记录'}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {recallTab === 'feed' ? <RecallFeed /> : <EventTimeline />}
+              </div>
             </div>
           ) : workspaceMode === 'schedule' ? (
             <SchedulePanel />

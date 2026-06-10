@@ -93,6 +93,89 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.equal(res.statusCode, 404, 'whisper not addressed to caller should be 404 in play mode');
   });
 
+  // #699 P1 (gpt52 intake review #2111): system/briefing are internal, non-routable —
+  // get-message must align with isEligibleReplyParent and never return their raw content.
+  test('returns 404 for system message (internal, non-routable)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'system test');
+    const sysMsg = messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'SYSTEM BADGE — internal',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${sysMsg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 404, 'system message must not be retrievable via get-message');
+  });
+
+  test('returns 404 for briefing message (internal, non-routable)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'briefing test');
+    const briefingMsg = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'TOP SECRET BRIEFING',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+      origin: 'briefing',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${briefingMsg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 404, 'briefing message must not be retrievable via get-message');
+  });
+
+  test('excludes system/briefing neighbors from get-message context', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const thread = threadStore.create('user-1', 'context test');
+    const target = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'normal target',
+      mentions: [],
+      timestamp: 1000,
+      threadId: thread.id,
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'SYSTEM BADGE neighbor',
+      mentions: [],
+      timestamp: 1001,
+      threadId: thread.id,
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'TOP SECRET BRIEFING neighbor',
+      mentions: [],
+      timestamp: 1002,
+      threadId: thread.id,
+      origin: 'briefing',
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${target.id}&contextCount=5`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 200);
+    const ctxContents = (JSON.parse(res.body).context ?? []).map((m) => m.content);
+    assert.ok(!ctxContents.includes('SYSTEM BADGE neighbor'), 'system must not appear in context');
+    assert.ok(!ctxContents.includes('TOP SECRET BRIEFING neighbor'), 'briefing must not appear in context');
+  });
+
   test('returns whisper in debug mode (full transparency)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

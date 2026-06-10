@@ -121,6 +121,26 @@ describe('F201 Antigravity recovery policy', () => {
     });
   });
 
+  test('retries transient provider errors when a displayed waiting run_command is read-only and undispatched', () => {
+    const decision = decideAntigravityRecovery(
+      baseContext({
+        dispatchState: {
+          ...baseContext().dispatchState,
+          hasDispatchRelevantStep: true,
+          hasBatchToolActivity: true,
+          toolishRetryEligible: true,
+          dispatchRelevantStepKind: 'tool_read_shell',
+        },
+      }),
+    );
+
+    assert.deepEqual(decision, {
+      action: 'retry_fresh_cascade',
+      reason: 'pre_side_effect_transient',
+      delayMs: 0,
+    });
+  });
+
   test('empty_response remains terminal without retryable cascade health', () => {
     const decision = decideAntigravityRecovery(baseContext({ errorCode: 'empty_response' }));
 

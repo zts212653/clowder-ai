@@ -260,17 +260,38 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
     assert.equal(spec.display.category, 'system');
   });
 
-  it('weekly gate includes eval:sop but excludes daily domains', async () => {
+  it('weekly gate includes enabled weekly domains (capability-wakeup + sop), excludes daily', async () => {
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const result = await spec.admission.gate();
     assert.equal(result.run, true);
 
     const domainIds = result.workItems.map((w) => w.subjectKey);
-    assert.ok(domainIds.includes('eval:sop'), 'eval:sop (weekly) must appear in weekly gate');
+    assert.ok(
+      domainIds.includes('eval:capability-wakeup'),
+      'eval:capability-wakeup (weekly + enabled) must appear in weekly gate',
+    );
+    // Re-enabled 2026-06-10 by feat/f192-sop-wiring: all 3 wiring conditions met.
+    assert.ok(domainIds.includes('eval:sop'), 'eval:sop (re-enabled) must appear in weekly gate');
     assert.ok(!domainIds.includes('eval:a2a'), 'eval:a2a (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:memory'), 'eval:memory (daily) must NOT appear in weekly gate');
     assert.ok(!domainIds.includes('eval:task-outcome'), 'eval:task-outcome (daily) must NOT appear in weekly gate');
+  });
+
+  it('weekly gate includes re-enabled eval:sop (was sunset, now wired)', async () => {
+    // eval:sop was sunset 2026-06-06 (enabled: false) due to missing generator wiring.
+    // Re-enabled 2026-06-10 by feat/f192-sop-wiring: SopTrace producer + file-writer +
+    // PUBLISH_VERDICT_INSTRUCTIONS all wired. The enabled flag removal means weekly cron
+    // now picks up eval:sop alongside eval:capability-wakeup.
+    const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+    const result = await spec.admission.gate();
+
+    assert.ok(result.run, 'weekly gate should run with re-enabled eval:sop');
+    const domainIds = result.workItems.map((w) => w.subjectKey);
+    assert.ok(
+      domainIds.includes('eval:sop'),
+      `re-enabled eval:sop must appear in weekly gate, got: ${JSON.stringify(domainIds)}`,
+    );
   });
 
   it('weekly gate returns run=false when no weekly domains exist', async () => {
@@ -282,12 +303,15 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
   });
 
   it('weekly execute delivers message with "Weekly eval" trigger reason', async () => {
+    // Post-sunset (2026-06-06): eval:sop is no longer the test subject for
+    // weekly cron execute because it's `enabled: false`. eval:capability-wakeup
+    // is the remaining enabled weekly domain — switch to it.
     const spec = createEvalDomainWeeklySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
 
     const gateResult = await spec.admission.gate();
     assert.equal(gateResult.run, true);
-    const sopItem = gateResult.workItems.find((w) => w.subjectKey === 'eval:sop');
-    assert.ok(sopItem);
+    const cwItem = gateResult.workItems.find((w) => w.subjectKey === 'eval:capability-wakeup');
+    assert.ok(cwItem, 'eval:capability-wakeup should be present (weekly + enabled)');
 
     const deliverMock = mock.fn(async () => 'msg_weekly_001');
     const triggerMock = mock.fn();
@@ -297,17 +321,17 @@ describe('eval-domain-weekly task spec (AC-E19, AC-E20)', () => {
       invokeTrigger: { trigger: triggerMock },
     };
 
-    await spec.run.execute(sopItem.signal, sopItem.subjectKey, ctx);
+    await spec.run.execute(cwItem.signal, cwItem.subjectKey, ctx);
 
     assert.equal(deliverMock.mock.callCount(), 1);
     const deliverCall = deliverMock.mock.calls[0].arguments[0];
-    assert.equal(deliverCall.threadId, 'thread_eval_sop');
+    assert.equal(deliverCall.threadId, 'thread_eval_capability_wakeup');
     assert.equal(deliverCall.userId, 'scheduler');
-    assert.ok(deliverCall.content.includes('eval:sop'), 'content should mention domain');
+    assert.ok(deliverCall.content.includes('eval:capability-wakeup'), 'content should mention domain');
 
     assert.equal(triggerMock.mock.callCount(), 1);
     const triggerArgs = triggerMock.mock.calls[0].arguments;
-    assert.equal(triggerArgs[0], 'thread_eval_sop');
+    assert.equal(triggerArgs[0], 'thread_eval_capability_wakeup');
     assert.ok(triggerArgs[3].includes('Weekly eval'), 'trigger reason should say Weekly');
   });
 });

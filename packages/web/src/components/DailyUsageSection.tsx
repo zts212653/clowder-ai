@@ -169,7 +169,7 @@ function CatUsageRow({ catId, usage, cat }: { catId: string; usage: CatDailyUsag
         <span className="font-medium text-cafe-secondary truncate">{label}</span>
         {model && (
           <span
-            className="text-cafe-muted text-[10px] truncate italic"
+            className="text-cafe-muted text-micro truncate italic"
             title={`${catId} 当前默认模型：${model}。历史聚合按 catId 分桶，不区分模型版本。`}
           >
             当前默认 {model}

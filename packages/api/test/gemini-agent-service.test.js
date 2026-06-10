@@ -541,6 +541,290 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
+  test('F210: resumed AGY progress side-channel skips historical steps from the same conversation db', async () => {
+    const proc = createMockProcess();
+    const accountHome = mkdtempSync(join(tmpdir(), 'agy-resume-home-'));
+    const appDataDir = join(accountHome, '.gemini', 'antigravity-cli');
+    const uuid = '33333333-3456-7890-abcd-ef1234567890';
+    const convDir = join(appDataDir, 'conversations');
+    mkdirSync(convDir, { recursive: true });
+    const dbPath = join(convDir, `${uuid}.db`);
+    const tdb = new Database(dbPath);
+    tdb.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const ins = tdb.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+    ins.run(0, 14, 3); // previous turn; must not be replayed on this invocation's progress bubble
+    tdb.close();
+
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      writeFileSync(args[logIndex + 1], `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+      const db = new Database(dbPath);
+      db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(1, 15, 3);
+      db.close();
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const msgsPromise = collect(
+      service.invoke('Resume and continue', {
+        sessionId: uuid,
+        workingDirectory: workDir,
+        accountEnv: { HOME: accountHome },
+      }),
+    );
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await msgsPromise;
+
+    const progressIdxs = msgs
+      .filter((m) => m.type === 'system_info' && typeof m.content === 'string')
+      .map((m) => JSON.parse(m.content))
+      .filter((payload) => payload.type === 'agy_trajectory_progress')
+      .map((payload) => payload.idx);
+
+    assert.deepEqual(progressIdxs, [1], 'resumed progress must be per-invocation delta, not 0..N cumulative');
+
+    rmSync(accountHome, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210: same-path recreated AGY db does not apply stale resume baseline', async () => {
+    const proc = createMockProcess();
+    const accountHome = mkdtempSync(join(tmpdir(), 'agy-recreated-home-'));
+    const appDataDir = join(accountHome, '.gemini', 'antigravity-cli');
+    const uuid = '44444444-3456-7890-abcd-ef1234567890';
+    const convDir = join(appDataDir, 'conversations');
+    mkdirSync(convDir, { recursive: true });
+    const dbPath = join(convDir, `${uuid}.db`);
+    let db = new Database(dbPath);
+    db.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(7, 14, 3);
+    db.close();
+
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      writeFileSync(args[logIndex + 1], `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+      rmSync(dbPath, { force: true });
+      db = new Database(dbPath);
+      db.exec(
+        'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+      );
+      db.close();
+      setTimeout(() => {
+        const nextDb = new Database(dbPath);
+        nextDb.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)').run(0, 15, 3);
+        nextDb.close();
+      }, 50);
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const msgsPromise = collect(
+      service.invoke('Resume after recreated DB', {
+        sessionId: uuid,
+        workingDirectory: workDir,
+        accountEnv: { HOME: accountHome },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await msgsPromise;
+
+    const progressIdxs = msgs
+      .filter((m) => m.type === 'system_info' && typeof m.content === 'string')
+      .map((m) => JSON.parse(m.content))
+      .filter((payload) => payload.type === 'agy_trajectory_progress')
+      .map((payload) => payload.idx);
+
+    assert.deepEqual(progressIdxs, [0], 'recreated same-path DB must read current low idx instead of stale baseline');
+
+    rmSync(accountHome, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210: same-path recreated AGY db reads current steps even after idx reaches old baseline', async () => {
+    const proc = createMockProcess();
+    const accountHome = mkdtempSync(join(tmpdir(), 'agy-recreated-caught-up-home-'));
+    const appDataDir = join(accountHome, '.gemini', 'antigravity-cli');
+    const uuid = '55555555-3456-7890-abcd-ef1234567890';
+    const convDir = join(appDataDir, 'conversations');
+    mkdirSync(convDir, { recursive: true });
+    const dbPath = join(convDir, `${uuid}.db`);
+    let db = new Database(dbPath);
+    db.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const previousInsert = db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+    for (let idx = 0; idx <= 7; idx += 1) previousInsert.run(idx, 14, 3);
+    db.close();
+
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      writeFileSync(args[logIndex + 1], `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+      rmSync(dbPath, { force: true });
+      db = new Database(dbPath);
+      db.exec(
+        'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+      );
+      const currentInsert = db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+      for (let idx = 0; idx <= 8; idx += 1) currentInsert.run(idx, 15, 3);
+      db.close();
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const msgsPromise = collect(
+      service.invoke('Resume after recreated DB catches old max', {
+        sessionId: uuid,
+        workingDirectory: workDir,
+        accountEnv: { HOME: accountHome },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await msgsPromise;
+
+    const progressIdxs = msgs
+      .filter((m) => m.type === 'system_info' && typeof m.content === 'string')
+      .map((m) => JSON.parse(m.content))
+      .filter((payload) => payload.type === 'agy_trajectory_progress')
+      .map((payload) => payload.idx);
+
+    assert.deepEqual(
+      progressIdxs,
+      [0, 1, 2, 3, 4, 5, 6, 7, 8],
+      'recreated same-path DB must not skip current low idx even when current max has caught the old baseline',
+    );
+
+    rmSync(accountHome, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210: same-identity rewritten AGY db reads current steps even after idx reaches old baseline', async () => {
+    const proc = createMockProcess();
+    const accountHome = mkdtempSync(join(tmpdir(), 'agy-rewritten-same-identity-home-'));
+    const appDataDir = join(accountHome, '.gemini', 'antigravity-cli');
+    const uuid = '66666666-3456-7890-abcd-ef1234567890';
+    const convDir = join(appDataDir, 'conversations');
+    mkdirSync(convDir, { recursive: true });
+    const dbPath = join(convDir, `${uuid}.db`);
+    const db = new Database(dbPath);
+    db.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const previousInsert = db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+    for (let idx = 0; idx <= 7; idx += 1) previousInsert.run(idx, 14, 3);
+    db.close();
+
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      writeFileSync(args[logIndex + 1], `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+      const currentDb = new Database(dbPath);
+      currentDb.exec('DELETE FROM steps;');
+      const currentInsert = currentDb.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+      for (let idx = 0; idx <= 8; idx += 1) currentInsert.run(idx, 15, 3);
+      currentDb.close();
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const msgsPromise = collect(
+      service.invoke('Resume after same-identity rewritten DB catches old max', {
+        sessionId: uuid,
+        workingDirectory: workDir,
+        accountEnv: { HOME: accountHome },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await msgsPromise;
+
+    const progressIdxs = msgs
+      .filter((m) => m.type === 'system_info' && typeof m.content === 'string')
+      .map((m) => JSON.parse(m.content))
+      .filter((payload) => payload.type === 'agy_trajectory_progress')
+      .map((payload) => payload.idx);
+
+    assert.deepEqual(
+      progressIdxs,
+      [0, 1, 2, 3, 4, 5, 6, 7, 8],
+      'same-identity rewritten DB must not skip current low idx when current max has caught the old baseline',
+    );
+
+    rmSync(accountHome, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('F210: baseline-row collision does not prove rewritten AGY db continuity', async () => {
+    const proc = createMockProcess();
+    const accountHome = mkdtempSync(join(tmpdir(), 'agy-row-collision-home-'));
+    const appDataDir = join(accountHome, '.gemini', 'antigravity-cli');
+    const uuid = '77777777-3456-7890-abcd-ef1234567890';
+    const convDir = join(appDataDir, 'conversations');
+    mkdirSync(convDir, { recursive: true });
+    const dbPath = join(convDir, `${uuid}.db`);
+    const db = new Database(dbPath);
+    db.exec(
+      'CREATE TABLE steps (idx integer, step_type integer NOT NULL DEFAULT 0, status integer NOT NULL DEFAULT 0, has_subtrajectory numeric, metadata blob, error_details blob, permissions blob, task_details blob, render_info blob, step_payload blob, step_format integer, PRIMARY KEY(idx));',
+    );
+    const previousInsert = db.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+    for (let idx = 0; idx <= 7; idx += 1) previousInsert.run(idx, 14, 3);
+    db.close();
+
+    const spawnFn = mock.fn((_command, args) => {
+      const logIndex = args.indexOf('--log-file');
+      assert.ok(logIndex >= 0, 'antigravity-cli adapter must pass --log-file');
+      writeFileSync(args[logIndex + 1], `appDataDir=${appDataDir}\nCreated conversation ${uuid}\n`);
+      const currentDb = new Database(dbPath);
+      currentDb.exec('DELETE FROM steps;');
+      const currentInsert = currentDb.prepare('INSERT INTO steps (idx, step_type, status) VALUES (?, ?, ?)');
+      for (let idx = 0; idx <= 6; idx += 1) currentInsert.run(idx, 15, 3);
+      currentInsert.run(7, 14, 3); // Collides with the old baseline row, but the DB prefix changed.
+      currentInsert.run(8, 15, 3);
+      currentDb.close();
+      return proc;
+    });
+    const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli', model: 'gemini-3.5-flash' });
+
+    const workDir = mkdtempSync(join(tmpdir(), 'agy-workdir-'));
+    const msgsPromise = collect(
+      service.invoke('Resume after rewritten DB baseline-row collision', {
+        sessionId: uuid,
+        workingDirectory: workDir,
+        accountEnv: { HOME: accountHome },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    emitPlainText(proc, 'AGY_FINAL_REPLY\n');
+    const msgs = await msgsPromise;
+
+    const progressIdxs = msgs
+      .filter((m) => m.type === 'system_info' && typeof m.content === 'string')
+      .map((m) => JSON.parse(m.content))
+      .filter((payload) => payload.type === 'agy_trajectory_progress')
+      .map((payload) => payload.idx);
+
+    assert.deepEqual(
+      progressIdxs,
+      [0, 1, 2, 3, 4, 5, 6, 7, 8],
+      'single baseline-row collision must not skip current low idx from a rewritten DB',
+    );
+
+    rmSync(accountHome, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
   test('F210-H4: yields tool_use and tool_result messages extracted from trajectory payload', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);

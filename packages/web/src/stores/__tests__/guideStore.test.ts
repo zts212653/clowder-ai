@@ -147,5 +147,74 @@ describe('guideStore', () => {
       expect(useGuideStore.getState().session).toBeNull();
       expect(useGuideStore.getState().completedGuides.size).toBe(0);
     });
+
+    // P1 fix (cloud Codex review on PR #2166): when completionFailed=true,
+    // useGuideEngine has already called rollbackCompletedGuide to allow the user
+    // to retry the failed completion. exitGuide must NOT re-add the key here, or
+    // it would undo the rollback and block ChatContainer's retry trigger.
+    it('does NOT record a completion key when completionFailed=true (preserves rollback for retry)', () => {
+      // Simulate: guide reached complete phase (advanceStep added key) → /complete
+      // API failed → useGuideEngine called markCompletionFailed + rollbackCompletedGuide
+      // (which already removed the key). Now state: session present, completionFailed=true,
+      // completedGuides does NOT contain the key.
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      const sessionId = useGuideStore.getState().session?.sessionId ?? '';
+      // Move to complete phase manually (mirror advanceStep behavior at last step) —
+      // markCompletionFailed only flips the flag when phase is 'complete'
+      useGuideStore.setState((s) =>
+        s.session ? { session: { ...s.session, currentStepIndex: 3, phase: 'complete' } } : s,
+      );
+      useGuideStore.getState().markCompletionFailed(sessionId);
+      // Verify pre-condition: completionFailed=true and key not in completedGuides
+      expect(useGuideStore.getState().completionFailed).toBe(true);
+      expect(useGuideStore.getState().completedGuides.has('thread-1::test-flow')).toBe(false);
+
+      // Act: user clicks dismiss on failure overlay (handleDismiss = dismissWithReconciliation
+      // when completionFailed=true; dismissWithReconciliation calls exitGuide)
+      useGuideStore.getState().exitGuide();
+
+      // Assert: session cleared, completionFailed reset, key NOT re-added (rollback preserved)
+      const { session, completedGuides, completionFailed } = useGuideStore.getState();
+      expect(session).toBeNull();
+      expect(completionFailed).toBe(false);
+      expect(completedGuides.has('thread-1::test-flow')).toBe(false);
+    });
+
+    // R2 P1 fix (cloud Codex on PR #2166 HEAD 39b128bd): exitGuide must
+    // distinguish explicit dismiss/control-exit callers from defensive cleanup
+    // callers (useGuideEngine thread-switch, GuideErrorBoundary auto-recovery).
+    // Default keeps PR #877 behavior (record key); recordCompletion:false opts out.
+    it('does NOT record a completion key when called with { recordCompletion: false } (thread-switch / error-boundary path)', () => {
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      useGuideStore.getState().exitGuide({ recordCompletion: false });
+      const { session, completedGuides } = useGuideStore.getState();
+      expect(session).toBeNull();
+      expect(completedGuides.has('thread-1::test-flow')).toBe(false);
+    });
+
+    it('preserves previously completed keys when called with { recordCompletion: false }', () => {
+      useGuideStore.setState({ completedGuides: new Set(['thread-0::other-flow']) });
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      useGuideStore.getState().exitGuide({ recordCompletion: false });
+      const { completedGuides } = useGuideStore.getState();
+      expect(completedGuides.has('thread-0::other-flow')).toBe(true);
+      expect(completedGuides.has('thread-1::test-flow')).toBe(false);
+    });
+
+    it('does NOT clobber an unrelated completion key when completionFailed=true', () => {
+      // Sanity: failure-dismiss on guide A must not affect previously-completed guide B.
+      useGuideStore.setState({ completedGuides: new Set(['thread-0::other-flow']) });
+      useGuideStore.getState().startGuide(MOCK_FLOW, 'thread-1');
+      const sessionId = useGuideStore.getState().session?.sessionId ?? '';
+      useGuideStore.setState((s) =>
+        s.session ? { session: { ...s.session, currentStepIndex: 3, phase: 'complete' } } : s,
+      );
+      useGuideStore.getState().markCompletionFailed(sessionId);
+      useGuideStore.getState().exitGuide();
+
+      const { completedGuides } = useGuideStore.getState();
+      expect(completedGuides.has('thread-0::other-flow')).toBe(true);
+      expect(completedGuides.has('thread-1::test-flow')).toBe(false);
+    });
   });
 });

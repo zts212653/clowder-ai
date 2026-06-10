@@ -137,6 +137,41 @@ export const frustrationIssueRoutes: FastifyPluginAsync<FrustrationIssueRoutesOp
     return { ok: true, issue: skipped };
   });
 
+  // ── POST /api/frustration-issues/:issueId/false-positive ────
+
+  app.post('/api/frustration-issues/:issueId/false-positive', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Not authenticated' };
+    }
+
+    const paramsParse = issueParamsSchema.safeParse(request.params);
+    if (!paramsParse.success) {
+      reply.status(400);
+      return { error: 'Invalid params', details: paramsParse.error.issues };
+    }
+
+    const { issueId } = paramsParse.data;
+
+    const issue = await frustrationIssueStore.getById(issueId);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Issue not found' };
+    }
+    if (issue.userId !== userId) {
+      reply.status(403);
+      return { error: 'Not your issue' };
+    }
+    if (issue.status !== 'draft') {
+      reply.status(409);
+      return { error: `Issue already ${issue.status}` };
+    }
+
+    const updated = await frustrationIssueStore.markFalsePositive(issueId);
+    return { ok: true, issue: updated };
+  });
+
   // ── GET /api/frustration-issues/pending ─────────────────────
 
   app.get('/api/frustration-issues/pending', async (request, reply) => {

@@ -336,7 +336,7 @@ export function MarkdownContent({ content, className, disableCommandPrefix, base
 
   let components = mdComponents;
   if (basePath != null) {
-    components = { ...components, a: createWorkspaceLinkComponent(basePath, withMentions) };
+    components = { ...components, a: createWorkspaceLinkComponent(basePath, withMentions, worktreeId) };
     if (worktreeId) {
       components = { ...components, img: createWorkspaceImageComponent(basePath, worktreeId) };
     }

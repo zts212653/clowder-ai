@@ -2,7 +2,12 @@
 
 import assert from 'node:assert';
 import test from 'node:test';
-import { buildCliDiagnostics, buildCliExitDiagnostic, formatCliStderrForLog } from '../dist/utils/cli-diagnostics.js';
+import {
+  buildCliDiagnostics,
+  buildCliExitDiagnostic,
+  buildSilentCompletionDiagnostic,
+  formatCliStderrForLog,
+} from '../dist/utils/cli-diagnostics.js';
 import { maybeCollectStreamError } from '../dist/utils/cli-spawn.js';
 
 const baseRef = { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-1' };
@@ -460,4 +465,162 @@ test('AC-F4/F5 backward-compat: buildCliDiagnostics omitting stderrEmpty keeps l
   assert.strictEqual(d.reasonCode, undefined);
   // legacy hint still works (callers without stderrEmpty signal)
   assert.ok(d.publicHint, 'legacy hint must exist');
+});
+
+// =============================================================================
+// F212 Phase G — silent_completion diagnostic (clowder-ai#875)
+// =============================================================================
+
+test('AC-G2: buildSilentCompletionDiagnostic returns silent_completion reasonCode + REASON_TEXT', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    invocationId: 'inv-silent-1',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    model: 'deepseek-chat',
+    sessionId: 'ses_15936cce6f4a4f7a9b3c0e1d2f5a8c7b',
+    exitCode: 0,
+    stderrPresent: false,
+  });
+  assert.strictEqual(d.reasonCode, 'silent_completion');
+  assert.ok(d.publicSummary.includes('无文字输出'), `summary should mention "无文字输出": ${d.publicSummary}`);
+  assert.ok(d.publicHint, 'publicHint must be set');
+  assert.ok(d.debugRef.invocationId === 'inv-silent-1', 'invocationId in debugRef');
+  assert.strictEqual(d.debugRef.exitCode, 0, 'silent_completion is a clean-exit diagnostic');
+});
+
+test('AC-G2 安全: sessionId truncated to first 8 chars only (full ID never exposed)', () => {
+  const fullSessionId = 'ses_15936cce6f4a4f7a9b3c0e1d2f5a8c7b';
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    sessionId: fullSessionId,
+    stderrPresent: false,
+  });
+  const evidence = JSON.parse(d.safeExcerpt);
+  // Only first 8 chars exposed
+  assert.strictEqual(evidence.sessionIdPrefix, 'ses_1593', 'sessionIdPrefix = first 8 chars');
+  // Full session ID MUST NOT appear anywhere in payload
+  const fullPayload = JSON.stringify(d);
+  assert.ok(!fullPayload.includes(fullSessionId), `full sessionId leaked: ${fullPayload}`);
+  assert.ok(!fullPayload.includes('15936cce6f4a4f7a'), `partial-beyond-8-chars still leaked: ${fullPayload}`);
+});
+
+test('AC-G2 安全: eventTypes deduped + sorted (stable output)', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 5,
+    eventTypes: ['step_start', 'step_start', 'tool_use', 'step_start'],
+    stderrPresent: false,
+  });
+  const evidence = JSON.parse(d.safeExcerpt);
+  assert.deepStrictEqual(evidence.eventTypes, ['step_start', 'tool_use'], 'deduped + sorted');
+});
+
+test('AC-G2 cloud P2: silent_completion caps event type evidence before JSON-stringifying', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 80,
+    eventTypes: Array.from({ length: 80 }, (_, i) => `very_long_event_type_${i}_${'x'.repeat(200)}`),
+    model: `deepseek-${'model'.repeat(80)}`,
+    stderrPresent: true,
+    stderrExcerpt: `fetch failed\n${'stderr-noise '.repeat(400)}`,
+  });
+
+  assert.ok(d.safeExcerpt.length <= 1500, `safeExcerpt should stay bounded, got ${d.safeExcerpt.length}`);
+  const evidence = JSON.parse(d.safeExcerpt);
+  assert.ok(evidence.eventTypes.length <= 12, `eventTypes count should be capped: ${evidence.eventTypes.length}`);
+  assert.ok(
+    evidence.eventTypes.every((type) => type.length <= 48),
+    `eventTypes entries should be capped: ${JSON.stringify(evidence.eventTypes)}`,
+  );
+  assert.strictEqual(evidence.eventTypeCount, 80, 'full distinct event type count remains visible');
+  assert.strictEqual(evidence.eventTypesTruncated, true, 'truncation flag remains visible');
+  assert.ok(evidence.model.length <= 96, `model should be capped: ${evidence.model.length}`);
+  assert.ok(evidence.stderrExcerpt.length <= 600, `stderrExcerpt should be capped: ${evidence.stderrExcerpt.length}`);
+});
+
+test('AC-G2 安全: stderrExcerpt goes through sanitizer (token redacted)', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    stderrPresent: true,
+    stderrExcerpt: 'API_KEY=sk-AbCdEfGh1234567890IjKlMnOpQr in env',
+  });
+  const evidence = JSON.parse(d.safeExcerpt);
+  assert.ok(evidence.stderrExcerpt, 'stderrExcerpt should be populated');
+  assert.ok(
+    !evidence.stderrExcerpt.includes('AbCdEfGh1234567890'),
+    `stderrExcerpt MUST be sanitized: ${evidence.stderrExcerpt}`,
+  );
+});
+
+test('AC-G2 cloud P2: silent_completion stderrExcerpt redacts non-HOME absolute paths', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    stderrPresent: true,
+    stderrExcerpt:
+      'loaded config from /workspace/cat-cafe/.opencode/config.json; cache at /srv/app/cache/index.db; windows D:\\work\\cat-cafe\\config.json',
+  });
+  const evidence = JSON.parse(d.safeExcerpt);
+  assert.ok(evidence.stderrExcerpt, 'stderrExcerpt should be populated');
+  assert.ok(!evidence.stderrExcerpt.includes('/workspace'), `workspace path leaked: ${evidence.stderrExcerpt}`);
+  assert.ok(!evidence.stderrExcerpt.includes('/srv'), `srv path leaked: ${evidence.stderrExcerpt}`);
+  assert.ok(!evidence.stderrExcerpt.includes('D:\\'), `Windows absolute path leaked: ${evidence.stderrExcerpt}`);
+  assert.ok(evidence.stderrExcerpt.includes('[PATH_REDACTED]'), `expected path marker: ${evidence.stderrExcerpt}`);
+});
+
+test('AC-G2: omits optional fields cleanly when not provided', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'claude',
+    eventCount: 2,
+    eventTypes: ['system', 'result'],
+    stderrPresent: false,
+  });
+  const evidence = JSON.parse(d.safeExcerpt);
+  assert.ok(!('model' in evidence), 'model omitted when not provided');
+  assert.ok(!('sessionIdPrefix' in evidence), 'sessionIdPrefix omitted when no sessionId');
+  assert.ok(!('stderrExcerpt' in evidence), 'stderrExcerpt omitted when stderr absent');
+  assert.strictEqual(d.debugRef.exitCode, 0, 'exitCode defaults to 0 for clean silent completion');
+});
+
+test('AC-G2: excerptSource = cc_structured (frontend whitelist admits this)', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    stderrPresent: false,
+  });
+  // Phase D KD-1 whitelist: 'cc_structured' is admitted for safeExcerpt rendering
+  assert.strictEqual(d.excerptSource, 'cc_structured');
+});
+
+// F212 Phase G R1 P1 (砚砚 catch on 1d519e7f2 / ef441a494): hint must point users at
+// the actual surface that holds the evidence (safeExcerpt, exposed via the panel's
+// expandable "详细诊断" disclosure) — NOT debugRef, which only carries command / exit /
+// signal / invocationId. Drift guard prevents the hint from regressing to "see
+// debugRef" wording that sent #875 users to an empty strip.
+test('AC-G2 R1 P1 (drift guard): silent_completion hint points to expandable details, NOT debugRef', () => {
+  const d = buildSilentCompletionDiagnostic({
+    command: 'opencode',
+    eventCount: 1,
+    eventTypes: ['step_start'],
+    stderrPresent: false,
+  });
+  // Hint must NOT direct users to "debugRef" for event types/counts (砚砚 R1 P1 catch)
+  const debugRefFingerprint = /debugRef\s*(字段|field)/i;
+  assert.ok(
+    !debugRefFingerprint.test(d.publicHint),
+    `hint must NOT send users to debugRef for evidence; got: ${d.publicHint}`,
+  );
+  // Hint should reference the disclosure / structured detail / safeExcerpt path
+  const evidenceFingerprint = /(详细诊断|展开|safeExcerpt|结构化)/;
+  assert.ok(
+    evidenceFingerprint.test(d.publicHint),
+    `hint should point users at the disclosure/expandable details path; got: ${d.publicHint}`,
+  );
 });

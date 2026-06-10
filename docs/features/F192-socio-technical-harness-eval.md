@@ -8,13 +8,79 @@ created: 2026-05-07
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
 
-> **Status**: in-progress (Phase G `eval:task-outcome` v0) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27
+> **Status**: in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10
 
 ## Architecture Ownership
 
 Architecture cell: harness-eval
 Map delta: new cell required (Phase E-pilot)
 Why: Phase E turns F192 from per-feature harness feedback into a cross-domain harness eval control plane. The cell owns eval domain registration, verdict handoff contracts, eval-cat invocation, legacy scheduled-task migration, and re-eval closure semantics.
+
+## Current Control Plane Architecture
+
+F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档约定，而是一条完整的 runtime control plane。当前主链路可以压成 5 层：
+
+1. **Signal / truth capture layer**
+   - 业务域先把自己的 ground truth 或 proxy signal 落到各自真相源
+   - 例子：
+   - `eval:a2a` 读 F153 telemetry / traces / metrics
+   - `eval:memory` 读 F200 recall metrics + F188 library health
+   - `eval:task-outcome` 读 `task-outcome-episodes.sqlite` + `event-memory.sqlite`
+   - 关键边界：F192 消费这些真相源，但**不拥有**它们；F192 负责解释层和 verdict 层，不负责替业务域定义 canonical data
+
+2. **Domain registry / scheduling layer**
+   - 每个 eval domain 都在 `docs/harness-feedback/eval-domains/*.yaml` 注册
+   - registry 至少定义：
+   - `domainId`
+   - `systemThreadId`
+   - `evalCat`
+   - `frequency`
+   - `sourceAdapter`
+   - `handoffTargetResolver`
+   - `sla`
+   - scheduler / manual trigger 只认 registry，不靠 thread 文本当状态机
+
+3. **Eval invocation layer**
+   - runtime 按 domain 唤醒对应 eval cat，进入该 domain 的 system thread
+   - `eval-cat-invocation.ts` 负责把 domain-specific instructions、publish guidance、selector 形状和 closure 语义注入给 eval cat
+   - eval cat 的职责是：读长期上下文、做 day-over-day analysis、产出 `VerdictHandoffPacket`
+
+4. **Publish pipeline**
+   - eval cat 不直接 `git add/commit/push`
+   - eval cat 只调用 `cat_cafe_publish_verdict`
+   - pipeline 顺序是：
+   - MCP tool schema 验证 `packet + sourceRefs`
+   - `/api/eval-domains/:domainId/publish-verdict` 用 callback principal 取 server-trusted `catId/userId`
+   - handler 做 domain/kind/ownership/selector 校验
+   - per-domain generator adapter 解析 source window / evidence inputs
+   - generator 写 `verdict.md + bundle/{snapshot,attribution,provenance}`
+   - `GitPublisher` 在 isolated worktree 里 commit / push / open PR
+
+5. **Hub / closure layer**
+   - Eval Hub 只消费已提交的 live verdict artifacts
+   - owner 处理 handoff 之后，不靠一句“修了”自闭环
+   - closure 只能来自：
+   - 后续 eval 复验通过
+   - 明确 CVO accept / suppress
+   - 或 domain-specific sunset / delete 语义
+
+### One Eval Cycle
+
+把一次完整闭环压成一句话：
+
+`domain truth source → eval cat analysis → VerdictHandoffPacket → cat_cafe_publish_verdict → isolated-worktree PR → Eval Hub 可见 → owner 响应 → re-eval closure`
+
+如果链路里任何一环需要人手工补文件、手工抄 bundle、手工 commit，那就还不算接进 F192 control plane。
+
+### Current Domain Wire Status (2026-06-09 truth sync)
+
+| Domain | Schedule | Publish path | Current truth |
+|--------|----------|--------------|---------------|
+| `eval:a2a` | live | wired | Live verdict path established; used as the first production domain for `cat_cafe_publish_verdict`. |
+| `eval:memory` | live | wired (PR #2160, squash `46441f4c`) | `memory-recall-snapshot` selector + live verdict generator are wired. Remaining work is domain-specific finding semantics / rollup quality, not publish plumbing. |
+| `eval:capability-wakeup` | weekly live | wired (PR #2117, squash `1caa98c84`) | First live verdict exists (`2026-06-06-cap-wakeup-c1-baseline-probe`). Phase F coverage expansion now covers all 13 L0 §8 Tier 1 capabilities and supports omitted-`sessionIds` runtime-session window scan; re-eval closure remains open. |
+| `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
+| `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
 
 ## Why
 
@@ -182,7 +248,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-E12: F188 Health Dashboard / badge 与 Eval Hub 边界决议落地：F188 health 是 memory-domain adapter 输入；Eval Hub 聚合 verdict / handoff / closure，不替代 F188 的现场健康入口，除非 Design Gate 明确迁移。UI 必须提供双向跳转：Eval Hub verdict → F188 repair / dry-run / apply surface，F188 Health Dashboard → 相关 Eval Hub verdict / handoff / closure 详情
 - [x] AC-E13: `eval:memory` legacy scheduled-task cleanup：列出现有 F200/F188 相关 scheduled tasks / health repair reminders；接入后 disable / redirect 对应旧任务，并有 regression test 或 dry-run report 证明不会双触发
 
-#### E-sop（`eval:sop`，domain-generic SOP compliance） ✅
+#### E-sop（`eval:sop`，domain-generic SOP compliance） — schema/evaluator landed; live cron sunset pending `F192-sop-wiring`
 
 来源 2026-05-23 #748 设计讨论（clowder-ai 社区 terrenceeLeung 提议外化 SOP stage 定义；CVO 反思 "skill = 软约束（猫可加载可不加载），需硬约束兜底"）。Phase D AC-D1 「hard / soft / eval 三栏 registry」正是答案：`SopDefinition.hard_rules / pitfalls` 是 ground truth，eval 跑 runtime trace 检测违规；hook 注入与否由 eval 数据驱动 (per AC-D9 acted-on rate)，不预判。**Domain-generic from day 1**：schema 不绑 coding，`development` 只是第一个 domain，video co-creation / tech article / family office 同 schema 不同实例（消除「多阶段 skill 如 video-forge / ppt-forge / tech-writing / expert-panel 本质是 SOP 错位写进 skill body」的归位错位）。
 
@@ -190,13 +256,15 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-E17: SOP Trace Adapter——从 F153 telemetry / session events / git state 抽 stage transition + tool-call sequence + repo state，喂 predicate evaluator
 - [x] AC-E18: Predicate Evaluator——接 SopDefinition 里的机器可检测 predicate（基础 type 集：command_pattern / command_sequence / sha_dedup / env_check / git_state_predicate / handle_check），输出 violation 列表带 trace anchor
 - [x] AC-E19: `eval:sop` domain registry + system thread bootstrap：复用 AC-E2/E4 pattern；first SOP scope = `development`（cat-cafe 开发 SOP，从 #748 SopDefinition 读取）
-- [x] AC-E20: Eval cat invocation：周度 scheduled task 唤醒 eval 猫，per-stage / per-rule 出 violation verdict
-- [x] AC-E21: Verdict Handoff target resolver：rule owner = SOP 维护者 / skill 维护者（按 rule 归属解析；development.yaml 的 owner 在 cat-cafe-skills/refs/）
+- [x] AC-E20: Eval cat invocation live verdict loop——`F192-sop-wiring` PR #2186 merged 2026-06-10：SopTrace producer + file-writer layer + PUBLISH_VERDICT_INSTRUCTIONS 三件套全部 wired，`eval-sop.yaml` re-enabled（removed `enabled: false`），weekly cron 恢复 pickup。
+- [x] AC-E21: Verdict Handoff target resolver：rule owner = SOP 维护者 / skill 维护者（按 rule 归属解析；development.yaml 的 owner 在 cat-cafe-skills/refs/）。当前只完成配置/adapter 层，live handoff 仍依赖 AC-E20 re-enable。
 - [x] AC-E22: First batch machine-checkable predicates 覆盖 sop_navigation 现存 12 条规则（merge `--squash` / `closed≠merged` / self-review / Redis 6398 / main 双向同步 等）；每条 rule 跑通过/未通过判定
 - [x] AC-E23: Cross-domain schema validation——用 stub `video-cocreation.yaml` / `tech-article.yaml` / `family-office.yaml` 跑 schema 校验，证明 schema generic 不绑 coding；不实做这些 domain，只验 schema
-- [x] AC-E24: Re-eval closure——与 E-pilot 同 pattern（owner 处理 handoff → 复验 verdict pass / CVO accept / suppress）
+- [x] AC-E24: Re-eval closure——`F192-sop-wiring` 已 wire live verdict path。Re-eval closure contract pattern 已复用，live verdict 产出后 owner response → re-eval closure 链路完整。
 
 依赖：#748（cat-cafe）已由 F203 PR #1868 落地（`SopDefinition` + predicate-backed `hard_rules/pitfalls`）；与 E-hub / E-scale / E-community 可并行（不依赖 UI / memory adapter / community path），但按 PR packaging 决策排在 E-hub / E-scale 后，降低控制面并发改动风险。
+
+**Truth sync (2026-06-10)**：E-sop 全部 AC 完成。`F192-sop-wiring` PR #2186 merged：SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS 三件套 wired，`eval-sop.yaml` re-enabled，weekly cron 恢复 live verdict 产出。AC-E20/E24 closed。
 
 #### E-community ✅
 - [x] AC-E14: Community path：支持社区实例把本地 eval finding 导出为脱敏 issue packet；也支持社区项目注册自有 eval domain，不 fork Cat Café core
@@ -208,7 +276,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 **关键定位区别**（与 E-sop 对比）：
 
-| | E-sop（已 merged） | F-capability（本 Phase） |
+| | E-sop（schema/evaluator merged; live publish disabled） | F-capability（本 Phase） |
 |---|---|---|
 | ground truth | `SopDefinition.hard_rules/pitfalls` 硬规则 | L0 §8 trigger reflex 软提示 |
 | 检测语义 | "做了违反规则的事" | "该用某能力但没用" |
@@ -217,22 +285,23 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 **Path C double-track**（Tier 1 ship + eval parallel）：L0 §8 v1（13 条 educated guess）已 ship 不阻塞；Phase F eval 收集 N 周 miss rate 数据 → L0 §8 v2 数据驱动调 Tier 1 排序 / 加新条目 / 移到 Tier 2。
 
-- [ ] AC-F2: Capability Trace Adapter——从 F153 telemetry / session events / Skill loading events / MCP tool call invocations / diff context 抽 capability invocation traces + scenario detection signals（如 diff 含 `packages/web/*` 文件、回复含特定 trigger phrase、文件路径 reference）
-- [ ] AC-F3: Scenario→Capability Predicate Evaluator——扩展 E-sop predicate type 集，加 capability-wakeup 专属 type：`scenario_then_capability_predicate`（场景 hit 但 capability invocation 缺失）/ `text_pattern_then_capability`（特定 trigger phrase 出现但没调相应 skill）/ `multi_msg_text_volume_threshold`（纯文字回复超 N tokens 没用 rich_block）/ `file_change_then_capability`（特定文件路径改了但 capability 没触发）
-- [ ] AC-F4: `eval:capability-wakeup` domain registry + system thread bootstrap：复用 AC-E2/E4 pattern；first scope = L0 §8 v1 的 13 条 Tier 1 trigger reflex（每条至少一个 predicate）
-- [ ] AC-F5: Eval cat invocation：周度 scheduled task 唤醒 eval 猫，per-cat / per-scenario / per-capability 出 miss rate verdict；区分 false-positive（不在该场景）vs true-miss（场景对了但没用 capability）vs negative（场景对了用了 capability）。**CVO 2026-05-28 决策 #1：miss 全记（含 threadId + sessionId 全 provenance），记录与归因解耦——3-way 根因分类（认知/行为/注意力稀释）是 analysis 层、不烤进记录，跨 session "会用" 是分析时可回溯的问题不预设记录规则（memo §3）。第三根因「注意力稀释」来自 ADR-030 §9.5 + team lead观察 CC 动态提醒机制**
-- [ ] AC-F6: Verdict Handoff target resolver：capability owner = F203 owner（@opus47 Ragdoll）/ skill 维护者（按 capability 归属解析）；handoff packet 含 miss rate trend + 排序建议（promote / demote / drop）+ scenario fixture 证据
-- [ ] AC-F7: First batch predicates 覆盖 L0 §8 v1 的 13 条 Tier 1（`rich-messaging` / `browser-preview` / `image-generation` / `workspace-navigator` / `pencil-design` / `guide-interaction` / `expert-panel` / `propose_thread` / `external_runtime_sessions` / `cliDiagnostics` / `eval verdict` / `search_evidence drilldown` / `update_workflow`）每条至少一个 machine-checkable predicate
-- [ ] AC-F8: Cross-cat scope validation——predicate 应能跨 cat family 分别检测（Ragdoll / Maine Coon / Siamese 各自典型掉球模式不同；e.g., 开发系猫常忘 `rich-messaging` + `propose_thread`，视觉系猫常忘 `update_workflow`）；verdict bundle 含 per-family 拆分
-- [ ] AC-F9: Re-eval closure——与 E-pilot 同 pattern（F203 owner 处理 handoff → L0 §8 v2 update → 复验 verdict miss rate 下降 → verdict close）；连续 4 周某条 Tier 1 miss rate < 5% → demote 候选 → 写入 `capability-wakeup-index.md` Tier 2。**CVO 2026-05-28 决策 #2 治理权重：新 forcing-function hook = 行为改动 → 走 Design Gate / CVO accept（继承 verdict-handoff cvoAcceptRequired gate）；纯 demote/promote（Tier 1↔Tier 2 排序）= eval-owner + feature-owner 轻量闭环、无 CVO gate（memo §4）**
+- [x] AC-F2: Capability Trace Adapter——`buildCapabilityTrace` + `CapabilityWakeupTrialProviderImpl` 已从 sealed session events / ToolEventLog / SkillLoadEventLog / transcript file-change signals replay trace。`sessionIds` 已从硬必填改为 optional narrowing：省略时走 runtime-session window scan；durable trial store / all-history stable trial IDs 仍未实现。
+- [x] AC-F3: Scenario→Capability Predicate Evaluator——4 个 capability-wakeup predicate type 已实现：`scenario_then_capability_predicate` / `text_pattern_then_capability` / `multi_msg_text_volume_threshold` / `file_change_then_capability`。分类器已区分 `negative` / `false_positive` / `miss`，并给 miss 打 `reachability_doubt` / `cognitive` / `behavioral` / `attention_dilution` / `unclassified`。
+- [x] AC-F4: `eval:capability-wakeup` domain registry + system thread bootstrap：`docs/harness-feedback/eval-domains/eval-capability-wakeup.yaml` weekly domain 已注册，weekly gate 会 pickup，system thread `thread_eval_capability_wakeup` 已承载真实 cycle。13 条 Tier 1 覆盖见 AC-F7。
+- [x] AC-F5: Eval cat invocation v1——周度 scheduled task 已真实唤醒 eval cat；2026-06-06/07 首个 cycle 产出 live verdict PR #2129 并合入 `docs/harness-feedback/verdicts/2026-06-06-cap-wakeup-c1-baseline-probe.md`。首轮样本是 hand-picked codex sessions；后续 selector 可省略 `sessionIds` 走 runtime-session window scan。
+- [x] AC-F6: Verdict Handoff target resolver v1——domain registry 将 handoff target 绑定 F203 owner (`opus-47`)；capability-wakeup generator / submitted-packet guard 校验 domain × feature × capability 一致性；handoff packet 含 trend / root cause / owner ask / re-eval plan。更细粒度 “skill maintainer per capability” routing 暂未需要，未来可在规则扩到 13 capability 时细化。
+- [x] AC-F7: First batch predicates 覆盖 L0 §8 v1 的 13 条 Tier 1（`rich-messaging` / `browser-preview` / `image-generation` / `workspace-navigator` / `pencil-design` / `guide-interaction` / `expert-panel` / `propose-thread` / `external-runtime-sessions` / `cli-diagnostics` / `eval-verdict` / `memory-drilldown` / `update-workflow`）每条至少一个 machine-checkable predicate。`capability-wakeup-rules.test.js` 锁 13/13 coverage；tool-use normalizer 也补了 Tier 1 MCP usage mapping。
+- [x] AC-F8: Cross-cat scope validation——predicate 支持跨 cat family runtime-session window scan：`CapabilityWakeupTrialProviderImpl` 在 `sessionIds` 省略时枚举 `RuntimeSessionStore.listRecent` window，production wiring 从 `catRegistry.breedId` 派生 trial-level `family`，raw trial evidence 保留 family 字段供审计 / future Hub rollup 使用。Limitation：这不是 durable trial store；若某历史 session 没有 runtime-session metadata，不会被 v1 window scan 覆盖；bundle snapshot 仍只发布现有 Eval Hub schema 字段，不伪造未消费的 `components[].byFamily` rollup。
+- [ ] AC-F9: Re-eval closure——与 E-pilot 同 pattern（F203 owner 处理 handoff → L0 §8 v2 update → 复验 verdict miss rate 下降 → verdict close）；连续 4 周某条 Tier 1 miss rate < 5% → demote 候选 → 写入 `capability-wakeup-index.md` Tier 2。**Current truth**：已有首个 `keep_observe` baseline probe，下一轮 re-eval 计划写到 2026-06-13，但尚未完成 closure / demote / promote。
 
 依赖：F203 PR（L0 §8 v1 ship）merged 后 register `eval:capability-wakeup` domain；F209 telemetry / Skill load tracking / MCP call tracking 提供 trace source；与 E-pilot/E-hub/E-scale/E-sop/E-community 共享 evaluator infra（extend predicate type 集 + 复用 verdict handoff schema）。
 
 **Build sequence**（Path C double-track）：
 1. F203 PR ship L0 §8 v1 + ref doc（本 PR）→ trigger 名单稳定
-3. Implementation：trace adapter + evaluator + domain registry + scheduled invocation
-4. First weekly verdict cycle（real data 第一刀）
-5. L0 §8 v2 数据驱动 iterate（去掉低 miss-rate 条目 / 加新发现的高 miss-rate 场景）
+3. ✅ Implementation v1：trace adapter + evaluator + domain registry + scheduled invocation + publish-verdict path 已由 PR #2117 / #2125 接通；首个 live verdict PR #2129 已合入。
+4. ✅ Coverage expansion：补齐 13 条 L0 §8 Tier 1 的 machine-checkable predicates，并补 Tier 1 MCP tool-use mapping。
+5. ✅ Unbiased sampling v1：去掉 `sessionIds` 硬必填，支持 runtime-session window scan + trial-level family evidence。Bundle-level per-family rollup 留待 Eval Hub schema/UI 真接入时再做，不作为 Phase F closure 前置；durable trial store / stable trial IDs 仍是未来增强。
+6. ⬜ L0 §8 v2 数据驱动 iterate：基于连续 re-eval 数据做 promote / demote / drop；当前只有 baseline probe。
 
 ### Phase G（`eval:task-outcome` — L3 任务交付质量 v0）
 
@@ -252,19 +321,20 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-G6: API route handlers + session auth guard——handlePermissionCancel / handleMagicWord / handleA1WorldTruth / handleUpdateTerminalState / handleGetEpisode / handleListEpisodes（自动创建 episode if none active）+ 路由注册到 index.ts
 - [x] AC-G7: eval:task-outcome 域注册——扩展 domainId enum + sourceAdapter enum + DOMAIN_INSTRUCTIONS + YAML registry file（daily frequency）+ verdict handoff domainId
 - [x] AC-G8: 授权系统集成——authorization respond 路由在 deny 时触发 onPermissionCancel hook（best-effort，reason 默认 skip，结构化 reason 来自 AC-G10）
+- [x] AC-G8b: Proposal reject 信号覆盖——F128 thread proposal reject + F225 session handoff proposal reject 接入 A2 discriminated union（`proposal_reject` type），补齐 eval:task-outcome cron 3 天 0 cancel 信号的覆盖面 gap（PR #2138）
 - [x] AC-G9: Shared types——CANCEL_REASON_OPTIONS + CancelReasonValue + PermissionCancelEvent 导出到 @cat-cafe/shared 供前端使用
 - [x] AC-G9b: env-registry + .gitignore——TASK_OUTCOME_DB 注册 + task-outcome-episodes.sqlite* gitignore
 
-#### v0.5 信号接线（下一个 PR，一个 PR 搞定）
+#### v0.5 信号接线（PR #2074 v0.5 scope, merged across v0.5 + F227 归一）
 
-- [ ] AC-G10: Cancel 理由浮层前端——cancel 后弹轻量浮层（可选：不该做/方向不对/我自己来/跳过），选择后调 POST /api/task-outcome/cancel 带结构化 reason
-- [ ] AC-G12: Magic Word 运行时检测 hook——在消息处理流程中检测 magic word 触发 → 调 POST /api/task-outcome/magic-word 记录（高权重 reason 采集）
-- [ ] AC-G13: Cancel burst proxy signal——短时间内连续 cancel ≥3 次 → 自动追加 proxy signal（中断动作聚合）
-- [ ] AC-G11: 端到端验证——team lead + Ragdoll一起：cancel → 选理由 → 绑 episode → magic word 检测 → eval hub 可见
+- [x] AC-G10: Cancel 理由结构化采集——AuthorizationCard deny 按钮变体（不该做/方向不对/我自己来/跳过），一键 deny + 结构化 reason 通过 authorization respond → onPermissionCancel → episode a2 signal 流转（设计从原 spec "弹浮层+独立 POST" 进化为"一键 deny 变体+复用 authorization 路由"，功能等价且 UX 更好）
+- [x] AC-G12: Magic Word 运行时检测 hook——messages.ts tryDetectMagicWords() 在 queued + immediate 双路径检测 → F227 Event Memory 真相源写入 + episode magic_word_ref projection signal（F227 归一后，Event Memory 是真相源，episode 存 ref；11 tests green）
+- [x] AC-G13: Cancel burst proxy signal——CancelBurstDetector（threshold=3, window=60s）+ index.ts authorization handler 接线，burst 触发时追加 proxy signal（8 tests green）
+- [x] AC-G11: 端到端验证——自动化 e2e 集成测试（PR #2167）：6 chain × 10 assertions，三条 production helper（appendPermissionCancelToEpisode / appendMagicWordRefToEpisode / checkAndAppendCancelBurst）从 index.ts 提取后 test + production 共用同一路径；含 reason normalization 边界测试。手动 runtime 验收待team lead + Ragdoll一起看 eval hub
 
 依赖：复用 F192 已有 Eval Domain Registry / Verdict Handoff / Re-eval Closure / Eval Hub 控制面。与 F222 Frustration Auto-Issue 的打通（confirmed issue → episode signal）标记为 v1。
 
-### Phase H（Verdict Publishing Pipeline — OQ-21 v1.x 收口 / Maine Coon R0 Path B）
+### Phase H（Verdict Publishing Pipeline — OQ-21 v1.x 收口 / Maine Coon R0 Path B）✅ merged 2026-06-05 (PR #2109, squash `33ee6ae54`)
 
 来源 OQ-21 PR #2092 merge 后 v1.x 收口（team lead 2026-06-05 directive: "继续完成最后一公里"）。Path B 由Maine Coon R0 narrowed：eval cat 产结构化 packet + 受控 MCP tool 提交，比 raw artifacts auto-export (Path A) scope 小但同样闭环 "eval cat 分析 → Hub 显示新 verdict"。
 
@@ -281,17 +351,14 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - Eval: Phase H Eval Contract 下
 
 **AC（Design Gate locked, Maine Coon 2026-06-05 narrowing A 方案）**：
-- [ ] AC-H1: 新 MCP tool `cat_cafe_publish_verdict` 接受**完整** `VerdictHandoffPacket`（9 字段全填，server 不从 narrative 猜结构）+ domain；若 generator 需要 evidence bundle 必须显式带 sanitized bundle/provenance 或 source refs，**tool 不造 evidence**
-- [ ] AC-H2: 受控 commit 路径——tool 创建 branch `verdict/auto/{domainSlug}/{verdictId}` + commit verdict.md + bundle/ + 自动开 PR；返回 commit SHA + PR URL；**禁止 working tree only**（非长期 SOT）/ **禁止直推 main**（绕 review，OQ-21 R0 教训）
-- [ ] AC-H3: Auth model = **callback auth (invocationId + callbackToken)** — 不复用 generate-now 的 session+network+owner（那是 browser API model）；额外 **domain-level allowlist**：只有该 eval domain 注册的 eval cat / 受信 invocation 能 publish；v1 暂不进 agent-key allowlist
-- [ ] AC-H4: eval cat DOMAIN_INSTRUCTIONS 升级——所有 5 domain 指引调用此 MCP tool 而非 git push；提供 packet 模板/helper 降低 cat 填写成本（替代 PR #2091 abandoned 的"git push origin main"教学）
-- [ ] AC-H5: Tool returns commit SHA + PR URL 在 success response 给 eval cat 用于 traceability + audit chain
-- [ ] AC-H6: 两层 tests:
-  - Handler unit tests (fake git/generator) — input shape / packet validation / branch naming / commit semantics
-  - Deterministic e2e (NO real LLM) — mock eval cat callback-auth MCP call → publish_verdict → files written → `loadEvalHubSummary()` sees verdict → fake PR created
-  - **失败 fixture 必含**：unsupported domain / invalid packet / duplicate verdictId / missing or wrong callback auth / git or branch conflict
-- [ ] AC-H7: 仅支持已 wired generator 的 domain（v1.x = eval:a2a + eval:capability-wakeup）；其他 domain 返回 unsupported_generator (与 generate-now 对称)
-- [ ] AC-H8: idempotency + length + slug validation 复用 manual-trigger/generate-now.ts 模式（不重新发明）
+- [x] AC-H1: 新 MCP tool `cat_cafe_publish_verdict` 接受**完整** `VerdictHandoffPacket`（12 字段全填——R1 Maine Coon + R11 完整性 + R18/R19 newline injection guard）+ domain；evidence 通过 `sourceRefs.snapshotName/attributionName` basenames 显式带（R2 cloud allowlist + R17 live-read/isolated-write 分层），**tool 不造 evidence**
+- [x] AC-H2: 受控 commit 路径——`createGitWorktreePublisher` 实现 git worktree add → stage → commit → push → `gh pr create` → cleanup finally；返回 commit SHA + PR URL；live worktree 永不被改（R1 P1 #1 isolated 抽象 + R12/R13/R15 push-fail 远程分支安全清理）
+- [x] AC-H3: Auth model = **callback auth + agent-key auth**（R4/R9/R10 wiring）— `requireCallbackPrincipal` accepts both `invocation` + `agent_key` principal kinds，catId 从 server-trusted principal 取（非 body 可伪造）；额外 **domain-level allowlist**（R6 P1 尊重 OQ-20 Redis evalCat override 与 trigger-now 对称）
+- [x] AC-H4: eval:a2a DOMAIN_INSTRUCTIONS 升级到 `cat_cafe_publish_verdict` MCP tool（R2 cloud 收口：只在 wired generator 的 domain append，其他 4 个 domain 保留原指引避免 501 loop）；明确禁止 abandoned `git push origin main` 反模式
+- [x] AC-H5: Tool returns commit SHA + PR URL + repo-relative verdictPath/bundleDir（R12 P2 cloud 修：不返回 temp worktree 绝对路径）
+- [x] AC-H6 (partial): handler unit tests + route Fastify-inject e2e（mock GitPublisher 真跑 stage callback + seed live evidence + copy 到 isolated）；deterministic real e2e（git+gh+真 worktree round-trip）deferred 到 alpha 验收
+- [x] AC-H7 (partial): v1 only `eval:a2a` wired；其他 domain 返回 501 unsupported_generator（与 generate-now 对称）；capability-wakeup generator 待后续 Phase
+- [x] AC-H8: idempotency（live + isolated worktree authoritative dup-check, R3 cloud P1 #2）+ length + slug validation（复用 generate-now.ts 模式）
 
 **Eval Contract (F192 mandate)**：
 - Primary Users + Activation Signal: eval cats publishing verdicts after analysis; tool call count per eval cycle
@@ -305,6 +372,133 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - 不在 Phase H: audit log (OQ-21 v1.5 backlog) / error sanitize / rate limit
 
 依赖：F192 现有 Verdict Handoff Packet schema + manual-trigger/ generators + Maine Coon R0 narrowed direction 文档。
+
+**Phase H v1.0 alpha verification (2026-06-05)**：MCP `cat_cafe_publish_verdict` 在 alpha (`pnpm alpha:start`) 真路径调通——opus-47 调 `eval:memory` domain 返回预期 `501 unsupported_generator`（一字不差匹配 `publish-verdict.ts:154` 详情），证明 MCP 注册 + callback auth + invocation principal + catId derive + packet schema + handoff completeness + newline guard + unsupported_generator path 全链路活；零副作用（无 commit/PR/分支）。完整 `eval:a2a` round-trip（commit + PR open + cleanup）需 codex (eval:a2a 注册 cat) 发起，留 codex 自验。
+
+### Phase H 收尾（wire remaining generator-ready domains）
+
+**Why**：Phase H v1.0 把基础设施 + 一个 domain (a2a) wire 完。剩下 4 个 domain 不应该 each-a-PR，应该按 generator 就绪状态分流。
+
+**就绪状态盘点**（2026-06-05）：
+- ✅ **eval:a2a**（v1.0 完成）：`generateA2aLiveVerdict` 写 bundle + verdict.md，adapter wired
+- ✅ **eval:capability-wakeup**：`generateCapabilityWakeupLiveVerdict` 同模式（write `mkdirSync(bundleDir)` + `writeFileSync(verdictPath, markdown)`），**adapter 30 行可直接 wire**
+- ❌ **eval:sop**：`eval-sop-adapter.ts` 只 build packet 对象，不写 disk。SOP eval 是 trace command/env/git 跑 predicate，没有 "snapshot YAML + attribution YAML → bundle + verdict.md" 资产管线。要进 publish-verdict 需先加 file-writer 层（~100-150 行独立工作）
+- ✅ **eval:memory**：PR #2160 已接通 `memory-recall-snapshot` selector + generator + publish instructions
+- ✅ **eval:task-outcome**：PR #2162 已接通 `task-outcome-snapshot` selector + generator + publish instructions；PR-D 补 `sourceRefs.episodeVerdicts` → `TaskOutcomeEpisodeStore.updateVerdict()` 显式 7-class writeback
+
+**Phase H v1.x follow-up scope**（与Maine Coon collab 细化）：
+
+**PR-1a — Contract Alignment（✅ merged 2026-06-06 PR #2115, squash `c51af580a`）**：Maine Coon R0 narrowing — wire 前先把 capability-wakeup 一侧的 submittedPacket contract 跟 a2a 路径对齐，否则 adapter wire 后 cat-mediated publish 比 CVO-regen 安全性弱。
+- [x] `assertSubmittedPacketMatches` (submitted-packet-guard.ts) — 4 轴 invariant 守 cat-submitted packet：
+  - R8 P1 mirror: `submitted.harnessUnderEval.featureId === domain.handoffTargetResolver.featureId`
+  - R8 P1 mirror: `submitted.domainId === input.domain.domainId`
+  - R2 P1 (cross-cap): `submitted.harnessUnderEval.componentId === input.capability`（无此则 cat 可 publish `workspace-navigator` verdict 绑定 `rich-messaging` evidence bundle）
+  - R3 P2 (cross-validated cloud): `input.domain.domainId === 'eval:capability-wakeup'`（mirror build-from-trials 路径 verdict.ts:20-22；无此则 wrong-generator routing 写出 hard-coded frontmatter / packet domain 不一致）
+- [x] R4 P2: newline injection guard on cat-controlled rendered fields（`phenomenon` / `ownerAsk.requestedAction` / `metricRefs[]`）— 阻 `value\n- snapshot:forged` 假 evidence 注入 Hub view
+- [x] `CapabilityWakeupSourceSelector` skeleton (capability-wakeup-trial-provider.ts) — window-based selector + future trial-ids 占位（Maine Coon R0：trial-ids 在 durable store 之前是伪精确，先 window range）；validation 含 newline guard + element shape
+- [x] R1 P2: metric ref `metric:metric:` double-prefix idempotent fix（a2a R14 mirror，extract to `formatMetricRefBullet` helper 让 strip-then-add 模式视觉无歧义）
+- [x] tests：9/9 capability-wakeup submittedPacket invariants green
+- 22 轮 review（Maine Coon R0-R3 local 主审 + 云端 R1-R5 fine-grained，R4 helper extract 破除云端 reviewer-LLM 模式盲视）
+
+**PR-2 — Adapter Wire（✅ merged 2026-06-06 PR #2117, squash `1caa98c84`）**：完整 capability-wakeup wire — Phase H 收尾完结。
+- [x] `CapabilityWakeupTrialProviderImpl` — replay/reclassify provider 复用现有 ports (SessionChainStore / TranscriptReader / ToolEventLog / SkillLoadEventLog)；PR-2 narrowed: sessionIds REQUIRED + dedup before replay (cloud R7 P2); constructor fail-closed if any port missing
+- [x] `capability-wakeup-rules.ts` — static rule registry 覆盖 3 capability (rich-messaging / workspace-navigator / browser-preview)；single-pattern regex alternation (cloud R8 P1 fix `every()` AND-semantics bug)
+- [x] `capability-wakeup-generator-adapter.ts` — discriminator + validate + provider.resolve + generateCapabilityWakeupLiveVerdict with submittedPacket
+- [x] VerdictSourceRefs discriminated union (a2a `{snapshotName, attributionName}` kind optional / cw `{kind: 'capability-wakeup-trial-window', ...}` kind required)
+- [x] Handler domain-agnostic dispatch: `if (!deps.generator) → 501`; route-layer (eval-hub.ts) is SoT for per-domain generator dispatch
+- [x] PR-2 strict handler validation: kind ↔ domain cross-check (cloud R8); sessionIds REQUIRED non-empty (Maine Coon R1); session_not_found / no_trials_in_window → 4xx (cloud R5)
+- [x] cw raw inputs (`generated/capability-wakeup/<verdictId>/`) staged via `extraStagedPaths` + `git add -f` (cloud R3 + R4 P1 — gitignored evidence path force-added)
+- [x] `wiredPublishDomains` gating: manual-trigger + scheduled daily/weekly paths both omit publish instructions for unwired domains (cloud R5 + R6 P2 — cats don't waste run on 501)
+- [x] PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: per-domain sourceRefs docs (a2a snapshot/attribution; cw selector with sessionIds REQUIRED)
+- [x] Bootstrap eager-construct cw provider with all 4 ports; fail-closed if Redis missing → cw wire skipped (degraded gracefully)
+- [x] tests: 14 rules + 14 provider + 6 adapter + 4 strict-validation + 5 e2e + 8 MCP schema + ALL existing a2a regression green
+- 11 轮 review（Maine Coon R1 design-review locked decisions + Maine Coon R2 LGTM + 云端 R3-R10 fine-grained; R10 clean "Didn't find any major issues. You're on a roll."）
+
+**PR-3 — Publish Policy + artifact-only-pr-merge-gate (✅ merged 2026-06-06 PR #2125, squash `8d8076b79`)**：PR-2 dogfood (#2114) 验收发现的"谁 merge"流程债，team lead directive 闭环。Maine Coon R2 design-lock。
+- [x] `computePublishPolicy(packet, attribution)` 纯函数 + 13/13+2 单测：severity-driven 路由（fix/build/sunset → regular_pr / keep_observe+findings → regular_pr + evidence-only / keep_observe+noFindingRecord → evidence_only_interim_pr + futureMode rollup_deferred）
+- [x] FAIL-OPEN 8 cases（undefined/null/non-object/non-array findings/Array.isArray noFindingRecord rejection/contradiction/findings non-array/noFindingRecord non-record）
+- [x] Handler reads attribution.json + applies policy (labels + body footer)
+- [x] GitPublisher passes `gh label create --force` (idempotent) + `gh pr create --label` flags
+- [x] StageResult adds `labels?: string[]`
+- [x] `docs/SOP.md` 新章节 `artifact-only-pr-merge-gate` 9 硬条件（path allowlist domain-aware：`docs/harness-feedback/` + `generated/capability-wakeup/<verdictId>/`；evidence-only label required；+ cross-individual / hotfix / mergeable / title-body pattern）
+- 7 轮 review (Maine Coon R1-R3 LGTM + 云端 R3-R7)。R6 cloud catch severity × SOP gate 边界 miss → R5 fix add condition #9。R7 clean "Didn't find any major issues. Bravo."
+
+**独立 backlog（不在 Phase H 收尾内）**：
+- sop publish 要先加 file-writer 层（独立 Phase）
+- memory publish path 已在 PR #2160 (2026-06-09, squash `46441f4c`) 接通；独立 backlog 改为 **domain-specific finding semantics / rollup strategy**（generator 已通，不再是 wiring 问题）
+- task-outcome publish path 已在 PR #2162 (2026-06-09, squash `c9aa0e16d`) 接通；PR-D 补 episode verdict writeback（packet verdict 仍是 4-class，per-episode verdict 通过显式 7-class `episodeVerdicts` 写回）；独立 backlog 剩 **rollup mechanism**
+- AC-H6 real e2e (real git+gh round-trip)：当前 alpha 验已覆盖 happy path 表征，deferred 留待真正端到端测试需求出现时再补
+- **rollup mechanism**（PR-3 占位 futureMode `rollup_deferred`）：daily/weekly batch PR 聚合 N 个 no-action verdict，或 runtime evidence store + 周期 flush archive PR — 等 PR-3 体感数据后再 design
+
+## How To Add A New Eval Domain
+
+以后再接一个新 domain，不要从 UI 或 cron 开始，而是按下面的顺序接：
+
+1. **先确认这个 domain 的 truth source 是谁**
+   - F192 不替你发明真相源
+   - 先回答：
+   - canonical data 在哪
+   - window/replay 怎么切
+   - owner scope 怎么带
+   - 哪些信号是 verdict，哪些只是 proxy
+
+2. **把 domain 注册进 registry**
+   - 新增 `docs/harness-feedback/eval-domains/<domain>.yaml`
+   - 至少填：
+   - `domainId`
+   - `systemThreadId`
+   - `evalCat`
+   - `frequency`
+   - `sourceAdapter`
+   - `handoffTargetResolver`
+   - `sla`
+
+3. **先写 domain instruction，再决定是否已经能 wire**
+   - `eval-cat-invocation.ts` 里给它加 domain-specific analysis instructions
+   - 如果 generator 还没 ready，保持 honest unwired 状态，不要假装能 publish
+   - honest unwired = schema / packet contract 可以先落，但 `verdictGenerators` / `wiredPublishDomains` 不 flip
+
+4. **定义 `sourceRefs` selector 契约**
+   - `publish-verdict/types.ts` 里加新的 discriminated union branch
+   - `validation.ts` 里加 fail-closed selector 校验
+   - selector 必须是 replayable 的：
+   - time window
+   - ids
+   - owner scope
+   - trusted runtime config path
+   - 哪个都行，但不能靠“猫自己记得该读哪份文件”
+
+5. **实现 generator adapter + generator**
+   - adapter 负责把 selector 解成 live source window / raw inputs
+   - generator 只负责把这些 inputs 变成：
+   - `verdict.md`
+   - `bundle/snapshot.json`
+   - `bundle/attribution.json`
+   - `bundle/provenance.json`
+   - bundle contract 必须符合 `docs/harness-feedback/SPEC.md`
+
+6. **只在 generator ready 后再 flip runtime wire**
+   - 这 4 处必须一起到位，否则就是 fake wire：
+   - MCP tool schema 接受该 `sourceRefs`
+   - `PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN[domainId]`
+   - `verdictGenerators[domainId]`
+   - `wiredPublishDomains.add(domainId)`
+
+7. **补 4 类测试**
+   - handler 校验：kind mismatch / invalid selector / honest 501
+   - generator 输出：bundle 能被 `loadEvalHubSummary()` 读回
+   - route e2e：callback principal / server-trusted ownership 正确
+   - MCP wrapper：tool schema 和 callback payload 正确
+
+8. **最后才做 legacy cleanup / Hub 文案 / timeline sync**
+   - 旧 cron / 旧 report / 旧 manual path 如果不关，会双触发
+   - merge 后必须回写 feature truth（timeline / backlog / phase status）
+
+一句话版：
+
+`truth source → registry → instruction → sourceRefs → adapter → generator → wire flip → tests → legacy cleanup`
+
+少任何一环，都不算真正接进 F192。
 
 ## 需求点 Checklist
 

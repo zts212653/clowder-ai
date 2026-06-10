@@ -377,6 +377,82 @@ describe('POST /api/authorization/respond', () => {
 
     assert.equal(res.statusCode, 401);
   });
+
+  test('F222 UX-3: withFeedback=true passes through to onPermissionCancel', async () => {
+    const cancelCalls = [];
+    const app = Fastify();
+    await app.register(authorizationRoutes, {
+      authManager,
+      ruleStore,
+      auditStore,
+      socketManager,
+      onPermissionCancel: (input) => cancelCalls.push(input),
+    });
+
+    const record = pendingStore.create({
+      invocationId: 'inv-feedback',
+      catId: 'codex',
+      threadId: 'thread-fb',
+      action: 'git_push',
+      reason: 'push to main',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: { 'x-cat-cafe-user': 'user-feedback' },
+      payload: {
+        requestId: record.requestId,
+        granted: false,
+        scope: 'once',
+        reason: 'wrong_direction',
+        withFeedback: true,
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(cancelCalls.length, 1);
+    assert.equal(cancelCalls[0].withFeedback, true);
+    assert.equal(cancelCalls[0].toolName, 'git_push');
+    assert.equal(cancelCalls[0].userId, 'user-feedback');
+    assert.equal(cancelCalls[0].cancelReason, 'wrong_direction');
+  });
+
+  test('F222 UX-3: withFeedback defaults to false when not provided', async () => {
+    const cancelCalls = [];
+    const app = Fastify();
+    await app.register(authorizationRoutes, {
+      authManager,
+      ruleStore,
+      auditStore,
+      socketManager,
+      onPermissionCancel: (input) => cancelCalls.push(input),
+    });
+
+    const record = pendingStore.create({
+      invocationId: 'inv-nofb',
+      catId: 'opus',
+      threadId: 'thread-nofb',
+      action: 'rm_file',
+      reason: 'cleanup',
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/authorization/respond',
+      headers: { 'x-cat-cafe-user': 'user-nofb' },
+      payload: {
+        requestId: record.requestId,
+        granted: false,
+        scope: 'once',
+        reason: 'skip',
+      },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(cancelCalls.length, 1);
+    assert.equal(cancelCalls[0].withFeedback, false);
+  });
 });
 
 describe('GET /api/authorization/pending', () => {

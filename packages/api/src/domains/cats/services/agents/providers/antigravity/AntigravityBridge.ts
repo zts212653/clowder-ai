@@ -291,6 +291,21 @@ function hasTerminalPlannerTextInLatestTurn(steps: TrajectoryStep[]): boolean {
   });
 }
 
+function plannerStepHasDisplayableText(step: TrajectoryStep): boolean {
+  if (step.plannerResponse?.stopReason === 'STOP_REASON_CLIENT_STREAM_ERROR') return false;
+  if (isNonEmptyText(step.plannerResponse?.modifiedResponse)) return true;
+  return isNonEmptyText(step.plannerResponse?.response);
+}
+
+function latestPlannerResponseInLatestTurn(steps: TrajectoryStep[]): TrajectoryStep | undefined {
+  const userInputIndex = latestUserInputIndex(steps);
+  for (let index = steps.length - 1; index > userInputIndex; index -= 1) {
+    const step = steps[index];
+    if (step?.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') return step;
+  }
+  return undefined;
+}
+
 function latestTurnHasErrorMessage(steps: TrajectoryStep[]): boolean {
   const userInputIndex = latestUserInputIndex(steps);
   const latestTurnSteps = userInputIndex >= 0 ? steps.slice(userInputIndex + 1) : steps;
@@ -961,19 +976,29 @@ export class AntigravityBridge {
         const changed = lastStatusKey === undefined || statusKey !== lastStatusKey;
         const throttledMutationProbe = isRunning && !changed && fullFetchSkips >= REG9_RUNNING_FULL_FETCH_THROTTLE;
         if (!changed && !throttledMutationProbe) {
-          lastStatusKey = statusKey;
-          fullFetchSkips += 1;
           const idleMs = Date.now() - lastActivityAt;
-          // A cascade awaiting user approval is NOT a stall (carry the last full-fetch observation).
-          // Otherwise the idle-timeout still fires here — so a genuinely hung cascade surfaces instead
-          // of polling forever silently (REG9 core: no done/error must never become an invisible hang).
-          if (!lastAwaitingUserInput && idleMs > idleTimeoutMs) {
-            throw new Error(
-              `Antigravity stall: no activity for ${idleMs}ms (steps=${statusForGate.stepCount}, status=${statusForGate.status})`,
-            );
+          const shouldProbeTerminalBeforeStall =
+            !lastAwaitingUserInput && statusForGate.status === 'CASCADE_RUN_STATUS_IDLE' && idleMs > idleTimeoutMs;
+          if (shouldProbeTerminalBeforeStall) {
+            // F211-REG14: when an unchanged IDLE summary reaches the watchdog deadline, do one final
+            // authoritative trajectory read before surfacing a stall. A retry can resume from the last
+            // delivered step after the cascade has already become a clean terminal tail; throwing from
+            // the cheap status gate would skip the no-new-steps terminalization path below.
+            pendingStatusKey = statusKey;
+          } else {
+            lastStatusKey = statusKey;
+            fullFetchSkips += 1;
+            // A cascade awaiting user approval is NOT a stall (carry the last full-fetch observation).
+            // Otherwise the idle-timeout still fires here — so a genuinely hung cascade surfaces instead
+            // of polling forever silently (REG9 core: no done/error must never become an invisible hang).
+            if (!lastAwaitingUserInput && idleMs > idleTimeoutMs) {
+              throw new Error(
+                `Antigravity stall: no activity for ${idleMs}ms (steps=${statusForGate.stepCount}, status=${statusForGate.status})`,
+              );
+            }
+            await new Promise((r) => setTimeout(r, pollIntervalMs));
+            continue;
           }
-          await new Promise((r) => setTimeout(r, pollIntervalMs));
-          continue;
         }
         // Defer the commit until the full fetch below actually succeeds (砚砚 P1) — a transient
         // getTrajectory failure must keep this change un-consumed so the retry re-fetches it.
@@ -1048,7 +1073,24 @@ export class AntigravityBridge {
         nextPlannerTexts = diff.nextPlannerTexts;
         hadMutation = diff.hadMutation;
       }
-      const terminalReady = isTerminal && !hasGeneratingPlannerResponse(allSteps);
+      const latestPlanner = latestPlannerResponseInLatestTurn(allSteps);
+      const latestPlannerIsGenerating = latestPlanner?.status === 'CORTEX_STEP_STATUS_GENERATING';
+      const latestGeneratingPlannerHasText =
+        latestPlannerIsGenerating && latestPlanner !== undefined && plannerStepHasDisplayableText(latestPlanner);
+      const deliveredBeyondReplayBaseline = delivered > replayBaselineStepCount;
+      const terminalReady =
+        isTerminal &&
+        (!latestPlannerIsGenerating ||
+          // F211-REG12: if Antigravity flips to IDLE while a planner response is still marked
+          // GENERATING, only close once that latest planner response itself has displayable text.
+          // Earlier planner text in the same user turn cannot prove this final generating step is done.
+          (!shouldFetchForNewSteps && !hadMutation && latestGeneratingPlannerHasText));
+      if (isTerminal && !terminalReady && latestPlannerIsGenerating) {
+        // The status key may already be committed for this IDLE fetch. Force one follow-up
+        // trajectory read so generating-planner text mutations are not hidden by the status gate.
+        lastStatusKey = undefined;
+        fullFetchSkips = 0;
+      }
 
       if (currentSteps > delivered || hadMutation) {
         waitingApprovalSignaled = false;
@@ -1130,7 +1172,7 @@ export class AntigravityBridge {
         if (
           terminalReady &&
           (!expectFollowUpTurn || followUpUserInputSeen) &&
-          (delivered > stepsBefore || idleMs > idleTimeoutMs)
+          (deliveredBeyondReplayBaseline || idleMs > idleTimeoutMs)
         ) {
           yield {
             steps: [],

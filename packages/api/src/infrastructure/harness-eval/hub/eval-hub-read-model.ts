@@ -23,11 +23,25 @@ export interface EvalDomainSummary {
   frequency: string;
   evalCatId: string;
   evalCatHandle: string;
+  /**
+   * Sunset state. `false` means the domain's yaml has `enabled: false` —
+   * scheduled cron silently skips it, and `nextCronFireAt` is omitted (because
+   * cron does NOT fire for sunset domains; showing a future fire time would be
+   * the operator-facing mirror of the silent-fire bug the sunset is meant to
+   * fix). Frontend renders a "Sunset" indicator instead of "下次评估".
+   * `true` (default) means the domain is active and the cron will fire as
+   * scheduled.
+   */
+  enabled: boolean;
   hasVerdict: boolean;
   latestVerdictId?: string;
   latestVerdict?: EvalHubItem['verdict'];
-  /** Next scheduled cron fire time (computed from frequency, not verdict re-eval deadline). */
-  nextCronFireAt: string;
+  /**
+   * Next scheduled cron fire time (computed from frequency, not verdict
+   * re-eval deadline). Omitted when `enabled === false` — sunset domains
+   * have no upcoming fire, and surfacing a future date would lie to operators.
+   */
+  nextCronFireAt?: string;
 }
 
 export interface EvalHubSummary {
@@ -133,6 +147,11 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
   const domainSummaries: EvalDomainSummary[] = [...domains.values()].map((domain) => {
     const domainVerdicts = items.filter((item) => item.domainId === domain.domainId);
     const latest = domainVerdicts[0]; // items already sorted by date desc
+    // Sunset 2026-06-06 (F192 silent-fire fix): when domain.enabled === false the
+    // scheduled cron silently skips it, so we must NOT publish a future
+    // nextCronFireAt — that would mirror silent-fire on the operator-facing surface
+    // (Hub UI would say "next fire Sunday" while cron actually never fires).
+    const isEnabled = domain.enabled !== false;
     return {
       domainId: domain.domainId,
       displayName: domain.displayName,
@@ -140,8 +159,9 @@ export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSumma
       frequency: domain.frequency,
       evalCatId: domain.evalCat.catId,
       evalCatHandle: domain.evalCat.handle,
+      enabled: isEnabled,
       hasVerdict: domainVerdicts.length > 0,
-      nextCronFireAt: computeNextCronFire(domain.frequency, now).toISOString(),
+      ...(isEnabled ? { nextCronFireAt: computeNextCronFire(domain.frequency, now).toISOString() } : {}),
       ...(latest
         ? {
             latestVerdictId: latest.id,

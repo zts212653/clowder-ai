@@ -101,15 +101,19 @@ status: draft  # 用户预览后才提交
 - **修复**：`frustrationAutoIssueEligible` boolean gate — user direct/retry/multi-mention = true，A2A/connector/podcast = false
 - **残留 P3**：worklist-inline A2A 在 user-origin route 内仍 eligible（理论边界，无复现，需 per-entry provenance 才能修）
 
-### UX-1: "跳过"应该是反馈信号 + 增加"误报"选项
+### ~~UX-1: "跳过"应该是反馈信号 + 增加"误报"选项~~ ✅ Fixed (PR #2106)
 - **现象**：跳过只改状态不记录原因，浪费 eval 信号；应区分"跳过"和"误报"
-- **方案**：新增 `false_positive` 状态，按钮变三选一（确认/跳过/误报）
-- **Owner**：Ragdoll
+- **修复**：新增 `false_positive` 状态 + `POST /false-positive` 路由，按钮变三选一（确认/跳过/误报）
 
-### UX-2: 处理完的卡片应折叠收起
+### ~~UX-2: 处理完的卡片应折叠收起~~ ✅ Fixed (PR #2106)
 - **现象**：确认/跳过后卡片仍全尺寸展示，"狗皮膏药"影响阅读
-- **方案**：处理后折叠为一行摘要，可点击展开
-- **Owner**：Ragdoll
+- **修复**：处理后自动折叠为一行摘要（标题+状态徽章），可点击展开/收起；hydrated resolved 也默认折叠
+
+### ~~UX-3: "取消并反馈"一键投诉~~ ✅ Fixed (PR #2107 + follow-up)
+- **现象**：用户否决权限请求后想投诉，需等 cancel_burst 阈值（≥3 次 60s 内）才能触发 auto-issue
+- **team experience**："我直接！反馈！我投诉！"
+- **修复**：AuthorizationCard + hold-ball connector card 新增"取消并反馈"按钮，走 `user_report` 信号（无阈值，每次点击都生成独立 issue），dedup 豁免
+- **PR #2113 补强**：持球卡片 live 路径取消持球并反馈；历史/stale 持球卡片遇到 404 时 fallback 到 `POST /api/callbacks/hold-ball/feedback`，后端做 user auth + thread ownership 校验后仍生成 `user_report`，避免反馈静默丢失
 
 ## Dependencies
 

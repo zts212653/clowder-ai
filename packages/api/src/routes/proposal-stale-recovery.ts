@@ -55,12 +55,19 @@ export async function handleApproveStaleClaim(args: {
   }
 
   if (proposal.createdThreadId) {
+    // The created thread is the source of truth for the re-homed ownership — it was created with
+    // the approve-time finalProjectPath BEFORE the crash. Backfill projectPath into the proposal
+    // audit here so a crash between recordCreatedThread and finalize doesn't leave the audit on
+    // the pre-override path (honors the AC-Z2 projectPath audit-sync contract on the recovery
+    // path). recordCreatedThread now also checkpoints approve-time overrides before this window,
+    // so non-thread-truth fields such as reportingMode are already carried by `proposal`.
+    const recoveredThread = await threadStore.get(proposal.createdThreadId);
     const recovered = await proposalStore.finalizeApproval({
       proposalId: proposal.proposalId,
       createdThreadId: proposal.createdThreadId,
+      ...(recoveredThread ? { overrides: { projectPath: recoveredThread.projectPath } } : {}),
     });
     if (recovered) {
-      const recoveredThread = await threadStore.get(proposal.createdThreadId);
       if (recoveredThread) socketManager.emitToUser(userId, 'thread_created', recoveredThread);
       socketManager.emitToUser(userId, 'proposal_updated', recovered);
       return {
@@ -90,13 +97,14 @@ export async function handleApproveStaleClaim(args: {
 export async function handleRejectStaleClaim(args: {
   proposal: ThreadProposal;
   proposalStore: IProposalStore;
+  threadStore: Pick<IThreadStore, 'get'>;
   reply: FastifyReply;
 }): Promise<
   | { kind: 'cleared' }
   | { kind: 'in_flight'; status: 409 }
   | { kind: 'cannot_reject'; status: 409; body: Record<string, unknown> }
 > {
-  const { proposal, proposalStore, reply } = args;
+  const { proposal, proposalStore, threadStore, reply } = args;
   if (proposal.status !== 'approving') return { kind: 'cleared' };
 
   const ageMs = proposal.claimedAt ? Date.now() - proposal.claimedAt : Number.POSITIVE_INFINITY;
@@ -106,9 +114,15 @@ export async function handleRejectStaleClaim(args: {
   }
 
   if (proposal.createdThreadId) {
+    // A thread already exists → this proposal is approved, not rejectable. Finalize it and, as on
+    // the approve-stale path, backfill projectPath from the created thread so the audit matches
+    // the thread's actual ownership. Other approval overrides are preserved by the
+    // recordCreatedThread checkpoint when the normal approve route reached Stage 1.5.
+    const recoveredThread = await threadStore.get(proposal.createdThreadId);
     const recovered = await proposalStore.finalizeApproval({
       proposalId: proposal.proposalId,
       createdThreadId: proposal.createdThreadId,
+      ...(recoveredThread ? { overrides: { projectPath: recoveredThread.projectPath } } : {}),
     });
     reply.status(409);
     return {

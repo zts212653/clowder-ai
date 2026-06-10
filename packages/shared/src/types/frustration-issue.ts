@@ -12,17 +12,24 @@ import { generateId } from './ids.js';
 
 // ── Signal Types ───────────────────────────────────────────────
 
-/** Phase A: cli_error + cancel_burst. Phase B: text_frustration. Phase C: a2a_timeout + retry_burst. */
-export type FrustrationSignalType = 'cli_error' | 'cancel_burst' | 'text_frustration' | 'a2a_timeout' | 'retry_burst';
+/** Phase A: cli_error + cancel_burst. Phase B: text_frustration. Phase C: a2a_timeout + retry_burst. UX-3: user_report. */
+export type FrustrationSignalType =
+  | 'cli_error'
+  | 'cancel_burst'
+  | 'text_frustration'
+  | 'a2a_timeout'
+  | 'retry_burst'
+  | 'user_report';
 
 // ── Issue Status ───────────────────────────────────────────────
 
 /**
  * Status lifecycle:
- *   draft → confirmed   (user approved the auto-issue)
- *   draft → skipped     (user dismissed)
+ *   draft → confirmed       (user approved the auto-issue)
+ *   draft → skipped         (user dismissed)
+ *   draft → false_positive  (user flagged as false alarm — UX-1)
  */
-export type FrustrationIssueStatus = 'draft' | 'confirmed' | 'skipped';
+export type FrustrationIssueStatus = 'draft' | 'confirmed' | 'skipped' | 'false_positive';
 
 // ── Context (auto-collected) ───────────────────────────────────
 
@@ -74,6 +81,7 @@ export interface FrustrationIssue {
   createdAt: number;
   confirmedAt?: number;
   skippedAt?: number;
+  falsePositiveAt?: number;
 }
 
 // ── Input Types ────────────────────────────────────────────────

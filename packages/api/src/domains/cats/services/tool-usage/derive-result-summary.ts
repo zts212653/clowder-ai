@@ -22,15 +22,30 @@ export function deriveResultSummary(normalizedToolName: string, content: unknown
 
   switch (normalizedToolName) {
     case 'search_evidence':
-      return deriveSearchEvidence(text);
+      return withGenericErrorFallback(deriveSearchEvidence(text), text);
     case 'graph_resolve':
-      return deriveGraphResolve(text);
+      return withGenericErrorFallback(deriveGraphResolve(text), text);
     case 'list_recent':
-      return deriveListRecent(text);
+      return withGenericErrorFallback(deriveListRecent(text), text);
     default:
-      return {};
+      return deriveGenericError(text) ?? {};
   }
 }
+
+function withGenericErrorFallback(summary: ResultSummary, text: string): ResultSummary {
+  if (Object.keys(summary).length > 0) return summary;
+  return deriveGenericError(text) ?? {};
+}
+
+function deriveGenericError(text: string): ResultSummary | null {
+  const message = text.trim();
+  if (!message) return null;
+  if (!GENERIC_ERROR_PATTERN.test(message)) return null;
+  return { isError: true, errorMessage: message };
+}
+
+const GENERIC_ERROR_PATTERN =
+  /^(?:error:|callback failed|callback request failed|refused:|access denied:|.*\bfailed\b|.*\berror\b|.*\brejected\b)/i;
 
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;

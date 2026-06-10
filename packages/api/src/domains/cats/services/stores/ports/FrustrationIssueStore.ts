@@ -1,7 +1,7 @@
 /**
  * F222: Frustration Auto-Issue Store — Port interface.
  *
- * Lifecycle: draft → confirmed | skipped (one-way, no CAS needed).
+ * Lifecycle: draft → confirmed | skipped | false_positive (one-way, no CAS needed).
  * User-visible data → persistent by default (Iron Law #5, LL-048).
  */
 
@@ -28,6 +28,9 @@ export interface IFrustrationIssueStore {
 
   /** User skips/dismisses the auto-issue. Sets status=skipped + skippedAt. */
   skip(issueId: string): Promise<FrustrationIssue | null>;
+
+  /** User flags as false positive (UX-1). Sets status=false_positive + falsePositiveAt. */
+  markFalsePositive(issueId: string): Promise<FrustrationIssue | null>;
 
   /** Set the card message ID (visibility marker). */
   setCardMessageId(issueId: string, cardMessageId: string): Promise<void>;

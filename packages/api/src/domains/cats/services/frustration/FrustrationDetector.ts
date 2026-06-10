@@ -94,12 +94,25 @@ export interface RetryBurstSignal {
   repeatedPrefix: string;
 }
 
+/**
+ * UX-3: User clicked "取消并反馈" — direct report, no threshold.
+ * The user explicitly wants to file a complaint alongside a permission denial.
+ */
+export interface UserReportSignal {
+  type: 'user_report';
+  /** The tool action that was denied */
+  toolName: string;
+  /** The structured cancel reason from the deny button */
+  cancelReason?: string;
+}
+
 export type FrustrationSignal =
   | CliErrorSignal
   | CancelBurstSignal
   | TextFrustrationSignal
   | A2ATimeoutSignal
-  | RetryBurstSignal;
+  | RetryBurstSignal
+  | UserReportSignal;
 
 /**
  * Evaluate whether a signal should trigger an auto-issue.
@@ -131,6 +144,11 @@ export function shouldTrigger(signal: FrustrationSignal): boolean {
 
   if (signal.type === 'retry_burst') {
     return signal.matchCount >= RETRY_BURST_THRESHOLD;
+  }
+
+  // UX-3: user_report always triggers — user explicitly clicked "取消并反馈"
+  if (signal.type === 'user_report') {
+    return true;
   }
 
   return false;
@@ -196,8 +214,8 @@ export async function evaluate(
 
   const signalType: FrustrationSignalType = signal.type;
 
-  // 2. Dedup
-  if (isDuplicate(threadId, signalType)) return null;
+  // 2. Dedup — skip for user_report: each explicit "取消并反馈" click is intentional
+  if (signalType !== 'user_report' && isDuplicate(threadId, signalType)) return null;
 
   // 3. Build signal detail
   let signalDetail: Record<string, unknown>;
@@ -222,11 +240,16 @@ export async function evaluate(
       targetCatId: signal.targetCatId,
       elapsedMs: signal.elapsedMs,
     };
-  } else {
-    // retry_burst
+  } else if (signal.type === 'retry_burst') {
     signalDetail = {
       matchCount: signal.matchCount,
       repeatedPrefix: signal.repeatedPrefix,
+    };
+  } else {
+    // user_report
+    signalDetail = {
+      toolName: signal.toolName,
+      cancelReason: signal.cancelReason,
     };
   }
 
@@ -272,7 +295,7 @@ export async function evaluate(
       userId: 'system',
       catId: null,
       threadId,
-      content: `[自动检测] 检测到可能的问题（${signalType === 'cli_error' ? 'CLI 错误' : '操作中断'}），已自动整理上下文。`,
+      content: `[${signalType === 'user_report' ? '用户反馈' : '自动检测'}] ${signalType === 'user_report' ? '你发起了问题反馈' : `检测到可能的问题（${signalType === 'cli_error' ? 'CLI 错误' : '操作中断'}）`}，已自动整理上下文。`,
       mentions: [],
       timestamp: Date.now(),
       source: {
@@ -308,8 +331,10 @@ export async function evaluate(
     // The issue is still in the store and queryable.
   }
 
-  // 10. Mark dedup
-  markTriggered(threadId, signalType);
+  // 10. Mark dedup (skip for user_report — no dedup for explicit user clicks)
+  if (signalType !== 'user_report') {
+    markTriggered(threadId, signalType);
+  }
 
   return issue;
 }

@@ -35,10 +35,18 @@ const bundleComponentSchema = z
     };
   });
 
+/**
+ * Bundle-layer feature id invariant. Both snapshot.json and attribution.json
+ * enforce this — generators MUST align their packet/field guards with this
+ * regex to fail up-front (clean 400) instead of after writing bundle (500).
+ * Cloud Codex R10 P2 surfaced this as a layered consistency requirement.
+ */
+export const BUNDLE_FEATURE_ID_REGEX = /^F\d{3}$/;
+
 const bundleSnapshotSchema = z.object({
   verdictId: z.string().min(1),
   evalSnapshotId: z.string().min(1),
-  featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
+  featureId: z.string().regex(BUNDLE_FEATURE_ID_REGEX, 'featureId must match F followed by 3 digits'),
   generatedAt: z.string().datetime({ offset: true }),
   window: z.object({
     startMs: z.number().int().optional(),
@@ -80,7 +88,7 @@ const attributionFindingSchema = z.object({
 
 const bundleAttributionSchema = z.object({
   verdictId: z.string().min(1),
-  featureId: z.string().regex(/^F\d{3}$/, 'featureId must match F followed by 3 digits'),
+  featureId: z.string().regex(BUNDLE_FEATURE_ID_REGEX, 'featureId must match F followed by 3 digits'),
   evalSnapshotId: z.string().min(1),
   generatedAt: z.string().datetime({ offset: true }),
   findings: z.array(attributionFindingSchema),

@@ -12,12 +12,38 @@ import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 6500;
+
+function assertWithinFullRuntimePromptBudget(prompt) {
+  assert.ok(
+    prompt.length < FULL_RUNTIME_PROMPT_CHAR_BUDGET,
+    `Full runtime prompt is ${prompt.length} chars, expected < ${FULL_RUNTIME_PROMPT_CHAR_BUDGET}`,
+  );
+}
 
 describe('SystemPromptBuilder', () => {
   // Dynamic import after build
   async function getBuilder() {
     const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     return buildSystemPrompt;
+  }
+
+  async function withFreshRuntimeRegistry(run) {
+    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
+    const originalConfigs = catRegistry.getAllConfigs();
+    catRegistry.reset();
+    try {
+      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
+      for (const [id, config] of Object.entries(runtimeConfigs)) {
+        catRegistry.register(id, config);
+      }
+      return await run();
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(originalConfigs)) {
+        catRegistry.register(id, config);
+      }
+    }
   }
 
   test('contains display name for opus', async () => {
@@ -134,6 +160,52 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('cat_cafe_get_thread_context'));
   });
 
+  test('F128: propose_thread description surfaces the projectPath ownership parameter', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+    assert.ok(prompt.includes('cat_cafe_propose_thread'), 'propose_thread must be listed');
+    // The whole point of the fix is discoverability: a cat proposing a cross-repo child
+    // thread must know it can pin projectPath, or the child inherits `default` and cats
+    // fall back to the runtime cwd. Pin the param + its cross-repo guidance in the prompt.
+    assert.ok(
+      prompt.match(/propose_thread[\s\S]*?projectPath/),
+      'propose_thread description must document the projectPath parameter',
+    );
+    assert.ok(
+      prompt.match(/projectPath[\s\S]*?(工作目录|跨 ?repo|项目归属)/),
+      'projectPath note must explain it controls the child thread working directory / ownership',
+    );
+  });
+
+  test('F128 Phase AA (AC-AA1): propose_thread reportingMode default is final-only, not none', async () => {
+    // Guard test: SystemPromptBuilder's cat-facing propose_thread description must
+    // align with the actual DEFAULT_REPORTING_MODE in proposal-enrich-header.ts.
+    // Phase AA changed the default from none to final-only. If they drift again,
+    // this test catches it at build time rather than in a cross-cut review round.
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+    const proposeSection = prompt.match(/cat_cafe_propose_thread[\s\S]*?(?=\n- cat_cafe_|$)/);
+    assert.ok(proposeSection, 'propose_thread description must be present');
+    const desc = proposeSection[0];
+    // final-only must be listed as default
+    assert.ok(
+      desc.includes('final-only（默认'),
+      `propose_thread must document final-only as 默认; got: ${desc.slice(0, 200)}`,
+    );
+    // none must NOT be labeled as default
+    assert.ok(!desc.includes('none（默认'), 'propose_thread must NOT label none as 默认 (Phase AA superseded)');
+  });
+
   test('F193 AC-B1: MCP_TOOLS_SECTION lists cat_cafe_cross_post_message with routing hint', async () => {
     const build = await getBuilder();
     const prompt = build({
@@ -215,18 +287,20 @@ describe('SystemPromptBuilder', () => {
   // 改 governance content（Magic Words / shared-rules）时两个 test 都要跑：
   //   - 本文件：char budget（runtime prompt）
   //   - scripts/compile-system-prompt-l0.test.mjs：token budget（L0 compiled markdown）
-  test('output size stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
-    const build = await getBuilder();
-    const prompt = build({
-      catId: 'opus',
-      mode: 'serial',
-      chainIndex: 1,
-      chainTotal: 3,
-      teammates: ['codex', 'gemini'],
-      mcpAvailable: true,
-      promptTags: ['critique'],
+  test('output size stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
+    await withFreshRuntimeRegistry(async () => {
+      const build = await getBuilder();
+      const prompt = build({
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 1,
+        chainTotal: 3,
+        teammates: ['codex', 'gemini'],
+        mcpAvailable: true,
+        promptTags: ['critique'],
+      });
+      assertWithinFullRuntimePromptBudget(prompt);
     });
-    assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
   });
 
   test('returns empty string for unknown catId', async () => {
@@ -339,11 +413,29 @@ describe('SystemPromptBuilder', () => {
     const opusId = buildStaticIdentity('opus');
     assert.ok(opusId.includes('工作流'), 'Opus should have workflow triggers');
     assert.ok(opusId.includes('@缅因猫'), 'Opus workflow should mention review with 缅因猫');
+    assert.ok(
+      opusId.includes('MG provenance override'),
+      'Opus workflow should avoid local-reviewer ping after external merge-gate feedback',
+    );
 
     const codexId = buildStaticIdentity('codex');
     assert.ok(codexId.includes('工作流'), 'Codex should have workflow triggers');
     assert.ok(codexId.includes('@布偶猫'), 'Codex workflow should mention notifying 布偶猫');
+    assert.ok(
+      codexId.includes('MG provenance override'),
+      'Codex workflow should avoid local-reviewer ping after external merge-gate feedback',
+    );
     assert.ok(codexId.includes('出口一问'), 'Codex workflow should include exit check (出口一问)');
+
+    const opencodeId = buildStaticIdentity('opencode');
+    assert.ok(opencodeId.includes('工作流'), 'OpenCode should have workflow triggers');
+    assert.ok(
+      opencodeId.includes('MG provenance override'),
+      'OpenCode workflow should avoid local-reviewer ping after external merge-gate feedback',
+    );
+    assert.ok(opencodeId.includes('### 执行纪律'), 'OpenCode workflow should include execution discipline');
+    assert.ok(opencodeId.includes('出口一问'), 'OpenCode workflow should include exit check (出口一问)');
+    assert.ok(opencodeId.includes('OMOC Sisyphus'), 'OpenCode workflow should keep golden-chinchilla governance');
   });
 
   test('buildStaticIdentity is deterministic', async () => {
@@ -596,16 +688,8 @@ describe('SystemPromptBuilder', () => {
   });
 
   test('buildStaticIdentity roster size with full runtime config stays under 4700 chars after Magic Words growth', async () => {
-    const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
-    const originalConfigs = catRegistry.getAllConfigs();
-    catRegistry.reset();
-    try {
-      const runtimeConfigs = toAllCatConfigs(loadCatConfig(CAT_TEMPLATE_PATH));
-      for (const [id, config] of Object.entries(runtimeConfigs)) {
-        catRegistry.register(id, config);
-      }
-
+    await withFreshRuntimeRegistry(async () => {
+      const { buildSystemPrompt } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
       const prompt = buildSystemPrompt({
         catId: 'opus',
         mode: 'serial',
@@ -615,13 +699,8 @@ describe('SystemPromptBuilder', () => {
         mcpAvailable: true,
         promptTags: ['critique'],
       });
-      assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
-    } finally {
-      catRegistry.reset();
-      for (const [id, config] of Object.entries(originalConfigs)) {
-        catRegistry.register(id, config);
-      }
-    }
+      assertWithinFullRuntimePromptBudget(prompt);
+    });
   });
 
   test('buildInvocationContext returns teammates when present', async () => {
@@ -1198,22 +1277,24 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
   });
 
-  test('buildSystemPrompt size with activeParticipants stays under 3900 chars after Magic Words + runtime prompt growth', async () => {
-    const build = await getBuilder();
-    const prompt = build({
-      catId: 'opus',
-      mode: 'serial',
-      chainIndex: 1,
-      chainTotal: 3,
-      teammates: ['codex', 'gemini'],
-      mcpAvailable: true,
-      promptTags: ['critique'],
-      activeParticipants: [
-        { catId: 'codex', lastMessageAt: Date.now(), messageCount: 5 },
-        { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
-      ],
+  test('buildSystemPrompt size with activeParticipants stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {
+    await withFreshRuntimeRegistry(async () => {
+      const build = await getBuilder();
+      const prompt = build({
+        catId: 'opus',
+        mode: 'serial',
+        chainIndex: 1,
+        chainTotal: 3,
+        teammates: ['codex', 'gemini'],
+        mcpAvailable: true,
+        promptTags: ['critique'],
+        activeParticipants: [
+          { catId: 'codex', lastMessageAt: Date.now(), messageCount: 5 },
+          { catId: 'opus', lastMessageAt: Date.now() - 1000, messageCount: 3 },
+        ],
+      });
+      assertWithinFullRuntimePromptBudget(prompt);
     });
-    assert.ok(prompt.length < 6400, `Full runtime prompt is ${prompt.length} chars, expected < 6400`);
   });
 
   // --- F042: pinned identity constant + direct-message reply target ---

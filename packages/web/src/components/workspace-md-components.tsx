@@ -27,7 +27,11 @@ export function createWorkspaceImageComponent(basePath: string, worktreeId: stri
 }
 
 /** Create an `a` override that intercepts relative .md links → workspace navigation */
-export function createWorkspaceLinkComponent(basePath: string, withMentions: MentionFn): Components['a'] {
+export function createWorkspaceLinkComponent(
+  basePath: string,
+  withMentions: MentionFn,
+  worktreeId?: string,
+): Components['a'] {
   return function WorkspaceLink({ href, children }) {
     const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
 
@@ -38,7 +42,10 @@ export function createWorkspaceLinkComponent(basePath: string, withMentions: Men
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            setOpenFile(resolved);
+            // F226 云端 P2: navigate within the given worktree (symmetric with the image resolver),
+            // so a torn-off float's relative links stay correct even after the docked workspace
+            // switches to another worktree.
+            setOpenFile(resolved, null, worktreeId ?? null);
           }}
           className="text-cafe-accent hover:text-cafe-interactive hover:underline break-all cursor-pointer"
           title={`在工作区中打开 ${resolved}`}

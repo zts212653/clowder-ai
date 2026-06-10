@@ -4,7 +4,14 @@
  */
 
 import { join } from 'node:path';
-import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, type ILimbNode } from '@cat-cafe/shared';
+import {
+  type CatConfig,
+  type CatId,
+  CORE_COMMANDS,
+  catRegistry,
+  type EventMemoryRecord,
+  type ILimbNode,
+} from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -92,6 +99,7 @@ import { createPendingRequestStore } from './domains/cats/services/stores/factor
 import { createProposalStore } from './domains/cats/services/stores/factories/ProposalStoreFactory.js';
 import { createPushSubscriptionStore } from './domains/cats/services/stores/factories/PushSubscriptionStoreFactory.js';
 import { createReadStateStore } from './domains/cats/services/stores/factories/ReadStateStoreFactory.js';
+import { createSessionHandoffProposalStore } from './domains/cats/services/stores/factories/SessionHandoffProposalStoreFactory.js';
 import { createSummaryStore } from './domains/cats/services/stores/factories/SummaryStoreFactory.js';
 import { createTaskStore } from './domains/cats/services/stores/factories/TaskStoreFactory.js';
 import { createThreadStore } from './domains/cats/services/stores/factories/ThreadStoreFactory.js';
@@ -160,6 +168,7 @@ import {
   connectorHubRoutes,
   connectorMediaRoutes,
   distillationRoutes,
+  eventsRoutes,
   evidenceRoutes,
   executionDigestRoutes,
   exportRoutes,
@@ -200,6 +209,7 @@ import {
   rulesRoutes,
   servicesRoutes,
   sessionChainRoutes,
+  sessionHandoffApproveRoutes,
   sessionHooksRoutes,
   sessionStrategyConfigRoutes,
   sessionTranscriptRoutes,
@@ -479,6 +489,7 @@ async function main(): Promise<void> {
   const deliveryCursorStore = new DeliveryCursorStore(sessionStore);
   const threadStore = createThreadStore(redis);
   const proposalStore = createProposalStore(redis);
+  const handoffProposalStore = createSessionHandoffProposalStore(redis);
   const frustrationIssueStore = createFrustrationIssueStore(redis);
   // F222: Create early so it's available for both AgentRouter (cancel burst detection) and AuthorizationManager
   const authPendingStore = createPendingRequestStore(redis);
@@ -632,13 +643,25 @@ async function main(): Promise<void> {
       const messages = await messageStore.getByThread(threadId, limit ?? 2000, 'default-user');
       return messages
         .filter((m: { origin?: string }) => m.origin !== 'briefing') // F148 Phase E (AC-E2): exclude briefing from evidence index
-        .map((m: { id: string; content: string; catId?: string | null; threadId: string; timestamp: number }) => ({
-          id: m.id,
-          content: m.content,
-          catId: m.catId ?? undefined,
-          threadId: m.threadId,
-          timestamp: m.timestamp,
-        }));
+        .map(
+          (m: {
+            id: string;
+            content: string;
+            catId?: string | null;
+            threadId: string;
+            timestamp: number;
+            contentBlocks?: readonly unknown[];
+            extra?: { rich?: { blocks?: readonly unknown[] } };
+          }) => ({
+            id: m.id,
+            content: m.content,
+            catId: m.catId ?? undefined,
+            threadId: m.threadId,
+            timestamp: m.timestamp,
+            contentBlocks: m.contentBlocks,
+            richBlocks: m.extra?.rich?.blocks,
+          }),
+        );
     },
     // Phase E-1: thread summary indexing — provide a callback that lists all threads
     threadListFn: async () => {
@@ -1437,30 +1460,62 @@ async function main(): Promise<void> {
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
     holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
-    // F192 Phase G AC-G12: magic word detection → task outcome signal
-    onMagicWordDetected: (hits: Array<{ word: string }>, threadId: string, catId: string | null) => {
-      try {
-        for (const hit of hits) {
-          const ep =
-            taskOutcomeStore.getActiveEpisode(threadId) ??
-            taskOutcomeStore.createEpisode({
-              trigger: 'cat_initiated',
-              threadId,
-              participants: catId ? [catId] : [],
-            });
-          taskOutcomeStore.appendSignal(ep.episodeId, {
-            category: 'a2',
-            record: {
-              type: 'magic_word',
-              word: hit.word,
-              timestamp: new Date().toISOString(),
-              threadId,
-              catId: catId ?? 'unknown',
-            },
-          });
+    // F192 Phase G AC-G12 / F227 归一: magic word → Event Memory (single truth
+    // source) + a lightweight episode ref for F192's a2 projection.
+    onMagicWordDetected: (
+      hits: Array<{ word: string }>,
+      threadId: string,
+      catId: string | null,
+      messageId: string,
+      ownerUserId: string,
+      messageExcerpt?: string,
+    ) => {
+      for (const hit of hits) {
+        // 1) Write the full event FIRST. LL-048 / 砚砚: user-visible data — never
+        //    silently swallow. On failure, dead-letter for replay (最终不丢);
+        //    must not block message processing.
+        const record: EventMemoryRecord = {
+          type: hit.word,
+          trigger: 'human_brake',
+          cat: catId ?? 'unknown',
+          threadId,
+          messageId,
+          timestamp: Date.now(),
+          summary: messageExcerpt ?? hit.word,
+          cognitiveTransition: 'user_brake',
+          relatedHarness: null,
+          confidence: 'high',
+        };
+        let eventId: string;
+        try {
+          eventId = memoryServices.eventMemoryStore.markEvent(record, ownerUserId).event.eventId;
+        } catch (err) {
+          // P1-3 (砚砚): dead-letter so the event is recoverable, not lost.
+          try {
+            memoryServices.eventMemoryStore.appendDeadLetter(record, ownerUserId, String(err));
+          } catch (dlErr) {
+            app.log.error({ dlErr, threadId, word: hit.word }, '[F227] dead-letter append ALSO failed');
+          }
+          app.log.error(
+            { err, threadId, word: hit.word },
+            '[F227] Event Memory write failed — dead-lettered for replay',
+          );
+          continue; // no orphan episode ref without a backing event
         }
-      } catch {
-        // Best-effort: don't fail message processing
+        // 2) Episode ref = projection convenience for F192 a2 (secondary, best-effort).
+        try {
+          appendMagicWordRefToEpisode(taskOutcomeStore, {
+            eventId,
+            word: hit.word,
+            threadId,
+            catId: catId ?? 'unknown',
+          });
+        } catch (err) {
+          app.log.error(
+            { err, threadId, eventId },
+            '[F227] episode magic_word_ref append failed (event already persisted)',
+          );
+        }
       }
     },
   };
@@ -1557,21 +1612,106 @@ async function main(): Promise<void> {
   };
 
   const { evalHubRoutes } = await import('./routes/eval-hub.js');
+  // F192 Phase H AC-H4: real GitPublisher (git worktree + gh) + per-domain generators
+  const { createGitWorktreePublisher } = await import(
+    './infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js'
+  );
+  const { createA2aGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/a2a-generator-adapter.js'
+  );
+  const { createTaskOutcomeGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/task-outcome-generator-adapter.js'
+  );
+  const { createSopGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/sop-generator-adapter.js'
+  );
+
+  // F192 Phase H 收尾 PR-2 (砚砚 R1 P1 + Q5): capability-wakeup generator wires a real
+  // CapabilityWakeupTrialProviderImpl with all 4 required ports (sessionStore /
+  // transcriptReader / toolEventLog / skillLoadEventLog). Constructor fail-closed —
+  // if Redis-backed ports are unavailable (no Redis client), skip cw wire entirely
+  // (eval-cat-invocation domain instructions filtering will degrade gracefully:
+  // cw cats see base instructions without publish section, handler returns 501).
+  const verdictGenerators: Partial<
+    Record<
+      'eval:a2a' | 'eval:capability-wakeup' | 'eval:memory' | 'eval:sop' | 'eval:task-outcome',
+      ReturnType<typeof createA2aGeneratorAdapter>
+    >
+  > = {
+    'eval:a2a': createA2aGeneratorAdapter(),
+    'eval:sop': createSopGeneratorAdapter(),
+    'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
+  };
+  if (toolEventLog && skillLoadEventLog) {
+    const { createCapabilityWakeupGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/capability-wakeup-generator-adapter.js'
+    );
+    const { CapabilityWakeupTrialProviderImpl } = await import(
+      './infrastructure/harness-eval/capability-wakeup/capability-wakeup-trial-provider-impl.js'
+    );
+    const { createCapabilityWakeupRuntimeSessionEnumerator } = await import(
+      './infrastructure/harness-eval/capability-wakeup/capability-wakeup-session-enumerator.js'
+    );
+    const cwProvider = new CapabilityWakeupTrialProviderImpl({
+      sessionStore: sessionChainStore,
+      transcriptReader,
+      toolEventLog,
+      skillLoadEventLog,
+      sessionEnumerator: createCapabilityWakeupRuntimeSessionEnumerator({
+        runtimeSessionStore,
+        getFamilyForCat: (catId) => catRegistry.tryGet(catId)?.config.breedId,
+      }),
+    });
+    verdictGenerators['eval:capability-wakeup'] = createCapabilityWakeupGeneratorAdapter(cwProvider);
+  }
+
+  // F192 publish_verdict eval:memory wire-up — wires MemoryMetricsProvider
+  // backed by RecallMetricsComputer + computeLibraryHealth against live
+  // evidenceDb + markerQueue. Constructor is cheap (pure ctor), so unconditional.
+  if (memoryServices.markerQueue) {
+    const { createMemoryGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/memory-generator-adapter.js'
+    );
+    const { MemoryMetricsProviderImpl } = await import(
+      './infrastructure/harness-eval/memory/memory-metrics-provider-impl.js'
+    );
+    const memProvider = new MemoryMetricsProviderImpl({
+      evidenceDb: memoryServices.store.getDb(),
+      markersProvider: memoryServices.markerQueue,
+      repoRoot,
+      docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+    });
+    verdictGenerators['eval:memory'] = createMemoryGeneratorAdapter(memProvider);
+  }
+
+  // F192 Phase G: Task Outcome Episode — L3 eval signals.
+  const { TaskOutcomeEpisodeStore } = await import('./infrastructure/harness-eval/task-outcome/task-outcome-store.js');
+  const taskOutcomeDbPath = process.env.TASK_OUTCOME_DB ?? resolve(repoRoot, 'task-outcome-episodes.sqlite');
+  const taskOutcomeStore = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
     redis: redisClient ?? undefined,
     invokeTriggerProvider: invokeTriggerHolder,
     messageStore,
+    gitPublisher: createGitWorktreePublisher({ repoRoot }),
+    verdictGenerators,
+    // 砚砚 R4 P1 + cloud R4 P1: register CallbackAuthRegistry for MCP route auth.
+    callbackRegistry: registry,
+    // 砚砚 R9 P1: shared-MCP (Antigravity) agent-key publish path needs this.
+    agentKeyRegistry,
+    taskOutcomeDbPath,
+    eventMemoryDbPath: memoryServices.eventMemoryDbPath,
   });
-
-  // F192 Phase G: Task Outcome Episode — L3 eval signals.
-  const { TaskOutcomeEpisodeStore } = await import('./infrastructure/harness-eval/task-outcome/task-outcome-store.js');
-  const taskOutcomeDbPath = process.env.TASK_OUTCOME_DB ?? resolve(repoRoot, 'task-outcome-episodes.sqlite');
-  const taskOutcomeStore = new TaskOutcomeEpisodeStore(taskOutcomeDbPath);
   // AC-G13: Cancel burst detector (in-memory, per-process)
+  const { buildProposalRejectSignal } = await import(
+    './infrastructure/harness-eval/task-outcome/task-outcome-signal-builder.js'
+  );
   const { CancelBurstDetector } = await import('./infrastructure/harness-eval/task-outcome/cancel-burst-detector.js');
   const cancelBurstDetector = new CancelBurstDetector({ threshold: 3, windowMs: 60_000 });
+  const { appendPermissionCancelToEpisode, appendMagicWordRefToEpisode, checkAndAppendCancelBurst } = await import(
+    './infrastructure/harness-eval/task-outcome/task-outcome-signal-wiring.js'
+  );
   const { taskOutcomeRoutes } = await import('./routes/task-outcome.js');
   await app.register(taskOutcomeRoutes, { store: taskOutcomeStore });
 
@@ -1706,7 +1846,7 @@ async function main(): Promise<void> {
   let getGitHubPluginEnv: () => Record<string, string | undefined> = () => ({});
   const getGitHubEnvValue = (key: string): string | undefined => {
     const pluginEnv = getGitHubPluginEnv();
-    return Object.prototype.hasOwnProperty.call(pluginEnv, key) ? pluginEnv[key] : process.env[key];
+    return Object.hasOwn(pluginEnv, key) ? pluginEnv[key] : process.env[key];
   };
   const getGitHubToken = (): string | undefined => {
     return resolveGhCliToken({ pluginEnv: getGitHubPluginEnv() });
@@ -1959,6 +2099,7 @@ async function main(): Promise<void> {
     sessionChainStore,
     runtimeSessionStore,
     proposalStore,
+    handoffProposalStore,
     agentRegistry,
     router,
     invocationRecordStore,
@@ -1987,6 +2128,27 @@ async function main(): Promise<void> {
       messageStore,
       socketManager,
       threadStore,
+      onHoldBallCancelFeedback: (input) => {
+        void import('./domains/cats/services/frustration/FrustrationDetector.js')
+          .then(({ evaluate }) =>
+            evaluate(
+              {
+                signal: {
+                  type: 'user_report',
+                  toolName: 'cat_cafe_hold_ball',
+                  cancelReason: 'hold_ball_cancel',
+                },
+                threadId: input.threadId,
+                userId: input.userId,
+                catId: input.catId,
+              },
+              { frustrationIssueStore, messageStore, socketManager: socketManager ?? undefined },
+            ),
+          )
+          .catch(() => {
+            // Best-effort: hold cancellation must not be blocked by feedback issue creation.
+          });
+      },
     },
   } as Parameters<typeof callbacksRoutes>[1];
   await app.register(callbacksRoutes, callbackOpts);
@@ -2013,50 +2175,40 @@ async function main(): Promise<void> {
     socketManager,
     onPermissionCancel: (input) => {
       try {
-        // taskOutcomeStore is created earlier in this file (F192 Phase G).
-        // AC-G10: use structured cancel reason from frontend popup if valid enum,
-        // otherwise default to 'skip' (auth free-text reason is not a cancel category).
-        const VALID_REASONS = ['should_not_do', 'wrong_direction', 'i_will_do_it', 'skip'];
-        const cancelReason =
-          input.cancelReason && VALID_REASONS.includes(input.cancelReason) ? input.cancelReason : 'skip';
-        taskOutcomeStore.appendSignal(
-          (
-            taskOutcomeStore.getActiveEpisode(input.threadId) ??
-            taskOutcomeStore.createEpisode({
-              trigger: 'cat_initiated',
-              threadId: input.threadId,
-              participants: input.catId ? [input.catId] : [],
-            })
-          ).episodeId,
-          {
-            category: 'a2',
-            record: {
-              type: 'permission_cancel',
-              toolName: input.toolName,
-              paramsSummary: input.paramsSummary,
-              reason: cancelReason,
-              timestamp: new Date().toISOString(),
-              catId: input.catId,
-              threadId: input.threadId,
-            },
-          },
-        );
+        // AC-G10/G11: permission cancel → episode a2 signal (production helper)
+        appendPermissionCancelToEpisode(taskOutcomeStore, {
+          toolName: input.toolName,
+          paramsSummary: input.paramsSummary,
+          cancelReason: input.cancelReason,
+          catId: input.catId,
+          threadId: input.threadId,
+        });
 
         // AC-G13: Check for cancel burst (≥3 cancels in 1 minute)
-        const burstResult = cancelBurstDetector.record(input.threadId, Date.now());
-        if (burstResult.burst) {
-          const ep = taskOutcomeStore.getActiveEpisode(input.threadId);
-          if (ep) {
-            taskOutcomeStore.appendSignal(ep.episodeId, {
-              category: 'proxy',
-              record: {
-                type: 'cancel_burst',
-                value: burstResult.count,
-                timestamp: new Date().toISOString(),
-                threadId: input.threadId,
-              },
+        checkAndAppendCancelBurst(taskOutcomeStore, cancelBurstDetector, input.threadId, Date.now());
+
+        // F222 UX-3: "取消并反馈" — immediately trigger auto-issue (no threshold)
+        if (input.withFeedback && input.userId) {
+          void import('./domains/cats/services/frustration/FrustrationDetector.js')
+            .then(({ evaluate }) =>
+              evaluate(
+                {
+                  signal: {
+                    type: 'user_report',
+                    toolName: input.toolName,
+                    cancelReason: input.cancelReason,
+                  },
+                  threadId: input.threadId,
+                  userId: input.userId,
+                  catId: input.catId,
+                },
+                { frustrationIssueStore, messageStore, socketManager: socketManager ?? undefined },
+              ),
+            )
+            .catch(() => {
+              // Best-effort: swallow import/evaluate failures so the authorization
+              // response is never blocked by frustration detection issues.
             });
-          }
         }
       } catch {
         // Best-effort: don't break authorization flow
@@ -2087,6 +2239,34 @@ async function main(): Promise<void> {
     socketManager,
   });
   await app.register(threadExportRoutes, { threadStore });
+  // F192: Shared callback — record proposal rejection as task outcome A2 signal.
+  // Covers both F128 (thread proposal) and F225 (session handoff proposal) rejections.
+  const onProposalReject = (input: {
+    proposalId: string;
+    proposalType: 'thread' | 'session_handoff';
+    catId: string;
+    threadId: string;
+    proposalTitle?: string;
+    rejectionReason?: string;
+  }) => {
+    try {
+      const record = buildProposalRejectSignal(input);
+      taskOutcomeStore.appendSignal(
+        (
+          taskOutcomeStore.getActiveEpisode(input.threadId) ??
+          taskOutcomeStore.createEpisode({
+            trigger: 'cat_initiated',
+            threadId: input.threadId,
+            participants: input.catId ? [input.catId] : [],
+          })
+        ).episodeId,
+        { category: 'a2', record },
+      );
+    } catch {
+      // Best-effort: eval signal recording must not break the rejection flow
+    }
+  };
+
   await app.register(proposalRoutes, {
     proposalStore,
     threadStore,
@@ -2095,6 +2275,17 @@ async function main(): Promise<void> {
     router,
     invocationQueue,
     queueProcessor,
+    onProposalReject: (input) => onProposalReject({ ...input, proposalType: 'thread' }),
+  });
+  // F225: cat-initiated session handoff approve/reject (user-auth commit-point dispatcher)
+  await app.register(sessionHandoffApproveRoutes, {
+    handoffProposalStore,
+    sessionChainStore,
+    sessionSealer,
+    invocationQueue,
+    queueProcessor,
+    socketManager,
+    onProposalReject: (input) => onProposalReject({ ...input, proposalType: 'session_handoff' }),
   });
   // F222: Frustration auto-issue routes
   await app.register(frustrationIssueRoutes, { frustrationIssueStore });
@@ -2384,6 +2575,19 @@ async function main(): Promise<void> {
     indexBuilder: memoryServices.indexBuilder,
     knowledgeResolver: memoryServices.knowledgeResolver,
     rebuildJobTracker,
+  });
+  // F227: Event Memory query route (GET /api/memory/events)
+  await app.register(eventsRoutes, {
+    eventMemoryStore: memoryServices.eventMemoryStore,
+    socketEmit: (event, data, room) => {
+      socketManager?.broadcastToRoom(room, event, data);
+    },
+    // F227 (砚砚 R2 P1): MCP callback auth for the cat_cafe_teleport callbackPost path.
+    callbackRegistry: registry,
+    agentKeyRegistry,
+    // F227 Task 7: corpus sources for the historical backfill route.
+    threadStore,
+    messageStore,
   });
   await app.register(perspectiveRoutes, {
     repoRoot,
@@ -3271,12 +3475,36 @@ async function main(): Promise<void> {
     './infrastructure/harness-eval/domain/eval-domain-daily.js'
   );
   const { getOwnerUserId } = await import('./config/cat-config-loader.js');
+  // cloud R6 P2 (PR-2) + memory wire-up: mirror the same wired set the
+  // eval-hub.ts route computes (Object.keys(verdictGenerators)). Bootstrap-time
+  // invariant:
+  //   eval:a2a always wired;
+  //   eval:capability-wakeup wired iff toolEventLog + skillLoadEventLog exist;
+  //   eval:memory wired iff memoryServices.markerQueue exists (always-present in
+  //     production but gated for parity with test/edge configs).
+  // This gates scheduled daily/weekly invocations' publish instructions on actual runtime support
+  // — without this, scheduled eval would tell cat to publish even when no Redis/markers →
+  // handler 501 → wasted run. Mirrors the eval-hub.ts route-layer gating.
+  const wiredPublishDomains = new Set<
+    'eval:a2a' | 'eval:memory' | 'eval:sop' | 'eval:capability-wakeup' | 'eval:task-outcome'
+  >(['eval:a2a']);
+  wiredPublishDomains.add('eval:task-outcome');
+  // eval:sop has no runtime dependencies (unlike cw needing toolEventLog or memory
+  // needing markerQueue) — unconditionally wired like eval:a2a and eval:task-outcome.
+  wiredPublishDomains.add('eval:sop');
+  if (toolEventLog && skillLoadEventLog) {
+    wiredPublishDomains.add('eval:capability-wakeup');
+  }
+  if (memoryServices.markerQueue) {
+    wiredPublishDomains.add('eval:memory');
+  }
   const evalScheduleOpts = {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
     defaultUserId: getOwnerUserId(),
     listDynamicTasks: () => dynamicTaskStore.getAll(),
     redis: redisClient ?? undefined,
+    wiredPublishDomains,
   };
   taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
   taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));

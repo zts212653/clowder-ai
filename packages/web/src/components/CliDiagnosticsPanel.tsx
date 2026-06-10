@@ -96,6 +96,12 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // F212 Phase D: model emitted an unparseable tool call (opus-4.8 decoder drift) — CC/model-side,
   // not a Clowder AI config issue. Cognitive tier (violet), same family as thinking-signature.
   tool_call_parse_failed: { ...PALETTE_COGNITIVE, Icon: WrenchIcon },
+  // F212 Phase G (clowder-ai#875): CLI exited cleanly but no text event was produced
+  // (e.g. OpenCode + DeepSeek step_start-only stream). NOT a hard error — surface
+  // structured evidence (event count/types/model/session prefix) so the user can act
+  // (换猫 / 换 model / 直接跑 CLI). System tier (slate, calm) — reasonCode lives here so
+  // the panel renders consistently even though the underlying CLI exit code is 0.
+  silent_completion: { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon },
 };
 
 const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };

@@ -92,12 +92,22 @@ export async function handleTriggerNow(
     }
   }
 
-  const invocation = buildEvalCatInvocation({
-    domain: effectiveDomain,
-    trendRefs: [],
-    verdictRefs: [],
-    legacyCleanup: { status: 'not_checked' },
-  });
+  const invocation = buildEvalCatInvocation(
+    {
+      domain: effectiveDomain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    },
+    // cloud R5 P2 (PR-2): gate publish instructions on actual runtime support so
+    // cats don't waste a run producing a packet they can't publish (501 from
+    // handler when generator wire skipped — e.g. cw + no Redis).
+    {
+      wiredPublishDomains: deps.wiredPublishDomains as
+        | ReadonlySet<'eval:a2a' | 'eval:memory' | 'eval:sop' | 'eval:capability-wakeup' | 'eval:task-outcome'>
+        | undefined,
+    },
+  );
 
   const content = [
     `## Eval Domain: ${invocation.domainId} (manual trigger by ${input.userId})`,

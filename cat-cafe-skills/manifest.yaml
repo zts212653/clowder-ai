@@ -450,6 +450,26 @@ skills:
     sop_step: null
     merged_from: null
 
+  context-self-management:
+    description: >
+      F225 软层：收到 context_management_hint(warn) 时判断 handoff / 续 / 冲刺（context 自管理三轴）。
+      Use when: 收到 context_management_hint(warn) 系统信号；或自觉话题漂移大想换干净桌子。
+      Not for: 没收到 warn 时主动焦虑 context%（内省不准）；把活交给别的猫（用 cross-cat-handoff）。
+      Output: handoff（封印自己 spawn 干净自己）/ 续 / 冲刺 判断 + 必要时 propose_session_handoff。
+    triggers:
+      - "context_management_hint"
+      - "context 自管理"
+      - "要不要 handoff"
+      - "我脏了"
+      - "话题漂移"
+    not_for:
+      - "没收到 warn 时主动焦虑 context%"
+      - "把活交给别的猫（用 cross-cat-handoff）"
+    output: "handoff / 续 / 冲刺 decision"
+    next: []
+    sop_step: null
+    merged_from: null
+
   # ── 跨 Thread 协同 ──
   cross-thread-sync:
     description: >

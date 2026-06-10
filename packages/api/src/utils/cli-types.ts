@@ -65,6 +65,13 @@ export interface CliSpawnOptions {
    * core backend-log contract untestable.
    */
   diagnosticLogger?: { error: (payload: object, msg: string) => void };
+  /**
+   * F212 Phase G: NDJSON providers need successful-exit stderr evidence for
+   * silent_completion diagnostics. This callback reports sanitized stderr
+   * summary without yielding an extra stream event that would perturb provider
+   * event counts.
+   */
+  onSuccessfulExitStderr?: (summary: { stderrPresent: boolean; stderrExcerpt?: string }) => void;
 }
 
 /**

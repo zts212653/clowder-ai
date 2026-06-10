@@ -47,6 +47,16 @@ export class InMemoryFrustrationIssueStore implements IFrustrationIssueStore {
     return clone(issue);
   }
 
+  async markFalsePositive(issueId: string): Promise<FrustrationIssue | null> {
+    const issue = this.issues.get(issueId);
+    if (!issue) return null;
+    if (issue.status !== 'draft') return null;
+
+    issue.status = 'false_positive';
+    issue.falsePositiveAt = Date.now();
+    return clone(issue);
+  }
+
   async setCardMessageId(issueId: string, cardMessageId: string): Promise<void> {
     const issue = this.issues.get(issueId);
     if (issue) {

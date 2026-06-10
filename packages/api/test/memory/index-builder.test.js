@@ -1113,6 +1113,121 @@ describe('IndexBuilder passage indexing (E3/E4/E5)', () => {
     assert.ok(threadResult, 'should find the thread doc (via summary or passage match)');
   });
 
+  it('indexes image contentBlocks and media_gallery alt/caption text into thread passages', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_visual1',
+        title: 'Visual artifact memory',
+        participants: ['codex'],
+        threadMemory: { summary: '' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const mockMessages = [
+      {
+        id: 'msg_visual1',
+        content: '',
+        contentBlocks: [{ type: 'image', url: '/uploads/topology.png', alt: 'declarative queue topology' }],
+        richBlocks: [
+          {
+            kind: 'media_gallery',
+            title: 'Architecture diagram',
+            items: [{ url: '/uploads/topology.png', caption: 'Redis stream route lanes' }],
+          },
+        ],
+        catId: 'codex',
+        threadId: 'thread_visual1',
+        timestamp: Date.now(),
+      },
+    ];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      (tid) => {
+        if (tid === 'thread_visual1') return mockMessages;
+        return [];
+      },
+    );
+    await builder.rebuild();
+
+    const passages = store.searchPassages('declarative queue topology');
+    assert.ok(passages.length >= 1, 'image alt text should be searchable as passage content');
+    assert.equal(passages[0].docAnchor, 'thread-thread_visual1');
+
+    const galleryPassages = store.searchPassages('Redis stream route lanes');
+    assert.ok(galleryPassages.length >= 1, 'media_gallery caption text should be searchable as passage content');
+  });
+
+  it('updates existing message passages when visual block text becomes available', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    const mockThreads = [
+      {
+        id: 'thread_visual_backfill',
+        title: 'Visual artifact backfill',
+        participants: ['codex'],
+        threadMemory: { summary: '' },
+        lastActiveAt: Date.now(),
+      },
+    ];
+
+    const baseMessage = {
+      id: 'msg_visual_backfill',
+      content: 'Existing diagram message',
+      catId: 'codex',
+      threadId: 'thread_visual_backfill',
+      timestamp: Date.now(),
+    };
+    let currentMessages = [baseMessage];
+
+    const builder = new IndexBuilder(
+      store,
+      docsDir,
+      undefined,
+      undefined,
+      () => mockThreads,
+      (tid) => {
+        if (tid === 'thread_visual_backfill') return currentMessages;
+        return [];
+      },
+    );
+
+    await builder.rebuild();
+    assert.equal(store.searchPassages('late visual alt text').length, 0, 'initial passage has no visual text');
+
+    currentMessages = [
+      {
+        ...baseMessage,
+        contentBlocks: [{ type: 'image', url: '/uploads/late.png', alt: 'late visual alt text' }],
+        richBlocks: [
+          {
+            kind: 'media_gallery',
+            items: [{ url: '/uploads/late.png', caption: 'late visual caption text' }],
+          },
+        ],
+      },
+    ];
+    await builder.rebuild();
+
+    const passages = store.searchPassages('late visual alt text');
+    assert.ok(passages.length >= 1, 'visual alt text should replace the existing passage content');
+    assert.equal(passages[0].docAnchor, 'thread-thread_visual_backfill');
+
+    const row = store
+      .getDb()
+      .prepare('SELECT content FROM evidence_passages WHERE doc_anchor = ? AND passage_id = ?')
+      .get('thread-thread_visual_backfill', 'msg-msg_visual_backfill');
+    assert.match(row.content, /late visual alt text/);
+    assert.match(row.content, /late visual caption text/);
+  });
+
   it('I2: rebuild does not delete existing passages when Redis returns fewer messages', async () => {
     const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
 
@@ -1584,6 +1699,31 @@ Some test content.
     const vision = results.find((r) => r.item.anchor === 'doc:VISION');
     assert.ok(vision, 'should discover VISION.md');
     assert.equal(vision.provenance.tier, 'authoritative');
+  });
+
+  it('discover() indexes text-bearing SVG architecture assets', async () => {
+    mkdirSync(join(docsDir, 'architecture', 'assets'), { recursive: true });
+    writeFileSync(
+      join(docsDir, 'architecture', 'assets', 'memory-map.svg'),
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400">
+  <title>Memory Recall Architecture</title>
+  <desc>Visual map for searchable diagram assets.</desc>
+  <text x="20" y="40">Capability Graph Resolver</text>
+  <text x="20" y="80"><tspan>Visual Artifact Index</tspan></text>
+</svg>
+`,
+    );
+
+    const { CatCafeScanner } = await import('../../dist/domains/memory/CatCafeScanner.js');
+    const scanner = new CatCafeScanner();
+    const results = scanner.discover(docsDir);
+
+    const svg = results.find((r) => r.item.anchor === 'doc:architecture/assets/memory-map');
+    assert.ok(svg, 'should discover SVG visual asset text');
+    assert.equal(svg.item.sourcePath, 'architecture/assets/memory-map.svg');
+    assert.ok(svg.item.summary.includes('Capability Graph Resolver'));
+    assert.ok(svg.item.summary.includes('Visual Artifact Index'));
+    assert.equal(svg.provenance.tier, 'derived');
   });
 
   it('discover() splits lessons-learned.md', async () => {
@@ -2074,6 +2214,15 @@ describe('IndexBuilder indexing version auto-rebuild', () => {
   afterEach(() => {
     store.close();
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('stays at or above 5 to backfill visual artifact searchable text', async () => {
+    const { INDEXING_VERSION } = await import('../../dist/domains/memory/IndexBuilder.js');
+
+    assert.ok(
+      INDEXING_VERSION >= 5,
+      'INDEXING_VERSION must stay at or above 5 so existing visual artifacts get searchable text backfilled',
+    );
   });
 
   it('re-indexes unchanged files when INDEXING_VERSION increases', async () => {

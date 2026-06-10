@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-06-08（F202 Phase 2: GitHub schedule resources）
+> 维护者：三猫 | 最后更新：2026-06-09（feature truth hygiene：F188 reopened / F128 active）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -55,8 +55,9 @@ created: 2026-02-26
 | F167 | A2A Chain Quality — 乒乓球熔断 + 虚空传球检测 + 角色护栏 | spec | Ragdoll | internal | [F167](features/F167-a2a-chain-quality.md) |
 | F178 | Persistent MCP Agent-Key Auth — 跨 invocation 写权限（F061 Bug-H follow-up） | spec | Ragdoll | internal | [F178](features/F178-persistent-mcp-agent-key-auth.md) |
 | F181 | Reserved Feature Slot — 待补充需求锚点 | idea | 待定 | internal | [F181](features/F181-reserved-feature-slot.md) |
+| F188 | Library Stewardship — 图书馆管护与成长（Phase K: Memory Center Config Health Surface） | in-progress | Ragdoll | internal | [F188](features/F188-library-stewardship.md) |
 | F189 | Operation Context Unification — 操作上下文单点化（HTTP/MCP/CLI/A2A 统一 builder） | spec | Ragdoll | internal | [F189](features/F189-operation-context-unification.md) |
-| F192 | Socio-Technical Harness Eval — Phase F `eval:capability-wakeup` reopened | in-progress | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
+| F192 | Socio-Technical Harness Eval — Phase F re-eval closure + Phase G task-outcome closure | in-progress | Ragdoll | internal | [F192](features/F192-socio-technical-harness-eval.md) |
 | F198 | Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll | spec | Ragdoll Opus 4.7 | internal | [F198](features/F198-claude-code-subscription-carrier.md) |
 | F200 | Memory Recall Eval — 基于猫真实行为的记忆系统反馈闭环 | in-progress | Ragdoll | internal | [F200](features/F200-memory-recall-eval.md) |
 | F202 | Plugin Framework — local discovery, config, resource activation, and schedule resources | in-progress | community @mindfn + maintainers | community [#686](https://github.com/zts212653/clowder-ai/pull/686) + [#844/#846](https://github.com/zts212653/clowder-ai/pull/846) | [F202](features/F202-plugin-framework.md) |
@@ -71,4 +72,9 @@ created: 2026-02-26
 | F220 | A2A 协作的可观测·可靠·可恢复（启动中占位可见 + 卡死根因 + force-reset 逃生口 UI）| spec | Ragdoll Opus-4.8（驱动 thread_mpxf7fdx5gonafzh）| internal | [F220](features/F220-a2a-collab-reliability.md) |
 | F23-followup | F23 Phase 2 — dir-size 5 个目录真拆（utils/config/providers 快线 + invocation/routes 跟 F219 协调）| in-progress | Ragdoll/Opus-4.7 | internal | [F23 § Phase 2](features/F023-directory-corrosion-defense.md) |
 | F224 | A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）| spec | Ragdoll Opus-4.8 | community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834) | [F224](features/F224-a2a-session-message-reliability.md) |
-| F225 | Cat-Initiated Session Handoff — 猫主导的 session 接力（猫主动提议封印 + 铲屎官 gate + 同 thread 续接注入交接留言）| spec | Ragdoll Opus-4.8 | internal | [F225](features/F225-cat-initiated-session-handoff.md) |
+| F225 | Cat-Initiated Session Handoff — 猫主动封印会话接力（硬层 done + dogfood；软层 L0+skill 元思维注入 + context_management_hint + eval=capability-wakeup 进行中）| in-progress | Ragdoll Opus-4.8 | internal | [F225](features/F225-cat-initiated-session-handoff.md) |
+| F226 | Presentation Surface / Demo Mode（右侧 surface 浮窗 PiP + AppShell 级 host + tear-off 快照，演示时 PPT 浮窗常驻、右侧切证据不打断）| Phase A done | Ragdoll Opus-4.8 | internal | [F226](features/F226-presentation-surface-demo-mode.md) |
+| F227 | Event Memory — 事件级记忆索引（拉闸记录 / 认知状态转折一等公民 + magic word 时间线 + teleport message 级跳转 + 飞轮可观测性层）| in-progress | Ragdoll Opus-4.8 | internal | [F227](features/F227-event-memory.md) |
+| F228 | Multi-Project Skill Mount Management — 多项目 / per-provider Skills 挂载管理 | spec | community @mindfn + maintainers | community [clowder-ai#760](https://github.com/zts212653/clowder-ai/pull/760) | [F228](features/F228-multi-project-skill-mount-management.md) |
+| F229 | 猫猫球前台猫 — 常驻入口 + 复合猫路由 + 用户侧记忆检索（悬浮球/桌宠、功能发现、求助分诊、金鱼的记忆、语音 loop、小模型分层）| spec | Ragdoll Fable-5 | internal (CVO 愿景) + community [clowder-ai#841](https://github.com/zts212653/clowder-ai/issues/841) | [F229](features/F229-cat-ball-concierge.md) |
+| F192-sop-wiring | `eval:sop` live publish path wired + re-enabled (PR #2186 merged 2026-06-10) | ✅ done | Ragdoll | internal | [F192 § 2026-06-10 timeline](features/F192-socio-technical-harness-eval.md) |

@@ -94,7 +94,14 @@ export function CardBlock({ block, messageId }: { block: RichCardBlock; messageI
       }
       if (action === 'tts-resynthesize') {
         await resynthesizeTts(payload);
+        return;
       }
+      // Defense-in-depth (F225 dogfood): a card whose action this build doesn't handle — e.g. a stale
+      // browser bundle rendering a newer `handoff:approve` card via this generic renderer instead of
+      // the dedicated one — would silently no-op. Warn so the dead button self-diagnoses (→ refresh).
+      console.warn(
+        `[CardBlock] unhandled card action "${action}" — the app bundle may be stale; hard-refresh (Cmd+Shift+R).`,
+      );
     },
     [copyToClipboard, resynthesizeTts],
   );

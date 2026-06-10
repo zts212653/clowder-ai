@@ -86,7 +86,7 @@ return errorResult('Invalid format "xlsx". Expected one of: pdf, docx, md. Examp
 - [ ] inputSchema 参数都有 `.describe()`
 - [ ] 枚举值用 `enum` 不用自由文本
 - [ ] tool-registration.test.js 已更新（EXPECTED_TOOLS / EXPECTED_COLLAB_TOOLS）
-- [ ] SystemPromptBuilder MCP_TOOLS_SECTION 已更新
+- [ ] 认知入口已更新：MCP tool description / 相关 skill refs / capability wakeup 或 L0 quick index；仅当 legacy/fallback surface 仍依赖时才更新 `SystemPromptBuilder.MCP_TOOLS_SECTION`
 
 ## 参考
 

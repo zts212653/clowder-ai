@@ -6,13 +6,20 @@
 
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
+import { apiFetch } from '@/utils/api-client';
 import { ConnectorBubble } from '../ConnectorBubble';
+
+vi.mock('@/utils/api-client', () => ({
+  API_URL: 'http://api.test',
+  apiFetch: vi.fn(),
+}));
 
 describe('ConnectorBubble theme', () => {
   let container: HTMLDivElement;
   let root: Root;
+  const mockApiFetch = vi.mocked(apiFetch);
 
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
@@ -25,6 +32,8 @@ describe('ConnectorBubble theme', () => {
   });
 
   beforeEach(() => {
+    mockApiFetch.mockClear();
+    mockApiFetch.mockResolvedValue(new Response('{}', { status: 200 }));
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -100,6 +109,80 @@ describe('ConnectorBubble theme', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  it('renders cancel-and-feedback for hold-ball bubbles and sends feedback cancel', async () => {
+    const message: ChatMessage = {
+      id: 'm-hold',
+      type: 'connector',
+      content: '🏓 opus 持球中 — 等云端 review。',
+      timestamp: Date.now(),
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-123' },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message }));
+    });
+
+    const buttons = Array.from(container.querySelectorAll('button'));
+    const feedbackButton = buttons.find((button) => button.textContent?.includes('取消并反馈'));
+    expect(feedbackButton).toBeDefined();
+
+    await act(async () => {
+      feedbackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/callbacks/hold-ball/hold-ball-123?withFeedback=1', {
+      method: 'DELETE',
+    });
+  });
+
+  it('falls back to standalone feedback when hold-ball task is already stale', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    const message: ChatMessage = {
+      id: 'm-hold-stale',
+      type: 'connector',
+      content: '🏓 opus 持球中 — 等云端 review。',
+      timestamp: Date.now(),
+      source: {
+        connector: 'hold-ball',
+        label: '持球通知',
+        icon: '🏓',
+        meta: { taskId: 'hold-ball-stale' },
+      },
+    };
+
+    act(() => {
+      root.render(React.createElement(ConnectorBubble, { message, threadId: 'thread-stale' }));
+    });
+
+    const feedbackButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('取消并反馈'),
+    );
+    expect(feedbackButton).toBeDefined();
+
+    await act(async () => {
+      feedbackButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(mockApiFetch).toHaveBeenNthCalledWith(1, '/api/callbacks/hold-ball/hold-ball-stale?withFeedback=1', {
+      method: 'DELETE',
+    });
+    expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/callbacks/hold-ball/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        threadId: 'thread-stale',
+        taskId: 'hold-ball-stale',
+      }),
+    });
+  });
+
   it('uses OKLCH-derived surface for github-review bubble', () => {
     const message: ChatMessage = {
       id: 'm1',
@@ -117,7 +200,7 @@ describe('ConnectorBubble theme', () => {
     const html = container.innerHTML;
     expect(html).toContain('--color-github-review-surface');
     expect(html).toContain('<svg');
-    expect(html).toContain('#2563EB');
+    expect(html).toContain('#778899');
   });
 
   it('uses OKLCH-derived surface for github-ci bubble', () => {

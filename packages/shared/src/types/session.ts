@@ -9,6 +9,7 @@
  */
 
 import type { CatId } from './ids.js';
+import type { CatHandoffNote } from './session-handoff-proposal.js';
 
 export type SessionStatus = 'active' | 'sealing' | 'sealed';
 
@@ -27,8 +28,14 @@ export interface SessionRecord {
   /** Latest token usage snapshot (persisted for frontend display after reload) */
   lastUsage?: SessionUsageSnapshot;
   messageCount: number;
-  /** Seal reason (Phase B) */
-  sealReason?: 'threshold' | 'manual' | 'error' | (string & {});
+  /** Seal reason (Phase B). F225 adds 'cat_initiated_handoff' for 猫主动 handoff. */
+  sealReason?: 'threshold' | 'manual' | 'error' | 'cat_initiated_handoff' | (string & {});
+  /**
+   * F225: 猫亲手写的五件套交接留言（typed，KD-4，非 continuityCapsule:unknown）。
+   * approve 时 seal 前持久化；bootstrap always-keep 注入续接 session 第一眼（B2）。
+   * 带 proposalId 让 commit point 可从 session 侧反推（KD-9 crash recovery）。
+   */
+  catHandoffNote?: CatHandoffNote;
   /** F33: Number of CLI compressions in this session (hybrid strategy) */
   compressionCount?: number;
   /** Structured collaboration control-flow state used across compact/seal/resume boundaries. */
@@ -76,6 +83,38 @@ export interface ContextHealth {
   /** Usage field that fed usedTokens. Older records may omit it. */
   usedFrom?: 'last_turn' | 'input' | 'total';
   measuredAt: number;
+}
+
+/**
+ * F225 软层: cat-facing DERIVED hint, emitted only when the session strategy
+ * enters the warn band (between warn and action thresholds). Distinct from the
+ * raw {@link ContextHealth} telemetry — this nudges the cat to run the
+ * `context-self-management` 3-axis self-check (line vs tree / breakpoint? /
+ * compressed how many times?). It does NOT say "handoff now": handoff-vs-compress
+ * is the cat's judgment, not a binary trigger.
+ */
+export interface ContextManagementHint {
+  /** Only 'warn' is emitted today (the band before auto-seal kicks in). */
+  severity: 'warn';
+  /**
+   * How much to trust the fill ratio, by CONFIDENCE TIER (not by cat family):
+   * - `exact_token`  — CLI-reported exact token usage → trust the %.
+   * - `approx_token` — token-based but fallback window / aggregate → weak signal.
+   * - `bytes_health` — trajectory bytes, not tokens (e.g. Antigravity) → weak signal.
+   * - `unavailable`  — no reliable fill signal (e.g. Gemini cumulative-only) →
+   *   cat leans purely on the breakpoint + drift self-check axes.
+   * Current producers emit `exact_token`/`approx_token`; `bytes_health`/`unavailable`
+   * are the documented homes for when per-runtime health computation feeds them.
+   */
+  fillConfidence: 'exact_token' | 'approx_token' | 'bytes_health' | 'unavailable';
+  /**
+   * Times this (cat, thread) session was compressed. Maintained by Claude's
+   * PreCompact hook (`f24-pre-compact.sh`); stays 0 on runtimes without a
+   * compression hook (Codex/Antigravity) → the cat degrades to the breakpoint +
+   * drift self-check. Objective drift anchor: `compressionCount > 0` ⇒ "you've
+   * been running long enough to compress — suspect topic drift before deciding".
+   */
+  compressionCount: number;
 }
 
 export interface ContextHealthConfig {

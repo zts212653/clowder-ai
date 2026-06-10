@@ -9,7 +9,7 @@
  * proposal-routes.ts.
  */
 
-import type { CatId, ReportingMode, RichCardBlock, ThreadProposal } from '@cat-cafe/shared';
+import type { CatId, ThreadProposal } from '@cat-cafe/shared';
 import { catIdSchema, generateProposalId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -19,15 +19,21 @@ import type { IProposalStore } from '../domains/cats/services/stores/ports/Propo
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeCatIdMentionsInText } from '../utils/cat-mention-handle.js';
+import { validateProjectPath } from '../utils/project-path.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { buildProposalCardBlock } from './proposal-card-block.js';
 
 const proposeThreadCallbackSchema = z.object({
   title: z.string().trim().min(1).max(200),
   reason: z.string().trim().min(1).max(1000),
   preferredCats: z.array(catIdSchema()).max(10).optional(),
   initialMessage: z.string().max(4000).optional(),
-  // F128 Phase Y: reporting contract for the sub-thread. Omitted → default none (AC-Y6).
+  // F128 Phase AA (AC-AA1): reporting contract. Omitted → default final-only (supersedes Phase Y AC-Y6 none).
   reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
+  // F128: explicit project ownership for the child thread. Validated against allowed roots
+  // (validateProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
+  // supplied-but-invalid → 400 (fail loud, never silently fall back to default).
+  projectPath: z.string().min(1).max(500).optional(),
   parentThreadId: z.string().min(1).optional(),
   clientRequestId: z.string().min(1).max(200).optional(),
 });
@@ -38,41 +44,6 @@ export interface ProposeThreadDeps {
   threadStore: IThreadStore;
   messageStore: IMessageStore;
   socketManager: SocketManager;
-}
-
-// F128 Phase Y: user-facing label for each reporting mode (C-Y4 — none shown as
-// "autonomous"). The proposal card MUST surface this create-time contract because
-// it is fixed at create time and not editable on approve (C-Y1).
-const REPORTING_MODE_LABEL: Record<ReportingMode, string> = {
-  none: 'autonomous（默认 · 下游自治，无强制回报）',
-  'final-only': 'final-only（完成时回报一次）',
-  'state-transitions': 'state-transitions（每阶段边界回报）',
-  'blocking-ack': 'blocking-ack（遇阻塞点等 ack）',
-};
-
-export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock {
-  const fields: Array<{ label: string; value: string }> = [
-    { label: '父 Thread', value: proposal.parentThreadId },
-    {
-      label: '建议成员',
-      value: proposal.preferredCats.length > 0 ? proposal.preferredCats.join(', ') : '（未指定）',
-    },
-    { label: '回报模式', value: REPORTING_MODE_LABEL[proposal.reportingMode ?? 'none'] },
-  ];
-  if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });
-  return {
-    id: `proposal-${proposal.proposalId}`,
-    kind: 'card',
-    v: 1,
-    title: `📥 提议新建 thread：${proposal.title}`,
-    bodyMarkdown: proposal.reason,
-    tone: 'info',
-    fields,
-    actions: [
-      { label: '批准并创建', action: 'propose:approve', payload: { proposalId: proposal.proposalId } },
-      { label: '驳回', action: 'propose:reject', payload: { proposalId: proposal.proposalId } },
-    ],
-  };
 }
 
 export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: ProposeThreadDeps): void {
@@ -94,6 +65,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       preferredCats,
       initialMessage: rawInitialMessage,
       reportingMode,
+      projectPath: explicitProjectPath,
       parentThreadId,
       clientRequestId,
     } = parsed.data;
@@ -154,7 +126,12 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       return { error: 'Source thread not found' };
     }
 
+    // The effective parent defaults to the source thread, but an explicit parentThreadId
+    // re-roots the child — and projectPath must inherit from the EFFECTIVE parent, not the
+    // source (spec: "projectPath 默认继承 parent thread"). Track the resolved parent thread so
+    // a re-parent doesn't silently keep the source thread's ownership.
     let resolvedParentThreadId = record.threadId;
+    let parentThread = sourceThread;
     if (parentThreadId && parentThreadId !== record.threadId) {
       const parent = await threadStore.get(parentThreadId);
       if (!parent || parent.createdBy !== record.userId) {
@@ -162,6 +139,21 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         return { error: 'parentThreadId does not belong to the current user' };
       }
       resolvedParentThreadId = parentThreadId;
+      parentThread = parent;
+    }
+
+    // F128: resolve the child thread's project ownership (the cwd/runtime-sanctuary bug's
+    // root cause was child threads inheriting a `default` projectPath). Fail loud on an
+    // invalid explicit path — never silently fall back to source/default, or a cat that
+    // thinks it pinned `clowder-ai` would land in `default` (砚砚 review push-back #1).
+    let resolvedProjectPath = parentThread.projectPath; // omitted → inherit effective parent thread
+    if (explicitProjectPath !== undefined) {
+      const validatedProjectPath = await validateProjectPath(explicitProjectPath);
+      if (!validatedProjectPath) {
+        reply.status(400);
+        return { error: 'Invalid projectPath: must be an existing directory under allowed roots' };
+      }
+      resolvedProjectPath = validatedProjectPath; // supplied & valid → canonical real path
     }
 
     // P2: Reserve dedup BEFORE create. Pre-generate a candidate proposalId, then atomically
@@ -225,7 +217,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         reason,
         parentThreadId: resolvedParentThreadId,
         preferredCats: (preferredCats ?? []) as CatId[],
-        projectPath: sourceThread.projectPath,
+        projectPath: resolvedProjectPath,
         createdBy: record.userId,
         ...(initialMessage ? { initialMessage } : {}),
         ...(reportingMode ? { reportingMode } : {}),

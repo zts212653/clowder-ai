@@ -438,7 +438,7 @@ describe('Callback Routes', () => {
     assert.equal(socketManager.getMessages().length, 0);
   });
 
-  test('POST post-message suppresses exact duplicate callback posts when transient extra differs', async () => {
+  test('POST post-message does not suppress plain text after same-text rich callback', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -470,11 +470,11 @@ describe('Callback Routes', () => {
     });
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
-    assert.equal(body.status, 'duplicate');
-    assert.equal(body.messageId, first.id);
+    assert.equal(body.status, 'ok');
+    assert.notEqual(body.messageId, first.id);
 
-    assert.equal(messageStore.size, 1);
-    assert.equal(socketManager.getMessages().length, 0);
+    assert.equal(messageStore.size, 2);
+    assert.equal(socketManager.getMessages().length, 1);
   });
 
   test('POST post-message supports cross-thread send with threadId', async () => {

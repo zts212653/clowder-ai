@@ -90,6 +90,19 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // Markdown version. Provider-neutral phrasing per cloud codex R2 P2.
     hint: '不是你的额度问题——是 CLI 上游 provider 服务器侧临时限流（provider 错误里通常会明示如 "not your usage limit" / "529 Overloaded"）。等 30-60 秒重试或换一只猫（不同 provider）；反复出现去你用的 provider 状态页（Anthropic / OpenAI / Google / DeepSeek 各有 status 页）。',
   },
+  // F212 Phase G (AC-G1): silent_completion — CLI 正常完成但事件流里没有 text event
+  // (e.g. OpenCode + DeepSeek 用户撞的 step_start-only NDJSON, clowder-ai#875)。NOT 真错误
+  // 但走 cliDiagnostics surface 让用户拿到结构化证据替代 generic "completed without
+  // textual output"。具体 evidence (event count + types + model + session prefix) 在
+  // metadata 的 cliDiagnostics 字段里，hint 给可操作建议。
+  silent_completion: {
+    summary: 'CLI 完成但无文字输出',
+    // R1 P1 fix (砚砚 catch 2026-06-08): evidence (eventCount / eventTypes / model /
+    // sessionIdPrefix / stderrPresent) lives in `safeExcerpt` (JSON), surfaced by the
+    // panel's expandable disclosure. debugRef only carries command / exit / signal /
+    // invocationId. Previous hint sent users to debugRef — wrong place, killed UX value.
+    hint: 'CLI 进程正常退出且收到了事件流，但没有 text event（常见于 OpenCode + DeepSeek 上游问题）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
+  },
 };
 
 const UNKNOWN_TEXT = {
@@ -118,8 +131,30 @@ const UNKNOWN_HINT_HAS_STDERR =
 
 const MAX_LINES = 8;
 const MAX_CHARS = 1500;
+const MAX_SILENT_EVENT_TYPES = 10;
+const MAX_SILENT_EVENT_TYPE_CHARS = 40;
+const MAX_SILENT_MODEL_CHARS = 80;
+const MAX_SILENT_STDERR_CHARS = 500;
 /** AC-A6: stack frame patterns — rust frame numbers / `at <file>` / cargo / node_modules */
 const FRAME_REGEX = /^\s*\d+:\s|^\s*at\s/;
+
+function truncateEvidenceString(value: string, maxChars: number): string {
+  const sanitized = sanitizeCliStderr(value).replace(/\s+/g, ' ').trim();
+  if (sanitized.length <= maxChars) return sanitized;
+  if (maxChars <= 3) return sanitized.slice(0, maxChars);
+  return `${sanitized.slice(0, maxChars - 3)}...`;
+}
+
+function truncateSilentEvidenceString(value: string, maxChars: number): string {
+  const sanitized = sanitizeCliStderr(value)
+    .replace(/\b[A-Za-z]:\\(?:[^\s"'`<>|]+\\)*[^\s"'`<>|]+/g, '[PATH_REDACTED]')
+    .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (sanitized.length <= maxChars) return sanitized;
+  if (maxChars <= 3) return sanitized.slice(0, maxChars);
+  return `${sanitized.slice(0, maxChars - 3)}...`;
+}
 
 function extractSafeExcerpt(rawText: string, reasonCode: CliErrorReasonCode): string {
   // KD-2: sanitize entire blob first; truncation happens on sanitized output.
@@ -332,5 +367,107 @@ export function buildCliExitDiagnostic(input: {
     reasonCode: input.reasonCode ?? null,
     stderrEmpty: input.stderrLength === 0,
     streamErrorCount: input.streamErrorCount,
+  };
+}
+
+// =============================================================================
+// F212 Phase G — silent_completion diagnostic builder (clowder-ai#875)
+// =============================================================================
+
+/**
+ * Phase G (AC-G2): build a CliDiagnostics for the silent-stdout case — CLI exited
+ * cleanly with event stream that has `eventCount > 0` but `textEventCount === 0`.
+ * Surfaces evidence (event count + unique types + model + session prefix + exit +
+ * stderr presence) so users get something actionable instead of generic
+ * "completed without textual output" message.
+ *
+ * Safety invariants (mirror F212 Phase A KD-1 + Phase F AC-F5 safety):
+ *  - sessionId truncated to first 8 chars only — never expose full session ID
+ *  - eventTypes sorted + deduped + capped — clean bounded list, no order leak
+ *  - stderrExcerpt optional and goes through sanitizeCliStderr if provided
+ *  - debugRef stays small + plain — no prompt/body content embedded
+ *
+ * @param input - structured evidence collected by the provider stream loop
+ * @returns CliDiagnostics with reasonCode = 'silent_completion'
+ */
+export function buildSilentCompletionDiagnostic(input: {
+  /** Provider/CLI name (e.g. 'opencode', 'claude') — used in debugRef.command */
+  command: string;
+  /** Optional invocation context — same field as other F212 helpers */
+  invocationId?: string;
+  /** Total events received from the CLI stream */
+  eventCount: number;
+  /** Unique event type strings observed (e.g. ['step_start'] for the clowder-ai#875 case) */
+  eventTypes: readonly string[];
+  /** Model name if known (e.g. 'deepseek-chat') */
+  model?: string;
+  /** Full session id — will be truncated to first 8 chars before exposure */
+  sessionId?: string;
+  /** Process exit code. Defaults to 0 because silent_completion is only emitted after clean CLI exit. */
+  exitCode?: number | null;
+  /** Whether stderr buffer had any content (boolean, no raw stderr by default) */
+  stderrPresent: boolean;
+  /** Optional sanitized stderr excerpt (caller should pre-sanitize OR let helper do it) */
+  stderrExcerpt?: string;
+}): CliDiagnostics {
+  const base = REASON_TEXT.silent_completion;
+  // Safety: only first 8 chars of sessionId (CCID-style prefix), never the full ID
+  const sessionIdPrefix = input.sessionId ? input.sessionId.slice(0, 8) : undefined;
+  // Sort + dedupe event types for stable / clean exposure, then cap the evidence surface.
+  // Cloud codex P2 (2026-06-09): event type strings come from NDJSON stream metadata and can be
+  // numerous/long in malformed streams; cap count + item length before JSON-stringifying.
+  const normalizedEventTypes = Array.from(
+    new Set(input.eventTypes.map((type) => truncateEvidenceString(type, MAX_SILENT_EVENT_TYPE_CHARS)).filter(Boolean)),
+  ).sort();
+  const safeEventTypes = normalizedEventTypes.slice(0, MAX_SILENT_EVENT_TYPES);
+  const eventTypesTruncated = normalizedEventTypes.length > safeEventTypes.length;
+  const safeModel = input.model ? truncateEvidenceString(input.model, MAX_SILENT_MODEL_CHARS) : undefined;
+  // Optional safeExcerpt: pre-sanitize through the shared sanitizer, then cap for the structured JSON budget.
+  const safeStderrExcerpt = input.stderrExcerpt
+    ? truncateSilentEvidenceString(input.stderrExcerpt, MAX_SILENT_STDERR_CHARS)
+    : undefined;
+  const evidence = {
+    eventCount: input.eventCount,
+    eventTypes: safeEventTypes,
+    ...(eventTypesTruncated ? { eventTypeCount: normalizedEventTypes.length, eventTypesTruncated: true } : {}),
+    ...(safeModel ? { model: safeModel } : {}),
+    ...(sessionIdPrefix ? { sessionIdPrefix } : {}),
+    stderrPresent: input.stderrPresent,
+    ...(safeStderrExcerpt ? { stderrExcerpt: safeStderrExcerpt } : {}),
+  };
+  const safeExcerpt = JSON.stringify(evidence, null, 2);
+
+  return {
+    reasonCode: 'silent_completion',
+    publicSummary: base.summary,
+    publicHint: base.hint,
+    debugRef: {
+      command: input.command,
+      // Cloud codex P2 (2026-06-08): silent_completion is a clean-exit path.
+      // Non-zero exits already surface as __cliError before this builder is used.
+      exitCode: input.exitCode ?? 0,
+      signal: null,
+      ...(input.invocationId ? { invocationId: input.invocationId } : {}),
+    },
+    // safeExcerpt slot holds the structured evidence (JSON-stringified — frontend renders
+    // as raw text in disclosure section). KD-1: this is admitted because the content is
+    // self-built (no raw stderr), sessionId is truncated, model + types + counts are
+    // metadata not user data.
+    safeExcerpt:
+      safeExcerpt.length <= MAX_CHARS
+        ? safeExcerpt
+        : JSON.stringify(
+            {
+              eventCount: input.eventCount,
+              eventTypes: safeEventTypes.slice(0, 3),
+              eventTypeCount: normalizedEventTypes.length,
+              eventTypesTruncated: true,
+              stderrPresent: input.stderrPresent,
+            },
+            null,
+            2,
+          ),
+    // Self-built structured payload — safe like Phase D's 'cc_structured' channel
+    excerptSource: 'cc_structured',
   };
 }

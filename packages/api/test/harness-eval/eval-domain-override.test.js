@@ -22,7 +22,7 @@ describe('eval-domain-override', { skip: redisIsolationSkipReason(REDIS_URL) }, 
 
   after(async () => {
     if (redis) {
-      await cleanupPrefixedRedisKeys(redis, 'eval-domain:');
+      await cleanupPrefixedRedisKeys(redis, ['eval-domain:*']);
       await redis.quit();
     }
   });

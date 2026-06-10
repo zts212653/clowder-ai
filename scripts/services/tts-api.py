@@ -440,7 +440,10 @@ class Qwen3CloneAdapter(TtsAdapter):
 def create_adapter(provider: str, model: str) -> TtsAdapter:
     """Create TTS adapter based on provider name."""
     if provider == "qwen3-clone":
-        return Qwen3CloneAdapter(model=model if model != Qwen3CloneAdapter.DEFAULT_MODEL else None)
+        # When TTS_MODEL equals the provider name (e.g. TTS_MODEL=qwen3-clone),
+        # it's not a valid HF model path — fall through to adapter's built-in default.
+        effective = model if (model and model != provider and model != Qwen3CloneAdapter.DEFAULT_MODEL) else None
+        return Qwen3CloneAdapter(model=effective)
     if provider == "mlx-audio":
         return MlxAudioAdapter(model=model)
     if provider == "edge-tts":
@@ -448,7 +451,7 @@ def create_adapter(provider: str, model: str) -> TtsAdapter:
     if provider == "sapi":
         return SapiAdapter()
     if provider == "piper":
-        return PiperAdapter(model=model if model else None)
+        return PiperAdapter(model=model if (model and model != provider) else None)
     raise ValueError(
         f"Unknown TTS provider: '{provider}'. Supported: qwen3-clone, mlx-audio, edge-tts, sapi, piper"
     )
@@ -532,6 +535,37 @@ async def health():
         "model": adapter.model_name if adapter else "none",
         "backend": adapter.name if adapter else "none",
     }
+
+
+@app.get("/health/deep")
+async def health_deep():
+    """Deep health check: verifies actual synthesis capability.
+
+    Used by lifecycle reconciler to detect zombie processes -- HTTP alive
+    but inference pipeline broken (e.g. Broken pipe after prolonged uptime).
+    Synthesizes a single character to verify the full pipeline works.
+    """
+    if not adapter_ready or not adapter:
+        raise HTTPException(503, detail="adapter not ready")
+    try:
+        _audio_bytes, _fmt = await asyncio.wait_for(
+            adapter.synthesize(
+                text="a",
+                voice="zm_yunjian",
+                lang_code="en",
+                speed=1.0,
+                audio_format="wav",
+            ),
+            timeout=15.0,
+        )
+        return {
+            "status": "ok",
+            "probe": "synthesis",
+            "model": adapter.model_name,
+        }
+    except Exception as exc:
+        log.warning("Deep health probe failed: %s", exc)
+        raise HTTPException(503, detail=f"synthesis probe failed: {exc}") from exc
 
 
 # ─── Main ─────────────────────────────────────────────────────────────

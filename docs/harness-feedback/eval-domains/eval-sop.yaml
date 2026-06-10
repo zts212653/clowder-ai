@@ -1,4 +1,18 @@
 ---
+# AUTO-SCHEDULE RE-ENABLED — 2026-06-10
+# All 3 re-enable conditions met by feat/f192-sop-wiring PR:
+#   1. SopTrace producer wired (eval cat builds SopTrace, embeds in sourceRefs,
+#      generator replays via buildSopTrace → evaluateSopDefinition)
+#   2. File-writer layer landed (eval-sop-live-verdict.ts writes
+#      snapshot.json + attribution.json + provenance.json → bundle,
+#      trace.json + eval-results.json → raw inputs, verdict.md)
+#   3. `eval:sop` added to PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN +
+#      verdictGenerators wired in index.ts — `cat_cafe_publish_verdict`
+#      no longer returns 501 for this domain.
+#
+# Previous sunset: 2026-06-06 (silent-fire 2 weeks: 5/30 + 6/6, 0 verdict, 0 ack).
+# See: docs/features/F192-socio-technical-harness-eval.md (sunset/re-enable journal)
+
 domainId: eval:sop
 displayName: SOP Compliance Eval
 systemThreadId: thread_eval_sop

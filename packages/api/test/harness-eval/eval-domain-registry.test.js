@@ -189,7 +189,7 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.frequency, 'weekly');
   });
 
-  it('loads the docs-backed eval:sop registry fixture', async () => {
+  it('loads the docs-backed eval:sop registry fixture (re-enabled 2026-06-10)', async () => {
     const raw = await readFile(
       new URL('../../../../docs/harness-feedback/eval-domains/eval-sop.yaml', import.meta.url),
       'utf8',
@@ -201,6 +201,31 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.sourceAdapter, 'sop-trace-eval');
     assert.equal(entry.frequency, 'weekly');
     assert.equal(entry.sla.reevalWithinHours, 336);
+    // Re-enabled: SopTrace producer + file-writer +
+    // PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN['eval:sop'] all wired (F192 sop-wiring PR).
+    assert.equal(entry.enabled, true, 'eval:sop is re-enabled; weekly cron must pick it up');
+  });
+
+  // --- sunset flag (silent-fire fix 2026-06-06) ---
+
+  it('defaults `enabled` to true when the field is omitted', () => {
+    const entry = parseEvalDomainRegistryEntry(validEntry);
+    assert.equal(entry.enabled, true, 'omitted enabled must default to true');
+  });
+
+  it('accepts explicit `enabled: true`', () => {
+    const entry = parseEvalDomainRegistryEntry({ ...validEntry, enabled: true });
+    assert.equal(entry.enabled, true);
+  });
+
+  it('accepts explicit `enabled: false` (sunset flag)', () => {
+    const entry = parseEvalDomainRegistryEntry({ ...validEntry, enabled: false });
+    assert.equal(entry.enabled, false);
+  });
+
+  it('rejects non-boolean `enabled` value', () => {
+    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, enabled: 'yes' }));
+    assert.throws(() => parseEvalDomainRegistryEntry({ ...validEntry, enabled: 1 }));
   });
 
   it('validates a valid eval:capability-wakeup registry entry', () => {

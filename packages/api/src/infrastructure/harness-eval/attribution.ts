@@ -1,3 +1,4 @@
+import type { PerFireSample } from './c2-sample-evidence.js';
 import type { ComponentHealth, TelemetryGap } from './f167-eval.js';
 
 export type AttributionClass =
@@ -8,6 +9,30 @@ export type AttributionClass =
   | 'execution_gap'
   | 'environment_drift'
   | 'taste_gap';
+
+export interface EvidenceRow {
+  type: string;
+  anchor: string;
+  excerpt: string;
+  /**
+   * F192 Phase D — populated only on `type: 'per-fire-sample'` rows. Carries
+   * the full HMAC-correlated, label-rich per-fire sample so artifact consumers
+   * can drill down without re-querying the trace store. Other row types omit it.
+   */
+  sample?: PerFireSample;
+}
+
+/**
+ * F192 Phase D — sampleCoverage describes the honesty of per-fire evidence on a
+ * finding: when `sampleCount < metricCount` the finding is reported as incomplete
+ * (e.g. active span missing during some emissions). Absent on findings that
+ * never sampled in the first place (e.g. observability gaps).
+ */
+export interface SampleCoverage {
+  sampleCount: number;
+  metricCount: number;
+  complete: boolean;
+}
 
 export interface AttributionRecord {
   id: string;
@@ -21,8 +46,9 @@ export interface AttributionRecord {
   attribution: {
     primaryLayer: AttributionClass;
     pipelineOrHuman: 'pipeline' | 'human-required';
-    evidence: Array<{ type: string; anchor: string; excerpt: string }>;
+    evidence: EvidenceRow[];
   };
+  sampleCoverage?: SampleCoverage;
   proposedAction: Array<{
     action: string;
     target: string;
@@ -59,6 +85,7 @@ interface AttributionInput {
         | 'componentId'
         | 'activationCounts'
         | 'frictionCounts'
+        | 'frictionSamples'
         | 'telemetryGaps'
         | 'confidence'
         | 'falsePositiveCandidates'
@@ -159,6 +186,7 @@ function buildFrictionFinding(
   metric: string,
   value: number,
   grade: FrictionGrade,
+  samples: ReadonlyArray<PerFireSample>,
 ): AttributionRecord {
   const isFailure = metric.includes('failed');
   const measureNote = grade.hasBaseline
@@ -170,7 +198,26 @@ function buildFrictionFinding(
     ? `${metric} ratio ${grade.ratioText} exceeds threshold`
     : `${metric}=${value} but denominator ${grade.baseKey} missing — add activation counter to compute a real friction ratio`;
 
-  return {
+  // F192 Phase D: per-fire sample evidence rows. Each sample becomes one row
+  // alongside the headline counter row, carrying the full PerFireSample so
+  // artifact consumers can drill down without re-querying trace store.
+  const evidence: EvidenceRow[] = [
+    {
+      type: 'counter',
+      anchor: `${componentId}/${metric}`,
+      excerpt: `${metric}=${value} (${measureNote})`,
+    },
+    ...samples.map(
+      (s): EvidenceRow => ({
+        type: 'per-fire-sample',
+        anchor: `${componentId}/${metric}/${s.spanId}`,
+        excerpt: `firedAt=${s.firedAt} trigger=${s.trigger} agentId=${s.agentId} threadSystemKind=${s.threadSystemKind}`,
+        sample: s,
+      }),
+    ),
+  ];
+
+  const record: AttributionRecord = {
     id: nextFindingId(),
     relatedFeature: 'F167',
     frictionSignal: {
@@ -182,28 +229,39 @@ function buildFrictionFinding(
     attribution: {
       primaryLayer: isFailure ? 'execution_gap' : 'harness_misfit',
       pipelineOrHuman: grade.severity === 'high' ? 'human-required' : 'pipeline',
-      evidence: [
-        {
-          type: 'counter',
-          anchor: `${componentId}/${metric}`,
-          excerpt: `${metric}=${value} (${measureNote})`,
-        },
-      ],
+      evidence,
     },
     proposedAction: [{ action, target, rationale }],
     status: 'open',
   };
+
+  // sampleCoverage: only when samples are expected (metric is supported by sampling).
+  // For now, only `c2.verdict_without_pass_count` is sampled. Other metrics get no
+  // sampleCoverage field — silent absence ≠ incomplete coverage, just "not sampled here".
+  if (metric === 'c2.verdict_without_pass_count') {
+    record.sampleCoverage = {
+      sampleCount: samples.length,
+      metricCount: value,
+      complete: samples.length >= value,
+    };
+  }
+
+  return record;
 }
 
 function detectFrictionFromCounts(component: AttributionInput['snapshot']['components'][0]): AttributionRecord[] {
   const findings: AttributionRecord[] = [];
   const { frictionCounts, activationCounts, componentId } = component;
+  // frictionSamples may be absent on older snapshot inputs (pre-F192-Phase-D fixtures
+  // and legacy callers) — treat missing as "no samples", emit counter row only.
+  const frictionSamples = component.frictionSamples ?? {};
 
   for (const [metric, value] of Object.entries(frictionCounts)) {
     if (value == null || value === 0) continue;
     const grade = gradeFriction(metric, value, activationCounts);
     if (!grade) continue;
-    findings.push(buildFrictionFinding(componentId, metric, value, grade));
+    const samples = frictionSamples[metric] ?? [];
+    findings.push(buildFrictionFinding(componentId, metric, value, grade, samples));
   }
   return findings;
 }

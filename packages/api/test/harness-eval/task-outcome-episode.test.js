@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import {
   parseA1WorldTruthRecord,
   parseMagicWordRecord,
+  parseMagicWordRefRecord,
   parsePermissionCancelRecord,
   parseTaskOutcomeEpisode,
   VERDICT_CLASSES,
@@ -46,6 +47,15 @@ const validMagicWord = {
   catId: 'opus',
   precedingMessageSummary: 'Cat was writing a temporary fix for the routing issue',
   followingMessageSummary: 'CVO told cat to rethink the approach from first principles',
+};
+
+const validMagicWordRef = {
+  type: 'magic_word_ref',
+  eventId: 'evt_abc123',
+  word: '脚手架',
+  timestamp: '2026-06-03T12:10:00.000Z',
+  threadId: 'thread_abc123',
+  catId: 'opus',
 };
 
 const validA1WorldTruth = {
@@ -181,6 +191,39 @@ describe('TaskOutcomeEpisode schema (F192 Phase G)', () => {
     it('rejects magic word without word field', () => {
       const { word: _, ...noWord } = validMagicWord;
       assert.throws(() => parseMagicWordRecord(noWord));
+    });
+  });
+
+  describe('parseMagicWordRefRecord (F227 归一)', () => {
+    it('accepts a valid magic word ref', () => {
+      const rec = parseMagicWordRefRecord(validMagicWordRef);
+      assert.equal(rec.type, 'magic_word_ref');
+      assert.equal(rec.eventId, 'evt_abc123');
+      assert.equal(rec.word, '脚手架');
+      assert.equal(rec.catId, 'opus');
+    });
+
+    it('rejects a ref without eventId (Event Memory pointer is required)', () => {
+      const { eventId: _, ...noEventId } = validMagicWordRef;
+      assert.throws(() => parseMagicWordRefRecord(noEventId));
+    });
+
+    it('rejects a ref without word (projection field required)', () => {
+      const { word: _, ...noWord } = validMagicWordRef;
+      assert.throws(() => parseMagicWordRefRecord(noWord));
+    });
+
+    it('is accepted by the a2 discriminated union inside an episode', () => {
+      const ep = parseTaskOutcomeEpisode({
+        ...validEpisode,
+        signals: {
+          a1WorldTruth: [],
+          a2InteractionDecisions: [validMagicWordRef],
+          proxy: [],
+        },
+      });
+      assert.equal(ep.signals.a2InteractionDecisions.length, 1);
+      assert.equal(ep.signals.a2InteractionDecisions[0].type, 'magic_word_ref');
     });
   });
 

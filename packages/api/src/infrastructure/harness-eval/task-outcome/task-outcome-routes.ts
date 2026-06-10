@@ -85,6 +85,10 @@ export function handlePermissionCancel(
   return { episodeId: episode.episodeId, signalAppended: true };
 }
 
+// F227 归一 (superseded): magic words are captured by Event Memory
+// (onMagicWordDetected → Event store, the single source of truth). The POST
+// /api/task-outcome/magic-word route is deprecated and no longer calls this.
+// Retained for the F192 owner to decide on removal — do NOT wire as a new writer.
 export function handleMagicWord(store: TaskOutcomeEpisodeStore, input: MagicWordInput): SignalAppendResult {
   const episode = ensureActiveEpisode(store, input.threadId, input.catId);
   const signal = buildMagicWordSignal(input);
@@ -118,6 +122,28 @@ export function handleA1WorldTruth(store: TaskOutcomeEpisodeStore, input: A1Worl
   return { episodeId: episode.episodeId, signalAppended: true };
 }
 
+/**
+ * F227 归一: project a stored a2 signal for the episode read-side. A
+ * `magic_word_ref` (lightweight pointer to the Event Memory truth source) is
+ * projected back to a `magic_word` entry so F192 eval keeps its a2 projection
+ * contract (type:'magic_word' with word/timestamp/threadId/catId) WITHOUT having
+ * to understand the Event schema. The eventId is preserved so consumers can fetch
+ * full event detail (messageId, summaries, cognitiveTransition) on demand.
+ */
+function projectA2Signal(record: Record<string, unknown>): Record<string, unknown> {
+  if (record.type === 'magic_word_ref') {
+    return {
+      type: 'magic_word',
+      word: record.word,
+      timestamp: record.timestamp,
+      threadId: record.threadId,
+      catId: record.catId,
+      eventId: record.eventId,
+    };
+  }
+  return record;
+}
+
 export function handleGetEpisode(store: TaskOutcomeEpisodeStore, episodeId: string): AssembledEpisode | null {
   const episode = store.getEpisode(episodeId);
   if (!episode) return null;
@@ -133,7 +159,7 @@ export function handleGetEpisode(store: TaskOutcomeEpisodeStore, episodeId: stri
         a1WorldTruth.push(s.record);
         break;
       case 'a2':
-        a2InteractionDecisions.push(s.record);
+        a2InteractionDecisions.push(projectA2Signal(s.record));
         break;
       case 'proxy':
         proxy.push(s.record);

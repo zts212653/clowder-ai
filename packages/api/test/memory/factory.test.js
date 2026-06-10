@@ -16,6 +16,7 @@ describe('createMemoryServices', () => {
     });
 
     assert.ok(services.evidenceStore);
+    assert.ok(services.eventMemoryStore);
     assert.ok(services.markerQueue);
     assert.ok(services.reflectionService);
     assert.ok(services.knowledgeResolver);
@@ -23,6 +24,7 @@ describe('createMemoryServices', () => {
     assert.ok(services.materializationService);
 
     assert.equal(await services.evidenceStore.health(), true);
+    assert.equal(services.eventMemoryStore.health(), true);
   });
 
   // ── Phase C: embed config integration ───────────────────────────

@@ -28,6 +28,16 @@ export interface ServiceManifest {
   };
   defaultEndpoint: string | null;
   healthPath: '/health' | '/status';
+  /**
+   * Optional deep health check path for synthesis-capable services.
+   * When set, lifecycle startService probes this AFTER shallow health passes
+   * to detect zombie processes (HTTP alive but inference pipeline broken).
+   * Must return 200 when synthesis works, 503 when degraded.
+   */
+  deepHealthPath?: string;
+  /** Timeout in ms for deep health probe (default 20000). Must be much longer
+   *  than the standard 1500ms health timeout because synthesis probes are slow. */
+  deepHealthTimeoutMs?: number;
   prerequisites?: {
     runtime?: string;
     venvPath?: string;
@@ -206,6 +216,7 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
     endpointEnvVars: ['TTS_URL'],
     defaultEndpoint: 'http://localhost:9879',
     healthPath: '/health',
+    deepHealthPath: '/health/deep',
     prerequisites: {
       runtime: 'python3.10+',
       venvPath: '~/.cat-cafe/tts-venv',
@@ -475,9 +486,15 @@ export function resolveServiceEndpointMap(
   );
 }
 
-export async function fetchServiceHealth(url: string): Promise<ServiceHealthResult> {
+export async function fetchServiceHealth(url: string, service?: ServiceManifest): Promise<ServiceHealthResult> {
+  // Deep health probes (synthesis dry-run, embedding trial, etc.) are much
+  // slower than a simple HTTP /health ping.  Use the per-service timeout when
+  // the URL targets a deep-health endpoint; otherwise keep the fast 1500ms
+  // default for shallow probes.  (Codex P1 — PR #2122)
+  const isDeepProbe = !!(service?.deepHealthPath && url.includes(service.deepHealthPath));
+  const timeoutMs = isDeepProbe ? (service?.deepHealthTimeoutMs ?? 20_000) : 1500;
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     return {
       ok: response.ok,
       status: response.status,

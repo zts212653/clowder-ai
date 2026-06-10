@@ -164,6 +164,37 @@ async function probeServiceReady(input: {
   }
 }
 
+/**
+ * Deep health probe: verifies that a service can actually perform its core
+ * function (e.g. TTS synthesis), not just respond to HTTP health endpoints.
+ * Used by startService to detect zombie processes — HTTP alive but inference
+ * pipeline broken (e.g. Broken pipe after prolonged uptime).
+ *
+ * Returns true if no deepHealthPath is configured (services without deep
+ * health are assumed healthy when shallow health passes).
+ */
+async function probeServiceDeepHealth(input: {
+  service: ServiceManifest;
+  env: NodeJS.ProcessEnv;
+  config: ServiceConfig | undefined;
+  fetchHealth: FetchServiceHealth;
+}): Promise<boolean> {
+  if (!input.service.deepHealthPath) return true;
+  const endpoint = resolveServiceEndpoint(input.service, input.env, input.config);
+  if (!endpoint) return false;
+  try {
+    const baseUrl = endpoint.replace(/\/+$/, '');
+    const deepUrl = `${baseUrl}${input.service.deepHealthPath}`;
+    // fetchHealth dispatches the correct timeout internally: deep-health
+    // paths get service.deepHealthTimeoutMs (default 20s) instead of the
+    // standard 1500ms shallow-probe timeout.  (Codex P1 — PR #2122)
+    const health = await input.fetchHealth(deepUrl, input.service);
+    return health.ok;
+  } catch {
+    return false;
+  }
+}
+
 function hasErrorCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
@@ -689,16 +720,41 @@ export async function registerServiceLifecycleRoutes(
             fetchHealth: healthProbe,
           });
           if (healthy) {
-            serviceConfigStore.set(service.id, { installed: true, enabled: true });
-            await audit({
-              serviceId: service.id,
-              action: 'start',
-              operator,
-              status: 'completed',
-              reason: 'already-running',
-            });
-            notifyServiceReady(service, operator, 'already-running');
-            return { ok: true, message: `${service.name} is already running`, pids: portProbe.owned };
+            // Deep health probe: detect zombie processes (HTTP alive but
+            // inference pipeline broken, e.g. Broken pipe after 11 days).
+            // If shallow health passes but deep health fails → kill and restart.
+            let deepHealthPassed = true;
+            if (service.deepHealthPath) {
+              deepHealthPassed = await probeServiceDeepHealth({
+                service,
+                env: lifecycleEnv,
+                config: startEffectiveCfg,
+                fetchHealth: healthProbe,
+              });
+              if (!deepHealthPassed) {
+                app.log.warn(
+                  { serviceId: service.id, pids: portProbe.owned },
+                  'service shallow health OK but deep health failed — killing zombie process(es)',
+                );
+                appendServiceLog(
+                  service.id,
+                  `[start] zombie detected: shallow health OK, deep health FAILED — restarting\n`,
+                );
+              }
+            }
+
+            if (deepHealthPassed) {
+              serviceConfigStore.set(service.id, { installed: true, enabled: true });
+              await audit({
+                serviceId: service.id,
+                action: 'start',
+                operator,
+                status: 'completed',
+                reason: 'already-running',
+              });
+              notifyServiceReady(service, operator, 'already-running');
+              return { ok: true, message: `${service.name} is already running`, pids: portProbe.owned };
+            }
           }
 
           const stopped: number[] = [];

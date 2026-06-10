@@ -68,6 +68,25 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     userId: 'user-1',
   };
 
+  it('catHandoffNote round-trips through Redis intact (F225 A2)', async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    const record = await store.create(BASE_INPUT);
+    const note = {
+      proposalId: 'prop-1',
+      sourceSessionId: record.id,
+      done: 'wrote A2',
+      worktreeBranch: 'feat/f225',
+      commits: ['abc', 'def'],
+      nextSteps: 'write B1',
+      gotchas: 'commit-point irreversible',
+      persistedAt: 12345,
+    };
+    await store.update(record.id, { catHandoffNote: note });
+    const got = await store.get(record.id);
+    // serialize/hydrate must preserve nested object + commits array (砚砚 feedback_inmemory)
+    assert.deepEqual(got.catHandoffNote, note, 'catHandoffNote survives Redis serialize/hydrate');
+  });
+
   it('create() returns SessionRecord with correct initial state', async () => {
     const record = await store.create(BASE_INPUT);
 

@@ -88,6 +88,206 @@ describe('G2: pollForSteps yields steps incrementally', () => {
     assert.equal(lastBatch.cursor.terminalSeen, true);
   });
 
+  test('F211-REG12: IDLE with already-delivered generating planner text returns terminal instead of stalling', async () => {
+    // Live repro 2026-06-05: Antigravity can flip the cascade summary to IDLE while the latest
+    // planner response remains GENERATING, but already contains the text we delivered. That cascade
+    // is still not a clean reuse target, but the current poll must close instead of waiting for a
+    // never-created next step and throwing "steps=N, status=IDLE" after 60s.
+    const bridge = createBridge();
+    let callCount = 0;
+    const generatingTextStep = {
+      type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_GENERATING',
+      plannerResponse: { response: '发现了关键信息。让我发评估到 thread。' },
+    };
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 1,
+        trajectory: { steps: [generatingTextStep] },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 1,
+        trajectory: { steps: [generatingTextStep] },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 40, 5)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded[0].steps[0].plannerResponse.response, '发现了关键信息。让我发评估到 thread。');
+    const lastBatch = yielded[yielded.length - 1];
+    assert.equal(lastBatch.cursor.terminalSeen, true);
+    assert.equal(lastBatch.cursor.lastDeliveredStepCount, 1);
+  });
+
+  test('F211-REG12: IDLE final text mutation under status gate gets a terminal follow-up fetch', async () => {
+    const bridge = createBridge();
+    let statusCallCount = 0;
+    let trajectoryCallCount = 0;
+    const statusSummaries = [
+      { stepCount: 1, status: 'CASCADE_RUN_STATUS_RUNNING', lastModifiedTime: 'T1' },
+      { stepCount: 1, status: 'CASCADE_RUN_STATUS_IDLE', lastModifiedTime: 'T2' },
+      { stepCount: 1, status: 'CASCADE_RUN_STATUS_IDLE', lastModifiedTime: 'T2' },
+    ];
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'CORTEX_STEP_STATUS_GENERATING',
+              plannerResponse: { response: '发现了关键信息。' },
+            },
+          ],
+        },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'CORTEX_STEP_STATUS_GENERATING',
+              plannerResponse: { response: '发现了关键信息。让我发评估到 thread。' },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(
+      bridge,
+      'getCascadeStatus',
+      async () => statusSummaries[Math.min(statusCallCount++, statusSummaries.length - 1)],
+    );
+    mock.method(
+      bridge,
+      'getTrajectory',
+      async () => trajectories[Math.min(trajectoryCallCount++, trajectories.length - 1)],
+    );
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 40, 5)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded[0].steps[0].plannerResponse.response, '发现了关键信息。');
+    assert.equal(yielded[1].steps[0].plannerResponse.response, '让我发评估到 thread。');
+    assert.equal(yielded.at(-1).cursor.terminalSeen, true);
+    assert.equal(yielded.at(-1).cursor.lastDeliveredStepCount, 1);
+    assert.ok(trajectoryCallCount >= 3, 'unchanged IDLE status must still get one follow-up full fetch');
+  });
+
+  test('F211-REG12: dirty-IDLE terminal exception requires text on the generating planner', async () => {
+    const bridge = createBridge();
+    let callCount = 0;
+    const emptyLatestPlanner = {
+      type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+      status: 'CORTEX_STEP_STATUS_GENERATING',
+      plannerResponse: {},
+    };
+    const textLatestPlanner = {
+      ...emptyLatestPlanner,
+      plannerResponse: { response: 'second planner finally produced text' },
+    };
+    const baseSteps = [
+      { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'DONE' },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'DONE',
+        plannerResponse: { response: 'earlier planner text' },
+      },
+    ];
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_RUNNING',
+        numTotalSteps: 3,
+        trajectory: { steps: [...baseSteps, emptyLatestPlanner] },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 3,
+        trajectory: { steps: [...baseSteps, emptyLatestPlanner] },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 3,
+        trajectory: { steps: [...baseSteps, textLatestPlanner] },
+      },
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 3,
+        trajectory: { steps: [...baseSteps, textLatestPlanner] },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 80, 5)) {
+      yielded.push(batch);
+    }
+
+    assert.deepEqual(plannerTextsFromBatches(yielded), [
+      'earlier planner text',
+      'second planner finally produced text',
+    ]);
+    assert.equal(yielded.at(-1).cursor.terminalSeen, true);
+    assert.ok(callCount >= 4, 'empty latest generating planner must force polling until that planner has text');
+  });
+
+  test('F211-REG14: resumed clean IDLE tail terminalizes before status-gate stall', async () => {
+    const bridge = createBridge();
+    let statusCallCount = 0;
+    let trajectoryCallCount = 0;
+    const cleanTail = [
+      { type: 'CORTEX_STEP_TYPE_USER_INPUT', status: 'CORTEX_STEP_STATUS_DONE' },
+      {
+        type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+        status: 'CORTEX_STEP_STATUS_DONE',
+        plannerResponse: {
+          response: '铲屎官催我了！来了来了！我已经把所有核心文档全部读完。',
+          stopReason: 'STOP_REASON_CLIENT_CANCELED',
+        },
+      },
+    ];
+    const idleSummary = { stepCount: 2, status: 'CASCADE_RUN_STATUS_IDLE', lastModifiedTime: 'T-final' };
+    mock.method(bridge, 'getCascadeStatus', async () => {
+      statusCallCount += 1;
+      return idleSummary;
+    });
+    mock.method(bridge, 'getTrajectory', async () => {
+      trajectoryCallCount += 1;
+      return {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 2,
+        trajectory: { steps: cleanTail },
+      };
+    });
+    mock.method(bridge, 'getTrajectorySteps', async () => cleanTail);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 2, 40, 5, undefined, false, 0)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded.length, 1, 'resumed clean IDLE tail should emit one empty terminal batch');
+    assert.equal(yielded[0].steps.length, 0);
+    assert.equal(yielded[0].cursor.terminalSeen, true);
+    assert.equal(yielded[0].cursor.lastDeliveredStepCount, 2);
+    assert.ok(statusCallCount >= 1);
+    assert.equal(trajectoryCallCount, 1, 'one full fetch is enough to prove the clean terminal tail');
+  });
+
   test('throws on stall (no new steps within timeout)', async () => {
     const bridge = createBridge();
     mock.method(bridge, 'getTrajectory', async () => ({

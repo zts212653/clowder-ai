@@ -41,6 +41,15 @@ describe('classifyStep: native tool types via shape-based fallback', () => {
     assert.equal(classifyStep(step), 'tool_pending');
   });
 
+  test('F211-REG13: GREP_SEARCH with metadata.toolCall → tool_pending', () => {
+    const step = {
+      type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
+      status: 'CORTEX_STEP_STATUS_WAITING',
+      metadata: { toolCall: { name: 'grep_search', argumentsJson: '{"Query":"foo"}' } },
+    };
+    assert.equal(classifyStep(step), 'tool_pending');
+  });
+
   test('FILE_EDIT with toolResult success → tool_pending', () => {
     const step = {
       type: 'CORTEX_STEP_TYPE_FILE_EDIT',
@@ -181,6 +190,49 @@ describe('transformer: native tool fallback emits tool messages', () => {
     const toolMsg = msgs.find((m) => m.type === 'tool_use');
     assert.ok(toolMsg, 'should emit tool_use for GREP_SEARCH');
     assert.equal(toolMsg.toolName, 'grep_search');
+  });
+
+  test('F211-REG13: GREP_SEARCH with metadata.toolCall emits tool_activity and tool_use', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
+        status: 'CORTEX_STEP_STATUS_WAITING',
+        metadata: {
+          toolCall: {
+            name: 'grep_search',
+            argumentsJson: '{"Query":"tool_activity","IncludePattern":"*.ts"}',
+          },
+        },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const activityMsg = msgs.find((m) => m.type === 'system_info');
+    assert.ok(activityMsg, 'should emit activity for metadata.toolCall');
+    assert.deepEqual(JSON.parse(activityMsg.content), { type: 'tool_activity', toolName: 'grep_search' });
+    const toolMsg = msgs.find((m) => m.type === 'tool_use');
+    assert.ok(toolMsg, 'should emit tool_use for metadata.toolCall');
+    assert.equal(toolMsg.toolName, 'grep_search');
+    assert.deepEqual(toolMsg.toolInput, { Query: 'tool_activity', IncludePattern: '*.ts' });
+  });
+
+  test('F211-REG13: direct toolCall uses metadata arguments when input is absent', () => {
+    const steps = [
+      {
+        type: 'CORTEX_STEP_TYPE_GREP_SEARCH',
+        status: 'CORTEX_STEP_STATUS_WAITING',
+        toolCall: { toolName: 'grep_search' },
+        metadata: {
+          toolCall: {
+            argumentsJson: '{"Query":"mixed-shape","IncludePattern":"*.ts"}',
+          },
+        },
+      },
+    ];
+    const msgs = transformTrajectorySteps(steps, catId, metadata);
+    const toolMsg = msgs.find((m) => m.type === 'tool_use');
+    assert.ok(toolMsg, 'should emit tool_use for mixed direct toolCall');
+    assert.equal(toolMsg.toolName, 'grep_search');
+    assert.deepEqual(toolMsg.toolInput, { Query: 'mixed-shape', IncludePattern: '*.ts' });
   });
 });
 

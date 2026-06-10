@@ -21,7 +21,10 @@ class GuideErrorBoundary extends Component<{ children: React.ReactNode }, { hasE
 
   componentDidCatch(error: Error) {
     console.error('[GuideOverlay] Caught error, auto-recovering:', error);
-    useGuideStore.getState().exitGuide();
+    // Auto-recovery from React error — NOT a user dismissal. Don't mark
+    // an in-memory abort as user-completed (same failure mode as the
+    // thread-switch path; cloud Codex P1 audit on PR #2166).
+    useGuideStore.getState().exitGuide({ recordCompletion: false });
   }
 
   render() {

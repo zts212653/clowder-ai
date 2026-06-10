@@ -64,6 +64,29 @@ body {
   }
 }
 
+/* F226: presentation float tear-off enter animation (烁烁 UX — 让"撕下来"有视觉反馈) */
+@keyframes f226-float-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.f226-float-in {
+  animation: f226-float-in 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 砚砚: respect reduced-motion — disable the tear-off animation for sensitive users */
+@media (prefers-reduced-motion: reduce) {
+  .f226-float-in {
+    animation: none;
+  }
+}
+
 @keyframes guide-success-flash {
   0% {
     transform: scale(1);

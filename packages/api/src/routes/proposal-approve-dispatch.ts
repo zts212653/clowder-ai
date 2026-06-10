@@ -67,8 +67,12 @@ export interface AppendApprovedInitialMessageInput extends ProposalInitialMessag
    *     collapsing to the first target would discard explicit user intent).
    */
   preferredCats?: readonly CatId[];
-  /** F128 Phase Y: reporting mode from the proposal record (undefined → enrich default none, AC-Y6). */
+  /** F128 Phase AA (AC-AA1): reporting mode (undefined → enrich default final-only, supersedes AC-Y6 none). */
   reportingMode?: ReportingMode;
+  /** Phase AA (AC-AA4): the cat that proposed this thread — seed message author. */
+  sourceCatId?: CatId | null;
+  /** Phase AA (AC-AA5): invocation id from the proposal — for crossPost metadata. */
+  sourceInvocationId?: string | null;
   messageStore: IMessageStore;
 }
 
@@ -86,11 +90,22 @@ export async function appendApprovedInitialMessage({
   sourceThreadTitle,
   preferredCats,
   reportingMode,
+  sourceCatId,
+  sourceInvocationId,
   messageStore,
   router,
   invocationQueue,
   queueProcessor,
 }: AppendApprovedInitialMessageInput): Promise<AppendApprovedInitialMessageResult> {
+  // Phase AA (AC-AA5): crossPost metadata for frontend pill + jump-to-source
+  const crossPostExtra = {
+    crossPost: {
+      sourceThreadId,
+      ...(sourceInvocationId ? { sourceInvocationId } : {}),
+    },
+  };
+  // Phase AA (AC-AA6): resolve source cat handle for routing credentials
+  const sourceCatHandle = sourceCatId ? (primaryMentionHandleForCatId(sourceCatId) ?? `@${sourceCatId}`) : null;
   if (!router || !invocationQueue || !queueProcessor) {
     const enrichedFallback = enrichWithParentThreadHeader(
       rawInitialMessage,
@@ -101,14 +116,16 @@ export async function appendApprovedInitialMessage({
       null,
       primaryMentionHandleForCatId,
       reportingMode,
+      sourceCatHandle,
     );
     const stored = await messageStore.append({
       userId,
-      catId: null,
+      catId: sourceCatId ?? null, // AC-AA4: source cat is the message author
       content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
       threadId,
+      extra: crossPostExtra, // AC-AA5: crossPost metadata
     });
     return {
       messageId: stored.id,
@@ -191,16 +208,18 @@ export async function appendApprovedInitialMessage({
     parallelReporterHandle,
     primaryMentionHandleForCatId,
     reportingMode,
+    sourceCatHandle, // Phase AA (AC-AA6): routing credentials
   );
 
   if (targetCats.length === 0) {
     const stored = await messageStore.append({
       userId,
-      catId: null,
+      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [],
       timestamp: Date.now(),
       threadId,
+      extra: crossPostExtra, // AC-AA5
     });
     return {
       messageId: stored.id,
@@ -221,11 +240,12 @@ export async function appendApprovedInitialMessage({
   if (enqueueResult.outcome === 'full' || !enqueueResult.entry) {
     const stored = await messageStore.append({
       userId,
-      catId: null,
+      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [...targetCats],
       timestamp: Date.now(),
       threadId,
+      extra: crossPostExtra, // AC-AA5
     });
     return {
       messageId: stored.id,
@@ -238,13 +258,14 @@ export async function appendApprovedInitialMessage({
     try {
       const stored = await messageStore.append({
         userId,
-        catId: null,
+        catId: sourceCatId ?? null, // AC-AA4
         content,
         mentions: [...targetCats],
         timestamp: Date.now(),
         threadId,
         idempotencyKey: `proposal-initial:${proposalId}`,
         deliveryStatus: 'queued',
+        extra: crossPostExtra, // AC-AA5
       });
       storedMessageId = stored.id;
       invocationQueue.backfillMessageId(threadId, userId, enqueueResult.entry.id, stored.id);

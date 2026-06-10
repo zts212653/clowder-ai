@@ -783,7 +783,7 @@
     {
       "id": "F128",
       "name": "Cat-Proposed Thread Creation — 猫猫提议创建 Thread",
-      "status": "active (Phase Y merged 2026-06-04, PR #2098) | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
+      "status": "active (Phase AA merged 2026-06-07 PR #2134) | **Source**: clowder-ai #82 (bouillipx) / PR #85 | **Priority**: P2",
       "file": "F128-cat-create-thread.md"
     },
     {
@@ -1155,7 +1155,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "done | **Completed**: 2026-05-26 | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "reopened | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1179,7 +1179,7 @@
     {
       "id": "F192",
       "name": "Socio-Technical Harness Eval — harness 共创评估体系",
-      "status": "in-progress (Phase G `eval:task-outcome` v0) | **Owner**: Ragdoll | **Phases A-E completed**: 2026-05-27",
+      "status": "in-progress (Phase F re-eval closure + Phase G `eval:task-outcome` closure) | **Owner**: Ragdoll | **Truth sync**: 2026-06-10",
       "file": "F192-socio-technical-harness-eval.md"
     },
     {
@@ -1226,8 +1226,8 @@
     },
     {
       "id": "F202",
-      "name": "Plugin Framework — local discovery, config, and resource activation",
-      "status": "in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "name": "Plugin Framework — local discovery, config, resource activation, and schedule resources",
+      "status": "in-progress (Phase 1 merged 2026-05-31 via cat-cafe#1999; Phase 2 scoped 2026-06-08) | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
       "file": "F202-plugin-framework.md"
     },
     {
@@ -1287,7 +1287,7 @@
     {
       "id": "F212",
       "name": "CLI Error Diagnostics — 结构化 CLI 错误诊断 + 受控前端展示",
-      "status": "done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
+      "status": "done | **Phase A-C done**: 2026-05-27 | **Phase D done**: 2026-05-29 (PR #1950 merged 40af2b82e) | **Phase G done**: 2026-06-09 (PR #2150 merged a22164f58) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P1",
       "file": "F212-cli-error-diagnostics.md"
     },
     {
@@ -1365,8 +1365,32 @@
     {
       "id": "F225",
       "name": "Cat-Initiated Session Handoff — 猫主导的 session 接力",
-      "status": "spec | **Owner**: Ragdoll（Opus 4.8） | **Priority**: P2",
+      "status": "in-progress（**硬层** done + dogfood；**软层**（L0 §8 反射 + `context-self-management` skill + `context_management_hint` **prompt-injection** delivery）**+ eval 注册**（capability-wakeup #14）done，merged PR #2178；**待**：真实 warn session 观测 hint 是否 fire + eval activation 数据，闭 KD-1 三层后再 close） | **Owner**: Ragdoll（Opus 4.8） | **Priority**: P2",
       "file": "F225-cat-initiated-session-handoff.md"
+    },
+    {
+      "id": "F226",
+      "name": "Presentation Surface / Demo Mode",
+      "status": "Phase A merged (#2126) + 尺寸快捷 enhancement merged (#2131, team lead dogfood 验收满意) | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
+      "file": "F226-presentation-surface-demo-mode.md"
+    },
+    {
+      "id": "F227",
+      "name": "Event Memory — 事件级记忆索引（拉闸记录）",
+      "status": "in-progress | **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
+      "file": "F227-event-memory.md"
+    },
+    {
+      "id": "F228",
+      "name": "Multi-Project Skill Mount Management — 多项目 Skills 挂载管理",
+      "status": "spec | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1",
+      "file": "F228-multi-project-skill-mount-management.md"
+    },
+    {
+      "id": "F229",
+      "name": "猫猫球 — 前台猫常驻入口（Cat Ball Concierge）",
+      "status": "spec | **Owner**: Ragdoll (Fable-5) | **Priority**: P1",
+      "file": "F229-cat-ball-concierge.md"
     }
   ]
 }

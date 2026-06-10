@@ -93,6 +93,23 @@ export class RedactingSpanProcessor implements SpanProcessor {
     // ReadableSpan.attributes is readonly; we mutate before export via
     // a proxy object that the inner processor serializes.
     Object.assign((span as unknown as Record<string, unknown>).attributes ?? {}, redacted);
+
+    // F192 Phase D: redact span event attributes too. Per-fire sample evidence
+    // (verdict 2026-06-08-eval-a2a-c2-sample-evidence-build) emits raw IDs on
+    // span events; LocalTraceExporter & LocalTraceStore contract is "all IDs
+    // already pseudonymized by RedactingSpanProcessor", but the prior version
+    // only redacted span.attributes. Without this, raw `messageId` /
+    // `invocationId` / `threadId` would leak via /api/telemetry/traces.
+    const events = (span as unknown as { events?: ReadonlyArray<{ attributes?: Record<string, unknown> }> }).events;
+    if (events) {
+      for (const ev of events) {
+        if (ev.attributes) {
+          const redactedEvAttrs = redactAttributes(ev.attributes);
+          Object.assign(ev.attributes, redactedEvAttrs);
+        }
+      }
+    }
+
     this.inner.onEnd(span);
   }
 

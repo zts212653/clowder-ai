@@ -98,7 +98,10 @@ Commit: `abc1234`
 所有自动行动完成后，通知铲屎官结果：
 - 成功: "已自动 rebase 并 push PR #42"
 - 失败: "PR #42 冲突无法自动解决，需要人工介入" + 冲突文件列表
-- Review 处理完: "已按 receive-review 模式处理 PR #42 的 review 意见，@ reviewer 确认"
+- cloud/GitHub review 处理完: "已按 receive-review 模式处理 PR #42 的 cloud review 意见，已重新触发 cloud review，等待 PR tracking"
+- 本地猫 review 处理完: "已按 receive-review 模式处理 PR #42 的本地 review 意见，已 @ local reviewer 确认"
+
+**Source-aware rule**：`github-review-feedback` 来自 cloud / GitHub truth source。处理 cloud P1/P2 后只 re-trigger cloud review，不把旧本地 reviewer 当 Stage ④ 常驻 gate；本地 reviewer 只在非 cloud 行为 delta、scope 扩大、cloud 不可用降级、或其自身 blocking finding 未清时介入。
 
 ## 去重机制
 

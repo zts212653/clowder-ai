@@ -101,7 +101,7 @@ Step 3: VERIFY — 逐项检查
   - 代码在哪？有测试覆盖？边界处理了？
   - 🔴 交付物必须核实 commit/PR 状态（git log --grep + gh pr list）
     spec checkbox 是记录工具，不是真相源（LL-029）
-  - 🔴 新增 MCP 工具 → `MCP_TOOLS_SECTION` 更新了吗？（F086 教训：造了工具猫不知道）
+  - 🔴 新增 MCP 工具 → 认知入口更新了吗？优先级：MCP tool description → 相关 skill refs → capability wakeup / L0 quick index；只有 legacy/fallback surface 仍依赖时才补 `MCP_TOOLS_SECTION`（F086 教训：造了工具猫不知道；F203 后不再默认塞 SystemPromptBuilder）
   - 🔴 新增行为规则 → governance digest / shared-rules 注入更新了吗？
   - 🔴 产出了 SKILL.md 或改了 MCP tool description → 加载 `writing-skills`，用 T0 六要素审查质量（软硬同检）
 

@@ -996,18 +996,30 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.notDeepEqual(all.sonnet.color, all.opus.color);
   });
 
-  it('total cat count is 14 (opus + sonnet + opus-45 + opus-47 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
+  it('Fable 5 expands as a Ragdoll variant with its own model, avatar, and mentions', () => {
+    const config = loadCatConfig();
+    const all = toAllCatConfigs(config);
+    const fable = all['fable-5'];
+    assert.ok(fable, 'fable-5 cat config exists');
+    assert.equal(fable.breedId, 'ragdoll');
+    assert.equal(fable.defaultModel, 'claude-fable-5');
+    assert.equal(fable.avatar, '/avatars/claude-fable-5.png');
+    assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
+  });
+
+  it('total cat count is 15 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 14);
+    assert.equal(Object.keys(all).length, 15);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
     assert.ok(all['opus-47']);
+    assert.ok(all['fable-5']);
     assert.ok(all.codex);
     assert.ok(all.gpt52);
     assert.ok(all.spark); // F032 Phase E: new cat added

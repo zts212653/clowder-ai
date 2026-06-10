@@ -25,7 +25,13 @@ const DENY_VARIANTS = [
 
 interface AuthorizationCardProps {
   request: AuthPendingRequest;
-  onRespond: (requestId: string, granted: boolean, scope: RespondScope, reason?: string) => void;
+  onRespond: (
+    requestId: string,
+    granted: boolean,
+    scope: RespondScope,
+    reason?: string,
+    withFeedback?: boolean,
+  ) => void;
 }
 
 export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps) {
@@ -68,6 +74,15 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
               className="px-3 py-1 text-xs bg-conn-red-bg text-conn-red-text rounded-md hover:bg-conn-red-ring transition-colors"
             >
               拒绝
+            </button>
+            {/* F222 UX-3: Cancel & Feedback — direct frustration report */}
+            <button
+              type="button"
+              onClick={() => onRespond(request.requestId, false, 'once', 'skip', true)}
+              className="px-3 py-1 text-xs bg-cafe-surface text-cafe-accent rounded-md hover:bg-cafe-accent/10 transition-colors border border-cafe-accent/40"
+              title="取消并提交问题反馈"
+            >
+              取消并反馈
             </button>
           </>
         ) : (
@@ -118,6 +133,15 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
               className="px-3 py-1 text-xs bg-conn-red-text text-[var(--cafe-surface)] rounded-md hover:bg-conn-red-hover transition-colors"
             >
               拒绝 (全局)
+            </button>
+            {/* F222 UX-3: Cancel & Feedback — direct frustration report */}
+            <button
+              type="button"
+              onClick={() => onRespond(request.requestId, false, 'once', 'skip', true)}
+              className="px-3 py-1 text-xs bg-cafe-surface text-cafe-accent rounded-md hover:bg-cafe-accent/10 transition-colors border border-cafe-accent/40"
+              title="取消并提交问题反馈"
+            >
+              取消并反馈
             </button>
             <button
               type="button"

@@ -6,6 +6,7 @@ import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js'
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { buildA2aVerdictHandoff } from './eval-a2a-adapter.js';
 import { resolveA2aEvidenceBundle } from './eval-a2a-artifact-resolver.js';
+import { formatLiveVerdictMarkdown } from './eval-a2a-verdict-renderer.js';
 
 const SANITIZE_RULES_VERSION = 'f192-e-pilot-v1';
 const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
@@ -18,6 +19,7 @@ interface GenerateA2aLiveVerdictInput {
   domain: EvalDomainRegistryEntry;
   generatedAt?: string;
   generatorCommit?: string;
+  submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1: Phase H cat-mediated (cat owns verdict; undefined = CVO regen)
 }
 
 export interface A2aLiveVerdictArtifact {
@@ -108,15 +110,24 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
   writeJson(join(bundleDir, 'provenance.json'), provenance);
 
   const resolved = resolveA2aEvidenceBundle({ bundleDir, verdictId: input.verdictId });
-  const packet = buildA2aVerdictHandoff({
-    domain: input.domain,
-    snapshot: resolved.snapshot,
-    attributionReport: resolved.attributionReport,
-  });
+  // 砚砚 R8 P1: cat owns verdict (only override bundle refs below); undefined = CVO regen.
+  const submitted = input.submittedPacket;
+  if (submitted && submitted.harnessUnderEval.featureId !== rawSnapshot.featureId) {
+    throw new Error(
+      `submitted_packet_evidence_mismatch: packet.featureId=${submitted.harnessUnderEval.featureId} vs snapshot.featureId=${rawSnapshot.featureId}`,
+    );
+  }
+  const basePacket: VerdictHandoffPacket =
+    submitted ??
+    buildA2aVerdictHandoff({
+      domain: input.domain,
+      snapshot: resolved.snapshot,
+      attributionReport: resolved.attributionReport,
+    });
   const packetWithBundleRefs = parseVerdictHandoffPacket({
-    ...packet,
+    ...basePacket,
     evidencePacket: {
-      ...packet.evidencePacket,
+      ...basePacket.evidencePacket,
       snapshotRefs: [resolved.snapshotRef],
       attributionRefs: resolved.attributionRefs,
     },
@@ -240,37 +251,7 @@ function parseMarkdownYaml(path: string): ParsedMarkdownYaml {
   };
 }
 
-function formatLiveVerdictMarkdown(verdictId: string, packet: VerdictHandoffPacket, sourceSnapshotRef: string): string {
-  return [
-    '---',
-    'feature_ids: [F192, F167]',
-    'topics: [harness-eval, eval-a2a, live-verdict]',
-    'doc_kind: harness-feedback',
-    'feedback_type: live-verdict',
-    'domain_id: eval:a2a',
-    `packet_id: ${packet.id}`,
-    `source_snapshot: "${sourceSnapshotRef}"`,
-    '---',
-    '',
-    `# Live Verdict — ${verdictId}`,
-    '',
-    `- Verdict: \`${packet.verdict}\``,
-    `- Phenomenon: ${packet.phenomenon}`,
-    `- Harness: ${packet.harnessUnderEval.featureId}/${packet.harnessUnderEval.componentId} (${packet.harnessUnderEval.name})`,
-    `- Owner ask: ${packet.ownerAsk.requestedAction}`,
-    `- Re-eval: ${packet.acceptanceReevalPlan.closureCondition} at ${packet.acceptanceReevalPlan.nextEvalAt}`,
-    '',
-    'Evidence:',
-    ...packet.evidencePacket.snapshotRefs.map((ref) => `- ${ref}`),
-    ...packet.evidencePacket.attributionRefs.map((ref) => `- ${ref}`),
-    ...packet.evidencePacket.metricRefs.map((ref) => `- metric:${ref}`),
-    ...packet.evidencePacket.sampleTraceRefs.map((ref) => `- ${ref}`),
-    '',
-    'Counterarguments:',
-    ...packet.counterarguments.map((counterargument) => `- ${counterargument}`),
-    '',
-  ].join('\n');
-}
+// formatLiveVerdictMarkdown extracted to eval-a2a-verdict-renderer.ts (350-line limit)
 
 function strongestFinding(findings: ReturnType<typeof parseAttribution>['findings'][number][]) {
   if (findings.length === 0) return undefined;

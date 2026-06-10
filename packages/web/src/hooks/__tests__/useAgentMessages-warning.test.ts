@@ -124,6 +124,22 @@ describe('useAgentMessages system_info warning', () => {
     );
   });
 
+  it('suppresses tool_activity telemetry on the active stream path', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'antig-opus',
+        content: JSON.stringify({ type: 'tool_activity', toolName: 'view_file' }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
   it('renders a2a_pingpong_terminated JSON as readable system message', () => {
     act(() => {
       root.render(React.createElement(Harness));

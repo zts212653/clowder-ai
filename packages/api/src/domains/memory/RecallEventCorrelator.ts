@@ -44,10 +44,10 @@ export class RecallEventCorrelator {
     this.insertStmt = db.prepare(`
       INSERT OR IGNORE INTO recall_events
         (recall_id, cat_id, invocation_id, tool_name, query, mode, scope,
-         candidates_json, consumed_json, reformulated, fell_back_to_grep,
+         candidates_json, result_count, consumed_json, reformulated, fell_back_to_grep,
          abandoned, next_graph_resolve_after_read, token_cost, timestamp,
          shadow_ranking_json, result_set_id, attribution_clarity, thread_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
   }
 
@@ -127,6 +127,7 @@ export class RecallEventCorrelator {
         mode: asString(event.summary.mode),
         scope: asString(event.summary.scope),
         candidates,
+        resultCount: asNumber(event.summary.resultCount),
         consumed,
         reformulated,
         fellBackToGrep,
@@ -165,6 +166,7 @@ export class RecallEventCorrelator {
           e.mode ?? null,
           e.scope ?? null,
           JSON.stringify(e.candidates),
+          e.resultCount ?? null,
           JSON.stringify(e.consumed),
           e.reformulated ? 1 : 0,
           e.fellBackToGrep ? 1 : 0,
@@ -315,4 +317,8 @@ export class RecallEventCorrelator {
 
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
+}
+
+function asNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }

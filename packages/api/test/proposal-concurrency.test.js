@@ -108,4 +108,64 @@ describe('F128 concurrency + stale-claim recovery', () => {
     const finalProposal = await ctx.proposalStore.get(proposalId);
     assert.equal(finalProposal.status, 'approved');
   });
+
+  // 砚砚 review P1-3: a crash between recordCreatedThread and finalize leaves the proposal in
+  // `approving`. The created thread already carries the approve-time projectPath, so stale
+  // recovery must backfill it into the proposal audit (otherwise the audit keeps the pre-override
+  // ownership while the thread is re-homed).
+  test('stale approve recovery syncs projectPath audit from the created thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source', 'default');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    ctx.proposalStore.claimForApproval({ proposalId, approvedBy: 'alice' });
+    const orphanedThread = await ctx.threadStore.create('alice', 'Recovered', '/projects/rehomed');
+    ctx.proposalStore.recordCreatedThread(proposalId, orphanedThread.id);
+    ctx.proposalStore.proposals.get(proposalId).claimedAt = Date.now() - 60_000;
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(
+      proposal.projectPath,
+      '/projects/rehomed',
+      'audit must sync to the created thread ownership, not stay default',
+    );
+  });
+
+  test('stale reject recovery also syncs projectPath audit from the created thread', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source', 'default');
+    const { proposalId } = JSON.parse((await ctx.propose({ userId: 'alice', threadId: source.id })).body);
+    ctx.proposalStore.claimForApproval({ proposalId, approvedBy: 'alice' });
+    const orphanedThread = await ctx.threadStore.create('alice', 'Recovered', '/projects/rehomed');
+    ctx.proposalStore.recordCreatedThread(proposalId, orphanedThread.id);
+    ctx.proposalStore.proposals.get(proposalId).claimedAt = Date.now() - 60_000;
+    const res = await ctx.reject('alice', proposalId);
+    assert.equal(res.statusCode, 409);
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.projectPath, '/projects/rehomed', 'reject-stale recovery also syncs projectPath audit');
+  });
+
+  test('stale approve recovery preserves checkpointed reportingMode override', async () => {
+    const ctx = await createProposalTestContext();
+    const source = await ctx.threadStore.create('alice', 'Source', 'default');
+    const { proposalId } = JSON.parse(
+      (
+        await ctx.propose({
+          userId: 'alice',
+          threadId: source.id,
+          reportingMode: 'final-only',
+        })
+      ).body,
+    );
+    ctx.proposalStore.claimForApproval({ proposalId, approvedBy: 'alice' });
+    const orphanedThread = await ctx.threadStore.create('alice', 'Recovered', 'default');
+    ctx.proposalStore.recordCreatedThread(proposalId, orphanedThread.id, { reportingMode: 'none' });
+    ctx.proposalStore.proposals.get(proposalId).claimedAt = Date.now() - 60_000;
+
+    const res = await ctx.approve('alice', proposalId);
+    assert.equal(res.statusCode, 200);
+    const proposal = await ctx.proposalStore.get(proposalId);
+    assert.equal(proposal.status, 'approved');
+    assert.equal(proposal.reportingMode, 'none', 'stale recovery must preserve the user-approved final mode');
+  });
 });
