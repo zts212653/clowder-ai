@@ -240,6 +240,7 @@ import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
+import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
 import { getDefaultUploadDir } from './utils/upload-paths.js';
@@ -596,14 +597,8 @@ async function main(): Promise<void> {
   );
 
   // F102: Memory services — SQLite-only
-  // P1 fix: resolve paths relative to repo root, not CWD (which may be packages/api)
-  const { existsSync } = await import('node:fs');
   const { resolve } = await import('node:path');
-  const repoRoot = existsSync(resolve(process.cwd(), 'docs', 'features'))
-    ? process.cwd()
-    : existsSync(resolve(process.cwd(), '..', '..', 'docs', 'features'))
-      ? resolve(process.cwd(), '..', '..')
-      : process.cwd();
+  const { repoRoot, docsRoot, markersDir } = resolveMemoryRepoPaths(process.cwd());
 
   const { initRepoIdentity, isSameRepo } = await import('./utils/is-same-repo.js');
   initRepoIdentity(repoRoot);
@@ -634,8 +629,8 @@ async function main(): Promise<void> {
   const memoryServices = await createMemoryServices({
     type: 'sqlite',
     sqlitePath: process.env.EVIDENCE_DB ?? resolve(repoRoot, 'evidence.sqlite'),
-    docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
-    markersDir: resolve(repoRoot, 'docs', 'markers'),
+    docsRoot,
+    markersDir,
     transcriptDataDir, // reuse the same resolved path as Writer/Reader (line 282)
     embed: { embedMode: resolvedEmbedMode },
     // Phase E-2: message passage indexing — provide a callback that reads thread messages
@@ -1679,7 +1674,7 @@ async function main(): Promise<void> {
       evidenceDb: memoryServices.store.getDb(),
       markersProvider: memoryServices.markerQueue,
       repoRoot,
-      docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+      docsRoot,
     });
     verdictGenerators['eval:memory'] = createMemoryGeneratorAdapter(memProvider);
   }
@@ -2611,7 +2606,7 @@ async function main(): Promise<void> {
     knowledgeResolver: memoryServices.knowledgeResolver,
     markerQueue: memoryServices.markerQueue,
     repoRoot,
-    docsRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+    docsRoot,
   });
 
   // F152 Phase C: Distillation routes (global lesson reflow)
@@ -2675,7 +2670,7 @@ async function main(): Promise<void> {
       ...(redisClient ? { redis: redisClient } : {}),
       // AC-H1 P1 R3: runtime exclude updates for parent IndexBuilder
       indexBuilder: memoryServices.indexBuilder as import('./domains/memory/IndexBuilder.js').IndexBuilder | undefined,
-      parentRoot: process.env.DOCS_ROOT ?? resolve(repoRoot, 'docs'),
+      parentRoot: docsRoot,
     });
   }
 
