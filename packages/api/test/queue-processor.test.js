@@ -2424,6 +2424,130 @@ describe('QueueProcessor', () => {
     });
   });
 
+  // ── R7: silent fallback late-success/failure cleanup ──
+
+  describe('silent fallback late-success cleanup (R7)', () => {
+    /** Poll until predicate returns true or timeout. */
+    async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (predicate()) return;
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+      throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+    }
+
+    it('silent fallback timeout + late-success → cleanupPlaceholders called', async () => {
+      // Silent invocation (only done, no text) → deliver times out → deliver
+      // later succeeds → cleanupPlaceholders must be called on late-success.
+      let resolveDeliver;
+      const deliverGate = new Promise((r) => {
+        resolveDeliver = r;
+      });
+      const outboundHook = {
+        deliver: mock.fn(async () => {
+          await deliverGate;
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      // Silent router: only yields done, no text content.
+      // deliverTimeoutMs: 50 — short timeout so test doesn't wait 10s.
+      const silentDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'done', catId: 'opus', content: '', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        deliverTimeoutMs: 50,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const silentProcessor = new QueueProcessor(silentDeps);
+
+      const entry = enqueueEntry(silentDeps.queue);
+      silentDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await silentProcessor.processNext('t1', 'u1');
+
+      // Timeout (50ms) has already fired; deliver still hanging on deliverGate
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(
+        streamingHook.cleanupPlaceholders.mock.calls.length,
+        0,
+        'cleanup must NOT run immediately after silent timeout',
+      );
+
+      // Late-success: deliver finally resolves
+      resolveDeliver();
+      await waitFor(() => streamingHook.cleanupPlaceholders.mock.calls.length >= 1);
+      assert.equal(
+        streamingHook.cleanupPlaceholders.mock.calls.length,
+        1,
+        'cleanup must run after silent late-success delivery (R7)',
+      );
+    });
+
+    it('silent fallback timeout + late-failure → cleanupPlaceholders NOT called', async () => {
+      // Silent invocation → deliver times out → deliver later rejects
+      // → cleanupPlaceholders must NOT be called (thinking card stays).
+      let rejectDeliver;
+      const deliverGate = new Promise((_, rej) => {
+        rejectDeliver = rej;
+      });
+      const outboundHook = {
+        deliver: mock.fn(async () => {
+          await deliverGate;
+        }),
+      };
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const silentDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield { type: 'done', catId: 'opus', content: '', timestamp: Date.now() };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        outboundHook,
+        streamingHook,
+        deliverTimeoutMs: 50,
+        threadMetaLookup: mock.fn(async () => undefined),
+      });
+      const silentProcessor = new QueueProcessor(silentDeps);
+
+      const entry = enqueueEntry(silentDeps.queue);
+      silentDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await silentProcessor.processNext('t1', 'u1');
+
+      // Timeout (50ms) has already fired; deliver still hanging on deliverGate
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(streamingHook.cleanupPlaceholders.mock.calls.length, 0, 'cleanup must NOT run after silent timeout');
+
+      // Late-failure: deliver rejects
+      rejectDeliver(new Error('connector down'));
+      await new Promise((r) => setTimeout(r, 100));
+      assert.equal(
+        streamingHook.cleanupPlaceholders.mock.calls.length,
+        0,
+        'cleanup must NOT run after silent hard failure (R7: preserve placeholder)',
+      );
+    });
+  });
+
   // ── F175 Task 5: user-message batching at dequeue ──
 
   describe('user-message batching (F175)', () => {

@@ -56,7 +56,7 @@ export interface CliDiagnostics {
    *  excerpt rendering on `KNOWN_EXCERPT_SOURCES.has(excerptSource)` — both protects
    *  malformed payloads (no source) AND fails closed when older clients see a future
    *  source value they don't recognize (e.g. a hypothetical 'pii_redacted'). */
-  excerptSource?: 'classifier' | 'cc_structured';
+  excerptSource?: 'classifier' | 'cc_structured' | 'unknown_raw';
   /** Debug correlation metadata — safe to expose */
   debugRef: {
     command: string;

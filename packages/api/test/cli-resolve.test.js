@@ -168,6 +168,44 @@ test(
   },
 );
 
+// --- #894: skipPathProbe skips PATH and goes straight to fallback dirs ---
+
+test(
+  'resolveCliCommand with skipPathProbe finds CLI in fallback dir without PATH probe (#894)',
+  { skip: process.platform === 'win32' && 'Unix-only (HOME fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-skipprobe-'));
+    const localBin = join(tempRoot, '.local', 'bin');
+    mkdirSync(localBin, { recursive: true });
+
+    // Use a unique name that definitely won't be on PATH
+    const cmdName = 'fake-skipprobe-test-tool-894';
+    const fakeBin = join(localBin, cmdName);
+    writeFileSync(fakeBin, '#!/bin/sh\necho ok\n', { mode: 0o755 });
+
+    const originalHome = process.env.HOME;
+    try {
+      process.env.HOME = tempRoot;
+      // Clear any cached result first
+      invalidateCliCommand(cmdName);
+
+      const result = resolveCliCommand(cmdName, { skipPathProbe: true });
+      assert.equal(result, fakeBin, 'should find binary in fallback dir even with skipPathProbe');
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test('resolveCliCommand with skipPathProbe returns null when not in fallback dirs', () => {
+  const cmdName = 'nonexistent-skipprobe-xyz-894';
+  invalidateCliCommand(cmdName);
+  const result = resolveCliCommand(cmdName, { skipPathProbe: true });
+  assert.equal(result, null, 'should return null for truly missing CLI');
+});
+
 // --- F173 Phase D AC-D1/D2: cache invalidation on stale entry ---
 
 test(

@@ -581,6 +581,7 @@ export function useChatHistory(threadId: string) {
         if ((canSettle && reachedTarget) || framesRemaining <= 0) {
           rememberScrollState(scheduledForThread, el);
           restoreFrameRef.current = null;
+          window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
           return;
         }
 

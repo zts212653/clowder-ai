@@ -31,7 +31,7 @@ function lightDecl(id: string): string {
   return (
     `--color-${id}-bubble:oklch(var(--cat-bubble-l, 0.62) calc(var(--${id}-chroma) * var(--cat-bubble-cmul, 1)) var(--${id}-hue));` +
     `--color-${id}-surface:oklch(var(--cat-surface-l, 0.85) calc(var(--${id}-chroma) * var(--cat-surface-cmul, 0.45)) var(--${id}-hue));` +
-    `--color-${id}-text:oklch(var(--cat-name-l, 0.24) var(--cat-name-c, 0.005) var(--cat-name-h, 139));` +
+    `--color-${id}-text:oklch(var(--cat-name-l, 0.15) var(--cat-name-c, 0.025) var(--cat-name-h, 5));` +
     `--color-${id}-ring:oklch(var(--cat-ring-l, 0.55) calc(var(--${id}-chroma) * var(--cat-ring-cmul, 1.1)) var(--${id}-hue));` +
     `--color-${id}-primary:var(--color-${id}-bubble);` +
     `--color-${id}-light:var(--color-${id}-surface);` +
@@ -43,8 +43,8 @@ function lightDecl(id: string): string {
 function darkDecl(id: string): string {
   return (
     `--color-${id}-bubble:oklch(var(--cat-bubble-l, 0.68) calc(var(--${id}-chroma) * var(--cat-bubble-cmul, 0.85)) var(--${id}-hue));` +
-    `--color-${id}-surface:oklch(var(--cat-surface-l, 0.28) calc(var(--${id}-chroma) * var(--cat-surface-cmul, 0.25)) var(--${id}-hue));` +
-    `--color-${id}-text:oklch(var(--cat-name-l, 0.88) var(--cat-name-c, 0.005) var(--cat-name-h, 139));` +
+    `--color-${id}-surface:oklch(var(--cat-surface-l, 0.3) calc(var(--${id}-chroma) * var(--cat-surface-cmul, 0.15)) var(--${id}-hue));` +
+    `--color-${id}-text:oklch(var(--cat-name-l, 0.95) var(--cat-name-c, 0.1) var(--cat-name-h, 25));` +
     `--color-${id}-ring:oklch(var(--cat-ring-l, 0.70) calc(var(--${id}-chroma) * var(--cat-ring-cmul, 1)) var(--${id}-hue));`
   );
 }

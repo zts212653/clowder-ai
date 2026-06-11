@@ -122,7 +122,7 @@ export const NEUTRAL_ROWS: [keyof NeutralP, string][] = [
   ['codeTextL', '代码字'],
 ];
 
-/* ── Per-theme INIT defaults (CVO-tuned 2026-05-28) ──
+/* ── Per-theme INIT defaults (CVO-tuned 2026-06-10) ──
  * Light and Dark themes have different accent hue, inset/msgText tuning,
  * surface elevation, and catText color. INIT = INIT_DARK (migration fallback). */
 export const INIT_LIGHT: TunerState = {
@@ -132,12 +132,12 @@ export const INIT_LIGHT: TunerState = {
   surfaceChroma: 1.0,
   light: {
     primary: { L: 0.62, Cmul: 1.0 },
-    surface: { L: 0.94, Cmul: 0.25 },
+    surface: { L: 0.85, Cmul: 0.45 },
     text: { L: 0.24, Cmul: 0.8 },
-    inset: { L: 0.9, Cmul: 0.15 },
+    inset: { L: 0.25, Cmul: 0.15 },
     ring: { L: 0.55, Cmul: 1.1 },
-    insetText: { L: 0.25, C: 0.02 },
-    msgText: { L: 0.2, C: 0.005 },
+    insetText: { L: 0.85, C: 0.03 },
+    msgText: { L: 0.25, C: 0.01 },
     elev: { sunken: 0.92, base: 0.95, elevated: 0.99, canvas: 0.995 },
   },
   dark: {
@@ -151,9 +151,9 @@ export const INIT_LIGHT: TunerState = {
     elev: { sunken: 0.275, base: 0.18, elevated: 0.1, canvas: 0.18 },
   },
   // biome-ignore format: compact INIT block
-  semanticLight: { criticalH: 38, successH: 135, warningH: 46, infoH: 209, L: 0.57, C: 0.12, surfL: 0.96, surfC: 0.03 },
+  semanticLight: { criticalH: 35, successH: 135, warningH: 45, infoH: 210, L: 0.55, C: 0.12, surfL: 0.96, surfC: 0.03 },
   semanticDark: { criticalH: 25, successH: 145, warningH: 70, infoH: 230, L: 0.7, C: 0.17, surfL: 0.25, surfC: 0.05 },
-  queue: { H: 290, C: 0.1, L: 0.62 },
+  queue: { H: 300, C: 0.12, L: 0.5 },
   neutralHue: 30,
   neutralChroma: 0.005,
   neutralLight: {
@@ -163,8 +163,8 @@ export const INIT_LIGHT: TunerState = {
     interactiveL: 0.36,
     borderL: 0.84,
     borderSubtleL: 0.915,
-    codeBgL: 0.92,
-    codeTextL: 0.2,
+    codeBgL: 0.9,
+    codeTextL: 0.19,
   },
   neutralDark: {
     textL: 0.94,
@@ -208,9 +208,9 @@ export const INIT_DARK: TunerState = {
     elev: { sunken: 0.36, base: 0.28, elevated: 0.21, canvas: 0.24 },
   },
   // biome-ignore format: compact INIT block
-  semanticLight: { criticalH: 38, successH: 135, warningH: 46, infoH: 209, L: 0.57, C: 0.12, surfL: 0.96, surfC: 0.03 },
+  semanticLight: { criticalH: 35, successH: 135, warningH: 45, infoH: 210, L: 0.55, C: 0.12, surfL: 0.96, surfC: 0.03 },
   semanticDark: { criticalH: 25, successH: 145, warningH: 70, infoH: 230, L: 0.7, C: 0.17, surfL: 0.25, surfC: 0.05 },
-  queue: { H: 290, C: 0.1, L: 0.62 },
+  queue: { H: 290, C: 0.15, L: 0.6 },
   neutralHue: 30,
   neutralChroma: 0.005,
   neutralLight: {
@@ -224,12 +224,12 @@ export const INIT_DARK: TunerState = {
     codeTextL: 0.22,
   },
   neutralDark: {
-    textL: 0.94,
-    secondaryL: 0.76,
+    textL: 0.95,
+    secondaryL: 0.75,
     mutedL: 0.66,
     interactiveL: 0.84,
-    borderL: 0.32,
-    borderSubtleL: 0.24,
+    borderL: 0.35,
+    borderSubtleL: 0.4,
     codeBgL: 0.25,
     codeTextL: 0.9,
   },

@@ -115,7 +115,7 @@ const UNKNOWN_PALETTE: Palette = { ...PALETTE_SYSTEM, Icon: UnknownReasonIcon };
  * no excerptSource and (b) forward-compat: any future api source value the current web
  * doesn't recognize yet (e.g. a hypothetical 'pii_redacted') is treated as untrusted.
  */
-const KNOWN_EXCERPT_SOURCES: ReadonlySet<string> = new Set(['classifier', 'cc_structured']);
+const KNOWN_EXCERPT_SOURCES: ReadonlySet<string> = new Set(['classifier', 'cc_structured', 'unknown_raw']);
 
 /**
  * 云端 codex P2 (2026-05-27): persisted/hydrated `cliDiagnostics.reasonCode` may carry

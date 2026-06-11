@@ -12,6 +12,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -81,7 +82,10 @@ const defaultExistsOnPath: ExistsOnPath = async (cli) => {
     }
     return true;
   } catch {
-    return false;
+    // PATH probe failed — fall back to well-known directory search (macOS GUI
+    // apps / Electron don't inherit the user's shell PATH).
+    // #894: skipPathProbe since we already probed PATH above; only scan fallback dirs.
+    return resolveCliCommand(cli, { skipPathProbe: true }) !== null;
   }
 };
 

@@ -172,6 +172,8 @@ export interface QueueProcessorDeps {
   streamingHook?: StreamingOutboundHookLike;
   /** F088 fix: optional thread metadata lookup for outbound delivery. */
   threadMetaLookup?: (threadId: string) => ThreadMetaLike | undefined | Promise<ThreadMetaLike | undefined>;
+  /** Outbound delivery timeout in ms (default 10_000). Mirrors ConnectorInvokeTrigger. */
+  deliverTimeoutMs?: number;
   /** #813: Thread store for passive continuation (write/consume pending continuation). */
   threadStore?: ThreadStoreLike;
   /** F224: continuation lifecycle coordinator boundary. */
@@ -877,6 +879,10 @@ export class QueueProcessor {
     // Cloud Codex P2: defer A2A consumption to success path — entries stay in queue
     // until the batch actually succeeds. The invocationTracker prevents double-pickup.
     let deferredA2AConsume = new Set<string>();
+    // R4 fix: hoist streamStartPromise above try so the catch block can await it
+    // before calling onStreamEnd → cleanupPlaceholders (the correct failure cleanup
+    // sequence per messages.ts cleanupStreamingOnFailure).
+    let streamStartPromise: Promise<void> | undefined;
 
     try {
       // 1. Create InvocationRecord (before batching — avoid claiming entries on duplicate)
@@ -1192,7 +1198,6 @@ export class QueueProcessor {
       const hook = this.entryCompleteHooks.get(entry.id);
 
       // F088 fix: start streaming placeholder on external platforms
-      let streamStartPromise: Promise<void> | undefined;
       if (this.deps.streamingHook) {
         streamStartPromise = this.deps.streamingHook
           .onStreamStart(threadId, primaryCat, invocationId, entry.senderMeta)
@@ -1203,7 +1208,7 @@ export class QueueProcessor {
 
       // F151: Mid-loop delivery to preserve ordering (same fix as ConnectorInvokeTrigger)
       const deliveredTurnIndices = new Set<number>();
-      const DELIVER_TIMEOUT_MS = 10_000;
+      const DELIVER_TIMEOUT_MS = this.deps.deliverTimeoutMs ?? 10_000;
       let threadMeta: ThreadMetaLike | undefined;
       let threadMetaPromise: Promise<ThreadMetaLike | undefined> | undefined;
       if (this.deps.outboundHook && this.deps.threadMetaLookup) {
@@ -1485,6 +1490,48 @@ export class QueueProcessor {
         /* ignore secondary errors */
       }
 
+      // R4 fix (#873): correct failure cleanup sequence per messages.ts
+      // cleanupStreamingOnFailure — onStreamEnd moves sessions from active →
+      // pendingCleanup; cleanupPlaceholders only acts on pendingCleanup, so
+      // calling it alone is a no-op when sessions are still active.
+      if (this.deps.streamingHook && invocationId) {
+        try {
+          const STREAM_START_TIMEOUT_MS = 5000;
+          if (streamStartPromise) {
+            await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
+          }
+          await this.deps.streamingHook.onStreamEnd(threadId, '', invocationId);
+          await this.deps.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
+        } catch (cleanupErr) {
+          log.warn({ err: cleanupErr, threadId }, '[QueueProcessor] Error-path streaming cleanup failed');
+        }
+      }
+
+      // R3 P2 fix (#873): Deliver error message to external IM so user sees
+      // a reply instead of silence (mirrors ConnectorInvokeTrigger error path).
+      // R6 fix: timeout prevents adapter hang from pinning queue slot (Cloud P1).
+      if (this.deps.outboundHook) {
+        const ERROR_DELIVER_TIMEOUT_MS = this.deps.deliverTimeoutMs ?? 10_000;
+        try {
+          await Promise.race([
+            this.deps.outboundHook.deliver(
+              threadId,
+              '抱歉，处理消息时遇到问题，请稍后重试。',
+              primaryCat,
+              undefined,
+              undefined,
+              undefined,
+              messageId ?? undefined,
+            ),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('deliver timeout')), ERROR_DELIVER_TIMEOUT_MS),
+            ),
+          ]);
+        } catch (deliverErr) {
+          log.error({ err: deliverErr, threadId }, '[QueueProcessor] Error-path outbound delivery failed');
+        }
+      }
+
       return 'failed';
     } finally {
       // Always cleanup tracker + queue (all target cat slots)
@@ -1648,7 +1695,7 @@ export class QueueProcessor {
         }
       }
 
-      const DELIVER_TIMEOUT_MS = 10_000;
+      const DELIVER_TIMEOUT_MS = this.deps.deliverTimeoutMs ?? 10_000;
       // F151: skip turns already delivered mid-loop
       const nonEmptyTurns = outboundTurns.filter(
         (t, i) =>
@@ -1752,10 +1799,53 @@ export class QueueProcessor {
           }
         });
       }
-    } else if (this.deps.streamingHook?.cleanupPlaceholders) {
-      await this.deps.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
-        log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.cleanupPlaceholders failed (silent)');
-      });
+    } else {
+      // R6+R7 fix: deliver fallback FIRST (with timeout), then cleanup placeholder
+      // only on success — preserves "thinking" card if delivery fails (Cloud P2).
+      // Timeout prevents adapter hang from pinning queue slot (Cloud P1).
+      // R7: late-success cleanup mirrors normal content-delivery pattern (lines 1783-1798).
+      const SILENT_DELIVER_TIMEOUT_MS = this.deps.deliverTimeoutMs ?? 10_000;
+      let silentDeliveryOk = !this.deps.outboundHook;
+      let silentDeliverPromise: Promise<void> | undefined;
+      if (this.deps.outboundHook) {
+        silentDeliverPromise = this.deps.outboundHook.deliver(
+          threadId,
+          '处理完成，但未产生回复内容。',
+          primaryCat,
+          undefined,
+          preResolvedMeta,
+          undefined,
+          triggerMessageId,
+        );
+        try {
+          await Promise.race([
+            silentDeliverPromise,
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('deliver timeout')), SILENT_DELIVER_TIMEOUT_MS),
+            ),
+          ]);
+          silentDeliveryOk = true;
+        } catch (deliverErr) {
+          log.error({ err: deliverErr, threadId }, '[QueueProcessor] Silent-path outbound delivery failed');
+        }
+      }
+      if (silentDeliveryOk && this.deps.streamingHook?.cleanupPlaceholders) {
+        await this.deps.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
+          log.warn({ err, threadId }, '[QueueProcessor] StreamingHook.cleanupPlaceholders failed (silent)');
+        });
+      } else if (silentDeliverPromise && this.deps.streamingHook?.cleanupPlaceholders) {
+        // R7: timeout fired but delivery may still succeed — defer cleanup to late-success
+        const cleanupFn = this.deps.streamingHook.cleanupPlaceholders.bind(this.deps.streamingHook);
+        silentDeliverPromise
+          .then(() => {
+            cleanupFn(threadId, invocationId).catch((err: unknown) => {
+              log.warn({ err, threadId }, '[QueueProcessor] Silent late-success placeholder cleanup failed');
+            });
+          })
+          .catch(() => {
+            /* delivery truly failed — thinking card stays as fallback UX */
+          });
+      }
     }
   }
 

@@ -376,31 +376,35 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
                 <div className="space-y-1.5">
                   {envEntries.map((entry, i) => (
                     <div key={i} className="flex items-center gap-1.5">
-                      <input
-                        value={entry.key}
-                        onChange={(e) => {
-                          const next = [...envEntries];
-                          next[i] = { ...next[i], key: e.target.value };
-                          setEnvEntries(next);
-                        }}
-                        placeholder="KEY"
-                        className={`w-[38%] font-mono ${
-                          entry.key.trim() && !isValidEnvKey(entry.key.trim())
-                            ? `${formInputClass} !border-semantic-critical !bg-semantic-critical-surface !text-semantic-critical`
-                            : formInputClass
-                        }`}
-                      />
+                      <div className="w-[38%] shrink-0">
+                        <input
+                          value={entry.key}
+                          onChange={(e) => {
+                            const next = [...envEntries];
+                            next[i] = { ...next[i], key: e.target.value };
+                            setEnvEntries(next);
+                          }}
+                          placeholder="KEY"
+                          className={`font-mono ${
+                            entry.key.trim() && !isValidEnvKey(entry.key.trim())
+                              ? `${formInputClass} !border-semantic-critical !bg-semantic-critical-surface !text-semantic-critical`
+                              : formInputClass
+                          }`}
+                        />
+                      </div>
                       <span className="text-micro text-cafe-muted">=</span>
-                      <input
-                        value={entry.value}
-                        onChange={(e) => {
-                          const next = [...envEntries];
-                          next[i] = { ...next[i], value: e.target.value };
-                          setEnvEntries(next);
-                        }}
-                        placeholder="value"
-                        className={`flex-1 font-mono ${formInputClass}`}
-                      />
+                      <div className="min-w-0 flex-1">
+                        <input
+                          value={entry.value}
+                          onChange={(e) => {
+                            const next = [...envEntries];
+                            next[i] = { ...next[i], value: e.target.value };
+                            setEnvEntries(next);
+                          }}
+                          placeholder="value"
+                          className={`font-mono ${formInputClass}`}
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={() => setEnvEntries(envEntries.filter((_, j) => j !== i))}

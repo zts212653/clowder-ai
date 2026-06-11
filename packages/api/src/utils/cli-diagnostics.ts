@@ -145,12 +145,21 @@ function truncateEvidenceString(value: string, maxChars: number): string {
   return `${sanitized.slice(0, maxChars - 3)}...`;
 }
 
-function truncateSilentEvidenceString(value: string, maxChars: number): string {
-  const sanitized = sanitizeCliStderr(value)
+/**
+ * R3 P1 fix (#857): aggressive path redaction for non-HOME absolute paths.
+ * sanitizeCliStderr only handles HOME/USERPROFILE/C:\Users/tmp — server installs
+ * under /srv, /workspace, /var/lib, D:\work would leak raw paths. This helper
+ * strips ALL multi-segment absolute paths (both Unix and Windows) that survived
+ * the HOME sanitizer. Used by unknown_raw + silent_completion evidence surfaces.
+ */
+function redactNonHomePaths(input: string): string {
+  return input
     .replace(/\b[A-Za-z]:\\(?:[^\s"'`<>|]+\\)*[^\s"'`<>|]+/g, '[PATH_REDACTED]')
-    .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
+}
+
+function truncateSilentEvidenceString(value: string, maxChars: number): string {
+  const sanitized = redactNonHomePaths(sanitizeCliStderr(value)).replace(/\s+/g, ' ').trim();
   if (sanitized.length <= maxChars) return sanitized;
   if (maxChars <= 3) return sanitized.slice(0, maxChars);
   return `${sanitized.slice(0, maxChars - 3)}...`;
@@ -289,16 +298,31 @@ export function buildCliDiagnostics(args: {
     }
   }
 
-  // Truly unknown (no structured CC error) — keep KD-1: no safeExcerpt.
+  // Truly unknown (no structured CC error).
+  // #857: when rawText is available, sanitize + truncate and surface as safeExcerpt so
+  // users see a desensitized message instead of having to check backend logs.
   // F212 Phase F (AC-F4/F5): pick honest unknown hint by stderrEmpty signal when caller
   // provides it; fall back to legacy hint for backward-compat (callers without Phase F awareness).
   let unknownHint: string = UNKNOWN_TEXT.hint;
   if (args.stderrEmpty === true) unknownHint = UNKNOWN_HINT_EMPTY_STDERR;
   else if (args.stderrEmpty === false) unknownHint = UNKNOWN_HINT_HAS_STDERR;
+
+  const trimmedRaw = args.rawText?.trim();
+  let safeExcerpt: string | undefined;
+  let excerptSource: CliDiagnostics['excerptSource'] | undefined;
+  if (trimmedRaw) {
+    // R3 P1 fix (#857): sanitize + redact non-HOME paths. sanitizeCliStderr only
+    // covers HOME/USERPROFILE/C:\Users/tmp; server installs under /srv, /workspace,
+    // /var/lib, D:\work would leak raw paths without the extra redaction layer.
+    safeExcerpt = redactNonHomePaths(sanitizeCliStderr(trimmedRaw)).slice(0, MAX_CHARS);
+    excerptSource = 'unknown_raw';
+  }
+
   return {
     publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : UNKNOWN_TEXT.summary,
     publicHint: unknownHint,
     debugRef: args.debugRef,
+    ...(safeExcerpt && { safeExcerpt, excerptSource }),
   };
 }
 

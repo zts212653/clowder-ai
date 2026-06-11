@@ -274,6 +274,9 @@ export class ConnectorInvokeTrigger {
     const HEARTBEAT_INTERVAL_MS = 30_000;
     let heartbeatInterval: ReturnType<typeof setInterval> | undefined;
     let invocationId: string | undefined;
+    // R4 fix: hoist above try so catch can await it for correct failure cleanup
+    // (onStreamEnd → cleanupPlaceholders, per messages.ts cleanupStreamingOnFailure).
+    let streamStartPromise: Promise<void> | undefined;
 
     try {
       // ① Atomic create InvocationRecord (inside try so finally releases controller on throw)
@@ -335,7 +338,6 @@ export class ConnectorInvokeTrigger {
       // Phase 4: Start streaming placeholder on external platforms
       // Fire-and-forget for the loop, but save the promise so onStreamEnd can await it
       // to prevent race (onStreamEnd before onStreamStart finishes registering sessions).
-      let streamStartPromise: Promise<void> | undefined;
       if (this.opts.streamingHook) {
         streamStartPromise = this.opts.streamingHook
           .onStreamStart(threadId, catId, createResult.invocationId, sender)
@@ -650,11 +652,56 @@ export class ConnectorInvokeTrigger {
               }
             });
           }
-        } else if (this.opts.streamingHook?.cleanupPlaceholders) {
-          // Cloud-P1-R3: silent invocation (no content) — still clean up placeholder
-          await this.opts.streamingHook.cleanupPlaceholders(threadId, createResult.invocationId).catch((err) => {
-            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed (silent)');
-          });
+        } else {
+          // R6+R7 fix: deliver fallback FIRST (with timeout), then cleanup placeholder
+          // only on success — preserves "thinking" card if delivery fails (Cloud P2).
+          // Timeout prevents adapter hang from blocking finally (Cloud P1).
+          // R7: late-success cleanup mirrors normal content-delivery pattern (lines 641-653).
+          let silentDeliveryOk = !this.opts.outboundHook; // no hook → proceed to cleanup
+          let silentDeliverPromise: Promise<void> | undefined;
+          if (this.opts.outboundHook) {
+            silentDeliverPromise = this.opts.outboundHook.deliver(
+              threadId,
+              '处理完成，但未产生回复内容。',
+              catId,
+              undefined,
+              undefined,
+              undefined,
+              messageId,
+            );
+            try {
+              await Promise.race([
+                silentDeliverPromise,
+                new Promise<void>((_, reject) =>
+                  setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS),
+                ),
+              ]);
+              silentDeliveryOk = true;
+            } catch (deliverErr) {
+              log.error({ err: deliverErr, threadId }, '[ConnectorInvokeTrigger] Silent-path outbound delivery failed');
+            }
+          }
+          if (silentDeliveryOk && this.opts.streamingHook?.cleanupPlaceholders) {
+            await this.opts.streamingHook.cleanupPlaceholders(threadId, createResult.invocationId).catch((err) => {
+              log.warn({ err, threadId }, '[ConnectorInvokeTrigger] StreamingHook.cleanupPlaceholders failed (silent)');
+            });
+          } else if (silentDeliverPromise && this.opts.streamingHook?.cleanupPlaceholders) {
+            // R7: timeout fired but delivery may still succeed — defer cleanup to late-success
+            const cleanupHook = this.opts.streamingHook;
+            const scopedInvocationId = createResult.invocationId;
+            silentDeliverPromise
+              .then(() => {
+                cleanupHook.cleanupPlaceholders(threadId, scopedInvocationId).catch((err) => {
+                  log.warn(
+                    { err, threadId },
+                    '[ConnectorInvokeTrigger] Silent late-success placeholder cleanup failed',
+                  );
+                });
+              })
+              .catch(() => {
+                /* delivery truly failed — thinking card stays as fallback UX */
+              });
+          }
         }
       }
 
@@ -687,6 +734,46 @@ export class ConnectorInvokeTrigger {
         },
         threadId,
       );
+
+      // R4 fix (#873): correct failure cleanup — onStreamEnd transitions sessions
+      // from active → pendingCleanup; cleanupPlaceholders alone is a no-op on active
+      // sessions. Matches messages.ts cleanupStreamingOnFailure() sequence.
+      if (this.opts.streamingHook) {
+        try {
+          const STREAM_START_TIMEOUT_MS = 5000;
+          if (streamStartPromise) {
+            await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
+          }
+          await this.opts.streamingHook.onStreamEnd(threadId, '', invocationId);
+          await this.opts.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
+        } catch (cleanupErr) {
+          log.warn({ err: cleanupErr, threadId }, '[ConnectorInvokeTrigger] Error-path streaming cleanup failed');
+        }
+      }
+
+      // #873: Deliver error message to external IM platform so user sees a reply (not silence)
+      // R6 fix: timeout prevents adapter hang from blocking finally (Cloud P1).
+      if (this.opts.outboundHook) {
+        const ERROR_DELIVER_TIMEOUT_MS = this.opts.deliverTimeoutMs ?? 10_000;
+        try {
+          await Promise.race([
+            this.opts.outboundHook.deliver(
+              threadId,
+              '抱歉，处理消息时遇到问题，请稍后重试。',
+              catId,
+              undefined,
+              undefined,
+              undefined,
+              messageId,
+            ),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('deliver timeout')), ERROR_DELIVER_TIMEOUT_MS),
+            ),
+          ]);
+        } catch (deliverErr) {
+          log.error({ err: deliverErr, threadId }, '[ConnectorInvokeTrigger] Error-path outbound delivery failed');
+        }
+      }
     } finally {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       invocationTracker.complete(threadId, catId, controller);

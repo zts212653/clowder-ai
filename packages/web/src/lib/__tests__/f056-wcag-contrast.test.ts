@@ -10,7 +10,7 @@
  * Token 派生公式来源：
  *   theme-tokens.css        — primitives（neutral / accent / semantic / chart）
  *   cat-persona-tokens.css  — text 走中性 --cafe-text（neutral-900）；
- *                            surface light L=0.94 / dark L=0.25（per-cat 派生）
+ *                            surface light L=0.85 / dark L=0.30（per-cat 派生）
  */
 import { describe, expect, it } from 'vitest';
 import { type OklchColor, oklchContrast } from '../color-utils';
@@ -25,14 +25,14 @@ function catPersonaDerived(hue: number, chroma: number, mode: 'light' | 'dark') 
     return {
       bubble: oklch(0.62, chroma, hue),
       surface: oklch(0.85, chroma * 0.45, hue),
-      text: oklch(0.36, 0.03, 30),
+      text: oklch(0.25, 0.01, 30),
       ring: oklch(0.55, chroma * 1.1, hue),
     };
   }
   return {
     bubble: oklch(0.68, chroma * 0.85, hue),
-    surface: oklch(0.28, chroma * 0.25, hue),
-    text: oklch(0.8, 0.02, 30),
+    surface: oklch(0.3, chroma * 0.15, hue),
+    text: oklch(0.8, 0.04, 30),
     ring: oklch(0.7, chroma, hue),
   };
 }
@@ -53,7 +53,7 @@ describe('F056 Phase E AC-E10 — WCAG contrast (OKLCH derived tokens)', () => {
       it(`${slug} light: text vs surface`, () => {
         const { text, surface } = catPersonaDerived(hue, chroma, 'light');
         const ratio = oklchContrast(text, surface);
-        // --cat-msg-text (L=0.36) is intentionally softer than --cafe-text (L=0.2)
+        // --cat-msg-text (L=0.25) is intentionally softer than --cafe-text (L=0.2)
         // inside colored bubbles. INIT_LIGHT.msgText tuned for readability + aesthetics.
         // Threshold: enhanced AA (6.5) — all cats score 6.86–6.97. Full AAA (7.0)
         // would require L≤0.33 which conflicts with the tuned visual design.
@@ -76,7 +76,7 @@ describe('F056 Phase E AC-E10 — WCAG contrast (OKLCH derived tokens)', () => {
 
     it('dark: neutral-900 text vs neutral-50 surface (mode-inverted)', () => {
       // dark mode: neutral-900=light text, neutral-50=dark surface (反转)
-      const ratio = oklchContrast(oklch(0.94, 0.005, 30), oklch(0.13, 0.005, 30));
+      const ratio = oklchContrast(oklch(0.95, 0.005, 30), oklch(0.13, 0.005, 30));
       expect(ratio).toBeGreaterThanOrEqual(7);
     });
   });
@@ -88,7 +88,7 @@ describe('F056 Phase E AC-E10 — WCAG contrast (OKLCH derived tokens)', () => {
     });
 
     it('dark: cafe-text (neutral-900) vs cafe-surface', () => {
-      const ratio = oklchContrast(oklch(0.94, 0.005, 30), oklch(0.18, 0.005, 30));
+      const ratio = oklchContrast(oklch(0.95, 0.005, 30), oklch(0.28, 0.0018, 30));
       expect(ratio).toBeGreaterThanOrEqual(7);
     });
   });
@@ -121,15 +121,14 @@ describe('F056 Phase E AC-E10 — WCAG contrast (OKLCH derived tokens)', () => {
 
   describe('Surface 三档 — dark mode L 跨度 ≥ 0.05 (perceptually distinguishable)', () => {
     it('dark: surface vs surface-elevated L 跨度 ≥ 0.05', () => {
-      // spec line 268: dark L 跨度 5-6 个点
-      const base = 0.18;
-      const elevated = 0.24;
+      const base = 0.28;
+      const elevated = 0.21;
       expect(Math.abs(elevated - base)).toBeGreaterThanOrEqual(0.05);
     });
 
     it('dark: surface vs surface-sunken L 跨度 ≥ 0.05', () => {
-      const base = 0.18;
-      const sunken = 0.12;
+      const base = 0.28;
+      const sunken = 0.36;
       expect(Math.abs(base - sunken)).toBeGreaterThanOrEqual(0.05);
     });
   });

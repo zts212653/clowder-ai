@@ -1757,7 +1757,7 @@ test('F212 AC-A1: __cliError includes cliDiagnostics with reasonCode for known s
   assert.equal(err.cliDiagnostics.debugRef.invocationId, 'inv-A1');
 });
 
-test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with no reasonCode/safeExcerpt', async () => {
+test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with sanitized safeExcerpt (#857)', async () => {
   const proc = createMockProcess({ exitOnKill: false });
   const spawnFn = createMockSpawnFn(proc);
 
@@ -1771,7 +1771,9 @@ test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with no reaso
   assert.ok(err);
   assert.ok(err.cliDiagnostics);
   assert.equal(err.cliDiagnostics.reasonCode, undefined);
-  assert.equal(err.cliDiagnostics.safeExcerpt, undefined);
+  // #857: unknown raw text now surfaced as sanitized safeExcerpt
+  assert.ok(err.cliDiagnostics.safeExcerpt, 'unknown stderr should produce safeExcerpt (#857)');
+  assert.equal(err.cliDiagnostics.excerptSource, 'unknown_raw');
   assert.match(err.cliDiagnostics.publicSummary, /未识别/);
 });
 

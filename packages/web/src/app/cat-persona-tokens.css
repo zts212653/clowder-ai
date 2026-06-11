@@ -14,7 +14,7 @@
  *
  * 公式（L 档位 / chroma 乘数）：
  *   light: bubble L=0.62 C×1.0 / surface L=0.85 C×0.45 / ring L=0.55 C×1.1
- *   dark:  bubble L=0.68 C×0.85 / surface L=0.28 C×0.25 / ring L=0.70 C×1.0
+ *   dark:  bubble L=0.68 C×0.85 / surface L=0.30 C×0.15 / ring L=0.70 C×1.0
  *   text 走中性 --cafe-text（不带猫色相）
  *
  * Runtime catId is the resolved name (e.g. "opus", "codex"), NOT the template
@@ -39,7 +39,7 @@
   --color-cocreator-surface: oklch(
     var(--cat-surface-l, 0.85) calc(var(--cocreator-chroma) * var(--cat-surface-cmul, 0.45)) var(--cocreator-hue)
   );
-  --color-cocreator-text: oklch(var(--cat-name-l, 0.24) var(--cat-name-c, 0.005) var(--cat-name-h, 139));
+  --color-cocreator-text: oklch(var(--cat-name-l, 0.15) var(--cat-name-c, 0.025) var(--cat-name-h, 5));
   --color-cocreator-ring: oklch(
     var(--cat-ring-l, 0.55) calc(var(--cocreator-chroma) * var(--cat-ring-cmul, 1.1)) var(--cocreator-hue)
   );
@@ -54,9 +54,9 @@
     var(--cat-bubble-l, 0.68) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 0.85)) var(--cocreator-hue)
   );
   --color-cocreator-surface: oklch(
-    var(--cat-surface-l, 0.28) calc(var(--cocreator-chroma) * var(--cat-surface-cmul, 0.25)) var(--cocreator-hue)
+    var(--cat-surface-l, 0.3) calc(var(--cocreator-chroma) * var(--cat-surface-cmul, 0.15)) var(--cocreator-hue)
   );
-  --color-cocreator-text: oklch(var(--cat-name-l, 0.88) var(--cat-name-c, 0.005) var(--cat-name-h, 139));
+  --color-cocreator-text: oklch(var(--cat-name-l, 0.95) var(--cat-name-c, 0.1) var(--cat-name-h, 25));
   --color-cocreator-ring: oklch(
     var(--cat-ring-l, 0.7) calc(var(--cocreator-chroma) * var(--cat-ring-cmul, 1)) var(--cocreator-hue)
   );

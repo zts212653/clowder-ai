@@ -102,10 +102,10 @@
   --conn-icon-default: #6b7280;
 
   /* Queue agent accent (feature-level accent, not IM brand) */
-  --queue-accent: #9b7ebd;
-  --queue-accent-hover: #8b6fae;
-  --queue-accent-surface: #f3eefa;
-  --queue-on-accent: #ffffff;
+  --queue-accent: oklch(0.5 0.12 300);
+  --queue-accent-hover: oklch(0.44 0.13 300);
+  --queue-accent-surface: oklch(0.96 0.024 300);
+  --queue-on-accent: oklch(1 0 0);
 }
 
 [data-theme="dark"] {
@@ -188,8 +188,8 @@
   --conn-icon-default: #9ca3af;
 
   /* Queue agent accent — dark mode */
-  --queue-accent: #c4b5fd;
-  --queue-accent-hover: #d8b4fe;
-  --queue-accent-surface: rgba(155, 126, 189, 0.12);
-  --queue-on-accent: #1a1025;
+  --queue-accent: oklch(0.76 0.17 290);
+  --queue-accent-hover: oklch(0.82 0.19 290);
+  --queue-accent-surface: oklch(0.25 0.06 290);
+  --queue-on-accent: oklch(0.18 0.03 290);
 }

@@ -24,13 +24,13 @@
     var(--cat-bubble-l, 0.62) calc(var(--msg-chroma, 0.1) * var(--cat-bubble-cmul, 1)) var(--msg-hue, 297)
   );
   --cat-msg-surface: oklch(
-    var(--cat-surface-l, 0.94) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.25)) var(--msg-hue, 297)
+    var(--cat-surface-l, 0.85) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.45)) var(--msg-hue, 297)
   );
   --cat-msg-inset: oklch(
-    var(--cat-inset-l, 0.9) calc(var(--msg-chroma, 0.1) * var(--cat-inset-cmul, 0.15)) var(--msg-hue, 297)
+    var(--cat-inset-l, 0.25) calc(var(--msg-chroma, 0.1) * var(--cat-inset-cmul, 0.15)) var(--msg-hue, 297)
   );
-  --cat-msg-inset-text: oklch(var(--cat-inset-text-l, 0.25) var(--cat-inset-text-c, 0.02) 30);
-  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.2) var(--cat-msg-text-c, 0.005) 30);
+  --cat-msg-inset-text: oklch(var(--cat-inset-text-l, 0.85) var(--cat-inset-text-c, 0.03) 30);
+  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.25) var(--cat-msg-text-c, 0.01) 30);
   --cat-msg-ring: oklch(
     var(--cat-ring-l, 0.55) calc(var(--msg-chroma, 0.1) * var(--cat-ring-cmul, 1.1)) var(--msg-hue, 297)
   );
@@ -41,13 +41,13 @@
     var(--cat-bubble-l, 0.68) calc(var(--msg-chroma, 0.1) * var(--cat-bubble-cmul, 0.85)) var(--msg-hue, 297)
   );
   --cat-msg-surface: oklch(
-    var(--cat-surface-l, 0.28) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.25)) var(--msg-hue, 297)
+    var(--cat-surface-l, 0.3) calc(var(--msg-chroma, 0.1) * var(--cat-surface-cmul, 0.15)) var(--msg-hue, 297)
   );
   --cat-msg-inset: oklch(
     var(--cat-inset-l, 0.24) calc(var(--msg-chroma, 0.1) * var(--cat-inset-cmul, 0.1)) var(--msg-hue, 297)
   );
   --cat-msg-inset-text: oklch(var(--cat-inset-text-l, 0.8) var(--cat-inset-text-c, 0.02) 250);
-  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.8) var(--cat-msg-text-c, 0.02) 30);
+  --cat-msg-text: oklch(var(--cat-msg-text-l, 0.8) var(--cat-msg-text-c, 0.04) 30);
   --cat-msg-ring: oklch(
     var(--cat-ring-l, 0.7) calc(var(--msg-chroma, 0.1) * var(--cat-ring-cmul, 1)) var(--msg-hue, 297)
   );
@@ -59,15 +59,15 @@
  * 等仅在当前 mode 可用的变量。buildCSS() 运行后会用 Tuner 实际值覆盖。
  * ⚠️ 硬编码值必须与 INIT defaults (oklch-tuner-engine.ts) 保持一致。 */
 .cat-persona-preview-light {
-  --cat-msg-surface: oklch(0.94 calc(var(--msg-chroma, 0.1) * 0.25) var(--msg-hue, 297));
-  --cat-msg-inset: oklch(0.9 calc(var(--msg-chroma, 0.1) * 0.15) var(--msg-hue, 297));
-  --cat-msg-inset-text: oklch(0.25 0.02 30);
-  --cat-msg-text: oklch(0.2 0.005 30);
+  --cat-msg-surface: oklch(0.85 calc(var(--msg-chroma, 0.1) * 0.45) var(--msg-hue, 297));
+  --cat-msg-inset: oklch(0.25 calc(var(--msg-chroma, 0.1) * 0.15) var(--msg-hue, 297));
+  --cat-msg-inset-text: oklch(0.85 0.03 30);
+  --cat-msg-text: oklch(0.25 0.01 30);
 }
 
 .cat-persona-preview-dark {
-  --cat-msg-surface: oklch(0.28 calc(var(--msg-chroma, 0.1) * 0.25) var(--msg-hue, 297));
+  --cat-msg-surface: oklch(0.3 calc(var(--msg-chroma, 0.1) * 0.15) var(--msg-hue, 297));
   --cat-msg-inset: oklch(0.24 calc(var(--msg-chroma, 0.1) * 0.1) var(--msg-hue, 297));
   --cat-msg-inset-text: oklch(0.8 0.02 250);
-  --cat-msg-text: oklch(0.8 0.02 30);
+  --cat-msg-text: oklch(0.8 0.04 30);
 }

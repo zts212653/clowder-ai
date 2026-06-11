@@ -74,7 +74,7 @@ export function invalidateCliCommand(commandOrPath: string): void {
  * fall through to re-probe instead of handing callers a stale path that would
  * spawn ENOENT in a loop until process restart.
  */
-export function resolveCliCommand(command: string): string | null {
+export function resolveCliCommand(command: string, opts?: { skipPathProbe?: boolean }): string | null {
   const cached = resolvedCache.get(command);
   if (cached !== undefined) {
     if (existsSync(cached)) return cached;
@@ -82,21 +82,25 @@ export function resolveCliCommand(command: string): string | null {
   }
 
   // Fast path: already in PATH
-  try {
-    const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;
-    const result = execSync(which, { timeout: 5000, encoding: 'utf-8' }).trim();
-    if (result) {
-      const lines = result
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      // On Windows, prefer the .cmd shim (more reliable for shim resolution)
-      const resolved = (IS_WINDOWS && lines.find((l) => /\.cmd$/i.test(l))) || lines[0];
-      resolvedCache.set(command, resolved);
-      return resolved;
+  // #894: caller can skip this when PATH was already probed (e.g. client-detection
+  // does its own `command -v`; repeating `which` is redundant + slower).
+  if (!opts?.skipPathProbe) {
+    try {
+      const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;
+      const result = execSync(which, { timeout: 5000, encoding: 'utf-8' }).trim();
+      if (result) {
+        const lines = result
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+        // On Windows, prefer the .cmd shim (more reliable for shim resolution)
+        const resolved = (IS_WINDOWS && lines.find((l) => /\.cmd$/i.test(l))) || lines[0];
+        resolvedCache.set(command, resolved);
+        return resolved;
+      }
+    } catch {
+      // fall through to manual search
     }
-  } catch {
-    // fall through to manual search
   }
 
   // Search common install directories

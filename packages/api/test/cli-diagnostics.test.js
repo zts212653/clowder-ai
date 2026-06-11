@@ -12,10 +12,12 @@ import { maybeCollectStreamError } from '../dist/utils/cli-spawn.js';
 
 const baseRef = { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-1' };
 
-test('AC-A5: unknown stderr → no safeExcerpt, publicSummary fallback', () => {
+test('AC-A5: unknown stderr → sanitized safeExcerpt (#857), publicSummary fallback', () => {
   const d = buildCliDiagnostics({ rawText: 'some weird thing happened', debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);
-  assert.strictEqual(d.safeExcerpt, undefined);
+  // #857: unknown raw text now surfaced as sanitized safeExcerpt (was: undefined per KD-1)
+  assert.ok(d.safeExcerpt, 'unknown raw text should produce safeExcerpt (#857)');
+  assert.strictEqual(d.excerptSource, 'unknown_raw');
   assert.match(d.publicSummary, /未识别/);
   assert.ok(d.publicHint.length > 0);
 });
@@ -57,7 +59,7 @@ test('AC-A6: panic stack — safeExcerpt strips frame lines if any', () => {
   assert.ok(!d.safeExcerpt.includes('.cargo/registry'), 'cargo path leaked');
 });
 
-test('AC-A6: panic without classifier match — publicSummary surfaces headline, no safeExcerpt', () => {
+test('AC-A6: panic without classifier match — publicSummary surfaces headline, sanitized safeExcerpt (#857)', () => {
   const rawText = [
     'thread "worker" panicked at src/bar.rs:99:1:',
     'completely unknown failure mode',
@@ -66,7 +68,9 @@ test('AC-A6: panic without classifier match — publicSummary surfaces headline,
   ].join('\n');
   const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);
-  assert.strictEqual(d.safeExcerpt, undefined);
+  // #857: unknown raw text now surfaced as sanitized safeExcerpt
+  assert.ok(d.safeExcerpt, 'panic raw text should produce safeExcerpt (#857)');
+  assert.strictEqual(d.excerptSource, 'unknown_raw');
   assert.match(d.publicSummary, /panic/i);
   assert.match(d.publicSummary, /worker/);
 });
@@ -274,13 +278,13 @@ test('AC-D3: unknown reasonCode + structuredErrorText → "Claude Code 报告：
   assert.strictEqual(d.excerptSource, 'cc_structured', 'AC-D3 path tags excerptSource for frontend whitelist');
 });
 
-test('AC-D3: truly unknown (no structuredErrorText) → keeps KD-1 no-safeExcerpt + 未识别 + no excerptSource', () => {
+test('AC-D3: truly unknown (no structuredErrorText) → sanitized safeExcerpt (#857) + 未识别', () => {
   const d = buildCliDiagnostics({ rawText: 'random noise no cause', debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);
-  assert.strictEqual(d.safeExcerpt, undefined, 'KD-1: no safeExcerpt for truly unknown');
+  // #857: unknown raw text now surfaced as sanitized safeExcerpt (overrides KD-1 for non-empty rawText)
+  assert.ok(d.safeExcerpt, 'unknown raw text should produce safeExcerpt (#857)');
+  assert.strictEqual(d.excerptSource, 'unknown_raw');
   assert.ok(d.publicSummary.includes('未识别'), 'truly unknown keeps 未识别');
-  // Phase D P2 fix: no safeExcerpt → no excerptSource (frontend membership check will fail closed)
-  assert.strictEqual(d.excerptSource, undefined, 'truly unknown: no excerptSource (fail-closed)');
 });
 
 // F212 Phase E — server_overloaded provider-neutral invariant (cloud codex R2 P2 on adf26db37):

@@ -14,7 +14,7 @@ import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { applyThemeCSS, getActiveTheme, restoreFromServer, useThemeStore } from '@/stores/themeStore';
 
 export function ThemeApplier() {
-  const { setTheme } = useCafeTheme();
+  const { theme, setTheme } = useCafeTheme();
   const active = useThemeStore((s) => getActiveTheme(s));
   const recoveryAttempted = useRef(false);
 
@@ -36,8 +36,9 @@ export function ThemeApplier() {
 
   /* Sync base mode to next-themes (manages data-theme attribute on <html>) */
   useEffect(() => {
+    if (theme === active.base) return;
     setTheme(active.base);
-  }, [active.base, setTheme]);
+  }, [active.base, setTheme, theme]);
 
   /* Inject CSS overrides for the active theme's OKLCH params */
   useEffect(() => {

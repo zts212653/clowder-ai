@@ -273,8 +273,9 @@ interface CallHint {
   warning: string;
 }
 
-// Generate a hint showing what API endpoint the CLI will actually call
-function buildCallHint(
+// Generate a hint showing what API endpoint the CLI will actually call.
+// Exported for testing (#886 regression coverage).
+export function buildCallHint(
   client: string,
   profile: ProfileItem | undefined,
   model: string,
@@ -282,9 +283,9 @@ function buildCallHint(
 ): CallHint | null {
   if (!profile || profile.authType === 'oauth' || !profile.baseUrl) return null;
   const base = profile.baseUrl.replace(/\/+$/, '');
-  const hasV1Suffix = /\/v1$/i.test(base);
-  // Strip trailing /v1 from base to avoid /v1/v1 duplication when pathSuffix already includes /v1
-  const baseWithoutV1 = hasV1Suffix ? base.replace(/\/v1$/i, '') : base;
+  // #886: detect ANY api-version suffix (/v1, /v2, …), not just /v1.
+  const versionMatch = base.match(/\/(v\d+)$/i);
+  const baseWithoutVersion = versionMatch ? base.slice(0, -versionMatch[0].length) : base;
 
   // For opencode, derive endpoint dynamically from provider name (sole authority)
   const ocPath = client === 'opencode' ? resolveOpenCodeEndpoint(providerName) : undefined;
@@ -299,9 +300,21 @@ function buildCallHint(
   const info = cliEndpoints[client];
   if (!info) return null;
 
-  // Use baseWithoutV1 for paths starting with /v1 to avoid duplication
-  const effectiveBase = info.pathSuffix.startsWith('/v1') ? baseWithoutV1 : base;
-  const fullUrl = `${effectiveBase}${info.pathSuffix}`;
+  // Match display URL to actual CLI runtime behavior:
+  // - base has /v1 + suffix has /v1 → strip /v1 from base to avoid /v1/v1.
+  // - only opencode uses provider base URLs as exact endpoint roots; for /vN
+  //   bases it calls /vN/<endpoint>, not /vN/v1/<endpoint> (#886).
+  //   Other CLIs keep their own /v1 suffix semantics.
+  let effectiveBase = base;
+  let effectiveSuffix = info.pathSuffix;
+  if (info.pathSuffix.startsWith('/v1') && versionMatch) {
+    if (versionMatch[1].toLowerCase() === 'v1') {
+      effectiveBase = baseWithoutVersion;
+    } else if (client === 'opencode') {
+      effectiveSuffix = info.pathSuffix.slice(3); // strip "/v1" prefix
+    }
+  }
+  const fullUrl = `${effectiveBase}${effectiveSuffix}`;
   let warning = '';
   if (client === 'google') {
     warning = '\n注意: Google 官方 endpoint 仍要求 builtin OAuth；第三方 gateway 会走这里展示的 baseUrl。';

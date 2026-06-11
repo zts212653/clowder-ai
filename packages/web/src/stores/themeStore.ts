@@ -23,7 +23,7 @@ const NO_HC: HcOverride = { on: false, hue: 0, chroma: 0 };
 /* Bump when INIT defaults change in a way that user's persisted built-in
  * overrides should be discarded (so they see the new defaults instead of
  * stale tuner edits from an older INIT). Custom themes are preserved. */
-const INIT_VERSION = '2026-05-28-per-theme-init';
+const INIT_VERSION = '2026-06-10-dark-token-init';
 
 export interface ThemePreset {
   id: string;
