@@ -1,20 +1,29 @@
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import type {
-  CapabilitiesConfig,
-  CapabilityEntry,
-  ILimbNode,
-  PluginManifest,
-  PluginResourceDef,
+import {
+  type CapabilitiesConfig,
+  type CapabilityEntry,
+  type ILimbNode,
+  type MountRules,
+  type PluginManifest,
+  type PluginResourceDef,
+  STANDARD_PROVIDER_IDS,
 } from '@cat-cafe/shared';
+import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
+import {
+  discardSkillMountSnapshot,
+  filterRulesToProvider,
+  mountSkillForProject,
+  restoreSkillMountSnapshot,
+  snapshotSkillMountsForProject,
+  unmountSkillForProject,
+} from '../../utils/skill-symlink-writer.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
 import type { ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
-
-const PROVIDER_DIRS = ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills'];
 
 export interface ActivationResult {
   type: string;
@@ -40,6 +49,7 @@ export interface ScheduleTaskRunner {
 
 export interface PluginResourceActivatorDeps {
   resolveProjectRoot: () => string;
+  resolveMainProjectRoot?: () => string;
   pluginsDir: string;
   limbRegistry: LimbRegistry;
   readCapabilities: () => Promise<CapabilitiesConfig | null>;
@@ -95,6 +105,41 @@ function scheduleNameFromCapabilityId(manifestId: string, capId: string): string
 
 function scheduleTaskIdForCapability(manifestId: string, cap: CapabilityEntry): string | undefined {
   return cap.scheduleTaskId ?? fallbackScheduleTaskId(manifestId, scheduleNameFromCapabilityId(manifestId, cap.id));
+}
+
+function allMountTargetIds(mountRules: MountRules): string[] {
+  return [...STANDARD_PROVIDER_IDS, ...(mountRules.customPaths ?? []).map((cp) => cp.alias)];
+}
+
+async function mountSkillForMountPaths(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  mountPaths?: readonly string[],
+): Promise<void> {
+  if (!mountPaths) {
+    await mountSkillForProject(projectRoot, skillName, skillsSource, mountRules);
+    return;
+  }
+  for (const providerId of mountPaths) {
+    await mountSkillForProject(projectRoot, skillName, skillsSource, filterRulesToProvider(mountRules, providerId));
+  }
+}
+
+async function unmountSkillOutsideMountPaths(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  mountPaths?: readonly string[],
+): Promise<void> {
+  if (!mountPaths) return;
+  const allowed = new Set(mountPaths);
+  for (const providerId of allMountTargetIds(mountRules)) {
+    if (allowed.has(providerId)) continue;
+    await unmountSkillForProject(projectRoot, skillName, filterRulesToProvider(mountRules, providerId), skillsSource);
+  }
 }
 
 export interface PluginLimbRehydrationDeps {
@@ -257,21 +302,25 @@ export class PluginResourceActivator {
       throw new Error(`Skill resource directory must contain SKILL.md: ${skillSourceDir}`);
     }
     const skillName = resourcePathBasename(resource.path);
+    const projectRoot = this.deps.resolveProjectRoot();
+    const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
+    const mountRules = await readMountRules(projectRoot, mainProjectRoot);
+    const skillsSource = dirname(skillSourceDir);
+    const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
 
-    const createdLinks: string[] = [];
+    const mountSnapshot = await snapshotSkillMountsForProject(projectRoot, skillName, skillsSource, mountRules, {
+      enabledOnly: mountPaths === undefined,
+      preserveNonSymlinks: true,
+    });
     try {
-      for (const providerDir of PROVIDER_DIRS) {
-        const skillsDir = join(this.deps.resolveProjectRoot(), providerDir);
-        if (await this.shouldSkipDirectoryLevelSkillsSymlink(skillsDir, dirname(skillSourceDir))) continue;
-        await mkdir(skillsDir, { recursive: true });
-        const linkPath = join(skillsDir, skillName);
-        if (await this.ensureSymlink(linkPath, skillSourceDir)) createdLinks.push(linkPath);
-      }
+      // F228: Delegate to source-agnostic mount primitive (MountRules-aware,
+      // handles per-skill symlinks, directory-level mounts, and rollback).
+      await unmountSkillOutsideMountPaths(projectRoot, skillName, skillsSource, mountRules, mountPaths);
+      await mountSkillForMountPaths(projectRoot, skillName, skillsSource, mountRules, mountPaths);
       await this.upsertCapabilityEntry(manifest, resource, true);
+      await discardSkillMountSnapshot(mountSnapshot);
     } catch (err) {
-      for (const linkPath of createdLinks) {
-        await this.removeOwnedSymlink(linkPath, skillSourceDir);
-      }
+      await restoreSkillMountSnapshot(mountSnapshot).catch(() => {});
       throw err;
     }
   }
@@ -281,13 +330,26 @@ export class PluginResourceActivator {
 
     const skillSourceDir = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     const skillName = resourcePathBasename(resource.path);
+    const projectRoot = this.deps.resolveProjectRoot();
+    const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
+    const mountRules = await readMountRules(projectRoot, mainProjectRoot);
 
-    for (const providerDir of PROVIDER_DIRS) {
-      const linkPath = join(this.deps.resolveProjectRoot(), providerDir, skillName);
-      await this.removeOwnedSymlink(linkPath, skillSourceDir);
-    }
-
+    // F228: Delegate to source-agnostic unmount primitive (MountRules-aware).
+    await unmountSkillForProject(projectRoot, skillName, mountRules, dirname(skillSourceDir));
     await this.upsertCapabilityEntry(manifest, resource, false);
+  }
+
+  private async readExistingPluginSkillMountPaths(
+    manifest: PluginManifest,
+    resource: PluginResourceDef,
+  ): Promise<readonly string[] | undefined> {
+    const config = await this.deps.readCapabilities();
+    if (!config) return undefined;
+    const capId = resourceCapId(manifest.id, resource);
+    const existing = config.capabilities.find(
+      (c) => normalizeCapId(c.id) === capId && c.pluginId === manifest.id && c.type === 'skill',
+    );
+    return Array.isArray(existing?.mountPaths) ? [...existing.mountPaths] : undefined;
   }
 
   private async activateLimb(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -686,69 +748,6 @@ export class PluginResourceActivator {
       });
     } catch {
       /* Preserve the original activation error; best-effort rollback already attempted. */
-    }
-  }
-
-  private async shouldSkipDirectoryLevelSkillsSymlink(skillsDir: string, expectedRoot: string): Promise<boolean> {
-    try {
-      const stat = await lstat(skillsDir);
-      if (!stat.isSymbolicLink()) return false;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
-      throw err;
-    }
-
-    let mountedRoot: string;
-    let expectedRealRoot: string;
-    try {
-      mountedRoot = await realpath(skillsDir);
-      expectedRealRoot = await realpath(expectedRoot);
-    } catch (err) {
-      throw new Error(
-        `Invalid directory-level plugin skill mount at ${skillsDir}: symlink must resolve to ${expectedRoot}. ${
-          (err as Error).message
-        }`,
-      );
-    }
-
-    if (mountedRoot !== expectedRealRoot) {
-      throw new Error(
-        `Refusing to mount plugin skill into directory-level skills symlink at ${skillsDir}: resolves to ${mountedRoot}, expected ${expectedRealRoot}`,
-      );
-    }
-
-    return true;
-  }
-
-  private async ensureSymlink(linkPath: string, target: string): Promise<boolean> {
-    try {
-      const s = await lstat(linkPath);
-      if (s.isSymbolicLink()) {
-        const { readlink } = await import('node:fs/promises');
-        const existing = await readlink(linkPath);
-        if (existing === target) return false;
-        throw new Error(`Refusing to overwrite existing symlink at ${linkPath} (current target: ${existing})`);
-      } else {
-        throw new Error(`Refusing to overwrite non-symlink at ${linkPath}`);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Refusing')) throw err;
-    }
-    await symlink(target, linkPath);
-    return true;
-  }
-
-  private async removeOwnedSymlink(linkPath: string, expectedTarget: string): Promise<void> {
-    try {
-      const s = await lstat(linkPath);
-      if (!s.isSymbolicLink()) return;
-      const { readlink } = await import('node:fs/promises');
-      const actual = await readlink(linkPath);
-      if (actual !== expectedTarget) return;
-      await rm(linkPath);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw err;
     }
   }
 }

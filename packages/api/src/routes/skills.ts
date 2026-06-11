@@ -1,32 +1,31 @@
 /**
- * Skills Route
- * GET /api/skills — Clowder AI 共享 Skills 看板数据 + staleness/conflicts (ADR-025 Phase 2)
- * POST /api/skills/sync — Re-sync managed symlinks
- * POST /api/skills/resolve-conflict — Resolve user/project skill conflict
+ * Skills Route — GET /api/skills
+ * Clowder AI 共享 Skills 看板数据 + staleness (ADR-025 Phase 2)
+ *
+ * Write routes (sync, sync-skill) are in skills-write.ts.
+ * Drift detection routes are in skills-drift.ts.
  */
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
-import type { SkillConflict } from '../config/governance/skill-conflict.js';
-import { detectConflicts } from '../config/governance/skill-conflict.js';
-import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
+import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import type { SkillsStaleness } from '../config/governance/skills-state.js';
-import { checkStaleness, readSkillsState } from '../config/governance/skills-state.js';
-import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
-import { resolveOwnerGate } from '../utils/owner-gate.js';
+import { checkStaleness } from '../config/governance/skills-state.js';
+import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   buildProviderSkillDirCandidates,
+  buildSkillMountTargets,
   isSkillMountedForProvider,
   resolveMainRepoPath,
 } from '../utils/skill-mount.js';
 import {
   listSkillDirs,
-  parseBootstrap,
   parseManifestSkillMeta,
   resolveSkillMcpStatuses,
   type SkillMcpDependency,
@@ -37,6 +36,14 @@ interface SkillMount {
   codex: boolean;
   gemini: boolean;
   kimi: boolean;
+  [providerId: string]: boolean;
+}
+
+interface SkillMountHealth {
+  enabledProviders: string[];
+  mountedCount: number;
+  requiredCount: number;
+  allMounted: boolean;
 }
 
 interface SkillEntry {
@@ -44,7 +51,11 @@ interface SkillEntry {
   category: string;
   trigger: string;
   description?: string;
+  source: 'cat-cafe' | 'external';
+  globalEnabled: boolean;
+  mountPaths: string[];
   mounts: SkillMount;
+  mountHealth: SkillMountHealth;
   requiresMcp?: SkillMcpDependency[];
 }
 
@@ -52,17 +63,22 @@ interface SkillsSummary {
   total: number;
   allMounted: boolean;
   registrationConsistent: boolean;
+  registrationIssues: { unregistered: string[]; phantom: string[] };
 }
 
 interface SkillsResponse {
   skills: SkillEntry[];
   summary: SkillsSummary;
   staleness: SkillsStaleness | null;
-  conflicts: SkillConflict[];
+}
+
+interface SkillsRouteOptions {
+  mainProjectRoot?: string;
+  skillsSourceDir?: string;
 }
 
 /** Resolve Clowder AI skills source from module location (stable across cwd/project). */
-function resolveCatCafeSkillsSourceDir(): string {
+export function resolveSkillsSourceDir(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   while (dir !== dirname(dir)) {
     const candidate = join(dir, 'cat-cafe-skills', 'manifest.yaml');
@@ -72,37 +88,36 @@ function resolveCatCafeSkillsSourceDir(): string {
   return resolve(process.cwd(), 'cat-cafe-skills');
 }
 
-const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
+type CatCafeSkillPolicyInfo = { source: 'cat-cafe'; enabled: boolean; mountPaths?: string[] };
 
-function resolveSessionUserId(request: import('fastify').FastifyRequest): string | null {
-  const userId = (request as import('fastify').FastifyRequest & { sessionUserId?: string }).sessionUserId;
-  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+async function loadDisabledCatCafeSkillNames(projectRoot: string): Promise<Set<string>> {
+  const config = await readCapabilitiesConfig(projectRoot);
+  return new Set(
+    config?.capabilities
+      .filter((cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && cap.enabled === false)
+      .map((cap) => cap.id) ?? [],
+  );
 }
 
-function requireSkillsOwner(
-  request: import('fastify').FastifyRequest,
-  reply: import('fastify').FastifyReply,
-): string | null {
-  const userId = resolveSessionUserId(request);
-  if (!userId) {
-    reply.status(401);
-    return null;
+function collectCatCafeSkillPolicy(
+  config: Awaited<ReturnType<typeof readCapabilitiesConfig>>,
+): Map<string, CatCafeSkillPolicyInfo> {
+  const lookup = new Map<string, CatCafeSkillPolicyInfo>();
+  for (const cap of config?.capabilities ?? []) {
+    if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
+    lookup.set(cap.id, {
+      source: 'cat-cafe',
+      enabled: cap.enabled,
+      mountPaths: cap.mountPaths,
+    });
   }
-  // Network guard: non-direct-loopback requests without a configured owner are
-  // rejected to prevent LAN/proxied skill writes in single-user mode (#794).
-  if (!isDirectLoopbackRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim()) {
-    reply.status(403);
-    return null;
-  }
-  const gateResult = resolveOwnerGate(userId);
-  if (gateResult) {
-    reply.status(gateResult.status);
-    return null;
-  }
-  return userId;
+  return lookup;
 }
 
-export const skillsRoutes: FastifyPluginAsync = async (app) => {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: GET /api/skills builds full skill inventory
+export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, opts) => {
+  const CAT_CAFE_SKILLS_SRC = opts.skillsSourceDir ?? resolveSkillsSourceDir();
+
   app.get('/api/skills', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -111,7 +126,6 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
     const repoRoot = dirname(skillsSrc);
-    const bootstrapPath = join(skillsSrc, 'BOOTSTRAP.md');
     const query = request.query as { projectPath?: string };
     let projectRoot = repoRoot;
     if (query.projectPath) {
@@ -123,16 +137,32 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       projectRoot = validated;
     }
     const home = homedir();
-    const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
-    const mainRepo = await resolveMainRepoPath();
+    const mainRepo = opts.mainProjectRoot ?? (await resolveMainRepoPath());
+    const mountRules = await readMountRules(projectRoot, mainRepo);
+    const enabledStandardProviders = STANDARD_PROVIDER_IDS.filter((id) => mountRules.providers[id].enabled);
+    const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home, mountRules);
+    const customMountTargets = buildSkillMountTargets(projectRoot, home, mountRules).filter(
+      (target) => target.kind === 'custom',
+    );
     const mainSkillsSrc = join(mainRepo, 'cat-cafe-skills');
 
-    const [sourceSkills, bootstrapEntries, manifestMeta] = await Promise.all([
+    const [sourceSkills, manifestMeta, disabledSkillNames, skillsCapConfig] = await Promise.all([
       listSkillDirs(skillsSrc),
-      parseBootstrap(bootstrapPath),
       parseManifestSkillMeta(skillsSrc),
+      loadDisabledCatCafeSkillNames(projectRoot),
+      readCapabilitiesConfig(projectRoot),
     ]);
     const mcpStatuses = await resolveSkillMcpStatuses(projectRoot, manifestMeta);
+
+    // F228: project policy wins. Empty external project configs inherit the global
+    // skill policy; projects with existing local rows keep their local facts until
+    // capabilities GET/sync materializes explicit Cat Cafe rows.
+    const projectCapLookup = collectCatCafeSkillPolicy(skillsCapConfig);
+    const shouldInheritGlobalSkillPolicy =
+      projectRoot !== mainRepo && skillsCapConfig !== null && skillsCapConfig.capabilities.length === 0;
+    const globalCapLookup = shouldInheritGlobalSkillPolicy
+      ? collectCatCafeSkillPolicy(await readCapabilitiesConfig(mainRepo))
+      : new Map<string, CatCafeSkillPolicyInfo>();
 
     // Build mount status lookup for each source skill
     const sourceSet = new Set(sourceSkills);
@@ -145,132 +175,115 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
           isSkillMountedForProvider(providerDirCandidates.gemini, skillsSrc, name, mainSkillsSrc),
           isSkillMountedForProvider(providerDirCandidates.kimi, skillsSrc, name, mainSkillsSrc),
         ]);
-        const entry = bootstrapEntries.get(name);
+        const customMounts = await Promise.all(
+          customMountTargets.map((target) =>
+            isSkillMountedForProvider(target.candidates, skillsSrc, name, mainSkillsSrc),
+          ),
+        );
+        const mounts: SkillMount = { claude, codex, gemini, kimi };
+        for (const [index, target] of customMountTargets.entries()) {
+          mounts[target.id] = customMounts[index] ?? false;
+        }
+        const capInfo = projectCapLookup.get(name) ?? globalCapLookup.get(name);
+        // When capInfo is inherited from global policy, ignore mountPaths.
+        // Global mountPaths reflect the main project's mount state (often [] for
+        // the source repo) and don't apply to the target project.  Only use
+        // mountPaths from the project's own capability entries.
+        const capInfoIsInherited = !projectCapLookup.has(name) && globalCapLookup.has(name);
+        const declaredMountPaths =
+          !capInfoIsInherited && Array.isArray(capInfo?.mountPaths) ? new Set(capInfo.mountPaths) : null;
+        const skillDisabled =
+          declaredMountPaths !== null
+            ? declaredMountPaths.size === 0
+            : capInfo?.enabled === false || disabledSkillNames.has(name);
+        const requiredProviders = skillDisabled
+          ? []
+          : declaredMountPaths
+            ? STANDARD_PROVIDER_IDS.filter((id) => declaredMountPaths.has(id) && mountRules.providers[id].enabled)
+            : enabledStandardProviders;
+        const requiredCustomTargets = skillDisabled
+          ? []
+          : declaredMountPaths
+            ? customMountTargets.filter((target) => declaredMountPaths.has(target.id))
+            : customMountTargets;
+        const requiredCustomTargetIds = new Set(requiredCustomTargets.map((target) => target.id));
+        const mountedCount =
+          requiredProviders.filter((id) => mounts[id]).length +
+          customMountTargets.filter((target, index) => requiredCustomTargetIds.has(target.id) && customMounts[index])
+            .length;
+        const requiredCount = requiredProviders.length + requiredCustomTargets.length;
+        const availableProviderIds = [...enabledStandardProviders, ...customMountTargets.map((target) => target.id)];
         const meta = manifestMeta.get(name);
-        const trigger = meta?.triggers?.length ? meta.triggers.join('、') : (entry?.trigger ?? '');
+        const trigger = meta?.triggers?.length ? meta.triggers.join('、') : '';
+        const source = capInfo?.source ?? 'cat-cafe';
+        const globalEnabled =
+          declaredMountPaths !== null ? declaredMountPaths.size > 0 : (capInfo?.enabled ?? !skillDisabled);
+        const mountedProviderIds = [
+          ...enabledStandardProviders.filter((id) => mounts[id]),
+          ...customMountTargets.filter((target) => mounts[target.id]).map((target) => target.id),
+        ];
+        const mountPaths = capInfo?.mountPaths ?? mountedProviderIds;
         mountLookup.set(name, {
           name,
-          category: entry?.category ?? '未分类',
+          category: meta?.category ?? '未分类',
           trigger,
+          source,
+          globalEnabled,
+          mountPaths,
           ...(meta?.description ? { description: meta.description } : {}),
-          mounts: { claude, codex, gemini, kimi },
+          mounts,
+          mountHealth: {
+            enabledProviders: availableProviderIds,
+            mountedCount,
+            requiredCount,
+            allMounted: mountedCount === requiredCount,
+          },
           ...(meta?.requiresMcp?.length
-            ? {
-                requiresMcp: meta.requiresMcp.map((id) => mcpStatuses.get(id) ?? { id, status: 'missing' }),
-              }
+            ? { requiresMcp: meta.requiresMcp.map((id) => mcpStatuses.get(id) ?? { id, status: 'missing' }) }
             : {}),
         });
       }),
     );
 
-    // Order: BOOTSTRAP insertion order first, then unregistered skills appended
+    // Order: manifest.yaml key order first, then source-only skills not in manifest
     const ordered: string[] = [];
-    const bootstrapOrdered = new Set<string>();
-    for (const bsName of bootstrapEntries.keys()) {
-      if (sourceSet.has(bsName)) {
-        ordered.push(bsName);
-        bootstrapOrdered.add(bsName);
+    const manifestOrdered = new Set<string>();
+    for (const mName of manifestMeta.keys()) {
+      if (sourceSet.has(mName)) {
+        ordered.push(mName);
+        manifestOrdered.add(mName);
       }
     }
     for (const name of sourceSkills) {
-      if (!bootstrapOrdered.has(name)) ordered.push(name);
+      if (!manifestOrdered.has(name)) ordered.push(name);
     }
     const skills = ordered.map((n) => mountLookup.get(n)!).filter(Boolean);
 
     // Registration consistency check
+    const capConfig = await readCapabilitiesConfig(projectRoot);
     const sourceNames = new Set(sourceSkills);
-    const bootstrapNames = new Set(bootstrapEntries.keys());
-    const unregistered = sourceSkills.filter((n) => !bootstrapNames.has(n));
-    const phantom = [...bootstrapNames].filter((n) => !sourceNames.has(n));
+    const capSkillNames = new Set(
+      capConfig?.capabilities
+        .filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId)
+        .map((c) => c.id) ?? [],
+    );
+    const unregistered = sourceSkills.filter((n) => !capSkillNames.has(n));
+    const phantom = [...capSkillNames].filter((n) => !sourceNames.has(n));
     const registrationConsistent = unregistered.length === 0 && phantom.length === 0;
-    const allMounted = skills.every((s) => s.mounts.claude && s.mounts.codex && s.mounts.gemini && s.mounts.kimi);
-
-    // ADR-025 Phase 2: staleness + conflicts
-    const state = await readSkillsState(projectRoot);
-    const managedNames = state?.managedSkillNames ?? sourceSkills;
-    const [staleness, conflicts] = await Promise.all([
-      checkStaleness(projectRoot, skillsSrc),
-      detectConflicts(projectRoot, home, managedNames),
-    ]);
+    const allMounted = skills.every((s) => s.mountHealth.allMounted);
+    const staleness = await checkStaleness(projectRoot, skillsSrc);
 
     const response: SkillsResponse = {
       skills,
-      summary: { total: skills.length, allMounted, registrationConsistent },
+      summary: {
+        total: skills.length,
+        allMounted,
+        registrationConsistent,
+        registrationIssues: { unregistered, phantom },
+      },
       staleness,
-      conflicts,
     };
 
     return response;
-  });
-
-  app.post('/api/skills/sync', async (request, reply) => {
-    const userId = requireSkillsOwner(request, reply);
-    if (!userId) {
-      return reply.statusCode === 401
-        ? { error: 'Authentication required' }
-        : { error: 'Skills write operations require owner authorization' };
-    }
-    const body = (request.body ?? {}) as { projectPath?: string };
-    const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const repoRoot = dirname(skillsSrc);
-    let projectRoot = repoRoot;
-    if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
-      if (!validated) {
-        reply.status(400);
-        return { error: 'Invalid project path: must be an existing directory under allowed roots' };
-      }
-      projectRoot = validated;
-    }
-
-    const result = await syncSkills(projectRoot, skillsSrc);
-    return result;
-  });
-
-  app.post('/api/skills/resolve-conflict', async (request, reply) => {
-    const userId = requireSkillsOwner(request, reply);
-    if (!userId) {
-      return reply.statusCode === 401
-        ? { error: 'Authentication required' }
-        : { error: 'Skills write operations require owner authorization' };
-    }
-    const body = (request.body ?? {}) as {
-      skillName?: string;
-      choice?: 'official' | 'mine';
-      projectPath?: string;
-    };
-    if (!body.skillName || !body.choice) {
-      reply.status(400);
-      return { error: 'skillName and choice are required' };
-    }
-    if (body.choice !== 'official' && body.choice !== 'mine') {
-      reply.status(400);
-      return { error: "choice must be 'official' or 'mine'" };
-    }
-    try {
-      validateSkillName(body.skillName);
-    } catch {
-      reply.status(400);
-      return { error: 'Invalid skill name: must be lowercase letters, digits, and hyphens' };
-    }
-    const repoRoot = dirname(CAT_CAFE_SKILLS_SRC);
-    let projectRoot = repoRoot;
-    if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
-      if (!validated) {
-        reply.status(400);
-        return { error: 'Invalid project path' };
-      }
-      projectRoot = validated;
-    }
-
-    const state = await readSkillsState(projectRoot);
-    if (!state?.managedSkillNames?.includes(body.skillName)) {
-      reply.status(400);
-      return { error: `Skill '${body.skillName}' is not managed by Clowder AI sync` };
-    }
-
-    await resolveConflict(projectRoot, homedir(), body.skillName, body.choice);
-    return { ok: true, skillName: body.skillName, choice: body.choice };
   });
 };

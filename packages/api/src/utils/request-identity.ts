@@ -54,6 +54,15 @@ export function resolveHeaderUserId(request: FastifyRequest): string | null {
   return nonEmptyString(request.headers['x-cat-cafe-user']);
 }
 
+/**
+ * Session-only identity resolver (strict auth for write endpoints).
+ * Unlike resolveUserId, does NOT fall back to headers or defaults.
+ */
+export function resolveSessionUserId(request: FastifyRequest): string | null {
+  const userId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
+  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+}
+
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {
   // F156 D-1: session cookie is the primary identity source
   const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);

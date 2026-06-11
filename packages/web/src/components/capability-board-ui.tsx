@@ -40,6 +40,7 @@ export interface CapabilityBoardItem {
   ecosystem?: 'claude' | 'codex' | 'openclaw' | 'antigravity';
   lockVersion?: { source: string; version: string; installedAt: string; installedBy: string };
   pluginId?: string;
+  mountPaths?: string[];
 }
 
 export interface CatFamily {
@@ -59,6 +60,8 @@ export interface CapabilityBoardResponse {
   items: CapabilityBoardItem[];
   catFamilies: CatFamily[];
   projectPath: string;
+  /** All known project paths for multi-project selector */
+  knownProjectPaths?: string[];
   skillHealth?: SkillHealthSummary;
 }
 

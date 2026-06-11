@@ -2,7 +2,11 @@
  * Skill Parsing Utilities
  *
  * Extracted from skills route to keep route file within size limits.
- * Handles BOOTSTRAP.md parsing, manifest.yaml parsing, and MCP resolution.
+ * Handles manifest.yaml parsing and MCP resolution.
+ *
+ * manifest.yaml is the single source of truth for skill metadata:
+ * category, description, triggers, MCP deps, and ordering (YAML key order).
+ * BOOTSTRAP.md is human documentation only — not parsed at runtime.
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -10,13 +14,8 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
 
-export interface BootstrapEntry {
-  name: string;
-  category: string;
-  trigger: string;
-}
-
 export interface SkillMeta {
+  category?: string;
   description?: string;
   triggers?: string[];
   requiresMcp?: string[];
@@ -47,45 +46,22 @@ export async function listSkillDirs(skillsSrc: string): Promise<string[]> {
   }
 }
 
-/** Parse BOOTSTRAP.md to extract skill entries with categories and triggers. */
-export async function parseBootstrap(bootstrapPath: string): Promise<Map<string, BootstrapEntry>> {
-  const result = new Map<string, BootstrapEntry>();
-  try {
-    const content = await readFile(bootstrapPath, 'utf-8');
-    const lines = content.split('\n');
-
-    let currentCategory = '';
-    for (const line of lines) {
-      const categoryMatch = line.match(/^###\s+(.+)/);
-      if (categoryMatch?.[1]) {
-        currentCategory = categoryMatch[1].trim();
-        continue;
-      }
-      const rowMatch = line.match(/^\|\s*`([a-z][-a-z0-9]*)`\s*\|\s*(.+?)\s*\|/);
-      if (rowMatch?.[1]) {
-        const name = rowMatch[1];
-        const trigger = rowMatch[2]?.trim() ?? '';
-        result.set(name, { name, category: currentCategory, trigger });
-      }
-    }
-  } catch {
-    // BOOTSTRAP.md not found or unreadable
-  }
-  return result;
-}
-
-/** Parse manifest.yaml and extract skill description/triggers. */
+/** Parse manifest.yaml and extract skill category/description/triggers. */
 export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string, SkillMeta>> {
   const result = new Map<string, SkillMeta>();
   const manifestPath = join(skillsSrcDir, 'manifest.yaml');
   try {
     const content = await readFile(manifestPath, 'utf-8');
     const parsed = parseYaml(content) as {
-      skills?: Record<string, { description?: unknown; triggers?: unknown; requires_mcp?: unknown }>;
+      skills?: Record<
+        string,
+        { category?: unknown; description?: unknown; triggers?: unknown; requires_mcp?: unknown }
+      >;
     } | null;
     if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
 
     for (const [name, meta] of Object.entries(parsed.skills)) {
+      const category = typeof meta?.category === 'string' ? meta.category.trim() : undefined;
       const description = typeof meta?.description === 'string' ? meta.description.trim() : undefined;
       const triggers = Array.isArray(meta?.triggers)
         ? meta.triggers
@@ -99,8 +75,11 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
             .map((value) => value.trim())
             .filter(Boolean)
         : undefined;
-      if (description || (triggers && triggers.length > 0) || (requiresMcp && requiresMcp.length > 0)) {
+      const hasData =
+        category || description || (triggers && triggers.length > 0) || (requiresMcp && requiresMcp.length > 0);
+      if (hasData) {
         result.set(name, {
+          ...(category ? { category } : {}),
           ...(description ? { description } : {}),
           ...(triggers && triggers.length > 0 ? { triggers } : {}),
           ...(requiresMcp && requiresMcp.length > 0 ? { requiresMcp } : {}),

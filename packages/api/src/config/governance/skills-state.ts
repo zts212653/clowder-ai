@@ -1,81 +1,128 @@
 /**
- * ADR-025 Phase 1: Skills State — managed skill set + manifest hash
+ * ADR-025 / F228: Skills sync state helpers
  *
- * Tracks which skills are managed by Clowder AI sync (vs externally installed).
- * Stored at `.cat-cafe/skills-state.json` in the project root.
- *
- * Written by:
- *   - `scripts/sync-skills.sh` (bash, for main repo sync)
- *   - `governance-bootstrap.ts` (TypeScript, for external project dispatch)
- *
- * Read by:
- *   - `/api/capabilities` route (source classification)
- *   - governance preflight (readiness check)
+ * capabilities.json is the single truth source:
+ *   - capabilities[].source === 'cat-cafe' identifies managed skills
+ *   - capabilities.json#skillsSync tracks source hash/timestamp
+ *   - capabilities[].mountPaths tracks intended project/provider mounts
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join, relative, resolve, sep } from 'node:path';
+import { readdir, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import type { SkillsSyncState } from '@cat-cafe/shared';
+import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../capabilities/capability-orchestrator.js';
 
-export interface SkillsState {
-  /** Skill names managed by Clowder AI sync (source of truth for "managed vs external") */
-  managedSkillNames: string[];
-  /** Relative path from project root to skills source directory */
-  sourceRoot: string;
-  /** Hash of the source directory's skill listing (detects additions/removals) */
-  sourceManifestHash: string;
-  /** ISO 8601 timestamp of last successful sync */
-  lastSyncedAt: string;
-}
-
-const STATE_DIR = '.cat-cafe';
-const STATE_FILENAME = 'skills-state.json';
-
-function safePath(root: string, ...segments: string[]): string {
-  const rootResolved = resolve(root);
-  const normalized = resolve(rootResolved, ...segments);
-  const rel = relative(rootResolved, normalized);
-  if (rel.startsWith(`..${sep}`) || rel === '..') {
-    throw new Error(`Path escapes project root: ${normalized}`);
+/**
+ * Read sync state from capabilities.json#skillsSync.
+ * Returns null if the selected project has not synced yet.
+ */
+export async function readSkillsSyncState(projectRoot: string): Promise<SkillsSyncState | null> {
+  const config = await readCapabilitiesConfig(projectRoot);
+  if (config?.skillsSync) {
+    const s = config.skillsSync;
+    if (
+      typeof s.sourceRoot === 'string' &&
+      typeof s.sourceManifestHash === 'string' &&
+      typeof s.lastSyncedAt === 'string'
+    ) {
+      return s;
+    }
   }
-  return normalized;
+  return null;
 }
 
-function isValidState(data: unknown): data is SkillsState {
-  if (!data || typeof data !== 'object') return false;
-  const obj = data as Record<string, unknown>;
-  return (
-    Array.isArray(obj.managedSkillNames) &&
-    typeof obj.sourceRoot === 'string' &&
-    typeof obj.sourceManifestHash === 'string' &&
-    typeof obj.lastSyncedAt === 'string'
+/**
+ * Write sync state to capabilities.json#skillsSync.
+ * Creates capabilities.json if it doesn't exist.
+ */
+export async function writeSkillsSyncState(projectRoot: string, syncState: SkillsSyncState): Promise<void> {
+  let config = await readCapabilitiesConfig(projectRoot);
+  if (!config) {
+    config = { version: 2, capabilities: [] };
+  }
+  if (config.version === 1) {
+    config.version = 2;
+  }
+  config.skillsSync = syncState;
+  await writeCapabilitiesConfig(projectRoot, config);
+}
+
+/**
+ * Update mountPaths for specific skills in capabilities.json.
+ * Sets mountPaths to the given provider names for each skill.
+ */
+export async function updateSkillMountPaths(
+  projectRoot: string,
+  skillNames: string[],
+  providerNames: string[],
+  opts?: { forceDisabled?: boolean; forceEnabled?: boolean },
+): Promise<void> {
+  if (skillNames.length === 0) return;
+  const config = await readCapabilitiesConfig(projectRoot);
+  if (!config) return;
+
+  const nameSet = new Set(skillNames);
+  // F228 mountPaths = faithful record of current mount state.
+  // forceDisabled: cascade disable → enabled:false, mountPaths:[]
+  // forceEnabled: cascade re-enable → enabled:true, mountPaths = caller-provided list
+  // Normal: providerNames non-empty → update; empty + no force → preserve existing state
+  const resolvedEnabled =
+    opts?.forceDisabled === true ? false : opts?.forceEnabled === true ? true : providerNames.length > 0 || undefined;
+  const isCatCafeSkill = (cap: (typeof config.capabilities)[number]) =>
+    cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId;
+  const existingIds = new Set(config.capabilities.filter(isCatCafeSkill).map((c) => c.id));
+
+  // Update existing entries
+  for (const cap of config.capabilities) {
+    if (isCatCafeSkill(cap) && nameSet.has(cap.id)) {
+      if (resolvedEnabled !== undefined) {
+        cap.enabled = resolvedEnabled;
+        // F228: mountPaths always written as explicit list — never undefined.
+        // Callers are responsible for passing the correct mount point list
+        // (all active mount points for re-enable/new-skill, specific list for policy).
+        cap.mountPaths = [...providerNames];
+      }
+      // else: empty providers, not force-disabled/enabled → preserve existing state.
+      nameSet.delete(cap.id);
+    }
+  }
+
+  // Upsert: create missing skill entries (e.g. first sync after drift detection)
+  for (const skillName of nameSet) {
+    if (!existingIds.has(skillName)) {
+      config.capabilities.push({
+        id: skillName,
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: resolvedEnabled ?? true,
+        // F228: mountPaths always explicit — caller provides the list of mount points.
+        mountPaths: [...providerNames],
+      });
+    }
+  }
+
+  await writeCapabilitiesConfig(projectRoot, config);
+}
+
+/**
+ * Remove source-tree Cat Cafe skill capabilities that no longer exist.
+ * Plugin-owned skill capabilities are intentionally preserved: their source
+ * lives outside cat-cafe-skills and is reconciled by the plugin lifecycle.
+ */
+export async function removeCatCafeSkillCapabilities(projectRoot: string, skillNames: string[]): Promise<void> {
+  if (skillNames.length === 0) return;
+  const config = await readCapabilitiesConfig(projectRoot);
+  if (!config) return;
+
+  const nameSet = new Set(skillNames);
+  const before = config.capabilities.length;
+  config.capabilities = config.capabilities.filter(
+    (cap) => !(cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && nameSet.has(cap.id)),
   );
-}
-
-/**
- * Read skills-state.json from a project root.
- * Returns null if file doesn't exist or is invalid.
- */
-export async function readSkillsState(projectRoot: string): Promise<SkillsState | null> {
-  try {
-    const filePath = safePath(projectRoot, STATE_DIR, STATE_FILENAME);
-    const raw = await readFile(filePath, 'utf-8');
-    const data = JSON.parse(raw);
-    return isValidState(data) ? data : null;
-  } catch {
-    return null;
+  if (config.capabilities.length !== before) {
+    await writeCapabilitiesConfig(projectRoot, config);
   }
-}
-
-/**
- * Write skills-state.json to a project root.
- * Creates .cat-cafe/ directory if it doesn't exist.
- */
-export async function writeSkillsState(projectRoot: string, state: SkillsState): Promise<void> {
-  const dir = safePath(projectRoot, STATE_DIR);
-  await mkdir(dir, { recursive: true });
-  const filePath = join(dir, STATE_FILENAME);
-  await writeFile(filePath, JSON.stringify(state, null, 2) + '\n', 'utf-8');
 }
 
 /**
@@ -145,25 +192,19 @@ export interface SkillsStaleness {
  * Detects when skills have been added or removed since last sync.
  */
 export async function checkStaleness(projectRoot: string, sourceRoot: string): Promise<SkillsStaleness> {
-  const state = await readSkillsState(projectRoot);
+  const syncState = await readSkillsSyncState(projectRoot);
   const currentHash = await computeSourceManifestHash(sourceRoot);
   const currentNames = await listSourceSkillNames(sourceRoot);
-  const managedNames = state?.managedSkillNames ?? [];
+  const config = await readCapabilitiesConfig(projectRoot);
+  const managedNames =
+    config?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id) ??
+    [];
 
   return {
-    stale: state === null || state.sourceManifestHash !== currentHash,
+    stale: syncState === null || syncState.sourceManifestHash !== currentHash,
     currentHash,
-    recordedHash: state?.sourceManifestHash ?? null,
+    recordedHash: syncState?.sourceManifestHash ?? null,
     newSkills: currentNames.filter((n) => !managedNames.includes(n)),
     removedSkills: managedNames.filter((n) => !currentNames.includes(n)),
   };
-}
-
-/**
- * Check if a skill name is in the managed set.
- * Returns false if state is null (backward compat: treat all as unmanaged).
- */
-export function isManagedSkill(state: SkillsState | null, skillName: string): boolean {
-  if (!state) return false;
-  return state.managedSkillNames.includes(skillName);
 }

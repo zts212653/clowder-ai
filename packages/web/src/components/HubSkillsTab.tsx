@@ -36,18 +36,10 @@ interface SkillsStaleness {
   removedSkills: string[];
 }
 
-interface SkillConflict {
-  skillName: string;
-  projectTarget: string;
-  userTarget: string;
-  activeLayer: 'user' | 'project';
-}
-
 interface SkillsData {
   skills: SkillEntry[];
   summary: SkillsSummary;
   staleness: SkillsStaleness | null;
-  conflicts: SkillConflict[];
 }
 
 function MountBadge({ mounted }: { mounted: boolean }) {
@@ -215,50 +207,10 @@ function StaleBanner({
   );
 }
 
-function ConflictCard({
-  conflict,
-  onResolve,
-  resolving,
-}: {
-  conflict: SkillConflict;
-  onResolve: (choice: 'official' | 'mine') => void;
-  resolving: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-3 text-xs">
-      <div className="flex items-center justify-between">
-        <div className="text-conn-amber-text">
-          <code className="font-mono font-semibold bg-conn-amber-bg px-1 rounded">{conflict.skillName}</code>
-          <span className="ml-1.5">在用户级和项目级来源不同</span>
-        </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => onResolve('official')}
-            disabled={resolving}
-            className="rounded-md bg-[var(--semantic-info)] px-2.5 py-1 text-[var(--cafe-surface)] text-xs font-medium hover:opacity-90 disabled:opacity-50"
-          >
-            用官方版本
-          </button>
-          <button
-            type="button"
-            onClick={() => onResolve('mine')}
-            disabled={resolving}
-            className="rounded-md bg-cafe-muted/20 px-2.5 py-1 text-cafe-primary text-xs font-medium hover:bg-cafe-muted/30 disabled:opacity-50"
-          >
-            用我的版本
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function HubSkillsTab() {
   const [data, setData] = useState<SkillsData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [resolving, setResolving] = useState<string | null>(null);
   const [installTarget, setInstallTarget] = useState<{ mcpId: string; category: string } | null>(null);
   const [previewSkill, setPreviewSkill] = useState<SkillEntry | null>(null);
   const addToast = useToastStore((s) => s.addToast);
@@ -294,31 +246,6 @@ export function HubSkillsTab() {
     }
   }, [addToast, fetchSkills]);
 
-  const handleResolveConflict = useCallback(
-    async (skillName: string, choice: 'official' | 'mine') => {
-      setResolving(skillName);
-      try {
-        const res = await apiFetch('/api/skills/resolve-conflict', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ skillName, choice }),
-        });
-        if (res.ok) {
-          const label = choice === 'official' ? '官方版本' : '我的版本';
-          addToast({ type: 'success', title: '冲突已解决', message: `${skillName} 使用${label}`, duration: 3000 });
-          await fetchSkills();
-        } else {
-          addToast({ type: 'error', title: '解决失败', message: '请稍后重试', duration: 5000 });
-        }
-      } catch {
-        addToast({ type: 'error', title: '解决失败', message: '网络错误', duration: 5000 });
-      } finally {
-        setResolving(null);
-      }
-    },
-    [addToast, fetchSkills],
-  );
-
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
@@ -345,16 +272,6 @@ export function HubSkillsTab() {
   return (
     <>
       {data.staleness?.stale && <StaleBanner staleness={data.staleness} onSync={handleSync} syncing={syncing} />}
-
-      {(data.conflicts?.length ?? 0) > 0 &&
-        data.conflicts.map((c) => (
-          <ConflictCard
-            key={c.skillName}
-            conflict={c}
-            onResolve={(choice) => handleResolveConflict(c.skillName, choice)}
-            resolving={resolving === c.skillName}
-          />
-        ))}
 
       {categoryOrder.map((cat) => (
         <CategoryGroup

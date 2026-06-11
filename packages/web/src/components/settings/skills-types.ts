@@ -1,10 +1,13 @@
 import type { CapabilityBoardItem } from '../capability-board-ui';
 
+export type StandardProviderKey = 'claude' | 'codex' | 'gemini' | 'kimi';
+
 export interface SkillMount {
   claude: boolean;
   codex: boolean;
   gemini: boolean;
   kimi: boolean;
+  [providerId: string]: boolean;
 }
 
 export interface SkillMcpDependency {
@@ -12,26 +15,32 @@ export interface SkillMcpDependency {
   status: 'ready' | 'missing' | 'unresolved';
 }
 
+export interface SkillMountHealth {
+  enabledProviders: string[];
+  mountedCount: number;
+  requiredCount: number;
+  allMounted: boolean;
+}
+
 export interface SkillEntry {
   name: string;
   category: string;
   trigger: string;
   description?: string;
+  source?: 'cat-cafe' | 'external';
+  globalEnabled?: boolean;
+  mountPaths?: string[];
   mounts: SkillMount;
+  mountHealth?: SkillMountHealth;
   requiresMcp: SkillMcpDependency[];
 }
 
 export interface SkillsStaleness {
   stale: boolean;
+  currentHash?: string;
+  recordedHash?: string;
   newSkills: string[];
   removedSkills: string[];
-}
-
-export interface SkillConflict {
-  skillName: string;
-  projectTarget: string;
-  userTarget: string;
-  activeLayer: 'user' | 'project';
 }
 
 export interface SkillsData {
@@ -40,9 +49,12 @@ export interface SkillsData {
     total: number;
     allMounted: boolean;
     registrationConsistent: boolean;
+    registrationIssues?: {
+      unregistered: string[];
+      phantom: string[];
+    };
   };
   staleness: SkillsStaleness | null;
-  conflicts: SkillConflict[];
 }
 
 export interface SkillsApiEntry extends Omit<SkillEntry, 'requiresMcp'> {
@@ -59,12 +71,16 @@ export interface SettingsSkillItem {
   category: string;
   trigger: string;
   description?: string;
+  source: 'cat-cafe' | 'external';
+  mountPaths?: string[];
   pluginId?: string;
   governance: {
     mounts: SkillMount;
     mountedCount: number;
+    requiredMountCount: number;
+    allMounted: boolean;
+    enabledProviders: string[];
     requiresMcp: SkillMcpDependency[];
-    hasConflict: boolean;
     isStaleNew: boolean;
     isStaleRemoved: boolean;
   };
@@ -76,8 +92,18 @@ export interface SettingsSkillItem {
   } | null;
 }
 
+export interface SkillProjectSyncSummary {
+  totalProjects: number;
+  syncedProjects: number;
+  status: 'all' | 'partial' | 'none' | 'unknown';
+}
+
 export const ALL_CATEGORIES = '全部';
-export const PROVIDER_KEYS: Array<keyof SkillMount> = ['claude', 'codex', 'gemini', 'kimi'];
+export const PROVIDER_KEYS: StandardProviderKey[] = ['claude', 'codex', 'gemini', 'kimi'];
+
+export type SkillScope = 'all' | 'project';
+export const SCOPE_ALL: SkillScope = 'all';
+export const SCOPE_PROJECT: SkillScope = 'project';
 
 export function getMountedCount(mounts: SkillMount): number {
   return PROVIDER_KEYS.filter((key) => mounts[key]).length;
@@ -97,6 +123,15 @@ export function matchesSkillSearch(skill: SettingsSkillItem, needle: string): bo
   return `${skill.name} ${skill.category} ${skill.trigger} ${skill.description ?? ''}`.toLowerCase().includes(needle);
 }
 
+export function isSkillVisibleInProjectScope(skill: SettingsSkillItem): boolean {
+  if (skill.source !== 'cat-cafe') return true;
+  // Cat Cafe skills with declared mountPaths are always visible in project scope,
+  // even when mountPaths is empty (project-disabled). The toggle communicates
+  // enabled/disabled state; hiding the row makes re-enable impossible from the UI.
+  if (Array.isArray(skill.mountPaths)) return true;
+  return skill.governance.requiredMountCount > 0 || skill.governance.mountedCount > 0;
+}
+
 export function normalizeSkillsData(payload: SkillsApiData): SkillsData {
   return {
     ...payload,
@@ -107,30 +142,51 @@ export function normalizeSkillsData(payload: SkillsApiData): SkillsData {
   };
 }
 
+function isNonPluginCatCafeSkillCapability(item: CapabilityBoardItem): boolean {
+  return item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId;
+}
+
 export function composeSkillItems(governance: SkillsData, capabilityItems: CapabilityBoardItem[]): SettingsSkillItem[] {
   const capMap = new Map<string, CapabilityBoardItem>();
+  const firstPartyCatCafeCapMap = new Map<string, CapabilityBoardItem>();
   for (const item of capabilityItems) {
     capMap.set(item.id, item);
+    if (isNonPluginCatCafeSkillCapability(item)) {
+      firstPartyCatCafeCapMap.set(item.id, item);
+    }
   }
 
-  const conflictNames = new Set(governance.conflicts.map((c) => c.skillName));
   const staleNewNames = new Set(governance.staleness?.newSkills ?? []);
   const staleRemovedNames = new Set(governance.staleness?.removedSkills ?? []);
 
   return governance.skills.map((skill) => {
-    const cap = capMap.get(skill.name);
+    const isCatCafeSourceSkill = (skill.source ?? 'cat-cafe') === 'cat-cafe';
+    const cap = (isCatCafeSourceSkill ? firstPartyCatCafeCapMap.get(skill.name) : undefined) ?? capMap.get(skill.name);
+    const legacyMountedCount = getMountedCount(skill.mounts);
+    const mountHealth =
+      skill.mountHealth ??
+      ({
+        enabledProviders: PROVIDER_KEYS,
+        mountedCount: legacyMountedCount,
+        requiredCount: PROVIDER_KEYS.length,
+        allMounted: legacyMountedCount === PROVIDER_KEYS.length,
+      } satisfies SkillMountHealth);
     return {
       id: skill.name,
       name: skill.name,
       category: skill.category,
       trigger: skill.trigger,
       description: skill.description,
+      source: skill.source ?? cap?.source ?? 'cat-cafe',
+      mountPaths: skill.mountPaths ?? cap?.mountPaths,
       pluginId: cap?.pluginId,
       governance: {
         mounts: skill.mounts,
-        mountedCount: getMountedCount(skill.mounts),
+        mountedCount: mountHealth.mountedCount,
+        requiredMountCount: mountHealth.requiredCount,
+        allMounted: mountHealth.allMounted,
+        enabledProviders: mountHealth.enabledProviders,
         requiresMcp: skill.requiresMcp,
-        hasConflict: conflictNames.has(skill.name),
         isStaleNew: staleNewNames.has(skill.name),
         isStaleRemoved: staleRemovedNames.has(skill.name),
       },

@@ -12,8 +12,11 @@
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_PROVIDER_IDS, type StandardProviderId } from '@cat-cafe/shared';
 
-const PROVIDER_SKILLS_DIRS = ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills'];
+function enabledStandardProviderIds(rules: MountRules): StandardProviderId[] {
+  return STANDARD_PROVIDER_IDS.filter((id) => rules.providers[id].enabled);
+}
 
 export interface SkillConflict {
   skillName: string;
@@ -135,13 +138,14 @@ async function areEquivalentOfficialMirrors(
 
 /**
  * Detect conflicts between project-level and user-level skills.
- * Only checks managed skills (from skills-state.json).
+ * Only checks managed skill names supplied by the capabilities source model.
  * Returns one conflict per skill name (first conflicting provider wins).
  */
 export async function detectConflicts(
   projectRoot: string,
   homeDir: string,
-  managedSkillNames: string[],
+  managedSkills: string[],
+  rules: MountRules = DEFAULT_MOUNT_RULES,
 ): Promise<SkillConflict[]> {
   const conflicts: SkillConflict[] = [];
   const seen = new Set<string>();
@@ -157,12 +161,12 @@ export async function detectConflicts(
     return result;
   }
 
-  for (const skillName of managedSkillNames) {
+  for (const skillName of managedSkills) {
     if (seen.has(skillName)) continue;
 
-    for (const dir of PROVIDER_SKILLS_DIRS) {
-      const projectLink = join(projectRoot, dir, skillName);
-      const userLink = join(homeDir, dir, skillName);
+    for (const providerId of enabledStandardProviderIds(rules)) {
+      const projectLink = join(projectRoot, rules.providers[providerId].path, skillName);
+      const userLink = join(homeDir, DEFAULT_MOUNT_RULES.providers[providerId].path, skillName);
 
       const [projectTarget, userTarget] = await Promise.all([
         resolveSkillTarget(projectLink),

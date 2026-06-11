@@ -438,6 +438,16 @@ export {
   createCatMessage,
   createUserMessage,
 } from './message.js';
+// Mount Rules types (F228 Skill 挂载规则解耦)
+export type {
+  CustomProviderRule,
+  MountRuleEntry,
+  MountRules,
+  SkillsSyncState,
+  StandardProviderId,
+  StandardProviderRule,
+} from './mount-rules.js';
+export { DEFAULT_MOUNT_RULES, STANDARD_PROVIDER_IDS } from './mount-rules.js';
 // Multi-mention types (F086 Cat Orchestration)
 export type {
   MultiMentionRequest,
