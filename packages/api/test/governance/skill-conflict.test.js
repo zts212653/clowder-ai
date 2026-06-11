@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
+import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import { detectConflicts } from '../../dist/config/governance/skill-conflict.js';
 
 let tempDir;
@@ -77,6 +78,33 @@ describe('Skill Conflict Detection (ADR-025 Phase 2)', () => {
     await symlink(join(skillsSourceB, 'tdd'), join(userSkills, 'tdd'));
 
     const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd']);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].skillName, 'tdd');
+    assert.equal(conflicts[0].activeLayer, 'user');
+  });
+
+  test('detects canonical home conflict when project provider path is customized', async () => {
+    const projectSkills = join(projectRoot, '.project-claude', 'skills');
+    await mkdir(projectSkills, { recursive: true });
+    await symlink(join(skillsSourceA, 'tdd'), join(projectSkills, 'tdd'));
+
+    const userSkills = join(homeDir, '.claude', 'skills');
+    await mkdir(userSkills, { recursive: true });
+    await symlink(join(skillsSourceB, 'tdd'), join(userSkills, 'tdd'));
+
+    const rules = {
+      version: 1,
+      providers: {
+        ...DEFAULT_MOUNT_RULES.providers,
+        claude: { enabled: true, path: '.project-claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+      customPaths: [],
+    };
+
+    const conflicts = await detectConflicts(projectRoot, homeDir, ['tdd'], rules);
     assert.equal(conflicts.length, 1);
     assert.equal(conflicts[0].skillName, 'tdd');
     assert.equal(conflicts[0].activeLayer, 'user');

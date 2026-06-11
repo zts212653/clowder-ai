@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { CapabilityBoardItem } from '../../capability-board-ui';
-import { composeSkillItems, matchesSkillSearch, type SettingsSkillItem, type SkillsData } from '../skills-types';
+import {
+  composeSkillItems,
+  isSkillVisibleInProjectScope,
+  matchesSkillSearch,
+  type SettingsSkillItem,
+  type SkillsData,
+} from '../skills-types';
 
 function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkillItem {
   return {
@@ -8,11 +14,14 @@ function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkil
     name: 'test-skill',
     category: '工具',
     trigger: '/test',
+    source: 'cat-cafe',
     governance: {
       mounts: { claude: true, codex: true, gemini: false, kimi: false },
       mountedCount: 2,
+      requiredMountCount: 4,
+      allMounted: false,
+      enabledProviders: ['claude', 'codex', 'gemini', 'kimi'],
       requiresMcp: [],
-      hasConflict: false,
       isStaleNew: false,
       isStaleRemoved: false,
     },
@@ -53,6 +62,32 @@ describe('matchesSkillSearch', () => {
   });
 });
 
+describe('isSkillVisibleInProjectScope', () => {
+  it('keeps project-disabled Cat Cafe skills visible for re-enable', () => {
+    const skill = makeSkillItem({
+      mountPaths: [],
+      governance: { ...makeSkillItem().governance, requiredMountCount: 0 },
+    });
+    expect(isSkillVisibleInProjectScope(skill)).toBe(true);
+  });
+
+  it('keeps external skills even when they do not have managed mount paths', () => {
+    const skill = makeSkillItem({
+      source: 'external',
+      mountPaths: [],
+      governance: { ...makeSkillItem().governance, mountedCount: 0, requiredMountCount: 0, allMounted: true },
+    });
+    expect(isSkillVisibleInProjectScope(skill)).toBe(true);
+  });
+
+  it('keeps Cat Cafe skills with required mounts missing so drift remains visible', () => {
+    const skill = makeSkillItem({
+      governance: { ...makeSkillItem().governance, mountedCount: 0, requiredMountCount: 4, allMounted: false },
+    });
+    expect(isSkillVisibleInProjectScope(skill)).toBe(true);
+  });
+});
+
 describe('composeSkillItems', () => {
   it('passes description through from SkillEntry', () => {
     const governance: SkillsData = {
@@ -68,7 +103,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: true, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const result = composeSkillItems(governance, []);
     expect(result[0].description).toBe('开发完成后的自检门禁');
@@ -87,7 +121,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: false, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const result = composeSkillItems(governance, []);
     expect(result[0].description).toBeUndefined();
@@ -106,7 +139,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: false, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const caps: CapabilityBoardItem[] = [
       {
@@ -135,10 +167,79 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: true, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const caps: CapabilityBoardItem[] = [{ id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: true, cats: {} }];
     const result = composeSkillItems(governance, caps);
     expect(result[0].pluginId).toBeUndefined();
+  });
+
+  it('prefers non-plugin Cat Cafe capabilities for same-id source skills', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'debugging',
+          category: 'SOP',
+          trigger: '/debugging',
+          source: 'cat-cafe',
+          globalEnabled: true,
+          mountPaths: ['claude'],
+          mounts: { claude: true, codex: false, gemini: false, kimi: false },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: false, registrationConsistent: true },
+      staleness: null,
+    };
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: { codex: true },
+        mountPaths: ['claude'],
+      },
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: false,
+        cats: { codex: false },
+        pluginId: 'same-id-plugin',
+        mountPaths: [],
+      },
+    ];
+
+    const result = composeSkillItems(governance, caps);
+
+    expect(result[0].pluginId).toBeUndefined();
+    expect(result[0].mountPaths).toEqual(['claude']);
+    expect(result[0].controls?.enabled).toBe(true);
+  });
+
+  it('uses provider-aware mount health when disabled providers are intentionally unmounted', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'debugging',
+          category: '工具',
+          trigger: '/debug',
+          mounts: { claude: true, codex: true, gemini: true, kimi: false },
+          mountHealth: {
+            enabledProviders: ['claude', 'codex', 'gemini'],
+            mountedCount: 3,
+            requiredCount: 3,
+            allMounted: true,
+          },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: true, registrationConsistent: true },
+      staleness: null,
+    };
+    const result = composeSkillItems(governance, []);
+    expect(result[0].governance.mountedCount).toBe(3);
+    expect(result[0].governance.requiredMountCount).toBe(3);
+    expect(result[0].governance.allMounted).toBe(true);
   });
 });

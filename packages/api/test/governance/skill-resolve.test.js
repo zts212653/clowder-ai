@@ -12,8 +12,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
+import {
+  readCapabilitiesConfig,
+  writeCapabilitiesConfig,
+} from '../../dist/config/capabilities/capability-orchestrator.js';
 import { resolveConflict } from '../../dist/config/governance/skill-sync.js';
-import { readSkillsState, writeSkillsState } from '../../dist/config/governance/skills-state.js';
 
 let tempDir;
 let projectRoot;
@@ -46,12 +49,12 @@ describe('Skill Conflict Resolution (ADR-025 Phase 2)', () => {
       await symlink(join(skillsSourceB, 'tdd'), join(userDir, 'tdd'));
     }
 
-    // Write initial skills-state
-    await writeSkillsState(projectRoot, {
-      managedSkillNames: ['tdd', 'debugging'],
-      sourceRoot: skillsSourceA,
-      sourceManifestHash: 'sha256:abc123',
-      lastSyncedAt: '2026-04-16T00:00:00Z',
+    await writeCapabilitiesConfig(projectRoot, {
+      version: 2,
+      capabilities: [
+        { id: 'tdd', type: 'skill', enabled: true, source: 'cat-cafe' },
+        { id: 'debugging', type: 'skill', enabled: true, source: 'cat-cafe' },
+      ],
     });
   });
 
@@ -80,9 +83,9 @@ describe('Skill Conflict Resolution (ADR-025 Phase 2)', () => {
       assert.ok(s.isSymbolicLink(), `${provider} project-level symlink should remain`);
     }
 
-    // managed set unchanged
-    const state = await readSkillsState(projectRoot);
-    assert.ok(state?.managedSkillNames.includes('tdd'));
+    const config = await readCapabilitiesConfig(projectRoot);
+    const tdd = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'tdd');
+    assert.equal(tdd?.source, 'cat-cafe', 'managed source should remain unchanged');
   });
 
   test('mine choice removes project-level symlinks and updates managed set', async () => {
@@ -106,11 +109,11 @@ describe('Skill Conflict Resolution (ADR-025 Phase 2)', () => {
       assert.ok(s.isSymbolicLink(), `${provider} user-level symlink should remain`);
     }
 
-    // 'tdd' removed from managed set, 'debugging' remains
-    const state = await readSkillsState(projectRoot);
-    assert.ok(state);
-    assert.ok(!state.managedSkillNames.includes('tdd'), 'tdd should be removed from managed set');
-    assert.ok(state.managedSkillNames.includes('debugging'), 'debugging should remain');
+    const config = await readCapabilitiesConfig(projectRoot);
+    const tdd = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'tdd');
+    const debugging = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging');
+    assert.equal(tdd?.source, 'external', 'tdd should be removed from managed set');
+    assert.equal(debugging?.source, 'cat-cafe', 'debugging should remain managed');
   });
 
   test('handles missing symlinks gracefully', async () => {
