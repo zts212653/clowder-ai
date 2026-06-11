@@ -97,6 +97,124 @@ Close the loop between the shipped UI/API behavior and ADR-025: document the fin
 | Filesystem writes corrupt user-owned skills or third-party skill installs | Preserve ADR-025 managed-vs-user-owned distinction; block conflicts instead of overwriting; test rollback/failure paths. |
 | Large inbound PR loses home invariants during intake | Use Intake Intent Issue, manual-port high-risk files, and cross-family Intake Review Guard. |
 
+## 数据模型
+
+### 单一真相源：capabilities.json v2
+
+所有 skill 挂载状态在 `.cat-cafe/capabilities.json`（v2）一个文件中管理。没有独立的 state 或 rules 文件。
+
+```
+capabilities.json v2
+├─ capabilities[]          # skill 列表
+│   ├─ enabled             # skill 级开关（用户/级联操作）
+│   ├─ mountPaths          # 目标挂载策略（声明该 skill 应挂载到哪些挂载点）
+│   ├─ source              # "cat-cafe" | "external"
+│   └─ type, id, ...
+├─ skillsSync              # 源同步追踪
+│   ├─ sourceManifestHash  # 源 skill 集合的 hash
+│   └─ lastSyncedAt        # 上次同步时间
+└─ mountRules              # 挂载点配置（哪些挂载点启用）
+    └─ MountRuleEntry[]    # 标准 + 自定义挂载点
+```
+
+文件系统 symlinks（`.claude/skills/xxx`、`.codex/skills/xxx` 等）是 capabilities.json 的**派生状态**，每次操作后同步。
+
+## mountPaths 状态模型
+
+### 核心原则
+
+`capabilities.json` 中每个 skill 的 `mountPaths` 字段记录该 skill **目标挂载策略**——声明该 skill 应挂载到哪些 mount point（挂载点）。文件系统 symlinks 是 mountPaths 的**活跃子集**：只有同时在 mountPaths 和 mount rules 中启用的 mount point 才有对应 symlink。当 mount point 被临时禁用时，mountPaths 保留该 mount point 以便 `restoreNewlyEnabledMountPoints()` 在重新启用时自动恢复挂载。
+
+**术语约定**：claude / codex / gemini / kimi 等目录称为"挂载点（mount point）"，不称 provider（避免与模型供应商混淆）。
+
+### mountPaths 值语义
+
+| 值 | 含义 | enabled |
+|---|------|---------|
+| `['claude','codex','gemini','kimi']` | skill 挂载到了这 4 个挂载点 | true |
+| `['claude','kimi']` | skill 只挂载到 claude 和 kimi | true |
+| `[]` + `enabled: false` | skill 被用户/级联禁用，无挂载 | false |
+| `[]` + `enabled: true` | 所有挂载点均被禁用，skill 本身未禁用 | true |
+
+**不再使用 `mountPaths: undefined`**——每个 managed skill 必须有明确的挂载点列表。
+
+**`enabled: true` + `mountPaths: []` 的读路径行为**：当所有挂载点均被禁用时，读路径（`resolveCapabilityMountPolicy`、drift 检测、skills 列表）将此状态视为"实际不可用"（等效 disabled）。这是合理的预期行为——skill 本身未被用户禁用，但因无可用挂载点而无法生效。当挂载点重新启用时，`restoreNewlyEnabledMountPoints()` 自动恢复挂载，skill 恢复为可用状态。
+
+### 完整操作场景
+
+#### Skill 级操作（单项目）
+
+| # | 操作 | mountPaths 变化 | enabled |
+|---|------|----------------|---------|
+| 1 | 新项目 sync，skill 首次挂载 | → 当前项目所有可用挂载点 | true |
+| 2 | 用户禁用 skill 在某个挂载点 | 移除该挂载点 | true |
+| 3 | 用户启用 skill 在某个挂载点 | 加上该挂载点 | true |
+| 4 | 项目下禁用 skill | → `[]` | false |
+| 5 | 项目下启用 skill | → 当前项目所有可用挂载点 | true |
+
+#### 全局 Skill 级联
+
+| # | 操作 | 效果 |
+|---|------|------|
+| 6 | 全局禁用 skill | 逐项目执行场景 4 |
+| 7 | 全局启用 skill | 逐项目执行场景 5 |
+
+#### 挂载点级联
+
+| # | 操作 | 效果 |
+|---|------|------|
+| 8 | 项目下禁用某个挂载点 | 该项目下所有 skill 执行场景 2（移除该挂载点） |
+| 9 | 项目下启用某个挂载点 | 该项目下所有 enabled skill 执行场景 3（加上该挂载点） |
+| 10 | 全局禁用某个挂载点 | 逐项目执行场景 8 |
+| 11 | 全局启用某个挂载点 | 逐项目执行场景 9 |
+
+#### Skill 源变更
+
+| # | 操作 | mountPaths 变化 |
+|---|------|----------------|
+| 12 | Skill 源内容更新（hash 变化） | 不变（只更新 symlink 内容） |
+| 13 | Skill 从全局源删除 | 清理 mountPaths + 移除 capability entry |
+| 14 | 全局新增 skill（首次发现） | 等同场景 1 |
+
+### Drift 异常检测与修复
+
+| 异常状态 | 预期处理 |
+|---------|---------|
+| config 有 mountPaths，link 不存在 | 补 link；若有名称冲突，提示用户选择跳过或强制覆盖 |
+| config 无此 skill，link 存在 | 清理冗余 link |
+| config+link 存在但全局已无此 skill | 清理 config 和 link |
+| enabled + mountPaths: [] + 所有挂载点均启用 | 异常：应有挂载点或应为 disabled（场景 8 级联导致的合法空列表除外） |
+| disabled 但有 mountPaths 内容 | 异常：disabled 应配合 mountPaths: [] |
+| config 无此 skill，link 无，全局存在 | 新增 skill 场景，补 config + link（等同场景 14） |
+
+### 名称冲突处理
+
+当 managed skill 名称与挂载点目录下已存在的用户自有 skill 冲突时：
+- **不自动覆写**，不修改 mountPaths
+- 通过 drift banner 提示用户选择：
+  - **跳过（skip）**：保留用户版本，该挂载点不挂载 managed skill
+  - **强制覆盖（override）**：删除用户版本，挂载 managed skill
+
+冲突粒度为 skill × 挂载点，用户可逐个决定。
+
+### 实现差距修复记录（已修复 — commit 4bef1b2de）
+
+1. **场景 1/5/7：新 skill / re-enable 写 `mountPaths: undefined` → 已改为写明确列表** ✅
+   - 修复：`skills-state.ts` 始终写 `mountPaths: [...providerNames]`；`skill-sync.ts` 传 `activeTargetIds` 替代 `[]`
+   - 测试：`skills-state.test.js`、`skill-sync.test.js`、`skill-sync-rules.test.js`
+
+2. **场景 9/11：挂载点 re-enable 后未更新 mountPaths → 已加 restore 逻辑** ✅
+   - 修复：`mount-rules-reconciliation.ts` 新增 `restoreNewlyEnabledMountPoints()`，仅恢复标准挂载点
+   - 测试：`mount-rules-reconciliation.test.js`（scenario 9 + custom path edge case）
+
+3. **场景 8/10：prune 不允许裁剪为空 → 已移除 guard** ✅
+   - 修复：`mount-rules-reconciliation.ts` 移除 `nextMountPaths.length === 0` guard
+   - 测试：`mount-rules-reconciliation.test.js`（prune-to-empty）
+
+4. **drift-resolver 同 Gap 1 → 已修复** ✅
+   - 修复：`drift-resolver.ts` noPolicySkills 写 `activeMountProviderIds()` 替代 `[]`
+   - 测试：`drift-resolver.test.js`
+
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
