@@ -166,7 +166,8 @@ export interface ConnectorGatewayDeps {
       }
     | undefined;
   readonly defaultUserId: string;
-  readonly defaultCatId: CatId;
+  /** Static catId or getter; getter form propagates runtime PUT default-cat (cloud P1 #2253). */
+  readonly defaultCatId: CatId | (() => CatId);
   readonly redis?: RedisClient | undefined;
   readonly log: FastifyBaseLogger;
   readonly frontendBaseUrl?: string | undefined;

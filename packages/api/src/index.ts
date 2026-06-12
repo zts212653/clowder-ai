@@ -3558,7 +3558,13 @@ async function main(): Promise<void> {
     invokeTrigger,
     socketManager,
     defaultUserId: 'default-user' as const,
-    defaultCatId: 'opus' as CatId,
+    // clowder-ai#910 + cloud P1: pass a getter (not a value) so runtime
+    // `PUT /api/config/default-cat` (which calls `setRuntimeDefaultCatId` →
+    // updates `_runtimeDefaultCatId`) propagates to ConnectorRouter's
+    // per-message parseMentions resolve, without needing a gateway restart.
+    // An object getter or a one-shot value would still be copied as a
+    // string into `new ConnectorRouter({ defaultCatId, ... })` and frozen.
+    defaultCatId: getDefaultCatId,
     redis: redisClient ?? undefined,
     log: app.log,
     agentRegistry,
