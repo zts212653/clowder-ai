@@ -37,8 +37,8 @@ export interface AddSkillOptions {
 }
 
 export interface SkillOperationResult {
-  mounted: Array<{ skillName: string; providerId: string }>;
-  unmounted: Array<{ skillName: string; providerId: string }>;
+  mounted: Array<{ skillName: string; providerId: string; path: string }>;
+  unmounted: Array<{ skillName: string; providerId: string; path: string }>;
   conflicts: MountConflict[];
 }
 
@@ -113,7 +113,7 @@ export async function mountSkillSymlinks(
         const linkPath = join(dir, skillName);
         if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
           await rm(linkPath);
-          result.unmounted.push({ skillName, providerId: target.id });
+          result.unmounted.push({ skillName, providerId: target.id, path: linkPath });
         }
       }
       continue;
@@ -124,7 +124,7 @@ export async function mountSkillSymlinks(
       const status = await classifyMountPath(linkPath, skillsSource, skillName);
       if (status === 'missing') {
         await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
-        result.mounted.push({ skillName, providerId: target.id });
+        result.mounted.push({ skillName, providerId: target.id, path: linkPath });
       } else if (status === 'conflict') {
         result.conflicts.push({ skillName, providerId: target.id, path: linkPath });
       }
@@ -148,7 +148,7 @@ export async function unmountSkillSymlinks(
     const linkPath = join(dir, skillName);
     if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
       await rm(linkPath);
-      result.unmounted.push({ skillName, providerId: 'cleanup' });
+      result.unmounted.push({ skillName, providerId: 'cleanup', path: linkPath });
     }
   }
   return result;

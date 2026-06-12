@@ -1208,6 +1208,97 @@ describe('PluginResourceActivator skill safety', () => {
   });
 });
 
+describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () => {
+  it('P1-2: enablePlugin fails when all mount points conflict (no silent success)', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p12-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'my-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    // Create user-owned directories at ALL standard provider paths → all conflict
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const userDir = join(projectRoot, `.${provider}`, 'skills', 'my-skill');
+      mkdirSync(userDir, { recursive: true });
+      writeFileSync(join(userDir, 'user-file.md'), 'user content');
+    }
+
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/my-skill' }],
+    };
+
+    const result = await activator.enablePlugin(manifest);
+
+    // Must report failure — not silent success with zero mounts
+    assert.equal(result.status, 'failed', 'all-conflict activation must fail');
+    const skillResult = result.resources?.find((r) => r.type === 'skill');
+    assert.ok(skillResult, 'skill result should exist in resources');
+    assert.equal(skillResult.ok, false, 'skill activation should report ok=false');
+    assert.ok(skillResult.error, 'skill result should have an error message');
+    assert.ok(skillResult.error.includes('All mount points conflict'), 'error should mention all-conflict');
+  });
+
+  it('P2-1: rollback cleans up exact symlink paths from mount result', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p21-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'rollback-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    const persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async () => {
+        throw new Error('Simulated config write failure');
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/rollback-skill' }],
+    };
+
+    // enablePlugin catches the error and wraps it in ActivationResult
+    const result = await activator.enablePlugin(manifest);
+
+    assert.equal(result.status, 'failed', 'config write failure should fail activation');
+    const skillResult = result.resources?.find((r) => r.type === 'skill');
+    assert.equal(skillResult?.ok, false, 'skill activation should report ok=false');
+    assert.ok(skillResult?.error?.includes('Simulated config write failure'), 'error should propagate');
+
+    // All provider skill symlinks should have been cleaned up by rollback
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const linkPath = join(projectRoot, `.${provider}`, 'skills', 'rollback-skill');
+      assert.equal(existsSync(linkPath), false, `${provider} symlink should be removed by rollback`);
+    }
+  });
+});
+
 describe('PluginResourceActivator limb activation safety', () => {
   function testLimbNode(nodeId) {
     return {

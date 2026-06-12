@@ -283,19 +283,24 @@ export class PluginResourceActivator {
       mountRules,
       mountPaths ?? undefined,
     );
+
+    // P1-2: Fail activation when all mount points conflict and nothing was mounted
+    if (mountResult.mounted.length === 0 && mountResult.conflicts.length > 0) {
+      throw new Error(
+        `All mount points conflict for skill '${skillName}': ${mountResult.conflicts.map((c) => c.path).join(', ')}`,
+      );
+    }
+
     try {
       await this.upsertCapabilityEntry(manifest, resource, true);
     } catch (err) {
-      // Rollback: only remove symlinks we just mounted (not pre-existing ones)
+      // P2-1: Rollback uses exact paths from mount result (covers standard + custom)
       const { rm: rmFile } = await import('node:fs/promises');
       for (const m of mountResult.mounted) {
-        const providerRule = mountRules.providers[m.providerId as keyof typeof mountRules.providers];
-        if (providerRule) {
-          try {
-            await rmFile(join(projectRoot, providerRule.path, skillName));
-          } catch {
-            /* best-effort rollback */
-          }
+        try {
+          await rmFile(m.path);
+        } catch {
+          /* best-effort rollback */
         }
       }
       throw err;

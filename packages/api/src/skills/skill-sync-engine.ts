@@ -93,8 +93,8 @@ export interface MountConflict {
 }
 
 export interface SyncProjectResult {
-  mounted: Array<{ skillName: string; providerId: string }>;
-  unmounted: Array<{ skillName: string; providerId: string }>;
+  mounted: Array<{ skillName: string; providerId: string; path?: string }>;
+  unmounted: Array<{ skillName: string; providerId: string; path?: string }>;
   conflicts: MountConflict[];
   removed: string[];
   syncedHash: string;
@@ -233,7 +233,7 @@ export async function syncProject(
         if (status === 'missing' || (status === 'conflict' && force)) {
           if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
           await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
-          result.mounted.push({ skillName, providerId: target.id });
+          result.mounted.push({ skillName, providerId: target.id, path: linkPath });
         } else if (status === 'conflict') {
           result.conflicts.push({ skillName, providerId: target.id, path: linkPath });
         }
@@ -243,7 +243,7 @@ export async function syncProject(
         const linkPath = join(skillsDir, skillName);
         if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
           await rm(linkPath);
-          result.unmounted.push({ skillName, providerId: target.id });
+          result.unmounted.push({ skillName, providerId: target.id, path: linkPath });
         }
       }
     }
@@ -269,7 +269,7 @@ export async function syncProject(
       const linkPath = join(skillsDir, skillName);
       if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
         await rm(linkPath);
-        result.unmounted.push({ skillName, providerId: 'cleanup' });
+        result.unmounted.push({ skillName, providerId: 'cleanup', path: linkPath });
       }
     }
   }
@@ -291,15 +291,17 @@ export async function syncProject(
         const lp = join(oldDir, entry);
         if ((await classifyMountPath(lp, skillsSource, entry)) === 'managed') {
           await rm(lp);
-          result.unmounted.push({ skillName: entry, providerId: 'old-provider' });
+          result.unmounted.push({ skillName: entry, providerId: 'old-provider', path: lp });
         }
       }
     }
   }
 
-  const conflictSkills = new Set(result.conflicts.map((c) => c.skillName));
+  // P1-1 fix: keep conflicting skills in enabledNames — partial conflict does NOT
+  // disable the whole skill. Config preserves user intent (mountPaths unchanged);
+  // conflicts are reported in SyncProjectResult for callers to surface.
   await updateConfigAfterSync(projectRoot, {
-    enabledNames: enabledNames.filter((n) => !conflictSkills.has(n)),
+    enabledNames,
     disabledNames,
     removedNames,
     mountPathsBySkill,

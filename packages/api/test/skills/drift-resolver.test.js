@@ -807,13 +807,14 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       .filter((c) => c.type === 'skill' && c.source === 'cat-cafe')
       .map((c) => c.id);
     assert.ok(managedIds.includes('managed'), 'mounted skill should be in capabilities');
-    // Skipped conflict: user-owned has a blocking dir, defaults to 'skip' so it should
-    // NOT have mountPaths (it was never successfully mounted as a managed skill)
+    // P1-1 fix: partial conflict → skill stays enabled. Config preserves user intent;
+    // conflict is reported in result, not reflected in config mountPaths.
+    // user-owned is a NEW skill with no prior mountPaths → gets all active providers.
     const userOwnedEntry = config.capabilities.find((c) => c.type === 'skill' && c.id === 'user-owned');
-    // user-owned may or may not appear; if it does, its mountPaths should be empty
-    if (userOwnedEntry) {
-      assert.deepEqual(userOwnedEntry.mountPaths ?? [], [], 'skipped conflict should have empty mountPaths');
-    }
+    assert.ok(userOwnedEntry, 'conflict skill should still appear in config');
+    assert.ok(userOwnedEntry.enabled !== false, 'partial conflict must NOT disable the skill');
+    const mp = userOwnedEntry.mountPaths ?? [];
+    assert.ok(mp.length > 0, 'new skill should have mountPaths (all active providers)');
   });
 
   test('syncDrift preserves mountPaths for non-stale skills — prune is reconciliation job (F228 state-record)', async () => {
