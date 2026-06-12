@@ -43,6 +43,11 @@ export interface SkillsStaleness {
   removedSkills: string[];
 }
 
+export interface MountIssue {
+  skill: string;
+  unmountedProviders: string[];
+}
+
 export interface SkillsData {
   skills: SkillEntry[];
   summary: {
@@ -53,6 +58,7 @@ export interface SkillsData {
       unregistered: string[];
       phantom: string[];
     };
+    mountIssues?: MountIssue[];
   };
   staleness: SkillsStaleness | null;
 }

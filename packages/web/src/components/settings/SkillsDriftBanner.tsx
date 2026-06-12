@@ -153,7 +153,11 @@ export function SkillsDriftBanner({
   const phantomSkills = registrationIssues?.phantom ?? [];
   const statusIssueGroups: Array<{ label: string; skills?: string[] }> = [];
   if (summary && !summary.allMounted) {
-    statusIssueGroups.push({ label: '挂载状态不一致' });
+    const mountIssueSkills = summary.mountIssues?.map((issue) => {
+      const providers = issue.unmountedProviders.join(', ');
+      return `${issue.skill}（${providers} 未挂载）`;
+    });
+    statusIssueGroups.push({ label: '挂载状态不一致', skills: mountIssueSkills });
   }
   if (summary && !summary.registrationConsistent) {
     if (unregisteredSkills.length > 0) {

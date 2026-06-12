@@ -53,11 +53,17 @@ interface SkillEntry {
   requiresMcp?: SkillMcpDependency[];
 }
 
+interface MountIssue {
+  skill: string;
+  unmountedProviders: string[];
+}
+
 interface SkillsSummary {
   total: number;
   allMounted: boolean;
   registrationConsistent: boolean;
   registrationIssues: { unregistered: string[]; phantom: string[] };
+  mountIssues: MountIssue[];
 }
 
 interface SkillsResponse {
@@ -265,6 +271,12 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     const phantom = [...capSkillNames].filter((n) => !sourceNames.has(n));
     const registrationConsistent = unregistered.length === 0 && phantom.length === 0;
     const allMounted = skills.every((s) => s.mountHealth.allMounted);
+    const mountIssues: MountIssue[] = skills
+      .filter((s) => !s.mountHealth.allMounted)
+      .map((s) => ({
+        skill: s.name,
+        unmountedProviders: s.mountHealth.enabledProviders.filter((id) => !s.mounts[id]),
+      }));
     const staleness = await checkStaleness(projectRoot, skillsSrc);
 
     const response: SkillsResponse = {
@@ -274,6 +286,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
         allMounted,
         registrationConsistent,
         registrationIssues: { unregistered, phantom },
+        mountIssues,
       },
       staleness,
     };
