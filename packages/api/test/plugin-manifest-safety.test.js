@@ -1255,7 +1255,11 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
     assert.ok(skillResult.error.includes('All mount points conflict'), 'error should mention all-conflict');
   });
 
-  it('P2-1: rollback cleans up exact symlink paths from mount result', async () => {
+  it('P2-1: rollback cleans up custom mount alias symlinks (not just standard providers)', async () => {
+    // Original bug: rollback used mountRules.providers[m.providerId].path to rebuild
+    // the link path, which misses custom aliases entirely. Fix uses m.path directly.
+    // This test disables ALL standard providers and uses ONLY a custom alias (acp)
+    // so the old buggy code would leave the symlink behind.
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p21-'));
     const pluginsDir = join(root, 'plugins');
     const projectRoot = join(root, 'project');
@@ -1263,13 +1267,36 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
     mkdirSync(skillSourceDir, { recursive: true });
     writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
 
-    const persisted = { version: 1, capabilities: [] };
+    // Write capabilities.json with custom-only mount rules (standard providers disabled)
+    const catCafeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    writeFileSync(
+      join(catCafeDir, 'capabilities.json'),
+      JSON.stringify({
+        version: 2,
+        capabilities: [],
+        mountRules: [
+          { name: 'claude', path: '.claude/skills', enabled: false },
+          { name: 'codex', path: '.codex/skills', enabled: false },
+          { name: 'gemini', path: '.gemini/skills', enabled: false },
+          { name: 'kimi', path: '.kimi/skills', enabled: false },
+          { name: 'acp', path: '.acp/skills', enabled: true },
+        ],
+      }),
+    );
+
+    let writeCallCount = 0;
     const activator = new PluginResourceActivator({
       resolveProjectRoot: () => projectRoot,
       pluginsDir,
       limbRegistry: {},
-      readCapabilities: async () => structuredClone(persisted),
+      readCapabilities: async () => {
+        // Read real config for mount rules resolution, but fail on write
+        const { readCapabilitiesConfig } = await import('../dist/config/capabilities/capability-orchestrator.js');
+        return readCapabilitiesConfig(projectRoot);
+      },
       writeCapabilities: async () => {
+        writeCallCount++;
         throw new Error('Simulated config write failure');
       },
       withCapabilityLock: async (fn) => fn(),
@@ -1283,7 +1310,6 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
       resources: [{ type: 'skill', path: 'skills/rollback-skill' }],
     };
 
-    // enablePlugin catches the error and wraps it in ActivationResult
     const result = await activator.enablePlugin(manifest);
 
     assert.equal(result.status, 'failed', 'config write failure should fail activation');
@@ -1291,10 +1317,14 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
     assert.equal(skillResult?.ok, false, 'skill activation should report ok=false');
     assert.ok(skillResult?.error?.includes('Simulated config write failure'), 'error should propagate');
 
-    // All provider skill symlinks should have been cleaned up by rollback
+    // The custom acp symlink must be cleaned up by rollback
+    const acpLink = join(projectRoot, '.acp', 'skills', 'rollback-skill');
+    assert.equal(existsSync(acpLink), false, 'custom alias symlink should be removed by rollback');
+
+    // Standard providers were disabled — no symlinks should exist there either
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
       const linkPath = join(projectRoot, `.${provider}`, 'skills', 'rollback-skill');
-      assert.equal(existsSync(linkPath), false, `${provider} symlink should be removed by rollback`);
+      assert.equal(existsSync(linkPath), false, `disabled ${provider} should have no symlink`);
     }
   });
 });
