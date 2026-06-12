@@ -1,0 +1,10 @@
+{
+  "verdictId": "task-outcome-2026-06-12",
+  "windowStartMs": 1749610800000,
+  "windowEndMs": 1749697200000,
+  "taskOutcomeDbPath": "/Users/xujinsong/VSCode/SynologyDrive/Clowder-AI/task-outcome-episodes.sqlite",
+  "eventMemoryDbPath": "/Users/xujinsong/VSCode/SynologyDrive/Clowder-AI/event-memory.sqlite",
+  "episodes": [],
+  "signals": [],
+  "eventRows": []
+}

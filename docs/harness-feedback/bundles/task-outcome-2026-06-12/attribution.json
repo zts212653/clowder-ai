@@ -1,0 +1,11 @@
+{
+  "verdictId": "task-outcome-2026-06-12",
+  "featureId": "F192",
+  "evalSnapshotId": "eval-F192-2026-06-12",
+  "generatedAt": "2026-06-12T03:16:03.741Z",
+  "findings": [],
+  "noFindingRecord": {
+    "reason": "no actionable task-outcome finding exceeded threshold in the selected window",
+    "evidence": "Phase-G-v0/episodes_total"
+  }
+}
