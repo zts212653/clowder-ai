@@ -61,12 +61,17 @@ function requireMountRulesWriteAccess(
   return { userId };
 }
 
-async function resolveTargetProjectRoot(projectPath?: string): Promise<string | null> {
-  if (!projectPath) return STARTUP_PROJECT_ROOT;
-  return validateProjectPath(projectPath);
+interface MountRulesRouteOptions {
+  mainProjectRoot?: string;
 }
 
-export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
+export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = async (app, opts) => {
+  const globalRoot = opts.mainProjectRoot ?? STARTUP_PROJECT_ROOT;
+
+  async function resolveTargetProjectRoot(projectPath?: string): Promise<string | null> {
+    if (!projectPath) return globalRoot;
+    return validateProjectPath(projectPath);
+  }
   app.get('/api/mount-rules', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -75,15 +80,14 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
     }
     const { projectPath, scope } = (request.query ?? {}) as { projectPath?: string; scope?: string };
     if (scope === 'default') {
-      const mainRoot = STARTUP_PROJECT_ROOT;
-      return { rules: await readDefaultMountRules(mainRoot), projectRoot: mainRoot, scope: 'default' };
+      return { rules: await readDefaultMountRules(globalRoot), projectRoot: globalRoot, scope: 'default' };
     }
     const projectRoot = await resolveTargetProjectRoot(projectPath);
     if (!projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
-    return { rules: await readMountRules(projectRoot, STARTUP_PROJECT_ROOT), projectRoot };
+    return { rules: await readMountRules(projectRoot, globalRoot), projectRoot };
   });
 
   app.put('/api/mount-rules', async (request, reply) => {
@@ -101,10 +105,9 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
 
     // scope=default: write global default, sync main project, cascade to registered projects
     if (body.scope === 'default') {
-      const mainRoot = STARTUP_PROJECT_ROOT;
-      await writeDefaultMountRules(mainRoot, validated);
-      await syncProject(mainRoot, skillsSrc, { mountRules: validated });
-      const syncResult = await syncAll(mainRoot, skillsSrc, { mountRules: validated });
+      await writeDefaultMountRules(globalRoot, validated);
+      await syncProject(globalRoot, skillsSrc, { mountRules: validated });
+      const syncResult = await syncAll(globalRoot, skillsSrc, { mountRules: validated });
       if (syncResult.warnings.length > 0) {
         reply.status(500);
         return {
@@ -112,11 +115,11 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
           error: `Default rules saved but ${syncResult.warnings.length} project(s) failed to reconcile`,
           failedProjects: syncResult.warnings,
           rules: validated,
-          projectRoot: mainRoot,
+          projectRoot: globalRoot,
           scope: 'default',
         };
       }
-      return { ok: true, rules: validated, projectRoot: mainRoot, scope: 'default' };
+      return { ok: true, rules: validated, projectRoot: globalRoot, scope: 'default' };
     }
 
     // Project-specific: write + reconcile, rollback on failure
@@ -127,13 +130,27 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const previousProjectRules = await readProjectMountRulesOverride(projectRoot);
-    const previousRules = await readMountRules(projectRoot, STARTUP_PROJECT_ROOT);
+    const previousRules = await readMountRules(projectRoot, globalRoot);
+
+    // Extract global cascade disabled for external projects
+    const cascadeDisabled = new Set<string>();
+    if (projectRoot !== globalRoot) {
+      const globalConfig = await readCapabilitiesConfig(globalRoot);
+      for (const cap of globalConfig?.capabilities ?? []) {
+        if (cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && !cap.enabled) {
+          cascadeDisabled.add(cap.id);
+        }
+      }
+    }
+    const cascadeOpt = cascadeDisabled.size > 0 ? cascadeDisabled : undefined;
+
     await writeMountRules(projectRoot, validated);
     try {
       await syncProject(projectRoot, skillsSrc, {
         mountRules: validated,
         previousMountRules: previousRules,
         pruneMountPaths: true,
+        cascadeDisabledSkills: cascadeOpt,
       });
       await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules);
     } catch (err) {
@@ -146,6 +163,7 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
         mountRules: previousRules,
         previousMountRules: validated,
         pruneMountPaths: true,
+        cascadeDisabledSkills: cascadeOpt,
       }).catch((re) => {
         console.warn(`[F228] Rollback mount-rules reconciliation failed: ${(re as Error).message}`);
       });

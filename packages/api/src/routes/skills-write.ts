@@ -160,14 +160,20 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
     const mainRoot = opts.mainProjectRoot ?? (await resolveMainRepoPath());
     const mountRules = await readMountRules(projectRoot, mainRoot);
     const globalConfig = await readCapabilitiesConfig(globalProjectRoot);
+    const cascadeDisabled = new Set<string>();
     const globalMountPaths = new Map<string, readonly string[]>();
     for (const cap of globalConfig?.capabilities ?? []) {
       if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
+      if (!cap.enabled) cascadeDisabled.add(cap.id);
       if (Array.isArray(cap.mountPaths)) globalMountPaths.set(cap.id, cap.mountPaths);
     }
 
     // syncProject reconciles all skills including the target — idempotent
-    const result = await syncProject(projectRoot, skillsSrc, { mountRules, globalMountPathsBySkill: globalMountPaths });
+    const result = await syncProject(projectRoot, skillsSrc, {
+      mountRules,
+      cascadeDisabledSkills: projectRoot !== globalProjectRoot ? cascadeDisabled : undefined,
+      globalMountPathsBySkill: globalMountPaths,
+    });
     const updatedConfig = await readCapabilitiesConfig(projectRoot);
     const cap = updatedConfig?.capabilities.find(
       (c: { type: string; id: string; source: string; pluginId?: string }) =>

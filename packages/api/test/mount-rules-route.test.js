@@ -27,7 +27,7 @@ const LOCAL_WRITE_HEADERS = {
   host: 'localhost:3003',
 };
 
-async function buildMountRulesApp() {
+async function buildMountRulesApp(opts = {}) {
   const app = Fastify();
   app.addHook('preHandler', async (request) => {
     const sessionUser = request.headers['x-test-session-user'];
@@ -35,7 +35,7 @@ async function buildMountRulesApp() {
       request.sessionUserId = sessionUser.trim();
     }
   });
-  await app.register(mountRulesRoutes);
+  await app.register(mountRulesRoutes, opts);
   await app.ready();
   return app;
 }
@@ -87,7 +87,7 @@ describe('Mount Rules Route (F228)', () => {
     ]);
     await Promise.all([symlink(oldClaudeTarget, oldClaudeLink), symlink(oldCodexTarget, oldCodexLink)]);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -140,7 +140,7 @@ describe('Mount Rules Route (F228)', () => {
     ]);
     await symlink(userTarget, oldClaudeLink);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -188,7 +188,7 @@ describe('Mount Rules Route (F228)', () => {
     await mkdir(dirname(oldClaudeRoot), { recursive: true });
     await symlink(oldClaudeTarget, oldClaudeRoot);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -246,7 +246,7 @@ describe('Mount Rules Route (F228)', () => {
     await mkdir(oldCustomDir, { recursive: true });
     await symlink(oldCustomTarget, oldCustomLink);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -292,7 +292,7 @@ describe('Mount Rules Route (F228)', () => {
       customPaths: [{ alias: 'opencode', path: relativeCustomDir }],
     };
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -352,7 +352,7 @@ describe('Mount Rules Route (F228)', () => {
     await mkdir(dirname(claudeLink), { recursive: true });
     await symlink(claudeTarget, claudeLink);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -424,7 +424,7 @@ describe('Mount Rules Route (F228)', () => {
     ]);
     await Promise.all([symlink(claudeTarget, claudeLink), symlink(codexTarget, codexLink)]);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -573,7 +573,7 @@ describe('Mount Rules Route (F228)', () => {
     await mkdir(dirname(disabledKimiRoot), { recursive: true });
     await symlink(disabledKimiTarget, disabledKimiRoot);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -611,7 +611,7 @@ describe('Mount Rules Route (F228)', () => {
     await mkdir(userOwnedSkillDir, { recursive: true });
     await writeFile(join(userOwnedSkillDir, 'local.txt'), 'keep local skill');
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -658,7 +658,7 @@ describe('Mount Rules Route (F228)', () => {
     ]);
     await Promise.all([symlink(oldClaudeTarget, oldClaudeLink), symlink(oldCodexTarget, oldCodexLink)]);
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -686,6 +686,7 @@ describe('Mount Rules Route (F228)', () => {
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
     const projectDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-remote-origin-'));
+    const canonicalProjectDir = await realpath(projectDir);
     const newRules = {
       ...DEFAULT_MOUNT_RULES,
       providers: {
@@ -696,7 +697,7 @@ describe('Mount Rules Route (F228)', () => {
       },
     };
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -722,6 +723,7 @@ describe('Mount Rules Route (F228)', () => {
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     delete process.env.DEFAULT_OWNER_USER_ID;
     const projectDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-single-user-'));
+    const canonicalProjectDir = await realpath(projectDir);
     const newRules = {
       ...DEFAULT_MOUNT_RULES,
       providers: {
@@ -732,7 +734,7 @@ describe('Mount Rules Route (F228)', () => {
       },
     };
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -803,7 +805,7 @@ describe('Mount Rules Route (F228)', () => {
       },
     };
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
@@ -881,7 +883,7 @@ describe('Mount Rules Route (F228)', () => {
       },
     };
 
-    const app = await buildMountRulesApp();
+    const app = await buildMountRulesApp({ mainProjectRoot: canonicalProjectDir });
     try {
       const res = await app.inject({
         method: 'PUT',
