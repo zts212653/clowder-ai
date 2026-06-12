@@ -273,12 +273,7 @@ export class PluginResourceActivator {
     for (const providerId of STANDARD_PROVIDER_IDS) {
       if (!mountRules.providers[providerId].enabled) continue;
       const skillsDir = join(projectRoot, mountRules.providers[providerId].path);
-      try {
-        await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
-      } catch {
-        // Provider dir is a directory-level symlink to a different source.
-        // Not fatal for plugin activation — mountSkillSymlinks handles conflicts.
-      }
+      await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
     }
 
     // Mount symlinks first (rollback only newly created if config write fails)
