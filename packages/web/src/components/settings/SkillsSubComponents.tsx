@@ -143,6 +143,7 @@ export function SkillRow({
           skillId={skill.id}
           scope={scope}
           mounts={skill.governance.mounts}
+          mountPaths={skill.mountPaths}
           enabledProviders={skill.governance.enabledProviders}
           toggling={toggling}
           onProviderToggle={(providerId, enabled, toggleScope) =>
@@ -154,11 +155,18 @@ export function SkillRow({
   );
 }
 
-/** F228: Per-provider mount toggles — replaces legacy per-cat toggles */
+/**
+ * F228: Per-provider mount toggles — replaces legacy per-cat toggles.
+ *
+ * Toggle state = config intent (mountPaths), NOT filesystem reality (mounts).
+ * When a mount point is in mountPaths but not actually mounted (e.g. conflict),
+ * the toggle stays ON — the anomaly detection banner surfaces the gap.
+ */
 function PerProviderMountToggles({
   skillId,
   scope,
   mounts,
+  mountPaths,
   enabledProviders,
   toggling,
   onProviderToggle,
@@ -166,18 +174,24 @@ function PerProviderMountToggles({
   skillId: string;
   scope: SkillScope;
   mounts: SkillMount;
+  mountPaths?: string[];
   enabledProviders: string[];
   toggling: string | null;
   onProviderToggle: (providerId: string, enabled: boolean, scope: 'global' | 'project') => void;
 }) {
   const toggleScope = scope === SCOPE_PROJECT ? 'project' : 'global';
+  // Config intent: mountPaths lists which providers the user WANTS mounted.
+  // Falls back to filesystem reality (mounts) when mountPaths is unavailable.
+  const mountPathSet = mountPaths ? new Set(mountPaths) : null;
   return (
     <SettingsCardSubSection label="挂载规则">
       <div className="mt-1.5 space-y-1">
         {PROVIDER_KEYS.map((providerId) => {
-          const mounted = mounts[providerId] ?? false;
+          const intended = mountPathSet ? mountPathSet.has(providerId) : (mounts[providerId] ?? false);
+          const actuallyMounted = mounts[providerId] ?? false;
           const providerEnabled = enabledProviders.includes(providerId);
           const busy = toggling === `${skillId}:${providerId}`;
+          const hasConflict = intended && !actuallyMounted;
           return (
             <div key={providerId} className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -187,17 +201,22 @@ function PerProviderMountToggles({
                     provider 已禁用
                   </SettingsBadge>
                 )}
+                {hasConflict && providerEnabled && (
+                  <SettingsBadge tone="amber" size="xxs">
+                    挂载异常
+                  </SettingsBadge>
+                )}
               </div>
               <SettingsResourceToggleSwitch
-                enabled={mounted}
+                enabled={intended}
                 busy={busy}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onProviderToggle(providerId, !mounted, toggleScope);
+                  onProviderToggle(providerId, !intended, toggleScope);
                 }}
                 disabled={!providerEnabled}
-                title={`${mounted ? '禁用' : '启用'} ${providerId} 挂载`}
-                ariaLabel={`${mounted ? '禁用' : '启用'} ${providerId} 挂载`}
+                title={`${intended ? '禁用' : '启用'} ${providerId} 挂载`}
+                ariaLabel={`${intended ? '禁用' : '启用'} ${providerId} 挂载`}
               />
             </div>
           );
@@ -205,8 +224,10 @@ function PerProviderMountToggles({
         {enabledProviders
           .filter((p) => !(PROVIDER_KEYS as readonly string[]).includes(p))
           .map((customId) => {
-            const mounted = mounts[customId] ?? false;
+            const intended = mountPathSet ? mountPathSet.has(customId) : (mounts[customId] ?? false);
+            const actuallyMounted = mounts[customId] ?? false;
             const busy = toggling === `${skillId}:${customId}`;
+            const hasConflict = intended && !actuallyMounted;
             return (
               <div key={customId} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -214,16 +235,21 @@ function PerProviderMountToggles({
                   <SettingsBadge tone="slate" size="xxs">
                     自定义路径
                   </SettingsBadge>
+                  {hasConflict && (
+                    <SettingsBadge tone="amber" size="xxs">
+                      挂载异常
+                    </SettingsBadge>
+                  )}
                 </div>
                 <SettingsResourceToggleSwitch
-                  enabled={mounted}
+                  enabled={intended}
                   busy={busy}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onProviderToggle(customId, !mounted, toggleScope);
+                    onProviderToggle(customId, !intended, toggleScope);
                   }}
-                  title={`${mounted ? '禁用' : '启用'} ${customId} 挂载`}
-                  ariaLabel={`${mounted ? '禁用' : '启用'} ${customId} 挂载`}
+                  title={`${intended ? '禁用' : '启用'} ${customId} 挂载`}
+                  ariaLabel={`${intended ? '禁用' : '启用'} ${customId} 挂载`}
                 />
               </div>
             );
