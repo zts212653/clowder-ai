@@ -143,8 +143,27 @@ export function SkillsDriftBanner({
   const currentDrift = drift ?? EMPTY_DRIFT;
   const visibleDrift = currentDrift.isIgnored ? EMPTY_DRIFT : currentDrift;
   const driftTotal = visibleDrift.newSkills.length + visibleDrift.conflicts.length + visibleDrift.stale.length;
+
+  // Cross-reference drift conflicts with mount issues to avoid double-counting
+  // and to enrich mount issue descriptions with conflict reasons.
+  const conflictLookup = new Map<string, string>();
+  for (const c of visibleDrift.conflicts) {
+    conflictLookup.set(`${c.skill}:${c.provider}`, c.kind);
+  }
+  const CONFLICT_KIND_LABELS: Record<string, string> = {
+    directory: '存在同名目录',
+    file: '存在同名文件',
+    'other-symlink': '被其他链接占用',
+  };
+
+  // Mount issues whose unmounted providers are NOT all explained by drift conflicts
+  const hasUnexplainedMountIssues = (summary?.mountIssues ?? []).some(
+    (issue) => !issue.unmountedProviders.every((p) => conflictLookup.has(`${issue.skill}:${p}`)),
+  );
+
+  // De-dup: skip "挂载不一致" when all mount issues are caused by known drift conflicts
   const summaryIssues = [
-    summary && !summary.allMounted ? '挂载不一致' : null,
+    summary && !summary.allMounted && hasUnexplainedMountIssues ? '挂载不一致' : null,
     summary && !summary.registrationConsistent ? '注册不一致' : null,
     !currentDrift.isIgnored && staleness?.stale ? '有更新' : null,
   ].filter(Boolean) as string[];
@@ -154,8 +173,14 @@ export function SkillsDriftBanner({
   const statusIssueGroups: Array<{ label: string; skills?: string[] }> = [];
   if (summary && !summary.allMounted) {
     const mountIssueSkills = summary.mountIssues?.map((issue) => {
-      const providers = issue.unmountedProviders.join(', ');
-      return `${issue.skill}（${providers} 未挂载）`;
+      const details = issue.unmountedProviders.map((provider) => {
+        const conflictKind = conflictLookup.get(`${issue.skill}:${provider}`);
+        if (conflictKind) {
+          return `${provider}：${CONFLICT_KIND_LABELS[conflictKind] ?? '冲突'}`;
+        }
+        return `${provider}：未挂载`;
+      });
+      return `${issue.skill}（${details.join('、')}）`;
     });
     statusIssueGroups.push({ label: '挂载状态不一致', skills: mountIssueSkills });
   }
@@ -191,8 +216,12 @@ export function SkillsDriftBanner({
         <div>
           <p className="text-sm font-bold text-conn-amber-text">⚠ 检测到 {total} 项 Skill 异常</p>
           <p className="mt-0.5 text-xs text-cafe-secondary">
-            {summaryIssues.join(' · ') || '挂载正常'} · {visibleDrift.newSkills.length} 待挂载 ·{' '}
-            {visibleDrift.conflicts.length} 挂载冲突 · {visibleDrift.stale.length} 残留待清
+            {[
+              ...summaryIssues,
+              ...(visibleDrift.conflicts.length > 0 ? [`${visibleDrift.conflicts.length} 挂载冲突`] : []),
+              ...(visibleDrift.newSkills.length > 0 ? [`${visibleDrift.newSkills.length} 待挂载`] : []),
+              ...(visibleDrift.stale.length > 0 ? [`${visibleDrift.stale.length} 残留待清`] : []),
+            ].join(' · ') || '检测中'}
           </p>
         </div>
         <span className="text-xs text-cafe-muted">查看详情</span>
