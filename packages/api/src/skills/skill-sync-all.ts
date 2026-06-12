@@ -9,6 +9,7 @@
 import type { MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
+import { readSkillsSyncState } from './skill-sync-config.js';
 import { type SyncProjectResult, syncProject } from './skill-sync-engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -85,11 +86,20 @@ export async function syncAll(catCafeRoot: string, skillsSource: string, opts: S
           (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId,
         ) ?? [];
 
+      // Exclude skills that were cascade-disabled (no local opinion) from disabledSkills.
+      // Without this filter, a globally re-enabled skill stays disabled because
+      // syncProject seeds disabledSet from opts.disabledSkills before consulting
+      // prevCascadeDisabled, blocking the re-enable path.
+      const prevCascade = new Set((await readSkillsSyncState(projectPath))?.cascadeDisabledSkills ?? []);
+      const locallyDisabledSkills = new Set(
+        projectManagedCaps.filter((cap) => !cap.enabled && !prevCascade.has(cap.id)).map((cap) => cap.id),
+      );
+
       const result = await syncProject(projectPath, skillsSource, {
         mountRules: projectMountRules,
         previousMountRules: opts.previousMountRules,
         pruneMountPaths: !!opts.previousMountRules,
-        disabledSkills: new Set(projectManagedCaps.filter((cap) => !cap.enabled).map((cap) => cap.id)),
+        disabledSkills: locallyDisabledSkills,
         cascadeDisabledSkills: globalDisabledSkills,
         mountPathsBySkill: new Map(
           projectManagedCaps.flatMap((cap) =>
