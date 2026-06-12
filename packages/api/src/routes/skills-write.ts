@@ -100,7 +100,9 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
       const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
       for (const target of targets) {
         const shouldMount = ps.enabled && (!allowed || allowed.has(target.id));
-        for (const dir of target.candidates) {
+        // Plugin skills are project-scoped: skip HOME fallback for standard providers
+      const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
+      for (const dir of dirs) {
           const linkPath = join(dir, ps.skillName);
           const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
           if (shouldMount && status === 'missing') {

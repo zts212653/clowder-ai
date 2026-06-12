@@ -33,7 +33,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
-import { buildSkillMountTargets } from '../utils/skill-mount.js';
+import { type MountTarget, buildSkillMountTargets } from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
@@ -105,8 +105,13 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
 
     // scope=default: write global default, sync main project, cascade to registered projects
     if (body.scope === 'default') {
+      const previousDefaultRules = await readDefaultMountRules(globalRoot);
       await writeDefaultMountRules(globalRoot, validated);
-      await syncProject(globalRoot, skillsSrc, { mountRules: validated });
+      await syncProject(globalRoot, skillsSrc, {
+        mountRules: validated,
+        previousMountRules: previousDefaultRules,
+        pruneMountPaths: true,
+      });
       const syncResult = await syncAll(globalRoot, skillsSrc, { mountRules: validated });
       if (syncResult.warnings.length > 0) {
         reply.status(500);
@@ -187,16 +192,16 @@ async function reconcilePluginMounts(
   if (pluginSkills.length === 0) return;
 
   const enabledTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
-  const enabledDirSet = new Set(enabledTargets.flatMap((t) => t.candidates));
 
-  // Collect ALL provider dirs from current + previous rules for cleanup
+  // Collect project-local provider dirs only (skip HOME fallback — plugin skills are project-scoped)
+  const projectDirs = (targets: MountTarget[]) =>
+    targets.flatMap((t) => (t.kind === 'standard' ? t.candidates.slice(0, 1) : t.candidates));
   const allDirs = new Set<string>();
   for (const id of STANDARD_PROVIDER_IDS) allDirs.add(join(projectRoot, mountRules.providers[id].path));
-  for (const t of enabledTargets) for (const d of t.candidates) allDirs.add(d);
+  for (const d of projectDirs(enabledTargets)) allDirs.add(d);
   if (previousRules) {
     for (const id of STANDARD_PROVIDER_IDS) allDirs.add(join(projectRoot, previousRules.providers[id].path));
-    for (const t of buildSkillMountTargets(projectRoot, homedir(), previousRules))
-      for (const d of t.candidates) allDirs.add(d);
+    for (const d of projectDirs(buildSkillMountTargets(projectRoot, homedir(), previousRules))) allDirs.add(d);
   }
 
   for (const ps of pluginSkills) {
