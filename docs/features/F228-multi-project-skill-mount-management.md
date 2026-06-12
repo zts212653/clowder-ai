@@ -9,7 +9,7 @@ community_pr: clowder-ai#760
 
 # F228: Multi-Project Skill Mount Management — 多项目 Skills 挂载管理
 
-> **Status**: spec | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
+> **Status**: implementation | **Owner**: community @mindfn + Cat Cafe maintainers | **Priority**: P1
 
 ## Source
 
@@ -200,7 +200,7 @@ capabilities.json v2
 ### 实现差距修复记录（已修复 — commit 4bef1b2de）
 
 1. **场景 1/5/7：新 skill / re-enable 写 `mountPaths: undefined` → 已改为写明确列表** ✅
-   - 修复：`skills-state.ts` 始终写 `mountPaths: [...providerNames]`；`skill-sync.ts` 传 `activeTargetIds` 替代 `[]`
+   - 修复：`skill-sync-config.ts` 始终写 `mountPaths: [...providerNames]`；`skill-sync-engine.ts` 传 `activeTargetIds` 替代 `[]`
    - 测试：`skills-state.test.js`、`skill-sync.test.js`、`skill-sync-rules.test.js`
 
 2. **场景 9/11：挂载点 re-enable 后未更新 mountPaths → 已加 restore 逻辑** ✅
@@ -215,12 +215,56 @@ capabilities.json v2
    - 修复：`drift-resolver.ts` noPolicySkills 写 `activeMountProviderIds()` 替代 `[]`
    - 测试：`drift-resolver.test.js`
 
+## 模块架构（最终布局）
+
+原 main 分支的 skill 管理代码分散在 5 个独立函数文件中，存在冗余重复和职责混乱。重构后按职责边界拆分为清晰模块：
+
+### API 核心模块 (`packages/api/src/skills/`)
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `skill-manage.ts` | 272 | CRUD API：addSkill / removeSkill / listSkills / querySkill |
+| `skill-meta.ts` | 167 | 元数据读取：SKILL.md frontmatter + manifest.yaml + MCP 依赖解析 |
+| `skill-sync-engine.ts` | 327 | syncProject 编排：detect → resolve → write config → write symlinks |
+| `skill-sync-config.ts` | 188 | config 写入：readSkillsSyncState / writeSkillsSyncState / updateSkillMountPaths |
+| `skill-sync-all.ts` | 107 | syncAll 级联：遍历所有已注册项目调用 syncProject |
+| `drift-detector.ts` | 309 | 漂移检测：文件系统 vs capabilities.json 对比 |
+| `drift-resolver.ts` | 146 | 漂移修复：事务性 snapshot/rollback |
+
+### 工具模块 (`packages/api/src/utils/`)
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `skill-source.ts` | 105 | 源目录扫描 + staleness 检测 |
+| `skill-mount.ts` | 232 | 挂载目标解析 + symlink 状态检查 |
+| `skill-mount-policy.ts` | 38 | 挂载路径策略归一化 |
+
+### 治理模块 (`packages/api/src/config/governance/`)
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `skill-sync.ts` | 34 | validateSkillName + resolveEffectiveSkillMountPaths |
+
+### 已删除模块
+
+| 文件 | 原行数 | 删除原因 |
+|------|--------|----------|
+| `skills-state.ts` | 210 | 职责混杂（扫描+配置读写+staleness），拆入 skill-source.ts + skill-sync-config.ts |
+| `skill-parse.ts` | 112 | 与 skill-meta.ts 重复（parseManifestSkillMeta + SkillMeta），合入 skill-meta.ts |
+| `skill-conflict.ts` | — | 被 drift-detector 取代 |
+| `managed-skill-writeback.ts` | — | 被 skill-sync-engine 取代 |
+| `HubSkillsTab.tsx` | 315 | 死代码，已被 SkillsContent 取代 |
+| `McpInstallForm.tsx` | 276 | 仅 HubSkillsTab 引用，随之删除 |
+
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | Assign F228 as the feature anchor for #760 broader multi-project skill management. | #760 is broader than #876 and not a child task of F041/F070/F202; it productizes ADR-025 for project/provider skill management. | 2026-06-09 |
 | KD-2 | Do not use the issue #719-derived pseudo feature id as an anchor. | `719` is the GitHub issue number, not a cat-cafe feature ID; pseudo feature anchors pollute the knowledge graph. | 2026-06-09 |
+| KD-3 | 将 5 个独立函数文件统一为 skill-manage / skill-sync-engine / skill-sync-all 三层 API + 通用 addSkill/removeSkill 接口。 | 原 5 函数冲突处理不一致，暴露了文件操作和同步细节。通用接口屏蔽实现，降耦合。| 2026-06-12 |
+| KD-4 | skills-state.ts 拆分到 skill-source.ts + skill-sync-config.ts；skill-parse.ts 合入 skill-meta.ts。 | skills-state 混杂扫描+配置+staleness 三种职责；skill-parse 与 skill-meta 存在 SkillMeta 接口和 parseManifestSkillMeta 函数重复。 | 2026-06-12 |
+| KD-5 | 删除 HubSkillsTab + McpInstallForm + 3 前端测试 + skill-conflict.test（共 1175 行死代码）。 | HubSkillsTab 已被 SkillsContent 取代零引用；McpInstallForm 仅被 HubSkillsTab 消费；skill-conflict.test 导入已删除模块。 | 2026-06-12 |
 
 ## Review Gate
 
