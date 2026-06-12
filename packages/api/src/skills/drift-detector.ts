@@ -12,7 +12,6 @@
  * Entry points:
  *   - checkGlobal: source ↔ global config + global mount sync ("全部 Skill" tab)
  *   - checkProject: global ↔ project config + project mount sync ("项目 Skill" tab)
- *   - detectDrift: mount-only compat wrapper (drift-resolver + tests)
  */
 
 import { createHash } from 'node:crypto';
@@ -410,29 +409,3 @@ export async function checkProject(
   );
 }
 
-/**
- * Mount-only drift check (backward compat for drift-resolver + tests).
- * Uses source pool as expected set — does NOT perform config-level checks.
- */
-export async function detectDrift(
-  projectRoot: string,
-  skillsSource: string,
-  mountRules: MountRules,
-  opts?: { disabledSkills?: Iterable<string>; skillMountPaths?: SkillMountPathInput; platformName?: NodeJS.Platform },
-): Promise<DriftResult> {
-  const sourceNames = await listSourceSkillNames(skillsSource);
-  const disabledSet = new Set(opts?.disabledSkills ?? []);
-  const policy = normalizeSkillMountPathPolicy(opts?.skillMountPaths);
-  const expectedSet = new Set(sourceNames.filter((n) => !disabledSet.has(n)));
-  const mount = await checkMountDrift(projectRoot, skillsSource, mountRules, expectedSet, policy, opts?.platformName);
-  return finalizeDriftResult(
-    [...mount.missingMounts],
-    mount.conflicts,
-    [...mount.staleMounts],
-    expectedSet,
-    disabledSet,
-    policy,
-    mountRules,
-    projectRoot,
-  );
-}

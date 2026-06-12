@@ -9,19 +9,43 @@ import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { detectDrift } from '../../dist/skills/drift-detector.js';
+import { checkGlobal } from '../../dist/skills/drift-detector.js';
 import { ignoreDrift, syncDrift } from '../../dist/skills/drift-resolver.js';
 import { syncProject } from '../../dist/skills/skill-sync-engine.js';
-import { checkStaleness } from '../../dist/utils/skill-source.js';
+import { checkStaleness, listSourceSkillNames } from '../../dist/utils/skill-source.js';
+
+/**
+ * Test helper: wraps checkGlobal for mount-level drift detection.
+ * Assumes all source skills are registered and mount to all enabled providers.
+ */
+async function checkMount(projectRoot, skillsSource, mountRules, opts = {}) {
+  const sourceNames = await listSourceSkillNames(skillsSource);
+  const disabled = new Set(opts.disabledSkills ?? []);
+  const enabledProviderIds = Object.entries(mountRules.providers)
+    .filter(([, v]) => v.enabled)
+    .map(([k]) => k);
+  const customIds = (mountRules.customPaths ?? []).map((p) => p.alias);
+  const allProviderIds = [...enabledProviderIds, ...customIds];
+  const skillMountPaths = {};
+  for (const name of sourceNames) {
+    if (disabled.has(name)) continue;
+    skillMountPaths[name] = opts.skillMountPaths?.[name] ?? allProviderIds;
+  }
+  return checkGlobal(projectRoot, skillsSource, mountRules, {
+    globalConfigSkills: new Set(sourceNames),
+    disabledSkills: opts.disabledSkills ?? [],
+    skillMountPaths,
+    platformName: opts.platformName,
+  });
+}
 
 // F228 compat wrappers: new syncDrift/ignoreDrift take pre-computed DriftResult.
-// Tests use the old (projectRoot, source, rules, conflictChoices, opts) signature.
 async function syncDriftCompat(projectRoot, skillsSource, mountRules, _conflictChoices, opts) {
-  const drift = await detectDrift(projectRoot, skillsSource, mountRules, opts);
+  const drift = await checkMount(projectRoot, skillsSource, mountRules, opts);
   return syncDrift(projectRoot, skillsSource, mountRules, drift, opts);
 }
 async function ignoreDriftCompat(projectRoot, skillsSource, mountRules, opts) {
-  const drift = await detectDrift(projectRoot, skillsSource, mountRules, opts);
+  const drift = await checkMount(projectRoot, skillsSource, mountRules, opts);
   return ignoreDrift(projectRoot, drift);
 }
 
@@ -67,7 +91,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       assert.ok(await exists(join(projectRoot, `.${p}/skills/tdd`)));
     }
     // post-sync drift should be empty
-    const after = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const after = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.deepEqual(after.newSkills, []);
   });
 
@@ -97,7 +121,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.type === 'skill' && entry.id === 'tdd');
     assert.deepEqual(cap?.mountPaths, ['claude']);
-    const after = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
+    const after = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
       skillMountPaths: { tdd: ['claude'] },
     });
     assert.deepEqual(after.newSkills, []);
@@ -159,7 +183,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.equal(await exists(codexLink), false, 'out-of-policy skill should not remain loadable through legacy root');
     assert.equal(await exists(join(skillsSource, 'tdd/SKILL.md')), true, 'source skill must not be deleted');
 
-    const after = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
+    const after = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
       skillMountPaths: { tdd: ['claude'] },
     });
     assert.deepEqual(after.stale, []);
@@ -244,13 +268,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
   test('syncDrift clears ignoredDriftHash after sync', async () => {
     await makeSkill('tdd');
     await ignoreDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
-    const beforeSync = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const beforeSync = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.equal(beforeSync.isIgnored, true);
 
     await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {});
 
     // After sync, even if new drift hash is the same, isIgnored should be false
-    const afterSync = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const afterSync = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.equal(afterSync.isIgnored, false);
   });
 
@@ -260,7 +284,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.ok(report.ignoredHash);
     assert.equal(report.ignoredHash, report.ignoredSnapshot.driftHash);
 
-    const check = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const check = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.equal(check.isIgnored, true);
   });
 
@@ -269,7 +293,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await ignoreDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     // add a new skill — hash changes
     await makeSkill('debugging');
-    const check = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const check = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.equal(check.isIgnored, false);
   });
 
@@ -321,7 +345,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await assert.rejects(() => lstat(join(claudeSkills, 'debugging')), /ENOENT/);
     assert.equal(await exists(join(skillsSource, 'debugging/SKILL.md')), true, 'source skill must not be deleted');
 
-    const after = await detectDrift(projectRoot, skillsSource, rules, { disabledSkills: ['debugging'] });
+    const after = await checkMount(projectRoot, skillsSource, rules, { disabledSkills: ['debugging'] });
     assert.deepEqual(after.newSkills, []);
     assert.deepEqual(after.conflicts, []);
     assert.deepEqual(after.stale, []);
@@ -409,7 +433,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       assert.equal(stat.isSymbolicLink(), true, `${provider} should be remounted`);
       assert.equal(await readlink(linkPath), expectedSymlinkTarget(linkPath, join(skillsSource, 'tdd')));
     }
-    const after = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const after = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     assert.deepEqual(after.newSkills, []);
     assert.deepEqual(after.conflicts, []);
     assert.deepEqual(after.stale, []);
@@ -458,7 +482,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     const stat = await lstat(linkPath);
     assert.equal(stat.isSymbolicLink(), true, 'custom conflict should be replaced by managed symlink');
     assert.equal(await readlink(linkPath), expectedSymlinkTarget(linkPath, join(skillsSource, 'tdd')));
-    const after = await detectDrift(projectRoot, skillsSource, rules);
+    const after = await checkMount(projectRoot, skillsSource, rules);
     assert.deepEqual(after.newSkills, []);
     assert.deepEqual(after.conflicts, []);
     assert.deepEqual(after.stale, []);
@@ -473,7 +497,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await writeFile(join(projectRoot, '.codex/skills/tdd/user.md'), 'codex user version');
 
     // Detect drift — should report two separate conflicts
-    const drift = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const drift = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     const tddConflicts = drift.conflicts.filter((c) => c.skill === 'tdd');
     assert.ok(tddConflicts.length >= 2, 'should report per-provider conflicts');
     const providers = tddConflicts.map((c) => c.provider);
@@ -508,7 +532,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await mkdir(join(projectRoot, '.claude/skills/tdd'), { recursive: true });
     await writeFile(join(projectRoot, '.claude/skills/tdd/user.md'), 'user version');
 
-    const drift = await detectDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    const drift = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
     // tdd should appear in conflicts (claude) but NOT in newSkills
     assert.ok(drift.conflicts.some((c) => c.skill === 'tdd' && c.provider === 'claude'));
     assert.ok(!drift.newSkills.includes('tdd'), 'detector suppresses newSkills when conflicts exist');
@@ -890,7 +914,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       ),
     };
 
-    const drift = await detectDrift(projectRoot, skillsSource, allDisabledRules, {
+    const drift = await checkMount(projectRoot, skillsSource, allDisabledRules, {
       skillMountPaths: { tdd: ['claude', 'kimi'] },
     });
     // All providers disabled → no mount dirs → no drift
