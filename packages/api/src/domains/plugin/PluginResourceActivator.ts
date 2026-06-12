@@ -266,13 +266,19 @@ export class PluginResourceActivator {
     const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
 
     // F719: Use mountSkillSymlinks for filesystem + injected deps for config.
-    // Directory-level symlink check: reject if a provider skills dir is itself
-    // a symlink pointing to the wrong root (prevents cross-contamination).
+    // Directory-level symlink pre-check: if a provider skills dir is a symlink
+    // pointing to a different source (e.g. cat-cafe-skills), mountSkillSymlinks
+    // will record a conflict — not a hard error for plugin activation.
     const skillsSource = dirname(skillSourceDir);
     for (const providerId of STANDARD_PROVIDER_IDS) {
       if (!mountRules.providers[providerId].enabled) continue;
       const skillsDir = join(projectRoot, mountRules.providers[providerId].path);
-      await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+      try {
+        await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+      } catch {
+        // Provider dir is a directory-level symlink to a different source.
+        // Not fatal for plugin activation — mountSkillSymlinks handles conflicts.
+      }
     }
 
     // Mount symlinks first (rollback only newly created if config write fails)

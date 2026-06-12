@@ -112,7 +112,10 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         previousMountRules: previousDefaultRules,
         pruneMountPaths: true,
       });
-      const syncResult = await syncAll(globalRoot, skillsSrc, { mountRules: validated });
+      const syncResult = await syncAll(globalRoot, skillsSrc, {
+        mountRules: validated,
+        previousMountRules: previousDefaultRules,
+      });
       if (syncResult.warnings.length > 0) {
         reply.status(500);
         return {

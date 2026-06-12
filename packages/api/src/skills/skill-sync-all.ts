@@ -20,6 +20,8 @@ export interface SyncAllResult {
 
 export interface SyncAllOptions {
   mountRules: MountRules;
+  /** Previous global mount rules — passed to syncProject for cleanup of old dirs. */
+  previousMountRules?: MountRules;
   /** Skills disabled in global (main project) config. */
   globalDisabledSkills?: ReadonlySet<string>;
   /** Per-skill mount path policy from global config. */
@@ -85,6 +87,8 @@ export async function syncAll(catCafeRoot: string, skillsSource: string, opts: S
 
       const result = await syncProject(projectPath, skillsSource, {
         mountRules: projectMountRules,
+        previousMountRules: opts.previousMountRules,
+        pruneMountPaths: !!opts.previousMountRules,
         disabledSkills: new Set(projectManagedCaps.filter((cap) => !cap.enabled).map((cap) => cap.id)),
         cascadeDisabledSkills: globalDisabledSkills,
         mountPathsBySkill: new Map(
