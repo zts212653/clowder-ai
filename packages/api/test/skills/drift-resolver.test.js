@@ -9,7 +9,7 @@ import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { checkStaleness } from '../../dist/config/governance/skills-state.js';
+import { checkStaleness } from '../../dist/utils/skill-source.js';
 import { detectDrift } from '../../dist/skills/drift-detector.js';
 import { ignoreDrift, syncDrift } from '../../dist/skills/drift-resolver.js';
 import { syncProject } from '../../dist/skills/skill-sync-engine.js';
