@@ -98,7 +98,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
   test('syncDrift respects per-skill mountPaths when mounting new skills', async () => {
     await makeSkill('tdd');
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       DEFAULT_MOUNT_RULES,
       {},
@@ -140,7 +141,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       symlink(expectedSymlinkTarget(codexLink, join(skillsSource, 'tdd')), codexLink),
     ]);
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       DEFAULT_MOUNT_RULES,
       {},
@@ -167,7 +169,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await mkdir(dirname(codexSkills), { recursive: true });
     await symlink(skillsSource, codexSkills);
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       DEFAULT_MOUNT_RULES,
       {},
@@ -236,7 +239,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await mkdir(join(projectRoot, '.codex/skills/tdd'), { recursive: true });
     await writeFile(join(projectRoot, '.codex/skills/tdd/user.md'), 'excluded-provider user version');
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       DEFAULT_MOUNT_RULES,
       { 'tdd:claude': 'override' },
@@ -303,7 +307,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     // Initial mount: both
     await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {});
     // Now disable debugging
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       DEFAULT_MOUNT_RULES,
       {},
@@ -374,7 +379,9 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     ]);
     await writeFile(join(projectRoot, '.cat-cafe'), 'not a directory');
 
-    await assert.rejects(() => syncDriftCompat(projectRoot, skillsSource, rules, {}, { disabledSkills: ['debugging'] }));
+    await assert.rejects(() =>
+      syncDriftCompat(projectRoot, skillsSource, rules, {}, { disabledSkills: ['debugging'] }),
+    );
 
     assert.equal((await lstat(claudeLink)).isSymbolicLink(), true, 'enabled-provider link should be restored');
     assert.equal((await lstat(codexLink)).isSymbolicLink(), true, 'disabled-provider link should be restored');
@@ -517,11 +524,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     // Gemini and kimi should also be mounted
     for (const provider of ['gemini', 'kimi']) {
       const linkPath = join(projectRoot, `.${provider}/skills/tdd`);
-      assert.equal(
-        (await lstat(linkPath)).isSymbolicLink(),
-        true,
-        `${provider} should be auto-mounted`,
-      );
+      assert.equal((await lstat(linkPath)).isSymbolicLink(), true, `${provider} should be auto-mounted`);
     }
   });
 
@@ -694,8 +697,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.equal(tdd?.enabled, false, 'tdd should be cascade-disabled after syncProject');
 
     // Step 2: syncDrift with disabled (simulates drift-resolve while global still disables)
-    await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {},
-      { disabledSkills: ['tdd'], cascadeDisabledSkills: ['tdd'] });
+    await syncDriftCompat(
+      projectRoot,
+      skillsSource,
+      DEFAULT_MOUNT_RULES,
+      {},
+      { disabledSkills: ['tdd'], cascadeDisabledSkills: ['tdd'] },
+    );
     config = await readCapabilitiesConfig(projectRoot);
     tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
     assert.equal(tdd?.enabled, false, 'tdd should remain disabled after syncDrift');
@@ -850,8 +858,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     };
     // Add a new skill to trigger drift
     await makeSkill('debugging');
-    await syncDriftCompat(projectRoot, skillsSource, kimiDisabledRules, {},
-      { skillMountPaths: { tdd: ['claude', 'kimi'] } });
+    await syncDriftCompat(
+      projectRoot,
+      skillsSource,
+      kimiDisabledRules,
+      {},
+      { skillMountPaths: { tdd: ['claude', 'kimi'] } },
+    );
 
     config = await readCapabilitiesConfig(projectRoot);
     tdd = config?.capabilities.find((c) => c.id === 'tdd');
@@ -877,7 +890,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       },
     };
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       kimiDisabledRules,
       {},
@@ -922,7 +936,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.deepEqual(drift.stale, [], 'no stale when all providers disabled');
     assert.deepEqual(drift.conflicts, [], 'no conflicts when all providers disabled');
 
-    const report = await syncDriftCompat(projectRoot,
+    const report = await syncDriftCompat(
+      projectRoot,
       skillsSource,
       allDisabledRules,
       {},

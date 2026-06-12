@@ -83,45 +83,8 @@ describe('SkillsDriftBanner', () => {
     });
   }
 
-  it('clears destructive conflict choices when switching projects', async () => {
-    act(() => {
-      root.render(<SkillsDriftBanner projectPath="/tmp/project-a" />);
-    });
-    await flush();
-
-    const toggleButton = container.querySelector('button');
-    expect(toggleButton).toBeTruthy();
-    await act(async () => {
-      (toggleButton as HTMLButtonElement).click();
-    });
-
-    const overrideInput = Array.from(container.querySelectorAll('input[type="radio"]')).at(1) as HTMLInputElement;
-    expect(overrideInput).toBeTruthy();
-    await act(async () => {
-      overrideInput.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    });
-    await flush();
-    expect(overrideInput.checked).toBe(true);
-
-    act(() => {
-      root.render(<SkillsDriftBanner projectPath="/tmp/project-b" />);
-    });
-    await flush();
-
-    const syncButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('立即同步'),
-    );
-    expect(syncButton).toBeTruthy();
-    await act(async () => {
-      (syncButton as HTMLButtonElement).click();
-    });
-
-    expect(syncBodies.at(-1)).toMatchObject({
-      action: 'sync',
-      projectPath: '/tmp/project-b',
-    });
-    expect(syncBodies.at(-1)?.conflictChoices).toEqual({});
-  });
+  // P2-2: 'clears destructive conflict choices when switching projects' test removed —
+  // G5/G7 removed skip/override radio UI, so the test's DOM expectations are stale.
 
   it('hides ignored drift even when issue details are still returned', async () => {
     apiFetch.mockImplementation(async (url: string) => {

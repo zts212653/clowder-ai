@@ -13,7 +13,7 @@
 import { lstat, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { MountRules } from '@cat-cafe/shared';
+import { type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import { clearDriftIgnored, markDriftIgnored } from '../config/mount/project-state-store.js';
 import { buildSkillMountTargets } from '../utils/skill-mount.js';
 import type { SkillMountPathInput } from '../utils/skill-mount-policy.js';
@@ -48,14 +48,23 @@ export async function syncDrift(
     cascadeDisabledSkills?: Iterable<string>;
   },
 ): Promise<DriftSyncReport> {
-  // Pre-delete all conflict paths so syncProject sees them as 'missing'
+  // Pre-delete all conflict paths so syncProject sees them as 'missing'.
+  // Use project-scoped targets only — standard providers resolve to project dir,
+  // NOT HOME fallback, to avoid cross-project side-effects (P1-1 review fix).
   const overriddenSkills = new Set<string>();
-  const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+  const resolveTargets = new Map<string, string[]>();
+  for (const id of STANDARD_PROVIDER_IDS) {
+    const rule = mountRules.providers[id];
+    if (rule.enabled) resolveTargets.set(id, [join(projectRoot, rule.path)]);
+  }
+  for (const target of buildSkillMountTargets(projectRoot, homedir(), mountRules)) {
+    if (target.kind === 'custom') resolveTargets.set(target.id, [...target.candidates]);
+  }
   for (const conflict of drift.conflicts ?? []) {
     overriddenSkills.add(conflict.skill);
-    const target = targets.find((t) => t.id === conflict.provider);
-    if (target) {
-      for (const dir of target.candidates) {
+    const dirs = resolveTargets.get(conflict.provider);
+    if (dirs) {
+      for (const dir of dirs) {
         await rm(join(dir, conflict.skill), { recursive: true, force: true }).catch(() => {});
         try {
           const rootStat = await lstat(dir);

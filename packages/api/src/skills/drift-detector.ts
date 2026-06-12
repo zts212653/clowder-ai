@@ -238,11 +238,7 @@ async function checkMountDrift(
         staleMounts.add(name);
         continue;
       }
-      if (
-        mountTargets.some(
-          (t) => legacyDirMounts.has(t.key) && !skillAllowsMountProvider(policy, name, t.provider),
-        )
-      ) {
+      if (mountTargets.some((t) => legacyDirMounts.has(t.key) && !skillAllowsMountProvider(policy, name, t.provider))) {
         staleMounts.add(name);
       }
     }
@@ -355,7 +351,14 @@ export async function checkGlobal(
 
   // 1.2 Mount: global config ↔ symlinks
   const expectedSet = buildExpectedSet(policy, disabledSet);
-  const mount = await checkMountDrift(globalProjectRoot, skillsSource, mountRules, expectedSet, policy, opts.platformName);
+  const mount = await checkMountDrift(
+    globalProjectRoot,
+    skillsSource,
+    mountRules,
+    expectedSet,
+    policy,
+    opts.platformName,
+  );
 
   return finalizeDriftResult(
     [...new Set([...unregistered, ...mount.missingMounts])],
@@ -394,7 +397,11 @@ export async function checkProject(
   }
 
   // 2. Mount: project config ↔ symlinks
+  // Exclude orphans: skills in project config but not global config belong in stale,
+  // not in mount detection — prevents same skill appearing in both newSkills and stale (P1-2).
+  const orphanSet = new Set(configOrphans);
   const expectedSet = buildExpectedSet(policy, disabledSet);
+  for (const orphan of orphanSet) expectedSet.delete(orphan);
   const mount = await checkMountDrift(projectRoot, skillsSource, mountRules, expectedSet, policy, opts.platformName);
 
   return finalizeDriftResult(
@@ -408,4 +415,3 @@ export async function checkProject(
     projectRoot,
   );
 }
-

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 
 import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import { markDriftIgnored } from '../../dist/config/mount/project-state-store.js';
-import { checkGlobal } from '../../dist/skills/drift-detector.js';
+import { checkGlobal, checkProject } from '../../dist/skills/drift-detector.js';
 import { listSourceSkillNames } from '../../dist/utils/skill-source.js';
 
 /**
@@ -455,6 +455,53 @@ describe('DriftDetector (F228 Phase 2)', () => {
     assert.equal(result.conflicts[0].kind, 'directory');
     assert.equal(result.conflicts[0].provider, 'acp');
     assert.deepEqual(result.stale, ['old-skill']);
+  });
+
+  // ── P1-2 regression: orphan must NOT appear in both newSkills and stale ──
+
+  test('checkProject: config orphan appears only in stale, not in newSkills (P1-2)', async () => {
+    await makeSkill('tdd');
+    await makeSkill('orphan-skill');
+    // Mount tdd so it's clean
+    await mountManagedLink('claude', 'tdd');
+    await mountManagedLink('codex', 'tdd');
+    await mountManagedLink('gemini', 'tdd');
+    await mountManagedLink('kimi', 'tdd');
+
+    // orphan-skill is in project config but NOT in global config
+    const allProviders = ['claude', 'codex', 'gemini', 'kimi'];
+    const result = await checkProject(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
+      globalConfigSkills: new Set(['tdd']),
+      projectConfigSkills: new Set(['tdd', 'orphan-skill']),
+      disabledSkills: [],
+      skillMountPaths: {
+        tdd: allProviders,
+        'orphan-skill': allProviders,
+      },
+    });
+
+    // orphan-skill should be in stale (config orphan) but NOT in newSkills
+    assert.ok(result.stale.includes('orphan-skill'), 'orphan should be in stale');
+    assert.ok(!result.newSkills.includes('orphan-skill'), 'orphan must NOT be in newSkills');
+  });
+
+  test('checkProject: config-new skill (in global, not project) appears only in newSkills (P1-2)', async () => {
+    await makeSkill('tdd');
+    await makeSkill('new-global-skill');
+
+    const allProviders = ['claude', 'codex', 'gemini', 'kimi'];
+    const result = await checkProject(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
+      globalConfigSkills: new Set(['tdd', 'new-global-skill']),
+      projectConfigSkills: new Set(['tdd']),
+      disabledSkills: [],
+      skillMountPaths: {
+        tdd: allProviders,
+        'new-global-skill': allProviders,
+      },
+    });
+
+    assert.ok(result.newSkills.includes('new-global-skill'), 'new global skill should be in newSkills');
+    assert.ok(!result.stale.includes('new-global-skill'), 'new global skill must NOT be in stale');
   });
 
   test('driftHash differs when custom mount paths change', async () => {

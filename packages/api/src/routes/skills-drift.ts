@@ -11,7 +11,7 @@
  */
 
 import { dirname } from 'node:path';
-import { type CapabilitiesConfig } from '@cat-cafe/shared';
+import { type CapabilitiesConfig, type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
@@ -44,6 +44,22 @@ function requireDriftWriteAccess(request: FastifyRequest, reply: FastifyReply): 
     return { error: ownerError.error };
   }
   return { userId };
+}
+
+/** @internal Exported for unit testing only.
+ *  Fill default mount paths for configured+enabled skills that lack explicit mountPaths.
+ *  Without this, `enabled:true` without `mountPaths` → not in policy → drift detection
+ *  misses the skill entirely (P1-3 review fix). */
+export function fillDefaultMountPaths(policy: ProjectSkillMountPolicy, mountRules: MountRules): void {
+  const activeIds = [
+    ...STANDARD_PROVIDER_IDS.filter((id) => mountRules.providers[id].enabled),
+    ...mountRules.customPaths.map((p) => p.alias),
+  ];
+  for (const skill of policy.configuredSkills) {
+    if (!policy.disabledSkills.includes(skill) && !policy.skillMountPaths[skill]) {
+      policy.skillMountPaths[skill] = activeIds;
+    }
+  }
 }
 
 async function resolveTargetProjectRoot(projectPath?: string): Promise<string | null> {
@@ -181,6 +197,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       const globalConfig = await readCapabilitiesConfig(globalProjectRoot);
       const globalPolicy = readCatCafeSkillMountPolicy(globalConfig);
       const mountRules = await readMountRules(globalProjectRoot, globalProjectRoot);
+      fillDefaultMountPaths(globalPolicy, mountRules);
       const drift = await checkGlobal(globalProjectRoot, skillsSource, mountRules, {
         globalConfigSkills: globalPolicy.configuredSkills,
         disabledSkills: globalPolicy.disabledSkills,
@@ -200,6 +217,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
 
     const { projectPolicy, globalPolicy, mergedPolicy } = await loadDriftPolicies(projectRoot, globalProjectRoot);
     const mountRules = await readMountRules(projectRoot, globalProjectRoot);
+    fillDefaultMountPaths(mergedPolicy, mountRules);
     const drift = await checkProject(projectRoot, skillsSource, mountRules, {
       globalConfigSkills: globalPolicy.configuredSkills,
       projectConfigSkills: projectPolicy.configuredSkills,

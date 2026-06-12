@@ -3,9 +3,10 @@ import { lstat, mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { writeCapabilitiesConfig } from '../dist/config/capabilities/capability-orchestrator.js';
-import { skillsDriftRoutes } from '../dist/routes/skills-drift.js';
+import { fillDefaultMountPaths, readCatCafeSkillMountPolicy, skillsDriftRoutes } from '../dist/routes/skills-drift.js';
 
 const OWNER_ID = 'owner-user';
 const LOCAL_WRITE_HEADERS = {
@@ -233,5 +234,45 @@ describe('Skills Drift Route (F228)', () => {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ── P1-3 regression: fillDefaultMountPaths fills defaults for enabled skills without mountPaths ──
+
+describe('fillDefaultMountPaths (P1-3 regression)', () => {
+  it('adds default mount paths for configured+enabled skills without explicit mountPaths', () => {
+    const policy = readCatCafeSkillMountPolicy({
+      version: 2,
+      capabilities: [
+        { type: 'skill', source: 'cat-cafe', id: 'tdd', enabled: true },
+        { type: 'skill', source: 'cat-cafe', id: 'debugging', enabled: true, mountPaths: ['claude'] },
+        { type: 'skill', source: 'cat-cafe', id: 'disabled-skill', enabled: false },
+      ],
+    });
+
+    // Before fill: tdd has no mountPaths, debugging has explicit, disabled-skill is disabled
+    assert.equal(policy.skillMountPaths['tdd'], undefined);
+    assert.deepEqual(policy.skillMountPaths['debugging'], ['claude']);
+
+    fillDefaultMountPaths(policy, DEFAULT_MOUNT_RULES);
+
+    // After fill: tdd should have all enabled providers as defaults
+    assert.ok(Array.isArray(policy.skillMountPaths['tdd']), 'tdd should have default mount paths');
+    assert.ok(policy.skillMountPaths['tdd'].includes('claude'), 'tdd defaults should include claude');
+    assert.ok(policy.skillMountPaths['tdd'].includes('codex'), 'tdd defaults should include codex');
+    // debugging keeps its explicit mount paths
+    assert.deepEqual(policy.skillMountPaths['debugging'], ['claude']);
+    // disabled-skill should NOT get defaults
+    assert.equal(policy.skillMountPaths['disabled-skill'], undefined);
+  });
+
+  it('does not overwrite existing mountPaths', () => {
+    const policy = readCatCafeSkillMountPolicy({
+      version: 2,
+      capabilities: [{ type: 'skill', source: 'cat-cafe', id: 'tdd', enabled: true, mountPaths: ['gemini'] }],
+    });
+
+    fillDefaultMountPaths(policy, DEFAULT_MOUNT_RULES);
+    assert.deepEqual(policy.skillMountPaths['tdd'], ['gemini']);
   });
 });

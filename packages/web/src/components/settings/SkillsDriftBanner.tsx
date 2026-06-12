@@ -67,7 +67,6 @@ export function SkillsDriftBanner({
     return () => window.removeEventListener('keydown', handler);
   }, [open]);
 
-
   const fetchDrift = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -289,10 +288,7 @@ export function SkillsDriftBanner({
                 {visibleDrift.conflicts.map((c) => {
                   const conflictKey = `${c.skill}:${c.provider}`;
                   return (
-                    <div
-                      key={conflictKey}
-                      className="mt-1 rounded-xl bg-[var(--console-card-bg)] p-2 text-xs"
-                    >
+                    <div key={conflictKey} className="mt-1 rounded-xl bg-[var(--console-card-bg)] p-2 text-xs">
                       <p className="font-medium text-cafe">{c.skill}</p>
                       <p className="text-cafe-muted">
                         {c.provider} ·{' '}
