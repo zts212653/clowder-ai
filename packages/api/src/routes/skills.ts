@@ -13,8 +13,6 @@ import { fileURLToPath } from 'node:url';
 import { STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
-import type { SkillsStaleness } from '../config/governance/skills-state.js';
-import { checkStaleness } from '../config/governance/skills-state.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -30,6 +28,7 @@ import {
   resolveSkillMcpStatuses,
   type SkillMcpDependency,
 } from '../utils/skill-parse.js';
+import { checkStaleness, type SkillsStaleness } from '../utils/skill-source.js';
 
 interface SkillMount {
   claude: boolean;

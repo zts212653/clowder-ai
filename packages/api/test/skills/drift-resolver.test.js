@@ -9,10 +9,10 @@ import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { syncProject } from '../../dist/skills/skill-sync-engine.js';
 import { checkStaleness } from '../../dist/config/governance/skills-state.js';
 import { detectDrift } from '../../dist/skills/drift-detector.js';
 import { ignoreDrift, syncDrift } from '../../dist/skills/drift-resolver.js';
+import { syncProject } from '../../dist/skills/skill-sync-engine.js';
 
 let tempDir;
 let projectRoot;
@@ -675,7 +675,10 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     await makeSkill('tdd');
 
     // Step 1: syncProject with cascade disabled — writes cascadeDisabledSkills
-    await syncProject(projectRoot, skillsSource, { mountRules: DEFAULT_MOUNT_RULES, cascadeDisabledSkills: new Set(['tdd']) });
+    await syncProject(projectRoot, skillsSource, {
+      mountRules: DEFAULT_MOUNT_RULES,
+      cascadeDisabledSkills: new Set(['tdd']),
+    });
     let config = await readCapabilitiesConfig(projectRoot);
     let tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
     assert.equal(tdd?.enabled, false, 'tdd should be cascade-disabled after syncProject');

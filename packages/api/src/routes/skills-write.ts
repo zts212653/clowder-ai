@@ -14,7 +14,6 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
 import { validateSkillName } from '../config/governance/skill-sync.js';
-import { listSourceSkillNames } from '../config/governance/skills-state.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
@@ -22,6 +21,7 @@ import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-sourc
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
 import { buildSkillMountTargets, resolveMainRepoPath } from '../utils/skill-mount.js';
+import { listSourceSkillNames } from '../utils/skill-source.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
 function requireSkillsWriteAccess(request: FastifyRequest, reply: FastifyReply): { error?: string } {

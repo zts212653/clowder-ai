@@ -21,7 +21,6 @@ import { lstat, readdir, readlink, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
-import { listSourceSkillNames } from '../config/governance/skills-state.js';
 import { readProjectState } from '../config/mount/project-state-store.js';
 import { pathsEqual } from '../utils/project-path.js';
 import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../utils/skill-mount.js';
@@ -31,6 +30,7 @@ import {
   type SkillMountPathInput,
   skillAllowsMountProvider,
 } from '../utils/skill-mount-policy.js';
+import { listSourceSkillNames } from '../utils/skill-source.js';
 
 export interface DriftConflict {
   /** Skill name that wanted to mount but found something in the way. */

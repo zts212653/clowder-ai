@@ -13,13 +13,11 @@ import {
   writeCapabilitiesConfig,
 } from '../../dist/config/capabilities/capability-orchestrator.js';
 import {
-  checkStaleness,
-  computeSourceManifestHash,
-  listSourceSkillNames,
   readSkillsSyncState,
   updateSkillMountPaths,
   writeSkillsSyncState,
-} from '../../dist/config/governance/skills-state.js';
+} from '../../dist/skills/skill-sync-config.js';
+import { checkStaleness, computeSourceManifestHash, listSourceSkillNames } from '../../dist/utils/skill-source.js';
 
 let tempDir;
 

@@ -7,15 +7,10 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { resolveEffectiveSkillMountPaths, validateSkillName } from '../config/governance/skill-sync.js';
-import {
-  computeSourceManifestHash,
-  listSourceSkillNames,
-  readSkillsSyncState,
-  writeSkillsSyncState,
-} from '../config/governance/skills-state.js';
 import { pathsEqual } from '../utils/project-path.js';
 import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../utils/skill-mount.js';
-import { updateConfigAfterSync } from './skill-sync-config.js';
+import { computeSourceManifestHash, listSourceSkillNames } from '../utils/skill-source.js';
+import { readSkillsSyncState, updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
 
 function symlinkTargetFor(linkPath: string, sourcePath: string): string {
   return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);

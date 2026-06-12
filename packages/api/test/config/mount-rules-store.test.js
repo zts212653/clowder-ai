@@ -489,5 +489,4 @@ describe('MountRulesStore (F228)', () => {
     assert.equal(rules.providers.codex.path, DEFAULT_MOUNT_RULES.providers.codex.path);
     assert.equal(rules.providers.claude.enabled, true, 'valid sibling standard rule should be preserved');
   });
-
 });

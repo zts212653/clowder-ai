@@ -15,7 +15,9 @@ import {
   type MountRules,
   STANDARD_PROVIDER_IDS,
 } from '@cat-cafe/shared';
+import { updateSkillMountPaths, writeSkillsSyncState } from '../../skills/skill-sync-config.js';
 import { pathsEqual } from '../../utils/project-path.js';
+import { computeSourceManifestHash } from '../../utils/skill-source.js';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../capabilities/capability-orchestrator.js';
 import { readMountRules } from '../mount/mount-rules-store.js';
 import type { Provider } from './governance-pack.js';
@@ -28,7 +30,6 @@ import {
 } from './governance-pack.js';
 import { GovernanceRegistry } from './governance-registry.js';
 import { getMethodologyTemplates } from './methodology-templates.js';
-import { computeSourceManifestHash, updateSkillMountPaths, writeSkillsSyncState } from './skills-state.js';
 
 const IS_WIN32 = process.platform === 'win32';
 
