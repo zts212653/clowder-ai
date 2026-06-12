@@ -200,6 +200,7 @@ export class GovernanceBootstrapService {
         sourceRoot: sourceRootRelative,
         sourceManifestHash: hash,
         lastSyncedAt,
+        ...(disabledSkillNames.length > 0 ? { cascadeDisabledSkills: [...disabledSkillNames].sort() } : {}),
       });
       for (const skillName of skillNames) {
         await updateSkillMountPaths(targetProject, [skillName], targetIdsBySkill.get(skillName) ?? []);

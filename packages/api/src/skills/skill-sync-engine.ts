@@ -140,7 +140,7 @@ export async function syncProject(
   );
 
   const prevCascadeDisabled = new Set((await readSkillsSyncState(projectRoot))?.cascadeDisabledSkills ?? []);
-  const disabledSet = new Set<string>(opts.disabledSkills ?? []);
+  const disabledSet = new Set<string>(opts.disabledSkills ?? configDisabledSet);
   const cascadeDisabledInThisSync = new Set<string>();
   const projectConfiguredSkills = new Set(
     previousNames.filter((name) => !prevCascadeDisabled.has(name) || !configDisabledSet.has(name)),
