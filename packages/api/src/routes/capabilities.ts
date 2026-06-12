@@ -59,11 +59,6 @@ import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
 import { parseManifestSkillMeta, readSkillMeta, type SkillMeta } from '../skills/skill-meta.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
-import {
-  ManagedSkillWritebackConflictError,
-  mountManagedSkillSymlinks,
-  unmountManagedSkillSymlinks,
-} from '../utils/managed-skill-writeback.js';
 import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {

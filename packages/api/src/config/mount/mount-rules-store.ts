@@ -5,7 +5,7 @@
  *
  * Adapter pattern: readMountRules() converts MountRuleEntry[] → MountRules (old format)
  * so downstream consumers (drift-detector, skill-sync-engine, drift-resolver,
- * mount-rules route, skill-mount, skill-conflict) get zero changes.
+ * mount-rules route, skill-mount) get zero changes.
  */
 
 import { isAbsolute } from 'node:path';
