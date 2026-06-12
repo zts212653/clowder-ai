@@ -17,8 +17,8 @@ import { readCapabilitiesConfig } from '../config/capabilities/capability-orches
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
 import { resolveEffectiveSkillMountPaths } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import { detectDrift } from '../skills/drift-detector.js';
-import { type ConflictChoice, ignoreDrift, syncDrift } from '../skills/drift-resolver.js';
+import { checkGlobal, checkProject } from '../skills/drift-detector.js';
+import { ignoreDrift, syncDrift } from '../skills/drift-resolver.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
@@ -155,25 +155,70 @@ export function mergeSkillMountPolicies(
   };
 }
 
-/** Compute effective per-skill mount policy from global + project capabilities.json. */
-async function loadEffectiveSkillMountPolicy(
-  projectRoot: string,
-  globalProjectRoot: string,
-): Promise<ProjectSkillMountPolicy> {
+/** Load individual + merged policies for three-layer drift detection. */
+async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string) {
   const [projectConfig, globalConfig] = await Promise.all([
     readCapabilitiesConfig(projectRoot),
     readCapabilitiesConfig(globalProjectRoot),
   ]);
-  // F228: Read previous cascade state so stale cascade entries don't block global re-enable
+  const projectPolicy = readCatCafeSkillMountPolicy(projectConfig);
+  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig);
   const prevCascadeDisabled = new Set<string>(projectConfig?.skillsSync?.cascadeDisabledSkills ?? []);
-  return mergeSkillMountPolicies(
-    readCatCafeSkillMountPolicy(projectConfig),
-    readCatCafeSkillMountPolicy(globalConfig),
-    prevCascadeDisabled,
-  );
+  const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy, prevCascadeDisabled);
+  return { projectPolicy, globalPolicy, mergedPolicy };
 }
 
 export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = async (app, opts) => {
+  /** Shared: compute drift using the three-layer model. */
+  async function computeDrift(projectPath?: string) {
+    const projectRoot = await resolveTargetProjectRoot(projectPath);
+    if (!projectRoot) return null;
+    const skillsSource = await resolveCatCafeSkillsSource();
+    const globalProjectRoot = opts.mainProjectRoot ?? dirname(skillsSource);
+    const isGlobalScope = !projectPath;
+
+    if (isGlobalScope) {
+      const globalConfig = await readCapabilitiesConfig(globalProjectRoot);
+      const globalPolicy = readCatCafeSkillMountPolicy(globalConfig);
+      const mountRules = await readMountRules(globalProjectRoot, globalProjectRoot);
+      const drift = await checkGlobal(globalProjectRoot, skillsSource, mountRules, {
+        globalConfigSkills: globalPolicy.configuredSkills,
+        disabledSkills: globalPolicy.disabledSkills,
+        skillMountPaths: globalPolicy.skillMountPaths,
+      });
+      return {
+        drift,
+        effectiveRoot: globalProjectRoot,
+        skillsSource,
+        mountRules,
+        syncOpts: {
+          disabledSkills: globalPolicy.disabledSkills,
+          skillMountPaths: globalPolicy.skillMountPaths,
+        },
+      };
+    }
+
+    const { projectPolicy, globalPolicy, mergedPolicy } = await loadDriftPolicies(projectRoot, globalProjectRoot);
+    const mountRules = await readMountRules(projectRoot, globalProjectRoot);
+    const drift = await checkProject(projectRoot, skillsSource, mountRules, {
+      globalConfigSkills: globalPolicy.configuredSkills,
+      projectConfigSkills: projectPolicy.configuredSkills,
+      disabledSkills: mergedPolicy.disabledSkills,
+      skillMountPaths: mergedPolicy.skillMountPaths,
+    });
+    return {
+      drift,
+      effectiveRoot: projectRoot,
+      skillsSource,
+      mountRules,
+      syncOpts: {
+        disabledSkills: mergedPolicy.disabledSkills,
+        skillMountPaths: mergedPolicy.skillMountPaths,
+        cascadeDisabledSkills: mergedPolicy.cascadeDisabledSkills,
+      },
+    };
+  }
+
   app.post('/api/skills/drift-check', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -181,65 +226,34 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const body = (request.body ?? {}) as { projectPath?: string };
-    const projectRoot = await resolveTargetProjectRoot(body.projectPath);
-    if (!projectRoot) {
+    const ctx = await computeDrift(body.projectPath);
+    if (!ctx) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
-
-    const skillsSource = await resolveCatCafeSkillsSource();
-    const globalProjectRoot = opts.mainProjectRoot ?? dirname(skillsSource);
-    const [mountRules, mountPolicy] = await Promise.all([
-      readMountRules(projectRoot, globalProjectRoot),
-      loadEffectiveSkillMountPolicy(projectRoot, globalProjectRoot),
-    ]);
-
-    const result = await detectDrift(projectRoot, skillsSource, mountRules, mountPolicy);
-    return { result, projectRoot };
+    return { result: ctx.drift, projectRoot: ctx.effectiveRoot };
   });
 
   app.post('/api/skills/drift-resolve', async (request, reply) => {
     const access = requireDriftWriteAccess(request, reply);
-    if (!access.userId) {
-      return { error: access.error };
-    }
+    if (!access.userId) return { error: access.error };
 
-    const body = (request.body ?? {}) as {
-      projectPath?: string;
-      action?: 'sync' | 'ignore';
-      conflictChoices?: Record<string, ConflictChoice>;
-    };
-
+    const body = (request.body ?? {}) as { projectPath?: string; action?: 'sync' | 'ignore' };
     if (body.action !== 'sync' && body.action !== 'ignore') {
       reply.status(400);
       return { error: 'Required: action ("sync" | "ignore")' };
     }
-
-    const projectRoot = await resolveTargetProjectRoot(body.projectPath);
-    if (!projectRoot) {
+    const ctx = await computeDrift(body.projectPath);
+    if (!ctx) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
 
-    const skillsSource = await resolveCatCafeSkillsSource();
-    const globalProjectRoot = opts.mainProjectRoot ?? dirname(skillsSource);
-    const [mountRules, mountPolicy] = await Promise.all([
-      readMountRules(projectRoot, globalProjectRoot),
-      loadEffectiveSkillMountPolicy(projectRoot, globalProjectRoot),
-    ]);
-
     if (body.action === 'ignore') {
-      const report = await ignoreDrift(projectRoot, skillsSource, mountRules, mountPolicy);
-      return { action: 'ignore', report, projectRoot };
+      const report = await ignoreDrift(ctx.effectiveRoot, ctx.drift);
+      return { action: 'ignore', report, projectRoot: ctx.effectiveRoot };
     }
-
-    const choices: Record<string, ConflictChoice> = {};
-    for (const [skill, choice] of Object.entries(body.conflictChoices ?? {})) {
-      if (choice === 'override' || choice === 'skip') {
-        choices[skill] = choice;
-      }
-    }
-    const report = await syncDrift(projectRoot, skillsSource, mountRules, choices, mountPolicy);
-    return { action: 'sync', report, projectRoot };
+    const report = await syncDrift(ctx.effectiveRoot, ctx.skillsSource, ctx.mountRules, ctx.drift, ctx.syncOpts);
+    return { action: 'sync', report, projectRoot: ctx.effectiveRoot };
   });
 };

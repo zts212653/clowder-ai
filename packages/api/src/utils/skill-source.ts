@@ -85,12 +85,21 @@ export interface SkillsStaleness {
 /**
  * Compare recorded manifest hash against current source directory.
  * Detects when skills have been added or removed since last sync.
+ *
+ * F228 three-layer model: staleness is source ↔ global config (registration layer).
+ * Pass globalProjectRoot to compare against the global config; defaults to projectRoot
+ * for backward compatibility (when the project IS the global project).
  */
-export async function checkStaleness(projectRoot: string, sourceRoot: string): Promise<SkillsStaleness> {
-  const syncState = await readSkillsSyncState(projectRoot);
+export async function checkStaleness(
+  projectRoot: string,
+  sourceRoot: string,
+  globalProjectRoot?: string,
+): Promise<SkillsStaleness> {
+  const configRoot = globalProjectRoot ?? projectRoot;
+  const syncState = await readSkillsSyncState(configRoot);
   const currentHash = await computeSourceManifestHash(sourceRoot);
   const currentNames = await listSourceSkillNames(sourceRoot);
-  const config = await readCapabilitiesConfig(projectRoot);
+  const config = await readCapabilitiesConfig(configRoot);
   const managedNames =
     config?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id) ??
     [];

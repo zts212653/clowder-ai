@@ -53,7 +53,6 @@ export function SkillsDriftBanner({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [conflictChoices, setConflictChoices] = useState<Record<string, 'override' | 'skip'>>({});
 
   const handleBackdrop = useCallback((e: MouseEvent) => {
     if (e.target === e.currentTarget) setOpen(false);
@@ -68,10 +67,6 @@ export function SkillsDriftBanner({
     return () => window.removeEventListener('keydown', handler);
   }, [open]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: projectPath/refreshToken intentionally reset stale conflict choices.
-  useEffect(() => {
-    setConflictChoices({});
-  }, [projectPath, refreshToken]);
 
   const fetchDrift = useCallback(async () => {
     setLoading(true);
@@ -104,14 +99,13 @@ export function SkillsDriftBanner({
       const res = await apiFetch('/api/skills/drift-resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sync', conflictChoices, projectPath }),
+        body: JSON.stringify({ action: 'sync', projectPath }),
       });
       if (!res.ok) {
         const txt = await res.text();
         throw new Error(`drift-resolve sync ${res.status} ${txt.slice(0, 80)}`);
       }
       setOpen(false);
-      setConflictChoices({});
       await fetchDrift();
       await onResolved?.();
     } catch (err) {
@@ -119,7 +113,7 @@ export function SkillsDriftBanner({
     } finally {
       setBusy(false);
     }
-  }, [conflictChoices, projectPath, fetchDrift, onResolved]);
+  }, [projectPath, fetchDrift, onResolved]);
 
   const ignore = useCallback(async () => {
     setBusy(true);
@@ -162,14 +156,16 @@ export function SkillsDriftBanner({
   );
 
   // De-dup: skip "挂载不一致" when all mount issues are caused by known drift conflicts
+  // Registration checks (unregistered/phantom) are global-only — project tab doesn't show them.
+  const isGlobalScope = !projectPath;
   const summaryIssues = [
     summary && !summary.allMounted && hasUnexplainedMountIssues ? '挂载不一致' : null,
-    summary && !summary.registrationConsistent ? '注册不一致' : null,
+    isGlobalScope && summary && !summary.registrationConsistent ? '注册不一致' : null,
     !currentDrift.isIgnored && staleness?.stale ? '有更新' : null,
   ].filter(Boolean) as string[];
   const registrationIssues = summary?.registrationIssues;
-  const unregisteredSkills = registrationIssues?.unregistered ?? [];
-  const phantomSkills = registrationIssues?.phantom ?? [];
+  const unregisteredSkills = isGlobalScope ? (registrationIssues?.unregistered ?? []) : [];
+  const phantomSkills = isGlobalScope ? (registrationIssues?.phantom ?? []) : [];
   const statusIssueGroups: Array<{ label: string; skills?: string[] }> = [];
   if (summary && !summary.allMounted) {
     const mountIssueSkills = summary.mountIssues?.map((issue) => {
@@ -287,38 +283,28 @@ export function SkillsDriftBanner({
                 <p className="text-xs font-semibold text-cafe-secondary">
                   ⚠ 挂载冲突 ({visibleDrift.conflicts.length})
                 </p>
+                <p className="mt-1 text-xs text-conn-amber-text">
+                  存在同名目录/文件/链接占用（立即同步会覆盖和清理已有内容，请先确认是否需要进行备份）
+                </p>
                 {visibleDrift.conflicts.map((c) => {
                   const conflictKey = `${c.skill}:${c.provider}`;
                   return (
                     <div
                       key={conflictKey}
-                      className="mt-1 flex items-center gap-3 rounded-xl bg-[var(--console-card-bg)] p-2 text-xs"
+                      className="mt-1 rounded-xl bg-[var(--console-card-bg)] p-2 text-xs"
                     >
-                      <div className="flex-1">
-                        <p className="font-medium text-cafe">{c.skill}</p>
-                        <p className="text-cafe-muted">
-                          {c.provider} · {c.kind}
-                          {c.pointsTo ? ` → ${c.pointsTo}` : ''}
-                        </p>
-                      </div>
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="radio"
-                          name={`conflict-${conflictKey}`}
-                          checked={conflictChoices[conflictKey] === 'skip' || !conflictChoices[conflictKey]}
-                          onChange={() => setConflictChoices((m) => ({ ...m, [conflictKey]: 'skip' }))}
-                        />
-                        跳过
-                      </label>
-                      <label className="flex items-center gap-1">
-                        <input
-                          type="radio"
-                          name={`conflict-${conflictKey}`}
-                          checked={conflictChoices[conflictKey] === 'override'}
-                          onChange={() => setConflictChoices((m) => ({ ...m, [conflictKey]: 'override' }))}
-                        />
-                        覆盖
-                      </label>
+                      <p className="font-medium text-cafe">{c.skill}</p>
+                      <p className="text-cafe-muted">
+                        {c.provider} ·{' '}
+                        {c.kind === 'directory'
+                          ? '存在同名目录'
+                          : c.kind === 'file'
+                            ? '存在同名文件'
+                            : c.kind === 'other-symlink'
+                              ? '被其他链接占用'
+                              : c.kind}
+                        {c.pointsTo ? ` → ${c.pointsTo}` : ''}
+                      </p>
                     </div>
                   );
                 })}

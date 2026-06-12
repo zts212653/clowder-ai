@@ -1,11 +1,11 @@
 /**
- * Drift Resolver — F228 redesign
+ * Drift Resolver — F228 Three-Layer Model
  *
- * Applies the user's "sync" or "ignore" decision to the current DriftResult.
+ * Applies the user's "sync" or "ignore" decision to a pre-computed DriftResult.
  * Uses syncProject as the unified reconciliation engine:
  *
- *   - action='sync': pre-deletes override conflict paths, then syncProject
- *     reconciles the entire project (mount new, remove stale, skip remaining conflicts).
+ *   - action='sync': pre-deletes all conflict paths (override), then syncProject
+ *     reconciles the entire project (mount new, remove stale).
  *
  *   - action='ignore': marks the current driftHash as ignored in projectState.
  */
@@ -17,30 +17,21 @@ import type { MountRules } from '@cat-cafe/shared';
 import { clearDriftIgnored, markDriftIgnored } from '../config/mount/project-state-store.js';
 import { buildSkillMountTargets } from '../utils/skill-mount.js';
 import type { SkillMountPathInput } from '../utils/skill-mount-policy.js';
-import { type DriftResult, detectDrift } from './drift-detector.js';
+import type { DriftResult } from './drift-detector.js';
 import { syncProject } from './skill-sync-engine.js';
 
-// ────────── Types (inlined from deleted drift-helpers.ts) ──────────
-
-export type ConflictChoice = 'override' | 'skip';
+// ────────── Types ──────────
 
 export interface DriftSyncReport {
-  /** Skills successfully mounted (newSkills + overridden conflicts). */
   mounted: string[];
-  /** Skills whose symlinks were removed (stale set). */
   unmounted: string[];
-  /** Conflicts the user chose 'override' for — local path was deleted + symlink created. */
+  /** Conflict skills whose blockers were pre-deleted before sync. */
   overridden: string[];
-  /** Conflicts the user chose 'skip' for — left alone. */
-  skipped: string[];
-  /** The drift snapshot used for this sync (post-sync state will be different). */
   resolvedFrom: DriftResult;
 }
 
 export interface DriftIgnoreReport {
-  /** The driftHash that is now ignored. */
   ignoredHash: string;
-  /** The drift snapshot at ignore time. */
   ignoredSnapshot: DriftResult;
 }
 
@@ -50,34 +41,27 @@ export async function syncDrift(
   projectRoot: string,
   skillsSource: string,
   mountRules: MountRules,
-  conflictChoices: Record<string, ConflictChoice>,
+  drift: DriftResult,
   opts?: {
     disabledSkills?: Iterable<string>;
     skillMountPaths?: SkillMountPathInput;
     cascadeDisabledSkills?: Iterable<string>;
   },
 ): Promise<DriftSyncReport> {
-  const drift = await detectDrift(projectRoot, skillsSource, mountRules, opts);
-
-  // Pre-delete override conflict paths so syncProject sees them as 'missing'
-  const overriddenKeys = new Set<string>();
+  // Pre-delete all conflict paths so syncProject sees them as 'missing'
+  const overriddenSkills = new Set<string>();
   const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
-  for (const conflict of drift.conflicts) {
-    const key = `${conflict.skill}:${conflict.provider}`;
-    if ((conflictChoices[key] ?? 'skip') === 'override') {
-      overriddenKeys.add(key);
-      const target = targets.find((t) => t.id === conflict.provider);
-      if (target) {
-        for (const dir of target.candidates) {
-          // Remove skill-level blocker
-          await rm(join(dir, conflict.skill), { recursive: true, force: true }).catch(() => {});
-          // Also remove root-level blocker (non-directory symlink/file)
-          try {
-            const rootStat = await lstat(dir);
-            if (rootStat.isSymbolicLink() || rootStat.isFile()) await rm(dir, { force: true });
-          } catch {
-            /* ENOENT — fine */
-          }
+  for (const conflict of drift.conflicts ?? []) {
+    overriddenSkills.add(conflict.skill);
+    const target = targets.find((t) => t.id === conflict.provider);
+    if (target) {
+      for (const dir of target.candidates) {
+        await rm(join(dir, conflict.skill), { recursive: true, force: true }).catch(() => {});
+        try {
+          const rootStat = await lstat(dir);
+          if (rootStat.isSymbolicLink() || rootStat.isFile()) await rm(dir, { force: true });
+        } catch {
+          /* ENOENT — fine */
         }
       }
     }
@@ -89,7 +73,6 @@ export async function syncDrift(
   // Reconcile the entire project via syncProject
   const disabledSet = new Set(opts?.disabledSkills ?? []);
   const cascadeDisabledSet = new Set(opts?.cascadeDisabledSkills ?? []);
-  // Convert skillMountPaths (Record | Map) → Map for syncProject
   const mountPathsBySkill = new Map<string, readonly string[]>();
   if (opts?.skillMountPaths) {
     const input = opts.skillMountPaths;
@@ -105,20 +88,8 @@ export async function syncDrift(
     disabledSkills: disabledSet,
     cascadeDisabledSkills: cascadeDisabledSet,
     mountPathsBySkill,
-    force: false, // Overrides were pre-deleted; remaining conflicts should skip
+    force: false,
   });
-
-  // Build report from drift + syncProject result
-  const overriddenSkills = new Set<string>();
-  const skippedSkills = new Set<string>();
-  for (const conflict of drift.conflicts) {
-    const key = `${conflict.skill}:${conflict.provider}`;
-    if (overriddenKeys.has(key)) {
-      overriddenSkills.add(conflict.skill);
-    } else {
-      skippedSkills.add(conflict.skill);
-    }
-  }
 
   const mountedSkills = new Set(syncResult.mounted.map((m) => m.skillName));
   const unmountedSkills = new Set(syncResult.unmounted.map((u) => u.skillName));
@@ -127,20 +98,13 @@ export async function syncDrift(
     mounted: [...mountedSkills].sort(),
     unmounted: [...unmountedSkills].sort(),
     overridden: [...overriddenSkills].sort(),
-    skipped: [...skippedSkills].sort(),
     resolvedFrom: drift,
   };
 }
 
 // ────────── Ignore Drift ──────────
 
-export async function ignoreDrift(
-  projectRoot: string,
-  skillsSource: string,
-  mountRules: MountRules,
-  opts?: { disabledSkills?: Iterable<string>; skillMountPaths?: SkillMountPathInput },
-): Promise<DriftIgnoreReport> {
-  const drift = await detectDrift(projectRoot, skillsSource, mountRules, opts);
+export async function ignoreDrift(projectRoot: string, drift: DriftResult): Promise<DriftIgnoreReport> {
   await markDriftIgnored(projectRoot, drift.driftHash);
   return { ignoredHash: drift.driftHash, ignoredSnapshot: drift };
 }

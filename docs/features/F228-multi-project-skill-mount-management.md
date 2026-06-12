@@ -178,24 +178,64 @@ capabilities.json v2
 
 ### Drift 异常检测与修复
 
+三层数据，每层只对比相邻层：
+
+```
+cat-cafe-skills/ 源目录
+        ↕ 全局级对比
+全局 capabilities.json
+        ↕ 项目级对比
+项目 capabilities.json（mountPaths）↔ 各 mountpoint 下的 symlinks
+```
+
+#### 全局级异常（"全部 Skill" tab）
+
+对比：**cat-cafe-skills/ 源目录** vs **全局 capabilities.json**
+
+| 场景 | 方向 | 同步动作 |
+|------|------|---------|
+| **未注册** | 源有 → 全局 config 无 | 注册到全局 config + 级联同步各项目 |
+| **幽灵注册** | 全局 config 有 → 源无 | 清理全局 config + 级联清理各项目 |
+| **源有更新** | hash 不一致 | 更新全局 config + 级联 |
+| **项目同步汇总** | — | 各项目异常的汇总视图 |
+
+#### 项目级异常（"项目 Skill" tab）
+
+**配置同步**：**全局 config** vs **项目 config**
+
+| 场景 | 方向 | 同步动作 |
+|------|------|---------|
+| **新增 skill 待同步** | 全局有 → 项目无 | 同步 skill 配置到项目 |
+| **项目残留** | 项目有 → 全局无 | 清理项目中全局已不存在的 skill |
+
+**挂载同步**：**项目 config 的 mountPaths** vs **各 mountpoint 下的 symlinks**（per mountpoint 粒度）
+
+| 场景 | 方向 | 同步动作 |
+|------|------|---------|
+| **挂载缺失** | mountPaths 有某 mountpoint → 该 mountpoint 下没 symlink（非冲突） | 建 symlink |
+| **残留 symlink** | mountPaths 没有某 mountpoint → 该 mountpoint 下有 symlink | 删 symlink |
+| **挂载冲突** | mountPaths 有某 mountpoint → 该路径被同名目录/文件/链接占了 | 覆盖（提示备份） |
+
+#### 状态一致性校验
+
 | 异常状态 | 预期处理 |
 |---------|---------|
-| config 有 mountPaths，link 不存在 | 补 link；若有名称冲突，提示用户选择跳过或强制覆盖 |
-| config 无此 skill，link 存在 | 清理冗余 link |
-| config+link 存在但全局已无此 skill | 清理 config 和 link |
 | enabled + mountPaths: [] + 所有挂载点均启用 | 异常：应有挂载点或应为 disabled（场景 8 级联导致的合法空列表除外） |
 | disabled 但有 mountPaths 内容 | 异常：disabled 应配合 mountPaths: [] |
-| config 无此 skill，link 无，全局存在 | 新增 skill 场景，补 config + link（等同场景 14） |
 
-### 名称冲突处理
+#### 操作
 
-当 managed skill 名称与挂载点目录下已存在的用户自有 skill 冲突时：
-- **不自动覆写**，不修改 mountPaths
-- 通过 drift banner 提示用户选择：
-  - **跳过（skip）**：保留用户版本，该挂载点不挂载 managed skill
-  - **强制覆盖（override）**：删除用户版本，挂载 managed skill
+统一"立即同步"按钮（调用现有 syncProject / syncAll 接口），不再提供逐条跳过/覆盖选项。
 
-冲突粒度为 skill × 挂载点，用户可逐个决定。
+### 挂载冲突处理
+
+当 managed skill 名称与挂载点目录下已存在的同名目录/文件/链接冲突时：
+
+- **不自动覆写**，不修改 mountPaths（config 保留用户意图）
+- 通过 drift banner 展示冲突详情：skill 名 + mountpoint + 冲突类型
+- 冲突提示信息：**存在同名目录/文件/链接占用（立即同步会覆盖和清理已有内容，请先确认是否需要进行备份）**
+- 用户点"立即同步"后统一覆盖处理
+- Per-provider toggle 显示 config 意图（ON），冲突的 mountpoint 旁标注"挂载异常"badge
 
 ### 实现差距修复记录（已修复 — commit 4bef1b2de）
 

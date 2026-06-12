@@ -277,7 +277,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
         skill: s.name,
         unmountedProviders: s.mountHealth.enabledProviders.filter((id) => !s.mounts[id]),
       }));
-    const staleness = await checkStaleness(projectRoot, skillsSrc);
+    const staleness = await checkStaleness(projectRoot, skillsSrc, mainRepo);
 
     const response: SkillsResponse = {
       skills,

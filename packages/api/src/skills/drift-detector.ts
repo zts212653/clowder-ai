@@ -1,19 +1,18 @@
 /**
- * Drift Detector — F228 Phase 2
+ * Drift Detector — F228 Three-Layer Model
  *
- * Compares the project's actual mounted symlinks against the expected
- * mount set (source pool ∖ disabled-in-policy) for every active mount target
- * in MountRules. Returns three categories:
+ * Three data layers, each compared only to its adjacent:
  *
- *   - newSkills: expected but not mounted in every active target
- *   - conflicts: expected but blocked by a same-name non-managed local path
- *                (directory, file, or symlink pointing elsewhere)
- *   - stale: managed symlinks for skills no longer in the expected set
- *            (skill removed from source OR newly disabled)
+ *   cat-cafe-skills/ source
+ *           ↕ checkGlobal (registration: source ↔ global config)
+ *   Global capabilities.json
+ *           ↕ checkProject (config sync: global ↔ project config)
+ *   Project capabilities.json (mountPaths) ↔ mount point symlinks
  *
- * The driftHash lets the user choose "ignore until something changes" —
- * markDriftIgnored stores it in project-state.json so subsequent checks with
- * the same hash return isIgnored=true.
+ * Entry points:
+ *   - checkGlobal: source ↔ global config + global mount sync ("全部 Skill" tab)
+ *   - checkProject: global ↔ project config + project mount sync ("项目 Skill" tab)
+ *   - detectDrift: mount-only compat wrapper (drift-resolver + tests)
  */
 
 import { createHash } from 'node:crypto';
@@ -32,29 +31,44 @@ import {
 } from '../utils/skill-mount-policy.js';
 import { listSourceSkillNames } from '../utils/skill-source.js';
 
+// ────────── Exported types ──────────
+
 export interface DriftConflict {
-  /** Skill name that wanted to mount but found something in the way. */
   skill: string;
-  /** What kind of file is blocking the mount path. */
   kind: 'other-symlink' | 'directory' | 'file';
-  /** First provider where the conflict was observed (claude/codex/gemini/kimi). */
   provider: string;
-  /** For other-symlink only: where it points. */
   pointsTo?: string;
 }
 
 export interface DriftResult {
-  /** Skills in the expected set but missing from at least one enabled provider. */
   newSkills: string[];
-  /** Same-name local paths blocking expected mounts. */
   conflicts: DriftConflict[];
-  /** Managed symlinks for skills no longer expected (source-removed or disabled). */
   stale: string[];
-  /** Stable hash of source/policy plus computed filesystem drift details for "ignore this drift" UX. */
   driftHash: string;
-  /** True iff driftHash matches projectState.ignoredDriftHash (user previously hit "ignore"). */
   isIgnored: boolean;
 }
+
+export interface CheckGlobalOpts {
+  /** Skills registered in global capabilities.json (cat-cafe managed). */
+  globalConfigSkills: ReadonlySet<string>;
+  disabledSkills: Iterable<string>;
+  skillMountPaths: SkillMountPathInput;
+  platformName?: NodeJS.Platform;
+}
+
+export interface CheckProjectOpts {
+  /** Skills registered in global capabilities.json. */
+  globalConfigSkills: ReadonlySet<string>;
+  /** Skills registered in this project's capabilities.json. */
+  projectConfigSkills: ReadonlySet<string>;
+  /** Merged disabled skills (global + project). */
+  disabledSkills: Iterable<string>;
+  /** Merged skill mount path policy (global + project). */
+  skillMountPaths: SkillMountPathInput;
+  platformName?: NodeJS.Platform;
+}
+
+// ────────── Internal types ──────────
 
 type ClassifiedEntry =
   | { kind: 'managed-symlink' }
@@ -68,6 +82,14 @@ interface DriftMountTarget {
   provider: string;
   dir: string;
 }
+
+interface MountDriftResult {
+  missingMounts: string[];
+  conflicts: DriftConflict[];
+  staleMounts: Set<string>;
+}
+
+// ────────── Helpers ──────────
 
 function resolveSymlinkTarget(linkPath: string, target: string): string {
   return isAbsolute(target) ? target : resolve(dirname(linkPath), target);
@@ -154,20 +176,20 @@ function buildDriftMountTargets(projectRoot: string, mountRules: MountRules): Dr
 }
 
 function computeDriftHash(
-  sourceNames: readonly string[],
+  expectedNames: readonly string[],
   disabledNames: readonly string[],
-  skillMountPathPolicy: ReadonlyMap<string, ReadonlySet<string>>,
+  policy: ReadonlyMap<string, ReadonlySet<string>>,
   mountRules: MountRules,
-  driftDetails: Pick<DriftResult, 'newSkills' | 'conflicts' | 'stale'>,
+  details: Pick<DriftResult, 'newSkills' | 'conflicts' | 'stale'>,
 ): string {
   const hash = createHash('sha256');
   hash.update(
     JSON.stringify({
-      source: [...sourceNames].sort(),
+      expected: [...expectedNames].sort(),
       disabled: [...disabledNames].sort(),
-      skillMountPaths: canonicalSkillMountPathPolicy(skillMountPathPolicy),
+      skillMountPaths: canonicalSkillMountPathPolicy(policy),
       mountPolicy: canonicalMountPolicy(mountRules),
-      drift: driftDetails,
+      drift: details,
     }),
   );
   return hash.digest('hex').slice(0, 16);
@@ -183,6 +205,215 @@ function sortDriftConflicts(conflicts: DriftConflict[]): DriftConflict[] {
   );
 }
 
+// ────────── Mount drift check (shared core) ──────────
+
+async function checkMountDrift(
+  projectRoot: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  expectedSet: ReadonlySet<string>,
+  policy: ReadonlyMap<string, ReadonlySet<string>>,
+  platformName?: NodeJS.Platform,
+): Promise<MountDriftResult> {
+  const mountTargets = buildDriftMountTargets(projectRoot, mountRules);
+  const missingMounts: string[] = [];
+  const conflicts: DriftConflict[] = [];
+  const staleMounts = new Set<string>();
+
+  // Legacy directory-level symlink detection
+  const legacyDirMounts = new Set<string>();
+  const invalidDirMounts = new Map<string, string | undefined>();
+  for (const target of mountTargets) {
+    try {
+      if (await isManagedDirectoryLevelSkillsSymlink(target.dir, skillsSource, platformName)) {
+        legacyDirMounts.add(target.key);
+      }
+    } catch {
+      invalidDirMounts.set(target.key, await describeDirectorySymlinkTarget(target.dir));
+    }
+  }
+  if (legacyDirMounts.size > 0) {
+    const sourceNames = await listSourceSkillNames(skillsSource);
+    for (const name of sourceNames) {
+      if (!expectedSet.has(name)) {
+        staleMounts.add(name);
+        continue;
+      }
+      if (
+        mountTargets.some(
+          (t) => legacyDirMounts.has(t.key) && !skillAllowsMountProvider(policy, name, t.provider),
+        )
+      ) {
+        staleMounts.add(name);
+      }
+    }
+  }
+
+  // Forward: each expected skill should have managed symlinks at allowed mount points
+  if (mountTargets.length > 0) {
+    for (const skillName of expectedSet) {
+      let hasMissing = false;
+      const skillConflicts: DriftConflict[] = [];
+      for (const target of mountTargets.filter((t) => skillAllowsMountProvider(policy, skillName, t.provider))) {
+        if (legacyDirMounts.has(target.key)) continue;
+        if (invalidDirMounts.has(target.key)) {
+          const c: DriftConflict = { skill: skillName, kind: 'other-symlink', provider: target.provider };
+          const pt = invalidDirMounts.get(target.key);
+          if (pt) c.pointsTo = pt;
+          skillConflicts.push(c);
+          continue;
+        }
+        const result = await classifyEntry(join(target.dir, skillName), join(skillsSource, skillName), platformName);
+        if (result.kind === 'managed-symlink') continue;
+        if (result.kind === 'missing') {
+          hasMissing = true;
+          continue;
+        }
+        const c: DriftConflict = { skill: skillName, kind: result.kind, provider: target.provider };
+        if (result.kind === 'other-symlink') c.pointsTo = result.pointsTo;
+        skillConflicts.push(c);
+      }
+      if (skillConflicts.length > 0) conflicts.push(...skillConflicts);
+      else if (hasMissing) missingMounts.push(skillName);
+    }
+  }
+
+  // Reverse: scan for stale managed symlinks not in expected set
+  for (const target of mountTargets) {
+    if (legacyDirMounts.has(target.key) || invalidDirMounts.has(target.key)) continue;
+    let entries: string[] = [];
+    try {
+      entries = await readdir(target.dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (expectedSet.has(name) && skillAllowsMountProvider(policy, name, target.provider)) continue;
+      const result = await classifyEntry(join(target.dir, name), join(skillsSource, name), platformName);
+      if (result.kind === 'managed-symlink') staleMounts.add(name);
+    }
+  }
+
+  return { missingMounts, conflicts, staleMounts };
+}
+
+/** Build expected mount set from policy: enabled skills with non-empty mount paths. */
+function buildExpectedSet(
+  policy: ReadonlyMap<string, ReadonlySet<string>>,
+  disabledSet: ReadonlySet<string>,
+): Set<string> {
+  const result = new Set<string>();
+  for (const [skill, paths] of policy) {
+    if (!disabledSet.has(skill) && paths.size > 0) result.add(skill);
+  }
+  return result;
+}
+
+function finalizeDriftResult(
+  newSkills: string[],
+  conflicts: DriftConflict[],
+  stale: string[],
+  expectedSet: ReadonlySet<string>,
+  disabledSet: ReadonlySet<string>,
+  policy: ReadonlyMap<string, ReadonlySet<string>>,
+  mountRules: MountRules,
+  projectRoot: string,
+): Promise<DriftResult> {
+  const sorted = {
+    newSkills: newSkills.sort(),
+    conflicts: sortDriftConflicts(conflicts),
+    stale: stale.sort(),
+  };
+  const driftHash = computeDriftHash([...expectedSet], [...disabledSet], policy, mountRules, sorted);
+  return readProjectState(projectRoot).then((state) => ({
+    ...sorted,
+    driftHash,
+    isIgnored: state.ignoredDriftHash === driftHash,
+  }));
+}
+
+// ────────── Public API ──────────
+
+/**
+ * Global drift check — source ↔ global config + global mount sync.
+ * 1.1 Registration: source skills not in global config (unregistered) or vice versa (phantom)
+ * 1.2 Mount: global config mountPaths ↔ global project symlinks
+ */
+export async function checkGlobal(
+  globalProjectRoot: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  opts: CheckGlobalOpts,
+): Promise<DriftResult> {
+  const disabledSet = new Set(opts.disabledSkills);
+  const policy = normalizeSkillMountPathPolicy(opts.skillMountPaths);
+  const sourceNames = await listSourceSkillNames(skillsSource);
+  const sourceSet = new Set(sourceNames);
+
+  // 1.1 Registration: source ↔ global config
+  const unregistered = sourceNames.filter((n) => !opts.globalConfigSkills.has(n));
+  const phantom = [...opts.globalConfigSkills].filter((n) => !sourceSet.has(n));
+
+  // 1.2 Mount: global config ↔ symlinks
+  const expectedSet = buildExpectedSet(policy, disabledSet);
+  const mount = await checkMountDrift(globalProjectRoot, skillsSource, mountRules, expectedSet, policy, opts.platformName);
+
+  return finalizeDriftResult(
+    [...new Set([...unregistered, ...mount.missingMounts])],
+    mount.conflicts,
+    [...new Set([...phantom, ...mount.staleMounts])],
+    expectedSet,
+    disabledSet,
+    policy,
+    mountRules,
+    globalProjectRoot,
+  );
+}
+
+/**
+ * Project drift check — global config ↔ project config + project mount sync.
+ * 1. Config sync: skills in global but not project (new) or vice versa (orphan)
+ * 2. Mount: project config mountPaths ↔ project symlinks
+ */
+export async function checkProject(
+  projectRoot: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  opts: CheckProjectOpts,
+): Promise<DriftResult> {
+  const disabledSet = new Set(opts.disabledSkills);
+  const policy = normalizeSkillMountPathPolicy(opts.skillMountPaths);
+
+  // 1. Config sync: global config ↔ project config
+  const configNew: string[] = [];
+  const configOrphans: string[] = [];
+  for (const skill of opts.globalConfigSkills) {
+    if (!disabledSet.has(skill) && !opts.projectConfigSkills.has(skill)) configNew.push(skill);
+  }
+  for (const skill of opts.projectConfigSkills) {
+    if (!opts.globalConfigSkills.has(skill)) configOrphans.push(skill);
+  }
+
+  // 2. Mount: project config ↔ symlinks
+  const expectedSet = buildExpectedSet(policy, disabledSet);
+  const mount = await checkMountDrift(projectRoot, skillsSource, mountRules, expectedSet, policy, opts.platformName);
+
+  return finalizeDriftResult(
+    [...new Set([...configNew, ...mount.missingMounts])],
+    mount.conflicts,
+    [...new Set([...configOrphans, ...mount.staleMounts])],
+    expectedSet,
+    disabledSet,
+    policy,
+    mountRules,
+    projectRoot,
+  );
+}
+
+/**
+ * Mount-only drift check (backward compat for drift-resolver + tests).
+ * Uses source pool as expected set — does NOT perform config-level checks.
+ */
 export async function detectDrift(
   projectRoot: string,
   skillsSource: string,
@@ -191,119 +422,17 @@ export async function detectDrift(
 ): Promise<DriftResult> {
   const sourceNames = await listSourceSkillNames(skillsSource);
   const disabledSet = new Set(opts?.disabledSkills ?? []);
-  const skillMountPathPolicy = normalizeSkillMountPathPolicy(opts?.skillMountPaths);
+  const policy = normalizeSkillMountPathPolicy(opts?.skillMountPaths);
   const expectedSet = new Set(sourceNames.filter((n) => !disabledSet.has(n)));
-  const mountTargets = buildDriftMountTargets(projectRoot, mountRules);
-
-  const newSkills: string[] = [];
-  const conflicts: DriftConflict[] = [];
-  const staleSet = new Set<string>();
-  const legacyDirectoryMounts = new Set<string>();
-  const invalidDirectoryMounts = new Map<string, string | undefined>();
-  for (const target of mountTargets) {
-    try {
-      if (await isManagedDirectoryLevelSkillsSymlink(target.dir, skillsSource, opts?.platformName)) {
-        legacyDirectoryMounts.add(target.key);
-      }
-    } catch {
-      invalidDirectoryMounts.set(target.key, await describeDirectorySymlinkTarget(target.dir));
-    }
-  }
-  if (legacyDirectoryMounts.size > 0) {
-    for (const skillName of sourceNames) {
-      if (disabledSet.has(skillName)) {
-        staleSet.add(skillName);
-        continue;
-      }
-      if (
-        mountTargets.some(
-          (target) =>
-            legacyDirectoryMounts.has(target.key) &&
-            !skillAllowsMountProvider(skillMountPathPolicy, skillName, target.provider),
-        )
-      ) {
-        staleSet.add(skillName);
-      }
-    }
-  }
-
-  if (mountTargets.length > 0) {
-    // 1) For each expected skill: every active mount target must hold a managed symlink.
-    //    If any provider is missing, sync can safely re-mount the skill everywhere.
-    //    If any provider has a blocker, report the conflict instead of auto-replacing it.
-    for (const skillName of expectedSet) {
-      let hasMissingMount = false;
-      const skillConflicts: DriftConflict[] = [];
-      for (const target of mountTargets.filter((entry) =>
-        skillAllowsMountProvider(skillMountPathPolicy, skillName, entry.provider),
-      )) {
-        if (legacyDirectoryMounts.has(target.key)) continue;
-        const invalidMountTarget = invalidDirectoryMounts.get(target.key);
-        if (invalidDirectoryMounts.has(target.key)) {
-          const c: DriftConflict = { skill: skillName, kind: 'other-symlink', provider: target.provider };
-          if (invalidMountTarget) c.pointsTo = invalidMountTarget;
-          skillConflicts.push(c);
-          continue;
-        }
-        const entryPath = join(target.dir, skillName);
-        const expectedTarget = join(skillsSource, skillName);
-        const result = await classifyEntry(entryPath, expectedTarget, opts?.platformName);
-        if (result.kind === 'managed-symlink') {
-          continue;
-        }
-        if (result.kind === 'missing') {
-          hasMissingMount = true;
-          continue;
-        }
-        const c: DriftConflict = { skill: skillName, kind: result.kind, provider: target.provider };
-        if (result.kind === 'other-symlink') c.pointsTo = result.pointsTo;
-        skillConflicts.push(c);
-      }
-      if (skillConflicts.length > 0) conflicts.push(...skillConflicts);
-      else if (hasMissingMount) newSkills.push(skillName);
-    }
-  }
-
-  // 2) Scan each active mount target for entries that are NOT in the expected set.
-  //    Managed symlinks pointing at source → stale (skill removed or now disabled).
-  //    Anything else → user-owned, not our concern.
-  for (const target of mountTargets) {
-    if (legacyDirectoryMounts.has(target.key)) continue;
-    if (invalidDirectoryMounts.has(target.key)) continue;
-    let entries: string[] = [];
-    try {
-      entries = await readdir(target.dir);
-    } catch {
-      continue;
-    }
-    for (const entryName of entries) {
-      if (expectedSet.has(entryName) && skillAllowsMountProvider(skillMountPathPolicy, entryName, target.provider)) {
-        continue;
-      }
-      const entryPath = join(target.dir, entryName);
-      const result = await classifyEntry(entryPath, join(skillsSource, entryName), opts?.platformName);
-      if (result.kind === 'managed-symlink') {
-        staleSet.add(entryName);
-      }
-    }
-  }
-
-  const sortedNewSkills = newSkills.sort();
-  const sortedConflicts = sortDriftConflicts(conflicts);
-  const sortedStale = [...staleSet].sort();
-  const driftHash = computeDriftHash(sourceNames, [...disabledSet], skillMountPathPolicy, mountRules, {
-    newSkills: sortedNewSkills,
-    conflicts: sortedConflicts,
-    stale: sortedStale,
-  });
-  const state = await readProjectState(projectRoot);
-  const isIgnored = state.ignoredDriftHash === driftHash;
-
-  return {
-    newSkills: sortedNewSkills,
-    conflicts: sortedConflicts,
-    stale: sortedStale,
-    driftHash,
-    isIgnored,
-  };
+  const mount = await checkMountDrift(projectRoot, skillsSource, mountRules, expectedSet, policy, opts?.platformName);
+  return finalizeDriftResult(
+    [...mount.missingMounts],
+    mount.conflicts,
+    [...mount.staleMounts],
+    expectedSet,
+    disabledSet,
+    policy,
+    mountRules,
+    projectRoot,
+  );
 }
