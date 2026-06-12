@@ -224,6 +224,9 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       disabledSkills: mergedPolicy.disabledSkills,
       skillMountPaths: mergedPolicy.skillMountPaths,
     });
+    // Config orphans: skills in project config but not global config.
+    // Must be cleaned from project capabilities.json on drift-resolve sync.
+    const configOrphans = [...projectPolicy.configuredSkills].filter((s) => !globalPolicy.configuredSkills.has(s));
     return {
       drift,
       effectiveRoot: projectRoot,
@@ -233,6 +236,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
         disabledSkills: mergedPolicy.disabledSkills,
         skillMountPaths: mergedPolicy.skillMountPaths,
         cascadeDisabledSkills: mergedPolicy.cascadeDisabledSkills,
+        configOrphans,
       },
     };
   }

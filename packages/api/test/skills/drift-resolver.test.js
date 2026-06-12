@@ -918,6 +918,46 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     );
   });
 
+  // ── P1-2b regression: config orphan must be cleaned from capabilities.json after drift-resolve ──
+
+  test('syncDrift removes config orphan from project capabilities.json (P1-2b)', async () => {
+    await makeSkill('tdd');
+    // Step 1: Initial sync to create a project config with tdd
+    await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {});
+    let config = await readCapabilitiesConfig(projectRoot);
+    assert.ok(
+      config?.capabilities.some((c) => c.type === 'skill' && c.id === 'tdd'),
+      'tdd should be in project config after initial sync',
+    );
+
+    // Step 2: Simulate orphan scenario — tdd is in project config but NOT in global config.
+    // Use checkProject directly to get a DriftResult with tdd in stale.
+    const { checkProject } = await import('../../dist/skills/drift-detector.js');
+    const allProviders = ['claude', 'codex', 'gemini', 'kimi'];
+    const drift = await checkProject(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {
+      globalConfigSkills: new Set(), // global has NOTHING → tdd is orphan
+      projectConfigSkills: new Set(['tdd']),
+      disabledSkills: [],
+      skillMountPaths: { tdd: allProviders },
+    });
+
+    assert.ok(drift.stale.includes('tdd'), 'tdd should be stale (config orphan)');
+    assert.ok(!drift.newSkills.includes('tdd'), 'tdd must not be in newSkills');
+
+    // Step 3: syncDrift with configOrphans — should clean tdd from project config
+    await syncDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, drift, {
+      configOrphans: ['tdd'],
+    });
+
+    // Step 4: Verify tdd is gone from capabilities.json
+    config = await readCapabilitiesConfig(projectRoot);
+    const tddEntry = config?.capabilities.find((c) => c.type === 'skill' && c.source === 'cat-cafe' && c.id === 'tdd');
+    assert.ok(
+      !tddEntry || tddEntry.enabled === false,
+      'config orphan tdd should be removed or disabled after drift-resolve',
+    );
+  });
+
   test('syncDrift with all providers disabled: no drift detected, no phantom entries (R2 P1 edge)', async () => {
     await makeSkill('tdd');
     // ALL standard providers disabled — drift detection has no mount dirs to scan

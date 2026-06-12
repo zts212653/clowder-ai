@@ -110,6 +110,10 @@ export interface SyncProjectOptions {
   force?: boolean;
   /** Prune ALL mountPaths to active providers (set on mount rules change). */
   pruneMountPaths?: boolean;
+  /** Skills to treat as removed even if still in source tree.
+   *  Used by drift resolver to clean config orphans (project-only skills
+   *  not in global config). Merged into removedNames for config cleanup. */
+  additionalRemovedSkills?: ReadonlySet<string>;
 }
 
 export async function syncProject(
@@ -158,7 +162,7 @@ export async function syncProject(
   const enabledNames = sourceNames.filter((n) => !disabledSet.has(n));
   const disabledNames = sourceNames.filter((n) => disabledSet.has(n));
   const sourceSet = new Set(sourceNames);
-  const removedNames = previousNames.filter((n) => !sourceSet.has(n));
+  const removedNames = [...previousNames.filter((n) => !sourceSet.has(n)), ...(opts.additionalRemovedSkills ?? [])];
 
   // Per-skill mount target resolution
   const activeTargets = activeProviderTargets(projectRoot, mountRules);

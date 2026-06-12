@@ -46,6 +46,9 @@ export async function syncDrift(
     disabledSkills?: Iterable<string>;
     skillMountPaths?: SkillMountPathInput;
     cascadeDisabledSkills?: Iterable<string>;
+    /** Config orphans: skills in project config but not global config.
+     *  Passed to syncProject as additionalRemovedSkills for config cleanup. */
+    configOrphans?: Iterable<string>;
   },
 ): Promise<DriftSyncReport> {
   // Pre-delete all conflict paths so syncProject sees them as 'missing'.
@@ -92,11 +95,13 @@ export async function syncDrift(
     for (const [k, v] of entries) mountPathsBySkill.set(k, v);
   }
 
+  const orphanSet = new Set(opts?.configOrphans ?? []);
   const syncResult = await syncProject(projectRoot, skillsSource, {
     mountRules,
     disabledSkills: disabledSet,
     cascadeDisabledSkills: cascadeDisabledSet,
     mountPathsBySkill,
+    additionalRemovedSkills: orphanSet.size > 0 ? orphanSet : undefined,
     force: false,
   });
 
