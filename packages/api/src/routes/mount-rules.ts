@@ -33,7 +33,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
-import { type MountTarget, buildSkillMountTargets } from '../utils/skill-mount.js';
+import { buildSkillMountTargets, type MountTarget } from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
