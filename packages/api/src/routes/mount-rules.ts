@@ -1,16 +1,22 @@
 /**
- * Mount Rules Route — F228
+ * Mount Rules Route — F228 redesign
  *
- * GET  /api/mount-rules         — read current mount rules (DEFAULT if absent)
- * PUT  /api/mount-rules         — replace mount rules (owner only)
+ * GET  /api/mount-rules — read current mount rules (DEFAULT if absent)
+ * PUT  /api/mount-rules — replace mount rules (owner only)
  *
  * Both endpoints accept `projectPath` (query for GET, body for PUT) for
  * multi-project routing. Falls back to startup project root when absent.
+ *
+ * PUT delegates filesystem reconciliation to syncProject / syncAll instead of
+ * the removed mount-rules-reconciliation module.
  */
 
-import { join } from 'node:path';
+import { mkdir, rm, symlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, relative } from 'node:path';
+import { type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
 import {
   clearProjectMountRulesOverride,
@@ -21,14 +27,15 @@ import {
   writeDefaultMountRules,
   writeMountRules,
 } from '../config/mount/mount-rules-store.js';
-import {
-  reconcileInheritedProjectMountsAfterDefaultRuleChange,
-  reconcileSkillMountsAfterRuleChange,
-} from '../services/mount-rules-reconciliation.js';
+import { syncAll } from '../skills/skill-sync-all.js';
+import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
+import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
+import { buildSkillMountTargets } from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
+import { resolveSkillsSourceDir } from './skills.js';
 
 const STARTUP_PROJECT_ROOT = resolveStartupProjectRoot();
 
@@ -67,28 +74,21 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const { projectPath, scope } = (request.query ?? {}) as { projectPath?: string; scope?: string };
-
-    // F228: scope=default reads global defaultMountRules from main project
     if (scope === 'default') {
       const mainRoot = STARTUP_PROJECT_ROOT;
-      const rules = await readDefaultMountRules(mainRoot);
-      return { rules, projectRoot: mainRoot, scope: 'default' };
+      return { rules: await readDefaultMountRules(mainRoot), projectRoot: mainRoot, scope: 'default' };
     }
-
     const projectRoot = await resolveTargetProjectRoot(projectPath);
     if (!projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
-    const rules = await readMountRules(projectRoot, STARTUP_PROJECT_ROOT);
-    return { rules, projectRoot };
+    return { rules: await readMountRules(projectRoot, STARTUP_PROJECT_ROOT), projectRoot };
   });
 
   app.put('/api/mount-rules', async (request, reply) => {
     const access = requireMountRulesWriteAccess(request, reply);
-    if (!access.userId) {
-      return { error: access.error };
-    }
+    if (!access.userId) return { error: access.error };
 
     const body = (request.body ?? {}) as { rules?: unknown; projectPath?: string; scope?: string };
     const validated = validateMountRules(body.rules);
@@ -97,26 +97,20 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Invalid mount rules: schema validation failed' };
     }
 
-    // F228: scope=default writes global defaultMountRules to main project and
-    // reconciles registered projects that inherit that default. Projects with
-    // explicit project-level mountRules keep their own policy untouched.
+    const skillsSrc = resolveSkillsSourceDir();
+
+    // scope=default: write global default, sync main project, cascade to registered projects
     if (body.scope === 'default') {
       const mainRoot = STARTUP_PROJECT_ROOT;
-      const previousRules = await readDefaultMountRules(mainRoot);
       await writeDefaultMountRules(mainRoot, validated);
-      const pluginsDir = join(STARTUP_PROJECT_ROOT, 'plugins');
-      const propagationWarnings = await reconcileInheritedProjectMountsAfterDefaultRuleChange(
-        mainRoot,
-        previousRules,
-        validated,
-        pluginsDir,
-      );
-      if (propagationWarnings.length > 0) {
+      await syncProject(mainRoot, skillsSrc, { mountRules: validated });
+      const syncResult = await syncAll(mainRoot, skillsSrc, { mountRules: validated });
+      if (syncResult.warnings.length > 0) {
         reply.status(500);
         return {
           ok: false,
-          error: `Default mount rules persisted but failed to reconcile ${propagationWarnings.length} inherited project(s). Stale provider symlinks may still be loadable by agents.`,
-          failedProjects: propagationWarnings,
+          error: `Default rules saved but ${syncResult.warnings.length} project(s) failed to reconcile`,
+          failedProjects: syncResult.warnings,
           rules: validated,
           projectRoot: mainRoot,
           scope: 'default',
@@ -125,35 +119,85 @@ export const mountRulesRoutes: FastifyPluginAsync = async (app) => {
       return { ok: true, rules: validated, projectRoot: mainRoot, scope: 'default' };
     }
 
+    // Project-specific: write + reconcile, rollback on failure
     const projectRoot = await resolveTargetProjectRoot(body.projectPath);
     if (!projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
 
-    const pluginsDir = join(STARTUP_PROJECT_ROOT, 'plugins');
     const previousProjectRules = await readProjectMountRulesOverride(projectRoot);
     const previousRules = await readMountRules(projectRoot, STARTUP_PROJECT_ROOT);
-    const previousCapabilities = await readCapabilitiesConfig(projectRoot);
     await writeMountRules(projectRoot, validated);
     try {
-      await reconcileSkillMountsAfterRuleChange(projectRoot, previousRules, validated, pluginsDir);
+      await syncProject(projectRoot, skillsSrc, {
+        mountRules: validated,
+        previousMountRules: previousRules,
+        pruneMountPaths: true,
+      });
+      await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules);
     } catch (err) {
       if (previousProjectRules) {
         await writeMountRules(projectRoot, previousProjectRules).catch(() => {});
       } else {
         await clearProjectMountRulesOverride(projectRoot).catch(() => {});
       }
-      if (previousCapabilities) await writeCapabilitiesConfig(projectRoot, previousCapabilities).catch(() => {});
-      await reconcileSkillMountsAfterRuleChange(projectRoot, validated, previousRules, pluginsDir).catch(
-        (rollbackErr) => {
-          console.warn(
-            `[F228] Failed to rollback mount rules filesystem reconciliation: ${(rollbackErr as Error).message}`,
-          );
-        },
-      );
+      await syncProject(projectRoot, skillsSrc, {
+        mountRules: previousRules,
+        previousMountRules: validated,
+        pruneMountPaths: true,
+      }).catch((re) => {
+        console.warn(`[F228] Rollback mount-rules reconciliation failed: ${(re as Error).message}`);
+      });
+      await reconcilePluginMounts(projectRoot, skillsSrc, previousRules, validated).catch(() => {});
       throw err;
     }
     return { ok: true, rules: validated, projectRoot };
   });
 };
+
+/** Reconcile plugin skill mounts after mount rules change. */
+async function reconcilePluginMounts(
+  projectRoot: string,
+  skillsSrc: string,
+  mountRules: MountRules,
+  previousRules?: MountRules,
+): Promise<void> {
+  const pluginsDir = join(dirname(skillsSrc), 'plugins');
+  const config = await readCapabilitiesConfig(projectRoot);
+  const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
+  if (pluginSkills.length === 0) return;
+
+  const enabledTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+  const enabledDirSet = new Set(enabledTargets.flatMap((t) => t.candidates));
+
+  // Collect ALL provider dirs from current + previous rules for cleanup
+  const allDirs = new Set<string>();
+  for (const id of STANDARD_PROVIDER_IDS) allDirs.add(join(projectRoot, mountRules.providers[id].path));
+  for (const t of enabledTargets) for (const d of t.candidates) allDirs.add(d);
+  if (previousRules) {
+    for (const id of STANDARD_PROVIDER_IDS) allDirs.add(join(projectRoot, previousRules.providers[id].path));
+    for (const t of buildSkillMountTargets(projectRoot, homedir(), previousRules))
+      for (const d of t.candidates) allDirs.add(d);
+  }
+
+  for (const ps of pluginSkills) {
+    const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
+    for (const dir of allDirs) {
+      const linkPath = join(dir, ps.skillName);
+      const target = enabledTargets.find((t) => t.candidates.includes(dir));
+      const shouldMount = ps.enabled && !!target && (!allowed || allowed.has(target.id));
+      const status = await classifyMountPath(linkPath, ps.skillsSource, ps.skillName);
+      if (shouldMount && status === 'missing') {
+        await mkdir(dir, { recursive: true });
+        const rel =
+          process.platform === 'win32'
+            ? join(ps.skillsSource, ps.skillName)
+            : relative(dirname(linkPath), join(ps.skillsSource, ps.skillName));
+        await symlink(rel, linkPath);
+      } else if (!shouldMount && status === 'managed') {
+        await rm(linkPath);
+      }
+    }
+  }
+}

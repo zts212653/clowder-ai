@@ -8,18 +8,10 @@ import {
   type MountRules,
   type PluginManifest,
   type PluginResourceDef,
-  STANDARD_PROVIDER_IDS,
 } from '@cat-cafe/shared';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import {
-  discardSkillMountSnapshot,
-  filterRulesToProvider,
-  mountSkillForProject,
-  restoreSkillMountSnapshot,
-  snapshotSkillMountsForProject,
-  unmountSkillForProject,
-} from '../../utils/skill-symlink-writer.js';
+import { addSkill, removeSkill } from '../../skills/skill-manage.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -105,41 +97,6 @@ function scheduleNameFromCapabilityId(manifestId: string, capId: string): string
 
 function scheduleTaskIdForCapability(manifestId: string, cap: CapabilityEntry): string | undefined {
   return cap.scheduleTaskId ?? fallbackScheduleTaskId(manifestId, scheduleNameFromCapabilityId(manifestId, cap.id));
-}
-
-function allMountTargetIds(mountRules: MountRules): string[] {
-  return [...STANDARD_PROVIDER_IDS, ...(mountRules.customPaths ?? []).map((cp) => cp.alias)];
-}
-
-async function mountSkillForMountPaths(
-  projectRoot: string,
-  skillName: string,
-  skillsSource: string,
-  mountRules: MountRules,
-  mountPaths?: readonly string[],
-): Promise<void> {
-  if (!mountPaths) {
-    await mountSkillForProject(projectRoot, skillName, skillsSource, mountRules);
-    return;
-  }
-  for (const providerId of mountPaths) {
-    await mountSkillForProject(projectRoot, skillName, skillsSource, filterRulesToProvider(mountRules, providerId));
-  }
-}
-
-async function unmountSkillOutsideMountPaths(
-  projectRoot: string,
-  skillName: string,
-  skillsSource: string,
-  mountRules: MountRules,
-  mountPaths?: readonly string[],
-): Promise<void> {
-  if (!mountPaths) return;
-  const allowed = new Set(mountPaths);
-  for (const providerId of allMountTargetIds(mountRules)) {
-    if (allowed.has(providerId)) continue;
-    await unmountSkillForProject(projectRoot, skillName, filterRulesToProvider(mountRules, providerId), skillsSource);
-  }
 }
 
 export interface PluginLimbRehydrationDeps {
@@ -305,24 +262,17 @@ export class PluginResourceActivator {
     const projectRoot = this.deps.resolveProjectRoot();
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
-    const skillsSource = dirname(skillSourceDir);
     const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
 
-    const mountSnapshot = await snapshotSkillMountsForProject(projectRoot, skillName, skillsSource, mountRules, {
-      enabledOnly: mountPaths === undefined,
-      preserveNonSymlinks: true,
+    // F719: Delegate to generic skill management interface.
+    // addSkill writes config + mounts symlinks in one call.
+    const capId = resourceCapId(manifest.id, resource);
+    await addSkill(projectRoot, skillName, dirname(skillSourceDir), {
+      mountRules,
+      pluginId: manifest.id,
+      capabilityId: capId,
+      mountPaths: mountPaths ?? undefined,
     });
-    try {
-      // F228: Delegate to source-agnostic mount primitive (MountRules-aware,
-      // handles per-skill symlinks, directory-level mounts, and rollback).
-      await unmountSkillOutsideMountPaths(projectRoot, skillName, skillsSource, mountRules, mountPaths);
-      await mountSkillForMountPaths(projectRoot, skillName, skillsSource, mountRules, mountPaths);
-      await this.upsertCapabilityEntry(manifest, resource, true);
-      await discardSkillMountSnapshot(mountSnapshot);
-    } catch (err) {
-      await restoreSkillMountSnapshot(mountSnapshot).catch(() => {});
-      throw err;
-    }
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -334,9 +284,14 @@ export class PluginResourceActivator {
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
 
-    // F228: Delegate to source-agnostic unmount primitive (MountRules-aware).
-    await unmountSkillForProject(projectRoot, skillName, mountRules, dirname(skillSourceDir));
-    await this.upsertCapabilityEntry(manifest, resource, false);
+    // F719: Delegate to generic skill management interface.
+    const capId = resourceCapId(manifest.id, resource);
+    await removeSkill(projectRoot, skillName, {
+      mountRules,
+      pluginId: manifest.id,
+      capabilityId: capId,
+      skillsSource: dirname(skillSourceDir),
+    });
   }
 
   private async readExistingPluginSkillMountPaths(

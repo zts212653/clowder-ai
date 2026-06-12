@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 
 import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import { readCapabilitiesConfig } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { resolveConflict } from '../../dist/config/governance/skill-sync.js';
 import { readMountRules, validateMountRules, writeMountRules } from '../../dist/config/mount/mount-rules-store.js';
 
 let tempDir;
@@ -279,37 +278,6 @@ describe('MountRulesStore (F228)', () => {
     assert.equal(config.mountRules.length, 4, 'should have 4 standard providers');
   });
 
-  test('resolveConflict mine changes source to external in v2 capabilities.json', async () => {
-    // Set up v2 capabilities.json with a cat-cafe skill
-    const v2Config = {
-      version: 2,
-      capabilities: [
-        { id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true },
-        { id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: true },
-      ],
-      mountRules: [
-        { name: 'claude', path: '.claude/skills', enabled: true },
-        { name: 'codex', path: '.codex/skills', enabled: true },
-        { name: 'gemini', path: '.gemini/skills', enabled: true },
-        { name: 'kimi', path: '.kimi/skills', enabled: true },
-      ],
-    };
-    await mkdir(join(tempDir, '.cat-cafe'), { recursive: true });
-    await writeFile(join(tempDir, '.cat-cafe/capabilities.json'), JSON.stringify(v2Config));
-
-    // resolveConflict('mine') should change 'debugging' source to 'external'
-    await resolveConflict(tempDir, join(tempDir, 'fake-home'), 'debugging', 'mine');
-
-    const updatedConfig = await readCapabilitiesConfig(tempDir);
-    assert.equal(updatedConfig.version, 2);
-    const debugCap = updatedConfig.capabilities.find((c) => c.id === 'debugging');
-    assert.equal(debugCap.source, 'external', 'mine choice must flip source to external');
-
-    // Other skills remain untouched
-    const tddCap = updatedConfig.capabilities.find((c) => c.id === 'tdd');
-    assert.equal(tddCap.source, 'cat-cafe', 'unrelated skill must keep cat-cafe source');
-  });
-
   test('readMountRules inherits defaultMountRules from main project when external project has no own mountRules', async () => {
     // Main project: has defaultMountRules with codex disabled
     const mainDir = await mkdtemp(join(tmpdir(), 'main-project-'));
@@ -522,24 +490,4 @@ describe('MountRulesStore (F228)', () => {
     assert.equal(rules.providers.claude.enabled, true, 'valid sibling standard rule should be preserved');
   });
 
-  test('resolveConflict official does not change source in v2 capabilities.json', async () => {
-    const v2Config = {
-      version: 2,
-      capabilities: [{ id: 'debugging', type: 'skill', source: 'cat-cafe', enabled: true }],
-      mountRules: [
-        { name: 'claude', path: '.claude/skills', enabled: true },
-        { name: 'codex', path: '.codex/skills', enabled: true },
-        { name: 'gemini', path: '.gemini/skills', enabled: true },
-        { name: 'kimi', path: '.kimi/skills', enabled: true },
-      ],
-    };
-    await mkdir(join(tempDir, '.cat-cafe'), { recursive: true });
-    await writeFile(join(tempDir, '.cat-cafe/capabilities.json'), JSON.stringify(v2Config));
-
-    await resolveConflict(tempDir, join(tempDir, 'fake-home'), 'debugging', 'official');
-
-    const updatedConfig = await readCapabilitiesConfig(tempDir);
-    const debugCap = updatedConfig.capabilities.find((c) => c.id === 'debugging');
-    assert.equal(debugCap.source, 'cat-cafe', 'official choice must keep cat-cafe source');
-  });
 });

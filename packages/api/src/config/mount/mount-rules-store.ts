@@ -4,8 +4,8 @@
  * Data source: capabilities.json#mountRules (v2) or #defaultMountRules.
  *
  * Adapter pattern: readMountRules() converts MountRuleEntry[] → MountRules (old format)
- * so all 7 downstream consumers (drift-detector, skill-sync, drift-resolver,
- * skill-symlink-writer, mount-rules route, skill-mount, skill-conflict) get zero changes.
+ * so downstream consumers (drift-detector, skill-sync-engine, drift-resolver,
+ * mount-rules route, skill-mount, skill-conflict) get zero changes.
  */
 
 import { isAbsolute } from 'node:path';

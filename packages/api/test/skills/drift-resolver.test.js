@@ -9,7 +9,7 @@ import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { syncSkills } from '../../dist/config/governance/skill-sync.js';
+import { syncProject } from '../../dist/skills/skill-sync-engine.js';
 import { checkStaleness } from '../../dist/config/governance/skills-state.js';
 import { detectDrift } from '../../dist/skills/drift-detector.js';
 import { ignoreDrift, syncDrift } from '../../dist/skills/drift-resolver.js';
@@ -671,14 +671,14 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.deepEqual(pluginOwned?.mountPaths, ['claude'], 'same-id plugin mount policy must be preserved');
   });
 
-  test('syncDrift preserves cascade tracking so syncSkills can re-enable on global re-enable (P1-1 cross-path)', async () => {
+  test('syncDrift preserves cascade tracking so syncProject can re-enable on global re-enable (P1-1 cross-path)', async () => {
     await makeSkill('tdd');
 
-    // Step 1: syncSkills with global disabled — writes cascadeDisabledSkills
-    await syncSkills(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, { globalDisabledSkills: ['tdd'] });
+    // Step 1: syncProject with cascade disabled — writes cascadeDisabledSkills
+    await syncProject(projectRoot, skillsSource, { mountRules: DEFAULT_MOUNT_RULES, cascadeDisabledSkills: new Set(['tdd']) });
     let config = await readCapabilitiesConfig(projectRoot);
     let tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
-    assert.equal(tdd?.enabled, false, 'tdd should be cascade-disabled after syncSkills');
+    assert.equal(tdd?.enabled, false, 'tdd should be cascade-disabled after syncProject');
 
     // Step 2: syncDrift with disabled (simulates drift-resolve while global still disables)
     await syncDrift(
@@ -692,8 +692,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
     assert.equal(tdd?.enabled, false, 'tdd should remain disabled after syncDrift');
 
-    // Step 3: syncSkills WITHOUT global disabled — global re-enables
-    await syncSkills(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    // Step 3: syncProject WITHOUT cascade disabled — global re-enables
+    await syncProject(projectRoot, skillsSource, { mountRules: DEFAULT_MOUNT_RULES });
 
     // tdd must re-enable — cascade tracking preserved across syncDrift
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
@@ -704,7 +704,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     }
     config = await readCapabilitiesConfig(projectRoot);
     tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
-    assert.equal(tdd?.enabled, true, 'cascade-disabled skill must re-enable after syncDrift + syncSkills');
+    assert.equal(tdd?.enabled, true, 'cascade-disabled skill must re-enable after syncDrift + syncProject');
   });
 
   test('mergeSkillMountPolicies preserves cascade marker when skill already in project disabledSkills (R4 P1)', async () => {
@@ -728,7 +728,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy, prevCascadeDisabled);
 
     // tdd must appear in cascadeDisabledSkills even though first loop already
-    // added it to disabledSkills — otherwise next syncSkills can't detect
+    // added it to disabledSkills — otherwise next syncProject can't detect
     // cascade origin and the skill stays permanently disabled.
     assert.ok(
       merged.cascadeDisabledSkills?.includes('tdd'),
@@ -824,7 +824,8 @@ describe('DriftResolver (F228 Phase 2B)', () => {
         kimi: { enabled: true, path: '.kimi/skills' },
       },
     };
-    await syncSkills(projectRoot, skillsSource, partialRules, {
+    await syncProject(projectRoot, skillsSource, {
+      mountRules: partialRules,
       globalMountPathsBySkill: new Map([['tdd', ['claude', 'kimi']]]),
     });
 
@@ -931,7 +932,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       { skillMountPaths: { tdd: ['claude', 'kimi'] } },
     );
 
-    // syncDrift correctly does nothing — this case is handled by syncSkills
+    // syncDrift correctly does nothing — this case is handled by syncProject
     assert.deepEqual(report.mounted, [], 'no drift = nothing mounted');
     assert.deepEqual(report.unmounted, [], 'no drift = nothing unmounted');
   });

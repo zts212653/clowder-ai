@@ -7,9 +7,10 @@ import { describe, it } from 'node:test';
 import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { writeCapabilitiesConfig } from '../dist/config/capabilities/capability-orchestrator.js';
-import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
+import { writeDefaultMountRules, writeMountRules } from '../dist/config/mount/mount-rules-store.js';
 import { mountRulesRoutes } from '../dist/routes/mount-rules.js';
-import { reconcileInheritedProjectMountsAfterDefaultRuleChange } from '../dist/services/mount-rules-reconciliation.js';
+import { syncAll } from '../dist/skills/skill-sync-all.js';
+import { syncProject } from '../dist/skills/skill-sync-engine.js';
 import { resolveCatCafeSkillsSource } from '../dist/utils/skill-source.js';
 
 function resolveRepoRoot() {
@@ -521,14 +522,12 @@ describe('Mount Rules Route (F228)', () => {
     ]);
 
     try {
-      const warnings = await reconcileInheritedProjectMountsAfterDefaultRuleChange(
-        mainDir,
-        previousRules,
-        nextRules,
-        join(resolveRepoRoot(), 'plugins'),
-      );
+      const skillsSource = await resolveRepoSkillsDir();
+      await writeDefaultMountRules(mainDir, nextRules);
+      await syncProject(mainDir, skillsSource, { mountRules: nextRules });
+      const syncResult = await syncAll(mainDir, skillsSource, { mountRules: nextRules });
 
-      assert.deepEqual(warnings, []);
+      assert.deepEqual(syncResult.warnings, []);
       assert.equal(await exists(mainCodexLink), false, 'main project default rules should be reconciled');
       assert.equal(await exists(inheritedCodexLink), false, 'inherited disabled provider should be cleaned');
       assert.equal(await readlink(ownCodexLink), ownTarget, 'project-owned mount rules should not be reconciled');
@@ -593,10 +592,10 @@ describe('Mount Rules Route (F228)', () => {
     }
   });
 
-  it('PUT /api/mount-rules restores absent project override when reconciliation fails', async () => {
+  it('PUT /api/mount-rules preserves user-owned directories as conflicts', async () => {
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;
-    const projectDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-rollback-absent-'));
+    const projectDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-conflict-preserve-'));
     const canonicalProjectDir = await realpath(projectDir);
     const skillName = 'debugging';
     const nextRules = {
@@ -621,7 +620,8 @@ describe('Mount Rules Route (F228)', () => {
         payload: { projectPath: projectDir, rules: nextRules },
       });
 
-      assert.equal(res.statusCode, 500);
+      // Conflicts are skip+record, not throw — user data preserved
+      assert.equal(res.statusCode, 200);
       assert.equal(await readFile(join(userOwnedSkillDir, 'local.txt'), 'utf8'), 'keep local skill');
     } finally {
       if (prevOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;

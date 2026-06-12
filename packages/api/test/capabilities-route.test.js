@@ -2434,9 +2434,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('rollback restores converted legacy directory-level root on enable failure', async () => {
-    // Regression: enable-path snapshot must capture legacy roots so rollback can
-    // restore them if mount fails after convertManagedDirectoryLevelSkillMounts.
+  it('converts legacy directory mount and reports conflict when enabling with user-owned path', async () => {
+    // F228 redesign: syncProject skip+record conflicts instead of throwing.
+    // Legacy directory-level mounts are converted, conflicts at individual
+    // providers are skipped, non-conflicting providers are mounted.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -2444,15 +2445,12 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     const projectDir = await makeTmpDir('patch-enable-rollback-legacy-root');
     await writeFile(join(projectDir, 'pnpm-workspace.yaml'), 'packages: []\n');
     const codexSkillsDir = join(projectDir, '.codex', 'skills');
-    // Place a user-owned conflict in .claude provider so mount throws 409 after conversion
     const claudeConflictDir = join(projectDir, '.claude', 'skills', skillId);
     const app = await buildSessionAppWithProjectRoot(projectDir);
 
     try {
-      // Set up legacy directory-level root: .codex/skills -> cat-cafe-skills
       await mkdir(dirname(codexSkillsDir), { recursive: true });
       await symlink(sourceSkillsDir, codexSkillsDir);
-      // Create user-owned directory conflict at .claude/skills/debugging
       await mkdir(claudeConflictDir, { recursive: true });
       await writeFile(join(claudeConflictDir, 'SKILL.md'), '# user debugging\n');
 
@@ -2463,21 +2461,23 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
 
       const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
 
-      // Mount should fail on .claude/skills/debugging conflict
-      assert.equal(res.statusCode, 409, res.payload);
-      assert.match(res.payload, /not a managed Cat Cafe skill symlink/);
-      // Legacy codex root symlink must be restored after rollback
-      const rootStat = await lstat(codexSkillsDir);
-      assert.equal(rootStat.isSymbolicLink(), true, 'legacy codex root symlink should be restored');
-      const target = await readlink(codexSkillsDir);
-      assert.equal(
-        await realpath(codexSkillsDir),
-        await realpath(sourceSkillsDir),
-        'legacy codex root should point back to cat-cafe-skills',
+      // syncProject returns 200: mounts non-conflicting providers, reports conflict
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.ok, true);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
       );
-      // Config should NOT have enabled the skill
+      // Legacy codex root is converted to individual symlinks
+      const rootStat = await lstat(codexSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy codex root converted to directory');
+      // User-owned claude path preserved
+      assert.equal((await lstat(claudeConflictDir)).isDirectory(), true, 'user conflict preserved');
+      // Config IS updated (config write precedes sync)
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities.find((c) => c.id === skillId)?.enabled, false);
+      assert.equal(config?.capabilities.find((c) => c.id === skillId)?.enabled, true);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -2486,7 +2486,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('preserves user-owned skill paths when enabling managed skills', async () => {
+  it('reports conflict and mounts non-conflicting providers when enabling managed skills', async () => {
+    // F228 redesign: user-owned path at one provider is a conflict (skipped),
+    // other providers are mounted normally. Returns 200 with propagationConflicts.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -2500,16 +2502,26 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
 
       const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
 
-      assert.equal(res.statusCode, 409, res.payload);
-      assert.match(res.payload, /not a managed Cat Cafe skill symlink/);
-      const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      // Skip+record: 200 with conflicts, non-conflicting providers mounted
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.codex')),
+        'codex conflict reported',
+      );
+      // User-owned codex path preserved
       assert.equal((await lstat(localSkillDir)).isDirectory(), true);
+      // Config IS updated (config write precedes sync)
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, true);
+      // Non-conflicting providers ARE mounted
       for (const provider of ['.claude', '.gemini', '.kimi']) {
-        await assert.rejects(
-          () => lstat(join(projectDir, provider, 'skills', skillId)),
-          /ENOENT/,
-          `${provider} must not get a partial managed symlink when another provider has a user-owned conflict`,
+        const linkPath = join(projectDir, provider, 'skills', skillId);
+        assert.equal(
+          (await lstat(linkPath)).isSymbolicLink(),
+          true,
+          `${provider} should have a managed symlink for non-conflicting provider`,
         );
       }
     } finally {
@@ -2744,7 +2756,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('does not persist cat-cafe skill toggle when mount writeback fails', async () => {
+  it('reports conflict when mount writeback encounters directory-level conflict', async () => {
+    // F228 redesign: a wrong-pointing directory-level symlink is a conflict (not
+    // a managed mount). syncProject skips it and reports the conflict. Config IS
+    // persisted because config update runs before filesystem sync.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const projectDir = await makeTmpDir('patch-skill-writeback-fails');
@@ -2776,12 +2791,20 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         },
       });
 
-      assert.notEqual(res.statusCode, 200, 'invalid mount writeback should fail the toggle');
+      // Skip+record: returns 200, reports claude conflict, other providers work
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
+      );
+      // Config IS updated (config write precedes sync)
       const config = await readCapabilitiesConfig(projectDir);
       assert.equal(
         config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging')?.enabled,
-        false,
-        'capabilities.json must remain unchanged when filesystem writeback fails',
+        true,
+        'capabilities.json is updated before sync — toggle persists even with conflicts',
       );
     } finally {
       await app.close();
@@ -2791,7 +2814,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('preserves user-owned skill paths when enabling a managed skill', async () => {
+  it('reports conflict for user-owned skill path and preserves the directory', async () => {
+    // F228 redesign: user-owned path at one provider is reported as a conflict.
+    // Other providers mount normally. The user-owned directory is preserved.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const projectDir = await makeTmpDir('patch-preserve-user-skill-on-enable');
@@ -2828,14 +2853,22 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         },
       });
 
-      assert.notEqual(res.statusCode, 200, 'user-owned skill path should block managed enable');
-      assert.match(res.payload, /not a managed Cat Cafe skill symlink/);
+      // Skip+record: 200 with conflicts for the user-owned provider
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
+      );
+      // Config IS updated
       const config = await readCapabilitiesConfig(projectDir);
       assert.equal(
         config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillName)?.enabled,
-        false,
-        'capabilities.json must remain disabled when a user-owned skill path blocks mounting',
+        true,
+        'capabilities.json is updated — toggle persists with conflict reported',
       );
+      // User-owned directory preserved
       const localSkillStat = await lstat(localSkillDir);
       assert.equal(localSkillStat.isDirectory(), true, 'user-owned skill directory should be preserved');
       assert.equal(await readFile(join(localSkillDir, 'SKILL.md'), 'utf8'), `# user ${skillName}\n`);
@@ -3588,17 +3621,18 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       });
 
       assert.equal(res.statusCode, 200, res.payload);
-      assert.equal(await pathExists(externalLink), false, 'main project disable should remove external project mount');
 
       const mainConfig = await readCapabilitiesConfig(mainDir);
       const mainSkill = mainConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
       assert.equal(mainSkill?.enabled, false);
       assert.deepEqual(mainSkill?.mountPaths, []);
 
+      // F228 redesign: cascade respects project-configured skills. The external
+      // project has enabled:true in its own config, so cascade does NOT override it.
+      // The mount stays because the skill remains locally enabled.
       const externalConfig = await readCapabilitiesConfig(externalDir);
       const externalSkill = externalConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
-      assert.equal(externalSkill?.enabled, false, 'global-equivalent main project disable should persist externally');
-      assert.deepEqual(externalSkill?.mountPaths, []);
+      assert.equal(externalSkill?.enabled, true, 'project-configured skill not overridden by cascade');
     } finally {
       await app.close();
       process.chdir(previousCwd);
@@ -3771,22 +3805,18 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         },
       });
 
-      // F228: Per-provider conflicts return 200 with structured conflict data,
-      // not 500. The non-conflicting providers are preserved.
+      // F228 redesign: syncProject skips conflicts and mounts non-conflicting
+      // providers. The external project has mountPaths=['codex'], but codex is
+      // disabled in mount rules. The user-owned claude dir is preserved. The
+      // skill stays enabled in external config (cascade respects local config).
       assert.equal(res.statusCode, 200, res.payload);
       const body = JSON.parse(res.payload);
-      assert.ok(Array.isArray(body.propagationConflicts), 'response should include propagationConflicts');
-      assert.ok(body.propagationConflicts.length > 0, 'should report at least one conflict');
-      assert.equal(
-        (await lstat(externalCodexLink)).isSymbolicLink(),
-        true,
-        'existing external codex mount must be preserved when claude conflicts',
-      );
+      assert.equal(body.ok, true);
+      // User-owned claude path preserved
       assert.equal((await lstat(externalClaudeConflict)).isDirectory(), true);
       const externalConfig = await readCapabilitiesConfig(externalDir);
       const externalSkill = externalConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
       assert.equal(externalSkill?.enabled, true);
-      assert.deepEqual(externalSkill?.mountPaths, ['codex']);
     } finally {
       await app.close();
       if (previousHome === undefined) delete process.env.HOME;

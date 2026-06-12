@@ -165,8 +165,9 @@ export function SkillsContent() {
             void controls.refetch(null);
           } else {
             setData(null);
+            // switchProject updates projectPathRef (used by toggle) AND fetches capabilities
+            controls.switchProject(selectedProjectPath ?? null);
             void fetchSkills(selectedProjectPath);
-            void controls.refetch(selectedProjectPath);
           }
         }}
         allCount={scopeCounts.all}

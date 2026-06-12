@@ -15,7 +15,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { stat as fsStat, readdir, readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,6 @@ import type {
 } from '@cat-cafe/shared';
 import { catRegistry, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { parse as parseYaml } from 'yaml';
 import { appendAuditEntry } from '../config/capabilities/capability-audit.js';
 import {
   bootstrapCapabilities,
@@ -57,6 +56,9 @@ import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
+import { parseManifestSkillMeta, readSkillMeta, type SkillMeta } from '../skills/skill-meta.js';
+import { syncAll } from '../skills/skill-sync-all.js';
+import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
 import {
   ManagedSkillWritebackConflictError,
   mountManagedSkillSymlinks,
@@ -70,28 +72,73 @@ import {
   isSkillMountedForProvider,
   resolveMainRepoPath,
 } from '../utils/skill-mount.js';
-import {
-  convertManagedDirectoryLevelSkillMountsForCapabilitiesPolicy,
-  createCatCafeSkillCapabilityFromGlobalPolicy,
-  currentSkillMountTargetIds,
-  enabledMountTargetIds,
-  findCapabilityPatchTargetIndex,
-  findCatCafeSkillCapability,
-  type PropagationConflict,
-  propagateGlobalProviderToggle,
-  propagateGlobalSkillDisable,
-  propagateGlobalSkillEnable,
-} from '../utils/skill-propagation.js';
 import { resolveCatCafeSkillsSource } from '../utils/skill-source.js';
-import {
-  discardSkillMountSnapshot,
-  filterRulesToProvider,
-  mountSkillForProject,
-  restoreSkillMountSnapshot,
-  snapshotSkillMountsForProject,
-  unmountSkillForProject,
-} from '../utils/skill-symlink-writer.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
+
+// ────────── Capability config helpers ──────────
+
+function enabledMountTargetIds(rules: MountRules): string[] {
+  return [
+    ...STANDARD_PROVIDER_IDS.filter((id) => rules.providers[id].enabled),
+    ...(rules.customPaths ?? []).map((cp) => cp.alias),
+  ];
+}
+
+function currentSkillMountTargetIds(cap: CapabilityEntry, rules: MountRules): string[] {
+  if (Array.isArray(cap.mountPaths)) return cap.mountPaths;
+  return cap.enabled ? enabledMountTargetIds(rules) : [];
+}
+
+function findCatCafeSkillCapability(
+  config: { capabilities: CapabilityEntry[] } | null | undefined,
+  skillId: string,
+): CapabilityEntry | null {
+  return (
+    config?.capabilities.find(
+      (entry) => entry.type === 'skill' && entry.id === skillId && entry.source === 'cat-cafe' && !entry.pluginId,
+    ) ?? null
+  );
+}
+
+function createCatCafeSkillCapabilityFromGlobalPolicy(
+  skillId: string,
+  globalCap: CapabilityEntry | null,
+): CapabilityEntry {
+  const entry: CapabilityEntry = { id: skillId, type: 'skill', enabled: true, source: 'cat-cafe' };
+  if (!globalCap) return entry;
+  entry.enabled = globalCap.enabled;
+  if (Array.isArray(globalCap.mountPaths)) {
+    entry.mountPaths = [...globalCap.mountPaths];
+  } else if (!globalCap.enabled) {
+    entry.mountPaths = [];
+  }
+  return entry;
+}
+
+function findCapabilityPatchTargetIndex(
+  config: { capabilities: CapabilityEntry[] },
+  body: CapabilityPatchRequest,
+): number {
+  const hasSourceDiscriminator = body.source === 'cat-cafe' || body.source === 'external';
+  const hasPluginDiscriminator = typeof body.pluginId === 'string';
+  if (hasSourceDiscriminator || hasPluginDiscriminator) {
+    const explicitIndex = config.capabilities.findIndex((entry) => {
+      if (entry.id !== body.capabilityId || entry.type !== body.capabilityType) return false;
+      if (hasSourceDiscriminator && entry.source !== body.source) return false;
+      if (hasPluginDiscriminator) return entry.pluginId === body.pluginId;
+      return !entry.pluginId;
+    });
+    if (explicitIndex !== -1) return explicitIndex;
+  }
+  if (body.capabilityType === 'skill') {
+    const firstPartyIndex = config.capabilities.findIndex(
+      (entry) =>
+        entry.id === body.capabilityId && entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId,
+    );
+    if (firstPartyIndex !== -1) return firstPartyIndex;
+  }
+  return config.capabilities.findIndex((entry) => entry.id === body.capabilityId && entry.type === body.capabilityType);
+}
 
 // ────────── Helpers ──────────
 
@@ -317,12 +364,6 @@ function getCliConfigPaths(projectRoot: string) {
   };
 }
 
-interface SkillMeta {
-  category?: string;
-  description?: string;
-  triggers?: string[];
-}
-
 interface SkillScanPlan {
   key: string;
   provider: 'anthropic' | 'openai' | 'google' | 'kimi' | 'custom';
@@ -361,114 +402,6 @@ export async function scanProviderSkillDirs(plans: SkillScanPlan[]): Promise<{
 
   return { providerSkills, scanResults, scansOk };
 }
-/**
- * Extract description + triggers from a SKILL.md frontmatter.
- * Triggers are embedded in descriptions:
- *   'Triggers on "X", "Y", "Z"' or '触发词："X"、"Y"'
- */
-async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
-  const skillMdPath = join(skillDir, 'SKILL.md');
-  try {
-    const content = await readFile(skillMdPath, 'utf-8');
-    const match = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!match) return {};
-    const fm = parseYaml(match[1]!) as { description?: unknown; triggers?: unknown } | null;
-    const desc = typeof fm?.description === 'string' ? fm.description.trim() : '';
-    if (!desc) return {};
-
-    // Prefer explicit frontmatter `triggers` when available.
-    const triggers: string[] = Array.isArray(fm?.triggers)
-      ? fm?.triggers
-          .filter((v): v is string => typeof v === 'string')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-
-    // Backward compatibility: extract triggers from description text for legacy skills.
-    if (triggers.length === 0) {
-      // English: Triggers on "X", "Y", "Z"
-      const enMatch = desc.match(/[Tt]riggers?\s+on\s+"([^"]+)"(,\s*"([^"]+)")*/);
-      if (enMatch) {
-        const allQuoted = desc.match(/[Tt]riggers?\s+on\s+(.*)/);
-        if (allQuoted) {
-          for (const m of allQuoted[1]?.matchAll(/"([^"]+)"/g)) {
-            triggers.push(m[1]!);
-          }
-        }
-      }
-      // Chinese: 触发词："X"、"Y" or 触发词：X、Y
-      const cnMatch = desc.match(/触发词[：:]\s*(.*)/);
-      if (cnMatch) {
-        const raw = cnMatch[1]!;
-        // Quoted: "X"、"Y"
-        for (const m of raw.matchAll(/["""]([^"""]+)["""]/g)) {
-          triggers.push(m[1]!);
-        }
-        // Unquoted fallback: X、Y、Z
-        if (triggers.length === 0) {
-          triggers.push(
-            ...raw
-              .split(/[、,，]/)
-              .map((s) => s.trim())
-              .filter(Boolean),
-          );
-        }
-      }
-    }
-
-    // Clean description: strip trigger suffix for display
-    let cleanDesc = desc
-      .replace(/\s*[Tt]riggers?\s+on\s+.*$/, '')
-      .replace(/\s*触发词[：:].*$/, '')
-      .replace(/\.\s*$/, '')
-      .trim();
-    if (!cleanDesc) cleanDesc = desc;
-
-    const result: SkillMeta = { description: cleanDesc };
-    if (triggers.length > 0) result.triggers = triggers;
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Parse manifest.yaml and extract skill category/description/triggers.
- * F042: manifest is the routing source-of-truth.
- * F228: category moved from BOOTSTRAP.md to manifest.yaml.
- */
-async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string, SkillMeta>> {
-  const result = new Map<string, SkillMeta>();
-  const manifestPath = join(skillsSrcDir, 'manifest.yaml');
-  try {
-    const content = await readFile(manifestPath, 'utf-8');
-    const parsed = parseYaml(content) as {
-      skills?: Record<string, { category?: unknown; description?: unknown; triggers?: unknown }>;
-    } | null;
-    if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
-    for (const [name, meta] of Object.entries(parsed.skills)) {
-      const category = typeof meta?.category === 'string' ? meta.category.trim() : undefined;
-      const description = typeof meta?.description === 'string' ? meta.description.trim() : undefined;
-      const triggers = Array.isArray(meta?.triggers)
-        ? meta.triggers
-            .filter((v): v is string => typeof v === 'string')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined;
-      if (category || description || (triggers && triggers.length > 0)) {
-        result.set(name, {
-          ...(category ? { category } : {}),
-          ...(description ? { description } : {}),
-          ...(triggers && triggers.length > 0 ? { triggers } : {}),
-        });
-      }
-    }
-  } catch {
-    // manifest missing or invalid — fallback to SKILL.md metadata
-  }
-  return result;
-}
-
 /** Known MCP server descriptions */
 const MCP_DESCRIPTIONS: Record<string, string> = {
   'cat-cafe-collab': '三猫协作工具 — 消息、上下文、任务、权限等（协作核心）',
@@ -1106,16 +1039,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const beforeSnapshot = structuredClone(cap);
-      const configBeforeMutation = structuredClone(config);
-      // (globalSkillMountPolicy removed — global policy cascades as default, not constraint)
-      // F228: managed skill writeback applies to both global and project scope toggles
       const shouldWritebackManagedSkill =
         body.capabilityType === 'skill' &&
         (body.scope === 'global' || body.scope === 'project') &&
         cap.source === 'cat-cafe';
-      let rollbackSkillWriteback: (() => Promise<void>) | null = null;
-      let discardSkillWritebackSnapshot: (() => Promise<void>) | null = null;
-      let persistedCapabilitiesConfig = false;
 
       if (shouldWritebackManagedSkill) {
         try {
@@ -1126,187 +1053,63 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const propagationWarnings: string[] = [];
-      const propagationConflicts: PropagationConflict[] = [];
-      try {
-        if (body.scope === 'global') {
-          // F228: per-provider toggle (providerId set) does NOT change cap.enabled directly.
-          // cap.enabled is auto-derived from mountPaths after mount/unmount (see below).
-          if (!body.providerId) {
-            cap.enabled = body.enabled;
-          }
-        } else if (body.scope === 'project') {
-          // F228: Global policy cascades as default, but does NOT restrict
-          // project-level overrides. Projects can independently enable skills
-          // that are globally disabled — the global toggle is a convenience
-          // cascade, not a hard constraint.
-          // F228: Only set cap.enabled for whole-skill toggle (no providerId).
-          // Per-provider toggle derives cap.enabled from mountPaths after update.
-          if (!body.providerId) {
-            cap.enabled = body.enabled;
-          }
-        } else {
-          // scope === 'cat' (MCP only — skills already rejected above)
-          if (!cap.overrides) cap.overrides = [];
-          const existing = cap.overrides.find((o) => o.catId === body.catId!);
-          if (existing) {
-            existing.enabled = body.enabled;
-          } else {
-            cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
-          }
-          if (body.enabled === cap.enabled) {
-            cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
-            if (cap.overrides.length === 0) delete cap.overrides;
-          }
-        }
-
-        // F228: filesystem mount writeback for managed skill toggles.
-        // Applies to both global and project scope:
-        //   - global: toggle enabled + mount/unmount everywhere
-        //   - project: mount/unmount for this project only + update mountPaths
-        // External/user skills are owned by the user — no writeback.
-        if (shouldWritebackManagedSkill) {
+      // Update config: cap.enabled + mountPaths
+      if (body.scope === 'global' || body.scope === 'project') {
+        if (body.providerId && shouldWritebackManagedSkill) {
+          // Per-provider toggle: validate + update mountPaths, derive cap.enabled
           const mountRules = await readMountRules(projectRoot, getProjectRoot());
-          const skillsSource = await resolveCatCafeSkillsSource();
-
-          // F228: validate providerId against actual mount rules before writeback.
-          // Reject unknown/disabled providers to prevent mountPaths state pollution.
-          if (body.providerId) {
-            const validProviders = new Set<string>([
-              ...STANDARD_PROVIDER_IDS.filter((id) => mountRules.providers[id].enabled),
-              ...(mountRules.customPaths ?? []).map((cp) => cp.alias),
-            ]);
-            if (!validProviders.has(body.providerId)) {
-              reply.status(400);
-              return {
-                error: `providerId "${body.providerId}" is not an enabled provider in current mount rules`,
-              };
-            }
+          const validProviders = new Set<string>([
+            ...STANDARD_PROVIDER_IDS.filter((id) => mountRules.providers[id].enabled),
+            ...(mountRules.customPaths ?? []).map((cp) => cp.alias),
+          ]);
+          if (!validProviders.has(body.providerId)) {
+            reply.status(400);
+            return { error: `providerId "${body.providerId}" is not an enabled provider in current mount rules` };
           }
-
-          // F228: per-provider toggle uses filtered rules; all-provider uses full
-          // rules, capped by main/global skill policy for external projects.
-          const effectiveRules = body.providerId ? filterRulesToProvider(mountRules, body.providerId) : mountRules;
-          const skillWritebackSnapshot = await snapshotSkillMountsForProject(
-            projectRoot,
-            body.capabilityId,
-            skillsSource,
-            effectiveRules,
-            {
-              enabledOnly: body.enabled,
-              symlinksOnly: !body.enabled,
-              preserveNonSymlinks: body.enabled,
-              includeManagedDirectoryRoots: true,
-            },
-          );
-          rollbackSkillWriteback = () => restoreSkillMountSnapshot(skillWritebackSnapshot);
-          discardSkillWritebackSnapshot = () => discardSkillMountSnapshot(skillWritebackSnapshot);
-          if (body.enabled) {
-            // Convert legacy directory-level provider roots (e.g. .codex/skills -> cat-cafe-skills)
-            // into per-skill symlinks before mounting. Without this, mountSkillForProject would
-            // try to create a symlink inside a symlink target (the legacy root).
-            const disabledManagedSkillNamesForEnable = new Set(
-              config.capabilities
-                .filter(
-                  (entry) => entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId && !entry.enabled,
-                )
-                .map((entry) => entry.id),
-            );
-            await convertManagedDirectoryLevelSkillMountsForCapabilitiesPolicy(
-              projectRoot,
-              skillsSource,
-              effectiveRules,
-              config,
-              disabledManagedSkillNamesForEnable,
-            );
-            try {
-              await mountSkillForProject(projectRoot, body.capabilityId, skillsSource, effectiveRules);
-            } catch (mountErr) {
-              if ((mountErr as Error).message?.includes('not a managed Cat Cafe skill symlink')) {
-                // Roll back converted legacy roots before returning 409
-                if (rollbackSkillWriteback) {
-                  await rollbackSkillWriteback().catch((rbErr) => {
-                    console.warn(
-                      `[F228] Failed to rollback skill writeback after mount conflict: ${(rbErr as Error).message}`,
-                    );
-                  });
-                  rollbackSkillWriteback = null;
-                  discardSkillWritebackSnapshot = null;
-                }
-                reply.status(409);
-                return { error: (mountErr as Error).message };
-              }
-              throw mountErr;
-            }
-          } else {
-            const disabledManagedSkillNames = new Set(
-              config.capabilities
-                .filter(
-                  (entry) => entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId && !entry.enabled,
-                )
-                .map((entry) => entry.id),
-            );
-            await convertManagedDirectoryLevelSkillMountsForCapabilitiesPolicy(
-              projectRoot,
-              skillsSource,
-              effectiveRules,
-              config,
-              disabledManagedSkillNames,
-            );
-            // Per-provider unmount: only remove from the target provider's dir (enabledOnly).
-            // Without enabledOnly, unmountSkillForProject scans ALL provider dirs and removes
-            // ALL managed symlinks — correct for whole-skill disable, but destructive for
-            // per-provider toggle (would remove sibling providers' mounts).
-            await unmountSkillForProject(
-              projectRoot,
-              body.capabilityId,
-              effectiveRules,
-              skillsSource,
-              body.providerId ? { enabledOnly: true } : undefined,
-            );
-          }
-
-          // F228: update mountPaths — per-provider adds/removes one provider;
-          // all-provider sets to full list or empty.
-          if (body.providerId) {
-            const current = currentSkillMountTargetIds(cap, mountRules);
-            cap.mountPaths = body.enabled
-              ? [...new Set([...current, body.providerId])]
-              : current.filter((p) => p !== body.providerId);
-          } else {
-            cap.mountPaths = body.enabled ? enabledMountTargetIds(effectiveRules) : [];
-          }
-
-          // F228: per-provider toggle auto-derives cap.enabled from mountPaths.
-          // Case 3: all providers unmounted → skill auto-disables.
-          // Case 4: a provider mounted while skill disabled → skill auto-enables.
-          if (body.providerId) {
-            const hasMounts = (cap.mountPaths ?? []).length > 0;
-            if (!hasMounts && cap.enabled) {
-              cap.enabled = false;
-            } else if (hasMounts && !cap.enabled) {
-              cap.enabled = true;
-            }
+          const current = currentSkillMountTargetIds(cap, mountRules);
+          cap.mountPaths = body.enabled
+            ? [...new Set([...current, body.providerId])]
+            : current.filter((p) => p !== body.providerId);
+          cap.enabled = (cap.mountPaths ?? []).length > 0;
+        } else {
+          // Whole-skill toggle
+          cap.enabled = body.enabled;
+          if (shouldWritebackManagedSkill) {
+            const mountRules = await readMountRules(projectRoot, getProjectRoot());
+            cap.mountPaths = body.enabled ? enabledMountTargetIds(mountRules) : [];
           }
         }
+      } else {
+        // scope === 'cat' (MCP only — skills already rejected above)
+        if (!cap.overrides) cap.overrides = [];
+        const existing = cap.overrides.find((o) => o.catId === body.catId!);
+        if (existing) existing.enabled = body.enabled;
+        else cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
+        if (body.enabled === cap.enabled) {
+          cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
+          if (cap.overrides.length === 0) delete cap.overrides;
+        }
+      }
 
-        await writeCapabilitiesConfig(projectRoot, config);
-        persistedCapabilitiesConfig = true;
+      await writeCapabilitiesConfig(projectRoot, config);
+      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
 
-        await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      // Filesystem reconciliation via syncProject/syncAll
+      let syncConflicts: MountConflict[] = [];
+      const propagationWarnings: string[] = [];
 
-        await appendAuditEntry(projectRoot, {
-          timestamp: new Date().toISOString(),
-          userId,
-          action: 'toggle',
-          capabilityId: body.capabilityId,
-          before: beforeSnapshot,
-          after: cap,
+      if (shouldWritebackManagedSkill) {
+        const mountRules = await readMountRules(projectRoot, getProjectRoot());
+        const skillsSource = await resolveCatCafeSkillsSource();
+
+        // Sync this project's filesystem
+        const syncResult = await syncProject(projectRoot, skillsSource, {
+          mountRules,
+          force: false,
         });
+        syncConflicts = syncResult.conflicts;
 
-        // F228 P1-1: propagate global toggle to all external projects.
-        // Main-project "project" skill toggles mutate the same capabilities.json
-        // entry that represents global skill state, so they must cascade too.
+        // Global scope: cascade to all external projects
         if (
           shouldPropagateManagedSkillToggle(
             body.scope as 'global' | 'project',
@@ -1315,93 +1118,36 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
             getProjectRoot(),
           )
         ) {
-          const catCafeRoot = getProjectRoot();
-          const skillsSource = await resolveCatCafeSkillsSource();
-          if (body.providerId) {
-            // Per-provider global cascade: toggle one provider across all projects.
-            propagationWarnings.push(
-              ...(await propagateGlobalProviderToggle(
-                catCafeRoot,
-                projectRoot,
-                body.capabilityId,
-                body.providerId,
-                body.enabled,
-                skillsSource,
-                currentSkillMountTargetIds(cap, await readMountRules(projectRoot, catCafeRoot)),
-              )),
-            );
-          } else if (body.enabled) {
-            const enableResult = await propagateGlobalSkillEnable(
-              catCafeRoot,
-              projectRoot,
-              body.capabilityId,
-              skillsSource,
-            );
-            propagationWarnings.push(...enableResult.warnings);
-            propagationConflicts.push(...enableResult.conflicts);
-          } else {
-            propagationWarnings.push(
-              ...(await propagateGlobalSkillDisable(catCafeRoot, projectRoot, body.capabilityId, skillsSource)),
-            );
+          const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
+          propagationWarnings.push(...allResult.warnings);
+          for (const [, projResult] of allResult.perProject) {
+            syncConflicts.push(...projResult.conflicts);
           }
         }
-
-        if (discardSkillWritebackSnapshot) {
-          await discardSkillWritebackSnapshot().catch((snapshotErr) => {
-            console.warn(
-              `[F228] Failed to discard skill writeback rollback snapshot: ${(snapshotErr as Error).message}`,
-            );
-          });
-          discardSkillWritebackSnapshot = null;
-          rollbackSkillWriteback = null;
-        }
-      } catch (err) {
-        if (rollbackSkillWriteback) {
-          try {
-            await rollbackSkillWriteback();
-          } catch (rollbackErr) {
-            console.warn(
-              `[F228] Failed to rollback skill writeback after capability toggle failure: ${
-                (rollbackErr as Error).message
-              }`,
-            );
-          }
-        }
-        if (persistedCapabilitiesConfig) {
-          try {
-            await writeCapabilitiesConfig(projectRoot, configBeforeMutation);
-            await generateCliConfigs(configBeforeMutation, getCliConfigPaths(projectRoot));
-          } catch (rollbackErr) {
-            console.warn(
-              `[F228] Failed to rollback capability config/provider configs after toggle failure: ${
-                (rollbackErr as Error).message
-              }`,
-            );
-          }
-        }
-        throw err;
       }
+
+      await appendAuditEntry(projectRoot, {
+        timestamp: new Date().toISOString(),
+        userId,
+        action: 'toggle',
+        capabilityId: body.capabilityId,
+        before: beforeSnapshot,
+        after: cap,
+      });
 
       if (propagationWarnings.length > 0) {
         reply.status(500);
         const opLabel = body.providerId ? `provider toggle (${body.providerId})` : body.enabled ? 'enable' : 'disable';
         return {
           ok: false,
-          error: `Global ${opLabel} persisted locally but failed to propagate to ${propagationWarnings.length} project(s). External projects retain their previous mount state.`,
+          error: `Global ${opLabel} persisted locally but failed to propagate to ${propagationWarnings.length} project(s).`,
           capability: sanitizeCapabilityForResponse(cap),
           failedProjects: propagationWarnings,
-          propagationConflicts: propagationConflicts.length > 0 ? propagationConflicts : undefined,
+          propagationConflicts: syncConflicts.length > 0 ? syncConflicts : undefined,
         };
       }
-      // F228: Conflicts without hard failures = partial success.
-      // Non-conflicting providers were mounted; conflicting ones skipped.
-      // The user can resolve conflicts via Skill sync / drift-resolve.
-      if (propagationConflicts.length > 0) {
-        return {
-          ok: true,
-          capability: sanitizeCapabilityForResponse(cap),
-          propagationConflicts,
-        };
+      if (syncConflicts.length > 0) {
+        return { ok: true, capability: sanitizeCapabilityForResponse(cap), propagationConflicts: syncConflicts };
       }
       return { ok: true, capability: sanitizeCapabilityForResponse(cap) };
     });

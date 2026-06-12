@@ -1206,10 +1206,13 @@ describe('Skills Route', () => {
         payload: { projectPath: projectDir, skillName },
       });
 
-      assert.equal(res.statusCode, 500);
+      // Conflicts are skip+record — user data preserved, successful mounts work
+      assert.equal(res.statusCode, 200, res.payload);
       assert.equal((await lstat(claudeLink)).isSymbolicLink(), true);
       assert.equal(resolve(dirname(claudeLink), await readlink(claudeLink)), join(sourceSkillsDir, skillName));
-      assert.equal((await lstat(codexConflict)).isDirectory(), true);
+      assert.equal((await lstat(codexConflict)).isDirectory(), true, 'user-owned directory should be preserved');
+      const body = JSON.parse(res.body);
+      assert.ok(body.conflicts?.length > 0, 'conflicts should be reported');
       const config = await readCapabilitiesConfig(projectDir);
       const cap = config?.capabilities.find(
         (entry) => entry.type === 'skill' && entry.id === skillName && entry.source === 'cat-cafe' && !entry.pluginId,
