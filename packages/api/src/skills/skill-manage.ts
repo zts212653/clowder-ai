@@ -90,6 +90,70 @@ function findSkillEntry(
   );
 }
 
+// ────────── Symlink helpers (shared by addSkill and PluginResourceActivator) ──────────
+
+/**
+ * Mount symlinks for a skill into active provider directories.
+ * Pure filesystem operation — does not touch capabilities config.
+ */
+export async function mountSkillSymlinks(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+  mountPaths?: readonly string[],
+): Promise<SkillOperationResult> {
+  const result: SkillOperationResult = { mounted: [], unmounted: [], conflicts: [] };
+  const targets = activeProviderTargets(projectRoot, mountRules);
+  const allowed = mountPaths ? new Set(mountPaths) : null;
+
+  for (const target of targets) {
+    if (allowed && !allowed.has(target.id)) {
+      for (const dir of target.dirs) {
+        const linkPath = join(dir, skillName);
+        if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
+          await rm(linkPath);
+          result.unmounted.push({ skillName, providerId: target.id });
+        }
+      }
+      continue;
+    }
+    for (const dir of target.dirs) {
+      await mkdir(dir, { recursive: true });
+      const linkPath = join(dir, skillName);
+      const status = await classifyMountPath(linkPath, skillsSource, skillName);
+      if (status === 'missing') {
+        await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+        result.mounted.push({ skillName, providerId: target.id });
+      } else if (status === 'conflict') {
+        result.conflicts.push({ skillName, providerId: target.id, path: linkPath });
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Remove managed symlinks for a skill from all provider directories.
+ * Pure filesystem operation — does not touch capabilities config.
+ */
+export async function unmountSkillSymlinks(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+): Promise<SkillOperationResult> {
+  const result: SkillOperationResult = { mounted: [], unmounted: [], conflicts: [] };
+  for (const dir of allProviderDirs(projectRoot, mountRules)) {
+    const linkPath = join(dir, skillName);
+    if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
+      await rm(linkPath);
+      result.unmounted.push({ skillName, providerId: 'cleanup' });
+    }
+  }
+  return result;
+}
+
 // ────────── Public API ──────────
 
 export interface SkillInfo {
@@ -157,38 +221,8 @@ export async function addSkill(
   await writeCapabilitiesConfig(projectRoot, config);
 
   // 2. Mount symlinks
-  const result: SkillOperationResult = { mounted: [], unmounted: [], conflicts: [] };
-  if (!enabled) return result;
-
-  const targets = activeProviderTargets(projectRoot, mountRules);
-  const allowed = opts.mountPaths ? new Set(opts.mountPaths) : null;
-
-  for (const target of targets) {
-    if (allowed && !allowed.has(target.id)) {
-      // Unmount from providers outside mountPaths
-      for (const dir of target.dirs) {
-        const linkPath = join(dir, skillName);
-        if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
-          await rm(linkPath);
-          result.unmounted.push({ skillName, providerId: target.id });
-        }
-      }
-      continue;
-    }
-    for (const dir of target.dirs) {
-      await mkdir(dir, { recursive: true });
-      const linkPath = join(dir, skillName);
-      const status = await classifyMountPath(linkPath, skillsSource, skillName);
-      if (status === 'missing') {
-        await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
-        result.mounted.push({ skillName, providerId: target.id });
-      } else if (status === 'conflict') {
-        result.conflicts.push({ skillName, providerId: target.id, path: linkPath });
-      }
-    }
-  }
-
-  return result;
+  if (!enabled) return { mounted: [], unmounted: [], conflicts: [] };
+  return mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, opts.mountPaths);
 }
 
 /**
@@ -217,18 +251,8 @@ export async function removeSkill(
   }
 
   // 2. Remove managed symlinks from ALL provider dirs
-  const result: SkillOperationResult = { mounted: [], unmounted: [], conflicts: [] };
-  if (!opts.skillsSource) return result;
-
-  for (const dir of allProviderDirs(projectRoot, mountRules)) {
-    const linkPath = join(dir, skillName);
-    if ((await classifyMountPath(linkPath, opts.skillsSource, skillName)) === 'managed') {
-      await rm(linkPath);
-      result.unmounted.push({ skillName, providerId: 'cleanup' });
-    }
-  }
-
-  return result;
+  if (!opts.skillsSource) return { mounted: [], unmounted: [], conflicts: [] };
+  return unmountSkillSymlinks(projectRoot, skillName, opts.skillsSource, mountRules);
 }
 
 // ────────── Query ──────────

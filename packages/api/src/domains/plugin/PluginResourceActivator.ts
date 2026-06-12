@@ -5,13 +5,14 @@ import {
   type CapabilitiesConfig,
   type CapabilityEntry,
   type ILimbNode,
-  type MountRules,
   type PluginManifest,
   type PluginResourceDef,
+  STANDARD_PROVIDER_IDS,
 } from '@cat-cafe/shared';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import { addSkill, removeSkill } from '../../skills/skill-manage.js';
+import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
+import { isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -264,15 +265,41 @@ export class PluginResourceActivator {
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
     const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
 
-    // F719: Delegate to generic skill management interface.
-    // addSkill writes config + mounts symlinks in one call.
-    const capId = resourceCapId(manifest.id, resource);
-    await addSkill(projectRoot, skillName, dirname(skillSourceDir), {
+    // F719: Use mountSkillSymlinks for filesystem + injected deps for config.
+    // Directory-level symlink check: reject if a provider skills dir is itself
+    // a symlink pointing to the wrong root (prevents cross-contamination).
+    const skillsSource = dirname(skillSourceDir);
+    for (const providerId of STANDARD_PROVIDER_IDS) {
+      if (!mountRules.providers[providerId].enabled) continue;
+      const skillsDir = join(projectRoot, mountRules.providers[providerId].path);
+      await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+    }
+
+    // Mount symlinks first (rollback only newly created if config write fails)
+    const mountResult = await mountSkillSymlinks(
+      projectRoot,
+      skillName,
+      skillsSource,
       mountRules,
-      pluginId: manifest.id,
-      capabilityId: capId,
-      mountPaths: mountPaths ?? undefined,
-    });
+      mountPaths ?? undefined,
+    );
+    try {
+      await this.upsertCapabilityEntry(manifest, resource, true);
+    } catch (err) {
+      // Rollback: only remove symlinks we just mounted (not pre-existing ones)
+      const { rm: rmFile } = await import('node:fs/promises');
+      for (const m of mountResult.mounted) {
+        const providerRule = mountRules.providers[m.providerId as keyof typeof mountRules.providers];
+        if (providerRule) {
+          try {
+            await rmFile(join(projectRoot, providerRule.path, skillName));
+          } catch {
+            /* best-effort rollback */
+          }
+        }
+      }
+      throw err;
+    }
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -284,14 +311,9 @@ export class PluginResourceActivator {
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
 
-    // F719: Delegate to generic skill management interface.
-    const capId = resourceCapId(manifest.id, resource);
-    await removeSkill(projectRoot, skillName, {
-      mountRules,
-      pluginId: manifest.id,
-      capabilityId: capId,
-      skillsSource: dirname(skillSourceDir),
-    });
+    // Unmount symlinks + update config using injected deps
+    await unmountSkillSymlinks(projectRoot, skillName, dirname(skillSourceDir), mountRules);
+    await this.upsertCapabilityEntry(manifest, resource, false);
   }
 
   private async readExistingPluginSkillMountPaths(
