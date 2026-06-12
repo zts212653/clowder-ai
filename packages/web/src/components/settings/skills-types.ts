@@ -109,12 +109,6 @@ export function getMountedCount(mounts: SkillMount): number {
   return PROVIDER_KEYS.filter((key) => mounts[key]).length;
 }
 
-export function dependencyTone(status: SkillMcpDependency['status']): string {
-  if (status === 'ready') return 'bg-emerald-100 text-emerald-700';
-  if (status === 'missing') return 'bg-rose-100 text-rose-700';
-  return 'bg-conn-amber-bg text-conn-amber-text';
-}
-
 export function normalizeSearch(value: string): string {
   return value.trim().toLowerCase();
 }
