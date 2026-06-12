@@ -318,7 +318,9 @@ describe('Skills Route', () => {
     process.env.HOME = homeDir;
 
     const app = Fastify();
-    await app.register(skillsRoutes);
+    // The test's HOME symlinks point to the git main worktree. Pass it as
+    // mainProjectRoot so the route recognizes those symlinks as managed.
+    await app.register(skillsRoutes, { mainProjectRoot: mainRepo });
     await app.ready();
 
     try {
@@ -367,7 +369,7 @@ describe('Skills Route', () => {
     process.env.HOME = homeDir;
 
     const app = Fastify();
-    await app.register(skillsRoutes);
+    await app.register(skillsRoutes, { mainProjectRoot: projectDir });
     await app.ready();
 
     try {
@@ -426,7 +428,7 @@ describe('Skills Route', () => {
     process.env.HOME = homeDir;
 
     const app = Fastify();
-    await app.register(skillsRoutes);
+    await app.register(skillsRoutes, { mainProjectRoot: projectDir });
     await app.ready();
 
     try {
@@ -615,7 +617,10 @@ describe('Skills Route', () => {
     process.env.HOME = homeDir;
 
     const app = Fastify();
-    await app.register(skillsRoutes);
+    // Isolate from the developer's actual capabilities config — without
+    // mainProjectRoot the test inherits global skill policy from the running
+    // worktree (which may have most skills disabled).
+    await app.register(skillsRoutes, { mainProjectRoot: projectDir });
     await app.ready();
 
     try {

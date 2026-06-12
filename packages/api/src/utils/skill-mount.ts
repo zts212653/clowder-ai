@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process';
 import { lstat, readlink, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from './project-path.js';
+import { resolveStartupProjectRoot } from './startup-root.js';
 
 export type SkillProviderMountKey = 'claude' | 'codex' | 'gemini' | 'kimi';
 
@@ -203,30 +201,13 @@ export async function isSkillMountedForProvider(
   return false;
 }
 
-const execFileAsync = promisify(execFile);
-let cachedMainRepoPath: string | null = null;
-let cachedMainRepoPathPromise: Promise<string> | null = null;
-
+/**
+ * Resolve the project root where this process was started.
+ *
+ * Delegates to `resolveStartupProjectRoot()` which walks upward from the
+ * compiled module directory looking for `cat-cafe-skills/manifest.yaml`.
+ * This correctly returns the startup worktree (not the git main worktree).
+ */
 export async function resolveMainRepoPath(): Promise<string> {
-  if (cachedMainRepoPath) return cachedMainRepoPath;
-  if (cachedMainRepoPathPromise) return cachedMainRepoPathPromise;
-  cachedMainRepoPathPromise = (async () => {
-    const moduleRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-    try {
-      const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain']);
-      const firstLine = stdout.split('\n')[0] ?? '';
-      return firstLine.replace(/^worktree\s+/, '').trim();
-    } catch {
-      try {
-        const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
-        return stdout.trim();
-      } catch {
-        return moduleRepoRoot;
-      }
-    }
-  })().then((p) => {
-    cachedMainRepoPath = p;
-    return p;
-  });
-  return cachedMainRepoPathPromise;
+  return resolveStartupProjectRoot();
 }
