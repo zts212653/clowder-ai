@@ -112,6 +112,7 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         previousMountRules: previousDefaultRules,
         pruneMountPaths: true,
       });
+      await reconcilePluginMounts(globalRoot, skillsSrc, validated, previousDefaultRules);
       const syncResult = await syncAll(globalRoot, skillsSrc, {
         mountRules: validated,
         previousMountRules: previousDefaultRules,
