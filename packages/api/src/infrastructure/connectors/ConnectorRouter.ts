@@ -124,7 +124,14 @@ export interface ConnectorRouterOptions {
       }
     | undefined;
   readonly defaultUserId: string;
-  readonly defaultCatId: CatId;
+  /**
+   * Default cat to invoke when an IM message has no @mention and the target
+   * thread has no recent active cat. Accepts either a static id (used by tests
+   * and historical callers) or a getter (cloud P1 #2253: bootstrap passes a
+   * `() => getDefaultCatId()` so runtime `PUT /api/config/default-cat` is
+   * honored without a gateway restart). Resolved at every parseMentions call.
+   */
+  readonly defaultCatId: CatId | (() => CatId);
   readonly log: FastifyBaseLogger;
   readonly commandLayer?: ConnectorCommandLayer | undefined;
   readonly permissionStore?: IConnectorPermissionStore | undefined;
@@ -154,6 +161,18 @@ export class ConnectorRouter {
   private readonly hubThreadResolvers = new Map<string, Promise<string | undefined>>();
 
   constructor(private readonly opts: ConnectorRouterOptions) {}
+
+  /**
+   * Resolve `opts.defaultCatId` whether it was passed as a static id or a
+   * getter. Called per parseMentions site so runtime
+   * `PUT /api/config/default-cat` propagates without a gateway restart
+   * (cloud P1 #2253). Tests historically pass a string; production passes
+   * `() => getDefaultCatId()`.
+   */
+  private resolveDefaultCatId(): CatId {
+    const d = this.opts.defaultCatId;
+    return typeof d === 'function' ? d() : d;
+  }
 
   /** Build @-mention patterns from catRegistry for parseMentions. */
   private getMentionPatterns(): Map<string, string[]> {
@@ -296,7 +315,7 @@ export class ConnectorRouter {
             icon: connectorSourceIcon(def2),
           };
           const mentionPatterns = this.getMentionPatterns();
-          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.opts.defaultCatId);
+          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.resolveDefaultCatId());
           const fwdTimestamp = Date.now();
           const fwdStored = await messageStore.append({
             threadId: fwdThreadId,
@@ -442,7 +461,7 @@ export class ConnectorRouter {
 
     // Parse @-mentions to determine target cat
     const mentionPatterns = this.getMentionPatterns();
-    const mentionResult = parseMentions(resolvedText, mentionPatterns, this.opts.defaultCatId);
+    const mentionResult = parseMentions(resolvedText, mentionPatterns, this.resolveDefaultCatId());
     let targetCatId = mentionResult.targetCatId;
     if (!mentionResult.matched && this.opts.threadStore.getParticipantsWithActivity) {
       const participants = await this.opts.threadStore.getParticipantsWithActivity(binding.threadId);
