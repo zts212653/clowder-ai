@@ -20,7 +20,7 @@ import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { checkGlobal, checkProject } from '../skills/drift-detector.js';
 import { ignoreDrift, syncDrift } from '../skills/drift-resolver.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
 import { resolveCatCafeSkillsSource } from '../utils/skill-source.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
@@ -191,7 +191,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
     if (!projectRoot) return null;
     const skillsSource = await resolveCatCafeSkillsSource();
     const globalProjectRoot = opts.mainProjectRoot ?? dirname(skillsSource);
-    const isGlobalScope = !projectPath;
+    const isGlobalScope = !projectPath || pathsEqual(projectRoot, globalProjectRoot);
 
     if (isGlobalScope) {
       const globalConfig = await readCapabilitiesConfig(globalProjectRoot);

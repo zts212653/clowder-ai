@@ -140,7 +140,13 @@ export async function syncProject(
   );
 
   const prevCascadeDisabled = new Set((await readSkillsSyncState(projectRoot))?.cascadeDisabledSkills ?? []);
-  const disabledSet = new Set<string>(opts.disabledSkills ?? configDisabledSet);
+  // When caller doesn't provide disabledSkills, fall back to config — but exclude
+  // entries that were only there from a previous cascade (not user choice).
+  // Without this exclusion, a globally re-enabled skill stays stuck disabled because
+  // configDisabledSet includes the stale cascade entry.
+  const disabledSet = new Set<string>(
+    opts.disabledSkills ?? [...configDisabledSet].filter((s) => !prevCascadeDisabled.has(s)),
+  );
   const cascadeDisabledInThisSync = new Set<string>();
   const projectConfiguredSkills = new Set(
     previousNames.filter((name) => !prevCascadeDisabled.has(name) || !configDisabledSet.has(name)),
