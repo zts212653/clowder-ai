@@ -517,7 +517,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         await writeCapabilitiesConfig(projectRoot, config);
       }
     }
-    const canSeedFromGlobalSkillPolicy = !pathsEqual(projectRoot, mainRoot) && existingCapabilitiesCount === 0;
+    const canSeedFromGlobalSkillPolicy = !pathsEqual(projectRoot, mainRoot) && (existingCapabilitiesCount ?? 0) === 0;
     const globalConfig = canSeedFromGlobalSkillPolicy ? await readCapabilitiesConfig(mainRoot) : null;
 
     // Always regenerate CLI configs so that config changes (e.g. new env
