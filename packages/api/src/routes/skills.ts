@@ -159,7 +159,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     // capabilities GET/sync materializes explicit Cat Cafe rows.
     const projectCapLookup = collectCatCafeSkillPolicy(skillsCapConfig);
     const shouldInheritGlobalSkillPolicy =
-      projectRoot !== mainRepo && skillsCapConfig !== null && skillsCapConfig.capabilities.length === 0;
+      projectRoot !== mainRepo && (skillsCapConfig === null || skillsCapConfig.capabilities.length === 0);
     const globalCapLookup = shouldInheritGlobalSkillPolicy
       ? collectCatCafeSkillPolicy(await readCapabilitiesConfig(mainRepo))
       : new Map<string, CatCafeSkillPolicyInfo>();
