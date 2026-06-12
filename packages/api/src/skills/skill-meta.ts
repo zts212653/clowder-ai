@@ -1,18 +1,27 @@
 /**
  * Skill Metadata — reads description/triggers/category from SKILL.md and manifest.yaml.
  *
- * Extracted from capabilities.ts route to be reusable by skill-manage.querySkill
- * and the GET /api/capabilities board builder.
+ * Single source for skill metadata parsing. Consumed by:
+ * - skill-manage.ts (querySkill)
+ * - routes/capabilities.ts (board builder)
+ * - routes/skills.ts (skills board + MCP status)
  */
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
 
 export interface SkillMeta {
   category?: string;
   description?: string;
   triggers?: string[];
+  requiresMcp?: string[];
+}
+
+export interface SkillMcpDependency {
+  id: string;
+  status: 'ready' | 'missing' | 'unresolved';
 }
 
 /**
@@ -97,7 +106,10 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
   try {
     const content = await readFile(manifestPath, 'utf-8');
     const parsed = parseYaml(content) as {
-      skills?: Record<string, { category?: unknown; description?: unknown; triggers?: unknown }>;
+      skills?: Record<
+        string,
+        { category?: unknown; description?: unknown; triggers?: unknown; requires_mcp?: unknown }
+      >;
     } | null;
     if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
     for (const [name, meta] of Object.entries(parsed.skills)) {
@@ -109,11 +121,20 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
             .map((s) => s.trim())
             .filter(Boolean)
         : undefined;
-      if (category || description || (triggers && triggers.length > 0)) {
+      const requiresMcp = Array.isArray(meta?.requires_mcp)
+        ? meta.requires_mcp
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : undefined;
+      const hasData =
+        category || description || (triggers && triggers.length > 0) || (requiresMcp && requiresMcp.length > 0);
+      if (hasData) {
         result.set(name, {
           ...(category ? { category } : {}),
           ...(description ? { description } : {}),
           ...(triggers && triggers.length > 0 ? { triggers } : {}),
+          ...(requiresMcp && requiresMcp.length > 0 ? { requiresMcp } : {}),
         });
       }
     }
@@ -121,4 +142,26 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
     // manifest missing or invalid — fallback to SKILL.md metadata
   }
   return result;
+}
+
+/**
+ * Resolve MCP dependency statuses for all skills that declare requires_mcp.
+ */
+export async function resolveSkillMcpStatuses(
+  projectRoot: string,
+  manifestMeta: Map<string, SkillMeta>,
+): Promise<Map<string, SkillMcpDependency>> {
+  const capabilities = await readCapabilitiesConfig(projectRoot);
+  const requiredIds = new Set<string>();
+  for (const meta of manifestMeta.values()) {
+    for (const id of meta.requiresMcp ?? []) requiredIds.add(id);
+  }
+
+  const statuses = new Map<string, SkillMcpDependency>();
+  for (const id of requiredIds) {
+    const resolved = await resolveRequiredMcpStatus(id, { capabilities, env: process.env });
+    statuses.set(id, { id, status: resolved.status });
+  }
+
+  return statuses;
 }

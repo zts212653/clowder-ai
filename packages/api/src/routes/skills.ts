@@ -14,6 +14,7 @@ import { STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
+import { parseManifestSkillMeta, resolveSkillMcpStatuses, type SkillMcpDependency } from '../skills/skill-meta.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
@@ -22,13 +23,7 @@ import {
   isSkillMountedForProvider,
   resolveMainRepoPath,
 } from '../utils/skill-mount.js';
-import {
-  listSkillDirs,
-  parseManifestSkillMeta,
-  resolveSkillMcpStatuses,
-  type SkillMcpDependency,
-} from '../utils/skill-parse.js';
-import { checkStaleness, type SkillsStaleness } from '../utils/skill-source.js';
+import { checkStaleness, listSourceSkillNames, type SkillsStaleness } from '../utils/skill-source.js';
 
 interface SkillMount {
   claude: boolean;
@@ -146,7 +141,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     const mainSkillsSrc = join(mainRepo, 'cat-cafe-skills');
 
     const [sourceSkills, manifestMeta, disabledSkillNames, skillsCapConfig] = await Promise.all([
-      listSkillDirs(skillsSrc),
+      listSourceSkillNames(skillsSrc),
       parseManifestSkillMeta(skillsSrc),
       loadDisabledCatCafeSkillNames(projectRoot),
       readCapabilitiesConfig(projectRoot),
