@@ -1097,27 +1097,35 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         const mountRules = await readMountRules(projectRoot, getProjectRoot());
         const skillsSource = await resolveCatCafeSkillsSource();
 
-        // Sync this project's filesystem
-        const syncResult = await syncProject(projectRoot, skillsSource, {
-          mountRules,
-          force: false,
-        });
-        syncConflicts = syncResult.conflicts;
+        try {
+          // Sync this project's filesystem
+          const syncResult = await syncProject(projectRoot, skillsSource, {
+            mountRules,
+            force: false,
+          });
+          syncConflicts = syncResult.conflicts;
 
-        // Global scope: cascade to all external projects
-        if (
-          shouldPropagateManagedSkillToggle(
-            body.scope as 'global' | 'project',
-            shouldWritebackManagedSkill,
-            projectRoot,
-            getProjectRoot(),
-          )
-        ) {
-          const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
-          propagationWarnings.push(...allResult.warnings);
-          for (const [, projResult] of allResult.perProject) {
-            syncConflicts.push(...projResult.conflicts);
+          // Global scope: cascade to all external projects
+          if (
+            shouldPropagateManagedSkillToggle(
+              body.scope as 'global' | 'project',
+              shouldWritebackManagedSkill,
+              projectRoot,
+              getProjectRoot(),
+            )
+          ) {
+            const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
+            propagationWarnings.push(...allResult.warnings);
+            for (const [, projResult] of allResult.perProject) {
+              syncConflicts.push(...projResult.conflicts);
+            }
           }
+        } catch (syncErr) {
+          // Rollback config to pre-toggle state so UI/config stays consistent with filesystem
+          Object.assign(cap, beforeSnapshot);
+          await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
+          await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
+          throw syncErr;
         }
       }
 

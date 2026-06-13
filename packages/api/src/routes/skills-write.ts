@@ -7,9 +7,10 @@
  * Plugin skills use classifyMountPath for lightweight mount/unmount.
  */
 
-import { mkdir, rm, symlink } from 'node:fs/promises';
+import { mkdir, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
+import { STANDARD_PROVIDER_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { requireLocalCapabilityWriteRequest } from '../config/capabilities/capability-write-guards.js';
@@ -95,10 +96,11 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
     const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
     const pluginMounted: string[] = [];
     const pluginUnmounted: string[] = [];
+    const enabledTargets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+    const enabledTargetDirs = new Set(enabledTargets.flatMap((t) => t.candidates));
     for (const ps of pluginSkills) {
-      const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
       const allowed = ps.mountPaths ? new Set(ps.mountPaths) : null;
-      for (const target of targets) {
+      for (const target of enabledTargets) {
         const shouldMount = ps.enabled && (!allowed || allowed.has(target.id));
         // Plugin skills are project-scoped: skip HOME fallback for standard providers
         const dirs = target.kind === 'standard' ? target.candidates.slice(0, 1) : target.candidates;
@@ -117,6 +119,16 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
             await rm(linkPath);
             pluginUnmounted.push(ps.skillName);
           }
+        }
+      }
+      // Clean plugin symlinks from disabled standard provider dirs (mirrors syncProject Phase 3)
+      for (const id of STANDARD_PROVIDER_IDS) {
+        const dir = join(projectRoot, mountRules.providers[id].path);
+        if (enabledTargetDirs.has(dir)) continue; // already handled above
+        const linkPath = join(dir, ps.skillName);
+        if ((await classifyMountPath(linkPath, ps.skillsSource, ps.skillName)) === 'managed') {
+          await rm(linkPath);
+          pluginUnmounted.push(ps.skillName);
         }
       }
     }

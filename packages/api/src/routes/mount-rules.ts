@@ -141,15 +141,21 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
     const previousProjectRules = await readProjectMountRulesOverride(projectRoot);
     const previousRules = await readMountRules(projectRoot, globalRoot);
 
-    // Extract global cascade disabled for external projects
+    // Extract global cascade policy for external projects
     const cascadeDisabled = new Set<string>();
+    let globalMountPathsBySkill: Map<string, readonly string[]> | undefined;
     if (projectRoot !== globalRoot) {
       const globalConfig = await readCapabilitiesConfig(globalRoot);
-      for (const cap of globalConfig?.capabilities ?? []) {
-        if (cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && !cap.enabled) {
-          cascadeDisabled.add(cap.id);
-        }
+      const globalManagedCaps =
+        globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId) ?? [];
+      for (const cap of globalManagedCaps) {
+        if (!cap.enabled) cascadeDisabled.add(cap.id);
       }
+      const mountMap = new Map<string, readonly string[]>();
+      for (const cap of globalManagedCaps) {
+        if (Array.isArray(cap.mountPaths)) mountMap.set(cap.id, cap.mountPaths);
+      }
+      if (mountMap.size > 0) globalMountPathsBySkill = mountMap;
     }
     const cascadeOpt = cascadeDisabled.size > 0 ? cascadeDisabled : undefined;
 
@@ -160,6 +166,7 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         previousMountRules: previousRules,
         pruneMountPaths: true,
         cascadeDisabledSkills: cascadeOpt,
+        globalMountPathsBySkill,
       });
       await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules);
     } catch (err) {
@@ -173,6 +180,7 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         previousMountRules: validated,
         pruneMountPaths: true,
         cascadeDisabledSkills: cascadeOpt,
+        globalMountPathsBySkill,
       }).catch((re) => {
         console.warn(`[F228] Rollback mount-rules reconciliation failed: ${(re as Error).message}`);
       });
