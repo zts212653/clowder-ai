@@ -158,8 +158,9 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     // skill policy; projects with existing local rows keep their local facts until
     // capabilities GET/sync materializes explicit Cat Cafe rows.
     const projectCapLookup = collectCatCafeSkillPolicy(skillsCapConfig);
-    const shouldInheritGlobalSkillPolicy =
-      projectRoot !== mainRepo && (skillsCapConfig === null || skillsCapConfig.capabilities.length === 0);
+    // R12 P2: use Cat Cafe skill entry count, not total capabilities count —
+    // a project with only MCP entries and no skill rows should still inherit
+    const shouldInheritGlobalSkillPolicy = projectRoot !== mainRepo && projectCapLookup.size === 0;
     const globalCapLookup = shouldInheritGlobalSkillPolicy
       ? collectCatCafeSkillPolicy(await readCapabilitiesConfig(mainRepo))
       : new Map<string, CatCafeSkillPolicyInfo>();

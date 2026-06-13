@@ -144,6 +144,10 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
         const hasLocalPolicy = ctx.projectConfigMountPaths.has(name) || ctx.explicitMountPathSkills.has(name);
         const shouldPrune = ctx.pruneMountPaths || !hasLocalPolicy;
         const providerNames = shouldPrune ? declared.filter((id) => activeSet.has(id)) : [...declared];
+        // R12 P2-2: if pruning an inherited declaration yields empty (all inherited
+        // providers are inactive), skip writing a local override — this preserves
+        // re-inheritance when providers are re-enabled
+        if (providerNames.length === 0 && !hasLocalPolicy && declared.length > 0) continue;
         const key = JSON.stringify(providerNames);
         const g = grouped.get(key) ?? { skillNames: [], providerNames };
         g.skillNames.push(name);
