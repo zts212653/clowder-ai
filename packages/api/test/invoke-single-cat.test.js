@@ -1736,6 +1736,414 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(payload.health.fillRatio > 0 && payload.health.fillRatio <= 1);
   });
 
+  it('clowder#915: agent_loop with metadata.usage triggers context_health (opencode mid-stream handoff path)', async () => {
+    // GIVEN opencode emits step_finish (mid-stream LLM-call boundary) → transformer
+    // returns AgentMessage of type=agent_loop carrying token usage. Before the
+    // clowder#915 fix the F8/F24 usage+context_health block lived only inside the
+    // `done` branch of processMessage, so agent_loop's early-return in the `else`
+    // branch silently DROPPED metadata.usage → contextHealth never computed →
+    // seal never requested → opencode session never sealed → CLI hung at its
+    // context limit. This test pins the new behavior: agent_loop with usage MUST
+    // route through the same F8/F24 path as done, while preserving F153 Phase I
+    // telemetry-only semantics (agent_loop itself stays invisible to users).
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-915', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'mid-stream answer', timestamp: Date.now() };
+        // step_finish event (per LLM call inside opencode agentic loop) carries
+        // input/output/total tokens + cost. Transformer wraps it as agent_loop.
+        // The shape mirrors what OpenCodeAgentService yields after the R1 P1
+        // merge logic that puts service-level model/provider onto the metadata.
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'claude-opus-4-6',
+            usage: {
+              inputTokens: 36928,
+              lastTurnInputTokens: 36928,
+              outputTokens: 9,
+              totalTokens: 36937,
+              contextWindowSize: 200000,
+              costUsd: 0.036973,
+            },
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-915-agent-loop',
+        isLastCat: true,
+      }),
+    );
+
+    // (1) context_health MUST be emitted (cloud P1 fix)
+    const healthInfos = msgs.filter((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'context_health';
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(healthInfos.length, 1, 'agent_loop with usage MUST emit context_health (clowder#915)');
+    const payload = JSON.parse(healthInfos[0].content);
+    assert.equal(payload.catId, 'opus');
+    assert.equal(payload.health.usedTokens, 36928, 'must use lastTurnInputTokens for per-call accuracy');
+    assert.equal(payload.health.windowTokens, 200000);
+    assert.equal(payload.health.usedFrom, 'last_turn');
+    assert.equal(payload.health.source, 'exact');
+
+    // (2) invocation_usage must also be emitted (F8/F230 — bubble footer fuel)
+    const usageInfos = msgs.filter((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'invocation_usage';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(usageInfos.length >= 1, 'agent_loop with usage MUST emit invocation_usage system_info');
+
+    // (3) F153 Phase I telemetry-only semantics preserved: agent_loop must NOT
+    //     appear in user-visible outputs (no bubble, no transcript write).
+    const agentLoopVisible = msgs.filter((m) => m.type === 'agent_loop');
+    assert.equal(agentLoopVisible.length, 0, 'agent_loop must stay telemetry-only — no user-visible output');
+  });
+
+  it('clowder#915 R4 cloud P1 #3: agent_loop above seal threshold DEFERS seal to done (transcript continuity)', async () => {
+    // Cloud's failing scenario: an opencode tool loop with step_finish.reason='tool-calls'
+    // crosses the seal threshold mid-stream. If we fire requestSeal inline, the active
+    // session pointer is cleared immediately and the remaining text/tool events from
+    // the SAME opencode invocation lose their transcript writes (getActive returns null).
+    // The fix: capture seal intent at agent_loop time, execute at the `done` boundary.
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const sealCalls = [];
+    let sealCalledAtIndex = -1; // tracks how many service yields had been observed when requestSeal fired
+    let yieldsObserved = 0;
+
+    const sessionSealer = {
+      requestSeal: async (args) => {
+        sealCalls.push(args);
+        sealCalledAtIndex = yieldsObserved;
+        return { accepted: true, status: 'sealing' };
+      },
+      finalize: async () => {},
+      reconcileStuck: async () => 0,
+      reconcileAllStuck: async () => 0,
+    };
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yieldsObserved = 1;
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-915-defer', timestamp: Date.now() };
+        yieldsObserved = 2;
+        yield { type: 'text', catId: 'opus', content: 'thinking...', timestamp: Date.now() };
+        yieldsObserved = 3;
+        // step_finish at high fill (180k of 200k = 90% — well above 0.85 threshold)
+        // would normally fire seal IMMEDIATELY in the inline path.
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'claude-opus-4-6',
+            usage: {
+              inputTokens: 180_000,
+              lastTurnInputTokens: 180_000,
+              outputTokens: 50,
+              totalTokens: 180_050,
+              contextWindowSize: 200_000,
+            },
+          },
+        };
+        yieldsObserved = 4;
+        // Post-seal-threshold tool/text events — these must NOT be sealed-while-emitting
+        yield { type: 'text', catId: 'opus', content: 'still here (post-threshold)', timestamp: Date.now() };
+        yieldsObserved = 5;
+        yield {
+          type: 'tool_use',
+          catId: 'opus',
+          toolName: 'bash',
+          toolInput: { command: 'ls' },
+          timestamp: Date.now(),
+        };
+        yieldsObserved = 6;
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore, sessionSealer };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-915-defer-seal',
+        isLastCat: true,
+      }),
+    );
+
+    // (1) Exactly one seal request fired — no double-seal
+    assert.equal(sealCalls.length, 1, 'must seal exactly once');
+
+    // (2) The seal must have fired AT or AFTER the done event (index 6), not at
+    //     agent_loop time (index 3). This is the heart of the defer fix.
+    assert.ok(
+      sealCalledAtIndex >= 6,
+      `seal must be deferred to done — fired at yield index ${sealCalledAtIndex}, expected ≥ 6 (done boundary)`,
+    );
+
+    // (3) The session_seal_requested system_info MUST carry the deferred marker
+    //     so observers can distinguish mid-stream-captured seals from synchronous
+    //     done-time seals.
+    const sealRequestedMsgs = msgs.filter((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'session_seal_requested';
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(sealRequestedMsgs.length, 1, 'one session_seal_requested message');
+    const sealPayload = JSON.parse(sealRequestedMsgs[0].content);
+    assert.equal(sealPayload.deferredFrom, 'mid_stream_agent_loop', 'must carry deferred-origin marker');
+    assert.equal(sealPayload.healthSnapshot.usedTokens, 180_000, 'health snapshot from agent_loop moment');
+
+    // (4) context_health system_info still emits at agent_loop time (observability
+    //     not deferred — only the seal action is).
+    const healthInfos = msgs.filter((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'context_health';
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(healthInfos.length, 1, 'context_health emits at mid-stream observation point');
+
+    // (5) Post-threshold text/tool events are still in user-visible outputs
+    //     (transcript continuity for the rest of the tool loop).
+    const postThresholdText = msgs.filter(
+      (m) => m.type === 'text' && typeof m.content === 'string' && m.content.includes('still here'),
+    );
+    assert.equal(postThresholdText.length, 1, 'post-threshold text must reach outputs (transcript continuity)');
+  });
+
+  it('clowder#915 R5 cloud P2: 3-tier window resolution — known opencode model uses fallback table (NOT clobbered by default)', async () => {
+    // Cloud's R5 regression catch: R4's unconditional 128k attach in the
+    // transformer would prevent claude-opus-4-6 (default opencode breed
+    // model per cat-template.json) from resolving to its true 200k via the
+    // fallback table. This test pins the 3-tier chain:
+    //   1) usage.contextWindowSize (none here)
+    //   2) getContextWindowFallback('claude-opus-4-6') = 200_000 ← THIS WINS
+    //   3) opencode last-resort default (128_000) — should NOT be used here
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-915-r5-known', timestamp: Date.now() };
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'claude-opus-4-6', // KNOWN to fallback table (200k)
+            usage: {
+              inputTokens: 150_000,
+              lastTurnInputTokens: 150_000,
+              outputTokens: 50,
+              totalTokens: 150_050,
+              // NO contextWindowSize from transformer — forces tier 2+3
+            },
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-915-r5-known-model',
+        isLastCat: true,
+      }),
+    );
+
+    const healthInfos = msgs
+      .filter((m) => m.type === 'system_info')
+      .map((m) => {
+        try {
+          return JSON.parse(m.content);
+        } catch {
+          return null;
+        }
+      })
+      .filter((p) => p && p.type === 'context_health');
+    assert.equal(healthInfos.length, 1, 'must emit context_health');
+    // CRITICAL: windowTokens MUST be 200_000 (from fallback table) NOT 128_000
+    // (the opencode last-resort default — which would wrongly cap claude-opus-4-6).
+    assert.equal(
+      healthInfos[0].health.windowTokens,
+      200_000,
+      'claude-opus-4-6 must resolve to its precise 200k via fallback table — NOT clobbered by opencode last-resort default',
+    );
+    // Sanity: 150k of 200k = 0.75 fillRatio (would be 1.17 if window were clobbered to 128k)
+    assert.ok(healthInfos[0].health.fillRatio < 0.8, 'fillRatio must reflect true 200k window');
+  });
+
+  it('clowder#915 R5 cloud P2: 3-tier window resolution — unknown opencode model falls back to default', async () => {
+    // Counterpart to the known-model test: when the model is NOT in the
+    // fallback table (GLM-5.1, openrouter customs — the actual breed
+    // clowder#915 targets), the opencode last-resort default (128_000)
+    // kicks in so handoff still fires. This is tier 3 of the chain.
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-915-r5-unknown', timestamp: Date.now() };
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            model: 'glm-5.1', // UNKNOWN — golden-chinchilla model (not in table)
+            usage: {
+              inputTokens: 109_000,
+              lastTurnInputTokens: 109_000,
+              outputTokens: 50,
+              totalTokens: 109_050,
+            },
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-915-r5-unknown-model',
+        isLastCat: true,
+      }),
+    );
+
+    const healthInfos = msgs
+      .filter((m) => m.type === 'system_info')
+      .map((m) => {
+        try {
+          return JSON.parse(m.content);
+        } catch {
+          return null;
+        }
+      })
+      .filter((p) => p && p.type === 'context_health');
+    assert.equal(healthInfos.length, 1, 'unknown opencode model must still emit context_health (last-resort fallback)');
+    assert.equal(healthInfos[0].health.windowTokens, 128_000, 'unknown opencode model resolves to last-resort 128k');
+  });
+
+  it('clowder#915 R2 cloud P1: agent_loop with provider-prefixed model (account-routing path) triggers context_health', async () => {
+    // Production opencode invocation path: invoke-single-cat.ts:1459 sets
+    // callbackEnv.CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE to `safeProvider/safeModel`
+    // form. OpenCodeAgentService.ts:139 then propagates that as effectiveModel.
+    // Transformer doesn't set contextWindowSize, so we fall back to
+    // getContextWindowFallback. Before the R2 cloud P1 fix, the prefixed
+    // string missed the lookup table → no windowSize → context_health silently
+    // skipped → handoff bypassed. This test pins the production scenario.
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const sessionChainStore = new SessionChainStore();
+
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke() {
+        yield { type: 'session_init', catId: 'opus', sessionId: 'cli-915-prefixed', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
+        yield {
+          type: 'agent_loop',
+          catId: 'opus',
+          timestamp: Date.now(),
+          metadata: {
+            provider: 'opencode',
+            // The model carries a provider prefix — this is the production
+            // account-routing path's normalized form (NOT a test artifact).
+            model: 'anthropic/claude-opus-4-6',
+            usage: {
+              inputTokens: 36928,
+              lastTurnInputTokens: 36928,
+              outputTokens: 9,
+              totalTokens: 36937,
+              // NO contextWindowSize — forces fallback through model lookup
+            },
+          },
+        };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = { ...makeDeps(), sessionChainStore };
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user1',
+        threadId: 'thread-915-prefixed',
+        isLastCat: true,
+      }),
+    );
+
+    const healthInfos = msgs.filter((m) => {
+      if (m.type !== 'system_info') return false;
+      try {
+        return JSON.parse(m.content).type === 'context_health';
+      } catch {
+        return false;
+      }
+    });
+    assert.equal(
+      healthInfos.length,
+      1,
+      'prefixed-model agent_loop with usage MUST emit context_health (clowder#915 R2 P1)',
+    );
+    const payload = JSON.parse(healthInfos[0].content);
+    assert.equal(payload.health.windowTokens, 200_000, 'fallback must resolve anthropic/claude-opus-4-6 → 200k');
+    assert.equal(payload.health.usedTokens, 36928);
+    assert.equal(payload.health.source, 'approx', 'fallback (no contextWindowSize on usage) → approx');
+  });
+
   it('F24: uses fallback window size for models without contextWindowSize', async () => {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const sessionChainStore = new SessionChainStore();

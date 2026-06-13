@@ -36,6 +36,31 @@ describe('getContextWindowFallback', () => {
     assert.equal(getContextWindowFallback(''), undefined);
   });
 
+  // clowder#915 R2 cloud P1: opencode (and any provider routed through
+  // CAT_CAFE_ANTHROPIC_MODEL_OVERRIDE in the account routing path) propagates
+  // a `safeProvider/model` form as `metadata.model`. Before this fix, those
+  // strings missed the table entirely and F24 context_health was silently
+  // skipped → handoff bypassed for the production opencode invocation path.
+  test('clowder#915: strips provider prefix for account-routing model IDs', async () => {
+    // Exact match after strip
+    assert.equal(getContextWindowFallback('anthropic/claude-opus-4-6'), 200_000);
+    assert.equal(getContextWindowFallback('anthropic/claude-sonnet-4-5'), 200_000);
+    assert.equal(getContextWindowFallback('openai-compat/gpt-5.3'), 128_000);
+    assert.equal(getContextWindowFallback('openai-compat/gpt-5.1-codex'), 400_000);
+    assert.equal(getContextWindowFallback('google/gemini-2.5-pro'), 1_000_000);
+    // Prefix match after strip (versioned model behind provider prefix)
+    assert.equal(getContextWindowFallback('anthropic/claude-opus-4-6-20260101'), 200_000);
+    assert.equal(getContextWindowFallback('openai-compat/gpt-5.3-turbo'), 128_000);
+    // Unknown model behind prefix still returns undefined
+    assert.equal(getContextWindowFallback('anthropic/unknown-model'), undefined);
+  });
+
+  test('clowder#915: handles multi-segment prefix defensively (last segment wins)', async () => {
+    // Defensive against hypothetical `provider/subgroup/model` shapes
+    assert.equal(getContextWindowFallback('openai-compat/v1/gpt-5.3'), 128_000);
+    assert.equal(getContextWindowFallback('anthropic/v1/claude-opus-4-6'), 200_000);
+  });
+
   test('covers all expected model families', async () => {
     const keys = Object.keys(CONTEXT_WINDOW_SIZES);
     // Claude

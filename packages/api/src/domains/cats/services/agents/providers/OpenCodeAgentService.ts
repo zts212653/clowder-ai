@@ -335,7 +335,14 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
             sessionInitEmitted = true;
             if (result.sessionId) metadata.sessionId = result.sessionId;
           }
-          yield { ...result, metadata: yieldMetadata };
+          // clowder#915 R1 P1 (砚砚): transformer may carry `metadata.usage`
+          // (from step_finish). The naive `metadata: yieldMetadata` below would
+          // strip it because spread can't see nested keys. Merge `usage` onto
+          // the service-level metadata (which has correct provider + model) so
+          // invoke-single-cat's F8 token block + F24 contextHealth path can fire.
+          const mergedMetadata: MessageMetadata =
+            result.metadata?.usage != null ? { ...yieldMetadata, usage: result.metadata.usage } : yieldMetadata;
+          yield { ...result, metadata: mergedMetadata };
         }
       }
 
