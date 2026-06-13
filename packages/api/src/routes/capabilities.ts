@@ -1094,20 +1094,42 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       await generateCliConfigs(config, getCliConfigPaths(projectRoot));
 
       // Filesystem reconciliation via syncProject/syncAll
-      let syncConflicts: MountConflict[] = [];
+      let localSyncConflicts: MountConflict[] = [];
+      let propagationConflicts: MountConflict[] = [];
       const propagationWarnings: string[] = [];
 
       if (shouldWritebackManagedSkill) {
         const mountRules = await readMountRules(projectRoot, getProjectRoot());
         const skillsSource = await resolveCatCafeSkillsSource();
 
+        // R14 P2-2: external projects need global cascade policy
+        let cascadeDisabledSkills: Set<string> | undefined;
+        let globalMountPathsBySkill: Map<string, readonly string[]> | undefined;
+        if (!pathsEqual(projectRoot, getProjectRoot())) {
+          const globalConfig = await readCapabilitiesConfig(getProjectRoot());
+          const globalManagedCaps =
+            globalConfig?.capabilities.filter(
+              (c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId,
+            ) ?? [];
+          const disabled = new Set<string>();
+          const mountMap = new Map<string, readonly string[]>();
+          for (const gc of globalManagedCaps) {
+            if (!gc.enabled) disabled.add(gc.id);
+            if (Array.isArray(gc.mountPaths)) mountMap.set(gc.id, gc.mountPaths);
+          }
+          if (disabled.size > 0) cascadeDisabledSkills = disabled;
+          if (mountMap.size > 0) globalMountPathsBySkill = mountMap;
+        }
+
         try {
           // Sync this project's filesystem
           const syncResult = await syncProject(projectRoot, skillsSource, {
             mountRules,
             force: false,
+            cascadeDisabledSkills,
+            globalMountPathsBySkill,
           });
-          syncConflicts = syncResult.conflicts;
+          localSyncConflicts = syncResult.conflicts;
 
           // Global scope: cascade to all external projects
           if (
@@ -1121,7 +1143,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
             const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
             propagationWarnings.push(...allResult.warnings);
             for (const [, projResult] of allResult.perProject) {
-              syncConflicts.push(...projResult.conflicts);
+              propagationConflicts.push(...projResult.conflicts);
             }
           }
         } catch (syncErr) {
@@ -1133,17 +1155,19 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      // Per-provider enable: revert mountPaths if the toggled provider hit a conflict
-      // (conflict = returned, not thrown — symlink not created but config says it was)
+      // R14 P2-1: per-provider enable rollback only checks LOCAL sync conflicts —
+      // external project conflicts should not revert the global capability
       if (
         body.providerId &&
         body.enabled &&
-        syncConflicts.some((c) => c.skillName === body.capabilityId && c.providerId === body.providerId)
+        localSyncConflicts.some((c) => c.skillName === body.capabilityId && c.providerId === body.providerId)
       ) {
         Object.assign(cap, beforeSnapshot);
         await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
         await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
       }
+
+      const syncConflicts = [...localSyncConflicts, ...propagationConflicts];
 
       await appendAuditEntry(projectRoot, {
         timestamp: new Date().toISOString(),
