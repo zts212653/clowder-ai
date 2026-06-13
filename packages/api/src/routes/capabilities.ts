@@ -1095,7 +1095,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
       // Filesystem reconciliation via syncProject/syncAll
       let localSyncConflicts: MountConflict[] = [];
-      let propagationConflicts: MountConflict[] = [];
+      const propagationConflicts: MountConflict[] = [];
       const propagationWarnings: string[] = [];
 
       if (shouldWritebackManagedSkill) {
@@ -1108,9 +1108,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         if (!pathsEqual(projectRoot, getProjectRoot())) {
           const globalConfig = await readCapabilitiesConfig(getProjectRoot());
           const globalManagedCaps =
-            globalConfig?.capabilities.filter(
-              (c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId,
-            ) ?? [];
+            globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId) ??
+            [];
           const disabled = new Set<string>();
           const mountMap = new Map<string, readonly string[]>();
           for (const gc of globalManagedCaps) {
