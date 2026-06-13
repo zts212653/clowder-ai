@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import {
   type CapabilitiesConfig,
@@ -12,7 +13,8 @@ import {
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
-import { isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
+import { classifyMountPath } from '../../skills/skill-sync-engine.js';
+import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -285,11 +287,22 @@ export class PluginResourceActivator {
       mountPaths ?? undefined,
     );
 
-    // P1-2: Fail activation when all mount points conflict and nothing was mounted
+    // P1-2: Fail activation when all mount points conflict and nothing is mounted
+    // (including already-managed symlinks from previous activation)
     if (mountResult.mounted.length === 0 && mountResult.conflicts.length > 0) {
-      throw new Error(
-        `All mount points conflict for skill '${skillName}': ${mountResult.conflicts.map((c) => c.path).join(', ')}`,
-      );
+      const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+      let existingManagedCount = 0;
+      for (const target of targets) {
+        for (const dir of target.candidates) {
+          const status = await classifyMountPath(join(dir, skillName), skillsSource, skillName);
+          if (status === 'managed') existingManagedCount++;
+        }
+      }
+      if (existingManagedCount === 0) {
+        throw new Error(
+          `All mount points conflict for skill '${skillName}': ${mountResult.conflicts.map((c) => c.path).join(', ')}`,
+        );
+      }
     }
 
     try {

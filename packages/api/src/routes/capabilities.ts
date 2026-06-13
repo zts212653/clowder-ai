@@ -517,8 +517,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         await writeCapabilitiesConfig(projectRoot, config);
       }
     }
-    const canSeedFromGlobalSkillPolicy = !pathsEqual(projectRoot, mainRoot) && (existingCapabilitiesCount ?? 0) === 0;
-    const globalConfig = canSeedFromGlobalSkillPolicy ? await readCapabilitiesConfig(mainRoot) : null;
+    const isExternalProject = !pathsEqual(projectRoot, mainRoot);
+    // Always load global config for external projects so newly discovered skills
+    // inherit global disabled state (per-skill, not all-or-nothing bootstrap gate)
+    const globalConfig = isExternalProject ? await readCapabilitiesConfig(mainRoot) : null;
 
     // Always regenerate CLI configs so that config changes (e.g. new env
     // placeholders for Gemini MCP) are applied to existing environments
@@ -571,7 +573,9 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const hasMountedCatCafeSkillEvidence = (catCafeOwnSkills ?? []).some((skillName) =>
       mountedSkillNames.has(skillName),
     );
-    const shouldSeedFromGlobalSkillPolicy = canSeedFromGlobalSkillPolicy && !hasMountedCatCafeSkillEvidence;
+    // Per-skill global policy: always inherit for external projects (not gated on
+    // "no existing capabilities" — a project with one mounted skill should still
+    // respect global disables for newly discovered skills)
 
     // F228 P2: Include custom mount target skills in project-level discovery
     const customProjectSkills = customMountTargets.flatMap((target) => scanResults[`custom-${target.id}`] ?? []);
@@ -607,7 +611,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           isCatCafe
             ? createCatCafeSkillCapabilityFromGlobalPolicy(
                 skillName,
-                shouldSeedFromGlobalSkillPolicy ? findCatCafeSkillCapability(globalConfig, skillName) : null,
+                findCatCafeSkillCapability(globalConfig, skillName),
               )
             : {
                 id: skillName,
@@ -1127,6 +1131,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
           throw syncErr;
         }
+      }
+
+      // Per-provider enable: revert mountPaths if the toggled provider hit a conflict
+      // (conflict = returned, not thrown — symlink not created but config says it was)
+      if (
+        body.providerId &&
+        body.enabled &&
+        syncConflicts.some((c) => c.skillName === body.capabilityId && c.providerId === body.providerId)
+      ) {
+        Object.assign(cap, beforeSnapshot);
+        await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
+        await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
       }
 
       await appendAuditEntry(projectRoot, {

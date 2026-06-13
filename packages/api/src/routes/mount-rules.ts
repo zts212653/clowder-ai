@@ -117,6 +117,15 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
         mountRules: validated,
         previousMountRules: previousDefaultRules,
       });
+      // Reconcile plugin mounts for registered projects that inherit default rules
+      for (const projectPath of syncResult.perProject.keys()) {
+        try {
+          const projectRules = await readMountRules(projectPath, globalRoot);
+          await reconcilePluginMounts(projectPath, skillsSrc, projectRules, previousDefaultRules);
+        } catch (err) {
+          syncResult.warnings.push(`${projectPath}: plugin reconciliation failed: ${(err as Error).message}`);
+        }
+      }
       if (syncResult.warnings.length > 0) {
         reply.status(500);
         return {
