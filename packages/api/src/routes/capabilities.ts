@@ -1164,6 +1164,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         Object.assign(cap, beforeSnapshot);
         await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
         await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
+
+        // R15 P2: return 409 after local conflict rollback — 200/ok:true would
+        // mislead UI into thinking the provider toggle succeeded
+        reply.status(409);
+        return {
+          ok: false,
+          error: 'Local mount point conflict — provider enable rolled back',
+          capability: sanitizeCapabilityForResponse(cap),
+          conflicts: localSyncConflicts.filter(
+            (c) => c.skillName === body.capabilityId && c.providerId === body.providerId,
+          ),
+        };
       }
 
       const syncConflicts = [...localSyncConflicts, ...propagationConflicts];

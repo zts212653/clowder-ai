@@ -148,8 +148,17 @@ export async function syncProject(
     opts.disabledSkills ?? [...configDisabledSet].filter((s) => !prevCascadeDisabled.has(s)),
   );
   const cascadeDisabledInThisSync = new Set<string>();
+  // R15 P1: Only explicit local overrides block global cascade.
+  // Read-materialized inherited rows (created by GET read path) must NOT block.
+  // Evidence of explicit user configuration:
+  //   - Was cascade-disabled but user re-enabled → local override
+  //   - User locally disabled (never cascade-involved) → local override
+  //   - Enabled + never cascade-involved → likely read-materialized, must NOT block
   const projectConfiguredSkills = new Set(
-    previousNames.filter((name) => !prevCascadeDisabled.has(name) || !configDisabledSet.has(name)),
+    previousNames.filter((name) => {
+      if (prevCascadeDisabled.has(name)) return !configDisabledSet.has(name);
+      return configDisabledSet.has(name);
+    }),
   );
   for (const sn of opts.cascadeDisabledSkills ?? []) {
     if (!projectConfiguredSkills.has(sn)) {
