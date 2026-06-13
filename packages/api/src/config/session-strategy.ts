@@ -50,6 +50,17 @@ const DEFAULT_STRATEGY_BY_PROVIDER: Record<string, SessionStrategyConfig> = {
     turnBudget: 12_000,
     safetyMargin: 4_000,
   },
+  // clowder#915: opencode (golden chinchilla / GLM-5.1) was falling through to
+  // GLOBAL_DEFAULT_STRATEGY because it had no entry here. The fallback values
+  // happened to be correct (handoff @ 0.75/0.85) but the gap masked an
+  // architectural issue: opencode had no first-class strategy provenance, and
+  // tuning would silently be dropped. Make it a peer of anthropic/openai/google.
+  opencode: {
+    strategy: 'handoff',
+    thresholds: { warn: 0.75, action: 0.85 },
+    turnBudget: 12_000,
+    safetyMargin: 4_000,
+  },
 };
 
 /** breedId-keyed overrides (same breed's variants share strategy) */

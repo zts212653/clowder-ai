@@ -265,6 +265,21 @@ describe('session-strategy', () => {
       assert.equal(config.thresholds.action, 0.65);
     });
 
+    test('returns opencode-specific defaults for opencode (clowder#915)', async () => {
+      // clowder#915: before this fix, opencode fell through to GLOBAL_DEFAULT_STRATEGY
+      // because DEFAULT_STRATEGY_BY_PROVIDER had no opencode entry. The fallback was
+      // technically correct (handoff at 0.75/0.85) but masked an architectural gap:
+      // any opencode-specific threshold tuning was silently dropped. We add an explicit
+      // entry so opencode is a first-class strategy peer with anthropic/openai/google.
+      const { getSessionStrategy } = await loadModule();
+      const config = getSessionStrategy('opencode');
+      assert.equal(config.strategy, 'handoff');
+      // Opencode (golden chinchilla / GLM-5.1) has 160k effective context per cat-template.
+      // Use 0.75/0.85 thresholds like openai (similar context budget envelope).
+      assert.equal(config.thresholds.warn, 0.75);
+      assert.equal(config.thresholds.action, 0.85);
+    });
+
     test('returns global default for unknown cat', async () => {
       const { getSessionStrategy } = await loadModule();
       const config = getSessionStrategy('unknown-cat-42');

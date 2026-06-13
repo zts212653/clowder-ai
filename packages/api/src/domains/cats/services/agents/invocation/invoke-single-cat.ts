@@ -13,7 +13,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { type CatId, type ContextHealth, catRegistry, type MessageContent, type SessionRecord } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type ContextHealth,
+  catRegistry,
+  type MessageContent,
+  type SealReason,
+  type SessionRecord,
+} from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
   resolveBuiltinClientForProvider,
@@ -24,7 +31,10 @@ import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
+import {
+  getContextWindowFallback,
+  OPENCODE_DEFAULT_CONTEXT_WINDOW,
+} from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
@@ -1636,6 +1646,22 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const userVisibleOutputSessionIds = new Set<string>();
     const userVisibleOutputCountedSessionIds = new Set<string>();
 
+    // clowder#915 R4 cloud P1 #3 (defer seal): when a mid-stream agent_loop
+    // crosses the seal threshold (opencode step_finish ≥ 0.85 fillRatio),
+    // we capture the seal intent here instead of firing requestSeal inline.
+    // The actual sealer.requestSeal + sessionManager.delete + finalize is
+    // executed at the `done` event boundary, so post-seal text/tool events
+    // in the SAME opencode invocation (tool-loop tail) still find an active
+    // SessionRecord via getActive() and write to transcript normally.
+    // Cleared on done (after deferred execution) or any inline seal that
+    // already fired (the active record is gone so no second seal makes sense).
+    let pendingMidStreamSeal: {
+      sessionId: string;
+      reason: SealReason;
+      healthSnapshot: ContextHealth;
+      activeRecord: SessionRecord;
+    } | null = null;
+
     const recordActiveSessionUserVisibleOutput = async (): Promise<void> => {
       if (!deps.sessionChainStore || !sessionChainActive) return;
       try {
@@ -1661,6 +1687,344 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     const processMessage = async (msg: AgentMessage): Promise<AgentMessage[]> => {
       const outputs: AgentMessage[] = [];
+
+      // clowder#915 (cloud P1): F8/F24 usage + context_health block extracted so
+      // it can run from BOTH the `done` branch (existing behavior) AND the
+      // `agent_loop` branch (NEW — opencode's step_finish event carries
+      // mid-stream token usage via agent_loop). Before this extraction, the
+      // agent_loop's early-return at L2322 silently dropped usage → no
+      // context_health → no seal → no handoff → opencode CLI hung at context
+      // limit. Closes over processMessage's lexical scope (catId, provider,
+      // sessionChainActive, deps, outputs, etc.). Parameter `msg` shadows the
+      // outer param so all the existing `msg.metadata.usage.*` refs resolve
+      // correctly to whatever message we're processing.
+      //
+      // clowder#915 R4 cloud P1 #3 (defer seal): callers from the agent_loop
+      // branch pass `deferSealForMidStream: true` so the seal case CAPTURES
+      // intent into `pendingMidStreamSeal` instead of firing `requestSeal`
+      // immediately. The actual seal is executed at the `done` boundary, so
+      // post-seal text/tool events from the same opencode tool loop still
+      // find an active session via getActive() and write to transcript.
+      const processUsageAndContextHealth = async (
+        msg: AgentMessage,
+        options: { deferSealForMidStream?: boolean } = {},
+      ): Promise<void> => {
+        if (!msg.metadata?.usage) return;
+        // F152: Record OTel token usage + LLM call duration
+        const modelBucket = normalizeModel(msg.metadata.model ?? '');
+        const providerSystem = provider ?? 'unknown';
+        const tokenAttrs = {
+          [AGENT_ID]: catId,
+          [GENAI_SYSTEM]: providerSystem,
+          [GENAI_MODEL]: modelBucket,
+          [OPERATION_NAME]: 'invoke',
+        };
+        if (msg.metadata.usage.inputTokens) {
+          tokenUsage.add(msg.metadata.usage.inputTokens, { ...tokenAttrs, [STATUS]: 'input' });
+        }
+        if (msg.metadata.usage.outputTokens) {
+          tokenUsage.add(msg.metadata.usage.outputTokens, { ...tokenAttrs, [STATUS]: 'output' });
+        }
+        if (msg.metadata.usage.durationApiMs) {
+          llmCallDuration.record(msg.metadata.usage.durationApiMs / 1000, tokenAttrs);
+        }
+
+        // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
+        // Only create when durationApiMs is available — providers without timing data
+        // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
+        if (invocationSpan && msg.metadata.usage.durationApiMs) {
+          recordLlmCallSpan(
+            invocationSpan,
+            catId,
+            providerSystem,
+            modelBucket,
+            {
+              durationApiMs: msg.metadata.usage.durationApiMs,
+              inputTokens: msg.metadata.usage.inputTokens,
+              outputTokens: msg.metadata.usage.outputTokens,
+              cacheReadTokens: msg.metadata.usage.cacheReadTokens,
+            },
+            invocationId,
+          );
+        }
+
+        // F230: include model + provider so all carrier paths (PTY, bg, -p) can
+        // populate bubble footer metadata from invocation_usage.
+        // PTY carrier text events carry no metadata (transcriptEntriesToAgentMessages);
+        // this is their only metadata source. For -p/bg the frontend handler is
+        // first-write-wins → idempotent (text event writes metadata first, this is no-op).
+        outputs.push({
+          type: 'system_info' as const,
+          catId,
+          content: JSON.stringify({
+            type: 'invocation_usage',
+            catId,
+            usage: msg.metadata.usage,
+            model: msg.metadata.model,
+            provider: msg.metadata.provider,
+          }),
+          timestamp: Date.now(),
+        });
+
+        // F24: Compute and emit context health (only when session chain is enabled)
+        if (sessionChainActive) {
+          // #679: Gemini CLI token stats are cumulative across all turns — not usable
+          // for context fill. Skip entire context_health block (raw usage still in
+          // invocation_usage above). Guard auto-disables when lastTurnInputTokens exists.
+          const isCumulativeOnly =
+            msg.metadata.usage.isCumulativeUsage === true && msg.metadata.usage.lastTurnInputTokens == null;
+          // Use lastTurnInputTokens (per-API-call) for accurate context fill,
+          // then fallback to aggregated inputTokens, and finally totalTokens
+          // for providers (Gemini CLI) that only expose a total count.
+          // clowder#915 R5 cloud P2: 3-tier window resolution.
+          // 1) Explicit `usage.contextWindowSize` (CLI-reported — Claude's exact value)
+          // 2) Fallback table by bare model name (handles prefix-strip for
+          //    account-routing path's `provider/model` form per R2 P1 #2)
+          // 3) opencode-only last-resort default for unknown/custom-provider
+          //    models (GLM-5.1, openrouter customs — the breed clowder#915
+          //    actually targets). Crucially this is LAST so known opencode
+          //    models like the default claude-opus-4-6 get their precise 200k
+          //    from the table, NOT the 128k conservative default.
+          const windowSize =
+            msg.metadata.usage.contextWindowSize ??
+            getContextWindowFallback(msg.metadata.model ?? '') ??
+            (msg.metadata.provider === 'opencode' ? OPENCODE_DEFAULT_CONTEXT_WINDOW : undefined);
+          const usedFrom =
+            msg.metadata.usage.lastTurnInputTokens != null
+              ? 'last_turn'
+              : msg.metadata.usage.inputTokens != null
+                ? 'input'
+                : msg.metadata.usage.totalTokens != null
+                  ? 'total'
+                  : undefined;
+          const usedTokens =
+            usedFrom === 'last_turn'
+              ? msg.metadata.usage.lastTurnInputTokens!
+              : usedFrom === 'input'
+                ? msg.metadata.usage.inputTokens!
+                : usedFrom === 'total'
+                  ? msg.metadata.usage.totalTokens!
+                  : 0;
+          if (windowSize && usedTokens > 0 && isCumulativeOnly) {
+            log.warn(
+              {
+                catId,
+                threadId,
+                invocationId,
+                cumulativeUsedTokens: usedTokens,
+                windowSize,
+                usedFrom,
+              },
+              'Gemini cumulative-only usage observed; skipping context_health and auto-seal',
+            );
+            geminiContextFallback.add(1, { [AGENT_ID]: catId, [TRIGGER]: 'no_per_turn_signal' });
+          }
+          if (windowSize && usedTokens > 0 && !isCumulativeOnly) {
+            const source: ContextHealth['source'] =
+              msg.metadata.usage.contextWindowSize != null && usedFrom !== 'total' ? 'exact' : 'approx';
+            const health: ContextHealth = {
+              usedTokens,
+              windowTokens: windowSize,
+              fillRatio: Math.min(usedTokens / windowSize, 1.0),
+              source,
+              usedFrom,
+              measuredAt: Date.now(),
+            };
+            // Update SessionRecord (best-effort): persist health + usage snapshot
+            if (deps.sessionChainStore) {
+              try {
+                const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
+                if (activeRecord) {
+                  const u = msg.metadata?.usage!;
+                  await deps.sessionChainStore.update(activeRecord.id, {
+                    contextHealth: health,
+                    lastUsage: {
+                      ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
+                      ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),
+                      ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
+                      ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
+                    },
+                    updatedAt: Date.now(),
+                  });
+                }
+              } catch {
+                /* best-effort */
+              }
+            }
+            // F-BLOAT: Detect context compression for re-injection on next turn.
+            // When usedTokens drops >60% from previous known value, the CLI
+            // auto-compacted its context. Flag for systemPrompt re-injection.
+            const cKey = `${userId}:${catId as string}:${threadId}`;
+            const prevFill = _prevContextFill.get(cKey);
+            _prevContextFill.set(cKey, usedTokens);
+            if (prevFill && usedTokens < prevFill * 0.4) {
+              _needsReinjection.add(cKey);
+            }
+            outputs.push({
+              type: 'system_info' as const,
+              catId,
+              content: JSON.stringify({ type: 'context_health', catId, health }),
+              timestamp: Date.now(),
+            });
+
+            // F33: Strategy-driven seal decision (replaces F24 Phase B shouldSeal)
+            if (deps.sessionSealer && deps.sessionChainStore) {
+              try {
+                // F062-fix:
+                // 1) api_key + approx health can be noisy on third-party gateways
+                // 2) api_key + compress strategy should not be force-sealed here
+                // Keep context_health observability in both cases.
+                const provider = catRegistry.tryGet(catId as string)?.config.clientId;
+                const profileMode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
+                const strategy = getSessionStrategy(catId as string);
+                const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;
+                const skipAutoSealForApproxApiKey = isAnthropicApiKey && health.source === 'approx';
+                const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
+                if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
+                  const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
+                  const action = shouldTakeAction(
+                    health.fillRatio,
+                    health.windowTokens,
+                    health.usedTokens,
+                    activeRecord?.compressionCount ?? 0,
+                    strategy,
+                  );
+
+                  switch (action.type) {
+                    case 'none':
+                      break;
+                    case 'warn': {
+                      // F225 软层: queue a cat-facing hint for the NEXT prompt. A
+                      // system_info output would never reach the cat (routing feeds only
+                      // `text` into previousResponses; ContextAssembler drops
+                      // userId='system') — so we ride the prompt-injection channel
+                      // (consumed at effectivePrompt assembly, ~line 1538). Nudges the cat
+                      // to run the context-self-management 3-axis self-check — NOT "handoff
+                      // now" (handoff-vs-compress is the cat's judgment). cKey matches the
+                      // compressionKey used there: `${userId}:${catId}:${threadId}`.
+                      queueContextHint(
+                        cKey,
+                        buildContextManagementHint({
+                          source: health.source,
+                          compressionCount: activeRecord?.compressionCount ?? 0,
+                        }),
+                      );
+                      break;
+                    }
+                    case 'seal':
+                    case 'seal_after_compress': {
+                      if (activeRecord) {
+                        // clowder#915 R4 cloud P1 #3: when called from agent_loop
+                        // (deferSealForMidStream=true), CAPTURE the seal intent
+                        // and let the `done` branch execute it. Firing inline
+                        // here would clear the active session pointer and break
+                        // transcript writes for the rest of the opencode
+                        // tool-loop's text/tool events.
+                        if (options.deferSealForMidStream) {
+                          pendingMidStreamSeal = {
+                            sessionId: activeRecord.id,
+                            reason: action.reason,
+                            healthSnapshot: health,
+                            activeRecord,
+                          };
+                          break;
+                        }
+                        const sealResult = await deps.sessionSealer.requestSeal({
+                          sessionId: activeRecord.id,
+                          reason: action.reason,
+                        });
+                        if (sealResult.accepted) {
+                          // If a done-path seal just fired inline, any pending
+                          // mid-stream intent is now obsolete (active record is
+                          // gone). Clear so the deferred-execution block below
+                          // does not double-seal.
+                          pendingMidStreamSeal = null;
+                          sessionManager.delete(userId, catId, threadId).catch(() => {});
+                          const sealTimestamp = Date.now();
+                          const continuityCapsule = params.continuityCapsule
+                            ? completeCapsuleForSeal(params.continuityCapsule, {
+                                invocationId,
+                                createdAt: sealTimestamp,
+                                seal: {
+                                  sessionId: activeRecord.id,
+                                  sessionSeq: activeRecord.seq + 1,
+                                  reason: action.reason,
+                                  healthSnapshot: health,
+                                },
+                              })
+                            : undefined;
+                          const sealInfoMessage = {
+                            type: 'system_info' as const,
+                            catId,
+                            content: JSON.stringify({
+                              type: 'session_seal_requested',
+                              catId,
+                              sessionId: activeRecord.id,
+                              sessionSeq: activeRecord.seq + 1,
+                              reason: action.reason,
+                              healthSnapshot: health,
+                              ...(continuityCapsule
+                                ? {
+                                    continuityCapsule,
+                                    continuityDiagnostics: {
+                                      source: 'route_state',
+                                      boundary: continuityCapsule.continuationReason,
+                                      generated: true,
+                                      persistedVia: 'session_seal_requested',
+                                      threadId,
+                                      catId,
+                                      invocationId,
+                                      sessionId: activeRecord.id,
+                                    },
+                                  }
+                                : {}),
+                            }),
+                            timestamp: sealTimestamp,
+                          };
+                          outputs.push(sealInfoMessage);
+                          if (deps.transcriptWriter) {
+                            const sessInfo: TranscriptSessionInfo = {
+                              sessionId: activeRecord.id,
+                              threadId,
+                              catId: activeRecord.catId,
+                              cliSessionId: activeRecord.cliSessionId,
+                              seq: activeRecord.seq,
+                            };
+                            deps.transcriptWriter.appendEvent(
+                              sessInfo,
+                              sealInfoMessage as unknown as Record<string, unknown>,
+                              invocationId,
+                            );
+                          }
+                          deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
+                        }
+                      }
+                      break;
+                    }
+                    case 'allow_compress':
+                      // Don't seal — let CLI compress. Log for observability.
+                      outputs.push({
+                        type: 'system_info' as const,
+                        catId,
+                        content: JSON.stringify({
+                          type: 'strategy_allow_compress',
+                          catId,
+                          strategy: strategy.strategy,
+                          compressionCount: activeRecord?.compressionCount ?? 0,
+                          healthSnapshot: health,
+                        }),
+                        timestamp: Date.now(),
+                      });
+                      break;
+                  }
+                }
+              } catch {
+                /* best-effort: strategy failure doesn't break invocation */
+              }
+            }
+          }
+        }
+      };
 
       if (msg.type === 'error') {
         hadStreamError = true;
@@ -2004,283 +2368,91 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
 
-        // F8: Push token usage for frontend cost/token display
-        if (msg.metadata?.usage) {
-          // F152: Record OTel token usage + LLM call duration
-          const modelBucket = normalizeModel(msg.metadata.model ?? '');
-          const providerSystem = provider ?? 'unknown';
-          const tokenAttrs = {
-            [AGENT_ID]: catId,
-            [GENAI_SYSTEM]: providerSystem,
-            [GENAI_MODEL]: modelBucket,
-            [OPERATION_NAME]: 'invoke',
-          };
-          if (msg.metadata.usage.inputTokens) {
-            tokenUsage.add(msg.metadata.usage.inputTokens, { ...tokenAttrs, [STATUS]: 'input' });
-          }
-          if (msg.metadata.usage.outputTokens) {
-            tokenUsage.add(msg.metadata.usage.outputTokens, { ...tokenAttrs, [STATUS]: 'output' });
-          }
-          if (msg.metadata.usage.durationApiMs) {
-            llmCallDuration.record(msg.metadata.usage.durationApiMs / 1000, tokenAttrs);
-          }
+        // F8/F24 usage + context_health (extracted to helper for clowder#915
+        // — see processUsageAndContextHealth declaration at top of processMessage).
+        await processUsageAndContextHealth(msg);
 
-          // F153 Phase B: Retrospective LLM call span (created after-the-fact from done event)
-          // Only create when durationApiMs is available — providers without timing data
-          // (Codex, Gemini, Kimi) would produce misleading 0-duration spans.
-          if (invocationSpan && msg.metadata.usage.durationApiMs) {
-            recordLlmCallSpan(
-              invocationSpan,
-              catId,
-              providerSystem,
-              modelBucket,
-              {
-                durationApiMs: msg.metadata.usage.durationApiMs,
-                inputTokens: msg.metadata.usage.inputTokens,
-                outputTokens: msg.metadata.usage.outputTokens,
-                cacheReadTokens: msg.metadata.usage.cacheReadTokens,
-              },
-              invocationId,
-            );
-          }
-
-          outputs.push({
-            type: 'system_info' as const,
-            catId,
-            content: JSON.stringify({
-              type: 'invocation_usage',
-              catId,
-              usage: msg.metadata.usage,
-            }),
-            timestamp: Date.now(),
-          });
-
-          // F24: Compute and emit context health (only when session chain is enabled)
-          if (sessionChainActive) {
-            // #679: Gemini CLI token stats are cumulative across all turns — not usable
-            // for context fill. Skip entire context_health block (raw usage still in
-            // invocation_usage above). Guard auto-disables when lastTurnInputTokens exists.
-            const isCumulativeOnly =
-              msg.metadata.usage.isCumulativeUsage === true && msg.metadata.usage.lastTurnInputTokens == null;
-            // Use lastTurnInputTokens (per-API-call) for accurate context fill,
-            // then fallback to aggregated inputTokens, and finally totalTokens
-            // for providers (Gemini CLI) that only expose a total count.
-            const windowSize =
-              msg.metadata.usage.contextWindowSize ?? getContextWindowFallback(msg.metadata.model ?? '');
-            const usedFrom =
-              msg.metadata.usage.lastTurnInputTokens != null
-                ? 'last_turn'
-                : msg.metadata.usage.inputTokens != null
-                  ? 'input'
-                  : msg.metadata.usage.totalTokens != null
-                    ? 'total'
-                    : undefined;
-            const usedTokens =
-              usedFrom === 'last_turn'
-                ? msg.metadata.usage.lastTurnInputTokens!
-                : usedFrom === 'input'
-                  ? msg.metadata.usage.inputTokens!
-                  : usedFrom === 'total'
-                    ? msg.metadata.usage.totalTokens!
-                    : 0;
-            if (windowSize && usedTokens > 0 && isCumulativeOnly) {
-              log.warn(
-                {
-                  catId,
-                  threadId,
-                  invocationId,
-                  cumulativeUsedTokens: usedTokens,
-                  windowSize,
-                  usedFrom,
-                },
-                'Gemini cumulative-only usage observed; skipping context_health and auto-seal',
-              );
-              geminiContextFallback.add(1, { [AGENT_ID]: catId, [TRIGGER]: 'no_per_turn_signal' });
-            }
-            if (windowSize && usedTokens > 0 && !isCumulativeOnly) {
-              const source: ContextHealth['source'] =
-                msg.metadata.usage.contextWindowSize != null && usedFrom !== 'total' ? 'exact' : 'approx';
-              const health: ContextHealth = {
-                usedTokens,
-                windowTokens: windowSize,
-                fillRatio: Math.min(usedTokens / windowSize, 1.0),
-                source,
-                usedFrom,
-                measuredAt: Date.now(),
-              };
-              // Update SessionRecord (best-effort): persist health + usage snapshot
-              if (deps.sessionChainStore) {
-                try {
-                  const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
-                  if (activeRecord) {
-                    const u = msg.metadata?.usage!;
-                    await deps.sessionChainStore.update(activeRecord.id, {
-                      contextHealth: health,
-                      lastUsage: {
-                        ...(u.inputTokens != null ? { inputTokens: u.inputTokens } : {}),
-                        ...(u.outputTokens != null ? { outputTokens: u.outputTokens } : {}),
-                        ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
-                        ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
-                      },
-                      updatedAt: Date.now(),
-                    });
-                  }
-                } catch {
-                  /* best-effort */
-                }
-              }
-              // F-BLOAT: Detect context compression for re-injection on next turn.
-              // When usedTokens drops >60% from previous known value, the CLI
-              // auto-compacted its context. Flag for systemPrompt re-injection.
-              const cKey = `${userId}:${catId as string}:${threadId}`;
-              const prevFill = _prevContextFill.get(cKey);
-              _prevContextFill.set(cKey, usedTokens);
-              if (prevFill && usedTokens < prevFill * 0.4) {
-                _needsReinjection.add(cKey);
-              }
-              outputs.push({
+        // clowder#915 R4 cloud P1 #3 (defer seal execution): if an earlier
+        // agent_loop captured a pending seal intent and the done-branch
+        // helper above didn't already fire its own seal (which would have
+        // cleared pendingMidStreamSeal), execute the deferred seal NOW at
+        // this clean boundary. Built from the snapshot captured at agent_loop
+        // time, so health/reason/continuity reflect the moment the threshold
+        // was actually crossed (not whatever done's metadata.usage happens
+        // to carry, which is often empty for opencode).
+        if (pendingMidStreamSeal && deps.sessionSealer && deps.sessionChainStore) {
+          const pending = pendingMidStreamSeal;
+          pendingMidStreamSeal = null;
+          try {
+            const sealResult = await deps.sessionSealer.requestSeal({
+              sessionId: pending.sessionId,
+              reason: pending.reason,
+            });
+            if (sealResult.accepted) {
+              sessionManager.delete(userId, catId, threadId).catch(() => {});
+              const sealTimestamp = Date.now();
+              const continuityCapsule = params.continuityCapsule
+                ? completeCapsuleForSeal(params.continuityCapsule, {
+                    invocationId,
+                    createdAt: sealTimestamp,
+                    seal: {
+                      sessionId: pending.sessionId,
+                      sessionSeq: pending.activeRecord.seq + 1,
+                      reason: pending.reason,
+                      healthSnapshot: pending.healthSnapshot,
+                    },
+                  })
+                : undefined;
+              const sealInfoMessage = {
                 type: 'system_info' as const,
                 catId,
-                content: JSON.stringify({ type: 'context_health', catId, health }),
-                timestamp: Date.now(),
-              });
-
-              // F33: Strategy-driven seal decision (replaces F24 Phase B shouldSeal)
-              if (deps.sessionSealer && deps.sessionChainStore) {
-                try {
-                  // F062-fix:
-                  // 1) api_key + approx health can be noisy on third-party gateways
-                  // 2) api_key + compress strategy should not be force-sealed here
-                  // Keep context_health observability in both cases.
-                  const provider = catRegistry.tryGet(catId as string)?.config.clientId;
-                  const profileMode = callbackEnv[ANTHROPIC_PROFILE_MODE_KEY];
-                  const strategy = getSessionStrategy(catId as string);
-                  const isAnthropicApiKey = provider === 'anthropic' && profileMode === ANTHROPIC_PROFILE_MODE_API_KEY;
-                  const skipAutoSealForApproxApiKey = isAnthropicApiKey && health.source === 'approx';
-                  const skipAutoSealForApiKeyCompress = isAnthropicApiKey && strategy.strategy === 'compress';
-                  if (!skipAutoSealForApproxApiKey && !skipAutoSealForApiKeyCompress) {
-                    const activeRecord = await deps.sessionChainStore.getActive(catId, threadId);
-                    const action = shouldTakeAction(
-                      health.fillRatio,
-                      health.windowTokens,
-                      health.usedTokens,
-                      activeRecord?.compressionCount ?? 0,
-                      strategy,
-                    );
-
-                    switch (action.type) {
-                      case 'none':
-                        break;
-                      case 'warn': {
-                        // F225 软层: queue a cat-facing hint for the NEXT prompt. A
-                        // system_info output would never reach the cat (routing feeds only
-                        // `text` into previousResponses; ContextAssembler drops
-                        // userId='system') — so we ride the prompt-injection channel
-                        // (consumed at effectivePrompt assembly, ~line 1538). Nudges the cat
-                        // to run the context-self-management 3-axis self-check — NOT "handoff
-                        // now" (handoff-vs-compress is the cat's judgment). cKey matches the
-                        // compressionKey used there: `${userId}:${catId}:${threadId}`.
-                        queueContextHint(
-                          cKey,
-                          buildContextManagementHint({
-                            source: health.source,
-                            compressionCount: activeRecord?.compressionCount ?? 0,
-                          }),
-                        );
-                        break;
-                      }
-                      case 'seal':
-                      case 'seal_after_compress': {
-                        if (activeRecord) {
-                          const sealResult = await deps.sessionSealer.requestSeal({
-                            sessionId: activeRecord.id,
-                            reason: action.reason,
-                          });
-                          if (sealResult.accepted) {
-                            sessionManager.delete(userId, catId, threadId).catch(() => {});
-                            const sealTimestamp = Date.now();
-                            const continuityCapsule = params.continuityCapsule
-                              ? completeCapsuleForSeal(params.continuityCapsule, {
-                                  invocationId,
-                                  createdAt: sealTimestamp,
-                                  seal: {
-                                    sessionId: activeRecord.id,
-                                    sessionSeq: activeRecord.seq + 1,
-                                    reason: action.reason,
-                                    healthSnapshot: health,
-                                  },
-                                })
-                              : undefined;
-                            const sealInfoMessage = {
-                              type: 'system_info' as const,
-                              catId,
-                              content: JSON.stringify({
-                                type: 'session_seal_requested',
-                                catId,
-                                sessionId: activeRecord.id,
-                                sessionSeq: activeRecord.seq + 1,
-                                reason: action.reason,
-                                healthSnapshot: health,
-                                ...(continuityCapsule
-                                  ? {
-                                      continuityCapsule,
-                                      continuityDiagnostics: {
-                                        source: 'route_state',
-                                        boundary: continuityCapsule.continuationReason,
-                                        generated: true,
-                                        persistedVia: 'session_seal_requested',
-                                        threadId,
-                                        catId,
-                                        invocationId,
-                                        sessionId: activeRecord.id,
-                                      },
-                                    }
-                                  : {}),
-                              }),
-                              timestamp: sealTimestamp,
-                            };
-                            outputs.push(sealInfoMessage);
-                            if (deps.transcriptWriter) {
-                              const sessInfo: TranscriptSessionInfo = {
-                                sessionId: activeRecord.id,
-                                threadId,
-                                catId: activeRecord.catId,
-                                cliSessionId: activeRecord.cliSessionId,
-                                seq: activeRecord.seq,
-                              };
-                              deps.transcriptWriter.appendEvent(
-                                sessInfo,
-                                sealInfoMessage as unknown as Record<string, unknown>,
-                                invocationId,
-                              );
-                            }
-                            deps.sessionSealer.finalize({ sessionId: activeRecord.id }).catch(() => {});
-                          }
-                        }
-                        break;
-                      }
-                      case 'allow_compress':
-                        // Don't seal — let CLI compress. Log for observability.
-                        outputs.push({
-                          type: 'system_info' as const,
+                content: JSON.stringify({
+                  type: 'session_seal_requested',
+                  catId,
+                  sessionId: pending.sessionId,
+                  sessionSeq: pending.activeRecord.seq + 1,
+                  reason: pending.reason,
+                  healthSnapshot: pending.healthSnapshot,
+                  // Mark as deferred so downstream observers can distinguish
+                  // mid-stream-captured seals from synchronous done-time seals.
+                  deferredFrom: 'mid_stream_agent_loop',
+                  ...(continuityCapsule
+                    ? {
+                        continuityCapsule,
+                        continuityDiagnostics: {
+                          source: 'route_state',
+                          boundary: continuityCapsule.continuationReason,
+                          generated: true,
+                          persistedVia: 'session_seal_requested',
+                          threadId,
                           catId,
-                          content: JSON.stringify({
-                            type: 'strategy_allow_compress',
-                            catId,
-                            strategy: strategy.strategy,
-                            compressionCount: activeRecord?.compressionCount ?? 0,
-                            healthSnapshot: health,
-                          }),
-                          timestamp: Date.now(),
-                        });
-                        break;
-                    }
-                  }
-                } catch {
-                  /* best-effort: strategy failure doesn't break invocation */
-                }
+                          invocationId,
+                          sessionId: pending.sessionId,
+                        },
+                      }
+                    : {}),
+                }),
+                timestamp: sealTimestamp,
+              };
+              outputs.push(sealInfoMessage);
+              if (deps.transcriptWriter) {
+                const sessInfo: TranscriptSessionInfo = {
+                  sessionId: pending.activeRecord.id,
+                  threadId,
+                  catId: pending.activeRecord.catId,
+                  cliSessionId: pending.activeRecord.cliSessionId,
+                  seq: pending.activeRecord.seq,
+                };
+                deps.transcriptWriter.appendEvent(
+                  sessInfo,
+                  sealInfoMessage as unknown as Record<string, unknown>,
+                  invocationId,
+                );
               }
+              deps.sessionSealer.finalize({ sessionId: pending.sessionId }).catch(() => {});
             }
+          } catch {
+            /* best-effort: deferred seal failure doesn't break invocation */
           }
         }
 
@@ -2292,6 +2464,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // is the correct way to skip the remaining branches and transcript writer below.
         if (msg.type === 'agent_loop') {
           if (invocationSpan) recordAgentLoop(invocationSpan);
+          // clowder#915: opencode emits step_finish (mid-stream LLM-call boundary)
+          // as agent_loop carrying token usage. Route through F8/F24 so
+          // context_health computes + seal can fire BEFORE the CLI hits its context
+          // window. For agent_loop messages without usage (other producers under
+          // F153 Phase I semantics), the helper returns early — no behavior change.
+          //
+          // clowder#915 R4 cloud P1 #3: deferSealForMidStream=true so the helper
+          // CAPTURES seal intent into pendingMidStreamSeal instead of firing
+          // requestSeal inline. The actual seal executes at the `done` boundary
+          // below — preserving transcript writes for the rest of the opencode
+          // tool-loop's text/tool events.
+          await processUsageAndContextHealth(msg, { deferSealForMidStream: true });
           return outputs;
         }
         // Main-merge: record user-visible session output (independent of toolTracing — uses raw msg).
