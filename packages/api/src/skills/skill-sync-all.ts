@@ -6,6 +6,7 @@
  * with cascade-disabled skills from global state.
  */
 
+import { stat } from 'node:fs/promises';
 import type { MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
@@ -77,6 +78,19 @@ export async function syncAll(catCafeRoot: string, skillsSource: string, opts: S
   // Sync each external project (main is handled by the caller)
   for (const projectPath of projectPaths) {
     if (projectPath === catCafeRoot) continue;
+
+    // R13 P2-1: validate registry path still exists before syncing — stale
+    // entries could trigger mkdir/config writes that recreate deleted trees
+    try {
+      const pathStat = await stat(projectPath);
+      if (!pathStat.isDirectory()) {
+        warnings.push(`${projectPath}: registered path is not a directory, skipping`);
+        continue;
+      }
+    } catch {
+      warnings.push(`${projectPath}: registered path does not exist, skipping stale registry entry`);
+      continue;
+    }
 
     try {
       const projectMountRules = await readMountRules(projectPath, catCafeRoot);

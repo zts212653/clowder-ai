@@ -140,11 +140,12 @@ for skill_name in "${skill_names[@]}"; do
   sync_link "$skill_name" "$HOME_GEMINI" "$SKILLS_SRC/$skill_name"
 done
 
-# ─── Part 3: Write skills-state.json (ADR-025 Phase 1) ───
+# ─── Part 3: Write sync state ───
+# v2: capabilities.json#skillsSync is the source of truth for checkStaleness()
+# Legacy: skills-state.json kept for backward compatibility
 
 if ! $DRY_RUN; then
   STATE_DIR="$MAIN_REPO/.cat-cafe"
-  STATE_FILE="$STATE_DIR/skills-state.json"
   mkdir -p "$STATE_DIR"
 
   # Compute manifest hash: SHA-256 of sorted skill names
@@ -156,7 +157,22 @@ if ! $DRY_RUN; then
   # For main repo: SKILLS_SRC is $MAIN_REPO/cat-cafe-skills → relative = "cat-cafe-skills"
   SOURCE_ROOT="${SKILLS_SRC#"$MAIN_REPO"/}"
 
-  # Build JSON (sorted names for deterministic output)
+  # v2: merge skillsSync into capabilities.json (source of truth for API staleness)
+  CAP_FILE="$STATE_DIR/capabilities.json"
+  node --input-type=module -e "
+import { readFileSync, writeFileSync } from 'node:fs';
+const capFile = process.argv[1];
+const syncState = JSON.parse(process.argv[2]);
+let config;
+try { config = JSON.parse(readFileSync(capFile, 'utf8')); } catch { config = { version: 2, capabilities: [] }; }
+config.skillsSync = syncState;
+writeFileSync(capFile, JSON.stringify(config, null, 2) + '\n');
+" "$CAP_FILE" "{\"sourceRoot\":\"$SOURCE_ROOT\",\"sourceManifestHash\":\"$MANIFEST_HASH\",\"lastSyncedAt\":\"$SYNCED_AT\"}"
+
+  printf "${BOLD}[State]${NC} ${GREEN}✓${NC} %s#skillsSync (hash: %s)\n" "$CAP_FILE" "$MANIFEST_HASH"
+
+  # Legacy: skills-state.json (backward compat — will be removed in a future cleanup)
+  STATE_FILE="$STATE_DIR/skills-state.json"
   SORTED_NAMES=$(printf '%s\n' "${skill_names[@]}" | sort | awk '{printf "    \"%s\"", $0; if (NR<TOTAL) printf ","; printf "\n"}' TOTAL="${#skill_names[@]}")
   cat > "$STATE_FILE" <<EOJSON
 {
@@ -169,7 +185,7 @@ ${SORTED_NAMES}
 }
 EOJSON
 
-  printf "${BOLD}[State]${NC} ${GREEN}✓${NC} %s (hash: %s)\n" "$STATE_FILE" "$MANIFEST_HASH"
+  printf "${BOLD}[State]${NC} ${GREEN}✓${NC} %s (legacy, hash: %s)\n" "$STATE_FILE" "$MANIFEST_HASH"
 fi
 
 # ─── Summary ───
