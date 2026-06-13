@@ -223,7 +223,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
           ...enabledStandardProviders.filter((id) => mounts[id]),
           ...customMountTargets.filter((target) => mounts[target.id]).map((target) => target.id),
         ];
-        const mountPaths = capInfo?.mountPaths ?? mountedProviderIds;
+        const mountPaths = capInfoIsInherited ? mountedProviderIds : (capInfo?.mountPaths ?? mountedProviderIds);
         mountLookup.set(name, {
           name,
           category: meta?.category ?? '未分类',
