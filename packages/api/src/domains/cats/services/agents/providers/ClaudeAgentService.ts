@@ -217,6 +217,12 @@ export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): R
     // Subscription mode must not inherit shell-level Anthropic credentials.
     // Claude CLI should read auth from ~/.claude/settings.json instead.
     env.ANTHROPIC_API_KEY = null;
+    // ANTHROPIC_AUTH_TOKEN is sent as `Authorization: Bearer` and overrides the
+    // CLI's native OAuth/Keychain login. If the daemon was launched with a
+    // proxy token (e.g. a DashScope key in ANTHROPIC_AUTH_TOKEN), leaking it
+    // here makes the subscription child send that token to api.anthropic.com →
+    // 401 Invalid Bearer Token. Strip it so native auth is used.
+    env.ANTHROPIC_AUTH_TOKEN = null;
     env.ANTHROPIC_BASE_URL = null;
     env.ANTHROPIC_MODEL = null;
     env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;

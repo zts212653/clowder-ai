@@ -573,8 +573,15 @@ test('preserves inherited Anthropic credentials when no profile mode override is
 test('F062: subscription profile clears inherited ANTHROPIC env vars', async () => {
   const prevApiKey = process.env.ANTHROPIC_API_KEY;
   const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;
+  const prevAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
   process.env.ANTHROPIC_API_KEY = 'sk-inherited';
   process.env.ANTHROPIC_BASE_URL = 'https://inherited.example.com';
+  // Regression: a daemon launched with a proxy token in ANTHROPIC_AUTH_TOKEN
+  // (e.g. a DashScope key + DashScope base URL) must NOT leak that token into
+  // a subscription-mode child. ANTHROPIC_AUTH_TOKEN is sent as `Authorization:
+  // Bearer`; leaking it makes the child send the proxy token to
+  // api.anthropic.com → 401 Invalid Bearer Token, overriding native OAuth.
+  process.env.ANTHROPIC_AUTH_TOKEN = 'sk-proxy-token';
 
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
@@ -597,11 +604,14 @@ test('F062: subscription profile clears inherited ANTHROPIC env vars', async () 
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
     assert.equal(spawnOpts.env.ANTHROPIC_API_KEY, undefined);
     assert.equal(spawnOpts.env.ANTHROPIC_BASE_URL, undefined);
+    assert.equal(spawnOpts.env.ANTHROPIC_AUTH_TOKEN, undefined);
   } finally {
     if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = prevApiKey;
     if (prevBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = prevBaseUrl;
+    if (prevAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+    else process.env.ANTHROPIC_AUTH_TOKEN = prevAuthToken;
   }
 });
 
