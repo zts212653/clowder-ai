@@ -16,8 +16,32 @@ import {
 } from './settings/EnvSubComponents';
 import { SettingsStatusStrip } from './settings/primitives';
 
+type StorageMode = 'redis' | 'memory';
+
+interface SystemStatusData {
+  storage?: {
+    mode?: StorageMode;
+    persistent?: boolean;
+    warning?: string | null;
+  };
+}
+
+function normalizeStorageMode(data: SystemStatusData): StorageMode | null {
+  const mode = data.storage?.mode;
+  return mode === 'redis' || mode === 'memory' ? mode : null;
+}
+
+function StorageModeStatus({ mode }: { mode: StorageMode | null }) {
+  if (!mode) return null;
+  if (mode === 'memory') {
+    return <SettingsStatusStrip tone="warn">Memory mode — data will be lost on restart</SettingsStatusStrip>;
+  }
+  return <SettingsStatusStrip tone="success">Redis persistent mode</SettingsStatusStrip>;
+}
+
 export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: string[] } = {}) {
   const [data, setData] = useState<EnvSummaryData | null>(null);
+  const [storageMode, setStorageMode] = useState<StorageMode | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const saveLockRef = useRef(false);
@@ -43,6 +67,22 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
         }
       })
       .catch(() => setError('环境信息加载失败'));
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/system/status')
+      .then(async (res) => {
+        if (!res.ok) return;
+        const body = (await res.json()) as SystemStatusData;
+        if (!cancelled) setStorageMode(normalizeStorageMode(body));
+      })
+      .catch(() => {
+        if (!cancelled) setStorageMode(null);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (error) return <SettingsStatusStrip tone="error">{error}</SettingsStatusStrip>;
@@ -113,6 +153,7 @@ export function HubEnvFilesTab({ excludeCategories }: { excludeCategories?: stri
   return (
     <div className="space-y-4">
       <PageIntro />
+      <StorageModeStatus mode={storageMode} />
       <EnvVarsSection
         categories={
           excludeCategories

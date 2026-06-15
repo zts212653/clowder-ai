@@ -478,6 +478,8 @@ async function main(): Promise<void> {
   }
   const storageResult = assertStorageReady(!!redis);
   app.log.info(`[api] Storage mode: ${storageResult.mode}`);
+  const { systemStatusRoutes } = await import('./routes/system-status.js');
+  await app.register(systemStatusRoutes, { storageMode: storageResult.mode });
 
   // F102 KD-34: append listener placeholder (wired after memoryServices init)
   let appendListener: ((msg: { id: string; threadId: string; timestamp: number; content: string }) => void) | null =
