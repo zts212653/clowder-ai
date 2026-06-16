@@ -1178,7 +1178,7 @@ describe('HubCatEditor', () => {
     expect(filterProfiles('google', profiles).map((profile) => profile.id)).toEqual(['gemini', 'gemini-proxy']);
   });
 
-  it('hides google api_key accounts in the member account selector', async () => {
+  it('shows google api_key accounts with baseUrl, hides those without (#470)', async () => {
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/accounts') {
         return Promise.resolve(
@@ -1261,7 +1261,9 @@ describe('HubCatEditor', () => {
     const providerSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]');
     const optionLabels = Array.from(providerSelect.options).map((option) => option.textContent ?? '');
     expect(optionLabels).toContain('Gemini (OAuth)（内置）');
-    expect(optionLabels).not.toContain('Gemini Proxy（API Key）');
+    // #470: api_key profiles WITH baseUrl (third-party proxy) now show;
+    // official Google endpoint (no baseUrl) stays hidden — filterAccounts rejects it.
+    expect(optionLabels).toContain('Gemini Proxy（API Key）');
     expect(optionLabels).not.toContain('Google Official API（API Key）');
   });
 

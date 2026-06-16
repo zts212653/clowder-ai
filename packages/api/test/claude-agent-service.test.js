@@ -605,6 +605,72 @@ test('F062: subscription profile clears inherited ANTHROPIC env vars', async () 
   }
 });
 
+test('#883: subscription profile clears ANTHROPIC_AUTH_TOKEN to prevent proxy bearer token leak', async () => {
+  const prevAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  process.env.ANTHROPIC_AUTH_TOKEN = 'bearer-proxy-token';
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  try {
+    const promise = collect(
+      service.invoke('hello', {
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-883',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-883',
+          CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
+        },
+      }),
+    );
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(spawnOpts.env.ANTHROPIC_AUTH_TOKEN, undefined);
+  } finally {
+    if (prevAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+    else process.env.ANTHROPIC_AUTH_TOKEN = prevAuthToken;
+  }
+});
+
+test('#883: subscription deny-list survives accountEnv merge (proxy token in account env)', async () => {
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
+
+  const promise = collect(
+    service.invoke('hello', {
+      callbackEnv: {
+        CAT_CAFE_API_URL: 'http://localhost:3004',
+        CAT_CAFE_INVOCATION_ID: 'inv-883b',
+        CAT_CAFE_CALLBACK_TOKEN: 'token-883b',
+        CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription',
+      },
+      // Account-level env contains a proxy token that must NOT leak
+      accountEnv: {
+        ANTHROPIC_AUTH_TOKEN: 'proxy-bearer-leaked',
+        ANTHROPIC_API_KEY: 'sk-account-leaked',
+      },
+    }),
+  );
+  emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+  await promise;
+
+  const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+  assert.equal(
+    spawnOpts.env.ANTHROPIC_AUTH_TOKEN,
+    undefined,
+    'ANTHROPIC_AUTH_TOKEN from accountEnv must be cleared in subscription mode',
+  );
+  assert.equal(
+    spawnOpts.env.ANTHROPIC_API_KEY,
+    undefined,
+    'ANTHROPIC_API_KEY from accountEnv must be cleared in subscription mode',
+  );
+});
+
 test('F062: api_key profile injects ANTHROPIC_API_KEY and ANTHROPIC_BASE_URL', async () => {
   const prevApiKey = process.env.ANTHROPIC_API_KEY;
   const prevBaseUrl = process.env.ANTHROPIC_BASE_URL;

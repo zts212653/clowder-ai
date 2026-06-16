@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect } from 'react';
+import { useChatStore } from '@/stores/chatStore';
 import { type ToastItem, useToastStore } from '@/stores/toastStore';
 
 const DISMISS_DELAY = 300; // animation duration
@@ -13,11 +14,18 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     setTimeout(() => removeToast(toast.id), DISMISS_DELAY);
   }, [toast.id, markExiting, removeToast]);
 
+  // Use remaining lifetime so toasts that were hidden (thread-scoped, other
+  // thread active) don't restart their full duration when they become visible.
   useEffect(() => {
     if (toast.duration <= 0) return;
-    const timer = setTimeout(dismiss, toast.duration);
+    const remaining = toast.duration - (Date.now() - toast.createdAt);
+    if (remaining <= 0) {
+      dismiss();
+      return;
+    }
+    const timer = setTimeout(dismiss, remaining);
     return () => clearTimeout(timer);
-  }, [toast.duration, dismiss]);
+  }, [toast.duration, toast.createdAt, dismiss]);
 
   const borderColor =
     toast.type === 'error'
@@ -65,14 +73,65 @@ function ToastCard({ toast }: { toast: ToastItem }) {
   );
 }
 
+/**
+ * Compute which hidden (non-current-thread) toasts have expired and when the
+ * next one will expire.  Pure function — extracted for testability.
+ */
+export function getHiddenToastExpiries(
+  toasts: ReadonlyArray<Pick<ToastItem, 'id' | 'threadId' | 'duration' | 'createdAt'>>,
+  currentThreadId: string | null,
+  now: number,
+): { expired: string[]; nextMs: number | null } {
+  const expired: string[] = [];
+  let nextMs: number | null = null;
+  for (const t of toasts) {
+    if (t.threadId && t.threadId !== currentThreadId && t.duration > 0) {
+      const remaining = t.duration - (now - t.createdAt);
+      if (remaining <= 0) {
+        expired.push(t.id);
+      } else if (nextMs === null || remaining < nextMs) {
+        nextMs = remaining;
+      }
+    }
+  }
+  return { expired, nextMs };
+}
+
+/**
+ * Filter toasts by the active thread.
+ * - Toasts with no threadId (global) are always shown.
+ * - Toasts with a threadId only show when that thread is active (#924).
+ */
 export function ToastContainer() {
   const toasts = useToastStore((s) => s.toasts);
+  const removeToast = useToastStore((s) => s.removeToast);
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
 
-  if (toasts.length === 0) return null;
+  // P2 review fix: expire hidden thread-scoped toasts whose ToastCard never
+  // mounted (so their per-card timer never started). Immediately removes any
+  // already-expired hidden toasts, then schedules a timer for the next one.
+  useEffect(() => {
+    const { expired, nextMs } = getHiddenToastExpiries(toasts, currentThreadId, Date.now());
+    for (const id of expired) removeToast(id);
+
+    if (nextMs !== null) {
+      const timer = setTimeout(() => {
+        // Re-scan: the closure's `toasts` may be stale, but removeToast by id
+        // is idempotent and the resulting store mutation re-triggers this effect.
+        const { expired: due } = getHiddenToastExpiries(toasts, currentThreadId, Date.now());
+        for (const id of due) removeToast(id);
+      }, nextMs + 16); // +16ms to land past the expiry boundary
+      return () => clearTimeout(timer);
+    }
+  }, [toasts, currentThreadId, removeToast]);
+
+  const visible = toasts.filter((t) => !t.threadId || t.threadId === currentThreadId);
+
+  if (visible.length === 0) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-      {toasts.map((toast) => (
+      {visible.map((toast) => (
         <ToastCard key={toast.id} toast={toast} />
       ))}
     </div>

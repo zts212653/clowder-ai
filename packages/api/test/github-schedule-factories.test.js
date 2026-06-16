@@ -678,7 +678,7 @@ test('resolvePluginEnv treats an explicitly cleared plugin config value as absen
 
     const resolved = resolvePluginEnv([testManifest]);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(resolved, testEnvKey));
+    assert.ok(Object.hasOwn(resolved, testEnvKey));
     assert.strictEqual(resolved[testEnvKey], undefined);
     assert.strictEqual(process.env[testEnvKey], 'ambient-shell-value');
   } finally {

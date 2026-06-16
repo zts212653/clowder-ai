@@ -50,6 +50,19 @@ const RESERVED_SYSTEM_PROMPT_FLAGS = new Set([
 // F198: exported so other Claude carriers (e.g. ClaudeBgCarrierService) can
 // reuse the single source of truth for profile mode routing.
 export const ANTHROPIC_PROFILE_MODE_KEY = 'CAT_CAFE_ANTHROPIC_PROFILE_MODE';
+
+// #883: Keys cleared in subscription mode to prevent proxy credentials leaking
+// to api.anthropic.com. Exported so the post-accountEnv merge step and tests
+// can reference the same authoritative list.
+export const SUBSCRIPTION_MODE_DENY_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+] as const;
 const ANTHROPIC_PROFILE_API_KEY = 'CAT_CAFE_ANTHROPIC_API_KEY';
 const ANTHROPIC_PROFILE_BASE_URL = 'CAT_CAFE_ANTHROPIC_BASE_URL';
 // F198: exported so ClaudeBgCarrierService and other carriers can reuse the
@@ -216,12 +229,7 @@ export function buildClaudeEnvOverrides(callbackEnv?: Record<string, string>): R
   } else if (mode === 'subscription') {
     // Subscription mode must not inherit shell-level Anthropic credentials.
     // Claude CLI should read auth from ~/.claude/settings.json instead.
-    env.ANTHROPIC_API_KEY = null;
-    env.ANTHROPIC_BASE_URL = null;
-    env.ANTHROPIC_MODEL = null;
-    env.ANTHROPIC_DEFAULT_OPUS_MODEL = null;
-    env.ANTHROPIC_DEFAULT_SONNET_MODEL = null;
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = null;
+    for (const key of SUBSCRIPTION_MODE_DENY_KEYS) env[key] = null;
   }
   return env;
 }
@@ -462,6 +470,12 @@ export class ClaudeAgentService implements AgentService {
       // F171: Account env vars applied LAST — user overrides provider-injected values
       if (options?.accountEnv) {
         for (const [k, v] of Object.entries(options.accountEnv)) envOverrides[k] = v;
+      }
+      // #883: Subscription mode deny-list must survive accountEnv merge.
+      // Account-level env (e.g. ANTHROPIC_AUTH_TOKEN from a proxy profile)
+      // could re-introduce the proxy token that buildClaudeEnvOverrides cleared.
+      if (options?.callbackEnv?.[ANTHROPIC_PROFILE_MODE_KEY] === 'subscription') {
+        for (const key of SUBSCRIPTION_MODE_DENY_KEYS) envOverrides[key] = null;
       }
 
       // Debug: log full invocation details (env values redacted by pino redact paths)

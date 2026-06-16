@@ -31,8 +31,8 @@
     {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "Memory 域现有 72 个非 index.ts 文件，职责已横跨 indexing/query/governance/library；先短续期，按真实边界拆子目录",
-      "expiresAt": "2026-06-15",
+      "reason": "Memory 域现有 89 个非 index.ts 文件，职责已横跨 indexing/query/governance/library；SECOND-ROUND unblock（2026-06-16 CI 过期例外失败），按真实边界拆子目录",
+      "expiresAt": "2026-06-30",
       "ticket": "F102"
     },
     {
@@ -41,13 +41,6 @@
       "reason": "API utils 31 files；按 cli/process/media/paths/network/parsing/skills 子域拆分（详见 F23 § Phase 2）。SECOND-ROUND unblock（首轮 4136847b10 砚砚 2026-05-18 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
       "expiresAt": "2026-06-30",
       "ticket": "F23-followup"
-    },
-    {
-      "path": "packages/api/src/infrastructure/harness-eval",
-      "owner": "opus",
-      "reason": "F192 socio-technical harness eval 当前 29 .ts（Phase F capability-wakeup 一批 eval-capability-wakeup-* 加入超 error=25）；登记基线红灯，后续按 capability-wakeup / a2a / domain / hub 子域拆分。详见 F192 feat doc Known Debt + GitHub issue。",
-      "expiresAt": "2026-06-15",
-      "ticket": "F192"
     }
   ]
 }

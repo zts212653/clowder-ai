@@ -241,6 +241,7 @@ import { marketplaceRoutes } from './routes/marketplace.js';
 import { previewRoutes } from './routes/preview.js';
 import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
+import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
@@ -2265,6 +2266,7 @@ async function main(): Promise<void> {
     socketManager,
   });
   await app.register(threadExportRoutes, { threadStore });
+  await app.register(threadMemberStrategyRoutes, { threadStore }); // #921
   // F192: Shared callback — record proposal rejection as task outcome A2 signal.
   // Covers both F128 (thread proposal) and F225 (session handoff proposal) rejections.
   const onProposalReject = (input: {

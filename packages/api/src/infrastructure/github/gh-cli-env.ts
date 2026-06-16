@@ -16,7 +16,7 @@ function cleanToken(value: string | undefined | null): string | undefined {
 
 export function resolveGhCliToken(options: ResolveGhCliTokenOptions = {}): string | undefined {
   const pluginEnv = options.pluginEnv ?? {};
-  if (Object.prototype.hasOwnProperty.call(pluginEnv, 'GITHUB_TOKEN')) {
+  if (Object.hasOwn(pluginEnv, 'GITHUB_TOKEN')) {
     return cleanToken(pluginEnv.GITHUB_TOKEN);
   }
 

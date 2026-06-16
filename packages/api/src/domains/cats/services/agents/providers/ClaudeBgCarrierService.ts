@@ -45,6 +45,7 @@ import {
   buildClaudeEnvOverrides,
   resolveClaudeModelSelection,
   resolveDefaultClaudeMcpServerPath,
+  SUBSCRIPTION_MODE_DENY_KEYS,
 } from './ClaudeAgentService.js';
 import { JobEventConsumer } from './JobEventConsumer.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
@@ -236,6 +237,16 @@ export class ClaudeBgCarrierService implements AgentService {
         for (const [k, v] of Object.entries(options.accountEnv)) {
           envOverrides[k] = v;
         }
+      }
+      // #883: Subscription deny-list must survive accountEnv merge.
+      // bg carrier is ALWAYS subscription (api_key fallback routes to
+      // ClaudeAgentService per KD-3). Use the effective mode from
+      // callbackEnvWithMode — which defaults to 'subscription' — so the
+      // deny-list fires even when the caller doesn't explicitly pass mode.
+      // Only an explicit api_key callbackEnv (which overrides the default
+      // at line 233) bypasses the deny-list.
+      if (callbackEnvWithMode[ANTHROPIC_PROFILE_MODE_KEY] === 'subscription') {
+        for (const key of SUBSCRIPTION_MODE_DENY_KEYS) envOverrides[key] = null;
       }
       envOverrides.CLAUDE_CODE_ENTRYPOINT = null;
       envOverrides.CLAUDECODE = null;

@@ -5,6 +5,7 @@ import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { catColorVar } from '@/lib/cat-slug';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { MemberSessionStrategy } from './MemberSessionStrategy';
 import { CatSelector } from './ThreadSidebar/CatSelector';
 
 /**
@@ -178,6 +179,13 @@ export function ThreadCatPill({ threadId }: ThreadCatPillProps) {
           <div className="p-3 overflow-y-auto max-h-[50vh]">
             <CatSelector selectedCats={selectedCats} onSelectionChange={handleSelectionChange} />
           </div>
+          {/* #921: Per-member session strategy control.
+              Uses the persisted preferredCats (not draft selectedCats) so that
+              strategy toggles don't fire PATCHes for unsaved selections — if
+              the user cancels or save fails, no orphan strategy state remains.
+              Component self-hides when API returns non-200 (shared default
+              thread, system-indexed threads, or any access restriction). */}
+          {preferredCats.length === 1 && <MemberSessionStrategy threadId={threadId} catId={preferredCats[0]} />}
           <div className="flex items-center justify-between px-3 pb-3 pt-2 border-t border-cafe-subtle flex-shrink-0">
             {saveError && <span className="text-micro text-conn-red-text">保存失败</span>}
             {!saveError && selectedCats.length > 0 && (

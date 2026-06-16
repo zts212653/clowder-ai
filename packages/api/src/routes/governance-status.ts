@@ -48,7 +48,12 @@ async function checkGitAvailable(): Promise<boolean> {
   return gitAvailableCache;
 }
 
-export const governanceStatusRoute: FastifyPluginAsync = async (app) => {
+export interface GovernanceStatusRouteOptions {
+  /** Override Cat Cafe root for testing — avoids polluting real registry (#926) */
+  catCafeRoot?: string;
+}
+
+export const governanceStatusRoute: FastifyPluginAsync<GovernanceStatusRouteOptions> = async (app, opts) => {
   app.get('/api/governance/status', async (request, reply) => {
     const userId = resolveHeaderUserId(request);
     if (!userId) {
@@ -68,7 +73,7 @@ export const governanceStatusRoute: FastifyPluginAsync = async (app) => {
       return { error: 'Project path not allowed' };
     }
 
-    const catCafeRoot = findMonorepoRoot(process.cwd());
+    const catCafeRoot = opts?.catCafeRoot ?? findMonorepoRoot(process.cwd());
     const preflight = await checkGovernancePreflight(validated, catCafeRoot);
 
     const [empty, gitRepo, gitOk] = await Promise.all([

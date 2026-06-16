@@ -11,18 +11,22 @@ import { projectSetupRoute } from '../../dist/routes/projects-setup.js';
 
 const HEADERS = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' };
 
-function buildApp() {
+function buildApp(catCafeRoot) {
   const app = Fastify();
-  app.register(projectSetupRoute);
+  app.register(projectSetupRoute, { catCafeRoot });
   return app;
 }
 
 describe('POST /api/projects/setup', () => {
   let app;
   let testRoot;
+  /** Isolated catCafeRoot so tests don't pollute the real governance registry (#926) */
+  let fakeCatCafeRoot;
 
   beforeEach(async () => {
-    app = buildApp();
+    fakeCatCafeRoot = join(tmpdir(), `catcafe-root-${randomUUID()}`);
+    await mkdir(fakeCatCafeRoot, { recursive: true });
+    app = buildApp(fakeCatCafeRoot);
     testRoot = join(tmpdir(), `setup-test-${randomUUID()}`);
     await mkdir(testRoot, { recursive: true });
   });
@@ -30,6 +34,7 @@ describe('POST /api/projects/setup', () => {
   afterEach(async () => {
     await app.close();
     await rm(testRoot, { recursive: true, force: true });
+    await rm(fakeCatCafeRoot, { recursive: true, force: true });
   });
 
   it('mode=skip calls governance bootstrap only', async () => {

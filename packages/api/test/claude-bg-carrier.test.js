@@ -358,8 +358,7 @@ test('codex round-6 P1.2: strip ANTHROPIC_* env for subscription-mode carrier', 
   // codex review (PR #1666 round 6) P1.2: host ANTHROPIC_API_KEY would route
   // --bg to API-key billing instead of subscription. This carrier is always
   // subscription (api_key fallback → ClaudeAgentService per KD-3), so all
-  // ANTHROPIC_* must be cleared. accountEnv CAN re-introduce them if a
-  // specific cat wants api_key mode for that invocation.
+  // ANTHROPIC_* must be cleared even without explicit callbackEnv mode.
   const savedKey = process.env.ANTHROPIC_API_KEY;
   const savedBase = process.env.ANTHROPIC_BASE_URL;
   process.env.ANTHROPIC_API_KEY = 'sk-ant-host-default';
@@ -375,20 +374,76 @@ test('codex round-6 P1.2: strip ANTHROPIC_* env for subscription-mode carrier', 
     const env = fakeSpawn.lastEnv;
     assert.equal(env.ANTHROPIC_API_KEY, undefined, 'host ANTHROPIC_API_KEY must be stripped');
     assert.equal(env.ANTHROPIC_BASE_URL, undefined, 'host ANTHROPIC_BASE_URL must be stripped');
-
-    // accountEnv CAN re-introduce (api_key mode for specific cat)
-    await service.startJob('hi', {
-      accountEnv: { ANTHROPIC_API_KEY: 'sk-ant-account', ANTHROPIC_BASE_URL: 'https://acct.example' },
-    });
-    const env2 = fakeSpawn.lastEnv;
-    assert.equal(env2.ANTHROPIC_API_KEY, 'sk-ant-account', 'accountEnv can opt-in to api_key mode');
-    assert.equal(env2.ANTHROPIC_BASE_URL, 'https://acct.example');
   } finally {
     if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = savedKey;
     if (savedBase === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = savedBase;
   }
+});
+
+test('#883: default subscription denies accountEnv Anthropic tokens (bg carrier is always subscription)', async () => {
+  // bg carrier defaults to subscription mode (KD-3: api_key → ClaudeAgentService).
+  // accountEnv must NOT be able to reintroduce ANTHROPIC_* in default mode.
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · ab120001\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test',
+  });
+  await service.startJob('hi', {
+    accountEnv: {
+      ANTHROPIC_AUTH_TOKEN: 'leaked-proxy-token',
+      ANTHROPIC_API_KEY: 'sk-ant-account',
+      ANTHROPIC_BASE_URL: 'https://acct.example',
+    },
+  });
+  const env = fakeSpawn.lastEnv;
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, 'default subscription must deny proxy token from accountEnv');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined, 'default subscription must deny API key from accountEnv');
+  assert.equal(env.ANTHROPIC_BASE_URL, undefined, 'default subscription must deny base URL from accountEnv');
+});
+
+test('#883: explicit api_key callbackEnv allows accountEnv Anthropic keys', async () => {
+  // When callbackEnv explicitly sets api_key mode, accountEnv keys should survive.
+  // This is the only path where bg carrier env retains Anthropic credentials.
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · ab120002\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test',
+  });
+  await service.startJob('hi', {
+    callbackEnv: { CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'api_key' },
+    accountEnv: {
+      ANTHROPIC_API_KEY: 'sk-ant-account',
+      ANTHROPIC_BASE_URL: 'https://acct.example',
+    },
+  });
+  const env = fakeSpawn.lastEnv;
+  assert.equal(env.ANTHROPIC_API_KEY, 'sk-ant-account', 'explicit api_key mode allows accountEnv API key');
+  assert.equal(env.ANTHROPIC_BASE_URL, 'https://acct.example', 'explicit api_key mode allows accountEnv base URL');
+});
+
+test('#883: explicit subscription callbackEnv denies accountEnv tokens', async () => {
+  // When callbackEnv explicitly sets subscription mode AND accountEnv leaks
+  // proxy credentials, the deny-list must re-apply after the accountEnv merge.
+  const fakeSpawn = buildFakeSpawn({ stdout: 'backgrounded · ab120099\n' });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test',
+  });
+  await service.startJob('hi', {
+    callbackEnv: { CAT_CAFE_ANTHROPIC_PROFILE_MODE: 'subscription' },
+    accountEnv: {
+      ANTHROPIC_AUTH_TOKEN: 'leaked-proxy-token',
+      ANTHROPIC_API_KEY: 'leaked-api-key',
+    },
+  });
+  const env = fakeSpawn.lastEnv;
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, 'proxy token must not leak through accountEnv');
+  assert.equal(env.ANTHROPIC_API_KEY, undefined, 'api key must not leak through accountEnv');
 });
 
 test('codex round-6 P1.3: spawn passes options.signal so startup abort kills child', async () => {

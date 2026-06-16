@@ -391,7 +391,8 @@ export function AccountSection({
                 ...accountOptions
                   .filter((profile) => {
                     // Gemini CLI doesn't support custom API endpoints — only show builtin
-                    if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
+                    // but allow api_key profiles with a third-party baseUrl (#470)
+                    if (form.clientId === 'google' && profile.authType !== 'oauth' && !profile.baseUrl) return false;
                     return true;
                   })
                   .map((profile) => ({
