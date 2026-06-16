@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { mock, test } from 'node:test';
 
-// Ensure `kimi` is resolvable on CI even when the real CLI is not installed.
-// resolveCliCommand uses `which kimi` — placing a stub on PATH satisfies it.
+// Ensure `kimi` (new kimi-code) and `kimi-cli` (legacy) are resolvable on CI even
+// when the real CLI is not installed. resolveCliCommand prefers `kimi-cli` first.
 const stubBinDir = mkdtempSync(join(tmpdir(), 'kimi-stub-bin-'));
 writeFileSync(join(stubBinDir, 'kimi'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+writeFileSync(join(stubBinDir, 'kimi-cli'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
 process.env.PATH = `${stubBinDir}:${process.env.PATH}`;
 
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
