@@ -15,6 +15,17 @@ function getInvokePnpmInstallFunctionBody() {
   return fn[0];
 }
 
+/**
+ * Extract the "Install dependencies and build" step block from install.ps1.
+ * Uses Step 5/\d+ … Step 6/\d+ so the match survives installer renumbering
+ * (e.g. 8→7 steps when a step is removed).
+ */
+function getInstallDependenciesStepBlock() {
+  const block = installScript.match(/Write-Step "Step 5\/\d+[\s\S]*?Write-Step "Step 6\/\d+/);
+  assert.ok(block, 'must find Step 5 install block');
+  return block[0];
+}
+
 test('install.ps1 defines Test-LockfileMismatchFailure helper', () => {
   assert.match(
     installScript,
@@ -69,9 +80,7 @@ test('install.ps1 defines Write-WindowsEpermHint to surface actionable fixes', (
 });
 
 test('Step 5 install flow branches on error class instead of blind retry', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   assert.match(
     block,
     /Test-LockfileMismatchFailure/,
@@ -85,9 +94,7 @@ test('Step 5 install flow branches on error class instead of blind retry', () =>
 });
 
 test('Step 5 no longer prints misleading "Frozen lockfile failed, retrying" for non-lockfile errors', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   // The misleading retry message must now be gated behind a lockfile-mismatch check.
   // It is acceptable for the string to appear once, but only inside a branch that
   // first confirmed the error is actually a lockfile mismatch.
@@ -103,9 +110,7 @@ test('Step 5 no longer prints misleading "Frozen lockfile failed, retrying" for 
 });
 
 test('Step 5 surfaces Windows EPERM hint when EPERM detected, instead of silently failing', () => {
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   assert.match(
     block,
     /Write-WindowsEpermHint/,
@@ -119,9 +124,7 @@ test('Step 5 plain-install retry passes --no-frozen-lockfile to override pnpm CI
   // ineffective in that environment unless we explicitly opt out: the retry
   // call must include --no-frozen-lockfile so it actually recovers from drift
   // (ERR_PNPM_LOCKFILE_CONFIG_MISMATCH / ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE).
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   // The retry call must appear AFTER the "Frozen lockfile failed, retrying"
   // warning (i.e. inside the lockfile-mismatch branch) and must contain
   // --no-frozen-lockfile.
@@ -139,9 +142,7 @@ test('Step 5 fails fast on non-lockfile errors instead of swapping to plain pnpm
   // The fix: when frozen-lockfile fails for a reason that is NOT a lockfile mismatch
   // (e.g. EPERM unlink), we must NOT fall back to plain `pnpm install` — that just
   // repeats the same failure and buries the real error under a misleading message.
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   // There must be a code path that exits 1 without invoking a second plain install
   // when the first failure is not a lockfile mismatch.
   assert.match(
@@ -176,9 +177,7 @@ test('Step 5 pins --store-dir + --package-import-method copy on Windows by defau
   // very same command works once those two flags are passed. Step 5 must inject
   // them on every Invoke-PnpmInstallWithCapturedOutput call when running on
   // Windows; non-Windows platforms must NOT see the extra flags.
-  const step5Block = installScript.match(/Write-Step "Step 5\/8[\s\S]*?Write-Step "Step 6\/8/);
-  assert.ok(step5Block, 'must find Step 5 install block');
-  const block = step5Block[0];
+  const block = getInstallDependenciesStepBlock();
   assert.match(block, /Windows_NT|IsWindows/, 'Step 5 must guard the extra args on a Windows-only condition');
   assert.match(block, /LOCALAPPDATA/, 'Step 5 must derive the store dir from %LOCALAPPDATA%');
   assert.match(block, /--store-dir/, 'Step 5 must pass --store-dir on the default install invocation');
