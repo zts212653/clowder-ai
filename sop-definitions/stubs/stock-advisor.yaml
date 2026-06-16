@@ -1,0 +1,147 @@
+id: stock-advisor
+domain: finance
+label: Stock Advisor SOP
+description: |
+  投资助手定时推送的数据获取→分析→推送→自检流程质量守护。
+  适用于猫扮演投资分析师角色的场景。
+  注意：本 SOP 只作为 eval:sop catalog 接入（predicate 检测），
+  不接入 Workflow SOP stage 路由（告示牌/stage 推进由小红自管）。
+
+# 推送场景作用域说明（eval 时用于过滤）：
+# - open: 开盘推送 9:35（全量分析）
+# - close: 盘后推送 15:35（全量分析）
+# - intraday: 盘中异动检测（快速，只用实时行情）
+# - silent: 无异动时一行记录
+# 每条 hard_rule 通过注释标注适用场景，eval 猫据此判断是否 applicable。
+# 当前 predicate engine 不支持 context gate，manual_only 的 eval 由周度 eval 猫自行过滤。
+
+stages:
+  - id: data_fetch
+    label: 数据获取
+    suggested_skill: stock-advisor
+    hard_rules:
+      - id: sa-h1-kline-required
+        text: 开盘/盘后推送必须拉取腾讯 K 线数据（ifzq.gtimg.cn/appstock/app/fqkline）
+        severity: blocker
+        # applicable: [open, close]  -- 盘中异动和 SILENT 不要求 K 线
+        predicate:
+          type: manual_only
+          reason: 当前 predicate engine 无 context gate，command_pattern 会对盘中/SILENT trace 误报。周度 eval 猫据 applicable 注释手动判断。
+          future_candidate: context_gate_predicate
+      - id: sa-h1b-realtime-required
+        text: 必须拉取实时行情数据（qt.gtimg.cn）
+        severity: blocker
+        # applicable: [open, close, intraday]  -- SILENT 不适用
+        predicate:
+          type: manual_only
+          reason: 同 SA-H1，缺 context gate 会误报 SILENT trace。
+          future_candidate: context_gate_predicate
+    pitfalls:
+      - id: sa-p1-kline-partial
+        text: K 线只拉了部分标的，未覆盖全部持仓
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: 需比对 curl URL 中的 code 参数数量与状态文件 holdings 数量，当前无通用 count predicate。
+          future_candidate: command_param_count_predicate
+
+  - id: analysis
+    label: 分析研判
+    suggested_skill: stock-advisor
+    hard_rules:
+      - id: sa-h4-basis-label
+        text: ACTION/WATCH 条目必须含依据标签（strategy.xxx 或 agent判断）
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: 需检查 post_message content 中是否含"依据："字段，当前无 content pattern predicate。
+          future_candidate: content_pattern_predicate
+    pitfalls:
+      - id: sa-p2-no-kline-analysis
+        text: 跳过 K 线指标（MA5/MA20/量比/MACD）直接凭当日数据推测趋势
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: 需验证 drilldown 内容中引用了具体计算值而非模糊描述，当前无 content evidence predicate。
+          future_candidate: content_pattern_predicate
+      - id: sa-p3-hallucinate-indicator
+        text: 输出指标值（如 MA5=31.2）但实际未从 K 线计算得出
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: 需对比 Bash curl output 与 post_message content 中的数值一致性。
+          future_candidate: tool_io_content_match_predicate
+
+  - id: push_delivery
+    label: 推送发送
+    suggested_skill: stock-advisor
+    hard_rules:
+      - id: sa-h2-two-messages
+        text: 开盘/盘后推送必须发速报+drilldown两条消息到投资助手 thread
+        severity: blocker
+        # applicable: [open, close]  -- 盘中异动只发速报不发 drilldown
+        predicate:
+          type: manual_only
+          reason: command_sequence.must_include 语义是"至少匹配一次"不是"匹配N次"，不能检测 post_message 调用次数。周度 eval 通过读 thread 消息计数验证。
+          future_candidate: command_count_predicate
+      - id: sa-h3-investor-split
+        text: 推送必须按投资人分层（含"📊 投资人"标识）
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: 需检查 post_message content 中是否含多个"📊 投资人"分隔块。
+          future_candidate: content_pattern_predicate
+      - id: sa-h3b-action-trigger
+        text: 每条 ACTION/WATCH 必须含"动作"和"触发"字段
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: 需检查推送内容结构。
+          future_candidate: content_pattern_predicate
+    pitfalls:
+      - id: sa-p4-intraday-drilldown
+        text: 盘中异动发了不必要的 drilldown（盘中只需速报）
+        severity: info
+        predicate:
+          type: manual_only
+          reason: 需区分推送类型（开盘/盘后 vs 盘中异动），当前无 context-aware predicate。
+          future_candidate: push_type_context_predicate
+
+  - id: state_update
+    label: 状态更新
+    suggested_skill: stock-advisor
+    hard_rules:
+      - id: sa-h5-changelog
+        text: 策略参数变更必须写入 strategy_changelog（含 date/code/field/old/new/reason/source）
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: 需对比 state 文件两次快照的 strategy 字段 diff 与 changelog 记录，当前无 file_diff predicate。
+          future_candidate: file_diff_predicate
+      - id: sa-h5b-auto-adjust-limit
+        text: agent_auto_adjust 微调幅度不超过 max_adjust_pct（默认 5%）
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: 需计算策略参数变更百分比并与配置比对。
+          future_candidate: numeric_range_predicate
+    pitfalls:
+      - id: sa-p5-ops-log-missing
+        text: 投资者报告买卖操作后未更新 ops_log
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: 需检测用户消息"我买了/卖了"后 state 文件是否有对应 ops_log 记录。
+          future_candidate: message_then_state_change_predicate
+
+  - id: self_check
+    label: 推送合规自检
+    suggested_skill: stock-advisor
+    hard_rules:
+      - id: sa-h6-self-check-output
+        text: 每次推送后必须输出推送合规自检清单（📋 推送合规自检）
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: 自检本身是软约束输出，需 eval 验证其存在性。周度 eval 回验时检查 thread 消息。
+          future_candidate: message_existence_predicate
