@@ -25,7 +25,7 @@ Issue #839: thread_mpuxhppp0vzl2y16 中 opus47 被 startup hook 注入的杂物�
 > "不可见：33 个注入段散落在 SystemPromptBuilder.ts + route-serial.ts + route-helpers.ts + shell hooks 里，没有统一 manifest，用户无法知道猫收到了什么"
 > "H1 Startup Hook + H3 Stop Hook：两者都有 '向铲屎官汇报/商量处理方式' 抢球权措辞。核心修复是默认降级为 diagnostic notice"
 
-- 来源：`docs/features/F226-prompt-injection-visibility.md` (Why section) + Issue #839
+- 来源：`docs/features/F237-prompt-injection-visibility.md` (Why section) + Issue #839
 - **请对照上面的摘录判断交付物是否解决了铲屎官的问题**
 
 ## Tradeoff
@@ -91,6 +91,6 @@ verify-template-extraction.mjs → "All 4 templates produce identical output"
 
 ### 相关文档
 
-- Spec: `docs/features/F226-prompt-injection-visibility.md`
+- Spec: `docs/features/F237-prompt-injection-visibility.md`
 - Issue: https://github.com/zts212653/clowder-ai/issues/839
 - Feature: F226 / Phase 1

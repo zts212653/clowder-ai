@@ -96,6 +96,6 @@ CVO 逐项验收驱动，每项改动有铲屎官原话可追溯。
 
 ### 相关文档
 
-- Feature: `docs/features/F226-prompt-injection-visibility.md`
+- Feature: `docs/features/F237-prompt-injection-visibility.md`
 - Manifest: `assets/prompt-injection-manifest.yaml`
 - Issue: [#839](https://github.com/zts212653/clowder-ai/issues/839)
