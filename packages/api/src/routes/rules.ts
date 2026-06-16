@@ -2,6 +2,7 @@
  * Rules & Prompts Route
  * GET /api/rules — shared rules + provider guides for console transparency
  * GET /api/rules/skill/:name — SKILL.md content preview (allowlisted paths only)
+ * GET /api/prompt-injection/manifest — F226 injection manifest for console visibility
  */
 
 import { existsSync } from 'node:fs';
@@ -11,6 +12,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
+import YAML from 'yaml';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { compileL0ViaSubprocess } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import { getDefaultRootsForPlatform, isPathUnderRoots, validateProjectPath } from '../utils/project-path.js';
@@ -307,4 +309,42 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       }
     },
   );
+
+  // F226: Prompt Injection Manifest — full segment registry for Console visibility
+  app.get('/api/prompt-injection/manifest', async (request, reply) => {
+    if (!resolveUserId(request)) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    const root = findProjectRoot();
+    const manifestPath = join(root, 'assets', 'prompt-injection-manifest.yaml');
+    if (!existsSync(manifestPath)) {
+      reply.status(404);
+      return { error: 'Manifest file not found' };
+    }
+    try {
+      const raw = await readFile(manifestPath, 'utf-8');
+      interface ManifestSegment {
+        id: string;
+        [key: string]: unknown;
+      }
+      const parsed = YAML.parse(raw) as { schemaVersion: string; segments: ManifestSegment[] };
+      const segments = Array.isArray(parsed.segments) ? parsed.segments : [];
+      return {
+        schemaVersion: parsed.schemaVersion,
+        segments,
+        totalActive: segments.filter((s) => {
+          const status = (s._status as string) ?? '';
+          return !status.startsWith('legacy') && status !== 'removed';
+        }).length,
+        totalLegacy: segments.filter((s) => {
+          const status = (s._status as string) ?? '';
+          return status.startsWith('legacy') || status === 'removed';
+        }).length,
+      };
+    } catch (e) {
+      reply.status(500);
+      return { error: `Failed to parse manifest: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  });
 };

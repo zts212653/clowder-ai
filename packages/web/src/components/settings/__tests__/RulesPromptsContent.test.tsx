@@ -10,12 +10,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  ConsumptionLegend,
   type L0PromptsBlock,
   L0PromptsSection,
   RuleFileCard,
   shouldShowL0Section,
 } from '@/components/settings/RulesPromptsContent';
+import { ConsumptionLegend } from '@/components/settings/RulesPromptsParts';
 
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
@@ -82,21 +82,17 @@ const SAMPLE_L0: L0PromptsBlock = {
 };
 
 describe('L0PromptsSection (F203 Phase F)', () => {
-  it('renders title, template card, and one card per compiled cat (AC-F2/F3)', () => {
+  it('renders title, template card, and template path (AC-F2/F3)', () => {
     const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
     expect(html).toContain('L0 系统提示词');
     expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
-    expect(html).toContain('布偶猫 Opus 4.7');
-    expect(html).toContain('缅因猫 GPT-5.5(codex)');
-    expect(html).toContain('Broken Cat');
+    expect(html).toContain('查看');
   });
 
-  it('renders customization paths info row with template + compile script + verify command (AC-F4)', () => {
+  it('renders template path and line count in the template row', () => {
     const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
     expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
-    expect(html).toContain('scripts/compile-system-prompt-l0.mjs');
-    expect(html).toContain('pnpm gate');
-    expect(html).toContain('runtime restart');
+    expect(html).toContain('行');
   });
 });
 
@@ -109,7 +105,7 @@ describe('Prompt consumption chain UX (#749)', () => {
     expect(html).toContain('skill 按需加载');
   });
 
-  it('RuleFileCard renders consumption badge and detail', () => {
+  it('RuleFileCard renders label and path for clickable cards', () => {
     const html = renderToStaticMarkup(
       <RuleFileCard
         file={{
@@ -126,10 +122,8 @@ describe('Prompt consumption chain UX (#749)', () => {
         onClick={() => {}}
       />,
     );
-    expect(html).toContain('实际进 prompt');
-    expect(html).toContain('shared-rules.md → governance L0');
-    expect(html).toContain('compile-system-prompt-l0.mjs');
-    expect(html).toContain('SystemPromptBuilder');
+    expect(html).toContain('shared-rules.md');
+    expect(html).toContain('查看');
   });
 });
 

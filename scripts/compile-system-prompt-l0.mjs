@@ -2,12 +2,24 @@
 /**
  * F203 Phase B: Compile per-cat L0 string from system-prompt-l0.md template.
  *
- * Template variables (injected per invocation, not statically baked):
- *   {{IDENTITY_BLOCK}}      — catId / displayName / nickname / role / personality / restrictions
+ * 13 template variables (per-cat, per-invocation):
+ *
+ *   Static content (L-segments — from individual template files):
+ *   {{L1_CONTENT}}          — [L1] 平行世界自我意识
+ *   {{L2_CONTENT}}          — [L2] 客观性 carry-over
+ *   {{L3_CONTENT}}          — [L3] 路由规则（传球三选一 + @ 路由）
+ *   {{L4_CONTENT}}          — [L4] 五条铁律
+ *   {{L5_CONTENT}}          — [L5] MCP 工具索引
+ *   {{L6_CONTENT}}          — [L6] 能力唤醒指南
+ *   {{L7_CONTENT}}          — [L7] 协作哲学
+ *
+ *   Dynamic per-cat (≈ S-segment equivalents in non-L0 path):
+ *   {{IDENTITY_BLOCK}}      — [S1] 身份声明（name/role/personality/model）
  *   {{USER_CAPSULE}}        — per-user profile capsule (F231): owner portrait + optional primer pointer
- *   {{TEAMMATE_ROSTER}}     — table of other available cats with @mention · model · strengths · caution
- *   {{GOVERNANCE_L0}}       — compact governance block compiled from shared-rules.md
- *   {{WORKFLOW_TRIGGERS}}   — per-breed workflow triggers (ragdoll / maine-coon / siamese)
+ *   {{TEAMMATE_ROSTER}}     — [S5] 队友名册（available cats with @mention/model/strengths）
+ *   {{GOVERNANCE_L0}}       — [S9] 治理摘要（from shared-rules.md deterministic extraction）
+ *   {{WORKFLOW_TRIGGERS}}   — [S6] 工作流触发点（per-breed workflow triggers）
+ *   {{CVO_REF}}             — [S8] 铲屎官引用（co-creator name + mention handles）
  *
  * Output: string ready for `claude --system-prompt <out>` or
  * `codex exec -c 'developer_instructions=<out>'`.
@@ -33,6 +45,32 @@ import { getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossi
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0.md');
+const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
+
+/** L1-L7 section template files — static content extracted from the monolithic L0 template. */
+const L0_SECTION_TEMPLATES = {
+  L1_CONTENT: 'l1-parallel-world.md',
+  L2_CONTENT: 'l2-carry-over.md',
+  L3_CONTENT: 'l3-routing-rules.md',
+  L4_CONTENT: 'l4-iron-laws.md',
+  L5_CONTENT: 'l5-mcp-tools-index.md',
+  L6_CONTENT: 'l6-capability-wakeup.md',
+  L7_CONTENT: 'l7-collaboration-philosophy.md',
+};
+
+/**
+ * Load an L0 section template file, stripping HTML comment lines.
+ * Returns the content with leading/trailing whitespace trimmed.
+ */
+function loadL0SectionTemplate(filename) {
+  const filePath = resolve(PROMPT_TEMPLATES_DIR, filename);
+  const raw = readFileSync(filePath, 'utf8');
+  return raw
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('<!--'))
+    .join('\n')
+    .trim();
+}
 
 let _bootstrapped = false;
 // 云端 review round-2 P1: bootstrap 必须用 no-arg loadCatConfig()——
@@ -433,7 +471,13 @@ export async function compileL0(options) {
     throw new Error(`compileL0: unknown catId "${catId}". Registered: ${catRegistry.getAllIds().join(', ')}`);
   }
   const config = { ...entry.config, catId };
-  const template = readFileSync(TEMPLATE_PATH, 'utf8');
+  // Strip HTML comment lines from the main template (same as loadL0SectionTemplate
+  // does for L-section files). Allows rich annotations in the .md source that
+  // don't bloat the compiled output sent to the model.
+  const template = readFileSync(TEMPLATE_PATH, 'utf8')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('<!--'))
+    .join('\n');
   const governanceL0 = await _loadCompiledGovernanceL0(REPO_ROOT);
 
   // F231: resolve user capsule (profileDir > env > default 'private/profile')
@@ -443,7 +487,14 @@ export async function compileL0(options) {
   const resolvedProfileDir = profileDir ?? process.env.CAT_CAFE_PROFILE_DIR ?? resolve(REPO_ROOT, 'private/profile');
   const capsuleSection = resolveUserCapsule(resolvedProfileDir, catId);
 
-  return template
+  // Load L1-L7 section templates (static content extracted to individual files)
+  let result = template;
+  for (const [placeholder, filename] of Object.entries(L0_SECTION_TEMPLATES)) {
+    result = result.replace(`{{${placeholder}}}`, loadL0SectionTemplate(filename));
+  }
+
+  // Dynamic per-cat substitutions
+  return result
     .replace('{{IDENTITY_BLOCK}}', buildIdentityBlock(config, runtimeModel))
     .replace('{{USER_CAPSULE}}', capsuleSection)
     .replace('{{TEAMMATE_ROSTER}}', buildTeammateRoster(catId))

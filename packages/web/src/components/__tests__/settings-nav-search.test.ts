@@ -47,7 +47,7 @@ describe('SettingsNav search filtering', () => {
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(14);
-    expect(container.textContent).toContain('规则与 SOP');
+    expect(container.textContent).toContain('协作与规则');
   });
 
   it('renders a primary icon for every settings section', () => {
@@ -92,7 +92,7 @@ describe('SettingsNav search filtering', () => {
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toContain('规则与 SOP');
+    expect(buttons[0].textContent).toContain('协作与规则');
   });
 
   it('filters concierge keywords to the 猫猫球 section', () => {

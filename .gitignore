@@ -33,8 +33,11 @@ packages/web/public/vendor/
 .env.local
 .env.*.local
 
-# Local overlay files (#603 .local convention)
+# Local overlay files (#603 .local convention, F225 prompt templates)
 *.local.md
+*.local.md.bak
+*.local.yaml
+*.local.yaml.bak
 *.local-override.md
 
 # IDE & AI tools

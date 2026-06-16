@@ -1202,47 +1202,9 @@ describe('SystemPromptBuilder', () => {
     );
   });
 
-  // F032 Phase D2: Reviewer section tests
-  test('buildReviewerSection returns reviewer list for opus (different family reviewers)', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('opus');
-    assert.ok(section, 'Should return section for opus');
-    assert.ok(section.includes('## 你当前的 Reviewers'), 'Should have reviewer header');
-    assert.ok(section.includes('@codex'), 'Should list codex as reviewer (different family)');
-    // Should NOT list same-family cats (opus-45 is ragdoll, same as opus)
-    assert.ok(!section.includes('@opus-45'), 'Should not list same-family opus-45');
-  });
-
-  test('buildReviewerSection returns null for unknown cat', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('unknown-cat');
-    assert.equal(section, null, 'Should return null for unknown cat');
-  });
-
-  // Cloud Codex R5 P2: Verify same-family fallback behavior is documented
-  // When requireDifferentFamily is enabled but no cross-family reviewers are available,
-  // same-family reviewers should be shown with a fallback note.
-  // This test verifies the cross-family-available case works correctly;
-  // the fallback case requires mocking roster/availability (out of scope for unit test).
-  test('buildReviewerSection shows cross-family when available (R5 P2 prerequisite)', async () => {
-    const { buildReviewerSection } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
-    const section = buildReviewerSection('opus');
-    assert.ok(section, 'Should return section');
-    // Cross-family available, so should NOT show fallback note
-    assert.ok(!section.includes('fallback'), 'Should not show fallback note when cross-family available');
-    assert.ok(section.includes('@codex'), 'Should show cross-family reviewer');
-  });
-
-  test('buildSystemPrompt includes reviewer section', async () => {
-    const build = await getBuilder();
-    const prompt = build({
-      catId: 'opus',
-      mode: 'independent',
-      teammates: [],
-      mcpAvailable: true,
-    });
-    assert.ok(prompt.includes('## 你当前的 Reviewers'), 'System prompt should include reviewer section');
-  });
+  // F032 Phase D2: Reviewer section tests — REMOVED in F226 Phase 1 (X1 dead code removal).
+  // buildReviewerSection was removed from SystemPromptBuilder; review policy is now
+  // handled by the review SOP workflow, not injected into the system prompt.
 
   // --- F042 Wave 3: Active participant hint tests ---
 

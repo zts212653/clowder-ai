@@ -159,7 +159,6 @@ export function OklchTuner({ onClose }: { onClose: () => void }) {
             step={1}
             fmt={`${params.surfaceHue}`}
             onChange={(v) => setParams((p) => ({ ...p, surfaceHue: v }))}
-            swatch={`oklch(${mp.elev.base} ${(0.012 * (params.surfaceChroma ?? 1)).toFixed(4)} ${params.surfaceHue})`}
           />
           <Slider
             label="C*"
@@ -169,30 +168,33 @@ export function OklchTuner({ onClose }: { onClose: () => void }) {
             step={0.05}
             fmt={(params.surfaceChroma ?? 1).toFixed(2)}
             onChange={(v) => setParams((p) => ({ ...p, surfaceChroma: v }))}
-            swatch={`oklch(${mp.elev.base} ${(0.012 * (params.surfaceChroma ?? 1)).toFixed(4)} ${params.surfaceHue})`}
           />
-          {SURF_KEYS.map((k) => (
-            <div key={k} className="flex items-center gap-1.5">
-              <div
-                className="w-3 h-3 rounded border border-[var(--console-border-soft)] shrink-0"
-                style={{
-                  background: `oklch(${mp.elev[k]} ${(0.012 * (params.surfaceChroma ?? 1)).toFixed(4)} ${params.surfaceHue})`,
-                }}
-              />
-              <span className="w-20 text-[9px] text-cafe-muted shrink-0">{SURF_LABELS[k]}</span>
-              <input
-                type="range"
-                aria-label={SURF_LABELS[k]}
-                min={0}
-                max={1}
-                step={0.005}
-                value={mp.elev[k]}
-                onChange={(e) => updateElev(k, +e.target.value)}
-                className="flex-1 h-1 accent-[var(--color-cafe-accent)]"
-              />
-              <span className="w-9 text-right text-[9px] tabular-nums shrink-0">{mp.elev[k].toFixed(3)}</span>
-            </div>
-          ))}
+          {SURF_KEYS.map((k, i) => {
+            const factors = [1.5, 1.2, 0.5, 0.3] as const;
+            const ch = (0.01 * (params.surfaceChroma ?? 1) * factors[i]).toFixed(4);
+            return (
+              <div key={k} className="flex items-center gap-1.5">
+                <div
+                  className="w-3 h-3 rounded border border-[var(--console-border-soft)] shrink-0"
+                  style={{
+                    background: `oklch(${mp.elev[k]} ${ch} ${params.surfaceHue})`,
+                  }}
+                />
+                <span className="w-20 text-[9px] text-cafe-muted shrink-0">{SURF_LABELS[k]}</span>
+                <input
+                  type="range"
+                  aria-label={SURF_LABELS[k]}
+                  min={0}
+                  max={1}
+                  step={0.005}
+                  value={mp.elev[k]}
+                  onChange={(e) => updateElev(k, +e.target.value)}
+                  className="flex-1 h-1 accent-[var(--color-cafe-accent)]"
+                />
+                <span className="w-9 text-right text-[9px] tabular-nums shrink-0">{mp.elev[k].toFixed(3)}</span>
+              </div>
+            );
+          })}
         </div>
 
         {/* ── 3. Bubble / inset tier (L/Cmul 派生) ── */}
