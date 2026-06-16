@@ -1,5 +1,5 @@
 ---
-feature_ids: [F226]
+feature_ids: [F237]
 related_features: [F203, F153, F180, F190, F199, F206]
 topics: [system-prompt, injection, visibility, console, settings, trust, governance]
 doc_kind: spec
@@ -11,7 +11,7 @@ updated: 2026-06-16
 
 > **Status**: in-progress (Phase 1 PR #859) | **Owner**: Ragdoll Opus 4.6
 > **Issue**: [#839](https://github.com/zts212653/clowder-ai/issues/839)
-> **Feature ID**: pending reassignment (F226 collision with Presentation Surface / Demo Mode)
+> **Feature ID**: F237 (assigned by maintainer; branch/PR retain original naming)
 
 ## Why
 
@@ -87,10 +87,6 @@ Security model:
 ### 5. Compiled Preview
 
 Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat from a dimension selector.
-
-### 6. X1 Dead Code Removal
-
-Removed unused `buildReviewerSection` export from `SystemPromptBuilder.ts`.
 
 ## What's NOT in Phase 1
 

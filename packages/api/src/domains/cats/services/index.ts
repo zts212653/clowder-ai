@@ -29,6 +29,7 @@ export {
   buildInvocationContext,
   buildStaticIdentity,
   buildStaticIdentityPackOnly,
+  buildSystemPrompt,
 } from './context/SystemPromptBuilder.js';
 // Game engine (F101)
 export { GameEngine } from './game/GameEngine.js';

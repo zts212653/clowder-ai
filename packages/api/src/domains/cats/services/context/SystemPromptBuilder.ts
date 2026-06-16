@@ -916,13 +916,111 @@ export function buildInvocationContext(context: InvocationContext): string {
 }
 
 /**
+ * F032 Phase D2: Build reviewer section for system prompt.
+ * Shows available reviewers based on roster, filtered by family.
+ *
+ * Cloud Codex R5 P2 fix: When requireDifferentFamily is enabled but no cross-family
+ * reviewers are available, show same-family reviewers as fallback options to match
+ * the actual degradation behavior in resolveReviewer().
+ *
+ * Cloud Codex R6 P2 fix: Respect excludeUnavailable policy. When false, show
+ * unavailable cats as available to match resolveReviewer() behavior.
+ */
+export function buildReviewerSection(catId: CatId): string | null {
+  const roster = getRoster();
+  const policy = getReviewPolicy();
+
+  // If no roster configured, skip reviewer section
+  if (Object.keys(roster).length === 0) return null;
+
+  const currentEntry = roster[catId];
+  if (!currentEntry) return null;
+
+  // Collect reviewers in separate buckets
+  const crossFamily: string[] = [];
+  const sameFamily: string[] = [];
+  const unavailable: string[] = [];
+
+  for (const [id, entry] of Object.entries(roster)) {
+    // Skip self
+    if (id === catId) continue;
+    // Must have peer-reviewer role
+    if (!catHasRole(id, 'peer-reviewer')) continue;
+
+    const config = getConfig(id);
+    const displayName = config?.displayName ?? id;
+    const isLead = isCatLead(id);
+    const isDifferentFamily = entry.family !== currentEntry.family;
+
+    // Build description
+    const tags: string[] = [];
+    if (isDifferentFamily) tags.push(entry.family);
+    if (isLead) tags.push('lead');
+    const desc = tags.length > 0 ? ` (${tags.join(', ')})` : '';
+    const mention = `@${id}`;
+    const line = `- ${mention}${desc}`;
+
+    // Cloud Codex R6 P2 fix: Respect excludeUnavailable policy
+    // When excludeUnavailable=false, treat all cats as "effectively available"
+    const isEffectivelyAvailable = !policy.excludeUnavailable || isCatAvailable(id);
+
+    if (isEffectivelyAvailable) {
+      if (isDifferentFamily) {
+        crossFamily.push(line);
+      } else {
+        sameFamily.push(line);
+      }
+    } else {
+      unavailable.push(`- ${mention} (${displayName}, 没猫粮)`);
+    }
+  }
+
+  // Determine which reviewers to show as "available"
+  let available: string[];
+  let fallbackNote: string | null = null;
+
+  if (policy.requireDifferentFamily) {
+    if (crossFamily.length > 0) {
+      // Cross-family available, show them
+      available = crossFamily;
+    } else if (sameFamily.length > 0) {
+      // Cloud Codex R5 P2 fix: No cross-family, but same-family available as fallback
+      available = sameFamily;
+      fallbackNote = '[注意] 没有跨家族 reviewer 可用，以下同家族猫可作为 fallback：';
+    } else {
+      available = [];
+    }
+  } else {
+    // No family requirement, show all available
+    available = [...crossFamily, ...sameFamily];
+  }
+
+  // Don't generate section if no reviewers at all
+  if (available.length === 0 && unavailable.length === 0) return null;
+
+  const lines: string[] = ['## 你当前的 Reviewers', ''];
+  if (available.length > 0) {
+    if (fallbackNote) {
+      lines.push(fallbackNote);
+    } else {
+      lines.push('根据 roster 配置，你当前可以找以下猫 review：');
+    }
+    lines.push(...available);
+    lines.push('');
+  }
+  if (unavailable.length > 0) {
+    lines.push('[注意] 以下猫当前不可用：');
+    lines.push(...unavailable);
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Build identity system prompt for a cat invocation.
  * Backward-compatible: returns staticIdentity + invocationContext combined.
  * Pure function — same inputs always produce same output.
- *
- * Note: X1 (buildReviewerSection) removed in F226 Phase 1 —
- * reviewer list is now sourced from cat-config roster at runtime,
- * not baked into the system prompt.
  */
 export function buildSystemPrompt(context: InvocationContext): string {
   const staticPart = buildStaticIdentity(context.catId, {
@@ -932,6 +1030,10 @@ export function buildSystemPrompt(context: InvocationContext): string {
   if (!staticPart) return '';
 
   const parts: string[] = [staticPart];
+
+  // F032 Phase D2: Inject reviewer section if available
+  const reviewerSection = buildReviewerSection(context.catId);
+  if (reviewerSection) parts.push(reviewerSection);
 
   // Invocation-specific context
   const dynamicPart = buildInvocationContext(context);
