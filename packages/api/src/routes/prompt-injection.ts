@@ -10,10 +10,14 @@
  * DELETE /api/prompt-injection/segment/:id/override — reset to default
  */
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
+import {
+  requireCapabilityWriteOwner,
+  requireLocalCapabilityWriteRequest,
+} from '../config/capabilities/capability-write-guards.js';
 import {
   getOverrideStatus,
   getTemplateFileInfo,
@@ -23,7 +27,6 @@ import {
   TEMPLATES_DIR,
 } from '../domains/cats/services/context/prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from '../domains/cats/services/context/rich-block-rules.js';
-import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveHookContent } from './prompt-injection-hooks.js';
 
@@ -45,21 +48,22 @@ function resolveWriteUserId(request: import('fastify').FastifyRequest): string |
  *   Layer 1 — session auth (401 if missing)
  *   Layer 2 — owner gate (403 if DEFAULT_OWNER_USER_ID configured and mismatch)
  */
-function requireOverlayWriteAuth(
-  request: import('fastify').FastifyRequest,
-  reply: import('fastify').FastifyReply,
-): string | null {
+type OverlayWriteAuthResult = { ok: true; userId: string } | { ok: false; status: number; error: string };
+
+function requireOverlayWriteAuth(request: import('fastify').FastifyRequest): OverlayWriteAuthResult {
   const userId = resolveWriteUserId(request);
   if (!userId) {
-    reply.status(401);
-    return null;
+    return { ok: false, status: 401, error: 'Authentication required for overlay writes' };
   }
-  const ownerError = resolveOwnerGate(userId);
+  const localError = requireLocalCapabilityWriteRequest(request);
+  if (localError) {
+    return { ok: false, status: localError.status, error: localError.error };
+  }
+  const ownerError = requireCapabilityWriteOwner(userId, { allowMissingOwner: true });
   if (ownerError) {
-    reply.status(ownerError.status);
-    return null;
+    return { ok: false, status: ownerError.status, error: ownerError.error };
   }
-  return userId;
+  return { ok: true, userId };
 }
 
 /**
@@ -83,6 +87,34 @@ function validateYamlStringMapping(content: string): string | null {
     }
   }
   return null;
+}
+
+function removeIfExists(path: string): void {
+  if (existsSync(path)) unlinkSync(path);
+}
+
+function tmpPathFor(path: string): string {
+  return `${path}.${process.pid}.${process.hrtime.bigint()}.tmp`;
+}
+
+function atomicWriteFileSync(path: string, content: string): void {
+  const tmpPath = tmpPathFor(path);
+  try {
+    writeFileSync(tmpPath, content, 'utf-8');
+    renameSync(tmpPath, path);
+  } finally {
+    removeIfExists(tmpPath);
+  }
+}
+
+function atomicCopyFileSync(sourcePath: string, targetPath: string): void {
+  const tmpPath = tmpPathFor(targetPath);
+  try {
+    copyFileSync(sourcePath, tmpPath);
+    renameSync(tmpPath, targetPath);
+  } finally {
+    removeIfExists(tmpPath);
+  }
 }
 
 // ── Dynamic segment metadata (derived from TEMPLATE_FILES registry) ──
@@ -224,8 +256,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Params: { id: string }; Body: { content: string } }>(
     '/api/prompt-injection/segment/:id/override',
     async (request, reply) => {
-      if (!requireOverlayWriteAuth(request, reply)) {
-        return { error: 'Authentication required for overlay writes' };
+      const auth = requireOverlayWriteAuth(request);
+      if (!auth.ok) {
+        reply.status(auth.status);
+        return { error: auth.error };
       }
       const { id } = request.params;
       const meta = resolveSegmentMeta(id);
@@ -265,10 +299,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       // Backup existing .local to .local.bak
       if (existsSync(localPath)) {
         const bakPath = `${localPath}.bak`;
-        copyFileSync(localPath, bakPath);
+        atomicCopyFileSync(localPath, bakPath);
       }
 
-      writeFileSync(localPath, content, 'utf-8');
+      atomicWriteFileSync(localPath, content);
 
       return { segmentId: id, saved: true, path: fileInfo.local };
     },
@@ -279,8 +313,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
    * Remove .local overlay, reverting to default template.
    */
   app.delete<{ Params: { id: string } }>('/api/prompt-injection/segment/:id/override', async (request, reply) => {
-    if (!requireOverlayWriteAuth(request, reply)) {
-      return { error: 'Authentication required for overlay writes' };
+    const auth = requireOverlayWriteAuth(request);
+    if (!auth.ok) {
+      reply.status(auth.status);
+      return { error: auth.error };
     }
     const { id } = request.params;
     const meta = resolveSegmentMeta(id);
@@ -307,8 +343,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
    * Restore .local from .local.bak (one-click rollback to previous version).
    */
   app.post<{ Params: { id: string } }>('/api/prompt-injection/segment/:id/restore-backup', async (request, reply) => {
-    if (!requireOverlayWriteAuth(request, reply)) {
-      return { error: 'Authentication required for overlay writes' };
+    const auth = requireOverlayWriteAuth(request);
+    if (!auth.ok) {
+      reply.status(auth.status);
+      return { error: auth.error };
     }
     const { id } = request.params;
     const meta = resolveSegmentMeta(id);
@@ -342,7 +380,7 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const localPath = join(TEMPLATES_DIR, fileInfo.local);
-    copyFileSync(bakPath, localPath);
+    atomicCopyFileSync(bakPath, localPath);
     return { segmentId: id, restored: true };
   });
 };

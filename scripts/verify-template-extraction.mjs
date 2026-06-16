@@ -192,5 +192,7 @@ if (failures > 0) {
   console.error(`❌ ${failures} regression(s) found — template output differs from original`);
   process.exit(1);
 } else {
-  console.log('✅ All 4 templates produce identical output to original hardcoded constants');
+  console.log('✅ Byte-identical compatibility coverage: 4 templates verified (S6, S13, D8, D21)');
+  console.log('ℹ️ Additional extracted templates are not byte-compared against historical inline fixtures.');
+  console.log('   They are covered by manifest/source existence checks and runtime prompt tests.');
 }

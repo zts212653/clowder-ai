@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { getTemplateFileInfo, TEMPLATES_DIR } from '../dist/domains/cats/services/context/prompt-template-loader.js';
 import { promptInjectionRoutes } from '../dist/routes/prompt-injection.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
+const LOCAL_WRITE_HEADERS = {
+  host: '127.0.0.1:3002',
+  origin: 'http://127.0.0.1:3001',
+};
 
 /**
  * Focused test: YAML overlay endpoints must reject non-object YAML values.
@@ -36,6 +43,33 @@ describe('prompt-injection YAML validation', () => {
 
   // S6 is the YAML segment (workflow-triggers)
   const YAML_SEGMENT = 'S6';
+
+  function snapshotFile(path) {
+    return existsSync(path) ? readFileSync(path, 'utf-8') : null;
+  }
+
+  function restoreFile(path, content) {
+    if (content === null) {
+      if (existsSync(path)) unlinkSync(path);
+      return;
+    }
+    writeFileSync(path, content, 'utf-8');
+  }
+
+  async function withPreservedOverlay(segmentId, fn) {
+    const fileInfo = getTemplateFileInfo(segmentId);
+    assert.ok(fileInfo?.local, `${segmentId} should have a local overlay path`);
+    const localPath = join(TEMPLATES_DIR, fileInfo.local);
+    const bakPath = `${localPath}.bak`;
+    const localSnapshot = snapshotFile(localPath);
+    const bakSnapshot = snapshotFile(bakPath);
+    try {
+      await fn();
+    } finally {
+      restoreFile(localPath, localSnapshot);
+      restoreFile(bakPath, bakSnapshot);
+    }
+  }
 
   describe('POST /api/prompt-injection/segment/:id/preview', () => {
     it('rejects null YAML with 400', async () => {
@@ -135,6 +169,7 @@ describe('prompt-injection YAML validation', () => {
           const res = await app.inject({
             method: 'PUT',
             url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+            headers: LOCAL_WRITE_HEADERS,
             payload: { content: 'ragdoll: "valid"' },
           });
           assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}`);
@@ -149,12 +184,31 @@ describe('prompt-injection YAML validation', () => {
       }
     });
 
+    it('rejects session writes that do not come from direct localhost Hub access', async () => {
+      await withPreservedOverlay(YAML_SEGMENT, async () => {
+        const app = await buildSessionApp();
+        try {
+          const res = await app.inject({
+            method: 'PUT',
+            url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+            payload: { content: 'ragdoll: "valid"' },
+          });
+          assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}: ${res.body}`);
+          const body = JSON.parse(res.body);
+          assert.match(body.error, /localhost|loopback|local/i);
+        } finally {
+          await app.close();
+        }
+      });
+    });
+
     it('rejects null YAML with 400 (session auth)', async () => {
       const app = await buildSessionApp();
       try {
         const res = await app.inject({
           method: 'PUT',
           url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+          headers: LOCAL_WRITE_HEADERS,
           payload: { content: 'null' },
         });
         assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
@@ -172,6 +226,7 @@ describe('prompt-injection YAML validation', () => {
         const res = await app.inject({
           method: 'PUT',
           url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+          headers: LOCAL_WRITE_HEADERS,
           payload: { content: 'just a string' },
         });
         assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
@@ -180,6 +235,20 @@ describe('prompt-injection YAML validation', () => {
       } finally {
         await app.close();
       }
+    });
+  });
+
+  describe('overlay write durability', () => {
+    it('uses tmp+rename for overlay saves, backups, and restore-backup', () => {
+      const source = readFileSync(new URL('../src/routes/prompt-injection.ts', import.meta.url), 'utf-8');
+      assert.match(source, /renameSync/, 'overlay write route should use atomic rename');
+      assert.doesNotMatch(
+        source,
+        /writeFileSync\(localPath,\s*content/,
+        'overlay save must not write directly to localPath',
+      );
+      assert.doesNotMatch(source, /copyFileSync\(localPath,\s*bakPath/, 'backup must not copy directly to final .bak');
+      assert.doesNotMatch(source, /copyFileSync\(bakPath,\s*localPath/, 'restore must not copy directly to localPath');
     });
   });
 });

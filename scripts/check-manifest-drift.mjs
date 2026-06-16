@@ -19,6 +19,7 @@ import YAML from 'yaml';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const MANIFEST_PATH = join(ROOT, 'assets', 'prompt-injection-manifest.yaml');
+const TEMPLATE_LOADER_PATH = join(ROOT, 'packages/api/src/domains/cats/services/context/prompt-template-loader.ts');
 
 // ── 1. Load manifest ──────────────────────────────────────────
 
@@ -49,9 +50,10 @@ function extractSegmentIds(filePath) {
   if (!existsSync(filePath)) return [];
   const content = readFileSync(filePath, 'utf-8');
   const ids = [];
-  let match;
-  while ((match = SEGMENT_PATTERN.exec(content)) !== null) {
+  let match = SEGMENT_PATTERN.exec(content);
+  while (match !== null) {
     ids.push(match[1]);
+    match = SEGMENT_PATTERN.exec(content);
   }
   return ids;
 }
@@ -59,7 +61,7 @@ function extractSegmentIds(filePath) {
 // Gather unique source files from manifest
 const sourceFiles = new Set();
 for (const seg of manifest.segments) {
-  if (seg.source && seg.source.endsWith('.ts')) {
+  if (seg.source?.endsWith('.ts')) {
     sourceFiles.add(join(ROOT, seg.source));
   }
 }
@@ -74,6 +76,23 @@ for (const file of sourceFiles) {
     codeIds.add(id);
   }
 }
+
+// ── 3b. Extract template local-overlay registry from prompt-template-loader ──
+
+function extractTemplateFileInfo() {
+  if (!existsSync(TEMPLATE_LOADER_PATH)) return new Map();
+  const loaderSource = readFileSync(TEMPLATE_LOADER_PATH, 'utf-8');
+  const entries = new Map();
+  const pattern = /([A-Z]\d+(?:_[a-z]+)?)\s*:\s*\{\s*base:\s*['"]([^'"]+)['"]\s*,\s*local:\s*['"]([^'"]*)['"]\s*\}/g;
+  let match = pattern.exec(loaderSource);
+  while (match !== null) {
+    entries.set(match[1], { base: match[2], local: match[3] });
+    match = pattern.exec(loaderSource);
+  }
+  return entries;
+}
+
+const templateFileInfo = extractTemplateFileInfo();
 
 // ── 3. Compare ────────────────────────────────────────────────
 
@@ -127,6 +146,21 @@ for (const seg of manifest.segments) {
   if (seg.safetyTier === 'readonly' && seg.allowLocalOverride !== false) {
     errors.push(`SAFETY: segment ${seg.id} is readonly but allowLocalOverride is not false`);
   }
+  const loaderInfo = templateFileInfo.get(seg.id);
+  if (loaderInfo) {
+    const loaderAllowsLocalOverride = !!loaderInfo.local;
+    if (loaderAllowsLocalOverride !== !!seg.allowLocalOverride) {
+      errors.push(
+        `LOCAL-OVERRIDE-DRIFT: segment ${seg.id} loader local=${loaderAllowsLocalOverride} but manifest allowLocalOverride=${seg.allowLocalOverride}`,
+      );
+    }
+  }
+}
+
+for (const [id, info] of templateFileInfo.entries()) {
+  if (!id.includes('_') && info.local && !manifestIds.has(id)) {
+    errors.push(`LOCAL-OVERRIDE-DRIFT: loader segment ${id} has local overlay but is missing from manifest`);
+  }
 }
 
 // ── 5. Validate template source files exist ──────────────────
@@ -146,6 +180,7 @@ console.log(`F226 Manifest Drift Check`);
 console.log(`  Manifest segments: ${manifestIds.size} (${activeIds.size} active)`);
 console.log(`  Code annotations:  ${codeIds.size}`);
 console.log(`  .ts sources scanned: ${sourceFiles.size}`);
+console.log(`  Template registry: ${templateFileInfo.size}`);
 
 if (errors.length === 0) {
   console.log('\n  All aligned. No drift detected.');
