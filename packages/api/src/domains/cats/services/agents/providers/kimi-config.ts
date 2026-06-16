@@ -244,6 +244,97 @@ export function buildApiKeyEnv(model: string, callbackEnv?: Record<string, strin
   };
 }
 
+/**
+ * kimi-cli native credential file location (relative to user $HOME).
+ * Written by `kimi login`; contains access_token + refresh_token.
+ * kimi-cli auto-detects this file when no API key is in env.
+ */
+export const KIMI_NATIVE_CREDENTIAL_REL_PATH = '.kimi-code/credentials/kimi-code.json';
+
+export type KimiAuthKind = 'api_key' | 'oauth_token' | 'native';
+
+/**
+ * Env vars passed to the kimi-cli subprocess for the chosen auth path.
+ * `kind` lives outside this shape so callers can use it for branching logic.
+ */
+export interface KimiAuthEnv {
+  KIMI_API_KEY?: string;
+  KIMI_OAUTH_TOKEN?: string;
+  KIMI_BASE_URL: string;
+  KIMI_MODEL_NAME: string;
+  KIMI_MODEL_MAX_CONTEXT_SIZE: string;
+  KIMI_SHARE_DIR?: string;
+  /** Absolute path to kimi-code credential file (for native auth). */
+  KIMI_CREDENTIALS_FILE?: string;
+}
+
+export interface KimiAuthResult {
+  kind: KimiAuthKind;
+  env: KimiAuthEnv;
+}
+
+/**
+ * Build kimi-cli auth env using dual-path detection.
+ *
+ * Priority:
+ *   1. `CAT_CAFE_KIMI_API_KEY` in callbackEnv          → kind: 'api_key'
+ *   2. `CAT_CAFE_KIMI_OAUTH_TOKEN` in callbackEnv      → kind: 'oauth_token'
+ *   3. Native kimi-cli credential at
+ *      `${userHomeDir}/.kimi-code/credentials/kimi-code.json` → kind: 'native'
+ *   4. None of the above → returns null
+ *
+ * When returning null, the caller MUST fail with a clear hint
+ * rather than spawning kimi-cli without auth.
+ */
+export function buildKimiAuthEnv(
+  model: string,
+  callbackEnv?: Record<string, string>,
+  options?: { userHomeDir?: string },
+): KimiAuthResult | null {
+  const baseUrl = normalizeKimiApiBaseUrl(
+    callbackEnv?.CAT_CAFE_KIMI_BASE_URL || DEFAULT_KIMI_BASE_URL,
+  );
+  const configuredModelName = model.trim();
+  const common: Omit<KimiAuthEnv, 'KIMI_API_KEY' | 'KIMI_OAUTH_TOKEN' | 'KIMI_CREDENTIALS_FILE'> = {
+    KIMI_BASE_URL: baseUrl,
+    KIMI_MODEL_NAME: configuredModelName,
+    KIMI_MODEL_MAX_CONTEXT_SIZE: callbackEnv?.KIMI_MODEL_MAX_CONTEXT_SIZE || '262144',
+    ...(callbackEnv?.KIMI_SHARE_DIR ? { KIMI_SHARE_DIR: callbackEnv.KIMI_SHARE_DIR } : {}),
+    ...(callbackEnv?.KIMI_MODEL_CAPABILITIES
+      ? { KIMI_MODEL_CAPABILITIES: callbackEnv.KIMI_MODEL_CAPABILITIES }
+      : {}),
+  };
+
+  // Priority 1: explicit server-side stored API key
+  if (callbackEnv?.CAT_CAFE_KIMI_API_KEY) {
+    return {
+      kind: 'api_key',
+      env: { ...common, KIMI_API_KEY: callbackEnv.CAT_CAFE_KIMI_API_KEY },
+    };
+  }
+
+  // Priority 2: explicit OAuth token (server-side stored)
+  if (callbackEnv?.CAT_CAFE_KIMI_OAUTH_TOKEN) {
+    return {
+      kind: 'oauth_token',
+      env: { ...common, KIMI_OAUTH_TOKEN: callbackEnv.CAT_CAFE_KIMI_OAUTH_TOKEN },
+    };
+  }
+
+  // Priority 3: kimi-cli's native OAuth credential file
+  // (written by `kimi login`; contains access_token + refresh_token)
+  const home = options?.userHomeDir ?? homedir();
+  const credentialPath = join(home, KIMI_NATIVE_CREDENTIAL_REL_PATH);
+  if (existsSync(credentialPath)) {
+    return {
+      kind: 'native',
+      env: { ...common, KIMI_CREDENTIALS_FILE: credentialPath },
+    };
+  }
+
+  return null;
+}
+
 export function writeMcpConfigFile(
   workingDirectory: string,
   mcpServerPath: string,
