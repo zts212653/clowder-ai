@@ -14,7 +14,7 @@ created: 2026-02-26
 ## Why
 
 ## What
-- **F37**: 四猫 + team lead讨论 multi-agent 协同方式借鉴。8 个 feat 拆解（4.5 初版 + 4.6 补充 + team lead反馈）。追溯链：Feat 拆解（入口） → 会议纪要 → 调研报告。核心共识：Swarm 是阶段性工具（Research+Brainstorm），决策权漏斗模式，Mode 系统需从机械模板转向柔性引导。
+- **F37**: 四猫 + operator讨论 multi-agent 协同方式借鉴。8 个 feat 拆解（4.5 初版 + 4.6 补充 + operator反馈）。追溯链：Feat 拆解（入口） → 会议纪要 → 调研报告。核心共识：Swarm 是阶段性工具（Research+Brainstorm），决策权漏斗模式，Mode 系统需从机械模板转向柔性引导。
 
 ## Acceptance Criteria
 - [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。

@@ -107,7 +107,11 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* Cost + duration row */}
       <div className="flex items-center gap-2 text-micro">
         {usage.costUsd != null && (
-          <span className="text-conn-amber-text font-medium tabular-nums animate-cost-glow">
+          <span
+            className="text-conn-amber-text font-medium tabular-nums animate-cost-glow"
+            title={usage.costEstimated ? '估算值 (基于定价表)' : undefined}
+          >
+            {usage.costEstimated ? '~' : ''}
             {formatCost(usage.costUsd)}
           </span>
         )}

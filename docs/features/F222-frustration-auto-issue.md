@@ -19,7 +19,7 @@ Map delta: none（复用 F128 propose_thread pattern + F192 signal pipeline）
 
 用户遇到问题时（CLI 报错 / A2A 超时 / 猫反复给错答案），大部分人默默扛或放弃。这些负体验是最有价值的 eval 信号，但目前完全流失。
 
-team experience（2026-06-02）："比如用户很愤怒了，这种时候介入一下，独立通知，然后采集日志，生成本地的 issue 让用户预览，用户就可以一键提单。"
+operator experience（2026-06-02）："比如用户很愤怒了，这种时候介入一下，独立通知，然后采集日志，生成本地的 issue 让用户预览，用户就可以一键提单。"
 
 类似 F128 创建 thread，但触发条件是摩擦信号。
 
@@ -57,7 +57,7 @@ status: draft  # 用户预览后才提交
 ## Eval / Tracking Contract
 
 ### 1. Primary Users + Activation Signal
-- **Users**: team lead（问题报告者）+ 猫猫（接单修复者）
+- **Users**: operator（问题报告者）+ 猫猫（接单修复者）
 - **Activation**: 摩擦信号触发 → 弹 issue 预览卡
 
 ### 2. Friction Metric
@@ -85,7 +85,7 @@ status: draft  # 用户预览后才提交
 
 ### Phase B ✅
 - [x] AC-B1: 文本情绪触发 — 用户消息含摩擦关键词（"不对""错了""怎么回事""又来了"等）时触发 auto-issue
-- [x] AC-B2: routeParallel 摩擦检测接入（Phase A 云端 review P2→P3 遗留）
+- [x] AC-B2: routeParallel 摩擦检测接入（Phase A remote review P2→P3 遗留）
 - [x] AC-B3: 误触发防护 — 关键词匹配须结合上下文窗口（避免正常讨论中的"不对"触发）
 
 ### Phase C ✅
@@ -93,7 +93,7 @@ status: draft  # 用户预览后才提交
 - [x] AC-C2: 用户反复 retry 同一操作触发 — 相同消息连续发送 ≥3 次时触发
 - [x] AC-C3: Issue 列表 API — GET /api/frustration-issues（用户可查看自己的所有 issue）
 
-## Known Issues (2026-06-05 team lead反馈)
+## Known Issues (2026-06-05 operator反馈)
 
 ### ~~P1: 猫猫 A2A 传球时无用户操作也弹"操作中断"~~ ✅ Fixed (PR #2105)
 - **现象**：猫猫互相传球跑 review，用户完全没操作，弹出 frustration auto-issue 卡片
@@ -111,7 +111,7 @@ status: draft  # 用户预览后才提交
 
 ### ~~UX-3: "取消并反馈"一键投诉~~ ✅ Fixed (PR #2107 + follow-up)
 - **现象**：用户否决权限请求后想投诉，需等 cancel_burst 阈值（≥3 次 60s 内）才能触发 auto-issue
-- **team experience**："我直接！反馈！我投诉！"
+- **operator experience**："我直接！反馈！我投诉！"
 - **修复**：AuthorizationCard + hold-ball connector card 新增"取消并反馈"按钮，走 `user_report` 信号（无阈值，每次点击都生成独立 issue），dedup 豁免
 - **PR #2113 补强**：持球卡片 live 路径取消持球并反馈；历史/stale 持球卡片遇到 404 时 fallback 到 `POST /api/callbacks/hold-ball/feedback`，后端做 user auth + thread ownership 校验后仍生成 `user_report`，避免反馈静默丢失
 

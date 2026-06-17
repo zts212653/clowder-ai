@@ -23,7 +23,7 @@ export interface GenerateCapabilityWakeupLiveVerdictInput {
   trials: ClassifiedCapabilityWakeupTrial[];
   generatedAt?: string;
   generatorCommit?: string;
-  submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1 (a2a mirror): Phase H cat-mediated; undefined = CVO regen
+  submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1 (a2a mirror): Phase H cat-mediated; undefined = operator regen
 }
 
 export interface CapabilityWakeupLiveVerdictArtifact {

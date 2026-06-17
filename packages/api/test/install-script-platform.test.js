@@ -276,7 +276,7 @@ test('darwin brew shellenv persisted to login profile after recovery', () => {
   );
   assert.match(
     installScriptText,
-    /brew.*shellenv.*Homebrew.*added by Cat Cafe/,
+    /brew.*shellenv.*Homebrew.*added by Clowder AI/,
     'must persist brew shellenv eval line with attribution comment',
   );
 });

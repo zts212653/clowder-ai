@@ -2,7 +2,7 @@
 name: enterprise-workflow
 description: >
   企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
-  Use when: 铲屎官要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
+  Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
   Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
   Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
 triggers:
@@ -52,7 +52,7 @@ F162：通过厂商官方 CLI 驱动企业操作。
 
 ## 如何选平台
 
-| 铲屎官提到 | 用哪边 |
+| operator提到 | 用哪边 |
 |-----------|--------|
 | 企微 / wecom / 企业微信 / 腾讯 IM | **WeCom** (`/api/callbacks/wecom-action`) |
 | 飞书 / feishu / lark / 字节 IM | **Lark** (`/api/callbacks/lark-action`) |
@@ -214,8 +214,8 @@ Content-Type: application/json
 
 ## 取用户 ID
 
-- **WeCom**：如果不知道 `userId`，先让 Hub 查通讯录（走 TypeScript import，不走 callback）。demo 场景下用铲屎官自己的 userId。
-- **Lark**：`searchUsers` 需要 `contact:contact.search` 授权；没授权就优先拿已知 `open_id`，或铲屎官自己的。
+- **WeCom**：如果不知道 `userId`，先让 Hub 查通讯录（走 TypeScript import，不走 callback）。demo 场景下用operator自己的 userId。
+- **Lark**：`searchUsers` 需要 `contact:contact.search` 授权；没授权就优先拿已知 `open_id`，或operator自己的。
 
 ## 注意事项
 

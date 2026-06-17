@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RichCardBlock } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { CafeIcon } from './CafeIcons';
+import { CommunityPublishFlow } from './CommunityPublishFlow';
 
 interface FrustrationIssueCardProps {
   block: RichCardBlock;
@@ -24,12 +26,15 @@ type IssueStatus =
   | 'skipped'
   | 'reporting_false_positive'
   | 'false_positive'
+  | 'creating_draft'
+  | 'draft_created'
   | 'error';
 
 interface FrustrationIssueStatusResponse {
   issue?: {
     status?: 'draft' | 'confirmed' | 'skipped' | 'false_positive';
     userDescription?: string;
+    communityIssueDraftId?: string;
   };
 }
 
@@ -50,9 +55,20 @@ function extractIssueId(block: RichCardBlock): string | null {
   return (block.meta as { issueId?: string } | undefined)?.issueId ?? null;
 }
 
+/** F225 猫猫化: signalType 透传 → user_report 用 megaphone，其余用 search（CafeIcon SVG）。 */
+function frustrationIconName(block: RichCardBlock): string {
+  const signalType = (block.meta as { signalType?: string } | undefined)?.signalType;
+  return signalType === 'user_report' ? 'megaphone' : 'search';
+}
+
+/** 剥离历史消息 title 的 🔍/📢 emoji 前缀（后端已停止生成，兼容旧卡片）。 */
+function displayFrustrationTitle(title: string): string {
+  return title.replace(/^(?:📢|🔍)\s*/u, '');
+}
+
 /** Status badge label for resolved states. */
 function resolvedLabel(status: IssueStatus): string {
-  if (status === 'confirmed') return '已提交';
+  if (status === 'confirmed') return '已记录';
   if (status === 'false_positive') return '误报';
   return '已跳过';
 }
@@ -71,6 +87,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
   const [userDescription, setUserDescription] = useState('');
   const [collapsed, setCollapsed] = useState(false);
   const actionEpochRef = useRef(0);
+  // F235: draft ID restored from server (Iron Law #5 persistence recovery)
+  const [hydratedDraftId, setHydratedDraftId] = useState<string | null>(null);
 
   const isResolved = isResolvedIssueStatus(status);
 
@@ -95,6 +113,29 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         }
         if (typeof data.issue?.userDescription === 'string') {
           setUserDescription(data.issue.userDescription);
+        }
+        // F235: Restore community draft preview after refresh (Iron Law #5 recovery)
+        // Restore if draft is active (editable) or published (show GitHub link).
+        // Only skip cancelled/missing drafts — those allow creating a replacement.
+        // F235: Restore community draft preview after refresh (Iron Law #5 recovery).
+        // Verify draft is active (editable) or published (show GitHub link).
+        // Cancelled/missing drafts are skipped — user can create a replacement.
+        if (data.issue?.communityIssueDraftId && !hydratedDraftId) {
+          try {
+            const draftRes = await apiFetch(`/api/community-issue-drafts/${data.issue.communityIssueDraftId}`);
+            if (draftRes.ok) {
+              const draftData = (await draftRes.json()) as { draft?: { status?: string } };
+              const draftStatus = draftData.draft?.status;
+              if (draftStatus === 'draft' || draftStatus === 'published') {
+                setHydratedDraftId(data.issue.communityIssueDraftId);
+                if (nextStatus === 'confirmed') {
+                  setStatus('draft_created');
+                }
+              }
+            }
+          } catch {
+            // Draft verification failed — don't restore stale preview
+          }
         }
       } catch {
         // Status hydration is best-effort; keep the original draft UI if unavailable.
@@ -126,7 +167,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       setStatus('confirmed');
-      setCollapsed(true);
+      // Don't collapse — keep expanded so "Publish to Community" button is visible.
+      // Skip/false-positive still auto-collapse since they have no next action.
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
       setStatus((currentStatus) => (isResolvedIssueStatus(currentStatus) ? currentStatus : 'draft'));
@@ -183,8 +225,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         onClick={() => setCollapsed(false)}
         className="flex w-full items-center gap-2 rounded-lg border border-cafe/20 bg-cafe-surface/30 px-3 py-2 text-left text-sm transition hover:bg-cafe-surface/50"
       >
-        <span className="text-base">🔍</span>
-        <span className="flex-1 truncate text-cafe-muted">{block.title}</span>
+        <CafeIcon name={frustrationIconName(block)} className="h-4 w-4 shrink-0 text-cafe-muted" />
+        <span className="flex-1 truncate text-cafe-muted">{displayFrustrationTitle(block.title)}</span>
         <span className={`rounded px-2 py-0.5 text-xs ${resolvedBadgeClass(status)}`}>{resolvedLabel(status)}</span>
         <span className="text-xs text-cafe-muted/50">▸</span>
       </button>
@@ -197,8 +239,8 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
     >
       {/* Header */}
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-lg">🔍</span>
-        <span className="font-medium text-cafe-text">{block.title}</span>
+        <CafeIcon name={frustrationIconName(block)} className="h-[18px] w-[18px] shrink-0 text-amber-700" />
+        <span className="font-medium text-cafe-text">{displayFrustrationTitle(block.title)}</span>
         {isResolved && (
           <>
             <span className={`ml-auto rounded px-2 py-0.5 text-xs ${resolvedBadgeClass(status)}`}>
@@ -232,8 +274,18 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
         </div>
       )}
 
-      {/* Actions — only when draft */}
-      {!isResolved && (
+      {/* F235: Community publish flow (extracted to stay under 350-line limit) */}
+      {(status === 'confirmed' || status === 'creating_draft' || status === 'draft_created') && issueId && (
+        <CommunityPublishFlow
+          issueId={issueId}
+          status={status}
+          restoredDraftId={hydratedDraftId}
+          onStatusChange={setStatus}
+        />
+      )}
+
+      {/* Actions — only when draft (hidden during community publish flow) */}
+      {!isResolved && status !== 'creating_draft' && status !== 'draft_created' && (
         <div className="mt-3 space-y-2">
           {/* Description input */}
           <input
@@ -251,9 +303,10 @@ export function FrustrationIssueCard({ block }: FrustrationIssueCardProps) {
               type="button"
               onClick={handleConfirm}
               disabled={isActionInProgress}
+              title="记录到本地反馈池，供猫猫优先处理"
               className="rounded bg-cafe-accent px-3 py-1.5 text-xs font-medium text-white transition hover:bg-cafe-accent/80 disabled:opacity-50"
             >
-              {status === 'confirming' ? '提交中...' : '确认提交'}
+              {status === 'confirming' ? '记录中...' : '确认记录'}
             </button>
             <button
               type="button"

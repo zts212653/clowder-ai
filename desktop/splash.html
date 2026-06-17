@@ -38,7 +38,7 @@
   </div>
   <script>
     // Use the safe bridge exposed by preload.js (contextIsolation is enabled)
-    if (window.desktopBridge && window.desktopBridge.onStatus) {
+    if (window.desktopBridge?.onStatus) {
       window.desktopBridge.onStatus((msg) => {
         document.getElementById('status').textContent = msg;
       });

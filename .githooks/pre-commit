@@ -1,0 +1,212 @@
+#!/bin/bash
+# .githooks/pre-commit — Shared State File Guard
+#
+# 共享状态文件禁止在非 main 分支提交。
+# 规则来源：cat-cafe-skills/refs/shared-rules.md §14
+#
+# 共享状态文件清单（严格定义，不是整个 docs/features/）：
+#   - docs/BACKLOG.md
+#   - cat-config.json
+#
+# 注意：docs/features/F*.md 的 status/owner 字段变更也应在 main，
+# 但整个 feature doc 的 spec/AC/设计内容可以在 worktree 改。
+# 这里只拦截整文件级别的共享状态文件，字段级别靠 review 守护。
+#
+# 可被 --no-verify 绕过，所以需要 CI guard 兜底。
+
+BRANCH=$(git branch --show-current 2>/dev/null)
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+
+# ── Root Hygiene Guard (F214): 白名单制拦根目录新增文件（所有分支，含 main）──
+# 规则来源：shared-rules.md §20。白名单制（不是黑名单）：根目录新增的文件，除非匹配
+# 白名单，否则拒——这样能兜底拦下「未来未预料的垃圾类型」（spec Eval Contract Fixture 2）。
+# debris / 有状态存储优先拒（即使扩展名看起来合法，如 cookies.json）。
+# *.rdb* / *.sqlite* 与 clean-root-debris.sh / §20 同口径（覆盖 dump.rdb.backup-* 和
+# dump.rdb-backup 等同族名）。放在 main bypass 之前，对每个分支都生效。
+# ^[^/]+$ 只看根目录顶层新增文件，不碰子目录。
+ROOT_ADDED=$(git diff --cached --name-only --diff-filter=A | grep -E '^[^/]+$' || true)
+hygiene_debris=()
+hygiene_unknown=()
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  # debris / 有状态存储优先拒（pattern 匹配，不依赖 .gitignore；continue 后不落白名单）
+  case "$f" in
+    *.log|*.tmp|forzadata-*.txt|cookies.json) hygiene_debris+=("$f (无状态残留)"); continue ;;
+    *.rdb*|*.sqlite*) hygiene_debris+=("$f (有状态存储/圣域)"); continue ;;
+  esac
+  # secret/local 拒：被 .gitignore 标记却被 force-add (-f) 进来的（.env / .mcp.json /
+  # *.local 等）。本 hook 是 force-added root 文件的唯一 backstop，绝不放行 .gitignore
+  # 标记的 secret/local（云端 codex P1 round-2）。
+  # --no-index: force-add (-f) 已把文件放进 index，普通 check-ignore 会因"已 tracked"
+  # 而不报告；--no-index 检查 .gitignore 规则本身，正确识别 force-added 的 ignored 文件。
+  if git check-ignore --no-index -q "$f" 2>/dev/null; then
+    hygiene_debris+=("$f (.gitignore-marked secret/local — force-added)"); continue
+  fi
+  # 白名单 — 合法根文件。dotfile 用 enumerate known-safe（不用 .* catch-all，否则
+  # 会放行任意 secret dotfile 如 .env）。
+  case "$f" in
+    *.md|*.mdx|*.json|*.jsonc|*.yaml|*.yml|*.cjs|*.mjs|*.ts|*.js|*.toml|*.lock|*.example|LICENSE*|CODEOWNERS|requirements.txt|Dockerfile*|Makefile|.gitignore|.gitattributes|.npmrc|.editorconfig|.nvmrc|.node-version|.prettierrc*|.eslintrc*|.dependency-cruiser.cjs|.dir-exceptions.json) ;;
+    *) hygiene_unknown+=("$f") ;;
+  esac
+done <<< "$ROOT_ADDED"
+
+if [ ${#hygiene_debris[@]} -gt 0 ] || [ ${#hygiene_unknown[@]} -gt 0 ]; then
+  echo "" >&2
+  echo "🧹 根目录卫生守护 (F214): 根目录新增文件未通过白名单！" >&2
+  if [ ${#hygiene_debris[@]} -gt 0 ]; then
+    echo "已知 debris / 有状态存储（绝不 commit 到根目录）：" >&2
+    printf '  - %s\n' "${hygiene_debris[@]}" >&2
+  fi
+  if [ ${#hygiene_unknown[@]} -gt 0 ]; then
+    echo "非白名单文件（未预料类型；如确为合法，请加进 hook 白名单）：" >&2
+    printf '  - %s\n' "${hygiene_unknown[@]}" >&2
+  fi
+  echo "" >&2
+  echo "处理：无状态产物移到 tmp/ 或删除；*.rdb/*.sqlite 是核心存储绝不 commit；合法新类型加白名单。" >&2
+  echo "规则来源：shared-rules.md §20。绕过（确认合法时）：git commit --no-verify" >&2
+  exit 1
+fi
+
+# ── Partial Commit Guard: pre-commit Biome scans the working tree, not the index ──
+STAGED_FILES="$(git diff --cached --name-only || true)"
+UNSTAGED_FILES="$(git diff --name-only || true)"
+PARTIAL_OVERLAP="$(printf '%s\n' "$STAGED_FILES" | grep -Fxf <(printf '%s\n' "$UNSTAGED_FILES") || true)"
+if [ -n "$PARTIAL_OVERLAP" ]; then
+  echo "" >&2
+  echo "🚫 BIOME GUARD: staged/unstaged overlap detected — partial commit would bypass index validation." >&2
+  echo "重叠文件：" >&2
+  printf '  - %s\n' "$PARTIAL_OVERLAP" >&2
+  echo "" >&2
+  echo "处理：把这些文件完整 stage，或先 stash/还原未暂存改动后再 commit。" >&2
+  echo "原因：pre-commit 的 Biome 扫描读取 working tree；若 index 和 working tree 分叉，会出现假绿。" >&2
+  exit 1
+fi
+
+# ── Biome Guard: fail closed on stale local installs + full-repo error scan ──
+echo "" >&2
+echo "🧭 BIOME GUARD: verifying lockfile version + full-repo error scan..." >&2
+if ! (
+  cd "$REPO_ROOT" &&
+  pnpm run check:biome-version >&2 &&
+  pnpm exec biome check . --diagnostic-level=error >&2
+); then
+  echo "" >&2
+  echo "🚫 BIOME GUARD failed! Refresh the worktree install or fix the reported Biome errors." >&2
+  exit 1
+fi
+
+# ── Brand Guard: detect brand-protected staged files ──
+# F238 Phase C: dictionary-driven detection for brand-sensitive AND manual-port paths.
+# Runs on ALL branches including main — brand contamination must be caught everywhere.
+# The dictionary is the single source of truth — both classifications need guarding.
+# Legacy patterns not yet in the dictionary are kept as fallback.
+BRAND_PROTECTED_REGEX='^packages/web/src/app/layout\.tsx$|^packages/web/src/components/(SplitPaneView|ChatContainerHeader)\.tsx$|^packages/web/src/utils/api-client\.ts$|^packages/web/public/icons/'
+if [ -f "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" ]; then
+  # Fail-closed: smoke-test ALL subcommand categories we depend on. If any
+  # returns non-zero, empty, or garbage output, block the commit.
+  # Category 1: --classify-path (classification pipeline)
+  _SMOKE=$(node "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" --classify-path "assets/system-prompts/x" 2>/dev/null) || _SMOKE=""
+  _SMOKE_CLS=$(echo "$_SMOKE" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.classification)}catch{console.log('BROKEN')}" 2>/dev/null) || _SMOKE_CLS="BROKEN"
+  if [ "$_SMOKE_CLS" != "manual-port" ]; then
+    echo "" >&2
+    echo "🚫 BRAND GUARD: dictionary helper broken — fail-closed." >&2
+    echo "   --classify-path smoke-test returned '$_SMOKE_CLS' (expected manual-port)." >&2
+    exit 1
+  fi
+  # Category 2: --brand-sensitive-patterns / --manual-port-patterns (glob lists)
+  # Cross-validation: convert each pattern to regex (same glob-to-regex below) and
+  # verify at least one matches a known anchor path. This catches empty, garbage,
+  # path-like garbage — any output that doesn't actually match real dictionary paths.
+  # Anchor paths are hardcoded from the dictionary (defense-in-depth; helper unit tests
+  # verify the dictionary-to-output pipeline).
+  DICT_BS=$(node "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" --brand-sensitive-patterns 2>/dev/null) || DICT_BS=""
+  DICT_MP=$(node "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" --manual-port-patterns 2>/dev/null) || DICT_MP=""
+  # glob-to-regex helper (reused below for BRAND_PROTECTED_REGEX)
+  _glob_to_re() { echo "$1" | sed 's/\./\\./g; s/\*\*/__GLOBSTAR__/g; s/\*/[^\/]*/g; s/__GLOBSTAR__/.*/g'; }
+  # Cross-validate brand-sensitive patterns against THREE known anchors from different
+  # glob families. A correct-subset that includes some but drops others fails.
+  _BS_ANCHORS=("packages/web/public/manifest.json" "packages/web/public/icons/logo.png" "packages/web/public/concierge/skins/ragdoll-v1/pet.json")
+  for _anchor in "${_BS_ANCHORS[@]}"; do
+    _BS_HIT=""
+    while IFS= read -r pat; do
+      [ -z "$pat" ] && continue
+      if echo "$_anchor" | grep -qE "^$(_glob_to_re "$pat")$"; then
+        _BS_HIT="yes"; break
+      fi
+    done <<< "$DICT_BS"
+    if [ -z "$_BS_HIT" ]; then
+      echo "" >&2
+      echo "🚫 BRAND GUARD: dictionary helper broken — fail-closed." >&2
+      echo "   --brand-sensitive-patterns doesn't match anchor: $_anchor" >&2
+      exit 1
+    fi
+  done
+  # Cross-validate manual-port patterns against known anchor
+  _MP_MATCH=""
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    if echo "assets/system-prompts/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
+      _MP_MATCH="yes"; break
+    fi
+  done <<< "$DICT_MP"
+  if [ -z "$_MP_MATCH" ]; then
+    echo "" >&2
+    echo "🚫 BRAND GUARD: dictionary helper broken — fail-closed." >&2
+    echo "   --manual-port-patterns doesn't match known anchor (assets/system-prompts/test.md)." >&2
+    exit 1
+  fi
+  DICT_PATTERNS=$(printf '%s\n%s' "$DICT_BS" "$DICT_MP" | sort -u)
+  while IFS= read -r pat; do
+    [ -z "$pat" ] && continue
+    re=$(_glob_to_re "$pat")
+    BRAND_PROTECTED_REGEX="${BRAND_PROTECTED_REGEX}|^${re}$"
+  done <<< "$DICT_PATTERNS"
+fi
+BRAND_PROTECTED_STAGED=$(git diff --cached --name-only | grep -E "$BRAND_PROTECTED_REGEX" || true)
+
+if [ -n "$BRAND_PROTECTED_STAGED" ]; then
+  echo "" >&2
+  echo "🛡 BRAND GUARD: brand-protected files staged, running validation..." >&2
+  echo "$BRAND_PROTECTED_STAGED" | sed 's/^/  - /' >&2
+  echo "" >&2
+  if [ -f "scripts/intake-from-opensource.sh" ]; then
+    if ! bash scripts/intake-from-opensource.sh --validate-inbound --from-index >&2; then
+      echo "" >&2
+      echo "🚫 Brand Guard failed! Fix brand contamination before committing." >&2
+      echo "   See: bash scripts/intake-from-opensource.sh --validate-inbound" >&2
+      exit 1
+    fi
+  else
+    echo "⚠ Brand validation script not found, skipping guard." >&2
+  fi
+fi
+
+# main 分支：Brand Guard 已在上面对所有分支生效；仅跳过 Shared State Guard
+# （共享状态文件 SHOULD be committed on main）
+if [ "$BRANCH" = "main" ]; then
+  exit 0
+fi
+
+# 获取暂存区中的共享状态文件
+SHARED_STATE_FILES=$(git diff --cached --name-only | grep -E '^(docs/BACKLOG\.md|cat-config\.json)$')
+
+if [ -n "$SHARED_STATE_FILES" ]; then
+  echo "" >&2
+  echo "🚫 SHARED-STATE GUARD: 共享状态文件不能在非 main 分支提交！" >&2
+  echo "" >&2
+  echo "被拦截的文件：" >&2
+  echo "$SHARED_STATE_FILES" | sed 's/^/  - /' >&2
+  echo "" >&2
+  echo "正确做法：" >&2
+  echo "  1. git restore --staged $SHARED_STATE_FILES" >&2
+  echo "  2. 切到 main worktree（如已有：cd <main-worktree-path>）" >&2
+  echo "     或：git stash && git checkout main（如 main 未被其他 worktree 占用）" >&2
+  echo "  3. 在 main 上：git pull && 编辑 → git add → commit → push" >&2
+  echo "  4. 切回 feature 分支继续工作" >&2
+  echo "" >&2
+  echo "规则来源：shared-rules.md §14「共享状态文件只在 main 改」" >&2
+  echo "绕过方式：--no-verify（但 CI 会再拦一次）" >&2
+  exit 1
+fi
+
+exit 0

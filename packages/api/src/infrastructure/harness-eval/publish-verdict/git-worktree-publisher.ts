@@ -111,7 +111,7 @@ export function createGitWorktreePublisher(deps: GitWorktreePublisherDeps): GitP
         const standardLabelMeta: Record<string, { color: string; description: string }> = {
           'evidence-only': {
             color: '0E8A16',
-            description: 'F192 auto-verdict artifact PR — cat-owned merge per SOP, not CVO',
+            description: 'F192 auto-verdict artifact PR — cat-owned merge per SOP, not operator',
           },
           'no-action-needed': {
             color: 'C5DEF5',

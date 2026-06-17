@@ -22,19 +22,19 @@ created: 2026-03-26
 
 ## Why
 
-team experience（2026-03-26 thread `F140 讨论`）：
+operator experience（2026-03-26 thread `F140 讨论`）：
 
 > "你看之前的猫猫是如何知道什么时候要挂PR，什么时候要挂CICD的...有的应该是你们主动注册关注哪个 PR 或者 issue 但是有的又是怎么样的？被通知吗？还是都是要主动注册？"
 
 Maine Coon分析（GPT-5.4）：
 
-> "基本靠team lead/maintainer 人肉发现，再把球传给我们...当前最大缺口不是 tracked PR 的后续信号，而是我们根本不知道仓库里来了一个新的外部 PR / Issue"
+> "基本靠operator/maintainer 人肉发现，再把球传给我们...当前最大缺口不是 tracked PR 的后续信号，而是我们根本不知道仓库里来了一个新的外部 PR / Issue"
 
 **现状 Gap**：
 - F133/F140 解决的是"已注册 PR 后续发生了什么"（追踪层）
 - 但 maintainer 最痛的是"有个新东西出现了，系统完全没感知"（发现层）
 - 社区 contributor 不用 Cat Café，不会调 `register_pr_tracking`
-- 新 PR / 新 Issue 全靠team lead人肉当 webhook
+- 新 PR / 新 Issue 全靠operator人肉当 webhook
 
 ## What
 
@@ -152,9 +152,9 @@ GitHub webhook POST → /api/connectors/github-repo-event/webhook
 | KD-1 | Webhook 做主发现入口，定时扫描只做补偿 | 零延迟、精确、省 API 额度；扫描适合已知对象状态轮询，不适合新事件发现 | 2026-03-26 |
 | KD-2 | 复用通用 webhook 端点传输层，不复用 chat connector 语义 | GitHub 不是 chat connector，repo 事件需先进 inbox 再路由，与 Feishu/Telegram 绑定模型不同 | 2026-03-26 |
 | KD-3 | Issue discovery 和 PR discovery 在同一个 Repo Inbox | 都是"仓库新事件"，统一发现层 | 2026-03-26 |
-| KD-4 | 独立立项不合并进 F140 | F140 = 追踪层（已注册 PR 信号），F141 = 发现层（新事件感知），不同抽象层级；team lead确认分开立项 | 2026-03-26 |
+| KD-4 | 独立立项不合并进 F140 | F140 = 追踪层（已注册 PR 信号），F141 = 发现层（新事件感知），不同抽象层级；operator确认分开立项 | 2026-03-26 |
 | KD-5 | 投递走 deliverConnectorMessage() 统一消息管线 | 与 F133/F140 体验一致，复用基础设施 | 2026-03-26 |
-| KD-6 | 主人翁五问 Gate 作为 triage 质量门禁 | team lead明确指出猫猫默认倾向接纳是大问题；fail-closed 设计对冲接纳偏向 | 2026-03-26 |
+| KD-6 | 主人翁五问 Gate 作为 triage 质量门禁 | operator明确指出猫猫默认倾向接纳是大问题；fail-closed 设计对冲接纳偏向 | 2026-03-26 |
 | KD-7 | Fail-closed 默认：无证据 = 不通过，unknown 不能进 WELCOME | 三猫讨论共识，防止形式主义打勾 | 2026-03-26 |
 | KD-8 | Scene B Merge Gate 重排：方向(五问) 在质量之前 | 家规 P3"方向正确 > 速度"——方向错的 PR 不值得花时间审代码 | 2026-03-26 |
 | KD-9 | 拒绝"方案"不否定"问题"：decline PR ≠ 否定底层问题 | 社区温度 + 问题仍挂 design anchor 追踪 | 2026-03-26 |

@@ -167,7 +167,7 @@ export const signalUpdateArticleInputSchema = {
   id: z.string().min(1).describe('Article ID'),
   status: z.enum(['inbox', 'read', 'archived', 'starred']).optional().describe('New status'),
   tags: z.array(z.string()).optional().describe('Replace tags'),
-  note: z.string().optional().describe('铲屎官个人备注'),
+  note: z.string().optional().describe('co-creator个人备注'),
 };
 
 export const signalDeleteArticleInputSchema = {
@@ -209,14 +209,14 @@ export const signalStudyTools = [
     description:
       'Update article fields: status, tags, or note. Use for managing articles from chat. ' +
       'STATUS VALUES: inbox (unread), read, starred (important), archived (done). ' +
-      'TIP: Use tags for categorization (e.g. ["ai", "infrastructure"]) and note for 铲屎官 personal remarks.',
+      'TIP: Use tags for categorization (e.g. ["ai", "infrastructure"]) and note for co-creator personal remarks.',
     inputSchema: signalUpdateArticleInputSchema,
     handler: handleUpdateArticle,
   },
   {
     name: 'signal_delete_article',
     description:
-      'Soft-delete one or more articles. Use when 铲屎官 wants to clean up garbage or irrelevant signals. ' +
+      'Soft-delete one or more articles. Use when co-creator wants to clean up garbage or irrelevant signals. ' +
       'Accepts multiple IDs for batch deletion. Articles are soft-deleted (recoverable).',
     inputSchema: signalDeleteArticleInputSchema,
     handler: handleDeleteArticle,

@@ -61,7 +61,13 @@ export function MetadataBadge({ metadata }: MetadataBadgeProps) {
           {usage.costUsd != null && (
             <>
               <span className="text-cafe-muted"> · </span>
-              <span className="text-conn-amber-text animate-cost-glow tabular-nums">{formatCost(usage.costUsd)}</span>
+              <span
+                className="text-conn-amber-text animate-cost-glow tabular-nums"
+                title={usage.costEstimated ? '估算值 (基于定价表)' : undefined}
+              >
+                {usage.costEstimated ? '~' : ''}
+                {formatCost(usage.costUsd)}
+              </span>
             </>
           )}
         </span>

@@ -1041,6 +1041,6 @@ describe('assembleIncrementalContext — system error exclusion', () => {
 
     const result = await assembleIncrementalContext(deps, 'user-1', 'thread-1', 'codex', {});
     assert.ok(!result.contextText.includes('stream_idle_stall'), 'system error should NOT enter incremental context');
-    assert.ok(!result.contextText.includes('铲屎官] Error:'), 'system error must not appear as 铲屎官 message');
+    assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator message');
   });
 });

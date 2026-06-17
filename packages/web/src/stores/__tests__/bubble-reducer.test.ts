@@ -2105,7 +2105,7 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
     expect(textAfter?.toolEvents?.[0]).toEqual(toolEvent);
   });
 
-  // F183 follow-up (R2/R4/R5 close blocker, 2026-05-02): 铲屎官 报告
+  // F183 follow-up (R2/R4/R5 close blocker, 2026-05-02): co-creator 报告
   // A→B→A 模式下第二个 A 的回复会"滑到第一个 A 的折叠里"。砚砚 R1 怀疑
   // store 层 invocation binding 错（或 UI sort/collapse 错）。用 RED probe
   // 先把 store 层钉死：reducer 应该按 (catId, invocationId, bubbleKind)
@@ -2281,7 +2281,7 @@ describe('F183 Phase B1 — BubbleReducer core', () => {
 
   // F194 Phase Z5 AC-Z14: live reconcile — empty assistant_text placeholder
   // 应该被同 turn 不同 kind 的 event 吸收，避免 helper-created placeholder + reducer-created
-  // kind-specific bubble 共存。铲屎官 alpha catch 2026-05-10: 同 turn thinking + tool_use + text
+  // kind-specific bubble 共存。co-creator alpha catch 2026-05-10: 同 turn thinking + tool_use + text
   // 链下 live UI 出现 2 个 bubble (assistant_text 容器 + tool_or_cli 容器)。
   describe('F194 Phase Z5 AC-Z14: empty placeholder absorbed by other-kind events (live reconcile)', () => {
     it('AC-Z14: tool_event absorbs empty assistant_text placeholder (no new bubble)', () => {

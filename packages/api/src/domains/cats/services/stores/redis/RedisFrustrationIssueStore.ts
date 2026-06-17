@@ -66,6 +66,7 @@ function hydrate(fields: Record<string, string>): FrustrationIssue | null {
     ...(fields.invocationId ? { invocationId: fields.invocationId } : {}),
     ...(fields.userDescription ? { userDescription: fields.userDescription } : {}),
     ...(fields.cardMessageId ? { cardMessageId: fields.cardMessageId } : {}),
+    ...(fields.communityIssueDraftId ? { communityIssueDraftId: fields.communityIssueDraftId } : {}),
     ...(fields.confirmedAt ? { confirmedAt: Number(fields.confirmedAt) } : {}),
     ...(fields.skippedAt ? { skippedAt: Number(fields.skippedAt) } : {}),
     ...(fields.falsePositiveAt ? { falsePositiveAt: Number(fields.falsePositiveAt) } : {}),
@@ -151,6 +152,10 @@ export class RedisFrustrationIssueStore implements IFrustrationIssueStore {
 
   async setCardMessageId(issueId: string, cardMessageId: string): Promise<void> {
     await this.redis.hset(FrustrationIssueKeys.detail(issueId), 'cardMessageId', cardMessageId);
+  }
+
+  async setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void> {
+    await this.redis.hset(FrustrationIssueKeys.detail(issueId), 'communityIssueDraftId', draftId);
   }
 
   async listByThread(threadId: string): Promise<FrustrationIssue[]> {

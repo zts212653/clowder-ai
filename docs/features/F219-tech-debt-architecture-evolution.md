@@ -10,11 +10,11 @@ created: 2026-06-02
 
 > **Status**: spec | **Owner**: Ragdoll（Ragdoll/Opus-4.8）| **Priority**: P1
 >
-> **CVO signoff**：team lead 2026-06-02 04:45 UTC 明确立项 "f219 这个立项哦"，scope = 聚焦核心引擎债（不贪全量），routeSerial 走快线打头。立项前讨论见 Links 讨论草案。
+> **operator signoff**：operator 2026-06-02 04:45 UTC 明确立项 "f219 这个立项哦"，scope = 聚焦核心引擎债（不贪全量），routeSerial 走快线打头。立项前讨论见 Links 讨论草案。
 
 ## Why
 
-### 触发（team experience）
+### 触发（operator experience）
 
 > "我们之后得解决这个债务……不只是 routeSerial 执行流，而是一个 feat 去盘点都有什么恐怖的技术债务，然后分 phase 评估如何去架构演进。"（2026-06-02 03:16）
 >
@@ -38,7 +38,7 @@ routeSerial 实测现状（`route-serial.ts`，2026-06-02 核实）：
 
 ### 元教训：F216 立项愿景 vs 实际交付的分叉（本 feat 要根治的系统性问题）
 
-F216 是从 F215 thread handoff 立项的。team lead诊断根因：
+F216 是从 F215 thread handoff 立项的。operator诊断根因：
 
 > "立项当时是 F215 还是哪里立项交接过来，导致你们这里可能失去了上下文，所以新的立项你们要好好写清楚愿景。"
 
@@ -50,7 +50,7 @@ F216 doc 的 Why 写的是"降 complexity"，但 scope/AC 实际落地成"修 bu
 
 ## What
 
-### Scope 边界（CVO 2026-06-02 拍定 — 必读）
+### Scope 边界（operator 2026-06-02 拍定 — 必读）
 
 | | 内容 |
 |---|------|
@@ -78,7 +78,7 @@ F216 doc 的 Why 写的是"降 complexity"，但 scope/AC 实际落地成"修 bu
 
 ### routeSerial 快线（pilot，与 Phase A 并行，不等全量盘点）
 
-CVO 拍定：routeSerial 证据已齐（F215/F216 两 feat 验证），不等盘点 Phase A 完成。它单独走快线，作为 F219 的演进 pilot——既最快止血最痛的债，也为 Phase B 的演进方法论打样。下一步是 routeSerial 本体**状态机化**（state enum + transition table，即 F216 评估为"属于瘦身技术债"的 AC-C1），而非从零拆（F216 已完成决策/执行分离，是"动了一半"不是"原地")。
+operator 拍定：routeSerial 证据已齐（F215/F216 两 feat 验证），不等盘点 Phase A 完成。它单独走快线，作为 F219 的演进 pilot——既最快止血最痛的债，也为 Phase B 的演进方法论打样。下一步是 routeSerial 本体**状态机化**（state enum + transition table，即 F216 评估为"属于瘦身技术债"的 AC-C1），而非从零拆（F216 已完成决策/执行分离，是"动了一半"不是"原地")。
 
 ### Phase C+: 按优先级逐个演进
 
@@ -118,12 +118,12 @@ CVO 拍定：routeSerial 证据已齐（F215/F216 两 feat 验证），不等盘
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | scope 聚焦核心引擎债，不贪"全部技术债"全量盘点 | 全量 meta-feat 愿景过大→自我分叉，重蹈 F216；聚焦能更快出价值 | 2026-06-02（CVO signoff） |
-| KD-2 | routeSerial 走快线 pilot，不等全量盘点 Phase A | F215+F216 已验证其脆弱，证据齐；每天还在核心路径产 bug，不能等 | 2026-06-02（CVO signoff） |
-| KD-3 | "立项愿景纪律"SOP 改进从 F219 解耦，owner 单独走（✅ 已落地 PR #2034） | 软流程目标塞进工程 feat 必被稀释→又一次愿景分叉（正是本 feat 要治的病） | 2026-06-02（CVO signoff "对齐了"） |
+| KD-1 | scope 聚焦核心引擎债，不贪"全部技术债"全量盘点 | 全量 meta-feat 愿景过大→自我分叉，重蹈 F216；聚焦能更快出价值 | 2026-06-02（operator signoff） |
+| KD-2 | routeSerial 走快线 pilot，不等全量盘点 Phase A | F215+F216 已验证其脆弱，证据齐；每天还在核心路径产 bug，不能等 | 2026-06-02（operator signoff） |
+| KD-3 | "立项愿景纪律"SOP 改进从 F219 解耦，owner 单独走（✅ 已落地 PR #2034） | 软流程目标塞进工程 feat 必被稀释→又一次愿景分叉（正是本 feat 要治的病） | 2026-06-02（operator signoff "对齐了"） |
 | KD-4 | **F23 dir-size Phase 2 拆分协调裁决**：F23 本周可全拆 5 目录（含 `invocation/`），不必等 F219 Phase A 1-2 周 | 唯一真**文件级**冲突点是 `invocation/`（F23 移文件 vs F219 改 QueueProcessor 内容，同一批文件）；`routes/`(147) 是 HTTP handler 层、与 F219 service 层（`routing/`+`invocation/`）正交——callback handler 运行时调 dispatch service 属**调用耦合非文件冲突**，F219 不碰 `routes/` 目录。F23 拆分（移文件+改 import，位置重组）与 F219 重构（改 service 内容/降 complexity，纵向）正交；invocation/ sub-dir 边界（queue/registry/progress…）是好 cell 划分，F219 纵向重构不推翻。F219 本周写操作以 `route-serial.ts` 为主 + Phase A 只读盘点，若快线需触碰 invocation/ 文件提前同步 4.7 错峰。撤回 F23 doc"等 Phase A 06-22"协议（同 4.7 撤回"每周一个"的过度保守，徒增 06-30 deadline 撞墙风险）。低概率 Phase A 若发现 invocation/ 需模块级重组，F219 owner 担责届时协调 | 2026-06-02 |
 
 ## Review Gate
 
 - Phase A: 盘点登记册经 ≥1 只非 owner 猫 review（AC-A3）
-- routeSerial 快线: 跨族 review（Maine Coon优先）+ 云端 review + 真实 runtime 愿景守护（LL-064）
+- routeSerial 快线: 跨族 review（Maine Coon优先）+ remote review + 真实 runtime 愿景守护（LL-064）

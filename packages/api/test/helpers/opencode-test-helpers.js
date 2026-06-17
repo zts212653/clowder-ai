@@ -68,7 +68,7 @@ export async function collect(iterable) {
   return messages;
 }
 
-// ── Cat Cafe identifiers ──
+// ── Clowder AI identifiers ──
 
 export const CAT_CAFE_HANDLES = ['@opus', '@codex', '@gemini', '@sonnet', '@gpt52', '@opencode'];
 export const CAT_CAFE_CAT_IDS = ['opus', 'codex', 'gemini', 'sonnet', 'gpt52'];

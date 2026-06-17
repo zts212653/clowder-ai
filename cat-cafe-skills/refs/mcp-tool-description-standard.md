@@ -93,4 +93,4 @@ return errorResult('Invalid format "xlsx". Expected one of: pdf, docx, md. Examp
 - Maine Coon《知识工程实践指南》：*(internal reference removed)*
 - Anthropic Skills Best Practices：`cat-cafe-skills/writing-skills/anthropic-best-practices.md`
 - MCP 官方规范：`https://modelcontextprotocol.io/specification`
-- 金渐层 MCP description 优化审查：thread `thread_mn1u0ygkt76bzxks`
+- 金渐层 MCP description 优化审查：thread `[thread-id]`

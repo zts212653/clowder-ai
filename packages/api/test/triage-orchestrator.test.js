@@ -194,4 +194,25 @@ describe('TriageOrchestrator', () => {
     const patch = issueStore.update.mock.calls[0].arguments[1];
     assert.equal(patch.relatedFeature, 'F042');
   });
+
+  // F168 Phase C C0.1 (INV-7): threadStore 接线缺失（生产 bug 场景）时 routeAccepted
+  // Path 2（无 relatedFeature → 新建 thread）必须 fail-loud，不能静默 return 让 issue
+  // 永远不被路由。narrator 推荐新建 thread 强依赖此路径。
+  test('routeAccepted Path 2 fails loud when threadStore is not wired', async () => {
+    const noThreadStore = new TriageOrchestrator({ communityIssueStore: issueStore });
+    await assert.rejects(
+      () => noThreadStore.routeAccepted('ci_1', null, 'user_1'),
+      /threadStore/,
+      'routeAccepted Path 2 must throw when threadStore is missing, not silently return',
+    );
+  });
+
+  // F168 Phase C C0.1: relatedFeature 路径不依赖 threadStore（不应受 fail-loud 影响）。
+  test('routeAccepted with relatedFeature does not require threadStore', async () => {
+    const noThreadStore = new TriageOrchestrator({ communityIssueStore: issueStore });
+    await noThreadStore.routeAccepted('ci_1', 'F056', 'user_1', 'thread_f056');
+    const patch = issueStore.update.mock.calls[0].arguments[1];
+    assert.equal(patch.state, 'accepted');
+    assert.equal(patch.assignedThreadId, 'thread_f056');
+  });
 });

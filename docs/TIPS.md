@@ -42,7 +42,7 @@ Common mentions:
 
 ## 3. @owner / @co-worker — Your Cat Needs You
 
-When a cat writes `@owner` or `@co-worker`, it's escalating a decision to you — the CVO (Chief Vision Officer). This means the cat has hit something it can't decide on its own: priorities, architecture direction, product intent, or a go/no-go call.
+When a cat writes `@owner` or `@co-worker`, it's escalating a decision to you — the operator (Chief Vision Officer). This means the cat has hit something it can't decide on its own: priorities, architecture direction, product intent, or a go/no-go call.
 
 ## 4. Chat Platform Commands
 
@@ -77,7 +77,7 @@ Working out? Commuting? Turn on Voice Companion from the header and talk to your
 - Replies auto-play in sequence — no tapping needed
 - Push-to-talk input via speech-to-text
 
-## 7. CVO Bootcamp — Guided Onboarding
+## 7. operator Bootcamp — Guided Onboarding
 
 First time here? Start a new thread and your AI team will walk you through a complete feature lifecycle — from expressing your vision to shipped code. No prior experience needed.
 
@@ -160,7 +160,7 @@ Your cats remember past decisions, discussion conclusions, and lessons learned a
 - 回复自动排队播放，不用点
 - 按住说话输入（语音转文字）
 
-## 7. CVO 训练营 — 新手引导
+## 7. operator 训练营 — 新手引导
 
 第一次来？开个新对话，AI 团队会亲自带你走完一个完整的 feature 生命周期 — 从表达愿景到代码上线。不需要任何经验。
 

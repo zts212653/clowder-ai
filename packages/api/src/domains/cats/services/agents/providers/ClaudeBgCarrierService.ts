@@ -219,7 +219,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // explicitly strip CLAUDE_CODE_ENTRYPOINT. Otherwise transcript entrypoint
       // becomes sdk-cli regardless of flag. See F198 spike commit 8c5da78c7.
       //
-      // F198 refactor (CVO directive 2026-05-14): delegate env construction
+      // F198 refactor (operator directive 2026-05-14): delegate env construction
       // to the shared `buildClaudeEnvOverrides` helper (exported from
       // ClaudeAgentService) instead of re-implementing 80% of subscription/
       // ENTRYPOINT/Anthropic-clearing rules. Coordinate-system fix for the
@@ -296,7 +296,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // ClaudeBgCarrierService ('--bg' carrier) was missing this flag → the
       // daemon-spawned claude process reverted to default permission mode →
       // every tool call prompted inside the detached daemon TTY (invisible
-      // from web UI) → invocations hung. Realized when 铲屎官 flipped
+      // from web UI) → invocations hung. Realized when co-creator flipped
       // CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫 cats stalled
       // on first Bash call. Parity-keep with ClaudeAgentService PERMISSION_MODE.
       args.push('--permission-mode', 'bypassPermissions');

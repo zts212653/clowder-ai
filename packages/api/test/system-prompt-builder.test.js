@@ -12,7 +12,7 @@ import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 6500;
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 6700; // 6500→6700: gemini35 standalone breed adds ~78 chars to roster
 
 function assertWithinFullRuntimePromptBudget(prompt) {
   assert.ok(
@@ -106,11 +106,11 @@ describe('SystemPromptBuilder', () => {
     // Dynamic teammate listing absent, but static collaboration guide still present
     assert.ok(!prompt.includes('你的队友'));
     assert.ok(prompt.includes('@队友'));
-    // Still mentions 铲屎官
-    assert.ok(prompt.includes('铲屎官'));
+    // Still mentions co-creator
+    assert.ok(prompt.includes('co-creator'));
   });
 
-  test('contains 铲屎官 reference', async () => {
+  test('contains co-creator reference', async () => {
     const build = await getBuilder();
     const prompt = build({
       catId: 'opus',
@@ -118,7 +118,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(prompt.includes('铲屎官'));
+    assert.ok(prompt.includes('co-creator'));
   });
 
   test('contains serial chain context when mode is serial', async () => {
@@ -448,7 +448,7 @@ describe('SystemPromptBuilder', () => {
   // user-message systemPrompt must carry ONLY F129 pack blocks (per-invocation
   // dynamic, external-project-specific) — never the non-pack identity/家规
   // (now compression-immune in the native system prompt). This is the precise
-  // de-dup the CVO asked for ("接通之后再删重复").
+  // de-dup the operator asked for ("接通之后再删重复").
 
   const PACK_FIXTURE = {
     packName: 'test-pack',
@@ -997,7 +997,7 @@ describe('SystemPromptBuilder', () => {
     // 2. external condition
     assert.match(ctx, /2\..*外部条件|hold_ball/, 'option 2 = external wait via hold_ball');
     // 3. only co-creator (three hard conditions)
-    assert.match(ctx, /3\..*铲屎官|@co-creator|@co-creator/, 'option 3 = co-creator reserved for hard conditions');
+    assert.match(ctx, /3\..*co-creator|@co-creator|@co-creator/, 'option 3 = co-creator reserved for hard conditions');
   });
 
   test('F167-L AC-L2: trailing anchor option 2 distinguishes polling (2a) vs event-driven (2b) modes', async () => {
@@ -1123,8 +1123,8 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!ctx.includes('## 协作'), 'Should not contain collaboration guide');
     // MCP tools moved to static identity (session-level, not per-message)
     assert.ok(!ctx.includes('cat_cafe_post_message'), 'MCP tools should be in static identity, not invocation context');
-    // 铲屎官 reference also moved to static identity
-    assert.ok(!ctx.includes('铲屎官是真人用户'), '铲屎官 reference should be in static identity');
+    // co-creator reference also moved to static identity
+    assert.ok(!ctx.includes('co-creator是真人用户'), 'co-creator reference should be in static identity');
   });
 
   test('buildStaticIdentity includes MCP tools when mcpAvailable', async () => {
@@ -1150,10 +1150,10 @@ describe('SystemPromptBuilder', () => {
     assert.ok(!identity.includes('HTTP 回调'), 'Codex should not have callback instructions in static identity');
   });
 
-  test('buildStaticIdentity includes 铲屎官 reference', async () => {
+  test('buildStaticIdentity includes co-creator reference', async () => {
     const { buildStaticIdentity } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const identity = buildStaticIdentity('opus');
-    assert.ok(identity.includes('铲屎官'), 'Should contain 铲屎官 reference in static identity');
+    assert.ok(identity.includes('co-creator'), 'Should contain co-creator reference in static identity');
   });
 
   test('buildStaticIdentity includes configured co-creator name and mention handles', async () => {
@@ -1162,11 +1162,14 @@ describe('SystemPromptBuilder', () => {
     // Config resolution: cat-template.json (base) + .cat-cafe/cat-catalog.json (overlay).
     // Template has coCreator.name="You", catalog may override to deployment-specific name.
     // Test structural invariants that hold regardless of deployment config:
-    assert.ok(identity.includes('铲屎官'), 'Should include 铲屎官 (always in CVO line)');
+    assert.ok(identity.includes('co-creator'), 'Should include co-creator (always in operator line)');
     assert.ok(identity.includes('行首'), 'Should teach line-start rule for owner mentions');
-    // CVO line: "{name}（铲屎官/CVO）…行首写 `@handle` / `@handle2`。"
+    // operator line: "{name}（co-creator/operator）…行首写 `@handle` / `@handle2`。"
     assert.ok(/重要决策由.+拍板/.test(identity), 'Should include decision authority line');
-    assert.ok(/行首写\s+`@\S+`/.test(identity), 'CVO line should contain backtick-wrapped mention handle after 行首写');
+    assert.ok(
+      /行首写\s+`@\S+`/.test(identity),
+      'operator line should contain backtick-wrapped mention handle after 行首写',
+    );
   });
 
   // F032 Phase D2: Reviewer section tests
@@ -1710,8 +1713,8 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    // 6200→6500: decision funnel §17 projection adds ~250 chars (four-cat discussion 2026-06-01)
-    assert.ok(prompt.length < 6500, `Prompt with SOP hint is ${prompt.length} chars, expected < 6500`);
+    // 6200→6500→6700: decision funnel §17 + gemini35 standalone breed roster growth
+    assert.ok(prompt.length < 6700, `Prompt with SOP hint is ${prompt.length} chars, expected < 6700`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1758,8 +1761,8 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    // 6200→6500: decision funnel §17 projection adds ~250 chars (four-cat discussion 2026-06-01)
-    assert.ok(prompt.length < 6500, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6500`);
+    // 6200→6500→6700: decision funnel §17 + gemini35 standalone breed roster growth
+    assert.ok(prompt.length < 6700, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6700`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -1994,7 +1997,7 @@ describe('SystemPromptBuilder', () => {
 
     // Pin: update this hash whenever you add/remove/rename P* or W* sections
     // in shared-rules.md, AND update GOVERNANCE_L0_DIGEST in SystemPromptBuilder.ts
-    const PINNED_HASH = '89989b48ac64c6ee';
+    const PINNED_HASH = '1b137442fdbb0d1c';
     if (PINNED_HASH === '${PLACEHOLDER}') {
       // First run — print hash for pinning
       console.log(`[drift-guard] shared-rules headings hash: ${hash} — pin this value`);
@@ -2048,5 +2051,152 @@ describe('SystemPromptBuilder', () => {
     // codex is available — should appear in opus's roster
     const prompt = buildStaticIdentity('opus');
     assert.ok(prompt.includes('codex'), 'available cat @codex must appear in roster');
+  });
+
+  // F229: ConciergePromptSection guard tests
+  test('F229: buildInvocationContext injects concierge duty section when threadKind=concierge', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const context = {
+      catId: 'sonnet',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-concierge-1',
+      threadKind: 'concierge',
+      conciergeConfig: {
+        enabled: true,
+        skin: 'ragdoll-v1',
+        displayName: '猫猫球',
+        personaTone: '温暖、简短、不啰嗦',
+        dutyCatProfileId: 'gemini35',
+        proactivePolicy: 'quiet-badge',
+        muted: false,
+      },
+    };
+    const result = buildInvocationContext(context);
+    assert.ok(result.includes('前台岗位'), 'should contain concierge duty marker');
+    assert.ok(result.includes('猫猫球'), 'should inject displayName');
+    assert.ok(result.includes('温暖、简短、不啰嗦'), 'should inject personaTone');
+    assert.ok(result.includes('anchor-first'), 'should contain anchor-first directive');
+    assert.ok(result.includes('search_evidence'), 'should list allowed tool search_evidence in whitelist');
+  });
+
+  test('F229: buildInvocationContext does NOT inject concierge section for normal thread', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const context = {
+      catId: 'sonnet',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-normal-1',
+      // no threadKind / no conciergeConfig
+    };
+    const result = buildInvocationContext(context);
+    assert.ok(!result.includes('前台岗位'), 'should NOT inject concierge section for normal thread');
+  });
+
+  test('F229: buildInvocationContext includes tool whitelist in concierge section', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const result = buildInvocationContext({
+      catId: 'sonnet',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-concierge-2',
+      threadKind: 'concierge',
+      conciergeConfig: {
+        enabled: true,
+        skin: 'ragdoll-v1',
+        displayName: 'Desk Cat',
+        personaTone: 'brief',
+        dutyCatProfileId: 'gemini35',
+        proactivePolicy: 'quiet-badge',
+        muted: false,
+      },
+    });
+    // Verify whitelist mentions from the岗位 section
+    assert.ok(result.includes('graph_resolve'), 'whitelist should include graph_resolve');
+    assert.ok(result.includes('feat_index'), 'whitelist should include feat_index');
+    assert.ok(result.includes('teleport'), 'whitelist should include teleport');
+    // Verify escalation protocol is mentioned
+    assert.ok(
+      result.includes('转接') || result.includes('escalation') || result.includes('escalate'),
+      'should include escalation protocol',
+    );
+  });
+
+  // KD-17: marker-based instructions replace old Rule #3 (actions array output)
+  test('F229 KD-17: concierge prompt has marker instructions [跳过去 R] [原地看 R], not actions array', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const result = buildInvocationContext({
+      catId: 'sonnet',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-concierge-kd17',
+      threadKind: 'concierge',
+      conciergeConfig: {
+        enabled: true,
+        skin: 'ragdoll-v1',
+        displayName: '猫猫球',
+        personaTone: '温暖、简短',
+        dutyCatProfileId: 'gemini35',
+        proactivePolicy: 'quiet-badge',
+        muted: false,
+      },
+    });
+
+    // New marker instructions must be present
+    assert.ok(result.includes('[跳过去 R'), 'should contain [跳过去 R] marker instruction');
+    assert.ok(result.includes('[原地看 R'), 'should contain [原地看 R] marker instruction');
+
+    // Old Rule #3 (actions array literal) must be gone
+    assert.ok(!result.includes('{ actions: [{ action:'), 'old Rule #3 actions array literal must be removed');
+
+    // Must NOT instruct model to output structured actions payload
+    assert.ok(!result.includes('anchor-first 答案必须附 teleport+peek 双动作卡'), 'old Rule #3 text must be removed');
+  });
+
+  // F229 Bug 1: Triage boundary criterion — duty cat must know when NOT to triage
+  test('F229: concierge prompt contains triage boundary criterion (direct-answer vs triage judgment)', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const result = buildInvocationContext({
+      catId: 'sonnet',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: false,
+      threadId: 'thread-concierge-boundary',
+      threadKind: 'concierge',
+      conciergeConfig: {
+        enabled: true,
+        skin: 'ragdoll-v1',
+        displayName: '猫猫球',
+        personaTone: '温暖、简短',
+        dutyCatProfileId: 'gemini35',
+        proactivePolicy: 'quiet-badge',
+        muted: false,
+      },
+    });
+
+    // Must have the boundary judgment criterion
+    assert.ok(result.includes('直接回答'), 'should contain direct-answer path');
+    assert.ok(result.includes('走分诊'), 'should contain triage path');
+    assert.ok(
+      result.includes('跨出当前对话'),
+      'should contain the core criterion: "does this need to leave the current conversation?"',
+    );
+
+    // Must explicitly list direct-answer cases (no triage-plan)
+    assert.ok(result.includes('不生成 triage-plan'), 'should explicitly say no triage-plan for direct answers');
+
+    // Must NOT have the old overly-broad trigger
+    assert.ok(
+      !result.includes('用户描述需求时，你要先理解意图，生成一个可确认的分诊计划'),
+      'old broad triage trigger must be removed',
+    );
+
+    // Investigate intent must be scoped to async search, not "查功能状态"
+    assert.ok(result.includes('当场答不了的异步搜索'), 'investigate intent should be scoped to async search');
+    assert.ok(!result.includes('查资料/记忆/功能状态'), 'old broad investigate description must be removed');
   });
 });

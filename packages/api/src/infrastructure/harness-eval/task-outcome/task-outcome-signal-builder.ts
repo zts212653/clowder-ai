@@ -6,7 +6,7 @@
  *
  * - Permission Cancel: built when user denies a tool call
  * - Proposal Reject: built when user rejects a cat's proposal (F128 thread / F225 handoff)
- * - Magic Word: built when CVO uses a magic word
+ * - Magic Word: built when operator uses a magic word
  * - A1 World Truth: built when merge/revert/test/build events occur
  */
 import {

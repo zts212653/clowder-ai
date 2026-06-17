@@ -434,6 +434,36 @@ describe('F222 UX-3: evaluate — user_report', () => {
     assert.ok(!card.title.includes('可能出了问题'), 'should NOT use auto-detection wording');
   });
 
+  // F225 猫猫化: title 不再嵌 emoji 前缀；signalType 透传给前端选 icon（megaphone/search）。
+  it('title carries no raw emoji prefix and meta surfaces signalType', () => {
+    const userReport = buildFrustrationIssueCard({
+      issueId: 'fi_svg1',
+      status: 'draft',
+      threadId: 't',
+      userId: 'u',
+      catId: 'c',
+      signalType: 'user_report',
+      signalDetail: {},
+      context: { recentMessages: [] },
+      createdAt: Date.now(),
+    });
+    assert.ok(!/📢|🔍/u.test(userReport.title), `title must not embed emoji; got ${userReport.title}`);
+    assert.equal(userReport.meta.signalType, 'user_report');
+    const auto = buildFrustrationIssueCard({
+      issueId: 'fi_svg2',
+      status: 'draft',
+      threadId: 't',
+      userId: 'u',
+      catId: 'c',
+      signalType: 'cli_error',
+      signalDetail: {},
+      context: { recentMessages: [] },
+      createdAt: Date.now(),
+    });
+    assert.ok(!/📢|🔍/u.test(auto.title), `title must not embed emoji; got ${auto.title}`);
+    assert.equal(auto.meta.signalType, 'cli_error');
+  });
+
   it('card fields include rejected tool name', () => {
     const mockIssue = {
       issueId: 'fi_ur_field',

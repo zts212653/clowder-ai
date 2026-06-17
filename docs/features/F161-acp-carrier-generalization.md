@@ -12,13 +12,13 @@ created: 2026-04-13
 
 ## Why
 
-F149 交付了完整的 ACP runtime operations（进程池 / session lease / lifecycle / watchdog），但第一载体只有 Gemini。team experience（2026-03-31）：
+F149 交付了完整的 ACP runtime operations（进程池 / session lease / lifecycle / watchdog），但第一载体只有 Gemini。operator experience（2026-03-31）：
 
 > "我们要支持acp这个协议 支持Siameseacp接入 其实 codex 和claude code也支持这个协议。"
 
 当前 `AcpProcessPool` 和 `AcpClient` 的接口没有 Gemini-specific 的硬依赖，但"没有 hard dependency ≠ 已验证可泛化"。F161 的目标是让第二个 ACP carrier 走通同一套池化/lease 模型，验证泛化性。
 
-**Scope 来源**：从 F149 Phase D 拆出（2026-04-13 team lead拍板）。Gemini 作为第一个已有实现，有需求时再继续。
+**Scope 来源**：从 F149 Phase D 拆出（2026-04-13 operator拍板）。Gemini 作为第一个已有实现，有需求时再继续。
 
 ## What
 

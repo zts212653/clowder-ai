@@ -707,8 +707,8 @@ describe('background thread socket handling', () => {
     });
   });
 
-  describe('F148: context briefing system_info', () => {
-    it('stores the briefing card message instead of a raw JSON system bubble', () => {
+  describe('F148: context briefing system_info — suppressed from user timeline', () => {
+    it('suppresses context_briefing from user timeline (internal routing context for cats)', () => {
       const now = Date.now();
 
       simulateBackgroundMessage({
@@ -743,57 +743,32 @@ describe('background thread socket handling', () => {
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      expect(ts.messages).toEqual([
-        expect.objectContaining({
-          id: 'briefing-msg-1',
-          type: 'system',
-          content: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
-          origin: 'briefing',
-          extra: {
-            rich: {
-              v: 1,
-              blocks: [
-                expect.objectContaining({
-                  id: 'briefing-1',
-                  kind: 'card',
-                  title: '看到 13 条 · 省略 8 条 · 锚点 3 条 · 记忆 5 sessions · 证据 3 条',
-                }),
-              ],
-            },
-          },
-        }),
-      ]);
+      // Briefing is consumed silently — no message added to user-facing store
+      expect(ts.messages).toHaveLength(0);
     });
 
-    it('falls back to the raw system message when briefing payload is incomplete', () => {
+    it('also suppresses incomplete briefing payloads (no id) from user timeline', () => {
       const now = Date.now();
-      const rawBriefing = JSON.stringify({
-        type: 'context_briefing',
-        messageId: 'briefing-msg-2',
-        storedMessage: {
-          content: 'briefing without id should not be swallowed',
-          origin: 'briefing',
-          timestamp: now,
-        },
-      });
 
       simulateBackgroundMessage({
         type: 'system_info',
         catId: 'opus',
         threadId: 'thread-bg',
-        content: rawBriefing,
+        content: JSON.stringify({
+          type: 'context_briefing',
+          messageId: 'briefing-msg-2',
+          storedMessage: {
+            content: 'briefing without id should not be swallowed',
+            origin: 'briefing',
+            timestamp: now,
+          },
+        }),
         timestamp: now,
       });
 
       const ts = useChatStore.getState().getThreadState('thread-bg');
-      expect(ts.messages).toHaveLength(1);
-      expect(ts.messages[0]).toEqual(
-        expect.objectContaining({
-          type: 'system',
-          content: rawBriefing,
-          variant: 'info',
-        }),
-      );
+      // Even incomplete briefing payloads are suppressed — they are internal routing context
+      expect(ts.messages).toHaveLength(0);
     });
   });
 
@@ -1360,6 +1335,85 @@ describe('background thread socket handling', () => {
         outputTokens: 1,
       });
     });
+
+    // ─── F230 footer-parity regression tests ─────────────────────────────────────
+    // PTY carrier: text events have no metadata (from transcriptEntriesToAgentMessages).
+    // The only way to populate model/provider on PTY bubbles is via invocation_usage.
+    // These tests pin the bg-path behavior.
+
+    it('PTY-like: invocation_usage with model/provider sets metadata on bg message (F230 footer fix)', () => {
+      const now = Date.now();
+      // PTY carrier emits text without metadata
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'sonnet',
+        threadId: 'thread-bg',
+        content: 'Thinking...',
+        // deliberately NO metadata — mimics PTY transcriptEntriesToAgentMessages output
+        timestamp: now,
+      });
+
+      // invocation_usage arrives with model + provider
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'sonnet',
+        threadId: 'thread-bg',
+        content: JSON.stringify({
+          type: 'invocation_usage',
+          catId: 'sonnet',
+          usage: { inputTokens: 0, outputTokens: 1042, cacheReadTokens: 55932 },
+          model: 'claude-sonnet-4-6',
+          provider: 'claude_interactive_pty',
+        }),
+        timestamp: now + 10000,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toHaveLength(1);
+      // F230 footer-parity: model and provider must be present on the bubble
+      expect(ts.messages[0]?.metadata?.model).toBe('claude-sonnet-4-6');
+      expect(ts.messages[0]?.metadata?.provider).toBe('claude_interactive_pty');
+      // usage should also be present
+      expect(ts.messages[0]?.metadata?.usage).toMatchObject({
+        outputTokens: 1042,
+        cacheReadTokens: 55932,
+      });
+    });
+
+    it('bg-carrier regression: existing metadata model/provider not corrupted by invocation_usage (F230)', () => {
+      const now = Date.now();
+      // Normal bg carrier: text WITH metadata (model/provider already set)
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: 'hello',
+        metadata: { provider: 'anthropic', model: 'claude-opus-4-6' },
+        timestamp: now,
+      });
+
+      // invocation_usage with matching model/provider (same values = idempotent)
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'opus',
+        threadId: 'thread-bg',
+        content: JSON.stringify({
+          type: 'invocation_usage',
+          catId: 'opus',
+          usage: { inputTokens: 160000, outputTokens: 1589 },
+          model: 'claude-opus-4-6',
+          provider: 'anthropic',
+        }),
+        timestamp: now + 1,
+      });
+
+      const ts = useChatStore.getState().getThreadState('thread-bg');
+      expect(ts.messages).toHaveLength(1);
+      // Original metadata must survive intact (not corrupted by second write)
+      expect(ts.messages[0]?.metadata?.provider).toBe('anthropic');
+      expect(ts.messages[0]?.metadata?.model).toBe('claude-opus-4-6');
+    });
+    // ─── end F230 footer-parity regression tests ──────────────────────────────────
 
     it('consumes invocation_metrics/context_health system_info silently', () => {
       const now = Date.now();

@@ -29,7 +29,7 @@ created: 2026-06-03
 | Hub callback/API wrapper | Needs Hub runtime state, socket, thread/worktree scoping, audit, or user-visible side effect | Route has schema, audit/probe, and a stable caller contract. |
 | First-party Hub MCP | Cats across runtimes need to invoke a first-party Hub side effect and should not handwrite HTTP/JSON | Tool schema, scoping fields, audit/probe, and availability in the relevant MCP toolset. |
 | ActionService | External/vendor resource mutation needs permissions, dry-run, idempotency, or resource handles | ADR-029 service boundary, callback/import/MCP exposure decision, audit and permission proof. |
-| Hook/JIT/eval | Behavior remains bad after reachability and execution surface are fixed | F192 verdict supports forcing function; Design Gate / CVO accept for new hard checks. |
+| Hook/JIT/eval | Behavior remains bad after reachability and execution surface are fixed | F192 verdict supports forcing function; Design Gate / operator accept for new hard checks. |
 
 ## Ownership Split
 
@@ -121,7 +121,7 @@ Every inventory row has an explicit follow-up state. States are intentionally co
 - `action-plane` remains the owner for external/vendor operations with permission, dry-run, idempotency, and resource handles.
 - `hub-action-surface` owns first-party Hub display side effects. A Hub MCP wrapper is valid only when it replaces fragile manual first-party calls and adds schema, scoping, audit, or verification.
 - F223 does not create MCP wrappers for discovery alone. Discovery is trigger/ref/skill work; execution wrappers need a side-effect/probe contract.
-- New hard checks against raw first-party calls require Design Gate / CVO accept per F192 Phase F AC-F9.
+- New hard checks against raw first-party calls require Design Gate / operator accept per F192 Phase F AC-F9.
 
 ## Phase B Entry Conditions
 

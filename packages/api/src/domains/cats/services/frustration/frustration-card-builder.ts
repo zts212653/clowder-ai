@@ -75,7 +75,7 @@ function buildBodyMarkdown(issue: FrustrationIssue): string {
   } else if (issue.signalType === 'retry_burst') {
     parts.push('**检测到重复发送相同消息**，之前的请求可能没有被正确处理。');
   } else if (issue.signalType === 'user_report') {
-    parts.push('**你主动发起了问题反馈**，已采集当前上下文。请补充描述后提交。');
+    parts.push('**你主动发起了问题反馈**，已采集当前上下文。请补充描述后确认记录到反馈池。');
   }
   if (issue.context.errorLogs) {
     parts.push(`**日志摘要**:\n\`\`\`\n${issue.context.errorLogs.slice(0, 300)}\n\`\`\``);
@@ -103,11 +103,13 @@ export function buildFrustrationIssueCard(issue: FrustrationIssue): RichCardBloc
     id: `frustration-${issue.issueId}`,
     kind: 'card',
     v: 1,
-    title: issue.signalType === 'user_report' ? '📢 你的问题反馈' : '🔍 我注意到刚才可能出了问题',
+    // F225 猫猫化: title 去掉 emoji 前缀（前端按 meta.signalType 渲染 megaphone/search SVG）。
+    title: issue.signalType === 'user_report' ? '你的问题反馈' : '我注意到刚才可能出了问题',
     bodyMarkdown: buildBodyMarkdown(issue),
     tone: 'warning',
     fields: buildSignalFields(issue),
-    meta: { kind: 'frustration_auto_issue', issueId: issue.issueId },
+    // signalType 透传给前端选 icon：user_report → megaphone，其余 → search。
+    meta: { kind: 'frustration_auto_issue', issueId: issue.issueId, signalType: issue.signalType },
   };
 }
 
@@ -121,12 +123,12 @@ export function buildFrustrationIssueInteractive(issue: FrustrationIssue): RichI
     kind: 'interactive',
     v: 1,
     interactiveType: 'confirm',
-    title: '要提交这个问题报告吗？',
-    description: '确认后会保存这份报告，帮助我们改进。跳过则不会保存。',
+    title: '要记录这个问题吗？',
+    description: '确认后会保存到本地反馈池，供猫猫优先处理。跳过则不会保存。',
     options: [
       {
         id: 'confirm',
-        label: '确认提交',
+        label: '确认记录',
         icon: 'check',
         description: '保存问题报告',
         customInput: true,

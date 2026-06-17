@@ -28,6 +28,7 @@ import {
   type EventAuditLog,
   getEventAuditLog,
 } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import { guessMime, readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import {
   addLinkedRoot,
   getLinkedRootsAsync,
@@ -116,47 +117,6 @@ const CONTENT_SEARCH_EXTENSIONS = new Set([
   '.sh',
   '.py',
 ]);
-
-const MIME_MAP: Record<string, string> = {
-  '.ts': 'text/typescript',
-  '.tsx': 'text/tsx',
-  '.js': 'text/javascript',
-  '.jsx': 'text/jsx',
-  '.json': 'application/json',
-  '.md': 'text/markdown',
-  '.css': 'text/css',
-  '.html': 'text/html',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.yaml': 'text/yaml',
-  '.yml': 'text/yaml',
-  '.toml': 'text/toml',
-  '.sh': 'text/x-shellscript',
-  '.py': 'text/x-python',
-  // Audio
-  '.mp3': 'audio/mpeg',
-  '.wav': 'audio/wav',
-  '.m4a': 'audio/mp4',
-  '.ogg': 'audio/ogg',
-  '.flac': 'audio/flac',
-  // Video
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-  '.mov': 'video/quicktime',
-};
-
-function guessMime(filepath: string): string {
-  return MIME_MAP[extname(filepath)] ?? 'text/plain';
-}
-
-function sha256(content: string): string {
-  return createHash('sha256').update(content).digest('hex');
-}
 
 interface TreeNode {
   name: string;
@@ -412,32 +372,20 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
         return { error: 'Path is a directory' };
       }
 
-      const mime = guessMime(resolved);
-      const isBinary = mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/');
-
-      if (isBinary) {
-        return {
-          path: filePath,
-          content: '',
-          sha256: '',
-          size: fileStat.size,
-          mime,
-          truncated: false,
-          binary: true,
-        };
-      }
-
-      const truncated = fileStat.size > MAX_FILE_SIZE;
-      const content = await readFile(resolved, 'utf-8');
-      const displayContent = truncated ? content.slice(0, MAX_FILE_SIZE) : content;
+      // Memory-bounded read: never pulls more than MAX_FILE_SIZE into a string.
+      // Binary detection (known media MIME + NUL-byte content sniff) and the
+      // hashing policy live in the shared helper, so this route and the
+      // file-watcher classify files identically (F063 OOM fix).
+      const preview = await readWorkspaceFilePreview(resolved, { maxBytes: MAX_FILE_SIZE });
 
       return {
         path: filePath,
-        content: displayContent,
-        sha256: sha256(content),
-        size: fileStat.size,
-        mime,
-        truncated,
+        content: preview.content,
+        sha256: preview.sha256,
+        size: preview.size,
+        mime: preview.mime,
+        truncated: preview.truncated,
+        binary: preview.binary,
       };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {

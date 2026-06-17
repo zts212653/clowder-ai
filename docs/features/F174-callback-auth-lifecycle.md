@@ -25,9 +25,9 @@ created: 2026-04-23
 
 ## Why
 
-**现象**：Maine Coon（Codex）反复出现 MCP 工具失败 — `register_pr_tracking` 401、post_message 超时、认证过期。team lead自己也撞到："干了半小时活要发语音，MCP 说 token 过期。"
+**现象**：Maine Coon（Codex）反复出现 MCP 工具失败 — `register_pr_tracking` 401、post_message 超时、认证过期。operator自己也撞到："干了半小时活要发语音，MCP 说 token 过期。"
 
-**team experience（2026-04-23 14:26 / 14:34 / 14:48）**：
+**operator experience（2026-04-23 14:26 / 14:34 / 14:48）**：
 
 > "我发现Maine Coon经常有mcp 我们家的 pr trcking 挂不上 auth 过期等等问题，我们mcp的设计是不是又问题？"
 >
@@ -43,7 +43,7 @@ created: 2026-04-23
 4. **零 telemetry** — 没有 401 率监控、没有按 cat/tool 维度的失败率，撞了多少次都没数据
 5. **失败原因不结构化**（Maine Coon review 加入）— `verify()` 只回 `record | null`（`InvocationRegistry.ts:110`），preHandler 把"过期/token 不匹配/invocation 不存在"全部压成同一个 401（`callback-auth-prehandler.ts:54`）。客户端降级现在靠字符串 regex 猜错误（`callback-tools.ts:260, 423`）。**不先改这个，下游降级 + telemetry 都会做歪 — 全都得用脆弱的字符串匹配。**
 
-**为什么现在做**：#509（社区 mindfn，MERGED + intaked）+ #1263（自家 refactor，MERGED）已经把 **Transport 层（header 迁移）+ Authority 层（actor/scope helpers）** 完成了。现在缺的就是 **Lifecycle 层** —— 再不做，Maine Coon会继续撞 401，team lead会继续撞"干活半小时 token 过期"。
+**为什么现在做**：#509（社区 mindfn，MERGED + intaked）+ #1263（自家 refactor，MERGED）已经把 **Transport 层（header 迁移）+ Authority 层（actor/scope helpers）** 完成了。现在缺的就是 **Lifecycle 层** —— 再不做，Maine Coon会继续撞 401，operator会继续撞"干活半小时 token 过期"。
 
 **非作用域**（刻意排除）：
 - 不改 MCP 协议本身（协议只规定 transport，我们调的是我们自己 server 的鉴权实现）
@@ -180,7 +180,7 @@ setTimeout(refresh, jitter);
 
 > **设计哲学**：统计是事后审计，现场可感知性是第一入口。详见 `cat-cafe-skills/refs/in-context-observability-checklist.md`。
 >
-> 早稿（spec v1）只规划单个 dashboard card，被team lead push back："F153 社区小伙伴设计的可观测性是上个世纪的——出问题了猫猫和team lead立刻应该看到，像 memory entity 自带状态、browser-preview 端上桌那样。" 收敛为三层结构。
+> 早稿（spec v1）只规划单个 dashboard card，被operator push back："F153 社区小伙伴设计的可观测性是上个世纪的——出问题了猫猫和operator立刻应该看到，像 memory entity 自带状态、browser-preview 端上桌那样。" 收敛为三层结构。
 
 **`in_context_observability` 决策字段**（per checklist 模板）：
 
@@ -189,7 +189,7 @@ in_context_observability:
   primary_surface: "thread 内 system_info 富块（D2b-1） + cat avatar status dot（D2b-2）"
   why_not_dashboard_only: |
     callback auth 失败影响"当前正在做的事"——猫调 register_pr_tracking 401 了，
-    team lead需要立刻知道（不然以为 PR tracking 已建好）。dashboard 等用户主动切 tab
+    operator需要立刻知道（不然以为 PR tracking 已建好）。dashboard 等用户主动切 tab
     才看到数字 +1，错过现场。
   deep_dive_surface: "HubObservabilityTab 子 tab（D2b-3）— 事后审计 + 跨周期趋势 + 批量诊断"
   noise_dedup_policy: |
@@ -265,9 +265,9 @@ interface CallbackTool<T> {
 **初始接入名单**（按 Phase D1 数据决定优先级，以下是基线推断）：
 - `create_rich_block`：`embed-text`（已有，重构进 framework）
 - `post_message`：`manual-instructions`（输出可粘贴的 `/cc_post` 指令 + 原始内容）
-- `register_pr_tracking`：`manual-instructions`（输出"请手动 `gh pr ...` 或通知team lead"）
+- `register_pr_tracking`：`manual-instructions`（输出"请手动 `gh pr ...` 或通知operator"）
 - `update_task`：`manual-instructions`（输出 task URL + 手动更新指令）
-- `retain_memory_callback`：`manual-instructions`（输出 memory candidate 让team lead手工 retain）
+- `retain_memory_callback`：`manual-instructions`（输出 memory candidate 让operator手工 retain）
 - `search_evidence` / `get_thread_context`：**`none`**（读类，401 直接报错让上层处理）
 - 其它写类：根据 D1 数据增量加，默认 `none`
 
@@ -329,8 +329,8 @@ interface CallbackTool<T> {
     - **当前形态（rev2）**：HubButton badge merge — `HubButton.tsx` 内部加 `useCallbackAuthAggregate` + `useCallbackAuthAvailable` hooks；24h failures > 0 时右上角渲染 amber/red 数字 badge（0 失败 = 无 badge，top-bar 视觉零增量）；click without badge = `openHub()` default，click with badge = `openHub('observability', 'callback-auth')` deep-link to D2b-3。复用 GitHub/iOS 通知 badge mental model，无新增 top-bar 图标
     - [x] AC-D6 (rev3): 系统级 affordance merge 进 HubButton (top-bar 现有 entity)，复用 GitHub bell icon / Slack unread / iOS app badge **未读 → 看过 → 消失** 通知 mental model；非 owner 不渲染；不在 top-bar 增加新图标
     - [x] AC-D7 (rev3): HubButton badge 显示 `unviewedFailures24h`（不是 totalFailures24h）— 进入 observability/callback-auth subtab 自动 mark-viewed → badge 消失 / 仅显示 viewed 之后的新失败；click HubButton **始终走 default openHub()**（撤回 deep-link，尊重用户原意图）；badge size 严守 max-width 22px（即使 99+ 也不撑爆 hub icon）
-    - ~~rev0 形态（已 revert via #1410）~~：ThreadItem 参与者 16px avatar 角上 colored dot。被team lead alpha 验收 #1 否决（"莫名其妙的颜色"——头像角点缺 affordance/legend，用户没有 mental model 把"红点"和"callback auth"对应起来）。CatAvatar dot props 保留以备后用，但默认调用点不再启用
-    - ~~rev1 形态（已 revert via #1419）~~：独立 `<CallbackAuthHealthIndicator />` 在 ChatContainerHeader top-bar 加专属 plug SVG 图标 + badge。被team lead alpha 验收 #2 否决（"top 栏位置宝贵，plug 图标冗余"——affordance 修对了但 placement 又错，top-bar 是稀缺位）。整组件 + 测试在 #1419 删除
+    - ~~rev0 形态（已 revert via #1410）~~：ThreadItem 参与者 16px avatar 角上 colored dot。被operator alpha 验收 #1 否决（"莫名其妙的颜色"——头像角点缺 affordance/legend，用户没有 mental model 把"红点"和"callback auth"对应起来）。CatAvatar dot props 保留以备后用，但默认调用点不再启用
+    - ~~rev1 形态（已 revert via #1419）~~：独立 `<CallbackAuthHealthIndicator />` 在 ChatContainerHeader top-bar 加专属 plug SVG 图标 + badge。被operator alpha 验收 #2 否决（"top 栏位置宝贵，plug 图标冗余"——affordance 修对了但 placement 又错，top-bar 是稀缺位）。整组件 + 测试在 #1419 删除
     - HubCallbackAuthPanel 内部的 affected-cats roster 仍使用 `<CallbackAuthCatAvatar>` (48px + "AFFECTED CATS" 文本 affordance)，那是 panel-internal context，用户主动打开后明确知道"这是 callback auth 数据"
     - **教训**：信号设计 = affordance × placement × legend × **scarcity-of-realestate**。affordance 修对了不代表 placement 也对，顶栏不是无限位，每个新增 icon 都要先问"能不能 merge 进现有 entity"。GitHub/iOS 通知 badge 范式比独立 icon 更省视觉预算
   - **D2b-3 stats 深挖 card**（P2 · 审计层）— ✅ merged 2026-04-25 via PR #1403
@@ -353,15 +353,15 @@ interface CallbackTool<T> {
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "Maine Coon经常有 mcp pr tracking 挂不上 auth 过期" | AC-B1/B3 | 集成测试：模拟 API restart 后 verify 不 401 | [x] |
 | R2 | "我干活，然后干了半小时，然后要发语音，结果mcp和我说token过期" | AC-C1/C3 | 集成测试：长 session + 自适应 refresh，voice callback 不 401 | [x] |
 | R3 | "站在架构层面完整的优化实现最佳方案 不当补锅匠" | 四层架构 + Phase A-F 完整拆分 | 本文 + Maine Coon跨家族 review | [x] |
 | R4 | "#509：callback auth 基础设施统一/加固" | 本 Feature 命名 + Phase F 收口 #509 follow-up | #509 + #1263 + Phase F 三件合起来形成完整闭环 | [x] |
-| R5 | "我需要一个完整的最终方案" | KD-4 ~ KD-11 收敛决策 + Phase 重排 | Maine Coon + 我达成共识，team lead拍板 | [x] |
+| R5 | "我需要一个完整的最终方案" | KD-4 ~ KD-11 收敛决策 + Phase 重排 | Maine Coon + 我达成共识，operator拍板 | [x] |
 | R6 | （隐含）401 故障归因不能靠字符串猜 | AC-A1~A5 | 单测：reason 枚举完整覆盖；regression：客户端不再 regex match | [x] |
-| R7 | "F153 社区小伙伴设计的可观测性是上个世纪的——出问题了猫猫和team lead立刻应该看到" (D2b 设计 push back) | D2b 三层"明厨亮灶"模型（D2b-1/D2b-2/D2b-3） | `cat-cafe-skills/refs/in-context-observability-checklist.md` 落地 + 三层全 merged | [x] |
+| R7 | "F153 社区小伙伴设计的可观测性是上个世纪的——出问题了猫猫和operator立刻应该看到" (D2b 设计 push back) | D2b 三层"明厨亮灶"模型（D2b-1/D2b-2/D2b-3） | `cat-cafe-skills/refs/in-context-observability-checklist.md` 落地 + 三层全 merged | [x] |
 | R8 | "莫名其妙的颜色...你还差一层啊" (D2b-2 alpha 否决 #1) + "用 SVG 不用 emoji" + "top 栏冗余/没必要展示在 top 栏" (alpha 否决 #2) | rev1: 独立 plug indicator → 否决；rev2: HubButton badge merge (复用 hub entity，零增量) | `HubButton.tsx` 含 `useCallbackAuthAggregate` + badge logic + emoji guard test `expect(html).not.toContain('🔌')` (PR #1419) | [x] |
 
 ### 覆盖检查
@@ -375,7 +375,7 @@ interface CallbackTool<T> {
 - **Blocked by**: 无（Redis production Redis (sacred)已有基建）
 - **Related**:
   - F016（Codex OAuth + 记忆闭环）— invocation-token 概念的起源
-  - F061（Antigravity 孟加拉猫）— Bug-H "persistent MCP write-path auth" 是 F174 的远房亲戚（F174 不解决 persistent 场景，但降级 framework 可能被复用）
+  - F061（Antigravity Bengal）— Bug-H "persistent MCP write-path auth" 是 F174 的远房亲戚（F174 不解决 persistent 场景，但降级 framework 可能被复用）
   - F077（Multi-User Secure Collaboration）— F174 不做多用户隔离，但 F077 会依赖 F174 的持久化（重启不丢会话）
   - F086（Cat Orchestration Multi-Mention）— callback auth 消费方
   - F098（Callback Message UX）— 消息类 callback 的 UX 层
@@ -389,7 +389,7 @@ interface CallbackTool<T> {
 | Redis backend 引入 network latency，callback 延迟变大 | 用 pipeline / 批量，verify 目标 < 5ms；如超标回退 memory + 写透后端 |
 | refresh endpoint 被滥用刷 TTL（恶意客户端） | rate limit：每 invocation 每 5min 最多 1 次 refresh；超限 429 |
 | 降级产物让猫误认为操作成功，实际没落地 | 降级产物**必须**标 `DEGRADED: true` 字段 + 清晰 hint；单测覆盖猫的感知口径 |
-| 仪表板数据隐私（露出 catId × tool 组合） | 当前只team lead自己用，不是多租户。F077 落地时再评估脱敏 |
+| 仪表板数据隐私（露出 catId × tool 组合） | 当前只operator自己用，不是多租户。F077 落地时再评估脱敏 |
 | Phase B 迁移期双 backend 并存导致 invocation id collision | 迁移期 memory + redis 同时写，read-through 优先 redis，迁移完成切 redis-only |
 | `stale_invocation` 被错算成 401，仪表盘低估真实失败面 | Phase A 把 `stale_invocation` 作为独立 reason，D1 单独 emit |
 | Compat window 永生（legacy body/query fallback 删不掉） | Phase F 设硬 deadline，即使命中率非零也按 deadline 切 |
@@ -414,7 +414,7 @@ interface CallbackTool<T> {
 
 ## Review Gate
 
-- **Discussion**：✅ 立项后 @Maine Coon 独立思考 → 收敛（spec v2 已落 KD-4~12）→ 待team lead拍板最终 scope
+- **Discussion**：✅ 立项后 @Maine Coon 独立思考 → 收敛（spec v2 已落 KD-4~12）→ 待operator拍板最终 scope
 - **Phase A**：跨家族 review（@Maine Coon owner-area），reason taxonomy 完整性是重点
 - **Phase B**：跨家族 review，Redis schema + 迁移兼容是重点
 - **Phase C**：跨家族 review，refresh 频率算法 + rate limit 是重点

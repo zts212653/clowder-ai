@@ -137,6 +137,48 @@ body {
   }
 }
 
+/* F229 PR-A3a: 猫猫球动画 */
+/* V4: idle 态慢呼吸（4s，scale 1→1.04→1） */
+@keyframes concierge-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+/* V4: 气泡弹出（200ms，从 origin-bottom-right 弹入） */
+@keyframes concierge-bubble-pop {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* V8: reduced-motion — 静态化猫猫球动画（重定义 keyframes 为 no-op） */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes concierge-breathe {
+    0%,
+    100%,
+    50% {
+      transform: scale(1);
+    }
+  }
+  @keyframes concierge-bubble-pop {
+    from,
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+}
+
 .animate-guide-error {
   animation: guide-error-shake 0.3s ease-out;
 }

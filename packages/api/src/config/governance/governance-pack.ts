@@ -1,7 +1,7 @@
 /**
  * F070: Portable Governance Pack — content definitions
  *
- * Defines the managed block content for Cat Cafe itself and for
+ * Defines the managed block content for Clowder AI itself and for
  * external project CLAUDE.md/AGENTS.md/GEMINI.md/KIMI.md files.
  *
  * Port values are read from environment variables at runtime,
@@ -44,7 +44,7 @@ function getRuntimePorts(): RuntimePorts {
 
 function getPortConstraint(context: GovernanceManagedBlockContext, ports: RuntimePorts): string {
   if (context === 'external') {
-    return `- **Cat Cafe runtime ports**: frontend ${ports.frontendPort} and API ${ports.apiPort} are reserved by Cat Cafe. Avoid using these ports for this project's dev servers.`;
+    return `- **Clowder AI runtime ports**: frontend ${ports.frontendPort} and API ${ports.apiPort} are reserved by Clowder AI. Avoid using these ports for this project's dev servers.`;
   }
 
   return `- **Public local defaults**: use frontend ${ports.frontendPort} and API ${ports.apiPort} to avoid colliding with another local runtime.`;
@@ -53,11 +53,11 @@ function getPortConstraint(context: GovernanceManagedBlockContext, ports: Runtim
 function getHardConstraints(context: GovernanceManagedBlockContext = 'self'): string {
   const ports = getRuntimePorts();
 
-  return `## Cat Cafe Governance Rules (Auto-managed)
+  return `## Clowder AI Governance Rules (Auto-managed)
 
 ### Hard Constraints (immutable)
 ${getPortConstraint(context, ports)}
-- **Redis port ${ports.redisPort}** is Cat Cafe's production Redis. Never connect to it from external projects. Use ${ports.redisDevPort} for dev/test.
+- **Redis port ${ports.redisPort}** is Clowder AI's production Redis. Never connect to it from external projects. Use ${ports.redisDevPort} for dev/test.
 - **No self-review**: The same individual cannot review their own code. Cross-family review preferred.
 - **Identity is constant**: Never impersonate another cat. Identity is a hard constraint.
 

@@ -26,9 +26,20 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
 export class TranscriptTailer {
-  private emittedLines = 0;
+  private emittedLines: number;
 
-  constructor(public readonly transcriptPath: string) {}
+  /**
+   * @param transcriptPath — path to the `.jsonl` transcript file.
+   * @param initialEmittedLines — start reading from this line offset (default 0).
+   *   Pass the number of existing lines when resuming a session to skip old content.
+   *   Computed by PtyDriver.injectPrompt() using the same split('\n').slice(0,-1) logic.
+   */
+  constructor(
+    public readonly transcriptPath: string,
+    initialEmittedLines = 0,
+  ) {
+    this.emittedLines = initialEmittedLines;
+  }
 
   /**
    * Read new entries.
@@ -68,7 +79,13 @@ export class TranscriptTailer {
     }
 
     const newLines = completeLines.slice(this.emittedLines);
-    this.emittedLines = completeLines.length;
+    // Monotonic: never regress emittedLines even if the next call is normal
+    // (non-includeTrailingPartial) and completeLines.length is smaller than
+    // what a previous includeTrailingPartial call already advanced to.
+    // Without this, after a trailing-partial read advances emittedLines to N+1,
+    // a subsequent normal read sets emittedLines = N (regression), causing the
+    // same trailing line to be re-emitted on every poll. (F230 R7 P2)
+    this.emittedLines = Math.max(this.emittedLines, completeLines.length);
 
     const entries: unknown[] = [];
     for (const line of newLines) {

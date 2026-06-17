@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Cat Cafe MCP Server - Finance Surface
+ * Clowder AI MCP Server - Finance Surface
  * Exposes read-only finance fact queries through the managed split topology.
  */
 

@@ -66,7 +66,7 @@ describe('MeetingContextBlock', () => {
     const { createMeetingContextBlock } = await import('../dist/types/meeting-context-block.js');
     const block = createMeetingContextBlock({
       meetingId: 'mtg_abc',
-      speakerLabel: '铲屎官',
+      speakerLabel: 'co-creator',
       speakerConfidence: 1.0,
       timestamp: 1715400000,
       content: 'My personal take on this topic',

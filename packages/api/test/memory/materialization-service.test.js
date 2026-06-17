@@ -112,6 +112,31 @@ describe('MaterializationService', () => {
     assert.ok(existsSync(r2.outputPath));
   });
 
+  it('does NOT commit by default (commit is opt-in)', async () => {
+    // Init a git repo so a commit COULD happen — proves no-commit is by design, not env
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'test',
+      GIT_AUTHOR_EMAIL: 'test@test',
+      GIT_COMMITTER_NAME: 'test',
+      GIT_COMMITTER_EMAIL: 'test@test',
+    };
+    execSync('git init && git commit --allow-empty -m "init"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    const marker = await queue.submit({
+      content: 'Default no-commit lesson',
+      source: 'opus:t1',
+      status: 'captured',
+      targetKind: 'lesson',
+    });
+    await queue.transition(marker.id, 'approved');
+    const result = await service.materialize(marker.id);
+    // opt-in: without { commit: true }, materialize writes the file but must NOT git-commit
+    assert.equal(result.committed, false);
+    assert.ok(existsSync(result.outputPath));
+    const log = execSync('git log --oneline', { cwd: tmpDir }).toString();
+    assert.ok(!log.includes('materialize'), 'must not create a materialize commit by default');
+  });
+
   it('commits the materialized file to git', async () => {
     // Init a git repo in tmpDir so commit can work
     const gitEnv = {
@@ -129,7 +154,7 @@ describe('MaterializationService', () => {
       targetKind: 'lesson',
     });
     await queue.transition(marker.id, 'approved');
-    const result = await service.materialize(marker.id);
+    const result = await service.materialize(marker.id, { commit: true });
     assert.equal(result.committed, true);
     const log = execSync('git log --oneline -1', { cwd: tmpDir }).toString();
     assert.ok(log.includes('materialize'));
@@ -479,8 +504,8 @@ describe('MaterializationService', () => {
     const approved = (await queue.list({ status: 'approved' })).find((m) => m.id === marker.id);
     assert.ok(approved);
 
-    // Materialize
-    const result = await fullService.materialize(marker.id);
+    // Materialize (opt-in commit to verify the git persistence path)
+    const result = await fullService.materialize(marker.id, { commit: true });
 
     // Verify .md file exists
     assert.ok(existsSync(result.outputPath));

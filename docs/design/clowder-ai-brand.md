@@ -7,7 +7,7 @@
 - **Slogan**: Hard Rails. Soft Power. Shared Mission.
 - **硬约束 / 铁律**: `Hard Rails` (不可越界的安全底线、系统边界)
 - **软约束 / 引导**: `Soft Power` (愿景、文化、共创信条)
-- **共同愿景**: `Shared Mission` (团队与 CVO 的共同目标)
+- **共同愿景**: `Shared Mission` (团队与 operator 的共同目标)
 - **禁忌词**: 严格禁止使用 `Soft Soul` 或其他变体，全仓必须统一口径。
 
 ## 2. 视觉意象：三棱镜 (The Prism Metaphor)
@@ -16,7 +16,7 @@
 
 | 视觉元素 | 物理形态 | 架构语义 (Architecture) |
 | :--- | :--- | :--- |
-| **白光 (White Light)** | 入射强光 | **Vision** (铲屎官/CVO 的用户愿景与请求) |
+| **白光 (White Light)** | 入射强光 | **Vision** (operator/operator 的用户愿景与请求) |
 | **棱镜 (The Prism)** | 坚固的几何体 | **Hard Rails** (平台层，规则与边界) |
 | **色散光束 (Dispersed Colors)** | 蓝/绿/橙等多色光 | **多角色协作分工** (被框架过滤增强后的 Agent 团队) |
 | **能量环线 (Orbital Rings)** | 缠绕棱镜的循环轨道 | **Memory & Audit** (记忆、审计与纠偏的闭环) |
@@ -35,7 +35,7 @@
 - **Opus Blue (Ragdoll)**: `#60A5FA` (Tailwind Blue 400)
 - **Codex Green (Maine Coon)**: `#34D399` (Tailwind Emerald 400)
 - **Gemini Amber (Siamese)**: `#FBBF24` (Tailwind Amber 400)
-- **Bengal Orange (孟加拉猫)**: `#FB923C` (Tailwind Orange 400)
+- **Bengal Orange (Bengal)**: `#FB923C` (Tailwind Orange 400)
 
 ### 色盲安全替代方案 (Color-blindness Safe)
 **规则**：不能仅靠颜色区分角色或信息状态。

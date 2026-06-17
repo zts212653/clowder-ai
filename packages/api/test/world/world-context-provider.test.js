@@ -80,7 +80,7 @@ describe('WorldContextProvider', () => {
   it('includes careLoopHint when provided', async () => {
     const hint = {
       trigger: '角色低落',
-      suggestion: '问问铲屎官今天怎么样',
+      suggestion: '问问co-creator今天怎么样',
       realityBridge: '你是否也有类似的感受？',
     };
     const envelope = await provider.assemble('w1', 's1', { careLoopHint: hint });

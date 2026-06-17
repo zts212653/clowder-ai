@@ -1,6 +1,6 @@
 # CC / Codex System Prompt Audit SOP（F203 Phase E）
 
-> 真相源。猫家共享。来源：F203 Phase E（铲屎官 2026-05-15："每个 claude code
+> 真相源。猫家共享。来源：F203 Phase E（operator 2026-05-15："每个 claude code
 > 大版本更新我们需要拆一次 cc 的系统提示词，比如他添加了新的功能性系统提示词
 > 我们得补"）。工具：`scripts/audit-claude-code-system-prompt.mjs`。
 
@@ -83,7 +83,7 @@ node scripts/audit-claude-code-system-prompt.mjs --cli codex \
 
 Phase E 注册了 weekly scheduled task：`--check` claude + codex 版本 vs 最新
 归档。drift → 发消息提醒猫跑本 SOP。**cron 不自动改 L0**（功能性判断 +
-carry-over 是猫/CVO 决策，不自动化）。task 管理见 `schedule-tasks` skill。
+carry-over 是猫/operator 决策，不自动化）。task 管理见 `schedule-tasks` skill。
 
 ## 一句话
 

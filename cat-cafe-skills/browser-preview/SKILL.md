@@ -2,7 +2,7 @@
 name: browser-preview
 description: >
   Hub 内嵌浏览器预览 localhost 应用。
-  Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、铲屎官说"看看效果"。
+  Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
   Not for: 后端纯 API 开发、不涉及页面的工作。
   Output: 前端页面在 Hub browser panel 中实时预览。
 triggers:
@@ -22,7 +22,7 @@ triggers:
 
 # Browser Preview
 
-Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的 localhost 应用。猫猫写完前端代码不用让铲屎官切浏览器看效果。
+Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的 localhost 应用。猫猫写完前端代码不用让operator切浏览器看效果。
 
 ## 工作流
 
@@ -35,9 +35,9 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 改代码 → HMR 热更新 → browser panel 内页面自动刷新，无需手动操作。
 
 ### 猫主动打开浏览器（Phase C — 必须掌握）
-铲屎官说过："别手动让我输入，你最好打开浏览器，把页面放出来。"
+operator说过："别手动让我输入，你最好打开浏览器，把页面放出来。"
 
-**猫应该主动替铲屎官打开浏览器**，不要等铲屎官点 toast 或手动输 URL。
+**猫应该主动替operator打开浏览器**，不要等operator点 toast 或手动输 URL。
 
 #### 调用步骤（按顺序执行，不要跳步）
 
@@ -78,11 +78,11 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
 
-- 适用场景：写完前端代码后、铲屎官说"看看效果"、需要展示复杂页面
+- 适用场景：写完前端代码后、operator说"看看效果"、需要展示复杂页面
 - ⚠️ **不要传 `html` 参数**（后端不支持）；简单 HTML 可视化用 `html_widget` rich block
 
 ### 两层可视化策略
-铲屎官拍板："简单的用富文本，复杂的用猫主动打开浏览器。"
+operator拍板："简单的用富文本，复杂的用猫主动打开浏览器。"
 
 | 场景 | 方式 | 怎么做 |
 |------|------|--------|
@@ -106,9 +106,9 @@ Step 3: 等 1-2 秒，右侧 Browser panel 应自动打开
 
 ## 什么时候主动用
 
-- 写完前端组件/页面 → **主动调 auto-open 打开浏览器展示**（不要等铲屎官点）
+- 写完前端组件/页面 → **主动调 auto-open 打开浏览器展示**（不要等operator点）
 - 调样式/布局 → 改代码后在 browser panel 里实时查看
-- 铲屎官说"看看效果"/"给我看看" → 主动打开 browser panel 展示
+- operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看

@@ -192,7 +192,7 @@ function findExistingByStableKey(
   //     placeholder（content="" && 无 toolEvents && 无 thinking），且当前 event 是其他
   //     kind（tool_or_cli/thinking/rich_block），就把 placeholder 当 same-turn container
   //     吸收掉（AC-Z14 reconcile，避免 helper 提前创建 assistant_text placeholder 后
-  //     被 reducer 别的 kind 事件分裂成两个 bubble = 铲屎官 alpha catch 的 Bug A 形态）
+  //     被 reducer 别的 kind 事件分裂成两个 bubble = co-creator alpha catch 的 Bug A 形态）
   //
   // F194 Phase Z5 R5 (cloud Codex P1): 吸收必须 gate 在 incoming kind 上 — 只允许
   // assistant 容器内的子事件（assistant_text / thinking / tool_or_cli / rich_block）。

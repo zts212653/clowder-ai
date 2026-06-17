@@ -1,5 +1,5 @@
 /**
- * F194 Phase Z11 — ChatMessage CLI Output stdout consistency (铲屎官 R15).
+ * F194 Phase Z11 — ChatMessage CLI Output stdout consistency (co-creator R15).
  *
  * After Z8 merges a stream record + a post_message callback into one
  * callback-origin bubble, ChatMessage previously fed `undefined` to

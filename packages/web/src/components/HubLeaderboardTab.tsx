@@ -132,12 +132,12 @@ export function HubLeaderboardTab() {
             </SectionCard>
           </div>
 
-          {/* Phase B: Game Arena + Phase C: Achievements + CVO */}
+          {/* Phase B: Game Arena + Phase C: Achievements + operator */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             <SectionCard title="成就墙">
               <AchievementWall achievements={data.achievements ?? []} />
             </SectionCard>
-            <SectionCard title="CVO 能力等级">
+            <SectionCard title="operator 能力等级">
               {data.cvoLevel ? (
                 <CvoLevelCard level={data.cvoLevel} />
               ) : (

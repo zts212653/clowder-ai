@@ -15,11 +15,11 @@ completed: 2026-03-28
 
 ## Why
 
-team lead问："我们现有的能力是不是已经功能上满足小龙虾的 heartbeat 覆盖的能力？"
+operator问："我们现有的能力是不是已经功能上满足小龙虾的 heartbeat 覆盖的能力？"
 
 **Ragdoll × Maine Coon共识**：事件驱动场景（GitHub webhook/邮件/消息唤醒猫）我们已经比龙虾 heartbeat polling 做得更好——秒级响应 vs 30 分钟轮询。但"没人找你但该主动检查"的自省能力（定时巡检、文档过期检查、stale issue 清理）还没有统一抽象。F102 的 TaskRunner 是 setInterval MVP，硬编码、不可配置、gate 返回 boolean 造成二次扫描。
 
-team experience："不建议你这个可配置是编辑到什么 Markdown 文档里……能让人类跟你直接说自然语言，你帮别人去编辑，或者你有个 UI 去把东西呈现出来"。
+operator experience："不建议你这个可配置是编辑到什么 Markdown 文档里……能让人类跟你直接说自然语言，你帮别人去编辑，或者你有个 UI 去把东西呈现出来"。
 
 **核心定位**：connector = 被动响应（有人找我），统一调度 = 主动巡检（没人找我但该看看）。前者已有且更好，后者是本 feature 要补的。
 
@@ -34,7 +34,7 @@ team experience："不建议你这个可配置是编辑到什么 Markdown 文档
 - **subjectKey 统一锚点**：lease / cursor / dedupe / dispatch / run-ledger 共用主键
 - **run ledger**：SQLite 记录每次调度结果（SKIP_NO_SIGNAL / RUN_DELIVERED / RUN_FAILED）
 - **Task profiles**：`awareness`（宽松）/ `poller`（精确）预设，防组合爆炸
-- **具体 consumer（team lead要求统一，不再加独立 setInterval）**：
+- **具体 consumer（operator要求统一，不再加独立 setInterval）**：
   - `summary-compact` — 迁移 F102 SummaryCompactionTask（boolean → typed signal）
   - `cicd-check` — 迁移 F133 CiCdCheckPoller（第一个验证用例）
   - `conflict-check` — 新增 PR 冲突检测（push to main → mergeable 状态变化）
@@ -115,7 +115,7 @@ team experience："不建议你这个可配置是编辑到什么 Markdown 文档
 - [x] AC-H2b: JS 重站点 browser 路径接线——`web-digest` 在 `needs-browser` 分支存真实 trigger message 后通过 `invokeTrigger` 唤醒猫，并带 `suggestedSkill: browser-automation`（PR #826）
 - [x] AC-H3: repo-activity 模板真实执行——查询 GitHub repo 新 issue/PR（cursor 追踪已见），投递到 deliveryThreadId
 - [x] AC-H4: Builtin 任务面板控制——所有任务（不限 dynamic）在 SchedulePanel 支持 pause/resume，后端复用 task override API
-- [x] AC-H5: 端到端验证——team lead在 thread 说"每天九点提醒我喝水"，任务注册、到点执行、消息投递、面板可控，全链路走通
+- [x] AC-H5: 端到端验证——operator在 thread 说"每天九点提醒我喝水"，任务注册、到点执行、消息投递、面板可控，全链路走通
 
 ## Dependencies
 
@@ -142,14 +142,14 @@ team experience："不建议你这个可配置是编辑到什么 Markdown 文档
 | KD-2 | typed signal gate 替代 boolean | 消除 F102 二次扫描 | 2026-03-25 |
 | KD-3 | subjectKey 统一锚点 | 防主键分裂，Maine Coon review P1 | 2026-03-25 |
 | KD-4 | actor.role = 能力命名空间 | Maine Coon review open question 收敛 | 2026-03-25 |
-| KD-5 | UI + 自然语言配置（非 markdown 编辑） | team lead明确要求 | 2026-03-25 |
+| KD-5 | UI + 自然语言配置（非 markdown 编辑） | operator明确要求 | 2026-03-25 |
 | KD-6 | 龙虾兼容但不照搬 | 事件驱动我们更好，只学主动自省语义 | 2026-03-25 |
-| KD-7 | 调度面板 = Workspace 顶级 Tab（和"开发""知识"平齐） | team lead确认，不是子 Tab；展示在 Workspace，配置在对话区自然语言；Tab 图标用 SVG 不用 emoji | 2026-03-25 |
-| KD-8 | 任务声明 display metadata（label/category/description/subjectKind），前端不再猜 | team lead + Maine Coon(gpt52) 讨论收敛：静态展示归 TaskSpec，动态对象展示归 API subjectPreview，前端纯渲染 | 2026-03-26 |
+| KD-7 | 调度面板 = Workspace 顶级 Tab（和"开发""知识"平齐） | operator确认，不是子 Tab；展示在 Workspace，配置在对话区自然语言；Tab 图标用 SVG 不用 emoji | 2026-03-25 |
+| KD-8 | 任务声明 display metadata（label/category/description/subjectKind），前端不再猜 | operator + Maine Coon(gpt52) 讨论收敛：静态展示归 TaskSpec，动态对象展示归 API subjectPreview，前端纯渲染 | 2026-03-26 |
 | KD-9 | category 采用对象导向分类（pr/repo/thread/system/external），弃 Custom | Maine Coon提出：Custom 是废桶，对象导向更稳，未来"叼邮箱"归 external | 2026-03-26 |
-| KD-10 | 任务注册 = 对话驱动，不是 NL 输入框；面板只管展示/管理 | team lead明确指出：W1 猫是 Agent 不是 API，用户在 thread 里和猫说话注册任务。NL 输入框违背愿景 | 2026-03-27 |
+| KD-10 | 任务注册 = 对话驱动，不是 NL 输入框；面板只管展示/管理 | operator明确指出：W1 猫是 Agent 不是 API，用户在 thread 里和猫说话注册任务。NL 输入框违背愿景 | 2026-03-27 |
 | KD-11 | 对话式注册先做模板化（受支持模板），不做任意 NL→TaskSpec 生成 | Maine Coon(gpt52) 建议：任意生成无审计线、无确认边界、重启丢失。模板化 = Draft/Confirm/Persist/Load 四步 | 2026-03-27 |
-| KD-12 | Phase 重排：3A（对话注册 + 面板最终态）→ 3B（Governance+Pack）。team lead指示：不止血，直接面向最终状态开发 | 动态注册是 Pack 的前置依赖。止血是浪费，一步到位 | 2026-03-27 |
+| KD-12 | Phase 重排：3A（对话注册 + 面板最终态）→ 3B（Governance+Pack）。operator指示：不止血，直接面向最终状态开发 | 动态注册是 Pack 的前置依赖。止血是浪费，一步到位 | 2026-03-27 |
 | KD-13 | once trigger 用 epoch ms（`fireAt`），不用 ISO 字符串 | 零时区歧义，直接 setTimeout 计算；路由层归一化 `delayMs → fireAt` 防重启漂移 | 2026-04-10 |
 | KD-14 | 生命周期通知 sender 使用服务端权威身份（`system`），不用客户端传入的 `createdBy` | Maine Coon(gpt52) P1 发现：`createdBy` 是客户端传入，用作 notification sender 会引入身份冒充路径 | 2026-04-10 |
 | KD-15 | 定时任务通知采用三层 UX 契约：生命周期回执降为 ephemeral toast；trigger 仅作 hidden reply anchor；真正强调落在首条 scheduler reply | 避免“管理态回执”抢走真正提醒的视觉焦点，同时保留 reply chain / retry / audit 所需的结构锚点 | 2026-04-13 |
@@ -158,4 +158,4 @@ team experience："不建议你这个可配置是编辑到什么 Markdown 文档
 
 - Phase A: Maine Coon review（跨 family 优先）
 - Phase B: Maine Coon review + MCP dispatch 集成测试
-- Phase C (Phase 2): Maine Coon review + **设计→代码保真度对照**（UX V2 设计稿 vs 实现截图，team lead明确要求）
+- Phase C (Phase 2): Maine Coon review + **设计→代码保真度对照**（UX V2 设计稿 vs 实现截图，operator明确要求）

@@ -2,7 +2,7 @@
   "name": "cat-cafe",
   "version": "0.1.0",
   "private": true,
-  "description": "三只 AI 猫猫的协作空间",
+  "description": "Your AI team collaboration space",
   "scripts": {
     "init": "./scripts/init-cafe.sh",
     "preinstall": "node scripts/check-node-runtime.mjs",
@@ -76,11 +76,14 @@
     "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/test-bash-runtime.test.mjs",
     "mcp:doctor": "node scripts/mcp-doctor.mjs",
     "sync:skills": "bash scripts/sync-skills.sh",
+    "clean:stale-skill-links": "bash scripts/clean-stale-skill-links.sh",
     "rescue:claude:thinking": "node ./scripts/rescue-claude-thinking-signature.mjs",
     "proxy:anthropic": "node ./scripts/anthropic-proxy.mjs",
     "logs:health": "bash ./scripts/logs-health.sh",
     "clean": "pnpm -r run clean && rm -rf node_modules",
-    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs"
+    "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
+    "check:brand-dictionary": "node --test scripts/brand-dictionary-helper.test.mjs",
+    "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",

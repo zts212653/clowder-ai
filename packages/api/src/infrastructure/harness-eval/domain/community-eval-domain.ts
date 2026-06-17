@@ -2,10 +2,10 @@
  * F192 E-community AC-E14: Community Eval Domain schema + filesystem loader.
  *
  * Enables community projects to register custom eval domains via YAML without
- * forking Cat Cafe core. Community domains use relaxed validation:
+ * forking Clowder AI core. Community domains use relaxed validation:
  * - domainId: any `eval:<lowercase-slug>` (not restricted to internal enum)
  * - sourceAdapter: must be `community-custom` (not internal adapter names)
- * - handoffTargetResolver: optional (community may not have Cat Cafe feature threads)
+ * - handoffTargetResolver: optional (community may not have Clowder AI feature threads)
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
@@ -53,7 +53,7 @@ const communityEvalDomainEntrySchema = z.object({
   /** Legacy task IDs to sunset (typically empty for new community domains). */
   legacyScheduledTaskIds: z.array(z.string()).default([]),
 
-  /** Optional: community domains may not have Cat Cafe feature thread targets. */
+  /** Optional: community domains may not have Clowder AI feature thread targets. */
   handoffTargetResolver: z
     .object({
       featureId: z.string().min(1),

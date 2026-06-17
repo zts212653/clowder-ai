@@ -3,9 +3,10 @@ name: GitHub
 version: 1.0.0
 description: "GitHub PR tracking, CI/CD monitoring, conflict detection, and repository scanning"
 icon: github
+
 docsUrl: "https://cli.github.com/manual/gh_auth_login"
 setupSteps:
-  - "Log in with the GitHub CLI (`gh auth login`) on the machine running Cat Cafe"
+  - "Log in with the GitHub CLI (`gh auth login`) on the machine running Clowder AI"
   - "Optional: configure a token only for plugin-managed child processes that explicitly consume it"
   - "Optional: configure Noise Bot list to reduce setup-only comment noise"
 
@@ -40,3 +41,7 @@ resources:
   - type: schedule
     name: issue-tracking
     factoryId: github.issue-tracking
+  - type: schedule
+    name: repo-comment-poll
+    factoryId: github.repo-comment-poll
+    optional: true

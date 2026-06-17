@@ -128,7 +128,7 @@ check_error_rate() {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "🐾 Cat Café Log Health Check (F130)"
+echo "🐾 Clowder AI Log Health Check (F130)"
 echo "────────────────────────────────────"
 echo ""
 echo "  Layer          Size    Files  Status"

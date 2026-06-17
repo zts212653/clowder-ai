@@ -2390,13 +2390,16 @@ describe('service lifecycle write routes', () => {
     );
   });
 
+  // PIDs use high values (90xxx) to avoid collision with process.pid — parsePidLines
+  // filters out the current process PID, and in --test-isolation=process mode the test
+  // runner can assign low PIDs (e.g. 222) that would collide with mock values.
   it('uses Windows-native port and command probes instead of lsof/ps', async () => {
     const calls = [];
     const fakeExecFile = (command, args, _options, callback) => {
       calls.push({ command, args });
       const commandText = args.join(' ');
       if (commandText.includes('Get-NetTCPConnection')) {
-        callback(null, "111\r\n222\r\n''\r\n", '');
+        callback(null, "90111\r\n90222\r\n''\r\n", '');
       } else if (commandText.includes('Get-CimInstance')) {
         callback(null, 'powershell.exe -File C:\\repo\\scripts\\services\\whisper-server.ps1\r\n', '');
       } else {
@@ -2406,9 +2409,9 @@ describe('service lifecycle write routes', () => {
     };
 
     const pids = await findPidsByPort(9876, { platform: 'win32', execFile: fakeExecFile });
-    const command = await readProcessCommand(111, { platform: 'win32', execFile: fakeExecFile });
+    const command = await readProcessCommand(90111, { platform: 'win32', execFile: fakeExecFile });
 
-    assert.deepEqual(pids, [111, 222]);
+    assert.deepEqual(pids, [90111, 90222]);
     assert.equal(command, 'powershell.exe -File C:\\repo\\scripts\\services\\whisper-server.ps1');
     assert.equal(calls[0].command, 'powershell.exe');
     assert.equal(calls[1].command, 'powershell.exe');
@@ -2426,10 +2429,10 @@ describe('service lifecycle write routes', () => {
           null,
           [
             '  Proto  Local Address          Foreign Address        State           PID',
-            '  TCP    0.0.0.0:9876           0.0.0.0:0              LISTENING       111',
-            '  TCP    [::]:9876              [::]:0                 LISTENING       222',
-            '  TCP    127.0.0.1:19876        0.0.0.0:0              LISTENING       333',
-            '  TCP    127.0.0.1:9876         127.0.0.1:50000        ESTABLISHED     444',
+            '  TCP    0.0.0.0:9876           0.0.0.0:0              LISTENING       90111',
+            '  TCP    [::]:9876              [::]:0                 LISTENING       90222',
+            '  TCP    127.0.0.1:19876        0.0.0.0:0              LISTENING       90333',
+            '  TCP    127.0.0.1:9876         127.0.0.1:50000        ESTABLISHED     90444',
           ].join('\r\n'),
           '',
         );
@@ -2441,7 +2444,7 @@ describe('service lifecycle write routes', () => {
 
     const pids = await findPidsByPort(9876, { platform: 'win32', execFile: fakeExecFile });
 
-    assert.deepEqual(pids, [111, 222]);
+    assert.deepEqual(pids, [90111, 90222]);
     assert.equal(calls[0].command, 'powershell.exe');
     assert.equal(calls[1].command, 'netstat.exe');
   });

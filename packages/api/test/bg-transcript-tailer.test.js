@@ -122,6 +122,42 @@ test('TranscriptTailer: includeTrailingPartial: true with truly partial JSON →
   assert.equal(entries[0].i, 1);
 });
 
+test('TranscriptTailer: includeTrailingPartial preserves offset monotonically — no duplicate emission on subsequent polls', async () => {
+  // Reproduces F230 R7 P2 bug: after includeTrailingPartial advances emittedLines to N+1,
+  // the next normal readNew() call previously set emittedLines = completeLines.length = N,
+  // regressing the offset and causing the same trailing line to be re-emitted every poll.
+  //
+  // Fix: emittedLines = Math.max(this.emittedLines, completeLines.length) — monotonic.
+  const path = tmpFile();
+
+  // File: one complete line + one complete-but-newline-less line (flush race)
+  writeFileSync(path, '{"type":"assistant","i":1}\n{"type":"system","subtype":"turn_duration","i":2}');
+
+  const tailer = new TranscriptTailer(path);
+
+  // First normal read: emits the complete line
+  const first = await tailer.readNew();
+  assert.equal(first.length, 1);
+  assert.equal(first[0].i, 1); // emittedLines now = 1
+
+  // Normal read: no new complete lines (partial not yet counted)
+  const noop = await tailer.readNew();
+  assert.equal(noop.length, 0); // emittedLines stays at 1
+
+  // Final drain: emits the newline-less line — emittedLines advances to 2
+  const drain1 = await tailer.readNew({ includeTrailingPartial: true });
+  assert.equal(drain1.length, 1, 'drain should emit the newline-less line');
+  assert.equal(drain1[0].i, 2); // emittedLines now = 2
+
+  // KEY: subsequent normal read must NOT regress emittedLines from 2 → 1
+  const afterDrain = await tailer.readNew();
+  assert.equal(afterDrain.length, 0, 'normal read after drain must return 0 (no offset regression)');
+
+  // KEY: a second includeTrailingPartial must NOT re-emit the already-emitted line
+  const drain2 = await tailer.readNew({ includeTrailingPartial: true });
+  assert.equal(drain2.length, 0, 'second includeTrailingPartial must not duplicate already-emitted trailing line');
+});
+
 test('TranscriptTailer: pure newlines (blank lines) skipped', async () => {
   const path = tmpFile();
   writeFileSync(path, '\n\n{"type":"assistant","i":1}\n\n');

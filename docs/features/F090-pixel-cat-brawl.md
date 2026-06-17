@@ -16,9 +16,9 @@ created: 2026-03-09
 
 clowder-ai 需要一个震撼的 demo：不是 slides，不是文档，是**猫猫自己做了一个游戏然后自己玩**。
 
-team lead说了一句"做个像素格斗游戏"，然后四只猫分工协作、完整走 feat lifecycle、最终产出一个可玩的即时格斗游戏——全程录屏就是最好的 demo video。
+operator说了一句"做个像素格斗游戏"，然后四只猫分工协作、完整走 feat lifecycle、最终产出一个可玩的即时格斗游戏——全程录屏就是最好的 demo video。
 
-### team experience（2026-03-09）
+### operator experience（2026-03-09）
 
 > "如果我们的 demo 视频是让你们做一个游戏，你们闭环之后Ragdoll opus 4.6 + Ragdoll opus 4.5 大战Maine Coon codex Maine Coon gpt 5.4，像素风有猫猫，是不是超级酷炫？你们做完了还能自己拉起来邀请猫猫加入测试"
 >
@@ -76,14 +76,14 @@ team lead说了一句"做个像素格斗游戏"，然后四只猫分工协作、
 
 | 模式 | 说明 |
 |------|------|
-| AI vs AI | 四只猫自己打，team lead看（demo 录屏用） |
-| 人机对战 | team lead操控一只猫，对面 AI |
-| 2v2 组队 | team lead + AI 队友 vs 两只 AI 猫 |
+| AI vs AI | 四只猫自己打，operator看（demo 录屏用） |
+| 人机对战 | operator操控一只猫，对面 AI |
+| 2v2 组队 | operator + AI 队友 vs 两只 AI 猫 |
 
 ### 技术架构
 
 ```
-team lead的 M4 Max Pro 128GB
+operator的 M4 Max Pro 128GB
 ├── Ollama / llama.cpp（本地推理，零延迟）
 │   ├── 实例1 → Ragdoll 4.6 战斗 AI（Qwen3-8B, ~50ms）
 │   ├── 实例2 → Ragdoll 4.5 战斗 AI
@@ -139,8 +139,8 @@ team lead的 M4 Max Pro 128GB
 ### 像素资产方案
 
 **Siamese调研推荐（2026-03-09）**：
-- **CUTE LEGENDS: CAT HEROES (by 9E0)** — ✅ **team lead选定**，16x16 极简但表现力强，4 种职业猫咪英雄
-- ~~2D Cat Street Fighter (by TampG)~~ — 淘汰（team lead：太丑了）
+- **CUTE LEGENDS: CAT HEROES (by 9E0)** — ✅ **operator选定**，16x16 极简但表现力强，4 种职业猫咪英雄
+- ~~2D Cat Street Fighter (by TampG)~~ — 淘汰（operator：太丑了）
 
 | 资产 | 来源 | 工作量 |
 |------|------|--------|
@@ -173,7 +173,7 @@ team lead的 M4 Max Pro 128GB
 - [ ] AC-A1: 游戏在浏览器中 60fps 流畅运行 — 未正式性能测试
 - [x] AC-A2: 4 只猫各有独特外观（颜色区分）和特色技能 — Phase 1b：4 猫各有独特颜色 + 专属技能（架构禁锢/逻辑丝线/代码洪流/金级 Review）
 - [ ] AC-A3: AI vs AI 模式可录屏作为 demo video — 功能就绪，待真素材 + 录屏
-- [x] AC-A4: team lead可用键盘操控一只猫参战 — Phase 1a 交付
+- [x] AC-A4: operator可用键盘操控一只猫参战 — Phase 1a 交付
 - [ ] AC-A5: 战斗结算在服务端，前端只渲染 — V1 纯前端，V2 迁后端
 - [x] AC-A6: Demo Mode 下战斗结果可复现（固定种子）— Phase 1a 交付（seeded PRNG）
 - [ ] AC-A7: 台词/弹幕安全（转义 + 长度限制）— 无台词功能，待 V2
@@ -182,17 +182,17 @@ team lead的 M4 Max Pro 128GB
 
 | # | 决策 | 日期 | 决策者 |
 |---|------|------|--------|
-| KD-1 | 即时格斗（拳皇 style），不是回合制 | 2026-03-09 | team lead |
-| KD-2 | 本地 Ollama 小模型做战斗 AI（M4 Max 128GB） | 2026-03-09 | team lead + 全猫 |
+| KD-1 | 即时格斗（拳皇 style），不是回合制 | 2026-03-09 | operator |
+| KD-2 | 本地 Ollama 小模型做战斗 AI（M4 Max 128GB） | 2026-03-09 | operator + 全猫 |
 | KD-3 | 安全硬约束 7 条（Maine Coon提出，Ragdoll全部采纳） | 2026-03-09 | Maine Coon + Ragdoll |
 | KD-4 | MVP 先做 Demo Mode（确定性 AI），V2 接真模型 | 2026-03-09 | 全猫共识 |
 | KD-5 | Phaser 3 + Canvas 2D + 开源像素资产 | 2026-03-09 | Ragdoll |
-| KD-6 | 素材选定 CUTE LEGENDS: CAT HEROES (by 9E0)，16x16 像素风 | 2026-03-09 | team lead |
+| KD-6 | 素材选定 CUTE LEGENDS: CAT HEROES (by 9E0)，16x16 像素风 | 2026-03-09 | operator |
 
 ## Dependencies
 
 - F059（开源计划）：demo video 是 F059 的关键交付物
-- F087（CVO Bootcamp）：作为候选任务之一
+- F087（operator Bootcamp）：作为候选任务之一
 - Ollama/llama.cpp：本地模型推理（V2）
 - Phaser 3：游戏引擎（MIT 许可）
 

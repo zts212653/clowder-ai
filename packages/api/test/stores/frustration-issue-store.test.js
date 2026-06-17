@@ -128,6 +128,16 @@ describe('F222: InMemoryFrustrationIssueStore', () => {
     assert.equal(fetched.cardMessageId, 'msg_card123');
   });
 
+  // ── setCommunityIssueDraftId ────────────────────────────
+
+  it('setCommunityIssueDraftId: links draft and survives round-trip', async () => {
+    const created = await store.create(validInput);
+    await store.setCommunityIssueDraftId(created.issueId, 'cid_draft456');
+    const fetched = await store.getById(created.issueId);
+    assert.ok(fetched);
+    assert.equal(fetched.communityIssueDraftId, 'cid_draft456');
+  });
+
   // ── listByThread ───────────────────────────────────────────
 
   it('listByThread: returns issues sorted by createdAt desc', async () => {

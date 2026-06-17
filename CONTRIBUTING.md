@@ -27,6 +27,19 @@ pnpm install
 pnpm build
 pnpm check
 
+# (Optional dev mode) Mount cat-cafe-skills/ symlinks at the project level
+# (.{claude,codex,gemini,kimi}/skills/ inside the repo and all worktrees) so
+# local agent CLIs see this repo's skills while developing. End users don't
+# need this — runtime governance bootstrap (POST /api/projects/setup) creates
+# project-level skill links automatically per ADR-025.
+#
+# Default writes only project-level links across all worktrees.
+# Add `--user` to also mount HOME-level (~/.{claude,codex,gemini,kimi}/skills/)
+# so agent CLIs running outside this repo can find these skills (opt-in per
+# ADR-025 section 3: user-level directories do not carry official skills by default).
+pnpm sync:skills          # project-level only (recommended)
+# pnpm sync:skills --user # also mount HOME-level (opt-in)
+
 # 4. Make your changes, then run checks
 pnpm check          # Biome lint
 pnpm lint           # TypeScript type check

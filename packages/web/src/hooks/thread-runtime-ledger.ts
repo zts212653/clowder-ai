@@ -21,9 +21,24 @@ type CatId = string;
 type InvocationId = string;
 type ThreadId = string;
 
+/**
+ * F194 cloud R3 (2026-06-15, 砚砚 co-author): runtime-only provenance of how the
+ * active bubble got seeded — distinguishes THIS turn's fresh seed (safe to upgrade
+ * to a turn id) from an earlier same-parent residue (must stay isolated). NOT
+ * persisted to ChatMessage.extra; lives only in the in-memory runtime ledger.
+ *  - 'fresh-parent-seed': created this turn before the turn id was known (parent-only).
+ *  - 'recovered': adopted from an existing identity-matched in-flight bubble.
+ *  - 'bound': bound to a resolved turn id.
+ */
+export type ActiveSeedSource = 'fresh-parent-seed' | 'recovered' | 'bound';
+
 export type ActiveEntry = {
   messageId: string;
   invocationId?: string;
+  seedSource?: ActiveSeedSource;
+  /** Runtime-only proof that a fresh parent seed was created in the current pre-turn event segment. */
+  freshParentSeedAt?: number;
+  freshParentSeedSeq?: number;
   lastTouched: number;
 };
 
@@ -198,12 +213,21 @@ export function setActiveBubble(
   ledger: ThreadRuntimeLedger,
   threadId: ThreadId,
   catId: CatId,
-  bubble: { messageId: string; invocationId?: string },
+  bubble: {
+    messageId: string;
+    invocationId?: string;
+    seedSource?: ActiveSeedSource;
+    freshParentSeedAt?: number;
+    freshParentSeedSeq?: number;
+  },
 ): void {
   const entry = ledger.getOrCreate(threadId);
   entry.active.set(catId, {
     messageId: bubble.messageId,
     ...(bubble.invocationId ? { invocationId: bubble.invocationId } : {}),
+    ...(bubble.seedSource ? { seedSource: bubble.seedSource } : {}),
+    ...(bubble.freshParentSeedAt !== undefined ? { freshParentSeedAt: bubble.freshParentSeedAt } : {}),
+    ...(bubble.freshParentSeedSeq !== undefined ? { freshParentSeedSeq: bubble.freshParentSeedSeq } : {}),
     lastTouched: Date.now(),
   });
 }

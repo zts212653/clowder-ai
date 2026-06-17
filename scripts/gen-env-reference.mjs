@@ -75,7 +75,7 @@ const lines = [
   `created: ${new Date().toISOString().slice(0, 10)}`,
   '---',
   '',
-  '# Cat Cafe 环境变量参考',
+  '# Clowder AI 环境变量参考',
   '',
   `> 自动生成于 ${new Date().toISOString().slice(0, 10)}，真相源：\`packages/api/src/config/env-registry.ts\``,
   '> ',

@@ -14,7 +14,7 @@ completed: 2026-03-12
 
 ## Why
 
-team lead反馈"新建对话"弹窗**太难用**：
+operator反馈"新建对话"弹窗**太难用**：
 - 项目目录选择栏太小，底部根本看不到
 - 没有文件系统浏览器（Finder 风格），只能在当前目录层级选
 - 无法快速跳转到上级或任意目录
@@ -40,7 +40,7 @@ team lead反馈"新建对话"弹窗**太难用**：
 - [x] 删除自建目录浏览器（`browseExpanded` 折叠面板等）
 - [x] 猫猫选择器保留（现有 CatSelector 组件）
 - [ ] 移动端仍可用（响应式，移动端降级为路径输入 + 最近项目）— 待验证
-- [x] 视觉设计经team lead确认
+- [x] 视觉设计经operator确认
 
 ## 需求点 Checklist
 
@@ -73,7 +73,7 @@ team lead反馈"新建对话"弹窗**太难用**：
 
 ## Review Gate
 
-- 视觉设计：team lead确认
+- 视觉设计：operator确认
 - Code review：跨家族 peer review
 
 ## Completion
@@ -83,8 +83,8 @@ team lead反馈"新建对话"弹窗**太难用**：
 | 问题 | 结论 | 签收猫 |
 |------|------|--------|
 | 核心问题是否被解决？ | 是 — 原生 Finder 体验 + 路径直输 + 快捷入口 | gpt52, codex, opus |
-| 交付物是否对齐原始需求？ | 是 — team lead"像上传图片那样选文件夹"完全命中 | gpt52, codex, opus |
-| team lead实际体验是否改善？ | 是 — 三入口 vs 旧版折叠浏览器 | gpt52, codex, opus |
+| 交付物是否对齐原始需求？ | 是 — operator"像上传图片那样选文件夹"完全命中 | gpt52, codex, opus |
+| operator实际体验是否改善？ | 是 — 三入口 vs 旧版折叠浏览器 | gpt52, codex, opus |
 
 ### 残留项
 - R5 移动端响应式降级：当前 Cat Café 仅桌面使用，移动端验证待 F010 手机端功能推进时一并确认

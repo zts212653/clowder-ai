@@ -47,7 +47,7 @@ knowledge:
 | L1 | Pattern | ≥2 similar episodes (180d) or human request; 5Q ≥ 7/10 |
 | L2 | Draft | smoke gate ≥3 cases (≥2/3 pass); promotion gate ≥5 cases (≥3/5 pass, covering 3 types) |
 | L3 | Validated | ≥6 uses, ≥2 agents, ≥80%, no critical breach |
-| L4 | Standard | ≥12 uses, last 10 ≥90%, CVO approved |
+| L4 | Standard | ≥12 uses, last 10 ≥90%, operator approved |
 
 Dual lane: `long_tail: true` allows parking at L2/L3 for high-risk domains.
 

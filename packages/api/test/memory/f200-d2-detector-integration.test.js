@@ -17,7 +17,7 @@ describe('F200 AC-D2 — Extended signal sources in OutputVerifiedDetector', () 
     OutputVerifiedDetector = mod.OutputVerifiedDetector;
   });
 
-  // AC-D2.1: CVO accept auto-detect
+  // AC-D2.1: operator accept auto-detect
   it('detects cvo_accepted signal when source returns true', async () => {
     const detector = new OutputVerifiedDetector({
       getInvocationStatus: async () => null,

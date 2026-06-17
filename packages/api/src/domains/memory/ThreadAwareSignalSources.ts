@@ -8,7 +8,7 @@ import { SqliteSignalSources } from './SqliteSignalSources.js';
  * Extends SqliteSignalSources (invocation status from evidence.sqlite) with
  * Redis-backed signals from thread messages and PR tracking tasks:
  *
- * - AC-D2.1: CVO accept + reviewer approval detected via thread message scanning
+ * - AC-D2.1: operator accept + reviewer approval detected via thread message scanning
  * - AC-D2.2: CI passed detected via pr_tracking task automationState
  * - AC-D2.3: PR merged detected via pr_tracking task status='done'
  *
@@ -67,14 +67,14 @@ function isNonApprovalContext(text: string): boolean {
   return false;
 }
 
-// CVO acceptance: full-text patterns (anchored or word-bounded — safe in long sentences).
+// operator acceptance: full-text patterns (anchored or word-bounded — safe in long sentences).
 const CVO_ACCEPT_PATTERNS = [
   /^\s*(please\s+)?merge(\s+(it|this|the\s+pr|please))?\s*[!.]*$/i,
   /^好[的了]?\s*[，,。.！!]?\s*$/,
   /^可以[了]?\s*$/,
 ];
 
-// CVO acceptance: clause-anchored Chinese patterns.
+// operator acceptance: clause-anchored Chinese patterns.
 // Split by clause separators and match only standalone short clauses.
 // "看了，没问题" → clause "没问题" matches; "没问题的话再合入" → no clause match.
 const CVO_ACCEPT_CLAUSE = [
@@ -170,16 +170,16 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
   }
 
   /**
-   * AC-D2.1: Detect CVO (铲屎官) acceptance by scanning thread messages.
+   * AC-D2.1: Detect operator (co-creator) acceptance by scanning thread messages.
    * Only human user messages count — cat messages are ignored.
    * Latest decision wins: iterate newest→oldest, first match determines result.
    */
   async isCvoAcceptedForThread(threadId: string): Promise<boolean> {
     const messages = await this.messageStore.getByThread(threadId, MESSAGE_SCAN_LIMIT);
-    // Iterate newest→oldest so the latest CVO decision takes precedence.
+    // Iterate newest→oldest so the latest operator decision takes precedence.
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      // Human (CVO) message: catId is null/undefined/empty. Cat messages have catId set.
+      // Human (operator) message: catId is null/undefined/empty. Cat messages have catId set.
       if (msg.catId) continue;
       // Skip connector/system messages (e.g. CI notifications with "CI 通过").
       if (msg.source) continue;

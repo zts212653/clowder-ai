@@ -36,9 +36,9 @@ describe('governance-pack', () => {
     assert.ok(block.includes('production Redis'), 'Redis port guidance should be present');
   });
 
-  it('self context keeps Cat Cafe runtime defaults wording', () => {
+  it('self context keeps Clowder AI runtime defaults wording', () => {
     const block = getGovernanceManagedBlock('claude', 'self');
-    assert.ok(block.includes('Public local defaults'), 'self context should describe Cat Cafe local defaults');
+    assert.ok(block.includes('Public local defaults'), 'self context should describe Clowder AI local defaults');
     assert.ok(block.includes(`use ${expectedRuntimePortsText}`), 'self context should keep runtime usage wording');
     assert.ok(
       !block.includes('Avoid using these ports for this project'),
@@ -46,18 +46,18 @@ describe('governance-pack', () => {
     );
   });
 
-  it('external context reserves Cat Cafe runtime ports instead of telling projects to use them', () => {
+  it('external context reserves Clowder AI runtime ports instead of telling projects to use them', () => {
     const block = getGovernanceManagedBlock('claude', 'external');
-    assert.ok(block.includes('Cat Cafe runtime ports'), 'external context should name Cat Cafe runtime ports');
-    assert.ok(block.includes(`${expectedRuntimePortsText} are reserved by Cat Cafe`));
+    assert.ok(block.includes('Clowder AI runtime ports'), 'external context should name Clowder AI runtime ports');
+    assert.ok(block.includes(`${expectedRuntimePortsText} are reserved by Clowder AI`));
     assert.ok(block.includes("Avoid using these ports for this project's dev servers."));
     assert.ok(
       !block.includes('Public local defaults'),
-      'external context should not advertise Cat Cafe ports as defaults',
+      'external context should not advertise Clowder AI ports as defaults',
     );
     assert.ok(
       !block.includes(`use ${expectedRuntimePortsText}`),
-      'external context must not instruct projects to use Cat Cafe ports',
+      'external context must not instruct projects to use Clowder AI ports',
     );
   });
 

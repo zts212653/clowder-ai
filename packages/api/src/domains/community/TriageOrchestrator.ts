@@ -75,7 +75,24 @@ export class TriageOrchestrator {
       return;
     }
 
-    if (!this.deps.threadStore) return;
+    // C3.1: if threadId is explicitly provided (e.g. from routeRecommendation
+    // existing-thread), route to that thread without auto-creating a new one.
+    if (threadId) {
+      await this.deps.communityIssueStore.update(issueId, {
+        state: 'accepted',
+        assignedThreadId: threadId,
+        lastActivity: { at: Date.now(), event: `routed-to-thread-${threadId}` },
+      });
+      return;
+    }
+
+    if (!this.deps.threadStore) {
+      // F168 Phase C C0.1 (INV-7): fail-loud — 静默 return 会让无 relatedFeature 的
+      // accepted issue 永远不被路由（thread 没建、assignedThreadId 为空、case.routed 不发）。
+      throw new Error(
+        `[TriageOrchestrator] routeAccepted: threadStore not wired — cannot create thread for issue ${issueId} (no relatedFeature). Check communityIssueRoutes registration in index.ts.`,
+      );
+    }
     const thread = await this.deps.threadStore.create(userId, `Community: ${issue.title}`);
     await this.deps.communityIssueStore.update(issueId, {
       state: 'accepted',

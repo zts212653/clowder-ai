@@ -1,0 +1,48 @@
+{
+  "id": "ragdoll-v1",
+  "displayName": "布偶猫 v1",
+  "description": "Clowder AI default concierge skin — ragdoll cat pixel art.",
+  "version": 1,
+  "format": "individual-sprites",
+  "sprites": {
+    "idle": "idle.png",
+    "running": "running.png",
+    "review": "review.png",
+    "failed": "failed.png"
+  },
+  "projection": {
+    "version": 1,
+    "fallback": "idle",
+    "map": {
+      "idle": "idle",
+      "sleeping": "idle",
+      "listening": "idle",
+      "thinking": "running",
+      "found": "review",
+      "needs-confirmation": "idle",
+      "handoff": "running",
+      "error": "failed"
+    }
+  },
+  "identity": {
+    "species": "cat",
+    "breedOrForm": "ragdoll",
+    "palette": [],
+    "markings": ["blue lynx point", "blue eyes", "fluffy long fur"],
+    "silhouetteNotes": "compact full-body, readable at 64x64",
+    "allowedProps": []
+  },
+  "provenance": {
+    "source": "image-generation",
+    "generator": "cloud-imagegen",
+    "promptTemplate": "docs/features/assets/F229/desktop-pet-sprite/README.md",
+    "notes": "v0 interim: reusing Phase A transition sprites (opus stickers 2026-02). Proper pixel art sprites to be generated in E1+. No logos, text, UI, scenery."
+  },
+  "qa": {
+    "readabilityCheck": "pass",
+    "identityDiffCheck": "pass",
+    "provenanceCheck": "pass",
+    "reviewer": "gpt52",
+    "reviewedAt": "2026-06-16"
+  }
+}

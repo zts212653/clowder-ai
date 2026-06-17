@@ -1,7 +1,7 @@
 export interface OutputVerifiedSignalSources {
   getInvocationStatus(invocationId: string): Promise<string | null>;
   isPrMergedForThread(threadId: string): Promise<boolean>;
-  /** AC-D2.1: CVO (铲屎官) explicitly accepted the output in thread messages */
+  /** AC-D2.1: operator (co-creator) explicitly accepted the output in thread messages */
   isCvoAcceptedForThread?(threadId: string): Promise<boolean>;
   /** AC-D2.1: A reviewer cat approved the output in thread messages */
   isReviewerApprovedForThread?(threadId: string): Promise<boolean>;
@@ -33,7 +33,7 @@ export class OutputVerifiedDetector {
       if (merged) signals.push('pr_merged');
     } catch {}
 
-    // AC-D2.1: CVO accept (optional source — backward compatible)
+    // AC-D2.1: operator accept (optional source — backward compatible)
     if (this.sources.isCvoAcceptedForThread) {
       try {
         const accepted = await this.sources.isCvoAcceptedForThread(threadId);

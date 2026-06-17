@@ -7,7 +7,7 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const REDIS_SANCTUM = 6399; // 用户 Redis 圣域，铁律 #1
+export const REDIS_SANCTUM = 6399; // 用户 production data boundary，铁律 #1
 const REDIS_BASE = 6398;
 const API_BASE = 3102;
 const WEB_BASE = 5102;

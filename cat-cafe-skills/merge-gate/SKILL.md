@@ -1,8 +1,8 @@
 ---
 name: merge-gate
 description: >
-  合入 main 的完整流程：门禁检查 → PR → 云端 review → squash merge → Phase 文档同步 → 清理。
-  Use when: reviewer 放行后准备合入、开 PR、触发云端 review、准备 merge。
+  合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → Phase 文档同步 → 清理。
+  Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
   Not for: 开发中、review 未通过、自检未完成。
   Output: PR merged + worktree cleaned。
 triggers:
@@ -18,7 +18,7 @@ triggers:
 
 > **SOP definition**: `sop-definitions/development.yaml` stage `merge`。
 
-合入 main 的完整流程：门禁检查 → PR → 云端 review → squash merge → 清理。
+合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → 清理。
 
 ## 核心知识
 
@@ -50,6 +50,15 @@ triggers:
 - `headChangeCause = ci-fix` / `local-gate` 且是非 cloud 的行为性 delta（代码、测试、配置、接口变化）→ local peer delta review；若超出原 review scope，按完整 local review 处理。
 - `headChangeCause = pr-meta`（只改 PR body/comment，不改 commit SHA）→ 不影响 local/cloud review coverage。
 - cloud 额度/权限不可用时，才降级为另一只合格本地猫做**完整 PR review**；这不是把旧 reviewer 拉回来续签。
+
+**封板协议（LL-072，cloud re-review 循环的硬上限）**：
+
+"cloud-finding 修复 → 重新触发 cloud review" 没有自然终点——cloud reviewer 是**无状态抽样信号源**（每轮重放全部历史 inline comments、不能分辨 stale/fresh、不读 pushback），在多 commit 累积 diff 上"0 P1/P2"这个条件**没有不动点**，等它说零等于无限循环（F168 PR #2214 实测 21 轮，R19 单轮 22 findings 中 21 个假阳性）。因此：
+
+1. **循环检测阈值（机械判定，无弹性）**：同一 PR cloud review 达到 **5 轮**，或单轮假阳性（stale 重放/已修重报）比例 **>50%** → 当轮处理完**强制进入封板**，不是继续修-触发循环。
+2. **封板动作**：处理完当前轮全部 finding（真 P1/P2 修复 + 红绿测试；假阳性在 PR comment 有据 pushback）→ **不再 re-trigger cloud review，无论结果**。终局确权交给**本地有状态 reviewer** 对最终 SHA 做 final review（核 pushback 成立性 + 全 diff continuity），放行即 merge。cloud 的角色定位：有贡献预算的辅助信号源，不是终局确权者。
+3. **介入循环时必须改写驱动循环的持久化指令**：tracking instructions / hold 文案里若写有 "0 P1/P2 → merge" 类无不动点条件，拉闸者第一动作是改写它——只改修法不拆循环指令，执行猫会被旧指令拖回循环（F168 R16→R17 复活实证）。
+4. 同类 finding ≥3 轮（同一 stateful 对象/同一 fallback 族）→ 停手回 plan 层补状态契约（转移表+不变量），不是补第 4 个锅（LL/F229）。
 
 进入 Step 7 之前，author 必须核对：
 
@@ -144,17 +153,17 @@ EOF
 # - 暂停当前工作，处理冲突优先（冲突是 merge blocker）
 # - 在对应 worktree 执行 rebase（参见 refs/pr-signals.md Phase B）
 # - rebase 成功后继续原工作流
-# - 复杂冲突 → 通知铲屎官，等指示后再继续
+# - 复杂冲突 → 通知operator，等指示后再继续
 
 # 4. PR body 防呆检查（禁止任何 @句柄出现在 body）
 PR_BODY="$(gh pr view {PR_NUMBER} --json body --jq '.body')" || \
   { echo "❌ 无法读取 PR body，停止流程"; exit 1; }
 printf '%s\n' "$PR_BODY" | rg -q '@[A-Za-z0-9_-]+ review' && \
-  { echo "❌ 不合规：云端 review 触发句柄只能写在 comment，不能写在 body"; exit 1; }
+  { echo "❌ 不合规：remote review 触发句柄只能写在 comment，不能写在 body"; exit 1; }
 printf '%s\n' "$PR_BODY" | rg -q '@(codex|chatgpt-codex-connector|gpt52|opus|sonnet|gemini)\b' && \
   { echo "❌ 不合规：PR body 禁止出现任何 @句柄（含 HTML 注释中的签名）"; exit 1; }
 
-# 5. 触发云端 review（极简格式，在 PR comment 中，不是 body！）
+# 5. 触发remote review（极简格式，在 PR comment 中，不是 body！）
 # ⚠️ 只发 “@codex review” 一行，不带 SHA、不带规则描述、不带审查标准！
 # 详细格式会让 Codex connector 误解为代码修改请求（2026-04-20 PR #1300 确认）
 # 详见 refs/pr-template.md「云端 Review 触发 Comment 模板」
@@ -167,7 +176,7 @@ LAST_TRIGGER=”$(gh pr view {PR_NUMBER} --json comments | jq -r '
 
 gh pr comment {PR_NUMBER} --body '@codex review'
 
-# 6. 等云端 review（事件驱动，不轮询）
+# 6. 等remote review（事件驱动，不轮询）
 #
 # 6.1 👀 接单检测（触发后 5 分钟查一次）
 TRIGGER_COMMENT_ID=”$(gh api repos/{OWNER}/{REPO}/issues/{PR_NUMBER}/comments \
@@ -277,7 +286,7 @@ gh pr merge {PR_NUMBER} --squash --delete-branch
 | `category` | `"pr"` |
 | `params` | `{"message":"Hotfix PR #{PR_NUMBER} 合入已满 2 周。请三选一处置：1. 升级正式修复（开 feat）2. 接受永久方案（标记 permanent）3. 已不再相关（代码已重写/删除，标记 obsolete）"}` |
 
-**Fail-closed**：MCP 调用失败 → **停止 merge-gate，不执行 Step 8（清理）**。排查 MCP 连接后重试；连续失败 → 通知铲屎官手动注册 reminder 后继续。
+**Fail-closed**：MCP 调用失败 → **停止 merge-gate，不执行 Step 8（清理）**。排查 MCP 连接后重试；连续失败 → 通知operator手动注册 reminder 后继续。
 
 ```bash
 # 8. 更新本地 + 清理（fail-closed）
@@ -318,17 +327,17 @@ fi
 git worktree prune  # 清理 dangling worktree references
 ```
 
-### 云端 review 处理规则
+### remote review 处理规则
 
 **⚠️ LL-033 教训：必须检查 inline code comments！**
 
-云端 review 的 P1/P2 可能在 **inline code comments** 里，不在 review body 里。
+remote review 的 P1/P2 可能在 **inline code comments** 里，不在 review body 里。
 `gh pr view` 的 `--json reviews` 只返回 review body（可能显示"no major issues"），
 但 inline code comment 里可能有 P1。
 
-#### 豁免条件 — 哪些 PR 跳过云端 review（CVO directive 2026-05-13）🔴
+#### 豁免条件 — 哪些 PR 跳过remote review（operator directive 2026-05-13）🔴
 
-云端 codex 没有 Cat Café MCP，看不到 thread / memory / 真相源，不了解家里 SOP 演化历史。对**纯家规/SOP/skill 类文字改动**做云端 review 会引入"被带歪"风险 > 价值。
+云端 codex 没有 Cat Café MCP，看不到 thread / memory / 真相源，不了解家里 SOP 演化历史。对**纯家规/SOP/skill 类文字改动**做remote review 会引入"被带歪"风险 > 价值。
 
 **默认豁免（本地 review pass 后直接 squash merge）**：
 - `cat-cafe-skills/**/SKILL.md` 改动（家规、SOP、流程文字 — 云端看不懂语境）
@@ -336,7 +345,7 @@ git worktree prune  # 清理 dangling worktree references
 - `project-reflections/*.md` / `feature-discussions/*.md` 纯文字改动
 - 任何 docs-only PR 且本地 reviewer 是非 author 的Maine Coon族 reviewer（跨 family）
 
-**仍必须走云端 review（不能豁免）**：
+**仍必须走remote review（不能豁免）**：
 - 任何 `packages/**` 代码改动（业务逻辑 / API / 前端）
 - 任何 test 改动（含 fixture）
 - 涉及 secret / auth / SSRF / DoS 资源边界的改动
@@ -345,9 +354,9 @@ git worktree prune  # 清理 dangling worktree references
 **豁免时仍要做**：
 - 本地 reviewer 跨家族 review pass（必经）
 - `pnpm gate` light path（biome + check:features + git diff --check）
-- PR comment 标注 "Cloud review skipped per CVO directive: <reason>" 留决策依据
+- PR comment 标注 "Cloud review skipped per operator directive: <reason>" 留决策依据
 
-事故来源：PR #1661 (SOP 改进 docs-only) 本地Maine Coon review pass 后无意识触发云端 review，CVO 立刻 push back "云端不懂家里情况，会被带歪"。
+事故来源：PR #1661 (SOP 改进 docs-only) 本地Maine Coon review pass 后无意识触发remote review，operator 立刻 push back "云端不懂家里情况，会被带歪"。
 
 #### 层级 A：通知已包含 severity（自动）
 
@@ -417,17 +426,17 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 
 | 错误 | 正确 |
 |------|------|
-| PR body 里写了云端 review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
+| PR body 里写了remote review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |
 | 触发 comment 带了多行描述（SHA/规则/审查标准） | **只发 `@codex review` 一行**，详细内容让 Codex 误解为代码修改请求 |
 | 同一个 commit 连续发多条触发 comment | 先做 Step 5.1 去重检查；只有新 commit 才 re-trigger |
 | 触发后立刻轮询或手动重触发 | 5 分钟后查 👀（Step 6.1）；有 👀 = PR tracking 自动通知，**释放 hold_ball 不再轮询**（KD-27）；无 👀 = 允许 re-trigger |
-| 修了 P1 不 re-trigger review | 修完 push 后**必须重新触发**云端 review |
+| 修了 P1 不 re-trigger review | 修完 push 后**必须重新触发**remote review |
 | cloud P1/P2 修完后又 @ 本地旧 reviewer 续签 | `headChangeCause=cloud-finding` → re-trigger cloud review + 等 PR tracking；本地 peer 不是 Stage ④ 常驻 gate |
 | `pnpm gate` rebase / fixup 后沿用旧 review 直接 merge | 先对齐 `headRefOid`；**只要 HEAD 变了，先按 Review Provenance Matrix 判定 nextGateOwner** |
 | 本地 `git rebase -i` 手动 squash | 用 `gh pr merge --squash`（GitHub 处理） |
 | 本地 merge 后 `gh pr close` | `gh pr close` = 放弃，`gh pr merge` = 合入 |
-| 不等云端 review 直接合入 | 必须等 0 P1/P2 |
+| 不等remote review 直接合入 | 必须等 0 P1/P2 |
 | 把截图/录屏/.pen 直接 commit 到仓库根目录 | Step 0.5 Root Artifact Guard 先拦截；先归档再开 PR |
 | Merge 后不更新 feature doc | Step 7.5 Phase 文档同步（每次 merge 必做！） |
 | Merge 后不清理 review 沙盒 | Step 8.5 按 review-target-id 回收 `/tmp/cat-cafe-review/` |
@@ -440,7 +449,7 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 
 **后果**：
 - 触发了 `chatgpt-codex-connector` 的“Create an environment”自动回复
-- 云端 review 没有实际执行，流程被噪声污染
+- remote review 没有实际执行，流程被噪声污染
 
 **硬规则（加粗执行）**：
 - **PR body（含 HTML 注释）禁止出现任何 `@句柄`**
@@ -466,7 +475,7 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 ### Q2: PR 里看到小眼睛（👀）是什么意思？
 
-**小眼睛 = 云端 reviewer 已接单/已看到触发。**
+**小眼睛 = remote reviewer 已接单/已看到触发。**
 
 **⚠️ EYES ICON MEANS "REQUEST RECEIVED", NOT "FAILED".**
 
@@ -480,18 +489,20 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 - **无 👀** = 云端没接到 → 允许 re-trigger
 - 有 👀 的情况下严禁重复触发
 
-### Q4: 云端 reviewer 没猫粮了怎么办？
+### Q4: remote reviewer 没猫粮了怎么办？
 
 云端 Codex 的"代码审查"额度独立于总额度，可能单独耗尽。此时降级到其他猫做 **完整 PR review**（不是跳过 review！）：
 
 | 原 reviewer | 降级到 | 说明 |
 |-------------|--------|------|
-| Maine Coon Codex | Maine Coon GPT-5.4 | 同族不同个体 |
-| Maine Coon GPT-5.4 | Maine Coon Codex | 反向降级 |
+| Maine Coon Codex | Ragdoll Opus 家族（47/48） | **跨 provider family**（Codex 和 GPT-5.4 共享 OpenAI API 池，一个没猫粮 = 都没猫粮） |
+| Maine Coon GPT-5.4 | Ragdoll Opus 家族（47/48） | 同上——OpenAI 共享池 |
 | Ragdoll某个体 | Ragdoll其他个体 / Maine Coon | 同族或跨族 |
-| **禁止** | Siamese | 不做代码 review（孟加拉猫 Opus 除外，底层是 Opus） |
+| **禁止** | Siamese | 不做代码 review（Bengal Opus 除外，底层是 Opus） |
 
 **铁律：降级后仍须校验"reviewer ≠ 作者"**——降级表是建议顺序，不能覆盖 self-review 禁令。
+
+**⚠️ 共享 API 池陷阱（F238 教训）**：同一 provider 的不同 model（Codex/GPT-5.4/GPT-5.5）共享 API 额度。降级必须跨 provider family（OpenAI → Anthropic），不能在同 provider 内换个体。
 
 操作：`gh pr comment {PR} --body "..."` 用标准触发模板 @ 降级 reviewer（句柄查 `cat-config.json`）。
 
@@ -511,8 +522,8 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 3. 守护猫放行 → close feat
 4. 守护猫踢回 → 修改后重新走 quality-gate
 
-**中间 Phase（大 Feature，3+ Phase）** → Phase 文档同步（Step 7.5 已做）+ **主动碰头铲屎官**：
+**中间 Phase（大 Feature，3+ Phase）** → Phase 文档同步（Step 7.5 已做）+ **主动碰头operator**：
 1. 成果展示（截图 / demo / 关键改动）
 2. 愿景进度（哪些 AC ✅ 了）
 3. 下个 Phase 方向 + 新发现
-4. "方向对吗？" → 铲屎官确认 → 继续下一个 Phase
+4. "方向对吗？" → operator确认 → 继续下一个 Phase

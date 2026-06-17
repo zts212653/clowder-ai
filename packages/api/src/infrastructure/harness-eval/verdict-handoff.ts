@@ -55,7 +55,7 @@ const verdictHandoffPacketSchema = z
     if (packet.governance?.cvoAcceptRequired !== true) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'delete_sunset verdict requires structured CVO accept gate',
+        message: 'delete_sunset verdict requires structured operator accept gate',
         path: ['governance', 'cvoAcceptRequired'],
       });
     }

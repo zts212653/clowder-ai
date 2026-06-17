@@ -10,7 +10,7 @@ created: 2026-02-26
 
 > **Status**: done | **Owner**: Ragdoll
 > **Created**: 2026-02-26
-> **Priority**: P1（team lead明确需求，影响日常管理体验）
+> **Priority**: P1（operator明确需求，影响日常管理体验）
 > **Re-opened**: 2026-02-27（愿景对照失败：UI 不可用 + 多项目管理缺失 + Skills 来源分类 bug）
 > **Completed**: 2026-02-28（PR #98 合入 main）
 
@@ -18,7 +18,7 @@ created: 2026-02-26
 
 ## Why
 
-team lead 2026-02-26 明确提出：
+operator 2026-02-26 明确提出：
 > "我都不知道你们三只猫到底挂了什么！"
 
 **核心痛点**：
@@ -56,14 +56,14 @@ team lead 2026-02-26 明确提出：
 > 来源：Discussion README §1.2 "不想当人肉路由器——Hub 是唯一管理入口"
 > 来源：Discussion README §1.3 "不同项目需要不同的工具集配置"
 
-- [x] 每条能力有**描述**（不是只有 raw ID），team lead一眼能知道这个能力干什么
+- [x] 每条能力有**描述**（不是只有 raw ID），operator一眼能知道这个能力干什么
 - [x] 猫猫过滤按**猫族**（Ragdoll/Maine Coon/Siamese），不是按 8 个 cat variant（codex/gpt52/opus/opus-45/...）
 - [x] Skills 来源分类正确：Cat Cafe 项目级 skills 标 `cat-cafe`，用户级/外部 skills 标 `external`
 - [x] 来源过滤可用：选 "Cat Cafe" 能看到 Cat Cafe 的 skills + MCP
 - [x] 视觉层级清晰：有分类/分组，不是纯 data grid（参考 Skills 看板的呈现水平）
 - [x] 表格宽度合理：不需要横向滚动就能看清全部信息
 
-### 多项目管理验收（🔴 Re-open 新增 — team lead核心痛点 #3）
+### 多项目管理验收（🔴 Re-open 新增 — operator核心痛点 #3）
 
 > 来源：Discussion README §1.3 "我现在甚至用你们来开发我公司内的代码。我在猫猫咖啡打开 dare-framework，让你们开发 dare-framework。"
 
@@ -113,11 +113,11 @@ team lead 2026-02-26 明确提出：
 
 ## Key Decisions
 
-1. **全局 + 每猫覆盖**：不做单层开关，支持两层覆盖（team lead拍板）
+1. **全局 + 每猫覆盖**：不做单层开关，支持两层覆盖（operator拍板）
 2. **MCP 归一优先**：三猫统一走原生 MCP，HTTP callback 只作 fallback（推翻"只有 Claude 支持 MCP"的旧假设）
 3. **配置编排器生成**：不让用户手写三份 CLI 配置，统一从 `.cat-cafe/capabilities.json` 生成
 4. **猫 tab 精简**：能力信息只在能力看板展示，不在猫 tab 重复
-5. **一步到位**：不分阶段，B 方案（完整归一）包含 A 方案（展示+开关），不走弯路（team lead拍板）
+5. **一步到位**：不分阶段，B 方案（完整归一）包含 A 方案（展示+开关），不走弯路（operator拍板）
 6. **配置编排是核心**：`.cat-cafe/` 作为项目级唯一真相源，编排器生成三猫 CLI 配置
 
 ---
@@ -163,7 +163,7 @@ interface CapabilityDescriptor {
 - **Fallback**：仅在"生成配置/进程失败/启动不可用"时触发，短时启用 callback 提示词
 - fallback 触发要有条件检测（异常才触发），不能默认每次注入
 
-> 三方（team lead+Ragdoll+Maine Coon）共识。
+> 三方（operator+Ragdoll+Maine Coon）共识。
 
 #### 4. 提示词归一与 F042 协调
 
@@ -223,7 +223,7 @@ startup_timeout_sec = 30
 
 ### 执行顺序（三方共识）
 
-> Ragdoll提议，team lead认可，Maine Coon确认（2026-02-27）。
+> Ragdoll提议，operator认可，Maine Coon确认（2026-02-27）。
 > Maine Coon原话："先做能力编排与配置下发，再落 `cat.ts`/`cat-config` 的 `mcpSupport: true`"。
 
 | 步骤 | 做什么 | 为什么 |
@@ -248,14 +248,14 @@ startup_timeout_sec = 30
 1. ~~执行顺序~~ → 已确认：Maine Coon同意"先铺路后点灯"
 2. ~~Codex `.codex/config.toml` 格式~~ → 已确认：见共识 §6
 3. ~~Gemini `.gemini/settings.json` 格式~~ → 已确认：见共识 §6
-4. ~~fallback 触发检测~~ → team lead定调：不重要，大概率是 MCP 调不通。实施时用最简检测（spawn 失败/工具列表为空 → 降级注入 callback）
+4. ~~fallback 触发检测~~ → operator定调：不重要，大概率是 MCP 调不通。实施时用最简检测（spawn 失败/工具列表为空 → 降级注入 callback）
 5. ~~Gemini CLI enable/disable bug~~ → 已确认：无可复现 bug 证据，采用稳妥策略（见共识 §7）
 
 ---
 
 ## Known Limitations
 
-### Same-provider per-cat override 不可强制执行（P3 降级 — team lead裁决 2026-02-27）
+### Same-provider per-cat override 不可强制执行（P3 降级 — operator裁决 2026-02-27）
 
 **现象**：同一 provider 下多只猫（如 codex/gpt52/spark 共享 `.codex/config.toml`）的 per-cat disable 无法在 CLI 配置层面执行。`capabilities.json` 正确保存了 per-cat override，但 `collectServersPerProvider` 生成 CLI 配置时采用 union 策略（any-enabled-wins），disabled 状态被合并丢失。
 
@@ -264,7 +264,7 @@ startup_timeout_sec = 30
 - Union 策略是最安全默认——反过来做（any-disabled-wins）会让 sibling cat 被误关
 - 修复需要 per-invocation 临时配置生成或运行时 MCP 过滤，超出 F041 范围
 
-**来源**：云端 Codex review PR #83，Ragdoll push back 后team lead裁决降级为 P3 known limitation。
+**来源**：云端 Codex review PR #83，Ragdoll push back 后operator裁决降级为 P3 known limitation。
 
 ### Skills 运行时强制执行受限于 CLI（2026-02-27）
 
@@ -305,7 +305,7 @@ startup_timeout_sec = 30
 | R1 | Maine Coon/Codex (本地) | 2 P1 + 2 P2 + 1 P3 → 全部修复/push back | 2026-02-27 | #83 |
 | R2 | Maine Coon/Codex (本地) | 放行 (0 P1/P2) + 2 non-blocking P3 → 修复 | 2026-02-27 | #83 |
 | Cloud R1 | Codex (云端) | P1-1 修复 (bootstrap CLI configs) + P1-2 push back (same-provider) | 2026-02-27 | #83 |
-| Cloud R2 | Codex (云端) | 同一 P1-2 重提 → team lead裁决降级 P3 | 2026-02-27 | #83 |
+| Cloud R2 | Codex (云端) | 同一 P1-2 重提 → operator裁决降级 P3 | 2026-02-27 | #83 |
 | Gap R1 | Maine Coon/Codex (本地) | 放行 (0 P1/P2), 1 P3 (skills hint) → 修复 | 2026-02-27 | #85 |
 | Gap R2 | Maine Coon/Codex (本地) | P1 React key + P2 toggling state → 修复 → 放行 | 2026-02-27 | #85 |
 | Cloud R1-R2 | Codex (云端) | P1 ID collision + P2 coexistence → 修复 | 2026-02-27 | #85 |

@@ -90,8 +90,8 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
       assert.ok(Array.isArray(fixtures), 'must return array');
       assert.equal(fixtures.length, 3, 'Phase B has 3 fixtures');
 
-      // Fixture 1: CVO alias — has query but anchor has no glob → drilldown
-      assert.equal(fixtures[0].query, 'CVO');
+      // Fixture 1: operator alias — has query but anchor has no glob → drilldown
+      assert.equal(fixtures[0].query, 'operator');
       assert.equal(fixtures[0].mode, 'lexical');
       assert.equal(fixtures[0].kind, 'drilldown', 'F1 has query but non-glob anchor');
 
@@ -185,7 +185,7 @@ describe('F200 HW-5: F209 fixture recall@k wrapper', () => {
 
       const fixture = {
         name: 'miss-fixture',
-        query: 'CVO',
+        query: 'operator',
         scope: 'docs',
         mode: 'lexical',
         depth: 'summary',

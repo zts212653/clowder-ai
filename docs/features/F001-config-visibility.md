@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- team lead洞察 🐬
+- operator洞察 🐬
 
 ## What
 - **F1**: Phase 3.9 6a671ac — ConfigRegistry + GET /api/config + /config chat command

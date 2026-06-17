@@ -3,7 +3,7 @@ import { exportText } from '../oklch-tuner-css';
 import { INIT_DARK, INIT_LIGHT } from '../oklch-tuner-engine';
 
 describe('OKLCH tuner defaults', () => {
-  it('exports the CVO-tuned light token defaults', () => {
+  it('exports the operator-tuned light token defaults', () => {
     expect(exportText(INIT_LIGHT, 'light')).toBe(
       [
         'OKLCH Token Values (light)',
@@ -29,7 +29,7 @@ describe('OKLCH tuner defaults', () => {
     );
   });
 
-  it('exports the CVO-tuned dark token defaults', () => {
+  it('exports the operator-tuned dark token defaults', () => {
     expect(exportText(INIT_DARK, 'dark')).toBe(
       [
         'OKLCH Token Values (dark)',

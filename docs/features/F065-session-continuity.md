@@ -24,9 +24,9 @@ created: 2026-03-05
 3. **Bootstrap 没有引导猫使用已有的查询工具** — MCP 工具已补齐（TD098 已完成 view 模式 + invocation detail + search 指针），但 bootstrap 引导路径未更新
 4. **没有线程级滚动记忆** — Session 5 对 Session 1 完全失明
 
-team experience："Session chain 新启动的猫需要继承过去的猫的猫猫崇崇。现在是你之前的 chain 上下文超过了被封印了，然后启动后的新 session 的你，我估计是没自动继承这个 plan 的。"
+operator experience："Session chain 新启动的猫需要继承过去的猫的猫猫崇崇。现在是你之前的 chain 上下文超过了被封印了，然后启动后的新 session 的你，我估计是没自动继承这个 plan 的。"
 
-team lead明确的恢复哲学：**搜文件树那样搜 session chain → invocation → 文件树**。不是让快没 context 的旧猫写总结——那时候他已经记不清了。
+operator明确的恢复哲学：**搜文件树那样搜 session chain → invocation → 文件树**。不是让快没 context 的旧猫写总结——那时候他已经记不清了。
 
 ## What
 
@@ -68,7 +68,7 @@ team lead明确的恢复哲学：**搜文件树那样搜 session chain → invoc
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "新启动的猫需要继承过去的猫的猫猫崇崇" | AC-1, AC-2 | test: bootstrap 输出包含 task 列表 | [x] Phase A `e5082209` |
 | R2 | "搜文件树那样搜 session chain → invocation → 文件树" | AC-3, AC-4 | test: bootstrap 引导路径 + 端到端查询 | [x] Phase A `e5082209` |
@@ -86,10 +86,10 @@ team lead明确的恢复哲学：**搜文件树那样搜 session chain → invoc
 
 | # | 决策 | 理由 |
 |---|------|------|
-| KD-1 | 恢复哲学是"搜"不是"灌"：新猫按需搜旧 session，不是一次性注入全部历史 | team lead明确指示；F24 Q2 决策 |
+| KD-1 | 恢复哲学是"搜"不是"灌"：新猫按需搜旧 session，不是一次性注入全部历史 | operator明确指示；F24 Q2 决策 |
 | KD-2 | Task 快照直接注入 bootstrap（例外于 KD-1） | Task 列表小且关键，不适合让猫自己去搜才知道有任务 |
 | KD-3 | MCP 查询工具已由 TD098 完成（view 模式 + invocation detail + search 指针），F065 只需更新 bootstrap 引导路径 | 避免重复劳动 |
-| KD-4 | 面向所有猫，不限 Claude | team lead确认 Q3 |
+| KD-4 | 面向所有猫，不限 Claude | operator确认 Q3 |
 | KD-5 | ThreadMemory token 上限 `min(3000, floor(maxPromptTokens * 0.03))`，下限 1200 | Maine Coon分析：预算未扣 bootstrap，Spark 64k prompt 下 3% ≈ 1920 |
 | KD-6 | Task 快照格式：紧凑列表 + 焦点任务，doing>blocked>todo>done 排序，最多 8 open + 2 done | Maine Coon建议，约 200-400 tokens |
 | KD-7 | Task title/why 按数据块渲染，截断 80/120 字符，含注入防护 | Maine Coon P1 安全发现 |

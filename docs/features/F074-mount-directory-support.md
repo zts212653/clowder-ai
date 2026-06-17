@@ -17,7 +17,7 @@ status: done
 
 ## Why
 
-team lead通过共享目录（SMB/NFS）将同事电脑挂载到本机，想在挂载目录下直接与猫猫协作。当前后端 `validateProjectPath` 的 allowlist 默认只含 `$HOME`、`/tmp`、`/private/tmp`，不包含 `/Volumes`，导致所有挂载目录被 403 拒绝。`PROJECT_ALLOWED_ROOTS` 环境变量是覆盖模式（非追加），配置成本高且容易丢失默认值。前端文案写"选择任意目录"但实际受限，体验不一致。
+operator通过共享目录（SMB/NFS）将同事电脑挂载到本机，想在挂载目录下直接与猫猫协作。当前后端 `validateProjectPath` 的 allowlist 默认只含 `$HOME`、`/tmp`、`/private/tmp`，不包含 `/Volumes`，导致所有挂载目录被 403 拒绝。`PROJECT_ALLOWED_ROOTS` 环境变量是覆盖模式（非追加），配置成本高且容易丢失默认值。前端文案写"选择任意目录"但实际受限，体验不一致。
 
 ## What
 

@@ -41,7 +41,7 @@ const RULES = [
     id: 'catcafe-test-tmux',
     minAgeSeconds: HOUR,
     match: (p) => p.ppid === 1 && /tmux\b.*\bcatcafe-test-agent-spawn-/.test(p.command),
-    reason: 'orphaned Cat Cafe test tmux session',
+    reason: 'orphaned Clowder AI test tmux session',
   },
   {
     id: 'orphan-alpha-start',
@@ -113,7 +113,7 @@ function listProcesses() {
 
 function printFindings(findings) {
   if (findings.length === 0) {
-    console.log('[stale-dev-processes] no stale Cat Cafe dev processes found');
+    console.log('[stale-dev-processes] no stale Clowder AI dev processes found');
     return;
   }
   for (const item of findings) {

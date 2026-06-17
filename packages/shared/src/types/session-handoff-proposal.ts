@@ -1,7 +1,7 @@
 /**
  * F225: Cat-initiated session handoff proposal types.
  *
- * 猫在干净断点主动提议封印当前 session → 铲屎官 gate → spawn 同 thread 同 catId
+ * 猫在干净断点主动提议封印当前 session → co-creator gate → spawn 同 thread 同 catId
  * 续接 + 注入猫亲手写的五件套交接留言。
  *
  * 与 F128 ThreadProposal 的关键差异（KD-5）：不复用 ThreadProposal shape（建-thread

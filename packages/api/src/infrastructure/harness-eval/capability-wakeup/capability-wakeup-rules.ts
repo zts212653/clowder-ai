@@ -33,7 +33,7 @@ export const DEFAULT_CAPABILITY_WAKEUP_RULES: CapabilityWakeupRule[] = [
     },
   },
 
-  // workspace-navigator — text patterns where cat should open files/dirs to show 铲屎官
+  // workspace-navigator — text patterns where cat should open files/dirs to show co-creator
   // 砚砚 R1 P1 PR-2 review: `text_pattern_then_capability` evaluator uses
   // `patterns.every(...)` (AND semantics) — multi-element array requires ALL phrases
   // in same transcript, effectively unmatchable. Fix: single regex with alternation.

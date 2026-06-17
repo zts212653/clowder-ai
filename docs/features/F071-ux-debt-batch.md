@@ -16,9 +16,9 @@ completed: 2026-03-11
 
 ## Why
 
-随着猫猫家族壮大和功能累积，前端出现了几个高频但零碎的 UX 痛点。单个都不大，但都直接影响team lead日常聊天体验，适合合并成一个 debt batch 统一收口。
+随着猫猫家族壮大和功能累积，前端出现了几个高频但零碎的 UX 痛点。单个都不大，但都直接影响operator日常聊天体验，适合合并成一个 debt batch 统一收口。
 
-### team experience（2026-03-07）
+### operator experience（2026-03-07）
 
 > "上传的图片上传后不支持预览"
 >
@@ -56,7 +56,7 @@ completed: 2026-03-11
 
 ### D2: 猫猫状态面板去掉误导性的幽灵“等待调用...”
 
-**问题**：当前 thread 没有猫猫在处理消息，但状态面板在 F5 或切 thread 后仍显示“等待调用...”，让team lead误以为还有活跃任务。
+**问题**：当前 thread 没有猫猫在处理消息，但状态面板在 F5 或切 thread 后仍显示“等待调用...”，让operator误以为还有活跃任务。
 
 **根因**：切换线程或冷启动时 `catStatuses` 可能为空，而 WebSocket 不会回放旧的 `intent_mode`；这时 UI 用“等待调用...”兜底，文案语义比真实状态更强，导致误导。
 
@@ -70,7 +70,7 @@ completed: 2026-03-11
 
 ### D3: @ mention 下拉从“堆一长列”改成可过滤、可滚动、可见性明确
 
-**问题**：猫猫家族成员增多后，@ mention 下拉变得很长。起初虽然加了滚动，但 macOS 隐藏滚动条，team lead看起来只像“只有前四只猫可以选”。
+**问题**：猫猫家族成员增多后，@ mention 下拉变得很长。起初虽然加了滚动，但 macOS 隐藏滚动条，operator看起来只像“只有前四只猫可以选”。
 
 **根因**：
 1. 初版下拉没有输入过滤，输入 `@op` 仍显示全部
@@ -85,7 +85,7 @@ completed: 2026-03-11
 - 列表底部仍有隐藏项时显示“↓ 还有更多猫猫”提示
 - 空结果时只拦截 plain `Enter`，保留 `Shift+Enter` 换行语义
 
-> team lead评价："你这只心机小坏猫！是不想让大家看到都接入了什么猫猫吗？"  
+> operator评价："你这只心机小坏猫！是不想让大家看到都接入了什么猫猫吗？"  
 > 结论：不是心机，是滚动 affordance 不够。
 
 **关键文件**：
@@ -112,7 +112,7 @@ completed: 2026-03-11
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | 上传后的消息图片支持点击预览（含回显） | AC-A1 | `pnpm --filter @cat-cafe/web test` + PR #268 | [x] |
 | R2 | 发送前的待上传图片也支持点击预览 | AC-A2 | code review + `a26ca1b7` | [x] |
@@ -145,18 +145,18 @@ completed: 2026-03-11
 | KD-1 | 共享 `Lightbox.tsx` 而不是继续 `window.open` | 消息图片、rich block、待上传图片要统一体验，避免重复实现 | 2026-03-07 |
 | KD-2 | D2 用“空闲”文案兜底，而不是在本轮补后端状态回放 | 原始痛点是“误导”，先保证文案真实，比做不完整同步更稳 | 2026-03-07 |
 | KD-3 | D3 先上过滤 + 滚动 + affordance，不做 breed 分组 | 这是最小有效解，能直接解决“看不见/选不到” | 2026-03-07 |
-| KD-4 | mention 空结果时只拦截 plain `Enter`，保留 `Shift+Enter` 换行 | 云端 review 指出语义回归，修成更精确的键位处理 | 2026-03-07 |
+| KD-4 | mention 空结果时只拦截 plain `Enter`，保留 `Shift+Enter` 换行 | remote review 指出语义回归，修成更精确的键位处理 | 2026-03-07 |
 
 ## Review Gate
 
 - 本地 review：@codex（2P1 + 1P2，修复后 re-review 放行）
-- 云端 review：1 个 P2（`Shift+Enter` 语义）修复后通过
+- remote review：1 个 P2（`Shift+Enter` 语义）修复后通过
 - 愿景守护 / feat close：@gpt52
 
 ## 愿景交叉验证签收
 
 | 猫猫 | 读了哪些文档 | 三问结论（核心问题 / 交付物 / 体验） | 签收 |
 |------|-------------|-------------------------------------|------|
-| Ragdoll/Ragdoll (opus) | F071 spec、PR #268、自测结果、后续 `a26ca1b7` / `e9249040` | 核心问题是 3 个高频 UX 刺点；交付物覆盖 D1/D2/D3 及两处补丁；team lead日常聊天路径已顺手很多 | ✅ |
+| Ragdoll/Ragdoll (opus) | F071 spec、PR #268、自测结果、后续 `a26ca1b7` / `e9249040` | 核心问题是 3 个高频 UX 刺点；交付物覆盖 D1/D2/D3 及两处补丁；operator日常聊天路径已顺手很多 | ✅ |
 | Maine Coon/Maine Coon (codex) | F071 spec、原始对话、分支 diff、PR #268、本地测试 | 初审抓出 2P1 + 1P2；修复后复审通过，确认可 merge；说明交付物经 review 打磨后已达标 | ✅ |
 | Maine Coon/Maine Coon (gpt52) | F071 spec、原始对话、PR #268、`a26ca1b7`、`e9249040`、反思胶囊 | 核心问题是“聊天时几个小刺反复打断体验”；最终交付既解决主诉求，也补上真实使用才暴露的边角；现在可以从 active backlog 正式移出 | ✅ 可 close |

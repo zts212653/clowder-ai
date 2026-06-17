@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 /**
  * opencode Config Template Generator
- * Generates opencode.json configuration for Cat Cafe runtime.
+ * Generates opencode.json configuration for Clowder AI runtime.
  *
  * opencode reads its config from opencode.json (per-project or ~/.config/opencode/).
  * This generator produces a config with:

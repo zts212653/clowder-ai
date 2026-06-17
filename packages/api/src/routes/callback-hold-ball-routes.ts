@@ -11,20 +11,25 @@
  * reminder scheduler; that is intentionally deferred.
  */
 
+import { trace } from '@opentelemetry/api';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { C1_ZOMBIE_HOLD_EVENT_NAME } from '../infrastructure/harness-eval/c1-zombie-hold-sample-evidence.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.js';
+import { AGENT_ID, THREAD_SYSTEM_KIND, TRIGGER } from '../infrastructure/telemetry/genai-semconv.js';
+import { hmacId } from '../infrastructure/telemetry/hmac.js';
 import { c1ZombieHoldCount } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { registerHoldBallCancelRoutes } from './callback-hold-ball-cancel-routes.js';
 import { deriveCallbackActor } from './callback-scope-helpers.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
+import { bucketWakeDelay } from './wake-delay-bucket.js';
 
 const log = createModuleLogger('routes/callback-hold-ball');
 
@@ -79,7 +84,14 @@ export interface HoldBallRouteDeps {
   dynamicTaskStore: DynamicTaskStore;
   messageStore: IMessageStore;
   socketManager: SocketManager;
-  threadStore: { get(threadId: string): { createdBy: string } | null | Promise<{ createdBy: string } | null> };
+  threadStore: {
+    get(
+      threadId: string,
+    ):
+      | { createdBy: string; systemKind?: 'connector_hub' | 'eval_domain' }
+      | null
+      | Promise<{ createdBy: string; systemKind?: 'connector_hub' | 'eval_domain' } | null>;
+  };
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
     threadId: string;
@@ -214,18 +226,79 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // New hold fully committed. Cancel prior pending holds (best-effort — a
     // failure here leaves an extra stale wake, not zero wakes, which is the
     // milder of the two failure modes).
+    //
+    // F192 Phase D — eval:a2a 2026-06-12 build verdict: emit a per-fire sample
+    // span event `c1.zombie_hold_fired` at each cancellation so attribution can
+    // classify replacements by wake-delay bucket (prior_overdue / prior_imminent
+    // / prior_short / prior_long). Same pattern as PR #2222 (C2 void-hold) and
+    // PR #2144 (C2 verdict-without-pass) — discipline single-sourced via the
+    // shared per-fire sample extractor.
+    //
+    // Counter `c1ZombieHoldCount.add` now carries `[TRIGGER]` for the same
+    // bucket so the aggregate count can split by replacement category without
+    // the per-fire sample dependency (already in metric-allowlist).
+    //
+    // F192 Phase D R1 P1-2 fix (砚砚): derive `thread.system_kind` from
+    // threadStore at cancel time so eval/connector_hub threads classify
+    // correctly (was hardcoded 'product' → misclassified eval-domain hold
+    // replacements as product friction). Same precedent as C2 route-serial
+    // (`routeThread?.systemKind ?? 'product'`).
+    let threadSystemKind = 'product';
+    if (pendingHolds.length > 0) {
+      try {
+        const thread = await deps.threadStore.get(threadId);
+        if (thread?.systemKind) {
+          threadSystemKind = thread.systemKind;
+        }
+      } catch {
+        /* threadStore lookup failure → fall back to 'product' */
+      }
+    }
+    const cancelNow = Date.now();
     for (const prior of pendingHolds) {
+      const priorFireAt = (prior.trigger as { fireAt?: number }).fireAt ?? cancelNow;
+      const wakeBucket = bucketWakeDelay(priorFireAt, cancelNow);
+      const c1FireAttr: Record<string, string> = {
+        [AGENT_ID]: catIdStr,
+        [THREAD_SYSTEM_KIND]: threadSystemKind,
+        [TRIGGER]: wakeBucket,
+      };
       try {
         taskRunner.unregister(prior.id);
         dynamicTaskStore.remove(prior.id);
-        c1ZombieHoldCount.add(1);
+        c1ZombieHoldCount.add(1, c1FireAttr);
+        // Per-fire sample span event. Marker span starts + immediately ends so
+        // RedactingSpanProcessor (onEnd hook) HMAC-pseudonymizes the Class C ids
+        // (messageId / invocationId / threadId) before LocalTraceStore stores them.
+        // priorTaskId / newTaskId are NOT in the Class C allowlist — pre-hash with
+        // explicit `Hash` suffix in the attr keys, mirroring PerFireSample
+        // schema's messageIdHash convention.
+        try {
+          const sampleSpan = trace.getTracer('cat-cafe-api', '0.1.0').startSpan('cat_cafe.a2a.c1.zombie_hold_sample');
+          sampleSpan.addEvent(C1_ZOMBIE_HOLD_EVENT_NAME, {
+            // Class C — redactor HMACs on event end:
+            messageId: prior.id, // semantically "what got cancelled" — duplicate of priorTaskIdHash post-redaction
+            invocationId: actor.invocationId,
+            threadId,
+            // Class D / labels:
+            [AGENT_ID]: catIdStr,
+            [THREAD_SYSTEM_KIND]: threadSystemKind,
+            [TRIGGER]: wakeBucket,
+            // Pre-hashed (key not in Class C allowlist — explicit `Hash` suffix marks redaction):
+            priorTaskIdHash: hmacId(prior.id),
+            newTaskIdHash: hmacId(taskId),
+          });
+          sampleSpan.end();
+        } catch {
+          /* best-effort sample emission */
+        }
         log.info(
-          { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId },
+          { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId, wakeBucket, threadSystemKind },
           'F167 Phase G: cancelled prior pending hold wake (single-slot replace)',
         );
       } catch (err) {
         log.warn(
-          { threadId, catId: catIdStr, priorTaskId: prior.id, err },
+          { threadId, catId: catIdStr, priorTaskId: prior.id, err, wakeBucket, threadSystemKind },
           'F167 Phase G: failed to cancel prior hold — cat may see 2 wakes (prior + new)',
         );
       }

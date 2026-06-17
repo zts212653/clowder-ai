@@ -12,18 +12,18 @@ created: 2026-03-11
 
 ## Why
 
-team experience（2026-03-11 16:50，F097 收尾时发现）：
+operator experience（2026-03-11 16:50，F097 收尾时发现）：
 
-> "你们猫猫之间传递消息，有好几个 MCP 传递的消息，有可能你得想想要怎么样的去展现。假设你是 at Maine Coon，你这里是不是得标明Ragdoll to Maine Coon或者Ragdoll箭头Maine Coon？然后如果是 multi mention，你这里也需要标明。然后我们曾经做的悄悄话的功能，那里就会标明team lead跟什么猫猫说，你是不是也得那样子去优化一下？"
+> "你们猫猫之间传递消息，有好几个 MCP 传递的消息，有可能你得想想要怎么样的去展现。假设你是 at Maine Coon，你这里是不是得标明Ragdoll to Maine Coon或者Ragdoll箭头Maine Coon？然后如果是 multi mention，你这里也需要标明。然后我们曾经做的悄悄话的功能，那里就会标明operator跟什么猫猫说，你是不是也得那样子去优化一下？"
 
 > "你看你的证据地方的字，我是看不见的。还有，你不觉得它超级突兀吗？跟你的其他的东西是不是一个设计感？"
 
 ### 核心痛点
 
-1. **方向不明** — 猫猫通过 MCP（post_message / cross_post / multi_mention）传话时，team lead看不到"谁对谁说"。stream 消息知道是谁说的（有 catId），但 callback 消息不标明目标受众
+1. **方向不明** — 猫猫通过 MCP（post_message / cross_post / multi_mention）传话时，operator看不到"谁对谁说"。stream 消息知道是谁说的（有 catId），但 callback 消息不标明目标受众
 2. **视觉断裂** — CLI 块和 Thinking 块有统一的 tinted-dark 设计语言（F097），但 callback 消息还是普通气泡，跟旁边的深色面板放一起很突兀
 3. **Evidence Panel 不可读** — 深色气泡背景上 Evidence Panel 的表格文字看不见，样式没有适配品种色主题
-4. **Whisper 不对称** — team lead的悄悄话有 "悄悄话 → [猫名]" 方向标注，但猫猫的悄悄话只显示 "悄悄话"，没有方向
+4. **Whisper 不对称** — operator的悄悄话有 "悄悄话 → [猫名]" 方向标注，但猫猫的悄悄话只显示 "悄悄话"，没有方向
 
 ### 现状分析
 
@@ -33,7 +33,7 @@ team experience（2026-03-11 16:50，F097 收尾时发现）：
 | 猫猫 callback（post_message） | `callback` | ❌ 无 | 普通气泡 ❌ | 不知道对谁说 |
 | 猫猫跨 thread 转发 | `callback` + `crossPost` | 📮 badge 有来源 | 普通气泡 ❌ | 只有来源没有方向 |
 | multi_mention 结果 | `connector` | ❌ 无 | connector 样式 | 不知道谁被 @ 了 |
-| team lead悄悄话 | — | ✅ "悄悄话 → [猫名]" | amber badge ✅ | — |
+| operator悄悄话 | — | ✅ "悄悄话 → [猫名]" | amber badge ✅ | — |
 | 猫猫悄悄话 | — | ❌ 只有 "悄悄话" | amber badge | 缺方向 |
 | Evidence Panel | `system` variant=evidence | — | 独立组件 | 深色背景上不可读 |
 | A2A 内部讨论 | `stream`/`callback` | — | 品种色气泡 + opacity-80 | 颜色刺眼（绿底+深绿 CLI 块叠加） |
@@ -61,7 +61,7 @@ team experience（2026-03-11 16:50，F097 收尾时发现）：
 - **post_message + 行首 @mention** → `→ @猫名` （从消息内容解析 @mention）
 - **multi_mention** → `→ @猫A + @猫B + @猫C` （从 targets 解析）
 - **cross_post** → `↗ [来源 thread] → [目标 thread]` （已有 crossPost 元数据）
-- **whisper（猫猫）** → `悄悄话 → @猫名` （复用 whisperTo 字段，和team lead一致）
+- **whisper（猫猫）** → `悄悄话 → @猫名` （复用 whisperTo 字段，和operator一致）
 - **无明确目标** → 不显示方向标注（向 thread 全体发言）
 
 方向标注视觉：品种色 pill badge（和 @mention 徽章同款），紧贴 header 行。
@@ -76,11 +76,11 @@ Callback 消息从普通气泡升级为 **浅色品种气泡**（区别于 CLI/T
 
 **A3: 猫猫 Whisper 方向补全**
 
-猫猫的悄悄话 badge 从 "悄悄话" 改为 "悄悄话 → @猫名"，和team lead悄悄话一致。
+猫猫的悄悄话 badge 从 "悄悄话" 改为 "悄悄话 → @猫名"，和operator悄悄话一致。
 
 **A4: A2A 内部讨论颜色优化**
 
-当前问题（team lead 17:28 截图）：
+当前问题（operator 17:28 截图）：
 - A2A 折叠展开后，内部消息用品种色 `secondary` 做气泡背景（如Maine Coon `#C8E6C9` 浅绿）
 - 气泡内的 CLI 块用 `tintedDark(greenAccent)` → 深绿面板
 - 浅绿气泡 + 深绿 CLI + `opacity-80` 叠加 → **颜色刺眼，看了眼疼**
@@ -106,7 +106,7 @@ Callback 消息从普通气泡升级为 **浅色品种气泡**（区别于 CLI/T
 
 ### Phase B.5: Connector 可扩展设计
 
-**team lead新需求**（2026-03-12 20:26）：
+**operator新需求**（2026-03-12 20:26）：
 > "我可能现在还要想要接苹果的iMessage，那你其实，在你的设计上得预留给他们一些空间，就不能写死。"
 
 - 将 `getConnectorTheme()` 从 if-else 硬编码重构为注册表驱动
@@ -126,13 +126,13 @@ Callback 消息从普通气泡升级为 **浅色品种气泡**（区别于 CLI/T
 
 ### Phase D: 消息流位置正确性
 
-**D1: team lead消息的"收到时刻"展示**
+**D1: operator消息的"收到时刻"展示**
 
-team experience（2026-03-12 19:12）：
+operator experience（2026-03-12 19:12）：
 > "假设你们正在猫猫调用这个阶段，我的消息在我们的 channel 里面排队嘛。但是我在前端看到的我的消息展现的位置是在我发的那一刻，但其实不是在你们收到的那一刻。这样子就会给别人一种误解，以后在回顾这整个 thread 的时候，就会分不清楚这些消息到底是什么时候被你们收到了。"
 
 当前问题：
-- team lead在猫猫调用期间发的消息进入 channel 排队
+- operator在猫猫调用期间发的消息进入 channel 排队
 - 前端展示位置是 **发送时刻**（`timestamp`）
 - 实际被猫猫处理的时刻可能延后很多（排队等待）
 - 回顾 thread 时，消息看起来像是在猫猫输出中间插入的，但实际猫猫当时还没看到
@@ -140,7 +140,7 @@ team experience（2026-03-12 19:12）：
 修复方向（终态设计）：
 - 方案 A：消息卡片增加"猫猫收到时间"标注（如 `发送 19:05 · 收到 19:12`）
 - 方案 B：消息在 thread 中按**实际被处理/收到时刻**排序，而非发送时刻
-- 方案 C：在猫猫输出流中插入"收到team lead消息"的系统提示，标明延迟
+- 方案 C：在猫猫输出流中插入"收到operator消息"的系统提示，标明延迟
 - 需要在 Phase D 设计时确定最终方案
 
 ## Acceptance Criteria
@@ -149,7 +149,7 @@ team experience（2026-03-12 19:12）：
 - [x] AC-A1: callback 消息 header 显示方向标注（→ @猫名），从消息内容 @mention 解析 ✅
 - [ ] ~~AC-A2~~: **降级到 Phase B**（依赖 Phase C2 后端元数据，见 KD-5）
 - [x] AC-A3: cross_post 消息方向标注包含来源/目标 thread ✅
-- [x] AC-A4: 猫猫 whisper badge 显示 "悄悄话 → @猫名"（和team lead whisper 一致）✅
+- [x] AC-A4: 猫猫 whisper badge 显示 "悄悄话 → @猫名"（和operator whisper 一致）✅
 - [x] AC-A5: callback 消息有品种色浅底气泡，视觉上和 CLI 深色块区分（tintedLight(primary, 0.08) + pill 提供区分）✅
 - [x] AC-A6: 方向标注用品种色 pill badge（和 @mention 彩色徽章同款样式）✅
 - [x] AC-A7: A2A 内部讨论消息用中性灰底（不用品种色背景），品种色仅用于边框/badge ✅
@@ -170,24 +170,24 @@ team experience（2026-03-12 19:12）：
 - [x] AC-C2: multi_mention 结果消息包含发起者 + targets 元数据 ✅
 
 ### Phase D（消息流位置正确性）
-- [x] AC-D1: team lead在猫猫调用期间发的消息，回顾时能区分"发送时刻"和"被收到时刻" ✅
+- [x] AC-D1: operator在猫猫调用期间发的消息，回顾时能区分"发送时刻"和"被收到时刻" ✅
 - [x] AC-D2: 消息在 thread 时间线中的位置能反映实际被处理顺序（不误导读者） ✅
 
 ## 需求点 Checklist
 
 | # | 需求点 | 来源 | Phase | AC |
 |---|--------|------|-------|-----|
-| R1 | callback 消息显示 "→ @猫名" 方向 | team lead 16:50 | A | AC-A1 |
-| R2 | multi_mention 显示方向 | team lead 16:50 | A | AC-A2 |
+| R1 | callback 消息显示 "→ @猫名" 方向 | operator 16:50 | A | AC-A1 |
+| R2 | multi_mention 显示方向 | operator 16:50 | A | AC-A2 |
 | R3 | cross_post 方向标注 | Ragdoll分析 | A | AC-A3 |
-| R4 | 猫猫 whisper 方向对齐team lead whisper | team lead 16:50 | A | AC-A4 |
-| R5 | callback 消息视觉统一（不突兀） | team lead 16:50 | A | AC-A5 |
-| R6 | Evidence Panel 文字可读 | team lead 16:50 截图 | B | AC-B1 |
+| R4 | 猫猫 whisper 方向对齐operator whisper | operator 16:50 | A | AC-A4 |
+| R5 | callback 消息视觉统一（不突兀） | operator 16:50 | A | AC-A5 |
+| R6 | Evidence Panel 文字可读 | operator 16:50 截图 | B | AC-B1 |
 | R7 | connector 消息视觉统一 | Ragdoll分析 | B | AC-B2 |
 | R8 | 后端 targetCats 元数据 | Ragdoll分析（优化） | C | AC-C1 |
-| R9 | A2A 内部讨论颜色刺眼 | team lead 17:28 截图 | A | AC-A7 |
-| R10 | 消息流位置正确性 — team lead消息"发送 vs 收到"时间差导致回顾误导 | team lead 19:12 (2026-03-12) | D | AC-D1/D2 |
-| R11 | Connector 主题不能写死，要预留给未来平台（iMessage 等）空间 | team lead 20:26 (2026-03-12) | B.5 | AC-B5-1~4 |
+| R9 | A2A 内部讨论颜色刺眼 | operator 17:28 截图 | A | AC-A7 |
+| R10 | 消息流位置正确性 — operator消息"发送 vs 收到"时间差导致回顾误导 | operator 19:12 (2026-03-12) | D | AC-D1/D2 |
+| R11 | Connector 主题不能写死，要预留给未来平台（iMessage 等）空间 | operator 20:26 (2026-03-12) | B.5 | AC-B5-1~4 |
 
 ## Dependencies
 
@@ -208,9 +208,9 @@ team experience（2026-03-12 19:12）：
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 方向信息从消息内容 @mention 解析（Phase A），后端元数据后补（Phase C） | 前端先上，不阻塞后端改动 | 2026-03-11 |
-| KD-2 | 猫猫 whisper 方向标注和team lead whisper 统一 | 一致性，用户心智模型统一 | 2026-03-11 |
+| KD-2 | 猫猫 whisper 方向标注和operator whisper 统一 | 一致性，用户心智模型统一 | 2026-03-11 |
 | KD-3 | 方向标注放 header 行（猫名右侧 pill badge） | 设计稿确认，不占额外行高 | 2026-03-11 |
-| KD-4 | A2A 内部讨论改中性灰底 + 品种色边框/badge | team lead截图确认颜色刺眼，灰底解决叠色问题 | 2026-03-11 |
+| KD-4 | A2A 内部讨论改中性灰底 + 品种色边框/badge | operator截图确认颜色刺眼，灰底解决叠色问题 | 2026-03-11 |
 | KD-5 | AC-A2 降级到 Phase B | multi_mention 结果是 `type:'connector'` 聚合消息（无 targets 元数据），方向标注需 Phase C2 后端补 targets 字段后才能可靠渲染。AC-B2 已覆盖 connector 视觉统一 | 2026-03-11 |
 | KD-6 | Phase D 采用 Method A 双时间标注（`deliveredAt` 字段） | 不重排序（保留实时体验）、不加系统消息（不添杂音）、最精确（读者可自行判断延迟）。StoredMessage 加 `deliveredAt?: number`，InvocationQueue dequeue 时回填，前端 gap>5s 时显示"发送 HH:MM · 收到 HH:MM" | 2026-03-12 |
 

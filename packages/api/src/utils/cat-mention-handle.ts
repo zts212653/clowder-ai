@@ -36,7 +36,7 @@ export function primaryMentionHandleForCatId(catId: string): string | null {
 /**
  * Replace `@<token>` matches in text with the cat's primary mention handle
  * when the token resolves to a registered catId. Tokens that don't resolve
- * (e.g. user wrote `@铲屎官` or already-stable handles like `@砚砚`) are left
+ * (e.g. user wrote `@co-creator` or already-stable handles like `@砚砚`) are left
  * untouched.
  *
  * Test seam: callers may pass a custom `resolveHandle` to test without

@@ -207,7 +207,7 @@ export class SocketManager {
           return;
         }
         // F211-REG6 instrument (observation-only): SocketManager hardcodes 'user_cancel' for every
-        // WS cancel_invocation, but the CVO reported spurious cancels he never triggered (Timeline
+        // WS cancel_invocation, but the operator reported spurious cancels he never triggered (Timeline
         // 2026-05-29: WS flapped 6× in 2min). msSinceConnect is the discriminator — a cancel arriving
         // milliseconds after a (re)connect is almost certainly reconnect/teardown noise, not a
         // deliberate Stop click. Pin the real trigger before changing any attribution behavior.

@@ -300,7 +300,9 @@ describe('AgentRouter + Services wiring', () => {
 
   test('passes callbackEnv to Codex service', async () => {
     const claudeSpawn = createTrackingSpawnFn(() => claudeEvents('s-1', 'hi'));
-    const codexSpawn = createTrackingSpawnFn(() => codexEvents('t-1', 'hi'));
+    // F177-H: this wiring test only verifies callbackEnv. Give the real Codex service a legal
+    // routing exit so the server-side remedial guard does not intentionally invoke it twice.
+    const codexSpawn = createTrackingSpawnFn(() => codexEvents('t-1', 'hi\n@co-creator'));
     const geminiSpawn = createTrackingSpawnFn(() => geminiEvents('g-1', 'hi'));
 
     const router = new AgentRouter(

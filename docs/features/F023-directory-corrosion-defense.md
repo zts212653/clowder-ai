@@ -13,7 +13,7 @@ created: 2026-02-26
 > **Phase 2 deadline**: 2026-06-30（5 个 dir-size exception 续期截止日，下一轮 sync 前必须真拆）
 
 ## Why
-- team lead 2026-02-13
+- operator 2026-02-13
 
 ## What
 - **F23 Phase 1**: PR #21 (d366ad5) — 5 WT 全部合入 main。87 files → 7 子目录 + ~690 imports 迁移 + 5 大文件拆分。防腐化门禁 pnpm check:dir-size + pnpm check:deps。Biome v2.4 + LSP + JetBrains MCP 全部启用。routes 目录有 .dir-exceptions.json 例外到 2026-04-01。ADR: 010-directory-hygiene-anti-rot.md
@@ -35,7 +35,7 @@ created: 2026-02-26
 
 ### 第三轮 unblock 硬门禁（new gate, this PR commits）
 如果 2026-06-30 后仍需要任何 `F23-followup` ticket 的续期，**禁止 cross-cat review-only 通过**，必须满足以下其一：
-- (a) **CVO 显式 signoff**：@co-creator 明确在 PR comment 同意第三轮 unblock
+- (a) **operator 显式 signoff**：@co-creator 明确在 PR comment 同意第三轮 unblock
 - (b) **同 PR 真拆 ≥1 个目录**：续期 PR 必须同时移除 ≥1 个 `.dir-exceptions.json` 条目并完成对应子目录拆分
 
 这条 gate 落到 `docs/SOP.md` 「outbound sync 基线修复」段（this PR 不顺手改 SOP，由 Phase 2 第一个真拆 PR 一起落）。

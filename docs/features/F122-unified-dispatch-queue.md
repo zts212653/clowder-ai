@@ -12,7 +12,7 @@ created: 2026-03-14
 
 ## Why
 
-team experience（2026-03-14 19:25）：
+operator experience（2026-03-14 19:25）：
 
 > "你们在 a2a 按道理我发的消息进 channel 然后我点 steer 才能强制推送 现在整个系统乱七八糟的"
 > "原本的行为是就算你们在 a2a 我看到的也是这个界面！现在是你们 a2a 我看到的是另一个我可以发消息的界面！"
@@ -23,7 +23,7 @@ team experience（2026-03-14 19:25）：
 2. **callback A2A**（post_message + targetCats/@mention）走 `WorklistRegistry` 自动推进，不受 steer 管控
 3. **multi_mention** 有自己的 dispatch 系统（`MultiMentionOrchestrator`），热修前连 `InvocationTracker` 都没接
 
-team lead期望的行为很简单：**猫猫在忙（不管怎么忙起来的），我发的消息就排队，只有我点 steer 才能强推。** 这要求所有执行路径都接入统一的 active/queue 状态语义。
+operator期望的行为很简单：**猫猫在忙（不管怎么忙起来的），我发的消息就排队，只有我点 steer 才能强推。** 这要求所有执行路径都接入统一的 active/queue 状态语义。
 
 ## 现状分析（基于代码审查 2026-03-14）
 
@@ -62,11 +62,11 @@ callback A2A（③）和 multi_mention（④）虽然热修后接了 InvocationT
 
 #### P1: multi_mention target 崩溃导致 caller slot 不释放
 
-**现象**（team lead 2026-03-14 22:54 截图）：Maine Coon干完活用 multi_mention @ opencode，opencode 上下文超限崩溃（`prompt token count of 158302 exceeds the limit of 128000`），但Maine Coon的 InvocationTracker slot 没有释放 → 系统一直显示"猫猫正在回复中"→ team lead发的消息只能排队，除非手动 steer 强推。
+**现象**（operator 2026-03-14 22:54 截图）：Maine Coon干完活用 multi_mention @ opencode，opencode 上下文超限崩溃（`prompt token count of 158302 exceeds the limit of 128000`），但Maine Coon的 InvocationTracker slot 没有释放 → 系统一直显示"猫猫正在回复中"→ operator发的消息只能排队，除非手动 steer 强推。
 
 **根因推测**：`callback-multi-mention-routes.ts` 的 `dispatchToTarget` 在 target 执行失败时，caller 的 tracker slot 没有正确 complete。热修加的 `tracker.start()` / `tracker.complete()` 只管 target 自己的 slot，但 caller（Maine Coon）的 slot 可能在等 multi_mention 完成才释放——target 崩了就永远等。
 
-**用户视角的影响**：猫 @ 了一个挂掉的猫后，team lead被锁死在排队状态，只能手动 steer。
+**用户视角的影响**：猫 @ 了一个挂掉的猫后，operator被锁死在排队状态，只能手动 steer。
 
 #### P2: QueuePanel 不显示 processing 状态
 
@@ -82,7 +82,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 ## What
 
-### team lead期望的行为
+### operator期望的行为
 
 1. **猫猫在忙时（不论原因），我发的消息必须排队** — 已实现 ✅
 2. **只有 steer 才能强推** — 对用户/connector 消息已实现 ✅；A2A/multi_mention 是否也需要被 steer 管控待决策（见 OQ-1）
@@ -130,10 +130,10 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 - [x] AC-A4: QueuePanel 显示 processing 态条目
 - [x] AC-A5: 回归测试覆盖：A2A 期间用户发消息 → 必须 queued；steer → 必须 immediate
 - [x] AC-A6: 回归测试覆盖：connector 消息在 active slot 下 → 必须 queued；steer → 必须 immediate
-- [x] AC-A7: multi_mention target 崩溃/超时时，caller 的 InvocationTracker slot 必须正确释放，不能锁死team lead
+- [x] AC-A7: multi_mention target 崩溃/超时时，caller 的 InvocationTracker slot 必须正确释放，不能锁死operator
 
 ### Phase A.1（TOCTOU 竞态修复）✅
-> team lead 2026-03-15 反馈：用户消息能打断 A2A 链。三猫（opus+codex+gpt52）独立排查确认为 P1 竞态。
+> operator 2026-03-15 反馈：用户消息能打断 A2A 链。三猫（opus+codex+gpt52）独立排查确认为 P1 竞态。
 > 必须先修，否则 OQ-1/2/4 的产品讨论基础不稳。
 
 **根因 1（P1）：`messages.ts` TOCTOU**
@@ -155,7 +155,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 - [x] AC-A12: 回归测试：multi_mention create/update 抛错 → slot 必释放
 
 ### Phase B（语义收敛 — 后端核心）✅
-> OQ-1/2/4 已由team lead拍板（ADR-018），Phase B 后端核心已合入。
+> OQ-1/2/4 已由operator拍板（ADR-018），Phase B 后端核心已合入。
 
 **已完成（PR #499 merged）：**
 - [x] AC-B1: QueueEntry 支持 `source: 'agent'` + `autoExecute` + `callerCatId`
@@ -176,7 +176,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 #### 观察到的现象：A2A agent entry 卡在队列（runtime 环境，待验证）
 
-> team lead 2026-03-17 00:00 报告（runtime 环境，非最新 main）：
+> operator 2026-03-17 00:00 报告（runtime 环境，非最新 main）：
 > "小金 at 了缅因，消息进入队列。小金早干完了，但队列里的消息永远到不了。"
 
 **现象**：opencode @ codex 的 A2A agent entry 在 QueuePanel 里排队，"猫猫正在回复中" 持续显示，但实际上 opencode 已完成执行。entry 不会被自动出队。
@@ -188,17 +188,17 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 **注意**：此现象在 runtime 环境观察到，runtime 可能未同步最新 main（含 PR #499/#502 等 F122B 改动）。需要先确认 runtime 代码版本再定位。
 
-#### 观察到的现象：Steer agent entry 后气泡显示为team lead发的（runtime 环境）
+#### 观察到的现象：Steer agent entry 后气泡显示为operator发的（runtime 环境）
 
-> team lead 2026-03-17 00:05 报告：Steer 推送 agent entry 后，小金的消息气泡显示成team lead发的。F5 刷新后纠正。
+> operator 2026-03-17 00:05 报告：Steer 推送 agent entry 后，小金的消息气泡显示成operator发的。F5 刷新后纠正。
 
-**可能根因**：agent entry 的 `userId` 继承了触发用户的 userId。Steer 推送后 QueueProcessor 用 entry 的 userId 广播 → 前端用 userId 判断气泡方向 → 误显示为team lead。刷新后从 messageStore 读的是正确的 catId 所以纠正。
+**可能根因**：agent entry 的 `userId` 继承了触发用户的 userId。Steer 推送后 QueueProcessor 用 entry 的 userId 广播 → 前端用 userId 判断气泡方向 → 误显示为operator。刷新后从 messageStore 读的是正确的 catId 所以纠正。
 
 **同上注意**：runtime 环境观察到，待确认代码版本。
 
 #### 已知问题：A2A 消息上下文提前可见（P1，AC-B6 前置修复）
 
-> team lead 2026-03-16 17:07 提出：
+> operator 2026-03-16 17:07 提出：
 > "我怕你这个发生了，你的这条消息还在队列里，但是你的历史上下文里面已经把别人的这条消息给塞进去了。"
 
 **现象**：A2A callback 消息（`post_message` with @mention）入库后 `deliveryStatus` 为 `undefined`，`isDelivered()` 返回 true → ContextAssembler 立即将其纳入猫的上下文 → 猫在处理其他任务时就"看到了"排队中的 A2A 消息。
@@ -219,7 +219,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 ## Roadmap（F108 × F122 统一执行计划）
 
-> 三猫（opus+gpt52+opencode）独立分析后的共识 + team lead 2026-03-14 拍板。
+> 三猫（opus+gpt52+opencode）独立分析后的共识 + operator 2026-03-14 拍板。
 > 负责：Ragdoll主写 + Maine Coon review，同一 thread 按节奏推进。
 
 ### 关系定位
@@ -249,10 +249,10 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
   ├── AC-A1: multi_mention parentInvocationId 透传
   ├── AC-A2/A3: pushToWorklist 结构化 reason + not_found 降级
   ├── AC-A4: QueuePanel 显示 processing 态
-  ├── AC-A7: multi_mention target 崩溃时释放 caller slot ← team lead截图的 bug
+  ├── AC-A7: multi_mention target 崩溃时释放 caller slot ← operator截图的 bug
   └── AC-A5/A6: 回归测试
 
-阶段 2: 产品决策（team lead拍板，阻塞后续所有工作）
+阶段 2: 产品决策（operator拍板，阻塞后续所有工作）
   ├── OQ-1: A2A handoff 走 queue？（好处：聊歪了能 steer 纠正）
   ├── OQ-2: multi_mention 走 queue？
   ├── OQ-4: 判忙 slot 级 vs thread 级？
@@ -289,7 +289,7 @@ QueuePanel 只显示 `status='queued'` 的条目（`QueuePanel.tsx:142`），条
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 热修优先，架构统一后做 | team lead现场 bug 需要立即止血 | 2026-03-14 |
+| KD-1 | 热修优先，架构统一后做 | operator现场 bug 需要立即止血 | 2026-03-14 |
 | KD-2 | Connector 消息走 slot 级条件入队，Phase A 需评估是否改为 thread 级 | `ConnectorInvokeTrigger` 用 `has(threadId, catId)` 判忙，只对同 cat slot 入队（Maine Coon review 指出） | 2026-03-14 |
 | KD-3 | Phase A 不改 A2A 调度模型，只补漏洞 | 降低风险，先稳后收敛 | 2026-03-14 |
 

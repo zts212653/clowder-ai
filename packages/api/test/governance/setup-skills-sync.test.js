@@ -139,7 +139,8 @@ describe('install scripts do not create HOME-level skill links (ADR-025)', () =>
  */
 describe('runtime governance creates project-level skill links (ADR-025)', () => {
   const BOOTSTRAP_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-bootstrap.ts');
-  const SKILL_SYNC_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'skill-sync.ts');
+  const SKILL_SYNC_ENGINE_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'skills', 'skill-sync-engine.ts');
+  const MOUNT_RULES_SRC = join(PROJECT_ROOT, 'packages', 'shared', 'src', 'types', 'mount-rules.ts');
   const PREFLIGHT_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-preflight.ts');
 
   it('GovernanceBootstrapService creates per-skill symlinks at project level', async () => {
@@ -152,16 +153,87 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
   });
 
   it('skill-sync creates per-skill symlinks at project level', async () => {
-    const content = await readFile(SKILL_SYNC_SRC, 'utf-8');
-    assert.ok(content.includes('.claude/skills'), 'skill-sync must reference .claude/skills');
-    assert.ok(content.includes('.codex/skills'), 'skill-sync must reference .codex/skills');
-    assert.ok(content.includes('.gemini/skills'), 'skill-sync must reference .gemini/skills');
-    assert.ok(content.includes('.kimi/skills'), 'skill-sync must reference .kimi/skills');
-    assert.ok(content.includes("process.platform === 'win32'"), 'skill-sync must handle Windows junction');
+    const [syncContent, mountRulesContent] = await Promise.all([
+      readFile(SKILL_SYNC_ENGINE_SRC, 'utf-8'),
+      readFile(MOUNT_RULES_SRC, 'utf-8'),
+    ]);
+    assert.ok(
+      syncContent.includes('join(projectRoot, rules.mountPoints[id].path)'),
+      'skill-sync engine must resolve standard mount dirs under projectRoot',
+    );
+    assert.ok(
+      syncContent.includes('await symlink(symlinkTargetFor(linkPath'),
+      'skill-sync engine must create per-skill symlinks',
+    );
+    assert.ok(syncContent.includes("process.platform === 'win32'"), 'skill-sync engine must handle Windows targets');
+    assert.ok(mountRulesContent.includes("claude: { enabled: true, path: '.claude/skills' }"));
+    assert.ok(mountRulesContent.includes("codex: { enabled: true, path: '.codex/skills' }"));
+    assert.ok(mountRulesContent.includes("gemini: { enabled: true, path: '.gemini/skills' }"));
+    assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi/skills' }"));
   });
 
   it('governance preflight checks skill symlinks are present', async () => {
     const content = await readFile(PREFLIGHT_SRC, 'utf-8');
     assert.ok(content.includes('skills'), 'governance-preflight must reference skills');
+  });
+});
+
+/**
+ * Stale step-denominator guard (砚砚 review feedback on cat-cafe#2323).
+ *
+ * When install/setup scripts get renumbered (e.g. removing a step), user-facing
+ * step markers like `[1/5]` or `Write-Step "Step 5/7"` MUST stay internally
+ * consistent within each script. Past blockers:
+ *   - clowder-ai#931 missed `install.ps1` help block "skills mount" wording
+ *     while step bodies were already renumbered 8→7
+ *   - cat-cafe#2323 absorb missed `setup.sh` `[4b/6]` sidecar sub-step
+ *     while main steps were renumbered 6→5
+ *
+ * This boundary test enforces that all `[N/M]` (POSIX) and `Step N/M` (Windows)
+ * markers inside a single script share the same denominator M.
+ */
+describe('install scripts have consistent step-denominator markers', () => {
+  /**
+   * Extract all denominators M from `[N/M]` (POSIX) or `Step N/M` (Windows)
+   * markers in the given content. Returns a sorted unique list.
+   */
+  function denominatorsIn(content, kind) {
+    const re = kind === 'posix' ? /\[\d+[a-z]?\/(\d+)\]/g : /Step\s+\d+\/(\d+)/gi;
+    const found = new Set();
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      found.add(m[1]);
+    }
+    return [...found].sort();
+  }
+
+  it('setup.sh main + sub-step markers share one denominator', async () => {
+    const content = await readFile(SETUP_SH, 'utf-8');
+    const denoms = denominatorsIn(content, 'posix');
+    assert.deepEqual(
+      denoms,
+      ['5'],
+      `setup.sh step markers must all share one denominator, got: [${denoms.join(', ')}]`,
+    );
+  });
+
+  it('install.sh main step markers share one denominator', async () => {
+    const content = await readFile(INSTALL_SH, 'utf-8');
+    const denoms = denominatorsIn(content, 'posix');
+    assert.deepEqual(
+      denoms,
+      ['8'],
+      `install.sh step markers must all share one denominator, got: [${denoms.join(', ')}]`,
+    );
+  });
+
+  it('install.ps1 Write-Step markers share one denominator', async () => {
+    const content = await readFile(INSTALL_PS1, 'utf-8');
+    const denoms = denominatorsIn(content, 'windows');
+    assert.deepEqual(
+      denoms,
+      ['7'],
+      `install.ps1 Step N/M markers must all share one denominator, got: [${denoms.join(', ')}]`,
+    );
   });
 });

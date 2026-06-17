@@ -17,11 +17,11 @@ Map delta: none（复用 F102 existing evidence lane 机制，不新建 cell）
 
 ## Why
 
-Cat Cafe 的猫猫已经在 L0/家规/Magic Words/feedback 里积累了大量team lead品味信号（"不要客服式结尾"/"先证据后漂亮话"/"共创伙伴不是工具"），但这些味道散落在不同文件里，猫在需要做品味判断时不一定能找到。
+Cat Cafe 的猫猫已经在 L0/家规/Magic Words/feedback 里积累了大量operator品味信号（"不要客服式结尾"/"先证据后漂亮话"/"共创伙伴不是工具"），但这些味道散落在不同文件里，猫在需要做品味判断时不一定能找到。
 
 2026-06-01 的 taste 实验证明：本地猫（有 L0/feedback 空气层）比云端猫更有 You 味——**味道已在空气里，缺的是目录（能搜到）和反射（当场记新的）。**
 
-team experience（2026-06-03）："我们是需要建立一整套 taste 机制才对吧？"
+operator experience（2026-06-03）："我们是需要建立一整套 taste 机制才对吧？"
 
 ## Current State / 现状基线
 
@@ -64,7 +64,7 @@ taste 信号（"这不美"/"太客服了"/"aha"/"这就是我要的"）
 ## Eval / Tracking Contract
 
 ### 1. Primary Users + Activation Signal
-- **Users**: 所有猫（通过 search_evidence 访问 taste lane）+ CVO（品味真相源）
+- **Users**: 所有猫（通过 search_evidence 访问 taste lane）+ operator（品味真相源）
 - **Activation signal**: 猫在做品味判断时搜到 taste vignette 并使用
 
 ### 2. Friction Metric

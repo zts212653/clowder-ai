@@ -87,7 +87,7 @@ export async function getLeaderboardStats(
   const silly = computeSillyStats(messages, catNames);
   const games = stores?.gameStore?.computeGameStats(catNames);
 
-  // Phase C: achievements + CVO level
+  // Phase C: achievements + operator level
   const userId = stores?.userId;
   const achievements = userId ? stores?.achievementStore?.getUnlocked(userId) : undefined;
   const cvoLevel = userId ? stores?.achievementStore?.getCvoLevel(userId) : undefined;

@@ -7,7 +7,7 @@ import { DEFAULT_SIGNAL_SOURCES } from './default-sources.js';
 import type { SignalPaths } from './signal-paths.js';
 import { resolveSignalPaths } from './signal-paths.js';
 
-const SOURCE_FILE_BANNER = '# Cat Cafe Signal Hunter sources config\n';
+const SOURCE_FILE_BANNER = '# Clowder AI Signal Hunter sources config\n';
 
 function toYaml(config: SignalSourceConfig): string {
   return `${SOURCE_FILE_BANNER}${stringify(config)}`;

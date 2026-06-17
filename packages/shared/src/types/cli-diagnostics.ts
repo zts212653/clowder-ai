@@ -63,5 +63,13 @@ export interface CliDiagnostics {
     exitCode: number | null;
     signal: NodeJS.Signals | string | null;
     invocationId?: string;
+    /**
+     * Provider-owned, path-safe spawn context. Values must be finite enum/hash
+     * tokens only: no raw cwd/HOME/prompt/env values.
+     */
+    homeMode?: 'process_home' | 'child_env_home' | 'agy_profile_home';
+    spawnCwdMode?: 'cat_cafe_agy_cwd' | 'agy_profile_cwd';
+    spawnCwdKey?: string;
+    profileId?: string;
   };
 }

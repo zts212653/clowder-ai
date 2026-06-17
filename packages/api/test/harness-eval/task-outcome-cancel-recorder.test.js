@@ -56,7 +56,7 @@ describe('Task Outcome Signal Builders (F192 Phase G)', () => {
         catId: 'opus',
         threadId: 'thread_abc123',
         precedingMessageSummary: 'Cat was writing temp fix',
-        followingMessageSummary: 'CVO told cat to rethink',
+        followingMessageSummary: 'operator told cat to rethink',
       });
       assert.equal(signal.type, 'magic_word');
       assert.equal(signal.word, '脚手架');

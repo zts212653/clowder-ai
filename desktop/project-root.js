@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function hasApiEntrypoint(rootDir) {
   return fs.existsSync(path.join(rootDir, 'packages', 'api', 'dist', 'index.js'));

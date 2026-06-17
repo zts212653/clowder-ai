@@ -49,7 +49,7 @@ function createServiceWithPostMessageAndStreamMetadata(catId) {
         content: JSON.stringify({ type: 'rich_block', block: richBlock }),
         timestamp: Date.now(),
       };
-      yield { type: 'text', catId, content: '@铲屎官\nCallback body with stream metadata.', timestamp: Date.now() };
+      yield { type: 'text', catId, content: '@co-creator\nCallback body with stream metadata.', timestamp: Date.now() };
       yield { type: 'tool_use', catId, toolName: 'cat_cafe_post_message', toolInput: '{}', timestamp: Date.now() };
       yield {
         type: 'tool_result',

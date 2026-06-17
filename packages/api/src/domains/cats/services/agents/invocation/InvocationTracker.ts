@@ -429,7 +429,13 @@ export class InvocationTracker {
     if (this.deleting.has(threadId)) return false;
     const key = this.slotKey(threadId, catId);
     const existing = this.active.get(key);
-    if (existing && !this.isExpired(key, existing)) {
+    // A2A re-track must REPLACE a 'canceled' tombstone, not idempotently keep it. getController()
+    // intentionally returns a tombstone's aborted controller (pre-invoke cancel semantics); if a
+    // freshly-handed-off A2A target still has a prior-turn canceled tombstone, route-serial reads that
+    // aborted signal via signalForCat and skips the target at the top of the worklist loop — the cat
+    // silently never invokes. Tombstones are purged by start-/complete-family calls; trackExternalSlot
+    // is the A2A re-occupation path and must do the same. (bug: 2026-06-11 a2a-handoff-no-spawn.)
+    if (existing && !this.isExpired(key, existing) && existing.state !== 'canceled') {
       // Idempotent if this slot already tracks the same batch. The passed `controller` is the
       // batch gate (route-serial's options.invocationController), stored as batchController below.
       return existing.batchController === controller || existing.controller === controller;

@@ -1,14 +1,14 @@
-// Cat Cafe Desktop — Electron main process
+// Clowder AI Desktop — Electron main process
 // Launches backend services (Redis, API, Web) then shows the web UI.
 
 const { app, BrowserWindow, Menu, Tray, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 const { resolveProjectRootFromDir } = require('./project-root');
 const ServiceManager = require('./service-manager');
 
-// Single instance lock — prevent multiple Cat Cafe processes
+// Single instance lock — prevent multiple Clowder AI processes
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -112,7 +112,7 @@ function createTray() {
     return; // icon missing — skip tray
   }
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Cat Cafe', click: () => mainWindow?.show() },
+    { label: 'Show Clowder AI', click: () => mainWindow?.show() },
     { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
   ]);
@@ -166,7 +166,7 @@ app.on('ready', async () => {
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);
     dialog.showErrorBox(
-      'Cat Cafe - Startup Error',
+      'Clowder AI - Startup Error',
       `Failed to start services:\n${err.message}\n\nCheck logs in .cat-cafe/logs/`,
     );
     app.quit();

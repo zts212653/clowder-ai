@@ -1,7 +1,7 @@
 /**
  * LimbPairingStore — F126 Phase C 设备配对审批
  *
- * 远程节点注册后进入 pending 状态，需要铲屎官审批后才能接入。
+ * 远程节点注册后进入 pending 状态，需要co-creator审批后才能接入。
  * 审批通过 → 生成 RemoteLimbNode → 注册到 LimbRegistry。
  */
 

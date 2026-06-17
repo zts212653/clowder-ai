@@ -2,43 +2,46 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { AllProjectsSyncBanner } from './AllProjectsSyncBanner';
 import { ProjectSelector } from './capability-settings-ui';
+import { MountRulesPanel } from './MountRulesPanel';
 import { SettingsStatusStrip } from './primitives';
 import { SettingsPageHeader } from './SettingsPageHeader';
-import { SkillConflictBanner } from './SkillConflictBanner';
 import { SkillPreviewModal } from './SkillPreviewModal';
+import { SkillsDriftBanner } from './SkillsDriftBanner';
 import {
-  HealthStrip,
   SkillRow,
   SkillsEmptyState,
   SkillsFilterToolbar,
+  SkillsScopeTabs,
   SkillsSummaryFooter,
 } from './SkillsSubComponents';
-import type { SettingsSkillItem, SkillsApiData, SkillsData } from './skills-types';
+import type { SettingsSkillItem, SkillScope, SkillsApiData, SkillsData } from './skills-types';
 import {
   ALL_CATEGORIES,
   composeSkillItems,
   matchesSkillSearch,
   normalizeSearch,
   normalizeSkillsData,
+  SCOPE_ALL,
+  SCOPE_PROJECT,
 } from './skills-types';
 import { useSkillControls } from './useSkillControls';
+import { useSkillsSync } from './useSkillsSync';
 
 export function SkillsContent() {
   const [data, setData] = useState<SkillsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scope, setScope] = useState<SkillScope>(SCOPE_ALL);
   const [activeCategory, setActiveCategory] = useState(ALL_CATEGORIES);
   const [query, setQuery] = useState('');
   const [previewSkill, setPreviewSkill] = useState<SettingsSkillItem | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [resolving, setResolving] = useState<string | null>(null);
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const [expandedCats, setExpandedCats] = useState<string | null>(null);
+  const [expandedMounts, setExpandedMounts] = useState<string | null>(null);
+  const [driftRefreshToken, setDriftRefreshToken] = useState(0);
 
   const controls = useSkillControls();
+  const refetchControls = controls.refetch;
   const skillsFetchGen = useRef(0);
-  const latestProjectRef = useRef(controls.projectPath);
-  latestProjectRef.current = controls.projectPath;
 
   const fetchSkills = useCallback(async (forProject?: string) => {
     const generation = ++skillsFetchGen.current;
@@ -70,106 +73,140 @@ export function SkillsContent() {
     return composeSkillItems(data, controls.items);
   }, [data, controls.items]);
 
+  // F228: project scope shows the full skill list (回显完整) so every skill can be
+  // managed per-project — not just the ones already mounted.
+  const scopeItems = composedItems;
+
+  const selectedProjectPath = controls.projectPath || controls.resolvedProjectPath || undefined;
+
+  const refreshSelectedSkills = useCallback(async () => {
+    await Promise.all([fetchSkills(selectedProjectPath), refetchControls(selectedProjectPath)]);
+  }, [fetchSkills, refetchControls, selectedProjectPath]);
+
+  const refreshMountRulesScopeSkills = useCallback(async () => {
+    if (scope === SCOPE_PROJECT) {
+      await refreshSelectedSkills();
+      return;
+    }
+    await Promise.all([fetchSkills(), refetchControls(null)]);
+  }, [fetchSkills, refetchControls, refreshSelectedSkills, scope]);
+
+  const handleMountRulesSaved = useCallback(async () => {
+    await refreshMountRulesScopeSkills();
+    setDriftRefreshToken((value) => value + 1);
+  }, [refreshMountRulesScopeSkills]);
+
+  // Unified toggle handler: PATCH capabilities then re-fetch BOTH capabilities AND skills
+  // so the mount display (from /api/skills) also updates.
+  const handleToggle = useCallback(
+    async (skill: SettingsSkillItem, enabled: boolean) => {
+      await controls.handleToggle(skill.id, enabled, scope === SCOPE_PROJECT ? 'project' : 'global', {
+        source: skill.controls?.source ?? skill.source,
+        pluginId: skill.pluginId,
+      });
+      // Re-fetch skills data so mount state reflects the filesystem changes.
+      await fetchSkills(scope === SCOPE_PROJECT ? selectedProjectPath : undefined);
+      // F228: refresh drift banner so conflict/anomaly state updates after toggle.
+      setDriftRefreshToken((v) => v + 1);
+    },
+    [controls, scope, fetchSkills, selectedProjectPath],
+  );
+
+  const handleMountPointToggle = useCallback(
+    async (skill: SettingsSkillItem, mountPointId: string, enabled: boolean, toggleScope: 'global' | 'project') => {
+      await controls.handleMountPointToggle(skill.id, mountPointId, enabled, toggleScope, {
+        source: skill.controls?.source ?? skill.source,
+        pluginId: skill.pluginId,
+      });
+      await fetchSkills(toggleScope === 'project' ? selectedProjectPath : undefined);
+      setDriftRefreshToken((v) => v + 1);
+    },
+    [controls, fetchSkills, selectedProjectPath],
+  );
+
+  const sync = useSkillsSync({ scope, data, composedItems, controls, fetchSkills, refreshToken: driftRefreshToken });
+
+  const scopeCounts = useMemo(() => ({ all: composedItems.length, project: composedItems.length }), [composedItems]);
+
   const categories = useMemo(() => {
-    if (!data) return [ALL_CATEGORIES];
     const seen = new Set<string>();
-    for (const skill of data.skills) {
+    for (const skill of scopeItems) {
       if (skill.category) seen.add(skill.category);
     }
     return [ALL_CATEGORIES, ...seen];
-  }, [data]);
+  }, [scopeItems]);
 
   const filteredSkills = useMemo(() => {
     const needle = normalizeSearch(query);
-    return composedItems.filter((skill) => {
+    return scopeItems.filter((skill) => {
       if (activeCategory !== ALL_CATEGORIES && skill.category !== activeCategory) return false;
       if (!needle) return true;
       return matchesSkillSearch(skill, needle);
     });
-  }, [activeCategory, composedItems, query]);
-
-  async function handleSync() {
-    setSyncing(true);
-    setWriteError(null);
-    try {
-      const payload: Record<string, unknown> = {};
-      if (latestProjectRef.current) payload.projectPath = latestProjectRef.current;
-      const res = await apiFetch('/api/skills/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setWriteError(body.error ?? `Sync failed (${res.status})`);
-        return;
-      }
-      await Promise.all([fetchSkills(latestProjectRef.current ?? undefined), controls.refetch()]);
-    } catch {
-      setWriteError('Sync request failed');
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function handleResolveConflict(skillName: string, choice: 'official' | 'mine') {
-    setResolving(skillName);
-    setWriteError(null);
-    try {
-      const payload: Record<string, unknown> = { skillName, choice };
-      if (latestProjectRef.current) payload.projectPath = latestProjectRef.current;
-      const res = await apiFetch('/api/skills/resolve-conflict', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setWriteError(body.error ?? `Resolve failed (${res.status})`);
-        return;
-      }
-      await Promise.all([fetchSkills(latestProjectRef.current ?? undefined), controls.refetch()]);
-    } catch {
-      setWriteError('Resolve request failed');
-    } finally {
-      setResolving(null);
-    }
-  }
+  }, [activeCategory, scopeItems, query]);
 
   const combinedError = error || controls.error;
-
   return (
     <div className="space-y-5">
       <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑" />
 
-      <ProjectSelector
-        resolvedPath={controls.resolvedProjectPath}
-        knownProjects={controls.knownProjects}
-        currentSelection={controls.projectPath}
-        onSwitch={(path) => {
-          setData(null);
+      <SkillsScopeTabs
+        scope={scope}
+        onScopeChange={(nextScope) => {
+          setScope(nextScope);
           setActiveCategory(ALL_CATEGORIES);
-          setQuery('');
-          controls.switchProject(path);
-          void fetchSkills(path ?? undefined);
+          setExpandedMounts(null);
+          if (nextScope === SCOPE_ALL) {
+            void fetchSkills();
+            void controls.refetch(null);
+          } else {
+            setData(null);
+            // switchProject updates projectPathRef (used by toggle) AND fetches capabilities
+            controls.switchProject(selectedProjectPath ?? null);
+            void fetchSkills(selectedProjectPath);
+          }
         }}
+        allCount={scopeCounts.all}
+        projectCount={scopeCounts.project}
       />
 
-      {combinedError && <SettingsStatusStrip tone="error">{combinedError}</SettingsStatusStrip>}
-      {writeError && <SettingsStatusStrip tone="error">{writeError}</SettingsStatusStrip>}
-
-      {data && (
-        <HealthStrip
-          summary={data.summary}
-          staleness={data.staleness}
-          conflictCount={data.conflicts.length}
-          syncing={syncing}
-          onSync={handleSync}
-        />
+      {scope === SCOPE_PROJECT && (
+        <>
+          <ProjectSelector
+            resolvedPath={controls.resolvedProjectPath}
+            knownProjects={controls.knownProjects}
+            currentSelection={controls.projectPath}
+            alwaysShow
+            onSwitch={(path) => {
+              setData(null);
+              setActiveCategory(ALL_CATEGORIES);
+              setQuery('');
+              controls.switchProject(path);
+              void fetchSkills(path ?? undefined);
+            }}
+          />
+          <MountRulesPanel projectPath={selectedProjectPath} onSaved={handleMountRulesSaved} />
+          <SkillsDriftBanner
+            projectPath={selectedProjectPath}
+            refreshToken={driftRefreshToken}
+            onResolved={refreshSelectedSkills}
+          />
+        </>
       )}
 
-      {data && data.conflicts.length > 0 && (
-        <SkillConflictBanner conflicts={data.conflicts} resolving={resolving} onResolve={handleResolveConflict} />
+      {combinedError && <SettingsStatusStrip tone="error">{combinedError}</SettingsStatusStrip>}
+
+      {scope === SCOPE_ALL && <MountRulesPanel scope="default" onSaved={handleMountRulesSaved} />}
+
+      {scope === SCOPE_ALL && data && (
+        <AllProjectsSyncBanner
+          scopes={sync.scopeIssues}
+          scopesWithIssues={sync.scopesWithIssues}
+          syncing={sync.syncing}
+          error={sync.syncAllError}
+          onSyncAll={sync.handleSyncAllScopes}
+          onSyncScope={sync.handleSyncScope}
+        />
       )}
 
       {data && (
@@ -183,7 +220,6 @@ export function SkillsContent() {
       )}
 
       {!data && !error && <SettingsStatusStrip tone="muted">加载中...</SettingsStatusStrip>}
-
       {data && filteredSkills.length === 0 && <SkillsEmptyState />}
 
       <div className="space-y-3" data-testid="skills-list">
@@ -191,17 +227,26 @@ export function SkillsContent() {
           <SkillRow
             key={skill.id}
             skill={skill}
-            catFamilies={controls.catFamilies}
+            scope={scope}
+            syncSummary={sync.skillProjectSync.get(skill.name)}
             toggling={controls.toggling}
-            expandedCats={expandedCats}
+            expandedMounts={expandedMounts}
             onPreview={() => setPreviewSkill(skill)}
-            onToggle={controls.handleToggle}
-            onExpandCats={(id) => setExpandedCats(expandedCats === id ? null : id)}
+            onToggle={handleToggle}
+            onExpandMounts={(id) => setExpandedMounts(expandedMounts === id ? null : id)}
+            onMountPointToggle={handleMountPointToggle}
           />
         ))}
       </div>
 
-      {data && <SkillsSummaryFooter summary={data.summary} />}
+      {data && (
+        <SkillsSummaryFooter
+          summary={data.summary}
+          scope={scope}
+          projectCount={sync.projectConsistency.totalProjects}
+          syncedProjects={sync.projectConsistency.syncedProjects}
+        />
+      )}
 
       {previewSkill && (
         <SkillPreviewModal

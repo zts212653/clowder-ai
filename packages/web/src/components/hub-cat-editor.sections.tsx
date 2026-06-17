@@ -82,7 +82,7 @@ export function IdentitySection({
         ariaLabel="Nickname"
         value={form.nickname}
         onChange={(value) => onChange({ nickname: value })}
-        placeholder="可选，铲屎官给的昵称"
+        placeholder="可选，co-creator给的昵称"
       />
       <TextField
         label="显示后缀"

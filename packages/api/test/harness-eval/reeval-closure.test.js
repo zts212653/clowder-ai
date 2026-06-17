@@ -41,7 +41,7 @@ describe('re-eval closure loop', () => {
         ...openRecord,
         status: 'accepted_suppressed',
         reevalRef: 'thread:cvo-accept',
-        closureEvidence: 'CVO accepts suppression',
+        closureEvidence: 'operator accepts suppression',
       },
       {
         ...openRecord,
@@ -96,16 +96,16 @@ describe('re-eval closure loop', () => {
     assert.equal(resolved.reevalRef, 'docs/harness-feedback/verdicts/reeval.md');
   });
 
-  it('CVO accept/suppress can close high-impact delete/sunset verdict', () => {
+  it('operator accept/suppress can close high-impact delete/sunset verdict', () => {
     const acted = transitionReevalClosure(openRecord, { type: 'owner_action', ref: 'pr:1234' });
     const accepted = transitionReevalClosure(acted, {
       type: 'cvo_accept_suppress',
       ref: 'thread:cvo-accept',
-      evidence: 'CVO accepts sunset risk for obsolete harness',
+      evidence: 'operator accepts sunset risk for obsolete harness',
     });
 
     assert.equal(accepted.status, 'accepted_suppressed');
-    assert.equal(accepted.closureEvidence, 'CVO accepts sunset risk for obsolete harness');
+    assert.equal(accepted.closureEvidence, 'operator accepts sunset risk for obsolete harness');
   });
 
   it('closure events do not overwrite terminal audit state', () => {
@@ -119,14 +119,14 @@ describe('re-eval closure loop', () => {
       ...openRecord,
       status: 'accepted_suppressed',
       reevalRef: 'thread:cvo-accept',
-      closureEvidence: 'CVO accepts suppression',
+      closureEvidence: 'operator accepts suppression',
     };
 
     assert.deepEqual(
       transitionReevalClosure(resolved, {
         type: 'cvo_accept_suppress',
         ref: 'thread:late-cvo',
-        evidence: 'late CVO note',
+        evidence: 'late operator note',
       }),
       resolved,
     );

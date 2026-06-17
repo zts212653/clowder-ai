@@ -419,7 +419,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     // ── F163: Post-retrieval authority boost (fail-open: Task 11) ──
     try {
-      applyAuthorityBoost(results);
+      applyAuthorityBoost(results, trimmed);
     } catch {
       // Kill-switch: boost failure → continue with original ranking
     }
@@ -1015,7 +1015,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     query = '',
   ): EvidenceItem[] {
     try {
-      if (this.db) applyConsumptionRerank(results, this.db, targetLimit);
+      if (this.db) applyConsumptionRerank(results, this.db, targetLimit, query);
     } catch {
       // F200 kill-switch: rerank failure → continue with existing ranking
     }
@@ -1864,9 +1864,10 @@ const AUTHORITY_WEIGHTS: Record<F163Authority, number> = {
  * F163_AUTHORITY_BOOST is 'on'. In 'shadow' mode, the boost is computed
  * but the original order is preserved. In 'off' mode, this is a no-op.
  */
-function applyAuthorityBoost(results: EvidenceItem[]): void {
+function applyAuthorityBoost(results: EvidenceItem[], query = ''): void {
   const flags = freezeFlags();
   if (flags.authorityBoost === 'off' || results.length < 2) return;
+  if (findExactLexicalProtectedAnchors(results, query).size > 0) return;
 
   // RRF-style positional score: 1/(rank+k) keeps adjacent positions close
   // so the 1.0–1.3 authority weight can meaningfully reorder near-tied items.
@@ -1945,13 +1946,37 @@ export function lookupShadowRanking(candidateAnchors: string[]): Array<{ anchor:
   return ranking;
 }
 
-export function applyConsumptionRerank(results: EvidenceItem[], db: Database.Database, targetLimit?: number): void {
+export function applyConsumptionRerank(
+  results: EvidenceItem[],
+  db: Database.Database,
+  targetLimit?: number,
+  query = '',
+): void {
   const f200Flags = freezeF200Flags();
   if (f200Flags.consumptionRerank === 'off' || results.length < 2) return;
 
+  const exactProtectedAnchors = findExactLexicalProtectedAnchors(results, query);
+  const protectedResults = exactProtectedAnchors.size
+    ? results.filter((item) => exactProtectedAnchors.has(item.anchor))
+    : [];
+  const rerankPool = exactProtectedAnchors.size
+    ? results.filter((item) => !exactProtectedAnchors.has(item.anchor))
+    : results;
+  if (rerankPool.length < 2) {
+    if (f200Flags.consumptionRerank === 'on' && protectedResults.length > 0) {
+      for (let i = 0; i < protectedResults.length; i++) results[i] = protectedResults[i];
+      results.length = protectedResults.length;
+    }
+    storeShadowRanking(
+      results.map((r) => r.anchor),
+      results.map((item, i) => ({ anchor: item.anchor, shadowRank: i })),
+    );
+    return;
+  }
+
   const anchorMetrics = loadAnchorMetrics(
     db,
-    results.map((r) => r.anchor),
+    rerankPool.map((r) => r.anchor),
   );
   const globalMeanCtr = loadGlobalCtrBaseline(db);
 
@@ -1959,7 +1984,7 @@ export function applyConsumptionRerank(results: EvidenceItem[], db: Database.Dat
   const BETA = 0.15;
   const GAMMA = 0.1;
 
-  const scored = results.map((item, i) => {
+  const scored = rerankPool.map((item, i) => {
     const metrics = anchorMetrics.get(item.anchor);
     const prior = computeConsumptionPrior(
       {
@@ -1997,16 +2022,17 @@ export function applyConsumptionRerank(results: EvidenceItem[], db: Database.Dat
     movable = mmrResults.map((item, i) => ({ item, newScore: targetLimit - i }));
   }
 
-  const final: EvidenceItem[] = [];
+  const reranked: EvidenceItem[] = [];
   let mi = 0;
-  for (let i = 0; i < results.length; i++) {
+  for (let i = 0; i < rerankPool.length; i++) {
     if (pinned.has(i)) {
-      final.push(pinned.get(i)!);
+      reranked.push(pinned.get(i)!);
     } else if (mi < movable.length) {
-      final.push(movable[mi++].item);
+      reranked.push(movable[mi++].item);
     }
   }
 
+  const final = protectedResults.length > 0 ? [...protectedResults, ...reranked] : reranked;
   const shadowOrder: Array<{ anchor: string; shadowRank: number }> = final.map((item, i) => ({
     anchor: item.anchor,
     shadowRank: i,
@@ -2020,6 +2046,29 @@ export function applyConsumptionRerank(results: EvidenceItem[], db: Database.Dat
       ? results.slice(0, targetLimit).map((r) => r.anchor)
       : results.map((r) => r.anchor);
   storeShadowRanking(keyAnchors, shadowOrder);
+}
+
+function findExactLexicalProtectedAnchors(results: EvidenceItem[], query: string): Set<string> {
+  const trimmed = query.trim();
+  if (!trimmed) return new Set();
+  const words = splitLexicalBackfillWords(trimmed);
+  if (words.length === 0) return new Set();
+  if (words.length < 2 && !hasCJKCharacters(trimmed)) return new Set();
+
+  const protectedAnchors = new Set<string>();
+  for (const item of results) {
+    if (isExactLexicalMatch(item, words)) protectedAnchors.add(item.anchor);
+  }
+  return protectedAnchors;
+}
+
+function isExactLexicalMatch(item: EvidenceItem, words: string[]): boolean {
+  const title = item.title.toLowerCase();
+  const summary = (item.summary ?? '').toLowerCase();
+  const keywords = (item.keywords ?? []).join(' ').toLowerCase();
+  const haystack = `${title} ${summary} ${keywords}`;
+  if (!words.every((word) => haystack.includes(word))) return false;
+  return words.some((word) => title.includes(word) || keywords.includes(word));
 }
 
 function annotateMatchReasons(results: EvidenceItem[], query: string, explain?: boolean): void {

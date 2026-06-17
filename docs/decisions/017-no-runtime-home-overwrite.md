@@ -30,7 +30,7 @@ F050 Phase 4（Native Prompt Sync for Codex + Gemini）讨论中，Ragdoll×Main
 
 1. **侵入性**：改用户 home 目录文件影响所有使用该 agent 的场景，不只是 Cat Café
 2. **竞态风险**：多个 Cat Café 实例/session 同时写同一文件可能互踩
-3. **个人环境污染**：铲屎官可能在原生配置中有自定义内容，runtime 覆写会丢失
+3. **个人环境污染**：operator可能在原生配置中有自定义内容，runtime 覆写会丢失
 4. **可审计性**：显式脚本有 commit 记录和 `--check` drift 检测，runtime 覆写无痕
 
 ## Consequences
@@ -43,4 +43,4 @@ F050 Phase 4（Native Prompt Sync for Codex + Gemini）讨论中，Ragdoll×Main
 
 - Ragdoll（提出问题 + 方案）
 - Maine Coon/GPT-5.4（架构讨论 + 否决 runtime 覆写）
-- 铲屎官（确认方向 + 否决 OpenCode wrapper）
+- operator（确认方向 + 否决 OpenCode wrapper）

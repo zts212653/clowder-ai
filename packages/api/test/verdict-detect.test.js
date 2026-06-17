@@ -290,7 +290,7 @@ describe('F167 C2 AC-C7: shouldWarnVerdictWithoutPass', () => {
     // 2026-04-25 false-positive root cause: parseA2AMentions only parses cat handles,
     // never returns co-creator handles like 'you'. route-serial passes that empty
     // array to shouldWarnVerdictWithoutPass, so a cat ending its summary report with
-    // line-start `@co-creator` (legitimate ball-pass to 铲屎官) gets flagged as
+    // line-start `@co-creator` (legitimate ball-pass to co-creator) gets flagged as
     // "verdict without pass". Fix: route-serial computes hasCoCreatorLineStartMention
     // via detectUserMention and passes it; shouldWarnVerdictWithoutPass treats it as
     // a legitimate exit.
@@ -320,10 +320,10 @@ describe('F167 C2 AC-C7: shouldWarnVerdictWithoutPass', () => {
     );
   });
 
-  test('verdict + co-creator line-start (Chinese 铲屎官) → false (CJK co-creator handle)', () => {
+  test('verdict + co-creator line-start (Chinese co-creator) → false (CJK co-creator handle)', () => {
     assert.equal(
       shouldWarnVerdictWithoutPass({
-        text: 'P1 已修\n\n@铲屎官',
+        text: 'P1 已修\n\n@co-creator',
         lineStartMentions: [],
         toolNames: [],
         structuredTargetCats: [],

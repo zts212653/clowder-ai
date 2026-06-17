@@ -7,10 +7,13 @@ import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-na
 import type { RichCardBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
+import { CafeIcon } from './CafeIcons';
 import {
+  displayProposalTitle,
   EditField,
   formatReportingMode,
   ProjectPathEdit,
+  ProposalCardIcon,
   ReportingModeEdit,
   type ReportingModeEditValue,
 } from './ProposalCardFields';
@@ -48,7 +51,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
     readReportingModeEdit(block),
   );
   const [edits, setEdits] = useState<ProposalFieldEdits>(() => ({
-    title: block.title.replace(/^📥 提议新建 thread：/, ''),
+    title: block.title.replace(/^(?:📥 )?提议新建 thread：/, ''),
     parentThreadId: readField(block, '父 Thread'),
     preferredCats: readField(block, '建议成员'),
     initialMessage: readField(block, '首条消息'),
@@ -192,7 +195,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
 
   return (
     <div className="border-l-4 border-l-blue-400 bg-[var(--semantic-info-surface)] rounded-r-lg p-3">
-      <div className="font-medium text-sm">{block.title}</div>
+      <div className="flex items-start gap-2">
+        <ProposalCardIcon />
+        <div className="font-medium text-sm">{displayProposalTitle(block.title)}</div>
+      </div>
       {block.bodyMarkdown && (
         <div className="mt-1 text-xs text-cafe-secondary [&_p]:mb-1 [&_p:last-child]:mb-0">
           <MarkdownContent content={block.bodyMarkdown} className="!text-xs" disableCommandPrefix />
@@ -269,7 +275,8 @@ export function ProposalCard({ block }: ProposalCardProps) {
               onChange={(e) => setPinOnApprove(e.target.checked)}
               className="rounded border-gray-300 dark:border-gray-600"
             />
-            📌 置顶新 thread
+            <CafeIcon name="pin" className="h-3.5 w-3.5 text-cafe-muted" />
+            置顶新 thread
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" disabled={loading} onClick={approve} className={btnPrimary}>
@@ -292,8 +299,9 @@ export function ProposalCard({ block }: ProposalCardProps) {
       )}
       {status === 'approving' && <div className="mt-2 text-xs text-[var(--semantic-info)] ">批准中…</div>}
       {status === 'approved' && (
-        <div className="mt-2 text-xs text-conn-emerald-text">
-          ✓ 已批准，thread 已创建{' '}
+        <div className="mt-2 flex items-center gap-1 text-xs text-conn-emerald-text">
+          <CafeIcon name="check" className="h-3.5 w-3.5 shrink-0" />
+          已批准，thread 已创建{' '}
           {resultThreadId ? (
             <button
               type="button"
@@ -308,7 +316,12 @@ export function ProposalCard({ block }: ProposalCardProps) {
           ) : null}
         </div>
       )}
-      {status === 'rejected' && <div className="mt-2 text-xs text-conn-red-text ">✗ 已驳回</div>}
+      {status === 'rejected' && (
+        <div className="mt-2 flex items-center gap-1 text-xs text-conn-red-text">
+          <CafeIcon name="cross" className="h-3.5 w-3.5 shrink-0" />
+          已驳回
+        </div>
+      )}
       {error && <div className="mt-1 text-xs text-conn-red-text">{error}</div>}
     </div>
   );

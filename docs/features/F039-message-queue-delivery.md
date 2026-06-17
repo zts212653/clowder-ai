@@ -13,7 +13,7 @@ created: 2026-02-26
 > **Completed**: 2026-02-28
 
 ## Why
-- 2026-02-26 team lead口述
+- 2026-02-26 operator口述
 
 ## What
 - **F39**: 猫在跑时支持排队发送/强制发送/取消三模式。InvocationQueue per-thread FIFO + scopeKey 用户隔离 + 同源合并 + 前端 QueuePanel + cancel 后暂停管理。Maine Coon R1→R8 放行。优先级在 #97 3c 之前（队列是 3c 的基础设施）。需求 · 技术 plan。
@@ -27,7 +27,7 @@ created: 2026-02-26
 - **Related**: 无
 - 无显式依赖声明
 
-## 已知 Bug / UX 改进（2026-02-27 team lead发现）
+## 已知 Bug / UX 改进（2026-02-27 operator发现）
 
 ### Bug 1: F5 刷新后队列消息状态丢失
 - **复现**：消息在队列中（queued/processing） → 按 F5 刷新 → 消息显示为"已发送"

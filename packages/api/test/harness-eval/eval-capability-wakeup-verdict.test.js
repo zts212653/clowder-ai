@@ -249,7 +249,7 @@ describe('Capability Wakeup Predicates And Verdicts', () => {
     assert.equal(packet.ownerAsk.requestedAction, 'No action required; keep observing the next scheduled eval.');
   });
 
-  it('requires CVO approval when a behavioral miss maps to a build verdict', () => {
+  it('requires operator approval when a behavioral miss maps to a build verdict', () => {
     const trace = buildCapabilityTrace({
       sessionId: 'session-cap',
       threadId: 'thread-cap',

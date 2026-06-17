@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- 2026-02-14 team lead提议
+- 2026-02-14 operator提议
 
 ## What
 - **F26**: ✅ f59740f + R1 fix 70e8321, PR #6. RightStatusPanel active/history 分区 + CatTaskProgress checklist + invoke-single-cat task 提取. 计划: 2026-02-14-ui-dashboard-upgrade.md

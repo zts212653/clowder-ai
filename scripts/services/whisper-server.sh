@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/services/whisper-server.sh
-# Start local Whisper ASR server for Cat Cafe voice input (MLX backend).
+# Start local Whisper ASR server for Clowder AI voice input (MLX backend).
 #
 # Usage:
 #   ./scripts/services/whisper-server.sh                                            # default: large-v3-turbo

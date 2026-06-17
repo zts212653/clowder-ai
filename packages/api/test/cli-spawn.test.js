@@ -1897,7 +1897,7 @@ test('F212 AC-A8: NDJSON stream error event triggers cliDiagnostics.reasonCode',
 });
 
 // =============================================================================
-// F212 Phase F — Empty-stderr observability follow-up (砚砚 catch + CVO 2026-05-30)
+// F212 Phase F — Empty-stderr observability follow-up (砚砚 catch + operator 2026-05-30)
 // =============================================================================
 
 // Test stub helper for P1-1 (砚砚 R1): captures log calls so we can assert the actual

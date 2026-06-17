@@ -73,7 +73,7 @@ test_trigger_l1_at_threshold() {
   # 设置 70 秒的活跃时间（超过 60 秒阈值）
   set_field "active_work_ms" "70000"
   set_field "last_activity_ts" "$(($(date +%s) - 1))000"
-  # 确保心跳新鲜（铲屎官在）
+  # 确保心跳新鲜（operator在）
   touch_user_heartbeat
 
   mock_input | "$HOOK_SCRIPT" >/dev/null 2>&1

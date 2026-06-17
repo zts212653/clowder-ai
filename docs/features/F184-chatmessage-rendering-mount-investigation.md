@@ -8,22 +8,22 @@ created: 2026-04-30
 
 # F184: ChatMessage Rendering Mount Investigation — F176 撤销后未查的 DOM 缺失真 bug
 
-> **Status**: done — original DOM mount issue incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `thread_mnux2eewbo4otg17`); stale live streaming bubble follow-up fixed by PR #1582 (2026-05-07); draft/live bubble split follow-up fixed by PR #1586 (2026-05-07) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2
+> **Status**: done — original DOM mount issue incidentally fixed by F183 Phase B-E architectural work (verified 2026-05-02 alpha walk on `[thread-id]`); stale live streaming bubble follow-up fixed by PR #1582 (2026-05-07); draft/live bubble split follow-up fixed by PR #1586 (2026-05-07) | **Owner**: Ragdoll/Ragdoll (Opus-47) | **Priority**: P2
 >
-> **F184 close evidence**: 2026-05-02 runtime alpha walk on the original repro thread (`thread_mnux2eewbo4otg17`, 1788 messages in Redis): DOM rendered 49 messages in the most-recent 50-msg window, API returned 50 in the same range, the 1 "missing" message is `extra.scheduler.hiddenTrigger=true` (intentional UI filter at `ConnectorBubble.tsx:140`, NOT the F184 bug). All cross-cat 互@ messages render correctly: opus-47 (17), codex (8), antig-opus (2) = 27/27 cat bubbles visible. F183 Phase B (single-writer reducer) + Phase D (IDB merge filter) + Phase E (strict invariant gate) collectively closed the rendering mount path that F176 误诊 had targeted.
+> **F184 close evidence**: 2026-05-02 runtime alpha walk on the original repro thread (`[thread-id]`, 1788 messages in Redis): DOM rendered 49 messages in the most-recent 50-msg window, API returned 50 in the same range, the 1 "missing" message is `extra.scheduler.hiddenTrigger=true` (intentional UI filter at `ConnectorBubble.tsx:140`, NOT the F184 bug). All cross-cat 互@ messages render correctly: opus-47 (17), codex (8), antig-opus (2) = 27/27 cat bubbles visible. F183 Phase B (single-writer reducer) + Phase D (IDB merge filter) + Phase E (strict invariant gate) collectively closed the rendering mount path that F176 误诊 had targeted.
 >
-> **2026-05-07 live follow-up**: team lead reported an old Opus bubble still showing `CLI Output · streaming` after Opus had finished and Codex was active; F5 / thread switch recovered because history hydration loaded the finalized server state. Root cause was the live `/queue` reconcile path: it rebuilt active server slots but did not finalize local streaming assistant bubbles whose `catId` was absent from server active slots. PR #1582 added a frontend reconcile helper in `useSocket.ts` plus regression coverage that finalizes stale absent-cat bubbles while preserving the active cat bubble.
+> **2026-05-07 live follow-up**: operator reported an old Opus bubble still showing `CLI Output · streaming` after Opus had finished and Codex was active; F5 / thread switch recovered because history hydration loaded the finalized server state. Root cause was the live `/queue` reconcile path: it rebuilt active server slots but did not finalize local streaming assistant bubbles whose `catId` was absent from server active slots. PR #1582 added a frontend reconcile helper in `useSocket.ts` plus regression coverage that finalizes stale absent-cat bubbles while preserving the active cat bubble.
 >
-> **2026-05-07 draft/live split follow-up**: team lead then reported the same thread (`thread_movcg5v7226tmg0q`) still showing a single running reply as two bubbles before F5: one local invocationless live bubble plus one server `draft-{invocationId}` bubble. Root cause was a second identity gap: late stream events did not backfill `invocationId` onto the existing local bubble, and hydration could not merge an unambiguous server draft back into that local bubble. PR #1586 added late invocation binding plus a narrow draft/live hydration merge guard, including a stronger text-proximity requirement so tool-only stale bubbles cannot capture textless new drafts.
+> **2026-05-07 draft/live split follow-up**: operator then reported the same thread (`[thread-id]`) still showing a single running reply as two bubbles before F5: one local invocationless live bubble plus one server `draft-{invocationId}` bubble. Root cause was a second identity gap: late stream events did not backfill `invocationId` onto the existing local bubble, and hydration could not merge an unambiguous server draft back into that local bubble. PR #1586 added late invocation binding plus a narrow draft/live hydration merge guard, including a stronger text-proximity requirement so tool-only stale bubbles cannot capture textless new drafts.
 
 ## Why
 
-F176 (Native CLI Assistant-Speech vs CLI-Stdout) 在 2026-04-26 被team lead revert，原因是误诊——把"DOM 缺失"误读成"内容被折叠"。F176 修了不存在的 bug，**真 bug 至今没人查**。
+F176 (Native CLI Assistant-Speech vs CLI-Stdout) 在 2026-04-26 被operator revert，原因是误诊——把"DOM 缺失"误读成"内容被折叠"。F176 修了不存在的 bug，**真 bug 至今没人查**。
 
-team experience（2026-04-26 01:02，三个感叹号纠正）：
+operator experience（2026-04-26 01:02，三个感叹号纠正）：
 > "我滴吗 这个 f176 你们完全理解错了啊，当时是为了修这个 bug 的，就是Ragdoll和Maine Coon互相 at 然后互相说话了，但是我前端连他们的头像 cli thinking 什么都看不到！！"
 
-`thread_mnux2eewbo4otg17` 实测现象：
+`[thread-id]` 实测现象：
 - ✅ 顶部Maine Coon GPT-5.5 那条消息：完整渲染（头像 + 标题 + CLI Output）
 - ✅ BriefingCard 系统消息 / DirectionPill：正常渲染
 - ❌ opus / codex 互 @ 之后的所有 cat 消息：**整条 ChatMessage 不渲染**
@@ -48,7 +48,7 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 
 ### Phase A: Repro & Diagnosis（在 F183 Phase A done 后启动）
 
-- 复现 thread_mnux2eewbo4otg17 现场（或新构造同型 thread）
+- 复现 [thread-id] 现场（或新构造同型 thread）
 - F12 看 DOM 是否有占位 vs 完全无元素
 - 沿 ChatMessage 渲染链定位早 return / dedup / merge / catData / mount 哪一层吃了消息
 - 用证据排除每一层，不止血式补 fallback
@@ -66,14 +66,14 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 ## Acceptance Criteria
 
 ### Phase A（Diagnosis）
-- [x] AC-A1: thread_mnux2eewbo4otg17 现场重新检查（2026-05-02 alpha walk via Playwright）— **现象不复现**：49/49 expected DOM nodes (50 API msgs - 1 intentional hiddenTrigger filter) all 渲染。F183 work 已经 collectively 修了这条线。Evidence: docs/features/assets/F184/diagnosis-2026-05-02.md
+- [x] AC-A1: [thread-id] 现场重新检查（2026-05-02 alpha walk via Playwright）— **现象不复现**：49/49 expected DOM nodes (50 API msgs - 1 intentional hiddenTrigger filter) all 渲染。F183 work 已经 collectively 修了这条线。Evidence: docs/features/assets/F184/diagnosis-2026-05-02.md
 - [x] AC-A2: 根因定位 — 不需要 fix。F183 reducer single-writer + Phase D IDB merge filter + Phase E strict invariant gate 覆盖了 mount-link 上 identity-related 的所有 early return / dedup / merge 路径。catData 缺失场景未在该 thread 复现（cat-catalog 默认包含所有内置 cats）。
 - [x] AC-A3: 与 F183 identity contract 兼容性确认 — F183 全 phase code 落地后 thread 复测，识别度 100%。
 
 ### Phase B（Fix）— **NOT NEEDED**
 - [x] AC-B1: 现象消失 (Phase A 验证已 confirm — F183 sided)
 - [x] AC-B2: F183 new tests cover mount-time identity invariants（bubble-invariants.test.ts + chatStore-invariant-coverage.test.ts strict mode = ChatMessage mount 前置条件保护）
-- [x] AC-B3: alpha 实测 thread_mnux2eewbo4otg17 现象不复发 (2026-05-02 验证)
+- [x] AC-B3: alpha 实测 [thread-id] 现象不复发 (2026-05-02 验证)
 
 ### Phase C（Live stale streaming bubble follow-up）
 - [x] AC-C1: 定位 live-only stale bubble 根因 — server `/queue` slots 不再包含 finished cat，但 local streaming assistant bubble 仍保持 `isStreaming=true`；F5 / thread switch 自愈来自 history hydrate，不是后端未落盘。
@@ -92,14 +92,14 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "我前端连他们的头像 cli thinking 什么都看不到" (2026-04-26) | AC-A1, AC-B1 | F12 + alpha | [x] (2026-05-02 alpha 复测不复现 — 27/27 cat 互@ messages 渲染) |
 | R2 | F176 误诊后真 bug 没人查 | AC-A2, AC-B1 | code review + repro | [x] (查了 — F183 collective fix 覆盖) |
 | R3 | 不能与 F183 并发去修（避免引入新不一致） | AC-E1 | roadmap 检查 | [x] (F184 在 F183 全 done 后做，零并发) |
 | R4 | F176 误诊教训沉淀 | AC-E2 | lessons-learned 链接 | [x] (F184 整体闭环 — diagnosis 方法论本身就是教训范例) |
 | R5 | "Ragdoll其实都回答完了，现在是Maine Coon但是他气泡还是这样；F5 / 切换 thread 又正常" (2026-05-07) | AC-C1, AC-C2, AC-C3 | live reconcile test + merge gate | [x] (PR #1582 fixed stale absent-cat streaming bubble finalize) |
-| R6 | "图1和图2是同一个thread f5前后的样子... 以及还是 气泡是分裂的！ 直接两个气泡" (2026-05-07, `thread_movcg5v7226tmg0q`) | AC-D1, AC-D2, AC-D3, AC-D4 | active late-bind test + hydration merge regression + merge gate | [x] (PR #1586 fixed draft/live bubble split and stale tool-only false binding) |
+| R6 | "图1和图2是同一个thread f5前后的样子... 以及还是 气泡是分裂的！ 直接两个气泡" (2026-05-07, `[thread-id]`) | AC-D1, AC-D2, AC-D3, AC-D4 | active late-bind test + hydration merge regression + merge gate | [x] (PR #1586 fixed draft/live bubble split and stale tool-only false binding) |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -117,7 +117,7 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 
 | 风险 | 缓解 |
 |------|------|
-| 复现失败 | thread_mnux2eewbo4otg17 历史数据已存在，理论可重放；不行就构造同型 thread（多猫互 @）|
+| 复现失败 | [thread-id] 历史数据已存在，理论可重放；不行就构造同型 thread（多猫互 @）|
 | 根因可能横跨 mount 链多层 | Phase A 显式排除每一层，不止血式补 fallback（F176 教训）|
 | 与 F183 reducer 改动冲突 | roadmap 串行；每 PR rebase 等 F183 B1 落地后再 merge；冲突率高时主动 hold |
 | 重蹈 F176 误诊覆辙 | Spec § Why 必须基于图/原话 verbatim quote；Phase A AC 必须用 DOM 证据，禁止凭印象 |
@@ -127,5 +127,5 @@ team experience（2026-04-26 01:02，三个感叹号纠正）：
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | F184 不并入 F183；分 feat 走 | rendering mount 层 ≠ identity contract 层（不同抽象层），F176 误诊教训说明混层修复风险高 | 2026-04-30 |
-| KD-2 | F184 立项 + 实施时间线与 F183 串行（team lead push back） | 耦合点：F183 改 message 数据结构 / reducer / cache contract；F184 改 ChatMessage mount——并发会 break 假设 + 文件冲突 | 2026-04-30 |
+| KD-2 | F184 立项 + 实施时间线与 F183 串行（operator push back） | 耦合点：F183 改 message 数据结构 / reducer / cache contract；F184 改 ChatMessage mount——并发会 break 假设 + 文件冲突 | 2026-04-30 |
 | KD-3 | Phase A 禁止凭印象猜根因，必须基于 F12 DOM 证据 + 代码定位 | F176 误诊教训：从图 → spec → 实现一路按错误前提推进，4 轮 review + cloud + alpha 验收都没人 push back § Why | 2026-04-30 |

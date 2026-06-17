@@ -14,7 +14,7 @@ created: 2026-03-12
 
 F066 Phase 1 落地了本地 TTS（Qwen3-TTS Base clone），但合成方式是**全文一次性**：VoiceBlockSynthesizer 收到完整 text → 调用 TTS → 等整段合成完 → 返回 audioUrl。对于长文本（>100 字），用户要等 10-30 秒才能听到第一个音节。
 
-team lead的核心痛点：**"为什么要等这么久才开始说话？"**
+operator的核心痛点：**"为什么要等这么久才开始说话？"**
 
 流式分句的思路是：LLM 边生成文字，TTS 边合成语音，前端边收边播。首次发声延迟从"全文合成时长"降到"第一句合成时长"（通常 1-2 秒）。
 
@@ -108,7 +108,7 @@ AIRI 项目的 `tts-chunker.ts` 已验证了这种管线在 TypeScript 中的可
 | ~~WebSocket 复杂度高于 SSE~~ | **已决**：选 SSE（单向足够，复杂度低） |
 | Qwen3-TTS mlx-audio SDK 不支持流式 generate | 三路可选：A) vLLM-Omni serving（真流式）B) KV-cache 手动 step（社区方案）C) Node 层分段调用全量合成（伪流式，最简单） |
 
-## 实测延迟报告（2026-03-17 team lead亲测）
+## 实测延迟报告（2026-03-17 operator亲测）
 
 **测试环境**：M-series Mac，本地 Qwen3-TTS (mlx-audio)，runtime worktree
 

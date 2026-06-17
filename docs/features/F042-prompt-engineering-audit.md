@@ -14,7 +14,7 @@ updated: 2026-03-02
 > **Created**: 2026-02-27
 > **Decision Date**: 2026-02-28
 > **Closed Date**: 2026-03-02
-> **Context Recovery**: Thread `thread_mm4dj9jp0tij0ch3`, 从 2026-02-28 16:05 team lead发言开始
+> **Context Recovery**: Thread `[thread-id]`, 从 2026-02-28 16:05 operator发言开始
 
 ## Why
 
@@ -198,7 +198,7 @@ feat-lifecycle → writing-plans → worktree → tdd
 
 合成一个会导致 over-trigger。触发准确性 > 数量少。
 
-### 3.3 ⚠️ 过度合并检查规则（team lead要求）
+### 3.3 ⚠️ 过度合并检查规则（operator要求）
 
 **每合并一个 skill 时，author 必须问自己**：
 > "合并后的 description 是否变成了'什么都能做'？如果一个用户说 X 和说 Y 都可能触发这个 skill，而 X 和 Y 实际需要不同的处理流程，那这个合并就是过度合并。"
@@ -266,14 +266,14 @@ skills:
 
 | # | 铁律 | 说明 |
 |---|------|------|
-| 1 | **Redis production Redis (sacred)** | Worktree 不碰team lead数据 |
+| 1 | **Redis production Redis (sacred)** | Worktree 不碰operator数据 |
 | 2 | **同一个体不能 review 自己的代码** | 跨 family 优先但可降级到同 family 不同个体（须注明降级原因） |
 | 3 | **不能冒充其他猫** | 身份是硬约束常量 |
 
-**Reviewer 降级策略**（team lead 2026-02-28 提出）：
+**Reviewer 降级策略**（operator 2026-02-28 提出）：
 1. 首选：跨 family 的 peer-reviewer
 2. 次选：同 family 但不同个体（codex 写 → gpt52 review）
-3. 兜底：team lead review 或延迟到有猫可用
+3. 兜底：operator review 或延迟到有猫可用
 
 其余现有"铁律"降级为"强烈建议"。**当所有东西都是铁律时，没有东西是铁律。**
 
@@ -312,7 +312,7 @@ skills:
 如果上下文压缩后丢失本文决策的记忆：
 
 1. **读本文件**: `docs/features/F042-prompt-engineering-audit.md`
-2. **原始讨论**: Thread `thread_mm4dj9jp0tij0ch3`，从 **2026-02-28 16:05** team lead发言开始
+2. **原始讨论**: Thread `[thread-id]`，从 **2026-02-28 16:05** operator发言开始
 
 ---
 
@@ -368,7 +368,7 @@ F042 核心交付完成后，剩余的实施项按知识工程栈归属毕业到
 ```
 BACKLOG F042（入口）
   └→ 本文件（spec + 完整决策）
-      ├→ Thread thread_mm4dj9jp0tij0ch3 16:05+（第二轮四猫审计）
+      ├→ Thread [thread-id] 16:05+（第二轮四猫审计）
       ├→ F032-agent-plugin-architecture.md（技术侧）
       └→ packages/shared/src/cat-config.json（roster 事实源）
 ```

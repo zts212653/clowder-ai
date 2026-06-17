@@ -127,7 +127,7 @@ describe('F226 presentation surface (file/md tear-off floating window)', () => {
     expect(useChatStore.getState().workspaceEditTokenExpiry).toBeNull();
   });
 
-  // ── F226 尺寸快捷 enhancement（铲屎官 dogfood 反馈）──
+  // ── F226 尺寸快捷 enhancement（co-creator dogfood 反馈）──
 
   it('detachToFloat initializes maximized=false', () => {
     useChatStore.getState().detachToFloat();

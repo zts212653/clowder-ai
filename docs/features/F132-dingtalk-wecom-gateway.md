@@ -17,7 +17,7 @@ created: 2026-03-22
 
 Cat Café 已通过 F088 建立了飞书和 Telegram 的双向 DM 通道，但国内企业级 IM 还有两个主力平台未覆盖：**钉钉**（阿里系，6 亿+用户）和**企业微信**（腾讯系，与微信互通）。三者合计覆盖国内企业即时通讯 90%+ 的份额。
 
-team experience：*"我们需要接入钉钉和企业微信，必须复用我们的 channel 等等架构设计，学习飞书的接入"*
+operator experience：*"我们需要接入钉钉和企业微信，必须复用我们的 channel 等等架构设计，学习飞书的接入"*
 
 F088 已验证的三层架构（Principal Link / Session Binding / Command Layer）+ adapter-only-protocol 原则天然支持新平台扩展——新增 adapter 无需改动公共层。本 feature 的核心工作是：为钉钉和企微写 adapter，复用 F088 全部公共基础设施。
 
@@ -198,7 +198,7 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 
 ### Phase E: WeCom Bot Guided Setup — 企微 Bot 快速接入向导
 
-> **前置**：Phase B~D 已 merged。企微 adapter 代码完整可用，但team lead因手动配置太麻烦一直没验证。本阶段降低接入摩擦。
+> **前置**：Phase B~D 已 merged。企微 adapter 代码完整可用，但operator因手动配置太麻烦一直没验证。本阶段降低接入摩擦。
 
 **问题**：当前企微 Bot 接入需要手动创建 bot → 复制 botId + secret → 粘贴到 .env 或 Hub 表单 → 重启服务。飞书/微信都有一键/扫码流程，企微还是"手抄凭证"模式。
 
@@ -283,7 +283,7 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "接入钉钉" | AC-A1~A7 | test + manual DM | [x] |
 | R2 | "接入企业微信" | AC-B1~B6, AC-C1~C7 | test + manual DM（两种模式） | [x] |
@@ -322,10 +322,10 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 |---|------|------|------|
 | KD-1 | 参考 OpenClaw 社区插件架构，不引入 ChannelPlugin 接口 | OpenClaw 社区有成熟钉钉/企微插件（`largezhou`、`YanHaidao`、`toboto` 等），验证了 adapter-only 模式。我们的三层架构已足够 | 2026-03-22 |
 | KD-2 | adapter-only 扩展，公共层零改动 | F088 架构验证 + duck typing 能力发现天然支持 | 2026-03-22 |
-| KD-3 | ~~DM-only MVP~~ → 钉钉分三步：DM 基础(A) → 媒体原生发送(A.1) → 群聊(A.2) | team lead确认"先把富文本/媒体原生发送都支持完整，然后再完整地做群聊" | 2026-03-22→03-23 |
+| KD-3 | ~~DM-only MVP~~ → 钉钉分三步：DM 基础(A) → 媒体原生发送(A.1) → 群聊(A.2) | operator确认"先把富文本/媒体原生发送都支持完整，然后再完整地做群聊" | 2026-03-22→03-23 |
 | KD-4 | **企微拆两个 connector**：`wecom-bot`（WebSocket + 流式）+ `wecom-agent`（HTTP callback + AES/XML） | GPT Pro 调研确认：身份、协议、流式能力完全不同，硬揉一个 adapter 会把 Principal Link 和 Session Binding 搅成毛线球。OpenClaw 生态的 `YanHaidao/wecom` 已验证 dual-mode 架构 | 2026-03-22 |
 | KD-5 | 钉钉用 AI Card 做流式，不用 plain message edit | 钉钉 plain message 不支持编辑，但 AI Card 支持 create → streaming update → finish 状态机。`soimy/openclaw-channel-dingtalk` 已验证此路径 | 2026-03-22 |
-| KD-6 | 钉钉群聊须对齐飞书 F134 IM Hub 抽象 | team experience"群聊你也得对接上飞书有的功能或者他们的抽象你要接入，IM Hub 里群聊怎么映射你们也要这么干" | 2026-03-23 |
+| KD-6 | 钉钉群聊须对齐飞书 F134 IM Hub 抽象 | operator experience"群聊你也得对接上飞书有的功能或者他们的抽象你要接入，IM Hub 里群聊怎么映射你们也要这么干" | 2026-03-23 |
 | KD-7 | **新 IM 接入 11 步清单**（统一架构指南） | 基于飞书/钉钉/Telegram/微信四个已接入平台的模式提炼，新平台改 11 个位置、公共层零改动。详见下方「新 IM 接入清单」 | 2026-03-27 |
 | KD-8 | **企微 Bot 走引导式设置，不走 ISV 扫码授权** | WeCom 没有飞书/微信那样的 QR-to-credential 协议。ClawPro 的扫码授权需要注册 WeCom 服务商（ISV），太重。用引导向导 + 实时 WebSocket 验证，3 分钟完成接入 | 2026-04-14 |
 
@@ -346,7 +346,7 @@ F088 已验证的三层架构（Principal Link / Session Binding / Command Layer
 | 9 | Config | `.env.example` | 新增注释块 |
 | 11 | Test | adapter 单测 + `connector-bubble-theme.test.ts` | parseEvent / sendReply / sendMedia / 气泡主题 |
 
-> 此清单来源于 2026-03-27 team lead要求"列出来我们现在要接入一个新 IM 要做什么"。
+> 此清单来源于 2026-03-27 operator要求"列出来我们现在要接入一个新 IM 要做什么"。
 
 ## Review Gate
 

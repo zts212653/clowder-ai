@@ -24,7 +24,7 @@
 
 ## 5 个必答问题
 
-1. 这个失败/状态，**谁第一时间需要看到**？（出问题的猫 / 受影响的铲屎官 / 旁观的猫）
+1. 这个失败/状态，**谁第一时间需要看到**？（出问题的猫 / 受影响的operator / 旁观的猫）
 2. 第一现场有没有 **in-context 通道**（thread 富块、entity 自带状态、avatar dot、cat status badge）？
 3. 类比哪个已有 Cat Café entity 范式？（memory entity 自带状态？browser-preview 端上桌？sigil status dot？）
 4. 如果只能保留一个 surface，是 in-context 还是 dashboard？（**默认必须 in-context 优先**）

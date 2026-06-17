@@ -91,8 +91,9 @@ export function ChatContainerHeader({
             />
           </svg>
         </button>
-        {/* F099: Unified right panel toggle (merged workspace + status panel) */}
-        <RightPanelToggle onToggleStatusPanel={onToggleStatusPanel} statusPanelOpen={statusPanelOpen} />
+        {/* F232 AC-A8: 单一 panel 开关（桌面 lg:block）；mode 切换从底部工具栏图标触发。
+            P2-2：右侧 panel desktop-only，小屏走 MobileStatusSheet。 */}
+        <PanelToggle onToggleStatusPanel={onToggleStatusPanel} statusPanelOpen={statusPanelOpen} />
       </div>
     </header>
   );
@@ -238,60 +239,25 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
 }
 
 /**
- * F099: Pure state-transition logic for the right panel toggle.
- * Exported for testability — the component delegates to this function.
+ * F232 AC-A8: 单一 panel 开关。原 F099 RightPanelToggle + F232 ArtifactsToggle
+ * 收敛成一个 toggle——mode 切换从底部工具栏图标触发。桌面 lg:block，小屏走 MobileStatusSheet。
  */
-export function rightPanelToggleTransition(
-  statusPanelOpen: boolean,
-  rightPanelMode: 'status' | 'workspace' | 'transcript',
-  callbacks: {
-    onToggleStatusPanel: () => void;
-    setRightPanelMode: (mode: 'status' | 'workspace' | 'transcript') => void;
-  },
-) {
-  if (!statusPanelOpen) {
-    callbacks.onToggleStatusPanel();
-    callbacks.setRightPanelMode('status');
-  } else if (rightPanelMode === 'status') {
-    callbacks.setRightPanelMode('workspace');
-  } else {
-    callbacks.onToggleStatusPanel();
-    callbacks.setRightPanelMode('status');
-  }
-}
-
-function RightPanelToggle({
+function PanelToggle({
   onToggleStatusPanel,
   statusPanelOpen,
 }: {
   onToggleStatusPanel: () => void;
   statusPanelOpen: boolean;
 }) {
-  const rightPanelMode = useChatStore((s) => s.rightPanelMode);
-  const setRightPanelMode = useChatStore((s) => s.setRightPanelMode);
-
-  const handleClick = () => {
-    rightPanelToggleTransition(statusPanelOpen, rightPanelMode, {
-      onToggleStatusPanel,
-      setRightPanelMode,
-    });
-  };
-
-  const isWorkspace = rightPanelMode === 'workspace';
-  const label = !statusPanelOpen ? '打开面板' : isWorkspace ? '关闭面板' : '工作区';
-
   return (
     <button
-      onClick={handleClick}
+      type="button"
+      onClick={onToggleStatusPanel}
       className={`p-1 rounded-lg transition-colors ml-1 hidden lg:block ${
-        statusPanelOpen
-          ? isWorkspace
-            ? 'bg-[var(--cafe-accent)]/5 text-[var(--cafe-accent)]'
-            : 'text-cafe-accent'
-          : 'text-cafe-secondary hover:text-cafe-accent'
+        statusPanelOpen ? 'text-cafe-accent' : 'text-cafe-secondary hover:text-cafe-accent'
       }`}
-      aria-label={label}
-      title={label}
+      aria-label={statusPanelOpen ? '收起面板' : '打开面板'}
+      title={statusPanelOpen ? '收起面板' : '打开面板'}
     >
       <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
         <path

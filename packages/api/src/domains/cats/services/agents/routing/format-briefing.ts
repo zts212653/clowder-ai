@@ -202,6 +202,6 @@ export function buildBriefingMessage(
     mentions: [],
     timestamp: Date.now(),
     origin: 'briefing',
-    extra: { rich },
+    extra: { rich, systemKind: 'context_briefing' },
   };
 }

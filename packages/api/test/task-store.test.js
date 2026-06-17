@@ -329,4 +329,40 @@ describe('TaskStore', () => {
       assert.equal(task.dispatchGate, undefined);
     });
   });
+
+  describe('patchAutomationState: issue cursor anti-regression (Cloud R19 P2)', () => {
+    it('re-patching with stale cursor seeds does NOT lower existing issue lastCommentCursor or lastDeliveredCursor', () => {
+      // Simulate: task seeded with high cursors (normal operation, 100 comments processed)
+      const task = store.create(
+        makeInput({
+          kind: 'issue_tracking',
+          subjectKey: 'issue:owner/repo#10',
+          title: 'Track owner/repo#10',
+        }),
+      );
+      // First patch: set cursors to high values (as if 100 comments processed)
+      store.patchAutomationState(task.id, {
+        issue: { lastCommentCursor: 100, lastDeliveredCursor: 90 },
+      });
+
+      // Second patch: re-route with stale seed (lastCommentCursor=0, lastDeliveredCursor=0)
+      // This simulates duplicate case routing in dev/test with no-Redis fallback
+      store.patchAutomationState(task.id, {
+        issue: { lastCommentCursor: 0, lastDeliveredCursor: 0 },
+      });
+
+      const updated = store.get(task.id);
+      // Cursors must NOT be lowered — shallow spread `{ ...existing, ...patch }` would lower them to 0
+      assert.equal(
+        updated.automationState?.issue?.lastCommentCursor,
+        100,
+        'lastCommentCursor must not be lowered by stale re-patch',
+      );
+      assert.equal(
+        updated.automationState?.issue?.lastDeliveredCursor,
+        90,
+        'lastDeliveredCursor must not be lowered by stale re-patch',
+      );
+    });
+  });
 });

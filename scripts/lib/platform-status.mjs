@@ -62,7 +62,7 @@ export function buildWindowsStatus({
   if (!existsSync(runDir)) {
     return {
       exitCode: 1,
-      lines: [`Cat Cafe Windows services not running (no run directory: ${runDir})`],
+      lines: [`Clowder AI Windows services not running (no run directory: ${runDir})`],
     };
   }
 
@@ -72,7 +72,7 @@ export function buildWindowsStatus({
     { pidFile: `web-${webPort}.pid`, running: false },
   ];
 
-  const lines = ['Cat Cafe Windows status'];
+  const lines = ['Clowder AI Windows status'];
   for (const service of requiredServices) {
     const pidPath = resolve(runDir, service.pidFile);
     const label = basename(service.pidFile, '.pid');

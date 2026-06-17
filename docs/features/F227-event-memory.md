@@ -17,11 +17,11 @@ created: 2026-06-06
 
 记忆系统缺了一层——**猫的认知状态变化不是一等公民**。
 
-现有记忆三层各有主体：Session/Invocation 的主体是**工具调用**，Thread Digest 的主体是**话题**，Raw Message 的主体是**消息**。但"48 在哪 aha 了 / team lead在哪拉了闸 / 坐标系在哪被纠正"——这些 harness 运行轨迹中**信息密度最高的认知转折点**（cognitive-state-transition），在系统里根本不存在。普通消息流信息密度低，"48 发现坐标系错了"才是黄金信号，而它没有一等公民的位置。后果：**连当事猫自己都回溯不了自己的认知轨迹**——F225 起源时，是team lead人肉记得"那只猫是 48"，不是系统记得。
+现有记忆三层各有主体：Session/Invocation 的主体是**工具调用**，Thread Digest 的主体是**话题**，Raw Message 的主体是**消息**。但"48 在哪 aha 了 / operator在哪拉了闸 / 坐标系在哪被纠正"——这些 harness 运行轨迹中**信息密度最高的认知转折点**（cognitive-state-transition），在系统里根本不存在。普通消息流信息密度低，"48 发现坐标系错了"才是黄金信号，而它没有一等公民的位置。后果：**连当事猫自己都回溯不了自己的认知轨迹**——F225 起源时，是operator人肉记得"那只猫是 48"，不是系统记得。
 
-对外，这不是 demo 道具，也不只是 CVO 仪表盘——这是 **AutoHarness（longform-004 二阶 harness / 飞轮）的可观测性层，飞轮的黑匣子 + 仪表盘**。没它，飞轮在转但你看不见转了什么；有它，每次转动可回溯、可度量。传统 APM（Datadog/Sentry）监控技术指标（延迟、错误率、崩溃）；Event Memory 监控**认知质量**——别人监控 agent 有没有报错，我们监控 agent 有没有**想对**。**你不可能卖一个"会自己改但你看不见它改了什么"的系统给企业。**
+对外，这不是 demo 道具，也不只是 operator 仪表盘——这是 **AutoHarness（longform-004 二阶 harness / 飞轮）的可观测性层，飞轮的黑匣子 + 仪表盘**。没它，飞轮在转但你看不见转了什么；有它，每次转动可回溯、可度量。传统 APM（Datadog/Sentry）监控技术指标（延迟、错误率、崩溃）；Event Memory 监控**认知质量**——别人监控 agent 有没有报错，我们监控 agent 有没有**想对**。**你不可能卖一个"会自己改但你看不见它改了什么"的系统给企业。**
 
-team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说"我说过脚手架"然后**瞬间跳转到那个 thread 那条 message**——正是这个动作暴露了记忆系统的真空层。
+operator experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说"我说过脚手架"然后**瞬间跳转到那个 thread 那条 message**——正是这个动作暴露了记忆系统的真空层。
 
 ## Current State / 现状基线
 
@@ -30,7 +30,7 @@ team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说
 | 认知转折维度 | **不存在**。magic word 拉闸事件散落在 raw message 流，无索引、无法 filter、无法精确 teleport |
 | Magic Word 真相源 | 已在 L0 家规注册（10 个词），是 single source of truth，但只用于运行时拉闸，无历史事件视图 |
 | 跳转能力 | generic `teleport(threadId, messageId)` MCP **缺失**；但 web 侧已有 message 级基座：`scrollToMessage(messageId)`（`scrollToMessage.ts:6`）+ cross-post scroll substrate `findCrossPostTargetMessageId`（`crosspost-scroll-target.ts:27`，F052/F194）。⚠️ `cat_cafe_workspace_navigate` 是 **repo file/dir reveal/open 工具**（schema 仅 `path/action/worktreeId/line`，`hub-action-tools.ts:26`），**不是** message navigation，不可当扩展点 |
-| 认知轨迹回溯 | 当事猫无法回溯自己的认知轨迹。F225 活案例：起源靠team lead人肉记忆"那只猫是 48" |
+| 认知轨迹回溯 | 当事猫无法回溯自己的认知轨迹。F225 活案例：起源靠operator人肉记忆"那只猫是 48" |
 | 趋势/闭环度量 | 无。"拉了几次闸""骂完长出什么能力"无任何索引或度量 |
 
 ## What
@@ -65,9 +65,9 @@ team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
-| R1 | "想在台上说'我说过脚手架'然后瞬间跳转到那个 thread 那条 message"（team experience）| AC-A4 | 15s 录屏端到端 teleport | [ ] |
+| R1 | "想在台上说'我说过脚手架'然后瞬间跳转到那个 thread 那条 message"（operator experience）| AC-A4 | 15s 录屏端到端 teleport | [ ] |
 | R2 | 内核是 Event Memory 事件级索引，不是 Magic Word 面板（Magic Word 只第一条 lane）| AC-A1 / A3 | schema + filter 截图 | [ ] |
 | R3 | 认知状态转折是一等公民（cognitive-state-transition 为核心字段）| AC-A1 | schema 字段 + 测试 | [ ] |
 | R4 | 两轨采集，猫自拉闸必须主动声明（no-classifier 红线）| AC-B1 | grep 无分类器路径 + 设计审查 | [ ] |
@@ -87,7 +87,7 @@ team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说
 
 ### Phase A（schema + 只读时间线 + teleport）
 
-> ✅ **Phase A merged** — PR-1（schema + EventMemoryStore + teleport substrate）+ PR-2（confidence backfill + 拉闸记录 timeline UI，#2132 / `34cbab09`，2026-06-07）。Maine Coon 跨族 review + 多轮云端 review，4×P2 + 4×P1 全修（owner-scoping / dead-letter owner / system-message skip / race-confidence upgrade）。AC 已 code-complete + 单测覆盖；**team lead alpha 批量验收（timeline 视觉 + teleport 录屏）为最终 acceptance，待跑**（先 `cat_cafe_backfill_events` 回扫出数据）。
+> ✅ **Phase A merged** — PR-1（schema + EventMemoryStore + teleport substrate）+ PR-2（confidence backfill + 拉闸记录 timeline UI，#2132 / `34cbab09`，2026-06-07）。Maine Coon 跨族 review + 多轮remote review，4×P2 + 4×P1 全修（owner-scoping / dead-letter owner / system-message skip / race-confidence upgrade）。AC 已 code-complete + 单测覆盖；**operator alpha 批量验收（timeline 视觉 + teleport 录屏）为最终 acceptance，待跑**（先 `cat_cafe_backfill_events` 回扫出数据）。
 - [x] AC-A1: Event schema 定型（**10 个语义字段**：`type/trigger/cat/threadId/messageId/timestamp/summary/cognitiveTransition/relatedHarness/confidence` **＋ owner scope 元数据 `ownerUserId`**——存储/权限边界，非第 11 个认知字段；PR-2 cloud-review P1 加固，事件按 owner 隔离、`UNIQUE(ownerUserId,threadId,messageId,type)`、读写都按 owner scope、无 unknown/default fallback，防跨用户泄漏），有类型定义 + 测试覆盖 + 文档；schema 设计可承载 Phase B/C 字段（面向终态，非脚手架）—— trace Why「认知转折成一等公民」
 - [x] AC-A2: 从 L0 注册的 10 个 magic word 回扫历史消息生成 event 索引；回扫范围/深度按 OQ-1 决议执行；检测置信度（高/中/低）逻辑有测试 —— trace Why「散落无索引 → 可检索」
 - [x] AC-A3: 只读 timeline UI 可 filter by magic word / 事件类型；每条含 日期/icon/当事猫/原话摘要/thread/[跳转]；低置信默认折叠 —— 可复核：截图 + filter 交互
@@ -124,13 +124,13 @@ team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说
 
 ## Eval / Tracking Contract（F192 门禁 — 含新 MCP tool + 改变猫行为模式，必填）
 
-1. **Primary Users + Activation Signal**：猫（主动 `mark_event` / 翻阅 event memory）+ team lead（teleport 到拉闸 thread）。Activation = `mark_event` 调用次数 / teleport 使用次数 / timeline 翻阅次数
+1. **Primary Users + Activation Signal**：猫（主动 `mark_event` / 翻阅 event memory）+ operator（teleport 到拉闸 thread）。Activation = `mark_event` 调用次数 / teleport 使用次数 / timeline 翻阅次数
 2. **Friction Metric**：猫想标记转折点但找不到入口 / 搜 event memory 搜不到目标事件 / teleport 跳错或跳不到 message 级
 3. **Regression Fixture**（≥2）：(a) `magic word + @猫` 应被标高置信拉闸；(b) magic word 在讨论家规/定义新词上下文应标低置信或不标记；(c) 猫 `mark_event` 后该事件能在 timeline 检索到且不被分类器改写
 4. **Sunset Signal（lane 级，两条独立触发，不 AND）**：(a) `mark_event` 长期零调用 → **猫主动声明 lane 证伪**，重设计该 lane；(b) timeline 长期无人翻阅 → **整体"小本本记录员"形态证伪**，重评是否该被动记录 / 换形态。任一触发即评估，不互相 AND（不设 reviewer 签字降级）
 
 ### Harness 三层（软+硬+eval）
-- **Soft**：L0 / skill 提示"认知转折点主动 `mark_event`"；teleport 场景触发反射（team lead说"传送到那个 X thread 的 msg"）
+- **Soft**：L0 / skill 提示"认知转折点主动 `mark_event`"；teleport 场景触发反射（operator说"传送到那个 X thread 的 msg"）
 - **Hard**：schema 校验 + `mark_event` 入参校验 + 回扫置信度分级逻辑测试 + **no-classifier 验证**（CI 断言无分类器/regex 推断 aha 的代码路径）
 - **Eval**：上述 Eval Contract fixtures + friction metric + sunset signal
 
@@ -151,13 +151,13 @@ team experience场景（2026-06-06，PPT 演示编排讨论）：想在台上说
 |---|------|------|------|
 | KD-1 | 内核是 Event Memory（事件级索引），不是 Magic Word 面板 | Magic Word 只是第一条 lane（Maine Coon收敛）| 2026-06-06 |
 | KD-2 | 核心 schema 字段是 cognitive-state-transition，不是 magic word | 真空层是"认知状态不是一等公民"（48 reframe）| 2026-06-06 |
-| KD-3 | 两轨采集，猫自拉闸必须主动声明 | no-classifier 红线：系统不判断哪条是 aha（48 批判 + team lead裁定）| 2026-06-06 |
-| KD-4 | 系统是小本本记录员，不 push 猫，猫主动翻阅 | team lead裁定 | 2026-06-06 |
-| KD-5 | v1 schema 面向 v5 终态，走正确路叠不脚手架叠 | team lead裁定 | 2026-06-06 |
+| KD-3 | 两轨采集，猫自拉闸必须主动声明 | no-classifier 红线：系统不判断哪条是 aha（48 批判 + operator裁定）| 2026-06-06 |
+| KD-4 | 系统是小本本记录员，不 push 猫，猫主动翻阅 | operator裁定 | 2026-06-06 |
+| KD-5 | v1 schema 面向 v5 终态，走正确路叠不脚手架叠 | operator裁定 | 2026-06-06 |
 | KD-6 | teleport 先独立做 | 最小、独立有用、demo 全靠它（48 建议）| 2026-06-06 |
 | KD-7 | 趋势必须配 resolution 链，频率下降 ≠ 自进化有效 | 频率下降可能是用户没说/任务少/检测漏（Maine Coon push back）| 2026-06-06 |
-| KD-8 | 新开 F 号，不挂现有 feature | 内核独立于 F114 magic words（三猫共识 + team lead）| 2026-06-06 |
-| KD-9 | Magic word 事件真相源归一：Event Memory 是唯一源，F192 task-outcome 改引用不双写 | 实现核实发现 F192 已有 magic word 采集（`detectMagicWords` + `onMagicWordDetected`→episode signal，无 messageId）；CVO 裁定架构归一/真相源归一，复用采集逻辑、Event 当源（语义主体侧）| 2026-06-06 |
+| KD-8 | 新开 F 号，不挂现有 feature | 内核独立于 F114 magic words（三猫共识 + operator）| 2026-06-06 |
+| KD-9 | Magic word 事件真相源归一：Event Memory 是唯一源，F192 task-outcome 改引用不双写 | 实现核实发现 F192 已有 magic word 采集（`detectMagicWords` + `onMagicWordDetected`→episode signal，无 messageId）；operator 裁定架构归一/真相源归一，复用采集逻辑、Event 当源（语义主体侧）| 2026-06-06 |
 
 ## Review Gate
 

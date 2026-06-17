@@ -141,7 +141,7 @@ status: draft
 
 # ${slug} — 素材标注表
 
-> **用法**：铲屎官录完每段素材后，在对应段落填写时间标注。
+> **用法**：co-creator录完每段素材后，在对应段落填写时间标注。
 > 格式：\`起始时间-结束时间 画面内容描述\`
 > 不需要精确到毫秒，粗标就行（如 \`1:20\` 或 \`50s\`）。
 
@@ -186,7 +186,7 @@ function generateVideoSpec() {
     version: 1,
     status: 'editorial',
     meta: {
-      title: `Cat Cafe ${slug}`,
+      title: `Clowder AI ${slug}`,
       type: videoType,
       ...(style && { style }),
       target_duration_ms: 60000,

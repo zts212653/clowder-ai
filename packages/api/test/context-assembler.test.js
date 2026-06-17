@@ -22,12 +22,12 @@ function mockMsg(overrides) {
 }
 
 describe('formatMessage', () => {
-  test('formats user message with 铲屎官', async () => {
+  test('formats user message with co-creator', async () => {
     const { formatMessage } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msg = mockMsg({ content: '你好', timestamp: new Date('2026-02-07T14:02:00Z').getTime() });
     const result = formatMessage(msg);
     assert.ok(result.includes('14:02 UTC'));
-    assert.ok(result.includes('铲屎官'));
+    assert.ok(result.includes('co-creator'));
     assert.ok(result.includes('你好'));
   });
 
@@ -96,7 +96,7 @@ describe('assembleContext', () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const result = assembleContext([mockMsg({ content: '你好世界' })]);
     assert.ok(result.contextText.includes('[对话历史 - 最近 1 条]'));
-    assert.ok(result.contextText.includes('铲屎官'));
+    assert.ok(result.contextText.includes('co-creator'));
     assert.ok(result.contextText.includes('你好世界'));
     assert.ok(result.contextText.endsWith('[/对话历史]'));
     assert.equal(result.messageCount, 1);
@@ -106,11 +106,11 @@ describe('assembleContext', () => {
     const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
     const msgs = [
       mockMsg({ catId: null, content: '@布偶 你好', timestamp: 1000 }),
-      mockMsg({ catId: 'opus', content: '你好铲屎官', timestamp: 2000 }),
+      mockMsg({ catId: 'opus', content: '你好co-creator', timestamp: 2000 }),
       mockMsg({ catId: 'codex', content: '我也在', timestamp: 3000 }),
     ];
     const result = assembleContext(msgs);
-    assert.ok(result.contextText.includes('铲屎官'));
+    assert.ok(result.contextText.includes('co-creator'));
     assert.ok(result.contextText.includes('布偶猫'));
     assert.ok(result.contextText.includes('缅因猫'));
     assert.equal(result.messageCount, 3);
@@ -165,7 +165,7 @@ describe('assembleContext', () => {
     assert.ok(result.contextText.includes('你好'), 'user message should be included');
     assert.ok(result.contextText.includes('猫猫回复'), 'cat message should be included');
     assert.ok(!result.contextText.includes('stream_idle_stall'), 'system error should NOT enter prompt');
-    assert.ok(!result.contextText.includes('铲屎官] Error:'), 'system error must not appear as 铲屎官');
+    assert.ok(!result.contextText.includes('co-creator] Error:'), 'system error must not appear as co-creator');
   });
 
   test('uses default maxMessages=20 and maxContentLength=1500', async () => {
@@ -529,8 +529,8 @@ describe('assembleContext — F8 token-based truncation', () => {
       },
     });
     const result = formatMessage(msg);
-    assert.ok(result.includes('GitHub Review'), 'should use source.label instead of 铲屎官');
-    assert.ok(!result.includes('铲屎官'), 'should NOT show 铲屎官 for connector messages');
+    assert.ok(result.includes('GitHub Review'), 'should use source.label instead of co-creator');
+    assert.ok(!result.includes('co-creator'), 'should NOT show co-creator for connector messages');
     assert.ok(result.includes('GitHub Review 通知'));
   });
 });

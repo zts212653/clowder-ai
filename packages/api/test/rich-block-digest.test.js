@@ -190,4 +190,24 @@ describe('safeParseExtra', () => {
     const raw = JSON.stringify({ stream: { invocationId: 123 } });
     assert.equal(safeParseExtra(raw), undefined);
   });
+
+  // Fix: context_briefing systemKind must survive Redis round-trip for API filtering
+  it('preserves systemKind context_briefing through round-trip', () => {
+    const raw = JSON.stringify({ systemKind: 'context_briefing' });
+    const result = safeParseExtra(raw);
+    assert.ok(result, 'context_briefing extra should not return undefined');
+    assert.equal(result.systemKind, 'context_briefing');
+  });
+
+  it('preserves systemKind a2a_routing through round-trip (existing behavior)', () => {
+    const raw = JSON.stringify({ systemKind: 'a2a_routing' });
+    const result = safeParseExtra(raw);
+    assert.ok(result, 'a2a_routing extra should not return undefined');
+    assert.equal(result.systemKind, 'a2a_routing');
+  });
+
+  it('ignores unknown systemKind values', () => {
+    const raw = JSON.stringify({ systemKind: 'unknown_kind' });
+    assert.equal(safeParseExtra(raw), undefined);
+  });
 });

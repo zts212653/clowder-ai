@@ -18,7 +18,7 @@ created: 2026-04-10
 
 2. **缺乏猫味**：`🤔 思考中...` 是冷冰冰的通用 loading 文案，不符合 Cat Cafe "猫猫和你" 的产品语义。
 
-**team experience**：
+**operator experience**：
 > "飞书显示思考中后撤回消息"
 > "好像甚至能发猫猫已经收到～（提供很多种文本随机发）然后不撤回？"
 > "可以参考我们做苹果手表特性的！那些句子"
@@ -57,8 +57,8 @@ created: 2026-04-10
 | gemini | Siamese | 热血设计师 | "收到！我眼前已经有画面了！" |
 | gemini25 | Siamese | 灵感气泡 | "灵感来了！我这就去办！" |
 | dare | 狸花猫 | 沉默警觉 | "已收到。" |
-| antigravity | 孟加拉猫 | 精力旺盛 | "收到！我来看看！" |
-| antig-opus | 孟加拉猫 | 沉稳大胆 | "收到，我看看。" |
+| antigravity | Bengal | 精力旺盛 | "收到！我来看看！" |
+| antig-opus | Bengal | 沉稳大胆 | "收到，我看看。" |
 | opencode | 金渐层 | 沉稳可靠 | "收到，我来安排。" |
 
 ### 代码改动范围
@@ -109,6 +109,6 @@ created: 2026-04-10
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 用 receipt text 替代 placeholder，不撤回 | 撤回通知是 UX 噪音；openJiuwen PR #24 验证了不撤回可行 | 2026-04-10 |
-| KD-2 | Reaction 用 HEART 而非 THUMBSUP | team lead说"太不猫猫了"；HEART 更暖更符合猫猫语义 | 2026-04-10 |
+| KD-2 | Reaction 用 HEART 而非 THUMBSUP | operator说"太不猫猫了"；HEART 更暖更符合猫猫语义 | 2026-04-10 |
 | KD-3 | Receipt 文案复用 F124 voice comfort 体系 | 已有按猫性格写好的 5 条/猫，产品语义一致（"被猫接住"） | 2026-04-10 |
 | KD-4 | Phase A: receipt 卡片 edit 为"✅ 已回复"+ 最终回复独立发送（零撤回） | 核心价值是零撤回；单消息生命周期留 Phase B（需 outbound delivery 层改造） | 2026-04-10 |
