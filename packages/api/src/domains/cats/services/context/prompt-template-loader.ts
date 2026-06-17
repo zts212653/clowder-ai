@@ -183,7 +183,6 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   M2: { base: 'm2-transcript-hints.md', local: '' },
   C1: { base: 'c1-mcp-callback.md', local: 'c1-mcp-callback.local.md' },
   N1: { base: 'n1-navigation.md', local: '' },
-  B1: { base: 'b1-session-bootstrap.md', local: '' },
   // ── Existing templates ──
   S6: { base: 'workflow-triggers.yaml', local: 'workflow-triggers.local.yaml' },
   S13: { base: 'mcp-tools.md', local: 'mcp-tools.local.md' },

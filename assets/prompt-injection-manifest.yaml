@@ -858,8 +858,8 @@ segments:
     name: Session Bootstrap
     category: session
     lifecycleStage: session-init
-    source: assets/prompt-templates/b1-session-bootstrap.md
-    sourceType: template
+    source: packages/api/src/domains/cats/services/session/SessionBootstrap.ts
+    sourceType: typescript
     trigger: "Session #2+ (first session returns null)"
     purpose: "Session continuity bootstrap: identity, thread memory, project knowledge, previous digest"
     userExplanation: "会话连续性引导——从第二次会话起注入身份、线程记忆、项目知识和上次摘要"

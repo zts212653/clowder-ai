@@ -1,6 +1,6 @@
 # @segment S6 — Per-breed workflow triggers
 # Keyed by breedId. All variants of a breed share the same workflow.
-# Used by SystemPromptBuilder to inject cat-specific collaboration triggers.
+# Used by SystemPromptBuilder and native L0 compiler to inject cat-specific collaboration triggers.
 
 ragdoll: |
   ## 工作流（主动 @ 触发点）
