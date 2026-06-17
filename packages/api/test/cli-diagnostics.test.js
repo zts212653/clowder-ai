@@ -12,13 +12,16 @@ import { maybeCollectStreamError } from '../dist/utils/cli-spawn.js';
 
 const baseRef = { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-1' };
 
-test('AC-A5: unknown stderr → sanitized safeExcerpt (#857), publicSummary fallback', () => {
+test('AC-A5: unknown stderr → sanitized safeExcerpt (#857), publicSummary derived from first non-frame line (#939 part B)', () => {
   const d = buildCliDiagnostics({ rawText: 'some weird thing happened', debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);
   // #857: unknown raw text now surfaced as sanitized safeExcerpt (was: undefined per KD-1)
   assert.ok(d.safeExcerpt, 'unknown raw text should produce safeExcerpt (#857)');
   assert.strictEqual(d.excerptSource, 'unknown_raw');
-  assert.match(d.publicSummary, /未识别/);
+  // #939 part B: when rawText is usable, publicSummary is the first non-blank/non-frame
+  // sanitized line — caller-attribution. Generic "未识别的CLI错误" only when rawText
+  // is empty / whitespace / all-frame-lines.
+  assert.strictEqual(d.publicSummary, 'some weird thing happened');
   assert.ok(d.publicHint.length > 0);
 });
 
@@ -278,13 +281,16 @@ test('AC-D3: unknown reasonCode + structuredErrorText → "Claude Code 报告：
   assert.strictEqual(d.excerptSource, 'cc_structured', 'AC-D3 path tags excerptSource for frontend whitelist');
 });
 
-test('AC-D3: truly unknown (no structuredErrorText) → sanitized safeExcerpt (#857) + 未识别', () => {
+test('AC-D3: truly unknown (no structuredErrorText) → sanitized safeExcerpt (#857) + caller-attribution (#939 part B)', () => {
   const d = buildCliDiagnostics({ rawText: 'random noise no cause', debugRef: baseRef });
   assert.strictEqual(d.reasonCode, undefined);
   // #857: unknown raw text now surfaced as sanitized safeExcerpt (overrides KD-1 for non-empty rawText)
   assert.ok(d.safeExcerpt, 'unknown raw text should produce safeExcerpt (#857)');
   assert.strictEqual(d.excerptSource, 'unknown_raw');
-  assert.ok(d.publicSummary.includes('未识别'), 'truly unknown keeps 未识别');
+  // #939 part B: caller-attribution — surface the first non-frame line of stderr so users
+  // see structured context (Error: foo, module path, etc.) instead of generic 未识别.
+  assert.strictEqual(d.publicSummary, 'random noise no cause');
+  assert.ok(!d.publicSummary.includes('未识别'), 'no fallback to 未识别 when rawText has usable first line');
 });
 
 // F212 Phase E — server_overloaded provider-neutral invariant (cloud codex R2 P2 on adf26db37):
@@ -627,4 +633,155 @@ test('AC-G2 R1 P1 (drift guard): silent_completion hint points to expandable det
     evidenceFingerprint.test(d.publicHint),
     `hint should point users at the disclosure/expandable details path; got: ${d.publicHint}`,
   );
+});
+
+// =============================================================================
+// F212 Phase H — unknown reasonCode caller-attribution (#939 part B)
+// =============================================================================
+// When the classifier doesn't match a known reasonCode but rawText is non-empty,
+// the public error bubble previously showed generic "未识别的CLI错误" — losing the
+// structured caller-attribution already present in stderr (Error:..., kimi_cli.X.Y:msg,
+// thread 'X' panicked at '...', [error] {message}, ToolReturnValue brief, etc.).
+//
+// New behavior: derive publicSummary from the first non-blank/non-frame sanitized
+// line of rawText (cap 200 chars, same redaction layer as safeExcerpt). Fall back
+// to UNKNOWN_TEXT.summary only when rawText is empty / whitespace / all-frame-lines.
+
+test('AC-H1: unknown + non-empty rawText → publicSummary derived from first non-blank line, NOT "未识别"', () => {
+  const d = buildCliDiagnostics({ rawText: 'Error: could not connect to server', debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.strictEqual(d.publicSummary, 'Error: could not connect to server');
+  assert.ok(!d.publicSummary.includes('未识别'), 'usable rawText must not fall back to 未识别');
+  // safeExcerpt preserved (regression of #857)
+  assert.ok(d.safeExcerpt);
+  assert.strictEqual(d.excerptSource, 'unknown_raw');
+});
+
+test('AC-H1: unknown + multi-line rawText → publicSummary = first non-blank line (Python traceback)', () => {
+  const d = buildCliDiagnostics({
+    rawText: [
+      'kimi_cli.cli.export:271 no previous session found',
+      'Traceback (most recent call last):',
+      '  File "kimi_cli/cli/export.py", line 271, in <module>',
+    ].join('\n'),
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.strictEqual(d.publicSummary, 'kimi_cli.cli.export:271 no previous session found');
+});
+
+test('AC-H1: unknown + first line is a stack frame (e.g. rust) → skip frame and use next meaningful line', () => {
+  const rawText = [
+    '   0: rust_begin_unwind',
+    '             at /rustc/abc/library/std/src/panicking.rs:600:5',
+    'Error: panic in plugin loader',
+  ].join('\n');
+  const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  // First two lines match FRAME_REGEX (`^\s*\d+:\s` and `^\s*at\s`); third is meaningful.
+  assert.strictEqual(d.publicSummary, 'Error: panic in plugin loader');
+});
+
+test('AC-H1: unknown + ALL lines are frame lines → fall back to UNKNOWN_TEXT.summary', () => {
+  const rawText = ['   0: rust_begin_unwind', '             at /rustc/abc/library/std/src/panicking.rs:600:5'].join(
+    '\n',
+  );
+  const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  // safeExcerpt still present (rawText non-empty)
+  assert.ok(d.safeExcerpt);
+  // No usable non-frame line → fall back to legacy "未识别的CLI错误"
+  assert.match(d.publicSummary, /未识别/);
+});
+
+test('AC-H1: unknown + blank/whitespace-only rawText → fall back to UNKNOWN_TEXT.summary', () => {
+  const d = buildCliDiagnostics({ rawText: '   \n  \n', debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  // safeExcerpt omitted (whitespace-only is not a usable rawText per #857 fail-closed)
+  assert.strictEqual(d.safeExcerpt, undefined);
+  assert.match(d.publicSummary, /未识别/);
+});
+
+test('AC-H1: unknown + empty rawText → keep existing UNKNOWN_TEXT.summary behavior', () => {
+  const d = buildCliDiagnostics({ rawText: '', debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.strictEqual(d.safeExcerpt, undefined);
+  assert.match(d.publicSummary, /未识别|CLI/);
+});
+
+test('AC-H1: unknown + secret token in first line → redacted in publicSummary', () => {
+  const d = buildCliDiagnostics({
+    rawText: 'Auth failed: api_key="sk-ant-api03-xxxxxxxxxxxxxxxxx" invalid',
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.ok(!d.publicSummary.includes('sk-ant-api03'), 'token must be redacted in publicSummary');
+  assert.ok(d.publicSummary.includes('[TOKEN_REDACTED]'));
+});
+
+test('AC-H1: unknown + non-HOME absolute path in first line → redacted in publicSummary', () => {
+  const d = buildCliDiagnostics({
+    rawText: 'Error: failed to read /srv/app/config/secrets.json',
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.ok(!d.publicSummary.includes('/srv/app'), 'non-HOME path must be redacted in publicSummary');
+  assert.ok(d.publicSummary.includes('[PATH_REDACTED]'));
+});
+
+test('AC-H1: unknown + very long first line → publicSummary capped at 200 chars with ellipsis', () => {
+  const longLine = `Error: ${'A'.repeat(500)}`;
+  const d = buildCliDiagnostics({ rawText: longLine, debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.ok(d.publicSummary.length <= 200, `publicSummary should be capped at 200, got ${d.publicSummary.length}`);
+  assert.ok(d.publicSummary.startsWith('Error: '), 'should start with the meaningful prefix');
+  assert.ok(d.publicSummary.endsWith('...'), 'should indicate truncation');
+});
+
+test('AC-H1: unknown + ToolReturnValue brief pattern (kimi-cli subagent output) → surfaced as summary', () => {
+  // kimi_cli.subagents.output:49 emits `[error] {message}\n` for subagent failures
+  const d = buildCliDiagnostics({
+    rawText: '[error] shell_exec: command not found on PATH: /usr/local/bin/missing-tool',
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, undefined);
+  // Multi-segment absolute paths are redacted by redactNonHomePaths (#857 R3 P1):
+  // /usr/local/bin is non-HOME server install territory — surface the brief without
+  // leaking the raw install path. Caller sees structured context ("shell_exec: command
+  // not found") without the raw path that triggered the redaction.
+  assert.strictEqual(d.publicSummary, '[error] shell_exec: command not found on PATH: [PATH_REDACTED]');
+  assert.ok(d.publicSummary.includes('[error] shell_exec'), 'subagent output pattern surfaced');
+});
+
+test('AC-H1: unknown + panic headline still takes precedence over caller-attribution (AC-A6 preserved)', () => {
+  // panicHeadline is special-cased higher in the function — the new unknown
+  // attribution only kicks in when panicHeadline is null. Regression anchor.
+  const rawText = [
+    'thread "worker" panicked at src/bar.rs:99:1:',
+    'completely unknown failure mode',
+    '   0: rust_begin_unwind',
+  ].join('\n');
+  const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
+  assert.match(d.publicSummary, /panic/i, 'panic headline still surfaces');
+  assert.match(d.publicSummary, /worker/, 'thread name preserved');
+});
+
+test('AC-H1: unknown + ANSI control sequences in first line → sanitized before summary extraction', () => {
+  // Some CLIs emit ANSI color codes; sanitizeCliStderr strips them in step 2.
+  const rawText = '\x1b[31mError\x1b[0m: something failed in plugin loader';
+  const d = buildCliDiagnostics({ rawText, debugRef: baseRef });
+  assert.strictEqual(d.reasonCode, undefined);
+  assert.strictEqual(d.publicSummary, 'Error: something failed in plugin loader');
+  assert.ok(!d.publicSummary.includes('\x1b'), 'ANSI escape must not leak into publicSummary');
+});
+
+test('AC-H1: unknown + known reasonCode path unchanged (caller-attribution only fires for unknown)', () => {
+  // regression anchor: AC-D2 path still uses REASON_TEXT.summary, NOT caller-attribution
+  const d = buildCliDiagnostics({
+    rawText: "The model's tool call could not be parsed (retry also failed).",
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, 'tool_call_parse_failed');
+  assert.match(d.publicSummary, /工具调用/, 'known reasonCode still uses REASON_TEXT.summary');
+  assert.ok(!d.publicSummary.includes('could not be parsed'), 'caller-attribution only for unknown');
 });

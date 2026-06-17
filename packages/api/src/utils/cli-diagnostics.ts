@@ -224,6 +224,47 @@ function extractPanicHeadline(rawText: string): string | null {
 }
 
 // =============================================================================
+// #939 part B — unknown reasonCode caller-attribution (F212 Phase H)
+// =============================================================================
+
+/**
+ * F212 Phase H / AC-H1 (#939 part B): when the classifier doesn't match a known
+ * reasonCode but rawText is non-empty, surface the first non-blank/non-frame
+ * sanitized line of stderr as the publicSummary. CLIs emit structured
+ * caller-attribution in stderr (Error:..., kimi_cli.X.Y:msg, [error] {message},
+ * thread 'X' panicked at '...', ToolReturnValue brief, ...) — losing that to a
+ * generic "未识别的CLI错误" reads as a Clowder AI bug and sends users to backend
+ * logs for context that's already on-screen in the safeExcerpt disclosure.
+ *
+ * Reuses sanitizeCliStderr + FRAME_REGEX (AC-A6) + 200-char cap to match the
+ * panicHeadline budget. Sanitization also redacts tokens / non-HOME absolute
+ * paths via the shared path-redaction layer (#857 R3 P1) — publicSummary
+ * MUST NOT leak raw stderr (AC-A9 red line).
+ *
+ * @returns a sanitized, length-capped caller-attribution line, or null when
+ *          rawText is empty / whitespace-only / all-frame-lines (caller falls
+ *          back to UNKNOWN_TEXT.summary).
+ */
+function extractUnknownAttribution(rawText: string): string | null {
+  if (!rawText) return null;
+  const sanitized = redactNonHomePaths(sanitizeCliStderr(rawText));
+  // Trim each line, then keep non-empty ones (preserves first-line attribution
+  // even if the first line is just whitespace).
+  const lines = sanitized
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  for (const line of lines) {
+    if (FRAME_REGEX.test(line)) continue; // AC-A6: skip stack frames
+    // Cap to 200 chars to keep summary readable in error bubble (matches
+    // panicHeadline cap, keeps summary+hint pair on one bubble line).
+    if (line.length <= 200) return line;
+    return `${line.slice(0, 197)}...`;
+  }
+  return null; // all lines were blank or frame lines
+}
+
+// =============================================================================
 // Builder
 // =============================================================================
 
@@ -299,10 +340,33 @@ export function buildCliDiagnostics(args: {
   }
 
   // Truly unknown (no structured CC error).
-  // #857: when rawText is available, sanitize + truncate and surface as safeExcerpt so
-  // users see a desensitized message instead of having to check backend logs.
-  // F212 Phase F (AC-F4/F5): pick honest unknown hint by stderrEmpty signal when caller
-  // provides it; fall back to legacy hint for backward-compat (callers without Phase F awareness).
+  return buildUnknownDiagnostic({
+    rawText: args.rawText,
+    debugRef: args.debugRef,
+    stderrEmpty: args.stderrEmpty,
+    panicHeadline,
+  });
+}
+
+/**
+ * F212 Phases F + H — build the truly-unknown CliDiagnostics (no reasonCode, no CC
+ * structured error). Extracted from buildCliDiagnostics to keep parent complexity
+ * within biome budget (cognitive complexity 17 → parent now at the 15 cap after
+ * Phase H caller-attribution was added).
+ *
+ * Subcontracts preserved from the previous inline implementation:
+ *  - #857: rawText non-empty → sanitized safeExcerpt + excerptSource='unknown_raw'
+ *  - Phase F (AC-F4/F5): stderrEmpty signal drives honest unknown hint
+ *  - Phase H (AC-H1): caller-attribution — first non-blank/non-frame sanitized
+ *    line surfaces as publicSummary when rawText is usable
+ *  - AC-A6: panic headline still takes precedence over caller-attribution
+ */
+function buildUnknownDiagnostic(args: {
+  rawText: string | undefined;
+  debugRef: CliDiagnostics['debugRef'];
+  stderrEmpty: boolean | undefined;
+  panicHeadline: string | null;
+}): CliDiagnostics {
   let unknownHint: string = UNKNOWN_TEXT.hint;
   if (args.stderrEmpty === true) unknownHint = UNKNOWN_HINT_EMPTY_STDERR;
   else if (args.stderrEmpty === false) unknownHint = UNKNOWN_HINT_HAS_STDERR;
@@ -318,8 +382,17 @@ export function buildCliDiagnostics(args: {
     excerptSource = 'unknown_raw';
   }
 
+  // F212 Phase H / AC-H1 (#939 part B): caller-attribution for unknown stderr.
+  // When rawText has a usable first non-blank/non-frame line, surface it as
+  // publicSummary so users see structured context (Error:..., module:line msg,
+  // [error] {brief}, ToolReturnValue brief) instead of generic 未识别. Fall
+  // back to UNKNOWN_TEXT.summary when no usable line (empty / whitespace / all-frame).
+  const unknownAttribution = extractUnknownAttribution(args.rawText ?? '');
+
   return {
-    publicSummary: panicHeadline ? `CLI panic — ${panicHeadline}` : UNKNOWN_TEXT.summary,
+    publicSummary: args.panicHeadline
+      ? `CLI panic — ${args.panicHeadline}`
+      : (unknownAttribution ?? UNKNOWN_TEXT.summary),
     publicHint: unknownHint,
     debugRef: args.debugRef,
     ...(safeExcerpt && { safeExcerpt, excerptSource }),

@@ -1774,7 +1774,9 @@ test('F212 AC-A1: __cliError for unknown stderr has cliDiagnostics with sanitize
   // #857: unknown raw text now surfaced as sanitized safeExcerpt
   assert.ok(err.cliDiagnostics.safeExcerpt, 'unknown stderr should produce safeExcerpt (#857)');
   assert.equal(err.cliDiagnostics.excerptSource, 'unknown_raw');
-  assert.match(err.cliDiagnostics.publicSummary, /未识别/);
+  // #939 part B: caller-attribution — publicSummary surfaces the first non-blank
+  // sanitized line of stderr (Error:..., module:line msg, [error] {brief}).
+  assert.strictEqual(err.cliDiagnostics.publicSummary, 'completely random weird thing');
 });
 
 test('F212 AC-A9 红线: __cliError.message does NOT contain raw stderr', async () => {
@@ -1782,7 +1784,14 @@ test('F212 AC-A9 红线: __cliError.message does NOT contain raw stderr', async 
   const spawnFn = createMockSpawnFn(proc);
 
   const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
-  const secret = 'super-secret-panic-marker-7f3xq';
+  // 33-char high-entropy string — long enough to match the high-entropy fallback
+  // regex (`[A-Za-z0-9+/=_-]{32,}`) AND have ≥0.5 unique-char ratio AND ≥16 unique
+  // chars (sanitizeCliStderr's looksHighEntropy threshold). #939 part B derives
+  // publicSummary from rawText, so the secret MUST be redacted by the sanitizer
+  // before reaching the user-facing field (same redaction layer that protects safeExcerpt).
+  // Realistic API-key shape — mimics a 33-char random token, not the previous
+  // 30-char "secret" that slipped through the 32-char high-entropy regex.
+  const secret = 'aZ7nQp3xK9mW2vL8jR5tY6bN4cF1hG0dE';
   proc.stderr.write(`${secret}\n`);
   proc.stdout.end();
   proc._emitter.emit('exit', 2, null);
@@ -1792,7 +1801,10 @@ test('F212 AC-A9 红线: __cliError.message does NOT contain raw stderr', async 
   assert.ok(err);
   assert.ok(!err.message.includes(secret), `message leaked raw stderr: ${err.message}`);
   // Also check cliDiagnostics 公共面板字段不漏
-  assert.ok(!err.cliDiagnostics.publicSummary.includes(secret));
+  assert.ok(
+    !err.cliDiagnostics.publicSummary.includes(secret),
+    `publicSummary leaked secret: ${err.cliDiagnostics.publicSummary}`,
+  );
   assert.ok(!err.cliDiagnostics.publicHint.includes(secret));
 });
 
