@@ -6,7 +6,7 @@ import type { CapabilityName } from './eval-capability-wakeup-adapter.js';
  * 砚砚 R8 P1 (a2a mirror) + R2 P1 + cloud R3 P2: when cat-mediated publish supplies
  * submittedPacket, generator uses it as base (NOT regenerate). The build-from-trials
  * path enforces invariants via `buildCapabilityWakeupVerdictHandoff` — submittedPacket
- * path MUST mirror them, else cat-mediated publish degrades safety vs CVO-regen.
+ * path MUST mirror them, else cat-mediated publish degrades safety vs operator-regen.
  *
  * Invariants enforced:
  * - input.domain.domainId === 'eval:capability-wakeup' (mirrors verdict.ts:20-22;

@@ -16,7 +16,7 @@ created: 2026-03-23
 
 ## Why
 
-> team experience（2026-03-23，F088 Phase 8 讨论中）：
+> operator experience（2026-03-23，F088 Phase 8 讨论中）：
 >
 > "connector 这个指的是？ im？ 我记得 F127 有一个烂摊子没收拾，他搞了个他自己的 Hot Reload 但是不用 cat config yaml 而是自己搞了一套。所以按照「脚手架」「喵约」理论我们是不是先梳理一下，我们有哪些配置项？我现在就能知道，我们有 ENV、Local，还有这个 cat config，这些可能都是需要有热更新的，这样子才能干掉 F127 的烂摊子，让它这些热更新都收到一块儿比较好一点。
 >
@@ -87,13 +87,13 @@ Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
 3. **收编 F127** — `runtime-cat-catalog.ts` 的热更新能力并入统一管线，干掉独立的 ad-hoc 机制
 4. **渐进式** — 可以分 Phase，先做 connector 热重载（F088 直接需求），再扩展到猫猫管理
 
-### 决策记录（2026-03-27，team lead + @opus + @codex 讨论收敛）
+### 决策记录（2026-03-27，operator + @opus + @codex 讨论收敛）
 
 - [x] **F127 收编方式：重写，渐进迁移（3A→3B→3C）**
   - 3A: 把 `/api/cats` 路由里的 side effect（registry reconcile）迁到统一 event bus subscriber — 终态 subscriber
   - 3B: `runtime-cat-catalog` 收敛成纯存储+校验，删掉 ad-hoc 触发路径 — 终态存储层
   - 3C: 删除 3A/3B 使旧代码变成的死代码
-  - 每步产物都是终态基座，不是脚手架（team lead确认）
+  - 每步产物都是终态基座，不是脚手架（operator确认）
   - 证据：`runtime-cat-catalog.ts` 实际 527 行，路由里直接耦合 reconcile（`cats.ts:297`、`index.ts:635`）
 
 - [x] **热更新粒度：key 级为主 + file/domain 级降级**
@@ -111,10 +111,10 @@ Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
   - 前端：token 输入后 mask 显示，不回显完整值
   - 证据：现有 `env-registry.ts:857` 的 `isEditableEnvVarName` 明确拒绝 sensitive vars，`env-registry.test.js:360` 有测试锁定
 
-### 决策记录（2026-03-28，team lead + @opus + @codex 讨论收敛 — Phase 4 真相源统一）
+### 决策记录（2026-03-28，operator + @opus + @codex 讨论收敛 — Phase 4 真相源统一）
 
 - [x] **推翻 A* 方案（"按领域切两个真相源"）——终态必须是单一真相源**
-  - team experience："那你这他妈有问题啊 127的尾巴还是解决不掉啊 现在这两个加载的代码就开始打架了"
+  - operator experience："那你这他妈有问题啊 127的尾巴还是解决不掉啊 现在这两个加载的代码就开始打架了"
   - `provider-binding-compat.ts` 的校验是双真相源的症状，不是合理设计
   - A* 方案本质上在合理化两个真相源，偏离 F136 愿景
 
@@ -146,10 +146,10 @@ Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
   - `provider-binding-compat.ts` 可删（不再有两边需要校验一致性）
   - `.env` 的 `*_API_KEY` deprecated（只读 legacy fallback），不再作为主写入口
 
-- [x] **`accounts` 区（@codex 提议，team lead确认）**
+- [x] **`accounts` 区（@codex 提议，operator确认）**
   - 多猫共用同一账户只引用 `accountRef`，不重复配置 protocol/baseUrl
   - `protocol` 字段决定 API 兼容性：任意支持 Anthropic 协议的 API 都能给Ragdoll用，任意支持 OpenAI 协议的都能给Maine Coon用
-  - team lead确认："可以，只要你能解决比如我任意一个 api 支持 anthropic 我都能给 claude code 用"
+  - operator确认："可以，只要你能解决比如我任意一个 api 支持 anthropic 我都能给 claude code 用"
 
 - [x] **凭证三入口收敛**
   - 现状：`.env`（`*_API_KEY`）、`provider-profiles.secrets.local.json`、`POST /api/config/secrets`
@@ -244,7 +244,7 @@ Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
 
 ## Follow-up: Startup Invariant Guard — ✅ Implemented (PR #835)
 
-**来源**：2026-03-28 runtime incident + @gpt52 审查建议 → team lead升级为"现在就做"
+**来源**：2026-03-28 runtime incident + @gpt52 审查建议 → operator升级为"现在就做"
 
 **实现**（PR #835, merged 2026-03-28）：
 - `hasLegacyProviderProfiles()`: 三态检测（文件不存在 → false, 存在但损坏 → true, 存在但空 providers → false, 存在且有 providers → true）
@@ -258,11 +258,11 @@ Phase 4 终态（2026-03-28 决策，F171 校准后的实际落地）:
 **AC**：
 1. [x] 旧 `provider-profiles.json` 存在 + 当前项目 `accounts` 缺失 → hard throw (startup blocked)
 2. [x] 回归测试：覆盖 legacy source + migration 未落成 + 空 providers + 损坏文件场景
-3. [x] 升级为 startup hard fail（team lead拍板："三件事情得做嘞，不能静默失败"）
+3. [x] 升级为 startup hard fail（operator拍板："三件事情得做嘞，不能静默失败"）
 
 ## Follow-up: Hub Profile Stale + HC-5 Worktree — ✅ Implemented (PR #847)
 
-**来源**：2026-03-29 team lead报告"新建 api key 更新不动"+ minimax baseUrl 更新报 conflict
+**来源**：2026-03-29 operator报告"新建 api key 更新不动"+ minimax baseUrl 更新报 conflict
 
 **实现**（PR #847, merged 2026-03-29）：
 - Cat Editor `profilesVersion` + `provider-profiles-changed` CustomEvent 跨组件 invalidation

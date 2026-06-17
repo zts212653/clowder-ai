@@ -5,7 +5,7 @@ import { catColorVar } from '@/lib/cat-slug';
 import type { ThreadState } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { API_URL, apiFetch } from '@/utils/api-client';
-// F174 D2b-2 (rev): per-cat callback-auth dot was rejected (铲屎官 alpha 反馈
+// F174 D2b-2 (rev): per-cat callback-auth dot was rejected (co-creator alpha 反馈
 // "莫名其妙的颜色" — 16px participant avatars lacked any affordance). Status now
 // surfaces system-level via <CallbackAuthHealthIndicator /> in ChatContainerHeader,
 // and per-cat (with "AFFECTED CATS" affordance) inside HubCallbackAuthPanel.

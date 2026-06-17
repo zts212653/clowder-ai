@@ -21,7 +21,7 @@
 
 ## 不适合
 
-- 拿来做 localhost 页面“给铲屎官看效果”的预览入口
+- 拿来做 localhost 页面“给operator看效果”的预览入口
 - 在 CLI-only 场景里硬替代更适合的 agent-browser
 
 ## 额外提示

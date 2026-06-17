@@ -154,7 +154,7 @@ export const useCallbackAuthStore = create<CallbackAuthState>((set, get) => ({
   },
   markViewed: async () => {
     try {
-      // F174 D2b-1 alpha #6 fix: 铲屎官 reported "小红点点进去看板没消除".
+      // F174 D2b-1 alpha #6 fix: co-creator reported "小红点点进去看板没消除".
       //
       // Original Cloud P2 round 1 design: pass viewedUpTo = snapshot's
       // server-side "as of" timestamp to avoid ack'ing failures user hasn't

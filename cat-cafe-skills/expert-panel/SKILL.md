@@ -2,7 +2,7 @@
 name: expert-panel
 description: >
   多猫专家辩论团：在现有协作习惯上加一层轻量编排 + WHY 链标准 + 交付链。
-  Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、铲屎官说"帮我分析一下"。
+  Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、operator说"帮我分析一下"。
   Not for: 单猫能搞定的问题、代码实现、bug fix、日常聊天。
   Output: 洞察卡片(rich block) + 语音总结 + 正式报告(DOCX/PDF)。
 triggers:
@@ -56,11 +56,11 @@ Dispatch → Independent → Synthesis → Contributor Check → Delivery
 Convergence Lead 用 `multi_mention` 分发给各猫。
 
 **dispatch payload 只允许包含**：
-- 铲屎官的原始问题（一字不改）
+- operator的原始问题（一字不改）
 - 该猫的角色和视角
 - 范围（调研边界）
 - 输出格式要求（WHY 链四格）
-- 原始材料（如有，如铲屎官发的文件/链接）
+- 原始材料（如有，如operator发的文件/链接）
 
 **dispatch payload 禁止包含**：
 - Lead 自己的判断、倾向、provisional conclusion
@@ -78,7 +78,7 @@ Convergence Lead 用 `multi_mention` 分发给各猫。
 | 档位 | 何时用 | 方法 |
 |------|--------|------|
 | **Light**（默认） | 日常分析、快速判断 | WebSearch + search_evidence + 已有知识 |
-| **Full** | 高 stakes / 铲屎官说"调研" / 需要多源验证 | 启动 `deep-research` skill 完整流程 |
+| **Full** | 高 stakes / operator说"调研" / 需要多源验证 | 启动 `deep-research` skill 完整流程 |
 
 不确定用哪档 → 用 Light。Light 不够再升级。
 
@@ -110,7 +110,7 @@ Convergence Lead 汇总所有猫的分析，产出收敛报告。
 - 共识区
 - **分歧区**（不抹平！各方理由都保留）
 - Tradeoffs / 适用边界（结论在什么场景成立、什么场景不适用）
-- Open Questions（待铲屎官拍板）
+- Open Questions（待operator拍板）
 - 行动项
 
 ### 4. Contributor Check — 原作者复核
@@ -155,7 +155,7 @@ Convergence Lead 汇总所有猫的分析，产出收敛报告。
 5. **Tradeoffs / 适用边界**：推荐在哪些场景成立、哪些场景不适用
 6. **Premortem**：最可能翻车在哪 + 护栏
 7. **行动建议**（分层：决策者 / 执行者）
-8. **Open Questions**：待铲屎官拍板
+8. **Open Questions**：待operator拍板
 9. **独立贡献记录**：各猫的独立判断摘要 + 独特洞察
 
 ## 什么时候叠加其他 skill？
@@ -163,7 +163,7 @@ Convergence Lead 汇总所有猫的分析，产出收敛报告。
 | 场景 | 用什么 |
 |------|--------|
 | 日常"帮我分析一下" | expert-panel 单独用（Light 调研档） |
-| 高 stakes 决策、铲屎官说"调研" | expert-panel + `deep-research`（Full 调研档） |
+| 高 stakes 决策、operator说"调研" | expert-panel + `deep-research`（Full 调研档） |
 | 分析后需要立项 | expert-panel → `feat-lifecycle` |
 | 分析后需要沉淀 | expert-panel → `collaborative-thinking` Mode C |
 | 需要和外部猫交接分析结果 | expert-panel → `cross-cat-handoff` 五件套 |
@@ -174,7 +174,7 @@ multi_mention 回调链会反复 supersede invocation 导致 MCP 工具 stale_ig
 
 - 洞察卡片在收敛消息里**同步发**
 - 语音+报告在**最后一只猫回调时立即发**
-- 凭证过期 → 报告存本地 + 告诉铲屎官"下轮对话发"
+- 凭证过期 → 报告存本地 + 告诉operator"下轮对话发"
 
 ## Common Mistakes
 

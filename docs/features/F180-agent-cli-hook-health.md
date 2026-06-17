@@ -15,7 +15,7 @@ community_issue: "https://github.com/zts212653/clowder-ai/issues/614"
 
 Cat Cafe 的用户级 SessionStart/Stop hooks 已经是我们自己出征时的基础纪律：启动时提醒 `cat_cafe_search_evidence` recall，收尾时检查闭环。但这套能力现在主要靠本机 `~/.claude/settings.json` 和 `~/.codex/hooks.json` 已经手动/同步过来维持。开源用户、桌面安装包用户、升级后的老用户都可能完全没有这层 hook。
 
-team lead连续确认了两点：安装流程可以补，但不能只覆盖新 clone 的源码安装；安装包和现有用户也必须能被运行时检测并一键修复。否则开源社区里的 agent 会继续看似接了 MCP，实际缺少开工 recall 和收尾纪律。
+operator连续确认了两点：安装流程可以补，但不能只覆盖新 clone 的源码安装；安装包和现有用户也必须能被运行时检测并一键修复。否则开源社区里的 agent 会继续看似接了 MCP，实际缺少开工 recall 和收尾纪律。
 
 ## What
 
@@ -52,7 +52,7 @@ Phase A+B 都是后端 health contract / sync module 范围，可以在同一个
 
 在新 thread / project setup surface 增加 Agent CLI Hook Health：
 
-- OQ-1 Design Gate 已按team lead对 ProjectSetupCard 治理入口的判断收敛：Agent Hook Health 的主入口与项目治理初始化同栖，避免用户带病开工；Hub 能力中心可以后续承载深诊断，但不是本片阻塞项。
+- OQ-1 Design Gate 已按operator对 ProjectSetupCard 治理入口的判断收敛：Agent Hook Health 的主入口与项目治理初始化同栖，避免用户带病开工；Hub 能力中心可以后续承载深诊断，但不是本片阻塞项。
 - OQ-2 已由Siamese于 2026-04-29 Design Gate 追认：当前片的 inline compact summary（target + status + diff message）足够作为现场急救站的 patch preview；完整 settings JSON patch modal 留给 Hub 大本营 deep-dive panel / UX polish。
 - Hub 启动 / first-run 时做一次 status 检测并缓存到当前 app session；新线程 / 项目切换可以复用缓存或触发轻量 refresh，但不能在每条消息上重复检测。
 - 缺失或过期时显示可操作提示；

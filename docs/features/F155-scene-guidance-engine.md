@@ -13,7 +13,7 @@ intake_issue: "cat-cafe#1294"
 
 > **Status**: done (closed 2026-05-26) | **Source**: Community (mindfn) | **Priority**: P1 | **Owner**: 社区 (mindfn)
 >
-> **Close 2026-05-26**：team lead拍板 close。Phase A（10 项）+ Phase B selective intake（5 项）全部 merged。Phase B 架构重构 6/6 已在 clowder-ai#457（absorbed via cat-cafe#1147）中完成——GuideRoutingInterceptor / GuidePromptSection / GuideSession / GuideSessionRepository / GuideStateMachine / GuideLifecycleService / GuideActionService / GuideDismissTracker / GuideOfferPolicy 均已独立存在于 `packages/api/src/domains/guides/`。9 个 YAML guide scenario 已上线（`guides/flows/`）。Guide Catalog UI 无独立浏览页面，但有 MCP `cat_cafe_get_available_guides` + `guide-registry-loader.ts` 后端 catalog——设计上是猫猫按上下文触发，不是用户浏览。KD-16 决定 session ephemeral by design，不做持久化。社区 issue clowder-ai#409 已关闭。
+> **Close 2026-05-26**：operator拍板 close。Phase A（10 项）+ Phase B selective intake（5 项）全部 merged。Phase B 架构重构 6/6 已在 clowder-ai#457（absorbed via cat-cafe#1147）中完成——GuideRoutingInterceptor / GuidePromptSection / GuideSession / GuideSessionRepository / GuideStateMachine / GuideLifecycleService / GuideActionService / GuideDismissTracker / GuideOfferPolicy 均已独立存在于 `packages/api/src/domains/guides/`。9 个 YAML guide scenario 已上线（`guides/flows/`）。Guide Catalog UI 无独立浏览页面，但有 MCP `cat_cafe_get_available_guides` + `guide-registry-loader.ts` 后端 catalog——设计上是猫猫按上下文触发，不是用户浏览。KD-16 决定 session ephemeral by design，不做持久化。社区 issue clowder-ai#409 已关闭。
 
 ## Why
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CommunityPanelFilters, TIME_RANGES } from '@/components/CommunityPanelFilters';
 import { PR_ICON, TYPE_ICONS } from '@/components/community-panel-icons';
+import { DirectionCard, type DirectionCardProps } from '@/components/DirectionCard';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 
 function relativeTime(ts: number): string {
@@ -24,6 +25,7 @@ interface CommunityIssueItem {
   consensusState?: string;
   assignedThreadId: string | null;
   assignedCatId: string | null;
+  directionCard: { entries: Array<Record<string, unknown>>; consensus?: Record<string, unknown> } | null;
   updatedAt: number;
 }
 
@@ -110,54 +112,84 @@ function SectionHeader({
 
 function IssueRow({
   item,
+  expanded,
   onNavigate,
   onDispatch,
+  onToggleExpand,
+  onResolve,
 }: {
   item: CommunityIssueItem;
+  expanded: boolean;
   onNavigate: (threadId: string) => void;
   onDispatch: (issueId: string) => void;
+  onToggleExpand: (issueId: string) => void;
+  onResolve: (
+    issueId: string,
+    decision: 'accepted' | 'declined',
+    opts?: {
+      routeRecommendation?: { kind: string; threadId?: string };
+    },
+  ) => Promise<void>;
 }) {
   const color = ISSUE_STATE_COLORS[item.state] ?? 'text-cafe-muted';
   const icon = TYPE_ICONS[item.issueType] ?? TYPE_ICONS.question;
+  const hasDirectionCard =
+    item.state === 'pending-decision' &&
+    item.directionCard?.entries?.some((e: Record<string, unknown>) => e.authoredByRole === 'narrator');
   const handleClick = () => {
-    if (item.assignedThreadId) onNavigate(item.assignedThreadId);
+    if (hasDirectionCard) {
+      onToggleExpand(item.id);
+    } else if (item.assignedThreadId) {
+      onNavigate(item.assignedThreadId);
+    }
   };
   return (
-    <div
-      data-testid={`issue-row-${item.id}`}
-      onClick={handleClick}
-      className={`flex items-center gap-2 px-3 py-1.5 hover:bg-cafe-surface-elevated/30 text-xs ${item.assignedThreadId ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
-    >
-      <span className={color}>{icon}</span>
-      <a
-        href={`https://github.com/${item.repo}/issues/${item.issueNumber}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="text-cafe-muted text-micro hover:text-cafe-accent hover:underline"
+    <>
+      <div
+        data-testid={`issue-row-${item.id}`}
+        onClick={handleClick}
+        className={`flex items-center gap-2 px-3 py-1.5 hover:bg-cafe-surface-elevated/30 text-xs transition-colors ${
+          expanded ? 'bg-cafe-surface-elevated/50 border-l-2 border-l-cafe-accent' : ''
+        } ${item.assignedThreadId || hasDirectionCard ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
       >
-        #{item.issueNumber}
-      </a>
-      <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
-      {item.assignedCatId && <span className="text-micro text-cafe-accent/60">{item.assignedCatId}</span>}
-      <span className="text-micro text-cafe-muted">{relativeTime(item.updatedAt)}</span>
-      {item.state === 'unreplied' && (
-        <button
-          type="button"
-          data-testid={`dispatch-btn-${item.id}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDispatch(item.id);
-          }}
-          className="text-xs text-cafe-crosspost bg-cafe-crosspost/10 px-1.5 py-0.5 rounded hover:bg-cafe-crosspost/20 transition-colors"
+        <span className={color}>{icon}</span>
+        <a
+          href={`https://github.com/${item.repo}/issues/${item.issueNumber}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-cafe-muted text-micro hover:text-cafe-accent hover:underline"
         >
-          发送给系统猫
-        </button>
+          #{item.issueNumber}
+        </a>
+        <span className="truncate flex-1 text-cafe-secondary">{item.title}</span>
+        {item.assignedCatId && <span className="text-micro text-cafe-accent/60">{item.assignedCatId}</span>}
+        <span className="text-micro text-cafe-muted">{relativeTime(item.updatedAt)}</span>
+        {item.state === 'unreplied' && (
+          <button
+            type="button"
+            data-testid={`dispatch-btn-${item.id}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDispatch(item.id);
+            }}
+            className="text-xs text-cafe-crosspost bg-cafe-crosspost/10 px-1.5 py-0.5 rounded hover:bg-cafe-crosspost/20 transition-colors"
+          >
+            发送给系统猫
+          </button>
+        )}
+        {item.replyState === 'unreplied' && item.state !== 'unreplied' && (
+          <span className="text-xs text-cafe-accent bg-cafe-accent/10 px-1 rounded">未回复</span>
+        )}
+      </div>
+      {expanded && hasDirectionCard && item.directionCard && (
+        <DirectionCard
+          issueId={item.id}
+          directionCard={item.directionCard as unknown as DirectionCardProps['directionCard']}
+          onResolve={onResolve}
+        />
       )}
-      {item.replyState === 'unreplied' && item.state !== 'unreplied' && (
-        <span className="text-xs text-cafe-accent bg-cafe-accent/10 px-1 rounded">未回复</span>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -216,6 +248,7 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
   const [catFilter, setCatFilter] = useState('all');
   const [timeRange, setTimeRange] = useState('all');
   const [repos, setRepos] = useState<string[]>([]);
+  const [expandedIssue, setExpandedIssue] = useState<string | null>(null);
 
   const fetchBoard = useCallback(async () => {
     if (!repo) return;
@@ -282,6 +315,35 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
   const navigateToThread = useCallback((threadId: string) => {
     pushThreadRouteWithHistory(threadId, window);
   }, []);
+
+  const toggleExpand = useCallback((issueId: string) => {
+    setExpandedIssue((prev) => (prev === issueId ? null : issueId));
+  }, []);
+
+  const resolveIssue = useCallback(
+    async (
+      issueId: string,
+      decision: 'accepted' | 'declined',
+      opts?: {
+        routeRecommendation?: { kind: string; threadId?: string };
+      },
+    ) => {
+      try {
+        const res = await fetch(`/api/community-issues/${issueId}/resolve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision, routeRecommendation: opts?.routeRecommendation }),
+        });
+        if (res.ok) {
+          setExpandedIssue(null);
+          fetchBoard();
+        }
+      } catch {
+        /* network error */
+      }
+    },
+    [fetchBoard],
+  );
 
   const filteredIssues = (board?.issues ?? []).filter((i) => {
     if (stateFilter !== 'all' && i.state !== stateFilter) return false;
@@ -352,7 +414,15 @@ export function CommunityPanel({ threadId }: { threadId?: string }) {
                     />
                     {!isCollapsed &&
                       items.map((item) => (
-                        <IssueRow key={item.id} item={item} onNavigate={navigateToThread} onDispatch={dispatchIssue} />
+                        <IssueRow
+                          key={item.id}
+                          item={item}
+                          expanded={expandedIssue === item.id}
+                          onNavigate={navigateToThread}
+                          onDispatch={dispatchIssue}
+                          onToggleExpand={toggleExpand}
+                          onResolve={resolveIssue}
+                        />
                       ))}
                   </div>
                 );

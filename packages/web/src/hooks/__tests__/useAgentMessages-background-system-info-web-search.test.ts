@@ -619,6 +619,29 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
   });
 
+  it('suppresses mcp_server_status telemetry', () => {
+    const options = createMockOptions();
+
+    const msg = {
+      type: 'system_info',
+      catId: 'opus',
+      threadId: 'thread-1',
+      content: JSON.stringify({
+        type: 'mcp_server_status',
+        provider: 'claude',
+        pendingMeaning: 'deferred_tool_loading',
+        counts: { connected: 1, pending: 1, failed: 0, disabled: 0, 'needs-auth': 0 },
+        servers: [{ name: 'MCP_DOCKER', status: 'pending' }],
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+  });
+
   it('suppresses resume_failure_stats telemetry', () => {
     const options = createMockOptions();
 

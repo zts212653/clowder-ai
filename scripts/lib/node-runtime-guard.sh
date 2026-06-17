@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Shared Node runtime guard for Cat Cafe startup scripts.
+# Shared Node runtime guard for Clowder AI startup scripts.
 # Native dependencies such as better-sqlite3 are not compatible with every
 # fresh Node major on day one. Keep startup on a supported major instead of
 # letting Homebrew's `node` alias silently move the runtime.
@@ -74,7 +74,7 @@ print_node_runtime_install_guidance() {
   brew install node@24
   PATH="$(brew --prefix node@24)/bin:$PATH" pnpm install --frozen-lockfile
 
-Or point Cat Cafe at an existing supported Node binary:
+Or point Clowder AI at an existing supported Node binary:
   CAT_CAFE_NODE_BIN=/absolute/path/to/node pnpm runtime:start
 EOF
 }
@@ -101,7 +101,7 @@ ensure_supported_node_runtime() {
         pinned_dir="$(cd "$(dirname "$pinned_node")" && pwd -P)"
         pinned_version="$(node_runtime_version "$pinned_node" || echo unknown)"
         if [ -x "$pinned_node" ] && [ "$pinned_node" != "$current_node" ]; then
-          echo "[node-runtime] current Node ${current_version:-<missing>} is supported but Cat Cafe startup is pinned to Node ${CAT_CAFE_NODE_PINNED_MAJOR}; re-exec with $pinned_node ($pinned_version)" >&2
+          echo "[node-runtime] current Node ${current_version:-<missing>} is supported but Clowder AI startup is pinned to Node ${CAT_CAFE_NODE_PINNED_MAJOR}; re-exec with $pinned_node ($pinned_version)" >&2
           export PATH="$pinned_dir:$PATH"
           export CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC=1
           exec bash "$script_path" "$@"
@@ -121,13 +121,13 @@ ensure_supported_node_runtime() {
   if selected="$(find_supported_node_runtime)"; then
     selected_dir="$(cd "$(dirname "$selected")" && pwd -P)"
     selected_version="$(node_runtime_version "$selected" || echo unknown)"
-    echo "[node-runtime] current Node ${current_version:-<missing>} is unsupported for Cat Cafe startup; re-exec with $selected ($selected_version)" >&2
+    echo "[node-runtime] current Node ${current_version:-<missing>} is unsupported for Clowder AI startup; re-exec with $selected ($selected_version)" >&2
     export PATH="$selected_dir:$PATH"
     export CAT_CAFE_NODE_RUNTIME_GUARD_REEXEC=1
     exec bash "$script_path" "$@"
   fi
 
-  echo "[node-runtime] ERROR: Node ${current_version:-<missing>} is unsupported for Cat Cafe startup; expected >=${CAT_CAFE_NODE_MIN_MAJOR} <${CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE}." >&2
+  echo "[node-runtime] ERROR: Node ${current_version:-<missing>} is unsupported for Clowder AI startup; expected >=${CAT_CAFE_NODE_MIN_MAJOR} <${CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE}." >&2
   if [ -n "$current_major" ] && [ "$current_major" -ge "$CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE" ]; then
     echo "[node-runtime] Native addons in this repo are not yet certified for Node $current_major." >&2
   fi

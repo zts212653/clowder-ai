@@ -1,6 +1,6 @@
 /**
  * F075 Phase C — In-memory achievement store
- * Tracks unlocked achievements per user and computes CVO level.
+ * Tracks unlocked achievements per user and computes operator level.
  */
 import type { Achievement, CvoLevel } from '@cat-cafe/shared';
 import { ALL_ACHIEVEMENTS, computeCvoLevel } from './achievement-defs.js';

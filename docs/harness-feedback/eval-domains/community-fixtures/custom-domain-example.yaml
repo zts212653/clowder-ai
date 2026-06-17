@@ -2,10 +2,10 @@
 #
 # Community projects can register eval domains by placing a YAML file
 # in their local `eval-domains/community/` directory. The schema follows
-# the same structure as Cat Cafe's internal domains but with:
+# the same structure as Clowder AI's internal domains but with:
 # - domainId: any `eval:<lowercase-slug>` (not restricted to internal enum)
 # - sourceAdapter: must be `community-custom`
-# - handoffTargetResolver: optional (community may not use Cat Cafe threads)
+# - handoffTargetResolver: optional (community may not use Clowder AI threads)
 #
 # See: packages/api/src/infrastructure/harness-eval/community-eval-domain.ts
 

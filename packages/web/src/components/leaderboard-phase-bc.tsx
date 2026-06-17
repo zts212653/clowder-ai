@@ -104,7 +104,7 @@ export function AchievementWall({ achievements }: { achievements: Achievement[] 
   );
 }
 
-/** Phase C: CVO level card */
+/** Phase C: operator level card */
 export function CvoLevelCard({ level }: { level: CvoLevel }) {
   const pct = Math.round(level.progress * 100);
   return (
@@ -128,7 +128,7 @@ export function CvoLevelCard({ level }: { level: CvoLevel }) {
       </div>
       {level.nextTitle && (
         <span className="text-label" style={{ color: 'var(--cafe-text-muted)' }}>
-          距离「{level.nextTitle}」还需 {level.needed} 个 CVO 成就
+          距离「{level.nextTitle}」还需 {level.needed} 个 operator 成就
         </span>
       )}
     </div>

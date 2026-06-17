@@ -29,7 +29,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
         baton: {
           fromMessageId: 'm1',
           fromSpeaker: 'user',
-          fromSpeakerDisplay: '铲屎官',
+          fromSpeakerDisplay: 'co-creator',
           timestamp: Date.now(),
           mentionExcerpt: '帮我看看 F148',
           staleHoldWarning: false,
@@ -40,7 +40,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
       });
       const card = result.extra.rich.blocks[0];
       // Title should contain navigation info, not coverage counts
-      assert.ok(card.title.includes('铲屎官'), `title should mention baton source, got: ${card.title}`);
+      assert.ok(card.title.includes('co-creator'), `title should mention baton source, got: ${card.title}`);
       assert.ok(card.title.includes('F148 spec'), `title should mention truth source, got: ${card.title}`);
     });
 
@@ -49,7 +49,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
         baton: {
           fromMessageId: 'm1',
           fromSpeaker: 'user',
-          fromSpeakerDisplay: '铲屎官',
+          fromSpeakerDisplay: 'co-creator',
           timestamp: Date.now(),
           mentionExcerpt: '看看这个',
           staleHoldWarning: false,
@@ -73,7 +73,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
         baton: {
           fromMessageId: 'm1',
           fromSpeaker: 'user',
-          fromSpeakerDisplay: '铲屎官',
+          fromSpeakerDisplay: 'co-creator',
           timestamp: Date.now(),
           mentionExcerpt: '看看 F148',
           staleHoldWarning: false,
@@ -187,7 +187,7 @@ describe('F148 briefing card — navigation-first collapsed view', () => {
         baton: {
           fromMessageId: 'm1',
           fromSpeaker: 'user',
-          fromSpeakerDisplay: '铲屎官',
+          fromSpeakerDisplay: 'co-creator',
           timestamp: Date.now(),
           mentionExcerpt: '看看 F148',
           staleHoldWarning: false,

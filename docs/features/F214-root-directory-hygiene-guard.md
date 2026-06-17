@@ -20,9 +20,9 @@ ADR-010 / F023 的防腐化机制只管**代码子目录**（文件数阈值 + d
 - `.gitignore` 已覆盖几乎所有这些产物（`*.log` / `forzadata-*.txt` / `cookies.json` / `dump.rdb*` / `*.sqlite*`）。`git status` 干净，**零垃圾被 git 追踪**。
 - 所以问题**不是** "猫 commit 垃圾进 git"（.gitignore 已挡住），**而是** "无状态残留物理堆在根目录文件系统，污染视觉"。
 - `requirements.txt` / `cat-template.json` 是 git 追踪的**合法文件**，初版提案误判为"归属不明垃圾"。
-- 初版提案（EP-002，从未落地成文件，源自 thread `thread_mpq6yy8q88py274n` 对话）把核心 frame 成 "pre-commit hook 拦 commit 垃圾"——但 git 根本不会 commit 已 ignore 的文件。pre-commit 在这里只是**兜底**（防未来新增、未被 ignore 的垃圾），不是主要矛盾。
+- 初版提案（EP-002，从未落地成文件，源自 thread `[thread-id]` 对话）把核心 frame 成 "pre-commit hook 拦 commit 垃圾"——但 git 根本不会 commit 已 ignore 的文件。pre-commit 在这里只是**兜底**（防未来新增、未被 ignore 的垃圾），不是主要矛盾。
 
-team experience（2026-05-28）：
+operator experience（2026-05-28）：
 - "不准动 redis相关的那些！！"
 - "Redis/SQLite/World Engine 的 CWD→专用目录根因修复...我觉得甚至不应该列，因为这都是不兼容修改"
 
@@ -41,7 +41,7 @@ team experience（2026-05-28）：
 **理由**：
 1. 它们不是"垃圾"，是有状态核心数据存储。"在根目录"是**架构布局**事实，不是卫生问题。
 2. 改它们的位置 = 改配置 + **迁移现有数据**，不迁就等于核心数据/记忆凭空消失 = **不兼容修改**。
-3. `evidence.sqlite` 是记忆系统命脉，敏感度与 Redis 圣域同级。
+3. `evidence.sqlite` 是记忆系统命脉，敏感度与 production data boundary同级。
 4. 重新规划数据存储布局若有必要，应是**独立架构立项**（带数据迁移方案），不是本 hygiene feature 的尾巴 / 后续 Phase。
 
 > **不留尾巴铁律**（`feedback_no_followup_tails` + 「下次一定」）：有状态存储迁移**不列为后续 Phase**。要做就独立立项，不在本 feature 画饼。
@@ -53,9 +53,9 @@ team experience（2026-05-28）：
 ### Phase A: 清理脚本（三重保险）
 
 `scripts/clean-root-debris.sh`，一个文件被删除必须**同时**满足三条，否则保留：
-1. **未被 git 追踪**（`git ls-files` 不含它）——自动保护所有 tracked 合法文件（`cat-config.json` / `cat-template.json` / `requirements.txt`，含 OQ-2 team lead要保留的）
+1. **未被 git 追踪**（`git ls-files` 不含它）——自动保护所有 tracked 合法文件（`cat-config.json` / `cat-template.json` / `requirements.txt`，含 OQ-2 operator要保留的）
 2. **匹配无状态残留白名单**（`*.log` / `forzadata-*.txt` / `cookies.json`）——白名单制，不靠黑名单兜底
-3. **不在硬保护清单**（额外 defense-in-depth）：`dump.rdb*`（含 `dump.rdb.backup-*` 时间戳后缀，OQ-3 team lead要保留）/ `*.sqlite*` / `world.sqlite*` 等有状态存储
+3. **不在硬保护清单**（额外 defense-in-depth）：`dump.rdb*`（含 `dump.rdb.backup-*` 时间戳后缀，OQ-3 operator要保留）/ `*.sqlite*` / `world.sqlite*` 等有状态存储
 
 - **dry-run 优先**：默认只列出将删除的文件；`--execute` 才实际删除。
 - 设计来源教训：`feedback_lsof_port_range_kills_sanctuary`（清理过滤宁可白名单不要黑名单 + 圣域显式排除）。
@@ -122,7 +122,7 @@ team experience（2026-05-28）：
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | `cat-config.json`（OQ-2）+ `dump.rdb.backup-*`（OQ-3）保留，不删不 untrack | team lead拍板"可能比较重要" | 2026-05-28 |
+| KD-1 | `cat-config.json`（OQ-2）+ `dump.rdb.backup-*`（OQ-3）保留，不删不 untrack | operator拍板"可能比较重要" | 2026-05-28 |
 | KD-2 | 清理脚本三重保险：untracked ∧ 白名单匹配 ∧ 不在硬保护清单 | OQ-3 暴露 `*.rdb` glob 漏 `dump.rdb.backup-*`；多层防圣域误删 | 2026-05-28 |
 
 ## Architecture Ownership (F191)
@@ -137,11 +137,11 @@ team experience（2026-05-28）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "从根源解决猫们乱扔垃圾问题"（提案总结） | AC-A1/A2, AC-C1 | test + manual | [x] |
-| R2 | "不准动 redis相关的那些！！"（team lead 2026-05-28） | AC-A2/A3, Fixture 4 | test（硬拒绝 .rdb/.sqlite） | [x] |
-| R3 | 有状态存储迁移"甚至不应该列"为后续 Phase（team lead 2026-05-28） | Scope 边界节 | manual（spec 审查无尾巴） | [x] |
+| R2 | "不准动 redis相关的那些！！"（operator 2026-05-28） | AC-A2/A3, Fixture 4 | test（硬拒绝 .rdb/.sqlite） | [x] |
+| R3 | 有状态存储迁移"甚至不应该列"为后续 Phase（operator 2026-05-28） | Scope 边界节 | manual（spec 审查无尾巴） | [x] |
 | R4 | §N 根目录卫生公约（提案三件事之一） | AC-B1/B2 | manual | [x] |
 | R5 | pre-commit hook 白名单（提案三件事之一） | AC-C1/C2 | test | [x] |
 

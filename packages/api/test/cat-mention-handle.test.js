@@ -34,7 +34,7 @@ describe('normalizeCatIdMentionsInText (F128 propose-text normalization)', () =>
 
   it('leaves @<token> unchanged when the token does not resolve', () => {
     const resolve = makeResolver({}); // empty registry → no resolution
-    const input = '请 @铲屎官 决定，并 @cat-unknown 跟踪';
+    const input = '请 @co-creator 决定，并 @cat-unknown 跟踪';
     const out = normalizeCatIdMentionsInText(input, resolve);
     assert.equal(out, input, 'unresolvable tokens must be passed through verbatim');
   });
@@ -62,9 +62,9 @@ describe('normalizeCatIdMentionsInText (F128 propose-text normalization)', () =>
       'cat-rcs85pvn': '@砚砚',
       'cat-g820pwcz': '@opus46',
     });
-    const input = ['顺序:', '1. @cat-rcs85pvn', '2. @cat-g820pwcz', '3. 回到铲屎官'].join('\n');
+    const input = ['顺序:', '1. @cat-rcs85pvn', '2. @cat-g820pwcz', '3. 回到co-creator'].join('\n');
     const out = normalizeCatIdMentionsInText(input, resolve);
-    assert.equal(out, ['顺序:', '1. @砚砚', '2. @opus46', '3. 回到铲屎官'].join('\n'));
+    assert.equal(out, ['顺序:', '1. @砚砚', '2. @opus46', '3. 回到co-creator'].join('\n'));
   });
 
   it('handles repeated mention of the same catId', () => {

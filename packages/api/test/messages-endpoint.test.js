@@ -815,3 +815,240 @@ describe('POST /api/messages delete-guard protection', () => {
     await app.close();
   });
 });
+
+// --- Internal message filtering (context_briefing + routing-guard-failure) ---
+
+describe('GET /api/messages internal message filtering', () => {
+  let app;
+  let messageStore;
+
+  beforeEach(async () => {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { InvocationRegistry } = await import(
+      '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
+    );
+    const { messagesRoutes } = await import('../dist/routes/messages.js');
+
+    messageStore = new MessageStore();
+    app = Fastify();
+    await app.register(messagesRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore,
+      socketManager: { broadcastAgentMessage: () => {} },
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  it('filters context_briefing messages from API response', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'user msg',
+      mentions: [],
+      timestamp: 1000,
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'briefing nav',
+      mentions: [],
+      timestamp: 2000,
+      origin: 'briefing',
+      extra: { systemKind: 'context_briefing' },
+    });
+    messageStore.append({
+      userId: 'default-user',
+      catId: 'opus',
+      content: 'cat reply',
+      mentions: [],
+      timestamp: 3000,
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 2);
+    assert.equal(body.messages[0].content, 'user msg');
+    assert.equal(body.messages[1].content, 'cat reply');
+  });
+
+  it('filters routing-guard-failure connector messages from API response', async () => {
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: 'user msg',
+      mentions: [],
+      timestamp: 1000,
+    });
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'route guard failed',
+      mentions: [],
+      timestamp: 2000,
+      source: { connector: 'routing-guard-failure', detail: 'test' },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'user msg');
+  });
+
+  it('preserves F233 duty briefing (origin=briefing without systemKind)', async () => {
+    messageStore.append({
+      userId: 'system',
+      catId: null,
+      content: 'duty briefing',
+      mentions: [],
+      timestamp: 1000,
+      origin: 'briefing',
+      extra: { rich: { v: 1, blocks: [{ id: 'duty-briefing', kind: 'card', v: 1, title: 'Duty' }] } },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'duty briefing');
+  });
+
+  it('loop-scans past large internal message clusters for pagination', async () => {
+    // Regression: fixed overscan=20 would return {messages:[], hasMore:true}
+    // when >20 consecutive internal messages exist between visible ones.
+    const threadId = 'thread-internal-cluster';
+
+    // Oldest visible message
+    messageStore.append({
+      threadId,
+      userId: 'default-user',
+      catId: null,
+      content: 'oldest visible',
+      mentions: [],
+      timestamp: 100,
+    });
+
+    // 25 consecutive internal context_briefing messages
+    for (let i = 0; i < 25; i++) {
+      messageStore.append({
+        threadId,
+        userId: 'system',
+        catId: null,
+        content: `briefing-${i}`,
+        mentions: [],
+        timestamp: 200 + i,
+        origin: 'briefing',
+        extra: { systemKind: 'context_briefing' },
+      });
+    }
+
+    // Newest visible message
+    messageStore.append({
+      threadId,
+      userId: 'default-user',
+      catId: null,
+      content: 'newest visible',
+      mentions: [],
+      timestamp: 300,
+    });
+
+    // Request with limit=1, cursor before newest visible
+    // This forces pagination to walk through the 25 internal messages
+    const cursor = `301:zzz`;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=1&before=${cursor}`,
+    });
+    const body = JSON.parse(res.body);
+
+    // Must return the newest visible message, not an empty page
+    assert.equal(body.messages.length, 1, 'should return 1 visible message, not empty page');
+    assert.equal(body.messages[0].content, 'newest visible');
+    assert.equal(body.hasMore, true, 'should indicate more messages exist');
+  });
+
+  it('scans past 300+ consecutive internal messages to reach buried visible (R4 regression)', async () => {
+    // R3/R4 review (gpt52): the scan must reach visible messages regardless
+    // of cluster size. This test places the ONLY visible message behind 300
+    // internal messages — the loop must walk through all of them. A fixed
+    // iteration cap (MAX_ITERATIONS=10) or scan limit (MAX_RAW_SCANNED=10000)
+    // would fail this test if the cluster exceeded the cap.
+    const threadId = 'thread-mega-cluster';
+    const CLUSTER_SIZE = 300;
+
+    // Only visible message — buried at the bottom behind the cluster
+    messageStore.append({
+      threadId,
+      userId: 'default-user',
+      catId: null,
+      content: 'buried visible',
+      mentions: [],
+      timestamp: 100,
+    });
+
+    // 300 consecutive internal context_briefing messages on top
+    for (let i = 0; i < CLUSTER_SIZE; i++) {
+      messageStore.append({
+        threadId,
+        userId: 'system',
+        catId: null,
+        content: `briefing-${i}`,
+        mentions: [],
+        timestamp: 200 + i,
+        origin: 'briefing',
+        extra: { systemKind: 'context_briefing' },
+      });
+    }
+
+    // Cursor after all messages — forces scan through the entire cluster
+    const cursor = `${200 + CLUSTER_SIZE + 1}:zzz`;
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=1&before=${cursor}`,
+    });
+    const body = JSON.parse(res.body);
+
+    // Must reach the buried visible message, not return empty page
+    assert.equal(body.messages.length, 1, 'must reach buried visible past 300 internal');
+    assert.equal(body.messages[0].content, 'buried visible');
+    assert.equal(body.hasMore, false, 'no more messages after the only visible one');
+  });
+
+  it('returns hasMore=false when store is exhausted after filtering', async () => {
+    const threadId = 'thread-exhausted';
+
+    messageStore.append({
+      threadId,
+      userId: 'default-user',
+      catId: null,
+      content: 'only visible',
+      mentions: [],
+      timestamp: 100,
+    });
+
+    // A few internal messages after
+    for (let i = 0; i < 3; i++) {
+      messageStore.append({
+        threadId,
+        userId: 'system',
+        catId: null,
+        content: `briefing-${i}`,
+        mentions: [],
+        timestamp: 200 + i,
+        origin: 'briefing',
+        extra: { systemKind: 'context_briefing' },
+      });
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/messages?threadId=${threadId}&limit=50`,
+    });
+    const body = JSON.parse(res.body);
+    assert.equal(body.messages.length, 1);
+    assert.equal(body.messages[0].content, 'only visible');
+    assert.equal(body.hasMore, false, 'store exhausted — no more messages');
+  });
+});

@@ -641,7 +641,7 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
- * Design constraint: Cat Cafe config is loaded once at startup, no hot-reload.
+ * Design constraint: Clowder AI config is loaded once at startup, no hot-reload.
  *
  * @param catId - The cat to check (e.g. 'opus', 'codex', 'opus-45')
  * @param config - Optional config override (for testing)
@@ -970,7 +970,7 @@ export function getReviewPolicy(config?: CatCafeConfig): ReviewPolicy {
 
 /**
  * Check if a cat is available (has quota).
- * F032: 铲屎官 40 美刀教训 — 没猫粮的猫不要找！
+ * F032: co-creator 40 美刀教训 — 没猫粮的猫不要找！
  */
 export function isCatAvailable(catId: string, config?: CatCafeConfig): boolean {
   const roster = getRoster(config);
@@ -1010,13 +1010,13 @@ export function isCatLead(catId: string, config?: CatCafeConfig): boolean {
 // ── F067: Co-Creator config accessor ────────────────────────────────
 
 /** Default co-creator mention patterns (backward compat when not configured) */
-const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
+const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator', '@co-creator', '@co-creator', '@co-creator'];
 
 let _cachedCoCreator: CoCreatorConfig | null = null;
 
 /**
  * Get coCreator config from the resolved cat config.
- * Returns a default config with @co-creator/@铲屎官 patterns when not configured.
+ * Returns a default config with @co-creator/@co-creator patterns when not configured.
  */
 export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
   if (_cachedCoCreator && !config) return _cachedCoCreator;
@@ -1025,7 +1025,7 @@ export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
 
   // v1 config or no coCreator → return defaults
   if (!cfg || cfg.version === 1 || !cfg.coCreator) {
-    return { name: '铲屎官', aliases: [], mentionPatterns: DEFAULT_CO_CREATOR_MENTION_PATTERNS };
+    return { name: 'co-creator', aliases: [], mentionPatterns: DEFAULT_CO_CREATOR_MENTION_PATTERNS };
   }
 
   _cachedCoCreator = cfg.coCreator;
@@ -1034,7 +1034,7 @@ export function getCoCreatorConfig(config?: CatCafeConfig): CoCreatorConfig {
 
 /**
  * Get all co-creator mention patterns (lowercased, with @ prefix).
- * Always includes @co-creator and @铲屎官 as fallback patterns in addition to configured ones.
+ * Always includes @co-creator and @co-creator as fallback patterns in addition to configured ones.
  */
 export function getCoCreatorMentionPatterns(config?: CatCafeConfig): readonly string[] {
   const coCreator = getCoCreatorConfig(config);

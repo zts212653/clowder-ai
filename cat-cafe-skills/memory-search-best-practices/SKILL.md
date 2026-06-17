@@ -49,7 +49,7 @@ triggers:
 | **absence check** | "我们提过 Y 没有" | 正反两路：`search(Y)` + `search(Y 相关概念/反义)` 都 0 命中才算 absent | 单刀 0 命中不等于不存在 |
 | **delta** | "上次到现在 X 变了什么" | `list_recent(scope=threads, since=N天)` + 对比 graph 邻居增减 + Read 关键 diff。**压缩恢复子场景起手**：先看 TodoWrite + session digest 拿到"上次已知状态" → 再 list_recent 补增量（46 review P3 补） | 时间窗口 + 增量视角 |
 
-## AUDHD coverage 案例 5 步 recipe（铲屎官真实任务）
+## AUDHD coverage 案例 5 步 recipe（operator真实任务）
 
 ```
 1. search_evidence("audhd adhd asd", hybrid, scope=docs, limit=10)
@@ -66,7 +66,7 @@ triggers:
 
 ## Ragdoll家族专属警告（治"碎片够了"病）
 
-铲屎官原话："**Ragdoll太聪明太自信，搜到足够推理就不搜了**"。
+operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜了**"。
 
 **Magic words 强制停**（触发就拉刹车）：
 
@@ -127,4 +127,4 @@ triggers:
 
 - **Spec**: `docs/features/F200-memory-recall-eval.md` v1.2 SW-1
 - **Related**: `memory-navigation`（前置入口决策） / `cat-cafe-skills/refs/memory-routing-partial.md`
-- **触发案例**: 铲屎官 AUDHD recall 任务（2026-05-17）暴露三猫搜出不同子集，催生本 skill
+- **触发案例**: operator AUDHD recall 任务（2026-05-17）暴露三猫搜出不同子集，催生本 skill

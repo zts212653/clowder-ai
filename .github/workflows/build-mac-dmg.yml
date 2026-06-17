@@ -1,6 +1,6 @@
 name: Build macOS DMG
 
-# Reusable workflow: builds macOS DMG installer(s) for Cat Cafe.
+# Reusable workflow: builds macOS DMG installer(s) for Clowder AI.
 # arm64 and x64 run as parallel matrix jobs for faster CI turnaround.
 #
 # Called by: release-desktop.yml (orchestrator)

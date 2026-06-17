@@ -60,7 +60,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       isExplicitPost?: boolean;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing';
+      systemKind?: 'a2a_routing' | 'context_briefing';
     }
   | undefined {
   if (!raw) return undefined;
@@ -85,7 +85,7 @@ export function safeParseExtra(raw: string | undefined):
       targetCats?: string[];
       isExplicitPost?: boolean;
       tracing?: { traceId: string; spanId: string; parentSpanId?: string };
-      systemKind?: 'a2a_routing';
+      systemKind?: 'a2a_routing' | 'context_briefing';
       a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string };
     } = {};
     let hasField = false;
@@ -148,8 +148,8 @@ export function safeParseExtra(raw: string | undefined):
       hasField = true;
     }
 
-    if (parsed.systemKind === 'a2a_routing') {
-      result.systemKind = 'a2a_routing';
+    if (parsed.systemKind === 'a2a_routing' || parsed.systemKind === 'context_briefing') {
+      result.systemKind = parsed.systemKind;
       hasField = true;
     }
 

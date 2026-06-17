@@ -2,7 +2,7 @@
 name: self-evolution
 description: >
   Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
-  Use when: 铲屎官 scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
+  Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
   Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
   Output: Scope Guard Log 记录 / Evolution Proposal 提案 / Episode Card → Method/Skill 蒸馏 → Eval 验证。
 ---
@@ -17,7 +17,7 @@ description: >
 
 | 模式 | 方向 | 保护/推动什么 | 触发 | 产出物 |
 |------|------|---------------|------|--------|
-| **A: Scope Guard** | 防御 | 当前 feat 验收边界 | 铲屎官讨论偏离愿景 | Scope Guard Log 记录 |
+| **A: Scope Guard** | 防御 | 当前 feat 验收边界 | operator讨论偏离愿景 | Scope Guard Log 记录 |
 | **B: Process Evolution** | 防御→改进 | 团队流程持续改进 | 重复犯错 / 流程缺口 | Evolution Proposal |
 | **C: Knowledge Evolution** | 进攻→成长 | 团队能力边界扩展 | 有价值的知识/方法论产生 | Episode Card → Method/Skill |
 
@@ -38,10 +38,10 @@ description: >
 
 ### 行为
 
-> 铲屎官，先收一下：当前 feat 愿景是 **{愿景}**。刚才提到的 **{新方向}** 更像独立 feat / 下一 phase。要不要拆出去方便验收？
+> operator，先收一下：当前 feat 愿景是 **{愿景}**。刚才提到的 **{新方向}** 更像独立 feat / 下一 phase。要不要拆出去方便验收？
 
 - 同一 phase **最多两次**：第一次温柔，第二次明确说"建议碰头"
-- 铲屎官说"不拆" → 复述新验收边界，不再追问
+- operator说"不拆" → 复述新验收边界，不再追问
 - 出口：继续 / 拆 feat / parking lot / 碰头
 
 ### 触发后记录
@@ -53,7 +53,7 @@ description: >
 ```
 
 - **同一 feat ≥3 次**触发 → 强烈建议拆 feat
-- **效果追踪**：成功率 = 铲屎官聚焦 / 总触发，用于调节灵敏度
+- **效果追踪**：成功率 = operator聚焦 / 总触发，用于调节灵敏度
 
 ---
 
@@ -62,7 +62,7 @@ description: >
 ### 触发（任一）
 
 1. Memory 中同类错误 **≥ 2 次**
-2. 铲屎官纠正了**可泛化为规则**的行为
+2. operator纠正了**可泛化为规则**的行为
 3. SOP 执行中发现**没有指引**
 4. Review 指出**系统性问题**（非个案 bug）
 
@@ -70,7 +70,7 @@ description: >
 
 1. **写提案**：用 `docs/evolution-proposals/TEMPLATE.md` 创建 `EP-XXX.md`
 2. **5 槽模板**：Trigger / Evidence(≥2 源) / Root Cause / Lever(最小杠杆) / Verify
-3. **审批**：影响单猫→直接提铲屎官；影响三猫→先 1 猫 sanity check→铲屎官拍板
+3. **审批**：影响单猫→直接提operator；影响三猫→先 1 猫 sanity check→operator拍板
 4. **落地闭环**：accepted → 必须关联 commit/PR，不能停在"提了"
 5. **30 天验证**：落地 30 天后自动触发 replay check——同类错误还出现吗？
 
@@ -93,14 +93,14 @@ description: >
 
 ### 触发信号
 
-铲屎官的自然语言纠正——不需要精确匹配，识别意图即可：
+operator的自然语言纠正——不需要精确匹配，识别意图即可：
 - 挫败类："笨猫/小笨猫/笨死了/绝了"
 - 纠正类："不是让你.../你理解错了/听不懂人话/我的意思是..."
 - 重复纠正：同一任务被纠正 2+ 次
 
 ### 记录动作
 
-检测到纠正信号后，**先完成铲屎官实际要求的任务**，然后在同一轮回复末尾附一段 evidence 记录到 F167 spec（`docs/features/F167-a2a-chain-quality.md` 的 Behavioral Evidence 区）：
+检测到纠正信号后，**先完成operator实际要求的任务**，然后在同一轮回复末尾附一段 evidence 记录到 F167 spec（`docs/features/F167-a2a-chain-quality.md` 的 Behavioral Evidence 区）：
 
 ```markdown
 ### Case E{N}: {一句话标题}（{日期}）
@@ -108,7 +108,7 @@ description: >
 | 维度 | 内容 |
 |------|------|
 | 我以为 | {我理解的任务} |
-| 实际要求 | {铲屎官实际要的} |
+| 实际要求 | {operator实际要的} |
 | 偏差根因 | {任务替换 / 锚定偏差 / 行动偏好 / 上下文盲视 / ...} |
 | 纠正轮次 | {被纠正几次才理解} |
 | 元心智哪条没执行 | {Q1角色确认 / Q2信息验证 / Q3坐标变换 / 都执行了但仍偏} |
@@ -132,7 +132,7 @@ description: >
 1. **Deep research** 产出了跨场景可复用的知识或框架
 2. **专业领域讨论**（医疗/法律/投资/技术调研等）形成了可迁移的分析方法论
 3. **跨域协作**中发现了可复用的协作模式或思维框架
-4. **铲屎官说"这个值得记住"** 或猫猫自主判断有高复用价值
+4. **operator说"这个值得记住"** 或猫猫自主判断有高复用价值
 
 ### 判断标准：值得沉淀吗？
 
@@ -217,7 +217,7 @@ Replay A/B 验证知识净增益。用 `evals/mode-c/TEMPLATE/` 结构创建。
 | **L1** | Pattern | ≥2 个相似 episode（180 天内），或人类要求；5Q ≥ 7/10 |
 | **L2** | Draft | smoke gate ≥3 cases（≥2/3 pass）；promotion gate ≥5 cases（≥3/5 pass，覆盖 3 类） |
 | **L3** | Validated | ≥6 uses，≥2 agents，≥80%，无 critical breach |
-| **L4** | Standard | ≥12 uses，最近 10 次 ≥90%，CVO 批准 |
+| **L4** | Standard | ≥12 uses，最近 10 次 ≥90%，operator 批准 |
 
 **双车道**：`long_tail: true` 允许长期停 L2/L3（高风险/低频域）。
 

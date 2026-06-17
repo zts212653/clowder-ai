@@ -57,4 +57,14 @@ describe('F128 proposal card — reportingMode visibility (Phase Y P1-2)', () =>
       assert.ok(field && field.value.length > 0, `${mode} must have a card label`);
     }
   });
+
+  // F225 猫猫化: title no longer embeds a raw 📥 emoji — the frontend renders an inbox SVG icon.
+  it('title carries no raw 📥 emoji prefix but keeps the readable label', () => {
+    const card = buildProposalCardBlock(/** @type {any} */ (baseProposal({ title: '通知卡片猫猫化' })));
+    assert.ok(!card.title.includes('📥'), `title must not embed 📥; got ${card.title}`);
+    assert.ok(
+      card.title.includes('提议新建 thread：通知卡片猫猫化'),
+      `title keeps the readable label; got ${card.title}`,
+    );
+  });
 });

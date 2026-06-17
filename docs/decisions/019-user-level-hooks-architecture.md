@@ -3,7 +3,7 @@ id: ADR-019
 title: 用户级 SessionStart/Stop Hooks 架构
 status: accepted
 date: 2026-03-17
-participants: [铲屎官, Ragdoll/Opus, Maine Coon/GPT-5.4, 金渐层/OpenCode]
+participants: [operator, Ragdoll/Opus, Maine Coon/GPT-5.4, 金渐层/OpenCode]
 related: [F050, ADR-017]
 ---
 
@@ -11,13 +11,13 @@ related: [F050, ADR-017]
 
 ## 背景
 
-2026-03-16~17 铲屎官集中治疗全猫行为退化问题（猜测式 debug、A2A 断链、review 盲改、共享文档不提交等）。讨论到 hook 自动化时，参考 [everything-claude-code](https://github.com/affaan-m/everything-claude-code) 的 hook 体系，提出是否引入工具级 hooks（PostToolUse auto-format、tsc check 等）。
+2026-03-16~17 operator集中治疗全猫行为退化问题（猜测式 debug、A2A 断链、review 盲改、共享文档不提交等）。讨论到 hook 自动化时，参考 [everything-claude-code](https://github.com/affaan-m/everything-claude-code) 的 hook 体系，提出是否引入工具级 hooks（PostToolUse auto-format、tsc check 等）。
 
 ## 决策
 
 ### 1. 工具级 hook（PreToolUse/PostToolUse）不做全猫统一
 
-**原因**（铲屎官判断）：各 CLI 工具级 hook 支持不一致（Claude Code 完整、Gemini CLI 完整、OpenCode 用 plugin、Codex CLI 无），强行在部分猫加会导致行为不一致——出问题时无法定位是提示词还是 hook 的问题。
+**原因**（operator判断）：各 CLI 工具级 hook 支持不一致（Claude Code 完整、Gemini CLI 完整、OpenCode 用 plugin、Codex CLI 无），强行在部分猫加会导致行为不一致——出问题时无法定位是提示词还是 hook 的问题。
 
 **结论**：行为一致性 > 自动化程度。工具级 hook 只在Ragdoll（Claude Code）做项目级守卫（evidence guard、runtime sanctuary），不承担全猫共用的纪律执行。
 
@@ -41,7 +41,7 @@ related: [F050, ADR-017]
 
 ### 4. Hook 脚本纳入 sync 管道
 
-**铲屎官原话**："万一你下次把这个 hook 改了，难道我又要自己脑子里记着要去 hook 脚本吗？"
+**operator experience**："万一你下次把这个 hook 改了，难道我又要自己脑子里记着要去 hook 脚本吗？"
 
 **结论**：hook 脚本和 AGENTS.md/GEMINI.md 一样走 `sync-system-prompts.ts` 全量同步。改了源文件，跑一次 `--apply` 就全量到位，不靠人脑记。
 

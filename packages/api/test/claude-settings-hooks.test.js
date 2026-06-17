@@ -2,7 +2,7 @@
 // 暂时注释掉：subagent model guard 测试
 //
 // 原因（2026-03-14）：
-//   铲屎官在 2026-03-12 明确关闭了 subagent model guard hook
+//   co-creator在 2026-03-12 明确关闭了 subagent model guard hook
 //   （~/.claude/hooks/check-subagent-model.sh 首行 exit 0）。
 //   理由："方向正确更重要，不缺猫粮（4×Max plan），省猫粮的 hook 变成了降智税。"
 //   参见 feedback_workflow_preferences.md "Subagent 不指定 model" 条目。

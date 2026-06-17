@@ -140,5 +140,5 @@ community_issue: "zts212653/clowder-ai#434"
 
 ## Review Gate
 
-- Phase A: Ragdoll + Maine Coon架构 review → team lead拍板
+- Phase A: Ragdoll + Maine Coon架构 review → operator拍板
 - Phase B-E: 跨 family review

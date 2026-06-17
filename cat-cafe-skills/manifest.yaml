@@ -1,4 +1,4 @@
-# Cat Café Skills Manifest — 路由单一真相源
+# Clowder AI Skills Manifest — 路由单一真相源
 # 所有 skill 的触发规则、排除条件、产出契约、skill-to-skill next 链在此定义。
 # SOP stage / suggested skill / hard rules / pitfalls 的机器真相源是 sop-definitions/development.yaml。
 # CLAUDE.md / AGENTS.md / GEMINI.md 的路由表当前手工同步（Wave 2 计划自动生成）。
@@ -105,7 +105,7 @@ skills:
   expert-panel:
     description: >
       多猫专家辩论团：独立分析→挑战→收敛→风险预演→语音汇报→文档交付。
-      Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、铲屎官说"帮我分析一下"。
+      Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、operator说"帮我分析一下"。
       Not for: 单猫能搞定的问题、代码实现、bug fix、日常聊天。
       Output: 洞察卡片(rich block) + 语音总结 + 会议纪要 + 正式报告(DOCX/PDF)。
     triggers:
@@ -212,7 +212,7 @@ skills:
     description: >
       检测摩擦信号 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或沉淀新 harness。
       Fix（确认重复→hook/lint/guard）+ Build（反复出现的新任务→规划新 skill）。
-      Use when: 铲屎官不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
+      Use when: operator不满且搜证据确认历史上重复出现、连续 cancel、反复出现的陌生任务类型。
       Not for: 一次性批评（搜证据未发现重复）、玩笑式笨猫、首次代码 bug（用 debugging）、
       review 反馈（用 receive-review）、一次性新任务（直接做不建 harness）。
       Output: Rich block 诊断卡 + 可选 F128 新 thread 提议 + 根因分类。
@@ -297,8 +297,8 @@ skills:
   # ── 合入门禁 ──
   merge-gate:
     description: >
-      合入 main 的完整流程：门禁检查 → PR → 云端 review → squash merge → 清理。
-      Use when: reviewer 放行后准备合入、开 PR、触发云端 review、准备 merge。
+      合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → 清理。
+      Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
       Not for: 开发中、review 未通过、自检未完成。
       Output: PR merged + worktree cleaned。
     triggers:
@@ -339,7 +339,7 @@ skills:
   open-source-teardown:
     description: >
       明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
-      Use when: 铲屎官要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
+      Use when: operator要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
       Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
       Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
       GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
@@ -360,7 +360,7 @@ skills:
       - "普通资料搜索"
       - "社区 issue/PR 运营"
       - "只需要架构头脑风暴"
-    output: "Code-evidence teardown report + Cat Cafe comparison + candidate lessons"
+    output: "Code-evidence teardown report + Clowder AI comparison + candidate lessons"
     next: ["collaborative-thinking", "writing-skills", "deep-research"]
     sop_step: null
     merged_from: null
@@ -369,7 +369,7 @@ skills:
   self-evolution:
     description: >
       Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
-      Use when: 铲屎官 scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
+      Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
       Not for: 日常 SOP 推进（正常执行）、一次性个案 bug fix。
       Output: Scope 收束提醒 / 流程改进提案 / 知识沉淀提案。
     triggers:
@@ -403,8 +403,8 @@ skills:
     description: >
       绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
       Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
-      Not for: 正常 debugging（用 debugging）、常规探索/调研（用 deep-research）、CVO 已签字降级的目标、trivial 任务。
-      Output: Desperation Packet（六问证据评估）+ 新方向行动计划 / CVO 升级请求。
+      Not for: 正常 debugging（用 debugging）、常规探索/调研（用 deep-research）、operator 已签字降级的目标、trivial 任务。
+      Output: Desperation Packet（六问证据评估）+ 新方向行动计划 / operator 升级请求。
     triggers:
       - "没希望"
       - "没救了"
@@ -424,9 +424,9 @@ skills:
     not_for:
       - "未出现绝境信号的常规 debugging"
       - "常规调研"
-      - "CVO 已签字降级"
+      - "operator 已签字降级"
       - "trivial 任务"
-    output: "Desperation Packet / 新方向行动计划 / CVO 升级请求"
+    output: "Desperation Packet / 新方向行动计划 / operator 升级请求"
     next: ["deep-research", "collaborative-thinking", "self-evolution"]
     sop_step: null
     merged_from: null
@@ -518,7 +518,7 @@ skills:
   deep-research:
     description: >
       多源深度调研管道（Web Deep Research + Coder 合成）。
-      Use when: 技术问题需要多源调查、设计决策需要证据、铲屎官说"调研"/"research"。
+      Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"。
       Not for: 简单搜索（直接用 WebSearch）、已有结论的确认。
       Output: 调研报告 + 证据合成。
     triggers:
@@ -693,10 +693,36 @@ skills:
     sop_step: null
     merged_from: null
 
+  anime-forge:
+    description: >
+      AI 生成动画短片生产线：图（关键帧锁确定性）→ 视频（i2v 给活气）→ 后期（剪辑做节奏）。
+      Use when: 做动画短剧/角色 IP 短片、猫咖日记系列新集、图生视频管线、剧情类 AI 视频。
+      Not for: 录屏/教程/showcase 视频（用 video-forge）、单张图生成（用 image-generation）、PPT（用 ppt-forge）。
+      Output: charter+分镜+prompt book+素材账本+EDL 驱动的成片，全程可复现可重渲。
+      GOTCHA: 与 video-forge 的区别——video-forge 素材是录的，anime-forge 素材是生成的，
+      核心难题是控制生成模型；含中文文字的图必须 GPT 系生成（Google 系中文乱码，实测）。
+    triggers:
+      - "动画短剧"
+      - "动漫短剧"
+      - "角色短片"
+      - "图生视频"
+      - "i2v"
+      - "猫咖日记"
+      - "醋醋喵"
+      - "AI 动画"
+    not_for:
+      - "录屏/教程/showcase 视频"
+      - "单张图生成"
+      - "PPT"
+    output: "Charter+shot-plan+prompt-book+ledger+EDL driven reproducible anime short"
+    next: ["feat-lifecycle", "rich-messaging"]
+    sop_step: null
+    merged_from: null
+
   # ── Skill 编写 ──
   writing-skills:
     description: >
-      创建或修改 Cat Café skill / MCP tool description 的元技能（含质量标准、范本、发布）。
+      创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
       Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
       或者功能实现中产出了 SKILL.md / cat-cafe-skills/ 新目录 / manifest.yaml skill 条目。
       Not for: 使用 skill（直接触发对应 skill）。
@@ -783,7 +809,7 @@ skills:
   enterprise-workflow:
     description: >
       企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
-      Use when: 铲屎官要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
+      Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
       Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
       Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
     triggers:
@@ -832,9 +858,9 @@ skills:
   # ── Workspace 导航 (F131) ──
   workspace-navigator:
     description: >
-      猫猫可编程导航 Workspace 面板：铲屎官说模糊意图，猫猫找到路径，自动打开文件/目录。
-      Use when: 铲屎官说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
-      Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给铲屎官看）。
+      猫猫可编程导航 Workspace 面板：operator说模糊意图，猫猫找到路径，自动打开文件/目录。
+      Use when: operator说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
+      Not for: 打开 localhost 前端页面（用 browser-preview）、纯代码编写（不涉及展示给operator看）。
       Output: Hub 右侧 Workspace 面板自动打开并导航到目标文件/目录。
     triggers:
       - "打开文件"
@@ -863,7 +889,7 @@ skills:
   browser-preview:
     description: >
       Hub 内嵌浏览器预览 localhost 应用。
-      Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、铲屎官说"看看效果"。
+      Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
       Not for: 后端纯 API 开发、不涉及页面的工作。
       Output: 前端页面在 Hub browser panel 中实时预览。
     triggers:
@@ -951,9 +977,9 @@ skills:
   # ── 健康提醒 (F085) ──
   hyperfocus-brake:
     description: >
-      铲屎官健康提醒：三猫撒娇打断 hyperfocus。
+      operator健康提醒：三猫撒娇打断 hyperfocus。
       Use when: hook 触发提醒、用户输入 /hyperfocus-brake。
-      Not for: 正常工作流程、非铲屎官用户。
+      Not for: 正常工作流程、非operator用户。
       Output: 三猫温柔提醒 + typed check-in。
     triggers:
       - "hyperfocus"
@@ -962,7 +988,7 @@ skills:
       - "/hyperfocus-brake"
     not_for:
       - "正常工作"
-      - "非铲屎官"
+      - "非operator"
     output: "Three-cat empathetic check-in"
     next: []
     sop_step: null
@@ -997,7 +1023,7 @@ skills:
   # ── 猫猫训练营引导 (F087) ──
   bootcamp-guide:
     description: >
-      CVO 新手训练营引导模式：Phase 驱动的新手引导行为。
+      operator 新手训练营引导模式：Phase 驱动的新手引导行为。
       Use when: thread 有 bootcampState（SystemPromptBuilder 自动注入）。
       Not for: 非训练营线程、老用户日常对话。
       Output: 分阶段引导行为 + bootcampState 状态更新。
@@ -1152,7 +1178,7 @@ refs:
     path: "refs/requirements-checklist-template.md"
     source: "F046 Phase B B3"
   decision-matrix:
-    description: "决策权漏斗矩阵（铲屎官/三猫/自治）"
+    description: "决策权漏斗矩阵（operator/三猫/自治）"
     path: "refs/decision-matrix.md"
     source: "CLAUDE.md + AGENTS.md + GEMINI.md 共用"
   commit-signatures:
@@ -1167,7 +1193,7 @@ refs:
 # ─── 三条铁律（仅此三条） ──────────────────────────────
 iron_laws:
   - id: redis-sanctuary
-    rule: "Redis 6399 是铲屎官数据圣域，Worktree 开发只用 6398"
+    rule: "Redis 6399 是operator数据圣域，Worktree 开发只用 6398"
   - id: no-self-review
     rule: "同一个体不能 review 自己的代码（跨 family 优先，可降级到同 family 不同个体）"
   - id: no-impersonation

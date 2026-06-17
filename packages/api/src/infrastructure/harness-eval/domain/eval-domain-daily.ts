@@ -38,6 +38,27 @@ export interface EvalDomainScheduleOpts {
    * → legacy default (all known-wireable domains get publish instructions in invocation).
    */
   wiredPublishDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>;
+  /**
+   * Direction B (clowder-ai#923 fix): pre-invocation prerequisite probe.
+   *
+   * `wiredPublishDomains` answers "is the generator wired?" but NOT "does this runtime's
+   * publish-verdict tool actually support the current sourceRefs contract?". A stale
+   * runtime (e.g. dogfood worktree on an outdated branch) can have the generator in its
+   * `verdictGenerators` map yet lack the sourceRefs validation added by later commits.
+   * When that mismatch happens, the eval cat receives the full publish + cross-post
+   * instructions, hits an infra blocker at publish time, and (per its prompt) cross-posts
+   * the blocker into a feature thread — exactly the leak clowder-ai#923 reported.
+   *
+   * The probe runs PER DOMAIN, PER CRON FIRE, BEFORE the cat is invoked. If it returns
+   * `false` (or throws), the cron writes a "blocked status" message to the domain's own
+   * system thread and skips cat invocation entirely. **Cat is never invoked when probe
+   * fails** → no LLM discretion → no possibility of cross-post leak.
+   *
+   * Omit/undefined → backward-compat (no skip; existing pass-through behaviour).
+   * Bootstrap (index.ts) wires a probe that dynamically imports per-domain adapters and
+   * checks for a known-post-fix symbol (e.g. `isA2aSourceRefs` for `eval:a2a`).
+   */
+  publishPrereqProbe?: (domainId: EvalDomainRegistryEntry['domainId']) => boolean | Promise<boolean>;
 }
 
 /** @deprecated Use EvalDomainScheduleOpts — kept for backward compat. */
@@ -78,6 +99,47 @@ interface EvalDomainSpecConfig extends EvalDomainScheduleOpts {
   label: string;
   description: string;
   triggerReasonPrefix: string;
+}
+
+/**
+ * Direction B (clowder-ai#923): build the "publish prereq missing" status message that
+ * gets posted to the domain's OWN system thread when the cron skips cat invocation.
+ *
+ * The message is intentionally human-readable + has a stable header (`SKIPPED (publish
+ * prereq missing)`) so future eval-domain readers / log scrubbers can recognize and
+ * count these skips. It also points at the actionable next step (sync the runtime that
+ * hosts this cron, or pin the cron to a runtime that has the prereq).
+ */
+function buildPublishPrereqSkippedMessage(domain: EvalDomainRegistryEntry): string {
+  return [
+    `## Eval Domain: ${domain.domainId} — SKIPPED (publish prereq missing)`,
+    '',
+    'The scheduled eval was skipped because the runtime hosting this cron does not',
+    'export the verdict-publish prerequisites required to run this eval domain end-to-end',
+    '(e.g. the `isA2aSourceRefs` validator exported by `publish-verdict/validation.js`).',
+    '',
+    'Why this matters: invoking the eval cat without the prerequisites would let it hit',
+    'an infra blocker at publish time, and (per its prompt) cross-post that blocker into',
+    'a feature thread — exactly the leak [clowder-ai#923] reported. The fail-closed skip',
+    'keeps the failure contained in this eval domain thread.',
+    '',
+    'Next action: ensure the runtime that hosts the eval cron has the publish-verdict',
+    'fix landed, or pin the cron to a runtime that does (Direction A/C per the issue).',
+  ].join('\n');
+}
+
+async function evaluatePublishPrereq(
+  probe: NonNullable<EvalDomainScheduleOpts['publishPrereqProbe']>,
+  domainId: EvalDomainRegistryEntry['domainId'],
+): Promise<boolean> {
+  // Fail-closed on throw: a probe that fails to introspect the runtime is treated as
+  // "prereq missing" — better to skip a recoverable eval than to invoke the cat into a
+  // potential cross-post leak.
+  try {
+    return await Promise.resolve(probe(domainId));
+  } catch {
+    return false;
+  }
 }
 
 function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDomainRegistryEntry> {
@@ -129,6 +191,26 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
             ],
             config.defaultUserId,
           );
+        }
+
+        // Direction B (clowder-ai#923 fix): publish-prereq gate.
+        // Runs BEFORE legacy-gate / override / buildEvalCatInvocation so that a runtime
+        // missing publish-verdict prerequisites never invokes the eval cat. The cat
+        // (LLM) is the only path through which the cross_post_message prompt instruction
+        // can fire — eliminating the invocation eliminates the leak class entirely.
+        // Probe omitted → backward-compat (no skip). Probe throws → fail-closed.
+        if (config.publishPrereqProbe) {
+          const prereqOk = await evaluatePublishPrereq(config.publishPrereqProbe, domain.domainId);
+          if (!prereqOk) {
+            if (ctx.deliver) {
+              await ctx.deliver({
+                threadId: domain.systemThreadId,
+                content: buildPublishPrereqSkippedMessage(domain),
+                userId: 'scheduler',
+              });
+            }
+            return;
+          }
         }
 
         // P1-2 fix: if this domain reached execute, it passed the legacy gate check

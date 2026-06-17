@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # F085 Hyperfocus Brake - UserPromptSubmit Hook
-# 铲屎官每次发消息时记录心跳，用于区分"人在干活"和"猫自己干活"
+# operator每次发消息时记录心跳，用于区分"人在干活"和"猫自己干活"
 
 set -euo pipefail
 

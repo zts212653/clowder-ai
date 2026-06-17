@@ -226,7 +226,12 @@ else
     echo -e "${RED}❌ pnpm install --frozen-lockfile 失败${NC}"
     exit 1
   fi
-  echo -e "${GREEN}✓ 依赖刷新通过${NC}"
+  if ! pnpm run check:biome-version; then
+    echo ""
+    echo -e "${RED}❌ Biome 版本与 lockfile 不匹配${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✓ 依赖刷新 + Biome 工具链校验通过${NC}"
   echo ""
 fi
 record_step "install" "$STEP_START"

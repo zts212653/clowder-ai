@@ -7,8 +7,14 @@ import type { ConnectorSource } from '@cat-cafe/shared';
 import { parsePrSubjectKey, prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
+
+/** Minimal projector interface for optional DI — avoids importing concrete class. */
+interface ICommunityProjectorMin {
+  apply(event: Parameters<ICommunityEventLog['append']>[0]): Promise<void>;
+}
 
 export type CiBucket = 'pass' | 'fail' | 'pending';
 
@@ -46,6 +52,14 @@ export interface CiCdRouterOptions {
     outcome: 'success' | 'failure';
     threadId: string;
   }) => void;
+  /**
+   * F168 Phase A (P1-3 fix): canonical PR lifecycle event emission point.
+   * CiCdRouter is first to detect merged/closed; ReviewFeedbackTaskSpec may race.
+   * sourceEventId dedup ensures double-fire is safe.
+   */
+  readonly eventLog?: ICommunityEventLog;
+  /** Optional projector to apply the emitted event immediately after append. */
+  readonly projector?: ICommunityProjectorMin;
 }
 
 export class CiCdRouter {
@@ -92,6 +106,33 @@ export class CiCdRouter {
           });
         } catch {
           // Best-effort: don't break CI/CD routing
+        }
+      }
+
+      // F168 Phase A P1-3: canonical community event emission.
+      // This is the first reliable detection point for PR lifecycle.
+      // sourceEventId = `lifecycle:${sk}:${prState}` — dedup-safe if ReviewFeedbackTaskSpec also fires.
+      if (this.opts.eventLog) {
+        try {
+          const eventKind = poll.prState === 'merged' ? 'pr.merged' : 'pr.closed';
+          const communityEvent = {
+            sourceEventId: `lifecycle:${sk}:${poll.prState}`,
+            subjectKey: sk,
+            kind: eventKind as 'pr.merged' | 'pr.closed',
+            classification: 'state-changing' as const,
+            payload: {
+              prState: poll.prState,
+              repoFullName: poll.repoFullName,
+              prNumber: poll.prNumber,
+            },
+            at: Date.now(),
+          };
+          const { appended } = await this.opts.eventLog.append(communityEvent);
+          if (appended && this.opts.projector) {
+            await this.opts.projector.apply(communityEvent);
+          }
+        } catch {
+          // Best-effort: event log failure MUST NOT block CI/CD routing (spec §Task6)
         }
       }
 

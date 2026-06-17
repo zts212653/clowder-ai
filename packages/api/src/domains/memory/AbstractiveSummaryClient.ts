@@ -4,7 +4,7 @@
  * Design: Opus outputs NATURAL LANGUAGE (what it's good at).
  * Program parses the output into structured segments (what code is good at).
  *
- * 铲屎官原话："我们就不能让他返回自然语言直接帮他加格式吗？格式就是程序加。"
+ * co-creator原话："我们就不能让他返回自然语言直接帮他加格式吗？格式就是程序加。"
  */
 
 export interface AbstractiveInput {
@@ -68,7 +68,7 @@ Rules:
 - The # title line is REQUIRED
 - The summary paragraph is REQUIRED (200-400 chars, after the title)
 - [decision], [lesson], [method] tags are OPTIONAL — only include if there's genuinely durable knowledge
-- Add ! suffix (e.g. [decision!]) ONLY when the human/CVO explicitly confirmed the decision or lesson in the conversation
+- Add ! suffix (e.g. [decision!]) ONLY when the human/operator explicitly confirmed the decision or lesson in the conversation
 - Do NOT extract brainstorm branches, temporary TODOs, or session-local context
 - Keep it concise — this is a summary, not a transcript
 - Write in the same language as the messages (Chinese/English/mixed)

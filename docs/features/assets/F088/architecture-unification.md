@@ -13,7 +13,7 @@ created: 2026-03-10
 
 ### 问题
 
-ConnectorRouter 收到飞书消息后在 ThreadStore 创建 thread，但用 `defaultUserId: 'default-user'`，导致铲屎官在前端看不到 connector thread。同时 binding 纯内存（重启即丢），IM 侧无法管理 thread。
+ConnectorRouter 收到飞书消息后在 ThreadStore 创建 thread，但用 `defaultUserId: 'default-user'`，导致operator在前端看不到 connector thread。同时 binding 纯内存（重启即丢），IM 侧无法管理 thread。
 
 ### 解决方案（Phase A + B + C）
 

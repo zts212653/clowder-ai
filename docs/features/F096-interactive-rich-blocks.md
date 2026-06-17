@@ -15,13 +15,13 @@ created: 2026-03-11
 
 当前 Rich Block 系统有 5 种 kind（card/diff/checklist/media_gallery/audio），全部是**只读展示**。很多场景需要用户在富文本中直接操作——选方案、勾选项、点按钮——而不是手动打字。
 
-### team experience（2026-03-11）
+### operator experience（2026-03-11）
 
 > "我们能做成可交互的富文本！Claude Code 有那个啊！你弹出一个东西让我选和 ☑️！我们按道理有前端！难道不能吗？这样的富文本别的地方还能用？！"
 
 ### 核心动机
 
-Cat Café 有完整的 Web 前端，交互能力远超 CLI。可交互 Rich Block 是**通用基础设施**，不只服务 F087 训练营，还能用于 CVO 决策、Review 投票、确认操作等所有需要用户选择的场景。
+Cat Café 有完整的 Web 前端，交互能力远超 CLI。可交互 Rich Block 是**通用基础设施**，不只服务 F087 训练营，还能用于 operator 决策、Review 投票、确认操作等所有需要用户选择的场景。
 
 ## What
 
@@ -92,7 +92,7 @@ interface InteractiveOption {
 |------|----------------|-------------|
 | 训练营选引导猫 | `card-grid` | F087 |
 | 训练营选任务 | `card-grid` + `allowRandom` | F087 |
-| CVO 拍板方案 | `select` | 通用 |
+| operator 拍板方案 | `select` | 通用 |
 | 环境检测确认 | `confirm` | F087 |
 | Review 多选标记 | `multi-select` | 通用 |
 | 危险操作确认 | `confirm` | 通用 |
@@ -146,7 +146,7 @@ interface InteractiveOption {
 | KD-3 | 交互后 block 变 disabled | 防止重复操作，保留选择记录 | 2026-03-11 |
 | KD-4 | 持久化到 `message.extra.rich`（PATCH endpoint） | 终态基座，刷新不丢状态（P1：每步产物是终态） | 2026-03-11 |
 | KD-5 | 随机选择用闪烁高亮减速动画（CSS + setInterval） | 有期待感，纯前端实现无需额外库 | 2026-03-11 |
-| KD-6 | 同组 block 用 `groupId` 统一提交，无 groupId 保持独立 | team lead反馈：一次发 N 个问题应全选完一起提交 | 2026-03-11 |
+| KD-6 | 同组 block 用 `groupId` 统一提交，无 groupId 保持独立 | operator反馈：一次发 N 个问题应全选完一起提交 | 2026-03-11 |
 
 ## Review Gate
 
@@ -154,7 +154,7 @@ interface InteractiveOption {
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "弹出一个东西让我选和☑️" | AC-A2, AC-A3 | test + screenshot | [x] |
 | R2 | "别的地方还能用" — 通用组件 | AC-A1~A6 | 多场景 test | [x] |

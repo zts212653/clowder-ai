@@ -7,7 +7,8 @@
  *
  * Follows F139 TaskSpec_P1 consumer pattern (CiCdCheckTaskSpec etc).
  */
-import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { CatId, CommunityEvent, ConnectorSource } from '@cat-cafe/shared';
+import type { ICommunityEventLog } from '../../../domains/community/CommunityEventLog.js';
 import type {
   ConnectorDeliveryDeps,
   ConnectorDeliveryInput,
@@ -17,6 +18,11 @@ import type { ExecuteContext, GateCtx, TaskSpec_P1, WorkItem } from '../../sched
 import type { IConnectorThreadBindingStore } from '../ConnectorThreadBindingStore.js';
 import type { ReconciliationDedup } from './ReconciliationDedup.js';
 import type { RepoInboxSignal } from './types.js';
+
+/** Minimal projector interface — only apply() needed here. */
+interface ICommunityProjectorApply {
+  apply(event: CommunityEvent): Promise<void>;
+}
 
 const CONNECTOR_ID = 'github-repo-event';
 const DEFAULT_MAX_WORK_ITEMS_PER_RUN = 5;
@@ -68,6 +74,9 @@ export interface RepoScanTaskSpecOptions {
   skipHistoricalOnFirstRun?: boolean;
   /** F202-2B: Override task ID for plugin-scoped schedule instances */
   id?: string;
+  // F168 Phase A: community event log + projector (best-effort, optional)
+  eventLog?: ICommunityEventLog;
+  projector?: ICommunityProjectorApply;
 }
 
 function formatReconciliationMessage(signal: RepoInboxSignal): string {
@@ -234,6 +243,35 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
         });
 
         await opts.reconciliationDedup.markNotified(signal.repoFullName, signal.subjectType, signal.number);
+
+        // F168 Phase A: emit community event (best-effort — failure never blocks notification)
+        if (opts.eventLog) {
+          try {
+            const kindMap: Record<string, CommunityEvent['kind']> = {
+              pr: 'pr.opened',
+              issue: 'issue.opened',
+            };
+            const eventKind = kindMap[signal.subjectType];
+            if (eventKind) {
+              const subjectKey = `${signal.subjectType}:${signal.repoFullName}#${signal.number}`;
+              const sourceEventId = `scan:${signal.repoFullName}:${signal.number}:${eventKind}`;
+              const communityEvent: CommunityEvent = {
+                sourceEventId,
+                subjectKey,
+                kind: eventKind,
+                classification: 'state-changing',
+                payload: { title: signal.title, authorLogin: signal.authorLogin },
+                at: Date.now(),
+              };
+              const { appended } = await opts.eventLog.append(communityEvent);
+              if (appended && opts.projector) {
+                await opts.projector.apply(communityEvent);
+              }
+            }
+          } catch {
+            opts.log.warn(`[repo-scan] community event emit failed for ${signal.repoFullName}#${signal.number}`);
+          }
+        }
 
         try {
           void Promise.resolve(

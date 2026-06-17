@@ -4,7 +4,7 @@
  * 机械校验 final routing slot 里的 @ 语法：slot 内出现 inline @handle 但无合法出口
  * （行首 @ / hold_ball / MCP targetCats）→ invalid_route_syntax。
  *
- * 设计原则（KD-24，2026-04-24 铲屎官 + 砚砚 GPT-5.5 拍板）：
+ * 设计原则（KD-24，2026-04-24 co-creator + 砚砚 GPT-5.5 拍板）：
  * - 只判"出口槽位语法对不对"，不推断"猫想不想传球"（禁止语义 intent 分类器 / KD-8）
  * - 命中只产出 invalid_route_syntax，不自动路由 / 不推断目标 / 不替猫决定意图
  * - 豁免只走结构边界（fenced code / blockquote / URL），禁止动作词表 / 语义豁免表

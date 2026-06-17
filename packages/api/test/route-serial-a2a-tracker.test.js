@@ -206,4 +206,75 @@ describe('routeSerial A2A tracker bridge', () => {
     assert.equal(sawOpusDone, true, 'test must exercise the callback-only handoff point');
     assert.equal(tracker.has(threadId), false, 'callback A2A slot must be cleaned up after the chain finishes');
   });
+
+  it('trackExternalSlot purges a canceled tombstone instead of preserving its aborted controller', async () => {
+    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
+
+    const threadId = 'thread-tombstone-retrack';
+    const userId = 'user-a';
+    const tracker = new InvocationTracker();
+
+    // Prior turn: codex started then cancelled → 'canceled' tombstone. getController() intentionally
+    // still returns the now-ABORTED controller (pre-invoke cancel semantics, InvocationTracker.ts:290).
+    tracker.startAll(threadId, ['codex'], userId);
+    tracker.cancel(threadId, 'codex', userId, 'user_cancel');
+    assert.equal(
+      tracker.getController(threadId, 'codex')?.signal.aborted,
+      true,
+      'precondition: a canceled tombstone exposes an aborted controller',
+    );
+
+    // A2A handoff re-tracks the target via trackExternalSlot — the exact bridge route-serial uses
+    // (trackA2ASlot → trackExternalSlot). The passed controller is the new turn's batch gate.
+    const batchGate = new AbortController();
+    tracker.trackExternalSlot(threadId, 'codex', batchGate, userId, ['codex']);
+
+    // BUG: trackExternalSlot returns idempotently on the un-expired tombstone, so getController keeps
+    // handing route-serial the aborted signal → the worklist loop skips codex at the top (route-serial
+    // line 429). After the fix, re-track must replace the tombstone with a fresh active slot.
+    assert.equal(
+      tracker.getController(threadId, 'codex')?.signal.aborted,
+      false,
+      'A2A re-track must replace the canceled tombstone with a fresh active slot (controller not aborted)',
+    );
+  });
+
+  it('ball.handed 记 original routed target + A2A target（云端 P1-1：不只 A2A handoff）', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const recorded = [];
+    const deps = createMockDeps({
+      opus: {
+        async *invoke() {
+          yield { type: 'text', catId: 'opus', content: '@codex\n请接手', timestamp: Date.now() };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+        },
+      },
+      codex: {
+        async *invoke() {
+          yield { type: 'text', catId: 'codex', content: '我接到了', timestamp: Date.now() };
+          yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+        },
+      },
+    });
+    // ball-custody ingest spy
+    deps.ballCustody = {
+      record: async (event) => {
+        recorded.push(event);
+      },
+    };
+
+    // currentUserMessageId 提供 original target 的 messageId 来源（用户消息 id）。
+    for await (const _ of routeSerial(deps, ['opus'], 'start', 'user-a', 'thread-handed-p1', {
+      currentUserMessageId: 'user-msg-1',
+    })) {
+      // drain
+    }
+
+    const handedTo = recorded.filter((e) => e.kind === 'ball.handed').map((e) => e.payload.toCatId);
+    // 修复前：emit 只在 A2A handoff loop（`if (wi < targetCats.length) continue` skip original）→ original
+    // opus 漏记 ball.handed。修复后：worklist 主循环接球时刻统一 emit → opus（original user→cat）+
+    // codex（A2A cat→cat）都记。
+    assert.ok(handedTo.includes('opus'), 'original routed target opus 必须记 ball.handed（P1-1 根因）');
+    assert.ok(handedTo.includes('codex'), 'A2A target codex 也记 ball.handed');
+  });
 });

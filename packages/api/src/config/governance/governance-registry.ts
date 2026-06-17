@@ -3,7 +3,7 @@
  *
  * Tracks which external projects have been bootstrapped,
  * their governance pack versions, and sync timestamps.
- * Stored at `.cat-cafe/governance-registry.json` in the Cat Cafe root.
+ * Stored at `.cat-cafe/governance-registry.json` in the Clowder AI root.
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';

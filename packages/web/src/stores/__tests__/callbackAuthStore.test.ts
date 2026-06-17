@@ -474,7 +474,7 @@ describe('markViewed — Cloud P2 #1425 round 2 reconcile-from-snapshot', () => 
   });
 
   it('alpha #6 fix: panel mount markViewed clears all 24h failures (offline cat scenario)', async () => {
-    // 铲屎官 alpha #6 root case: cat went offline after generating 60 failures,
+    // co-creator alpha #6 root case: cat went offline after generating 60 failures,
     // user opens panel, badge should clear. Original viewedUpTo=snapshot 设计
     // didn't reliably clear (over-cautious). 新设计 markViewed POSTs without
     // body → server uses now() → lastViewedAt > all sample.at → optimistic

@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
  * Layers confidence (high/mid/low) on top of the F192 deterministic substring
  * detector. This is the 人工拉闸 lane's noise filter — it does NOT infer cat
  * intent (KD-3 no-classifier); it applies deterministic context rules:
- *   - cat-authored magic word        → low  (magic words are CVO-only brake words;
+ *   - cat-authored magic word        → low  (magic words are operator-only brake words;
  *                                            a cat using one is quoting/discussing)
  *   - >=3 distinct words OR 「word」=def → low  (the SNR-22% listing/defining noise
  *                                            opus-47 found in eval: RFC listing the table)
@@ -65,7 +65,7 @@ describe('F227 PR-2: magic word confidence grading', () => {
     assert.equal(g[0].confidence, 'low');
   });
 
-  it('grades a cat-authored magic word as low (CVO-only word; cat usage = discussion)', async () => {
+  it('grades a cat-authored magic word as low (operator-only word; cat usage = discussion)', async () => {
     const { detectGradedMagicWords } = await loadMod();
     const g = detectGradedMagicWords('我刚才是不是写得有点脚手架了，下次注意', { authoredByCocreator: false });
     assert.equal(g.length, 1);

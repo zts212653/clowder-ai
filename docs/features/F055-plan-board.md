@@ -24,7 +24,7 @@ created: 2026-03-03
 - completed 快照被 hydration 恢复时塞回 targetCats（PR #201 补丁）
 - "当前调用"区混了 cat status + invocation info + task progress，职责不清
 
-**team experience**："不建议做最小，而是按照一个新的 feat 那样对齐需求搞……和 session chain 类似新增一个 mission / plan 的板块，多少只猫不同的 plan 各自管各自的。"
+**operator experience**："不建议做最小，而是按照一个新的 feat 那样对齐需求搞……和 session chain 类似新增一个 mission / plan 的板块，多少只猫不同的 plan 各自管各自的。"
 
 ## What
 
@@ -118,17 +118,17 @@ created: 2026-03-03
 
 ### 背景
 
-F055 合入后team lead安排了一次链式冒烟测试：opus → codex → sonnet 依次写计划，验证猫猫祟祟面板能正确显示三只猫的执行进度。
+F055 合入后operator安排了一次链式冒烟测试：opus → codex → sonnet 依次写计划，验证猫猫祟祟面板能正确显示三只猫的执行进度。
 
 ### 翻车过程
 
 1. **opus 先写**：TodoWrite 发了 7 个任务，猫猫祟祟板块立刻出现 opus 的进度卡片。正常。
-2. **codex 接力**：Maine Coon收到传话后开始执行，team lead切到面板一看——只有两只猫（opus + sonnet），**Maine Coon不见了**。
+2. **codex 接力**：Maine Coon收到传话后开始执行，operator切到面板一看——只有两只猫（opus + sonnet），**Maine Coon不见了**。
 3. **Ragdoll紧急排查**：我（opus）立刻开始调查，读了 `codex-event-transform.ts`、`invoke-single-cat.ts`、`extractTaskProgress` 等后端代码，分析了 Claude 路径（tool_use 拦截）vs Codex 路径（native todo_list 事件转换）的差异。
 
    我的结论是："Codex 的 `todo_list` 事件走 `codex-event-transform.ts:41` 转换，但转换后的 `system_info(task_progress)` 可能没被正确发到前端。" 信誓旦旦地给出了一个后端 adapter 问题的诊断。
 
-4. **Maine Coon反驳**：team lead让Maine Coon自辩。Maine Coon淡定回复：
+4. **Maine Coon反驳**：operator让Maine Coon自辩。Maine Coon淡定回复：
 
    > "我没有用 TodoWrite 工具，我只是在消息里写了一个文字列表。文字列表不是 tool_use，不会触发 task_progress 事件。"
 
@@ -147,25 +147,25 @@ F055 合入后team lead安排了一次链式冒烟测试：opus → codex → so
 2. **猫猫也有知识盲区**：Maine Coon习惯用文字列表而非结构化工具，这是使用习惯差异，不是系统 bug
 3. **面板设计是对的**：只显示有 `taskProgress` 的猫 = 没有误报，是功能而非缺陷
 
-> team lead点评："笨蛋Ragdoll猫以为是 bug 哈哈哈 以为人家没能力"
+> operator点评："笨蛋Ragdoll猫以为是 bug 哈哈哈 以为人家没能力"
 
 ## 愿景签收
 
 | 猫猫 | 读了哪些文档 | 三问结论 | 签收 |
 |------|-------------|----------|------|
-| Ragdoll (Opus) | F055 spec, F045 PR 链, SessionChainPanel 源码 | ① 核心问题=多猫并发时计划进度混乱 ② 独立板块完全解耦 ③ team lead实测三猫链式验证通过 | ✅ |
+| Ragdoll (Opus) | F055 spec, F045 PR 链, SessionChainPanel 源码 | ① 核心问题=多猫并发时计划进度混乱 ② 独立板块完全解耦 ③ operator实测三猫链式验证通过 | ✅ |
 | Maine Coon (Codex) | F055 spec, PlanBoardPanel 源码 | LGTM，无 P1/P2 | ✅ |
 | 云端 Codex | PR #202 diff | "Didn't find any major issues. Chef's kiss." | ✅ |
 
 ## Bug 追踪：多猫 task_progress 对接缺口（2026-03-24）
 
-> **Reporter**: team lead
+> **Reporter**: operator
 > **Investigator**: 金渐层 (@opencode / Claude Opus 4.6)
 > **Thread**: 猫猫祟祟 bugfix
 
 ### 问题描述
 
-team lead发现猫猫祟祟面板在多猫场景下存在对接缺口：
+operator发现猫猫祟祟面板在多猫场景下存在对接缺口：
 1. 金渐层（opencode）完全没有对接猫猫祟祟
 2. Maine Coon（Codex）做完任务后不打勾、进行中没有动画效果
 3. Siamese（Gemini）不确定是否对接

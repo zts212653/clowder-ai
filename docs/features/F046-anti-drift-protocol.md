@@ -18,13 +18,13 @@ updated: 2026-03-06
 
 ## Why
 
-F041 能力看板暴露致命问题：AC 12 项全绿、76 测试全过、14 轮 review 全通过——**但team lead打开就发现交付物完全不是想要的**。根因：整条 review 链路没有任何角色回去读用户的原始需求。
+F041 能力看板暴露致命问题：AC 12 项全绿、76 测试全过、14 轮 review 全通过——**但operator打开就发现交付物完全不是想要的**。根因：整条 review 链路没有任何角色回去读用户的原始需求。
 
 这不是个案，是系统性缺陷：三猫协作流程中**缺少愿景层守护**，只守了代码质量层。
 
 ## What
 
-建立多层愿景守护机制，确保从开发到交付全链路不偏离team lead原始意图。
+建立多层愿景守护机制，确保从开发到交付全链路不偏离operator原始意图。
 
 ### 已完成（Phase A — 立即做）
 
@@ -32,7 +32,7 @@ F041 能力看板暴露致命问题：AC 12 项全绿、76 测试全过、14 轮
 |----|------|------|--------|
 | A1 | 三猫指引（CLAUDE/AGENTS/GEMINI.md）新增「愿景守护」铁律 | ✅ Done | `642c31b` |
 | A2 | `feat-completion` Skill 新增 Step 0d 跨猫签收记录 | ✅ Done | `642c31b` |
-| A3 | 截图证据链——限定前端 UI/UX（team lead决策：后端免截图） | ✅ Done | `642c31b` |
+| A3 | 截图证据链——限定前端 UI/UX（operator决策：后端免截图） | ✅ Done | `642c31b` |
 | A4 | Review Skills 新增「≤5 行原始需求摘录」强制规则 | ✅ Done | `642c31b` |
 
 ### 待开发（Phase B — 计划做）
@@ -50,13 +50,13 @@ F041 能力看板暴露致命问题：AC 12 项全绿、76 测试全过、14 轮
 
 #### D.0 问题现象
 
-2026-03-02 team lead观察到Maine Coon的 **"@ 二极管"现象**：
+2026-03-02 operator观察到Maine Coon的 **"@ 二极管"现象**：
 
-- **不干预时**：Maine Coon（Codex 和 GPT-5.2）疯狂互相 @，包括"收到，我也在等云端 review"这种**零行动**消息也会 @，导致无意义的 agent 调用浪费算力。两只Maine Coon提了 PR 在等云端 review，却不停 @ 对方确认"对，我们在等"。
+- **不干预时**：Maine Coon（Codex 和 GPT-5.2）疯狂互相 @，包括"收到，我也在等remote review"这种**零行动**消息也会 @，导致无意义的 agent 调用浪费算力。两只Maine Coon提了 PR 在等remote review，却不停 @ 对方确认"对，我们在等"。
 - **加了 prompt 规则后**：矫枉过正，该 @ 的时候反而不 @，review 结果出来了不通知对方，导致流程卡住。
 - **Ragdoll（Opus）不受影响**：能正确判断何时该 @、何时不该。
 
-**team experience**：
+**operator experience**：
 > "要么往死里at 要么不at 去找不着其他猫"
 > "他可能以为Ragdoll的名字叫 at xxxx 你懂吧？"
 
@@ -68,7 +68,7 @@ F041 能力看板暴露致命问题：AC 12 项全绿、76 测试全过、14 轮
 
 结果：runtime 更新后Maine Coon**仍然疯狂 @**。Prompt 软约束打不过上下文里大量 `@xxx` 模式的补全惯性。
 
-**第二步：Maine Coon自述采访（Thread `thread_mm95ha2vubft1bbi` 08:13-08:15）**
+**第二步：Maine Coon自述采访（Thread `[thread-id]` 08:13-08:15）**
 
 Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度一致：
 
@@ -84,11 +84,11 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 2. 路由层 `a2a-mentions.ts` 只检测"行首有没有 @handle"，不检测"有没有行动请求"，所以废话也被路由
 3. Prompt 规则是软约束，在高密度 @ 上下文里被模式补全覆盖
 
-**第三步：方案讨论（team lead + 三猫）**
+**第三步：方案讨论（operator + 三猫）**
 
-| 方案 | 提出者 | team lead决策 | 理由 |
+| 方案 | 提出者 | operator决策 | 理由 |
 |------|--------|-----------|------|
-| 强制 MCP 工具调用才能 @ | team lead | 暂不采用 | 可能矫枉过正，Ragdoll不需要这约束 |
+| 强制 MCP 工具调用才能 @ | operator | 暂不采用 | 可能矫枉过正，Ragdoll不需要这约束 |
 | 强制冷却期（3 分钟内不能 @ 同目标 2 次以上） | Ragdoll | **否决** | "Maine Coon思考三分钟说一句废话你怎么办？" |
 | 可路由门禁（@ + 动作词才路由） | Codex + GPT-5.2 | **认可方向** | 软硬结合，不矫枉过正 |
 | 输入去惯性（元信息去 @ 前缀） | GPT-5.2 | **认可方向** | 治根——减少上下文里 @ 模式密度 |
@@ -115,7 +115,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
   - `relaxed`（线程级热开关）：允许 `@handle` 段后空一行，在下一段出现动作词
   - 入口：`PATCH /api/threads/:id { mentionActionabilityMode: 'strict' | 'relaxed' }`
 - **动作词初始集**（硬编码，后续可配置化）：`review`、`确认`、`处理`、`修复`、`请`、`帮`、`决策`、`看一下`、`check`、`fix`、`merge`
-- **注意**：team lead的 @ 不受此门禁影响（team lead消息走不同路径），只影响猫→猫的 A2A mention
+- **注意**：operator的 @ 不受此门禁影响（operator消息走不同路径），只影响猫→猫的 A2A mention
 
 **D2: Input De-inertia（输入去惯性）**
 
@@ -158,16 +158,16 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 | 方案 | 不做原因 |
 |------|---------|
 | 强制 MCP 工具调用 @ | 改动太大（重写整个 A2A 路由）+ Ragdoll不需要 + 工程量不匹配收益 |
-| 冷却期（时间窗口内限频） | team lead否决："猫思考慢了怎么办？" + 误伤正常交互 |
+| 冷却期（时间窗口内限频） | operator否决："猫思考慢了怎么办？" + 误伤正常交互 |
 | 只改 prompt 不改机制 | **已证实无效**（PR #159 实验） |
 | 按猫种区分规则（只限Maine Coon） | 增加复杂度，统一规则更简单可维护 |
 
 #### D.5 验收标准（已按 PR #206 更新）
 
-1. ~~Maine Coon发"@opus 收到，我在等"→ 不路由，猫收到提示~~ → **已回退**：行首 @ 即路由（team lead决策）
+1. ~~Maine Coon发"@opus 收到，我在等"→ 不路由，猫收到提示~~ → **已回退**：行首 @ 即路由（operator决策）
 2. Maine Coon发"请 review 这个 PR\n@opus"→ **正常路由** ✅
 3. Ragdoll的正常 @ 行为不受影响 ✅
-4. team lead的 @ 不受门禁影响 ✅
+4. operator的 @ 不受门禁影响 ✅
 5. SystemPromptBuilder 输出中不含 `@handle` 格式的元信息（WORKFLOW_TRIGGERS 教学内容除外） ✅
 6. B6 identity check 相关代码和测试全部移除，同族 review 不再要求首行 Identity Check ✅
 7. 有对应的单元测试覆盖 D2/D4（D1/D3 keyword gate 测试随 PR #206 简化后移除） ✅
@@ -190,7 +190,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 
 | 资源 | 路径 |
 |------|------|
-| 原始讨论 | Thread `thread_mm95ha2vubft1bbi`，2026-03-02 04:26 起 |
+| 原始讨论 | Thread `[thread-id]`，2026-03-02 04:26 起 |
 | Maine Coon采访 | 同 thread 08:13-08:15（Codex + GPT-5.2 独立回答） |
 | Prompt 治疗实验 | PR #159（已合入，效果失败） |
 | SOP 歧义修复 | PR #162（已合入，附带发现） |
@@ -198,7 +198,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 
 | ID | 内容 | 状态 | 说明 |
 |----|------|------|------|
-| D1 | **Actionability Gate**——原为 `@ + 动作词` 门禁，经team lead否决后简化为「行首 @ 即路由」 | ✅ Done（简化） | PR #192 实现 → PR #206 回退简化（team lead："强匹配太挫了"） |
+| D1 | **Actionability Gate**——原为 `@ + 动作词` 门禁，经operator否决后简化为「行首 @ 即路由」 | ✅ Done（简化） | PR #192 实现 → PR #206 回退简化（operator："强匹配太挫了"） |
 | D2 | **Input De-inertia**——SystemPromptBuilder 元信息中去除 `@` 前缀 | ✅ Done | PR #192（`27e5e70b`） |
 | D3 | **No-action @ Feedback**——随 D1 简化一并移除（无 keyword gate 则无 suppression feedback） | ✅ Done（移除） | PR #194 实现 → PR #206 随 D1 一并移除 |
 | D4 | **Remove B6 Identity Check**——删除同族 reviewer 身份校验（根因是 resume bug，非模型混淆） | ✅ Done | PR #195（`3825aaea`） |
@@ -209,7 +209,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 |----|------|------|
 | C1 | 需求嵌入 system prompt（上下文嵌入） | 成本过高，压缩后会丢 |
 | C2 | 向量化语义偏离检测 | 过度工程，小团队不需要 |
-| C3 | 覆盖度 KPI | team lead明确拒绝："别变成填表" |
+| C3 | 覆盖度 KPI | operator明确拒绝："别变成填表" |
 | C4 | 跨猫 thinking 实时广播（属 F045） | 范围不同，F045 负责 |
 
 ## Acceptance Criteria
@@ -226,7 +226,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 - [x] skill-lint CI gate 可运行 + 检测 manifest 一致性（B4）
 - [x] ≥10 条对话场景回归测试就位（B5，10 条，10/10 pass）
 - [x] 同族 reviewer identity check gate 曾落地（B6 历史项，已在 D4 移除）
-- [x] @ 路由卫生落地：行首 @ 即路由（经team lead否决动作词门禁后简化，PR #206）（D1）
+- [x] @ 路由卫生落地：行首 @ 即路由（经operator否决动作词门禁后简化，PR #206）（D1）
 - [x] SystemPromptBuilder 元信息不含 `@` 前缀（D2）
 - [x] 无动作 @ 反馈机制已实现后随 D1 简化一并移除（D3，PR #206）
 - [x] B6 identity check 代码和测试全部移除（D4）
@@ -236,8 +236,8 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 | 决策 | 选择 | 放弃的方案 | 理由 |
 |------|------|-----------|------|
 | 守护层级 | 流程嵌入（Skills/指引） | 上下文嵌入（system prompt） | 成本可控，上下文嵌入压缩后会丢 |
-| 截图范围 | 仅前端 UI/UX | 所有 Feature 强制截图 | team lead："后端功能硬截图是折腾" |
-| 覆盖度衡量 | 不设 KPI | 愿景覆盖度量化指标 | team lead："别变成填表" |
+| 截图范围 | 仅前端 UI/UX | 所有 Feature 强制截图 | operator："后端功能硬截图是折腾" |
+| 覆盖度衡量 | 不设 KPI | 愿景覆盖度量化指标 | operator："别变成填表" |
 | 验证方式 | Cold-start Verifier（独立 agent） | 向量化语义偏离检测 | 简单有效 vs 过度工程 |
 | 调研方法 | Deep Research Pipeline（三路+Pro） | 单猫调研 | 6 份报告交叉验证，避免单一偏见 |
 
@@ -248,7 +248,7 @@ Ragdoll设计了 4 个采访问题，两只Maine Coon独立回答，结论高度
 | 流程过重导致开发效率降低 | 中 | A 项都是轻量嵌入（≤5 行摘录），不是新流程 |
 | 猫猫表面合规但实质应付 | 中 | B2 Cold-start Verifier 做独立校验 |
 | MCP 截图工具局限性 | 低 | Claude in Chrome 覆盖主流场景，特殊情况手动补 |
-| team lead审美疲劳（截图太多） | 低 | 已限定 ≤3 张 + 1 段 15s 录屏 |
+| operator审美疲劳（截图太多） | 低 | 已限定 ≤3 张 + 1 段 15s 录屏 |
 
 ## Dependencies
 - **Related**: 无
@@ -301,8 +301,8 @@ Phase D（D4）移除 identity gate 证据（2026-03-03）：
 
 | 猫猫 | 读了哪些文档 | 三问结论 | 签收 |
 |------|-------------|---------|------|
-| Ragdoll Opus 4.6 | F046 spec, F041 spec, vision-drift synthesis, 17 commits, PR #206, a2a-mentions.ts 代码验证, B5 测试运行 | 核心问题（流程层愿景守护）已解决；D1/D3 经team lead产品决策回退，属正常迭代；B2 转 F067 | ✅ 可 close |
+| Ragdoll Opus 4.6 | F046 spec, F041 spec, vision-drift synthesis, 17 commits, PR #206, a2a-mentions.ts 代码验证, B5 测试运行 | 核心问题（流程层愿景守护）已解决；D1/D3 经operator产品决策回退，属正常迭代；B2 转 F067 | ✅ 可 close |
 | Maine Coon Codex | F046 spec, F041 spec, vision-drift synthesis, BACKLOG, features README, a2a-mentions.ts/route-serial.ts/SystemPromptBuilder.ts 代码验证, 96 tests 全绿 | 3 个 P1（B2 未完成 + D1/D3 spec 漂移 + completion 闭环未执行）；建议先同步 spec 再 close | ✅ 同意 close（条件：先修 3 个 P1） |
 | Maine Coon GPT-5.2 | F046 spec, F041 spec, 关联 commit/PR 证据, a2a-mentions.ts/route-serial.ts 代码验证, B4/B5 测试运行 | 同 Codex：3 个 P1 + 1 个 P2（B5 数量）；B2 转新 feature 而非 TD | ✅ 同意 close（条件：先修 P1+P2） |
 
-**team lead决策**（2026-03-06）：B2 转新 Feature（F067），执行 spec 同步 + completion 闭环。
+**operator决策**（2026-03-06）：B2 转新 Feature（F067），执行 spec 同步 + completion 闭环。

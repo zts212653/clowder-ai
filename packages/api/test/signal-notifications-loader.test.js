@@ -46,7 +46,7 @@ describe('signal notifications loader', () => {
 
     writeFileSync(
       notificationsFile,
-      `version: 1\nnotifications:\n  email:\n    enabled: true\n    provider: gmail\n    smtp:\n      host: smtp.gmail.com\n      port: 587\n      secure: false\n      auth:\n        user: cat-cafe@example.com\n        pass: app-password\n    to: owner@example.com\n    from: Cat Cafe <noreply@example.com>\n  in_app:\n    enabled: true\n    thread: signals\n  system:\n    enabled: false\n  schedule:\n    daily_digest: "08:00"\n    timezone: Asia/Shanghai\n`,
+      `version: 1\nnotifications:\n  email:\n    enabled: true\n    provider: gmail\n    smtp:\n      host: smtp.gmail.com\n      port: 587\n      secure: false\n      auth:\n        user: cat-cafe@example.com\n        pass: app-password\n    to: owner@example.com\n    from: Clowder AI <noreply@example.com>\n  in_app:\n    enabled: true\n    thread: signals\n  system:\n    enabled: false\n  schedule:\n    daily_digest: "08:00"\n    timezone: Asia/Shanghai\n`,
       'utf-8',
     );
 
@@ -67,7 +67,7 @@ describe('signal notifications loader', () => {
 
     writeFileSync(
       notificationsFile,
-      `version: 1\nnotifications:\n  email:\n    enabled: true\n    provider: gmail\n    smtp:\n      host: smtp.gmail.com\n      port: 587\n      secure: false\n    to: not-an-email\n    from: Cat Cafe <noreply@example.com>\n  in_app:\n    enabled: true\n    thread: signals\n  system:\n    enabled: false\n  schedule:\n    daily_digest: "08:00"\n    timezone: Asia/Shanghai\n`,
+      `version: 1\nnotifications:\n  email:\n    enabled: true\n    provider: gmail\n    smtp:\n      host: smtp.gmail.com\n      port: 587\n      secure: false\n    to: not-an-email\n    from: Clowder AI <noreply@example.com>\n  in_app:\n    enabled: true\n    thread: signals\n  system:\n    enabled: false\n  schedule:\n    daily_digest: "08:00"\n    timezone: Asia/Shanghai\n`,
       'utf-8',
     );
 

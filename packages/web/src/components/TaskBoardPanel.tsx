@@ -73,7 +73,7 @@ function EmptyState({ onCreateFirst }: { onCreateFirst: () => void }) {
       <div className="text-3xl mb-3">&#x1F9F6;</div>
       <h3 className="text-sm font-semibold text-cafe-secondary mb-1">把长期事项挂在线上，不埋回聊天里</h3>
       <p className="text-xs text-cafe-muted mb-4 leading-relaxed">
-        需要跨多轮对话跟踪的事项，铲屎官和猫猫都可以创建毛线球。 临时步骤继续留给猫猫祟祟。
+        需要跨多轮对话跟踪的事项，co-creator和猫猫都可以创建毛线球。 临时步骤继续留给猫猫祟祟。
       </p>
       <button
         type="button"

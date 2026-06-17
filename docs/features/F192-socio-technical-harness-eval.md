@@ -61,7 +61,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
    - owner 处理 handoff 之后，不靠一句“修了”自闭环
    - closure 只能来自：
    - 后续 eval 复验通过
-   - 明确 CVO accept / suppress
+   - 明确 operator accept / suppress
    - 或 domain-specific sunset / delete 语义
 
 ### One Eval Cycle
@@ -84,9 +84,9 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 
 ## Why
 
-Cat Cafe 的 harness（skill、SOP、MCP tool、shared rules）是猫猫和team lead共同创造的社会技术系统，但目前缺少系统化的评估和反馈路径。harness 改动后无法追踪效果，不满意的 feature 无法定位归因层级（是愿景不清？翻译偏差？工具不顺手？执行不到位？），猫猫作为 harness 的一线用户没有结构化的反馈通道。
+Cat Cafe 的 harness（skill、SOP、MCP tool、shared rules）是猫猫和operator共同创造的社会技术系统，但目前缺少系统化的评估和反馈路径。harness 改动后无法追踪效果，不满意的 feature 无法定位归因层级（是愿景不清？翻译偏差？工具不顺手？执行不到位？），猫猫作为 harness 的一线用户没有结构化的反馈通道。
 
-team experience（2026-05-06 01:15）："我们必须有 tracing...当一个 feat close 了...thread id 可知道...session id 可知道 => 意味着他们的 tool call 上下文完全透明！...可选环节采访猫猫的干活体验是否才是不污染工作上下文且是一个持续性评估的可靠扩展点？"
+operator experience（2026-05-06 01:15）："我们必须有 tracing...当一个 feat close 了...thread id 可知道...session id 可知道 => 意味着他们的 tool call 上下文完全透明！...可选环节采访猫猫的干活体验是否才是不污染工作上下文且是一个持续性评估的可靠扩展点？"
 
 ## Authority Boundary
 
@@ -129,7 +129,7 @@ team experience（2026-05-06 01:15）："我们必须有 tracing...当一个 fea
 | Trace fixtures | regression ground truth——pipeline 必须正确判断 | 手填 anchor，pipeline 消费 |
 | Feature Trace Bundle | derived view——pipeline 自动从 F153 生成 | 自动化（Phase C） |
 | Cat interview | 触发型产物——pipeline 检测 anomaly 时触发 | 触发自动化，回答手填 |
-| Feature Fit Review | 人工 sense-check——归因后 CVO/愿景守护猫裁定 | 半自动 |
+| Feature Fit Review | 人工 sense-check——归因后 operator/愿景守护猫裁定 | 半自动 |
 | Tool Eval Contracts | 预期声明——同 Eval Contract | 手填 |
 
 ### Phase C: Runtime Harness Eval — F167 端到端验证 ✅
@@ -160,7 +160,7 @@ Phase C 骨架跑通后，完善基础设施 + 扩展到更多工具。含原 Ph
 
 ### Phase E: Harness Eval Control Plane / Eval Hub
 
-Phase A-D 证明了 F192 能对单个 harness domain（F167/A2A）做预期声明、runtime 观测、归因和 digest。但team lead在 2026-05-21 指出：eval 的第一性目的不是"有个告警"或"有个定时任务"，而是**长期追踪并解释 harness 运行效果，产出 delete/sunset / build / fix / keep 的证据化 verdict，再把诊断交给负责 feature 的猫处理，由后续 eval 复验**。
+Phase A-D 证明了 F192 能对单个 harness domain（F167/A2A）做预期声明、runtime 观测、归因和 digest。但operator在 2026-05-21 指出：eval 的第一性目的不是"有个告警"或"有个定时任务"，而是**长期追踪并解释 harness 运行效果，产出 delete/sunset / build / fix / keep 的证据化 verdict，再把诊断交给负责 feature 的猫处理，由后续 eval 复验**。
 
 Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
@@ -181,7 +181,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 5. **E-community**：开放社区 issue packet / custom domain path
 6. **Phase F** (reopened 2026-05-27)：接 `eval:capability-wakeup`（F203 L0 §8 trigger reflex 命中率监测；从 hard 规则合规 eval 扩到软提示发现率 eval）
 
-**Remaining PR packaging（CVO + 46/55, 2026-05-24）**：Phase E 剩余工作不按 AC 逐条拆 PR，按可独立验收的功能块收敛为 4 个 PR，避免过细 PR 造成 review / merge overhead：
+**Remaining PR packaging（operator + 46/55, 2026-05-24）**：Phase E 剩余工作不按 AC 逐条拆 PR，按可独立验收的功能块收敛为 4 个 PR，避免过细 PR 造成 review / merge overhead：
 
 1. **E-hub PR（owner: Maine Coon/Maine Coon）**：System Workspace 归一 + Eval Hub v1。只消费真实 `eval:a2a` verdict，不接 memory / sop / community；Hub 放 Console daily workflow path（Observability/Eval），不放 Settings；必须提供 IM Hub / domain thread / 相关 surface 的跳转按钮。
 2. **E-scale PR（owner: Ragdoll/Ragdoll）**：`eval:memory` adapter（F200 + F188）+ F188 repair surface 双向跳转 + F200/F188 旧定时任务清理 dry-run，确保不双触发。
@@ -195,7 +195,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 ### Phase A（基础骨架）
 - [x] AC-A1: `docs/harness-feedback/` 目录存在，README 含 doc_kind 规范
 - [x] AC-A2: CatCafeScanner 能索引 `docs/harness-feedback/**/*.md`，并保留/暴露 `doc_kind: harness-feedback`（search result 能区分它不是普通 discussion）。若当前不支持按 doc_kind filter，在 README 记录此限制
-- [x] AC-A3: feat-lifecycle Completion 含 Step 0.6 Harness Eval Checkpoint，且明确：checkpoint 必做；默认允许写 `harness_feedback: none` + reason；触发条件（harness/skill/MCP feature、CVO 不满意、trace anomaly、抽样）；interview 必须独立 session/turn；触发后必须链接 harness-feedback 文档到 feature spec / CloseGateReport
+- [x] AC-A3: feat-lifecycle Completion 含 Step 0.6 Harness Eval Checkpoint，且明确：checkpoint 必做；默认允许写 `harness_feedback: none` + reason；触发条件（harness/skill/MCP feature、operator 不满意、trace anomaly、抽样）；interview 必须独立 session/turn；触发后必须链接 harness-feedback 文档到 feature spec / CloseGateReport
 - [x] AC-A4: 至少一份样例 harness-feedback 文档通过 search_evidence 可召回
 - [x] AC-A5: harness-feedback README/schema 明确只存 annotations + evidence_refs，不存 raw trace 副本；Feature Trace Bundle 是 derived view，schema defer to F153/ADR-032
 - [x] AC-A6: 样例 harness-feedback 文档使用 trace_refs/evidence_refs 指向 canonical trace/thread/session，不复制 raw tool-call payload
@@ -236,7 +236,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-E4: `eval:a2a` domain thread bootstrap：thread 只承载 A2A eval 长期分析；状态 / verdict / trend SOT 在 registry，不在 thread 文本
 - [x] AC-E5: Eval cat invocation primitive：统一 scheduled task 唤醒 eval 猫进入 `eval:a2a` thread，加载该域纵向上下文，执行 day-over-day analysis，替代旧 `harness-fit-digest` 自注册任务
 - [x] AC-E6: `eval:a2a` legacy scheduled-task cleanup：inventory `harness-fit-digest`，接入后 disable / redirect，并用 dry-run report 证明不会双触发
-- [x] AC-E7: Re-eval closure loop：feature owner 处理 handoff 后，只有后续 eval 复验或明确 CVO accept / suppress 才能 close verdict；猫猫不能靠一句"修了"自闭环
+- [x] AC-E7: Re-eval closure loop：feature owner 处理 handoff 后，只有后续 eval 复验或明确 operator accept / suppress 才能 close verdict；猫猫不能靠一句"修了"自闭环
 - [x] AC-E8: E-pilot contract demo：用 representative A2A 数据证明 Verdict Handoff Packet contract / adapter transform / pending closure state；不得把 fixture 当作 live F167 verdict。真实 day-over-day telemetry verdict + cross-thread handoff deferred until real snapshot / attribution artifacts exist
 
 #### E-hub（由 E-pilot contract + 真实 a2a verdict 驱动）
@@ -250,7 +250,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 #### E-sop（`eval:sop`，domain-generic SOP compliance） — schema/evaluator landed; live cron sunset pending `F192-sop-wiring`
 
-来源 2026-05-23 #748 设计讨论（clowder-ai 社区 terrenceeLeung 提议外化 SOP stage 定义；CVO 反思 "skill = 软约束（猫可加载可不加载），需硬约束兜底"）。Phase D AC-D1 「hard / soft / eval 三栏 registry」正是答案：`SopDefinition.hard_rules / pitfalls` 是 ground truth，eval 跑 runtime trace 检测违规；hook 注入与否由 eval 数据驱动 (per AC-D9 acted-on rate)，不预判。**Domain-generic from day 1**：schema 不绑 coding，`development` 只是第一个 domain，video co-creation / tech article / family office 同 schema 不同实例（消除「多阶段 skill 如 video-forge / ppt-forge / tech-writing / expert-panel 本质是 SOP 错位写进 skill body」的归位错位）。
+来源 2026-05-23 #748 设计讨论（clowder-ai 社区 terrenceeLeung 提议外化 SOP stage 定义；operator 反思 "skill = 软约束（猫可加载可不加载），需硬约束兜底"）。Phase D AC-D1 「hard / soft / eval 三栏 registry」正是答案：`SopDefinition.hard_rules / pitfalls` 是 ground truth，eval 跑 runtime trace 检测违规；hook 注入与否由 eval 数据驱动 (per AC-D9 acted-on rate)，不预判。**Domain-generic from day 1**：schema 不绑 coding，`development` 只是第一个 domain，video co-creation / tech article / family office 同 schema 不同实例（消除「多阶段 skill 如 video-forge / ppt-forge / tech-writing / expert-panel 本质是 SOP 错位写进 skill body」的归位错位）。
 
 - [x] AC-E16: Architecture Decision——`eval:sop` 是 F192 内部 domain 扩展（同 E-pilot/E-scale，不是新 F 号）；复用 Verdict Handoff / re-eval closure pattern；明确三件套定位（skill = 软约束 / SopDefinition = 硬约束 ground truth / eval = 观测层）
 - [x] AC-E17: SOP Trace Adapter——从 F153 telemetry / session events / git state 抽 stage transition + tool-call sequence + repo state，喂 predicate evaluator
@@ -272,7 +272,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 ### Phase F（`eval:capability-wakeup` — L0 §8 软提示发现率 eval）
 
-来源 2026-05-27 F203 L0 §8 candidate triage（team lead反思 "skills/features 存在 ≠ 在猫认知路径"；Tier 1 决定缺 eval/tracking 数据驱动）。Phase F 把 F192 eval 从「**hard 规则合规检测**（E-pilot/E-hub/E-scale/E-sop/E-community）」扩展到「**软提示发现率监测**」——观测猫在 L0 §8 trigger reflex 场景下"该用没用"的掉球率，verdict 反馈给 F203 owner iterate L0 §8 v2。
+来源 2026-05-27 F203 L0 §8 candidate triage（operator反思 "skills/features 存在 ≠ 在猫认知路径"；Tier 1 决定缺 eval/tracking 数据驱动）。Phase F 把 F192 eval 从「**hard 规则合规检测**（E-pilot/E-hub/E-scale/E-sop/E-community）」扩展到「**软提示发现率监测**」——观测猫在 L0 §8 trigger reflex 场景下"该用没用"的掉球率，verdict 反馈给 F203 owner iterate L0 §8 v2。
 
 **关键定位区别**（与 E-sop 对比）：
 
@@ -330,13 +330,13 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-G10: Cancel 理由结构化采集——AuthorizationCard deny 按钮变体（不该做/方向不对/我自己来/跳过），一键 deny + 结构化 reason 通过 authorization respond → onPermissionCancel → episode a2 signal 流转（设计从原 spec "弹浮层+独立 POST" 进化为"一键 deny 变体+复用 authorization 路由"，功能等价且 UX 更好）
 - [x] AC-G12: Magic Word 运行时检测 hook——messages.ts tryDetectMagicWords() 在 queued + immediate 双路径检测 → F227 Event Memory 真相源写入 + episode magic_word_ref projection signal（F227 归一后，Event Memory 是真相源，episode 存 ref；11 tests green）
 - [x] AC-G13: Cancel burst proxy signal——CancelBurstDetector（threshold=3, window=60s）+ index.ts authorization handler 接线，burst 触发时追加 proxy signal（8 tests green）
-- [x] AC-G11: 端到端验证——自动化 e2e 集成测试（PR #2167）：6 chain × 10 assertions，三条 production helper（appendPermissionCancelToEpisode / appendMagicWordRefToEpisode / checkAndAppendCancelBurst）从 index.ts 提取后 test + production 共用同一路径；含 reason normalization 边界测试。手动 runtime 验收待team lead + Ragdoll一起看 eval hub
+- [x] AC-G11: 端到端验证——自动化 e2e 集成测试（PR #2167）：6 chain × 10 assertions，三条 production helper（appendPermissionCancelToEpisode / appendMagicWordRefToEpisode / checkAndAppendCancelBurst）从 index.ts 提取后 test + production 共用同一路径；含 reason normalization 边界测试。手动 runtime 验收待operator + Ragdoll一起看 eval hub
 
 依赖：复用 F192 已有 Eval Domain Registry / Verdict Handoff / Re-eval Closure / Eval Hub 控制面。与 F222 Frustration Auto-Issue 的打通（confirmed issue → episode signal）标记为 v1。
 
 ### Phase H（Verdict Publishing Pipeline — OQ-21 v1.x 收口 / Maine Coon R0 Path B）✅ merged 2026-06-05 (PR #2109, squash `33ee6ae54`)
 
-来源 OQ-21 PR #2092 merge 后 v1.x 收口（team lead 2026-06-05 directive: "继续完成最后一公里"）。Path B 由Maine Coon R0 narrowed：eval cat 产结构化 packet + 受控 MCP tool 提交，比 raw artifacts auto-export (Path A) scope 小但同样闭环 "eval cat 分析 → Hub 显示新 verdict"。
+来源 OQ-21 PR #2092 merge 后 v1.x 收口（operator 2026-06-05 directive: "继续完成最后一公里"）。Path B 由Maine Coon R0 narrowed：eval cat 产结构化 packet + 受控 MCP tool 提交，比 raw artifacts auto-export (Path A) scope 小但同样闭环 "eval cat 分析 → Hub 显示新 verdict"。
 
 **Why（愿景硬度）**：
 - 真实现状：OQ-21 PR #2092 merge 后，trigger-now 真叫醒 eval cat ✓，generate-now API ready ✓，但 eval cat 分析完后**无受控写出路径**——4.6 abandoned PR #2091 教 cat `git push origin main` 违反铁律 #2；当前 cat 只能产 verdict 在 thread 里飘，端到端"Hub 看到新 verdict"靠人工 commit
@@ -364,7 +364,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - Primary Users + Activation Signal: eval cats publishing verdicts after analysis; tool call count per eval cycle
 - Friction Metric: tool error rate / invalid packet / commit failures / merge conflicts
 - Regression Fixture: success / unsupported domain / invalid packet / duplicate verdictId (idempotency)
-- Sunset Signal: 如果 Path A (raw artifacts auto-export from F153 telemetry) 完全自动化 → cat-mediated publish 可 sunset；或team lead明确"我们不要 cat-in-the-loop 了"
+- Sunset Signal: 如果 Path A (raw artifacts auto-export from F153 telemetry) 完全自动化 → cat-mediated publish 可 sunset；或operator明确"我们不要 cat-in-the-loop 了"
 
 **Scope 边界**：
 - v1.x scope: Path B (cat-mediated publish via MCP)
@@ -388,7 +388,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 **Phase H v1.x follow-up scope**（与Maine Coon collab 细化）：
 
-**PR-1a — Contract Alignment（✅ merged 2026-06-06 PR #2115, squash `c51af580a`）**：Maine Coon R0 narrowing — wire 前先把 capability-wakeup 一侧的 submittedPacket contract 跟 a2a 路径对齐，否则 adapter wire 后 cat-mediated publish 比 CVO-regen 安全性弱。
+**PR-1a — Contract Alignment（✅ merged 2026-06-06 PR #2115, squash `c51af580a`）**：Maine Coon R0 narrowing — wire 前先把 capability-wakeup 一侧的 submittedPacket contract 跟 a2a 路径对齐，否则 adapter wire 后 cat-mediated publish 比 operator-regen 安全性弱。
 - [x] `assertSubmittedPacketMatches` (submitted-packet-guard.ts) — 4 轴 invariant 守 cat-submitted packet：
   - R8 P1 mirror: `submitted.harnessUnderEval.featureId === domain.handoffTargetResolver.featureId`
   - R8 P1 mirror: `submitted.domainId === input.domain.domainId`
@@ -398,7 +398,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] `CapabilityWakeupSourceSelector` skeleton (capability-wakeup-trial-provider.ts) — window-based selector + future trial-ids 占位（Maine Coon R0：trial-ids 在 durable store 之前是伪精确，先 window range）；validation 含 newline guard + element shape
 - [x] R1 P2: metric ref `metric:metric:` double-prefix idempotent fix（a2a R14 mirror，extract to `formatMetricRefBullet` helper 让 strip-then-add 模式视觉无歧义）
 - [x] tests：9/9 capability-wakeup submittedPacket invariants green
-- 22 轮 review（Maine Coon R0-R3 local 主审 + 云端 R1-R5 fine-grained，R4 helper extract 破除云端 reviewer-LLM 模式盲视）
+- 22 轮 review（Maine Coon R0-R3 local 主审 + 云端 R1-R5 fine-grained，R4 helper extract 破除remote reviewer-LLM 模式盲视）
 
 **PR-2 — Adapter Wire（✅ merged 2026-06-06 PR #2117, squash `1caa98c84`）**：完整 capability-wakeup wire — Phase H 收尾完结。
 - [x] `CapabilityWakeupTrialProviderImpl` — replay/reclassify provider 复用现有 ports (SessionChainStore / TranscriptReader / ToolEventLog / SkillLoadEventLog)；PR-2 narrowed: sessionIds REQUIRED + dedup before replay (cloud R7 P2); constructor fail-closed if any port missing
@@ -414,7 +414,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] tests: 14 rules + 14 provider + 6 adapter + 4 strict-validation + 5 e2e + 8 MCP schema + ALL existing a2a regression green
 - 11 轮 review（Maine Coon R1 design-review locked decisions + Maine Coon R2 LGTM + 云端 R3-R10 fine-grained; R10 clean "Didn't find any major issues. You're on a roll."）
 
-**PR-3 — Publish Policy + artifact-only-pr-merge-gate (✅ merged 2026-06-06 PR #2125, squash `8d8076b79`)**：PR-2 dogfood (#2114) 验收发现的"谁 merge"流程债，team lead directive 闭环。Maine Coon R2 design-lock。
+**PR-3 — Publish Policy + artifact-only-pr-merge-gate (✅ merged 2026-06-06 PR #2125, squash `8d8076b79`)**：PR-2 dogfood (#2114) 验收发现的"谁 merge"流程债，operator directive 闭环。Maine Coon R2 design-lock。
 - [x] `computePublishPolicy(packet, attribution)` 纯函数 + 13/13+2 单测：severity-driven 路由（fix/build/sunset → regular_pr / keep_observe+findings → regular_pr + evidence-only / keep_observe+noFindingRecord → evidence_only_interim_pr + futureMode rollup_deferred）
 - [x] FAIL-OPEN 8 cases（undefined/null/non-object/non-array findings/Array.isArray noFindingRecord rejection/contradiction/findings non-array/noFindingRecord non-record）
 - [x] Handler reads attribution.json + applies policy (labels + body footer)
@@ -502,7 +502,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "eval 是为了 tracing harness 后看 harness 效果如何，是不是需要 sunset / delete / build" | AC-E1, AC-E3, AC-E8, AC-E9 | Design Gate + Verdict Packet fixture | [x] |
 | R2 | "delete 还有一种情况是 sunset，比如猫猫变强了，不需要了" | AC-E1, AC-E3 | Verdict enum + sunset fixture | [x] |
@@ -522,7 +522,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 
 | 项 | Contract |
 |----|----------|
-| Primary Users + Activation Signal | eval 猫、feature owner、CVO、社区 maintainer。触发：harness 进入 registry / existing domain adapter 接入 / verdict 产生 / owner action 完成后待复验 |
+| Primary Users + Activation Signal | eval 猫、feature owner、operator、社区 maintainer。触发：harness 进入 registry / existing domain adapter 接入 / verdict 产生 / owner action 完成后待复验 |
 | Friction Metric | incomplete_handoff_count、duplicate_trigger_count、unowned_verdict_count、stale_verdict_days、unverified_close_count、legacy_task_overlap_count |
 | Regression Fixture | 1) F192 `harness-fit-digest` 迁入后旧 scheduled task 不再重复发；2) F200 memory eval 产出 verdict 后必须带 evidence packet；3) F188 orphan-edge health finding 不能只显示指标，必须能形成 owner ask + re-eval plan |
 | Sunset Signal | 若 Phase E 连续 2 个 eval domain 接入后，verdict handoff acted-on rate < 50% 且 duplicate_trigger_count > 0，说明控制面比旧竖井更重，必须进入 simplify / sunset review |
@@ -535,7 +535,7 @@ Verdict 不是自由文案。每个 verdict 都必须满足对应证据门槛、
 |---|---|---|---|---|---|
 | `fix` | 已有 harness 目标正确，但实现 / prompt / workflow 没做到位；出现 regression、false positive、bypass 或 owner friction | phenomenon、affected harness、metric refs、day-over-day trend、root-cause hypothesis、counterarguments | 请 feature owner 修正现有 harness 或其接线 | 后续 eval 对同一 failure pattern 复验通过；owner 不能自报 resolved | 默认 eval owner + feature owner 闭环；高影响行为变更走 Design Gate |
 | `build` | 反复出现的 failure pattern 没有现有 harness 覆盖，或现有 harness 边界外出现新场景 | missing-coverage evidence、candidate harness scope、expected activation signal、success metric、counterarguments | 请 feature owner 设计 / 扩展 harness，并补 Eval Contract | 新 harness 有 Eval Contract + 首次 eval snapshot；未接入前不得标 resolved | 新增规则 / SOP / MCP 行为变化必须过 Design Gate |
-| `delete_sunset` | harness 的边际效果低或成本高，且可能已被模型 / 猫猫能力内化；**不能仅因最近没触发就判 sunset** | cost/effect trend、activation history、原始 failure pattern refs、Sunset Trial Plan、counterarguments | 请 owner 启动 sunset trial；verdict 本身不执行删除 | trial 满足 criteria 后进入 `dormant`；真正 `retired` 需额外 CVO accept | `toDormant` 可按 criteria 自动；`toRetired` 必须 CVO accept |
+| `delete_sunset` | harness 的边际效果低或成本高，且可能已被模型 / 猫猫能力内化；**不能仅因最近没触发就判 sunset** | cost/effect trend、activation history、原始 failure pattern refs、Sunset Trial Plan、counterarguments | 请 owner 启动 sunset trial；verdict 本身不执行删除 | trial 满足 criteria 后进入 `dormant`；真正 `retired` 需额外 operator accept | `toDormant` 可按 criteria 自动；`toRetired` 必须 operator accept |
 | `keep_observe` | 当前证据不足以改变 harness，或 harness 仍健康；不是“什么都不做”的永久终态 | current metric refs、why-no-action、next observation window、known blind spots | 继续观察 / 补 instrumentation / 等下一窗口 | 到期必须重新 eval；若无 next window 则不合法 | 可由 eval owner 自决；不能用来掩盖缺数据 |
 
 不变式：
@@ -558,7 +558,7 @@ active -> trial -> dormant -> retired
 - `active`: harness 在 prompt / SOP / tool / hook 的正常路径里生效。
 - `trial`: harness 从主动路径中撤出或降级，只按 Trial Plan 观测。
 - `dormant`: 默认 sunset 终态。harness 不再消耗 active 注意力预算，但配置、文档、revival path 保留，目标是 24h 内可恢复。
-- `retired`: 真的删除代码 / skill / SOP。只在 dormant 连续通过多个周期后考虑，且必须 CVO accept。
+- `retired`: 真的删除代码 / skill / SOP。只在 dormant 连续通过多个周期后考虑，且必须 operator accept。
 
 Trial Plan schema：
 
@@ -603,9 +603,9 @@ Sunset 判断规则：
 
 1. **低触发率不是 sunset 证据**。低触发只说明场景少，不能区分“能力内化”与“问题间歇出现”。
 2. 思考类 harness 的效果用 adversarial probe pass rate 衡量：把当初 harness 要防的 failure pattern 重新呈现给不带 harness 的猫，观察是否仍能正确处理。
-3. 任何 probe fail、真实 regression、或 CVO / feature owner 指出关键反例，都立即回退 `active`。
+3. 任何 probe fail、真实 regression、或 operator / feature owner 指出关键反例，都立即回退 `active`。
 4. `triggerScenarios` 为空时 Trial Plan schema reject；没有原始 failure pattern 的 harness 先补 Eval Contract，不许 sunset。
-5. 进入 `dormant` 不是失败，是正常释放注意力预算；进入 `retired` 才是不可逆删除门，必须 CVO accept。
+5. 进入 `dormant` 不是失败，是正常释放注意力预算；进入 `retired` 才是不可逆删除门，必须 operator accept。
 
 ### Phase E Live Verdict Evidence Bundle Contract（OQ-15）
 
@@ -675,25 +675,25 @@ Based on the first micro fit digest (2026-05-11):
 | F192/F200/F188 旧定时任务与新 runtime 双触发 | AC-E6/AC-E13 强制 inventory + disable/redirect + dry-run 证明 |
 | domain thread 变成新垃圾桶 | AC-E4 限定 thread 只按域承载长期分析；工作状态 / verdict SOT 在 registry + Eval Hub |
 | IM Hub 老系统 thread 与 Eval domain thread 割裂成两套前端模型 | KD-15 明确 System Thread / System Workspace 归一：统一 system kind / linked surface / actions；IM Hub kind=`connector_hub`，Eval kind=`eval_domain`，互用系统分区与删除保护 |
-| eval 猫武断给 delete/sunset verdict | AC-E3 要 counterarguments；高影响 delete/sunset 需 CVO accept 或 Design Gate 签字 |
+| eval 猫武断给 delete/sunset verdict | AC-E3 要 counterarguments；高影响 delete/sunset 需 operator accept 或 Design Gate 签字 |
 | **`harness-eval/` 目录 dir-size 超限债** — Phase F capability-wakeup 一批 `eval-capability-wakeup-*.ts` 加入，使 `packages/api/src/infrastructure/harness-eval/` 达 29 .ts（> error=25），2026-05-30 全量 sync 时被 clowder-ai Directory Size Guard 抓出 | `.dir-exceptions.json` 已登记 time-bound 豁免（expiresAt 2026-06-15，ticket F192）；**后续按 capability-wakeup / a2a / domain / hub 子域拆分**（GitHub issue 跟踪）。根因：`check:dir-size` 此前不在 pnpm gate，本次已补入堵住下次 |
 
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 本 feature 是 enrichment layer，不拥有 canonical trace schema | 防止和 ADR-032 变成两套源（team lead + 三猫共识 2026-05-07） | 2026-05-07 |
-| KD-2 | F167 作为首个 pilot | 天然具备 failure pattern / trace signal / CVO pain / cat friction / sunset 问题 | 2026-05-07 |
+| KD-1 | 本 feature 是 enrichment layer，不拥有 canonical trace schema | 防止和 ADR-032 变成两套源（operator + 三猫共识 2026-05-07） | 2026-05-07 |
+| KD-2 | F167 作为首个 pilot | 天然具备 failure pattern / trace signal / operator pain / cat friction / sunset 问题 | 2026-05-07 |
 | KD-3 | 立项前置 Eval Contract 塞进 Phase B 验证（方案 C），不 reopen Phase A | 模板需 pilot 验证后才有资格成为硬门禁；AC 驱动验证不是验证驱动 AC（47 提议 + 46 确认） | 2026-05-07 |
 | KD-4 | Sunset Signal 空填 = Design Gate 不通过，不设 reviewer 签字降级 | 治"只加不删"的核心机制；说不清何时删 = 没想清楚要解决什么（46 决策） | 2026-05-07 |
-| KD-5 | Phase C scope pivot：从"文档模板 + monthly digest"改为"runtime eval 基础设施"。Phase B 重新定性为"Eval Contract & Evidence Artifact Pilot"（预期声明层），不是 runtime eval 完成证明 | Phase B AC 设计把"pilot"翻译成了"写文档模板验证 schema"，没有从 F153 拉运行时数据跑真正的 eval。CVO 原话："f192的基础设施根本没做呀！""一个 harness 需要有硬/软/eval，eval 去观测 harness 跑的如何→归因→抽象→解决"。三猫讨论收敛后team lead确认（2026-05-08） | 2026-05-08 |
-| KD-6 | Phase C = 4 条核心 AC（骨架），剩余推 Phase D。原 Phase C (Tool Eval Contracts + Monthly Digest) 推为 Phase D 后半 | 7 条 AC 是终态蓝图，一口气做完有过度设计风险。3-4 条先搭骨架跑通端到端，再扩展（team lead 2026-05-10 确认） | 2026-05-10 |
+| KD-5 | Phase C scope pivot：从"文档模板 + monthly digest"改为"runtime eval 基础设施"。Phase B 重新定性为"Eval Contract & Evidence Artifact Pilot"（预期声明层），不是 runtime eval 完成证明 | Phase B AC 设计把"pilot"翻译成了"写文档模板验证 schema"，没有从 F153 拉运行时数据跑真正的 eval。operator 原话："f192的基础设施根本没做呀！""一个 harness 需要有硬/软/eval，eval 去观测 harness 跑的如何→归因→抽象→解决"。三猫讨论收敛后operator确认（2026-05-08） | 2026-05-08 |
+| KD-6 | Phase C = 4 条核心 AC（骨架），剩余推 Phase D。原 Phase C (Tool Eval Contracts + Monthly Digest) 推为 Phase D 后半 | 7 条 AC 是终态蓝图，一口气做完有过度设计风险。3-4 条先搭骨架跑通端到端，再扩展（operator 2026-05-10 确认） | 2026-05-10 |
 | KD-7 | Phase E 不开新 F 号，作为 F192 的 Harness Eval Control Plane / Eval Hub 升级 | 关联检测显示 F192 已 owns harness eval + runtime pipeline；longform 第 5 章也把统一 Eval Hub 定位为 F192/F200 竖井的终态收敛 | 2026-05-21 |
 | KD-8 | Verdict Handoff Packet 是硬 contract，不是文案建议 | 没有 evidence / trend / root cause / owner ask / re-eval plan 的 handoff 无法 enforce "有理有据"，会退化成"你去看看" | 2026-05-21 |
 | KD-9 | 每个 eval domain 要有专属 system thread，但 thread 不是状态真相源 | 深度分析需要长期上下文；状态和趋势仍进入 registry/Eval Hub，避免 thread 变垃圾桶 | 2026-05-21 |
 | KD-10 | 旧 scheduled task 清理是接入 AC，不是收尾优化 | F192/F200/F188 已有各自定时/报告机制；不迁移清理会双触发，导致猫猫收到重复 verdict，破坏信任 | 2026-05-21 |
 | KD-11 | Phase E 拆为 E-pilot → E-hub → E-scale → E-community；先一个真实 domain 跑通闭环，再做 Hub UI 和多域扩展 | owner review 指出 10 AC 单 Phase 违反 F192 KD-6；Hub 必须由真实 verdict 驱动，避免 F188 dashboard-before-verdict 反模式 | 2026-05-21 |
-| KD-12 | Verdict Matrix + Sunset Trial 是 E-hub 前的 contract hardening，不是 UI 后补 | E-pilot review 连续暴露 `fix/build/delete_sunset/keep_observe` 语义洞；应把四类 verdict 的证据门槛、handoff ask、closure 和 CVO 门固化成 contract，避免靠 review 逐条补锅。`delete_sunset` 只能触发可逆 trial，默认终态是 dormant，不直接删除 | 2026-05-22 |
+| KD-12 | Verdict Matrix + Sunset Trial 是 E-hub 前的 contract hardening，不是 UI 后补 | E-pilot review 连续暴露 `fix/build/delete_sunset/keep_observe` 语义洞；应把四类 verdict 的证据门槛、handoff ask、closure 和 operator 门固化成 contract，避免靠 review 逐条补锅。`delete_sunset` 只能触发可逆 trial，默认终态是 dormant，不直接删除 | 2026-05-22 |
 | KD-13 | Live verdict 的 `snapshot:` / `attribution:` evidence SOT 是 committed sanitized bundle，不是 raw runtime artifacts | raw `snapshots/` / `attributions/` 是 gitignored generated artifacts；直接引用会让 clean checkout / reviewer 无法解析 refs。Hybrid bundle 保留审计证据、脱敏边界和可重派生 provenance，同时避免把全量 runtime dump 提交进 repo | 2026-05-22 |
 | KD-14 | Eval Hub 是 daily workflow surface，不是 Settings 配置页；F188 Health Dashboard 与 Eval Hub 互链不互替 | Settings 只承载 domain registry / frequency / owner / export policy 等配置。Hub 承载 verdict lifecycle、trend、handoff、closure；F188 承载现场 health repair controls。互链按钮是验收要求，避免用户在两个 surface 间手动找入口；若实用性差，后续调整 IA / 跳转位置属于低风险 UI 改动 | 2026-05-23 |
 | KD-15 | System Thread / System Workspace 基座归一：IM Hub 与 eval domain thread 共享系统线程模型，但按 `kind` 区分 | IM Hub（`connector_hub`）和 Eval domain（`eval_domain`）都是 system-managed thread / workspace；归一的是 thread 基础模型、系统分区、删除保护、跳转和管理方式，不归一业务语义。Eval Hub 是工作面，不另造割裂前端；IM Hub 与 Eval Hub 互链，不互替 | 2026-05-23 |
@@ -704,5 +704,5 @@ Based on the first micro fit digest (2026-05-11):
 - Phase A: Maine Coon review（草案原作者验证骨架实现与设计一致）
 - Phase B: 跨家族 review
 - Phase C: spec 更新需跨家族 review；实现需跨家族 review
-- Phase D: digest 结论需team lead确认
-- Phase E: 架构级 Design Gate 由 F192 owner + 跨族 reviewer 收敛；E-pilot 先行（无 UI）；Eval Hub UI 需等 E-pilot 真实 verdict 后再 design-in-context + team lead验收；legacy scheduled-task cleanup 需 dry-run report
+- Phase D: digest 结论需operator确认
+- Phase E: 架构级 Design Gate 由 F192 owner + 跨族 reviewer 收敛；E-pilot 先行（无 UI）；Eval Hub UI 需等 E-pilot 真实 verdict 后再 design-in-context + operator验收；legacy scheduled-task cleanup 需 dry-run report

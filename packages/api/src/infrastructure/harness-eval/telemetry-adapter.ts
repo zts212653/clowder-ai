@@ -112,11 +112,15 @@ export function parseTraceStoreStats(json: unknown): EvalTraceStoreStats {
 
 export async function fetchTraces(
   config: TelemetryAdapterConfig,
-  filter?: { catId?: string; limit?: number },
+  filter?: { catId?: string; limit?: number; expandLimit?: boolean },
 ): Promise<EvalTracesResponse> {
   const params = new URLSearchParams();
   if (filter?.catId) params.set('catId', filter.catId);
   if (filter?.limit) params.set('limit', String(filter.limit));
+  // F192 verdict 2026-06-17-eval-a2a-c1-sample-window-build: opt-in cap raise
+  // for scheduled eval. Only emit when explicitly true — `false`/undefined
+  // omit the param so the server keeps its 500 default cap.
+  if (filter?.expandLimit === true) params.set('expandLimit', 'true');
   const qs = params.toString();
   const url = `${config.baseUrl}/api/telemetry/traces${qs ? `?${qs}` : ''}`;
   const res = await fetch(url, {

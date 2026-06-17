@@ -57,6 +57,8 @@ export interface ReviewAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
+  /** #949: Number of MR reviews completed on the current thread. Used for thread rotation. */
+  readonly completedReviewCount?: number;
 }
 
 /**
@@ -75,6 +77,13 @@ export interface IssueAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastNotifiedAt?: number;
   readonly issueState?: 'open' | 'closed';
+  /**
+   * F168 Phase B: dual-cursor delivery tracking.
+   * Tracks the max comment id that was successfully delivered (notified) to the owner.
+   * Separate from lastCommentCursor (collection) so delivery retries don't re-append events.
+   * Undefined means "not yet managed by dual-cursor; default to lastCommentCursor".
+   */
+  readonly lastDeliveredCursor?: number;
 }
 
 /** Composite automation state embedded in pr_tracking/issue_tracking tasks (#320 KD-14, F202-2D) */
@@ -151,6 +160,8 @@ export type UpdateTaskInput = {
   status?: TaskStatus;
   why?: string;
   automationState?: AutomationState;
+  /** #949: Thread rotation — allow reassigning a task to a new thread. */
+  threadId?: string;
   /** F193-E1 P1-4: allow patching dispatchGate on existing tasks */
   dispatchGate?: DispatchGateState;
 };

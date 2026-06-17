@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsc && node --test test/*.test.js"
+    "test": "tsc && node --import tsx --test test/*.test.js test/*.test.ts"
   },
   "dependencies": {
     "@cat-cafe/finance": "workspace:*",

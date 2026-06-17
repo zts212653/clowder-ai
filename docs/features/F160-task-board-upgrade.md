@@ -12,7 +12,7 @@ created: 2026-04-12
 
 ## Why
 
-### team experience（2026-04-11 thread 讨论）
+### operator experience（2026-04-11 thread 讨论）
 
 > "为什么毛线球长期任务从来没有被任何猫用过？是因为这个能力猫猫不知道？"
 > "为什么一个东西有两个展示的地方？"
@@ -75,7 +75,7 @@ created: 2026-04-12
 - cat_cafe_create_task: 创建新任务
 - cat_cafe_update_task: 更新任务状态（todo/doing/blocked/done）
 - cat_cafe_list_tasks: 查看当前 thread 的任务列表
-适用场景：team lead提了需要跟踪的事项、多猫协作分工、长期追踪项。
+适用场景：operator提了需要跟踪的事项、多猫协作分工、长期追踪项。
 不要用于临时执行步骤（那是猫猫祟祟 PlanBoard 的职责）。
 ```
 
@@ -196,7 +196,7 @@ created: 2026-04-12
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "为什么毛线球从来没有被任何猫用过？" | AC-A1, AC-A2, AC-C1~C3 | MCP tool 测试 + prompt 检查 + skill 自动化 | [x] |
 | R2 | "为什么一个东西有两个展示的地方？" | AC-B1, AC-B6 | 毛线球只在 Workspace Tab，旧 ThreadSidebar 入口已移除 | [x] |
@@ -241,5 +241,5 @@ created: 2026-04-12
 ## Review Gate
 
 - Phase A: 跨家族 review（纯后端/协议层）
-- Phase B: **team lead review**（前端 UI/UX，需 Design Gate 确认 wireframe）+ 跨家族 code review
+- Phase B: **operator review**（前端 UI/UX，需 Design Gate 确认 wireframe）+ 跨家族 code review
 - Phase C: 跨家族 review

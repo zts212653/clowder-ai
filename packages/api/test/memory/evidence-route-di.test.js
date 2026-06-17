@@ -97,7 +97,7 @@ describe('evidence route DI (IEvidenceStore path)', () => {
           kind: 'thread',
           status: 'active',
           title: 'Vision discussion',
-          summary: 'CVO asked about entity anchors',
+          summary: 'operator asked about entity anchors',
           updatedAt: new Date().toISOString(),
           matchReason: 'entity:person:landy',
           entityMatches: [
@@ -105,13 +105,13 @@ describe('evidence route DI (IEvidenceStore path)', () => {
               entityId: 'person:landy',
               type: 'person',
               canonicalName: 'You',
-              matchedAlias: 'CVO',
-              surface: '铲屎官',
+              matchedAlias: 'operator',
+              surface: 'co-creator',
               source: 'passage',
               docAnchor: 'thread:vision',
               passageId: 'p1',
               provenance: [{ source: 'F209 Phase B route contract test' }],
-              why: 'query CVO matched entity person:landy via alias 铲屎官',
+              why: 'query operator matched entity person:landy via alias co-creator',
             },
           ],
         },
@@ -128,17 +128,17 @@ describe('evidence route DI (IEvidenceStore path)', () => {
 
     const res = await app.inject({
       method: 'GET',
-      url: '/api/evidence/search?q=CVO',
+      url: '/api/evidence/search?q=operator',
     });
 
     assert.equal(res.statusCode, 200);
     const body = res.json();
     const match = body.results[0]?.entityMatches?.[0];
     assert.equal(match?.entityId, 'person:landy');
-    assert.equal(match?.matchedAlias, 'CVO');
-    assert.equal(match?.surface, '铲屎官');
+    assert.equal(match?.matchedAlias, 'operator');
+    assert.equal(match?.surface, 'co-creator');
     assert.equal(match?.provenance?.[0]?.source, 'F209 Phase B route contract test');
-    assert.match(match?.why ?? '', /CVO.*person:landy.*铲屎官/);
+    assert.match(match?.why ?? '', /operator.*person:landy.*co-creator/);
   });
 
   it('preserves typed drillDown hints in search results', async () => {
@@ -149,7 +149,7 @@ describe('evidence route DI (IEvidenceStore path)', () => {
           kind: 'thread',
           status: 'active',
           title: 'Vision discussion',
-          summary: 'CVO asked about drill-down readers',
+          summary: 'operator asked about drill-down readers',
           updatedAt: new Date().toISOString(),
           drillDown: {
             tool: 'cat_cafe_get_thread_context',

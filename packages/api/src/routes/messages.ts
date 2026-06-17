@@ -1442,7 +1442,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ) {
                 continue;
               }
-              const result = await opts.queueProcessor
+              await opts.queueProcessor
                 ?.enqueueContinuation({
                   threadId: resolvedThreadId,
                   userId,
@@ -1721,14 +1721,68 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
     // Always thread-scoped — default to 'default' thread for lobby
     const resolvedThreadId = threadId ?? 'default';
-    const messages =
-      beforeTs != null
-        ? await opts.messageStore.getByThreadBefore(resolvedThreadId, beforeTs, limit + 1, beforeId, userId)
-        : await opts.messageStore.getByThread(resolvedThreadId, limit + 1, userId);
 
-    // Fetch limit+1 to determine hasMore; drop oldest (first) probe item
-    const hasMore = messages.length > limit;
-    const page = hasMore ? messages.slice(1) : messages;
+    // Loop-scan: iteratively fetch batches from the store, filtering out
+    // internal system messages, until we have `limit + 1` visible items
+    // (the +1 probes hasMore) or the store is exhausted. This guarantees
+    // reachability regardless of how many consecutive internal messages
+    // cluster together — the old fixed-overscan approach would return
+    // {messages:[], hasMore:true} when internal clusters exceeded the cap.
+    //
+    // Termination guarantee: both in-memory and Redis store implementations
+    // use strict cursor advancement (exclusive `< cursor`), so each batch
+    // is strictly older than the previous. The store has finite data, so
+    // storeExhausted (rawBatch.length < BATCH_SIZE) is guaranteed to fire.
+    // The prevCursorId check is a defensive backstop against store bugs
+    // where the cursor fails to advance — it breaks the loop rather than
+    // spinning forever, and does NOT impose any functional scan limit.
+    const BATCH_SIZE = limit + 1 + 20; // generous first batch for common case
+    const needed = limit + 1;
+
+    type StoredMsg = Awaited<ReturnType<typeof opts.messageStore.getByThread>>[number];
+    const allVisible: StoredMsg[] = [];
+    let cursorTs = beforeTs;
+    let cursorId = beforeId;
+    let storeExhausted = false;
+
+    while (allVisible.length < needed && !storeExhausted) {
+      const rawBatch =
+        cursorTs != null
+          ? await opts.messageStore.getByThreadBefore(resolvedThreadId, cursorTs, BATCH_SIZE, cursorId, userId)
+          : await opts.messageStore.getByThread(resolvedThreadId, BATCH_SIZE, userId);
+
+      if (rawBatch.length < BATCH_SIZE) {
+        storeExhausted = true;
+      }
+
+      // Filter internal messages:
+      // - systemKind='context_briefing': F148 routing context for cats
+      //   (NOT F233 duty briefing, which also uses origin='briefing' but lacks this marker)
+      // - routing-guard-failure: internal route guard diagnostic
+      const batchVisible = rawBatch.filter(
+        (m) => m.extra?.systemKind !== 'context_briefing' && m.source?.connector !== 'routing-guard-failure',
+      );
+
+      // Prepend: each subsequent batch is chronologically older
+      allVisible.unshift(...batchVisible);
+
+      // Advance cursor to the oldest message in this batch for next iteration.
+      // Store returns oldest-first (after internal .reverse()), so [0] is oldest.
+      // Defensive: if cursor didn't advance, break to prevent infinite loop.
+      if (rawBatch.length > 0) {
+        const oldest = rawBatch[0]!;
+        const nextTs = oldest.deliveredAt ?? oldest.timestamp;
+        const nextId = oldest.id;
+        if (nextTs === cursorTs && nextId === cursorId) break; // cursor stuck — store bug
+        cursorTs = nextTs;
+        cursorId = nextId;
+      }
+    }
+
+    // hasMore: true if we collected more visible items than the page size,
+    // or if we haven't exhausted the store (more may exist deeper).
+    const hasMore = allVisible.length > limit || !storeExhausted;
+    const page = allVisible.length > limit ? allVisible.slice(allVisible.length - limit) : allVisible;
 
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {

@@ -27,7 +27,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
-| `merge-gate` | 门禁→PR→云端 review→merge→清理 | ④⑤⑥ |
+| `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
 | `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
 | `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
 | `deep-research` | 多源深度调研 | — |
@@ -41,20 +41,21 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
 | `enterprise-workflow` | 企微/飞书文档、表格、待办、会议、日程一键创建 | — |
 | `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
-| `hyperfocus-brake` | 铲屎官健康提醒/三猫撒娇打断 | — |
+| `hyperfocus-brake` | operator健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
 | `self-evolution` | scope 守护/流程改进/知识沉淀 | — |
 | `vision-rescue` | 任务绝境/反复摆动/投降修辞/放弃愿景 | — |
-| `bootcamp-guide` | CVO 新手训练营引导 | — |
+| `bootcamp-guide` | operator 新手训练营引导 | — |
 | `cross-thread-sync` | 跨 thread 协同/通知/争用协调 | — |
 | `browser-preview` | 写前端/跑 dev server/看页面效果 | — |
 | `console-dev` | Console 前端开发的入口、设计体系、实现和验证门禁 | — |
 | `browser-automation` | 外部网站浏览/登录态流程/浏览器工具路由 | — |
 | `organize-threads` | 整理未分类 thread，建议合适标签 | — |
-| `workspace-navigator` | 铲屎官说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
+| `workspace-navigator` | operator说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
+| `anime-forge` | 做动画短剧/角色 IP 短片/图生视频管线（素材是生成的不是录的） | — |
 
 ### 参考文件（refs/，按需读取）
 
@@ -63,7 +64,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `refs/shared-rules.md` | 三猫共用协作规则（单一真相源） |
 | `refs/decision-matrix.md` | 决策权漏斗矩阵 |
 | `refs/commit-signatures.md` | 猫猫签名表 + @ 句柄 |
-| `refs/pr-template.md` | PR 模板 + 云端 review 触发模板 |
+| `refs/pr-template.md` | PR 模板 + remote review 触发模板 |
 | `refs/review-request-template.md` | Review 请求信模板 |
 | `refs/vision-evidence-workflow.md` | 前端截图/录屏证据流程（B1） |
 | `refs/requirements-checklist-template.md` | 需求点 checklist 模板（B3） |

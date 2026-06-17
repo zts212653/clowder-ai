@@ -21,7 +21,7 @@ triggers:
 
 **硬规则**：cross-post 是**通知层**，不是真相源。阻塞信息必须双写到可追溯状态（feature doc / workflow / task）。
 
-> **⚠️ 路由铁律**：cross-post 消息如果**没有 @mention 也没有 targetCats**，消息会到达目标 thread 但**不会触发任何猫 session**——消息静默躺在那里，直到铲屎官手动 @ 某只猫。**必须**用以下任一方式触发目标猫：
+> **⚠️ 路由铁律**：cross-post 消息如果**没有 @mention 也没有 targetCats**，消息会到达目标 thread 但**不会触发任何猫 session**——消息静默躺在那里，直到operator手动 @ 某只猫。**必须**用以下任一方式触发目标猫：
 > 1. 在 content 末尾另起一行写 `@句柄`（如 `@目标猫句柄`）
 > 2. 传 `targetCats` 参数（如 `targetCats: ["opus"]`）
 
@@ -68,7 +68,7 @@ Action Needed 必须标注级别：
 |------|------|---------|
 | `[FYI]` | 知悉即可 | 不需要回复，不需要动作 |
 | `[ACTION]` | 需要动作 | 执行指定动作（rebase / rebuild / 确认兼容） |
-| `[BLOCKING]` | 阻塞依赖 | **必须 ack**。超时未 ack → 升级铲屎官 |
+| `[BLOCKING]` | 阻塞依赖 | **必须 ack**。超时未 ack → 升级operator |
 
 ### 升级到五件套
 
@@ -112,7 +112,7 @@ Action Needed 必须标注级别：
    其他 session 可以重新 claim
 
 5. 升级 — 双方都不能让：
-   升级铲屎官决定优先级
+   升级operator决定优先级
 ```
 
 ### 场景速查
@@ -130,7 +130,7 @@ Action Needed 必须标注级别：
 |---------|-----------|
 | `[FYI]` | 不等 |
 | `[ACTION]` | 不等（PR tracking / @ 机制保证对方会看到） |
-| `[BLOCKING]` | **必须等 ack** → 超时未 ack → 升级铲屎官 |
+| `[BLOCKING]` | **必须等 ack** → 超时未 ack → 升级operator |
 
 **§15 家规**：BLOCKING 信息不能只留在 cross-post 消息里，必须同时写入可追溯状态（feature doc / workflow / task）。
 
@@ -167,4 +167,4 @@ Action Needed 必须标注级别：
 ## 下一步
 
 - 需要交接工作给其他猫 → `cross-cat-handoff`
-- 争用升级到铲屎官 → 直接在 thread 里说明情况
+- 争用升级到operator → 直接在 thread 里说明情况

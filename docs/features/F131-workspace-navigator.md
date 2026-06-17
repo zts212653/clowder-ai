@@ -12,17 +12,17 @@ created: 2026-03-21
 
 ## Why
 
-team lead 2026-03-20 语音指示（逐字）：
+operator 2026-03-20 语音指示（逐字）：
 
 > "你最好也有自己的 skills，能够让猫猫。我跟猫猫说，现在我们一起来看一下审，看一下日志。你能帮我去把右边的 workspace 面板打开？当然，这个不只是日志哦，就有点有点多了。可能是你，我们一起看一下怎么样的文档，你也能一起帮我把文档直接打开，就不要我一个个去点。"
 
 > "跟浏览器的 Preview 一样。更通用的是，我用语音或者用文字告诉你，你帮我一起打开这个 workspace 的哪个地方？你要能帮我打开。"
 
-team lead 2026-03-21 进一步明确：
+operator 2026-03-21 进一步明确：
 
-> team lead不会给精确路径。"帮我打开日志""看看 F131 的设计图""打开那个 discussion"——猫猫自己能 glob/grep 到路径，自己去传精确路径到 API。对人类来说说全路径太不友好了。
+> operator不会给精确路径。"帮我打开日志""看看 F131 的设计图""打开那个 discussion"——猫猫自己能 glob/grep 到路径，自己去传精确路径到 API。对人类来说说全路径太不友好了。
 
-核心痛点：team lead让猫猫一起看某个文件/目录时，只能靠自己在 Workspace Explorer 里手动点击层层目录。猫猫有 `setWorkspaceOpenFile` / `revealInTree` 等前端能力，但没有对外暴露的 HTTP 端点供猫猫调用。browser-preview 的 `auto-open` 已证明这种模式可行且体验好。
+核心痛点：operator让猫猫一起看某个文件/目录时，只能靠自己在 Workspace Explorer 里手动点击层层目录。猫猫有 `setWorkspaceOpenFile` / `revealInTree` 等前端能力，但没有对外暴露的 HTTP 端点供猫猫调用。browser-preview 的 `auto-open` 已证明这种模式可行且体验好。
 
 ## What
 
@@ -56,7 +56,7 @@ team lead 2026-03-21 进一步明确：
 猫猫收到模糊意图后，**用自身工具（glob/grep/read）找到精确路径**，然后调用基础设施层的 API：
 
 ```
-team lead: "帮我打开 F131 的设计图"
+operator: "帮我打开 F131 的设计图"
   ↓
 猫猫: glob("**/F131*.pen") → 找到精确路径
   ↓
@@ -84,7 +84,7 @@ Hub: 右面板自动打开并导航到文件
 - [x] AC-3: 支持指定 worktreeId 跨 worktree 导航（如从 main 导航到 runtime 的日志目录） ✅ PR #611 (threadId session isolation)
 - [x] AC-4: 面板关闭时收到事件能自动打开（参考 usePreviewAutoOpen 的 pending 机制） ✅ PR #611 (复用 chatStore.setWorkspaceRevealPath/setWorkspaceOpenFile)
 - [x] AC-5: Skill 文档 `workspace-navigator/SKILL.md` 创建完成，含意图匹配策略、调用步骤、常见场景速查 ✅ commit 8d61c783
-- [x] AC-6: 端到端验证——team lead说"帮我打开日志"，猫猫能自己找到路径 → 调 API → Hub 右面板自动展示日志目录 ✅ 2026-03-23 runtime E2E（含 PR #678 回归）
+- [x] AC-6: 端到端验证——operator说"帮我打开日志"，猫猫能自己找到路径 → 调 API → Hub 右面板自动展示日志目录 ✅ 2026-03-23 runtime E2E（含 PR #678 回归）
 
 ## Dependencies
 
@@ -98,13 +98,13 @@ Hub: 右面板自动打开并导航到文件
 |------|------|
 | Socket 事件在面板关闭时丢失 | 复用 F120 的 pending 机制：存 store → 面板打开时消费 |
 | worktreeId 不匹配导致导航失败 | API 层校验 worktreeId 存在性，不存在返回 404 + 提示 |
-| 猫猫意图匹配不准（找错文件） | Skill 文档提供明确的搜索策略 + 多结果时让team lead确认 |
+| 猫猫意图匹配不准（找错文件） | Skill 文档提供明确的搜索策略 + 多结果时让operator确认 |
 
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 参照 F120 browser-preview 的 auto-open 模式（HTTP API + Socket 事件 + 前端监听） | team lead明确说"跟浏览器的 Preview 一样"，已验证模式可行 | 2026-03-21 |
+| KD-1 | 参照 F120 browser-preview 的 auto-open 模式（HTTP API + Socket 事件 + 前端监听） | operator明确说"跟浏览器的 Preview 一样"，已验证模式可行 | 2026-03-21 |
 | KD-2 | 日志一键跳转按钮作为 F130 Polish 独立实现，不依赖 F131 | 按钮是 UI 入口，F131 是猫猫编程式能力，解耦更灵活 | 2026-03-21 |
-| KD-3 | 不分 Phase A/B，单 Phase 三层：基础设施层 + 硬实力层 + 软实力层(Skill) | team lead拍板——模糊路径解析是猫猫的 Agent 能力（硬实力），不需要后端做；Skill 教猫猫怎么做（软实力）；API/Socket 是管道（基础设施） | 2026-03-21 |
-| KD-4 | 猫猫传给 API 的路径必须是精确路径，模糊意图解析在 Agent 侧完成 | team lead："我不会告诉你全路径，你自己能 glob 到的" — Agent 本身就是路径解析器，无需后端 LLM | 2026-03-21 |
+| KD-3 | 不分 Phase A/B，单 Phase 三层：基础设施层 + 硬实力层 + 软实力层(Skill) | operator拍板——模糊路径解析是猫猫的 Agent 能力（硬实力），不需要后端做；Skill 教猫猫怎么做（软实力）；API/Socket 是管道（基础设施） | 2026-03-21 |
+| KD-4 | 猫猫传给 API 的路径必须是精确路径，模糊意图解析在 Agent 侧完成 | operator："我不会告诉你全路径，你自己能 glob 到的" — Agent 本身就是路径解析器，无需后端 LLM | 2026-03-21 |

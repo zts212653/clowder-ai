@@ -17,13 +17,13 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
 
 ## Why
 
-猫目前无法帮助team lead准备新 thread。当话题需要独立上下文时（如新 issue 调查、子任务分配），猫只能口头请求team lead去前端手动创建，打断了自主工作流。
+猫目前无法帮助operator准备新 thread。当话题需要独立上下文时（如新 issue 调查、子任务分配），猫只能口头请求operator去前端手动创建，打断了自主工作流。
 
-> 发现场景（issue #82）：team lead要求"新开一个 thread"，但猫没有 API 可调，只能等team lead手动操作。
+> 发现场景（issue #82）：operator要求"新开一个 thread"，但猫没有 API 可调，只能等operator手动操作。
 
-但直接给猫暴露 `cat_cafe_create_thread` 也不对。Thread 是用户可见、持久化、会改变工作空间结构的对象；猫可以起草创建信息，但不应悄悄创建。F128 的产品目标不是"猫绕过team lead创建 thread"，而是：
+但直接给猫暴露 `cat_cafe_create_thread` 也不对。Thread 是用户可见、持久化、会改变工作空间结构的对象；猫可以起草创建信息，但不应悄悄创建。F128 的产品目标不是"猫绕过operator创建 thread"，而是：
 
-> 猫猫把新 thread 的信息填好，以卡片形式展示；team lead确认或编辑后，系统再创建。
+> 猫猫把新 thread 的信息填好，以卡片形式展示；operator确认或编辑后，系统再创建。
 
 ## What
 
@@ -40,7 +40,7 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
   - 返回 `{ proposalId }`，不返回 `threadId`，因为此阶段尚未创建 thread
 - Thread proposal rich block
   - 插入当前 thread，展示标题、原因、父 thread、默认猫、初始消息
-  - team lead可编辑字段
+  - operator可编辑字段
   - 操作：Create / Edit / Dismiss
 - `POST /api/thread-proposals/:proposalId/approve`
   - 必须由用户 principal 调用，不能由猫 callback token 自批
@@ -59,9 +59,9 @@ community_pr: https://github.com/zts212653/clowder-ai/pull/85
   - 源 thread 自动追加系统消息：已创建子 thread，并链接到新 thread
   - 新 thread 自动追加 seed message，说明来源与初始任务
 
-### ~~Phase B: 前端层级 UI + Proposal Card（需设计稿）~~ — CVO rejected (2026-05-29)
+### ~~Phase B: 前端层级 UI + Proposal Card（需设计稿）~~ — operator rejected (2026-05-29)
 
-> **CVO 决策**：Sidebar 层级树形 UI 是社区原始设计，不符合自家愿景，拒绝实现。
+> **operator 决策**：Sidebar 层级树形 UI 是社区原始设计，不符合自家愿景，拒绝实现。
 > ProposalCard 本身已在 Phase F 实现（pin + navigate + 编辑 + 状态翻转）。
 
 ### Phase C: Thread Orchestration Skill
@@ -79,7 +79,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 |--------|-----------|
 | 猫猫能否直接创建 thread | 默认不能 |
 | 猫猫能做什么 | 起草 thread proposal rich block |
-| 谁确认 | team lead或具备 thread create 权限的用户 |
+| 谁确认 | operator或具备 thread create 权限的用户 |
 | 谁执行创建 | 后端使用用户确认上下文执行 |
 | 如何追踪 | proposalId + sourceThreadId + approvedBy + threadId 双向链接 |
 | 可否 trusted auto-create | 后续 settings opt-in，默认关闭 |
@@ -107,7 +107,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - [x] AC-B6: `Proposal` schema in shared types matches the spec model above
 - [x] AC-B7: Tests cover: cat auth happy path, stale guard, ownership rejection, idempotency, user approve happy path, double-approve idempotency, cross-user approve 403, approve-after-reject 409, reject happy path, reject-then-approve 409, edit-on-approve applied to created thread
 
-### Phase F: 前端实现（2026-05-29 CVO 补充置顶 + 卡片体验）
+### Phase F: 前端实现（2026-05-29 operator 补充置顶 + 卡片体验）
 
 - [x] AC-F1: Proposal card renders in source thread on `proposal_created` socket event (no manual refresh)
 - [x] AC-F2: Card prefills with cat-supplied fields; user can edit `title`, `parentThreadId`, `preferredCats`, `initialMessage` before approve
@@ -125,7 +125,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - [x] AC-X3: `MCP_TOOLS_SECTION` updated; `thread-orchestration` skill rewritten for propose-first
 - [x] AC-X4: `pnpm check` + `pnpm lint` + all affected tests green
 
-### Phase Y: Reporting Mode 分型 ✅ merged (PR #2098, squash `914fce810`, 2026-06-04)（Maine Coon cross-post 提出 + CVO 委托猫讨论达成一致）
+### Phase Y: Reporting Mode 分型 ✅ merged (PR #2098, squash `914fce810`, 2026-06-04)（Maine Coon cross-post 提出 + operator 委托猫讨论达成一致）
 
 > **Source**: Maine Coon cross-post — 守门猫 Repo Inbox PR triage 场景里，当前 F128 默认让所有 propose 出去的 thread 回报主 thread (`proposal-enrich-header.ts:61` 并行 + `:66` 串行硬写"最后一棒回报"进 initialMessage)，triage 类任务被回报 noise 拉回。
 > **Why**: thread 之间的关系不是一刀切——按"源 thread 是否背负任务"分型，4 种关系应有 4 种 reporting mode。
@@ -134,10 +134,10 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 | Mode | 语义 | 推荐场景 |
 |------|------|---------|
-| `none` (UI: `autonomous`) | 球权完全释放，源 thread 不默认持有回执责任；"不强制回报"≠"禁止上报"——下游遇 CVO 决策 / 跨 feature 冲突 / 共享文件争用 / blocking dep / 不可逆风险仍按家规主动 cross-post | Repo Inbox / PR triage / 分发 |
+| `none` (UI: `autonomous`) | 球权完全释放，源 thread 不默认持有回执责任；"不强制回报"≠"禁止上报"——下游遇 operator 决策 / 跨 feature 冲突 / 共享文件争用 / blocking dep / 不可逆风险仍按家规主动 cross-post | Repo Inbox / PR triage / 分发 |
 | `final-only` | 下游自治，最后一棒回报一次 summary | Feature work fork |
 | `state-transitions` | 下游每个 phase boundary 回报（≈当前隐式默认） | Bug investigation / Research |
-| `blocking-ack` | 下游必须等源 thread ack 才能继续；持球在**被阻塞的下游 thread** 不是源 thread；下游发 `[BLOCKING]` ack 请求 + 自己 `cat_cafe_hold_ball` 等 ack/超时，源 thread 不背 polling 责任；未来若加结构化 ack 回调 + EYES>0 走事件驱动不续 hold（KD-27 一致） | 等 review / 等 CVO / blocking handoff |
+| `blocking-ack` | 下游必须等源 thread ack 才能继续；持球在**被阻塞的下游 thread** 不是源 thread；下游发 `[BLOCKING]` ack 请求 + 自己 `cat_cafe_hold_ball` 等 ack/超时，源 thread 不背 polling 责任；未来若加结构化 ack 回调 + EYES>0 走事件驱动不续 hold（KD-27 一致） | 等 review / 等 operator / blocking handoff |
 
 #### Default 决策（历史结论；2026-06-07 被 Phase AA 修正）
 
@@ -147,7 +147,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 收敛论证（两条核心）：
 1. **`final-only` 不解决 silent deadlock**：`final-only` 的"最后回报"也是下游主动发；下游真卡死/崩溃时既不闭环也不发 final summary → 对真正的 silent deadlock 同样无能为力。silent deadlock 的真解药是 `blocking-ack`（带 timeout）或源 thread 主动 poll，不是 `final-only`。去掉 safety 维度后，`final-only` vs `none` 退化为纯"例行 summary noise vs 静默"权衡。
-2. **该权衡里 `none` 占优**：C-Y2 已保证关键上报（CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突）在 `none` 下照常发生 → 关键路径不丢，`none` 只省"例行 phase 回报"；`none` 零额外副作用；强制回报的 noise（triage 把 summary 拉回守门猫）正是 `final-only` 的失败模式 = Maine Coon提此 feature 的初始痛点。
+2. **该权衡里 `none` 占优**：C-Y2 已保证关键上报（operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突）在 `none` 下照常发生 → 关键路径不丢，`none` 只省"例行 phase 回报"；`none` 零额外副作用；强制回报的 noise（triage 把 summary 拉回守门猫）正是 `final-only` 的失败模式 = Maine Coon提此 feature 的初始痛点。
 
 #### Design Constraint（实施时必须满足）
 
@@ -155,7 +155,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - **C-Y2**: `none` 允许下游主动 cross-post — "不强制回报"≠"禁止上报"
 - **C-Y3**: `blocking-ack` 持球边界 — 持球在**下游**（被阻塞的猫）不是源 thread；下游 `hold_ball` + 发 `[BLOCKING]` ack 请求；源 thread 不背 polling 责任
 - **C-Y4**: 命名 UI 分离 — `none` 可 UI 显示成 `autonomous` 减少误读（spec 时统一决定内部字段是否同步改名）
-- **C-Y5**: `none`/`autonomous` 的 header 不得出现"最后一棒回报主 Thread"/"顺序 → 回到主 Thread"文案；改写为"无强制回报；遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突按家规主动 cross-post"（Maine Coon review guard：`proposal-enrich-header.ts:61/:66` 旧硬写默认正是 Phase Y 要拆掉的，不能反过来变成保留 report-back 的理由）
+- **C-Y5**: `none`/`autonomous` 的 header 不得出现"最后一棒回报主 Thread"/"顺序 → 回到主 Thread"文案；改写为"无强制回报；遇 operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突按家规主动 cross-post"（Maine Coon review guard：`proposal-enrich-header.ts:61/:66` 旧硬写默认正是 Phase Y 要拆掉的，不能反过来变成保留 report-back 的理由）
 - **C-Y6**: `#ideate` 与 `reportingMode` **正交** — `#ideate` 只决定并行 wake-all vs 串行接龙；report-back owner 由 `reportingMode` 决定。`#ideate + none` 不注入 reporter owner；`#ideate + final-only/state-transitions` 才指定汇总 owner（Maine Coon review guard：防止实现把"并行=必回报"耦死）
 
 #### Acceptance Criteria
@@ -177,12 +177,12 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 - 提议/实施猫：Ragdoll（Opus-47 立项 + Opus-48 接手 default 收敛与实施）
 - 设计 input：Maine Coon（Codex GPT-5.5）— design constraint C-Y1~C-Y6 来源（C-Y5/C-Y6 为 default 收敛时补充的实现 review guard）
-- CVO sign-off：landy（立项 + 委托猫讨论 default，2026-06-04）
+- operator sign-off：landy（立项 + 委托猫讨论 default，2026-06-04）
 
 ### Phase AA: Reporting Contract UX + Source Attribution（2026-06-07）
 
 > **Status**: ✅ merged (PR #2134, 2026-06-07)
-> **Source**: team lead 2026-06-07 反馈：猫 post 回主 thread 没有 @ 对应猫，消息存了但没有唤醒；同时 F128 子 thread 的首条消息显示成team lead发的，而真实发起者是 propose 的猫。
+> **Source**: operator 2026-06-07 反馈：猫 post 回主 thread 没有 @ 对应猫，消息存了但没有唤醒；同时 F128 子 thread 的首条消息显示成operator发的，而真实发起者是 propose 的猫。
 > **Why**: Phase Y 在下游 header 里解决 reporting mode，但坐标系仍偏下游。第一性原理是：**猫在 propose 时就必须明确这个 thread 是 fork-and-return 还是 autonomous；子 thread 第一条消息必须带真实来源；需要回报时必须知道回到哪个 thread、唤醒哪只源猫。**
 
 #### Design Decision
@@ -196,7 +196,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
    - 需要阶段性状态 → `state-transitions`
    - 遇阻塞必须等源 thread ack → `blocking-ack`
 3. **首条消息作者 = source cat，不是 approver**
-   team lead点击 approve 是授权动作，不是 seed content 作者。Approved seed / initial message 应显示为 `proposal.sourceCatId` 的猫消息；`approvedBy` 继续保留在线程/proposal 审计元数据里。
+   operator点击 approve 是授权动作，不是 seed content 作者。Approved seed / initial message 应显示为 `proposal.sourceCatId` 的猫消息；`approvedBy` 继续保留在线程/proposal 审计元数据里。
 4. **首条消息携带 F193/F52 风格来源元数据**
    Seed message `extra.crossPost` 必须携带 `sourceThreadId` + `sourceInvocationId`（未来若有 source message id，可一并扩展），前端复用现有 cross-post pill：可点击回源 thread，并尽量定位到 source invocation/message。
 5. **Report-back 指令必须带 routing credentials**
@@ -206,7 +206,7 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 - `reportingMode` 仍是 create-time thread contract；v1 不支持创建后动态切换（继承 C-Y1）。
 - `#ideate` 与 `reportingMode` 继续正交（继承 C-Y6）：并行/串行只决定 wake 方式，report-back 由 `reportingMode` 决定。
-- `none` 不强制回报，但不禁止上报。即使 `none` 下遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突需要 cross-post，也必须使用 `targetCats` 或 line-start `@`，不能发无路由 cross-post。
+- `none` 不强制回报，但不禁止上报。即使 `none` 下遇 operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突需要 cross-post，也必须使用 `targetCats` 或 line-start `@`，不能发无路由 cross-post。
 - `sourceCatId` 是默认 report recipient；若实现需要展示 handle，应通过 cat registry / `primaryMentionHandleForCatId` 解析 stable handle，不写死中文名或模型名。
 
 #### Acceptance Criteria
@@ -229,12 +229,12 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 
 - 诊断与方案 input：Ragdoll（Opus-4.6）— 2026-06-07 指出 Phase Y default `none` + cross-post routing 指引缺失的叠加根因，并提出 source-cat attribution / F193-style source pill 方案。
 - 设计收敛：Maine Coon（Codex GPT-5.5）— 接受"上游 contract 完整化"方向，补充：保留 Phase Y triage 价值但 supersede 通用 default；routing credentials 是 report-back contract 的硬要求，不是 header 文案 polish。
-- CVO correction：landy — 要求从第一性原理修 propose-time mode choice 和首条消息来源体验，避免下游补锅。
+- operator correction：landy — 要求从第一性原理修 propose-time mode choice 和首条消息来源体验，避免下游补锅。
 
 ### Phase Z: projectPath 项目归属 — cwd 圣域回落根因修复（2026-06-05）
 
 > **Status**: merged（PR #2118, squash `b3541acf`, 2026-06-06）
-> **Source**: F200-B 愿景守护时 opus-47 在子 thread 被唤起后落到 `cat-cafe-runtime/packages/api`（runtime 圣域）——"我竟然在 runtime！🙀"。三方坐实根因（team lead UI 截图 + Maine Coon live API + 代码 trace）。
+> **Source**: F200-B 愿景守护时 opus-47 在子 thread 被唤起后落到 `cat-cafe-runtime/packages/api`（runtime 圣域）——"我竟然在 runtime！🙀"。三方坐实根因（operator UI 截图 + Maine Coon live API + 代码 trace）。
 > **Why**: Phase A 早已 spec `projectPath`（propose 继承 parent、approve 校验权限，见上 line 39/48），但实现从未让猫真正传/用它。propose 创建的子 thread 继承 source thread 的 `default` projectPath → 子 thread 无项目归属 → cat invocation 的 workingDirectory 解析不到有效 projectPath → cwd 回落 `process.cwd()` = runtime 圣域。本 Phase 补齐并扩展这条契约。
 
 #### What
@@ -298,16 +298,16 @@ Maine Coon code review 抓 3 个 P1（同族：projectPath 契约在非主路径
 
 ### 2026-05-22 产品修正
 
-上述 review 聚焦在 PR #85 的技术拆分与 P2 缺陷；team lead在 2026-05-22 补充了更上层的产品判断：
+上述 review 聚焦在 PR #85 的技术拆分与 P2 缺陷；operator在 2026-05-22 补充了更上层的产品判断：
 
-> 猫猫创建 thread 之类的能力应该弹出一个卡片，填写好创建的信息，team lead点击再创建，不是悄摸摸创建。
+> 猫猫创建 thread 之类的能力应该弹出一个卡片，填写好创建的信息，operator点击再创建，不是悄摸摸创建。
 
 因此 PR-A 的方向也需从 `cat_cafe_create_thread` 调整为 `cat_cafe_propose_thread`。幂等性、所有权校验、Redis pipeline 仍然有效，但它们属于 approve 后执行阶段的技术约束；产品入口不再是猫直接创建。
 
 ### Phase AB: Default-Parent Project Awareness（2026-06-09，merged）
 
 > **Status**: ✅ merged via PR #2170 (squash `c411ba14d`)
-> **Source**: team lead 2026-06-09 反馈："我们的 f128 为什么创建的 thread 有的在未分类呀？难道不应该是和主 thread 一样？或者允许猫猫选到底哪个 project 如果没选那就和主 thread 一样"
+> **Source**: operator 2026-06-09 反馈："我们的 f128 为什么创建的 thread 有的在未分类呀？难道不应该是和主 thread 一样？或者允许猫猫选到底哪个 project 如果没选那就和主 thread 一样"
 > **Why**: Phase Z 的 projectPath 继承逻辑本身正确（"没选就继承 parent"）。但当 parent 本身是 `default`（eval/lobby/meta thread 无项目归属）时，子 thread 静默继承 `default` = 进"未分类"——继承合法但体验错。Live 数据验证：`F192 publish_verdict` 和 `F200-B' fix shadowConsumedMRR` 的子 thread 都是 `default`，因为 parent `thread_eval_memory` 本身就是 `default`。
 
 #### Design Decision
@@ -341,7 +341,7 @@ Maine Coon code review 抓 3 个 P1（同族：projectPath 契约在非主路径
 ### Phase AC: Approval-Time Reporting Mode Override（2026-06-09）
 
 > **Status**: ✅ merged via PR #2179 (squash `4a6c841d0`, 2026-06-09)
-> **Source**: team lead 2026-06-09 追问："F128 到底有没有模式就是主 thread 的猫要求子 thread 不要汇报？会不会格式写死最后汇报？" 进一步确认：proposal card 既然显示"回报模式"，team lead approve 前也应该能改，不满意猫的选择时不该只能驳回重提。
+> **Source**: operator 2026-06-09 追问："F128 到底有没有模式就是主 thread 的猫要求子 thread 不要汇报？会不会格式写死最后汇报？" 进一步确认：proposal card 既然显示"回报模式"，operator approve 前也应该能改，不满意猫的选择时不该只能驳回重提。
 > **Why**: Phase AA 把默认改回 `final-only`，并保留 `none` 作为 explicit opt-in。这个运行时契约是对的，但 UX 仍然让猫的选择过强：`reportingMode` 只在 propose 时填，用户审批卡只能看，不能改。结果猫忘记选 `none` 时，卡片看起来像"系统写死必须最终汇报"。第一性原理：proposal 是猫提出的草案，approve 是用户授权前的最终编辑点；回报契约和 projectPath 一样，必须能在创建前被用户修正。
 
 #### Design Decision

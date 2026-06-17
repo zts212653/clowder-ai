@@ -84,6 +84,33 @@ test('safeExcerpt is sanitized (token redacted)', () => {
   assert.ok(d.safeExcerpt.includes('[TOKEN_REDACTED]'), `expected redaction marker: ${d.safeExcerpt}`);
 });
 
+test('safeExcerpt redacts OAuth URL fragments from classifiable stderr', () => {
+  const rawText = [
+    'Authentication required. Please visit the URL to log in:',
+    'https://accounts.google.com/o/oauth2/auth#state=very-secret-state&access_token=ya29.AGYAccessToken',
+  ].join('\n');
+  const d = buildCliDiagnostics({ rawText, debugRef: { ...baseRef, command: 'agy' } });
+  assert.strictEqual(d.reasonCode, 'auth_failed');
+  assert.ok(d.safeExcerpt, 'auth stderr should produce a safe excerpt');
+
+  const payload = JSON.stringify(d);
+  assert.match(payload, /FRAGMENT_REDACTED/);
+  assert.doesNotMatch(payload, /very-secret-state/);
+  assert.doesNotMatch(payload, /ya29\.AGYAccessToken/);
+});
+
+test('safeExcerptRawText limits public excerpt while rawText still classifies', () => {
+  const d = buildCliDiagnostics({
+    rawText: 'private stdout before classifier\n401 Unauthorized from stdout path',
+    safeExcerptRawText: 'stderr noise without a classifier match',
+    debugRef: baseRef,
+  });
+  assert.strictEqual(d.reasonCode, 'auth_failed');
+  assert.strictEqual(d.safeExcerpt, undefined);
+  assert.equal(d.excerptSource, undefined);
+  assert.doesNotMatch(JSON.stringify(d), /private stdout/);
+});
+
 test('OQ-3 accept: safeExcerpt ≤8 lines and ≤1500 chars', () => {
   // 50 long lines matching network_error
   const longLines = Array.from(
@@ -371,7 +398,7 @@ test('REASON_TEXT invariant: publicSummary + publicHint MUST be plain text (no m
 });
 
 // =============================================================================
-// F212 Phase F — Empty-stderr observability (砚砚 catch + CVO directive 2026-05-30)
+// F212 Phase F — Empty-stderr observability (砚砚 catch + operator directive 2026-05-30)
 // =============================================================================
 
 // AC-F1 + F6: buildCliExitDiagnostic builds structured payload with every required field

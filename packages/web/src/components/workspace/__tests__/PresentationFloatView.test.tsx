@@ -143,7 +143,7 @@ describe('PresentationFloatView (F226 floating window)', () => {
     expect(minEl.key).not.toBe(fullEl.key);
   });
 
-  // ── F226 尺寸快捷 enhancement（铲屎官 dogfood）──
+  // ── F226 尺寸快捷 enhancement（co-creator dogfood）──
 
   it('renders 适配 PPT (⤢) control; maximized shows restore glyph (⤡) with distinct key for remount', () => {
     const html = renderToStaticMarkup(<PresentationFloatView {...baseProps} minimized={false} fileContent={'# doc'} />);
@@ -157,7 +157,7 @@ describe('PresentationFloatView (F226 floating window)', () => {
     expect(maxHtml).toContain('⤡'); // ⤡ restore glyph
   });
 
-  it('drops backdrop-blur so the float is a solid panel readable over the dark chat area (铲屎官 dogfood)', () => {
+  it('drops backdrop-blur so the float is a solid panel readable over the dark chat area (co-creator dogfood)', () => {
     const html = renderToStaticMarkup(<PresentationFloatView {...baseProps} minimized={false} fileContent={'# doc'} />);
     // 毛玻璃在深色聊天区透字不清；演示讲稿首要清晰 → 实底面板
     expect(html).not.toContain('backdrop-blur');

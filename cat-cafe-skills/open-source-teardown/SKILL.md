@@ -2,7 +2,7 @@
 name: open-source-teardown
 description: >
   明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
-  Use when: 铲屎官要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
+  Use when: operator要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
   Not for: 普通资料搜索（用 deep-research）、社区 issue/PR 运营（用 opensource-ops）、只需要架构头脑风暴（用 collaborative-thinking）。
   Output: feature-discussions/YYYY-MM-DD-{project}-deep-dive/ 下的代码证据报告 + 对比结论 + 候选 lesson/skill。
   GOTCHA: 不许只看 README 下判断；每个明星特性必须追到代码路径、状态突变点、反馈闭环和算法输入输出。
@@ -27,7 +27,7 @@ triggers:
 
 ## When to Use
 
-触发：铲屎官看到 PPT、博客、README、社区讨论后问“这个项目是不是很强？”；需要拆解 agent runtime、skill 系统、memory/RAG、MCP/gateway、RL/eval、插件架构等工程系统；或需要把一次竞品分析沉淀为 lesson / ADR / skill。
+触发：operator看到 PPT、博客、README、社区讨论后问“这个项目是不是很强？”；需要拆解 agent runtime、skill 系统、memory/RAG、MCP/gateway、RL/eval、插件架构等工程系统；或需要把一次竞品分析沉淀为 lesson / ADR / skill。
 
 排除：只需要查公开资料或论文综述用 `deep-research`；只需要处理外部 issue/PR/intake 用 `opensource-ops`；还没有明确目标项目、只是在讨论方向用 `collaborative-thinking`。
 
@@ -109,7 +109,7 @@ signal -> decision -> state mutation -> future behavior
 |----------|----------------|
 | 客观任务：测试、编译、错误修复 | 机器/CI/eval |
 | 专业任务：架构、review、审美、产品判断 | 对口专家/peer review |
-| 主观/愿景任务：PPT、品牌、方向选择 | CVO/用户明确反馈 |
+| 主观/愿景任务：PPT、品牌、方向选择 | operator/用户明确反馈 |
 
 如果项目把三层都压给同一个模型自评，要明确写风险：它可能能沉淀步骤，但不能证明质量提升。
 
@@ -123,7 +123,7 @@ signal -> decision -> state mutation -> future behavior
 
 ### Step 6 — 沉淀
 
-1. 把候选 lesson 写进报告，不直接改全局 lesson，等铲屎官确认。
+1. 把候选 lesson 写进报告，不直接改全局 lesson，等operator确认。
 2. 如果形成稳定方法论，更新本 skill 或相关 skill。
 3. docs 产物 commit + push；如果是新 skill，还要跑 `pnpm check:skills` 和 `pnpm sync:skills`。
 

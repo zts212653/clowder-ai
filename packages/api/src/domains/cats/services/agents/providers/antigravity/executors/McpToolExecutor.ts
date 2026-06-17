@@ -184,7 +184,7 @@ function isErrorMcpResult(result: unknown): boolean {
 async function callMcpToolViaStdio(input: McpToolInput, ctx: ExecutorContext): Promise<unknown> {
   const resolved = resolveMcpEntrypoint(input.serverName, ctx.cwd);
   if (!resolved) {
-    throw new Error(`Unsupported or unavailable Cat Cafe MCP server: ${input.serverName}`);
+    throw new Error(`Unsupported or unavailable Clowder AI MCP server: ${input.serverName}`);
   }
   const timeoutMs = mcpToolTimeoutMs();
   const serverParams: StdioServerParameters = {

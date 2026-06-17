@@ -5,6 +5,7 @@ import { Suspense, useLayoutEffect } from 'react';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { initSidebarWidth, useSidebarStore } from '@/stores/sidebarStore';
 import { ActivityBar } from './ActivityBar';
+import { ConciergeHost } from './concierge/ConciergeHost';
 import { ThreadSidebar } from './ThreadSidebar';
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
@@ -67,6 +68,9 @@ function AppShellContent({ children }: AppShellProps) {
           children) so the float survives both workspace mode-tab switches AND full-page route
           changes (/memory, /settings, /mission-hub). KD-1. */}
       <FloatingPresentationSurfaceHost />
+      {/* F229: concierge ball + panel — root-level mount for INV-6 route survival.
+          z-30 (ball) < z-[35] (presentation surface). */}
+      <ConciergeHost />
     </div>
   );
 }

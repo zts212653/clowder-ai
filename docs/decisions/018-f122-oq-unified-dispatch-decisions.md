@@ -6,12 +6,12 @@ topics: [a2a, queue, dispatch, steer, multi_mention, architecture]
 doc_kind: decision
 created: 2026-03-15
 status: accepted
-decided_by: 铲屎官
+decided_by: operator
 ---
 
 # ADR-018: F122 OQ-1/2/4 — 统一执行通道产品决策
 
-> 决策日期：2026-03-15 | 决策人：铲屎官 | 提案人：Ragdoll
+> 决策日期：2026-03-15 | 决策人：operator | 提案人：Ragdoll
 
 ## 背景
 

@@ -43,7 +43,7 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
     id: `proposal-${proposal.proposalId}`,
     kind: 'card',
     v: 1,
-    title: `📥 提议新建 thread：${proposal.title}`,
+    title: `提议新建 thread：${proposal.title}`,
     bodyMarkdown: proposal.reason,
     tone: 'info',
     fields,

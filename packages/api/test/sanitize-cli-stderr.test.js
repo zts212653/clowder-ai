@@ -32,6 +32,22 @@ test('redacts HOME path to ~/', () => {
   assert.ok(!out.includes(home), `home path leaked: ${out}`);
 });
 
+test('redacts caller-provided child HOME path to ~/', () => {
+  const childHome = '/srv/agy/home';
+  const input = `401 Unauthorized while reading ${childHome}/.config/agy/auth.json`;
+  const out = sanitizeCliStderr(input, { additionalHomePaths: [childHome] });
+  assert.ok(out.includes('~/.config/agy/auth.json'), `expected child HOME redaction, got: ${out}`);
+  assert.ok(!out.includes(childHome), `child HOME path leaked: ${out}`);
+});
+
+test('redacts caller-provided child HOME path before colon-delimited errors', () => {
+  const childHome = '/srv/agy/home';
+  const input = `${childHome}: permission denied`;
+  const out = sanitizeCliStderr(input, { additionalHomePaths: [childHome] });
+  assert.strictEqual(out, '~: permission denied');
+  assert.ok(!out.includes(childHome), `child HOME path leaked: ${out}`);
+});
+
 test('redacts high-entropy temp HOME path before entropy fallback', () => {
   const originalHome = process.env.HOME;
   const home = '/tmp/cat-cafe-test-home-aB3xZ9pQ7nM2vL5kR8tY4wU6';
@@ -74,6 +90,23 @@ test('redacts URL query string entirely', () => {
   const out = sanitizeCliStderr(input);
   assert.ok(out.includes('[QUERY_REDACTED]'), `expected QUERY_REDACTED, got: ${out}`);
   assert.ok(!out.includes('sk-abc123def456ghijklmnop'), `token leaked via query: ${out}`);
+});
+
+test('redacts URL fragment string entirely', () => {
+  const input =
+    'Open https://accounts.google.com/o/oauth2/auth#state=very-secret-state&access_token=ya29.AGYAccessToken';
+  const out = sanitizeCliStderr(input);
+  assert.ok(out.includes('[FRAGMENT_REDACTED]'), `expected FRAGMENT_REDACTED, got: ${out}`);
+  assert.ok(!out.includes('very-secret-state'), `state leaked via fragment: ${out}`);
+  assert.ok(!out.includes('ya29.AGYAccessToken'), `access token leaked via fragment: ${out}`);
+});
+
+test('redacts sensitive fragment-only OAuth payloads', () => {
+  const input = 'callback failed with #state=very-secret-state&access_token=ya29.AGYAccessToken';
+  const out = sanitizeCliStderr(input);
+  assert.ok(out.includes('[FRAGMENT_REDACTED]'), `expected FRAGMENT_REDACTED, got: ${out}`);
+  assert.ok(!out.includes('very-secret-state'), `state leaked via fragment-only payload: ${out}`);
+  assert.ok(!out.includes('ya29.AGYAccessToken'), `access token leaked via fragment-only payload: ${out}`);
 });
 
 test('redacts cookie / set-cookie header values', () => {

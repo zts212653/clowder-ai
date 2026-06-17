@@ -11,11 +11,13 @@ vi.mock('@/utils/api-client', () => ({
 
 Object.assign(globalThis as Record<string, unknown>, { React });
 
+const legacyHandoffTitlePrefix = String.fromCodePoint(0x1f504);
+
 const handoffBlock: RichCardBlock = {
   id: 'handoff-prop_1',
   kind: 'card',
   v: 1,
-  title: '🔄 提议 session 接力（封印当前 → 续接 fresh 自己）',
+  title: `${legacyHandoffTitlePrefix} 提议 session 接力（封印当前 → 续接 fresh 自己）`,
   bodyMarkdown: 'opus 想在干净断点封印当前 session。',
   tone: 'info',
   fields: [
@@ -73,9 +75,32 @@ describe('HandoffProposalCard (F225 P1-2 — buttons no longer inert)', () => {
 
   it('renders 五件套 fields + two real approve/reject buttons', () => {
     act(() => root.render(<HandoffProposalCard block={handoffBlock} />));
+    expect(container.textContent).toContain('提议 session 接力');
+    expect(container.textContent).not.toContain(legacyHandoffTitlePrefix);
+    expect(container.querySelector('svg[data-testid="handoff-card-icon"]')).not.toBeNull();
     expect(container.textContent).toContain('sess_1');
     expect(container.textContent).toContain('wire B');
     expect(container.querySelectorAll('button').length).toBe(2);
+  });
+
+  it('renders metadata as compact text and rich handoff fields as markdown sections', () => {
+    const richBlock: RichCardBlock = {
+      ...handoffBlock,
+      fields: [
+        { label: '封印 session', value: 'sess_2' },
+        { label: 'worktree', value: 'cat-cafe-f225' },
+        { label: '已完成', value: '- **wired A**\n- wired B' },
+        { label: '下一步', value: '1. wire C\n2. wire D' },
+      ],
+    };
+    act(() => root.render(<HandoffProposalCard block={richBlock} />));
+
+    expect(container.textContent).toContain('sess_2');
+    expect(container.textContent).toContain('cat-cafe-f225');
+    expect(container.textContent).toContain('已完成');
+    expect(container.textContent).toContain('下一步');
+    expect(container.querySelector('strong')?.textContent).toBe('wired A');
+    expect(container.querySelectorAll('li').length).toBeGreaterThanOrEqual(4);
   });
 
   it('approve button POSTs /api/session-handoff/:id/approve then shows approved', async () => {

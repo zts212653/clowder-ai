@@ -3,7 +3,7 @@
  * Used by GET /api/config/env-summary to report current values to the frontend.
  *
  * ⚠️  ALL CATS: 新增 process.env.XXX → 必须在下方 ENV_VARS 数组注册！
- *    不注册 = 前端「环境 & 文件」页面看不到 = 铲屎官不知道 = 不存在。
+ *    不注册 = 前端「环境 & 文件」页面看不到 = co-creator不知道 = 不存在。
  *    SOP.md「环境变量注册」章节有说明。
  *
  * To add a new env var:
@@ -233,6 +233,32 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+    defaultValue: '0',
+    description:
+      'F178 Persistent MCP Agent-Key Auth — 仅全局 sidecar owner（runtime 主实例）设为 1；alpha/dev 不得设置，避免覆盖 ~/.cat-cafe/agent-keys。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_AGENT_KEY_ALLOW_MEMORY_SIDECAR',
+    defaultValue: '0',
+    description:
+      'F178 Persistent MCP Agent-Key Auth — 本地降级开发开关；仅在 CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1 且无 Redis 时允许 memory backend 写 sidecar。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_AGENT_KEY_SIDECAR_DISABLED',
+    defaultValue: '0',
+    description: 'F178 Persistent MCP Agent-Key Auth — 强制关闭全局 sidecar provisioning，优先级高于 owner 标记。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_HOOK_TOKEN',
     defaultValue: '(空)',
     description: 'Hook 回调鉴权 token',
@@ -360,6 +386,30 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'COMMUNITY_PUBLISH_DEFAULT_REPO',
+    defaultValue: 'clowder-ai/cat-cafe',
+    description: 'F235 社区发布默认 GitHub 仓库（owner/repo 格式）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'COMMUNITY_PUBLISH_REPO_ALLOWLIST',
+    defaultValue: 'clowder-ai/cat-cafe',
+    description: 'F235 社区发布允许的 GitHub 仓库列表（逗号分隔 owner/repo）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
+    name: 'COMMUNITY_NARRATOR_THREAD_ID',
+    defaultValue: '(未设置 → 不启用)',
+    description: 'F168 社区 narrator 工作线程 ID（设置后 dispatch 自动 spawn narrator 讲人话）',
+    category: 'server',
+    sensitive: false,
+    hubVisible: false,
+  },
+  {
     name: 'WEB_PUBLIC_DIR',
     defaultValue: '../web/public',
     description: 'Web 前端静态文件目录（connector gateway 静态资源服务）',
@@ -377,7 +427,7 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_GLOBAL_CONFIG_ROOT',
     defaultValue: '(未设置 → homedir())',
-    description: '全局配置根目录（accounts / credentials 查找路径的父目录，实际路径为 ${ROOT}/.cat-cafe/）',
+    description: '全局配置根目录（accounts / credentials 查找路径的父目录，实际路径为 <ROOT>/.cat-cafe/）',
     category: 'server',
     sensitive: false,
     hubVisible: false,
@@ -862,6 +912,15 @@ export const ENV_VARS: EnvDefinition[] = [
   },
 
   // --- connector ---
+  {
+    name: 'CONNECTOR_GATEWAY_AUTOSTART',
+    defaultValue: 'runtime-production-only',
+    description:
+      '预配置 IM connector 自动接入开关：默认仅 runtime production（NODE_ENV=production + CAT_CAFE_RUNTIME_ROOT）启用；start:direct/alpha/dev 默认禁用。需在启动前通过 env/.env 设置，设 1 强制启用，0 强制禁用',
+    category: 'connector',
+    sensitive: false,
+    runtimeEditable: false,
+  },
   {
     name: 'TELEGRAM_BOT_TOKEN',
     defaultValue: '(未设置 → 不启用)',

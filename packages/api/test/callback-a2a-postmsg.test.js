@@ -444,7 +444,7 @@ describe('post_message A2A mention invocation', () => {
       url: '/api/callbacks/post-message',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        content: '铲屎官快看！有事情！',
+        content: 'co-creator快看！有事情！',
         targetCats: ['codex'],
       },
     });
@@ -468,7 +468,7 @@ describe('post_message A2A mention invocation', () => {
       url: '/api/callbacks/post-message',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
       payload: {
-        content: '铲屎官快看！有事情！',
+        content: 'co-creator快看！有事情！',
         targetCats: ['default-user'],
       },
     });

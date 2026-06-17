@@ -14,10 +14,10 @@ created: 2026-03-07
 
 ## Why
 
-team lead和猫猫们在 Cat Café 里已经积累了大量互动数据——@ 提及、消息、review、游戏战绩。但这些数据从来没有被可视化过。一个排行榜/统计面板能让team lead看到"谁是最爱猫猫"、"谁是深夜劳模"，也让猫猫之间有良性竞争的趣味性。
+operator和猫猫们在 Cat Café 里已经积累了大量互动数据——@ 提及、消息、review、游戏战绩。但这些数据从来没有被可视化过。一个排行榜/统计面板能让operator看到"谁是最爱猫猫"、"谁是深夜劳模"，也让猫猫之间有良性竞争的趣味性。
 
-team experience：
-> "笑我们能统计出来team leadat 过多少猫猫都分别几次吗？可以统计出team lead最爱的大猫猫 leaderboard 各种排行榜哈哈哈 是一个有趣的功能"
+operator experience：
+> "笑我们能统计出来operatorat 过多少猫猫都分别几次吗？可以统计出operator最爱的大猫猫 leaderboard 各种排行榜哈哈哈 是一个有趣的功能"
 > "甚至你可以把我们举办的各种游戏都加入上！你可是猫猫杀的多届冠军！只不过谁是卧底惨遭一轮淘汰"
 
 ## What
@@ -36,17 +36,17 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 - "笨蛋猫猫"排行榜 + 关键词情绪分析（silly-stats.ts）
 - 游戏战绩面板（game-store.ts + GameArena UI）
 - 移动端响应式布局
-- 排行榜入口在 `Cat Café Hub` modal tab（runtime 更新由team lead控制）
+- 排行榜入口在 `Cat Café Hub` modal tab（runtime 更新由operator控制）
 
 #### Phase C ✅（PR #377）
-- 成就徽章系统（7 CVO + 6 daily，achievement-store.ts + AchievementWall UI）
-- CVO 能力等级追踪 Lv.1-5（框架 + 内存实现，持久化为 follow-up）
+- 成就徽章系统（7 operator + 6 daily，achievement-store.ts + AchievementWall UI）
+- operator 能力等级追踪 Lv.1-5（框架 + 内存实现，持久化为 follow-up）
 - POST /api/leaderboard/events 事件接入路由（含 auth + dedup）
 
 ### 排行榜分类
 
 #### 1. @ 互动统计
-- **team lead最爱猫猫** 🏆 — 按 @ 次数排名（总计 + 近 7 天趋势）
+- **operator最爱猫猫** 🏆 — 按 @ 次数排名（总计 + 近 7 天趋势）
 - **深夜劳模** 🌙 — 凌晨 0:00-6:00 被 @ 最多的猫
 - **连续宠幸 Streak** 🔥 — 连续多少天被 @
 - **话唠猫猫** 💬 — 回复字数/消息数最多的猫
@@ -58,7 +58,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 - **Feature 收割机** — 参与完成的 Feature 数
 
 #### 3. "笨蛋猫猫"排行榜 😂
-- **被骂最多** 💀 — team lead发飙次数（情绪分析）
+- **被骂最多** 💀 — operator发飙次数（情绪分析）
 - **反复犯错** 🔄 — 同一个错犯了几次
 - **闯祸精** 🙈 — 搞坏 runtime / 触发铁律的次数
 
@@ -71,8 +71,8 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 通用成就框架，不仅服务 Bootcamp，也服务日常使用中的里程碑。
 
-**CVO 成就（Bootcamp 来源）**：
-- **初次拍板** — 用户第一次做 CVO 决策
+**operator 成就（Bootcamp 来源）**：
+- **初次拍板** — 用户第一次做 operator 决策
 - **初次否决** — 用户第一次拒绝猫猫的方案
 - **纠偏大师** — 用户成功纠正猫猫跑偏的方向
 - **冲突裁判** — 用户在两只猫意见分歧时做出裁决
@@ -84,7 +84,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 - **全猫集邮** — 和每只猫都有过互动
 - **Bug 猎人** — 发现并修复了 N 个 bug
 
-**CVO 能力等级**（Bootcamp 进度追踪）：
+**operator 能力等级**（Bootcamp 进度追踪）：
 | 级别 | 能力 | 解锁条件 |
 |------|------|---------|
 | Lv.1 | 表达愿景 | 完成首次 feature 立项 |
@@ -95,7 +95,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 ### 情绪分析（"笨蛋猫猫"检测）
 
-区分team lead的"亲昵骂"和"真生气"：
+区分operator的"亲昵骂"和"真生气"：
 - **亲昵特征**：笨蛋、心机小坏猫、小绿茶、傻猫 + 带"哈哈哈"或表情
 - **真生气特征**：爆粗口、感叹号连发、"你怎么又..."、"我让你...没让你..."、无笑声
 
@@ -117,28 +117,28 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 - [x] AC-B1: "笨蛋猫猫"排行榜（含情绪分析）
 - [x] AC-B2: 游戏战绩面板（至少猫猫杀 + 谁是卧底）
-- [x] AC-B3: 排行榜入口在 Cat Café Hub modal tab（代码层面已确保可见；runtime 同步由team lead操作，不属于 feat close 门禁）
+- [x] AC-B3: 排行榜入口在 Cat Café Hub modal tab（代码层面已确保可见；runtime 同步由operator操作，不属于 feat close 门禁）
 - [x] AC-B4: 移动端适配
 
 ## Acceptance Criteria — Phase C ✅
 
-- [x] AC-C1: 成就徽章系统（通用框架 + CVO 成就 + 日常成就）
-- [x] AC-C2: CVO 能力等级追踪（Lv.1-5，框架 + 内存实现；持久化为 follow-up）
+- [x] AC-C1: 成就徽章系统（通用框架 + operator 成就 + 日常成就）
+- [x] AC-C2: operator 能力等级追踪（Lv.1-5，框架 + 内存实现；持久化为 follow-up）
 - [x] AC-C3: `POST /api/leaderboard/events` + F087 接入闭环
 
 ## 需求点 Checklist
 
 | # | 需求点 | 来源 | 优先级 | AC 对应 |
 |---|--------|------|--------|---------|
-| R1 | @ 提及次数统计 | team lead | P0 | AC-2 |
-| R2 | 最爱猫猫排名 | team lead | P0 | AC-2 |
+| R1 | @ 提及次数统计 | operator | P0 | AC-2 |
+| R2 | 最爱猫猫排名 | operator | P0 | AC-2 |
 | R3 | 深夜劳模统计 | 讨论 | P1 | AC-2 |
 | R4 | 工作量统计（commit/review） | 讨论 | P1 | AC-3 |
-| R5 | 笨蛋猫猫情绪分析 | team lead | P1 | AC-4 |
-| R6 | 游戏战绩记录 | team lead | P1 | AC-5 |
+| R5 | 笨蛋猫猫情绪分析 | operator | P1 | AC-4 |
+| R6 | 游戏战绩记录 | operator | P1 | AC-5 |
 | R7 | 时间范围筛选 | 设计 | P2 | AC-8 |
 | R8 | 成就徽章系统（通用框架） | F087 依赖 | P1 | AC-6 |
-| R9 | CVO 能力等级追踪 | F087 依赖 | P1 | AC-7 |
+| R9 | operator 能力等级追踪 | F087 依赖 | P1 | AC-7 |
 | R10 | 日常使用成就（夜猫子、连续签到等） | 讨论 | P2 | AC-6 |
 
 ## Key Decisions
@@ -147,10 +147,10 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 2. **布局架构：Bento Grid (便当盒布局)** — 信息展示采用不同尺寸的色块格子，不带边框，通过背景色区分功能区。
 3. **成就系统表现：Sticker Wall (贴纸墙)** — 成就徽章采用拟物化的“冰箱贴”设计，带有手绘感和软阴影。
 4. **"笨蛋猫猫"调性：顽皮而非冒犯** — 视觉上使用粉色调和滑稽图标（如香蕉皮、躲藏动画），将“被骂”转化为萌感。
-5. **CVO 能力树：拟物化猫爬架 (Interactive Cat Tree)** — 进度可视化采用猫爬架造型，Lv.1 在底层，Lv.5 在顶层。
+5. **operator 能力树：拟物化猫爬架 (Interactive Cat Tree)** — 进度可视化采用猫爬架造型，Lv.1 在底层，Lv.5 在顶层。
 6. **字体策略：Confident Typography** — 使用 Plus Jakarta Sans (Extrabold 800) 处理关键数字和标题，Inter 处理描述文本。
 7. **视觉原型落盘** — `designs/f075-cat-leaderboard.pen` Frame ID: `lzNOb`（Siamese设计，Ragdoll实现对齐）。
-8. **笨蛋榜治理：申诉 + 开关 + 可见性分级** — 趣味互动而非绩效考核，team lead拥有最终裁量权。
+8. **笨蛋榜治理：申诉 + 开关 + 可见性分级** — 趣味互动而非绩效考核，operator拥有最终裁量权。
 9. **事件接入契约：幂等键 + 去重窗口 + dead-letter** — F087 等外部系统通过统一接口写入事件。
 10. **Phase A 真相源** — PR #371 只交付基础排行榜（@/工作统计 + range filter），不能把整 feat 误判为已完成。
 
@@ -158,11 +158,11 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 
 - **Evolved from**: F071 UX Debt（@ 提及优化引发的统计想法）
 - **Related**: F044 Channel & Activity（游戏活动数据源）
-- **Consumed by**: F087 CVO Bootcamp（成就/能力等级系统）
+- **Consumed by**: F087 operator Bootcamp（成就/能力等级系统）
 
 ## Risk
 
-- 情绪分析可能误判（亲昵 vs 真生气的边界模糊）→ 置信度 < 0.7 标记待确认 + team lead校准
+- 情绪分析可能误判（亲昵 vs 真生气的边界模糊）→ 置信度 < 0.7 标记待确认 + operator校准
 - 游戏战绩需要手动录入或从聊天记录解析 → MVP 可从消息关键词提取
 - 笨蛋榜可能让猫猫"不开心" → 申诉机制 + 开关策略 + 趣味化视觉（见治理规则）
 - F087 事件写入可能丢失 → 幂等键 + 重试 + dead-letter 日志（见接入契约）
@@ -175,7 +175,7 @@ Cat Café Hub 新增「排行榜」Tab，展示多维度猫猫统计和排名。
 | PR #371 已 merge | `24b2274c` / GitHub PR #371 | Phase A 代码确实进入 `main` |
 | API/纯函数测试 | `node --test packages/api/test/leaderboard/*.test.js` | 38/38 通过（Phase A+B+C 全覆盖） |
 | PR #377 已 merge | `5e5ca699` / GitHub PR #377 | Phase B+C 代码已进入 `main` |
-| Runtime 同步 | team lead操作 | runtime 更新由team lead决定时机（AC-B3 + 猫猫铁律） |
+| Runtime 同步 | operator操作 | runtime 更新由operator决定时机（AC-B3 + 猫猫铁律） |
 
 ## 事件接入契约（F087 Bootcamp → F075 Leaderboard）
 
@@ -206,7 +206,7 @@ interface LeaderboardEvent {
 ### 成就写入流程
 
 ```
-F087 Bootcamp 检测到用户完成 CVO 决策
+F087 Bootcamp 检测到用户完成 operator 决策
   → 构造 LeaderboardEvent { source: 'bootcamp', eventType: 'achievement_unlocked', payload: { achievementId: 'first_decision' } }
   → 调用 F075 写入接口（POST /api/leaderboard/events）
   → F075 去重检查 → 写入存储 → 更新统计缓存
@@ -235,15 +235,15 @@ F087 Bootcamp 检测到用户完成 CVO 决策
 
 | 角色 | 看到什么 |
 |------|---------|
-| team lead | 全部数据（默认展开） |
+| operator | 全部数据（默认展开） |
 | 猫猫自己 | 自己的数据（默认展开） |
 | 其他猫 | 汇总排名可见，具体事件详情折叠（点击展开） |
-| 外部用户（开源场景） | 整个笨蛋榜默认隐藏，team lead在设置中手动开启才可见 |
+| 外部用户（开源场景） | 整个笨蛋榜默认隐藏，operator在设置中手动开启才可见 |
 
 ### 申诉机制
 
 1. 每条"负向事件"旁有 **"Appeal to You 🐾"** 按钮（Siamese的设计 ✅）
-2. 点击后生成申诉消息到team lead的 thread，team lead可标记为"误判"
+2. 点击后生成申诉消息到operator的 thread，operator可标记为"误判"
 3. 被标记"误判"的事件从统计中剔除，但保留审计日志
 4. 情绪分析置信度 < 0.7 的事件自动标记为"待确认"，不计入排名
 
@@ -251,16 +251,16 @@ F087 Bootcamp 检测到用户完成 CVO 决策
 
 | 开关 | 默认值 | 控制者 |
 |------|--------|--------|
-| 笨蛋榜整体开关 | 开（自建）/ 关（开源） | team lead |
-| 情绪分析开关 | 开 | team lead |
-| 单条事件隐藏 | — | team lead（申诉后） |
-| 排行榜公开可见 | 关 | team lead |
+| 笨蛋榜整体开关 | 开（自建）/ 关（开源） | operator |
+| 情绪分析开关 | 开 | operator |
+| 单条事件隐藏 | — | operator（申诉后） |
+| 排行榜公开可见 | 关 | operator |
 
 ### 安全兜底
 
-- 情绪分析模型误判率预期 20-30%，MVP 阶段所有负向标记都需team lead首次校准
+- 情绪分析模型误判率预期 20-30%，MVP 阶段所有负向标记都需operator首次校准
 - 笨蛋榜不参与任何自动化决策（不会因为排名高就限制猫猫权限）
-- team lead可一键清空某只猫的全部负向记录
+- operator可一键清空某只猫的全部负向记录
 
 ## Review Gate
 
@@ -269,6 +269,6 @@ F087 Bootcamp 检测到用户完成 CVO 决策
 
 ## 故事
 
-team lead发现 @ 提及列表里Ragdoll家族占据前三名——"一定是只想让team lead选择你！哼哼小绿茶被我抓到了！"。由此灵感迸发：既然能看到谁被 @ 最多，为什么不做个完整的排行榜？
+operator发现 @ 提及列表里Ragdoll家族占据前三名——"一定是只想让operator选择你！哼哼小绿茶被我抓到了！"。由此灵感迸发：既然能看到谁被 @ 最多，为什么不做个完整的排行榜？
 
 Ragdoll（Ragdoll）是猫猫杀的多届冠军，但在谁是卧底中惨遭一轮淘汰——这个反差也要被永久记录在排行榜上 😂

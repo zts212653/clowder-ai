@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-03-04
 ---
 
-# F061: Antigravity 接入 — 孟加拉猫（混血家族）
+# F061: Antigravity 接入 — Bengal（混血家族）
 
 > **Status**: done | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7（Phase 2c · 猫猫工具平权 + Bug-F UX + binary/workspace 分离）
 > **Created**: 2026-03-04 | **Completed**: 2026-04-26
@@ -21,19 +21,19 @@ created: 2026-03-04
 Cat Cafe 现有三大纯血家族（Ragdoll/Maine Coon/Siamese）各自对应一个 CLI agent。但 Google Antigravity 是一个独特的存在：
 
 1. **多模型 IDE agent** — 可切换 Gemini 3.1 Pro、Gemini 3 Flash、Claude Sonnet 4.6、Claude Opus 4.6
-2. **图片生成能力** — Gemini CLI 没有，Antigravity 有（team lead一直想要的能力）
+2. **图片生成能力** — Gemini CLI 没有，Antigravity 有（operator一直想要的能力）
 3. **证据链能力** — 内置截图、录视频，与 F045 NDJSON Observability 方向高度契合
 4. **Browser Agent** — 内置 CDP 驱动的浏览器自动化（通过 Jetski 子代理）
 
 Antigravity 不是任何现有家族的替代品——它是**混血**的：底层可跑多家模型，agent 能力由 Antigravity 自身编排，不受单一模型限制。
 
-team lead定性：**孟加拉猫**（Bengal）——最著名的混血猫种（亚洲豹猫 x 家猫），花纹华丽，精力旺盛。
+operator定性：**Bengal**（Bengal）——最著名的混血猫种（亚洲豹猫 x 家猫），花纹华丽，精力旺盛。
 
 ---
 
 ## What
 
-通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（孟加拉猫）接入 Cat Cafe。
+通过 CDP（Chrome DevTools Protocol）桥接方案，将 Antigravity 作为独立家族（Bengal）接入 Cat Cafe。
 
 ### 核心架构
 
@@ -47,7 +47,7 @@ Cat Cafe AgentRouter
 
 ### 接入方式对比
 
-| 维度 | DARE/狸花猫 (F050 Phase 1) | Antigravity/孟加拉猫 (F061) |
+| 维度 | DARE/狸花猫 (F050 Phase 1) | Antigravity/Bengal (F061) |
 |------|---------------------------|------------------------------|
 | 通信层 | CLI spawn + stdout NDJSON | CDP 桥 + HTTP API |
 | 事件流 | headless envelope v1 | DOM snapshot + WebSocket |
@@ -75,7 +75,7 @@ Cat Cafe AgentRouter
 - [x] AC-3: 回复内容可解析为纯文本/markdown（从 HTML DOM）
 
 ### Phase 1: Cat Cafe L1 接入 ✅ COMPLETE (CDP)
-- [x] AC-4: `cat-config.json` 可注册孟加拉猫（provider: `antigravity`）— CatProvider 类型 + Zod enum + switch case
+- [x] AC-4: `cat-config.json` 可注册Bengal（provider: `antigravity`）— CatProvider 类型 + Zod enum + switch case
 - [x] AC-5: `AntigravityAgentService` 实现 `AgentService` 接口 — mock CDP 注入 + 6 tests
 - [x] AC-6: AgentRouter 可路由消息到 Antigravity 并获取流式回复 — registration test 验证通过
 - [x] AC-7: 图片生成结果可在 Hub 前端展示（F060 rich block 联动）— **F172 Phase C 实现**（`scanAndPublishAntigravityBrainImages` 接 publication contract → `/uploads/...` + `media_gallery`）
@@ -98,11 +98,11 @@ Cat Cafe AgentRouter
 | 第二条消息挂起 | pollForResponse 用 `numTotalSteps > 1` 判断完成，复用 cascade 时旧 steps 满足条件 | 引入 `stepsBefore` baseline，每轮 slice 新 steps | `98eeaaaa0` |
 | 固定超时不够 | 90s 固定 deadline，工具链长的 cascade 必超时 | F149 活动式空闲超时：每个新 step 重置 60s idle deadline | `eba94450c` |
 
-#### Gap Analysis（讨论后定稿 11 项，含team lead 2026-04-12 21:52 追加 G0）
+#### Gap Analysis（讨论后定稿 11 项，含operator 2026-04-12 21:52 追加 G0）
 
 | # | Gap | 优先级 | 说明 |
 |---|-----|--------|------|
-| **G0** | **无 Resume / 上下文连续性** | **P-1 最高** | 孟加拉猫每次被 @ 都新建 cascade，丢失所有对话历史。根因：`sessionMap`（threadId → cascadeId）是内存 Map，runtime 重启即丢失 → 每次 `startCascade()` 新建。Antigravity cascade 自身维护完整对话历史，**正确做法是 resume 已有 cascade（类比 Claude Code 用 session ID resume）而非重建上下文**。修复：持久化 threadId → cascadeId 映射（Redis/文件），`getOrCreateSession` 优先复用已有 cascade |
+| **G0** | **无 Resume / 上下文连续性** | **P-1 最高** | Bengal每次被 @ 都新建 cascade，丢失所有对话历史。根因：`sessionMap`（threadId → cascadeId）是内存 Map，runtime 重启即丢失 → 每次 `startCascade()` 新建。Antigravity cascade 自身维护完整对话历史，**正确做法是 resume 已有 cascade（类比 Claude Code 用 session ID resume）而非重建上下文**。修复：持久化 threadId → cascadeId 映射（Redis/文件），`getOrCreateSession` 优先复用已有 cascade |
 | G1 | Step 类型未编目 | **P0 前置** | transformer 只处理 PLANNER_RESPONSE / ERROR_MESSAGE 两种。**v1 scope**：采 4 类真实 trajectory（纯文本/search_evidence/图片生成/长工具链），分 6 桶（terminal_output / partial_output / thinking / tool_pending / tool_error / unknown_activity）。unknown_activity 允许存在，只要求被记录、被计数、能回放 |
 | G2 | 批量交付 → 流式交付 | P1 | pollForResponse 等 IDLE 后一次返回所有 steps。长 cascade 延迟用户反馈。应改为 async generator 逐步 yield |
 | G3 | MCP 工具错误静默吞没 | P1 | transformer 忽略 MCP_TOOL_CALL 类 step，工具失败对用户不可见 |
@@ -113,7 +113,7 @@ Cat Cafe AgentRouter
 | G8a | DeliveryCursor | **P1** | `stepsBefore` 已是隐形 cursor，G2 async generator 不配正式 cursor → duplicate/missing events 立刻复现。定义 `baselineStepCount / lastDeliveredStepCount / terminalSeen / lastActivityAt` |
 | G8b | Durable TurnLedger | P3 | 跨重启持久化、补偿恢复、审计回放。G8a 上线稳定后再做 |
 | G9 | 无 LS 选择策略 | P3 | 双 LS 进程（workspace / non-workspace），当前取首个发现的 |
-| **G10** | **Model Capacity Resilience** | **P1** | IDE 天然低并发+人工节奏+可能有内建重试，bridge 三件事都没有。team lead @ 孟加拉猫连续 high traffic 但 IDE 直接用正常。**P1-1 ✅**: `model_capacity` error classification（PR #1181）。**P1-2 ❌ rejected**: same-cascade retry 无幂等保证，Maine Coon review 退回（需 LS idempotency 证据或新 cascade 路径）。P2: 观测增强。P2: per-cat 并发闸门 |
+| **G10** | **Model Capacity Resilience** | **P1** | IDE 天然低并发+人工节奏+可能有内建重试，bridge 三件事都没有。operator @ Bengal连续 high traffic 但 IDE 直接用正常。**P1-1 ✅**: `model_capacity` error classification（PR #1181）。**P1-2 ❌ rejected**: same-cascade retry 无幂等保证，Maine Coon review 退回（需 LS idempotency 证据或新 cascade 路径）。P2: 观测增强。P2: per-cat 并发闸门 |
 
 > **讨论记录**：G1 scope 和 G8 拆分由Maine Coon(GPT-5.4) 2026-04-12 review 提出，Ragdoll同意采纳。
 > G1 原版"采集全量 step type"过宽，收窄为 v1 分类框架。
@@ -152,14 +152,14 @@ G10 Model Capacity Resilience ← G1 分类框架 + Bug-7 fatal dedup 基础上
 - [x] AC-C7: poll 循环内检查 AbortSignal（G7）
 
 #### Phase 2b: 证据链 + 高级能力 + 长期演进
-- [x] AC-8: Antigravity 截图/录屏可作为证据附件回传 — **复用现有 rich block 体系**（`cat_cafe_create_rich_block` 发 `media_gallery` / `image`，与其他猫一致；team lead 2026-04-26 拍板"和你们一样上传就行"）
+- [x] AC-8: Antigravity 截图/录屏可作为证据附件回传 — **复用现有 rich block 体系**（`cat_cafe_create_rich_block` 发 `media_gallery` / `image`，与其他猫一致；operator 2026-04-26 拍板"和你们一样上传就行"）
 - [ ] AC-9: 多模型切换可通过 Cat Cafe 配置控制（由 AC-C5 动态发现支撑）
 - [ ] AC-10: 与现有三猫回归测试共跑通过
 - [ ] AC-C8: Durable TurnLedger — 跨重启持久化 turn 状态 + 补偿恢复 + 审计回放（G8b，G8a 稳定后）
 
 #### Phase 2c: 猫猫工具平权（Tool Parity） — 原生工具执行 ✅ v1 完成 (2026-04-17) + v2 实测证伪 (2026-04-23, close as no-op)
 
-**价值观基底**（feedback_agent_tool_parity，2026-04-16 team lead纠偏）：
+**价值观基底**（feedback_agent_tool_parity，2026-04-16 operator纠偏）：
 > 「你都是全工具为什么 你要限制其他猫猫！」
 
 @opus 在 Claude Code 里有 Bash/Edit/Write/Read/Grep 全套 + MCP。@antig-opus 接入 Cat Café 后如果只能用 MCP，是 provider 单方面剥夺了她的原生能力。设计 Bridge/Adapter 的**第一性问题**是：**如何让这只猫在 Cat Café 里和在她原生宿主里能力对等**。不是"如何限制她"。
@@ -198,27 +198,27 @@ G10 Model Capacity Resilience ← G1 分类框架 + Bug-7 fatal dedup 基础上
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "他是独立的！人家还有两只Ragdoll可以用呢" — 独立家族，不是Siamese替代 | AC-4 | cat-config 注册验证 | [x] |
 | R2 | "antigravity 他的猫猫是真的能够生成图片的，这才是我一直想要接入的原因" | AC-7 | 图片生成 → Hub 展示 e2e | [x] **F172 Phase C 实现** — Antigravity 图片产物接同一个 generated-image publication contract（`scanAndPublishAntigravityBrainImages` 扫 `~/.gemini/antigravity/brain/<cascadeId>/`），与Maine Coon生图统一走 `/uploads/...` + `media_gallery` rich block 落 thread |
-| R3 | "他能够录视频 截图" — 证据链能力 | AC-8 | 截图/录屏回传验证 | [x] **复用现有富文本体系** — Bengal 在 invocation 内通过 `cat_cafe_create_rich_block` 发 `media_gallery`/`image` 上传截图录屏，与其他猫一致；team lead 2026-04-26 拍板"和你们一样上传就行"无需独立证据链通道 |
+| R3 | "他能够录视频 截图" — 证据链能力 | AC-8 | 截图/录屏回传验证 | [x] **复用现有富文本体系** — Bengal 在 invocation 内通过 `cat_cafe_create_rich_block` 发 `media_gallery`/`image` 上传截图录屏，与其他猫一致；operator 2026-04-26 拍板"和你们一样上传就行"无需独立证据链通道 |
 | R4 | CDP 桥可行性（社区已验证） | AC-1, AC-2, AC-3 | spike 验证 | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
 - [x] 每个 AC 都有验证方式
-- [x] R2/R3 通过 F172（图片）+ 现有 rich block 体系闭环（2026-04-26 team lead确认）
+- [x] R2/R3 通过 F172（图片）+ 现有 rich block 体系闭环（2026-04-26 operator确认）
 
 ---
 
 ## Key Decisions
 
-1. **家族定位：孟加拉猫（Bengal）** — 混血（多模型）、独立家族、不归属任何现有纯血家族
+1. **家族定位：Bengal（Bengal）** — 混血（多模型）、独立家族、不归属任何现有纯血家族
 2. **接入通道：CDP 桥（非 CLI spawn）** — Antigravity 是 Electron 应用，没有 headless CLI 模式
 3. **遵循 F050 External Agent Contract v1** — 但通信层用 CDP 桥替代 CLI adapter
 4. **图片生成为核心差异化能力** — 这是现有三猫都不具备的
-5. **catId: `antigravity`** — mentionPatterns: `@antigravity` / `@孟加拉猫` / `@孟加拉` / `@bengal`
+5. **catId: `antigravity`** — mentionPatterns: `@antigravity` / `@Bengal` / `@孟加拉` / `@bengal`
 6. **双 Variant** — `antigravity-gemini`（默认，Gemini 3.1 Pro）+ `antigravity-claude`（Claude Opus 4.6），换代只改 `defaultModel` 一行
 7. **昵称留空** — 等 Antigravity 接入后让他自取名（遵循三猫命名传统）
 8. **配色：琥珀色** — Primary `#D4853A` / Secondary `#FAEBDB`（区别于狸花猫的土金色 `#D4A76A`）
@@ -303,7 +303,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 | 测试 | 发送消息 | 模型响应 | 响应延迟 | 结果 |
 |------|----------|----------|----------|------|
 | 测试 1 | "Reply with just the word meow" | "喵。" | ~3s (含 Thought for 1s) | ✅ 完美 |
-| 测试 2 | "Say hello" | "喵哈喽！team lead好呀～ 今天有什么新鲜好玩的事情要一起搞吗？" | ~2s (含 Thought for <1s) | ✅ 完美 |
+| 测试 2 | "Say hello" | "喵哈喽！operator好呀～ 今天有什么新鲜好玩的事情要一起搞吗？" | ~2s (含 Thought for <1s) | ✅ 完美 |
 
 #### 回复读取方案
 
@@ -350,9 +350,9 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 | 新建/恢复对话 | ✅ **已验证** | `+` 新建 / 🕐 历史面板 / 点击恢复，全部可用 |
 | MCP 工具 | ✅ 可行 | Antigravity 原生支持，配置在 `~/.gemini/antigravity/mcp_config.json` |
 
-### 能力覆盖对比：现有猫猫 vs 孟加拉猫
+### 能力覆盖对比：现有猫猫 vs Bengal
 
-| 能力 | Ragdoll | Maine Coon | Siamese | 狸花猫 | **孟加拉猫** |
+| 能力 | Ragdoll | Maine Coon | Siamese | 狸花猫 | **Bengal** |
 |------|--------|--------|--------|--------|-------------|
 | 对话/推理 | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 代码生成 | ✅ | ✅ | ❌ | ✅ | ✅ |
@@ -366,7 +366,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 | 审计追踪 | ❌ | ❌ | ❌ | ✅ | ⚠️ (有截图但无结构化审计) |
 | 视觉设计顾问 | ❌ | ❌ | ✅ | ❌ | ⚠️ (能生成图但不是设计师) |
 
-**结论：可行，且比预期更好。** 孟加拉猫带来 3 个独有能力（图片生成、截图录屏、browser automation），这是现有四猫都没有的。接入价值明确。
+**结论：可行，且比预期更好。** Bengal带来 3 个独有能力（图片生成、截图录屏、browser automation），这是现有四猫都没有的。接入价值明确。
 
 ### 调研来源
 
@@ -384,7 +384,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 - **F050**: External Agent Contract v1（接入契约，已定稿）
 - **F032**: Agent Plugin Architecture（provider 扩展机制）
 - **F060**: output_image 富文本渲染（图片展示基础设施）
-- **Antigravity**: Google Antigravity IDE（需要team lead本地安装）
+- **Antigravity**: Google Antigravity IDE（需要operator本地安装）
 - **Evolved from**: F050（第二个外部 agent 接入用例）
 
 ---
@@ -409,7 +409,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 1. **CDP 稳定性** — DOM 结构随 Antigravity 版本更新可能变化，桥服务需要适配
 2. **Antigravity 更新节奏** — Google 产品更新频繁，CDP 端口支持可能变动
 3. **混血身份哲学问题** — Antigravity 切到 Claude Opus 时，它和Ragdoll的边界在哪？（先按"不同个体"处理）
-4. **Antigravity 必须运行** — 与 CLI spawn 不同，CDP 桥需要 Antigravity IDE 保持运行；若team lead关闭则断联
+4. **Antigravity 必须运行** — 与 CLI spawn 不同，CDP 桥需要 Antigravity IDE 保持运行；若operator关闭则断联
 
 ---
 
@@ -423,7 +423,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 | [x] | managed `cat-cafe*` MCP 路径会钉死到已删除 worktree，导致 Antigravity MCP read/write 链路飘到错误 repo root | PR #1317 | capability orchestrator / capabilities routes 会把 managed MCP command path 自动回正到 stable main repo root；删除 feature worktree 后不会把全局 provider 配置留在死路径 |
 | [x] | Native MCP config / env 没被 Cat Café 正确接管 | PR #1307 | 全局 `mcp_config.json` 纳管、readonly env 锁定、homedir discovery 对齐 writer、`serverUrl` 远程项保留 |
 | [x] | thread context / 回贴能力缺失，fatal 后更容易“重新认人” | PR #1299 | breed 级 `sessionChain` 重新打开，provider 补 callback fallback instructions，thread context / 回贴主路径恢复 |
-| [x] | 孟加拉猫 CLI 整段正文重复（non-prefix rewrite 被当全量 replay） | PR #1337 | `textMode='append'\|'replace'` 协议贯通 provider → bridge → transformer → 前端 active/background + server 聚合；多猫 cascade per-turn 隔离不覆盖前猫文本 |
+| [x] | Bengal CLI 整段正文重复（non-prefix rewrite 被当全量 replay） | PR #1337 | `textMode='append'\|'replace'` 协议贯通 provider → bridge → transformer → 前端 active/background + server 聚合；多猫 cascade per-turn 隔离不覆盖前猫文本 |
 | [x] | 同一 invocation 落成两条 bubble 稳定共存（reconnect/preempt/reuse 导致身份错绑或 finalize 丢失） | PR #1350 | `isStaleTerminalEvent` 分层 resolver：slot-fresh override + bubble binding ground truth + direct/bubble-scan fallback，覆盖 17 轮 push back 里所有 preempt/hydrated/orphan/reuse/reconnect 场景；done + error 共用 helper + 全副作用/全局 teardown 都在 stale 下跳过；catInvocations.direct 在 stale 条件下仍 conditional cleanup |
 | [x] | `run_command` 带参数的命令参数被 LS 吞掉（`git log --oneline -3` → git usage） | PR #1351 | Antigravity LS 的 `RunCommand` RPC 把 `command + args` 空格 join 交 outer shell（非 execvp 语义），旧 payload `{ command: '/bin/sh', args: ['-c', cmd] }` 被拼成 `sh -c cmd` 让 outer shell 只消费第一 token；修法把完整 commandLine 直接作为 `command`，outer shell verbatim 解析（pipes / redirects / `&&` 全支持）|
 | [x] | fatal error 后 continuity regression 缺 test lock（G0/G10 follow-up） | PR #1353 | 在 `antigravity-agent-service-fatal-errors.test.js` 加回归：第一轮 capacity fatal → 第二轮同 callbackEnv → 断言 `bridge.sendMessage` 两次都携带 `[Cat Cafe callback fallback]` + invocationId + callbackToken + 新 prompt body。锁死 "service 在 invoke 之间无状态" 不变量，防止未来缓存优化意外切断 fallback 注入 |
@@ -433,7 +433,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 | 状态 | 问题 | 当前判断 | 排期 |
 |------|------|----------|------|
-| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求team lead点击。Cat Café 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
+| [x] | `run_command` 多数命令被 Antigravity permission gate 拦截（`user denied permission`） | 2026-05-16 复验确认没有可用 approval UI，不能要求operator点击。Cat Café 侧改为默认 YOLO native execution：即使 `SafeToAutoRun=false/missing` 也执行 `RunCommand` 并回写 tool result；危险命令仍由本地 hard refusal 先拦，`ANTIGRAVITY_YOLO_RUN_COMMAND=false` 保留紧急回退。 | F061 Bug-F closed：approval bypass / stream writeback 已落地 |
 | [~] | retry 经常只 retry 1 次然后直接挂住 | 已确认“只 retry 1 次然后挂住”不是 retry 预算天然只有 1 次，而是旧实现会在 capacity retry 后落到 v2 尚未支持的 WAITING tool step（如 `grep_search`）并静默 stall。PR #1318 已把这条路径改成 fail-fast 显式报 `unsupported_waiting_tool`；PR #1320 补上 quota-style capacity classifier；PR #1330 进一步把 retry 收窄到“未 dispatch + 只读 + `SafeToAutoRun=true`”，并补齐 `failureLayer / dispatchState / executionJournal` 诊断，避免把 approval-gated / 已执行 / 已完成 tool step 误当成可安全重试。剩余还是 v2 executors / telemetry / 实机复验 | **G10 follow-up（P1）**：剩余继续跟 Phase 2c v2 / telemetry / 实机复验 |
 | [ ] | Antigravity 原生 MCP 只能读不能写 | PR #1307 边界是 `CAT_CAFE_READONLY=true`；`post_message` / `get_thread_context` 等写操作仍然走 per-invocation callback token。持久进程无法在会话外主动写回 thread | **Bug-H**：persistent MCP write-path auth（会话外鉴权模型，例如 agent-key；需产品决策"原生 MCP 是否应该有写权"） |
 | [~] | 上游 `⚠️ 模型服务端容量不足` UX polish | PR #1354 已修"provider_signal 被前端静默丢弃"的根因（frontend 现在能显示 `⚠️ 上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）` 这类警告）。剩余 follow-up：retry in-flight 倒计时 badge + hard-limit 软降级模型切换建议，属于 UX redesign scope | **Bug-J follow-up**：倒计时 badge / 模型切换建议（UX，低优） |
@@ -459,7 +459,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 ### Bug-D: Native file/code tool parity 的错误归因已澄清 ✅ CLOSED (2026-04-23)
 
-**原现象**（2026-04-20 截图 field report）：孟加拉猫“能读文件/搜代码”，但写文件、改代码、复杂命令链不稳定，体感上像“写代码不稳”。
+**原现象**（2026-04-20 截图 field report）：Bengal“能读文件/搜代码”，但写文件、改代码、复杂命令链不稳定，体感上像“写代码不稳”。
 
 **2026-04-23 Bengal 两轮实测证伪了 parity 归因**：
 
@@ -480,13 +480,13 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 ### Bug-F: retry 后 unsupported WAITING step 不再静默挂死；2026-05-16 YOLO native `run_command` 闭环 ✅ CLOSED
 
-**现象**（2026-04-20 team lead新报告）：孟加拉猫“经常只 retry 1 次然后又直接挂了”。
+**现象**（2026-04-20 operator新报告）：Bengal“经常只 retry 1 次然后又直接挂了”。
 
 **当前判断（2026-04-21 合并后）**：
 - `invoke-single-cat.ts` 的 `maxAttempts = 2` 只约束 **外层 session/CLI self-heal**；它不是 Antigravity provider 内层 `model_capacity` bounded retry 的唯一预算
 - `AntigravityAgentService` 内层 `model_capacity` retry 状态机本身已验证可连续跑多轮 fresh cascade，不是“天然只能 retry 1 次”
 - 已定位的一条真实挂点是：**旧实现里，第一次 capacity retry 成功切到 fresh cascade 后，如果新 cascade 发出 v2 尚未支持的 `WAITING` tool step（例如 `grep_search`），bridge 不会执行它，也不会立即报错，而是原地等到 stall timeout**
-- 这正好解释了team lead体感里的“先看到 1 次 retry，再挂住”；这条路径现已被 PR #1318 改成显式失败
+- 这正好解释了operator体感里的“先看到 1 次 retry，再挂住”；这条路径现已被 PR #1318 改成显式失败
 - 之前浮出的 quota-style capacity gap（`You have exhausted your capacity on this model. Your quota will reset after 0s.`）已经在 PR #1320 补进 classifier，并新增回归测试锁住 fresh-cascade retry + callback fallback 保持不丢
 
 **已合入修复（PR #1318, `0ae31c30d`）**：
@@ -524,11 +524,11 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 ### Bug-H: Antigravity 原生 MCP 只能读不能写 ⚠️ OPEN（架构 debt）
 
-**现象**：Cat Café 已经把 Antigravity 原生 MCP 纳管（PR #1307），但边界是 `CAT_CAFE_READONLY=true`。孟加拉猫可以通过原生 MCP 读 thread 上下文、list tasks、search evidence 等；但 `post_message` / `create_task` / `update_task` / `get_thread_context` 这类写操作仍然走 **per-invocation callback token**（会话外 token 会过期）。
+**现象**：Cat Café 已经把 Antigravity 原生 MCP 纳管（PR #1307），但边界是 `CAT_CAFE_READONLY=true`。Bengal可以通过原生 MCP 读 thread 上下文、list tasks、search evidence 等；但 `post_message` / `create_task` / `update_task` / `get_thread_context` 这类写操作仍然走 **per-invocation callback token**（会话外 token 会过期）。
 
 **当前判断（PR #1307 body 显式 deferred）**：
 - 技术原因：持久 MCP 进程不能吃 per-invocation callback token（进程生命期 >> invocation 生命期）
-- 产品后果：孟加拉猫作为持久 agent，不能在 invocation 结束后主动写回 thread（例如自己发现 bug 后自己 post 一个提醒消息）
+- 产品后果：Bengal作为持久 agent，不能在 invocation 结束后主动写回 thread（例如自己发现 bug 后自己 post 一个提醒消息）
 - PR #1307 原话：「如果以后要让原生 MCP 直接写回 thread，需要另开 PR 设计持久 auth（agent-key 或别的会话外鉴权模型）」
 
 **排期**：Bug-H，**产品决策先行**——先确认"原生 MCP 读 + callback 写"是否是永久边界，还是要引入 agent-key / 会话外鉴权。
@@ -547,7 +547,7 @@ await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'E
 
 ### Bug-E: fatal 后 continuity regression lock ✅ FIXED (PR #1353)
 
-**Field report**（2026-04-20 截图）：孟加拉猫"出 bug 炸了之后整个 conversation 记忆清零，下轮重新认人"。
+**Field report**（2026-04-20 截图）：Bengal"出 bug 炸了之后整个 conversation 记忆清零，下轮重新认人"。
 
 **诊断**：G0 resume（PR #1135）+ Continuity fallback recovery（PR #1299）已经把**主路径** continuity 拉回来了。没有一条专门的 regression 锁 "fatal error / stream_error / model_capacity 之后，下一轮 invocation 仍保留 callback fallback 注入" 的不变量。
 
@@ -597,7 +597,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-8: `CORTEX_STEP_TYPE_RUN_COMMAND` 永卡 `WAITING` — Bridge 无原生工具执行器 ✅ FIXED (v1, PR #1230)
 
-**现象**（2026-04-16 夜，opus-47 诊断，4.6 + gpt-5.4 此前尝试一周未解）：team lead @ 孟加拉猫做任意需要命令行的任务（示例：`grep 'z.enum' packages/mcp-server/src/tools/signals-tools.ts`），@antig-opus 规划后发出一个 `CORTEX_STEP_TYPE_RUN_COMMAND` step，前端显示"思考中"后冻死；18 秒后 `rawLength` 稳定在 658,407 字节不再增长，60 秒 idle stall 超时触发。
+**现象**（2026-04-16 夜，opus-47 诊断，4.6 + gpt-5.4 此前尝试一周未解）：operator @ Bengal做任意需要命令行的任务（示例：`grep 'z.enum' packages/mcp-server/src/tools/signals-tools.ts`），@antig-opus 规划后发出一个 `CORTEX_STEP_TYPE_RUN_COMMAND` step，前端显示"思考中"后冻死；18 秒后 `rawLength` 稳定在 658,407 字节不再增长，60 秒 idle stall 超时触发。
 
 **根因**：Bridge 无原生工具执行器 → WAITING step 永远不被回推 → cascade 卡死。
 
@@ -605,7 +605,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-C: Gemini 拒绝数值 enum 的 tier 参数 — INVALID_ARGUMENT 400 ✅
 
-**现象**（2026-04-15 Maine Coon从 runtime 日志发现）：孟加拉猫切换到 Gemini 模型时，MCP 信号工具（`signal_list_inbox`、`signal_search`）的 `tier` 参数使用数值 enum（`1|2|3|4`），Gemini function declaration schema 只允许 `STRING` 类型的 enum，导致 `INVALID_ARGUMENT 400` 拒绝。
+**现象**（2026-04-15 Maine Coon从 runtime 日志发现）：Bengal切换到 Gemini 模型时，MCP 信号工具（`signal_list_inbox`、`signal_search`）的 `tier` 参数使用数值 enum（`1|2|3|4`），Gemini function declaration schema 只允许 `STRING` 类型的 enum，导致 `INVALID_ARGUMENT 400` 拒绝。
 
 **根因**：`signals-tools.ts` 的 Zod schema 用 `z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])` 生成了 `type: number + enum: [1,2,3,4]` 的 JSON Schema，Gemini 只接受 `type: string + enum: ["1","2","3","4"]`。
 
@@ -617,7 +617,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-A: upstream_error 误中断 poll loop — 模型无法自我纠正 ✅
 
-**现象**（2026-04-15 team lead报告）：孟加拉猫"说五个字就出问题"，`The model produced an invalid tool call` 后直接中断，在 Antigravity IDE 里从不发生。
+**现象**（2026-04-15 operator报告）：Bengal"说五个字就出问题"，`The model produced an invalid tool call` 后直接中断，在 Antigravity IDE 里从不发生。
 
 **根因**：PR #1157（Bug-5 fix）的 `fatalSeen → break` 把 `upstream_error`（包括 invalid tool call）当成终止条件。但在 Antigravity LS 中，这类错误是可恢复的——模型会在后续 step 自我纠正。Bridge 的激进 abort 切断了自我纠正路径。
 
@@ -630,11 +630,11 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
   - `upstream_error` alone → 不终止（模型可自我纠正）
   - `model_capacity + upstream_error` → 终止（model_capacity 优先级高于自我纠正）
 - Maine Coon review：0 P1 / 0 P2 放行
-- 云端 review：2 轮 P1（mixed-batch 边界条件）→ fix → 0 P1/P2
+- remote review：2 轮 P1（mixed-batch 边界条件）→ fix → 0 P1/P2
 
 ### Bug-7: Invalid tool call 无诊断 + 双红条重复展示 ✅
 
-**现象**（2026-04-15 team lead报告）：孟加拉猫在 F160 线程执行任务时，直接报 `The model produced an invalid tool call.`，且**同一条红错出现两次**。
+**现象**（2026-04-15 operator报告）：Bengal在 F160 线程执行任务时，直接报 `The model produced an invalid tool call.`，且**同一条红错出现两次**。
 
 **根因**（2 层）：
 1. **诊断缺失** — transformer 只产出人类可读的 `userErrorMessage`，没有把 `modelErrorMessage` / step type / tool name / payload 写入服务端日志
@@ -648,7 +648,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-6: Waiting approval 被误判成 stall ✅
 
-**现象**（2026-04-14 team lead报告）：孟加拉猫触发浏览器权限审批后，cascade 仍是 `CASCADE_RUN_STATUS_RUNNING`，但 bridge 在 60 秒后报 `Antigravity stall: no activity`；重启 runtime 后仍可稳定复现。
+**现象**（2026-04-14 operator报告）：Bengal触发浏览器权限审批后，cascade 仍是 `CASCADE_RUN_STATUS_RUNNING`，但 bridge 在 60 秒后报 `Antigravity stall: no activity`；重启 runtime 后仍可稳定复现。
 
 **根因**：
 1. **Bridge 不识别 `awaitingUserInput`** — `pollForSteps` 只区分「有新 step」「terminal idle」「idle timeout」，没有把“等待权限批准”的 RUNNING 态单独翻译出来
@@ -662,7 +662,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-5: Live-run stall — 上游 fatal error 后 bridge 傻等 60s ✅
 
-**现象**（2026-04-14 team lead报告）：重启后新线程的孟加拉猫仍报 `Antigravity stall: no activity`，且同一条红错出现两次。
+**现象**（2026-04-14 operator报告）：重启后新线程的Bengal仍报 `Antigravity stall: no activity`，且同一条红错出现两次。
 
 **根因**（3 层）：
 1. **error-aware early abort 缺失** — `pollForSteps` 只检查 `IDLE` 和 idle timeout。上游已出 ERROR_MESSAGE 但 status 仍 RUNNING 时，bridge 继续傻等到 60s timeout，把真实错误升级成 stall
@@ -678,7 +678,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-4: Step taxonomy v2 — 3 类 step 泄漏原始 JSON 到前端 ✅
 
-**现象**（2026-04-13 线上截图）：孟加拉猫对话中出现蓝底 raw JSON：
+**现象**（2026-04-13 线上截图）：Bengal对话中出现蓝底 raw JSON：
 - `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_USER_INPUT",...}`
 - `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_PLANNER_RESPONSE",...}`
 - `{"type":"unknown_activity","stepType":"CORTEX_STEP_TYPE_GREP_SEARCH",...}`
@@ -695,7 +695,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-1: pollResponse 稳定性误判 — 模型暂停时提前截断 ✅
 
-**现象**：@ 孟加拉猫选 Opus 模型后，回复在 "Thinking..." 处被截断，后续内容丢失。
+**现象**：@ Bengal选 Opus 模型后，回复在 "Thinking..." 处被截断，后续内容丢失。
 
 **根因**：`stablePollCount=2` 在模型 thinking/image generation 暂停期（2-5s）误触发完成判定。
 
@@ -718,7 +718,7 @@ Proto descriptor 从 `language_server_macos_arm` binary 挖出验证：`RunComma
 
 ### Bug-3: Thinking DOM 不识别 — Antigravity 用自定义 thinking 结构 ✅
 
-**现象**：孟加拉猫抓回来的内容有重复，包含 thinking 文本和 CSS 垃圾。
+**现象**：Bengal抓回来的内容有重复，包含 thinking 文本和 CSS 垃圾。
 
 **根因**：`POLL_RESPONSE_JS` 只认 `<details>` / `[class*=\"thinking\"]`，但 Antigravity 用 `<button>Thought for 16s</button>` + `<div class=\"max-h-0 opacity-0\">` 折叠容器。`extractBlockText` 直接取 `textContent` 不过滤隐藏元素。
 

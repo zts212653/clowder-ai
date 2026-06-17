@@ -77,7 +77,7 @@ export interface Achievement {
   unlockedAt?: number;
 }
 
-/** Phase C: CVO ability level */
+/** Phase C: operator ability level */
 export interface CvoLevel {
   level: number;
   title: string;

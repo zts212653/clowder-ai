@@ -1117,6 +1117,24 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
     assert.ok(!restored.deletedAt, 'deletedAt should be cleared after restore');
   });
 
+  it('POST /api/threads/:id/restore rejects concierge threads (R17 failure-mode audit)', async () => {
+    // Concierge carrier threads are canonicalized by /api/concierge/thread.
+    // Generic trash restore must not revive a stale concierge carrier and create a
+    // second live concierge thread for the same user.
+    const concierge = threadStore.create('alice', 'Concierge Restore Blocked');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/threads/${concierge.id}/restore`,
+    });
+    assert.equal(res.statusCode, 400);
+
+    const after = threadStore.get(concierge.id);
+    assert.ok(after.deletedAt, 'concierge thread should remain soft-deleted after rejected restore');
+  });
+
   it('POST /api/threads/:id/restore returns 400 for non-deleted thread', async () => {
     const thread = threadStore.create('alice', 'Not Deleted');
 
@@ -1153,6 +1171,44 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
     const titles = body.threads.map((t) => t.title);
     assert.ok(titles.includes('Trashed 1'));
     assert.ok(titles.includes('Trashed 2'));
+  });
+
+  it('GET /api/threads?deleted=true excludes soft-deleted concierge thread by default (R17 P2)', async () => {
+    // Regression: the deleted branch returned before the concierge filter, so a soft-deleted
+    // concierge thread appeared in the trash view. After restore + getOrCreate creates a
+    // replacement, two live concierge threads could exist for the same user.
+    const normal = threadStore.create('alice', 'Normal Trashed');
+    const concierge = threadStore.create('alice', 'Concierge Thread');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(normal.id);
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads?deleted=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const ids = body.threads.map((t) => t.id);
+    assert.ok(ids.includes(normal.id), 'normal trashed thread should be visible');
+    assert.ok(!ids.includes(concierge.id), 'concierge thread must NOT appear in trash by default');
+  });
+
+  it('GET /api/threads?deleted=true&includeConcierge=true surfaces soft-deleted concierge thread (R17 P2)', async () => {
+    const concierge = threadStore.create('alice', 'Concierge Trashed');
+    threadStore.updateThreadKind(concierge.id, 'concierge');
+    threadStore.softDelete(concierge.id);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads?deleted=true&includeConcierge=true',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const ids = body.threads.map((t) => t.id);
+    assert.ok(ids.includes(concierge.id), 'concierge thread must be visible with includeConcierge=true');
   });
 
   it('PATCH /api/threads/:id returns 404 for soft-deleted thread (P1 fix)', async () => {

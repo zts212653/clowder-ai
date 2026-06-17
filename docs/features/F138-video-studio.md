@@ -14,13 +14,13 @@ updated: 2026-04-05
 ## Why
 
 > "来吧猫猫 立项吧！link waoowaoo 和 Remotion，我们的第一个目标就是把我们的做出我们的 bilibili 的视频？比如先把我们的教程做成视频？"
-> — team lead，2026-03-24
+> — operator，2026-03-24
 
 Cat Café 需要**系统化的视频制作能力**，不再是一次性手搓 Remotion 代码。目标：
 
 1. **把教程做成 B 站视频**——Cat Café 的 setup guide、bootcamp 流程、功能演示都应该有视频版
 2. **重构现有介绍视频**——V4.8 是手动分镜 + 手写代码，学习 waoowaoo 后应该能更自动化
-3. **建立可复用的视频制作管线**——team lead给素材+脚本，猫猫自动排版渲染
+3. **建立可复用的视频制作管线**——operator给素材+脚本，猫猫自动排版渲染
 
 ### 核心原则（GPT Pro 设计审阅 2026-03-25）
 
@@ -56,7 +56,7 @@ F138 需要同时支持两条视频生产路径，对应不同场景和复杂度
 
 ### 锻造策略：用实战磨管线（对标 F144 PPT Forge）
 
-> "ppt 那个 feat 也是我们一起做了 ppt 然后不断打磨我们的管线" — team lead，2026-04-05
+> "ppt 那个 feat 也是我们一起做了 ppt 然后不断打磨我们的管线" — operator，2026-04-05
 
 不从 schema 纸上设计开始，而是 **边做真实视频边沉淀工具链**：
 
@@ -123,9 +123,9 @@ F138 需要同时支持两条视频生产路径，对应不同场景和复杂度
 brief → asset ingest → video-spec → voice-script → TTS(+timestamps) → Remotion 自动对齐 → preview → review patch → final render
 ```
 
-1. **第一支视频：Feature Showcase 60s 精华版**（✅ team lead已拍板 2026-04-05）
+1. **第一支视频：Feature Showcase 60s 精华版**（✅ operator已拍板 2026-04-05）
    - 8 段画面（多猫协作/飞书同步/语音声线/Browser Preview/记忆搜索/Rich Block/训练营/学习伴侣）
-   - team lead录素材 + 粗标关键时间点，猫猫并行建管线
+   - operator录素材 + 粗标关键时间点，猫猫并行建管线
 2. **第二支视频：待定**（攻防战 or 安装教程 or 训练营演示）— 验证管线复用性
 3. **Remotion 模板库重构** — 从一次性 demo 重构为 schema 驱动的模板库
 4. **TTS + forced alignment → Remotion 自动对齐**（⚠️ 2026-04-05 修正：不赌 TTS 原生 timestamps）
@@ -264,4 +264,4 @@ brief → asset ingest → video-spec → voice-script → TTS(+timestamps) → 
 | KD-11 | 先冻 video-spec + voice-script 两个 schema，其余 Phase 2 补 | 5 个 schema 一起冻容易纸上谈兵，先用实战验证最核心的两个 | 2026-04-05 |
 | KD-12 | 全局音频，不段级切碎 TTS | Gemini "致命缺陷" + Siamese"情绪连贯性" — 段级切碎丢失语调/呼吸感/上下文 | 2026-04-05 |
 | KD-14 | retiming 拒绝暴力慢放，优先 FREEZE_STYLIZED > B_ROLL > SLOW_MO | Siamese审美判断 + 三猫拍板 | 2026-04-05 |
-| KD-15 | garden-skills 吸收策略：学起手体验（scaffold）和约束思想（beat_ledger），不降级核心架构（全局音频/FA/真渲染不动）。具体：P0 scaffold → P1 beat_ledger invariant → P2 style-recipes → P3 knowledge-explainer 模板。不吸收：逐 step TTS / 浏览器录屏产物 / kb-retriever | Ragdoll + Maine Coon讨论收敛 + team lead拍板 | 2026-06-01 |
+| KD-15 | garden-skills 吸收策略：学起手体验（scaffold）和约束思想（beat_ledger），不降级核心架构（全局音频/FA/真渲染不动）。具体：P0 scaffold → P1 beat_ledger invariant → P2 style-recipes → P3 knowledge-explainer 模板。不吸收：逐 step TTS / 浏览器录屏产物 / kb-retriever | Ragdoll + Maine Coon讨论收敛 + operator拍板 | 2026-06-01 |

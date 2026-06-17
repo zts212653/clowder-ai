@@ -18,9 +18,12 @@ export function parsePrSubjectKey(key: string): { repoFullName: string; prNumber
   const hashIdx = rest.lastIndexOf('#');
   if (hashIdx < 0) return null;
   const repoFullName = rest.slice(0, hashIdx);
-  const prNumber = parseInt(rest.slice(hashIdx + 1), 10);
-  if (!repoFullName || Number.isNaN(prNumber)) return null;
-  return { repoFullName, prNumber };
+  const suffix = rest.slice(hashIdx + 1);
+  // Cloud R12 P2: require strictly all-digit suffix so "123abc" is rejected.
+  // parseInt("123abc") === 123 (not NaN), but the projector regex requires /^\d+$/;
+  // accepting partially-numeric keys leaves unprojectable events in the event log.
+  if (!repoFullName || !/^\d+$/.test(suffix)) return null;
+  return { repoFullName, prNumber: parseInt(suffix, 10) };
 }
 
 /** F202 Phase 2D: issue tracking subject key */
@@ -34,9 +37,12 @@ export function parseIssueSubjectKey(key: string): { repoFullName: string; issue
   const hashIdx = rest.lastIndexOf('#');
   if (hashIdx < 0) return null;
   const repoFullName = rest.slice(0, hashIdx);
-  const issueNumber = parseInt(rest.slice(hashIdx + 1), 10);
-  if (!repoFullName || Number.isNaN(issueNumber)) return null;
-  return { repoFullName, issueNumber };
+  const suffix = rest.slice(hashIdx + 1);
+  // Cloud R12 P2: require strictly all-digit suffix so "123abc" is rejected.
+  // parseInt("123abc") === 123 (not NaN), but the projector regex requires /^\d+$/;
+  // accepting partially-numeric keys leaves unprojectable events in the event log.
+  if (!repoFullName || !/^\d+$/.test(suffix)) return null;
+  return { repoFullName, issueNumber: parseInt(suffix, 10) };
 }
 
 export function threadSubjectKey(threadId: string): string {

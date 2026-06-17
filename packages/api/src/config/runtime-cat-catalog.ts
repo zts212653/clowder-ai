@@ -457,9 +457,9 @@ export function updateRuntimeCoCreator(projectRoot: string, patch: RuntimeCoCrea
   }
 
   const currentOwner = (catalog.coCreator ?? {
-    name: '铲屎官',
+    name: 'co-creator',
     aliases: [],
-    mentionPatterns: ['@co-creator', '@铲屎官'],
+    mentionPatterns: ['@co-creator', '@co-creator'],
   }) as CoCreatorConfig;
 
   const nextOwner: Record<string, unknown> = {

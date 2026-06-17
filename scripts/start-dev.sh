@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Cat Cafe 启动脚本（底层实现）
+# Clowder AI 启动脚本（底层实现）
 # 用户入口:
 #   pnpm start                        — runtime worktree 稳定启动（由 runtime-worktree.sh 注入 --prod-web）
 #   pnpm start:direct                 — 当前目录稳定启动（package.json 注入 --prod-web + --profile=opensource + 非 watch API + 优先当前 .env 端口）
@@ -56,7 +56,7 @@ source "$SCRIPT_DIR/lib/redis-rdb-first.sh"
 source "$SCRIPT_DIR/download-source-overrides.sh"
 cd "$PROJECT_DIR"
 
-echo "🐱 Cat Café 启动"
+echo "🐱 Clowder AI 启动"
 echo "================"
 
 # 颜色定义
@@ -94,6 +94,8 @@ done
 #     默认模式: CLI env > .env.local > .env（CLI 值在 source 后恢复）
 #     RESPECT_DOTENV_PORTS 模式: .env.local > .env（CLI 端口值不恢复）
 #   对于其他键: .env.local > .env（无 CLI 恢复机制）
+#   例外：CAT_CAFE_PROVISION_GLOBAL_SIDECAR 是 machine-global sidecar
+#   owner marker，只能来自 wrapper/CLI 环境；dotenv 不得授予 ownership。
 #   安全注意: .env.local 全量 source，不再限于 DARE 白名单。
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
@@ -106,13 +108,14 @@ CLI_ANTHROPIC_PROXY_PORT_OVERRIDE="${ANTHROPIC_PROXY_PORT-}"
 CLI_WHISPER_PORT_OVERRIDE="${WHISPER_PORT-}"
 CLI_TTS_PORT_OVERRIDE="${TTS_PORT-}"
 CLI_LLM_POSTPROCESS_PORT_OVERRIDE="${LLM_POSTPROCESS_PORT-}"
+CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE="${CAT_CAFE_PROVISION_GLOBAL_SIDECAR-}"
 
 clear_inherited_profile_env() {
     [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
     [ -n "$PROFILE" ] || return 0
 
     # Public direct-launch wrappers should honor the requested profile rather
-    # than ambient Cat Cafe shell exports leaked from another checkout.
+    # than ambient Clowder AI shell exports leaked from another checkout.
     unset ANTHROPIC_PROXY_ENABLED ASR_ENABLED TTS_ENABLED LLM_POSTPROCESS_ENABLED EMBED_ENABLED AUDIO_SERVICE_ENABLED
     unset MESSAGE_TTL_SECONDS THREAD_TTL_SECONDS TASK_TTL_SECONDS SUMMARY_TTL_SECONDS
     unset REDIS_PROFILE
@@ -155,6 +158,12 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
 fi
 
+if [ -n "$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE" ]; then
+    export CAT_CAFE_PROVISION_GLOBAL_SIDECAR="$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE"
+else
+    unset CAT_CAFE_PROVISION_GLOBAL_SIDECAR
+fi
+
 # === F182 大赛 / 多 worktree 并发：WORKTREE_PORT_OFFSET 派生 + 主动覆盖 ===
 # 砚砚 review: cat-cafe/docs/plans/2026-04-30-worktree-port-offset.md
 # OFFSET 非 0 时主动覆盖（不是检查）：
@@ -195,7 +204,7 @@ apply_worktree_port_offset() {
 
     # 圣域防御（defense-in-depth — derive-worktree-ports.mjs 已挡）
     if [ "$REDIS_PORT" = "6399" ]; then
-        echo "[start-dev] 拒绝使用 Redis 圣域 6399！" >&2
+        echo "[start-dev] 拒绝使用 production data boundary 6399！" >&2
         exit 2
     fi
 
@@ -1378,7 +1387,7 @@ main() {
 
     echo ""
     echo "========================"
-    echo -e "${GREEN}🎉 Cat Café 已启动！${NC}"
+    echo -e "${GREEN}🎉 Clowder AI 已启动！${NC}"
     [ -n "$PROFILE" ] && echo -e "  Profile: ${CYAN}${PROFILE}${NC}"
     echo ""
     print_config_summary
@@ -1414,7 +1423,7 @@ if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]]; then
     fi
     DAEMON_PID=$(cat "$DAEMON_PID_FILE")
     if kill -0 "$DAEMON_PID" 2>/dev/null; then
-        echo "正在停止 Cat Café daemon (PID: $DAEMON_PID)..."
+        echo "正在停止 Clowder AI daemon (PID: $DAEMON_PID)..."
         kill -TERM "$DAEMON_PID" 2>/dev/null || true
         for i in $(seq 1 15); do
             kill -0 "$DAEMON_PID" 2>/dev/null || break
@@ -1426,7 +1435,7 @@ if [[ "${1:-}" == "--stop" ]] || [[ "${1:-}" == "stop" ]]; then
         fi
         rm -f "$DAEMON_PID_FILE"
         rm -f "$DAEMON_LOG_PATH_FILE"
-        echo "Cat Café daemon 已停止 🐾"
+        echo "Clowder AI daemon 已停止 🐾"
     else
         echo "Daemon 进程 (PID: $DAEMON_PID) 已不存在，清理 PID 文件"
         rm -f "$DAEMON_PID_FILE"
@@ -1437,14 +1446,14 @@ fi
 
 if [[ "${1:-}" == "--status" ]] || [[ "${1:-}" == "status" ]]; then
     if [ ! -f "$DAEMON_PID_FILE" ]; then
-        echo "Cat Café daemon 未运行（无 PID 文件）"
+        echo "Clowder AI daemon 未运行（无 PID 文件）"
         exit 1
     fi
     DAEMON_PID=$(cat "$DAEMON_PID_FILE")
     if kill -0 "$DAEMON_PID" 2>/dev/null; then
         REAL_LOG="$DAEMON_LOG_FILE"
         [ -f "$DAEMON_LOG_PATH_FILE" ] && REAL_LOG=$(cat "$DAEMON_LOG_PATH_FILE")
-        echo -e "${GREEN}Cat Café daemon 运行中${NC} (PID: $DAEMON_PID)"
+        echo -e "${GREEN}Clowder AI daemon 运行中${NC} (PID: $DAEMON_PID)"
         [ -f "$REAL_LOG" ] && echo "  日志: $REAL_LOG"
         echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
         echo "  查看日志: tail -f $REAL_LOG"
@@ -1460,7 +1469,7 @@ if [ "$DAEMON_MODE" = true ]; then
     if [ -f "$DAEMON_PID_FILE" ]; then
         EXISTING_PID=$(cat "$DAEMON_PID_FILE")
         if kill -0 "$EXISTING_PID" 2>/dev/null; then
-            echo -e "${RED}Cat Café daemon 已在运行 (PID: $EXISTING_PID)${NC}"
+            echo -e "${RED}Clowder AI daemon 已在运行 (PID: $EXISTING_PID)${NC}"
             echo "  停止: pnpm stop  或  ./scripts/start-dev.sh --stop"
             echo "  查看日志: tail -f $DAEMON_LOG_FILE"
             exit 1
@@ -1478,7 +1487,7 @@ if [ "$DAEMON_MODE" = true ]; then
     done
 
     mkdir -p "$DAEMON_STATE_DIR"
-    echo "🐱 Cat Café 以后台模式启动..."
+    echo "🐱 Clowder AI 以后台模式启动..."
     echo "  日志输出: $DAEMON_LOG_FILE"
     nohup "$0" "${RESTART_ARGS[@]}" > "$DAEMON_LOG_FILE" 2>&1 &
     DAEMON_PID=$!

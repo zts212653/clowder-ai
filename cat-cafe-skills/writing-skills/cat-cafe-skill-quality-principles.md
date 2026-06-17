@@ -17,7 +17,7 @@ Before writing a skill, answer this table. If every answer is "no", do not write
 | Question | Good answer |
 |----------|-------------|
 | Does it contain project/industry/vendor know-how the model is unlikely to know reliably? | Yes: write a skill or reference with source paths. |
-| Does it encode a real Cat Café failure mode or CVO correction? | Yes: include the exact trap and countermeasure. |
+| Does it encode a real Cat Café failure mode or operator correction? | Yes: include the exact trap and countermeasure. |
 | Does it define an evidence standard for completion or escalation? | Yes: turn vague quality into checkable proof. |
 | Does it stop a behavior the model knows is wrong but rationalizes under pressure? | Yes: write a discipline skill and pressure-test it. |
 | Does it make an important tool or truth source discoverable at the right moment? | Yes: write a routing skill or MCP description. |

@@ -18,17 +18,17 @@ Why: F192 eval side belongs to harness-eval; first-party Hub execution surfaces 
 
 ## Why
 
-team lead 2026-06-03 指出：workspace-navigator 这种能力已经存在，但暴露度不够，猫猫要靠手写 `curl` 和猜端口才能用；这会让“有能力”在真实协作里退化成“想不起来 / 调不好 / 调了但用户看不到”。
+operator 2026-06-03 指出：workspace-navigator 这种能力已经存在，但暴露度不够，猫猫要靠手写 `curl` 和猜端口才能用；这会让“有能力”在真实协作里退化成“想不起来 / 调不好 / 调了但用户看不到”。
 
 这个 feature 的价值不是再补一条 skill，而是建立统一能力面：猫应该先能想起能力，再用稳定的 typed surface 执行，再有可验证的成功信号，最后由 eval 判断这套 harness 是否真的改善行为。
 
 ## Current State / 现状基线
 
-- F131 已完成 workspace navigator 的基础管道，但当时把“猫猫自己 `curl POST /api/workspace/navigate`”写成硬实力层。2026-06-03 现场复现显示，这个边界已经不够稳：Ragdoll调用了 navigate API，Hub 也拉到了文件内容，但team lead只看到 Workspace 面板，没有可靠看到目标文档。
+- F131 已完成 workspace navigator 的基础管道，但当时把“猫猫自己 `curl POST /api/workspace/navigate`”写成硬实力层。2026-06-03 现场复现显示，这个边界已经不够稳：Ragdoll调用了 navigate API，Hub 也拉到了文件内容，但operator只看到 Workspace 面板，没有可靠看到目标文档。
 - `cat-cafe-skills/refs/capability-wakeup-index.md` 已把 Tier 1 / Tier 2 能力列出来，并把 `workspace-navigator`、`rich-messaging`、`browser-preview` 判为 habit-resistant；但它仍偏“何时想起”，不是完整执行面 registry。
 - F192 Phase F `eval:capability-wakeup` 正在衡量猫“该用没用”的 miss rate；它不负责定义每个能力应该通过 MCP、callback route、helper 还是 ActionService 执行。
 - 家里已有大量 MCP 工具（例如 `cat_cafe_create_rich_block`、`cat_cafe_generate_document`、`cat_cafe_update_workflow`、`cat_cafe_multi_mention`、`cat_cafe_start_vote`），但部分能力在 skill / L0 / tool description 里的触发条件不够显眼。
-- LL-041 已验证过同类问题：workspace-navigator、browser-preview、rich block 等展示能力存在，但猫只在team lead明确要求时被动使用，缺少“端上桌”的触发与执行闭环。
+- LL-041 已验证过同类问题：workspace-navigator、browser-preview、rich block 等展示能力存在，但猫只在operator明确要求时被动使用，缺少“端上桌”的触发与执行闭环。
 
 ## 需求点 Checklist
 
@@ -100,7 +100,7 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 
 ### 1. Primary Users + Activation Signal
 
-- **Users**: 所有猫（能力调用者）、team lead（用户可见结果的接收者）、feature owner（能力维护者）。
+- **Users**: 所有猫（能力调用者）、operator（用户可见结果的接收者）、feature owner（能力维护者）。
 - **Activation**: 猫遇到 L0 §8 / skill trigger 场景，应该调用某个家里独有能力。
 
 ### 2. Friction Metric
@@ -149,7 +149,7 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 
 ### Phase D（Guardrail + Eval Loop）
 
-- [x] AC-D1: 新增或扩展 `pnpm check:skills` 类检查，阻止未豁免的第一方 raw `curl localhost` 主路径进入 skill。按 F192 Phase F AC-F9 决策 #2，hard check / forcing-function 行为改动必须走 Design Gate / CVO accept；豁免名单（exception allowlist）与检查范围同审。✅ `check:skills:surfaces` 扫 `cat-cafe-skills/**/SKILL.md` + `refs/**/*.md`，接入 `pnpm check` / merge-gate，含 reviewed allowlist 与 red/green tests。
+- [x] AC-D1: 新增或扩展 `pnpm check:skills` 类检查，阻止未豁免的第一方 raw `curl localhost` 主路径进入 skill。按 F192 Phase F AC-F9 决策 #2，hard check / forcing-function 行为改动必须走 Design Gate / operator accept；豁免名单（exception allowlist）与检查范围同审。✅ `check:skills:surfaces` 扫 `cat-cafe-skills/**/SKILL.md` + `refs/**/*.md`，接入 `pnpm check` / merge-gate，含 reviewed allowlist 与 red/green tests。
 - [x] AC-D2: 每个 registry 条目能被 F192 verdict 或手动 probe 追踪到后续行动：fix / build / keep_observe / delete_sunset。✅ inventory `Phase D Action Tracking` + `check:f223-action-tracking` contract。
 - [x] AC-D3: PR packaging 遵守批处理策略：优先按能力族合并，不按单个能力拆 PR；只有跨架构边界、风险或 review owner 明显不同才拆。✅ Phase D merged via PR #2095 as one guardrail + eval tracking batch.
 
@@ -176,11 +176,11 @@ Phase A 必须先关闭 OQ-3：第一方 Hub UX 动作是否扩展既有 `action
 |---|------|------|------|
 | KD-1 | 新建 F223，而不是强挂 F192/F203/F131 | F192 管 eval，F203 管 L0 触发，F131 管单个 workspace 能力；本需求横跨 trigger/execution/verification/eval 四层 | 2026-06-03 |
 | KD-2 | Skill 不是执行面，MCP/helper/callback/ActionService 才是执行面 | 防止 skill 继续教猫手写第一方 `curl`，也避免把认知问题误修成 hook | 2026-06-03 |
-| KD-3 | 不做“一能力一 PR” | team lead明确要求效率；按能力族合并能减少 review/merge overhead | 2026-06-03 |
+| KD-3 | 不做“一能力一 PR” | operator明确要求效率；按能力族合并能减少 review/merge overhead | 2026-06-03 |
 | KD-4 | workspace typed surface 命名方向收敛为 `cat_cafe_workspace_navigate` | `workspace-navigator` 已覆盖 reveal/open 等 action；`open_file` 会把已有语义重新切碎 | 2026-06-03 |
 | KD-5 | 第一方 Hub 展示动作归 `hub-action-surface`，不扩 `action-plane` | action-plane 是外部资源 mutation；workspace/preview/rich block 是 Hub UI/socket/probe 侧效应 | 2026-06-03 |
 | KD-6 | Phase A registry 先用 Markdown inventory，Phase D 再决定是否生成机器格式 | 先让架构边界可 review；hard check 接受后再加机器消费层 | 2026-06-03 |
-| KD-7 | Phase D 采纳 Design Gate Option A：新增 scoped lightweight skill-surface hard check，接入 `pnpm check` / merge-gate，并同步 `writing-skills` + `worktree` SOP；Option A+ pre-push/git guard 暂不做，若直接 push 逃逸复发再升级 | team lead指出只放 PR gate 会让小 skill 直推逃逸；`pnpm check` 覆盖正常本地/PR 流程，SOP 澄清执行面 skill 改动不算免验证纯文档；pre-push 先不加，避免额外 hook 维护摩擦 | 2026-06-04 |
+| KD-7 | Phase D 采纳 Design Gate Option A：新增 scoped lightweight skill-surface hard check，接入 `pnpm check` / merge-gate，并同步 `writing-skills` + `worktree` SOP；Option A+ pre-push/git guard 暂不做，若直接 push 逃逸复发再升级 | operator指出只放 PR gate 会让小 skill 直推逃逸；`pnpm check` 覆盖正常本地/PR 流程，SOP 澄清执行面 skill 改动不算免验证纯文档；pre-push 先不加，避免额外 hook 维护摩擦 | 2026-06-04 |
 
 ## Phase B1 Vision Guard（2026-06-04, opus-48）
 

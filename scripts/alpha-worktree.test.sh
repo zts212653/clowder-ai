@@ -22,7 +22,7 @@ assert_contains() {
 test_usage_includes_alpha_commands() {
   local output
   output="$(usage)"
-  assert_contains "$output" "Cat Cafe Alpha Worktree Manager" "usage should describe alpha manager"
+  assert_contains "$output" "Clowder AI Alpha Worktree Manager" "usage should describe alpha manager"
   assert_contains "$output" "./scripts/alpha-worktree.sh start" "usage should include start command"
   assert_contains "$output" "../cat-cafe-alpha" "usage should mention default alpha dir"
   assert_contains "$output" "alpha/main-sync" "usage should mention default alpha branch"
@@ -40,6 +40,7 @@ test_print_alpha_env_exports() {
   assert_contains "$output" "export ASR_ENABLED=0" "should disable ASR sidecar"
   assert_contains "$output" "export TTS_ENABLED=0" "should disable TTS sidecar"
   assert_contains "$output" "export LLM_POSTPROCESS_ENABLED=0" "should disable LLM postprocess sidecar"
+  assert_contains "$output" "export CONNECTOR_GATEWAY_AUTOSTART=0" "should disable preconfigured IM connector autostart"
   echo "PASS: alpha env exports are fixed to isolated defaults"
 }
 

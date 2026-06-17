@@ -16,7 +16,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', '铲屎官', 'CVO'],
+        aliases: ['you', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test', anchor: 'F209' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -26,7 +26,7 @@ describe('F209 entity registry storage', () => {
     assert.equal(entity.entityId, 'person:landy');
     assert.equal(entity.type, 'person');
     assert.equal(entity.canonicalName, 'You');
-    assert.deepEqual(entity.aliases.sort(), ['CVO', 'you', '铲屎官'].sort());
+    assert.deepEqual(entity.aliases.sort(), ['operator', 'you', 'co-creator'].sort());
     assert.equal(entity.updatedAt, '2026-05-22T00:00:00Z');
     assert.deepEqual(entity.provenance, [{ source: 'F209 Phase B test', anchor: 'F209' }]);
     assert.equal(entity.privacyScope, undefined);
@@ -40,7 +40,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['CVO'],
+        aliases: ['operator'],
         provenance: [{ source: 'initial seed' }],
         createdAt: '2026-05-20T00:00:00Z',
         updatedAt: '2026-05-20T00:00:00Z',
@@ -52,7 +52,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['CVO', '铲屎官'],
+        aliases: ['operator', 'co-creator'],
         provenance: [{ source: 'alias refresh' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -61,7 +61,7 @@ describe('F209 entity registry storage', () => {
     const entity = await store.getEntity('person:landy');
     assert.equal(entity.createdAt, '2026-05-20T00:00:00Z');
     assert.equal(entity.updatedAt, '2026-05-22T00:00:00Z');
-    assert.deepEqual(entity.aliases.sort(), ['CVO', '铲屎官'].sort());
+    assert.deepEqual(entity.aliases.sort(), ['operator', 'co-creator'].sort());
   });
 
   it('updates stored alias surfaces when only alias casing changes', async () => {
@@ -70,7 +70,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['CVO'],
+        aliases: ['operator'],
         provenance: [{ source: 'initial seed' }],
         updatedAt: '2026-05-20T00:00:00Z',
       },
@@ -90,7 +90,7 @@ describe('F209 entity registry storage', () => {
     const entity = await store.getEntity('person:landy');
     assert.deepEqual(entity.aliases, ['cvo']);
 
-    const matches = await store.resolveEntityAliases('CVO asked about recall');
+    const matches = await store.resolveEntityAliases('operator asked about recall');
     assert.deepEqual(
       matches.map((m) => [m.entityId, m.matchedAlias]),
       [['person:landy', 'cvo']],
@@ -118,7 +118,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', '铲屎官', 'CVO'],
+        aliases: ['you', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -132,10 +132,10 @@ describe('F209 entity registry storage', () => {
       },
     ]);
 
-    const cvoMatches = await store.resolveEntityAliases('CVO asked about recall');
+    const cvoMatches = await store.resolveEntityAliases('operator asked about recall');
     assert.deepEqual(
       cvoMatches.map((m) => [m.entityId, m.matchedAlias]),
-      [['person:landy', 'CVO']],
+      [['person:landy', 'operator']],
     );
 
     const catMatches = await store.resolveEntityAliases('@gemini should review this');
@@ -157,7 +157,7 @@ describe('F209 entity registry storage', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['CVO', '铲屎官'],
+        aliases: ['operator', 'co-creator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },

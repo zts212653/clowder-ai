@@ -31,7 +31,7 @@ describe('F167 Phase H AC-H1: finalRoutingSlot', () => {
   });
 
   test('strips blockquote lines', () => {
-    const msg = '我的结论。\n\n> 铲屎官原话 @opus';
+    const msg = '我的结论。\n\n> co-creator原话 @opus';
     const slot = finalRoutingSlot(msg);
     assert.equal(slot, '我的结论。');
   });

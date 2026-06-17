@@ -22,8 +22,27 @@ describe('Community Issues Routes', () => {
     communityPrStore = new InMemoryCommunityPrStore();
   });
 
+  // C3.1: mockThreadStore needs get() for routeRecommendation thread validation (INV-7)
+  // Known threads: thread_community_ops (C3.1), plus legacy test fixtures.
+  // INV-7 validation now rejects unknown threadIds, so all test fixtures must be registered.
+  const knownThreads = new Set([
+    'thread_community_ops',
+    'thread_f056',
+    'thread_abc',
+    't1',
+    'thread_f168_test',
+    'thread_r13_test',
+    'thread_r21_p1_test',
+  ]);
+  // Cloud R2 P2: soft-deleted threads must be rejected by INV-7
+  const softDeletedThreads = new Set(['thread_soft_deleted']);
   const mockThreadStore = {
     create: async (_userId, title) => ({ id: `thread_${Date.now()}`, title, createdAt: Date.now() }),
+    get: async (id) => {
+      if (knownThreads.has(id)) return { id, title: 'mock', createdAt: Date.now() };
+      if (softDeletedThreads.has(id)) return { id, title: 'mock', createdAt: Date.now(), deletedAt: Date.now() };
+      return null;
+    },
   };
 
   const catCredentials = {
@@ -554,6 +573,282 @@ describe('Community Issues Routes', () => {
       payload: { decision: 'accepted' },
     });
     assert.equal(res.statusCode, 409);
+  });
+
+  // --- Phase C C3.1: resolve consumes routeRecommendation for routing ---
+
+  /** Helper: create issue → dispatch → two conflicting triages → pending-decision */
+  async function createPendingDecisionIssue(app, issueNumber = 100) {
+    const issue = await createAndDispatch(app, { issueNumber });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'UNSURE' },
+    });
+    return issue;
+  }
+
+  test('POST resolve with routeRecommendation existing-thread → routes to that thread (C3.1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 101);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_community_ops' },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.state, 'accepted');
+    assert.equal(body.assignedThreadId, 'thread_community_ops');
+  });
+
+  test('POST resolve with routeRecommendation new-thread → creates new thread (C3.1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 102);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        routeRecommendation: { kind: 'new-thread' },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.state, 'accepted');
+    assert.ok(body.assignedThreadId, 'new thread must be auto-created');
+  });
+
+  test('POST resolve with routeRecommendation existing-thread for nonexistent thread → 404 (INV-7 C3.1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 103);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_does_not_exist_xyz' },
+      },
+    });
+    assert.equal(res.statusCode, 404, 'dead thread must be rejected (INV-7)');
+    assert.ok(res.json().error.includes('thread'), 'error message must mention thread');
+  });
+
+  test('POST resolve without routeRecommendation → backward compat unchanged (INV-12 C3.1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 104);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      payload: { decision: 'accepted' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().state, 'accepted');
+  });
+
+  test('POST resolve with routeRecommendation new-thread + relatedFeature → still creates thread (Cloud R2 P1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 105);
+    // Resolve with both new-thread recommendation AND relatedFeature.
+    // Bug: routeAccepted takes the relatedFeature early return and skips
+    // thread creation, leaving accepted issue without assignedThreadId.
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        relatedFeature: 'F168',
+        routeRecommendation: { kind: 'new-thread' },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.state, 'accepted');
+    assert.ok(body.assignedThreadId, 'new-thread must create a thread even when relatedFeature exists');
+  });
+
+  test('POST resolve with routeRecommendation existing-thread for soft-deleted thread → 404 (Cloud R2 P2)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 106);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_soft_deleted' },
+      },
+    });
+    assert.equal(res.statusCode, 404, 'soft-deleted thread must be rejected (INV-7)');
+    assert.ok(res.json().error.includes('thread'), 'error message must mention thread');
+  });
+
+  test('POST resolve with legacy threadId for nonexistent thread → 404 (Cloud R3 P1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 107);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        threadId: 'thread_does_not_exist_legacy',
+      },
+    });
+    assert.equal(res.statusCode, 404, 'legacy threadId must be validated (INV-7)');
+    assert.ok(res.json().error.includes('thread'), 'error message must mention thread');
+  });
+
+  test('POST resolve with legacy threadId for soft-deleted thread → 404 (Cloud R3 P1)', async () => {
+    const app = await createApp();
+    const issue = await createPendingDecisionIssue(app, 108);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        threadId: 'thread_soft_deleted',
+      },
+    });
+    assert.equal(res.statusCode, 404, 'soft-deleted legacy threadId must be rejected (INV-7)');
+    assert.ok(res.json().error.includes('thread'), 'error message must mention thread');
+  });
+
+  test('POST resolve with threadId but no threadStore wired → 500 fail-closed (Cloud R4 P2)', async () => {
+    const app = await createApp({ threadStore: undefined });
+    const issue = await createPendingDecisionIssue(app, 109);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        threadId: 'thread_anything',
+      },
+    });
+    assert.equal(res.statusCode, 500, 'must fail-closed when threadStore unavailable for validation');
+  });
+
+  // --- C3.2 eval.1: RouteDecisionEvalEvent recording (INV-13) ---
+
+  /** Mock event log that collects appended events for assertion. */
+  function createMockEventLog() {
+    const events = [];
+    return {
+      events,
+      append: async (event) => {
+        events.push(event);
+        return { appended: true, sequence: events.length };
+      },
+      read: async () => events,
+    };
+  }
+
+  test('POST resolve records RouteDecisionEvalEvent agreed=true when owner confirms narrator recommendation (INV-13)', async () => {
+    const mockEventLog = createMockEventLog();
+    const app = await createApp({ eventLog: mockEventLog });
+    const issue = await createPendingDecisionIssue(app, 200);
+
+    // Triage with narrator recommendation: existing-thread to thread_community_ops
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: {
+        catId: 'narrator-cat',
+        verdict: 'WELCOME',
+        questions: fivePass,
+        authoredByRole: 'narrator',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_community_ops' },
+      },
+    });
+
+    // Owner confirms same route as narrator recommended
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        catId: 'opus',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_community_ops' },
+      },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const evalEvents = mockEventLog.events.filter((e) => e.kind === 'case.route_decision_eval');
+    assert.equal(evalEvents.length, 1, 'must record exactly one RouteDecisionEvalEvent');
+    const evalEvent = evalEvents[0];
+    assert.equal(evalEvent.payload.agreed, true, 'agreed must be true when owner confirms narrator');
+    assert.deepStrictEqual(evalEvent.payload.narratorRecommendation, {
+      kind: 'existing-thread',
+      threadId: 'thread_community_ops',
+    });
+    assert.equal(evalEvent.payload.ownerDecision.verdict, 'accepted');
+    assert.equal(evalEvent.classification, 'informational');
+  });
+
+  test('POST resolve records RouteDecisionEvalEvent agreed=false when owner overrides narrator (INV-13)', async () => {
+    const mockEventLog = createMockEventLog();
+    const app = await createApp({ eventLog: mockEventLog });
+    const issue = await createPendingDecisionIssue(app, 201);
+
+    // Narrator recommends existing-thread
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: {
+        catId: 'narrator-cat',
+        verdict: 'WELCOME',
+        questions: fivePass,
+        authoredByRole: 'narrator',
+        routeRecommendation: { kind: 'existing-thread', threadId: 'thread_community_ops' },
+      },
+    });
+
+    // Owner overrides: declines instead of accepting
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: { decision: 'declined' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const evalEvents = mockEventLog.events.filter((e) => e.kind === 'case.route_decision_eval');
+    assert.equal(evalEvents.length, 1, 'must record eval even when declining');
+    assert.equal(evalEvents[0].payload.agreed, false, 'agreed must be false when owner overrides');
+    assert.equal(evalEvents[0].payload.ownerDecision.verdict, 'declined');
+  });
+
+  test('POST resolve does NOT record RouteDecisionEvalEvent when no narrator recommendation (INV-13)', async () => {
+    const mockEventLog = createMockEventLog();
+    const app = await createApp({ eventLog: mockEventLog });
+    const issue = await createPendingDecisionIssue(app, 202);
+
+    // Resolve without any narrator recommendation (pure human decision)
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: { decision: 'accepted' },
+    });
+    assert.equal(res.statusCode, 200);
+
+    const evalEvents = mockEventLog.events.filter((e) => e.kind === 'case.route_decision_eval');
+    assert.equal(evalEvents.length, 0, 'must NOT record eval when no narrator recommendation');
   });
 
   // --- Phase D: Guardian assignment endpoints ---
@@ -1231,5 +1526,364 @@ describe('Community Issues Routes', () => {
     assert.ok(tracked, 'tracked PR should appear in board');
     assert.equal(tracked.prNumber, 42, 'tracked PR must include prNumber extracted from subjectKey');
     assert.equal(tracked.ownerCatId, 'opus', 'tracked PR must include ownerCatId');
+  });
+
+  test('POST resolve accepted — case.routed event ownerRole must be catId not relatedFeature (Cloud R7 P2)', async () => {
+    // Cloud R7 P2: when /resolve is called with both catId and relatedFeature,
+    // the case.routed event payload must set ownerRole = catId (the assigned cat),
+    // NOT relatedFeature (the feature ID). The projector maps ownerRole → assignedCatId
+    // in the board view; storing the feature ID there silently loses the actual routed cat.
+    const appendedEvents = [];
+    const eventLog = {
+      async append(event) {
+        appendedEvents.push(event);
+        return { appended: true, sequence: appendedEvents.length - 1 };
+      },
+      async read() {
+        return [];
+      },
+      async listSubjects() {
+        return [];
+      },
+    };
+    const app = await createApp({ eventLog });
+    const issue = await createAndDispatch(app, { issueNumber: 99 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'NOT_NOW' },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        catId: 'opus',
+        relatedFeature: 'F056',
+        threadId: 'thread_f168_test',
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    const routedEvent = appendedEvents.find((e) => e.kind === 'case.routed');
+    assert.ok(routedEvent, 'case.routed event must be appended when accepted with catId+threadId');
+    assert.equal(
+      routedEvent.payload.ownerRole,
+      'opus',
+      'case.routed ownerRole must be the catId ("opus"), not the relatedFeature ("F056") — Cloud R7 P2',
+    );
+    assert.notEqual(
+      routedEvent.payload.ownerRole,
+      'F056',
+      'case.routed ownerRole must NOT be the relatedFeature string',
+    );
+  });
+
+  test('POST resolve accepted with catId but no threadId — case.routed emitted with auto-created threadId (Cloud R11 P1)', async () => {
+    // Cloud R11 P1: when /resolve is called without threadId in body, routeAccepted()
+    // auto-creates a thread. The case.routed guard must use the resolved assignedThreadId
+    // (not result.data.threadId which is undefined), otherwise case.routed is never emitted
+    // and issue tracking is never registered.
+    const autoCreatedThreadId = 'thread_auto_r11_test';
+    const deterministicThreadStore = {
+      create: async (_userId, _title) => ({ id: autoCreatedThreadId, title: _title, createdAt: Date.now() }),
+    };
+
+    const appendedEvents = [];
+    const eventLog = {
+      async append(event) {
+        appendedEvents.push(event);
+        return { appended: true, sequence: appendedEvents.length - 1 };
+      },
+      async read() {
+        return [];
+      },
+      async listSubjects() {
+        return [];
+      },
+    };
+
+    const app = await createApp({ eventLog, threadStore: deterministicThreadStore });
+    const issue = await createAndDispatch(app, { issueNumber: 111 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'NOT_NOW' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: {
+        decision: 'accepted',
+        catId: 'opus',
+        // NOTE: no threadId — routeAccepted() must auto-create one
+      },
+    });
+    assert.equal(res.statusCode, 200, 'resolve must succeed');
+
+    const routedEvent = appendedEvents.find((e) => e.kind === 'case.routed');
+    assert.ok(routedEvent, 'case.routed must be emitted even when threadId is not in request body (Cloud R11 P1)');
+    assert.equal(
+      routedEvent.payload.ownerThreadId,
+      autoCreatedThreadId,
+      'case.routed ownerThreadId must be the auto-created thread ID from routeAccepted()',
+    );
+    assert.equal(routedEvent.payload.catId, 'opus', 'case.routed catId must be the assigned cat');
+  });
+
+  test('POST resolve accepted — auto-registered tracking task carries userId from resolving request (Cloud R13 P1)', async () => {
+    // Cloud R13 P1: when /resolve auto-registers an issue_tracking task via registerRoutingTracking,
+    // the task's userId must be set to the resolving user so the poller can deliver notifications.
+    // Without userId, IssueCommentTaskSpec uses task.userId ?? '' (empty string) as the invocation
+    // target, causing silent delivery failures.
+    const appendedEvents = [];
+    const eventLog = {
+      async append(event) {
+        appendedEvents.push(event);
+        return { appended: true, sequence: appendedEvents.length - 1 };
+      },
+      async read() {
+        return [];
+      },
+      async listSubjects() {
+        return [];
+      },
+    };
+    const app = await createApp({ eventLog });
+    const issue = await createAndDispatch(app, { issueNumber: 222 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'NOT_NOW' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: { decision: 'accepted', catId: 'opus', threadId: 'thread_r13_test' },
+    });
+    assert.equal(res.statusCode, 200, 'resolve must succeed');
+
+    // The tracking task should carry the resolving userId ('you')
+    const tasks = await taskStore.listByKind('issue_tracking');
+    const trackingTask = tasks.find((t) => t.subjectKey?.includes('222'));
+    assert.ok(trackingTask, 'issue_tracking task must be auto-registered');
+    assert.equal(trackingTask.userId, 'you', 'tracking task userId must be the resolving user (Cloud R13 P1)');
+  });
+
+  test('POST resolve accepted — projector.apply() throwing must not skip registerRoutingTracking (Cloud R21 P1)', async () => {
+    // Cloud R21 P1: when eventLog.append() succeeds (appended:true) but projector.apply() throws,
+    // the outer catch previously skipped registerRoutingTracking(). Because the case.routed event
+    // already claimed its sourceEventId, any retry sees appended:false and the auto-tracking path
+    // is intentionally not called — leaving an accepted case permanently without issue_tracking.
+    // Fix: projector.apply() must be wrapped in its own try-catch so its failure does not block
+    // registerRoutingTracking().
+    const appendedEvents = [];
+    const eventLog = {
+      async append(event) {
+        appendedEvents.push(event);
+        return { appended: true, sequence: appendedEvents.length - 1 };
+      },
+      async read() {
+        return [];
+      },
+      async listSubjects() {
+        return [];
+      },
+    };
+    // Projector that always throws — simulates transient failure
+    const throwingProjector = {
+      async apply(_event) {
+        throw new Error('transient projector error');
+      },
+    };
+
+    const app = await createApp({ eventLog, projector: throwingProjector });
+    const issue = await createAndDispatch(app, { issueNumber: 321 });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'codex', verdict: 'POLITELY-DECLINE', questions: fivePass, reasonCode: 'NOT_NOW' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/resolve`,
+      headers: { 'x-cat-cafe-user': 'you' },
+      payload: { decision: 'accepted', catId: 'opus', threadId: 'thread_r21_p1_test' },
+    });
+    assert.equal(res.statusCode, 200, 'resolve must succeed even when projector throws');
+
+    // case.routed must have been appended despite projector throwing
+    const routedEvent = appendedEvents.find((e) => e.kind === 'case.routed');
+    assert.ok(routedEvent, 'case.routed event must be appended');
+
+    // issue_tracking task must still be auto-registered despite projector failure
+    const tasks = await taskStore.listByKind('issue_tracking');
+    const trackingTask = tasks.find((t) => t.subjectKey?.includes('321'));
+    assert.ok(trackingTask, 'issue_tracking task must be registered even when projector.apply() throws (Cloud R21 P1)');
+  });
+
+  // F168 Phase C C2.2 R1 fix: triage-complete must accept narrator extension fields
+  test('POST triage-complete preserves narrator extension fields (P1-1 R1)', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 2001 });
+    const narratorPayload = {
+      catId: 'opus',
+      verdict: 'WELCOME',
+      questions: fivePass,
+      // C2.1 narrator extension fields — must survive Zod validation, not be stripped
+      authoredByRole: 'narrator',
+      narrative: 'This issue requests dark mode support for the web client.',
+      evidenceRefs: ['F056', 'issue:clowder-ai#100'],
+      routeRecommendation: { kind: 'existing-thread', threadId: 'thread_f056' },
+      recommendedOwnerRole: 'case-owner',
+    };
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: narratorPayload,
+    });
+    assert.equal(res.statusCode, 200);
+
+    // Verify the stored entry preserves narrator fields
+    const detail = (await app.inject({ method: 'GET', url: `/api/community-issues/${issue.id}` })).json();
+    const entries = detail.directionCard?.entries ?? [];
+    const entry = entries.find((e) => e.catId === 'opus');
+    assert.ok(entry, 'entry must exist');
+    assert.equal(entry.authoredByRole, 'narrator', 'authoredByRole must be preserved');
+    assert.equal(entry.narrative, narratorPayload.narrative, 'narrative must be preserved');
+    assert.deepEqual(entry.evidenceRefs, narratorPayload.evidenceRefs, 'evidenceRefs must be preserved');
+    assert.deepEqual(
+      entry.routeRecommendation,
+      narratorPayload.routeRecommendation,
+      'routeRecommendation must be preserved',
+    );
+    assert.equal(entry.recommendedOwnerRole, 'case-owner', 'recommendedOwnerRole must be preserved');
+  });
+
+  test('POST triage-complete still works with legacy payload without narrator fields (INV-12)', async () => {
+    const app = await createApp();
+    const issue = await createAndDispatch(app, { issueNumber: 2002 });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/community-issues/${issue.id}/triage-complete`,
+      payload: { catId: 'opus', verdict: 'WELCOME', questions: fivePass },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().action, 'await-second-cat');
+  });
+
+  // F168 Phase C C2.2: narrator spawn via NarratorDriver integration
+  describe('narrator spawn on dispatch (C2.2)', () => {
+    test('dispatch fires narrator via narratorDriver.spawnNarrator (fire-and-forget)', async () => {
+      const spawnCalls = [];
+      const mockNarratorDriver = {
+        spawnNarrator: async (params) => {
+          spawnCalls.push(params);
+        },
+      };
+
+      const app = await createApp({ narratorDriver: mockNarratorDriver });
+
+      const created = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/community-issues',
+          payload: {
+            repo: 'zts212653/clowder-ai',
+            issueNumber: 999,
+            issueType: 'feature',
+            title: 'Narrator dispatch test',
+          },
+        })
+      ).json();
+      assert.equal(created.state, 'unreplied');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/community-issues/${created.id}/dispatch`,
+      });
+      assert.equal(res.statusCode, 200, 'dispatch should succeed regardless of narrator');
+
+      // Give fire-and-forget a microtask to settle
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.equal(spawnCalls.length, 1, 'spawnNarrator must be called once after dispatch');
+      const call = spawnCalls[0];
+      assert.equal(call.subjectKey, 'issue:zts212653/clowder-ai#999', 'subjectKey must match issue');
+      assert.ok(
+        typeof call.sourceEventId === 'string' && call.sourceEventId.startsWith('dispatch:'),
+        'sourceEventId must start with dispatch:',
+      );
+      assert.ok(
+        typeof call.briefingContext === 'string' && call.briefingContext.includes('Narrator dispatch test'),
+        'briefingContext must include issue title',
+      );
+      assert.equal(call.caseId, created.id, 'caseId must be passed so narrator can call triage-complete (P1-2 R1)');
+    });
+
+    test('dispatch still succeeds when narratorDriver is not provided (opt optional)', async () => {
+      // No narratorDriver in opts
+      const app = await createApp();
+      const created = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/community-issues',
+          payload: { repo: 'x/y', issueNumber: 1001, issueType: 'bug', title: 'No narrator' },
+        })
+      ).json();
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/community-issues/${created.id}/dispatch`,
+      });
+      assert.equal(res.statusCode, 200, 'dispatch must not require narratorDriver (opt optional)');
+    });
+
+    test('dispatch still returns 200 even when narrator spawnNarrator throws (fire-and-forget)', async () => {
+      const mockNarratorDriver = {
+        spawnNarrator: async () => {
+          throw new Error('narrator infra failure');
+        },
+      };
+      const app = await createApp({ narratorDriver: mockNarratorDriver });
+      const created = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/community-issues',
+          payload: { repo: 'x/y', issueNumber: 1002, issueType: 'question', title: 'Narrator crash test' },
+        })
+      ).json();
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/community-issues/${created.id}/dispatch`,
+      });
+      // Fire-and-forget: narrator failure must never crash dispatch
+      assert.equal(res.statusCode, 200, 'narrator crash must not affect dispatch response');
+    });
   });
 });

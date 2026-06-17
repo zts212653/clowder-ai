@@ -2,7 +2,7 @@
 name: deep-research
 description: >
   多源深度调研管道（Web Deep Research + Coder 合成 + 云端模型咨询）。
-  Use when: 技术问题需要多源调查、设计决策需要证据、铲屎官说"调研"/"research"、需要咨询云端模型。
+  Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"、需要咨询云端模型。
   Not for: 简单搜索（直接用 WebSearch）、已有结论的确认。
   Output: 调研报告 + 证据合成 或 咨询文档（含回填区）。
 triggers:
@@ -18,7 +18,7 @@ renamed-from: deep-research-pipeline
 
 两种模式：
 - **Mode A: 多源调研**：Web 猫（网络搜索）+ Coder 猫（代码判断）+ GPT-5.2 Pro（审阅）= 三角验证
-- **Mode B: 云端模型咨询**：本地猫总结背景 → 铲屎官发给云端模型 → 回填结果 → 本地猫综合
+- **Mode B: 云端模型咨询**：本地猫总结背景 → operator发给云端模型 → 回填结果 → 本地猫综合
 
 ## 两种猫，各有分工
 
@@ -82,7 +82,7 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 **Step 4 — Coder 猫综合 + 决策**
 读全部四份文档 → 对照实际 codebase 验证 → 标注"直接可用/需验证/项目特殊约束"
 如果多只猫并行综合，每只猫存自己的：`{cat}-synthesis.md`
-最终合并版：`synthesis.md` → 和铲屎官讨论 → 落到 ADR
+最终合并版：`synthesis.md` → 和operator讨论 → 落到 ADR
 
 ## Prompt 模板（Step 1）
 
@@ -210,7 +210,7 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 - 需要 GPT Pro 帮忙审阅/补充观点
 - 需要外部专家视角
 - 本地调研完成后，想要第三方验证
-- 铲屎官说"问一下云端的 xxx"
+- operator说"问一下云端的 xxx"
 
 ## 三步流程
 
@@ -228,7 +228,7 @@ project-research/YYYY-MM-DD-{topic}-{model}-consult.md
 {自包含的背景 + 我们的现状 + 已有结论 + 请求}
 
 ## Part 2: 云端模型回答（待回填）
-> 铲屎官粘贴回答到这里
+> operator粘贴回答到这里
 
 [待回填]
 
@@ -238,7 +238,7 @@ project-research/YYYY-MM-DD-{topic}-{model}-consult.md
 [待撰写]
 ```
 
-**Step 2 — 铲屎官发送 + 回填**
+**Step 2 — operator发送 + 回填**
 
 1. 复制 Part 1 发给云端模型
 2. 把回答粘贴到 Part 2

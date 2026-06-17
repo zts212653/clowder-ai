@@ -94,7 +94,7 @@ pnpm test
 
 | Redis | 端口 | 用途 |
 |-------|------|------|
-| **用户 Redis** | **6399** | 铲屎官的数据，🔴 圣域，只读 |
+| **用户 Redis** | **6399** | operator的数据，🔴 圣域，只读 |
 | **开发 Redis** | **6398** | 猫猫开发测试，随便折腾 |
 
 **Worktree 中启动服务 = 必须用 6398。**
@@ -146,7 +146,7 @@ OFFSET 非 0 时，**派生值优先级高于 `.env` 和 `CAT_CAFE_RESPECT_DOTEN
 pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端口无冲突
 ```
 
-诊断脚本是 CI 用，**不是唯一 gate**——唯一 gate 是 `start-dev.sh` 内置 preflight（启动时主动派生端口、强制 export sidecar=0、unset Redis dir 让重派生；OFFSET 派生失败 / Redis 圣域 6399 拒绝启动）。
+诊断脚本是 CI 用，**不是唯一 gate**——唯一 gate 是 `start-dev.sh` 内置 preflight（启动时主动派生端口、强制 export sidecar=0、unset Redis dir 让重派生；OFFSET 派生失败 / production data boundary 6399 拒绝启动）。
 
 ### Sidecar 处理
 
@@ -184,7 +184,7 @@ Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>
 Why: Add read-side affordance so search/list_recent results show where to cross-post.
 
 [Maine Coon/GPT-5.5🐾]
-Thread-Context: threadId=thread_mpl0np23o7syhxl5 invocationId=0001780508313338 catId=codex
+Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
 ```
 
 规则：

@@ -6,7 +6,14 @@
  * ID 使用 generateSortableId 保证天然有序。
  */
 
-import type { AutomationState, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
+import type {
+  AutomationState,
+  CreateTaskInput,
+  IssueAutomationState,
+  TaskItem,
+  TaskKind,
+  UpdateTaskInput,
+} from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
 import { generateSortableId } from './MessageStore.js';
 
@@ -211,7 +218,26 @@ export class TaskStore implements ITaskStore {
       ci: patch.ci ? { ...existing?.ci, ...patch.ci } : existing?.ci,
       conflict: patch.conflict ? { ...existing?.conflict, ...patch.conflict } : existing?.conflict,
       review: patch.review ? { ...existing?.review, ...patch.review } : existing?.review,
-      issue: patch.issue ? { ...existing?.issue, ...patch.issue } : existing?.issue,
+      issue: patch.issue ? this.mergeIssueAutomationState(existing?.issue, patch.issue) : existing?.issue,
+    };
+  }
+
+  /** Merge issue automation state using Math.max for cursor fields to prevent stale re-seeds from lowering cursors. */
+  private mergeIssueAutomationState(
+    existing: IssueAutomationState | undefined,
+    patch: IssueAutomationState,
+  ): IssueAutomationState {
+    const merged: IssueAutomationState = { ...existing, ...patch };
+    return {
+      ...merged,
+      lastCommentCursor:
+        existing?.lastCommentCursor !== undefined && patch.lastCommentCursor !== undefined
+          ? Math.max(existing.lastCommentCursor, patch.lastCommentCursor)
+          : merged.lastCommentCursor,
+      lastDeliveredCursor:
+        existing?.lastDeliveredCursor !== undefined && patch.lastDeliveredCursor !== undefined
+          ? Math.max(existing.lastDeliveredCursor, patch.lastDeliveredCursor)
+          : merged.lastDeliveredCursor,
     };
   }
 
@@ -226,6 +252,8 @@ export class TaskStore implements ITaskStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
+      // #949: thread rotation — allow reassigning to a new thread
+      ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
       // F193-E1 P1-4: allow patching dispatchGate
       ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
       updatedAt: Date.now(),

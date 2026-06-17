@@ -60,7 +60,7 @@ describe('F163 authority boost', () => {
 
   it('authority_boost=on ranks validated above observed', async () => {
     process.env.F163_AUTHORITY_BOOST = 'on';
-    const results = await store.search('Redis pitfall');
+    const results = await store.search('Redis');
     assert.ok(results.length >= 2);
 
     const validatedIdx = results.findIndex((r) => r.anchor === 'lesson-validated');
@@ -73,7 +73,7 @@ describe('F163 authority boost', () => {
 
   it('authority_boost=off preserves original order', async () => {
     process.env.F163_AUTHORITY_BOOST = 'off';
-    const results = await store.search('Redis pitfall');
+    const results = await store.search('Redis');
     assert.ok(results.length >= 2);
 
     // With boost off, each result should have boostSource=['legacy']
@@ -82,13 +82,13 @@ describe('F163 authority boost', () => {
 
   it('authority_boost=shadow does NOT change result order', async () => {
     process.env.F163_AUTHORITY_BOOST = 'shadow';
-    const results = await store.search('Redis pitfall');
+    const results = await store.search('Redis');
     assert.ok(results.length >= 2);
 
     // Shadow mode: original order preserved (boost computed but not applied)
     // Verified by comparing with off results
     process.env.F163_AUTHORITY_BOOST = 'off';
-    const offResults = await store.search('Redis pitfall');
+    const offResults = await store.search('Redis');
     assert.deepEqual(
       results.map((r) => r.anchor),
       offResults.map((r) => r.anchor),
@@ -111,7 +111,7 @@ describe('F163 authority boost', () => {
     ]);
 
     process.env.F163_AUTHORITY_BOOST = 'on';
-    const results = await store.search('Redis pitfall');
+    const results = await store.search('Redis');
     const constIdx = results.findIndex((r) => r.anchor === 'lesson-constitutional');
     const validatedIdx = results.findIndex((r) => r.anchor === 'lesson-validated');
     assert.ok(

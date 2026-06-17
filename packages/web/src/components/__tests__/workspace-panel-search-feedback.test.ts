@@ -97,6 +97,8 @@ function setupMocks() {
       clearPendingPreviewAutoOpen: vi.fn(),
       restoreWorkspaceTabs: vi.fn(),
       _workspaceFileSetAt: { ts: 0, threadId: null },
+      workspaceMode: 'dev',
+      setWorkspaceMode: vi.fn(),
     };
     return sel(store);
   });

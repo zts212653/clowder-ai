@@ -26,7 +26,7 @@ describe('F209 entity alias search', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', '铲屎官', 'CVO'],
+        aliases: ['you', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test', anchor: 'F209' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -40,21 +40,21 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Entity alias design note',
-        summary: '铲屎官要求中文称呼也指向同一个可检索实体门牌号。',
+        summary: 'co-creator要求中文称呼也指向同一个可检索实体门牌号。',
         keywords: ['memory', 'entity'],
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
     await seedYouEntity();
 
-    const results = await store.search('CVO', { scope: 'docs', limit: 5, explain: true });
+    const results = await store.search('operator', { scope: 'docs', limit: 5, explain: true });
 
     assert.equal(results[0].anchor, 'F209-alias-doc');
     assert.equal(results[0].matchReason, 'entity:person:landy');
     assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
     assert.equal(results[0].entityMatches?.[0]?.type, 'person');
-    assert.equal(results[0].entityMatches?.[0]?.surface, '铲屎官');
-    assert.match(results[0].entityMatches?.[0]?.why ?? '', /CVO.*person:landy.*铲屎官/);
+    assert.equal(results[0].entityMatches?.[0]?.surface, 'co-creator');
+    assert.match(results[0].entityMatches?.[0]?.why ?? '', /operator.*person:landy.*co-creator/);
   });
 
   it('limits entity doc hits by distinct anchors instead of raw mention rows', async () => {
@@ -64,7 +64,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Crowded entity doc',
-        summary: '铲屎官 appears here and also in several passages.',
+        summary: 'co-creator appears here and also in several passages.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
       {
@@ -72,7 +72,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Second entity doc',
-        summary: '铲屎官 appears in this separate anchor.',
+        summary: 'co-creator appears in this separate anchor.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
@@ -85,7 +85,7 @@ describe('F209 entity alias search', () => {
       insertPassage.run(
         'entity-crowded-doc',
         `msg-crowded-${index}`,
-        `铲屎官 repeated mention ${index}`,
+        `co-creator repeated mention ${index}`,
         'codex',
         index,
         `2026-05-22T01:0${index}:00Z`,
@@ -93,7 +93,7 @@ describe('F209 entity alias search', () => {
     }
     await seedYouEntity();
 
-    const results = await store.search('CVO', { scope: 'docs', limit: 2 });
+    const results = await store.search('operator', { scope: 'docs', limit: 2 });
     const anchors = results.map((result) => result.anchor);
 
     assert.equal(new Set(anchors).size, 2);
@@ -108,7 +108,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Old entity doc',
-        summary: '铲屎官 appears in older evidence.',
+        summary: 'co-creator appears in older evidence.',
         updatedAt: '2026-05-20T00:00:00Z',
       },
       {
@@ -116,13 +116,13 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'New entity doc',
-        summary: '铲屎官 appears in newer evidence.',
+        summary: 'co-creator appears in newer evidence.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
     await seedYouEntity();
 
-    const results = await store.search('CVO', { scope: 'docs', limit: 1 });
+    const results = await store.search('operator', { scope: 'docs', limit: 1 });
 
     assert.equal(results[0].anchor, 'z-new-entity-doc');
   });
@@ -134,7 +134,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'archived',
         title: 'Archived crowded entity doc',
-        summary: '铲屎官 appears here but this doc is archived.',
+        summary: 'co-creator appears here but this doc is archived.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
       {
@@ -142,7 +142,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Active filtered entity doc',
-        summary: '铲屎官 appears in this active anchor.',
+        summary: 'co-creator appears in this active anchor.',
         updatedAt: '2026-05-21T00:00:00Z',
       },
     ]);
@@ -155,7 +155,7 @@ describe('F209 entity alias search', () => {
       insertPassage.run(
         'entity-archived-crowded-doc',
         `msg-archived-${index}`,
-        `铲屎官 archived repeated mention ${index}`,
+        `co-creator archived repeated mention ${index}`,
         'codex',
         index,
         `2026-05-22T02:0${index}:00Z`,
@@ -163,7 +163,7 @@ describe('F209 entity alias search', () => {
     }
     await seedYouEntity();
 
-    const results = await store.search('CVO', { scope: 'docs', status: 'active', limit: 1 });
+    const results = await store.search('operator', { scope: 'docs', status: 'active', limit: 1 });
 
     assert.equal(results.length, 1);
     assert.equal(results[0].anchor, 'entity-active-filtered-doc');
@@ -192,19 +192,19 @@ describe('F209 entity alias search', () => {
       .run(
         'thread-thread_alias',
         'msg-entity',
-        '铲屎官说 Phase B 要先把实体门牌号和 alias provenance 钉住。',
+        'co-creator说 Phase B 要先把实体门牌号和 alias provenance 钉住。',
         'codex',
         0,
         '2026-05-22T01:00:00Z',
       );
     await store.refreshEntityMentions(['thread-thread_alias']);
 
-    const results = await store.search('CVO', { depth: 'raw', scope: 'threads', limit: 5 });
+    const results = await store.search('operator', { depth: 'raw', scope: 'threads', limit: 5 });
 
     assert.equal(results[0].anchor, 'thread-thread_alias');
     assert.equal(results[0].passages?.[0]?.passageId, 'msg-entity');
     assert.equal(results[0].passages?.[0]?.messageId, 'entity');
-    assert.match(results[0].passages?.[0]?.content ?? '', /铲屎官/);
+    assert.match(results[0].passages?.[0]?.content ?? '', /co-creator/);
     assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
   });
 
@@ -214,7 +214,7 @@ describe('F209 entity alias search', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['CVO'],
+        aliases: ['operator'],
         provenance: [{ source: 'F209 Phase B test', anchor: 'F209' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -283,7 +283,7 @@ describe('F209 entity alias search', () => {
       '2026-05-22T01:00:00Z',
     );
 
-    const results = await store.search('CVO', {
+    const results = await store.search('operator', {
       depth: 'raw',
       scope: 'threads',
       threadId: 'thread_entity_dedupe',
@@ -309,17 +309,17 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Private entity note',
-        summary: '铲屎官 private project-only alias evidence.',
+        summary: 'co-creator private project-only alias evidence.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
 
     const resolver = new KnowledgeResolver({ projectStore: store, globalStore });
 
-    const globalOnly = await resolver.resolve('CVO', { dimension: 'global', limit: 5 });
+    const globalOnly = await resolver.resolve('operator', { dimension: 'global', limit: 5 });
     assert.equal(globalOnly.results.length, 0);
 
-    const projectOnly = await resolver.resolve('CVO', { dimension: 'project', limit: 5 });
+    const projectOnly = await resolver.resolve('operator', { dimension: 'project', limit: 5 });
     assert.equal(projectOnly.results[0].anchor, 'F209-private-entity-note');
     assert.equal(projectOnly.results[0].entityMatches?.[0]?.entityId, 'person:landy');
   });
@@ -340,7 +340,7 @@ describe('F209 entity alias search', () => {
           entityId: 'person:landy',
           type: 'person',
           canonicalName: 'You',
-          aliases: ['you', '铲屎官', 'CVO'],
+          aliases: ['you', 'co-creator', 'operator'],
           provenance: [{ source: 'F209 Phase B test' }],
           updatedAt: '2026-05-22T00:00:00Z',
         },
@@ -352,7 +352,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Internal alias note',
-        summary: '铲屎官 alias in internal collection.',
+        summary: 'co-creator alias in internal collection.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
@@ -362,7 +362,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Private family alias note',
-        summary: '铲屎官 alias in private collection.',
+        summary: 'co-creator alias in private collection.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
     ]);
@@ -373,7 +373,7 @@ describe('F209 entity alias search', () => {
       id: 'project:cat-cafe-test',
       kind: 'project',
       name: 'cat-cafe-test',
-      displayName: 'Cat Cafe Test',
+      displayName: 'Clowder AI Test',
       root: '/tmp/cat-cafe-test',
       sensitivity: 'internal',
       scannerLevel: 0,
@@ -401,14 +401,14 @@ describe('F209 entity alias search', () => {
     ]);
     const resolver = new KnowledgeResolver({ projectStore: internalStore, catalog, stores });
 
-    const libraryResult = await resolver.resolve('CVO', { dimension: 'library', limit: 5 });
+    const libraryResult = await resolver.resolve('operator', { dimension: 'library', limit: 5 });
     assert.deepEqual(
       libraryResult.results.map((r) => r.anchor),
       ['F209-internal-alias-note'],
     );
     assert.equal(libraryResult.results[0].entityMatches?.[0]?.entityId, 'person:landy');
 
-    const privateResult = await resolver.resolve('CVO', {
+    const privateResult = await resolver.resolve('operator', {
       dimension: 'collection',
       collections: ['world:private-family'],
       limit: 5,
@@ -429,7 +429,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Entity hit one',
-        summary: '铲屎官 mentioned entity aliases here.',
+        summary: 'co-creator mentioned entity aliases here.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
       {
@@ -437,7 +437,7 @@ describe('F209 entity alias search', () => {
         kind: 'feature',
         status: 'active',
         title: 'Entity hit two',
-        summary: 'CVO also appears in this entity-only document.',
+        summary: 'operator also appears in this entity-only document.',
         updatedAt: '2026-05-22T00:00:00Z',
       },
       {
@@ -463,13 +463,13 @@ describe('F209 entity alias search', () => {
       mode: 'on',
     });
 
-    const results = await store.search('CVO', { mode: 'semantic', scope: 'docs', limit: 2 });
+    const results = await store.search('operator', { mode: 'semantic', scope: 'docs', limit: 2 });
     const anchors = results.map((r) => r.anchor);
 
     assert.ok(anchors.includes('entity-hit-one') || anchors.includes('entity-hit-two'));
     assert.ok(anchors.includes('semantic-vector-hit'), 'entity prepending should not starve semantic hits');
 
-    const limited = await store.search('CVO', { mode: 'semantic', scope: 'docs', limit: 1 });
+    const limited = await store.search('operator', { mode: 'semantic', scope: 'docs', limit: 1 });
     assert.equal(limited.length, 1, 'entity merge must still honor the requested limit');
   });
 });

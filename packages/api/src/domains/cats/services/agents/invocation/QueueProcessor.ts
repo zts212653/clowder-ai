@@ -4,7 +4,7 @@
  *
  * 两个入口：
  * - onInvocationComplete（系统级）：invocation 完成后调用，succeeded 时自动出队
- * - processNext（用户级）：铲屎官手动触发处理自己的下一条
+ * - processNext（用户级）：co-creator手动触发处理自己的下一条
  */
 
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
@@ -670,7 +670,7 @@ export class QueueProcessor {
   }
 
   /**
-   * User-level entry: 铲屎官 manually triggers processing their next entry.
+   * User-level entry: co-creator manually triggers processing their next entry.
    */
   async processNext(threadId: string, userId: string): Promise<{ started: boolean; entry?: QueueEntry }> {
     // Clear all paused slots for this thread (manual resume clears all)
@@ -1264,6 +1264,9 @@ export class QueueProcessor {
           // F222 P1: Only user-originated queue entries trigger frustration detection.
           // Whitelist (not blacklist) — agent + connector sources both suppressed.
           frustrationAutoIssueEligible: entry.source === 'user',
+          // #949 P1-1: Connector-sourced queue entries have no ball-pass expectation.
+          // A2A/agent entries still get the verdict-pass handoff guard.
+          verdictPassWarningEnabled: entry.source !== 'connector',
         },
       )) {
         if (controller.signal.aborted) {

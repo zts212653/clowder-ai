@@ -1,7 +1,7 @@
 {
   "name": "cat-cafe-desktop",
   "version": "0.10.1",
-  "description": "Cat Cafe Desktop - Multi-Agent Collaboration Platform",
+  "description": "Clowder AI Desktop - Multi-Agent Collaboration Platform",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,7 +9,7 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac dmg --arm64 --x64"
   },
-  "author": "Cat Cafe",
+  "author": "Clowder AI",
   "license": "AGPL-3.0-only",
   "devDependencies": {
     "electron": "35.7.5",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "ai.catcafe.desktop",
-    "productName": "Cat Cafe",
+    "productName": "Clowder AI",
     "artifactName": "CatCafe-${version}-${arch}.${ext}",
     "win": {
       "target": "dir",

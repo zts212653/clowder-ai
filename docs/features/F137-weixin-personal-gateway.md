@@ -16,15 +16,15 @@ created: 2026-03-23
 
 ## Why
 
-F088 + F132 覆盖了**企业级 IM**（飞书、Telegram、钉钉、企业微信），但team lead的个人微信——12 亿用户量级的国民级 IM——一直无法接入。2026 年 3 月，腾讯微信正式开放 **iLink Bot 协议**（灰度中），允许个人微信号直接与 AI Bot 交互（扫码登录、长轮询收消息、HTTP 发消息），无需企业资质、无需公网 URL、无需 XML/AES 加解密。
+F088 + F132 覆盖了**企业级 IM**（飞书、Telegram、钉钉、企业微信），但operator的个人微信——12 亿用户量级的国民级 IM——一直无法接入。2026 年 3 月，腾讯微信正式开放 **iLink Bot 协议**（灰度中），允许个人微信号直接与 AI Bot 交互（扫码登录、长轮询收消息、HTTP 发消息），无需企业资质、无需公网 URL、无需 XML/AES 加解密。
 
-team experience：*"那我们是不是可以学习 @tencent-weixin/openclaw-weixin 这个的实现模式！把我们的猫猫接入微信！！？"*
+operator experience：*"那我们是不是可以学习 @tencent-weixin/openclaw-weixin 这个的实现模式！把我们的猫猫接入微信！！？"*
 
-team experience：*"你也得复用那些基础设施，就不要自己做一套"*
+operator experience：*"你也得复用那些基础设施，就不要自己做一套"*
 
-team experience：*"如果这个有配置需要配置，有配置哈，我们也在得在那边能够显示我们的这个配置才可以"*（指 IM Hub 配置向导）
+operator experience：*"如果这个有配置需要配置，有配置哈，我们也在得在那边能够显示我们的这个配置才可以"*（指 IM Hub 配置向导）
 
-team lead确认已被灰度到 ClawBot（iLink Bot）功能。
+operator确认已被灰度到 ClawBot（iLink Bot）功能。
 
 **为什么独立于 F132**：F132 是**企业微信**（WeCom），走 WebSocket SDK / HTTP callback + AES/XML；F137 是**个人微信**，走 iLink Bot HTTP 长轮询，协议、认证、能力完全不同。两者平行但互不依赖。
 
@@ -104,7 +104,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 ### 富媒体能力调研（2026-03-25）
 
-> team lead提问：*"个人微信能接入和飞书那样超级多的富文本包括文件的传输 音频 图片等等吗？"*
+> operator提问：*"个人微信能接入和飞书那样超级多的富文本包括文件的传输 音频 图片等等吗？"*
 
 **~~结论（已过时）：收入方向支持图片/文件/语音；发出方向目前只能纯文本。~~**
 
@@ -174,7 +174,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 ### Phase C: IM Hub 配置向导 + 健壮性
 
-**IM Hub QR 登录 UI**（team lead明确要求：*"能不能做到im hub内？我点击获取二维码 然后给我二维码 我点击扫码完成 然后挂上这个？"*）：
+**IM Hub QR 登录 UI**（operator明确要求：*"能不能做到im hub内？我点击获取二维码 然后给我二维码 我点击扫码完成 然后挂上这个？"*）：
 
 扩展 `HubConnectorConfigTab.tsx`（现有 265 行，已有飞书/Telegram/钉钉配置）：
 
@@ -193,7 +193,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
    - 轮询 `GET /api/connector/weixin/qrcode-status?qrPayload=<hex>`，间隔 2~3s
    - 状态映射：`0` → 等待扫码 → `1` → 已扫码待确认 → `4` → 成功
    - 超时处理：60s 无扫码自动过期，提示重新获取
-   - team experience：*"扫码之后得自动 poll！不要我还要给你发个消息才能 poll"*
+   - operator experience：*"扫码之后得自动 poll！不要我还要给你发个消息才能 poll"*
 
 4. **扫码完成 → 自动激活（零用户干预）**：
    - poll 到 `confirmed` 后自动调用 `POST /api/connector/weixin/activate`
@@ -254,7 +254,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 ### Phase D（断开连接 + 解绑）✅
 
-> **反思**：Phase A-C 只做了"连接"方向，没有做"断开"。能连接就必须能断开——这是 UX 完整性的基本功。立项时应该主动挖掘这类隐含需求，而不是等team lead发现了才补。
+> **反思**：Phase A-C 只做了"连接"方向，没有做"断开"。能连接就必须能断开——这是 UX 完整性的基本功。立项时应该主动挖掘这类隐含需求，而不是等operator发现了才补。
 
 - [x] AC-D1: IM Hub 配置卡片在已连接状态下显示"断开连接"按钮
 - [x] AC-D2: 点击"断开连接"后停止长轮询 + 清除 bot_token/context_tokens + 状态回到"未配置"
@@ -264,7 +264,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "把我们的猫猫接入微信" | AC-A1~A7 | test + manual DM | [x] |
 | R2 | "你也得复用那些基础设施，就不要自己做一套" | AC-A5, AC-C4 | code review: 公共层 diff = 0 | [x] |
@@ -283,7 +283,7 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 
 - **Evolved from**: F088（Multi-Platform Chat Gateway — 复用其三层架构和全部公共层）
 - **Related**: F132（DingTalk + WeCom — 姐妹 feature，企业微信 vs 个人微信）
-- **External**: 腾讯微信 iLink Bot 协议（灰度阶段，team lead已获权限）
+- **External**: 腾讯微信 iLink Bot 协议（灰度阶段，operator已获权限）
 
 ## Risk
 
@@ -326,10 +326,10 @@ team lead确认已被灰度到 ClawBot（iLink Bot）功能。
 cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
   connectorId: weixin
   externalChatId: o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
-  threadId: thread_mn45go5om80e4v98
+  threadId: [thread-id]
   userId: default-user
   createdAt: 1774328644432
-  hubThreadId: thread_mn45nbswl44j0aei
+  hubThreadId: [thread-id]
 ```
 
 **关键发现 — 双 invocation ID**：
@@ -349,7 +349,7 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 
 **状态**: 🟢 Fixed — PR #704 + #708 + #710 + #711 累积修复，E2E 三轮验证通过 (2026-03-24)
 
-**现象**：team lead发第一条微信消息 → 猫猫回复 → 微信收到 ✅。发第二条 → 猫猫回复 → 微信收不到 ❌（或延迟 3-5 分钟才收到）。
+**现象**：operator发第一条微信消息 → 猫猫回复 → 微信收到 ✅。发第二条 → 猫猫回复 → 微信收不到 ❌（或延迟 3-5 分钟才收到）。
 
 **根因（多层）**：
 1. **iLink `context_token` 单次消费**（PR #704）：第一次 `sendmessage` + `FINISH` 后 token 作废，后续用同一 token 被静默丢弃
@@ -376,7 +376,7 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 
 ### BUG-4：A→B→C 接力链只送达 A，B/C 静默丢失
 
-**现象**：team lead在微信端发消息触发 A→B→C 猫猫接力链时，只收到 A 的回复，B 和 C 的回复静默丢失。iLink API 均返回 200 OK。
+**现象**：operator在微信端发消息触发 A→B→C 猫猫接力链时，只收到 A 的回复，B 和 C 的回复静默丢失。iLink API 均返回 200 OK。
 
 **根因**：`context_token` 单次消费（iLink 协议约束）+ 3s debounce 阻塞 deliver loop。A 的 `flushReply()` 消费 token 后删除，B/C 的 `sendReply()` 到达时已无 token，静默跳过（`WeixinAdapter.ts:519-524`）。
 
@@ -389,8 +389,8 @@ cat-cafe:connector-binding:weixin:o9cq8008zWwzHxRSAQqEgo5Sz34g@im.wechat
 **BUG-4b/4c 后续修复**（PR #740，2026-03-25，commit 08c663fb）：
 - **BUG-4b**：`ConnectorInvokeTrigger` 合并判断 `every()` → `some()`。原逻辑要求所有绑定 connector 都是单 token 才合并，但 weixin+feishu 混合绑定时 `every()` 返回 false，导致不合并。修正为 `some()` — 只要有一个是 weixin 就合并。
 - **BUG-4c**：`QueueProcessor` 完全缺失 BUG-4 合并逻辑。当 queued invocations 产出多 turn WeChat 输出时，每个 turn 独立 deliver，第一个消费 token 后后续静默丢失。新增完整合并路径（含 `getConnectorIds` 检测 + `SINGLE_TOKEN_CONNECTORS` + 猫名前缀 + 分隔线）。
-- **BUG-4c P1**（云端 review 发现）：QueueProcessor merge 路径丢弃 richBlocks。修复：合并循环中用 `renderAllRichBlocksPlaintext` 将 richBlocks 渲染为纯文本后嵌入合并内容。
-- **验证**：83 pass（42 ConnectorInvokeTrigger + 41 QueueProcessor）。Gate 全绿，云端 review 两轮通过。
+- **BUG-4c P1**（remote review 发现）：QueueProcessor merge 路径丢弃 richBlocks。修复：合并循环中用 `renderAllRichBlocksPlaintext` 将 richBlocks 渲染为纯文本后嵌入合并内容。
+- **验证**：83 pass（42 ConnectorInvokeTrigger + 41 QueueProcessor）。Gate 全绿，remote review 两轮通过。
 
 ### BUG-5：context_token "单次消费"是误判 — 实际可重复使用
 
@@ -454,7 +454,7 @@ F137 下一轮修复应把 **file attachment 作为默认成功路径**，把 `v
 
 | 项 | 原因 |
 |----|------|
-| HermesClaw/Clawbot 同号多 runtime 代理 | 这是"多个 runtime 共享一个 iLink token"的问题，不是猫猫自身个人微信能力；team lead本轮明确排除 |
+| HermesClaw/Clawbot 同号多 runtime 代理 | 这是"多个 runtime 共享一个 iLink token"的问题，不是猫猫自身个人微信能力；operator本轮明确排除 |
 | 普通微信群完整支持 | iLink Bot 侧是否投递普通群事件仍不稳定；等腾讯能力明确后再做，不在本轮修复队列 |
 
 ## Key Decisions
@@ -465,10 +465,10 @@ F137 下一轮修复应把 **file attachment 作为默认成功路径**，把 `v
 | KD-2 | 直接实现 iLink 协议，不引入 `weixin-agent-sdk` | SDK 太薄（仅封装 fetch），我们需要完整控制长轮询生命周期 + ConnectorRouter 集成 | 2026-03-23 |
 | KD-3 | 仅实现 `IOutboundAdapter`，不实现 `IStreamableOutboundAdapter` | iLink Bot 不支持消息编辑/流式更新，`message_state: GENERATING` 在 bot 窗口无效。用 typing 状态 + final 发送 | 2026-03-23 |
 | KD-4 | adapter-only 扩展，公共层零改动 | F088/F132 已验证，duck typing 能力发现天然支持 | 2026-03-23 |
-| KD-5 | Phase A 优先文本双向，媒体和 IM Hub 放后续 Phase | team lead期望快速可用（"两小时后就能用"），文本覆盖 90% 日常场景 | 2026-03-23 |
+| KD-5 | Phase A 优先文本双向，媒体和 IM Hub 放后续 Phase | operator期望快速可用（"两小时后就能用"），文本覆盖 90% 日常场景 | 2026-03-23 |
 
 ## Review Gate
 
 - Phase A: 跨 family review（Maine Coon @codex）
 - Phase B: 跨 family review（Maine Coon @codex）— AES 加解密需额外审查
-- Phase C: 前端走 Design Gate（IM Hub 配置向导 UX → team lead确认）
+- Phase C: 前端走 Design Gate（IM Hub 配置向导 UX → operator确认）

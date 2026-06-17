@@ -79,6 +79,7 @@ const SECTION_KEYWORDS: Record<string, string> = {
   system: '配置 环境 .env bubble A2A codex',
   notify: '推送 通知 push web',
   ops: '运维 监控 排行 记忆 健康 命令 救援 usage',
+  concierge: '猫猫球 悬浮球 值班猫 前台 主动性 proactive ball persona',
 };
 
 export function SettingsNav({ activeSection, onSelect, searchQuery }: SettingsNavProps) {

@@ -12,7 +12,7 @@ created: 2026-05-07
 
 ## Why
 
-team lead在 2026-05-07 追问：老项目不断加新需求时，我们到底是在补锅，还是在按第一性原理找正确坐标系？
+operator在 2026-05-07 追问：老项目不断加新需求时，我们到底是在补锅，还是在按第一性原理找正确坐标系？
 
 F183 / F185 的成功路径不是继续修症状，而是先梳理现有模块架构，暴露多 truth source、多写入口、多语义混用等技术债，再设计新的归一坐标。反过来，F124 x F088 也提醒我们：架构归一不是把所有东西强行抽象到一层，归一的是对话内核和设备语义，不是 connector transport。
 
@@ -148,7 +148,7 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | “老项目 + 新需求”不能继续瞎累积架构 | AC-A1~A7, AC-B1~B4 | spec + skill review | [x] |
 | R2 | 不是每个 Feature 重新填表 / 重新画图 | AC-A1, AC-A7, AC-B1, AC-B2 | 普通增量写 `Map delta: none` | [x] |
@@ -201,7 +201,7 @@ README 总索引不作为手写真相源。Phase A 直接定为由 cells frontma
 
 ## Review Gate
 
-- Kickoff spec: Ragdoll Opus 4.6 review（按team lead要求“让 46 帮你看看”）
+- Kickoff spec: Ragdoll Opus 4.6 review（按operator要求“让 46 帮你看看”）
 - Phase A: Maine Coon author，46 review；如 47 参与实现，Maine Coon负责 code-quality review
 - Phase B: Maine Coon author，46 review
 - Phase C: Maine Coon author，46 review

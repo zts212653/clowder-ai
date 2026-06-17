@@ -607,6 +607,56 @@ test('.env.local can activate respect-dotenv-ports mode (#603)', () => {
   }
 });
 
+test('global sidecar owner marker from wrapper env beats dotenv values', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR=0\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv({ CAT_CAFE_PROVISION_GLOBAL_SIDECAR: '1' }),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), '1');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('dotenv cannot grant global sidecar ownership without wrapper env', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1\n');
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `set -e\nsource "${scriptPath}" --source-only >/dev/null 2>&1\ntrap - EXIT INT TERM\nprintf '%s' "\${CAT_CAFE_PROVISION_GLOBAL_SIDECAR-unset}"`,
+      ],
+      {
+        encoding: 'utf8',
+        env: baseShellEnv(),
+      },
+    );
+
+    assert.equal(result.status, 0, `snippet failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.stdout.trim(), 'unset');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('explicit port env vars override .env values for direct startup', () => {
   const tmp = createTempProject();
   try {

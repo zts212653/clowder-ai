@@ -158,7 +158,7 @@ function human(x, y, scale) {
     <path d="M ${x - 50 * s} ${y + 26 * s} Q ${x} ${y - 20 * s} ${x + 50 * s} ${y + 26 * s} L ${x + 34 * s} ${y + 94 * s} L ${x - 34 * s} ${y + 94 * s} Z" fill="#334155" stroke="${C.line}" stroke-width="${3 * s}"/>
     <path d="M ${x + 42 * s} ${y + 2 * s} C ${x + 84 * s} ${y - 18 * s}, ${x + 110 * s} ${y - 26 * s}, ${x + 142 * s} ${y - 35 * s}" fill="none" stroke="${C.line}" stroke-width="${6 * s}" stroke-linecap="round"/>
     <circle cx="${x + 150 * s}" cy="${y - 37 * s}" r="${8 * s}" fill="${C.line}"/>
-    <text x="${x}" y="${y + 140 * s}" text-anchor="middle" font-size="${26 * s}" font-weight="800" fill="${C.ink}">铲屎官 / CVO</text>
+    <text x="${x}" y="${y + 140 * s}" text-anchor="middle" font-size="${26 * s}" font-weight="800" fill="${C.ink}">operator / operator</text>
   </g>`;
 }
 
@@ -193,15 +193,15 @@ function heroDiagram() {
   const w = 1800;
   const h = 1200;
   const body = `
-  ${sectionTitle('Cat Cafe 产品全景：不同引擎看同一件事', 'AI 团队不是岗位分工表；跨厂商多样性是结构性质量来源', w)}
+  ${sectionTitle('Clowder AI 产品全景：不同引擎看同一件事', 'AI 团队不是岗位分工表；跨厂商多样性是结构性质量来源', w)}
 
-  ${box(78, 145, 1644, 285, { fill: '#fff7ed', stroke: C.orange, label: '方向层 / CVO 共创', labelColor: C.orange })}
+  ${box(78, 145, 1644, 285, { fill: '#fff7ed', stroke: C.orange, label: '方向层 / operator 共创', labelColor: C.orange })}
   <rect x="155" y="260" width="420" height="90" rx="42" fill="#fed7aa" stroke="${C.line}" stroke-width="4"/>
   <rect x="125" y="316" width="485" height="45" rx="22" fill="#fdba74" stroke="${C.line}" stroke-width="3"/>
   ${human(360, 270, 0.82)}
   ${box(720, 205, 700, 170, { fill: C.white, stroke: C.orange, r: 20, shadow: false })}
   ${lines(['愿景', 'SOP', '教训'], 830, 265, { size: 34, weight: 850, fill: C.orange })}
-  ${lines(['铲屎官定义方向与边界', '猫猫自治执行，必要时 push back'], 1015, 252, { size: 26, weight: 650, fill: C.ink })}
+  ${lines(['operator定义方向与边界', '猫猫自治执行，必要时 push back'], 1015, 252, { size: 26, weight: 650, fill: C.ink })}
   <circle cx="1538" cy="270" r="62" fill="${C.redSoft}" stroke="${C.red}" stroke-width="6"/>
   <circle cx="1538" cy="270" r="36" fill="${C.red}" opacity="0.9"/>
   ${lines(['Magic Words', '紧急拉闸'], 1538, 365, { size: 24, weight: 800, fill: C.red, anchor: 'middle' })}
@@ -269,7 +269,7 @@ function harnessMapDiagram() {
   const ANT = { tag: 'ANT', fill: '#f5f3ff', stroke: C.purple };
   const FOW = { tag: 'FOW', fill: '#ffedd5', stroke: C.orange };
   const body = `
-  ${sectionTitle('Cat Cafe Harness Engineering：六大件 + 第七类', '行业六大构件我们全有落地；多猫协作还需要协作语义与球权治理', w)}
+  ${sectionTitle('Clowder AI Harness Engineering：六大件 + 第七类', '行业六大构件我们全有落地；多猫协作还需要协作语义与球权治理', w)}
   ${pill(720, 132, 'Agent Quality = Model Capability × Environment Fit', C.purpleSoft, C.purple, { w: 760, size: 26, textFill: C.purple })}
 
   ${componentBox(
@@ -320,7 +320,7 @@ function harnessMapDiagram() {
       'Computational: lint / test / gate / CI',
       'Inferential: 跨族 review / 愿景守护',
       'Human Runtime: Magic Words 拉闸',
-      'CVO 漏斗决策',
+      'operator 漏斗决策',
     ],
     C.red,
     '→ 图3 verdict',
@@ -399,13 +399,13 @@ function harnessMapDiagram() {
   )}
 
   ${box(180, 1090, 1840, 370, { fill: '#fff7ed', stroke: C.orange, r: 30, label: '7. Collaboration Semantics', labelColor: C.orange })}
-  ${lines(['六大件之外，Cat Cafe 独有'], 1100, 1150, { size: 35, weight: 900, fill: C.orange, anchor: 'middle' })}
+  ${lines(['六大件之外，Clowder AI 独有'], 1100, 1150, { size: 35, weight: 900, fill: C.orange, anchor: 'middle' })}
   ${lines(
     [
       '@ 路由 · targetCats · hold_ball · 接 / 退 / 升三选一',
       '统一执行平面：InvocationQueue 接住所有 handoff',
       '跨厂商多样性：Claude × GPT × Gemini = 结构性纠错',
-      'CVO 终裁：愿景层拍板，执行层自治',
+      'operator 终裁：愿景层拍板，执行层自治',
       '核心定律：状态迁移必须由现实动作产生',
     ],
     280,
@@ -446,7 +446,7 @@ function a2aDiagram() {
   ${sectionTitle('A2A 协作球权流转：状态迁移必须由现实动作产生', '正常流看现实动作；反例看没有 tool call 的纯文本乒乓', w)}
 
   ${box(70, 160, 1810, 610, { fill: '#f8fafc', stroke: C.blue, r: 30, label: '正常流：接球 → 执行 → 交棒', labelColor: C.blue })}
-  ${timelineLane(260, '铲屎官', C.orange)}
+  ${timelineLane(260, 'operator', C.orange)}
   ${timelineLane(390, 'Ragdoll', C.purple)}
   ${timelineLane(520, 'Maine Coon', C.blue)}
   ${timelineLane(650, 'Shared', C.green)}
@@ -608,7 +608,7 @@ function dualFlywheelDiagram() {
   ${lines(['现实证据在中间回流'], 1100, 1086, { size: 24, weight: 900, fill: C.teal, anchor: 'middle' })}
 
   ${box(180, 1310, 1840, 92, { fill: '#fffbeb', stroke: '#d97706', r: 26, shadow: false })}
-  ${lines(['常见六大件主要覆盖左轮的知识/产物熵控；Cat Cafe 额外把 harness 自身熵控画成右轮：规则要能产出删除自己的证据。'], 1100, 1366, { size: 25, weight: 820, fill: '#92400e', anchor: 'middle' })}
+  ${lines(['常见六大件主要覆盖左轮的知识/产物熵控；Clowder AI 额外把 harness 自身熵控画成右轮：规则要能产出删除自己的证据。'], 1100, 1366, { size: 25, weight: 820, fill: '#92400e', anchor: 'middle' })}
   `;
   return svgShell(w, h, body);
 }
@@ -648,9 +648,9 @@ function flywheelExpansionDiagram() {
   ${pill(940, 540, '知识质量有保障', C.greenSoft, C.green, { w: 320, size: 24, textFill: C.green })}
 
   ${box(90, 610, 2020, 385, { fill: '#f5f3ff', stroke: C.purple, r: 34, label: 'F152 出：把飞轮带到新地方', labelColor: C.purple })}
-  ${lines(['问题：方法论锁在 Cat Cafe 自己家，外部项目还是从零摸索'], 1100, 677, { size: 27, weight: 850, fill: C.ink, anchor: 'middle' })}
-  ${lines(['解法：猫猫驻场冷启动，和铲屎官一起做 AI native 改造，再把经验带回来'], 1100, 722, { size: 25, weight: 850, fill: C.purple, anchor: 'middle' })}
-  ${projectBox(235, 798, 'Cat Cafe', '双飞轮方法论', C.green)}
+  ${lines(['问题：方法论锁在 Clowder AI 自己家，外部项目还是从零摸索'], 1100, 677, { size: 27, weight: 850, fill: C.ink, anchor: 'middle' })}
+  ${lines(['解法：猫猫驻场冷启动，和operator一起做 AI native 改造，再把经验带回来'], 1100, 722, { size: 25, weight: 850, fill: C.purple, anchor: 'middle' })}
+  ${projectBox(235, 798, 'Clowder AI', '双飞轮方法论', C.green)}
   ${projectBox(745, 798, 'F152 远征', '冷启动记忆 / 驻场', C.purple)}
   ${projectBox(1255, 798, '外部项目', 'AI native 改造', C.blue)}
   ${projectBox(1705, 798, '经验回流', '决策 / 教训 / 模式', C.orange)}
@@ -666,7 +666,7 @@ function flywheelExpansionDiagram() {
   ${box(90, 1110, 2020, 390, { fill: C.blueSoft, stroke: C.blue, r: 34, label: 'F186 联：让所有知识互通', labelColor: C.blue })}
   ${lines(['问题：回流经验散落在不同项目 / 方法论库里，猫开工时搜不到'], 1100, 1177, { size: 27, weight: 850, fill: C.ink, anchor: 'middle' })}
   ${lines(['解法：多域联邦检索，不统一存储，但统一发现和路由'], 1100, 1222, { size: 25, weight: 850, fill: C.blue, anchor: 'middle' })}
-  ${projectBox(210, 1280, 'Cat Cafe', '本项目 docs', C.green)}
+  ${projectBox(210, 1280, 'Clowder AI', '本项目 docs', C.green)}
   ${projectBox(510, 1280, '项目 A', '外部项目知识', C.purple)}
   ${projectBox(810, 1280, '项目 B', '另一套真相源', C.orange)}
   ${projectBox(1110, 1280, '方法论库', '跨项目经验', C.teal)}
@@ -691,7 +691,7 @@ function runtimeStackDiagram() {
   const w = 1800;
   const h = 1200;
   const body = `
-  ${sectionTitle('Cat Cafe 运行时技术栈：代码在哪，改什么影响什么', 'Hub → Fastify API → Provider / MCP / Storage；6399 是 runtime 用户数据圣域', w)}
+  ${sectionTitle('Clowder AI 运行时技术栈：代码在哪，改什么影响什么', 'Hub → Fastify API → Provider / MCP / Storage；6399 是 runtime 用户数据圣域', w)}
 
   ${box(110, 165, 1580, 245, { fill: C.purpleSoft, stroke: C.purple, r: 28, label: '用户交互', labelColor: C.purple })}
   ${lines(['Hub (React + Zustand)', 'Workspace：对话 / 监控 / 知识 / 导航', 'Rich Block / Preview / Audio', 'WebSocket：实时 bubble stream'], 190, 245, { size: 30, weight: 820, fill: C.ink, leading: 1.28 })}
@@ -908,11 +908,11 @@ function globalArchitectureDiagram() {
   const layerH = 170;
   const ys = [150, 345, 540, 735, 930, 1125, 1320];
   const body = `
-  ${sectionTitle('Cat Cafe 全局架构总图 2026-05', '从 CVO 到猫、从产品面到队列、从记忆到治理：一张看全貌', w)}
+  ${sectionTitle('Clowder AI 全局架构总图 2026-05', '从 operator 到猫、从产品面到队列、从记忆到治理：一张看全貌', w)}
 
-  ${globalLayer(x, ys[0], layerW, layerH, 1, 'CVO / Human Direction Layer', ['愿景 · 拍板 · 纠偏 · Magic Words · 验收 · eval 信号', '人不是逐步审批器，而是方向与判断力的来源'], C.orange, '☕')}
+  ${globalLayer(x, ys[0], layerW, layerH, 1, 'operator / Human Direction Layer', ['愿景 · 拍板 · 纠偏 · Magic Words · 验收 · eval 信号', '人不是逐步审批器，而是方向与判断力的来源'], C.orange, '☕')}
   ${globalLayer(x, ys[1], layerW, layerH, 2, 'Product Surfaces Layer', ['Hub / Workspace：对话 · 监控 · 知识 · 导航', 'Rich Block / Preview / Audio / image gallery · 外部 IM：飞书 · 企微 · Telegram · Email'], C.purple, '🖥')}
-  ${globalLayer(x, ys[2], layerW, layerH, 3, 'Collaboration Semantics Layer', ['猫猫身份：布偶/Claude · 缅因/GPT · 暹罗/Gemini（身份/引擎，不是岗位）', 'A2A：@ 行首路由 · targetCats · multi_mention · hold_ball · 接/退/升 · 跨族 review · CVO 终裁'], C.teal, '🧶')}
+  ${globalLayer(x, ys[2], layerW, layerH, 3, 'Collaboration Semantics Layer', ['猫猫身份：布偶/Claude · 缅因/GPT · 暹罗/Gemini（身份/引擎，不是岗位）', 'A2A：@ 行首路由 · targetCats · multi_mention · hold_ball · 接/退/升 · 跨族 review · operator 终裁'], C.teal, '🧶')}
   ${globalLayer(x, ys[3], layerW, layerH, 4, 'Unified Execution Plane', ['InvocationQueue：user / agent / multi_mention 统一入队', 'QueueProcessor：自动执行、暂停、恢复、取消 · InvocationTracker：谁在跑/等/完成 · SessionBootstrap：窄口上下文'], C.blue, '⚙')}
   ${globalLayer(x, ys[4], layerW, layerH, 5, 'Shared State / Memory Layer', ['Thread / Task / Workflow / Session Chain · docs 真相源 · evidence.sqlite · LibraryCatalog', 'Knowledge Feed · F163 熵减 · F186 图书馆联邦 · F152 外部项目冷启动与经验回流'], C.green, '📚')}
   ${globalLayer(x, ys[5], layerW, layerH, 6, 'Runtime / Tools / Storage Layer', ['Hub React + Zustand → API Fastify · Provider Adapters：Claude / GPT / Gemini / OpenCode', 'MCP Servers：core / collab / memory / signals / external · Tools：exec / browser / GitHub / image_gen / Pencil · Redis production Redis (sacred) / 6398 隔离 / SQLite / git'], C.blue, '🔌')}
@@ -924,7 +924,7 @@ function globalArchitectureDiagram() {
     .join('')}
 
   ${box(110, 1548, 680, 235, { fill: '#fff7ed', stroke: C.orange, r: 28, label: '任务链', labelColor: C.orange })}
-  ${lines(['CVO 目标', '→ 球权', '→ 执行平面', '→ 工具运行', '→ 可见产出'], 185, 1622, { size: 28, weight: 840, fill: C.ink, leading: 1.2 })}
+  ${lines(['operator 目标', '→ 球权', '→ 执行平面', '→ 工具运行', '→ 可见产出'], 185, 1622, { size: 28, weight: 840, fill: C.ink, leading: 1.2 })}
   ${box(860, 1548, 680, 235, { fill: C.greenSoft, stroke: C.green, r: 28, label: '记忆链', labelColor: C.green })}
   ${lines(['docs / events', '→ 编译索引', '→ recall / drill-down', '→ 反馈 / 教训', '→ 回流到知识层'], 935, 1622, { size: 28, weight: 840, fill: C.ink, leading: 1.2 })}
   ${box(1610, 1548, 680, 235, { fill: C.redSoft, stroke: C.red, r: 28, label: '治理链', labelColor: C.red })}
@@ -988,7 +988,7 @@ function harnessLoadingSequenceDiagram() {
   ${lines(['行业常见：注入 1 次', '我们：5 个注入时机', '注入项：10 + 19 + 6 + hooks + 回收'], 2035, 225, { size: 24, weight: 850, fill: '#92400e', leading: 1.26 })}
 
   ${box(70, 170, 1860, 68, { fill: C.blueSoft, stroke: C.blue, r: 24, shadow: false })}
-  ${lines(['Cat Cafe Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI'], 1000, 214, { size: 27, weight: 900, fill: C.blue, anchor: 'middle' })}
+  ${lines(['Clowder AI Orchestrator / route-serial.ts：先构建 prompt，再交给 provider CLI'], 1000, 214, { size: 27, weight: 900, fill: C.blue, anchor: 'middle' })}
 
   <line x1="${axisX}" y1="275" x2="${axisX}" y2="2915" stroke="${C.line}" stroke-width="6" stroke-linecap="round" opacity="0.46"/>
   ${timelineDot(axisX, 325, 'A', C.blue)}
@@ -1027,7 +1027,7 @@ function harnessLoadingSequenceDiagram() {
     'buildStaticIdentity() 只产出 Session-level candidate，实际注入在 Phase F 决策',
     [
       '10 项：猫身份 / 限制声明 / Pack Masks / A2A 格式 / 队友名册',
-      '工作流触发 / CVO 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明',
+      '工作流触发 / operator 信息 / L0 治理摘要 / Pack 护栏 / MCP 工具说明',
       '关键：不是 --append-system-prompt；后面按条件 string prepend',
     ],
     C.blue,

@@ -37,7 +37,7 @@ if (prodEnv || prodFlag) {
 
 if (Number.isNaN(major) || major < minMajor || major >= maxMajorExclusive) {
   console.error(
-    `[node-runtime] Node ${version} is not supported by this Cat Cafe checkout; expected >=${minMajor} <${maxMajorExclusive}.`,
+    `[node-runtime] Node ${version} is not supported by this Clowder AI checkout; expected >=${minMajor} <${maxMajorExclusive}.`,
   );
   console.error('[node-runtime] Install the supported local runtime and retry:');
   console.error('  brew install node@24');

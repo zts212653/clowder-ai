@@ -5,7 +5,7 @@
  * 纯函数，无副作用。读取 catRegistry 生成身份上下文。
  */
 
-import type { CatConfig, CatId, CompiledPackBlocks, WorldContextEnvelope } from '@cat-cafe/shared';
+import type { CatConfig, CatId, CompiledPackBlocks, ConciergeConfig, WorldContextEnvelope } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import {
   catHasRole,
@@ -19,6 +19,7 @@ import { getCatModel } from '../../../../config/cat-models.js';
 // F167 Phase F P1 (cloud Codex): roster model cell must resolve via getCatModel
 // (env CAT_{CATID}_MODEL → registry → defaults), not from static config.defaultModel,
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
+import { buildConciergePromptLines } from '../../../concierge/ConciergePromptSection.js';
 import { buildGuidePromptLines } from '../../../guides/GuidePromptSection.js';
 import type {
   BootcampStateV1,
@@ -28,6 +29,9 @@ import type {
 } from '../stores/ports/ThreadStore.js';
 import { loadCompiledGovernanceL0, loadCompiledGovernanceL0Sync } from './governance-l0.js';
 import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
+// L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is wired in
+// invoke-single-cat (mirrors F225 contextHintPrefix), NOT here. See note
+// at the buildLiveStaticIdentity removal site below for the rationale.
 
 /**
  * Context for a single cat invocation
@@ -58,7 +62,7 @@ export interface InvocationContext {
    * F167 L1: ping-pong streak warning.
    * When present (streak >= 2), inject a warning prompt reminding the cat
    * that they've been bouncing the same pair back and forth — consider
-   * third-party input / wrap up / escalate to 铲屎官 instead of another volley.
+   * third-party input / wrap up / escalate to co-creator instead of another volley.
    */
   pingPongWarning?: {
     /** The other cat in the ping-pong pair (not this cat). */
@@ -109,7 +113,7 @@ export interface InvocationContext {
   };
   /**
    * F091: Active Signal articles in discussion context.
-   * Injected when 铲屎官 links a Signal article in the thread.
+   * Injected when co-creator links a Signal article in the thread.
    */
   activeSignals?: readonly {
     readonly id: string;
@@ -136,7 +140,7 @@ export interface InvocationContext {
    */
   threadId?: string;
   /**
-   * F087: Bootcamp state for CVO onboarding threads.
+   * F087: Bootcamp state for operator onboarding threads.
    * When present, cats inject bootcamp-guide behavior per phase.
    */
   bootcampState?: BootcampStateV1;
@@ -174,6 +178,16 @@ export interface InvocationContext {
    * When present, injects world state (characters, scene, canon) into the prompt.
    */
   worldContext?: WorldContextEnvelope;
+  /**
+   * F229: Concierge thread marker.
+   * When 'concierge', ConciergePromptSection is injected into the invocation context.
+   */
+  threadKind?: 'concierge';
+  /**
+   * F229: Per-user concierge configuration.
+   * Required when threadKind === 'concierge'. Provides displayName / personaTone / dutyCatProfileId.
+   */
+  conciergeConfig?: ConciergeConfig;
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */
@@ -401,7 +415,7 @@ const WORKFLOW_TRIGGERS: Record<string, string> = {
     '',
     '### 金渐层家族治理（OpenCode 专属）',
     'OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Clowder AI MCP 需避免 tool 名冲突。',
-    '`question` 工具已 deny——铲屎官通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
+    '`question` 工具已 deny——co-creator通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
   ].join('\n'),
 };
 
@@ -481,7 +495,7 @@ export interface StaticIdentityOptions {
 /**
  * Build static identity prompt — persistent across invocations.
  * Includes: identity, personality, rules, A2A format, workflow triggers,
- * 铲屎官 reference, and MCP tool documentation (session-level).
+ * co-creator reference, and MCP tool documentation (session-level).
  * Suitable for --system-prompt / --append-system-prompt injection.
  */
 export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOptions): string {
@@ -560,13 +574,13 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     lines.push(packBlocks.workflowsBlock, '');
   }
 
-  // 铲屎官 reference (session-level, not per-message)
+  // co-creator reference (session-level, not per-message)
   // F067: Use co-creator config for name + mention handles
   // Note: "不冒充/不编造/身份契约" folded into compiled governance L0
   const coCreator = getCoCreatorConfig();
   const ccName = coCreator.name;
   const ccHandles = coCreator.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
-  lines.push(`${ccName}（铲屎官/CVO）。重要决策由${ccName}拍板。需要关注时行首写 ${ccHandles}。`, '');
+  lines.push(`${ccName}（co-creator/operator）。重要决策由${ccName}拍板。需要关注时行首写 ${ccHandles}。`, '');
 
   // L0 Governance Digest — compiled from shared-rules.md (#747)
   // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local/.local-override)
@@ -600,7 +614,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 /**
  * F203 Phase C (Task 2): the pack-only slice of the static identity.
  *
- * After L0 (non-pack identity / A2A / roster / workflow triggers / CVO ref /
+ * After L0 (non-pack identity / A2A / roster / workflow triggers / operator ref /
  * governance digest / MCP) moves to the compression-immune native system role
  * (`--system-prompt-file` for Claude, `-c developer_instructions` for Codex —
  * Task 3/4), the user-message `systemPrompt` must carry ONLY the F129 pack
@@ -629,7 +643,7 @@ export function buildStaticIdentityPackOnly(catId: CatId, options?: StaticIdenti
 /**
  * Build dynamic invocation context — changes per call.
  * Includes: teammates, mode, chain position, prompt tags.
- * (MCP tools and 铲屎官 reference moved to buildStaticIdentity for session-level injection.)
+ * (MCP tools and co-creator reference moved to buildStaticIdentity for session-level injection.)
  */
 export function buildInvocationContext(context: InvocationContext): string {
   const config = getConfig(context.catId as string);
@@ -694,7 +708,7 @@ export function buildInvocationContext(context: InvocationContext): string {
     const otherConfig = getConfig(context.pingPongWarning.pairedWith as string);
     const otherLabel = formatHandleFreeLabel(context.pingPongWarning.pairedWith as string, otherConfig);
     lines.push(
-      `🏓 乒乓球警告：你和 ${otherLabel} 已连续互相 @ ${context.pingPongWarning.count} 轮。思考是否真的需要再回一棒——第三方介入？收尾给铲屎官？还是这轮可以不 @？再 @ 2 轮将自动熔断。`,
+      `🏓 乒乓球警告：你和 ${otherLabel} 已连续互相 @ ${context.pingPongWarning.count} 轮。思考是否真的需要再回一棒——第三方介入？收尾给co-creator？还是这轮可以不 @？再 @ 2 轮将自动熔断。`,
     );
   }
 
@@ -809,18 +823,18 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F092: Voice companion mode — instruct cats to prioritize audio output
   if (context.voiceMode) {
     lines.push(
-      'Voice Mode ON: 铲屎官在语音陪伴模式。',
+      'Voice Mode ON: co-creator在语音陪伴模式。',
       '- 默认用 audio rich block；代码/表格/长内容用文字并附语音摘要',
       '',
     );
   } else {
     lines.push(
-      'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在铲屎官明确要求语音时才发。',
+      'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在co-creator明确要求语音时才发。',
       '',
     );
   }
 
-  // F087: Bootcamp mode — inject phase context so cats know to guide the new CVO
+  // F087: Bootcamp mode — inject phase context so cats know to guide the new operator
   if (context.bootcampState) {
     const { phase, leadCat, selectedTaskId } = context.bootcampState;
     const threadPart = context.threadId ? ` thread=${context.threadId}` : '';
@@ -835,6 +849,11 @@ export function buildInvocationContext(context: InvocationContext): string {
   // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
   if (context.guideCandidate) {
     lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
+  }
+
+  // F229: Concierge duty section — injected only for per-user concierge threads
+  if (context.threadKind === 'concierge' && context.conciergeConfig) {
+    lines.push(...buildConciergePromptLines(context.conciergeConfig, context.threadId));
   }
 
   // F093: World context envelope — inject world state for world-building mode
@@ -902,13 +921,13 @@ export function buildInvocationContext(context: InvocationContext): string {
   // @co-creator is a hard-condition exit, not the safe default (KD-19).
   // Placed at the very end for maximum recency bias (critical for non-Claude models).
   if (context.mode !== 'parallel' && context.a2aEnabled) {
-    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
+    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@co-creator';
     lines.push(
       '',
       `下一棒传球决策树（本轮必选其一，缺 = 消息不完整）：先问"下一步谁能做"——`,
       `1. 另一只猫能做 → @句柄（review 完→@author / 修完→@reviewer / merge 完→@愿景守护猫）`,
       `2. 等外部条件（按 2a/2b 判断行动）。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条。2a 无回调覆盖（如等 EYES）→ **调用 cat_cafe_hold_ball(...)** + 轮询（口头"我继续"不算）；2b 已有结构化回调且 EYES>0 → 纯事件驱动，**不调用/不续约 hold_ball**（KD-27）`,
-      `3. 只有铲屎官本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
+      `3. 只有co-creator本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
       `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（按 2a/2b 判断），严禁投射成本地 @句柄。`,
     );
   }
@@ -1042,3 +1061,16 @@ export function buildSystemPrompt(context: InvocationContext): string {
 
   return parts.join('\n\n');
 }
+
+// L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is now injected directly
+// in invoke-single-cat at the per-invocation prompt prefix level (mirrors F225
+// contextHintPrefix), NOT folded into staticIdentity at route-serial/parallel.
+//
+// Cloud R2 P1 #2237 L1099 (root cause): folding staging into staticIdentity
+// causes resumed session-chain turns to drop staging, because invoke-single-cat
+// skips systemPrompt injection on canSkipOnResume + isResume turns. Staging
+// must apply EVERY turn per ADR-038 "每轮注入生效" contract → wire it
+// independently of injectSystemPrompt.
+//
+// buildLiveStaticIdentity removed. buildStagingPrepend (in StagingContent.ts)
+// is the single source — invoke-single-cat consumes it directly.

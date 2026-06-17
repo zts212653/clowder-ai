@@ -86,7 +86,7 @@ async function readRuleFile(
 /**
  * F203 Phase F — L0 system prompt visibility (read-only viewer in Console
  * 「规则与 SOP」). Returns the L0 template + per-cat compiled L0 + paths users
- * follow to customize. Read-only by Design Gate (铲屎官 2026-05-16 confirm
+ * follow to customize. Read-only by Design Gate (co-creator 2026-05-16 confirm
  * "先做可见"; AC-F5 编辑器 DEFER). compileL0 + availableCats injectable for
  * unit tests; route handler passes the real subprocess + cat-catalog.
  */

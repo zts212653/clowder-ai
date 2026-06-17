@@ -2,7 +2,7 @@ import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 
 /**
  * Render a VerdictHandoffPacket as a frontmatter-prefixed markdown document.
- * Used by `generateA2aLiveVerdict` for both CVO-regen and Phase H cat-mediated
+ * Used by `generateA2aLiveVerdict` for both operator-regen and Phase H cat-mediated
  * publish paths. Extracted from `eval-a2a-live-verdict.ts` to honor 350-line limit.
  */
 export function formatLiveVerdictMarkdown(
@@ -32,7 +32,7 @@ export function formatLiveVerdictMarkdown(
     'Evidence:',
     ...packet.evidencePacket.snapshotRefs.map((ref) => `- ${ref}`),
     ...packet.evidencePacket.attributionRefs.map((ref) => `- ${ref}`),
-    // 砚砚 R14 P2 + cloud R14 P2: CVO regen path passes raw `c2.foo`; Phase H
+    // 砚砚 R14 P2 + cloud R14 P2: operator regen path passes raw `c2.foo`; Phase H
     // cat-mediated path passes pre-prefixed `metric:c2.foo`. Read-model classifies
     // by `metric:` prefix (eval-hub-read-model.ts), so output MUST be exactly one
     // `metric:` prefix. Normalize to handle both shapes — strip then add.

@@ -14,7 +14,7 @@ created: 2026-03-07
 
 ## Why
 
-team lead在日常使用中，Thread 侧栏的未读数字 badge 累积过多（尤其冷启动/F5 刷新后），分散了对猫猫状态颜色（橙色/黄色/绿色）的注意力。需要一种快速方式清掉所有未读数字，只保留猫猫活跃状态的视觉提示。
+operator在日常使用中，Thread 侧栏的未读数字 badge 累积过多（尤其冷启动/F5 刷新后），分散了对猫猫状态颜色（橙色/黄色/绿色）的注意力。需要一种快速方式清掉所有未读数字，只保留猫猫活跃状态的视觉提示。
 
 ## What
 
@@ -36,7 +36,7 @@ team lead在日常使用中，Thread 侧栏的未读数字 badge 累积过多（
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "一键清理未读消息" | AC-1 | test + screenshot | [x] |
 | R2 | "只看到猫猫是橙色 黄色 绿色 他的目前状态" | AC-2 | screenshot | [x] |
@@ -51,7 +51,7 @@ team lead在日常使用中，Thread 侧栏的未读数字 badge 累积过多（
 
 ## Key Decisions
 
-- 只清 unread count，不清猫猫状态颜色（team lead明确区分了这两种视觉信息）
+- 只清 unread count，不清猫猫状态颜色（operator明确区分了这两种视觉信息）
 - 复用 F069 的 `RedisThreadReadStateStore.ack()` 批量调用，不引入新的存储机制
 
 ## Dependencies
@@ -67,7 +67,7 @@ team lead在日常使用中，Thread 侧栏的未读数字 badge 累积过多（
 ## Review Gate
 
 - 本地 review: 跨 family（codex）
-- 云端 review: PR comment 触发
+- remote review: PR comment 触发
 
 ## 签收表
 

@@ -83,7 +83,7 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
     );
   });
 
-  test('does not include Cat Cafe MCP tools in config', () => {
+  test('does not include Clowder AI MCP tools in config', () => {
     const config = generateOpenCodeConfig({
       apiKey: 'sk-test',
       baseUrl: 'https://proxy.example/v1',
@@ -94,8 +94,8 @@ describe('opencode Config Template (AC-9 + AC-10)', () => {
     if (config.mcp) {
       const mcpKeys = Object.keys(config.mcp);
       for (const key of mcpKeys) {
-        assert.ok(!key.startsWith('cat_cafe'), `MCP config must not include Cat Cafe tools: ${key}`);
-        assert.ok(!key.startsWith('cat-cafe'), `MCP config must not include Cat Cafe tools: ${key}`);
+        assert.ok(!key.startsWith('cat_cafe'), `MCP config must not include Clowder AI tools: ${key}`);
+        assert.ok(!key.startsWith('cat-cafe'), `MCP config must not include Clowder AI tools: ${key}`);
       }
     }
   });

@@ -386,6 +386,111 @@ describe('CiCdRouter', () => {
     });
   });
 
+  // ── P1-3 fix: CiCdRouter emits community events to eventLog ────────
+  // Plan: PR lifecycle canonical detection point is CiCdRouter (not ReviewFeedbackTaskSpec).
+  // CiCdRouter is the first to detect merged/closed; ReviewFeedbackTaskSpec races.
+  // dedup via sourceEventId ensures both can fire without double-projection.
+
+  describe('P1-3: community event emission on PR lifecycle (eventLog)', () => {
+    function makeMockEventLog() {
+      /** @type {{ sourceEventId: string; kind: string; subjectKey: string }[]} */
+      const appended = [];
+      return {
+        log: /** @type {any} */ ({
+          /** @param {any} event */
+          append(event) {
+            appended.push({ sourceEventId: event.sourceEventId, kind: event.kind, subjectKey: event.subjectKey });
+            return Promise.resolve({ appended: true, sequence: appended.length });
+          },
+        }),
+        appended,
+      };
+    }
+
+    it('emits pr.merged event to eventLog when PR merges (P1-3)', async () => {
+      const { log: eventLog, appended } = makeMockEventLog();
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        eventLog,
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(appended.length, 1, 'expected exactly one community event appended');
+      assert.strictEqual(appended[0].kind, 'pr.merged');
+      assert.ok(appended[0].subjectKey.includes('42'), 'subjectKey should contain PR number');
+    });
+
+    it('emits pr.closed event to eventLog when PR closes without merge (P1-3)', async () => {
+      const { log: eventLog, appended } = makeMockEventLog();
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        eventLog,
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      await router.route(makePollResult({ prState: 'closed' }));
+
+      assert.strictEqual(appended.length, 1, 'expected exactly one community event appended');
+      assert.strictEqual(appended[0].kind, 'pr.closed');
+    });
+
+    it('does not throw when eventLog is not provided (backward compat)', async () => {
+      // No eventLog → existing tests should be unaffected
+      const router = createRouter();
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      const result = await router.route(makePollResult({ prState: 'merged' }));
+      assert.strictEqual(result.kind, 'skipped');
+    });
+
+    it('continues routing even if eventLog.append throws (best-effort)', async () => {
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        eventLog: /** @type {any} */ ({
+          append() {
+            return Promise.reject(new Error('redis down'));
+          },
+        }),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      // Must not throw
+      const result = await router.route(makePollResult({ prState: 'merged' }));
+      assert.strictEqual(result.kind, 'skipped');
+    });
+  });
+
   // ── AC-A10: patchCiState does not reset registeredAt ────────────
 
   describe('patchCiState preservation (AC-A10)', () => {

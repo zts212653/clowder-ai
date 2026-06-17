@@ -6,7 +6,7 @@
  *
  * Tech decision: Pandoc CLI over JS libraries (puppeteer/pdf-lib/docx).
  * Rationale: cats output Markdown natively, Pandoc's md→pdf/docx is first-class.
- * Confirmed by CVO 2026-03-23.
+ * Confirmed by operator 2026-03-23.
  */
 
 import { execFile } from 'node:child_process';

@@ -4,7 +4,7 @@
 
 **决策时间**: 2026-03-18  
 **参与猫猫**: Ragdoll(Opus)、Maine Coon(GPT-5.4)、金渐层(OpenCode)  
-**铲屎官拍板**: You  
+**operator拍板**: You  
 **依据**: F059 开源计划 §命名与品牌、三猫共识讨论
 
 ---

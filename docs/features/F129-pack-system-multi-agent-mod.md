@@ -13,10 +13,10 @@ created: 2026-03-19
 ## Why
 
 > "如果我是一个金融从业者，我用你们如何构建一套金融的猫猫协作？如何分享？如果我是一个喜欢 AI 恋爱的玩家我要怎么样？如果我是一个跑团爱好者？如果我是律师？……me & world & cats，我可以是任何身份的我。"
-> — team lead，2026-03-19
+> — operator，2026-03-19
 
 > "好像无意间搞出了团队 skills 或者说 multi-agent 的 skills 体系，和单 agent 的差别在于 shared-rules.md"
-> — team lead，2026-03-19
+> — operator，2026-03-19
 
 Cat Café 的 coding 基石已经成熟（120+ features，cat-config + skills + shared-rules 体系经过验证）。但 Cat Café 从来不只是 coding 协作平台——是 **Cats & U**，猫猫和你，一起创造，一起生活。
 
@@ -245,7 +245,7 @@ OpenClaw 在 v2026.3.22（2026-03-22）做了底层架构大换血（12 breaking
 | KD-1 | 术语统一为 Pack（不叫 Plugin/Mod/Seed） | 三猫共识：Pack 直观、无歧义、和游戏 mod 类比对齐 | 2026-03-19 |
 | KD-2 | Pack = 声明式 mod，不是代码插件 | 零代码覆盖 90% 创作需求；同权脚本插件在 lesson-07 已列为禁区 | 2026-03-19 |
 | KD-3 | Core Identity Layer 不可插件化 | F093 铁律：身份不可污染，信任是地基 | 2026-03-19 |
-| KD-4 | shared-rules 是 Pack 的灵魂，不是 masks | team lead洞察：multi-agent 和 single-agent 的分水岭是协作规范 | 2026-03-19 |
+| KD-4 | shared-rules 是 Pack 的灵魂，不是 masks | operator洞察：multi-agent 和 single-agent 的分水岭是协作规范 | 2026-03-19 |
 | KD-5 | Experience = Me × Pack + Growth | Maine Coon提出：Me 不打包、Growth 私有、只有 Pack 可分享 | 2026-03-19 |
 | KD-6 | World Driver 声明 resolver: code/agent/hybrid | Maine Coon提出：不同世界有不同运转方式，需要显式声明。`agent`（非 `llm`）：Cat Café 是 multi-agent 架构，世界推进由猫猫 agent 决策，不是裸调 LLM API | 2026-03-19 |
 | KD-7 | v1 先 Git URL 安装，不做 marketplace | 去中心化更符合"种子自由生长"，降低首发基建成本 | 2026-03-19 |

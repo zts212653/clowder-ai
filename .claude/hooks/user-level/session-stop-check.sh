@@ -57,7 +57,7 @@ if [ -n "$UNTRACKED_DOCS" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：docs/ 下有未跟踪的 .md 文件（你或其他猫生成了但忘记 commit push）：
 ${UNTRACKED_DOCS}
-→ 别走！先向铲屎官汇报这些文件，商量处理方式
+→ 别走！先向co-creator汇报这些文件，商量处理方式
 "
 fi
 
@@ -67,7 +67,7 @@ if [ -n "$ROOT_IMAGES" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：根目录有图片文件（截图应放 assets/screenshots/）：
 ${ROOT_IMAGES}
-→ 别走！先向铲屎官汇报，商量移走还是删除
+→ 别走！先向co-creator汇报，商量移走还是删除
 "
 fi
 
@@ -79,7 +79,7 @@ if [ -n "$ROOT_CLUTTER" ]; then
   WARNINGS="${WARNINGS}
 ⚠️ 收尾检查：根目录有杂物文件：
 ${ROOT_CLUTTER}
-→ 别走！先向铲屎官汇报这些文件
+→ 别走！先向co-creator汇报这些文件
 "
 fi
 

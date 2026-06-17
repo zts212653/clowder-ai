@@ -24,6 +24,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveProfileDir } from '../../profile/profile-dir.js';
 
 const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
 
@@ -222,7 +223,12 @@ async function doCompileL0(
     );
   }
 
-  const args = [scriptPath, '--cat', catId, ...(outPath ? ['--out', outPath] : [])];
+  // F231: capsule/primer live in private/profile/ (gitignored user data). resolveProfileDir is
+  // the SINGLE SOURCE OF TRUTH shared with the profile-update write routes — read (here) and
+  // write (routes) MUST resolve identically or the nurturing loop silently breaks (a primer
+  // written to one path while the injector reads another).
+  const profileDir = resolveProfileDir(cwd, scriptPath);
+  const args = [scriptPath, '--cat', catId, '--profile-dir', profileDir, ...(outPath ? ['--out', outPath] : [])];
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
     const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });

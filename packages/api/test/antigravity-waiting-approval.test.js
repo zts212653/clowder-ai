@@ -62,6 +62,80 @@ function createMockServiceBridge({ resolveOutstandingSteps, approvePendingIntera
   };
 }
 
+function createWaitingFileCodeActionStep({ id, name, stepIndex }) {
+  const argumentsJson =
+    name === 'replace_file_content'
+      ? JSON.stringify({ TargetFile: 'docs/probe.md', Search: 'old', Replace: 'probe' })
+      : JSON.stringify({ TargetFile: 'docs/probe.md', CodeContent: 'probe\n' });
+  return {
+    type: 'CORTEX_STEP_TYPE_CODE_ACTION',
+    status: 'CORTEX_STEP_STATUS_WAITING',
+    metadata: {
+      sourceTrajectoryStepInfo: { trajectoryId: 'traj-1', stepIndex },
+      toolCall: { id, name, argumentsJson },
+    },
+    requestedInteraction: {
+      permission: {
+        resource: {
+          action: 'write_file',
+          target: 'docs/probe.md',
+        },
+      },
+    },
+  };
+}
+
+function createExistingAwaitingCodeActionBridge({
+  resolveOutstandingSteps,
+  approvePendingInteraction,
+  waitingSteps,
+  response = 'write approved after existing wait step',
+}) {
+  const totalSteps = 9 + waitingSteps.length;
+  return {
+    ...createMockServiceBridge({ resolveOutstandingSteps, approvePendingInteraction }),
+    getTrajectory: mock.fn(async () => ({
+      status: 'CASCADE_RUN_STATUS_RUNNING',
+      numTotalSteps: totalSteps,
+      awaitingUserInput: true,
+      trajectory: {
+        steps: Array.from({ length: 9 }, () => ({
+          type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+          status: 'DONE',
+        })).concat(...waitingSteps),
+      },
+      updatedAt: Date.now(),
+    })),
+    pollForSteps: mock.fn(async function* () {
+      yield {
+        steps: [],
+        cursor: {
+          baselineStepCount: totalSteps,
+          lastDeliveredStepCount: totalSteps,
+          terminalSeen: false,
+          lastActivityAt: Date.now(),
+          awaitingUserInput: true,
+        },
+      };
+      yield {
+        steps: [
+          {
+            type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+            status: 'DONE',
+            plannerResponse: { response },
+          },
+        ],
+        cursor: {
+          baselineStepCount: totalSteps,
+          lastDeliveredStepCount: totalSteps + 1,
+          terminalSeen: true,
+          lastActivityAt: Date.now(),
+        },
+      };
+    }),
+  };
+}
+
 describe('Antigravity waiting approval', () => {
   test('pollForSteps yields awaiting-user-input state instead of throwing stall', async () => {
     const bridge = createBridge();
@@ -101,6 +175,24 @@ describe('Antigravity waiting approval', () => {
     const texts = messages.filter((msg) => msg.type === 'text');
     assert.equal(texts.length, 1);
     assert.equal(texts[0].content, 'browser approved');
+  });
+
+  test('service falls back to generic resolve when awaiting trajectory inspection fails', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const bridge = {
+      ...createMockServiceBridge({ resolveOutstandingSteps }),
+      getTrajectory: mock.fn(async () => {
+        throw new Error('transient trajectory failure');
+      }),
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('open browser'));
+
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 1, 'generic resolve should remain the fallback');
+    assert.equal(resolveOutstandingSteps.mock.calls[0].arguments[0], 'test-cascade-001');
+    const waiting = messages.find((msg) => msg.type === 'liveness_signal');
+    assert.equal(waiting, undefined, 'fallback resolve should avoid user-visible waiting when it clears');
   });
 
   test('service falls back to liveness_signal when auto-approve fails', async () => {
@@ -164,6 +256,113 @@ describe('Antigravity waiting approval', () => {
     // Must emit liveness_signal on the second awaitingUserInput (resolve didn't work)
     const waiting = messages.filter((msg) => msg.type === 'liveness_signal');
     assert.ok(waiting.length >= 1, 'must emit liveness_signal when resolve did not clear awaitingUserInput');
+  });
+
+  test('service step-approves existing waiting CODE_ACTIONs when awaitingUserInput has no new steps', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const approvePendingInteraction = mock.fn(async () => {});
+    const firstWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_replace_file_content',
+      name: 'replace_file_content',
+      stepIndex: 9,
+    });
+    const secondWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_write_to_file',
+      name: 'write_to_file',
+      stepIndex: 10,
+    });
+    const bridge = createExistingAwaitingCodeActionBridge({
+      resolveOutstandingSteps,
+      approvePendingInteraction,
+      waitingSteps: [firstWaitingStep, secondWaitingStep],
+    });
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('write file'));
+
+    assert.equal(
+      approvePendingInteraction.mock.calls.length,
+      2,
+      'existing permission CODE_ACTIONs should trigger the approval router',
+    );
+    assert.equal(approvePendingInteraction.mock.calls[0].arguments[0], 'test-cascade-001');
+    assert.equal(approvePendingInteraction.mock.calls[0].arguments[1], firstWaitingStep);
+    assert.equal(approvePendingInteraction.mock.calls[1].arguments[0], 'test-cascade-001');
+    assert.equal(approvePendingInteraction.mock.calls[1].arguments[1], secondWaitingStep);
+    assert.equal(resolveOutstandingSteps.mock.calls.length, 0, 'permission CODE_ACTION must not use generic resolve');
+    const text = messages.find((msg) => msg.type === 'text');
+    assert.equal(text?.content, 'write approved after existing wait step');
+  });
+
+  test('service continues approving later existing CODE_ACTIONs after one approval fails', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const firstWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_replace_file_content',
+      name: 'replace_file_content',
+      stepIndex: 9,
+    });
+    const secondWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_write_to_file',
+      name: 'write_to_file',
+      stepIndex: 10,
+    });
+    const approvePendingInteraction = mock.fn(async (_cascadeId, step) => {
+      if (step === firstWaitingStep) throw new Error('permission rpc failed once');
+    });
+    const bridge = createExistingAwaitingCodeActionBridge({
+      resolveOutstandingSteps,
+      approvePendingInteraction,
+      waitingSteps: [firstWaitingStep, secondWaitingStep],
+      response: 'later write approved after partial failure',
+    });
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('write file'));
+
+    assert.equal(approvePendingInteraction.mock.calls.length, 2, 'should not stop after the first failure');
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      0,
+      'one successful step-specific approval should avoid generic resolve',
+    );
+    const text = messages.find((msg) => msg.type === 'text');
+    assert.equal(text?.content, 'later write approved after partial failure');
+  });
+
+  test('service falls back to generic resolve when all existing CODE_ACTION approvals fail', async () => {
+    const resolveOutstandingSteps = mock.fn(async () => {});
+    const approvePendingInteraction = mock.fn(async () => {
+      throw new Error('permission rpc unavailable');
+    });
+    const firstWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_replace_file_content',
+      name: 'replace_file_content',
+      stepIndex: 9,
+    });
+    const secondWaitingStep = createWaitingFileCodeActionStep({
+      id: 'toolu_existing_write_to_file',
+      name: 'write_to_file',
+      stepIndex: 10,
+    });
+    const bridge = createExistingAwaitingCodeActionBridge({
+      resolveOutstandingSteps,
+      approvePendingInteraction,
+      waitingSteps: [firstWaitingStep, secondWaitingStep],
+      response: 'generic resolve recovered after approval failures',
+    });
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'claude-opus-4-6', bridge });
+
+    const messages = await collect(service.invoke('write file'));
+
+    assert.equal(approvePendingInteraction.mock.calls.length, 2, 'should attempt every existing CODE_ACTION');
+    assert.equal(
+      resolveOutstandingSteps.mock.calls.length,
+      1,
+      'all step-specific failures should fall back to generic resolve',
+    );
+    assert.equal(resolveOutstandingSteps.mock.calls[0].arguments[0], 'test-cascade-001');
+    const text = messages.find((msg) => msg.type === 'text');
+    assert.equal(text?.content, 'generic resolve recovered after approval failures');
   });
 
   test('env var ANTIGRAVITY_AUTO_APPROVE=false disables auto-approve', async () => {

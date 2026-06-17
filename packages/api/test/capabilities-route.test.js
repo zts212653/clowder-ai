@@ -1787,7 +1787,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       const res = await patchSkillCapability(app, projectDir, skillId, true);
 
       assert.equal(res.statusCode, 409, res.payload);
-      assert.match(res.payload, /not a managed Cat Cafe skill symlink/);
+      assert.match(res.payload, /not a managed Clowder AI skill symlink/);
       const config = await readCapabilitiesConfig(projectDir);
       assert.equal(config?.capabilities[0]?.enabled, false);
       assert.equal((await lstat(localSkillDir)).isDirectory(), true);

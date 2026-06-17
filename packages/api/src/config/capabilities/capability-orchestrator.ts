@@ -6,7 +6,7 @@
  * 生成三猫 CLI 的 MCP 配置文件。
  *
  * 首次运行时自动从现有 CLI 配置中发现外部 MCP 服务器，
- * 连同 Cat Cafe 自有 MCP 一起写入 capabilities.json。
+ * 连同 Clowder AI 自有 MCP 一起写入 capabilities.json。
  */
 
 import { existsSync, statSync } from 'node:fs';
@@ -551,7 +551,7 @@ export async function discoverExternalMcpServers(paths: DiscoveryPaths): Promise
 }
 
 /**
- * Build the Cat Cafe own MCP server descriptor.
+ * Build the Clowder AI own MCP server descriptor.
  * Uses the same resolution logic as ClaudeAgentService.
  */
 export function buildCatCafeMcpDescriptor(projectRoot: string): McpServerDescriptor {
@@ -938,7 +938,7 @@ export function ensureCatCafeMainServer(
 }
 
 /**
- * Rewrite managed Cat Cafe MCP command paths to a stable repo root.
+ * Rewrite managed Clowder AI MCP command paths to a stable repo root.
  * This prevents global provider configs from pinning deleted feature worktrees.
  */
 export function realignManagedCatCafeServerPaths(

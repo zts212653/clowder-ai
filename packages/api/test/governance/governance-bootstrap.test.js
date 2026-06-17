@@ -111,13 +111,13 @@ describe('GovernanceBootstrapService', () => {
     await svc.bootstrap(targetProject, { dryRun: false });
 
     const content = await readFile(join(targetProject, 'CLAUDE.md'), 'utf-8');
-    assert.ok(content.includes('Cat Cafe runtime ports'), 'external project should see reserved runtime ports');
-    assert.ok(content.includes(`${expectedRuntimePortsText} are reserved by Cat Cafe`));
+    assert.ok(content.includes('Clowder AI runtime ports'), 'external project should see reserved runtime ports');
+    assert.ok(content.includes(`${expectedRuntimePortsText} are reserved by Clowder AI`));
     assert.ok(content.includes("Avoid using these ports for this project's dev servers."));
     assert.ok(!content.includes('Public local defaults'), 'external project should not receive self-context defaults');
     assert.ok(
       !content.includes(`use ${expectedRuntimePortsText}`),
-      'external project must not be told to use Cat Cafe ports',
+      'external project must not be told to use Clowder AI ports',
     );
   });
 

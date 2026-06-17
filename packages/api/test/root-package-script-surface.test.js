@@ -52,13 +52,13 @@ test('alpha worktree scripts expose help output', () => {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  assert.match(alphaHelp, /Cat Cafe Alpha Worktree Manager/);
+  assert.match(alphaHelp, /Clowder AI Alpha Worktree Manager/);
 
   const alphaTestHelp = execFileSync('bash', ['./scripts/alpha-worktree.test.sh', '--help'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
-  assert.match(alphaTestHelp, /Cat Cafe Alpha Worktree Manager|PASS: usage documents alpha commands/);
+  assert.match(alphaTestHelp, /Clowder AI Alpha Worktree Manager|PASS: usage documents alpha commands/);
 });
 
 test('directly invoked root scripts keep executable bit', () => {

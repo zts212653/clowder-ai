@@ -9,16 +9,16 @@ updated: 2026-05-19
 
 # F147: i18n — Hub 界面中英文切换
 
-> **Status**: idea | **Owner**: 待定 | **Priority**: P2（team lead 2026-05-19 提出需求）
+> **Status**: idea | **Owner**: 待定 | **Priority**: P2（operator 2026-05-19 提出需求）
 
-## team lead愿景
+## operator愿景
 
-Hub 界面支持中英文切换。team lead本人习惯英文 UI，全量同步后发现大量界面已中文化，希望有切换选项。
+Hub 界面支持中英文切换。operator本人习惯英文 UI，全量同步后发现大量界面已中文化，希望有切换选项。
 
 ## Why
 
 - Hub 界面在 #723 视觉归一化（2026-05-19）后全面中文化（memory/signals/settings/ops 等页面）
-- team lead本人更习惯英文 UI（"不习惯了"）
+- operator本人更习惯英文 UI（"不习惯了"）
 - 开源社区（clowder-ai）面向国际用户，英文是基础需求
 - 当前无 i18n 框架，UI 文案全部硬编码在组件中
 

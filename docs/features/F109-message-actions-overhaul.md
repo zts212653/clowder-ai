@@ -13,7 +13,7 @@ created: 2026-03-12
 
 ## Why
 
-team lead测试消息操作功能时发现一系列问题：
+operator测试消息操作功能时发现一系列问题：
 
 > "点了软删除之后，发现前端这个并没有删掉，就前端气泡还在，那你这算啥软删除？"
 
@@ -81,7 +81,7 @@ team lead测试消息操作功能时发现一系列问题：
 - [x] AC-A3: 刷新页面后，已软删除的消息不再出现
 - [x] AC-A4: hard delete 复用同一 thread-scoped remove，不回归
 - [x] AC-A5: restore 跨客户端同步（socket 到达后 refetch via requestStreamCatchUp）
-- [x] AC-A6: team lead可以在任何 thread 中 Branch From 任意消息（含 system thread）
+- [x] AC-A6: operator可以在任何 thread 中 Branch From 任意消息（含 system thread）
 - [x] AC-A7: Branch/Delete 失败时前端显示 toast 错误提示
 - [x] AC-A8: 已有测试不回归 + 新增 15 个测试（socket wiring + toast 4路径 + branch permission + restore + identity fix）
 
@@ -116,6 +116,6 @@ team lead测试消息操作功能时发现一系列问题：
 | KD-3 | 编辑三档分层：tail-edit / branch-rewrite / cat-no-edit | 避免破坏上下文链和审计（Maine Coon@gpt52） | 2026-03-12 |
 | KD-4 | Revision 独立 store，主消息只放元数据 | 不污染 message hash（Maine Coon@gpt52） | 2026-03-12 |
 | KD-5 | WebSocket 用 `message_edited` 专用事件 | 删除/恢复/编辑是不同前端语义（Maine Coon@gpt52） | 2026-03-12 |
-| KD-6 | Revision note 不走 unread 计数，引入显式 message `kind` | 防止team lead编辑触发 UI 未读 badge（Maine Coon@gpt52） | 2026-03-12 |
+| KD-6 | Revision note 不走 unread 计数，引入显式 message `kind` | 防止operator编辑触发 UI 未读 badge（Maine Coon@gpt52） | 2026-03-12 |
 | KD-7 | Phase A 同时覆盖 soft/hard delete + restore | hard/soft 走同一回调，restore 前端是 no-op（Maine Coon@gpt52 R2 补充） | 2026-03-12 |
 | KD-8 | B2 前置：message `kind` 必须先显式化 | 历史接口靠推断，不先解约束 revision note 会串语义（Maine Coon@gpt52 R2 补充） | 2026-03-12 |

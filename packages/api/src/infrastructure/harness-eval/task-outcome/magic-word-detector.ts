@@ -1,7 +1,7 @@
 /**
  * F192 Phase G AC-G12 — Magic Word runtime detection.
  *
- * Detects magic words (CVO-only emergency brake words) in user messages.
+ * Detects magic words (operator-only emergency brake words) in user messages.
  * These are "intention interrupts" — the user expresses dissatisfaction
  * with the cat's direction, not just a mechanical button press.
  *

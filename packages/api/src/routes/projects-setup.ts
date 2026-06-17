@@ -18,7 +18,7 @@ type SetupMode = (typeof VALID_MODES)[number];
 export interface ProjectSetupRouteOptions {
   memoryBootstrapService?: { bootstrap: (projectPath: string, options?: unknown) => Promise<unknown> };
   socketManager?: { emitToUser(userId: string, event: string, data: unknown): void };
-  /** Override Cat Cafe root for testing — avoids polluting real registry (#926) */
+  /** Override Clowder AI root for testing — avoids polluting real registry (#926) */
   catCafeRoot?: string;
 }
 
@@ -166,11 +166,11 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       return { error: 'Project path not allowed' };
     }
 
-    // Guard: never bootstrap Cat Cafe's own directory (same as governance/confirm)
+    // Guard: never bootstrap Clowder AI's own directory (same as governance/confirm)
     const catCafeRoot = opts?.catCafeRoot ?? findMonorepoRoot(process.cwd());
     if (validated === catCafeRoot) {
       reply.status(400);
-      return { error: 'Cannot setup governance for Cat Cafe itself' };
+      return { error: 'Cannot setup governance for Clowder AI itself' };
     }
 
     // ── Mode: clone ──

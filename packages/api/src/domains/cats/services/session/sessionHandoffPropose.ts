@@ -3,7 +3,7 @@
  *
  * 猫在干净断点调 cat_cafe_propose_session_handoff（MCP tool → callback route）。
  * 逻辑写成纯函数便于单元测试；route 是薄 wire（生成确认卡 + broadcast）。
- * A4 abuse guard: ≤1 pending handoff proposal per active session（铲屎官 gate 只挡
+ * A4 abuse guard: ≤1 pending handoff proposal per active session（co-creator gate 只挡
  * seal，挡不住卡片刷屏，砚砚 P2）。
  */
 
@@ -96,7 +96,7 @@ export async function proposeSessionHandoff(
   return { ok: true, proposal };
 }
 
-/** Confirmation card surfaced to 铲屎官 in the thread (approve/reject gate). */
+/** Confirmation card surfaced to co-creator in the thread (approve/reject gate). */
 export function buildHandoffProposalCardBlock(proposal: SessionHandoffProposal): RichCardBlock {
   const n = proposal.note;
   const fields: Array<{ label: string; value: string }> = [
@@ -111,7 +111,7 @@ export function buildHandoffProposalCardBlock(proposal: SessionHandoffProposal):
     id: `handoff-${proposal.proposalId}`,
     kind: 'card',
     v: 1,
-    title: '🔄 提议 session 接力（封印当前 → 续接 fresh 自己）',
+    title: '提议 session 接力（封印当前 → 续接 fresh 自己）',
     bodyMarkdown: `${proposal.sourceCatId} 想在干净断点封印当前 session，把这份亲手写的交接带给续接的自己。`,
     tone: 'info',
     fields,

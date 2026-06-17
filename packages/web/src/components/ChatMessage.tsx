@@ -138,7 +138,7 @@ export function ChatMessage({
           label,
           radius: breed.radius,
           font: breed.font,
-          /* F056 (铲屎官 2026-05-28): post_message callback bubbles use the
+          /* F056 (co-creator 2026-05-28): post_message callback bubbles use the
            * SAME --color-{slug}-surface as normal bubbles. Previously isCallback
            * branched to tintedLight(hex, 0.08) — a hex-derived value that
            * bypassed the F056 token chain, so callback bubbles didn't follow
@@ -213,7 +213,15 @@ export function ChatMessage({
   }
 
   if (isSystem) {
-    // F148 Phase E + VG-2: Briefing card — collapsible with source label
+    // F148 context briefing is internal routing context for cats — suppress from user timeline.
+    // Defense-in-depth: stream/socket/API all filter these, but if one leaks through, hide here.
+    // Note: F233 duty briefing also uses origin='briefing' but lacks systemKind='context_briefing',
+    // so it renders normally via the BriefingCard path below.
+    if (message.extra?.systemKind === 'context_briefing') {
+      return null;
+    }
+
+    // F233 duty briefing + other user-visible briefing cards (origin='briefing' without systemKind marker)
     if (message.origin === 'briefing' && message.extra?.rich?.blocks?.length) {
       return (
         <div data-message-id={message.id} className="flex justify-center mb-3">

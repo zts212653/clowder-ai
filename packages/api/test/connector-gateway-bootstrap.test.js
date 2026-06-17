@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { FeishuTokenManager } from '../dist/infrastructure/connectors/adapters/FeishuTokenManager.js';
 import { TelegramAdapter } from '../dist/infrastructure/connectors/adapters/TelegramAdapter.js';
-import { startConnectorGateway } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
+import {
+  applyConnectorGatewayAutostartPolicy,
+  isPreconfiguredConnectorAutostartEnabled,
+  startConnectorGateway,
+} from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
 
 function noopLog() {
   const noop = () => {};
@@ -259,6 +263,135 @@ describe('ConnectorGateway Bootstrap', () => {
     } finally {
       TelegramAdapter.prototype.startPolling = originalStartPolling;
     }
+  });
+
+  it('disables preconfigured connector autostart outside production by default', () => {
+    assert.equal(
+      isPreconfiguredConnectorAutostartEnabled({ NODE_ENV: 'development' }),
+      false,
+      'development API instances must not auto-connect external IM platforms',
+    );
+    assert.equal(isPreconfiguredConnectorAutostartEnabled({ NODE_ENV: 'test' }), false);
+    assert.equal(
+      isPreconfiguredConnectorAutostartEnabled({ NODE_ENV: 'production' }),
+      false,
+      'production mode alone is not a runtime identity; start:direct also runs NODE_ENV=production',
+    );
+    assert.equal(
+      isPreconfiguredConnectorAutostartEnabled({
+        NODE_ENV: 'production',
+        CAT_CAFE_RUNTIME_ROOT: '/tmp/cat-cafe-runtime',
+      }),
+      true,
+      'runtime worktree production launches carry the runtime-root marker',
+    );
+    assert.equal(
+      isPreconfiguredConnectorAutostartEnabled({
+        NODE_ENV: 'development',
+        CONNECTOR_GATEWAY_AUTOSTART: '1',
+      }),
+      true,
+      'explicit override keeps connector integration test workflows possible',
+    );
+    assert.equal(
+      isPreconfiguredConnectorAutostartEnabled({
+        NODE_ENV: 'production',
+        CONNECTOR_GATEWAY_AUTOSTART: '0',
+      }),
+      false,
+      'explicit override can fail-closed even in production',
+    );
+  });
+
+  it('scrubs preconfigured IM credentials for dev and alpha while preserving runtime production config', () => {
+    const rawConfig = {
+      telegramBotToken: '123456:ABC-DEF-tokenfull',
+      feishuAppId: 'cli_test',
+      feishuAppSecret: 'feishu-secret',
+      feishuVerificationToken: 'verify-token',
+      feishuBotOpenId: 'ou_bot',
+      feishuAdminOpenIds: 'ou_admin',
+      feishuConnectionMode: 'websocket',
+      dingtalkAppKey: 'ding-key',
+      dingtalkAppSecret: 'ding-secret',
+      weixinBotToken: 'weixin-token',
+      wecomBotId: 'wecom-bot',
+      wecomBotSecret: 'wecom-secret',
+      wecomCorpId: 'ww_corp',
+      wecomAgentId: '1000002',
+      wecomAgentSecret: 'agent-secret',
+      wecomToken: 'wecom-token',
+      wecomEncodingAesKey: 'a'.repeat(43),
+      xiaoyiAk: 'xiaoyi-ak',
+      xiaoyiSk: 'xiaoyi-sk',
+      xiaoyiAgentId: 'xiaoyi-agent',
+      coCreatorUserId: 'owner-1',
+      whisperUrl: 'http://127.0.0.1:9881',
+      connectorMediaDir: './data/connector-media',
+    };
+
+    const devConfig = applyConnectorGatewayAutostartPolicy(rawConfig, { NODE_ENV: 'development' });
+    assert.deepEqual(
+      {
+        telegramBotToken: devConfig.telegramBotToken,
+        feishuAppId: devConfig.feishuAppId,
+        feishuAppSecret: devConfig.feishuAppSecret,
+        feishuVerificationToken: devConfig.feishuVerificationToken,
+        feishuBotOpenId: devConfig.feishuBotOpenId,
+        feishuAdminOpenIds: devConfig.feishuAdminOpenIds,
+        dingtalkAppKey: devConfig.dingtalkAppKey,
+        dingtalkAppSecret: devConfig.dingtalkAppSecret,
+        weixinBotToken: devConfig.weixinBotToken,
+        wecomBotId: devConfig.wecomBotId,
+        wecomBotSecret: devConfig.wecomBotSecret,
+        wecomCorpId: devConfig.wecomCorpId,
+        wecomAgentId: devConfig.wecomAgentId,
+        wecomAgentSecret: devConfig.wecomAgentSecret,
+        wecomToken: devConfig.wecomToken,
+        wecomEncodingAesKey: devConfig.wecomEncodingAesKey,
+        xiaoyiAk: devConfig.xiaoyiAk,
+        xiaoyiSk: devConfig.xiaoyiSk,
+        xiaoyiAgentId: devConfig.xiaoyiAgentId,
+      },
+      {
+        telegramBotToken: undefined,
+        feishuAppId: undefined,
+        feishuAppSecret: undefined,
+        feishuVerificationToken: undefined,
+        feishuBotOpenId: undefined,
+        feishuAdminOpenIds: undefined,
+        dingtalkAppKey: undefined,
+        dingtalkAppSecret: undefined,
+        weixinBotToken: undefined,
+        wecomBotId: undefined,
+        wecomBotSecret: undefined,
+        wecomCorpId: undefined,
+        wecomAgentId: undefined,
+        wecomAgentSecret: undefined,
+        wecomToken: undefined,
+        wecomEncodingAesKey: undefined,
+        xiaoyiAk: undefined,
+        xiaoyiSk: undefined,
+        xiaoyiAgentId: undefined,
+      },
+    );
+    assert.equal(devConfig.coCreatorUserId, 'owner-1');
+    assert.equal(devConfig.whisperUrl, 'http://127.0.0.1:9881');
+    assert.equal(devConfig.connectorMediaDir, './data/connector-media');
+
+    const directProductionConfig = applyConnectorGatewayAutostartPolicy(rawConfig, { NODE_ENV: 'production' });
+    assert.equal(
+      directProductionConfig.weixinBotToken,
+      undefined,
+      'direct/debug production-mode starts must still fail closed without a runtime marker',
+    );
+
+    const runtimeProductionConfig = applyConnectorGatewayAutostartPolicy(rawConfig, {
+      NODE_ENV: 'production',
+      CAT_CAFE_RUNTIME_ROOT: '/tmp/cat-cafe-runtime',
+    });
+    assert.equal(runtimeProductionConfig.weixinBotToken, 'weixin-token');
+    assert.equal(runtimeProductionConfig.telegramBotToken, '123456:ABC-DEF-tokenfull');
   });
 
   it('feishu webhook handler routes card action button click (AC-14)', async () => {

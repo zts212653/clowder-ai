@@ -21,7 +21,7 @@ New feature:
 
 | Level | When to use | Approval |
 |-------|-------------|----------|
-| L1 | Chat, memory, signals, settings 等每日核心入口 | CVO decision |
+| L1 | Chat, memory, signals, settings 等每日核心入口 | operator decision |
 | L2 | 管理、配置、连接器、凭据、偏好设置 | Maintainer decision |
 | L3 | 某个 settings section 内的只读视图、监控、排行、日志摘要 | Maintainer decision |
 | L4 | 工作流/游戏/设计器等需要独立布局的体验 | Discuss before build |

@@ -9,9 +9,7 @@
  * (future); v1 only sees public/internal collections.
  */
 
-import type { SuggestedCrossPostAction } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -43,7 +41,7 @@ interface RecentItem {
   filesRead?: number;
   filesModified?: number;
   verified?: boolean;
-  suggestedAction?: SuggestedCrossPostAction;
+  suggestedAction?: { type: string; threadId?: string; reason?: string; source?: string };
 }
 
 interface SelectionGroup {
@@ -103,6 +101,7 @@ function formatRecent(data: RecentResponse, since: string): string {
   } else if (data.items.length === 0) {
     // nudge already shown above
   } else {
+    let hasCrossPostItems = false;
     for (const item of data.items) {
       const date = item.updatedAt.slice(0, 10);
       let line = `  ${date} | ${item.anchor} — ${item.title} (${item.kind}) [source: ${item.source}]`;
@@ -113,12 +112,17 @@ function formatRecent(data: RecentResponse, since: string): string {
         if (item.filesModified != null) parts.push(`${item.filesModified} modified`);
         if (parts.length > 0) line += ` {${parts.join(', ')}}`;
       }
-      lines.push(line);
-      if (item.suggestedAction) {
-        lines.push(
-          ...formatSuggestedCrossPostActionLines(item.suggestedAction, { indent: '    ', detailIndent: '    ' }),
-        );
+      if (item.suggestedAction?.type === 'cross_post' && item.suggestedAction.threadId) {
+        hasCrossPostItems = true;
+        line += ` → cross-post: ${item.suggestedAction.threadId}`;
       }
+      lines.push(line);
+    }
+    if (hasCrossPostItems) {
+      lines.push('');
+      lines.push(
+        '  Tip: use cat_cafe_cross_post_message(threadId, targetCats, content) — targetCats or a line-start @mention in content required.',
+      );
     }
   }
   if (data.groups && data.groups.length > 1) {

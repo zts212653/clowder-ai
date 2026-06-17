@@ -1531,7 +1531,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       id: 'msg-partial-done',
       type: 'assistant',
       catId: 'opus',
-      content: '铲屎官，我活着，',
+      content: 'co-creator，我活着，',
       isStreaming: true,
       origin: 'stream',
       extra: { stream: { invocationId: 'inv-partial-done' } },
@@ -1554,7 +1554,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     expect(storeState.messages).toContainEqual(
       expect.objectContaining({
         id: 'msg-partial-done',
-        content: '铲屎官，我活着，',
+        content: 'co-creator，我活着，',
         isStreaming: false,
       }),
     );
@@ -1569,7 +1569,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
       id: 'msg-partial-error',
       type: 'assistant',
       catId: 'opus',
-      content: '铲屎官，我活着，',
+      content: 'co-creator，我活着，',
       isStreaming: true,
       origin: 'stream',
       extra: { stream: { invocationId: 'inv-partial-error' } },
@@ -1593,7 +1593,7 @@ describe('useAgentMessages bubble merge prevention (Bug B)', () => {
     expect(storeState.messages).toContainEqual(
       expect.objectContaining({
         id: 'msg-partial-error',
-        content: '铲屎官，我活着，',
+        content: 'co-creator，我活着，',
         isStreaming: false,
       }),
     );

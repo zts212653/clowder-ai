@@ -172,7 +172,7 @@ describe('Skill Conflict Detection (ADR-025 Phase 2)', () => {
     assert.equal(conflicts.length, 0, 'Same target should not be flagged as conflict');
   });
 
-  test('does not flag identical Cat Cafe official mirrors as a user conflict', async () => {
+  test('does not flag identical Clowder AI official mirrors as a user conflict', async () => {
     const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
     const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
     await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });
@@ -194,7 +194,7 @@ describe('Skill Conflict Detection (ADR-025 Phase 2)', () => {
     assert.equal(conflicts.length, 0);
   });
 
-  test('detects Cat Cafe official mirror conflict when content differs', async () => {
+  test('detects Clowder AI official mirror conflict when content differs', async () => {
     const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
     const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
     await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });
@@ -215,7 +215,7 @@ describe('Skill Conflict Detection (ADR-025 Phase 2)', () => {
     assert.equal(conflicts[0].skillName, 'tdd');
   });
 
-  test('detects Cat Cafe official mirror conflict when same symlink text resolves to different content', async () => {
+  test('detects Clowder AI official mirror conflict when same symlink text resolves to different content', async () => {
     const projectSkillsSource = join(tempDir, 'runtime', 'cat-cafe-skills');
     const userSkillsSource = join(tempDir, 'main', 'cat-cafe-skills');
     await mkdir(join(projectSkillsSource, 'tdd'), { recursive: true });

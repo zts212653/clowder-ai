@@ -1,5 +1,5 @@
 /**
- * Regression: 并发 @ 多只猫，取消一只误伤/漏伤另一只（铲屎官报告 2026-05-30）
+ * Regression: 并发 @ 多只猫，取消一只误伤/漏伤另一只（co-creator报告 2026-05-30）
  *
  * 现象：并发 @codex 和 @gpt52，点击取消 codex → 两只猫一起被取消。
  *
@@ -8,7 +8,7 @@
  * 执行层（QueueProcessor:961 → AgentRouter.routeExecution → route-parallel:426）
  * 把这单一 primaryController.signal 传给 EVERY cat 监听。于是：
  *   - 取消第一只（= primary）→ abort primaryController → 所有猫一起死
- *     （铲屎官复现：并发 @codex+@gpt52，取消 codex → 两只一起取消）
+ *     （co-creator复现：并发 @codex+@gpt52，取消 codex → 两只一起取消）
  *   - 取消非第一只 → abort 一个没人监听的 controller → 那只猫继续跑（取消无效）
  *
  * Fix: route-parallel 必须给每只猫各自的 slot signal —— options.signalForCat(catId)。
@@ -84,7 +84,7 @@ function createMockDeps(services) {
 
 describe('route-parallel per-cat cancel isolation (concurrent @ multi-cat)', () => {
   it('canceling the FIRST cat does NOT abort the sibling cat execution signal', async () => {
-    // 复现铲屎官现象：取消 opus（第一只/primary）不应误伤 codex
+    // 复现co-creator现象：取消 opus（第一只/primary）不应误伤 codex
     const captured = {};
     const services = {
       opus: makeCapturingService('opus', captured),
@@ -165,7 +165,7 @@ describe('route-parallel per-cat cancel isolation (concurrent @ multi-cat)', () 
 
 describe('route-serial per-cat cancel isolation (concurrent @ multi-cat execute path)', () => {
   it('canceling the FIRST cat skips only that cat — worklist NOT broken, sibling still runs', async () => {
-    // 铲屎官真实场景：@codex @gpt52（execute intent，无 #ideate）→ route-serial 串行 worklist。
+    // co-creator真实场景：@codex @gpt52（execute intent，无 #ideate）→ route-serial 串行 worklist。
     // 取消第一只（worklist[0] = primary）→ 旧代码 abort 共享 primaryController.signal →
     // loop 顶 `if (signal?.aborted) break` → 整个 worklist 停 → 第二只永不执行（= 两只一起没了）。
     const order = [];

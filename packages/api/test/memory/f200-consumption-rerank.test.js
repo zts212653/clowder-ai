@@ -29,11 +29,11 @@ describe('F200 consumption rerank integration', () => {
     else process.env.F200_CONSUMPTION_RERANK = savedEnv.F200;
   });
 
-  function insertDoc(anchor, kind, authority = 'observed') {
+  function insertDoc(anchor, kind, authority = 'observed', title = anchor, summary = '') {
     db.prepare(
       `INSERT OR IGNORE INTO evidence_docs (anchor, kind, status, title, summary, updated_at, authority)
-       VALUES (?, ?, 'active', ?, '', datetime('now'), ?)`,
-    ).run(anchor, kind, anchor, authority);
+       VALUES (?, ?, 'active', ?, ?, datetime('now'), ?)`,
+    ).run(anchor, kind, title, summary, authority);
   }
 
   function insertMetric(anchor, consumed30d, exposure30d, dormancyDays) {
@@ -85,6 +85,27 @@ describe('F200 consumption rerank integration', () => {
     const results = [getDoc('low-ctr'), getDoc('high-ctr')];
     applyConsumptionRerank(results, db);
     assert.equal(results[0].anchor, 'high-ctr', 'high-CTR anchor should be promoted');
+  });
+
+  it('on mode: preserves exact lexical hits for named CJK queries', () => {
+    process.env.F200_CONSUMPTION_RERANK = 'on';
+    insertDoc(
+      'exact-story',
+      'lesson',
+      'observed',
+      '醋醋喵诞生记：大缅因猫醋意 max 与一张头像的标准 PR 流程',
+      '这就是醋醋喵 story 的原案。',
+    );
+    insertDoc('popular-max', 'feature', 'observed', 'M4 Max TTS 调研', '常被读取的泛化资料');
+    insertMetric('exact-story', 0, 30, 90);
+    insertMetric('popular-max', 30, 30, 1);
+    insertBaseline('feature', 0.2);
+    insertBaseline('lesson', 0.1);
+
+    const results = [getDoc('exact-story'), getDoc('popular-max')];
+    applyConsumptionRerank(results, db, undefined, '大缅因猫醋意 max');
+
+    assert.equal(results[0].anchor, 'exact-story', 'exact named-story match must not be demoted by consumption prior');
   });
 
   it('shadow mode: computes but preserves original order', () => {

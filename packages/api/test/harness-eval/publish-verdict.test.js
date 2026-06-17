@@ -47,14 +47,14 @@ describe('handlePublishVerdict', () => {
       }
     });
 
-    it('returns 400 when delete_sunset lacks CVO accept gate', async () => {
+    it('returns 400 when delete_sunset lacks operator accept gate', async () => {
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: '/tmp/phase-h-test' },
         { packet: buildPacket({ verdict: 'delete_sunset' }), domain: 'eval:a2a', catId: 'codex' },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 400);
-      assert.match(result.detail, /CVO|cvoAcceptRequired/i);
+      assert.match(result.detail, /operator|cvoAcceptRequired/i);
     });
   });
 

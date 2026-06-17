@@ -43,7 +43,7 @@ export function collectSnapshotActiveCats(
  *
  * F194 Phase Z5 AC-Z15: ideate mode 下保留 targetCats UNION（不只看 slots），
  * 让 ParallelStatusBar 全程显示本轮所有 targetCats 卡片。slot 移除（猫完成清 slot）
- * 不应让卡片消失——铲屎官 alpha catch 2026-05-10 04:51："并发 at 47 和 55
+ * 不应让卡片消失——co-creator alpha catch 2026-05-10 04:51："并发 at 47 和 55
  * 但是观点采样面板只显示 47"。
  */
 export function deriveActiveCats({

@@ -6,7 +6,7 @@
  * backfill. It does NOT infer cat intent (KD-3 no-classifier red line) — it
  * applies deterministic, auditable context rules:
  *
- *   1. cat-authored magic word          → low   magic words are CVO-only brake
+ *   1. cat-authored magic word          → low   magic words are operator-only brake
  *                                                words (L0 家规); a cat using one
  *                                                is quoting/discussing, never braking
  *   2. >=3 distinct words, or 「word」=def → low   discussion / listing / defining the
@@ -32,8 +32,8 @@ export interface GradedMagicWordHit extends MagicWordHit {
 
 export interface GradeOptions {
   /**
-   * True if the message was authored by the cocreator (铲屎官). Magic words are
-   * CVO-only brake words — a cat authoring one is quoting/discussing, not braking.
+   * True if the message was authored by the cocreator (co-creator). Magic words are
+   * operator-only brake words — a cat authoring one is quoting/discussing, not braking.
    * Defaults to grading as cocreator-authored when authorship is unknown.
    */
   authoredByCocreator?: boolean;
@@ -54,7 +54,7 @@ const DEFINITION_RE = new RegExp(
 );
 
 function computeConfidence(message: string, hits: MagicWordHit[], opts: GradeOptions): EventConfidence {
-  // Rule 1: a cat using a CVO-only magic word is discussing/quoting, never braking.
+  // Rule 1: a cat using a operator-only magic word is discussing/quoting, never braking.
   if (opts.authoredByCocreator === false) return 'low';
   // Rule 2: discussion/definition context — listing the table or defining a word.
   const distinct = new Set(hits.map((h) => h.word)).size;

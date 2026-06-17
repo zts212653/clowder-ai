@@ -10,7 +10,7 @@ decision_id: ADR-022
 # ADR-022: 统一调度抽象 — 从 setInterval 到值守台
 
 > **Status**: accepted
-> **Deciders**: 铲屎官 + Ragdoll(opus) + Maine Coon(gpt52)
+> **Deciders**: operator + Ragdoll(opus) + Maine Coon(gpt52)
 > **Date**: 2026-03-25
 > **Consult**: GPT Pro (云端审阅), 金渐层(opencode)
 > **Research**: *(internal reference removed)*
@@ -55,7 +55,7 @@ interface ScheduledTask {
 - Gateway 硬耦合（我们需要可插拔 backend）
 - 单 agent 模型（龙虾没有"谁来干"的问题）
 
-### 铲屎官原话
+### operator experience
 
 > "有点像定时任务，但定时任务太机械了，我不想要机械的东西。"
 
@@ -148,7 +148,7 @@ interface DispatchReceipt {
 
 | 层 | 内容 | 谁能改 | 格式 |
 |----|------|--------|------|
-| **电闸**（TaskSpec） | trigger、run policy、actor、outcome | 仅铲屎官审批 | TypeScript / YAML |
+| **电闸**（TaskSpec） | trigger、run policy、actor、outcome | 仅operator审批 | TypeScript / YAML |
 | **备忘录**（Checklist） | "醒来检查什么" | 猫可以改 | 自然语言 |
 
 **Why**：龙虾的 HEARTBEAT.md 把电闸和备忘录混在一起，agent 可以把自己的触发频率改成每 5 分钟。我们分离两层：猫可以改"检查什么"，不能改"多久检查一次"。
@@ -166,7 +166,7 @@ RUN_DISPATCHED | RUN_COMPLETED | RUN_TIMEOUT | RUN_FAILED
 
 #### D-6: 用户配置 = UI + 自然语言，不是编辑 markdown
 
-**铲屎官明确否决了"编辑 markdown 文件"的配置方式。** 用户交互三层：
+**operator明确否决了"编辑 markdown 文件"的配置方式。** 用户交互三层：
 
 | 方式 | 面向谁 | 例子 |
 |------|--------|------|

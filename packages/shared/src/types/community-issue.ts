@@ -3,6 +3,10 @@
  * Repo-agnostic issue/PR board for community operations.
  */
 
+// F168 Phase C: imported for narrator TriageEntry extension (authoredByRole, recommendedOwnerRole).
+// The circular-import risk is absent: community-role.ts has no dependency on community-issue.ts.
+import type { CommunityRole } from './community-role.js';
+
 export type IssueState = 'unreplied' | 'discussing' | 'pending-decision' | 'accepted' | 'declined' | 'closed';
 export type IssueType = 'bug' | 'feature' | 'enhancement' | 'question';
 export type ReplyState = 'unreplied' | 'replied';
@@ -47,6 +51,12 @@ export interface QuestionResult {
   readonly result: QuestionGrade;
 }
 
+/** Narrator routeRecommendation — discriminated union (Phase C §0 terminal schema). */
+export type RouteRecommendation =
+  | { readonly kind: 'existing-thread'; readonly threadId: string }
+  | { readonly kind: 'new-thread' }
+  | { readonly kind: 'decline' };
+
 export interface TriageEntry {
   readonly catId: string;
   readonly verdict: Verdict;
@@ -54,6 +64,17 @@ export interface TriageEntry {
   readonly reasonCode?: string;
   readonly relatedFeature?: string;
   readonly timestamp: number;
+  // F168 Phase C — narrator extension fields (all optional; INV-12: old entries remain valid)
+  /** Marks a machine-generated entry from the narrator role vs. a human triage entry. */
+  readonly authoredByRole?: CommunityRole;
+  /** One-sentence "what is this issue about" in plain language produced by the narrator. */
+  readonly narrative?: string;
+  /** Evidence references gathered by narrator (linked feat/PR/issue anchors). */
+  readonly evidenceRefs?: readonly string[];
+  /** Narrator's route recommendation — one of the three outcome kinds. */
+  readonly routeRecommendation?: RouteRecommendation;
+  /** Which community role the narrator recommends should own this case (default: case-owner). */
+  readonly recommendedOwnerRole?: CommunityRole;
 }
 
 export interface ConsensusResult {
@@ -92,7 +113,7 @@ export interface GuardianAssignment {
 
 export const DEFAULT_INTAKE_CHECKLIST: readonly Omit<IntakeChecklistItem, 'evidence' | 'verifiedAt' | 'verifiedBy'>[] =
   [
-    { id: 'vision-alignment', label: '愿景对齐：交付物解决了铲屎官的原始需求', required: true },
+    { id: 'vision-alignment', label: '愿景对齐：交付物解决了co-creator的原始需求', required: true },
     { id: 'test-coverage', label: '测试覆盖：新增行为有对应测试', required: true },
     { id: 'doc-sync', label: '文档同步：spec/plan/BACKLOG 已更新', required: true },
     { id: 'no-regression', label: '无回归：现有测试全绿', required: true },

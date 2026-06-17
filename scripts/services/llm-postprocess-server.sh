@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/services/llm-postprocess-server.sh
-# Start local LLM post-processing server for Cat Cafe voice input (MLX backend).
+# Start local LLM post-processing server for Clowder AI voice input (MLX backend).
 #
 # Pipeline position:  Whisper ASR -> **LLM post-edit** -> term dictionary -> filler removal
 #

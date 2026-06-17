@@ -8,7 +8,7 @@ created: 2026-04-08
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 代码链已闭环，等待 AC-C5 team lead全链路终验
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 代码链已闭环，等待 AC-C5 operator全链路终验
 
 ## Why
 
@@ -30,9 +30,9 @@ F102 已经做完了记忆引擎（6 接口 + SQLite 基座 + 全局/项目层 +
 2. **无法快速理解**：项目已有大量代码和文档，猫每次从零开始读
 3. **经验不回流**：猫在外部项目踩的坑（如"鸿蒙某 API 兼容性问题"）沉淀在那个项目里，下次去别的鸿蒙项目时用不上
 
-> team experience（2026-04-08）："社区小伙伴使用你们，大概率不是开发你们，而是用你们开发其他项目。别人是让你们去做他们自己的项目，甚至别人的项目未必从零开始。这才是他们的痛点。"
+> operator experience（2026-04-08）："社区小伙伴使用你们，大概率不是开发你们，而是用你们开发其他项目。别人是让你们去做他们自己的项目，甚至别人的项目未必从零开始。这才是他们的痛点。"
 >
-> team lead补充（2026-04-09）："很多企业都完成信息化，但是信息化如何和 AI 结合？未必有探索。"
+> operator补充（2026-04-09）："很多企业都完成信息化，但是信息化如何和 AI 结合？未必有探索。"
 >
 > 社区洞察（2026-04-09）："这些小猫可以变为 Palantir 概念里面的 FDE，指导和完成业务系统的开发。"
 
@@ -143,7 +143,7 @@ interface ScannedEvidence {
 外部项目的 lesson/decision
   → 标记 generalizable: true/false（默认 false — fail-closed）
   → generalizable: true → 进入 candidate queue
-  → 审核（team lead或猫猫 review）
+  → 审核（operator或猫猫 review）
   → approved → 写入全局层
 ```
 
@@ -192,11 +192,11 @@ interface ScannedEvidence {
 - [x] AC-C2: 默认 `generalizable: false`（fail-closed）
 - [x] AC-C3: `generalizable: true` 的 candidate 走审核流程后才能写入 `global_knowledge.sqlite`
 - [x] AC-C4: 回流内容自动脱敏（移除项目私有标识）
-- [ ] AC-C5: team lead亲手体验一轮完整的"出征→冷启动→干活→经验回流"链路
+- [ ] AC-C5: operator亲手体验一轮完整的"出征→冷启动→干活→经验回流"链路
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R0 | "如果对方希望学习最佳实践，先帮人家做一次文档重构" | AC-01~05 | manual: skill 指导用户完成文档骨架 | [x] |
 | R1 | "别人的项目未必从零开始" — 能吃已有项目 | AC-A1, AC-A3 | test: 对一个普通 Git 仓库运行 scanner | [x] |
@@ -224,7 +224,7 @@ interface ScannedEvidence {
 
 ### 当前不允许宣布 done 的原因
 
-- **AC-C5 仍未完成**：我们还没有拿到team lead亲手走完一轮“出征 → 冷启动 → 干活 → 经验回流”的终验记录。
+- **AC-C5 仍未完成**：我们还没有拿到operator亲手走完一轮“出征 → 冷启动 → 干活 → 经验回流”的终验记录。
 - **因此本 feature 现在的真实状态是**：代码完成度已达到 close 前夜，但产品级 feat close 仍 blocked by AC-C5；在 AC-C5 完成前，F152 继续保留在 BACKLOG，不迁入 `docs/features/README.md` 的 done 表。
 
 ## Dependencies
@@ -246,7 +246,7 @@ interface ScannedEvidence {
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-0 | 加 Phase 0: Knowledge Engineering Skill（两条路径：Guided vs Autonomous） | team lead纠偏：Scanner 再强也只能吃已有文档，真正帮到用户的是指导文档重构（IdeaHub 咨询实证） | 2026-04-09 |
+| KD-0 | 加 Phase 0: Knowledge Engineering Skill（两条路径：Guided vs Autonomous） | operator纠偏：Scanner 再强也只能吃已有文档，真正帮到用户的是指导文档重构（IdeaHub 咨询实证） | 2026-04-09 |
 | KD-1 | 三 Phase 精简方案（不是五 Phase）→ 调整为 Phase 0+A+B+C | Phase 0 是 skill 层（不涉及引擎改动），不改原有三 Phase 的工程边界 | 2026-04-08 |
 | KD-2 | Scanner 输出带 provenance + 三层置信度 | Maine Coon护栏：不带来源信息后面无法区分置信度、无法决定回流策略 | 2026-04-08 |
 | KD-3 | Global distillation fail-closed（默认不回流） | Maine Coon护栏：防止甲方私有语境污染全局层 | 2026-04-08 |
@@ -257,18 +257,18 @@ interface ScannedEvidence {
 | KD-8 | Bootstrap 摘要先结构化提取，LLM 可选润色 | 不把冷启动绑死在模型额度上 | 2026-04-08 |
 | KD-9 | monorepo 先 detection + overview，不做 per-package 深扫 | 控制 Phase B 复杂度 | 2026-04-08 |
 | KD-10 | Phase A v1 不扫 commit messages 和 code comments | 噪音高、语言相关、性能贵，Maine Coon否决 | 2026-04-08 |
-| KD-11 | 经验回流双层路由：猫猫审核通道（四条件同时满足：provenance≥derived + 可验证 + 事实型 + 已脱敏）+ team lead审核通道（命中任一敏感条件即上升）；Phase C 初期先全量人审校准再逐步放权 | Ragdoll×Maine Coon(GPT-5.4) 讨论收敛 + team lead授权分层 | 2026-04-09 |
+| KD-11 | 经验回流双层路由：猫猫审核通道（四条件同时满足：provenance≥derived + 可验证 + 事实型 + 已脱敏）+ operator审核通道（命中任一敏感条件即上升）；Phase C 初期先全量人审校准再逐步放权 | Ragdoll×Maine Coon(GPT-5.4) 讨论收敛 + operator授权分层 | 2026-04-09 |
 | KD-12 | index_state 五态状态机（missing/stale/building/ready/failed）替代简单文件存在检测 | Maine Coon护栏：单靠 db 是否存在无法区分"过期""失败""构建中"，会导致误判和重复提示 | 2026-04-10 |
 | KD-13 | 幂等 key = projectRoot + headCommit + scannerVersion + scanMode；服务端 in-flight lock 防重复扫描 | Maine Coon提议 + Ragdoll采纳，防止多 session 并发触发重复 bootstrap | 2026-04-10 |
 | KD-14 | 摘要卡结构化优先 + LLM optional 增强（不违反 AC-B6）| Siamese提议 LLM 一句话定调 vs AC-B6 不绑 LLM 额度；折中：结构化默认，LLM 可用时润色 | 2026-04-10 |
 | KD-15 | 老用户"稍后"snooze 机制（7 天冷却）| Maine Coon护栏：不加冷却会反复打扰老用户 | 2026-04-10 |
-| KD-16 | Phase B UX 必须沿用 coral 色系（cocreator-primary #e29578），不用紫色；视觉衔接 ProjectSetupCard（PR #299）画风 | team lead审核设计稿时指出：实际 UI 是 coral 色系（Anthropic 品牌色），.pen 设计稿的紫色只是 spec，实现必须对齐已有代码 | 2026-04-10 |
-| KD-17 | Phase B review 时Maine Coon必须启动 dev 截图验证前端，不能只看代码 | team lead要求：前端改动必须实际打开浏览器验证，防止"代码对了但 UI 离谱" | 2026-04-10 |
+| KD-16 | Phase B UX 必须沿用 coral 色系（cocreator-primary #e29578），不用紫色；视觉衔接 ProjectSetupCard（PR #299）画风 | operator审核设计稿时指出：实际 UI 是 coral 色系（Anthropic 品牌色），.pen 设计稿的紫色只是 spec，实现必须对齐已有代码 | 2026-04-10 |
+| KD-17 | Phase B review 时Maine Coon必须启动 dev 截图验证前端，不能只看代码 | operator要求：前端改动必须实际打开浏览器验证，防止"代码对了但 UI 离谱" | 2026-04-10 |
 
 ## Review Gate
 
 - Phase A: 跨家族 review（Maine Coon优先）
 - Phase 0: Skill 层，writing-skills 流程验收
 - Phase A: 跨家族 review（Maine Coon优先）
-- Phase B: 跨家族 review + team lead短验收（在一个真实外部项目上 bootstrap）
-- Phase C: 跨家族 review + team lead全链路验收（出征→冷启动→干活→回流）
+- Phase B: 跨家族 review + operator短验收（在一个真实外部项目上 bootstrap）
+- Phase C: 跨家族 review + operator全链路验收（出征→冷启动→干活→回流）

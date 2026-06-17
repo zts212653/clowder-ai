@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/services/tts-server.sh
-# Start local TTS server for Cat Cafe voice output.
+# Start local TTS server for Clowder AI voice output.
 #
 # Usage:
 #   ./scripts/services/tts-server.sh                                  # default: qwen3-clone + Qwen3-TTS Base

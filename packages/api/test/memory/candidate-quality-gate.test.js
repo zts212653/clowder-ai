@@ -48,7 +48,7 @@ describe('Candidate quality gate', () => {
     );
   });
 
-  it('rejects real production garbage candidates (铲屎官 reported)', async () => {
+  it('rejects real production garbage candidates (co-creator reported)', async () => {
     const mod = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
     // These are the exact candidates from the screenshot that triggered the bug report
     assert.ok(mod.isImplementationNoise('submitCandidate 管道自动提取并推送到 Feed', '这是 Feed 自己的实现描述'));

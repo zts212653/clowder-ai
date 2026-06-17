@@ -8,12 +8,12 @@ created: 2026-03-23
 
 # F135: 狸花猫开箱即用（DARE Out-of-the-Box）
 
-> **Status**: done (closed — 需求已不存在，team lead 2026-05-26 拍板) | **Owner**: bouillipx (社区) | **Priority**: P2
+> **Status**: done (closed — 需求已不存在，operator 2026-05-26 拍板) | **Owner**: bouillipx (社区) | **Priority**: P2
 >
 > **来源**：社区 PR [clowder-ai#192](https://github.com/zts212653/clowder-ai/pull/192) / [clowder-ai#194](https://github.com/zts212653/clowder-ai/pull/194)
 > **Issue**: [clowder-ai#195](https://github.com/zts212653/clowder-ai/issues/195)
 >
-> **Close 2026-05-26**：team lead判定需求已不存在（DARE 狸花猫不再需要单独 OOTB 流程），直接 close。Phase A 代码已合入（clowder-ai#211），issue #195 已关闭。
+> **Close 2026-05-26**：operator判定需求已不存在（DARE 狸花猫不再需要单独 OOTB 流程），直接 close。Phase A 代码已合入（clowder-ai#211），issue #195 已关闭。
 
 ## Why
 
@@ -23,7 +23,7 @@ created: 2026-03-23
 3. 手动在 DARE venv 中安装 Python 依赖（openai、httpx[socks] 等）
 4. 手动修改 bootstrap binding 从 `skip` 改为 `enabled`
 
-team experience："我想要安装猫猫就有狸花猫，安装完后，只需要配置 api_key 就能使用了"
+operator experience："我想要安装猫猫就有狸花猫，安装完后，只需要配置 api_key 就能使用了"
 
 ## What
 

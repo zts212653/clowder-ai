@@ -34,6 +34,93 @@ test('system/init → session_init', () => {
   assert.equal(result.sessionId, 'sess-abc');
 });
 
+test('system/init with array mcp_servers → session_init + system_info(mcp_server_status)', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'sess-mcp',
+    mcp_servers: [
+      { name: 'MCP_DOCKER', status: 'pending' },
+      { name: 'playwright', status: 'connected' },
+      { name: 'jetbrains', status: 'failed' },
+      { name: 'plugin:figma:figma', status: 'disabled' },
+      { name: 'claude.ai Gmail', status: 'needs-auth' },
+      { name: 'ignored_unknown_status', status: 'connecting' },
+      { name: '', status: 'pending' },
+      { status: 'pending' },
+    ],
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(Array.isArray(result), 'mcp status telemetry should accompany session_init');
+  assert.equal(result.length, 2);
+  assert.equal(result[0].type, 'session_init');
+  assert.equal(result[0].sessionId, 'sess-mcp');
+  assert.equal(result[1].type, 'system_info');
+
+  const parsed = JSON.parse(result[1].content);
+  assert.equal(parsed.type, 'mcp_server_status');
+  assert.equal(parsed.provider, 'claude');
+  assert.equal(parsed.catId, CAT);
+  assert.equal(parsed.sessionId, 'sess-mcp');
+  assert.equal(parsed.pendingMeaning, 'deferred_tool_loading');
+  assert.deepEqual(parsed.counts, {
+    connected: 1,
+    pending: 1,
+    failed: 1,
+    disabled: 1,
+    'needs-auth': 1,
+  });
+  assert.deepEqual(parsed.pendingServers, ['MCP_DOCKER']);
+  assert.deepEqual(parsed.failedServers, ['jetbrains']);
+  assert.deepEqual(parsed.needsAuthServers, ['claude.ai Gmail']);
+  assert.deepEqual(
+    parsed.servers.map((server) => [server.name, server.status]),
+    [
+      ['MCP_DOCKER', 'pending'],
+      ['playwright', 'connected'],
+      ['jetbrains', 'failed'],
+      ['plugin:figma:figma', 'disabled'],
+      ['claude.ai Gmail', 'needs-auth'],
+    ],
+  );
+});
+
+test('system/init with object mcp_servers keeps backward-compatible telemetry parsing', () => {
+  const state = makeStreamState();
+  const event = {
+    type: 'system',
+    subtype: 'init',
+    session_id: 'sess-mcp-object',
+    mcp_servers: {
+      MCP_DOCKER: 'pending',
+      future_object_shape: { status: 'pending' },
+      ignored_unknown_status: 'connecting',
+    },
+  };
+
+  const result = transformClaudeEvent(event, CAT, state);
+
+  assert.ok(Array.isArray(result), 'mcp status telemetry should accompany session_init');
+  const parsed = JSON.parse(result[1].content);
+  assert.deepEqual(parsed.counts, {
+    connected: 0,
+    pending: 2,
+    failed: 0,
+    disabled: 0,
+    'needs-auth': 0,
+  });
+  assert.deepEqual(
+    parsed.servers.map((server) => [server.name, server.status]),
+    [
+      ['MCP_DOCKER', 'pending'],
+      ['future_object_shape', 'pending'],
+    ],
+  );
+});
+
 test('stream_event text_delta → text', () => {
   const state = makeStreamState();
   state.currentMessageId = 'msg-1';

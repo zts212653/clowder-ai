@@ -55,7 +55,7 @@ export function formatPromptTime(epochMs: number, options?: PromptTimeFormatOpti
   const utc = `${utcHhmm(epochMs)} UTC`;
   const timeZone = resolvePromptTimeZone(options);
   if (!timeZone) return utc;
-  return `铲屎官本地 ${localDateTime(epochMs, timeZone)} ${timeZone} / ${utc}`;
+  return `co-creator本地 ${localDateTime(epochMs, timeZone)} ${timeZone} / ${utc}`;
 }
 
 /** Format a from–to range for prompt injection. */
@@ -63,5 +63,5 @@ export function formatPromptTimeRange(fromMs: number, toMs: number, options?: Pr
   const utc = `${utcHhmm(fromMs)} — ${utcHhmm(toMs)} UTC`;
   const timeZone = resolvePromptTimeZone(options);
   if (!timeZone) return utc;
-  return `铲屎官本地 ${localDateTime(fromMs, timeZone)} — ${localDateTime(toMs, timeZone)} ${timeZone} / ${utc}`;
+  return `co-creator本地 ${localDateTime(fromMs, timeZone)} — ${localDateTime(toMs, timeZone)} ${timeZone} / ${utc}`;
 }

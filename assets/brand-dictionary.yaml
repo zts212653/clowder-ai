@@ -1,0 +1,365 @@
+# Clowder AI <-> Clowder AI boundary dictionary
+#
+# This file is the machine-readable truth source for F238. It defines
+# repo-specific brand, role, L4 culture, and path policies used by outbound
+# sanitization, inbound validation, hooks, CI, and tests.
+
+version: 0.1
+updated: 2026-06-16
+owner: "F238"
+
+modes:
+  outbound:
+    direction: home_to_public
+    default_action: detect_and_transform
+  inbound:
+    direction: public_to_home
+    default_action: detect_only
+  round_trip:
+    direction: both
+    default_action: detect_only
+
+term_classes:
+  brand:
+    description: Product names and user-visible product descriptions.
+  role:
+    description: Human/operator role names and route handles.
+  persona:
+    description: Cat family names, private nicknames, and persona labels.
+  l4_culture:
+    description: Home-only governance phrases and cultural shorthand.
+  code_identifier:
+    description: Identifiers retained for compatibility unless separately migrated.
+
+terms:
+  - id: product.primary
+    class: brand
+    severity: P1
+    home:
+      canonical: "Clowder AI"
+      variants:
+        - "Clowder AI"
+        - "Clowder AI"
+        - "猫猫咖啡"
+    public:
+      canonical: "Clowder AI"
+      variants:
+        - "Clowder AI"
+    contexts:
+      - ui
+      - docs
+      - scripts
+      - desktop
+      - manifest
+      - prompt
+    exceptions:
+      - pattern: "@cat-cafe/*"
+        reason: "Package scope is a code identifier; rename is a separate compatibility project."
+      - pattern: "cat-cafe-skills"
+        reason: "Public distribution path remains compatible for now; content is still scanned."
+      - pattern: "cat_cafe_*"
+        reason: "MCP tool namespace is currently a public runtime contract."
+
+  - id: product.hub
+    class: brand
+    severity: P1
+    home:
+      canonical: "Clowder AI Hub"
+      variants:
+        - "Clowder AI Hub"
+        - "Clowder AI Hub"
+    public:
+      canonical: "Clowder AI Hub"
+      variants:
+        - "Clowder AI Hub"
+
+  - id: product.tagline
+    class: brand
+    severity: P1
+    home:
+      canonical: "Your AI team collaboration space"
+      variants:
+        - "Your AI team collaboration space"
+    public:
+      canonical: "Your AI team collaboration space"
+      variants:
+        - "Your AI team collaboration space"
+
+  - id: role.co_creator
+    class: role
+    severity: P1
+    home:
+      canonical: "co-creator"
+      variants:
+        - "co-creator"
+        - "@co-creator"
+        - "@co-creator"
+        - "@co-creator"
+        - "@co-creator"
+        - "You"
+        - "you"
+    public:
+      canonical: "co-creator"
+      variants:
+        - "co-creator"
+        - "operator"
+        - "@co-creator"
+    context_rules:
+      route_handle: "co-creator"
+      governance_role: "operator"
+
+  - id: role.cvo
+    class: role
+    severity: P2
+    home:
+      canonical: "operator"
+      variants:
+        - "operator"
+    public:
+      canonical: "operator"
+      variants:
+        - "operator"
+    note: "If operator remains a public product concept, whitelist explicit paths instead of relying on implicit pass-through."
+
+  - id: persona.private_nicknames
+    class: persona
+    severity: P1
+    home:
+      variants:
+        - "宪宪"
+        - "砚砚"
+        - "烁烁"
+    public:
+      variants:
+        - "Ragdoll"
+        - "Maine Coon"
+        - "Siamese"
+    note: "Private cat nicknames are home identity, not public product copy."
+
+  - id: persona.breed_labels
+    class: persona
+    severity: P2
+    home:
+      variants:
+        - "布偶猫"
+        - "缅因猫"
+        - "暹罗猫"
+        - "孟加拉猫"
+    public:
+      variants:
+        - "Ragdoll"
+        - "Maine Coon"
+        - "Siamese"
+        - "Bengal"
+    note: "Public product may intentionally keep a cat metaphor; each exception must be path-scoped."
+
+  - id: l4.redis_sanctum
+    class: l4_culture
+    severity: P1
+    home:
+      canonical: "Redis production Redis (sacred)"
+      variants:
+        - "Redis production Redis (sacred)"
+        - "production data boundary"
+        - "production Redis (sacred)"
+        - "圣域"
+    public:
+      canonical: "production data boundary"
+      variants:
+        - "Runtime data safety"
+        - "production Redis"
+        - "production data boundary"
+
+  - id: l4.alpha_acceptance
+    class: l4_culture
+    severity: P2
+    home:
+      canonical: "Alpha 验收通道"
+      variants:
+        - "Alpha 验收通道"
+        - "pnpm alpha:start"
+    public:
+      canonical: "release acceptance channel"
+      variants:
+        - "release acceptance channel"
+
+  - id: l4.home_family
+    class: l4_culture
+    severity: P2
+    home:
+      variants:
+        - "家里"
+        - "三猫"
+        - "猫猫是家庭成员"
+    public:
+      variants:
+        - "project"
+        - "maintainers"
+        - "team"
+    note: "Allowed in internal docs; public phrasing should be product/team language unless explicitly branded."
+
+path_policies:
+  - pattern: "assets/system-prompts/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P0
+    reason: "Native L0 and governance prompt truth source."
+
+  - pattern: "assets/prompt-templates/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P0
+    reason: "F237 prompt extraction target; prompt semantics must preserve home invariants."
+
+  - pattern: "scripts/compile-system-prompt-l0.mjs"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "L0 compiler can carry role, route, and governance strings."
+
+  - pattern: "packages/web/public/manifest.json"
+    outbound: sanitize
+    inbound: brand-sensitive
+    risk: P1
+    reason: "PWA user-visible brand surface."
+
+  - pattern: "packages/web/public/concierge/**/pet.json"
+    outbound: sanitize
+    inbound: brand-sensitive
+    risk: P2
+    reason: "Public concierge metadata is user-visible product copy."
+
+  - pattern: "cat-config.json"
+    outbound: generate-and-sanitize
+    inbound: public-only
+    risk: P1
+    reason: "Home roster is generated into a public config; community edits need explicit policy before absorption."
+
+  - pattern: "sop-definitions/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Runtime SOP text carries safety and operator terminology."
+
+  - pattern: "guides/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Guide YAML is user-visible onboarding copy and can contain product terms."
+
+  - pattern: "desktop/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Desktop app product identity, installer metadata, and support paths differ by repo."
+
+  - pattern: "cat-cafe-skills/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Skills are runtime behavior instructions; content must be semantically sanitized."
+
+  - pattern: "plugins/**/*.yaml"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Plugin setup copy is public user-facing configuration guidance."
+
+  # ── Legacy patterns migrated from hardcoded intake case statement (F238 Phase C review) ──
+
+  - pattern: "README.md"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Root README is generated from README.opensource; community edits must port to source."
+
+  - pattern: "README.*.md"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Localized READMEs are generated from README.opensource sources."
+
+  - pattern: "docs/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Docs receive global sanitizer transforms (cat names, ports, internal paths)."
+
+  - pattern: "scripts/*.sh"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Shell scripts receive global sanitizer transforms."
+
+  - pattern: "packages/api/src/config/**"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Config files carry port remapping, env registry, frontend origin, and governance transforms."
+
+  - pattern: "packages/api/src/domains/leaderboard/leaderboard-service.ts"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Leaderboard service has code-level outbound transforms."
+
+  - pattern: "packages/web/src/lib/mention-highlight.ts"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P2
+    reason: "Mention highlight has code-level outbound transforms."
+
+  - pattern: "packages/web/public/icons/**"
+    outbound: sanitize
+    inbound: brand-sensitive
+    risk: P1
+    reason: "Icon files are brand identity assets."
+
+exceptions:
+  - id: code.mcp_namespace
+    class: code_identifier
+    patterns:
+      - "cat_cafe_*"
+    applies_to:
+      - scripts
+      - docs
+      - skills
+    reason: "MCP tool names are currently runtime contracts and must not be rewritten by generic brand rules."
+
+  - id: code.package_scope
+    class: code_identifier
+    patterns:
+      - "@cat-cafe/*"
+    applies_to:
+      - package.json
+      - pnpm-lock.yaml
+      - source
+    reason: "Package scope migration is a separate compatibility decision."
+
+  - id: compatibility.skill_path
+    class: code_identifier
+    patterns:
+      - "cat-cafe-skills"
+    applies_to:
+      - paths
+      - docs
+    reason: "Directory name remains exported for compatibility; file contents still follow term policy."
+
+enforcement:
+  outbound_export:
+    fail_on: [P0, P1]
+    warn_on: [P2, P3]
+    output: "text + json"
+  inbound_validate:
+    fail_on: [P0, P1]
+    warn_on: [P2, P3]
+    output: "text + json"
+  hooks:
+    pre_commit:
+      source: "path_policies"
+      from_index: true
+    ci:
+      required: true
+  eval:
+    metric: "boundary_violation_count_by_term_class"
+    target: "P0/P1 zero in public export and inbound-sensitive cat-cafe paths"
