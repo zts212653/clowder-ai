@@ -228,6 +228,15 @@ Every contribution should respect these:
 - **Biome** for formatting and linting (`pnpm check` / `pnpm check:fix`)
 - **pnpm** for package management
 - Files under 350 lines (warning at 200)
+
+### Provider CLI Auth Setup
+
+When contributing to a provider service (e.g. `KimiAgentService`, `ClaudeAgentService`), understand the auth model of the underlying CLI. Kimi is a good example:
+
+- **kimi-cli uses OAuth**, not API keys. After `kimi login`, the credential file lives at `~/.kimi-code/credentials/kimi-code.json` (access_token + refresh_token).
+- The `KimiAgentService` detects auth in priority order: (1) `CAT_CAFE_KIMI_API_KEY` in account binding, (2) `CAT_CAFE_KIMI_OAUTH_TOKEN` in account binding, (3) native credential file at `$HOME/.kimi-code/credentials/kimi-code.json`. If none of these resolve, the service fails with a clear hint before spawning the CLI (avoids `exit 1` with `未识别的CLI错误`).
+- When testing locally: either run `kimi login` once, or set `CAT_CAFE_KIMI_API_KEY` in your shell env.
+- The detection function (`buildKimiAuthEnv` in `kimi-config.ts`) takes an optional `userHomeDir` override so tests can stub the home directory without mocking `os.homedir()`.
 - No `any` types
 - Run `pnpm lint` before submitting
 

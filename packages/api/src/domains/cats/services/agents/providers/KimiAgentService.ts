@@ -17,7 +17,7 @@ import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractImagePaths } from './image-paths.js';
 import {
-  buildApiKeyEnv,
+  buildKimiAuthEnv,
   buildProjectMcpArgs,
   readKimiContextUsedTokens,
   readKimiModelConfigInfo,
@@ -71,17 +71,17 @@ export class KimiAgentService implements AgentService {
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     const effectivePrompt = buildKimiPrompt(prompt, options?.systemPrompt, imagePaths);
     const workingDirectory = options?.workingDirectory ?? process.cwd();
-    const apiKeyEnv = buildApiKeyEnv(effectiveModel, options?.callbackEnv);
+    const authResult = buildKimiAuthEnv(effectiveModel, options?.callbackEnv);
     const tempMcpConfig = this.mcpServerPath
       ? writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
       : null;
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
     const supportsThinking =
       modelConfig.capabilities.includes('thinking') ||
-      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
+      authResult?.env.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
     const supportsImageInput =
       modelConfig.capabilities.includes('image_in') ||
-      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
+      authResult?.env.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
 
     const args = ['--print', '--output-format', 'stream-json'];
     if (options?.sessionId) {
@@ -107,7 +107,8 @@ export class KimiAgentService implements AgentService {
     for (const dir of imageAccessDirs) {
       args.push('--add-dir', dir);
     }
-    if (!apiKeyEnv && effectiveModel) {
+    // When using native auth, no KIMI_MODEL_NAME in env — pass --model CLI arg.
+    if (authResult?.kind === 'native' && effectiveModel) {
       args.push('--model', effectiveModel);
     }
     args.push('--prompt', effectivePrompt);
@@ -146,15 +147,37 @@ export class KimiAgentService implements AgentService {
         return;
       }
 
+      // Fail fast if no auth is configured — see issue #939.
+      // Without auth, kimi-cli would still spawn and exit 1 with a
+      // generic "未识别的CLI错误" — clearer to surface the cause here.
+      if (!authResult) {
+        yield {
+          type: 'error' as const,
+          catId: this.catId,
+          error:
+            'No Kimi auth configured. ' +
+            'Either: (1) bind a Kimi account via cat-account-binding ' +
+            '(sets CAT_CAFE_KIMI_API_KEY), ' +
+            '(2) set CAT_CAFE_KIMI_OAUTH_TOKEN explicitly, ' +
+            'or (3) run `kimi login` to create ' +
+            '~/.kimi-code/credentials/kimi-code.json.',
+          metadata,
+          timestamp: Date.now(),
+        };
+        yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
+        return;
+      }
+
       let emittedSessionInit = Boolean(options?.sessionId);
       let sawThinking = false;
       let emittedImageCapability = false;
+      const authEnv = authResult.env;
       const cliOpts = {
         command: kimiCommand,
         args,
         ...(options?.workingDirectory ? { cwd: options.workingDirectory } : {}),
-        ...(options?.callbackEnv || apiKeyEnv || options?.accountEnv
-          ? { env: { ...(options?.callbackEnv ?? {}), ...(apiKeyEnv ?? {}), ...(options?.accountEnv ?? {}) } }
+        ...(options?.callbackEnv || authEnv || options?.accountEnv
+          ? { env: { ...(options?.callbackEnv ?? {}), ...authEnv, ...(options?.accountEnv ?? {}) } }
           : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),
