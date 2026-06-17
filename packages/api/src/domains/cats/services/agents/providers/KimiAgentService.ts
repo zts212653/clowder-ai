@@ -229,10 +229,16 @@ export class KimiAgentService implements AgentService {
         }
         if (isCliError(event)) {
           // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
+          // F212 Phase H (#939 part B): prefer cliDiagnostics.publicSummary (caller-attribution)
+          // over formatCliExitError when diagnostics are present — the generic
+          // `Kimi CLI: <sanitized message>` fallback drops the structured caller context
+          // (Error:..., kimi_cli.X.Y:msg, [error] {brief}) already computed in buildCliDiagnostics.
+          // formatCliExitError remains as defense-in-depth for legacy cli-spawn consumers
+          // that pre-date F212 Phase A (no cliDiagnostics attached).
           yield {
             type: 'error',
             catId: this.catId,
-            error: formatCliExitError('Kimi CLI', event),
+            error: event.cliDiagnostics?.publicSummary ?? formatCliExitError('Kimi CLI', event),
             metadata: event.cliDiagnostics ? { ...metadata, cliDiagnostics: event.cliDiagnostics } : metadata,
             timestamp: Date.now(),
           };

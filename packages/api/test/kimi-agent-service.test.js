@@ -621,3 +621,97 @@ test('enriches done metadata with local Kimi context snapshot for session-chain 
     rmSync(shareDir, { recursive: true, force: true });
   }
 });
+
+// =============================================================================
+// F212 Phase H (#939 part B) — KimiAgentService surfaces cliDiagnostics.publicSummary
+// in the user-facing error field instead of the generic `formatCliExitError` fallback.
+// =============================================================================
+// Before: error field = `Kimi CLI: <sanitized message> [reasonCode]` — drops structured
+//         caller-attribution already present in cliDiagnostics (Error: foo, module path, etc.)
+// After:  error field = cliDiagnostics.publicSummary ?? formatCliExitError('Kimi CLI', event)
+//         (defense-in-depth fallback when cliDiagnostics is missing for any reason)
+
+test('AC-H2: __cliError with cliDiagnostics → error field equals cliDiagnostics.publicSummary', async () => {
+  async function* spawnCliOverride() {
+    yield {
+      __cliError: true,
+      exitCode: 1,
+      signal: null,
+      message: 'kimi-cli: 错误：无法连接上游',
+      command: 'kimi',
+      // No reasonCode → unknown classifier. cliDiagnostics carries the structured caller-attribution.
+      cliDiagnostics: {
+        publicSummary: 'Error: kimi_cli.cli.plugin:75 plugin foo not found',
+        publicHint: '检查 ~/.kimi/plugins/ 目录下插件配置',
+        debugRef: { command: 'kimi', exitCode: 1, signal: null, invocationId: 'inv-h2' },
+        reasonCode: undefined,
+        safeExcerpt: 'Error: kimi_cli.cli.plugin:75 plugin foo not found',
+        excerptSource: 'unknown_raw',
+      },
+    };
+  }
+
+  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
+  const errorMsg = msgs.find((msg) => msg.type === 'error');
+  assert.ok(errorMsg, 'should yield an error message');
+  // #939 part B: error field is cliDiagnostics.publicSummary (caller-attribution), NOT
+  // the generic `Kimi CLI: <sanitized message>` fallback
+  assert.strictEqual(errorMsg.error, 'Error: kimi_cli.cli.plugin:75 plugin foo not found');
+  assert.ok(
+    !errorMsg.error.startsWith('Kimi CLI:'),
+    'should not use formatCliExitError fallback when cliDiagnostics present',
+  );
+  // Metadata still carries cliDiagnostics (existing behavior preserved)
+  assert.equal(errorMsg.metadata?.cliDiagnostics?.publicSummary, 'Error: kimi_cli.cli.plugin:75 plugin foo not found');
+});
+
+test('AC-H2: __cliError WITHOUT cliDiagnostics → falls back to formatCliExitError (defense-in-depth)', async () => {
+  // Regression anchor: legacy cli-spawn consumers that pre-date F212 Phase A
+  // (no cliDiagnostics attached) must still surface a useful error string.
+  async function* spawnCliOverride() {
+    yield {
+      __cliError: true,
+      exitCode: 1,
+      signal: null,
+      message: 'sanitized message without diagnostics',
+      command: 'kimi',
+    };
+  }
+
+  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
+  const errorMsg = msgs.find((msg) => msg.type === 'error');
+  assert.ok(errorMsg, 'should yield an error message');
+  // formatCliExitError fallback: 'Kimi CLI: <message>'
+  assert.strictEqual(errorMsg.error, 'Kimi CLI: sanitized message without diagnostics');
+  // No cliDiagnostics on metadata
+  assert.equal(errorMsg.metadata?.cliDiagnostics, undefined);
+});
+
+test('AC-H2: __cliError with reasonCode and cliDiagnostics → publicSummary from REASON_TEXT wins (regression)', async () => {
+  // When reasonCode is known, buildCliDiagnostics returns REASON_TEXT.summary.
+  // KimiAgentService must surface that, not derive a new caller-attribution.
+  async function* spawnCliOverride() {
+    yield {
+      __cliError: true,
+      exitCode: 1,
+      signal: null,
+      message: '401 Unauthorized',
+      command: 'kimi',
+      reasonCode: 'auth_failed',
+      cliDiagnostics: {
+        publicSummary: 'API 认证失败',
+        publicHint: '检查 .env 或 Console 里 provider 的 API key 是否正确、未过期。',
+        debugRef: { command: 'kimi', exitCode: 1, signal: null, invocationId: 'inv-auth' },
+        reasonCode: 'auth_failed',
+      },
+    };
+  }
+
+  const service = new KimiAgentService({ model: 'kimi-code/kimi-for-coding' });
+  const msgs = await collect(service.invoke('Hello', { spawnCliOverride }));
+  const errorMsg = msgs.find((msg) => msg.type === 'error');
+  assert.ok(errorMsg, 'should yield an error message');
+  assert.strictEqual(errorMsg.error, 'API 认证失败');
+});
