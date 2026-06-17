@@ -14,15 +14,15 @@
  *   useSyncExternalStore, each notification triggers a synchronous re-render.
  *   800 synchronous nested re-renders exceed React's 50-update limit → crash.
  *
- *   WITH coalescer: 0 store notifications during the burst (all buffered).
- *   The microtask fires AFTER the current macrotask completes. React 18 treats
- *   all state updates within a single microtask as one batch → O(1) renders,
- *   no nested update cascade, no crash.
+ *   WITH coalescer (chunked flush): 0 store notifications during push phase.
+ *   Each microtask flush processes at most CHUNK_SIZE events (~6 × 4 = 24
+ *   notifications per microtask). React resets its nested update counter
+ *   between microtasks → each chunk stays safely under the 50-update limit.
  *
- * This test proves invariant A (0 synchronous notifications) and invariant B
- * (all notifications happen in the subsequent microtask) directly using the
- * real zustand store subscription mechanism — the same one useSyncExternalStore
- * builds on top of.
+ * This test proves invariant A (0 synchronous notifications during push) and
+ * invariant B (notifications are spread across multiple microtasks, each
+ * staying under the 50-update limit) directly using the real zustand store
+ * subscription mechanism — the same one useSyncExternalStore builds on.
  */
 import { describe, expect, it } from 'vitest';
 import { createStore } from 'zustand/vanilla';
@@ -61,6 +61,13 @@ function simulateHandleAgentMessage(store: ReturnType<typeof createTestStore>, s
   store.setState((s) => ({ invocationCount: s.invocationCount + 1 }));
 }
 
+/** Drain all pending microtasks (chunked flush needs multiple ticks). */
+async function drainMicrotasks(ticks = 50): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    await Promise.resolve();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Invariant A — document the bug (without coalescer)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,11 +103,11 @@ describe('WITHOUT coalescer (documents the bug)', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Invariant B — prove the fix (with coalescer)
+// Invariant B — prove the fix (with chunked coalescer)
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('WITH coalescer (proves the fix)', () => {
-  it('invariant A: 200 synchronous events → 0 synchronous notifications during burst', async () => {
+  it('invariant A: 200 synchronous events → 0 synchronous notifications during push phase', async () => {
     const store = createTestStore();
 
     const synchronousNotifications: number[] = [];
@@ -124,15 +131,15 @@ describe('WITH coalescer (proves the fix)', () => {
     }
     burstActive = false;
 
-    // KEY ASSERTION: zero synchronous notifications during the burst.
+    // KEY ASSERTION: zero synchronous notifications during the push phase.
     // All 200 events are buffered; none has fired yet.
     // React's subscriber is never called synchronously → no nested update cascade.
     expect(synchronousNotifications).toHaveLength(0);
 
-    // Drain microtask — all 200 events flush together
-    await Promise.resolve();
+    // Drain all microtask chunks — all 200 events flush across multiple microtasks
+    await drainMicrotasks();
 
-    // After the microtask: store is fully up-to-date
+    // After drain: store is fully up-to-date
     expect(store.getState().lastSeq).toBe(200);
     expect(store.getState().messageCount).toBe(200);
     expect(store.getState().invocationCount).toBe(200);
@@ -140,14 +147,15 @@ describe('WITH coalescer (proves the fix)', () => {
     unsub();
   });
 
-  it('invariant B: all 800 store notifications happen inside a single microtask flush', async () => {
+  it('invariant B: each microtask chunk stays under 50 store notifications (React safety)', async () => {
     const store = createTestStore();
 
-    const notificationTimestamps: Array<'sync' | 'microtask'> = [];
-    let phase: 'sync' | 'microtask' = 'sync';
+    // Track notifications per microtask tick
+    const notificationsPerTick: number[] = [];
+    let currentTickCount = 0;
 
     const unsub = store.subscribe(() => {
-      notificationTimestamps.push(phase);
+      currentTickCount++;
     });
 
     const coalescer = createAgentMessageCoalescer((msg) => {
@@ -155,26 +163,35 @@ describe('WITH coalescer (proves the fix)', () => {
       simulateHandleAgentMessage(store, seq);
     });
 
-    // Burst phase: phase = 'sync'
+    // Push 200 events
     for (let seq = 1; seq <= 200; seq++) {
       coalescer.push({ seq });
     }
 
-    // Switch phase before microtask drains
-    phase = 'microtask';
-    await Promise.resolve();
+    // Drain microtasks one at a time, recording notifications per tick
+    for (let tick = 0; tick < 50; tick++) {
+      currentTickCount = 0;
+      await Promise.resolve();
+      if (currentTickCount > 0) {
+        notificationsPerTick.push(currentTickCount);
+      }
+      if (store.getState().lastSeq === 200) break;
+    }
 
-    // All notifications should bear 'microtask' phase — none fired synchronously
-    const syncNotifications = notificationTimestamps.filter((t) => t === 'sync');
-    const microtaskNotifications = notificationTimestamps.filter((t) => t === 'microtask');
+    // Every tick must stay under React's 50-nested-update limit.
+    // With CHUNK_SIZE=6, each tick processes 6 events × 4 set() = 24 notifications.
+    for (const count of notificationsPerTick) {
+      expect(count).toBeLessThanOrEqual(50);
+    }
 
-    expect(syncNotifications).toHaveLength(0); // No sync notifications — bug cannot occur
-    expect(microtaskNotifications).toHaveLength(800); // All 800 in microtask — safe for React
+    // All events were processed
+    expect(store.getState().lastSeq).toBe(200);
+    expect(store.getState().messageCount).toBe(200);
 
     unsub();
   });
 
-  it('normal streaming pace (events across microtasks) is unaffected', async () => {
+  it('normal streaming pace (events across macrotasks) is unaffected', async () => {
     // Verify: when events arrive slowly (typical use), each event still gets
     // processed promptly in its own microtask. No artificial batching delay.
     const store = createTestStore();
