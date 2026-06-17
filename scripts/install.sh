@@ -979,16 +979,6 @@ build_step "mcp-server" pnpm --dir packages/mcp-server run build
 build_step "api" pnpm --dir packages/api run build
 build_step "web" env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}" pnpm --dir packages/web run build
 ok "Build complete"
-# Skills: per-skill user-level symlinks (ADR-009)
-SKILLS_SOURCE="$PROJECT_DIR/cat-cafe-skills"
-if [[ -d "$SKILLS_SOURCE" ]]; then
-    for tdir in "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.gemini/skills" "$HOME/.kimi/skills"; do
-        mkdir -p "$tdir"
-        for sd in "$SKILLS_SOURCE"/*/; do
-            [[ -d "$sd" ]] || continue; sn=$(basename "$sd"); [[ "$sn" == "refs" ]] && continue; ln -sfn "$sd" "$tdir/$sn"
-        done
-    done; ok "Skills linked"
-else fail "cat-cafe-skills/ not found"; exit 1; fi
 sync_agent_hooks_best_effort
 
 # ── [6/8] Install AI agent CLI tools ─────────────────────

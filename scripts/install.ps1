@@ -6,7 +6,7 @@
   Installs prerequisites and sets up the current checked-out cat-cafe repo.
   Clone or download the repo first, then run this helper from inside it.
   Steps: env detect -> preflight network check -> Node/pnpm install -> Redis -> .env generate
-         -> deps & build -> skills mount -> AI CLI tools -> verify & optionally start
+         -> deps & build -> AI CLI tools -> verify & optionally start
 
 .EXAMPLE
   # From repo root:
@@ -245,7 +245,7 @@ function Resolve-ProjectRoot {
 }
 
 # -- Step 1: Environment detection ---------------------------
-Write-Step "Step 1/8 - Detect environment"
+Write-Step "Step 1/7 - Detect environment"
 
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Err "PowerShell 5.0+ required (current: $($PSVersionTable.PSVersion))"
@@ -291,7 +291,7 @@ if (-not $SkipPreflight -and (Test-Path $preflightScript)) {
     }
 }
 
-Write-Step "Step 2/8 - Node.js and pnpm"
+Write-Step "Step 2/7 - Node.js and pnpm"
 
 $nodeOk = $false
 try {
@@ -389,7 +389,7 @@ if (-not $pnpmOk) {
     }
 }
 
-Write-Step "Step 3/8 - Redis"
+Write-Step "Step 3/7 - Redis"
 
 $redisPlan = Resolve-InstallerRedisPlan -ProjectRoot $ProjectRoot
 $hasRedis = Apply-InstallerRedisPlan -State $authState -ProjectRoot $ProjectRoot -Plan $redisPlan
@@ -398,7 +398,7 @@ if (-not $hasRedis) {
     exit 1
 }
 
-Write-Step "Step 4/8 - Generate .env"
+Write-Step "Step 4/7 - Generate .env"
 
 Set-Location $ProjectRoot
 Write-Ok "Using project root: $ProjectRoot"
@@ -460,7 +460,7 @@ if (Test-Path $envFile) {
     Write-Ok ".env loaded into session"
 }
 
-Write-Step "Step 5/8 - Install dependencies and build"
+Write-Step "Step 5/7 - Install dependencies and build"
 
 # pnpm 9 + npm-global pnpm.cmd + Node 24 on Windows hits
 # "Could not determine Node.js install directory" the moment `pnpm install`
@@ -530,10 +530,7 @@ if (-not $SkipBuild) {
     Write-Warn "Build skipped (-SkipBuild)"
 }
 
-Write-Step "Step 6/8 - Skills mount"
-Mount-InstallerSkills -ProjectRoot $ProjectRoot
-
-Write-Step "Step 7/8 - AI CLI tools"
+Write-Step "Step 6/7 - AI CLI tools"
 
 function Install-AntigravityCli {
     $installerUrl = "https://antigravity.google/cli/install.cmd"
@@ -614,7 +611,7 @@ $hasCodex = $null -ne (Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6)
 $hasAgy = $null -ne (Resolve-ToolCommandWithRetry -Name "agy" -Attempts 6)
 $hasKimi = $null -ne (Resolve-ToolCommandWithRetry -Name "kimi" -Attempts 6)
 
-Write-Step "Step 8/8 - Verify and launch"
+Write-Step "Step 7/7 - Verify and launch"
 
 $artifacts = @("packages/shared/dist", "packages/mcp-server/dist/index.js", "packages/api/dist/index.js", "packages/web/.next")
 $allGood = $true
