@@ -58,6 +58,30 @@ export interface AcpClientConfig {
   permissionHandler?: AcpPermissionHandler;
 }
 
+export interface AcpSpawnLogFields {
+  command: string;
+  argCount: number;
+  cwd: string;
+  pid?: number;
+  envKeyCount: number;
+}
+
+export function buildAcpSpawnLogFields(input: {
+  command: string;
+  args: readonly string[];
+  cwd: string;
+  pid?: number;
+  env?: Record<string, string>;
+}): AcpSpawnLogFields {
+  return {
+    command: input.command,
+    argCount: input.args.length,
+    cwd: input.cwd,
+    ...(input.pid !== undefined ? { pid: input.pid } : {}),
+    envKeyCount: Object.keys(input.env ?? {}).length,
+  };
+}
+
 // ─── Errors ──────────────��─────────────────────────────────────
 
 export class AcpProtocolError extends Error {
@@ -183,26 +207,121 @@ export class AcpClient {
 
     this.startReading();
 
+    log.info(
+      buildAcpSpawnLogFields({ command, args, cwd: this.config.cwd, pid: this.child.pid, env: this.config.env }),
+      'ACP initialize: process spawned, sending initialize request',
+    );
     const resp = await this.sendRequest(ACP_METHODS.initialize, { protocolVersion: 1 });
     this.initResult = resp.result as unknown as AcpInitializeResult;
+    log.info(
+      {
+        agentInfo: this.initResult.agentInfo,
+        mcpCapabilities: this.initResult.agentCapabilities?.mcpCapabilities,
+        loadSession: this.initResult.agentCapabilities?.loadSession,
+        pid: this.child?.pid,
+      },
+      'ACP initialize: agent ready',
+    );
     return this.initResult;
   }
 
   async newSession(cwd?: string, mcpServers: AcpMcpServer[] = []): Promise<AcpNewSessionResult> {
+    // F161: Filter MCP servers by client's announced mcpCapabilities.
+    // Per ACP spec: stdio is mandatory (always passes), http/sse are optional.
+    const compatible = this.filterMcpByCapabilities(mcpServers);
+    if (compatible.length !== mcpServers.length) {
+      log.info(
+        {
+          total: mcpServers.length,
+          compatible: compatible.length,
+          dropped: mcpServers.length - compatible.length,
+          droppedNames: mcpServers.filter((s) => !compatible.includes(s)).map((s) => s.name),
+          capabilities: this.initResult?.agentCapabilities?.mcpCapabilities ?? 'unknown',
+        },
+        'ACP: filtered incompatible MCP servers by client mcpCapabilities',
+      );
+    }
+
+    const effectiveCwd = cwd ?? this.config.cwd;
+    // F161 diagnostic: log the full session/new payload shape for timeout debugging
+    log.info(
+      {
+        cwd: effectiveCwd,
+        mcpServerCount: compatible.length,
+        mcpServers: compatible.map((s) => ({
+          name: s.name,
+          transport: 'type' in s ? s.type : 'stdio',
+          // For stdio: log command + args (no env values — security)
+          ...('command' in s ? { command: s.command, argCount: s.args.length } : {}),
+          // For http/sse: log url presence
+          ...('url' in s ? { hasUrl: !!s.url } : {}),
+          envKeyCount: 'env' in s && Array.isArray(s.env) ? s.env.length : 0,
+          envKeys: 'env' in s && Array.isArray(s.env) ? (s.env as Array<{ name: string }>).map((e) => e.name) : [],
+        })),
+        agentInfo: this.initResult?.agentInfo,
+        pid: this.child?.pid,
+      },
+      'ACP session/new: sending request',
+    );
+
+    const t0 = Date.now();
     const resp = await this.sendRequest(ACP_METHODS.sessionNew, {
-      cwd: cwd ?? this.config.cwd,
-      mcpServers,
+      cwd: effectiveCwd,
+      mcpServers: compatible,
     });
+    log.info({ durationMs: Date.now() - t0, hasResult: !!resp.result }, 'ACP session/new: response received');
     return resp.result as unknown as AcpNewSessionResult;
   }
 
   async loadSession(sessionId: string, cwd?: string, mcpServers: AcpMcpServer[] = []): Promise<AcpNewSessionResult> {
+    const compatible = this.filterMcpByCapabilities(mcpServers);
+    if (compatible.length !== mcpServers.length) {
+      log.info(
+        {
+          total: mcpServers.length,
+          compatible: compatible.length,
+          dropped: mcpServers.length - compatible.length,
+          droppedNames: mcpServers.filter((s) => !compatible.includes(s)).map((s) => s.name),
+          capabilities: this.initResult?.agentCapabilities?.mcpCapabilities ?? 'unknown',
+        },
+        'ACP loadSession: filtered incompatible MCP servers by client mcpCapabilities',
+      );
+    }
+
+    const effectiveCwd = cwd ?? this.config.cwd;
+    log.info(
+      { sessionId, cwd: effectiveCwd, mcpServerCount: compatible.length, pid: this.child?.pid },
+      'ACP session/load: sending request',
+    );
+    const t0 = Date.now();
     const resp = await this.sendRequest(ACP_METHODS.sessionLoad, {
       sessionId,
-      cwd: cwd ?? this.config.cwd,
-      mcpServers,
+      cwd: effectiveCwd,
+      mcpServers: compatible,
     });
+    log.info(
+      { sessionId, durationMs: Date.now() - t0, hasResult: !!resp.result },
+      'ACP session/load: response received',
+    );
     return resp.result as unknown as AcpNewSessionResult;
+  }
+
+  async setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    const trimmedConfigId = configId.trim();
+    const trimmedValue = value.trim();
+    if (!trimmedConfigId || !trimmedValue) return;
+
+    log.info(
+      { sessionId, configId: trimmedConfigId, value: trimmedValue, pid: this.child?.pid },
+      'ACP session/set_config_option: sending request',
+    );
+    const t0 = Date.now();
+    await this.sendRequest(ACP_METHODS.sessionSetConfigOption, {
+      sessionId,
+      configId: trimmedConfigId,
+      value: trimmedValue,
+    });
+    log.info({ sessionId, durationMs: Date.now() - t0 }, 'ACP session/set_config_option: response received');
   }
 
   /**
@@ -527,6 +646,37 @@ export class AcpClient {
     this._recentCapacitySignal = null;
   }
 
+  // ── MCP Capability Filtering ─────────────────────────────────
+
+  /**
+   * Filter MCP servers to only those compatible with the client's capabilities.
+   *
+   * Per the ACP spec (agentclientprotocol.com/protocol/v1/initialization):
+   *   - stdio is MANDATORY — all ACP agents MUST support it; not listed in mcpCapabilities
+   *   - mcpCapabilities only advertises OPTIONAL transports: { http?: boolean; sse?: boolean }
+   *
+   * Transport detection:
+   *   - Has `type: 'http'` → needs mcpCapabilities.http === true
+   *   - Has `type: 'sse'`  → needs mcpCapabilities.sse === true
+   *   - Has `command` (no type) → stdio; always passes (mandatory per ACP spec)
+   *
+   * If initResult is unavailable, all servers pass through (permissive fallback).
+   */
+  private filterMcpByCapabilities(servers: AcpMcpServer[]): AcpMcpServer[] {
+    const caps = this.initResult?.agentCapabilities?.mcpCapabilities;
+    if (!caps) return servers; // no capability info → pass all (backward compat)
+
+    return servers.filter((s) => {
+      if ('type' in s) {
+        if (s.type === 'http') return caps.http === true;
+        if (s.type === 'sse') return caps.sse === true;
+        return false; // unknown type
+      }
+      // Stdio server (has command, no type field) — mandatory per ACP spec, always pass
+      return true;
+    });
+  }
+
   // ── Internal ─────────────────────────────────────────────────
 
   private startReading(): void {
@@ -592,11 +742,21 @@ export class AcpClient {
 
     const id = randomUUID();
     const msg = { jsonrpc: '2.0', method, id, params };
-    this.child.stdin.write(JSON.stringify(msg) + '\n');
+    const payload = JSON.stringify(msg);
+    log.info(
+      { method, id, timeoutMs, pid: this.child?.pid, payloadBytes: payload.length },
+      'ACP sendRequest: writing to stdin',
+    );
+    this.child.stdin.write(payload + '\n');
 
     return new Promise<AcpResponse>((resolve, reject) => {
+      const sentAt = Date.now();
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        log.error(
+          { method, id, timeoutMs, pid: this.child?.pid, elapsedMs: Date.now() - sentAt, exited: this.exited },
+          'ACP sendRequest: TIMEOUT — no response from agent process',
+        );
         // For prompt timeouts, send session/cancel to stop the agent's internal retry loop
         if (method === ACP_METHODS.sessionPrompt && params.sessionId) {
           this.cancelSession(params.sessionId as string);
@@ -607,6 +767,10 @@ export class AcpClient {
       this.pending.set(id, {
         resolve: (resp) => {
           clearTimeout(timer);
+          log.info(
+            { method, id, durationMs: Date.now() - sentAt, hasError: !!resp.error },
+            'ACP sendRequest: response received',
+          );
           if (resp.error) {
             reject(new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data));
           } else {
@@ -615,6 +779,7 @@ export class AcpClient {
         },
         reject: (err) => {
           clearTimeout(timer);
+          log.error({ method, id, durationMs: Date.now() - sentAt, error: err.message }, 'ACP sendRequest: rejected');
           reject(err);
         },
       });

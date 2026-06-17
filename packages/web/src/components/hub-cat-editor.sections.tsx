@@ -5,11 +5,17 @@ import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
 import {
+  ACP_TRANSPORT_OPTIONS,
   autoSlug,
   CLIENT_OPTIONS,
+  defaultAcpCommandForClient,
+  defaultAcpStartupArgsForClient,
+  getAcpWarning,
   type HubCatEditorFormState,
+  isAcpOnlyClient,
   joinTags,
   normalizeMentionPattern,
+  showTransportSelector,
   splitMentionPatterns,
   splitStrengthTags,
 } from './hub-cat-editor.model';
@@ -19,6 +25,26 @@ import { VoiceConfigSection } from './hub-cat-editor-voice';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
+
+function acpDefaultsForClientSwitch(
+  form: HubCatEditorFormState,
+  nextClient: HubCatEditorFormState['clientId'],
+): FormPatch {
+  const currentCommand = form.acpCommand.trim();
+  const currentStartupArgs = form.acpStartupArgs.trim();
+  const currentDefaultCommand = defaultAcpCommandForClient(form.clientId);
+  const currentDefaultStartupArgs = defaultAcpStartupArgsForClient(form.clientId);
+  const patch: FormPatch = {};
+
+  if (!currentCommand || currentCommand === currentDefaultCommand) {
+    patch.acpCommand = defaultAcpCommandForClient(nextClient);
+  }
+  if (!currentStartupArgs || currentStartupArgs === currentDefaultStartupArgs) {
+    patch.acpStartupArgs = defaultAcpStartupArgsForClient(nextClient);
+  }
+
+  return patch;
+}
 
 function safeAvatarSrc(value: string): string | null {
   const trimmed = value.trim();
@@ -358,11 +384,47 @@ export function AccountSection({
           label="Client"
           value={form.clientId}
           options={CLIENT_OPTIONS}
-          onChange={(value) =>
-            onChange({ clientId: value as HubCatEditorFormState['clientId'], provider: '', cliEffort: '' })
-          }
+          onChange={(value) => {
+            const nextClient = value as HubCatEditorFormState['clientId'];
+            const forceAcp = isAcpOnlyClient(nextClient);
+            const nextAcpEnabled = forceAcp || (showTransportSelector(nextClient) && form.acpEnabled);
+            onChange({
+              clientId: nextClient,
+              provider: '',
+              cliEffort: '',
+              acpEnabled: nextAcpEnabled,
+              ...(nextAcpEnabled ? acpDefaultsForClientSwitch(form, nextClient) : {}),
+            });
+          }}
           required
         />
+
+        {showTransportSelector(form.clientId) ? (
+          <SelectField
+            label="Transport"
+            ariaLabel="Transport"
+            value={form.acpEnabled ? 'acp' : 'cli'}
+            options={ACP_TRANSPORT_OPTIONS}
+            onChange={(value) => {
+              const acpEnabled = value === 'acp';
+              onChange({
+                acpEnabled,
+                ...(acpEnabled && !form.acpCommand.trim()
+                  ? { acpCommand: defaultAcpCommandForClient(form.clientId) }
+                  : {}),
+                ...(acpEnabled && !form.acpStartupArgs.trim()
+                  ? { acpStartupArgs: defaultAcpStartupArgsForClient(form.clientId) }
+                  : {}),
+              });
+            }}
+            required
+          />
+        ) : null}
+
+        {(() => {
+          const acpWarn = getAcpWarning(form.clientId, form.acpEnabled);
+          return acpWarn ? <p className="text-xs text-amber-600 dark:text-amber-400">⚠️ {acpWarn}</p> : null;
+        })()}
 
         {form.clientId === 'antigravity' ? (
           <>
@@ -463,6 +525,42 @@ export function AccountSection({
                   {callHint.warning}
                 </p>
               </div>
+            ) : null}
+            {form.acpEnabled ? (
+              <>
+                <TextField
+                  label="ACP Command"
+                  value={form.acpCommand}
+                  onChange={(value) => onChange({ acpCommand: value })}
+                  required
+                  placeholder={defaultAcpCommandForClient(form.clientId) || 'agent-cli'}
+                />
+                <TextField
+                  label="ACP Startup Args"
+                  value={form.acpStartupArgs}
+                  onChange={(value) => onChange({ acpStartupArgs: value })}
+                  required
+                  placeholder={defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
+                />
+                <p className="-mt-1 text-[11px] leading-4 text-cafe-muted">
+                  空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
+                  <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
+                </p>
+                <TextField
+                  label="ACP Max Processes"
+                  value={form.acpMaxLiveProcesses}
+                  onChange={(value) => onChange({ acpMaxLiveProcesses: value })}
+                  inputMode="numeric"
+                  placeholder="3"
+                />
+                <TextField
+                  label="ACP Idle TTL (min)"
+                  value={form.acpIdleTtlMinutes}
+                  onChange={(value) => onChange({ acpIdleTtlMinutes: value })}
+                  inputMode="numeric"
+                  placeholder="30"
+                />
+              </>
             ) : null}
           </>
         )}

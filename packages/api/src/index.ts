@@ -50,10 +50,10 @@ import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueP
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
 import {
-  resolveAcpBootstrapArgs,
-  resolveAcpBootstrapCommand,
-  resolveAcpBootstrapCwd,
-} from './domains/cats/services/agents/providers/acp/acp-bootstrap-cwd.js';
+  type AcpPoolRegistry,
+  createAcpServiceForConfig,
+} from './domains/cats/services/agents/providers/acp/AcpServiceFactory.js';
+import { closeStaleAcpPools } from './domains/cats/services/agents/providers/acp/acp-pool-registry.js';
 import { AntigravityAgentService } from './domains/cats/services/agents/providers/antigravity/AntigravityAgentService.js';
 import { RedisAntigravitySupervisorStore } from './domains/cats/services/agents/providers/antigravity/AntigravitySupervisorStore.js';
 import {
@@ -257,6 +257,7 @@ import { terminalRoutes } from './routes/terminal.js';
 import { threadExportRoutes } from './routes/thread-export.js';
 import { threadMemberStrategyRoutes } from './routes/thread-member-strategy.js';
 import { ApiInstanceLease, type ApiInstanceLeaseInvalidation } from './services/ApiInstanceLease.js';
+import { resolveActiveProjectRoot } from './utils/active-project-root.js';
 import { resolveMemoryRepoPaths } from './utils/memory-root.js';
 import { findMonorepoRoot } from './utils/monorepo-root.js';
 import { resolveUserId } from './utils/request-identity.js';
@@ -1153,9 +1154,7 @@ async function main(): Promise<void> {
   }
 
   // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
-  // Using Map<string, any> because AcpProcessPool is dynamically imported only when acp config present.
-  // biome-ignore lint: dynamic import bridge
-  const acpPoolRegistry = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const acpPoolRegistry: AcpPoolRegistry = new Map();
 
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
@@ -1164,116 +1163,100 @@ async function main(): Promise<void> {
   const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
     agentRegistry.reset();
     clearL0Cache(); // Invalidate stale L0 compilations from previous sync
+    const projectRoot = resolveActiveProjectRoot();
+    const activeAcpProfileIds = new Set<string>();
     for (const [id, config] of Object.entries(configs)) {
       const catId = config.id;
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
       // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
       let service: AgentService;
-      switch (config.clientId) {
-        case 'anthropic': {
-          // F198 Phase B Step 3 canary: env-gated carrier selection.
-          // CAT_CAFE_CLAUDE_CARRIER=bg_daemon → --bg carrier (subscription
-          // quota, R1 救宪宪). Unset/other → -p (current production default).
-          const { createClaudeAgentServiceForCanary } = await import(
-            './domains/cats/services/agents/providers/claude-carrier-factory.js'
-          );
-          service = createClaudeAgentServiceForCanary(catId);
-          break;
-        }
-        case 'openai':
-          service = new CodexAgentService({ catId });
-          break;
-        case 'google': {
-          const acpConfig = getAcpConfig(id);
-          if (acpConfig) {
-            const { GeminiAcpAdapter } = await import(
-              './domains/cats/services/agents/providers/acp/GeminiAcpAdapter.js'
+
+      // ── F161: Generic ACP transport path (provider-agnostic) ──
+      // Any clientId with an `acp` config section uses AcpAgentService.
+      // This check runs BEFORE the clientId switch — ACP is a transport, not a provider.
+      const acpConfig = getAcpConfig(id, projectRoot);
+      if (acpConfig) {
+        activeAcpProfileIds.add(id);
+        const acpService = await createAcpServiceForConfig({
+          projectRoot,
+          profileId: id,
+          config,
+          acpConfig,
+          poolRegistry: acpPoolRegistry,
+          log: app.log,
+        });
+        if (!acpService) continue;
+        service = acpService;
+      } else
+        switch (config.clientId) {
+          // ── Provider-specific CLI paths (non-ACP) ──
+          case 'anthropic': {
+            // F198 Phase B Step 3 canary: env-gated carrier selection.
+            // CAT_CAFE_CLAUDE_CARRIER=bg_daemon → --bg carrier (subscription
+            // quota, R1 救宪宪). Unset/other → -p (current production default).
+            const { createClaudeAgentServiceForCanary } = await import(
+              './domains/cats/services/agents/providers/claude-carrier-factory.js'
             );
-            const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
-            const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
-            const acpProjectRoot = findMonorepoRoot();
-            const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, acpConfig.command);
-            const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, acpConfig.startupArgs);
-            const poolKey = { projectPath: acpProjectRoot, providerProfile: id };
-            // Shared pool per variant — reused across cats with same variant
-            if (!acpPoolRegistry.has(id)) {
-              const pool = new AcpProcessPool(
-                {
-                  maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
-                  idleTtlMs: acpConfig.pool?.idleTtlMs ?? 5 * 60 * 1000,
-                  healthCheckIntervalMs: 30_000,
-                },
-                acpConfig,
-                () =>
-                  new AcpClient({
-                    command: acpCommand,
-                    args: acpArgs,
-                    cwd: resolveAcpBootstrapCwd(acpProjectRoot, id),
-                  }),
-              );
-              acpPoolRegistry.set(id, pool);
-            }
-            const { resolveAcpMcpServers } = await import(
-              './domains/cats/services/agents/providers/acp/acp-mcp-resolver.js'
-            );
-            const mcpServers = resolveAcpMcpServers(acpProjectRoot, acpConfig.mcpWhitelist ?? []);
-            service = new GeminiAcpAdapter({
-              catId,
-              pool: acpPoolRegistry.get(id)!,
-              poolKey,
-              projectRoot: acpProjectRoot,
-              mcpServers,
-            });
-          } else {
+            service = createClaudeAgentServiceForCanary(catId);
+            break;
+          }
+          case 'openai':
+            service = new CodexAgentService({ catId });
+            break;
+          case 'google':
             service = new GeminiAgentService({ catId, agyProfile: config.agyProfile });
+            break;
+          case 'kimi':
+            service = new KimiAgentService({ catId });
+            break;
+          case 'dare':
+            service = new DareAgentService({ catId });
+            break;
+          case 'antigravity':
+            service = new AntigravityAgentService({
+              catId,
+              runtimeSessionStore,
+              transcriptReader,
+              supervisorStore: redisClient
+                ? new RedisAntigravitySupervisorStore(redisClient, {
+                    auditDir: join(process.cwd(), 'data', 'antigravity-audit'),
+                  })
+                : undefined,
+            });
+            break;
+          case 'opencode':
+            service = new OpenCodeAgentService({ catId });
+            break;
+          case 'catagent': {
+            const { CatAgentService } = await import(
+              './domains/cats/services/agents/providers/catagent/CatAgentService.js'
+            );
+            service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
+            break;
           }
-          break;
-        }
-        case 'kimi':
-          service = new KimiAgentService({ catId });
-          break;
-        case 'dare':
-          service = new DareAgentService({ catId });
-          break;
-        case 'antigravity':
-          service = new AntigravityAgentService({
-            catId,
-            runtimeSessionStore,
-            transcriptReader,
-            supervisorStore: redisClient
-              ? new RedisAntigravitySupervisorStore(redisClient, {
-                  auditDir: join(process.cwd(), 'data', 'antigravity-audit'),
-                })
-              : undefined,
-          });
-          break;
-        case 'opencode':
-          service = new OpenCodeAgentService({ catId });
-          break;
-        case 'catagent': {
-          const { CatAgentService } = await import(
-            './domains/cats/services/agents/providers/catagent/CatAgentService.js'
-          );
-          service = new CatAgentService({ catId, projectRoot: findMonorepoRoot(), catConfig: config });
-          break;
-        }
-        case 'a2a': {
-          const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
-          const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
-          const a2aUrl = process.env[envKey] ?? '';
-          if (!a2aUrl) {
-            app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+          case 'a2a': {
+            const { A2AAgentService } = await import('./domains/cats/services/agents/providers/A2AAgentService.js');
+            const envKey = `CAT_${id.toUpperCase()}_A2A_URL`;
+            const a2aUrl = process.env[envKey] ?? '';
+            if (!a2aUrl) {
+              app.log.warn(`[api] A2A cat "${id}" missing ${envKey} env var. It will not be routable.`);
+              continue;
+            }
+            service = new A2AAgentService({ catId, config: { url: a2aUrl } });
+            break;
+          }
+          default:
+            app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
             continue;
-          }
-          service = new A2AAgentService({ catId, config: { url: a2aUrl } });
-          break;
         }
-        default:
-          app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
-          continue;
-      }
       agentRegistry.register(id, service);
     }
+    await closeStaleAcpPools(acpPoolRegistry, activeAcpProfileIds, {
+      reason: 'config-sync',
+      onCloseError: (err, profileId, reason) => {
+        app.log.warn({ err, profileId, reason }, 'ACP registry sync failed to close stale member pool');
+      },
+    });
     if (router) router.refreshFromRegistry(agentRegistry);
 
     // Pre-compile L0 system prompts for all registered cats in parallel.
@@ -2112,8 +2095,6 @@ async function main(): Promise<void> {
       './config/capabilities/capability-orchestrator.js'
     );
     const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
-    const { resolveActiveProjectRoot } = await import('./utils/active-project-root.js');
-
     const monorepoRoot = findMonorepoRoot(process.cwd());
     const pluginsDir = join(monorepoRoot, 'plugins');
     const { loadAllPluginConfigs, resolvePluginEnv } = await import('./domains/plugin/plugin-config-store.js');

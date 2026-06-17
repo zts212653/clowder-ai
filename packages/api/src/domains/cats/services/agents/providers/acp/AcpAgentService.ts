@@ -1,15 +1,20 @@
 /**
- * GeminiAcpAdapter — AgentService implementation backed by ACP protocol.
+ * AcpAgentService — Generic AgentService implementation backed by ACP protocol.
  *
- * Phase C: Acquires a client lease from AcpProcessPool per invocation.
+ * F161: Renamed from GeminiAcpAdapter. Provider-agnostic — works with any CLI
+ * that speaks ACP (gemini --acp, opencode acp, etc.).
+ *
+ * Phase C (F149): Acquires a client lease from AcpProcessPool per invocation.
  * Pool handles lifecycle (spawn, init, idle TTL, eviction, zombie cleanup).
  *
  * Key behaviors:
  *   - Pool-backed: each invoke() acquires lease, releases in finally
- *   - Session per invocation: each invoke() calls newSession()
+ *   - Session reuse: if options.sessionId is provided (from session chain), reuse
+ *     the existing ACP session for multi-turn memory. Falls back to newSession()
+ *     if the session is gone (process restarted, evicted, etc.).
  *   - 4-window abort coverage (pre-invoke, post-newSession, post-yield, during-prompt)
  *   - Failure classification: init_failure / prompt_failure / model_capacity / mcp_pollution / stream_idle_stall / turn_budget_exceeded
- *   - System prompt: prepended to prompt text (same as GeminiAgentService)
+ *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
  */
 
 import type { CatId } from '@cat-cafe/shared';
@@ -18,14 +23,14 @@ import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
-import { createAcpSessionState, transformAcpEvent } from './acp-event-transformer.js';
+import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
-import type { AcpMcpServer } from './types.js';
+import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
 
-const log = createModuleLogger('gemini-acp');
+const log = createModuleLogger('acp-agent');
 
-export interface GeminiAcpAdapterConfig {
+export interface AcpAgentServiceConfig {
   catId: CatId;
   pool: AcpProcessPool;
   poolKey: PoolKey;
@@ -33,25 +38,44 @@ export interface GeminiAcpAdapterConfig {
   projectRoot: string;
   /** MCP servers to pass to each ACP session (resolved from mcpWhitelist) */
   mcpServers?: AcpMcpServer[];
+  /** Provider name for metadata (e.g. 'google', 'opencode'). Defaults to 'acp'. */
+  providerName?: string;
+  /** Model name for metadata. Defaults to 'acp'. */
+  modelName?: string;
+  /** ACP session model override sent via session/set_config_option when the agent exposes model selection. */
+  sessionModel?: string;
+  /** When false, disables ALL MCP servers (base + per-project) for this member. */
+  mcpSupport?: boolean;
 }
 
-export class GeminiAcpAdapter implements AgentService {
+/** @deprecated Use AcpAgentServiceConfig. Kept for backward compat during transition. */
+export type GeminiAcpAdapterConfig = AcpAgentServiceConfig;
+
+export class AcpAgentService implements AgentService {
   readonly catId: CatId;
   private readonly pool: AcpProcessPool;
   private readonly poolKey: PoolKey;
   private readonly projectRoot: string;
   private readonly mcpServers: AcpMcpServer[];
+  private readonly providerName: string;
+  private readonly modelName: string;
+  private readonly sessionModel?: string;
+  private readonly mcpSupportEnabled: boolean;
 
-  constructor(config: GeminiAcpAdapterConfig) {
+  constructor(config: AcpAgentServiceConfig) {
     this.catId = config.catId;
     this.pool = config.pool;
     this.poolKey = config.poolKey;
     this.projectRoot = config.projectRoot;
     this.mcpServers = config.mcpServers ?? [];
+    this.providerName = config.providerName ?? 'acp';
+    this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
+    this.sessionModel = config.sessionModel?.trim() || undefined;
+    this.mcpSupportEnabled = config.mcpSupport !== false;
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
-    const metadata: MessageMetadata = { provider: 'google', model: 'gemini-acp' };
+    const metadata: MessageMetadata = { provider: this.providerName, model: this.modelName };
     // Diagnostic context: threadId + invocationId for correlating thread-specific failures
     const threadId = options?.auditContext?.threadId;
     const invocationId = options?.auditContext?.invocationId;
@@ -76,7 +100,7 @@ export class GeminiAcpAdapter implements AgentService {
 
     let lease: AcpLease | null = null;
     try {
-      lease = await this.pool.acquire(this.poolKey);
+      lease = await this.pool.acquire(this.poolKey, { sessionId: options?.sessionId });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error({ ...ctx, err: errMsg }, 'ACP init failure');
@@ -94,7 +118,9 @@ export class GeminiAcpAdapter implements AgentService {
 
     // Pool returns AcpPoolClient; we know it's actually an AcpClient with full protocol methods
     const client = lease.client as unknown as {
-      newSession(cwd: string, mcpServers?: AcpMcpServer[]): Promise<{ sessionId: string }>;
+      newSession(cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
+      loadSession(sessionId: string, cwd: string, mcpServers?: AcpMcpServer[]): Promise<AcpNewSessionResult>;
+      setSessionConfigOption(sessionId: string, configId: string, value: string): Promise<void>;
       cancelSession(sessionId: string): void;
       promptStream(sessionId: string, text: string): AsyncGenerator<import('./types.js').AcpSessionUpdate>;
       onCapacity(fn: (signal: AcpCapacitySignal) => void): void;
@@ -131,12 +157,18 @@ export class GeminiAcpAdapter implements AgentService {
 
     let promptStreamStartedAt = 0;
     let eventCount = 0;
+    // Circuit breaker: compaction auto-continue loop detection.
+    // After scratchpad is detected by the transformer, count events still arriving.
+    // If they exceed the threshold, OpenCode is in a compaction → auto-continue loop.
+    let scratchpadSuppressedEvents = 0;
+    const MAX_SCRATCHPAD_SUPPRESSED_EVENTS = 50;
 
     try {
       // F145 Phase E: merge user project MCP servers per-invoke (thread.projectPath → workingDirectory)
+      // F161 gate: when mcpSupport is disabled, skip ALL MCP — both base (already []) and per-project.
       let invokeServers = this.mcpServers;
       const userProjectRoot = options?.workingDirectory;
-      if (userProjectRoot && userProjectRoot !== this.projectRoot) {
+      if (this.mcpSupportEnabled && userProjectRoot && userProjectRoot !== this.projectRoot) {
         const baseNames = new Set(this.mcpServers.map((s) => s.name));
         const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
         if (userServers.length > 0) {
@@ -148,14 +180,66 @@ export class GeminiAcpAdapter implements AgentService {
       // (multi_mention, post_message, etc.) get CAT_CAFE_API_URL / token / invocationId.
       const sessionMcpServers = materializeSessionMcpServers(invokeServers, options?.callbackEnv);
       const envDiag = callbackEnvDiagnostic(options?.callbackEnv);
-      log.info(
-        { ...ctx, cwd, promptLen: prompt.length, mcpCount: sessionMcpServers.length, ...envDiag },
-        'ACP newSession starting',
-      );
-      const session = await client.newSession(cwd, sessionMcpServers);
-      sessionId = session.sessionId;
-      metadata.sessionId = sessionId;
-      log.info({ ...ctx, sessionId }, 'ACP newSession completed');
+      // Session reuse: if options.sessionId is provided (from session chain), try to
+      // reuse the existing ACP session for multi-turn memory. The agent keeps conversation
+      // history server-side, so reusing the session avoids "amnesia" across turns.
+      const resumeSessionId = options?.sessionId;
+      let isResumedSession = false;
+      let resumeSessionLoadFailed = false;
+
+      if (resumeSessionId) {
+        try {
+          log.info(
+            { ...ctx, sessionId: resumeSessionId, cwd, mcpCount: sessionMcpServers.length, ...envDiag },
+            'ACP session resume: loading existing session',
+          );
+          const session = await client.loadSession(resumeSessionId, cwd, sessionMcpServers);
+          sessionId = session.sessionId || resumeSessionId;
+          this.pool.rememberSession?.(this.poolKey, sessionId, lease);
+          if (sessionId !== resumeSessionId) this.pool.rememberSession?.(this.poolKey, resumeSessionId, lease);
+          metadata.sessionId = sessionId;
+          isResumedSession = true;
+          log.info({ ...ctx, sessionId, requestedSessionId: resumeSessionId }, 'ACP session resume completed');
+        } catch (err) {
+          resumeSessionLoadFailed = true;
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          log.warn(
+            { ...ctx, sessionId: resumeSessionId, cwd, err: errorMsg },
+            'ACP session resume failed; creating a fresh session',
+          );
+        }
+      }
+
+      if (!isResumedSession) {
+        log.info(
+          { ...ctx, cwd, promptLen: prompt.length, mcpCount: sessionMcpServers.length, ...envDiag },
+          'ACP newSession starting',
+        );
+        const session = await client.newSession(cwd, sessionMcpServers);
+        sessionId = session.sessionId;
+        this.pool.rememberSession?.(this.poolKey, sessionId, lease);
+        metadata.sessionId = sessionId;
+        log.info({ ...ctx, sessionId }, 'ACP newSession completed');
+
+        const sessionModel = this.sessionModel;
+        const modelConfig = sessionModel ? resolveSessionModelConfigOption(session, sessionModel) : null;
+        if (modelConfig && sessionModel) {
+          try {
+            await client.setSessionConfigOption(sessionId, modelConfig.configId, sessionModel);
+            log.info({ ...ctx, sessionId, model: this.sessionModel }, 'ACP session model selected');
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : String(err);
+            log.warn(
+              { ...ctx, sessionId, model: this.sessionModel, err: errorMsg },
+              'ACP session model selection failed — continuing with agent default',
+            );
+          }
+        }
+      }
+
+      // At this point sessionId is always defined (resume or newSession path).
+      // TS control-flow can't prove it across the if/else — assert for downstream usage.
+      if (!sessionId) throw new Error('ACP invariant: sessionId must be set after session setup');
 
       // Window 2: abort may have fired during newSession
       if (options?.signal?.aborted) {
@@ -176,7 +260,7 @@ export class GeminiAcpAdapter implements AgentService {
         type: 'session_init',
         catId: this.catId,
         sessionId,
-        ephemeralSession: true,
+        ephemeralSession: false,
         metadata,
         timestamp: Date.now(),
       };
@@ -188,8 +272,16 @@ export class GeminiAcpAdapter implements AgentService {
         return;
       }
 
-      // Prepend system prompt (Gemini CLI/ACP has no system prompt flag)
-      const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+      // Prepend system prompt (ACP agents have no system prompt flag).
+      // If a resume load failed, the outer invocation skipped identity because it
+      // expected session memory; the fresh fallback session must receive it once.
+      const fallbackSystemPrompt =
+        resumeSessionLoadFailed && options?.resumeFallbackSystemPrompt ? options.resumeFallbackSystemPrompt : undefined;
+      const effectivePrompt = options?.systemPrompt
+        ? `${options.systemPrompt}\n\n${prompt}`
+        : fallbackSystemPrompt
+          ? `${fallbackSystemPrompt}\n\n${prompt}`
+          : prompt;
 
       // Window 4: onAbort listener covers the duration of promptStream
       promptStreamStartedAt = Date.now();
@@ -205,7 +297,7 @@ export class GeminiAcpAdapter implements AgentService {
             capacityWarningYielded = true;
             capacitySignal = { message: event.update.message as string, timestamp: event.update.timestamp as number };
             log.info({ ...ctx, sessionId }, 'ACP capacity warning yielded to frontend (stream)');
-            yield makeCapacityWarning(this.catId, capacitySignal, metadata);
+            yield makeCapacityWarning(this.catId, this.providerName, capacitySignal, metadata);
           }
           continue; // Not a real ACP event — don't count, don't transform
         }
@@ -217,17 +309,17 @@ export class GeminiAcpAdapter implements AgentService {
               { ...ctx, sessionId, idleSinceMs: event.update.idleSinceMs },
               'Stream idle warning yielded to frontend',
             );
-            yield makeIdleWarning(this.catId, event, metadata);
+            yield makeIdleWarning(this.catId, this.providerName, event, metadata);
           }
           continue; // Not a real ACP event — don't count, don't transform
         }
-        // Tool wait warning — Gemini is waiting for MCP tool result, idle is expected
+        // Tool wait warning — agent is waiting for MCP tool result, idle is expected
         if (event.update?.sessionUpdate === 'stream_tool_wait_warning') {
           log.info(
             { ...ctx, sessionId, idleSinceMs: event.update.idleSinceMs },
             'Stream tool wait warning (idle suppressed — tool executing)',
           );
-          yield makeToolWaitWarning(this.catId, event, metadata);
+          yield makeToolWaitWarning(this.catId, this.providerName, event, metadata);
           continue;
         }
         // F149: Fallback — capacity signal captured before promptStream started
@@ -235,7 +327,7 @@ export class GeminiAcpAdapter implements AgentService {
         if (capacitySignal && !capacityWarningYielded) {
           capacityWarningYielded = true;
           log.info({ ...ctx, sessionId }, 'ACP capacity warning yielded to frontend (pre-stream fallback)');
-          yield makeCapacityWarning(this.catId, capacitySignal, metadata);
+          yield makeCapacityWarning(this.catId, this.providerName, capacitySignal, metadata);
         }
         eventCount++;
         if (eventCount === 1) {
@@ -245,6 +337,26 @@ export class GeminiAcpAdapter implements AgentService {
         // F197: transformAcpEvent may return AgentMessage | AgentMessage[] | null
         // (Gemini v0.36 single-event with status=completed splits into [tool_use, tool_result])
         const result = transformAcpEvent(event, this.catId, metadata, acpState);
+
+        // Circuit breaker: OpenCode compaction auto-continue loop detection.
+        // When the transformer detects compaction scratchpad output, it suppresses
+        // subsequent text chunks (returns null). If events keep flowing after detection,
+        // OpenCode is stuck in a compaction → auto-continue loop. Cancel the session
+        // after a threshold to stop burning tokens.
+        if (acpState.scratchpadDetected) {
+          scratchpadSuppressedEvents++;
+          if (scratchpadSuppressedEvents >= MAX_SCRATCHPAD_SUPPRESSED_EVENTS) {
+            log.error(
+              { ...ctx, sessionId, eventCount, scratchpadSuppressedEvents },
+              'ACP compaction auto-continue loop detected — cancelling session',
+            );
+            client.cancelSession(sessionId);
+            throw new Error(
+              `ACP compaction auto-continue loop cancelled after ${scratchpadSuppressedEvents} suppressed events`,
+            );
+          }
+        }
+
         if (!result) continue;
         if (Array.isArray(result)) {
           for (const msg of result) yield msg;
@@ -253,6 +365,9 @@ export class GeminiAcpAdapter implements AgentService {
         }
       }
       log.info({ ...ctx, sessionId, eventCount }, 'ACP promptStream completed');
+      // Flush any remaining accumulated thinking before done.
+      const trailingThinking = flushAcpThinking(acpState, this.catId, metadata);
+      if (trailingThinking) yield trailingThinking;
       // Successful prompt — provider has recovered; clear stale capacity signal
       client.clearRecentCapacitySignal();
 
@@ -267,14 +382,18 @@ export class GeminiAcpAdapter implements AgentService {
       if (capacitySignal && !capacityWarningYielded) {
         capacityWarningYielded = true;
         log.info({ ...ctx }, 'ACP capacity warning yielded (catch path)');
-        yield makeCapacityWarning(this.catId, capacitySignal, metadata);
+        yield makeCapacityWarning(this.catId, this.providerName, capacitySignal, metadata);
       }
+      // Flush any pending thinking accumulated before the error — don't lose user-visible content.
+      const pendingThinking = flushAcpThinking(acpState, this.catId, metadata);
+      if (pendingThinking) yield pendingThinking;
+
       const { errorCode, errorMsg } = classifyError(err, capacitySignal, client.recentCapacitySignal);
       log.error({ ...ctx, errorCode, err: errorMsg, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
       yield {
         type: 'error',
         catId: this.catId,
-        error: toUserFacingError(errorCode, errorMsg),
+        error: toUserFacingError(this.providerName, errorCode, errorMsg),
         errorCode,
         metadata,
         timestamp: Date.now(),
@@ -290,14 +409,50 @@ export class GeminiAcpAdapter implements AgentService {
   }
 }
 
+/** @deprecated Use AcpAgentService. Alias for backward compatibility during transition. */
+export const GeminiAcpAdapter = AcpAgentService;
+/** @deprecated Use AcpAgentServiceConfig. */
+export type { AcpAgentServiceConfig as GeminiAcpAdapterConfig_Deprecated };
+
+function resolveSessionModelConfigOption(
+  session: { configOptions?: unknown },
+  modelId: string,
+): { configId: string } | null {
+  const configOptions = session.configOptions;
+  if (!Array.isArray(configOptions)) return null;
+  const modelOption = configOptions.find(
+    (option) => isRecord(option) && (option.id === 'model' || option.category === 'model'),
+  );
+  if (!isRecord(modelOption)) return null;
+  const configId = typeof modelOption.id === 'string' ? modelOption.id.trim() : '';
+  if (!configId) return null;
+  if (modelOption.currentValue === modelId) return null;
+  const optionValues = Array.isArray(modelOption.options)
+    ? modelOption.options
+        .map((option) => (isRecord(option) && typeof option.value === 'string' ? option.value.trim() : ''))
+        .filter(Boolean)
+    : [];
+  if (optionValues.length > 0 && !optionValues.includes(modelId)) return null;
+  return { configId };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 /** F149: Build a provider_signal warning for realtime capacity display. */
-function makeCapacityWarning(catId: CatId, signal: AcpCapacitySignal, metadata: MessageMetadata): AgentMessage {
+function makeCapacityWarning(
+  catId: CatId,
+  providerName: string,
+  signal: AcpCapacitySignal,
+  metadata: MessageMetadata,
+): AgentMessage {
   return {
     type: 'provider_signal',
     catId,
     content: JSON.stringify({
       type: 'warning',
-      message: `Gemini 服务端容量不足，正在重试 (${signal.message.slice(0, 100)})`,
+      message: `${providerName} 服务端容量不足，正在重试 (${signal.message.slice(0, 100)})`,
     }),
     metadata,
     timestamp: Date.now(),
@@ -307,6 +462,7 @@ function makeCapacityWarning(catId: CatId, signal: AcpCapacitySignal, metadata: 
 /** F149: Build a liveness_signal warning for stream idle watchdog. */
 function makeIdleWarning(
   catId: CatId,
+  providerName: string,
   event: import('./types.js').AcpSessionUpdate,
   metadata: MessageMetadata,
 ): AgentMessage {
@@ -316,16 +472,17 @@ function makeIdleWarning(
     catId,
     content: JSON.stringify({
       type: 'warning',
-      message: `Gemini 已开始回复但后续停滞 (idle ${Math.round(idleSinceMs / 1000)}s)`,
+      message: `${providerName} 已开始回复但后续停滞 (idle ${Math.round(idleSinceMs / 1000)}s)`,
     }),
     metadata,
     timestamp: Date.now(),
   };
 }
 
-/** Build a liveness_signal info for tool wait — Gemini is executing MCP tool, idle is expected. */
+/** Build a liveness_signal info for tool wait — agent is executing MCP tool, idle is expected. */
 function makeToolWaitWarning(
   catId: CatId,
+  providerName: string,
   event: import('./types.js').AcpSessionUpdate,
   metadata: MessageMetadata,
 ): AgentMessage {
@@ -335,7 +492,7 @@ function makeToolWaitWarning(
     catId,
     content: JSON.stringify({
       type: 'info',
-      message: `Gemini 正在等待工具返回 (${Math.round(idleSinceMs / 1000)}s)`,
+      message: `${providerName} 正在等待工具返回 (${Math.round(idleSinceMs / 1000)}s)`,
     }),
     metadata,
     timestamp: Date.now(),
@@ -394,22 +551,23 @@ function classifyError(
 /** Map internal error codes to user-friendly messages that clarify the failure source.
  *  Format: `{errorCode}: {errorMsg}\n{user-facing explanation}`
  *  The errorCode prefix is preserved for machine grep-ability (tests + invoke-helpers). */
-function toUserFacingError(errorCode: string, errorMsg: string): string {
+function toUserFacingError(providerName: string, errorCode: string, errorMsg: string): string {
+  const label = providerName === 'acp' ? 'ACP agent' : providerName;
   const base = `${errorCode}: ${errorMsg}`;
   switch (errorCode) {
     case 'model_capacity':
-      return `${base}\n⚠️ Gemini 服务端容量不足（Google 服务器繁忙），非 Clowder AI 系统故障。`;
+      return `${base}\n⚠️ ${label} 服务端容量不足（服务器繁忙），非 Clowder AI 系统故障。`;
     case 'stream_idle_stall':
-      return `${base}\n⚠️ Gemini 服务端响应中断（Google 服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
+      return `${base}\n⚠️ ${label} 服务端响应中断（服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
     case 'turn_budget_exceeded':
-      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），烁烁可能在执行复杂工具链。非故障，可重试。`;
+      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），agent 可能在执行复杂工具链。非故障，可重试。`;
     case 'mcp_pollution':
-      return `${base}\n⚠️ Gemini 工具调用异常（MCP 服务端错误）。`;
+      return `${base}\n⚠️ ${label} 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':
-      return `${base}\n⚠️ Gemini CLI 启动失败（本地进程异常）。`;
+      return `${base}\n⚠️ ACP agent 启动失败（本地进程异常）。`;
     case 'prompt_failure':
       if (/Premature close|ECONNRESET|socket hang up/i.test(errorMsg)) {
-        return `${base}\n⚠️ Gemini 与 Google 服务端连接中断（Premature close），非 Clowder AI 系统故障。`;
+        return `${base}\n⚠️ ${label} 与服务端连接中断（Premature close），非 Clowder AI 系统故障。`;
       }
       return base;
     default:

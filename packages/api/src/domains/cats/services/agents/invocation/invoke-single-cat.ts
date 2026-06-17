@@ -82,6 +82,7 @@ import { createPromptDigest } from '../../context/prompt-digest.js';
 import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
+import { extractUserEnvTemplates, hasSupportedEnvTemplate, resolveEnvMap } from '../providers/env-map.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
 import { OC_INSTRUCTIONS_ONLY_ENV } from '../providers/OpenCodeAgentService.js';
 import {
@@ -1237,9 +1238,43 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    // F161: ACP is a transport, not a provider. Derive credential protocol from the
+    // bound account's client family so env injection branches (MOONSHOT_API_KEY,
+    // GEMINI_API_KEY, etc.) fire correctly for ACP subprocesses.
+    if (provider === 'acp' && !effectiveProtocol && resolvedAccount?.client) {
+      effectiveProtocol = protocolForProvider[resolvedAccount.client] ?? null;
+    }
+
     // effectiveProtocol is used below for env injection branching (anthropic/openai/google)
     // but is NOT passed to callbackEnv — it should not influence CLI routing decisions.
 
+    // ── F161: Data-driven env var injection via resolveEnvMap ──────────────
+    // Standard provider credential env vars (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
+    // are resolved from BUILTIN_ENV_MAPS templates. Cat Cafe internal routing vars
+    // (CAT_CAFE_*_PROFILE_MODE, CODEX_AUTH_MODE, proxy) remain explicit below.
+    const userEnvTemplates = resolvedAccount?.envVars ? extractUserEnvTemplates(resolvedAccount.envVars) : undefined;
+
+    // Inject standard provider env vars for api_key accounts
+    if (resolvedAccount?.authType === 'api_key') {
+      const credentialAccount = {
+        apiKey: resolvedAccount.apiKey,
+        baseUrl: resolvedAccount.baseUrl,
+        baseModel: defaultModel,
+      };
+      // Protocol-level mapping (anthropic → ANTHROPIC_API_KEY, openai → OPENAI_API_KEY, google → GEMINI_API_KEY, etc.)
+      if (effectiveProtocol) {
+        const protocolKey = effectiveProtocol === 'openai-responses' ? 'openai' : effectiveProtocol;
+        const envFromMap = resolveEnvMap(protocolKey, undefined, credentialAccount, userEnvTemplates);
+        Object.assign(callbackEnv, envFromMap);
+      }
+      // Dare has its own env vars regardless of effectiveProtocol (dare's protocol = 'openai')
+      if (provider === 'dare') {
+        const dareEnv = resolveEnvMap('dare', undefined, credentialAccount);
+        Object.assign(callbackEnv, dareEnv);
+      }
+    }
+
+    // ── Cat Cafe internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
     if (effectiveProtocol === 'anthropic') {
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
@@ -1275,36 +1310,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
       }
     } else if (effectiveProtocol === 'openai' || effectiveProtocol === 'openai-responses') {
+      // Standard env vars (OPENAI_API_KEY, etc.) already set by resolveEnvMap above
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CODEX_AUTH_MODE = 'api_key';
-        if (resolvedAccount.apiKey) {
-          callbackEnv.OPENAI_API_KEY = resolvedAccount.apiKey;
-          // OpenCode selects provider by model prefix; `openrouter/...` models require this key name.
-          callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
-        }
-        if (resolvedAccount.baseUrl) {
-          callbackEnv.OPENAI_BASE_URL = resolvedAccount.baseUrl;
-          callbackEnv.OPENAI_API_BASE = resolvedAccount.baseUrl;
-        }
       } else if (effectiveAccountRef) {
         callbackEnv.CODEX_AUTH_MODE = 'oauth';
-      }
-    } else if (effectiveProtocol === 'google') {
-      if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
-        // Gemini CLI: native Google SDK, uses GEMINI_API_KEY
-        callbackEnv.GEMINI_API_KEY = resolvedAccount.apiKey;
-        callbackEnv.GOOGLE_API_KEY = resolvedAccount.apiKey;
-        // opencode CLI: OpenRouter provider uses OPENROUTER_API_KEY
-        callbackEnv.OPENROUTER_API_KEY = resolvedAccount.apiKey;
-        if (resolvedAccount.baseUrl) {
-          callbackEnv.GEMINI_BASE_URL = resolvedAccount.baseUrl;
-        }
       }
     } else if (effectiveProtocol === 'kimi') {
       if (resolvedAccount?.authType === 'api_key' && resolvedAccount.apiKey) {
         callbackEnv.CAT_CAFE_KIMI_PROFILE_MODE = 'api_key';
         callbackEnv.CAT_CAFE_KIMI_API_KEY = resolvedAccount.apiKey;
-        callbackEnv.MOONSHOT_API_KEY = resolvedAccount.apiKey;
+        // MOONSHOT_API_KEY already set by resolveEnvMap above
         if (resolvedAccount.baseUrl) {
           callbackEnv.CAT_CAFE_KIMI_BASE_URL = resolvedAccount.baseUrl;
         }
@@ -1315,23 +1331,23 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Fallback for unresolved accounts on anthropic/opencode providers
       callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
     }
-
-    // Dare has its own env vars regardless of protocol-based injection above
-    if (provider === 'dare' && resolvedAccount?.authType === 'api_key') {
-      if (resolvedAccount.apiKey) callbackEnv.DARE_API_KEY = resolvedAccount.apiKey;
-      if (resolvedAccount.baseUrl) callbackEnv.DARE_ENDPOINT = resolvedAccount.baseUrl;
-    }
+    // Note: google and dare protocol branches no longer need explicit credential injection
+    // — fully handled by resolveEnvMap above.
 
     // F171: User-defined env vars from account config.
     // Passed separately via accountEnv — NOT injected into callbackEnv.
     // callbackEnv is for MCP callback routing; accountEnv is applied LAST
     // in subprocess env so user vars override provider-injected values.
+    // F161: Template entries (${api_key} / ${base_url}) are already resolved by
+    // resolveEnvMap above — filter them out to prevent literal "${...}" leaking.
     let accountEnv: Record<string, string> | undefined;
     if (resolvedAccount?.envVars) {
       const validEnvKey = /^[A-Z_][A-Za-z0-9_]*$/;
       const filtered: Record<string, string> = {};
       for (const [k, v] of Object.entries(resolvedAccount.envVars)) {
         if (!validEnvKey.test(k) || k.startsWith('CAT_CAFE_')) continue;
+        // Skip template entries — already resolved by resolveEnvMap
+        if (hasSupportedEnvTemplate(v)) continue;
         filtered[k] = v;
       }
       if (Object.keys(filtered).length > 0) accountEnv = filtered;
@@ -1656,6 +1672,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
+      ...(isResume && !injectSystemPrompt && params.systemPrompt
+        ? { resumeFallbackSystemPrompt: params.systemPrompt }
+        : {}),
       // F118 Phase B: Enable liveness probe for all CLI providers.
       // #774: stallAutoKill clears truly stuck idle-silent CLIs before F216's 10m stale-processing guard.
       // #854: Windows cannot sample CPU; suppress suspected_stall there so CLI_TIMEOUT_MS stays binding.

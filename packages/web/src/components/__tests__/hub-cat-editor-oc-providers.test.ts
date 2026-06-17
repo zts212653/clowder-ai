@@ -15,8 +15,8 @@ function mkProfile(baseUrl: string): ProfileItem {
     clientId: 'opencode',
     baseUrl,
     hasApiKey: true,
-    createdAt: '2026-06-11T00:00:00.000Z',
-    updatedAt: '2026-06-11T00:00:00.000Z',
+    createdAt: '2026-06-14T00:00:00.000Z',
+    updatedAt: '2026-06-14T00:00:00.000Z',
   };
 }
 

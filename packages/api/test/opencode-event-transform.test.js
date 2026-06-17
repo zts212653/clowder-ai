@@ -235,6 +235,61 @@ describe('transformOpenCodeEvent', () => {
     assert.ok(result.error.includes('Rate limit exceeded'));
   });
 
+  // ── reasoning → system_info(thinking) (F161) ──
+  test('F161: maps reasoning event → system_info(thinking)', () => {
+    const event = {
+      type: 'reasoning',
+      timestamp: 1773304958495,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: 'Let me think about this...' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result, 'reasoning event must not be dropped');
+    assert.strictEqual(result.type, 'system_info');
+    const parsed = JSON.parse(result.content);
+    assert.strictEqual(parsed.type, 'thinking');
+    assert.strictEqual(parsed.text, 'Let me think about this...');
+  });
+
+  test('F161: reasoning event with empty text returns null', () => {
+    const event = {
+      type: 'reasoning',
+      timestamp: 1773304958495,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: '' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.strictEqual(result, null);
+  });
+
+  test('F161: text event with part.type=reasoning routes to thinking, not CLI Output', () => {
+    const event = {
+      type: 'text',
+      timestamp: 1773304958496,
+      sessionID: 'ses_xxx',
+      part: { type: 'reasoning', text: 'Analyzing the problem...' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result, 'reasoning-in-text must not be dropped');
+    assert.strictEqual(result.type, 'system_info', 'must route to thinking block, not CLI Output');
+    const parsed = JSON.parse(result.content);
+    assert.strictEqual(parsed.type, 'thinking');
+    assert.strictEqual(parsed.text, 'Analyzing the problem...');
+  });
+
+  test('F161: text event with normal part.type=text still maps to text', () => {
+    const event = {
+      type: 'text',
+      timestamp: 1773304958497,
+      sessionID: 'ses_xxx',
+      part: { type: 'text', text: 'Here is the answer' },
+    };
+    const result = transformOpenCodeEvent(event, catId);
+    assert.ok(result);
+    assert.strictEqual(result.type, 'text');
+    assert.strictEqual(result.content, 'Here is the answer');
+  });
+
   // ── unknown → null ──
   test('returns null for unknown event type', () => {
     const event = { type: 'heartbeat', timestamp: 123456, sessionID: 'ses_xxx' };

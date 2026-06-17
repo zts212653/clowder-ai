@@ -22,6 +22,8 @@ export function builtinAccountFamilyForClient(client: ClientId): BuiltinAccountC
     case 'dare':
     case 'opencode':
       return client;
+    // F161: generic ACP is a transport, not an account family — no synthetic builtin account.
+    // Returning null prevents auto-rebase from rewriting accountRef to non-existent 'acp'.
     case 'catagent':
       return 'anthropic';
     default:

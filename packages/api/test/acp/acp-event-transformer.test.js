@@ -461,4 +461,143 @@ describe('transformAcpEvent', () => {
     assert.equal(result.type, 'text');
     assert.equal(result.content, '');
   });
+
+  // --- OpenCode compaction scratchpad suppression ---
+
+  it('suppresses OpenCode compaction scratchpad signature in single chunk', () => {
+    const state = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+
+    // Normal text chunk first
+    const r1 = transformAcpEvent(mkChunk('Hello! '), catId, metadata, state);
+    assert.equal(r1.type, 'text');
+    assert.equal(r1.content, 'Hello! ');
+
+    // Chunk containing the OpenCode compaction signature; only text before marker should pass.
+    const r2 = transformAcpEvent(
+      mkChunk('How can I help? ## Goal\n- Greeting exchange\n\nConstraints & Preferences\n- (none)'),
+      catId,
+      metadata,
+      state,
+    );
+    // Text before the marker, trailing whitespace trimmed
+    assert.notEqual(r2, null);
+    assert.equal(r2.type, 'text');
+    assert.equal(r2.content, 'How can I help?');
+
+    // Subsequent chunks suppressed
+    const r3 = transformAcpEvent(mkChunk('\n\n## Progress\n- continuing compaction'), catId, metadata, state);
+    assert.equal(r3, null, 'Chunks after scratchpad detection must be suppressed');
+  });
+
+  it('suppresses scratchpad signature that starts at beginning of chunk', () => {
+    const state = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+
+    const r1 = transformAcpEvent(mkChunk('Done!'), catId, metadata, state);
+    assert.equal(r1.type, 'text');
+
+    // Signature at start of new chunk; nothing to emit.
+    const r2 = transformAcpEvent(
+      mkChunk('## Goal\n- Summary\n\nConstraints & Preferences\n- none'),
+      catId,
+      metadata,
+      state,
+    );
+    assert.equal(r2, null, 'Scratchpad at chunk start → null');
+  });
+
+  it('detects scratchpad signature split across two chunks', () => {
+    const state = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+
+    // First chunk has only the heading; do not classify it until the companion marker arrives.
+    const r1 = transformAcpEvent(mkChunk('Hi there! ## Goal\n- Greeting'), catId, metadata, state);
+    assert.equal(r1.type, 'text');
+    assert.equal(r1.content, 'Hi there! ## Goal\n- Greeting');
+    assert.equal(state.scratchpadDetected, false);
+
+    // Second chunk completes the signature; it and later chunks are suppressed.
+    const r2 = transformAcpEvent(mkChunk('\n\nConstraints & Preferences\n- none'), catId, metadata, state);
+    assert.equal(r2, null, 'Cross-chunk compaction signature completion must suppress');
+
+    // Further chunks remain suppressed
+    const r3 = transformAcpEvent(mkChunk('\n## Progress'), catId, metadata, state);
+    assert.equal(r3, null);
+  });
+
+  it('does not false-positive on legitimate Markdown ## Goal heading with state', () => {
+    const state = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+    const markdown = 'Spec template\n\n## Goal\nShip ACP safely\n\n## Acceptance Criteria\n- Keep Markdown intact';
+    const result = transformAcpEvent(mkChunk(markdown), catId, metadata, state);
+    assert.equal(result.type, 'text');
+    assert.equal(result.content, markdown);
+    assert.equal(state.scratchpadDetected, false);
+
+    const next = transformAcpEvent(mkChunk('\n\nMore requested output.'), catId, metadata, state);
+    assert.equal(next.type, 'text');
+    assert.equal(next.content, '\n\nMore requested output.');
+  });
+
+  it('does not suppress ordinary plan Markdown with Goal and Constraints sections', () => {
+    const state = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+    const markdown = [
+      'Implementation plan',
+      '',
+      '## Goal',
+      'Ship the ACP route safely.',
+      '',
+      '## Constraints & Preferences',
+      '- Keep callback MCP support enabled for whitelisted tools.',
+      '',
+      '## Steps',
+      '1. Add tests.',
+      '2. Patch the route.',
+    ].join('\n');
+
+    const result = transformAcpEvent(mkChunk(markdown), catId, metadata, state);
+    assert.equal(result.type, 'text');
+    assert.equal(result.content, markdown);
+    assert.equal(state.scratchpadDetected, false);
+
+    const next = transformAcpEvent(mkChunk('\n\nContinue with validation evidence.'), catId, metadata, state);
+    assert.equal(next.type, 'text');
+    assert.equal(next.content, '\n\nContinue with validation evidence.');
+  });
+
+  it('scratchpad detection resets per session (new state)', () => {
+    const state1 = createAcpSessionState();
+    const state2 = createAcpSessionState();
+    const mkChunk = (text) => ({
+      sessionId: 's1',
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+    });
+
+    // Trigger scratchpad in state1
+    transformAcpEvent(mkChunk('## Goal\n- test\n\nConstraints & Preferences\n- none'), catId, metadata, state1);
+    assert.equal(state1.scratchpadDetected, true);
+
+    // state2 should be unaffected
+    const r = transformAcpEvent(mkChunk('Normal text'), catId, metadata, state2);
+    assert.equal(r.type, 'text');
+    assert.equal(r.content, 'Normal text');
+    assert.equal(state2.scratchpadDetected, false);
+  });
 });

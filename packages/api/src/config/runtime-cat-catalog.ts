@@ -14,6 +14,7 @@ import type {
 import { createCatId } from '@cat-cafe/shared';
 import { clearBudgetCache } from './cat-budgets.js';
 import { bootstrapCatCatalog, readCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
+import type { AcpVariantConfig } from './cat-config-loader.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
@@ -45,6 +46,8 @@ export interface RuntimeCatInput {
   voiceConfig?: VoiceConfig;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string;
+  /** F161: ACP transport config — presence triggers ACP transport instead of CLI. */
+  acp?: AcpVariantConfig;
 }
 
 export interface RuntimeCatUpdate {
@@ -73,6 +76,8 @@ export interface RuntimeCatUpdate {
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
   provider?: string | null;
   available?: boolean;
+  /** F161: ACP transport config — null to remove, undefined to skip. */
+  acp?: AcpVariantConfig | null;
 }
 
 export interface RuntimeCoCreatorUpdate {
@@ -235,6 +240,7 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           ? { caution: input.caution && input.caution.trim().length > 0 ? input.caution.trim() : null }
           : {}),
         ...(input.strengths ? { strengths: input.strengths } : {}),
+        ...(input.acp ? { acp: input.acp } : {}),
       },
     ],
   } as unknown as CatBreed;
@@ -430,6 +436,14 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.provider = patch.provider;
     } else {
       delete variant.provider;
+    }
+  }
+  // F161: ACP transport config — null removes it (revert to CLI transport).
+  if (patch.acp !== undefined) {
+    if (patch.acp) {
+      (variant as Record<string, unknown>).acp = patch.acp;
+    } else {
+      (variant as Record<string, unknown>).acp = null;
     }
   }
   if (patch.available !== undefined && catalog.version === 2) {

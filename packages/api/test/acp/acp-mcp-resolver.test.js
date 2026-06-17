@@ -28,8 +28,29 @@ describe('resolveAcpMcpServers', () => {
     temps.length = 0;
   });
 
-  it('returns [] for empty whitelist', () => {
-    const result = resolveAcpMcpServers('/nonexistent', []);
+  it('auto-provisions all built-in cat-cafe servers when whitelist is empty (F161)', () => {
+    const root = makeTempRoot(); // no .mcp.json
+    const result = resolveAcpMcpServers(root, []);
+    // All 6 built-in cat-cafe servers should be auto-provisioned
+    const names = result.map((s) => s.name);
+    assert.ok(names.includes('cat-cafe'), 'should include cat-cafe');
+    assert.ok(names.includes('cat-cafe-collab'), 'should include cat-cafe-collab');
+    assert.ok(names.includes('cat-cafe-memory'), 'should include cat-cafe-memory');
+    assert.ok(names.includes('cat-cafe-signals'), 'should include cat-cafe-signals');
+    assert.ok(names.includes('cat-cafe-limb'), 'should include cat-cafe-limb');
+    assert.ok(names.includes('cat-cafe-finance'), 'should include cat-cafe-finance');
+    assert.equal(result.length, 6);
+    // Each server should be a valid stdio config
+    for (const s of result) {
+      assert.equal(s.command, 'node');
+      assert.ok(s.args[0].includes('packages/mcp-server/dist/'));
+    }
+  });
+
+  it('keeps MCP servers empty when member-level mcpSupport is disabled', () => {
+    const root = makeTempRoot(); // no .mcp.json
+    const result = resolveAcpMcpServers(root, [], undefined, { mcpSupport: false });
+
     assert.deepStrictEqual(result, []);
   });
 

@@ -7,7 +7,8 @@
  *
  * Event mapping:
  *   step_start  → session_init (first occurrence establishes session)
- *   text        → text (part.text)
+ *   text        → text (part.text) — but if part.type='reasoning', routes to system_info(thinking)
+ *   reasoning   → system_info(thinking) (F161: previously dropped by default case)
  *   tool_use    → tool_use (part.tool, part.state.input)
  *   error       → error (error.data.message or error.name)
  *   step_finish → agent_loop + metadata.usage (telemetry-only). Lights up
@@ -93,10 +94,34 @@ export function transformOpenCodeEvent(event: unknown, catId: CatId | string): A
     case 'text': {
       const text = event.part?.text;
       if (typeof text !== 'string' || text.length === 0) return null;
+      // F161: OpenCode CLI may send reasoning/thinking as a text event with
+      // part.type = 'reasoning'. Route to thinking block instead of CLI Output.
+      if (event.part?.type === 'reasoning') {
+        return {
+          type: 'system_info',
+          catId: catId as CatId,
+          content: JSON.stringify({ type: 'thinking', text }),
+          timestamp: ts,
+        };
+      }
       return {
         type: 'text',
         catId: catId as CatId,
         content: text,
+        timestamp: ts,
+      };
+    }
+
+    // F161: OpenCode CLI sends dedicated reasoning events for thinking models.
+    // Previously these hit `default → null` and were silently dropped.
+    // Map to system_info(thinking) — same pattern as codex-event-transform.
+    case 'reasoning': {
+      const reasoningText = event.part?.text;
+      if (typeof reasoningText !== 'string' || reasoningText.length === 0) return null;
+      return {
+        type: 'system_info',
+        catId: catId as CatId,
+        content: JSON.stringify({ type: 'thinking', text: reasoningText }),
         timestamp: ts,
       };
     }

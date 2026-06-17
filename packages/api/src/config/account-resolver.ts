@@ -276,6 +276,8 @@ export function validateRuntimeProviderBinding(
     }
     return null;
   }
+  // F161: Generic ACP is a transport, not a provider — any account is valid.
+  if (clientId === 'acp') return null;
   const expectedClient = resolveBuiltinClientForProvider(clientId);
   if (expectedClient && profile.authType === 'oauth' && profile.client && profile.client !== expectedClient) {
     return `bound provider profile "${profile.id}" is incompatible with client "${clientId}"`;

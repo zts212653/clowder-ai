@@ -10,6 +10,7 @@ function inferBuiltinClient(profile: ProfileItem): BuiltinAccountClient | undefi
   if (normalizedId.includes('kimi') || normalizedId.includes('moonshot')) return 'kimi';
   if (normalizedId.includes('dare')) return 'dare';
   if (normalizedId.includes('opencode')) return 'opencode';
+  if (normalizedId.includes('acp')) return 'acp';
   return undefined;
 }
 
@@ -35,6 +36,8 @@ export function builtinClientLabel(client?: BuiltinAccountClient): string {
       return 'Dare';
     case 'opencode':
       return 'OpenCode';
+    case 'acp':
+      return 'ACP';
     default:
       return 'Builtin';
   }

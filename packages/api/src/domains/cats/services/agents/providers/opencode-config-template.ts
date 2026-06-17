@@ -35,6 +35,7 @@ type OpenCodeProviderConfig = {
 interface OpenCodeConfig {
   $schema: string;
   model?: string;
+  small_model?: string;
   provider: Record<string, OpenCodeProviderConfig>;
   plugin?: string[];
   mcp?: Record<string, unknown>;
@@ -121,6 +122,7 @@ export interface OpenCodeRuntimeConfigOptions {
 
 export interface OpenCodeRuntimeConfigDebugSummary {
   model?: string;
+  smallModel?: string;
   providerKeys: string[];
   providerSummary: Record<
     string,
@@ -192,7 +194,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
 
   const config: OpenCodeConfig = {
     $schema: 'https://opencode.ai/config.json',
-    ...(configDefaultModel ? { model: configDefaultModel } : {}),
+    ...(configDefaultModel ? { model: configDefaultModel, small_model: configDefaultModel } : {}),
     provider: {
       [configName]: {
         npm: NPM_ADAPTER_FOR_API_TYPE[apiType] ?? NPM_ADAPTER_FOR_API_TYPE.openai,
@@ -238,6 +240,7 @@ export function summarizeOpenCodeRuntimeConfigForDebug(
 
   return {
     model: config.model,
+    smallModel: config.small_model,
     providerKeys: providerEntries.map(([providerName]) => providerName),
     providerSummary: Object.fromEntries(
       providerEntries.map(([providerName, providerConfig]) => [

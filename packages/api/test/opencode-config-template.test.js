@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { prepareOpenCodeAcpSpawnConfig } from '../dist/domains/cats/services/agents/providers/opencode-acp-spawn-config.js';
 import {
   deriveOpenCodeApiType,
   generateOpenCodeConfig,
@@ -13,6 +14,25 @@ import {
   summarizeOpenCodeRuntimeConfigForDebug,
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
+
+describe('opencode config module boundaries', () => {
+  test('keeps ACP spawn config in a dedicated module under the line budget', () => {
+    const templateSource = readFileSync(
+      new URL('../src/domains/cats/services/agents/providers/opencode-config-template.ts', import.meta.url),
+      'utf8',
+    );
+    const spawnSource = readFileSync(
+      new URL('../src/domains/cats/services/agents/providers/opencode-acp-spawn-config.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.ok(
+      templateSource.split('\n').length <= 350,
+      'opencode-config-template.ts should stay under the 350-line module budget',
+    );
+    assert.match(spawnSource, /prepareOpenCodeAcpSpawnConfig/);
+  });
+});
 
 describe('opencode Config Template (AC-9 + AC-10)', () => {
   test('generates valid opencode config with required fields', () => {
@@ -206,6 +226,95 @@ describe('deriveOpenCodeApiType', () => {
   });
 });
 
+describe('prepareOpenCodeAcpSpawnConfig', () => {
+  test('writes OPENCODE_CONFIG and credential env for OpenCode ACP api_key accounts', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-acp-'));
+    try {
+      const prepared = prepareOpenCodeAcpSpawnConfig({
+        projectRoot,
+        profileId: 'opencode-acp',
+        clientId: 'opencode',
+        command: '/opt/homebrew/bin/opencode',
+        providerName: 'anthropic',
+        defaultModel: 'anthropic/claude-opus-4-6',
+        account: {
+          id: 'anthropic-proxy',
+          authType: 'api_key',
+          apiKey: 'sk-test-secret',
+          baseUrl: 'https://proxy.example/v1',
+          models: ['claude-opus-4-6'],
+        },
+      });
+
+      assert.ok(prepared, 'OpenCode ACP should receive a prepared spawn config');
+      assert.ok(prepared.env.OPENCODE_CONFIG, 'OPENCODE_CONFIG must be set for OpenCode ACP');
+      assert.equal(prepared.env[OC_API_KEY_ENV], 'sk-test-secret');
+      assert.equal(prepared.env[OC_BASE_URL_ENV], 'https://proxy.example/v1');
+
+      const config = JSON.parse(readFileSync(prepared.env.OPENCODE_CONFIG, 'utf8'));
+      assert.equal(config.model, 'anthropic/claude-opus-4-6');
+      assert.equal(config.small_model, 'anthropic/claude-opus-4-6');
+      assert.equal(config.provider.anthropic.options.apiKey, `{env:${OC_API_KEY_ENV}}`);
+      assert.equal(config.provider.anthropic.options.baseURL, `{env:${OC_BASE_URL_ENV}}`);
+      assert.ok(!JSON.stringify(config).includes('sk-test-secret'), 'runtime config must not write secrets');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does NOT manage generic ACP by command basename (clientId=acp + command=opencode → null)', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-acp-generic-'));
+    try {
+      // F161 cleanup: generic ACP (clientId='acp') must NOT be auto-upgraded to
+      // OpenCode managed config by sniffing the command basename. OpenCode managed
+      // config is opt-in via clientId='opencode' only. A generic carrier that happens
+      // to point at the opencode binary stays on the pure generic env path.
+      const prepared = prepareOpenCodeAcpSpawnConfig({
+        projectRoot,
+        profileId: 'generic-acp-opencode',
+        clientId: 'acp',
+        command: 'opencode',
+        providerName: undefined,
+        defaultModel: 'anthropic/claude-opus-4-6',
+        account: {
+          id: 'anthropic-proxy',
+          authType: 'api_key',
+          apiKey: 'sk-test-secret',
+          baseUrl: 'https://proxy.example/v1',
+          models: ['claude-opus-4-6'],
+        },
+      });
+
+      assert.equal(prepared, null, 'generic ACP must not get OpenCode managed config via command sniffing');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('skips non-OpenCode ACP clients', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-opencode-acp-skip-'));
+    try {
+      const prepared = prepareOpenCodeAcpSpawnConfig({
+        projectRoot,
+        profileId: 'gemini-acp',
+        clientId: 'google',
+        command: 'gemini',
+        providerName: 'google',
+        defaultModel: 'gemini-3-flash',
+        account: {
+          id: 'gemini',
+          authType: 'oauth',
+          models: ['gemini-3-flash'],
+        },
+      });
+
+      assert.equal(prepared, null);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('generateOpenCodeRuntimeConfig', () => {
   test('generates custom provider config with env placeholders and stripped model keys', () => {
     const config = generateOpenCodeRuntimeConfig({
@@ -217,6 +326,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
 
     assert.equal(config.model, 'maas/glm-5');
+    assert.equal(config.small_model, 'maas/glm-5');
     assert.deepStrictEqual(config.provider.maas.models, {
       'glm-5': { name: 'glm-5' },
       'glm-4-plus': { name: 'glm-4-plus' },
@@ -270,6 +380,19 @@ describe('generateOpenCodeRuntimeConfig', () => {
 
     assert.equal(config.model, 'openai-compat/qwen3.6-max-preview');
     assert.ok(config.provider['openai-compat'].models?.['qwen3.6-max-preview']);
+  });
+
+  test('pins small_model to the remapped default model for OpenCode title generation', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'openai',
+      models: ['gpt-4o'],
+      defaultModel: 'openai/gpt-4o',
+      apiType: 'openai',
+      hasBaseUrl: true,
+    });
+
+    assert.equal(config.model, 'openai-compat/gpt-4o');
+    assert.equal(config.small_model, 'openai-compat/gpt-4o');
   });
 
   test('non-reserved providerName is kept as-is', () => {
@@ -355,6 +478,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
 
     assert.equal(summary.model, 'anthropic/minimax-m2.7');
+    assert.equal(summary.smallModel, 'anthropic/minimax-m2.7');
     assert.deepStrictEqual(summary.providerKeys, ['anthropic']);
     assert.deepStrictEqual(summary.providerSummary, {
       anthropic: {

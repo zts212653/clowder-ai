@@ -10,6 +10,7 @@ const { bootstrapCatCatalog, resolveCatCatalogPath, writeCatCatalog } = await im
 const { createRuntimeCat, deleteRuntimeCat, readRuntimeCatCatalog, updateRuntimeCat } = await import(
   '../dist/config/runtime-cat-catalog.js'
 );
+const { getAcpConfig, _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
 
 function validConfig() {
   return {
@@ -466,6 +467,32 @@ describe('cat-catalog-store', () => {
     updated = catalog.breeds.find((breed) => breed.catId === 'opus');
     assert.ok(updated, 'opus breed should still exist after clearing voiceConfig');
     assert.equal(updated.variants[0]?.voiceConfig, undefined);
+  });
+
+  it('persists acp tombstone when disabling template-inherited ACP transport', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].variants[0].clientId = 'google';
+    template.breeds[0].variants[0].acp = { command: 'gemini', startupArgs: ['--acp'] };
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    await updateRuntimeCat(projectRoot, 'opus', { clientId: 'openai', acp: null });
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    assert.equal(rawCatalog.breeds[0].variants[0].acp, null, 'runtime overlay must keep an ACP tombstone');
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      assert.equal(getAcpConfig('opus'), undefined, 'template ACP must not reappear after runtime acp:null');
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
   });
 
   it('keeps sessionChain updates scoped to non-default variants', async () => {

@@ -58,7 +58,7 @@ export const ACP_METHODS = {
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel', // notification (no response)
   sessionSetMode: 'session/set_mode',
-  sessionSetModel: 'session/set_model',
+  sessionSetConfigOption: 'session/set_config_option',
 
   // Agent → Client notifications
   sessionUpdate: 'session/update',
@@ -113,6 +113,7 @@ export interface AcpNewSessionParams {
 
 export interface AcpNewSessionResult {
   sessionId: string;
+  configOptions?: AcpSessionConfigOption[];
   modes?: {
     availableModes: Array<{ id: string; name: string; description: string }>;
     currentModeId: string;
@@ -121,6 +122,16 @@ export interface AcpNewSessionResult {
     availableModels: Array<{ id: string; name: string }>;
     currentModelId: string;
   };
+}
+
+export interface AcpSessionConfigOption {
+  id: string;
+  name?: string;
+  category?: string;
+  type?: string;
+  currentValue?: unknown;
+  options?: Array<{ value: string; name?: string; description?: string }>;
+  [key: string]: unknown;
 }
 
 export interface AcpLoadSessionParams {

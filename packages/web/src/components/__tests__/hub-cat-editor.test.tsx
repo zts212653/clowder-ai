@@ -16,12 +16,16 @@ vi.mock('@/components/useConfirm', () => ({
 import { HubCatEditor } from '@/components/HubCatEditor';
 import type { ProfileItem } from '@/components/hub-accounts.types';
 import {
+  buildCatPatchPayload,
   buildCatPayload,
   builtinAccountIdForClient,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
+  getAcpWarning,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
+  isAcpOnlyClient,
+  showTransportSelector,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
@@ -37,6 +41,14 @@ const emptyVoiceFields = {
   voiceRefText: '',
   voiceInstruct: '',
   voiceTemperature: '',
+};
+
+const emptyAcpFields = {
+  acpEnabled: false,
+  acpCommand: '',
+  acpStartupArgs: '',
+  acpMaxLiveProcesses: '',
+  acpIdleTtlMinutes: '',
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -136,6 +148,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
       ...emptyVoiceFields,
     };
 
@@ -200,6 +213,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
       ...emptyVoiceFields,
     };
     const existingCat = {
@@ -247,6 +261,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
       ...emptyVoiceFields,
     };
     const existingCat = {
@@ -293,6 +308,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
       ...emptyVoiceFields,
     };
 
@@ -333,6 +349,7 @@ describe('HubCatEditor', () => {
       maxContextTokens: '',
       maxMessages: '',
       maxContentLengthPerMsg: '',
+      ...emptyAcpFields,
       ...emptyVoiceFields,
     } as HubCatEditorFormState & { cliEffort: string };
 
@@ -355,6 +372,361 @@ describe('HubCatEditor', () => {
     expect(validateModelFormatForClient('opencode', 'gpt-5.4')).toMatch(/providerId\/modelId/i);
     expect(validateModelFormatForClient('opencode', 'openai/gpt-5.4')).toBeNull();
     expect(validateModelFormatForClient('openai', 'gpt-5.4')).toBeNull();
+  });
+
+  it('buildCatPayload includes ACP transport config when enabled for OpenCode', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'opencode-acp',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/opencode.png',
+      colorPrimary: '#c8a951',
+      colorSecondary: '#f5edda',
+      mentionPatterns: '@opencode-acp',
+      roleDescription: 'OpenCode over ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: 'anthropic',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'opencode',
+      acpStartupArgs: '--acp --mode agent',
+      acpMaxLiveProcesses: '4',
+      acpIdleTtlMinutes: '30',
+    };
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.acp).toEqual({
+      command: 'opencode',
+      startupArgs: ['--acp', '--mode', 'agent'],
+      pool: { maxLiveProcesses: 4, idleTtlMs: 1_800_000 },
+    });
+  });
+
+  it('buildCatPayload preserves existing hidden ACP fields when ACP stays enabled', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'opencode-acp',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/opencode.png',
+      colorPrimary: '#c8a951',
+      colorSecondary: '#f5edda',
+      mentionPatterns: '@opencode-acp',
+      roleDescription: 'OpenCode over ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: 'anthropic',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'opencode',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const cat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      acp: {
+        command: 'opencode',
+        startupArgs: ['acp'],
+        mcpWhitelist: ['search_evidence'],
+        supportsMultiplexing: true,
+      },
+    } as CatData;
+
+    const payload = buildCatPayload(form, cat) as Record<string, unknown>;
+
+    expect(payload.acp).toEqual({
+      command: 'opencode',
+      startupArgs: ['acp'],
+      mcpWhitelist: ['search_evidence'],
+      supportsMultiplexing: true,
+    });
+  });
+
+  it('showTransportSelector for dual-transport clients (opencode, google, kimi)', () => {
+    expect(showTransportSelector('opencode')).toBe(true);
+    expect(showTransportSelector('google')).toBe(true);
+    expect(showTransportSelector('kimi')).toBe(true);
+    expect(showTransportSelector('acp')).toBe(false);
+    expect(showTransportSelector('anthropic')).toBe(false);
+    expect(showTransportSelector('openai')).toBe(false);
+    expect(showTransportSelector('antigravity')).toBe(false);
+  });
+
+  it('isAcpOnlyClient identifies generic ACP client', () => {
+    expect(isAcpOnlyClient('acp')).toBe(true);
+    expect(isAcpOnlyClient('opencode')).toBe(false);
+    expect(isAcpOnlyClient('anthropic')).toBe(false);
+  });
+
+  it('getAcpWarning returns kimi login warning when kimi + ACP', () => {
+    const warning = getAcpWarning('kimi', true);
+    expect(warning).toBeTruthy();
+    expect(warning).toContain('kimi login');
+  });
+
+  it('getAcpWarning returns null for kimi when ACP disabled', () => {
+    expect(getAcpWarning('kimi', false)).toBeNull();
+  });
+
+  it('getAcpWarning returns null for non-kimi clients', () => {
+    expect(getAcpWarning('opencode', true)).toBeNull();
+    expect(getAcpWarning('google', true)).toBeNull();
+    expect(getAcpWarning('anthropic', true)).toBeNull();
+  });
+
+  it('buildCatPayload forces ACP transport for generic acp client', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'acp-deepseek',
+      name: 'DeepSeek ACP',
+      displayName: 'DeepSeek ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-deepseek',
+      roleDescription: 'ACP agent',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'deepseek-key',
+      defaultModel: 'deepseek-chat',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'deepseek-cli',
+      acpStartupArgs: '--acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+
+    const payload = buildCatPayload(form, null) as Record<string, unknown>;
+    expect(payload.clientId).toBe('acp');
+    expect(payload.acp).toEqual({
+      command: 'deepseek-cli',
+      startupArgs: ['--acp'],
+    });
+  });
+
+  it('buildCatPatchPayload clears stale provider for generic ACP — provider is opencode-only, not carried by acp', () => {
+    // F161 root-cause fix: clientId='acp' (generic ACP) is NOT a provider carrier.
+    // `provider` selects the env-map template (BUILTIN_ENV_MAPS[provider]) and is an
+    // OpenCode-only concept — there is no UI field for generic ACP, and env customization
+    // flows through account envVars templates instead. A stale provider (e.g. left over from
+    // a clientId='opencode' member or pre-cleanup data) must be cleared (provider:null) on
+    // save; otherwise prepareAcpProcessEnv forwards it to the env-map and injects the new
+    // account's key under the wrong provider's env name. For OpenCode provider management,
+    // use clientId='opencode' (cli or acp transport).
+    const form: HubCatEditorFormState = {
+      catId: 'acp-opencode',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-opencode',
+      roleDescription: 'OpenCode over generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'anthropic-key',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'opencode',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-opencode',
+      name: 'OpenCode ACP',
+      displayName: 'OpenCode ACP',
+      clientId: 'acp',
+      accountRef: 'anthropic-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-opencode'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'OpenCode over generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload.provider).toBeNull();
+  });
+
+  it('buildCatPatchPayload provider handling is independent of command basename — generic ACP never carries provider, kimi or opencode alike', () => {
+    // F161 root-cause fix: provider handling for generic ACP must NOT depend on the command
+    // basename. A clientId='acp' member is never a provider carrier whether the command is
+    // "kimi", "opencode", or anything else — a stale provider is always cleared on save.
+    // (Pre-cleanup, the opencode command basename alone preserved it; the cleanup commit
+    // wrongly widened the carrier to ALL acp — the correct scope is opencode-only.)
+    const form: HubCatEditorFormState = {
+      catId: 'acp-kimi',
+      name: 'Kimi ACP',
+      displayName: 'Kimi ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-kimi',
+      roleDescription: 'Kimi over generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'moonshot-key',
+      defaultModel: 'kimi-k2',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'kimi',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-kimi',
+      name: 'Kimi ACP',
+      displayName: 'Kimi ACP',
+      clientId: 'acp',
+      accountRef: 'moonshot-key',
+      provider: 'moonshot',
+      defaultModel: 'kimi-k2',
+      acp: { command: 'kimi', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-kimi'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'Kimi over generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload.provider).toBeNull();
+  });
+
+  it('buildCatPatchPayload does not emit a redundant provider:null when a generic ACP member has no stale provider', () => {
+    // F161 root-cause fix guard: a clean generic ACP member (no existing provider) must NOT
+    // gain a noisy provider:null on every save. Clearing only applies when there is a stale
+    // value to remove.
+    const form: HubCatEditorFormState = {
+      catId: 'acp-clean',
+      name: 'Clean ACP',
+      displayName: 'Clean ACP',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/default.png',
+      colorPrimary: '#0f172a',
+      colorSecondary: '#e2e8f0',
+      mentionPatterns: '@acp-clean',
+      roleDescription: 'Clean generic ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'acp',
+      accountRef: 'some-key',
+      defaultModel: 'some-model',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      ...emptyVoiceFields,
+      acpEnabled: true,
+      acpCommand: 'some-acp-agent',
+      acpStartupArgs: 'acp',
+      acpMaxLiveProcesses: '',
+      acpIdleTtlMinutes: '',
+    };
+    const existingCat = {
+      id: 'acp-clean',
+      name: 'Clean ACP',
+      displayName: 'Clean ACP',
+      clientId: 'acp',
+      accountRef: 'some-key',
+      defaultModel: 'some-model',
+      acp: { command: 'some-acp-agent', startupArgs: ['acp'] },
+      color: { primary: '#0f172a', secondary: '#e2e8f0' },
+      mentionPatterns: ['@acp-clean'],
+      avatar: '/avatars/default.png',
+      roleDescription: 'Clean generic ACP',
+    } as CatData;
+
+    const payload = buildCatPatchPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('provider');
   });
 
   it('renders normal member provider/model fields and saves to /api/cats', async () => {
@@ -813,6 +1185,276 @@ describe('HubCatEditor', () => {
     const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
     expect(postCall).toBeUndefined();
     expect(document.body.textContent).toContain('Provider 名称');
+  });
+
+  it('lets OpenCode members opt into ACP transport from the auth section', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                mode: 'api_key',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }, 201));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          draft: { clientId: 'opencode', accountRef: 'claude-key', defaultModel: 'claude-opus-4-6' },
+          onClose: vi.fn(),
+          onSaved,
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(document.body.textContent).toContain('Transport');
+    await changeField(queryField(container, 'select[aria-label="Transport"]'), 'acp', 'change');
+    expect(document.body.textContent).toContain('ACP Command');
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), 'OpenCode ACP');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), 'OpenCode over ACP');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@opencode-acp');
+    await changeField(queryField(container, 'input[aria-label="OC Provider Name"]'), 'anthropic');
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.acp).toEqual({ command: 'opencode', startupArgs: ['acp'] });
+    expect(onSaved).toHaveBeenCalled();
+  });
+
+  it('drops stale ACP transport when switching an ACP-enabled member to a CLI-only client', async () => {
+    const existingCat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@opencode-acp'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'OpenCode over ACP',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                protocol: 'anthropic',
+                mode: 'api_key',
+                clientId: 'anthropic',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/opencode-acp' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: existingCat,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'anthropic', 'change');
+    expect(document.body.querySelector('select[aria-label="Transport"]')).toBeNull();
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/opencode-acp' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.clientId).toBe('anthropic');
+    expect(payload.acp).toBeNull();
+  });
+
+  it('resets default ACP command and args when switching between dual-transport clients', async () => {
+    const existingCat = {
+      id: 'opencode-acp',
+      name: 'opencode-acp',
+      displayName: 'OpenCode ACP',
+      clientId: 'opencode',
+      accountRef: 'claude-key',
+      provider: 'anthropic',
+      defaultModel: 'claude-opus-4-6',
+      color: { primary: '#5B8C5A', secondary: '#D4E6D3' },
+      mentionPatterns: ['@opencode-acp'],
+      avatar: '/avatars/opencode.png',
+      roleDescription: 'OpenCode over ACP',
+      acp: { command: 'opencode', startupArgs: ['acp'] },
+    } as CatData;
+
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            activeProfileId: 'claude-key',
+            providers: [
+              {
+                id: 'claude-key',
+                provider: 'claude',
+                displayName: 'Claude Key',
+                name: 'Claude Key',
+                authType: 'api_key',
+                protocol: 'anthropic',
+                mode: 'api_key',
+                clientId: 'anthropic',
+                models: ['claude-opus-4-6'],
+                hasApiKey: true,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+              {
+                id: 'gemini-oauth',
+                provider: 'gemini',
+                displayName: 'Gemini OAuth',
+                name: 'Gemini OAuth',
+                authType: 'oauth',
+                protocol: 'google',
+                mode: 'subscription',
+                clientId: 'google',
+                models: ['gemini-2.5-pro'],
+                hasApiKey: false,
+                createdAt: '2026-03-18T00:00:00.000Z',
+                updatedAt: '2026-03-18T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cats/opencode-acp' && init?.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'opencode-acp' } }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: existingCat,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+
+    expect(queryField<HTMLSelectElement>(container, 'select[aria-label="Transport"]').value).toBe('acp');
+    await changeField(queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]'), 'google', 'change');
+    await flushEffects();
+    await changeField(
+      queryField<HTMLSelectElement>(container, 'select[aria-label="认证信息"]'),
+      'gemini-oauth',
+      'change',
+    );
+    await changeField(queryField<HTMLInputElement>(container, 'input[aria-label="Model"]'), 'gemini-2.5-pro');
+
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="ACP Command"]').value).toBe('gemini');
+    expect(queryField<HTMLInputElement>(container, 'input[aria-label="ACP Startup Args"]').value).toBe(
+      '--acp --approval-mode yolo',
+    );
+
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === '保存',
+    );
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    const patchCall = mockApiFetch.mock.calls.find(
+      ([path, init]) => path === '/api/cats/opencode-acp' && init?.method === 'PATCH',
+    );
+    expect(patchCall).toBeTruthy();
+    const payload = JSON.parse(String(patchCall?.[1]?.body));
+    expect(payload.clientId).toBe('google');
+    expect(payload.acp).toEqual({
+      command: 'gemini',
+      startupArgs: ['--acp', '--approval-mode', 'yolo'],
+    });
   });
 
   it('resets defaultModel when switching Provider to prevent stale model carry-over', async () => {

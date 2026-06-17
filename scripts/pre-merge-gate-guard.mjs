@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_FSEVENTSD_RSS_MAX_KB = 4 * 1024 * 1024;
-// 6398=worktree dev / 6399=runtime sanctuary / 6401=user-redis persistent user data.
+// 6099=fork runtime sanctuary / 6398=worktree dev /
+// 6399=runtime sanctuary / 6401=user-redis persistent user data.
 // 6401 must be protected too — flagging it as a killable orphan led to it being murdered
 // alongside 6399 (CAFE-INCIDENT-20260527).
-const PROTECTED_REDIS_PORTS = new Set([6398, 6399, 6401]);
+const PROTECTED_REDIS_PORTS = new Set([6099, 6398, 6399, 6401]);
 const ALLOWED_LOCAL_REDIS_PORTS = new Set([6379, ...PROTECTED_REDIS_PORTS]);
 // Concurrent-gate detection — another gate / pre-merge-check is already running.
 // Downgraded from hard-block to soft-warning (#1912 added this hard-block): gates run in

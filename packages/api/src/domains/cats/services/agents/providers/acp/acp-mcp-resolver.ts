@@ -123,6 +123,10 @@ function readMcpJson(mcpJsonPath: string): Record<string, McpJsonEntry> {
 
 // ─── Main resolver ───────────────────────────────────────────────
 
+interface ResolveAcpMcpServersOptions {
+  mcpSupport?: boolean;
+}
+
 /**
  * Resolve MCP servers for an ACP session.
  *
@@ -141,14 +145,23 @@ export function resolveAcpMcpServers(
   projectRoot: string,
   whitelist: string[],
   userProjectRoot?: string,
+  options: ResolveAcpMcpServersOptions = {},
 ): AcpMcpServer[] {
-  if (!whitelist.length && !userProjectRoot) return [];
+  if (options.mcpSupport === false) {
+    log.info({ hasUserProject: !!userProjectRoot }, 'MCP support disabled for ACP member');
+    return [];
+  }
+
+  // F161: when whitelist is empty, auto-provision all built-in cat-cafe MCP servers
+  // — same behavior as CLI clients (ClaudeAgentService / CodexAgentService via --mcp-config).
+  // ACP is just a different transport; MCP capabilities should be identical.
+  const effectiveWhitelist = whitelist.length > 0 ? whitelist : [...BUILTIN_CAT_CAFE_SERVERS.keys()];
 
   const servers: AcpMcpServer[] = [];
   const externalNames: string[] = [];
 
   // Phase 1: resolve builtins from projectRoot (no .mcp.json needed)
-  for (const name of whitelist) {
+  for (const name of effectiveWhitelist) {
     const builtin = resolveBuiltinCatCafeServer(projectRoot, name);
     if (builtin) {
       servers.push(builtin);

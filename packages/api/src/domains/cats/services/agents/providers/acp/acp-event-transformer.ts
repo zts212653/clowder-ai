@@ -29,12 +29,63 @@ export interface AcpSessionState {
   emittedToolUseByCallId: Set<string>;
   /** toolCallIds that have already emitted a final `tool_result`. */
   finalEmittedByCallId: Set<string>;
+  /** Accumulated thinking text — flushed as a single event when a non-thinking event arrives. */
+  thinkingBuffer: string;
+  /**
+   * OpenCode compaction scratchpad detection.
+   * When the model mimics the compaction template (`## Goal`, `Constraints & Preferences`,
+   * etc.) in its regular response text, subsequent chunks are suppressed.
+   */
+  scratchpadDetected: boolean;
+  /** Trailing text window for cross-chunk compaction signature detection. */
+  textTail: string;
 }
 
 export function createAcpSessionState(): AcpSessionState {
   return {
     emittedToolUseByCallId: new Set<string>(),
     finalEmittedByCallId: new Set<string>(),
+    thinkingBuffer: '',
+    scratchpadDetected: false,
+    textTail: '',
+  };
+}
+
+/**
+ * OpenCode compaction signature. `## Goal` alone is normal Markdown, and
+ * `## Constraints & Preferences` is a normal planning heading. Suppress only
+ * when the companion marker appears as the bare compaction-template line.
+ */
+const SCRATCHPAD_MARKER = '## Goal';
+const SCRATCHPAD_COMPANION_MARKER_RE = /(?:^|\n)(?![ \t]*#{1,6}\s)[ \t]*Constraints & Preferences\b/;
+const SCRATCHPAD_TAIL_CHARS = 800;
+
+function findScratchpadSignature(text: string): number {
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const markerIdx = text.indexOf(SCRATCHPAD_MARKER, searchFrom);
+    if (markerIdx < 0) return -1;
+    const afterMarker = text.slice(markerIdx + SCRATCHPAD_MARKER.length);
+    if (SCRATCHPAD_COMPANION_MARKER_RE.test(afterMarker)) return markerIdx;
+    searchFrom = markerIdx + SCRATCHPAD_MARKER.length;
+  }
+  return -1;
+}
+
+/**
+ * Flush any accumulated thinking text as a single system_info event.
+ * Call at end-of-stream to emit thinking that was the last content block.
+ */
+export function flushAcpThinking(state: AcpSessionState, catId: CatId, metadata: MessageMetadata): AgentMessage | null {
+  if (!state.thinkingBuffer) return null;
+  const text = state.thinkingBuffer;
+  state.thinkingBuffer = '';
+  return {
+    type: 'system_info',
+    catId,
+    content: JSON.stringify({ type: 'thinking', text }),
+    metadata,
+    timestamp: Date.now(),
   };
 }
 
@@ -93,17 +144,55 @@ export function transformAcpEvent(
     );
   }
 
+  // Flush accumulated thinking before any non-thinking event.
+  // Mirrors claude-ndjson-parser's thinkingBuffer → content_block_stop pattern.
+  const flushPending =
+    state && state.thinkingBuffer && sessionUpdate !== 'agent_thought_chunk'
+      ? flushAcpThinking(state, catId, metadata)
+      : null;
+
+  /** Wrap result with flushed thinking (if any) — returns array when both exist. */
+  function withFlush(msg: AgentMessage | AgentMessage[] | null): AgentMessage | AgentMessage[] | null {
+    if (!flushPending) return msg;
+    if (!msg) return flushPending;
+    if (Array.isArray(msg)) return [flushPending, ...msg];
+    return [flushPending, msg];
+  }
+
   switch (sessionUpdate) {
-    case 'agent_message_chunk':
-      return {
-        type: 'text',
-        catId,
-        content: content?.text ?? '',
-        metadata,
-        timestamp: now,
-      };
+    case 'agent_message_chunk': {
+      const text = content?.text ?? '';
+      if (state) {
+        // Once scratchpad is detected, suppress all subsequent text chunks.
+        if (state.scratchpadDetected) return withFlush(null);
+
+        // Cross-chunk detection: combine trailing window with current chunk.
+        const combined = state.textTail + text;
+        const markerIdx = findScratchpadSignature(combined);
+        if (markerIdx >= 0) {
+          state.scratchpadDetected = true;
+          log.info({ catId }, 'Suppressing OpenCode compaction scratchpad from ACP text stream');
+          // Emit only the portion of the current chunk before the marker.
+          const cleanEnd = markerIdx - state.textTail.length;
+          if (cleanEnd <= 0) return withFlush(null);
+          // Trim trailing whitespace that precedes the scratchpad header.
+          const clean = text.slice(0, cleanEnd).replace(/[\s\n]+$/, '');
+          if (!clean) return withFlush(null);
+          return withFlush({ type: 'text', catId, content: clean, metadata, timestamp: now });
+        }
+        // Keep trailing window bounded for cross-chunk detection.
+        state.textTail = combined.length > SCRATCHPAD_TAIL_CHARS ? combined.slice(-SCRATCHPAD_TAIL_CHARS) : combined;
+      }
+      return withFlush({ type: 'text', catId, content: text, metadata, timestamp: now });
+    }
 
     case 'agent_thought_chunk':
+      // Accumulate — emit nothing until a non-thinking event flushes the buffer.
+      if (state) {
+        state.thinkingBuffer += content?.text ?? '';
+        return null;
+      }
+      // No state (shouldn't happen) — fall back to immediate emit.
       return {
         type: 'system_info',
         catId,
@@ -128,7 +217,7 @@ export function transformAcpEvent(
       // event multiple times — second+ occurrences must be dropped to honor
       // "仅一次 final tool_result" invariant.
       if (state && toolCallId && state.finalEmittedByCallId.has(toolCallId)) {
-        return null;
+        return withFlush(null);
       }
       const toolUse: AgentMessage = {
         type: 'tool_use',
@@ -161,13 +250,13 @@ export function transformAcpEvent(
           state.emittedToolUseByCallId.add(toolCallId);
           state.finalEmittedByCallId.add(toolCallId);
         }
-        return hasPendingToolUse ? resultMsg : [toolUse, resultMsg];
+        return withFlush(hasPendingToolUse ? resultMsg : [toolUse, resultMsg]);
       }
       // Pending/in_progress/no-status → tool_use only.
       // Register state AFTER non-final branch so duplicate plain tool_call is
       // tolerated (transformer is event-by-event; dedup only blocks final replay).
       if (state && toolCallId) state.emittedToolUseByCallId.add(toolCallId);
-      return toolUse;
+      return withFlush(toolUse);
     }
 
     case 'tool_call_update': {
@@ -183,23 +272,23 @@ export function transformAcpEvent(
         // re-emit tool_use to avoid double-pending in Recall sidebar).
         // For unknown toolCallId without state tracking, fall back to legacy
         // tool_use emission so we don't silently lose first observation of a tool.
-        if (alreadyHasToolUse) return null;
+        if (alreadyHasToolUse) return withFlush(null);
         if (state && toolCallId) {
           // First observation with no final status — emit tool_use, register state
           state.emittedToolUseByCallId.add(toolCallId);
         }
-        return {
+        return withFlush({
           type: 'tool_use',
           catId,
           ...(toolName !== undefined ? { toolName } : {}),
           metadata,
           timestamp: now,
-        };
+        });
       }
       // F197 KD-5 / 砚砚 PR review P1: dedup duplicate final replay (same as
       // tool_call branch above — ACP can re-deliver same final event).
       if (state && toolCallId && state.finalEmittedByCallId.has(toolCallId)) {
-        return null;
+        return withFlush(null);
       }
       // Final status (completed/failed)
       const resultMsg: AgentMessage = {
@@ -218,7 +307,7 @@ export function transformAcpEvent(
         // above (before this `if (alreadyHasToolUse)` branch). Second final
         // for same toolCallId returns null before reaching this point.
         if (state && toolCallId) state.finalEmittedByCallId.add(toolCallId);
-        return resultMsg;
+        return withFlush(resultMsg);
       }
       // F197 AC-A3 boundary: toolCallId first appears as final update with no prior
       // tool_call. Split to [tool_use, tool_result] so the pair is never orphaned.
@@ -226,7 +315,7 @@ export function transformAcpEvent(
         state.emittedToolUseByCallId.add(toolCallId);
         state.finalEmittedByCallId.add(toolCallId);
       }
-      return [
+      return withFlush([
         {
           type: 'tool_use',
           catId,
@@ -235,22 +324,22 @@ export function transformAcpEvent(
           timestamp: now,
         },
         resultMsg,
-      ];
+      ]);
     }
 
     case 'plan':
-      return {
+      return withFlush({
         type: 'system_info',
         catId,
         content: JSON.stringify({ type: 'plan', text: content?.text ?? '' }),
         metadata,
         timestamp: now,
-      };
+      });
 
     case 'user_message_chunk':
-      return null;
+      return withFlush(null);
 
     default:
-      return null;
+      return withFlush(null);
   }
 }

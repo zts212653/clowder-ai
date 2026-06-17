@@ -27,6 +27,7 @@ const BUILTIN_CLIENT_LABELS: Record<BuiltinAccountClient, string> = {
   kimi: 'Kimi',
   dare: 'Dare',
   opencode: 'OpenCode',
+  acp: 'ACP',
 };
 
 function uniqueTags(tags: string[]): string[] {

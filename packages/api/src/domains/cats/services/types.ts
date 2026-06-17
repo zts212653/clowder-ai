@@ -266,6 +266,8 @@ export interface AgentServiceOptions {
   auditContext?: AuditContext;
   /** Static identity prompt (Claude: --append-system-prompt, others: prepend to prompt) */
   systemPrompt?: string;
+  /** Static identity prompt used only if a resumed carrier creates a fresh fallback session. */
+  resumeFallbackSystemPrompt?: string;
   /** F089: Override spawnCli with tmux-based spawner (set per-invocation) */
   spawnCliOverride?: SpawnCliOverride;
   /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */

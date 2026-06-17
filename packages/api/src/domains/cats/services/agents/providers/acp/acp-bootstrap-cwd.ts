@@ -133,6 +133,17 @@ function resolveAcpBootstrapArg(projectRoot: string, arg: string): string {
   return existsSync(candidate) ? candidate : arg;
 }
 
-export function resolveAcpBootstrapArgs(projectRoot: string, args: readonly string[]): string[] {
-  return args.map((arg) => resolveAcpBootstrapArg(projectRoot, arg));
+const ARG_TEMPLATE_RE = /\$\{(base_model|model)\}/g;
+
+function expandAcpBootstrapArgTemplates(arg: string, vars?: Record<string, string | undefined>): string {
+  if (!vars) return arg;
+  return arg.replace(ARG_TEMPLATE_RE, (_, name: string) => vars[name] ?? '');
+}
+
+export function resolveAcpBootstrapArgs(
+  projectRoot: string,
+  args: readonly string[],
+  templateVars?: Record<string, string | undefined>,
+): string[] {
+  return args.map((arg) => resolveAcpBootstrapArg(projectRoot, expandAcpBootstrapArgTemplates(arg, templateVars)));
 }

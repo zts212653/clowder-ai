@@ -24,6 +24,7 @@ import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider 
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
+import { resolveProjectTemplatePath } from './project-template-path.js';
 import { isValidTimeZone } from './time-zone.js';
 
 const log = createModuleLogger('cat-config');
@@ -261,7 +262,7 @@ function readTemplate(templatePath: string): string {
  * across provider switches (e.g. template cli.defaultArgs surviving into a
  * catalog variant that switched to a different client).
  */
-const ATOMIC_OBJECT_KEYS = new Set(['cli', 'agyProfile', 'color', 'contextBudget', 'voiceConfig']);
+const ATOMIC_OBJECT_KEYS = new Set(['cli', 'agyProfile', 'color', 'contextBudget', 'voiceConfig', 'acp']);
 
 /**
  * Deep merge two plain objects. `overlay` fields override `base` fields.
@@ -871,6 +872,10 @@ export function getCatContextWindowConfig(catId: string): CatContextWindowConfig
 export interface AcpVariantConfig {
   command: string;
   startupArgs: string[];
+  /** F161 Phase C: ACP wire transport. 'stdio' = NDJSON over stdin/stdout (default). 'httpstream' = spawn process that listens on HTTP port. */
+  transport?: 'stdio' | 'httpstream';
+  /** Required for httpstream until ACP publishes a stable HTTP transport spec. */
+  experimental?: boolean;
   mcpWhitelist?: string[];
   supportsMultiplexing?: boolean;
   /** Phase C: optional pool config overrides */
@@ -885,12 +890,14 @@ export interface AcpVariantConfig {
  * Returns undefined if the variant has no `acp` section (= use legacy CLI).
  * Reads raw JSON because `acp` is not in the typed CatConfig (intentionally).
  */
-export function getAcpConfig(catId: string): AcpVariantConfig | undefined {
+export function getAcpConfig(catId: string, projectRoot?: string): AcpVariantConfig | undefined {
   try {
-    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+    const templatePath = projectRoot
+      ? resolveProjectTemplatePath(projectRoot)
+      : (process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH);
     const raw = mergeTemplateWithCatalog(templatePath) ?? readTemplate(templatePath);
     const json = JSON.parse(raw) as {
-      breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig }> }>;
+      breeds?: Array<{ catId?: string; variants?: Array<{ catId?: string; acp?: AcpVariantConfig | null }> }>;
     };
     for (const breed of json.breeds ?? []) {
       for (const variant of breed.variants ?? []) {

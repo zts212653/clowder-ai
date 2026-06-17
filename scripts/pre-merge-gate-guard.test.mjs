@@ -259,7 +259,7 @@ describe('pre-merge gate guard', () => {
     }
   });
 
-  it('does not flag protected sanctuary ports 6398/6399/6401 as orphans', () => {
+  it('does not flag protected sanctuary ports 6099/6398/6399/6401 as orphans', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'gate-guard-test-'));
     const lockDir = path.join(tempDir, 'pre-merge-check.lock');
     writeFileSync(
@@ -268,6 +268,7 @@ describe('pre-merge gate guard', () => {
         'redis-ser 100 user 6u IPv4 0x0 0t0 TCP 127.0.0.1:6398 (LISTEN)',
         'redis-ser 101 user 6u IPv4 0x0 0t0 TCP 127.0.0.1:6399 (LISTEN)',
         'redis-ser 102 user 6u IPv4 0x0 0t0 TCP 127.0.0.1:6401 (LISTEN)',
+        'redis-ser 103 user 6u IPv4 0x0 0t0 TCP 127.0.0.1:6099 (LISTEN)',
       ].join('\n'),
     );
     try {

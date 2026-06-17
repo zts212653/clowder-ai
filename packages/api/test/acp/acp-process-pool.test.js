@@ -49,7 +49,7 @@ function createMockClient() {
 
 const defaultPoolConfig = {
   maxLiveProcesses: 3,
-  idleTtlMs: 5 * 60 * 1000,
+  idleTtlMs: 30 * 60 * 1000,
   evictionPolicy: /** @type {const} */ ('lru'),
   healthCheckIntervalMs: 30_000,
 };
@@ -58,6 +58,12 @@ const defaultVariantConfig = {
   command: 'gemini',
   startupArgs: ['--acp'],
   supportsMultiplexing: true,
+};
+
+const nonMultiplexedVariantConfig = {
+  command: 'single-flight-agent',
+  startupArgs: ['--acp'],
+  supportsMultiplexing: false,
 };
 
 const key1 = { projectPath: '/tmp/a', providerProfile: 'gemini-default' };
@@ -73,6 +79,30 @@ describe('AcpProcessPool', () => {
   afterEach(async () => {
     if (pool) await pool.closeAll();
     clientIdCounter = 0;
+  });
+
+  describe('defaults', () => {
+    test('uses 30 minutes as the default idle TTL', async () => {
+      const { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { maxLiveProcesses: 3, healthCheckIntervalMs: 999_999 },
+        defaultVariantConfig,
+        createMockClient,
+      );
+      assert.equal(DEFAULT_ACP_IDLE_TTL_MS, 30 * 60 * 1000);
+      assert.equal(pool.config.idleTtlMs, DEFAULT_ACP_IDLE_TTL_MS);
+    });
+
+    test('exposes the typed spawn signature used for registry staleness checks', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient, 'spawn:v1');
+      assert.equal(pool.spawnSignature, 'spawn:v1');
+      assert.equal(Object.prototype.hasOwnProperty.call(pool, '_spawnSignature'), false);
+    });
   });
 
   describe('acquire / release basics', () => {
@@ -126,6 +156,64 @@ describe('AcpProcessPool', () => {
       assert.strictEqual(pool.getMetrics().coldStartCount, 2);
       lease1.release();
       lease2.release();
+    });
+
+    test('non-multiplexed carriers do not share an active warm process for the same key', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const lease2 = await pool.acquire(key1);
+
+      assert.notStrictEqual(lease1.client, lease2.client);
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 2);
+      assert.strictEqual(pool.getMetrics().coldStartCount, 2);
+
+      lease1.release();
+      lease2.release();
+    });
+
+    test('non-multiplexed carriers still reuse idle processes for later turns', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const client = lease1.client;
+      lease1.release();
+
+      const lease2 = await pool.acquire(key1);
+      assert.strictEqual(lease2.client, client);
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 1);
+      lease2.release();
+    });
+
+    test('session affinity leases the client that owns a resumed session', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      const lease1 = await pool.acquire(key1);
+      const firstClient = lease1.client;
+      const lease2 = await pool.acquire(key1);
+      const secondClient = lease2.client;
+      pool.rememberSession(key1, 'sess-on-second-client', lease2);
+
+      lease1.release();
+      lease2.release();
+
+      const resumeLease = await pool.acquire(key1, { sessionId: 'sess-on-second-client' });
+      assert.strictEqual(
+        resumeLease.client,
+        secondClient,
+        'resume must lease the remembered session owner, not the first idle warm client',
+      );
+      assert.notStrictEqual(resumeLease.client, firstClient);
+      resumeLease.release();
     });
 
     test('double release is safe (no-op)', async () => {
@@ -328,6 +416,26 @@ describe('AcpProcessPool', () => {
       assert.strictEqual(m.liveProcessCount, 1, 'should only have 1 process');
       assert.strictEqual(m.coldStartCount, 1, 'should only cold start once');
       assert.strictEqual(l1.client, l2.client, 'should share same client');
+      l1.release();
+      l2.release();
+    });
+
+    test('concurrent acquire for non-multiplexed same key starts separate processes', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, maxLiveProcesses: 2, healthCheckIntervalMs: 999_999 },
+        nonMultiplexedVariantConfig,
+        createMockClient,
+      );
+
+      const [l1, l2] = await Promise.all([pool.acquire(key1), pool.acquire(key1)]);
+
+      assert.notStrictEqual(l1.client, l2.client);
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 2);
+      assert.strictEqual(pool.getMetrics().coldStartCount, 2);
+
       l1.release();
       l2.release();
     });

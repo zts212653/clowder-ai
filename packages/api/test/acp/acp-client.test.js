@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
-const { AcpClient, AcpProtocolError } = await import(
+const { AcpClient, AcpProtocolError, buildAcpSpawnLogFields } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
 );
 
@@ -66,6 +66,21 @@ describe('AcpClient', () => {
     }
   });
 
+  it('redacts startup args from initialize spawn log metadata', () => {
+    const fields = buildAcpSpawnLogFields({
+      command: 'custom-acp',
+      args: ['--api-key', 'sk-secret', '--token=tok-secret', '--acp'],
+      cwd: '/tmp/project',
+      pid: 12345,
+      env: { CUSTOM_API_KEY: 'env-secret' },
+    });
+
+    assert.equal(fields.argCount, 4);
+    assert.equal(fields.envKeyCount, 1);
+    assert.equal(Object.hasOwn(fields, 'args'), false);
+    assert.doesNotMatch(JSON.stringify(fields), /sk-secret|tok-secret|env-secret/);
+  });
+
   it('initialize sends protocolVersion and parses response', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
@@ -118,6 +133,38 @@ describe('AcpClient', () => {
     const session = await client.newSession();
     assert.equal(session.sessionId, 'sess-456');
     assert.equal(capturedCwd, '/my/project');
+  });
+
+  it('setSessionConfigOption sends session/set_config_option with config value', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    let captured = null;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/set_config_option') {
+          captured = msg;
+          agentRespond(agentStdout, msg.id, { configOptions: [] });
+        }
+      }
+    });
+
+    client = new AcpClient({
+      command: 'fake',
+      args: [],
+      cwd: '/my/project',
+      spawnFn: () => child,
+    });
+
+    await client.initialize();
+    await client.setSessionConfigOption('sess-123', 'model', 'anthropic/claude-opus-4-6');
+
+    assert.ok(captured, 'Expected session/set_config_option request');
+    assert.equal(captured.params.sessionId, 'sess-123');
+    assert.equal(captured.params.configId, 'model');
+    assert.equal(captured.params.value, 'anthropic/claude-opus-4-6');
   });
 
   it('promptCollect collects events and returns stopReason', async () => {
