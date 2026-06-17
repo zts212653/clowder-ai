@@ -29,14 +29,14 @@ function buildMentionColor(cats: Array<{ id: string; color: { primary: string } 
   return Object.fromEntries(cats.map((cat) => [cat.id, cat.color.primary]));
 }
 
-// ── Co-Creator (铲屎官) ───────────────────────────────────
+// ── Co-Creator (co-creator) ───────────────────────────────────
 const CO_CREATOR_ID = '__co-creator__';
 const CO_CREATOR_COLOR = CO_CREATOR_MENTION; // warm gold — centralized in color-defaults.ts
-const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@铲屎官'];
+const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator'];
 
 // ── Module-level cache (populated by refreshMentionData after /api/cats fetch) ─
 
-// Include co-creator as pseudo-cat so @铲屎官 highlights gold
+// Include co-creator as pseudo-cat so @co-creator highlights gold
 let _cats: Array<{ id: string; mentionPatterns: string[]; color: { primary: string } }> = [];
 let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
 let _mentionToCat = buildMentionToCat([]);

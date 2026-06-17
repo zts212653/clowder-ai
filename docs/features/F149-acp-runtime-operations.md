@@ -28,7 +28,7 @@ F143 已经回答了“宿主抽象怎么分层”这个问题，但它的 Phase
 - `session resume` 不等于 `process reuse`
 - 如果只是靠“怪目录 + supervisor + workaround”把 CLI 吊起来，那还是脚手架，不是终态
 
-team experience（2026-03-31）：
+operator experience（2026-03-31）：
 > “10个thread Siamese可不是随时都需要参加的啊。”
 >
 > “今天可能一共开了20个甚至更多thread。”
@@ -74,7 +74,7 @@ team experience（2026-03-31）：
 
 ### Phase D: ACP Carrier 泛化 → 拆出到 F161
 
-> **Scope 收窄决策（2026-04-13 team lead拍板）**：F149 的愿景是 ACP runtime operations（池化/lease/lifecycle），Phase A~C 已完整兑现 Gemini 载体。Carrier 泛化是独立愿景，拆到 F161，Gemini 作为第一个已有实现，有需求时再继续。
+> **Scope 收窄决策（2026-04-13 operator拍板）**：F149 的愿景是 ACP runtime operations（池化/lease/lifecycle），Phase A~C 已完整兑现 Gemini 载体。Carrier 泛化是独立愿景，拆到 F161，Gemini 作为第一个已有实现，有需求时再继续。
 
 ~~在 Gemini 路径稳定后，再验证这套运行时运营层是否能服务其他 ACP-style local agent。~~ → **See [F161](F161-acp-carrier-generalization.md)**
 
@@ -160,15 +160,15 @@ team experience（2026-03-31）：
 | KD-3 | V1 的优化目标是 process reuse，不是重复强调 session resume | F053 已经解决了旧 headless Gemini 路径的 `--resume`，当前瓶颈是每轮重启进程 | 2026-03-31 |
 | KD-4 | Phase B 先用 Gemini 当第一载体，但 feature 命名不绑死单 provider | 避免”只救Siamese”的窄 patch，同时不提前抽象到第二个 F143 | 2026-03-31 |
 | KD-5 | F149 Phase B 不被 F143 Phase A 阻塞，反向反哺 F143 抽象提取 | 具体物先于抽象层——先做 GeminiAcpAdapter，再让 F143 从中提取 seam。等抽象层先落地再做具体实现是 waterfall，会浪费实验动量（Ragdoll push back） | 2026-03-31 |
-| KD-6 | thread 持有 logical session binding，不持有 long process lease | 云端两份咨询最强共识。thread 是异步长生命周期业务实体，process lease 是物理资源短占用。绑死会让team lead吃饭的 10 分钟里进程不可回收（GPT Pro + DeepThink 一致） | 2026-04-01 |
+| KD-6 | thread 持有 logical session binding，不持有 long process lease | 云端两份咨询最强共识。thread 是异步长生命周期业务实体，process lease 是物理资源短占用。绑死会让operator吃饭的 10 分钟里进程不可回收（GPT Pro + DeepThink 一致） | 2026-04-01 |
 | KD-7 | 失败处理分三层：process-poison / session-poison / turn-transient | process-poison（stdout 污染/协议失步/僵尸）→ kill process；session-poison（merged/dropped response）→ seal session；turn-transient（429/5xx 无 side effect）→ retry/backoff。有 tool call side effect 的禁止盲重试（GPT Pro failure taxonomy + Gemini issue #24017） | 2026-04-01 |
 | KD-8 | `loadSession` 保留为 recovery primitive，恢复路径必须 shadow | Gemini ACP 的 `loadSession` 会 replay 历史（`session.streamHistory()`），直接用会污染 thread transcript。保留但必须拦截 replay 事件（GPT Pro 建议 + 本地源码验证） | 2026-04-01 |
 | KD-9 | 在 provider profile 中预留 `supports_multiplexing` 能力标志 | 今天 Gemini 默认 false；Phase A 验证通过后或新 carrier 进来后可切 true，调度器据此决定是否向同一进程并行下发。留 seam 不提前抽象（DeepThink 建议） | 2026-04-01 |
 | KD-10 | Gemini ACP 实测 `supportsMultiplexing = true` | OQ-6 实验验证：单进程双 session 并发 prompt（A="DELTA" B="ECHO"）正确完成，执行窗口重叠，无 cross-contamination。Phase C 池化可按 1 process : N sessions 设计，不需要每个并发 prompt 独占进程 | 2026-04-01 |
-| KD-11 | Stream idle watchdog：两段式（warning → stall），不做单阈值 kill + 不做自动重试 | 实际案例（2026-04-04 07:47）：firstEvent 5.8s 正常到达，eventCount=2 后静默 116s 至 timeout，stderr 零输出，errorCode=lease_timeout。team lead痛点："到底是谷歌的问题还是我们的？"。opus+gpt52 共识：(1) 只在 eventCount>0 后启用 idle watchdog (2) ~20s alive_but_silent warning / ~45s stream_idle_stall 终止 / 120s hard timeout 保留 (3) transport 注入 synthetic event（复用 capacity warning 管道）(4) 新 AgentMessageType 不复用 provider_signal（语义不同）(5) 不做自动重试（eventCount>0 不等于安全可重试，KD-7 约束）(6) 文案不过度归因"Google 的锅"，写"已开始回复但后续停滞" | 2026-04-04 |
+| KD-11 | Stream idle watchdog：两段式（warning → stall），不做单阈值 kill + 不做自动重试 | 实际案例（2026-04-04 07:47）：firstEvent 5.8s 正常到达，eventCount=2 后静默 116s 至 timeout，stderr 零输出，errorCode=lease_timeout。operator痛点："到底是谷歌的问题还是我们的？"。opus+gpt52 共识：(1) 只在 eventCount>0 后启用 idle watchdog (2) ~20s alive_but_silent warning / ~45s stream_idle_stall 终止 / 120s hard timeout 保留 (3) transport 注入 synthetic event（复用 capacity warning 管道）(4) 新 AgentMessageType 不复用 provider_signal（语义不同）(5) 不做自动重试（eventCount>0 不等于安全可重试，KD-7 约束）(6) 文案不过度归因"Google 的锅"，写"已开始回复但后续停滞" | 2026-04-04 |
 | KD-12 | 绝对超时降级为 turn budget，不再承载健康判定语义 | 连续三种故障（permission stall → Premature close → 300s 工具执行中被杀）暴露根因：idle watchdog 把健康判定/进度判定/资源回收混成一个 stdout timer。上游 #21783 确认 Gemini CLI 不发 MCP tool_call 事件，#24029 正在做 channel notifications 但未落地。opus+gpt52 喵约共识：(1) 300s 绝对超时改为可配 turn budget（默认 600s），语义从"你死了"变为"预算用完" (2) idle stall 90s 保留抓真挂死 (3) stderr 可做 activity hint 但非主判据 (4) 不自造 heartbeat/proxy，等上游 channel notifications 落地后接入 L2 信号 (5) 终态三层模型：L1 进程存活 / L2 外部活动信号 / L3 资源预算——分治不混用 | 2026-04-08 |
 
 ## Review Gate
 
-- Phase A: 架构级——先由Maine Coon收敛，再请Ragdoll push back，最后team lead拍板
+- Phase A: 架构级——先由Maine Coon收敛，再请Ragdoll push back，最后operator拍板
 - Phase B/C: 跨 family review

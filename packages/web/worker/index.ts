@@ -1,5 +1,5 @@
 /**
- * Cat Cafe Service Worker — Push Notification Handler
+ * Clowder AI Service Worker — Push Notification Handler
  *
  * Injected into the Workbox-generated sw.js via @ducanh2912/next-pwa's
  * customWorkerSrc convention (worker/index.ts → importScripts).
@@ -36,7 +36,7 @@ self.addEventListener('push', (event: PushEvent) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
-      // When Cat Cafe is focused, generic replies are suppressed because
+      // When Clowder AI is focused, generic replies are suppressed because
       // in-app toast already handles them; forced categories still show.
       const hasFocusedClient = clients.some((c) => c.visibilityState === 'visible');
       if (!shouldShowSystemNotification(payload, hasFocusedClient)) return;
@@ -65,7 +65,7 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window' }).then((clients) => {
-      // Find existing Cat Cafe window
+      // Find existing Clowder AI window
       for (const client of clients) {
         if (new URL(client.url).origin === self.location.origin) {
           return client.focus().then((focused) => {

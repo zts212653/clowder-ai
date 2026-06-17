@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Cat Cafe 初始化脚本
+# Clowder AI 初始化脚本
 # 用于首次设置项目环境
 
 set -e
 
-echo "🐱 Cat Café 初始化脚本"
+echo "🐱 Clowder AI 初始化脚本"
 echo "======================"
 
 # 颜色定义
@@ -134,7 +134,7 @@ main() {
 
     echo ""
     echo "========================"
-    echo -e "${GREEN}🎉 Cat Café 初始化完成！${NC}"
+    echo -e "${GREEN}🎉 Clowder AI 初始化完成！${NC}"
     echo ""
     echo "下一步："
     echo "  1. 打开 http://localhost:3003 → Hub → 系统配置 → 账号配置，添加 API Key"

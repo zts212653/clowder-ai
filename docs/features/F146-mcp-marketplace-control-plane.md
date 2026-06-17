@@ -8,11 +8,11 @@ created: 2026-03-28
 
 # F146: Capability Marketplace Control Plane — 一键接入 + 多生态聚合
 
-> **Scope 扩展（2026-04-18 team lead拍板）**：不止 MCP，覆盖 plugin / skill / tool / connector。UI 标签"能力市场"。
+> **Scope 扩展（2026-04-18 operator拍板）**：不止 MCP，覆盖 plugin / skill / tool / connector。UI 标签"能力市场"。
 
 > **Status**: done | **Completed**: 2026-04-19 | **Owner**: Maine Coon + Ragdoll | **Priority**: P1
 
-## team lead愿景
+## operator愿景
 
 > “我想问你，我们搞设计有什么 MCP？到时候你就可以直接去 Claude 官方的 Hub 市场、Codex 官方的市场、OpenClaw 的市场，一搜——哎，把官方推荐的、最不容易被下毒、最可靠的那些东西拉回来。”
 >
@@ -22,11 +22,11 @@ created: 2026-03-28
 >
 > “Connectors 比如 Figma 那种 app connector 也要。L1、L2、L3 都得做。”
 
-**一句话**：team lead说一句自然语言需求，猫就能去多家市场搜索、比较、安全评估、一键拉回来安装——人类不碰 JSON、不碰命令行。
+**一句话**：operator说一句自然语言需求，猫就能去多家市场搜索、比较、安全评估、一键拉回来安装——人类不碰 JSON、不碰命令行。
 
 ## Why
 
-team lead诉求（2026-03-28）：
+operator诉求（2026-03-28）：
 
 1. 不接受继续手改 `capabilities.json` 作为 MCP 新增主流程
 2. 既然我们已有能力中心看板，就要支持”一键添加 MCP / 一键下线 MCP”
@@ -180,7 +180,7 @@ Skill 内容安全（防下毒）：
 3. **Quarantine 状态机**
    - `pending_review` → `approved` / `quarantined` / `rejected`
    - `quarantined` 的 skill 可以查看内容但不能激活
-   - 只有team lead或审核猫显式 approve 才能从 quarantined 变 approved
+   - 只有operator或审核猫显式 approve 才能从 quarantined 变 approved
 
 版本管理：
 
@@ -251,7 +251,7 @@ Skill 内容安全（防下毒）：
 - [x] AC-C6: 声明态与实测态出现 diff 时强制告警并阻断 ready
 - [x] AC-C7: 外来 SKILL.md 安装时必须经过内容安全扫描（prompt injection 检测），不通过则标 `quarantined`
 - [x] AC-C8: 外来 skill 权限隔离（不允许访问写路径、不允许触发其他 skill、工具调用需逐次确认）
-- [x] AC-C9: quarantined skill 只有team lead或审核猫显式 approve 后才能激活
+- [x] AC-C9: quarantined skill 只有operator或审核猫显式 approve 后才能激活
 - [x] AC-C10: 外来 skill 安装时记录不可变指纹（source + version + hash/signature），运行前校验一致性，不一致自动降级 `quarantined`
 - [x] AC-C11: 外来 skill 首次运行默认最小权限（dry-run/只读），涉及写文件、网络外发、高危工具必须二次确认
 - [x] AC-C12: 一键 `revoke`（全端停用 + 清理挂载 + 禁止再次激活），60s 内传播到 Hub/CLI/connector 侧
@@ -287,7 +287,7 @@ Skill 内容安全（防下毒）：
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 立项必须覆盖 L1/L2/L3 三层，不做单层优化 | team lead明确要求“完整立项，不只一层” | 2026-03-28 |
+| KD-1 | 立项必须覆盖 L1/L2/L3 三层，不做单层优化 | operator明确要求“完整立项，不只一层” | 2026-03-28 |
 | KD-2 | 以 L1 capabilities 为唯一真相源 | 避免 marketplace 状态与本地真实可用状态漂移 | 2026-03-28 |
 | KD-3 | Phase A 先解决“手改 JSON”痛点，再做多生态聚合 | 先交付立即价值（一键添加） | 2026-03-28 |
 | KD-4 | 三家生态先统一 discovery，再逐步统一 install | 降低首期复杂度与安全风险 | 2026-03-28 |

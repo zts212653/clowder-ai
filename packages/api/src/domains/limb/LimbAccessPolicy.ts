@@ -2,7 +2,7 @@
  * LimbAccessPolicy — F126 Phase B 三维权限检查
  *
  * catId × nodeId × capability → authLevel
- * 三级授权：free（直接通过）/ leased（需要租约）/ gated（需要铲屎官审批）
+ * 三级授权：free（直接通过）/ leased（需要租约）/ gated（需要co-creator审批）
  */
 
 import type { LimbAccessEntry, LimbAuthLevel, LimbCapability } from '@cat-cafe/shared';

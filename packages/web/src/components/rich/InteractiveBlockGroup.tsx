@@ -17,8 +17,8 @@ function patchBlockState(messageId: string, blockId: string, patch: { disabled?:
   });
 }
 
-function dispatchInteractiveSend(text: string) {
-  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text } }));
+function dispatchInteractiveSend(text: string, sendContext?: string) {
+  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
 }
 
 // ── Pure function (exported for testing) ────────────────────
@@ -54,7 +54,15 @@ function needsCustomText(block: RichInteractiveBlock, selectedIds?: string[]): b
   return block.options.some((o) => o.customInput && selectedIds.includes(o.id));
 }
 
-export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInteractiveBlock[]; messageId?: string }) {
+export function InteractiveBlockGroup({
+  blocks,
+  messageId,
+  sendContext,
+}: {
+  blocks: RichInteractiveBlock[];
+  messageId?: string;
+  sendContext?: string;
+}) {
   const allDisabled = blocks.every((b) => b.disabled);
   const [submitted, setSubmitted] = useState(allDisabled);
   const [selections, setSelections] = useState<Map<string, string[]>>(() => {
@@ -104,7 +112,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
 
     // Build and send combined message
     const text = buildGroupMessage(blocks, selections, customTexts);
-    dispatchInteractiveSend(text);
+    dispatchInteractiveSend(text, sendContext);
 
     // Persist each block
     if (messageId) {
@@ -114,7 +122,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
         patchBlockState(messageId, block.id, { disabled: true, selectedIds: optionIds }).catch(() => {});
       }
     }
-  }, [allSelected, submitted, blocks, selections, customTexts, messageId]);
+  }, [allSelected, submitted, blocks, selections, customTexts, messageId, sendContext]);
 
   return (
     <div className="space-y-3 rounded-2xl border-2 border-dashed border-conn-amber-ring p-3">
@@ -128,6 +136,7 @@ export function InteractiveBlockGroup({ blocks, messageId }: { blocks: RichInter
           onCustomTextChange={(text) => handleCustomTextChange(block.id, text)}
           groupDisabled={submitted}
           groupSelectedIds={submitted ? selections.get(block.id) : undefined}
+          sendContext={sendContext}
         />
       ))}
       {!submitted && (

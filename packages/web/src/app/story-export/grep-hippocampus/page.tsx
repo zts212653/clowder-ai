@@ -151,7 +151,7 @@ export default function GrepHippocampusStoryPage() {
         {/* Footer */}
         <div className="text-center py-8 border-t border-cafe mt-4">
           <p className="text-sm text-cafe-secondary italic">&ldquo;他说的每一句都是对的。这才是最好笑的地方。&rdquo;</p>
-          <p className="text-xs text-cafe-muted mt-2">Cat Cafe · 一只严肃的大缅因猫和他的铲屎官</p>
+          <p className="text-xs text-cafe-muted mt-2">Clowder AI · 一只严肃的大缅因猫和他的co-creator</p>
         </div>
       </div>
     </div>

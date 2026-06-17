@@ -23,7 +23,7 @@ created: {YYYY-MM-DD}
 
 ## Why
 
-{一段话说清楚为什么要做，用价值语言而非技术动作。铲屎官原话如有请引用。}
+{一段话说清楚为什么要做，用价值语言而非技术动作。operator experience如有请引用。}
 
 ## Current State / 现状基线
 

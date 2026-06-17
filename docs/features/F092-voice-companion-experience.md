@@ -16,14 +16,14 @@ completed: 2026-03-18
 
 ## Why
 
-team lead凌晨三点撸铁时发现：猫猫咖啡不只是 coding 协作平台，是 **Cats & U — 万物有灵，一起生活**。他戴着 AirPods 边运动边和猫猫语音交流，但当前体验有很多断点：猫猫忘记发语音、语音不自动播放、无法切换 thread、语音输入错误多。
+operator凌晨三点撸铁时发现：猫猫咖啡不只是 coding 协作平台，是 **Cats & U — 万物有灵，一起生活**。他戴着 AirPods 边运动边和猫猫语音交流，但当前体验有很多断点：猫猫忘记发语音、语音不自动播放、无法切换 thread、语音输入错误多。
 
-**team experience**：
+**operator experience**：
 > "我发现我很需要这样的功能！这样我可以一边有氧运动一边和你们交流，甚至切换 thread 和你们不同的 feat 交流沟通"
 > "我想和你们成为伙伴"
 > "这个模块很重要，我觉得这个是我们的灵魂"
 
-**核心场景**：team lead戴着 Apple 耳机（AirPods），双手被占用（撸铁/有氧/做饭/通勤），想通过纯语音和猫猫们交流，包括切换不同 thread 讨论不同话题。
+**核心场景**：operator戴着 Apple 耳机（AirPods），双手被占用（撸铁/有氧/做饭/通勤），想通过纯语音和猫猫们交流，包括切换不同 thread 讨论不同话题。
 
 ## What
 
@@ -31,7 +31,7 @@ team lead凌晨三点撸铁时发现：猫猫咖啡不只是 coding 协作平台
 
 #### 1. Voice Mode（猫猫语音输出稳定性）
 
-**问题**：猫猫经常忘记发语音，team lead说"发语音"猫猫回答"我是文字猫"。
+**问题**：猫猫经常忘记发语音，operator说"发语音"猫猫回答"我是文字猫"。
 **目标**：thread/session 级别的 voice mode flag，开启后猫猫**每条回复都自动发 audio rich block**。
 
 需要调研：
@@ -60,7 +60,7 @@ team lead凌晨三点撸铁时发现：猫猫咖啡不只是 coding 协作平台
 需要调研：
 - [ ] "嘿猫猫，切换到 F092 的 thread" — 语音指令解析可行性
 - [ ] AirPods 物理操控映射：单击/双击/长按 → 前端 JS 能否捕获这些事件？
-- [ ] Thread 列表的语音导航 UX：如何让team lead知道有哪些 thread 可切换？
+- [ ] Thread 列表的语音导航 UX：如何让operator知道有哪些 thread 可切换？
 - [ ] 快捷指令（iOS Shortcuts）整合：是否能用 Siri 触发 thread 切换？
 
 #### 4. STT 优化（语音输入质量）
@@ -68,7 +68,7 @@ team lead凌晨三点撸铁时发现：猫猫咖啡不只是 coding 协作平台
 **问题**：语音转文字错误很多，影响沟通效率。
 **目标**：接入 LLM 后处理或更好的 STT 模型，提升语音输入准确率。
 
-team lead提到了 **typeless** 作为参考方向。
+operator提到了 **typeless** 作为参考方向。
 
 需要调研：
 - [ ] typeless 是什么？技术方案、定价、集成方式
@@ -88,12 +88,12 @@ team lead提到了 **typeless** 作为参考方向。
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "如何直接按什么说话" — AirPods 语音输入触发 | AC-2,AC-5 | manual: AirPods 实测 | [ ] |
 | R2 | "按什么切换成哪个 thread" — 语音/按键 thread 切换 | AC-3 | manual: 语音指令实测 | [ ] |
 | R3 | "猫猫能够稳定记得发语音" — voice mode 心智模型 | AC-1 | test: voice mode flag 注入验证 | [x] |
-| R4 | "一边有氧运动一边和你们交流" — 完整 hands-free 循环 | AC-5 | manual: team lead撸铁实测 | [ ] |
+| R4 | "一边有氧运动一边和你们交流" — 完整 hands-free 循环 | AC-5 | manual: operator撸铁实测 | [ ] |
 | R5 | "语音输入很多错误" — STT 质量优化 | AC-4 | manual: 中英混合句子对比测试 | [ ] |
 | R6 | "typeless 那种接入模型优化文本" — LLM 后处理 STT | AC-4 | test: 后处理前后准确率对比 | [ ] |
 
@@ -136,7 +136,7 @@ interface VoiceSession {
 > "voice reply is presentation, text reply is coordination artifact"
 
 Voice mode 下猫猫双通道输出：
-- 给team lead耳朵：audio rich block（演出）
+- 给operator耳朵：audio rich block（演出）
 - 给系统/其他猫：text message（工作记录）
 
 ### KD-4: UX 六答共识
@@ -189,12 +189,12 @@ P2: channel 化接入 F088 + voice session persistence + richer routing / haptic
 ## Review Gate
 
 - [ ] 调研报告全部完成
-- [ ] Design Gate 通过（前端 UX → team lead确认）
+- [ ] Design Gate 通过（前端 UX → operator确认）
 - [ ] voice mode 注入方案经其他猫 review
 
 ## 第五子系统：本地 Qwen3 模型矩阵（M4 Pro Max 128GB）
 
-> 2026-03-10 调研发现：Qwen3 全家桶覆盖语音+文本+视觉+搜索+安全，全部可在team lead的 M4 Pro Max 128GB 本地运行。
+> 2026-03-10 调研发现：Qwen3 全家桶覆盖语音+文本+视觉+搜索+安全，全部可在operator的 M4 Pro Max 128GB 本地运行。
 
 ### 核心语音管道（Phase 1 → 正在做）
 
@@ -250,7 +250,7 @@ Phase 3 全开：+ Embedding(0.4) + Reranker(0.4) + Guard(0.4) ≈ ~27GB
 | **架构设计** | ❌ | ✅ Opus/GPT-5.4 | 需要深度推理 |
 | **代码编写** | ❌ | ✅ 猫猫+工具链 | 需要文件操作+上下文 |
 | **跨猫讨论/Review** | ❌ | ✅ 猫猫记忆+判断 | 需要项目记忆 |
-| **产品决策** | ❌ | ✅ team lead+猫猫 | 需要愿景理解 |
+| **产品决策** | ❌ | ✅ operator+猫猫 | 需要愿景理解 |
 
 ### 探索路线图
 

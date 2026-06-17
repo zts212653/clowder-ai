@@ -26,8 +26,8 @@ describe('F209 entity seeds', () => {
     const seeds = loadExplicitEntitySeeds(defaultPath);
     const landy = seeds.find((entity) => entity.entityId === 'person:landy');
     assert.ok(landy, 'default seed file should include person:landy');
-    assert.ok(landy.aliases.includes('CVO'));
-    assert.ok(landy.aliases.includes('铲屎官'));
+    assert.ok(landy.aliases.includes('operator'));
+    assert.ok(landy.aliases.includes('co-creator'));
   });
 
   it('loads explicit person seeds and one-way roster cat aliases on memory startup', async () => {
@@ -49,7 +49,7 @@ describe('F209 entity seeds', () => {
               entityId: 'person:landy',
               type: 'person',
               canonicalName: 'You',
-              aliases: ['you', '铲屎官', 'CVO', 'you'],
+              aliases: ['you', 'co-creator', 'operator', 'you'],
               provenance: [
                 {
                   source: 'F209 Phase B.1 test seed',
@@ -80,7 +80,7 @@ describe('F209 entity seeds', () => {
 
       const landy = await services.store.getEntity('person:landy');
       assert.ok(landy, 'explicit person seed should be loaded');
-      assert.deepEqual(landy.aliases.sort(), ['CVO', 'you', 'you', '铲屎官'].sort());
+      assert.deepEqual(landy.aliases.sort(), ['operator', 'you', 'you', 'co-creator'].sort());
       assert.equal(landy.provenance[0]?.source, 'F209 Phase B.1 test seed');
 
       const codex = await services.store.getEntity('cat:codex');
@@ -175,7 +175,7 @@ describe('F209 entity seeds', () => {
     }
   });
 
-  it('lets /api/evidence/search find CVO evidence that only mentions 铲屎官 after seed load', async () => {
+  it('lets /api/evidence/search find operator evidence that only mentions co-creator after seed load', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
     const { evidenceRoutes } = await import('../../dist/routes/evidence.js');
 
@@ -195,7 +195,7 @@ describe('F209 entity seeds', () => {
               entityId: 'person:landy',
               type: 'person',
               canonicalName: 'You',
-              aliases: ['you', '铲屎官', 'CVO', 'you'],
+              aliases: ['you', 'co-creator', 'operator', 'you'],
               provenance: [{ source: 'F209 Phase B.1 test seed', anchor: 'F209', date: '2026-05-23' }],
               updatedAt: '2026-05-23T00:00:00.000Z',
             },
@@ -224,7 +224,7 @@ describe('F209 entity seeds', () => {
           kind: 'thread',
           status: 'active',
           title: 'Alias dogfood thread',
-          summary: '铲屎官 asked whether the evidence recall dogfood loop is real.',
+          summary: 'co-creator asked whether the evidence recall dogfood loop is real.',
           updatedAt: '2026-05-23T00:00:00.000Z',
         },
       ]);
@@ -239,7 +239,7 @@ describe('F209 entity seeds', () => {
 
       const res = await app.inject({
         method: 'GET',
-        url: '/api/evidence/search?q=CVO&limit=5',
+        url: '/api/evidence/search?q=operator&limit=5',
       });
       await app.close();
 
@@ -247,10 +247,10 @@ describe('F209 entity seeds', () => {
       const body = res.json();
       const results = body.results;
       const hit = results.find((item) => item.anchor === 'thread-f209-b1-dogfood');
-      assert.ok(hit, 'CVO query should retrieve evidence that only contains 铲屎官');
+      assert.ok(hit, 'operator query should retrieve evidence that only contains co-creator');
       assert.equal(hit.matchReason, 'entity:person:landy');
-      assert.equal(hit.entityMatches?.[0]?.matchedAlias, 'CVO');
-      assert.equal(hit.entityMatches?.[0]?.surface, '铲屎官');
+      assert.equal(hit.entityMatches?.[0]?.matchedAlias, 'operator');
+      assert.equal(hit.entityMatches?.[0]?.surface, 'co-creator');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

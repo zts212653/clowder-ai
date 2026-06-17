@@ -77,9 +77,17 @@ if (args[0] === 'install') {
   );
 }
 
-const command = args[0] === '-r' ? args.slice(0, 4).join(' ') : args[0] === '--filter' ? args.slice(0, 3).join(' ') : args[0];
+const command =
+  args[0] === '-r'
+    ? args.slice(0, 4).join(' ')
+    : args[0] === '--filter'
+      ? args.slice(0, 3).join(' ')
+      : args[0] === 'run'
+        ? args.slice(0, 2).join(' ')
+        : args[0];
 const knownCommands = new Set([
   'install',
+  'run check:biome-version',
   'build',
   'test',
   'check',
@@ -152,12 +160,22 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.equal(result.status, 0, result.stderr);
     const rebaseIndex = result.logLines.findIndex((line) => line.startsWith('git rebase origin/main'));
     const installIndex = result.logLines.indexOf('pnpm install --frozen-lockfile');
+    const biomeVersionIndex = result.logLines.indexOf('pnpm run check:biome-version');
     const buildIndex = result.logLines.indexOf('pnpm -r --if-present run build');
 
     assert.notEqual(rebaseIndex, -1, 'expected rebase to run');
     assert.notEqual(installIndex, -1, 'expected pnpm install to run');
+    assert.notEqual(biomeVersionIndex, -1, 'expected biome version guard to run');
     assert.notEqual(buildIndex, -1, 'expected pnpm build to run');
     assert.ok(rebaseIndex < installIndex, `expected install after rebase, got:\n${result.logLines.join('\n')}`);
+    assert.ok(
+      installIndex < biomeVersionIndex,
+      `expected biome version guard after install, got:\n${result.logLines.join('\n')}`,
+    );
+    assert.ok(
+      biomeVersionIndex < buildIndex,
+      `expected build after biome version guard, got:\n${result.logLines.join('\n')}`,
+    );
     assert.ok(installIndex < buildIndex, `expected build after install, got:\n${result.logLines.join('\n')}`);
   });
 

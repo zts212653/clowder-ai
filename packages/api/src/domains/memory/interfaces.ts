@@ -367,6 +367,12 @@ export interface IMarkerQueue {
 export interface MaterializeOptions {
   targetRoot?: string;
   indexBuilder?: Pick<IIndexBuilder, 'incrementalUpdate'> | null;
+  /**
+   * Opt-in: git-commit the materialized .md (default off). Auto-committing onto
+   * the current branch (e.g. runtime/main-sync) silently diverges it and breaks
+   * the next ff-only sync — callers that want git persistence must opt in explicitly.
+   */
+  commit?: boolean;
 }
 
 export interface IMaterializationService {

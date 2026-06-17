@@ -1,6 +1,6 @@
 /**
  * Authorization Types (猫猫授权系统)
- * 猫猫向铲屎官请求权限 — 动态审批 + 持久化规则
+ * 猫猫向co-creator请求权限 — 动态审批 + 持久化规则
  */
 
 import type { CatId } from './ids.js';
@@ -52,7 +52,7 @@ export interface PendingRequestRecord {
   readonly respondScope?: RespondScope;
 }
 
-/** 铲屎官审批时的 scope 选择 */
+/** co-creator审批时的 scope 选择 */
 export type RespondScope = 'once' | 'thread' | 'global';
 
 /**
@@ -100,7 +100,7 @@ export interface AuthorizationRequestEvent {
   readonly context?: string;
 }
 
-/** Client → Server: 铲屎官响应 */
+/** Client → Server: co-creator响应 */
 export interface AuthorizationRespondEvent {
   readonly requestId: string;
   readonly granted: boolean;

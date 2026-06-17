@@ -21,7 +21,7 @@ created: 2026-03-02
 
 Cat Café 的每条 Thread 是一条独立工作流。多条 Thread 并行时，猫猫需要跨线程通知、传话、交接。F043 `cross_post_message` 解决了"传输"，但传过去的消息**没有来源标记**——收件方分不清是本线程的猫说的，还是别线程的猫传过来的。
 
-### team experience（2026-03-02 Thread `thread_mm8nkwlcwmwhmfgz`）
+### operator experience（2026-03-02 Thread `[thread-id]`）
 
 > "我们没做跨线程的身份隔离！别线程的 codex 他顶着 codex 的名字"
 > "我得知道是Maine Coon本地还是其他线程来的？"
@@ -30,7 +30,7 @@ Cat Café 的每条 Thread 是一条独立工作流。多条 Thread 并行时，
 
 ### 期望体验
 
-team lead坐在 Thread B 的 UI 前：
+operator坐在 Thread B 的 UI 前：
 1. 看到一条消息，**一眼能分辨**是 Thread B 本地的 codex 说的，还是 Thread A 的 codex 传话过来的
 2. Thread B 的 codex 收到这条消息时，**知道它来自 Thread A**，不会误以为是自己之前说的
 3. Thread A 的 codex 在消息里 `@codex`，**Thread B 的 codex 能被 A2A 触发**（当前被自引用过滤器误杀）
@@ -45,7 +45,7 @@ team lead坐在 Thread B 的 UI 前：
 | 消息来源标识 | `StoredMessage` 无 sourceThread | 无法区分本地/跨线程消息 | 🔴 高 |
 | A2A 路由 | `parseA2AMentions` 全局 catId 自引用过滤 | 跨线程同名猫 @mention 被误杀 | 🔴 高 |
 | Context 混淆 | 跨线程消息被当本地消息混入 | codex 分不清自己说的还是别线程传来的 | 🟡 中 |
-| UX 展示 | 无视觉区分 | team lead看不出消息来源 | 🟡 中 |
+| UX 展示 | 无视觉区分 | operator看不出消息来源 | 🟡 中 |
 | 安全审计 | owner check 有 | 但无法追溯跨线程消息流向 | 🟡 中 |
 
 ### 复现证据（2026-03-02 实测）
@@ -150,7 +150,7 @@ export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[]
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "我得知道是Maine Coon本地还是其他线程来的" | AC-A1, AC-B1, AC-B2 | test + UI badge | [x] |
 | R2 | "别线程 codex at 我们的 codex 他无法 a2a" | AC-A2, AC-A3 | test（跨线程 @codex 触发 + 同线程不触发） | [x] |
@@ -195,7 +195,7 @@ export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[]
 
 | 猫猫 | 读了哪些文档 | 三问结论 | 签收 |
 |------|-------------|---------|------|
-| Ragdoll (Opus) | F052 spec, F043 spec, team experience thread | ① 核心问题=跨线程消息无来源标记+A2A误杀 ② 交付物解决了 ③ team lead在UI看到蓝色badge+codex被正确A2A触发 | [x] 签收 |
+| Ragdoll (Opus) | F052 spec, F043 spec, operator experience thread | ① 核心问题=跨线程消息无来源标记+A2A误杀 ② 交付物解决了 ③ operator在UI看到蓝色badge+codex被正确A2A触发 | [x] 签收 |
 | Maine Coon (Codex) | F052 spec, 代码diff(16 files), 测试覆盖 | R1: 2P1(WS路径遗漏) → R2: 1P1(后台线程遗漏) → R3: 0P1/P2 放行 | [x] 放行 |
 
 ## Known Bugs

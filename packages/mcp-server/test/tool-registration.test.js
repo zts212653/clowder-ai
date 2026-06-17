@@ -64,6 +64,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_propose_thread',
   // F225: Cat-initiated session handoff proposal
   'cat_cafe_propose_session_handoff',
+  // F231 Phase C: Cat-initiated profile-update proposal
+  'cat_cafe_propose_profile_update',
   // Callback-scoped memory tools
   'cat_cafe_retain_memory_callback',
   // Direct evidence tools (cat_cafe_reflect removed in F193 Phase D AC-D1)
@@ -135,6 +137,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_finance_query',
   // F192 Phase H AC-H4: verdict publishing pipeline (eval cat → MCP → handler)
   'cat_cafe_publish_verdict',
+  // F168 Phase B Task 6: declare awaiting_external state for a community case
+  'cat_cafe_community_await_external',
 ];
 
 const EXPECTED_COLLAB_TOOLS = [
@@ -184,6 +188,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_propose_thread',
   // F225: Cat-initiated session handoff proposal
   'cat_cafe_propose_session_handoff',
+  // F231 Phase C: Cat-initiated profile-update proposal
+  'cat_cafe_propose_profile_update',
   'cat_cafe_submit_game_action',
   // F139 Phase 3A: Schedule tools
   'cat_cafe_list_schedule_templates',
@@ -194,6 +200,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_list_labels',
   // F061 Bug-F workaround: MCP shell exec for read-only commands
   'cat_cafe_shell_exec',
+  // F168 Phase B Task 6: declare awaiting_external state for a community case
+  'cat_cafe_community_await_external',
 ];
 
 const EXPECTED_MEMORY_TOOLS = [

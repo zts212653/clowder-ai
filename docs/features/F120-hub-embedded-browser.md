@@ -12,20 +12,20 @@ created: 2026-03-14
 
 ## Why
 
-team lead截图展示了 Claude Code 的 embedded browser panel：猫猫跑 `pnpm dev` 后，旁边直接嵌一个浏览器看 `localhost:3847` 的完整应用，改代码 → HMR 热更新 → 浏览器实时刷新。
+operator截图展示了 Claude Code 的 embedded browser panel：猫猫跑 `pnpm dev` 后，旁边直接嵌一个浏览器看 `localhost:3847` 的完整应用，改代码 → HMR 热更新 → 浏览器实时刷新。
 
 Cat Café 目前的差距：
 
 1. **F063 AC-5 只做了静态渲染**：单文件 HTML/JSX 通过 esbuild-wasm + iframe sandbox 渲染，不是运行中的应用
-2. **看前端效果要切浏览器**：猫猫在 worktree 写前端代码，team lead想看效果必须切到 Chrome 打开 localhost——这和 F063 愿景（"不用打开 IDE 也能协作"）同源，但 scope 是全新的
+2. **看前端效果要切浏览器**：猫猫在 worktree 写前端代码，operator想看效果必须切到 Chrome 打开 localhost——这和 F063 愿景（"不用打开 IDE 也能协作"）同源，但 scope 是全新的
 3. **F089 Terminal 已有**：猫猫可以在 Hub 里跑 `pnpm dev`，但跑起来后看不到效果，体验断裂
 
-team experience（2026-03-14）：
+operator experience（2026-03-14）：
 > "我想要的其实是这个能力"（指 Claude Code 截图中的 embedded browser）
 > "让你们把前端启动起来，你们能在这里直接看到"
 > "a + b，按照咱的家规，我们要面向最终的状态开发"
 
-team experience（2026-03-14，Phase C 讨论）：
+operator experience（2026-03-14，Phase C 讨论）：
 > "我希望的是你打开那个浏览器不是我手动输入...别手动让我输入，你最好打开浏览器，把页面放出来"（猫必须能主动打开浏览器，不能只靠用户点 toast 或手动输 URL）
 > "简单的用富文本，复杂的用猫主动打开浏览器"（两层策略：轻量可视化走 rich block 内联，复杂应用走浏览器面板）
 > "这种能力我们能搞吗？"（指 Claude.ai 的 `visualize:show_widget` — 在聊天中内联渲染可交互 HTML/JS 组件）
@@ -99,7 +99,7 @@ team experience（2026-03-14，Phase C 讨论）：
    - iframe `srcdoc` 直接注入 HTML（不走 Preview Gateway），零额外网络请求
    - 适合简单可视化：Chart.js 图表、计算器、CSS 动画等纯前端组件
    - 类似 Claude.ai 的 `visualize:show_widget` 能力
-   - team lead决策："简单的用富文本，复杂的用猫主动打开浏览器"——两层策略共存
+   - operator决策："简单的用富文本，复杂的用猫主动打开浏览器"——两层策略共存
 
 3. **DevTools 精简版**
    - Console 输出面板：显示 iframe 内页面的 console.log/warn/error
@@ -109,7 +109,7 @@ team experience（2026-03-14，Phase C 讨论）：
 4. **截图与分享**
    - 一键截图当前 browser panel 内容
    - 截图自动附到对话中（复用 F060 图片能力）
-   - team lead可以在截图上标注"这里有问题"
+   - operator可以在截图上标注"这里有问题"
 
 5. **多 Tab 浏览**
    - 同时打开多个 localhost 页面（前端 + 后端 Swagger 等）
@@ -138,7 +138,7 @@ team experience（2026-03-14，Phase C 讨论）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "让你们把前端启动起来，你们能在这里直接看到" | AC-A1, AC-A3 | manual: Hub 内看到运行中的前端页面 | [x] |
 | R2 | "跟 Claude Code 这样能够有一个浏览器能够直接预览前端的能力" | AC-A1, AC-A4 | manual: embedded browser 有基础导航控件 | [x] |
@@ -173,11 +173,11 @@ team experience（2026-03-14，Phase C 讨论）：
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 独立立项（不挂 F063） | F063 已关闭（23 PR），技术栈完全不同（live server vs 静态渲染），独立 scope | 2026-03-14 |
-| KD-2 | 自动检测 + 手动输入都要（不拆 A/B） | team lead："面向最终的状态开发"，只有其一是残缺体验 | 2026-03-14 |
+| KD-2 | 自动检测 + 手动输入都要（不拆 A/B） | operator："面向最终的状态开发"，只有其一是残缺体验 | 2026-03-14 |
 | KD-3 | **反向代理为必选方案**（否决 iframe 直连作为默认路径） | X-Frame-Options/CSP 不可控 + 独立 origin 隔离安全 + WebSocket 代理可控。Maine Coon Design Gate 安全审查结论 | 2026-03-14 |
 | KD-4 | 端口发现：stdout 解析 + lsof 兜底 + 可达性探测 | 快+通用+防误报三层保险。Maine Coon Design Gate 结论 | 2026-03-14 |
 | KD-5 | 独立预览 origin（preview gateway 独立端口） | allow-same-origin + allow-scripts 同 origin 不安全。Maine Coon安全审查结论 | 2026-03-14 |
-| KD-6 | **两层可视化策略**：简单走 `html_widget` rich block 内联，复杂走猫主动打开浏览器 | team lead拍板："简单的用富文本，复杂的用猫主动打开浏览器"。参考 Claude.ai `visualize:show_widget` | 2026-03-14 |
+| KD-6 | **两层可视化策略**：简单走 `html_widget` rich block 内联，复杂走猫主动打开浏览器 | operator拍板："简单的用富文本，复杂的用猫主动打开浏览器"。参考 Claude.ai `visualize:show_widget` | 2026-03-14 |
 | KD-7 | `html_widget` 用 iframe `srcdoc` 渲染，不走 Preview Gateway | 内联 widget 是纯前端沙箱，不需要反向代理；sandbox 禁止 `allow-same-origin`（比 browser panel 更严格） | 2026-03-14 |
 
 ## Review Gate

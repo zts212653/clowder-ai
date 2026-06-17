@@ -20,7 +20,7 @@ updated: 2026-04-10
 |--------|---------|---------|
 | 狸花猫 (DARE) | F135 | L1 CLI — 首个 proof-of-concept |
 | 金渐层 (OpenCode) | F105 | L1 CLI — Claude Code 运行时共享 |
-| 孟加拉猫 (Antigravity) | F061 | L1 CLI — CDP bridge 适配 |
+| Bengal (Antigravity) | F061 | L1 CLI — CDP bridge 适配 |
 | 梵花猫 (Kimi) | F158 | L1 CLI — 社区贡献 NDJSON 流式 |
 
 **拆出的后续方向**：
@@ -140,7 +140,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 | Codex (Maine Coon) | `~/.codex/AGENTS.md` + App Personalization | Markdown | CLI 和 App 都读；截图里的 Custom instructions |
 | Gemini (Siamese) | `~/.gemini/GEMINI.md` | Markdown | 项目级可用 `.gemini/GEMINI.md` |
 | OpenCode (金渐层) | `~/.config/opencode/opencode.json` | JSON | 系统提示词走 OMOC plugin；底层 Claude Code 运行时共享 `~/.claude/` 配置和 skills（见下方说明） |
-| Antigravity (孟加拉猫) | CDP bridge / prompt 注入 | — | 无独立配置文件，纯靠 Cat Café 动态注入 |
+| Antigravity (Bengal) | CDP bridge / prompt 注入 | — | 无独立配置文件，纯靠 Cat Café 动态注入 |
 
 **变更 SOP**：
 1. 改了 Codex/Gemini 原生配置相关内容 → 编辑 `assets/system-prompts/` 分片文件（Codex/Gemini 原生配置的仓库内真相源）
@@ -241,7 +241,7 @@ Cat Café 通过 `SystemPromptBuilder` 动态注入身份和家规到 prompt 文
 
 DARE 支持 OpenRouter adapter，可用免费/低成本模型测试，不需要 OpenAI key。
 
-**环境变量**（team lead已在 `~/.zshrc` 中配置）：
+**环境变量**（operator已在 `~/.zshrc` 中配置）：
 
 ```bash
 export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
@@ -337,11 +337,11 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 
 ### Phase 4: Native Prompt Sync for Codex + Gemini（2026-03-13 起）
 
-**背景**：F105（金渐层接入）过程中发现系统提示词存在动态层（SystemPromptBuilder）与静态层（各猫 `~/` 原生配置）不同步问题。team lead直接 CLI 裸跑 opencode 时完全无身份/家规意识（回复"大猫猫你好"），而 Codex 因team lead手动在 `~/.codex/AGENTS.md` 写了身份所以裸跑也正常。
+**背景**：F105（金渐层接入）过程中发现系统提示词存在动态层（SystemPromptBuilder）与静态层（各猫 `~/` 原生配置）不同步问题。operator直接 CLI 裸跑 opencode 时完全无身份/家规意识（回复"大猫猫你好"），而 Codex 因operator手动在 `~/.codex/AGENTS.md` 写了身份所以裸跑也正常。
 
 **愿景**：
 1. Codex/Gemini 原生配置有**仓库内真相源**（`assets/system-prompts/`），不再在各猫 `~/` 中各自为政
-2. team lead改了原生配置相关内容后，跑一条命令就能同步到 Codex + Gemini 的 `~/` 配置，**不会漏改 `~/`**
+2. operator改了原生配置相关内容后，跑一条命令就能同步到 Codex + Gemini 的 `~/` 配置，**不会漏改 `~/`**
 3. 不支持原生配置的猫（OpenCode、Antigravity）继续靠 Cat Café 动态注入，**不假装有配置**
 4. 禁止 runtime 自动覆写 `~/` 配置（ADR 记录）
 
@@ -351,11 +351,11 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 - 真相源：`assets/system-prompts/` 语义分片（`governance-l0.md`、`collab-rules.md`、`cats/{catId}.md`）
 - 渲染器：`scripts/sync-system-prompts.ts` — 按 provider 差异拼装为各猫目标格式
 - 同步：`--apply`（写入 `~/` 对应位置）+ `--check`（drift 检查，CI 可跑）
-- 不做：runtime 动态改 `~/`、OpenCode wrapper（team lead否决，非真实使用场景）
+- 不做：runtime 动态改 `~/`、OpenCode wrapper（operator否决，非真实使用场景）
 
 **否决记录**：
 - ❌ 调度时动态覆写各猫 home 配置 — 侵入性强、易竞态、污染个人环境
-- ❌ OpenCode wrapper（`scripts/opencode-cat-cafe-run`）— team lead否决，裸跑场景是测试触发非日常使用
+- ❌ OpenCode wrapper（`scripts/opencode-cat-cafe-run`）— operator否决，裸跑场景是测试触发非日常使用
 
 - [x] AC-P4-1: `assets/system-prompts/` 语义分片结构建立（governance-l0 + collab-rules + 各猫身份）
 - [x] AC-P4-2: `scripts/sync-system-prompts.ts --check` 能检测 Codex/Gemini `~/` 配置 drift
@@ -382,5 +382,5 @@ export OPENROUTER_API_KEY=”sk-or-v1-...”  # OpenRouter API key
 ## Dependencies
 
 - **DARE 仓库**：`github.com/zts212653/Deterministic-Agent-Runtime-Engine`（issue #135 已基本完成）
-- **OpenRouter API key**：team lead已在 `~/.zshrc` 配置 `OPENROUTER_API_KEY`
+- **OpenRouter API key**：operator已在 `~/.zshrc` 配置 `OPENROUTER_API_KEY`
 - **Evolved from**: F032（Agent Plugin Architecture）、F041/F043（MCP 统一管理）

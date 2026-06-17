@@ -13,7 +13,7 @@ community_issue: "#109"
 
 ## Why
 
-> team experience（社区 issue #109）：
+> operator experience（社区 issue #109）：
 > "想加一只新猫（比如用 API key 接入的 GLM-5）或者给猫改个 @ 别名，都得手动改配置文件重启。"
 
 当前猫猫管理是静态 `cat-config.json` 一锅端模式：provider/model/认证/别名/@路由/角色全部写死在一个 JSON 里。用户想加一只新猫或给猫改个 @ 别名，都得手动改配置文件重启。
@@ -181,7 +181,7 @@ community_issue: "#109"
 | KD-1 | 两层分离：账户配置 × 猫猫实例 | 认证凭据和猫猫身份是正交关注点，解耦后可独立扩展 | 2026-03-17 |
 | KD-2 | 持久化用文件（`.cat-cafe/cat-catalog.json`），不用 Redis | 社区 PR #130 选择了文件方案。原因：开源用户不一定有 Redis；文件方案零外部依赖。**代价**：引入了"两个 JSON 文件存同类数据"的双真相源风险。已通过 PR #632 的 deep merge 缓解（catalog 只是 delta overlay，不再整体替换 config） | 2026-03-21 |
 | KD-3 | config loader 做字段级 deep merge | catalog 是 overlay 而非替代品。`cat-config.json` 新增字段不会被 catalog 吞掉。解决了头像/颜色丢失的根因 | 2026-03-21 |
-| KD-4 | `owner` → `coCreator` 术语统一 | F127 intake 引入了 `owner` 概念（指team lead），但 `owner` 在 CS 领域是过载术语（repo owner, worklist owner），改为 `coCreator` 对齐愿景（共创者） | 2026-03-21 |
+| KD-4 | `owner` → `coCreator` 术语统一 | F127 intake 引入了 `owner` 概念（指operator），但 `owner` 在 CS 领域是过载术语（repo owner, worklist owner），改为 `coCreator` 对齐愿景（共创者） | 2026-03-21 |
 
 ## 遗留项（未来可能需要调整）
 
@@ -194,7 +194,7 @@ community_issue: "#109"
 | R-5 | **社区 issue #109 仍 OPEN** — 应同步更新状态 | 低 | 和开源同步时 | 发 comment 说明进度 + 关闭或标为 phase 2 |
 | R-6 | ~~**Hub 编辑器滚动时右上角 X 按钮跟着滚**~~ — ✅ 已修复（PR #665 初版 + PR #714 二修）。3 个 modal 统一改为 flex-col 布局，header/footer 固定，仅 content 滚动 | ~~中~~ done | — | — |
 | R-7 | **API key 账号需手动逐个填支持的 model 列表** — 应该自动探测或提供预设列表 | 中（UX 痛点） | 添加 API key 账号时 | 自动探测 endpoint 支持的 model（`/v1/models`）或提供常用 model 预设 |
-| R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | team lead想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
+| R-8 | **切换认证方式（订阅↔API key）没有一键切换** — 要一只猫一只猫改 provider profile binding | 高（UX 痛点） | operator想批量切换认证方式时 | 加"一键切换所有猫的 provider profile"功能 |
 | R-9 | **nuoda.vip 代理 model name 格式混淆** — API 代理用 `claude-opus-4-6`（Anthropic 原生），但 opencode CLI 需要 `anthropic/claude-opus-4-6`（provider/model 格式），Hub 不知道该用哪个 | 中（配置困惑） | 用第三方 API 代理时 | Hub 编辑器应按 client 类型自动处理 model name 格式 |
 | R-10 | **本地反代 `anthropic-proxy.mjs` 的 upstream 配置未初始化** — `start-dev.sh` 启动的反代（端口 9877）依赖 `.cat-cafe/proxy-upstreams.json` 配置上游，但 F127 intake 后 runtime 里该文件不存在。API key profile 创建应自动注册 upstream 到反代 | 中（反代功能不可用） | 配置 API key profile 用本地反代时 | profile 创建/更新时自动写 `proxy-upstreams.json` |
 | R-11 | ~~**Hub 缺少结构化、provider-aware 的 `cli.effort` 编辑**~~ — ✅ 已修复（PR #882）。Hub 已提供结构化 effort 字段；Claude=`low/medium/high/max`，Codex=`low/medium/high/xhigh`；保存写 `variant.cli.effort`；只对新 invocation 生效，不强切旧 session；开源跟踪 issue: [clowder-ai#315](https://github.com/zts212653/clowder-ai/issues/315) | ~~高（易错 + UX 差）~~ done | — | — |
@@ -236,4 +236,4 @@ community_issue: "#109"
 ## Review Gate
 
 - Phase A~D: 每 Phase 独立 review + merge
-- 前端 UI: Design Gate 必须team lead确认
+- 前端 UI: Design Gate 必须operator确认

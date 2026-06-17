@@ -1023,14 +1023,14 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
   });
 
-  it('total cat count is 15 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gemini + gemini25 + kimi + dare + antigravity + antig-opus + opencode)', () => {
+  it('total cat count is 16 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gemini + gemini25 + gemini35 + kimi + dare + antigravity + antig-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 15);
+    assert.equal(Object.keys(all).length, 16);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
@@ -1041,6 +1041,7 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.spark); // F032 Phase E: new cat added
     assert.ok(all.gemini);
     assert.ok(all.gemini25);
+    assert.ok(all.gemini35); // Gemini 3.5 Flash standalone breed
     assert.ok(all.kimi); // Kimi CLI cat (moonshot)
     assert.ok(all.dare); // F050: DARE external agent (dragon-li)
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)

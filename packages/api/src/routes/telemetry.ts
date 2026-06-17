@@ -56,6 +56,17 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
    *   invocationId  — raw ID, HMAC'd before matching store
    *   catId         — agent.id (Class D, matched directly)
    *   limit         — max results (default 100, max 500)
+   *   expandLimit   — when literal "true", raises the cap from 500 to
+   *                   `traceStore.stats().maxSpans` (still bounded). Intended
+   *                   for scheduled eval (F192) that needs the full window to
+   *                   compute `sampleCoverage.complete=true`. Session auth
+   *                   still required; same redacted DTO shape returned.
+   *                   This is NOT cursor pagination and NOT a general
+   *                   bulk-export API — UI/dashboard callers must omit it.
+   *
+   * Verdict trail: `2026-06-17-eval-a2a-c1-sample-window-build` (砚砚 F192).
+   * Strict "true" string check (no truthy coercion) prevents accidental
+   * enablement via misconfigured clients.
    */
   app.get<{
     Querystring: {
@@ -63,6 +74,7 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
       invocationId?: string;
       catId?: string;
       limit?: string;
+      expandLimit?: string;
     };
   }>('/api/telemetry/traces', async (request, reply) => {
     if (!requireSession(request, reply)) return;
@@ -71,7 +83,9 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
       return reply.status(503).send({ error: 'Trace store not available (OTel may be disabled)' });
     }
 
-    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '100', 10) || 100), 500);
+    const expandLimit = request.query.expandLimit === 'true';
+    const cap = expandLimit ? opts.traceStore.stats().maxSpans : 500;
+    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '100', 10) || 100), cap);
 
     const spans = opts.traceStore.query({
       traceId: request.query.traceId || undefined,

@@ -225,7 +225,7 @@ const MINI_SHARED_RULES = `# 协作纪律
 不搭脚手架。每个产出物直达最终形态。
 
 ### P2: Co-Creator Partners
-铲屎官是合伙人，不是老板。
+co-creator是合伙人，不是老板。
 
 ### P3: Direction > Speed
 方向正确比速度重要。

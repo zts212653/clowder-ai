@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  fetchTraces,
   parseMetricsHistoryResponse,
   parseTraceStoreStats,
   parseTracesResponse,
@@ -103,6 +104,58 @@ describe('F192 Telemetry Adapter Contract', () => {
 
     it('rejects missing spanCount', () => {
       assert.throws(() => parseTraceStoreStats({ maxSpans: 10000 }), /expected.*spanCount/i);
+    });
+  });
+
+  // F192 verdict 2026-06-17-eval-a2a-c1-sample-window-build — expandLimit
+  // passthrough on fetchTraces. The adapter is the only path scheduled eval
+  // uses to talk to /api/telemetry/traces; if it silently drops expandLimit
+  // the route fix is invisible to run-f167-eval.
+  describe('fetchTraces expandLimit URL passthrough', () => {
+    /** Replace globalThis.fetch with a recorder that returns a stub response. */
+    function withCapturedFetch(body, fn) {
+      const original = globalThis.fetch;
+      let capturedUrl = '';
+      let capturedHeaders = null;
+      globalThis.fetch = async (url, opts) => {
+        capturedUrl = String(url);
+        capturedHeaders = opts?.headers ?? null;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => body,
+        };
+      };
+      return Promise.resolve(fn(() => ({ url: capturedUrl, headers: capturedHeaders }))).finally(() => {
+        globalThis.fetch = original;
+      });
+    }
+
+    const emptyTracesBody = { spans: [], count: 0 };
+
+    it('passes expandLimit=true as query param when filter.expandLimit set', async () => {
+      await withCapturedFetch(emptyTracesBody, async (get) => {
+        await fetchTraces({ baseUrl: 'http://test', cookie: 'k=v' }, { limit: 10000, expandLimit: true });
+        const { url } = get();
+        assert.ok(url.includes('expandLimit=true'), `expected expandLimit=true in URL, got: ${url}`);
+        assert.ok(url.includes('limit=10000'), `expected limit=10000 in URL, got: ${url}`);
+      });
+    });
+
+    it('omits expandLimit when filter.expandLimit is undefined (default)', async () => {
+      await withCapturedFetch(emptyTracesBody, async (get) => {
+        await fetchTraces({ baseUrl: 'http://test', cookie: 'k=v' }, { limit: 200 });
+        const { url } = get();
+        assert.ok(!url.includes('expandLimit'), `expected no expandLimit param, got: ${url}`);
+      });
+    });
+
+    it('omits expandLimit when filter.expandLimit is false (explicit opt-out)', async () => {
+      await withCapturedFetch(emptyTracesBody, async (get) => {
+        await fetchTraces({ baseUrl: 'http://test', cookie: 'k=v' }, { limit: 200, expandLimit: false });
+        const { url } = get();
+        assert.ok(!url.includes('expandLimit'), `false should not emit param, got: ${url}`);
+      });
     });
   });
 });

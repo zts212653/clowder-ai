@@ -26,7 +26,7 @@ export interface SenderMeta {
 /**
  * Resolve any senderCatId to display metadata.
  *
- * - `null` → co-creator (铲屎官 is a member too)
+ * - `null` → co-creator (co-creator is a member too)
  * - known catId → cat display name + cat color
  * - unknown catId → raw ID + fallback color
  */

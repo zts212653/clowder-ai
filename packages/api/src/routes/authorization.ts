@@ -1,5 +1,5 @@
 /**
- * Authorization Management Routes — 铲屎官审批 + 规则管理 + 审计查询
+ * Authorization Management Routes — co-creator审批 + 规则管理 + 审计查询
  * 安全: X-Cat-Cafe-User header（兼容 legacy x-user-id）
  */
 
@@ -55,7 +55,7 @@ const addRuleSchema = z.object({
 export const authorizationRoutes: FastifyPluginAsync<AuthorizationRoutesOptions> = async (app, opts) => {
   const { authManager, ruleStore, auditStore, socketManager, onPermissionCancel } = opts;
 
-  // POST /api/authorization/respond — 铲屎官审批
+  // POST /api/authorization/respond — co-creator审批
   app.post('/api/authorization/respond', async (request, reply) => {
     const userId = resolveAuthorizationUserId(request);
     if (!userId) {

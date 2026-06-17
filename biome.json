@@ -7,7 +7,27 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!gitnexus"]
+    "includes": [
+      "**",
+      "!gitnexus",
+      "!.claude/skills",
+      "!assets/avatars",
+      "!assets/concierge",
+      "!assets/design-concepts",
+      "!assets/docs",
+      "!assets/hero-prism.svg",
+      "!assets/icons",
+      "!assets/logos",
+      "!assets/preview-v2.html",
+      "!assets/reference",
+      "!assets/screenshots",
+      "!assets/stickers",
+      "!diagrams",
+      "!docs/designs",
+      "!docs/features/assets",
+      "!docs/harness-feedback/bundles",
+      "!docs/videos"
+    ]
   },
   "formatter": {
     "enabled": true,

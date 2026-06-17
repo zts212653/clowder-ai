@@ -113,7 +113,7 @@ describe('ChatMessage CliOutputBlock config-respecting stream stdout visibility'
     globalCliOutputDefault = 'collapsed';
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
-      name: '铲屎官',
+      name: 'co-creator',
       aliases: [],
       mentionPatterns: ['@owner'],
       avatar: '/uploads/owner.png',

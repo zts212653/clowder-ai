@@ -49,7 +49,7 @@ async function checkGitAvailable(): Promise<boolean> {
 }
 
 export interface GovernanceStatusRouteOptions {
-  /** Override Cat Cafe root for testing — avoids polluting real registry (#926) */
+  /** Override Clowder AI root for testing — avoids polluting real registry (#926) */
   catCafeRoot?: string;
 }
 

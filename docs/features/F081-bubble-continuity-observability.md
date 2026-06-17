@@ -14,15 +14,15 @@ completed: 2026-03-10
 
 ## Why
 
-team lead连续报了同一类痛点，但它们表面上长得像不同 bug：
+operator连续报了同一类痛点，但它们表面上长得像不同 bug：
 
 1. Ragdoll明明在 Claude Code session 里已经回答了，主区却没有 assistant 气泡
 2. 先看到了Ragdoll回答，切到别的 thread 再切回来，刚才已经看到的气泡又没了
 3. 右侧 `task_progress / 猫猫祟祟` 还活着，主区 `💭 心里话` 却消失
 4. 有时最后又显示 `CLI 响应超时 (1800s)`，把“UI 丢气泡”和“后端真的静默超时”混成一团
-5. 更离奇的是，Ragdoll在较早时刻就应已产出回复，但主区直到team lead后续再发一句提示词后，上一条 assistant 气泡才“闪现回来”，呈现出明显的错位回放 / 迟到补写
+5. 更离奇的是，Ragdoll在较早时刻就应已产出回复，但主区直到operator后续再发一句提示词后，上一条 assistant 气泡才“闪现回来”，呈现出明显的错位回放 / 迟到补写
 6. 同一条 assistant 气泡并非“补回来就稳定了”，而是切到别的 thread 再切回来后还能再次消失，呈现出反复出现 / 反复消失的非单调可见性
-7. 当team lead绕过 Cat Café，直接在 Claude CLI 里 `resume/continue` 同一 session 时，session 会自行消费 `[对话历史增量 - 未发送过 N 条]` 并在外部推进状态；随后主区气泡可能出现迟到、错位或与前端当前可见状态不一致
+7. 当operator绕过 Cat Café，直接在 Claude CLI 里 `resume/continue` 同一 session 时，session 会自行消费 `[对话历史增量 - 未发送过 N 条]` 并在外部推进状态；随后主区气泡可能出现迟到、错位或与前端当前可见状态不一致
 8. 现在已经证明 `Codex app` 的 thread id 也可以手动 bind 进猫猫咖啡，但 bind 成功后，先前已经存在于 app 里的聊天历史并没有回灌到主区；换句话说，我们能把猫绑进来，却没把它已经说过的话带进来
 9. `F081` 第一刀之后，主区又暴露出另一种瞬时“双影”：有时会短暂看到两条自己的消息，或者两条同样的 assistant 回复；但 `F5` 之后又只剩一条，说明服务器真相源通常只有一条，重复更像前端本地 reconcile 留下的临时 duplicate
 10. 进一步追查后发现，这类残余“双影”并不都来自 hydration；前台在 `thinking / rich_block / tool` 这类系统占位路径里，一旦 `activeRefs` 先丢了，却又没有先认领 store 里现存的 streaming bubble，就会重新起一个新的 assistant placeholder，形成短暂重复
@@ -34,7 +34,7 @@ team lead连续报了同一类痛点，但它们表面上长得像不同 bug：
 - 哪个时刻被创建、续写、替换、清空
 - thread switch / F5 / reconnect / timeout 之后，为什么最终会看到或看不到它
 
-team experience可以概括成一句：
+operator experience可以概括成一句：
 
 > 渲染不出来也好，跑着突然没了也罢，都要能抓住Ragdoll的猫尾巴。
 
@@ -44,13 +44,13 @@ team experience可以概括成一句：
 
 ### 1. Bubble Continuity
 
-保证一条已经显示给team lead的 assistant 气泡，不会因为 thread switch、history replace、draft merge、socket reconnect、F5 恢复而被无声覆盖或清空。
+保证一条已经显示给operator的 assistant 气泡，不会因为 thread switch、history replace、draft merge、socket reconnect、F5 恢复而被无声覆盖或清空。
 
 更严格地说，**历史气泡的可见性必须是单调的**：一条已被显示的 assistant 气泡，除非被明确撤回/删除，否则不能因为后续 rehydrate、切 thread、再进 thread 或发送下一句消息而来回抖动。
 
 ### 2. Rendering Observability
 
-建立一套面向team lead和开发者都能用的可观测性，能回答：
+建立一套面向operator和开发者都能用的可观测性，能回答：
 
 - 这只猫这次 invocation 到底有没有产出文本
 - 文本有没有到前端
@@ -88,7 +88,7 @@ team experience可以概括成一句：
 
 - [x] AC-A1: 气泡连续性与可观测性修复主链路已完成（详见下方条目）
 
-- [x] AC1: 如果 assistant 气泡已经显示给team lead，切到别的 thread 再切回时，该气泡不会无声消失 *(PR #288 non-destructive merge + #337 activeRefs recovery)*
+- [x] AC1: 如果 assistant 气泡已经显示给operator，切到别的 thread 再切回时，该气泡不会无声消失 *(PR #288 non-destructive merge + #337 activeRefs recovery)*
 - [x] AC2: active invocation 恢复时，history replace / draft merge 不会覆盖掉更新的本地 live bubble *(PR #288)*
 - [~] AC3: 当 provider/session 内已产出文本，但主区没有气泡时，debug 证据能明确指出断在 provider / socket / store / hydration 的哪一层 *(部分完成：ring buffer + history_replace 事件已有，无完整 debug UI → TD)*
 - [~] AC4: timeout 诊断能明确区分”UI 丢气泡”和”后端 1800s 静默超时” *(部分完成：smoke test 假超时已修 #281，无系统化 timeout diagnosis → TD)*
@@ -128,7 +128,7 @@ team experience可以概括成一句：
 ## Key Decisions
 
 - **这是 Feature，不是散装 UX debt**
-  - 原因：team lead能直接感知，且会反复影响对猫猫是否“真的在工作”的判断
+  - 原因：operator能直接感知，且会反复影响对猫猫是否“真的在工作”的判断
 - **可观测性是本 Feature 的一部分，不是附属品**
   - 原因：没有证据链，气泡连续性问题会反复“猜修复”
 - **先做最小真 debug mode，不做庞大平台**
@@ -229,7 +229,7 @@ team experience可以概括成一句：
 
 ### 2026-03-08 Maine Coon侦探补刀：残余瞬时双影
 
-- team lead继续报告：有时前端仍会短暂看到两条自己的消息或两条同样的 assistant 回复，但 `F5` 后又只剩一条
+- operator继续报告：有时前端仍会短暂看到两条自己的消息或两条同样的 assistant 回复，但 `F5` 后又只剩一条
 - 这说明后端真相源通常没有重复，剩余问题更像前端本地 store 的瞬时 duplicate
 - 新红灯已坐实：`packages/web/src/hooks/useAgentMessages.ts` 在处理 `system_info.thinking` 和 `system_info.rich_block` 时，如果 `activeRefs` 已丢，但 store 里已有同猫 `isStreaming` bubble，会直接新建 placeholder，而不是先认领已有 bubble
 - 同样的“先认领再创建”缺口也存在于前台 `tool_use` / `tool_result` / `web_search` 占位路径

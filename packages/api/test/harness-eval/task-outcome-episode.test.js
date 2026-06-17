@@ -46,7 +46,7 @@ const validMagicWord = {
   threadId: 'thread_abc123',
   catId: 'opus',
   precedingMessageSummary: 'Cat was writing a temporary fix for the routing issue',
-  followingMessageSummary: 'CVO told cat to rethink the approach from first principles',
+  followingMessageSummary: 'operator told cat to rethink the approach from first principles',
 };
 
 const validMagicWordRef = {

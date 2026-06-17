@@ -106,7 +106,7 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 1. `keyPrefix` 在 `eval()` 中的行为是否和普通命令一致？
 2. 是否需要添加重试逻辑？
 
-**价值 OQ**（如需 CVO 拍板，附 Decision Packet——格式见 `refs/decision-matrix.md`）：
+**价值 OQ**（如需 operator 拍板，附 Decision Packet——格式见 `refs/decision-matrix.md`）：
 - （本次无）
 
 ### Next Action

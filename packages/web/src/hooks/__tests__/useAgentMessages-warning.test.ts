@@ -140,6 +140,28 @@ describe('useAgentMessages system_info warning', () => {
     expect(mockAddMessage).not.toHaveBeenCalled();
   });
 
+  it('suppresses mcp_server_status telemetry on the active stream path', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({
+          type: 'mcp_server_status',
+          provider: 'claude',
+          pendingMeaning: 'deferred_tool_loading',
+          counts: { connected: 1, pending: 1, failed: 0, disabled: 0, 'needs-auth': 0 },
+          servers: [{ name: 'MCP_DOCKER', status: 'pending' }],
+        }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
+
   it('renders a2a_pingpong_terminated JSON as readable system message', () => {
     act(() => {
       root.render(React.createElement(Harness));

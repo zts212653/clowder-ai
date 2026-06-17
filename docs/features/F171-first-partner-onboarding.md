@@ -15,7 +15,7 @@ community_pr: ["clowder-ai#520"]
 
 我们家当前对开源小白不够友好。现有默认心智是“家里已经有猫、你知道每只猫是谁、也知道该先配什么账号”，但真实新用户往往并不具备这些背景知识。
 
-team lead判断（2026-04-21）：
+operator判断（2026-04-21）：
 > “我们家现在对于开源小白不太友好所以才想接受他的产品语意。”
 > “不是每个人都是你的landy这么了解你们每只猫 每只猫猫的agent 且还是正版订阅用户。”
 
@@ -90,7 +90,7 @@ team lead判断（2026-04-21）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | “我们家现在对于开源小白不太友好” | AC-A1, AC-B1 | 文案 review + 手动走查 | [x] |
 | R2 | “不是每个人都这么了解每只猫、每只猫猫的 agent” | AC-A2, AC-B3 | 产品流程 review | [x] |
@@ -104,7 +104,7 @@ team lead判断（2026-04-21）：
 
 ## Dependencies
 
-- **Evolved from**: F087（CVO Bootcamp — 原先承担 open-source onboarding 的完整训练营体验）
+- **Evolved from**: F087（operator Bootcamp — 原先承担 open-source onboarding 的完整训练营体验）
 - **Related**: F110（训练营愿景引导增强 — 处理中后段引导，不是冷启动主语）
 - **Related**: F127（猫猫管理重构 — 账户配置与运行时建猫的技术底座）
 - **Related**: F155（Scene-Based Guidance Engine — 必要引导能力的承载层）
@@ -128,6 +128,6 @@ team lead判断（2026-04-21）：
 
 ## Review Gate
 
-- Phase A: ✅ team lead确认冷启动产品语意（“领养第一只猫 / 第一位伙伴”）
+- Phase A: ✅ operator确认冷启动产品语意（“领养第一只猫 / 第一位伙伴”）
 - Phase B: ✅ Maine Coon + Ragdoll确认与 F127/F155/F110 的边界
 - Completion: ✅ GPT-5.4 守护审计确认 `merge + intake` 全流程闭环，无 brand 污染、无明显漏吸、定向回归通过

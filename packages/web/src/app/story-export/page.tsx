@@ -142,7 +142,7 @@ export default function StoryExportPage() {
       {/* Header */}
       <div className="bg-cafe-surface border-b border-cafe py-6 text-center">
         <h1 className="text-2xl font-bold text-cafe">猫猫杀名场面集锦</h1>
-        <p className="text-sm text-cafe-secondary mt-1">当 AI 猫猫们互相贴标签猜词 · 一个铲屎官的恶趣味编年史</p>
+        <p className="text-sm text-cafe-secondary mt-1">当 AI 猫猫们互相贴标签猜词 · 一个co-creator的恶趣味编年史</p>
         <p className="text-xs text-cafe-muted mt-2">七届 · 三只猫 · 无数名场面</p>
       </div>
 
@@ -155,7 +155,7 @@ export default function StoryExportPage() {
         {/* Footer */}
         <div className="text-center py-8 border-t border-cafe mt-4">
           <p className="text-sm text-cafe-secondary">Clowder AI</p>
-          <p className="text-xs text-cafe-muted mt-1">三只 AI 猫猫 + 一个恶趣味铲屎官</p>
+          <p className="text-xs text-cafe-muted mt-1">三只 AI 猫猫 + 一个恶趣味co-creator</p>
         </div>
       </div>
     </div>

@@ -79,9 +79,42 @@ describe('FrustrationIssueCard', () => {
     });
 
     // UX-2: hydrated resolved state starts collapsed — badge visible, no action buttons
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
-    expect(container.textContent).not.toContain('确认提交');
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
+    expect(container.textContent).not.toContain('确认记录');
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/frustration-issues/fi_test_status/status');
+  });
+
+  // F225 猫猫化: header icon 按 signalType 选 megaphone/search SVG（替代 🔍/📢 emoji）+ 剥离 title 前缀
+  it('user_report card renders megaphone SVG and strips 📢', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ issue: { issueId: 'fi_ur', status: 'draft' } }));
+    const block = {
+      ...issueBlock,
+      title: '📢 你的问题反馈',
+      meta: { kind: 'frustration_auto_issue', issueId: 'fi_ur', signalType: 'user_report' },
+    };
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={block} />);
+    });
+    expect(container.textContent).not.toContain('📢');
+    expect(container.textContent).toContain('你的问题反馈');
+    const d = container.querySelector('svg path')?.getAttribute('d') ?? '';
+    expect(d).toContain('m3 11 18-5'); // megaphone signature
+  });
+
+  it('auto-detect card renders search SVG and strips 🔍', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(okJson({ issue: { issueId: 'fi_auto', status: 'draft' } }));
+    const block = {
+      ...issueBlock,
+      title: '🔍 我注意到刚才可能出了问题',
+      meta: { kind: 'frustration_auto_issue', issueId: 'fi_auto', signalType: 'cli_error' },
+    };
+    await act(async () => {
+      root.render(<FrustrationIssueCard block={block} />);
+    });
+    expect(container.textContent).not.toContain('🔍');
+    expect(container.textContent).toContain('我注意到刚才可能出了问题');
+    const d = container.querySelector('svg path')?.getAttribute('d') ?? '';
+    expect(d).toContain('M21 21l-6-6'); // search signature
   });
 
   it('ignores stale draft hydration after a local confirm action resolves', async () => {
@@ -106,7 +139,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     const confirmButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('确认提交'),
+      button.textContent?.includes('确认记录'),
     );
     expect(confirmButton).toBeTruthy();
 
@@ -114,16 +147,16 @@ describe('FrustrationIssueCard', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
-    expect(container.textContent).not.toContain('确认提交');
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
+    expect(container.textContent).not.toContain('确认记录');
 
     await act(async () => {
       resolveStatus(okJson({ issue: { status: 'draft', userDescription: 'stale draft' } }));
       await statusPromise;
     });
 
-    expect(container.textContent).toContain('已提交');
-    expect(container.textContent).not.toContain('确认提交');
+    expect(container.textContent).toContain('已记录');
+    expect(container.textContent).not.toContain('确认记录');
   });
 
   it('hydrates confirmed status after a duplicate confirm conflict resolves first', async () => {
@@ -148,7 +181,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     const confirmButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('确认提交'),
+      button.textContent?.includes('确认记录'),
     );
     expect(confirmButton).toBeTruthy();
 
@@ -157,15 +190,15 @@ describe('FrustrationIssueCard', () => {
     });
 
     await vi.waitFor(() => expect(container.textContent).toContain('Issue already confirmed'));
-    expect(container.textContent).toContain('确认提交');
+    expect(container.textContent).toContain('确认记录');
 
     await act(async () => {
       resolveStatus(okJson({ issue: { status: 'confirmed', userDescription: 'Already submitted' } }));
       await statusPromise;
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
-    expect(container.textContent).not.toContain('确认提交');
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
+    expect(container.textContent).not.toContain('确认记录');
     expect(container.textContent).not.toContain('Issue already confirmed');
   });
 
@@ -197,7 +230,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     await vi.waitFor(() => expect(container.textContent).toContain('误报'));
-    expect(container.textContent).not.toContain('确认提交');
+    expect(container.textContent).not.toContain('确认记录');
   });
 
   it('hydrates false_positive status from persisted issue', async () => {
@@ -215,7 +248,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     await vi.waitFor(() => expect(container.textContent).toContain('误报'));
-    expect(container.textContent).not.toContain('确认提交');
+    expect(container.textContent).not.toContain('确认记录');
     expect(container.textContent).not.toContain('跳过');
   });
 
@@ -238,7 +271,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     const confirmButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('确认提交'),
+      button.textContent?.includes('确认记录'),
     );
     expect(confirmButton).toBeTruthy();
 
@@ -246,9 +279,12 @@ describe('FrustrationIssueCard', () => {
       confirmButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    // After confirm, card should collapse — body should not be visible
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
-    expect(container.textContent).not.toContain('模型工具调用解析失败');
+    // After confirm, card stays expanded (F235: "Publish to Community" button must be visible)
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
+    // Body remains visible — card is NOT collapsed after confirm (unlike skip/false_positive)
+    expect(container.textContent).toContain('模型工具调用解析失败');
+    // F235: Community publish flow should render
+    expect(container.textContent).toContain('Publish to Community');
   });
 
   it('expands collapsed card on click', async () => {
@@ -306,7 +342,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     // Should be collapsed: shows badge but not body
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
     expect(container.textContent).not.toContain('模型工具调用解析失败');
   });
 
@@ -338,7 +374,7 @@ describe('FrustrationIssueCard', () => {
     });
 
     const confirmButton = Array.from(container.querySelectorAll('button')).find((button) =>
-      button.textContent?.includes('确认提交'),
+      button.textContent?.includes('确认记录'),
     );
     expect(confirmButton).toBeTruthy();
 
@@ -351,16 +387,16 @@ describe('FrustrationIssueCard', () => {
       await statusPromise;
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain('已提交'));
-    expect(container.textContent).not.toContain('确认提交');
+    await vi.waitFor(() => expect(container.textContent).toContain('已记录'));
+    expect(container.textContent).not.toContain('确认记录');
 
     await act(async () => {
       resolveConfirm(errorJson(409, { error: 'Issue already confirmed' }));
       await confirmPromise;
     });
 
-    expect(container.textContent).toContain('已提交');
-    expect(container.textContent).not.toContain('确认提交');
+    expect(container.textContent).toContain('已记录');
+    expect(container.textContent).not.toContain('确认记录');
     expect(container.textContent).not.toContain('Issue already confirmed');
   });
 });

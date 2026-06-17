@@ -223,7 +223,7 @@ function buildBoardMcpServer(
 }
 
 /**
- * Resolve Cat Cafe skills source from module location (stable), not selected project path.
+ * Resolve Clowder AI skills source from module location (stable), not selected project path.
  * This avoids false "未挂载" when projectPath points to another repo (e.g. cat-cafe-runtime).
  */
 function resolveCatCafeSkillsSourceDir(): string {
@@ -538,7 +538,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     let config = await readCapabilitiesConfig(projectRoot);
     if (!config) {
       // Multi-project: when bootstrapping a non-cat-cafe project, still point the
-      // Cat Cafe MCP server to THIS repo (host), not the managed project root.
+      // Clowder AI MCP server to THIS repo (host), not the managed project root.
       config = await bootstrapCapabilities(projectRoot, getDiscoveryPaths(projectRoot), {
         catCafeRepoRoot,
       });
@@ -605,7 +605,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     for (const skills of Object.values(providerSkills)) {
       for (const s of skills) allSkillNames.add(s);
     }
-    // Cloud P2: include source-only Cat Cafe skills (present in cat-cafe-skills/ but not mounted
+    // Cloud P2: include source-only Clowder AI skills (present in cat-cafe-skills/ but not mounted
     // into any provider directory yet) so mount health can detect missing mounts.
     if (catCafeOwnSkills !== null) {
       for (const s of catCafeOwnSkills) allSkillNames.add(s);
@@ -683,7 +683,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       discoverExternalMcpServers(userLevelPaths),
     ]);
     const discoveredServers = deduplicateDiscoveredMcpServers([...projectLevelServers, ...userLevelServers]);
-    // Skip legacy Cat Cafe names — a stale 'cat-cafe' entry in user config should
+    // Skip legacy Clowder AI names — a stale 'cat-cafe' entry in user config should
     // not be re-added alongside the split 'cat-cafe-*' built-in entries.
     // F193/F207 split-only: include supplemental built-ins so discovery doesn't
     // re-add stale user-level entries alongside managed split servers.
@@ -1073,7 +1073,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const catCafeRoot = getProjectRoot();
     if (validated === catCafeRoot) {
       reply.status(400);
-      return { error: 'Cannot confirm governance for Cat Cafe itself' };
+      return { error: 'Cannot confirm governance for Clowder AI itself' };
     }
 
     const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');

@@ -6,7 +6,7 @@ doc_kind: spec
 created: 2026-05-15
 ---
 
-# F201: Antigravity Reliability Contract — 孟加拉猫可靠可用性闭环
+# F201: Antigravity Reliability Contract — Bengal可靠可用性闭环
 
 > **Status**: done | **Owner**: Maine Coon（Maine Coon） | **Reviewer**: Ragdoll Opus 4.6 + Ragdoll Opus 4.7 | **Priority**: P0
 
@@ -21,11 +21,11 @@ Map delta: none — F201 收口 Antigravity provider/retry/recovery 契约，并
 - `@antig-opus` 在隔壁 `adhd asd` thread 写入测试文件成功后，前端显示 `Error: 连接中断`。本地证据显示测试文件确实留下了，说明故障发生在 side effect 之后；此时不能盲 retry，也不能只给红色错误。
 - 现有 retry gate 为了避免重复执行工具，遇到 toolish/side-effect activity 后会停止自动 retry，这是正确的安全底线，但用户体验变成“写了文件然后挂了，不知道后续怎么办”。
 
-这不是“给孟加拉猫降级”的问题。我们要把 Antigravity 从“能接入、能偶尔修”提升到“可诊断、可恢复、可验收、可持续巡检”。
+这不是“给Bengal降级”的问题。我们要把 Antigravity 从“能接入、能偶尔修”提升到“可诊断、可恢复、可验收、可持续巡检”。
 
-### CVO 判断：长任务不可用 = F201 未完成（2026-05-17）
+### operator 判断：长任务不可用 = F201 未完成（2026-05-17）
 
-team lead 2026-05-17 头脑风暴拍板：**“现在要是没解决就是 F201 没完成”**。Phase A–E 交付了 side-effect 可追踪 / 不盲 retry / typed recovery card，但**没解决长任务为什么会进入需要 recovery 的状态**。三猫诊断收敛出 root cause 不在 Antigravity 上游，而在我们桥接层的超时/存活判断：
+operator 2026-05-17 头脑风暴拍板：**“现在要是没解决就是 F201 没完成”**。Phase A–E 交付了 side-effect 可追踪 / 不盲 retry / typed recovery card，但**没解决长任务为什么会进入需要 recovery 的状态**。三猫诊断收敛出 root cause 不在 Antigravity 上游，而在我们桥接层的超时/存活判断：
 
 - **Ragdoll/Ragdoll (Opus 4.7)** — 精确 root cause：`stallProbed` 仅在 `deliveryAdvanced`（有新 step 交付）时复位 → 持续无交付的真卡顿**全局只有一次** stall probe，第二个 60s idle 直接 `throw err` → terminal。坐标系错误：用单一固定 idle timeout 衡量所有“等待”，缺 liveness 信号区分“慢但活”vs“真死”。与 F194 invocation liveness 同源。
 - **Maine Coon/Maine Coon (GPT-5.5)** — 现场日志证据：不是单纯 idle 超时，而是 native executor success → 2s 后 trajectory 标 ERROR → 2s 后 `STOP_REASON_CLIENT_STREAM_ERROR`，桥接回写时 Antigravity client stream 状态机崩。结论：不能靠“把 stream 变稳定”，要把 stream 降级为**观察通道**，任务生命线必须是我们自己的 durable supervisor + journal + probe + safe resume。
@@ -35,7 +35,7 @@ team lead 2026-05-17 头脑风暴拍板：**“现在要是没解决就是 F201 
 
 ### Phase F Design Gate 决议（2026-05-17）
 
-team lead要求把三件事讲成人话并拍板，Phase F 按以下决议落地：
+operator要求把三件事讲成人话并拍板，Phase F 按以下决议落地：
 
 1. **任务进度记在哪里**：新增 Antigravity 专属 durable supervisor read model（Redis，TTL=0）作为长任务断点/恢复真相源；JSONL 只做审计黑匣子；F194 invocation liveness 只消费摘要投影，不承载 provider-specific 的 cascade / executor receipt 细节。side-effect 状态仍以 Phase B `AntigravitySideEffectJournal` 为唯一真相源，supervisor 只持久化 journal summary snapshot + recovery strategy，不重新分类或平行维护第二套 side-effect journal。
 2. **心跳如何判断“慢但活”**：heartbeat 必须由真实 liveness evidence 支撑，不能靠“每 60 秒假装发一句”。证据包括：本地工具 pid/log/exit 仍活跃、trajectory step/partial text 有增长或 mutation、awaiting approval 明确存在、LS/RPC 可重连且能拉到新状态。没有证据时不续命，进入 probe / recovery。
@@ -45,8 +45,8 @@ team lead要求把三件事讲成人话并拍板，Phase F 按以下决议落地
 
 | 事故 | Anchor | 现象 | F201 回归形态 |
 |------|--------|------|---------------|
-| empty response | `thread_mp5lezi1hp0cft3w` / `cascade=e764b99a...` | 老 cascade 上 Antigravity 返回空 `PLANNER_RESPONSE`，前端显示 `Antigravity returned no text response` | `empty_response && no side effect` 应带 cascade health，并在阈值命中时 fresh-cascade retry 一次 |
-| post-file-write stream interruption | `thread_mp5vr6hjjwsv9zbw` / `cascade=5df3042c...` 与 `3f5ad2f2...` | 文件写入成功后出现 `stream_error grace expired without recovery`，用户只看到 `连接中断` | `post_side_effect_interrupted` 应输出 side-effect journal + resumable recovery card，禁止盲 retry |
+| empty response | `[thread-id]` / `cascade=e764b99a...` | 老 cascade 上 Antigravity 返回空 `PLANNER_RESPONSE`，前端显示 `Antigravity returned no text response` | `empty_response && no side effect` 应带 cascade health，并在阈值命中时 fresh-cascade retry 一次 |
+| post-file-write stream interruption | `[thread-id]` / `cascade=5df3042c...` 与 `3f5ad2f2...` | 文件写入成功后出现 `stream_error grace expired without recovery`，用户只看到 `连接中断` | `post_side_effect_interrupted` 应输出 side-effect journal + resumable recovery card，禁止盲 retry |
 
 ## Feature Audit
 
@@ -149,7 +149,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 - [x] AC-F2: 集成测试覆盖 pre-side-effect retry 与 post-side-effect non-retry。
 - [x] AC-F3: 手动 alpha smoke 记录落到 close report。
 - [x] AC-F4: F178 Phase D 状态不被 F201 偷偷吞掉；若 close 前仍未完成，close report 必须列为 external dependency。
-- [x] AC-F5: AC-G 全部满足（含 AC-G8 真实 Antigravity alpha 验收）才允许进 close gate；长任务存活未解决则 F201 不得 close（CVO 2026-05-17 拍板）。
+- [x] AC-F5: AC-G 全部满足（含 AC-G8 真实 Antigravity alpha 验收）才允许进 close gate；长任务存活未解决则 F201 不得 close（operator 2026-05-17 拍板）。
 
 ### AC-G: Long-Task Liveness & Durable Supervisor
 
@@ -215,7 +215,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 - Task 3 merged in PR #1741 (`f7c82cfe`): native executor success + trajectory/upstream ERROR is classified as `receipt_conflict`; no-side-effect conflicts retry via fresh cascade, while observed/pending/unknown side-effect risk persists resumable/manual-card supervisor state with `receiptState=native_success_trajectory_error`（AC-G5 ✅；deterministic tier probing remains in AC-G6/Task 4）。
 - Task 4 merged in PR #1743 (`472329280`): adds the provider-internal resume tier classifier for AC-G6. The classifier reads Phase B journal summary snapshots only, fail-closes unknown/insufficient evidence, routes hard refusals to Tier 4 before probes, routes shared/external operations to Tier 3, and allows Tier 2 only with owned + reliable + successful deterministic probe evidence. Actual resume execution / attempt cap remains Task 5.
 - Task 5 merged in PR #1744 (`061b27a6`): wires the AC-G6 execution path. Antigravity auto-resume is gated by the Task 4 classifier, injects Phase C `resumeContext` into the fresh cascade prompt, persists `auto_resuming` supervisor attempt state, caps attempts per original invocation, supports `ANTIGRAVITY_AUTO_RESUME=false` rollback, routes post-side-effect `empty_response` through the same capped retry helper, and preserves the safe prompt across later pre-side-effect fresh-cascade retries（AC-G6 ✅）。
-- **Remaining implementation compression（2026-05-17 CVO + 46/55 agreement）**：剩余 Phase F 不按“一个 AC 一个 PR”拆。PR1 合并 AC-G2/G3/G4 为“活性全家桶”：liveness signal、heartbeat/keepalive 能力验证、trajectory re-pull fallback、durable supervisor evidence 状态机必须端到端一起测；heartbeat upstream 兼容性验证直接进入 PR1 的 Red→Green，而不是单开 spike PR。PR2 单独做 AC-G7 controlled YOLO，因为它是高风险执行策略，需要独立安全 review。Close 只做 AC-G8 alpha 验收 + AC-F close report/docs commit，不再单开实现 PR。
+- **Remaining implementation compression（2026-05-17 operator + 46/55 agreement）**：剩余 Phase F 不按“一个 AC 一个 PR”拆。PR1 合并 AC-G2/G3/G4 为“活性全家桶”：liveness signal、heartbeat/keepalive 能力验证、trajectory re-pull fallback、durable supervisor evidence 状态机必须端到端一起测；heartbeat upstream 兼容性验证直接进入 PR1 的 Red→Green，而不是单开 spike PR。PR2 单独做 AC-G7 controlled YOLO，因为它是高风险执行策略，需要独立安全 review。Close 只做 AC-G8 alpha 验收 + AC-F close report/docs commit，不再单开实现 PR。
 - PR1 merged in PR #1749 (`5b7569c97`): closes AC-G2/G3/G4 as one liveness bundle. Trajectory re-pull heartbeat is bounded, terminal/idle guards win over timestamp churn, native executor and pending approval/tool evidence persist into supervisor records, and F194 receives only sanitized liveness projections. Side-effect state remains Phase B journal-derived.
 - PR2 merged in PR #1751 (`f1e373d49`): closes AC-G7 controlled YOLO. `run_command` dispatch is bounded by an executor-layer timeout plus Bridge socket buffer, env parsing fails closed to a safe default, abort/error listeners are attached before teardown to avoid unhandled request errors, and existing hard-refusal / opt-out boundaries remain ahead of dispatch.
 - Alpha unblock hotfixes merged in PR #1756 (`3339b86fe`), PR #1760 (`e8cc8135f`), and PR #1773 (`a24cf2d53`): app-level global CSS that does not need Next processing now loads from static vendor links with dev watcher sync, while the remaining Tailwind `globals.css` path is protected by forcing frontend `next dev` to run with `NODE_ENV=development` even when the invoking shell is polluted with `NODE_ENV=production`. These unblock AC-G8 alpha validation but do not by themselves close AC-G8.
@@ -231,7 +231,7 @@ F201 关闭时，Antigravity 必须满足以下契约：
 
 ## Close Gate Report
 
-**State**: done — vision guardian PASS + CVO close signoff captured.  
+**State**: done — vision guardian PASS + operator close signoff captured.  
 **Author**: Maine Coon/Maine Coon（Codex, GPT-5.5）.  
 **Vision guardian**: Ragdoll/Ragdoll（Opus 4.6） PASS.
 
@@ -321,7 +321,7 @@ close_gate_report:
       evidence:
         - kind: doc
           ref: "F201 Phase F Remaining implementation compression"
-          description: "CVO + 46/55 agreement: AC-G8/AC-F close as validation/docs only, no standalone implementation PR"
+          description: "operator + 46/55 agreement: AC-G8/AC-F close as validation/docs only, no standalone implementation PR"
         - kind: alpha
           ref: "AC-G8 alpha smoke 2026-05-19"
           description: "root/settings compile, vendor CSS 200, PostCSS loader chain verified under NODE_ENV=production shell"

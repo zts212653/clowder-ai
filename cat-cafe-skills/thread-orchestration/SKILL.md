@@ -34,7 +34,7 @@ triggers:
 
 > **F128/F193 环**（KD-E4）：`propose_thread`（新建）和 `cross_post_message`（投递）是一个环。
 > 默认走投递（`cross_post_message`），只有确认没有已有 thread 时才走新建（`propose_thread`）。
-> 新建 thread 的阈值高于投递——新建会增加铲屎官的认知负担。
+> 新建 thread 的阈值高于投递——新建会增加operator的认知负担。
 
 ## 五步流程
 
@@ -82,9 +82,9 @@ triggers:
 | Mode | 语义 | 何时用 |
 |------|------|--------|
 | `final-only`（**默认**） | 子 thread 自治，**完成时**回报一次 summary | Feature work fork / 大多数情况——要最终结果、不要过程噪音 |
-| `none`（autonomous，显式 opt-in） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 CVO 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | Repo Inbox / PR triage / 分发——踢出去就让下游自闭环 |
+| `none`（autonomous，显式 opt-in） | 球权完全释放，子 thread 自治；主 thread 不背回执责任。遇 operator 决策 / 阻塞 / 不可逆 / 跨 feature 冲突仍按家规主动 cross_post | Repo Inbox / PR triage / 分发——踢出去就让下游自闭环 |
 | `state-transitions` | 每个 phase boundary（阶段完成 / 重要决策 / 状态切换）回报 | Bug 调查 / Research——主 thread 要跟过程 |
-| `blocking-ack` | 子 thread **遇阻塞点**（at each blocker，非每步）才等主 thread ack 再继续；持球在**子 thread**（被阻塞方）自己 `hold_ball` + 发 `[BLOCKING]`，主 thread 不背 polling | 等 review / 等 CVO / blocking handoff |
+| `blocking-ack` | 子 thread **遇阻塞点**（at each blocker，非每步）才等主 thread ack 再继续；持球在**子 thread**（被阻塞方）自己 `hold_ball` + 发 `[BLOCKING]`，主 thread 不背 polling | 等 review / 等 operator / blocking handoff |
 
 **场景化选择指南**（AC-AA2）：
 - 做完后源 thread 需要结果回来？→ **`final-only`**（默认，不用填）

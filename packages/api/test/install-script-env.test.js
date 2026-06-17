@@ -176,7 +176,7 @@ printf '%s' "$(resolve_installer_auth_config_root)"
 });
 
 // `configure_agent_auth`-based tests removed: install.sh no longer prompts for
-// per-cat OAuth / API-key configuration during install (per CVO). Users now
+// per-cat OAuth / API-key configuration during install (per operator). Users now
 // authenticate each CLI themselves with the standard flow (e.g. `claude login`)
 // after install completes. The install-auth-config.mjs helper itself is kept
 // for project-local auth tooling outside the installer pipeline; tests below

@@ -12,23 +12,23 @@ trigger: cvo-pushback-post-close
 
 > **Status**: done | **Completed**: 2026-05-15 | **Reopened**: 2026-05-14 | **Owner**: Ragdoll Opus 4.7 + Maine Coon GPT-5.5 | **Priority**: P1
 > **Parent**: [F190 Console Settings/AppShell Skeleton](F190-console-settings-appshell-skeleton.md) (closed 2026-05-13)
-> **Trigger**: CVO push-back 2026-05-13 — F190 close 后发现 settings parity gap
+> **Trigger**: operator push-back 2026-05-13 — F190 close 后发现 settings parity gap
 
-> **Reopen correction (2026-05-14)**: D-1..D-5 close evidence remains valid for the first F199 pass, but CVO challenged the "out of F199" treatment for `InstallPreviewModal` and Skills write actions. Corrected rule: **different security boundary decides slice design, not feature ownership**. Service lifecycle install/start/stop and Skills sync/resolve/uninstall are now F199 Phase E, not ownerless follow-up candidates.
+> **Reopen correction (2026-05-14)**: D-1..D-5 close evidence remains valid for the first F199 pass, but operator challenged the "out of F199" treatment for `InstallPreviewModal` and Skills write actions. Corrected rule: **different security boundary decides slice design, not feature ownership**. Service lifecycle install/start/stop and Skills sync/resolve/uninstall are now F199 Phase E, not ownerless follow-up candidates.
 
 Architecture cell: action-plane
 Map delta: none — F199 backfills existing Console settings surfaces; D-2 is read-mostly and does not introduce a new action owner or capability writer.
 
 ## Why
 
-F190 close (`1039d68a4`) 后 CVO 重启 runtime 用 `/settings` 实测，对比 clowder-ai 开源最新 main，发现 settings/ 目录组件 diff：
+F190 close (`1039d68a4`) 后 operator 重启 runtime 用 `/settings` 实测，对比 clowder-ai 开源最新 main，发现 settings/ 目录组件 diff：
 
 ```
 开源 settings/: 20 components
 本地 settings/: 13 components → 缺失 7 个
 ```
 
-**team experience（2026-05-13）**：
+**operator experience（2026-05-13）**：
 > "图1是开源的 图2是我们的 这里能证明 你们只是调整了样式 其实很多东西都丢了？"
 > "走 Phase D 用 -> 完整 backfill 7 个组件"
 
@@ -38,10 +38,10 @@ F190 close (`1039d68a4`) 后 CVO 重启 runtime 用 `/settings` 实测，对比 
   - F199 内继续处理：ServiceStatusPanel / SkillsContent read 部分 / `capability-settings-ui` / restricted `useCapabilityState` / PushServiceConfig / GithubConfigPanel
   - F199 外移除：`InstallPreviewModal`（service lifecycle install/start/stop 写面，不属于 capability settings）
 - 内部分类：
-  - 4 个是 F190 **KD-5 deliberate defer** (secret write-back / capability write) — 但 CVO close-gate 不知道"通知页变成纯诊断面板"，技术语言"deferred"没映射到用户可见性
+  - 4 个是 F190 **KD-5 deliberate defer** (secret write-back / capability write) — 但 operator close-gate 不知道"通知页变成纯诊断面板"，技术语言"deferred"没映射到用户可见性
   - 3 个是 read-mostly/配套项，本该 port 没 port (ServiceStatusPanel / SkillsContent read 部分 / useCapabilityState)，其中 useCapabilityState 只允许 restricted MCP settings 形态进入 F199
 
-**2026-05-14 纠偏**：上面的 `InstallPreviewModal` reclassification 只说明它不能塞进 D-1 read-only slice；不说明它应该离开 F199。CVO 明确指出："难道不是 f199 的下一个 phase？"。因此 `InstallPreviewModal` 和 Skills write actions 进入 Phase E，按高风险写面重新拆刀、review、proof，不降低安全标准。
+**2026-05-14 纠偏**：上面的 `InstallPreviewModal` reclassification 只说明它不能塞进 D-1 read-only slice；不说明它应该离开 F199。operator 明确指出："难道不是 f199 的下一个 phase？"。因此 `InstallPreviewModal` 和 Skills write actions 进入 Phase E，按高风险写面重新拆刀、review、proof，不降低安全标准。
 
 **维度 B: 路径级 path 漏挂（`hub-icons.tsx` 内）**
 - **2 个 SVG icon path 缺失**（`box` / `puzzle`） — 真 review miss，已 hotfix via PR #1659 (`d928fb696`)
@@ -97,7 +97,7 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
   - `mergeSecretRecord` 保留 omitted secret
   - audit metadata-only（不入 secret value）
   - F136 hot reload 保留
-- 这是 CVO 截图里指出的"通知页变成诊断矩阵"的直接修复
+- 这是 operator 截图里指出的"通知页变成诊断矩阵"的直接修复
 
 ### D-5: GithubConfigPanel hardening port
 - GitHub token 写入面板
@@ -105,7 +105,7 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
 - 涉及外部 IM provider，注意 SSRF 边界（callback URL 不在本刀范围）
 
 ### E-0: Phase E design gate (reopen correction)
-- 记录 CVO 对 `InstallPreviewModal` / Skills write actions 的 Phase E ownership 判断
+- 记录 operator 对 `InstallPreviewModal` / Skills write actions 的 Phase E ownership 判断
 - 对照开源 `ServiceStatusPanel` + `InstallPreviewModal` + `useCapabilityState('skill')`
 - 对照本地现状：`/api/services` 只有 read routes；`/api/skills/sync` / `resolve-conflict` 已存在但只有 identity gate；Settings `SkillsContent` 仍 read-mostly
 - 产出 threat model + slice plan，先给跨猫 reviewer 看边界
@@ -139,7 +139,7 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
 
 ### Phase D (D-1..D-5 first pass)
 - [x] AC-D1: D-1 ServiceStatusPanel merged，对照开源 visual side-by-side 通过 parity gate (per opensource-ops 原则 22)
-- [x] AC-D2: D-2 SkillsContent (read-mostly) merged，external uninstall 仍 deferred 但有 CVO signoff
+- [x] AC-D2: D-2 SkillsContent (read-mostly) merged，external uninstall 仍 deferred 但有 operator signoff
 - [x] AC-D3a: D-3a capability write hardening merged；所有 capability write routes owner-gated fail-closed，audit JSONL / `/api/capabilities/audit` 不含 raw env/header secret
 - [x] AC-D3b: D-3b MCP settings UI parity merged；restricted MCP-only `useCapabilityState` + capability settings controls 对齐开源，`InstallPreviewModal` / Skills write actions 不进入 F199
 - [x] AC-D4: D-4 PushServiceConfig merged，用户能在 UI 配置 VAPID + 一键生成 + 联系信箱
@@ -152,7 +152,7 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
 - [x] AC-D9: F088/F124 transport runtime 未接管（只动 config 写面）
 
 ### Phase E (reopened parity writes)
-- [x] AC-E0: CVO explicit reopen captured: `InstallPreviewModal` + Skills write actions are F199 Phase E, not ownerless follow-up
+- [x] AC-E0: operator explicit reopen captured: `InstallPreviewModal` + Skills write actions are F199 Phase E, not ownerless follow-up
 - [x] AC-E1: Phase E design memo reviewed by non-author reviewer before implementation
 - [x] AC-E2: Service lifecycle backend has explicit owner fail-closed, service allowlist, per-service mutex, script path confinement, strict process matching, model validation, install/uninstall timeout cap, port-busy refusal, bounded logs, and metadata-only audit
 - [x] AC-E3: Settings service UI exposes install/start/stop/uninstall only on hardened backend; `InstallPreviewModal` visual proof covers prerequisites/model selection/error/fail-closed states
@@ -189,15 +189,15 @@ F190 Phase C 已经把 hardening pattern (`requireExplicitOwner` + `containsReda
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | F199 最终保留为 F190 Phase D 实施容器；未来开新 F 号 / reopen / rename feature anchor 必须 CVO 显式 signoff | 事后确认：Opus-47 原先按 design memo 推荐自决开 F199 是流程错误；CVO 2026-05-14 选择 keep F199，避免已合历史重写 | 2026-05-14 |
+| KD-1 | F199 最终保留为 F190 Phase D 实施容器；未来开新 F 号 / reopen / rename feature anchor 必须 operator 显式 signoff | 事后确认：Opus-47 原先按 design memo 推荐自决开 F199 是流程错误；operator 2026-05-14 选择 keep F199，避免已合历史重写 | 2026-05-14 |
 | KD-2 | 完整处理维度 A gap：6 个 settings parity backfill + 1 个 service lifecycle reclassified-out disclosure | 永久 defer 长期心累，hardening pattern 已摸清，复用成本低；但 `InstallPreviewModal` 不属于 capability settings，不能为凑数打穿 D-1 read-only 边界。维度 B (2 SVG path) 已独立 hotfix close，不属本 feat | 2026-05-13 |
-| KD-3 | D-1 ServiceStatusPanel 先开（猫自决，CVO 不管） | 最低风险，验证新 SOP（parity gate + User Visibility Disclosure）在小 slice 上跑通后再做高风险 secret write | 2026-05-13 |
+| KD-3 | D-1 ServiceStatusPanel 先开（猫自决，operator 不管） | 最低风险，验证新 SOP（parity gate + User Visibility Disclosure）在小 slice 上跑通后再做高风险 secret write | 2026-05-13 |
 | KD-4 | D-4/D-5 secret write 复用 IM connector hardening pattern | Pattern 已审过，新增刀降低 review 成本 | 2026-05-13 |
 | KD-5 | 不接 callback URL / provider endpoint 写面（OQ-D 同 F190 IM connector） | 避免扩面 SSRF 边界，本 feat 只补现有 secret credential 写 UI | 2026-05-13 |
 | KD-6 | D-3 拆成 D-3a backend hardening + D-3b UI parity | capability 写路径首次进入 F199 高风险区，先堵 P0 secret/audit/auth，再扩 UI | 2026-05-13 |
 | KD-7 | `InstallPreviewModal` initially reclassified out of D-1/D-3 | Superseded by KD-9. 原判断只适用于"不能塞进 read-only / capability settings slice"，不适用于"离开 F199" | 2026-05-13 / corrected 2026-05-14 |
 | KD-8 | `useCapabilityState` 只允许 restricted MCP settings 形态进入 D-3b | 源 hook 混 MCP/Skills read/write；Skills toggle/uninstall 会打穿 D-2 read-mostly promise | 2026-05-13 |
-| KD-9 | Reopen F199 Phase E for `InstallPreviewModal` + Skills write actions | CVO 明确指出它们仍是 F190/F199 parity gap；"需要独立 hardening"是 HOW，不是 WHERE | 2026-05-14 |
+| KD-9 | Reopen F199 Phase E for `InstallPreviewModal` + Skills write actions | operator 明确指出它们仍是 F190/F199 parity gap；"需要独立 hardening"是 HOW，不是 WHERE | 2026-05-14 |
 | KD-10 | ThreadSidebar and token drift stay out of Phase E | ThreadSidebar 行为等价且红区敏感；token drift 是 brand/visual alignment 判断，不是 missing capability | 2026-05-14 |
 | KD-11 | E-1a must exceed source service lifecycle safety baseline | Open-source lifecycle routes lack per-service mutex, strict bounded path/process checks, and timeout cap; home inherits D-3a/D-4 stricter write-surface standard | 2026-05-14 |
 

@@ -17,9 +17,9 @@ Branch: {branch-name}
 {为什么做、约束、目标}
 
 ## Original Requirements（必填）
-> {直接粘贴铲屎官原话，≤5 行}
+> {直接粘贴operator experience，≤5 行}
 - 来源：`feature-discussions/{date}-{topic}/...`
-- **请对照上面的摘录判断交付物是否解决了铲屎官的问题**
+- **请对照上面的摘录判断交付物是否解决了operator的问题**
 
 ## Tradeoff
 {放弃了什么方案，为什么}
@@ -40,8 +40,8 @@ Why: {一句话}
 ### 技术 OQ（给 reviewer）
 {需要 reviewer 特别关注的实现正确性/安全性/性能问题}
 
-### 价值 OQ（给 CVO，如有）
-{需要 CVO 判断的价值取舍——必须附 Decision Packet（格式见 `refs/decision-matrix.md`）}
+### 价值 OQ（给 operator，如有）
+{需要 operator 判断的价值取舍——必须附 Decision Packet（格式见 `refs/decision-matrix.md`）}
 {如果没有价值 OQ，写"无"——回滚成本低的技术选择猫猫自决，不升级}
 
 ## Next Action

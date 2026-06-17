@@ -13,17 +13,17 @@ created: 2026-03-14
 
 ## Why
 
-team lead 2026-03-14 实测发现：queue 模式发送消息后立即取消，该消息仍出现在聊天流、进入猫猫 prompt context。社区 issue #20 也报告了同样问题。
+operator 2026-03-14 实测发现：queue 模式发送消息后立即取消，该消息仍出现在聊天流、进入猫猫 prompt context。社区 issue #20 也报告了同样问题。
 
 根因：当前架构下 queue send 在 enqueue 阶段就持久化 user message 并做乐观插入，但没有 delivery status 概念。History API 和 ContextAssembler 不区分 queued/delivered/canceled，导致未送达甚至已取消的消息污染聊天历史和猫猫上下文。
 
 **核心 invariant**：`undelivered user messages MUST NOT appear in timeline, history API, or prompt context.`
 
-team experience：
+operator experience：
 > "前端不应该显示你们真正没有收到的消息，对吧？"
 > "当我发了一个正在队列的消息的时候，我的用户气泡这里先不显示，等到你们真的收到这个消息的那一刻，再在正确的地方插入这个气泡"
 
-## 已确认的 Bug 现象（team lead实测 2026-03-14）
+## 已确认的 Bug 现象（operator实测 2026-03-14）
 
 ### Bug 1: 队列消息提前显示气泡
 - **复现**：猫猫正在回复中 → 用户发消息（自动进队列）→ 消息还在"排队中"面板 → 聊天流里气泡已经出现
@@ -33,7 +33,7 @@ team experience：
 ### Bug 2: 取消后消息仍在气泡 + 仍进入猫猫上下文
 - **复现**：用户在队列面板按 X 取消消息 → 气泡仍然留在聊天流 → 猫猫下次回复时 prompt context 里有这条已取消的消息
 - **期望**：取消后气泡消失，猫猫永远不应该"看到"这条消息
-- **实测证据**：team lead发送 `嘿嘿大猫猫喵` → 取消 → 猫猫对话上下文中仍出现该消息
+- **实测证据**：operator发送 `嘿嘿大猫猫喵` → 取消 → 猫猫对话上下文中仍出现该消息
 
 ### Bug 3a: queued 用户 @mention 提前进入 pending-mentions（F117 scope）
 - **复现**：用户发带 @gpt52 的消息 → 消息进入队列（排队中）→ `pending-mentions` 已包含该条目
@@ -118,7 +118,7 @@ team experience：
 |---|------|------|------|
 | KD-1 | 用显式 `deliveryStatus` 字段而非 `deliveredAt` | `deliveredAt` 老数据没有，过滤会误伤即时消息和历史消息（Maine Coon提出） | 2026-03-14 |
 | KD-2 | 不 merge 社区 PR #25 作为 quick fix | 只修渲染层是脚手架不是终态，withdraw resurfacing 未闭合（P1铁律）| 2026-03-14 |
-| KD-3 | 修完后走全量 sync 而非 hotfix | 有多个已完成 F 待同步，hotfix 增加后续同步难度（team lead决定）| 2026-03-14 |
+| KD-3 | 修完后走全量 sync 而非 hotfix | 有多个已完成 F 待同步，hotfix 增加后续同步难度（operator决定）| 2026-03-14 |
 | KD-4 | Bug 3 拆分：queued @mention 泄漏 in scope / post_message callback 路由 out of scope | post_message 走 callback 路由不经 queue，硬塞进 F117 会混 scope（Maine Coon Design Gate 提出）| 2026-03-14 |
 
 ## Review Gate

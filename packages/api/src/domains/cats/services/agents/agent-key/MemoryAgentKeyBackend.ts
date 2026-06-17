@@ -4,6 +4,8 @@ import type { AgentKeyInput, IAgentKeyBackend } from './IAgentKeyBackend.js';
 
 export class MemoryAgentKeyBackend implements IAgentKeyBackend {
   private records = new Map<string, AgentKeyRecord>();
+  private readonly clientMessageIds = new Map<string, number>();
+  private static readonly DEDUP_TTL_MS = 60 * 60 * 1000;
 
   async create(input: AgentKeyInput): Promise<void> {
     this.records.set(input.agentKeyId, { ...input });
@@ -62,5 +64,19 @@ export class MemoryAgentKeyBackend implements IAgentKeyBackend {
   async touchLastUsed(agentKeyId: string, timestamp: number): Promise<void> {
     const record = this.records.get(agentKeyId);
     if (record) record.lastUsedAt = timestamp;
+  }
+
+  async claimClientMessageId(agentKeyId: string, clientMessageId: string): Promise<boolean> {
+    if (!this.records.has(agentKeyId)) return false;
+    const key = `${agentKeyId}:${clientMessageId}`;
+    if (this.clientMessageIds.has(key)) return false;
+    this.clientMessageIds.set(key, Date.now());
+    if (this.clientMessageIds.size > 10_000) {
+      const cutoff = Date.now() - MemoryAgentKeyBackend.DEDUP_TTL_MS;
+      for (const [k, ts] of this.clientMessageIds) {
+        if (ts < cutoff) this.clientMessageIds.delete(k);
+      }
+    }
+    return true;
   }
 }

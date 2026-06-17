@@ -1,5 +1,5 @@
 /**
- * F152: First batch of OTel instruments for Cat Cafe observability.
+ * F152: First batch of OTel instruments for Clowder AI observability.
  *
  * All instruments use the `cat_cafe.` prefix and are bound by the
  * MetricAttributeAllowlist Views (D2 enforcement).

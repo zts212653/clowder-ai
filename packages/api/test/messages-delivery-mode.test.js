@@ -925,7 +925,7 @@ describe('POST /api/messages deliveryMode', () => {
     // then ends normally (no throw) — this is the exact scenario砚砚 identified.
     deps.router.routeExecution.mock.mockImplementation(async function* () {
       yield { type: 'text', catId: 'opus', content: 'partial output', timestamp: Date.now() };
-      // External cancel happens here (e.g., force-send from铲屎官)
+      // External cancel happens here (e.g., force-send fromco-creator)
       controller.abort();
       // Generator ends normally — no throw. The for-await break exits the loop,
       // but post-loop code must NOT run ack+succeeded.

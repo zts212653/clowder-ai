@@ -3428,10 +3428,23 @@ describe('Callback Routes', () => {
 
     const body = JSON.parse(response.body);
     assert.equal(body.task.automationState.issue.lastCommentCursor, 1234);
+    // Cloud R17 P1: both cursors must be seeded at registration so the crash-window
+    // fallback (lastDeliveredCursor ?? collectionCursor) lands on the correct pre-advance
+    // value if collection advances before delivery cursor is persisted.
+    assert.equal(
+      body.task.automationState.issue.lastDeliveredCursor,
+      1234,
+      'Cloud R17 P1: lastDeliveredCursor must be seeded alongside lastCommentCursor at registration',
+    );
     assert.equal(body.task.automationState.trackingInstructions, 'Watch for maintainer updates');
 
     const stored = taskStore.getBySubject('issue:zts212653/cat-cafe#861');
     assert.equal(stored.automationState.issue.lastCommentCursor, 1234);
+    assert.equal(
+      stored.automationState.issue.lastDeliveredCursor,
+      1234,
+      'Cloud R17 P1: persisted task must also have lastDeliveredCursor seeded at registration',
+    );
   });
 
   test('POST register-issue-tracking preserves existing cursor on re-register', async () => {
@@ -3465,7 +3478,9 @@ describe('Callback Routes', () => {
     });
 
     const task = taskStore.getBySubject('issue:zts212653/cat-cafe#862');
-    taskStore.patchAutomationState(task.id, { issue: { lastCommentCursor: 55, lastNotifiedAt: 1000 } });
+    // Simulate active processing: cursor has advanced BEYOND the seed (9999 → 10001)
+    // (cursors only move forward; using a value > seed ensures Math.max preserves it correctly)
+    taskStore.patchAutomationState(task.id, { issue: { lastCommentCursor: 10001, lastNotifiedAt: 1000 } });
 
     const secondInvocation = await registry.create('user-1', 'opus', 'thread-issue-2');
     const response = await app.inject({
@@ -3487,7 +3502,7 @@ describe('Callback Routes', () => {
 
     const updated = taskStore.getBySubject('issue:zts212653/cat-cafe#862');
     assert.equal(updated.threadId, 'thread-issue-2');
-    assert.equal(updated.automationState.issue.lastCommentCursor, 55);
+    assert.equal(updated.automationState.issue.lastCommentCursor, 10001);
     assert.equal(updated.automationState.issue.lastNotifiedAt, 1000);
     assert.equal(updated.automationState.trackingInstructions, 'Updated instructions');
   });

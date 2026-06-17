@@ -49,9 +49,9 @@ routeSerial 是 Cat Cafe 的核心路由引擎——所有 A2A 串行调度、me
 3. **真实 runtime 验证（LL-064）**——routeSerial 比 F215 更核心，merge 前必须真 runtime + 真截图 + 刻意触发多路由场景，绝不只信单测
 4. **跨族 review 强制**——5 套路由耦合最易出 edge case，必须Maine Coon族 review
 
-## Context 卫生安排（CVO directive）
+## Context 卫生安排（operator directive）
 
-> ⚠️ "fresh" 的语义（team lead 2026-05-30 纠正，防后人重蹈）：**fresh = 相对 F215 的纯粹，NOT 再开空白 thread**。
+> ⚠️ "fresh" 的语义（operator 2026-05-30 纠正，防后人重蹈）：**fresh = 相对 F215 的纯粹，NOT 再开空白 thread**。
 > handoff 的初心是「接 F216 的猫不背 F215 重构的 context 包袱」——F215-thread 的 opus-48 立项后把 spec
 > 交给一只 **context 是 F216 而非 F215** 的 opus-48。**承接 coalesce bug 的本 thread 就是那只 fresh 猫**：
 > 从头到尾 context 都是 F216（coalesce bug = Phase D 引爆现象），零 F215 污染。再开 thread = fresh 到失忆，
@@ -86,19 +86,19 @@ routeSerial 是 Cat Cafe 的核心路由引擎——所有 A2A 串行调度、me
 
 ### Phase B
 - [x] AC-B1: 路由决策是纯函数，可独立单测（无 side effect）— c1.2 `resolveRoutingDecisions`（`routing-decision.ts`）+ `routing-decision.test.js` / `routing-decision-streak.test.js`（PR #1987）
-- [ ] AC-B2: **NOT ACHIEVED** — cognitive complexity 未下降。实测（2026-06-02，`pnpm exec biome lint`）routeSerial 仍是 **complexity 255**，与立项时完全相同。B1 达成的是**可测性**（决策逻辑抽成纯函数可单测），不是 complexity reduction。routeSerial 本体 255→瘦身**转独立技术债**（见 Links），不作为 F216 close 阻塞项（CVO scope 判定：F216 = bug 修复价值，瘦身另记）。
+- [ ] AC-B2: **NOT ACHIEVED** — cognitive complexity 未下降。实测（2026-06-02，`pnpm exec biome lint`）routeSerial 仍是 **complexity 255**，与立项时完全相同。B1 达成的是**可测性**（决策逻辑抽成纯函数可单测），不是 complexity reduction。routeSerial 本体 255→瘦身**转独立技术债**（见 Links），不作为 F216 close 阻塞项（operator scope 判定：F216 = bug 修复价值，瘦身另记）。
 - [~] AC-B3: F216 touched paths（inline-mention c1.3 + queue-pending/deferred c2）已 runtime/alpha 验证（330 单测 + alpha a2a-coalesce 22/22）。**relay 路径有意保留独立 battle-tested block，不接入统一决策层（de-scoped）**——relay no-change 由 F215 relay regression 覆盖。不是"三路都接统一层"。
 
 > **PR #1987（c0–c1.3）已合入 main（squash `32f88814e`，2026-05-31）**。Maine Coon GPT-5.5 跨族 review 两轮（R1 三个 P1 全修 red→green：caller-scope 生产 lookup 漏接 / multi-target streak 陈旧快照 / pnpm check import-sort；R2 Findings: none 放行）+ 云端 codex review（1 个 P2 docs frontmatter，已修）。
 > **本 PR 落地**：c0 caller-scope（`findInFlightAgentEntry` 第 3 参）+ c1.1 `peekStreakOnPush` 纯读预判 + c1.2 `resolveRoutingDecisions` 纯决策函数 + c1.3 inline-mention 接线（副作用留执行层）。
 > **PR #1991（c2）已合入 main（squash `d3966c85d`，2026-05-31）**：queue-pending（deferred）A2A 路径接入 `resolveRoutingDecisions`（逐 cat resolve+apply，非 batch，避免 P1-2 stale-streak），三条路径（inline/relay/queue-pending）统一决策层。Maine Coon跨族 review 三轮（R1 3 P1：followup-tails subject / defer_queue 未计 depth / P2 fix 漏提交；R2-3 Findings: none 放行）+ 云端 codex review（0 findings）。
-> **剩余**：c3（supersede 执行层 = Phase D processing 主场景 — team lead报的"at 两次同猫，第一条已 processing 时 abort 重启"那个 bug 的主场景）。
+> **剩余**：c3（supersede 执行层 = Phase D processing 主场景 — operator报的"at 两次同猫，第一条已 processing 时 abort 重启"那个 bug 的主场景）。
 
 ### Phase C（conditional）
 - [~] AC-C1: **不做** — Phase B 后评估：routeSerial 本体的可变状态耦合**未解**（complexity 仍 255，见 AC-B2），但显式状态机化（state enum + transition table）属于"routeSerial 瘦身技术债"范畴，不在 F216 bug-fix scope 内。Phase C 转入技术债，不单独做。
 
 ### Phase D: A2A same-turn handoff supersede（driven by 2026-05-30 coalesce bug）
-> 来源：team lead报 bug「post msg at 了两次同一只猫 → 第一条先执行（可能错误行动），第二条又独立执行」。
+> 来源：operator报 bug「post msg at 了两次同一只猫 → 第一条先执行（可能错误行动），第二条又独立执行」。
 >
 > **已独立交付（不依赖 F216）**：queued-merge —— 第一条还 queued（没开跑）时，同 turn 重复 handoff
 > 合并进同一 entry（`coalesceContentIntoQueuedAgent`），并把后续 handoff coalesce 进 queued follow-up，
@@ -116,7 +116,7 @@ routeSerial 是 Cat Cafe 的核心路由引擎——所有 A2A 串行调度、me
 - [x] AC-D4: queued-merge（已交付）零回归——22 个 a2a-coalesce + 85 queue-processor 测试全绿（PR #1997）
 
 #### Review nits 收口（PR #1971 已交付后的 reviewer 建议，归 Phase D 一并清理）
-> 来源：antig-opus（孟加拉猫 Opus，云端 codex 额度耗尽替补）completed review of `3654ea9d9`，3 个 non-blocking。
+> 来源：antig-opus（Bengal Opus，云端 codex 额度耗尽替补）completed review of `3654ea9d9`，3 个 non-blocking。
 - [x] AC-D5: vote 路径 `missed` check 排除 `coalesced` voters（PR #2002）
 - [x] AC-D6: `MessageDeliveryService` 在 coalesce（enqueued=[] + coalesced>0）时不误报 warn（PR #2002）
 - [x] AC-D7: `callback-a2a-trigger.ts` emit `queue_updated` action='coalesced' 语义准确（PR #2002）

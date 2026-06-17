@@ -577,10 +577,10 @@ describe('AntigravityAgentService (Bridge)', () => {
     );
 
     const sentPrompt = bridge.sendMessage.mock.calls[0].arguments[1];
-    assert.ok(sentPrompt.includes('Cat Cafe callback fallback'), 'should describe fallback path');
+    assert.ok(sentPrompt.includes('Clowder AI callback fallback'), 'should describe fallback path');
     assert.match(
       sentPrompt,
-      /如果当前环境已挂载只读 Cat Cafe MCP/,
+      /如果当前环境已挂载只读 Clowder AI MCP/,
       'should describe native readonly MCP conditionally',
     );
     assert.ok(

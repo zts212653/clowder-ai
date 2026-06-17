@@ -1,6 +1,13 @@
 {
   "exceptions": [
     {
+      "path": "packages/api/src/domains/cats/services/agents/routing",
+      "owner": "opus-48",
+      "reason": "Routing 25 files（agent routing + artifact-tracking + F232 thread-artifacts-aggregator）。与 invocation(25)/providers(32) 同属 agents 子域债务，ADR-010 该子拆分但 scope 不含 F232。F232 加 aggregator 顶过 25 线，time-bound 豁免待 routing 子拆分（记 F23 Phase 2）。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
+    },
+    {
       "path": "packages/api/src/routes",
       "owner": "opus",
       "reason": "Routes 按功能已分文件（147 files），ADR-010 重构 scope 不含 routes，需要按 HTTP verb / domain 重新评估子拆分边界。SECOND-ROUND unblock（首轮 a4e81b8791 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
@@ -29,9 +36,16 @@
       "ticket": "F23-followup"
     },
     {
+      "path": "packages/api/src/domains/cats/services/stores/ports",
+      "owner": "codex",
+      "reason": "F231 Phase C 新增 ProfileUpdateProposalStore port 后，stores/ports 达到 25 files；当前 store port 集中目录仍是既有模式，Phase C scope 不做跨 store-port 拆分。需在 F23/F231 follow-up 中按 proposal/profile/session 等子域拆分 ports。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F231/F23-followup"
+    },
+    {
       "path": "packages/api/src/domains/memory",
       "owner": "gpt52",
-      "reason": "Memory 域现有 89 个非 index.ts 文件，职责已横跨 indexing/query/governance/library；SECOND-ROUND unblock（2026-06-16 CI 过期例外失败），按真实边界拆子目录",
+      "reason": "Memory 域现有 72 个非 index.ts 文件，职责已横跨 indexing/query/governance/library；SECOND-ROUND unblock（首轮续期到 2026-06-15），继续按真实边界拆子目录。",
       "expiresAt": "2026-06-30",
       "ticket": "F102"
     },
@@ -39,6 +53,20 @@
       "path": "packages/api/src/utils",
       "owner": "codex",
       "reason": "API utils 31 files；按 cli/process/media/paths/network/parsing/skills 子域拆分（详见 F23 § Phase 2）。SECOND-ROUND unblock（首轮 4136847b10 砚砚 2026-05-18 续期到 2026-06-01）。Follow-up split plan 记在 F23 § Phase 2 follow-up。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F23-followup"
+    },
+    {
+      "path": "packages/api/src/infrastructure/harness-eval",
+      "owner": "opus",
+      "reason": "F192 socio-technical harness eval 当前 29 .ts（Phase F capability-wakeup 一批 eval-capability-wakeup-* 加入超 error=25）；SECOND-ROUND unblock（首轮续期到 2026-06-15），后续按 capability-wakeup / a2a / domain / hub 子域拆分。详见 F192 feat doc Known Debt + GitHub issue。",
+      "expiresAt": "2026-06-30",
+      "ticket": "F192"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/stores/redis",
+      "owner": "opus",
+      "reason": "F235 RedisCommunityIssueDraftStore 加入后 redis/ 达 25 files；与 ports/(26) 同源——每个 store port 一个 Redis impl。需在 F23 follow-up 中按 proposal/community/session 子域拆分。",
       "expiresAt": "2026-06-30",
       "ticket": "F23-followup"
     }

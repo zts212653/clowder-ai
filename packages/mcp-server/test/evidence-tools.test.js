@@ -199,7 +199,7 @@ describe('MCP Evidence Tools', () => {
           {
             title: 'Vision discussion',
             anchor: 'thread:vision',
-            snippet: 'CVO asked about entity anchors',
+            snippet: 'operator asked about entity anchors',
             confidence: 'high',
             sourceType: 'discussion',
             matchReason: 'entity:person:landy',
@@ -208,13 +208,13 @@ describe('MCP Evidence Tools', () => {
                 entityId: 'person:landy',
                 type: 'person',
                 canonicalName: 'You',
-                matchedAlias: 'CVO',
-                surface: '铲屎官',
+                matchedAlias: 'operator',
+                surface: 'co-creator',
                 source: 'passage',
                 docAnchor: 'thread:vision',
                 passageId: 'p1',
                 provenance: [{ source: 'F209 Phase B MCP contract test' }],
-                why: 'query CVO matched entity person:landy via alias 铲屎官',
+                why: 'query operator matched entity person:landy via alias co-creator',
               },
             ],
           },
@@ -222,15 +222,15 @@ describe('MCP Evidence Tools', () => {
       }),
     });
 
-    const result = await handleSearchEvidence({ query: 'CVO', mode: 'hybrid' });
+    const result = await handleSearchEvidence({ query: 'operator', mode: 'hybrid' });
     const text = result.content[0].text;
 
     assert.ok(text.includes('match: entity:person:landy'), 'should keep coarse entity match reason');
     assert.ok(text.includes('entity: person:landy'), 'should render entity id');
-    assert.ok(text.includes('matchedAlias=CVO'), 'should render the query alias');
-    assert.ok(text.includes('surface=铲屎官'), 'should render the matched surface');
+    assert.ok(text.includes('matchedAlias=operator'), 'should render the query alias');
+    assert.ok(text.includes('surface=co-creator'), 'should render the matched surface');
     assert.ok(
-      text.includes('why: query CVO matched entity person:landy via alias 铲屎官'),
+      text.includes('why: query operator matched entity person:landy via alias co-creator'),
       'should render entity match why explanation',
     );
     assert.ok(text.includes('provenance: F209 Phase B MCP contract test'), 'should render entity match provenance');
@@ -247,7 +247,7 @@ describe('MCP Evidence Tools', () => {
           {
             title: 'Vision discussion',
             anchor: 'thread:vision',
-            snippet: 'CVO asked about drill-down readers',
+            snippet: 'operator asked about drill-down readers',
             confidence: 'high',
             sourceType: 'discussion',
             drillDown: {

@@ -9,7 +9,7 @@ created: 2026-04-02
 
 > **状态**: 已决定
 > **日期**: 2026-04-02
-> **决策者**: 铲屎官 + Ragdoll + Maine Coon（review）
+> **决策者**: operator + Ragdoll + Maine Coon（review）
 > **上下文**: F151 Design Gate review + feat-lifecycle 指导
 
 ## 背景

@@ -78,19 +78,7 @@ export class AgentKeyRegistry {
     return this.backend.get(agentKeyId);
   }
 
-  private readonly clientMessageIds = new Map<string, number>();
-  private static readonly DEDUP_TTL_MS = 60 * 60 * 1000;
-
   async claimClientMessageId(agentKeyId: string, clientMessageId: string): Promise<boolean> {
-    const key = `${agentKeyId}:${clientMessageId}`;
-    if (this.clientMessageIds.has(key)) return false;
-    this.clientMessageIds.set(key, Date.now());
-    if (this.clientMessageIds.size > 10_000) {
-      const cutoff = Date.now() - AgentKeyRegistry.DEDUP_TTL_MS;
-      for (const [k, ts] of this.clientMessageIds) {
-        if (ts < cutoff) this.clientMessageIds.delete(k);
-      }
-    }
-    return true;
+    return this.backend.claimClientMessageId(agentKeyId, clientMessageId);
   }
 }

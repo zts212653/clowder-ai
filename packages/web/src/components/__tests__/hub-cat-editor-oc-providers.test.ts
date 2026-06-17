@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import type { ProfileItem } from '@/components/hub-accounts.types';
 import { buildCallHint, KNOWN_OC_PROVIDERS, resolveOpenCodeEndpoint } from '@/components/hub-cat-editor.sections';
 
 /** Minimal profile stub for buildCallHint tests */
-function mkProfile(baseUrl: string) {
+function mkProfile(baseUrl: string): ProfileItem {
   return {
     id: 't',
     displayName: '',
     name: '',
-    authType: 'api-key' as const,
-    kind: 'opencode' as const,
+    authType: 'api_key',
+    kind: 'api_key',
     builtin: false,
-    mode: 'default' as const,
+    mode: 'api_key',
+    clientId: 'opencode',
     baseUrl,
+    hasApiKey: true,
+    createdAt: '2026-06-11T00:00:00.000Z',
+    updatedAt: '2026-06-11T00:00:00.000Z',
   };
 }
 

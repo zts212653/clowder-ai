@@ -151,7 +151,7 @@ export const limbTools = [
   {
     name: 'limb_pair_list',
     description:
-      'List pending limb pairing requests. Remote devices must be approved by 铲屎官 before cats can use them. ' +
+      'List pending limb pairing requests. Remote devices must be approved by co-creator before cats can use them. ' +
       'Use to check if any new devices are waiting for approval. ' +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairListInputSchema,
@@ -162,7 +162,7 @@ export const limbTools = [
     description:
       'Approve a limb pairing request. After approval, the remote device is automatically registered in the Registry ' +
       'and becomes available for cats to invoke. ' +
-      'GOTCHA: Only 铲屎官 should initiate approval — do not auto-approve without user consent. ' +
+      'GOTCHA: Only co-creator should initiate approval — do not auto-approve without user consent. ' +
       'Shared Antigravity MCP GOTCHA: pass agentKeyCatId to select the correct variant sidecar key.',
     inputSchema: limbPairApproveInputSchema,
     handler: handleLimbPairApprove,

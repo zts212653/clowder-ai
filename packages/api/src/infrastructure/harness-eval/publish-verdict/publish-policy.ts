@@ -4,7 +4,7 @@ import type { VerdictHandoffPacket } from '../verdict-handoff.js';
  * F192 Phase H 收尾 PR-3 — auto-verdict publish-policy classifier (砚砚 R2 design-lock).
  *
  * Why: PR-2 dogfood (PR #2114) surfaced that EVERY scheduled eval verdict opens a regular
- * PR — including `keep_observe + noFindingRecord` runs that need no action. CVO asked
+ * PR — including `keep_observe + noFindingRecord` runs that need no action. operator asked
  * "who merges this?" and the answer "you" is wrong product-shape. This policy separates:
  *   - Real workspace PRs (owner action) — `regular_pr`
  *   - Low-noise evidence artifacts (cat-owned merge) — `evidence_only_interim_pr`
@@ -74,7 +74,7 @@ export function computePublishPolicy(packet: VerdictHandoffPacket, attribution: 
   }
 
   // keep_observe + actionable findings → regular PR with evidence-only label
-  // (cat-owned merge per artifact-merge-gate SOP, not CVO).
+  // (cat-owned merge per artifact-merge-gate SOP, not operator).
   if (hasFindings) {
     return { mode: 'regular_pr', labels: ['evidence-only'], cvoMergeRequired: false };
   }

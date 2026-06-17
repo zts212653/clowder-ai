@@ -45,7 +45,7 @@ test('skips Windows resources root when extraResources is missing node_modules',
 test('accepts macOS Resources root after afterPack copies node_modules', () => {
   const bundleRoot = mkdtempSync(path.join(tmpdir(), 'desktop-root-mac-'));
   try {
-    const resourcesRoot = path.join(bundleRoot, 'Cat Cafe.app', 'Contents', 'Resources');
+    const resourcesRoot = path.join(bundleRoot, 'Clowder AI.app', 'Contents', 'Resources');
     seedRuntimeRoot(resourcesRoot, { withNodeModules: true });
 
     const startDir = path.join(resourcesRoot, 'app');

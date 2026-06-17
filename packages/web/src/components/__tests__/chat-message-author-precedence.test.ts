@@ -94,7 +94,7 @@ describe('ChatMessage author precedence', () => {
 
     expect(container.textContent).toContain('cross-posted review');
     expect(container.textContent).toContain('缅因猫（GPT-5.2）');
-    expect(container.textContent).not.toContain('铲屎官');
+    expect(container.textContent).not.toContain('co-creator');
   });
 
   it('does not invent a parenthetical label from catId when variantLabel is absent', async () => {
@@ -158,7 +158,7 @@ describe('ChatMessage author precedence', () => {
     });
 
     expect(container.textContent).toContain('始皇帝');
-    expect(container.textContent).not.toContain('铲屎官');
+    expect(container.textContent).not.toContain('co-creator');
     const avatar = container.querySelector('img[alt="始皇帝"]') as HTMLImageElement | null;
     expect(avatar?.getAttribute('src')).toBe('/uploads/qin-owner.png');
   });

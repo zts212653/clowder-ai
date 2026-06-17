@@ -27,11 +27,11 @@
 
 ### 1. 确认音频源
 
-铲屎官说"监听XX"时，先确认采集模式：
+operator说"监听XX"时，先确认采集模式：
 
 - 提到具体 App 名（腾讯会议、Chrome、Zoom、华为云会议） → `source: "app"`
 - 提到"麦克风""录环境""线下会议" → `source: "mic"`
-- 不确定 → 用 `cat_cafe_audio_list_sources` 列出可用源，让铲屎官选
+- 不确定 → 用 `cat_cafe_audio_list_sources` 列出可用源，让operator选
 
 ### 2. 开始采集
 
@@ -55,7 +55,7 @@ cat_cafe_audio_capture_start({
 
 ### 3. 读取转写
 
-铲屎官问问题时，读取最近的转写：
+operator问问题时，读取最近的转写：
 
 ```
 cat_cafe_audio_read_transcript({ latest: 20 })
@@ -68,7 +68,7 @@ cat_cafe_audio_read_transcript({ from: 1715300000, to: 1715300300 })
 
 ### 4. 停止采集
 
-铲屎官说"停""不听了""结束" → 停止采集：
+operator说"停""不听了""结束" → 停止采集：
 
 ```
 cat_cafe_audio_capture_stop()

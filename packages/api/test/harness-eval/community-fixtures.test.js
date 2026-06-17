@@ -18,14 +18,14 @@ describe('E-community fixtures (AC-E15)', () => {
       assert.equal(packet.verdict, 'fix');
     });
 
-    it('contains no internal Cat Cafe thread IDs', () => {
+    it('contains no internal Clowder AI thread IDs', () => {
       const raw = readFileSync(resolve(FIXTURES_DIR, 'sanitized-issue-packet-example.json'), 'utf8');
       // Internal thread IDs follow pattern thread_eval_* or thread_*
       assert.ok(!raw.includes('thread_eval_'));
       assert.ok(!raw.includes('thread_'));
     });
 
-    it('contains no Cat Cafe internal cat model names', () => {
+    it('contains no Clowder AI internal cat model names', () => {
       const raw = readFileSync(resolve(FIXTURES_DIR, 'sanitized-issue-packet-example.json'), 'utf8');
       const internalModels = ['claude-opus', 'claude-sonnet', 'gpt-5.5', 'gpt-5.4', 'gpt-5.3', 'gemini-3', 'gemini-2'];
       for (const model of internalModels) {

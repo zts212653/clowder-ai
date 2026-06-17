@@ -12,13 +12,13 @@ created: 2026-05-26
 
 ## Why
 
-### team experience（愿景）
+### operator experience（愿景）
 
 > "你们能不能把**删掉的 mcp 的配置帮人启动的时候清理掉**啊！！这是别的思考方式！  
 > **你们过期的 mcp 竟然不清理？**"  
 > — 2026-05-26 23:56
 
-team lead指出一个**架构盲点**：cat-cafe 团队 deprecate 了一个 mcp server (`cat-cafe` legacy all-in-one)，但**用户已有的 user-level config 永远保留着这个过期 entry**。我们的代码花了 5 轮试图"运行时兜底"这个过期 entry——但**应该的做法是启动时主动清理**。
+operator指出一个**架构盲点**：cat-cafe 团队 deprecate 了一个 mcp server (`cat-cafe` legacy all-in-one)，但**用户已有的 user-level config 永远保留着这个过期 entry**。我们的代码花了 5 轮试图"运行时兜底"这个过期 entry——但**应该的做法是启动时主动清理**。
 
 ### 来龙去脉（人话）
 
@@ -31,9 +31,9 @@ team lead指出一个**架构盲点**：cat-cafe 团队 deprecate 了一个 mcp 
 4. **strict-codex**（社区小伙伴用的 npm v22.22.3）看到"只有 env 没 transport"的残缺定义 → 报 `invalid transport` → exit code 1
 5. cat-cafe 自动重试 → 同样错 → 死循环
 
-**5 轮云端 review + Maine Coon review 都在补 helper**——helper 试图重现 codex CLI 的 config lookup 优先级（user → project → ancestor → `$CODEX_HOME` → `/etc`）→ 推断 codex 会不会加载 legacy → 决定要不要 inject env。
+**multiple remote review rounds + Maine Coon review 都在补 helper**——helper 试图重现 codex CLI 的 config lookup 优先级（user → project → ancestor → `$CODEX_HOME` → `/etc`）→ 推断 codex 会不会加载 legacy → 决定要不要 inject env。
 
-**team lead识破坐标系错**——这是**侧推 codex 内部行为**，永远会漏一个 source。**真正的修复是"启动时主动清理过期 entry"**——legacy `cat-cafe` 根本不该留在 user config 里，cat-cafe 启动时应该扫一遍，删掉过期的 managed entry。
+**operator识破坐标系错**——这是**侧推 codex 内部行为**，永远会漏一个 source。**真正的修复是"启动时主动清理过期 entry"**——legacy `cat-cafe` 根本不该留在 user config 里，cat-cafe 启动时应该扫一遍，删掉过期的 managed entry。
 
 ### 数学之美对比
 
@@ -186,12 +186,12 @@ trace 所有 mcp config writer：
 
 ### Phase D（Migration Communication）
 
-- [x] AC-D1: clowder-ai 同步 PR (outbound sync) — cvo_signoff(2026-05-26 01:58 team experience："现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了") — deferred 到外部 PR intake 后全量同步那次，不阻塞本 feat close
-- [x] AC-D2: cat-cafe-runtime 同步 — cvo_signoff(`feedback_no_touch_runtime` P0 铁律：runtime sync 由team lead自主决定时机和方式，47 不擅自触碰) — 信息透明已传达，等 CVO 节奏
+- [x] AC-D1: clowder-ai 同步 PR (outbound sync) — cvo_signoff(2026-05-26 01:58 operator experience："现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了") — deferred 到外部 PR intake 后全量同步那次，不阻塞本 feat close
+- [x] AC-D2: cat-cafe-runtime 同步 — cvo_signoff(`feedback_no_touch_runtime` P0 铁律：runtime sync 由operator自主决定时机和方式，47 不擅自触碰) — 信息透明已传达，等 operator 节奏
 
 ### Phase E（Close + Vision Guard）
 
-- [x] AC-E1: 跨族愿景守护猫 — 孟加拉猫 antig-opus (claude-opus-4-6, Anthropic 模型族跨 Codex/Gemini reviewer 族) 独立 verdict 2026-05-26 09:49 ✅ PASS（愿景对齐 / 架构完整 / 测试验证 / 3 非阻塞关注点已在 Phase E close 时标注）
+- [x] AC-E1: 跨族愿景守护猫 — Bengal antig-opus (claude-opus-4-6, Anthropic 模型族跨 Codex/Gemini reviewer 族) 独立 verdict 2026-05-26 09:49 ✅ PASS（愿景对齐 / 架构完整 / 测试验证 / 3 非阻塞关注点已在 Phase E close 时标注）
 - [x] AC-E2: CloseGateReport — 见下方「Close Gate Report」节
 - [x] AC-E4: PR #1894 close + 临时 workaround 文档化 + 社区小伙伴通知 — 2026-05-26 close 时已贴 4 行 toml workaround in close comment `#4541459254`
 
@@ -201,7 +201,7 @@ trace 所有 mcp config writer：
 - **Related**: F193 Phase C (split-only migration 的 implementation gap 补完)
 - **Related**: F212 (CLI Error Diagnostics — 错误展示改进，跟本 feat 无 scope 重叠，但都源于 2026-05-25 社区 bug 报告)
 - **Related**: ADR-036 (legacy cell 退出 active managed matrix — amended 2026-05-26)
-- **Blocked by**: 无（team lead CVO signoff 已给 2026-05-26 00:02）
+- **Blocked by**: 无（operator operator signoff 已给 2026-05-26 00:02）
 
 ## Risk
 
@@ -209,7 +209,7 @@ trace 所有 mcp config writer：
 |------|------|
 | user 已配第三方 `cat-cafe` server（与自家 binary 不同 path）被误删 | `isOurOwnedDeprecatedEntry` 严格 marker 匹配；未知 entry 保留 + warn |
 | 启动 cleanup IO 失败（文件权限 / TOML parse error） | try/catch fail-safe；cleanup 失败不阻塞启动；log.error 但服务继续 |
-| ADR-036 修订是否过早（1 天前刚 close） | CVO 已签字（"你们得改这个 adr"）；amendment 不废弃整 ADR，只 amend legacy cell |
+| ADR-036 修订是否过早（1 天前刚 close） | operator 已签字（"你们得改这个 adr"）；amendment 不废弃整 ADR，只 amend legacy cell |
 | 多 harness writer 都要改，scope 大 | 抽 cross-harness shared cleanup helper（DRY），1 处实现 5 处用 |
 | user 没看 log.warn 不知道发生了什么 | log.warn 内容人话化 ("Removed deprecated managed server `cat-cafe` (replaced by split servers cat-cafe-{collab,memory,signals,limb})")；F212 错误展示路径将来可加 UI 通知 |
 | Cleanup 误删用户当前需要的 server（race condition） | Cleanup 仅在 startup 一次性跑，不在每次 invoke 时跑；user 重新加 entry 后下次 startup 才会再 cleanup |
@@ -219,20 +219,20 @@ trace 所有 mcp config writer：
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 走 startup cleanup（CVO reframe）而非 lookup helper / dummy disabled override | 数学之美：startup 一次清理 > runtime 每次兜底；用户 config 干净 | 2026-05-26 |
+| KD-1 | 走 startup cleanup（operator reframe）而非 lookup helper / dummy disabled override | 数学之美：startup 一次清理 > runtime 每次兜底；用户 config 干净 | 2026-05-26 |
 | KD-2 | Selective marker remove（保守），不无条件删 user-owned | Maine Coon push back 第三方破坏风险（A 方案太激进） | 2026-05-26 |
 | KD-3 | Amend ADR-036 而非新 ADR | ADR-036 是 cross-layer matrix authority；legacy cell 退出由 amend 表达，避免两个真相源 | 2026-05-26 |
-| KD-4 | 同 PR 处理所有 harness（Phase B 全做），不留 follow-up | team lead硬指令："别 follow up 你最好"；F213 终态 = 系统性机制不是单点 | 2026-05-26 |
+| KD-4 | 同 PR 处理所有 harness（Phase B 全做），不留 follow-up | operator硬指令："别 follow up 你最好"；F213 终态 = 系统性机制不是单点 | 2026-05-26 |
 
 ## Review Gate
 
 - Phase A/B: Maine Coon (@codex GPT-5.5) cross-family review — 安全分析 / 测试覆盖 / marker 准确性 ✅
 - Phase C/D: 47 self-review (doc-only) ✅
-- Phase E close: 跨族愿景守护猫 — **孟加拉猫 antig-opus (Claude Opus 4.6) ✅ PASS 2026-05-26** （非 47 / 非Maine Coon / 非 sonnet，跨族 vision-guard）
+- Phase E close: 跨族愿景守护猫 — **Bengal antig-opus (Claude Opus 4.6) ✅ PASS 2026-05-26** （非 47 / 非Maine Coon / 非 sonnet，跨族 vision-guard）
 
 ## Close Gate Report
 
-**Generated**: 2026-05-26 10:00. Author: Ragdoll/Opus-47. Vision Guardian: 孟加拉猫/antig-opus.
+**Generated**: 2026-05-26 10:00. Author: Ragdoll/Opus-47. Vision Guardian: Bengal/antig-opus.
 
 ### AC status
 
@@ -242,13 +242,13 @@ trace 所有 mcp config writer：
 | B | B1..B5 | ✅ met | PR #1903 merged commit `487b27f0d` (Phase B delivered: shared cleanup helper + 4 harness extension Claude/Gemini/Antigravity/Kimi + 72/72 mcp-config-adapters tests) |
 | C | C1 | ✅ met | ADR-036 amended 2026-05-26 (commit `c2eeb6382` + `d42ea892b` doc-tail cleanup) |
 | C | C2 | ✅ delete(why) | F193 spec related_features 反向链已建（commit `c2eeb6382`），不需独立 follow-up 节 |
-| D | D1 | ✅ cvo_signoff | team lead 2026-05-26 01:58 message `0001779785882771-000536-f145a458`：「现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了」— defer 到外部 PR intake 后全量同步 |
-| D | D2 | ✅ cvo_signoff | `feedback_no_touch_runtime` P0 铁律：runtime sync 由 CVO 自主决定时机，47 不擅自触碰 |
+| D | D1 | ✅ cvo_signoff | operator 2026-05-26 01:58 message `0001779785882771-000536-f145a458`：「现在暂时不能 a 因为有个 PR 在外部合入了但是还没 intake 回家... 我们本来之后就要全量同步一次了」— defer 到外部 PR intake 后全量同步 |
+| D | D2 | ✅ cvo_signoff | `feedback_no_touch_runtime` P0 铁律：runtime sync 由 operator 自主决定时机，47 不擅自触碰 |
 | E | E1..E4 | ✅ met | 跨族愿景守护 antig-opus APPROVE / CloseGateReport (本节) / 反思胶囊 / PR #1894 close + 4-line toml workaround in close comment `#4541459254` |
 
 ### Vision Guardian Evidence Table
 
-| team experience | 当前实际状态 | 匹配？ |
+| operator experience | 当前实际状态 | 匹配？ |
 |-----------|--------|--------|
 | "你们能不能把删掉的 mcp 的配置帮人启动的时候清理掉啊" | `applyDeprecatedManagedCleanup` shared helper 在所有 5 个 writer (Codex/Claude/Gemini/Antigravity/Kimi) 启动时跑（capability orchestrator regen / `/api/capabilities` 调用 / startup-cli-config）+ Sonnet alpha 实测 echoLegacyShim entry 被清除（live alpha verification report） | ✅ |
 | "你们过期的 mcp 竟然不清理？" | DEPRECATED_MANAGED_SERVERS registry 注册 `cat-cafe` deprecated（reason: F193 Phase C split-only migration）+ knownManagedMarkers 识别 + log.warn 通知 | ✅ |
@@ -258,16 +258,16 @@ trace 所有 mcp config writer：
 
 ### Deferred / Sign-off Items
 
-- **AC-D1 outbound sync to clowder-ai** — CVO signed off defer to "全量同步一次" 后续 batch；社区临时 workaround (4-line toml) 已在 PR #1894 close comment `#4541459254` 公开
-- **AC-D2 cat-cafe-runtime sync** — CVO signed off 由 CVO 手动 sync（runtime P0 铁律）；live runtime `cat-cafe-runtime` 当前落后 main 23+ commits（Sonnet alpha 验证报告 catch 到 + Maine Coon verdict 再确认）
+- **AC-D1 outbound sync to clowder-ai** — operator signed off defer to "全量同步一次" 后续 batch；社区临时 workaround (4-line toml) 已在 PR #1894 close comment `#4541459254` 公开
+- **AC-D2 cat-cafe-runtime sync** — operator signed off 由 operator 手动 sync（runtime P0 铁律）；live runtime `cat-cafe-runtime` 当前落后 main 23+ commits（Sonnet alpha 验证报告 catch 到 + Maine Coon verdict 再确认）
 
 ### Vision Guardian Non-Blocking Concerns Disposition
 
-孟加拉猫 antig-opus verdict 提出 3 个非阻塞关注点，处置：
+Bengal antig-opus verdict 提出 3 个非阻塞关注点，处置：
 
 1. **argsSuffix type variant 保留但未使用** → OQ-4 处置标注：前瞻为未来 owner-tag mechanism 留扩展位（同 `ManagedEntryMarker` discriminated union 加 `kind: 'ownerTag'`），cleanup helper 改动最小，不是 dead code
 2. **5 个 OQ 全部 ⬜** → close gate 中全部 ✅ 处置（OQ-1..5）
-3. **Runtime 滞后 main 23 commits** → AC-D2 cvo_signoff 已记 + 状态报告告知 CVO，等他节奏
+3. **Runtime 滞后 main 23 commits** → AC-D2 cvo_signoff 已记 + 状态报告告知 operator，等他节奏
 
 ### Predecessor Saga Documented as Antipattern
 

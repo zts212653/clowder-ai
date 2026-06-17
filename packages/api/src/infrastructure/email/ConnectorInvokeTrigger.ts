@@ -384,6 +384,8 @@ export class ConnectorInvokeTrigger {
         parentInvocationId: createResult.invocationId,
         // F222 P1: Connector-triggered execution is not user-origin — suppress frustration detection
         frustrationAutoIssueEligible: false,
+        // #949 P2: Connector-sourced flows have no ball-pass expectation — suppress verdict warning
+        verdictPassWarningEnabled: false,
       })) {
         // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
         if (!intentModeBroadcast) {

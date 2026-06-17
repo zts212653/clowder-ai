@@ -13,6 +13,10 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { TaskProgressStore } from '../domains/cats/services/agents/invocation/TaskProgressStore.js';
+import {
+  aggregateThreadArtifacts,
+  collectAllThreadMessages,
+} from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
@@ -67,6 +71,12 @@ export interface ThreadsRoutesOptions {
   labelStore?: ILabelStore;
   /** F102: keep thread evidence search in sync after title-only updates */
   indexBuilder?: ThreadIndexBuilder;
+  /**
+   * F229: Reserved — no longer used by GET /api/threads.
+   * createdBy=userId (P1 fix) means threadStore.list(userId) already returns concierge threads;
+   * threadKind='concierge' filter handles default exclusion / includeConcierge=true inclusion.
+   */
+  conciergeThreadService?: import('../domains/concierge/ConciergeThreadService.js').ConciergeThreadService;
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -128,6 +138,11 @@ const listThreadsSchema = z.object({
   featureIds: z.string().trim().min(1).max(2000).optional(),
   /** F095 Phase D: When true, list soft-deleted threads (trash bin) instead of active threads. */
   deleted: z.union([z.boolean(), z.string().trim().min(1).max(8)]).optional(),
+  /**
+   * F229: When true, include concierge threads in the list (default: excluded).
+   * Used by the concierge surface to load the per-user concierge thread.
+   */
+  includeConcierge: z.union([z.boolean(), z.string().trim().min(1).max(8)]).optional(),
 });
 
 async function resolveCreateThreadProjectPath(
@@ -181,6 +196,10 @@ export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thre
   return thread;
 }
 
+function isConciergeThread(thread: Thread): boolean {
+  return thread.threadKind === 'concierge';
+}
+
 const threadRoutingRuleSchema = z
   .object({
     avoidCats: z.array(catIdSchema()).max(10).optional(),
@@ -228,7 +247,10 @@ const updateThreadSchema = z
     /** Bubble display overrides: CLI output block expand/collapse. */
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
-    preferredWorkspaceMode: z.enum(['dev', 'recall', 'schedule', 'tasks', 'community']).nullable().optional(),
+    preferredWorkspaceMode: z
+      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts'])
+      .nullable()
+      .optional(),
     /** F187: Thread label IDs. */
     labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
   })
@@ -253,7 +275,7 @@ const updateThreadSchema = z
   );
 
 export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (app, opts) => {
-  const { threadStore, messageStore, taskProgressStore } = opts;
+  const { threadStore, messageStore, taskProgressStore, taskStore } = opts;
 
   // POST /api/threads - 创建对话
   app.post('/api/threads', async (request, reply) => {
@@ -337,22 +359,39 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       hasBacklogItemId: hasBacklogItemIdRaw,
       featureIds,
       deleted: deletedRaw,
+      includeConcierge: includeConciergeRaw,
     } = parseResult.data;
     const hasBacklogItemId = parseOptionalBooleanQuery(hasBacklogItemIdRaw);
     const showDeleted = parseOptionalBooleanQuery(deletedRaw);
+    const includeConcierge = parseOptionalBooleanQuery(includeConciergeRaw);
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) return { threads: [] };
 
     // F095 Phase D: Return soft-deleted threads when deleted=true
     if (showDeleted) {
-      const deletedThreads = (await threadStore.listDeleted(userId)).map((thread) =>
+      let deletedThreads = (await threadStore.listDeleted(userId)).map((thread) =>
         sanitizeThreadForResponse(thread, userId),
       );
+      // F229: Apply the same concierge exclusion to the trash view.
+      // Without this, a soft-deleted concierge thread appears in the default trash list;
+      // after /api/concierge/thread creates a replacement and the old thread is restored,
+      // two live concierge threads can exist for the same user.
+      if (!includeConcierge) {
+        deletedThreads = deletedThreads.filter((t) => !isConciergeThread(t));
+      }
       return { threads: deletedThreads };
     }
 
     let threads = projectPath ? await threadStore.listByProject(userId, projectPath) : await threadStore.list(userId);
     threads = threads.map((thread) => sanitizeThreadForResponse(thread, userId));
+
+    // F229: Exclude concierge threads from default sidebar listing.
+    // createdBy=userId (P1 fix) means threadStore.list(userId) includes concierge threads;
+    // threadKind='concierge' is the filter signal at this route layer.
+    // includeConcierge=true opt-in exposes them (used by the concierge surface itself).
+    if (!includeConcierge) {
+      threads = threads.filter((t) => !isConciergeThread(t));
+    }
 
     // F058 Phase G: Match threads by feature IDs in titles
     if (featureIds) {
@@ -621,6 +660,13 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
 
+    if (isConciergeThread(thread)) {
+      reply.status(400);
+      return {
+        error: 'Concierge threads cannot be restored through the generic trash endpoint; use /api/concierge/thread',
+      };
+    }
+
     const restored = await threadStore.restore(id);
     if (!restored) {
       reply.status(400);
@@ -655,6 +701,98 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     const snapshot = taskProgressStore ? await taskProgressStore.getThreadSnapshots(threadId) : {};
     return { threadId, taskProgress: snapshot };
+  });
+
+  // F232: GET /api/threads/:threadId/artifacts — aggregate thread products (rich blocks + PR tasks + file ledger)
+  app.get<{ Params: { threadId: string } }>('/api/threads/:threadId/artifacts', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const { threadId } = request.params;
+    const thread = await threadStore.get(threadId);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+
+    if (thread.createdBy !== userId && thread.createdBy !== 'system') {
+      reply.status(403);
+      return { error: 'Access denied' };
+    }
+
+    // P1 fix (砚砚 review): 分页扫全量消息，getByThread 默认 limit=50 会吞掉 >50 条 thread 的早期产物
+    const messages = messageStore ? await collectAllThreadMessages(messageStore, threadId, userId) : [];
+    const allTasks = taskStore ? await taskStore.listByThread(threadId) : [];
+    // F232 P1 (cloud review): system thread（createdBy='system'，shared default thread）任何认证用户
+    // 都通过上面的 access guard，但 PR tracking task 带注册者 userId（user-specific）。必须按 userId 过滤，
+    // 否则 shared system thread 上 Alice 会看到 Bob 的 PR titles/refs。messages 已由
+    // collectAllThreadMessages(userId) scoped；ledger 是 thread 级产物记录（updatedBy=cat/'user'，非
+    // user 私有数据），无需过滤。
+    const prTasks = allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
+    const mem = await threadStore.getThreadMemory(threadId);
+    // P1 fix (砚砚 review): ledger 含 file/plan/feature-doc 文档产物（F148 类型），不止 file；都映射为面板 file 类，不静默丢
+    const fileLedger = (mem?.recentArtifacts ?? []).filter(
+      (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
+    );
+    const artifacts = aggregateThreadArtifacts({ messages, prTasks, fileLedger });
+    return { threadId, artifacts };
+  });
+
+  // F232 Phase B: GET /api/artifacts — global artifact aggregation across all user threads (AC-B1, AC-B2).
+  // Iterates all threads calling aggregateThreadArtifacts() per thread (reuses Phase A pipeline).
+  app.get('/api/artifacts', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const userThreads = await threadStore.list(userId);
+
+    // Parallel aggregation across all threads (AC-B2: reuse pipeline)
+    const perThread = await Promise.all(
+      userThreads.map(async (thread) => {
+        const messages = messageStore ? await collectAllThreadMessages(messageStore, thread.id, userId) : [];
+        const allTasks = taskStore ? await taskStore.listByThread(thread.id) : [];
+        const prTasks = allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
+        const mem = await threadStore.getThreadMemory(thread.id);
+        const fileLedger = (mem?.recentArtifacts ?? []).filter(
+          (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
+        );
+        const artifacts = aggregateThreadArtifacts({ messages, prTasks, fileLedger });
+        return artifacts.map((a) => ({
+          ...a,
+          threadId: thread.id,
+          threadTitle: thread.title ?? thread.id,
+        }));
+      }),
+    );
+
+    // Flatten + sort descending by createdAt
+    let all = perThread.flat().sort((a, b) => b.createdAt - a.createdAt);
+
+    // F232 Phase B: server-side query param filtering (AC-B1)
+    const { type, cat, q } = request.query as { type?: string; cat?: string; q?: string };
+    if (type) {
+      all = all.filter((a) => a.type === type);
+    }
+    if (cat) {
+      // Normalize null catId → '—' sentinel (same as client-side extractCatChips)
+      all = all.filter((a) => (a.catId ?? '—') === cat);
+    }
+    if (q) {
+      // Normalize: Fastify may expose duplicate ?q= as array; take first element
+      const qStr = Array.isArray(q) ? q[0] : q;
+      if (typeof qStr === 'string') {
+        const lower = qStr.toLowerCase();
+        all = all.filter((a) => a.name && a.name.toLowerCase().includes(lower));
+      }
+    }
+
+    return { artifacts: all, total: all.length };
   });
 
   // F35: PATCH /api/threads/:id/reveal — reveal all whispers in a thread

@@ -20,6 +20,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
 
 const IS_WINDOWS = process.platform === 'win32';
+const CONNECTOR_AUTOSTART_OVERRIDE_VALUES = new Set(['1', 'true', 'yes', 'on', '0', 'false', 'no', 'off']);
+
+function hasConnectorAutostartOverride(env) {
+  const normalized = env.CONNECTOR_GATEWAY_AUTOSTART?.trim().toLowerCase();
+  return normalized !== undefined && CONNECTOR_AUTOSTART_OVERRIDE_VALUES.has(normalized);
+}
+
+function directConnectorAutostartFailClosed(env) {
+  if (hasConnectorAutostartOverride(env)) return env;
+  return { ...env, CONNECTOR_GATEWAY_AUTOSTART: '0' };
+}
 
 // First positional arg is the mode (start | start:direct | dev:direct | status)
 const [mode, ...rest] = process.argv.slice(2);
@@ -43,7 +54,10 @@ if (mode === 'status') {
   // Extract --profile=* (not a PS1 param) and pass via env instead
   const profileArg = rest.find((a) => a.startsWith('--profile='));
   const profileName = profileArg?.split('=')[1];
-  const childEnv = { ...process.env };
+  let childEnv = { ...process.env };
+  if (mode === 'start:direct' || mode === 'dev:direct') {
+    childEnv = directConnectorAutostartFailClosed(childEnv);
+  }
   if (profileName) {
     childEnv.CAT_CAFE_PROFILE = profileName;
     childEnv.CAT_CAFE_STRICT_PROFILE_DEFAULTS = '1';
@@ -66,20 +80,20 @@ if (mode === 'status') {
   } else if (mode === 'start:direct') {
     cmd = resolve(__dirname, 'start-dev.sh');
     args = ['--prod-web', ...rest];
-    env = {
+    env = directConnectorAutostartFailClosed({
       ...process.env,
       ...(hasProfile ? { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' } : {}),
       CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
       CAT_CAFE_DIRECT_NO_WATCH: '1',
-    };
+    });
   } else if (mode === 'dev:direct') {
     cmd = resolve(__dirname, 'start-dev.sh');
     args = [...rest];
-    env = {
+    env = directConnectorAutostartFailClosed({
       ...process.env,
       ...(hasProfile ? { CAT_CAFE_STRICT_PROFILE_DEFAULTS: '1' } : {}),
       CAT_CAFE_RESPECT_DOTENV_PORTS: '1',
-    };
+    });
   } else {
     console.error(`Unknown mode: ${mode}. Use: start, start:direct, dev:direct, status`);
     process.exit(1);

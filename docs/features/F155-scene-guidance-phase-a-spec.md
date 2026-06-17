@@ -29,7 +29,7 @@ data-guide-id tags → Flow YAML (guides/flows/) → Runtime API → Guide Engin
                                                                   Cat (状态感知)
 ```
 
-**设计原则**（CVO Phase A 反馈收敛）：
+**设计原则**（operator Phase A 反馈收敛）：
 - 自动推进：用户与目标元素交互后引导自动前进，无手动 下一步/上一步/跳过
 - HUD 极简：仅显示 tips + progress dots + "退出"
 - 标签驱动：前端元素仅标注 `data-guide-id`，tips 来自 YAML flow 定义
@@ -109,7 +109,7 @@ interface OrchestrationStep {
 | P0 内部场景 | ✅ 完成 | `add-member` 已收口为 4 步：`hub.trigger → cats.overview → cats.add-member → member-editor.profile(confirm)` |
 | 完成态闭环 | ✅ 完成 | 前端 `complete` → 后端 `guideState=completed` → Socket 通知猫 → 一次性消费 ack |
 | Esc 误退修复 | ✅ 完成 | KD-14：GuideOverlay preventDefault + CatCafeHub guideActive guard |
-| CVO 验收 | ✅ 通过 | 2026-04-09 CVO 手动测试”添加成员”流程，确认链路通畅 |
+| operator 验收 | ✅ 通过 | 2026-04-09 operator 手动测试”添加成员”流程，确认链路通畅 |
 | gpt52 review | ✅ 放行 | completion callback 6 轮 + 收尾 2 轮，全部 P1/P2 已修复 |
 | Phase B 场景扩展 | 🚧 Review-ready | 当前 branch 已补齐 `add-account-auth`、`configure-first-provider`、`edit-member-auth`、`connect-wechat`、`connect-feishu` |
 | 当前阶段判断 | **Phase A accepted / Phase B review-ready** | 基础引导引擎已冻结；当前 PR 聚焦场景扩展与交互 hardening 收口 |
@@ -231,13 +231,13 @@ interface OrchestrationStep {
 | KD-6 | observe.fields 对 sensitive 字段只上报 {filled, valid} | 防止侧信道泄漏长度/前缀 | 2026-03-27 |
 | KD-7 | 迭代策略：核心引擎先完整 → P0(1内部+1外部)验收 → 再逐场景补全 | 不一次性实现所有场景；编排文件按需补充 | 2026-03-27 |
 | KD-8 | external_instruction 支持富内容（多图 + 链接 + 前置条件 + 版本要求） | 胶囊 HUD 不够，外部步骤需要完整的操作指引卡片 | 2026-03-27 |
-| KD-9 | v2 重构：自动推进取代手动导航，HUD 仅保留"退出" | CVO Phase A 反馈：手动导航降低体验，用户操作即推进 | 2026-03-30 |
+| KD-9 | v2 重构：自动推进取代手动导航，HUD 仅保留"退出" | operator Phase A 反馈：手动导航降低体验，用户操作即推进 | 2026-03-30 |
 | KD-10 | v2 步骤类型收敛为 4 种 advance mode（click/visible/input/confirm） | 简化 Phase A 范围，6 种步骤类型推迟到 Phase B 按需扩展 | 2026-03-30 |
 | KD-11 | Flow YAML 运行时加载（API），不在构建时生成 TS | 解耦部署：改 flow 不需要重新构建前端 | 2026-03-30 |
-| KD-12 | 完成回调作为基础能力：前端 complete → 后端状态 + Socket 通知 | CVO 明确要求：完整流程闭环是基础能力，不是后续补充 | 2026-04-03 |
-| KD-13 | Phase B 继续复用 Guide Engine 覆盖已有 Hub / IM Hub UI 中的 provider / connector 场景；需要新增外部配置页签或 observe substrate 的能力另拆 | CVO：优先复用现有产品 surface 收口高频场景，把真正需要新 UI / 新联调形态的外部流程与观测基建拆出去 | 2026-04-06 |
-| KD-14 | 禁用引导模式下全局 Esc 退出，仅保留显式退出按钮 | CVO 手测反馈：误触 Esc 导致引导意外退出，体验差 | 2026-04-09 |
-| KD-15 | 双向可观测拆出为独立 feature，不再是 F155 Phase B | CVO + gpt52 共识：observe substrate 应更大——不只服务 guide，可被 debug/diagnostics 复用 | 2026-04-09 |
+| KD-12 | 完成回调作为基础能力：前端 complete → 后端状态 + Socket 通知 | operator 明确要求：完整流程闭环是基础能力，不是后续补充 | 2026-04-03 |
+| KD-13 | Phase B 继续复用 Guide Engine 覆盖已有 Hub / IM Hub UI 中的 provider / connector 场景；需要新增外部配置页签或 observe substrate 的能力另拆 | operator：优先复用现有产品 surface 收口高频场景，把真正需要新 UI / 新联调形态的外部流程与观测基建拆出去 | 2026-04-06 |
+| KD-14 | 禁用引导模式下全局 Esc 退出，仅保留显式退出按钮 | operator 手测反馈：误触 Esc 导致引导意外退出，体验差 | 2026-04-09 |
+| KD-15 | 双向可观测拆出为独立 feature，不再是 F155 Phase B | operator + gpt52 共识：observe substrate 应更大——不只服务 guide，可被 debug/diagnostics 复用 | 2026-04-09 |
 
 ## Review Gate
 

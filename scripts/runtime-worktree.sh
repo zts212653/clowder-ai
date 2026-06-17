@@ -26,7 +26,7 @@ START_ARGS=()
 
 usage() {
   cat <<'EOF'
-Cat Café Runtime Worktree Manager
+Clowder AI Runtime Worktree Manager
 
 Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
@@ -334,6 +334,75 @@ ensure_runtime_branch() {
   fi
 }
 
+print_untracked_merge_blockers() {
+  local found=false
+  local path blocker note remaining candidate segment type existing already reported_count=0
+  local -a reported_blockers=()
+
+  while IFS= read -r -d '' path; do
+    blocker=""
+    note=""
+    remaining="$path"
+    candidate=""
+
+    while [[ "$remaining" == */* ]]; do
+      segment="${remaining%%/*}"
+      remaining="${remaining#*/}"
+      if [ -z "$candidate" ]; then
+        candidate="$segment"
+      else
+        candidate="$candidate/$segment"
+      fi
+
+      type=$(git -C "$RUNTIME_DIR" cat-file -t "$REMOTE_NAME/main:$candidate" 2>/dev/null || true)
+      if [ -n "$type" ] && [ "$type" != "tree" ]; then
+        blocker="$candidate"
+        note=" (incoming tracked path replaces local directory)"
+        break
+      fi
+    done
+
+    if [ -z "$blocker" ]; then
+      type=$(git -C "$RUNTIME_DIR" cat-file -t "$REMOTE_NAME/main:$path" 2>/dev/null || true)
+      if [ -n "$type" ]; then
+        blocker="$path"
+        note=""
+        if [ "$type" != "tree" ] \
+          && [ -f "$RUNTIME_DIR/$path" ] \
+          && cmp -s -- "$RUNTIME_DIR/$path" <(git -C "$RUNTIME_DIR" show "$REMOTE_NAME/main:$path" 2>/dev/null); then
+          note=" (same bytes as incoming)"
+        fi
+      fi
+    fi
+
+    if [ -n "$blocker" ]; then
+      already=false
+      if [ "$reported_count" -gt 0 ]; then
+        for existing in "${reported_blockers[@]}"; do
+          if [ "$existing" = "$blocker" ]; then
+            already=true
+            break
+          fi
+        done
+      fi
+      if [ "$already" = true ]; then
+        continue
+      fi
+      reported_blockers+=("$blocker")
+      reported_count=$((reported_count + 1))
+
+      if [ "$found" = false ]; then
+        echo "  Untracked files blocking sync:"
+        found=true
+      fi
+
+      printf '    - %s%s\n' "$blocker" "$note"
+    fi
+  done < <(git -C "$RUNTIME_DIR" ls-files --others --exclude-standard -z 2>/dev/null || true)
+
+  [ "$found" = true ]
+}
+
 init_runtime_worktree() {
   require_git_repo
   ensure_remote_exists
@@ -389,9 +458,22 @@ sync_runtime_worktree() {
   git -C "$RUNTIME_DIR" fetch "$REMOTE_NAME" main
   if ! git -C "$RUNTIME_DIR" merge --ff-only "$REMOTE_NAME/main" 2>/dev/null; then
     echo ""
-    echo "  ff-only merge failed — likely stale untracked files blocking the sync."
-    echo "  Check with:  git -C \"$RUNTIME_DIR\" status"
-    echo "  Quick fix:   git -C \"$RUNTIME_DIR\" clean -fd .claude/skills/"
+    echo "  ff-only merge failed."
+    if print_untracked_merge_blockers; then
+      echo "  Move or remove the listed files, then re-run sync."
+      echo "  Files marked 'same bytes as incoming' will be restored by the merge with identical content."
+    else
+      ahead_count=$(git -C "$RUNTIME_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo 0)
+      if [ "$ahead_count" -gt 0 ]; then
+        echo "  Local branch is ahead of $REMOTE_NAME/main by $ahead_count commit(s) — diverged, cannot fast-forward."
+        echo "  Likely local commits on the runtime sync branch (e.g. auto-materialized lessons/docs)."
+        echo "  Inspect:  git -C \"$RUNTIME_DIR\" log --oneline $REMOTE_NAME/main..HEAD"
+        echo "  Resolve:  git -C \"$RUNTIME_DIR\" reset --hard $REMOTE_NAME/main   (discards local commits; untracked files kept)"
+      else
+        echo "  No untracked files matching incoming tracked files were found."
+        echo "  Check with:  git -C \"$RUNTIME_DIR\" status"
+      fi
+    fi
     echo ""
     die "runtime sync failed (see above)"
   fi
@@ -455,6 +537,7 @@ start_runtime_worktree() {
     # In-place deployment: binary == workspace == PROJECT_DIR
     export CAT_CAFE_RUNTIME_ROOT="$PROJECT_DIR"
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
+    export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
@@ -490,8 +573,10 @@ start_runtime_worktree() {
   # project (the main cat-cafe repo where they're editing code).
   export CAT_CAFE_RUNTIME_ROOT="$RUNTIME_DIR"
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
+  export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
+  info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
   exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}

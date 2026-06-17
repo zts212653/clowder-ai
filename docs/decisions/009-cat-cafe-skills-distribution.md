@@ -22,7 +22,7 @@ drift_note: >
 
 > 状态：~~已决策~~ → drifted（2026-04-07 标注）
 > 日期：2026-02-10
-> 决策者：铲屎官 + Ragdoll
+> 决策者：operator + Ragdoll
 
 ## 背景
 

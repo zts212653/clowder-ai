@@ -94,7 +94,7 @@ export function WeComBotSetupPanel({ configured, onConnected, onDisconnected }: 
           </button>
         </div>
         <p className="text-xs leading-relaxed text-cafe-tertiary">
-          WebSocket long-connection active. Messages from WeCom will be routed to Cat Cafe.
+          WebSocket long-connection active. Messages from WeCom will be routed to Clowder AI.
         </p>
       </div>
     );

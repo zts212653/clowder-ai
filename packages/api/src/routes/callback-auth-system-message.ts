@@ -16,7 +16,7 @@
  *  - **Background heartbeat tools** (refresh-token, etc.) → skip regardless of reason
  *    — they fire on a timer not on user action, so user has no actionable
  *    response. Telemetry still counts (D2b-3 panel + HubButton badge), but
- *    no thread富块 noise. Source: alpha 验收 #5 — 铲屎官撞到 idle gemini 因后台
+ *    no thread富块 noise. Source: alpha 验收 #5 — co-creator撞到 idle gemini 因后台
  *    refresh-token 心跳触发的"幽灵失败"。
  *
  * Dedup (anti-noise per checklist):
@@ -65,7 +65,7 @@ const SURFACEABLE_REASONS = new Set<AuthFailureReason | 'missing_creds'>(['expir
  * re-establish auth naturally"). Telemetry still records these for D2b-3
  * panel + HubButton badge counts; we just don't surface them in-context.
  *
- * Source: alpha 验收 #5 (2026-04-26 16:31) — 铲屎官「gemini 都一小时没说话了
+ * Source: alpha 验收 #5 (2026-04-26 16:31) — co-creator「gemini 都一小时没说话了
  * 为什么会有这个奇怪的提醒？」 caused by refresh-token timer firing while
  * cat was idle. 现场可感知性 = "用户驱动 callback 失败"，不是 "system 心跳失败"。
  *

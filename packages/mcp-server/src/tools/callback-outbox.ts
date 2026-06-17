@@ -171,14 +171,16 @@ async function flushOutbox(): Promise<void> {
 
 export async function sendCallbackRequest(
   request: CallbackRequest,
-  options?: { enableOutbox?: boolean },
+  options?: { enableOutbox?: boolean; retryDelaysMs?: number[]; fetchTimeoutMs?: number },
 ): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> {
   const enableOutbox = options?.enableOutbox === true && isOutboxEnabled();
   if (enableOutbox) await flushOutbox();
 
-  const retryDelaysMs = getRetryDelaysMs();
+  const retryDelaysMs = options?.retryDelaysMs ?? getRetryDelaysMs();
   const payload = JSON.stringify(request.body);
-  const result = await postJsonWithRetry(`${request.apiUrl}${request.path}`, payload, retryDelaysMs, request.headers);
+  const result = await postJsonWithRetry(`${request.apiUrl}${request.path}`, payload, retryDelaysMs, request.headers, {
+    fetchTimeoutMs: options?.fetchTimeoutMs,
+  });
   if (result.ok) return { ok: true, data: result.data };
 
   if (enableOutbox && result.failure.retryable) {

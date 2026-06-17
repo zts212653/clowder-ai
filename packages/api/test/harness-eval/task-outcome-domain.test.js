@@ -70,7 +70,7 @@ describe('eval:task-outcome domain registration (F192 Phase G)', () => {
       rootCauseHypothesis: {
         summary: 'Cat is over-using hold_ball when it should be passing',
         confidence: 'medium',
-        alternatives: ['CVO preference shift', 'Task type distribution change'],
+        alternatives: ['operator preference shift', 'Task type distribution change'],
       },
       verdict: 'fix',
       ownerAsk: {

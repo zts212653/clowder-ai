@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/services/embed-server.sh
-# Start local embedding server for Cat Cafe memory system (F102).
+# Start local embedding server for Clowder AI memory system (F102).
 #
 # Usage:
 #   EMBED_MODEL=jinaai/jina-embeddings-v2-base-zh ./scripts/services/embed-server.sh

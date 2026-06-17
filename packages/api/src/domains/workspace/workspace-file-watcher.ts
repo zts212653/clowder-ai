@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
 import { watch } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Server, Socket } from 'socket.io';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import { computeWorkspaceFileSha256 } from './workspace-file-read.js';
 import { getWorktreeRoot, resolveWorkspacePath } from './workspace-security.js';
 
 const log = createModuleLogger('file-watcher');
@@ -18,10 +18,6 @@ interface WatchEntry {
   absolutePath: string;
   lastSha256: string;
   debounceTimer: ReturnType<typeof setTimeout> | null;
-}
-
-function sha256(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
 function startFileMonitor(parentDir: string, onFsEvent: () => void, onPoll: () => void): () => void {
@@ -53,15 +49,6 @@ function startFileMonitor(parentDir: string, onFsEvent: () => void, onPoll: () =
   }
 }
 
-async function computeFileSha256(absolutePath: string): Promise<string | null> {
-  try {
-    const content = await readFile(absolutePath, 'utf-8');
-    return sha256(content);
-  } catch {
-    return null;
-  }
-}
-
 export function setupWorkspaceFileWatcher(io: Server): void {
   const socketWatchers = new Map<string, WatchEntry>();
 
@@ -76,7 +63,7 @@ export function setupWorkspaceFileWatcher(io: Server): void {
         const absolutePath = await resolveWorkspacePath(root, data.path);
         await stat(absolutePath);
 
-        const currentSha = (await computeFileSha256(absolutePath)) || '';
+        const currentSha = (await computeWorkspaceFileSha256(absolutePath)) || '';
         const parentDir = dirname(absolutePath);
 
         const entry: WatchEntry = {
@@ -128,7 +115,7 @@ export function setupWorkspaceFileWatcher(io: Server): void {
   });
 
   async function handleChange(socket: Socket, entry: WatchEntry): Promise<void> {
-    const newSha = await computeFileSha256(entry.absolutePath);
+    const newSha = await computeWorkspaceFileSha256(entry.absolutePath);
     if (!newSha || newSha === entry.lastSha256) return;
 
     entry.lastSha256 = newSha;

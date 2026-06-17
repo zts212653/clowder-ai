@@ -235,7 +235,7 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     await messageStore.append({
       userId: 'user1',
       catId: 'opus',
-      content: '@铲屎官 look',
+      content: '@co-creator look',
       mentions: [],
       mentionsUser: true,
       timestamp: Date.now() - 1000,

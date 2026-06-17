@@ -12,7 +12,7 @@ import { callbackGet, callbackPost } from './callback-tools.js';
 import type { ToolResult } from './file-tools.js';
 
 export const teleportInputSchema = {
-  threadId: z.string().min(1).describe('Target Cat Cafe thread id to teleport into.'),
+  threadId: z.string().min(1).describe('Target Clowder AI thread id to teleport into.'),
   messageId: z
     .string()
     .min(1)

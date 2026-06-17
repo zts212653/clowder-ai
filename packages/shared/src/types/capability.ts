@@ -32,7 +32,7 @@ export interface McpServerDescriptor {
   enabled: boolean;
   /** Optional working directory */
   workingDir?: string;
-  /** Origin: Cat Cafe's own MCP or user-configured external */
+  /** Origin: Clowder AI's own MCP or user-configured external */
   source: 'cat-cafe' | 'external';
 }
 
@@ -152,7 +152,7 @@ export interface CatFamily {
 
 /** Skill mount health summary */
 export interface SkillHealthSummary {
-  /** All Cat Cafe skills correctly symlinked to all providers */
+  /** All Clowder AI skills correctly symlinked to all providers */
   allMounted: boolean;
   /** No orphaned skills or phantom BOOTSTRAP entries */
   registrationConsistent: boolean;

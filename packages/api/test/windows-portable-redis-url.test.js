@@ -127,11 +127,11 @@ test('Windows portable Redis defers REDIS_URL to runtime instead of hardcoding l
 });
 
 test('Windows installer persists Redis env changes after generating .env without restoring auth prompts', () => {
-  const generateEnvStepIndex = installScript.indexOf('Write-Step "Step 4/8 - Generate .env"');
+  const generateEnvStepIndex = installScript.indexOf('Write-Step "Step 4/7 - Generate .env"');
   const envApplyIndex = installScript.indexOf('Apply-InstallerAuthEnv -State $authState -EnvFile $envFile');
   const envLoadIndex = installScript.indexOf('Write-Ok ".env loaded into session"');
-  const cliStepIndex = installScript.indexOf('Write-Step "Step 7/8 - AI CLI tools"');
-  const verifyStepIndex = installScript.indexOf('Write-Step "Step 8/8 - Verify and launch"');
+  const cliStepIndex = installScript.indexOf('Write-Step "Step 6/7 - AI CLI tools"');
+  const verifyStepIndex = installScript.indexOf('Write-Step "Step 7/7 - Verify and launch"');
 
   assert.notEqual(generateEnvStepIndex, -1, 'install.ps1 must still generate .env before env flush');
   assert.notEqual(envApplyIndex, -1, 'installer must flush Redis EnvSetMap/EnvDeleteMap to .env');

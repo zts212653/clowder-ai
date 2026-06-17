@@ -27,16 +27,16 @@ status: done
 1. `PR #303`：runtime 能识别这类故障并给出明确修复提示
 2. `scripts/rescue-claude-thinking-signature.mjs`：可以手工按 session 或批量救回坏掉的Ragdoll
 
-但这还不是team lead真正想要的交付。
+但这还不是operator真正想要的交付。
 
-team lead要的是：
+operator要的是：
 
 - 不用再进 Claude CLI 一只只手敲命令
 - 最好在 Config Hub / 账号配置层就能看见哪些Ragdoll坏了
 - 最好点一下就能“救活Ragdoll”
 - 如果未来足够稳，还可以考虑对精确命中的坏 session 做可选自动救援
 
-所以这次不是继续把救援故事塞进 `F081`，而是单独立一个面向team lead的 Feature：把“现场救火脚本”产品化成“Ragdoll救援中心”。
+所以这次不是继续把救援故事塞进 `F081`，而是单独立一个面向operator的 Feature：把“现场救火脚本”产品化成“Ragdoll救援中心”。
 
 ## What
 
@@ -100,7 +100,7 @@ team lead要的是：
 - **把Ragdoll救援从 F081 单独拆出来**
   - 原因：`F081` 解决的是“主区气泡 / 历史连续性真相源”；坏 thinking signature 属于 provider/session 自愈能力
 - **第一版先做显式一键救援，不默认自动修**
-  - 原因：救援本质上会修改本机 `~/.claude` transcript，先让team lead可见、可控、更安全
+  - 原因：救援本质上会修改本机 `~/.claude` transcript，先让operator可见、可控、更安全
 - **保留已合入脚本与 runtime 提示，Config Hub 站在它们之上做产品化**
   - 原因：已有底层能力已经验证有效，没必要重做一套修复逻辑
 - **第一版只做 Claude / Ragdoll**
@@ -125,7 +125,7 @@ team lead要的是：
 
 2026-03-08，Ragdoll/Ragdoll完成 post-merge 愿景守护，结论：
 
-- `F084 V1` 目标兑现：team lead已经可以在不打开 Claude CLI 的情况下，扫描并一键救活坏掉的Ragdoll session
+- `F084 V1` 目标兑现：operator已经可以在不打开 Claude CLI 的情况下，扫描并一键救活坏掉的Ragdoll session
 - `Codex app` 原生历史 adapter 未做属于明确边界，不算漏交付
 - 可 close `F084 V1`
 
@@ -142,10 +142,10 @@ team lead要的是：
   - 扫描 API / rescue API / 结构化结果 contract
   - 幂等与反例测试
 - 交付：
-  - team lead可在不打开 Claude CLI 的情况下，完成一次“扫描 → 点一下 → 救活Ragdoll”
+  - operator可在不打开 Claude CLI 的情况下，完成一次“扫描 → 点一下 → 救活Ragdoll”
 
 ### 实际验收
 
 - 本地 peer review：Ragdoll/Ragdoll放行（0 P1 / 0 P2，P2 修复后确认通过）
-- 云端 review：`Codex Review: Didn't find any major issues`
+- remote review：`Codex Review: Didn't find any major issues`
 - PR 合入：[#305](https://github.com/zts212653/clowder-ai/pull/305)

@@ -1,7 +1,7 @@
 /**
  * F225 Session Handoff Proposal Store.
  *
- * 猫提议 session handoff；铲屎官 gate。复用 F128 ProposalStore 的 CAS claim 思路，
+ * 猫提议 session handoff；co-creator gate。复用 F128 ProposalStore 的 CAS claim 思路，
  * 但不复用 ThreadProposal shape（KD-5）。approve 用 commit-point 模型（KD-8/9）：
  * checkpoint 字段（handoffNotePersistedAt/sealedSessionId/sealAcceptedAt/
  * continuationEntryId）由 recordCheckpoint 持久化，crash recovery 按这些续跑。

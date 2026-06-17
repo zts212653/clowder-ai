@@ -251,7 +251,7 @@ describe('cat-catalog-store', () => {
 
     assert.deepEqual(runtimeCatalog.breeds, []);
     assert.deepEqual(runtimeCatalog.roster, {
-      owner: { family: 'owner', roles: ['owner'], lead: false, available: true, evaluation: '铲屎官 / 大当家' },
+      owner: { family: 'owner', roles: ['owner'], lead: false, available: true, evaluation: 'co-creator / 大当家' },
     });
     // Non-breed config (reviewPolicy, coCreator) is preserved from template.
     assert.deepEqual(runtimeCatalog.reviewPolicy, template.reviewPolicy);

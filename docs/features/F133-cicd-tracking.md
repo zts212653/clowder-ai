@@ -12,7 +12,7 @@ created: 2026-03-23
 
 ## Why
 
-team experience（2026-03-23 thread `ci/cd github tracking`）：
+operator experience（2026-03-23 thread `ci/cd github tracking`）：
 
 > "你看看我们现在 GitHub 的 Tracking，它能 Tracking CI/CD 的执行结果吗？"
 > "这个 ci cd tracking 应该也和现在的 github 一样消息投递到我们的 channel 或者叫消息管道"
@@ -172,7 +172,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 - [x] AC-A11: 测试覆盖：CiCdCheckPoller + CiCdRouter 单元测试（轮询、去重、投递、lifecycle）
 
 ### Phase B（Skill 文档 + SOP）
-- [x] AC-B1: ~~merge-gate SKILL.md 包含等 CI 绿灯步骤~~ → **N/A**（team lead确认：只在有 Actions 额度时才有意义，暂缓。转 OQ 待 Phase C 时重新评估）
+- [x] AC-B1: ~~merge-gate SKILL.md 包含等 CI 绿灯步骤~~ → **N/A**（operator确认：只在有 Actions 额度时才有意义，暂缓。转 OQ 待 Phase C 时重新评估）
 - [x] AC-B2: opensource-ops SKILL.md 的 Outbound PR / Hotfix 流程含 CI 门禁
 - [x] AC-B3: refs/cicd-tracking.md 新增（通知格式、配置、处理策略）
 
@@ -210,7 +210,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 ## Design Gate 讨论归档
 
 **参与者**: 金渐层 (@opencode) + Maine Coon (@gpt52, GPT-5.4)
-**Thread**: `thread_mn2krkok6nflpavy`（ci/cd github tracking）
+**Thread**: `[thread-id]`（ci/cd github tracking）
 **日期**: 2026-03-23
 
 **Maine Coon核心贡献**:
@@ -218,7 +218,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 2. 提出 `PrTrackingStore` 缺少 patch/update 接口 → 新增 `patchCiState()`
 3. 发现 `ProcessedEmailStore` 5min 窗口去重不适合 CI 状态迁移 → 改用 `headSha + aggregateBucket` 去重
 4. 建议独立 `CiCdRouter` + 独立 bootstrap，不塞 ReviewRouter
-5. Design Gate 建议 CI failure trigger 用 `normal`；后续经team lead确认，升级为 `urgent` 以与 review 优先级行为归一（F175 修正：urgent 语义为队列内优先出队，不再走抢占旁路）
+5. Design Gate 建议 CI failure trigger 用 `normal`；后续经operator确认，升级为 `urgent` 以与 review 优先级行为归一（F175 修正：urgent 语义为队列内优先出队，不再走抢占旁路）
 6. 强调 headSha 必须 poll 时覆盖更新，不能只注册时拉一次
 7. PR lifecycle: open 持续轮询，merged/closed 才停
 8. required checks 为空时 fallback 到 all checks
@@ -230,4 +230,4 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 ## Review Gate
 
 - Phase A: Maine Coon review（coding 落地 + test 覆盖）
-- Phase B: team lead确认 SOP 流程变更
+- Phase B: operator确认 SOP 流程变更

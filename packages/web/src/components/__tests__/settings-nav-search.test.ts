@@ -46,7 +46,7 @@ describe('SettingsNav search filtering', () => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(12);
+    expect(buttons).toHaveLength(13);
     expect(container.textContent).toContain('规则与 SOP');
   });
 
@@ -56,7 +56,7 @@ describe('SettingsNav search filtering', () => {
     });
 
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(12);
+    expect(buttons).toHaveLength(13);
     for (const button of buttons) {
       expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
     }
@@ -93,6 +93,17 @@ describe('SettingsNav search filtering', () => {
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
     expect(buttons[0].textContent).toContain('规则与 SOP');
+  });
+
+  it('filters concierge keywords to the 前台猫 section', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '悬浮球' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('前台猫');
   });
 
   it('shows empty message when no match', () => {

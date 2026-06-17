@@ -56,8 +56,8 @@ function patchBlockState(messageId: string, blockId: string, patch: { disabled?:
   });
 }
 
-function dispatchInteractiveSend(text: string) {
-  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text } }));
+function dispatchInteractiveSend(text: string, sendContext?: string) {
+  window.dispatchEvent(new CustomEvent('cat-cafe:interactive-send', { detail: { text, sendContext } }));
 }
 
 /** Render option icon: prefer SVG icon over emoji */
@@ -503,6 +503,9 @@ export interface InteractiveBlockProps {
   groupDisabled?: boolean;
   /** Phase C: externally controlled selectedIds (group submitted) */
   groupSelectedIds?: string[];
+  /** F229 Bug 2 fix: context tag for cat-cafe:interactive-send events.
+   *  Listeners can filter on this to avoid cross-panel message leaks. */
+  sendContext?: string;
 }
 
 export function InteractiveBlock({
@@ -513,6 +516,7 @@ export function InteractiveBlock({
   onCustomTextChange,
   groupDisabled,
   groupSelectedIds,
+  sendContext,
 }: InteractiveBlockProps) {
   const [localDisabled, setLocalDisabled] = useState(block.disabled ?? false);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(block.selectedIds ?? []);
@@ -580,7 +584,7 @@ export function InteractiveBlock({
               block.messageTemplate,
               block.title,
             );
-            dispatchInteractiveSend(text);
+            dispatchInteractiveSend(text, sendContext);
           }
         } catch (err) {
           console.error('[InteractiveBlock] callback action failed:', err);
@@ -599,7 +603,7 @@ export function InteractiveBlock({
           block.title,
           ct || undefined,
         );
-        dispatchInteractiveSend(text);
+        dispatchInteractiveSend(text, sendContext);
       }
 
       // P2-1 fix: write back to store so re-mount/thread-switch preserves state

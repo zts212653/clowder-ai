@@ -13,11 +13,11 @@ created: 2026-03-04
 
 ## Why
 
-猫猫们在 CLI 文本里写 `@队友` 的格式经常出错（行中 @、忘记换行、冒号后紧跟 @），导致 A2A 路由失败，team lead变成人工转发站。
+猫猫们在 CLI 文本里写 `@队友` 的格式经常出错（行中 @、忘记换行、冒号后紧跟 @），导致 A2A 路由失败，operator变成人工转发站。
 
 **根因**：CLI 纯文本输出是自由格式，@ mention 靠文本解析是软约束，模型生成惯性导致格式不遵守。
 
-**team experience**：
+**operator experience**：
 > "你们真的很不喜欢好好 at"
 > "现在有个问题就是很容易不自己 at 自己的队友导致 a2a 链条断掉"
 > "之前一直要用 cli @ 其他猫是因为 codex 和 gemini 是 http callback 导致你们行为不统一...但是我们后续统一了 mcp 了，那其实我们直接不允许 cli at，一定是调用 mcp"
@@ -84,7 +84,7 @@ created: 2026-03-04
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "主回复的 callback 里加 targetCats 字段，让它是一个动作" | AC-1, AC-2 | test: callback + routing | [ ] |
 | R2 | "不允许 cli at 一定是调用 mcp" | AC-4, AC-5 | test: prompt content + callback integration | [ ] |
@@ -102,10 +102,10 @@ created: 2026-03-04
 
 | # | 决策 | 理由 |
 |---|------|------|
-| D1 | targetCats 是路由信号，不是可见性控制 | team lead确认 debug/play 可见性逻辑不变 |
+| D1 | targetCats 是路由信号，不是可见性控制 | operator确认 debug/play 可见性逻辑不变 |
 | D2 | 双通道取并集（Phase 1），逐步移除文本解析 | 平滑过渡，不破坏现有流程 |
 | D3 | 不做 7B 意图识别 | CJK 准确率不够 + 结构化字段已解决根因 |
-| D4 | targetCats 放在 callback response，不是独立 MCP 调用 | team lead确认"一个动作"体验更好 |
+| D4 | targetCats 放在 callback response，不是独立 MCP 调用 | operator确认"一个动作"体验更好 |
 
 ---
 
@@ -129,6 +129,6 @@ created: 2026-03-04
 ## Review Gate
 
 - [ ] 本地 review: 跨家族 reviewer
-- [ ] 云端 review: PR comment 触发
+- [ ] remote review: PR comment 触发
 
 ---

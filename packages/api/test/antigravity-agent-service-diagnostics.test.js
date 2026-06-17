@@ -138,7 +138,7 @@ describe('AntigravityAgentService (Bridge) — diagnostics', () => {
           {
             type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
             status: 'CORTEX_STEP_STATUS_DONE',
-            plannerResponse: { modifiedResponse: '铲屎官，我活着，' },
+            plannerResponse: { modifiedResponse: 'co-creator，我活着，' },
           },
         ],
         cursor: { baselineStepCount: 0, lastDeliveredStepCount: 1, terminalSeen: false, lastActivityAt: Date.now() },
@@ -158,7 +158,7 @@ describe('AntigravityAgentService (Bridge) — diagnostics', () => {
     const messages = await collect(service.invoke('test'));
 
     const texts = messages.filter((m) => m.type === 'text').map((m) => m.content);
-    assert.deepEqual(texts, ['铲屎官，我活着，', '喵。']);
+    assert.deepEqual(texts, ['co-creator，我活着，', '喵。']);
     const emptyErrs = messages.filter((m) => m.type === 'error' && m.errorCode === 'empty_response');
     assert.equal(emptyErrs.length, 0, 'partial text path must not regress into empty_response');
     assert.equal(messages.at(-1)?.type, 'done');

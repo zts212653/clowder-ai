@@ -94,6 +94,16 @@ export type {
   ThreadPhase,
   UpdateBacklogDispatchProgressInput,
 } from './backlog.js';
+// F233 Phase B: Ball Custody event-stream types (event-sourcing; impl stays in api)
+export type {
+  BallCustodyEvent,
+  BallCustodyProjection,
+  BallEventClassification,
+  BallEventKind,
+  BallIntent,
+  BallResolveMode,
+  BallState,
+} from './ball-custody.js';
 // Brake types (F085 Phase 4 — 平台级健康守护)
 export type {
   BrakeCheckinRequest,
@@ -205,6 +215,17 @@ export type {
   ParsedCommand,
   SlashCommandDefinition,
 } from './command.js';
+// Community Ops Event types (F168 Phase A/B — event-sourcing engine)
+export type {
+  CommunityClosureWaiver,
+  CommunityEvent,
+  CommunityEventClassification,
+  CommunityEventKind,
+  CommunityNextOwner,
+  CommunityObjectProjection,
+  CommunityObjectState,
+  GitHubAuthorAssociation,
+} from './community-event.js';
 export type {
   CommunityIssueItem,
   ConsensusResult,
@@ -220,6 +241,7 @@ export type {
   QuestionId,
   QuestionResult,
   ReplyState,
+  RouteRecommendation,
   TriageEntry,
   UpdateCommunityIssueInput,
   Verdict,
@@ -229,6 +251,47 @@ export {
   DEFAULT_INTAKE_CHECKLIST,
   validateIntakeChecklist,
 } from './community-issue.js';
+// Community Issue Draft types (F235)
+export type {
+  CommunityIssueDraft,
+  CommunityIssueDraftId,
+  CommunityIssueDraftSourceType,
+  CommunityIssueDraftStatus,
+  CreateCommunityIssueDraftInput,
+} from './community-issue-draft.js';
+export { createCommunityIssueDraft, generateCommunityIssueDraftId } from './community-issue-draft.js';
+// F168 Phase C: Community Role Registry (engine routes by role, never cat name)
+export {
+  COMMUNITY_ROLES,
+  type CommunityRole,
+  isCommunityRole,
+  isRoleCapability,
+  ROLE_CAPABILITIES,
+  type RoleCapability,
+  type RoleExecutor,
+  type RoleResolver,
+} from './community-role.js';
+// F229: 猫猫球前台猫 shared types
+export type {
+  ConciergeBallState,
+  ConciergeCardAction,
+  ConciergeConfig,
+  ConciergeThreadKind,
+  ConfirmationStatus,
+  InvestigationAnchor,
+  InvestigationJob,
+  InvestigationJobStatus,
+  InvestigationReport,
+  PendingConfirmation,
+  RelayReceipt,
+  RelayReceiptStatus,
+  TriagePlan,
+  TriagePlanIntent,
+  TriagePlanResult,
+  TriagePlanStatus,
+  TriagePlanTarget,
+} from './concierge.js';
+export { CONCIERGE_CONFIG_DEFAULTS } from './concierge.js';
 // Connector types (F97 外部信息源抽象)
 export type {
   ConnectorDefinition,
@@ -254,6 +317,8 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+// F233 Phase A: 值班简报 DTO (pure-projection aggregator output; impl stays in api)
+export type { BallEntry, BallEntryKind, DutyBriefing, DutyBriefingCounts } from './duty-briefing.js';
 // F227: Event Memory types (cognitive-transition event index)
 export {
   COGNITIVE_TRANSITIONS,
@@ -486,6 +551,14 @@ export type {
   PluginResourceStatus,
   PluginStatus,
 } from './plugin.js';
+// Profile update proposal types (F231 Phase C 养熟循环)
+export type {
+  ProfileUpdateApproveOverrides,
+  ProfileUpdateProposal,
+  ProfileUpdateProposalStatus,
+  ProfileUpdateSignalProvenance,
+  ProfileUpdateTargetLayer,
+} from './profile-update.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
   ProposalApproveOverrides,
@@ -629,6 +702,14 @@ export { extractFeatureIds, isTrackingKind } from './task.js';
 export type { CancelReasonValue, PermissionCancelEvent } from './task-outcome.js';
 // Task Outcome types (F192 Phase G)
 export { CANCEL_REASON_OPTIONS } from './task-outcome.js';
+// F232: thread artifacts panel DTO
+export type {
+  GlobalArtifactDTO,
+  GlobalArtifactsResponse,
+  ThreadArtifactDTO,
+  ThreadArtifactsResponse,
+  ThreadArtifactType,
+} from './thread-artifact.js';
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,

@@ -12,15 +12,15 @@ created: 2026-04-22
 >
 > **Closure 2026-04-26 23:14**: AC-E1/E2/E3 真闭环。Phase E (KD-1 handler unification) 做完 — useSocket-background.ts (634 行) + useSocket-background.types.ts (111 行) + useSocket-background-system-info.ts (341 行) 全部删除，业务逻辑 inline 进 useAgentMessages.ts (+1038 行)。drift risk 结构性消除 (active+bg 同一份实现)。9 PR 闭环：#1347 Phase A → #1379 hotfix3 → #1391 Phase B-3 → #1399 → #1400 → #1405 PR-A → #1411 PR-B → #1413 PR-B-2 → #1416 PR-C → #1417 Phase D → #1421 Phase E Task 1+2 → #1423 Phase E Task 6 fixture → #1426 Phase E Task 3-5 (Maine Coon GPT-5.5)。
 >
-> **Reopen-then-closed history**: 04-26 07:30 第一次 close 时 AC-B2 deferred 开 F177 stub 被team lead识破"虚假闭环"，11:30 reopen + 删 F177 stub，重新做 Phase E Task 3-5（Maine Coon GPT-5.5 接手实施）。23:14 真闭环：F177 stub 删除 + handler 业务逻辑真 inline + bg 文件真删除。两次反复后真闭环。教训沉淀：`feedback_no_anchor_as_followup_disguise.md` (P0 铁律)。gpt52 守护 vote 3/3 通过 (2026-04-26 第二次 close)。
+> **Reopen-then-closed history**: 04-26 07:30 第一次 close 时 AC-B2 deferred 开 F177 stub 被operator识破"虚假闭环"，11:30 reopen + 删 F177 stub，重新做 Phase E Task 3-5（Maine Coon GPT-5.5 接手实施）。23:14 真闭环：F177 stub 删除 + handler 业务逻辑真 inline + bg 文件真删除。两次反复后真闭环。教训沉淀：`feedback_no_anchor_as_followup_disguise.md` (P0 铁律)。gpt52 守护 vote 3/3 通过 (2026-04-26 第二次 close)。
 >
 > **Phase A merged 2026-04-23 (PR #1347, squash 3feae9563)**：mirror invariant + 单指针 routing + deterministic bubble id + invocation-driven suppression cleanup（含 fail-open）。Phase B/C/D 留 follow-up PR。
 >
-> **Phase A hotfix merged 2026-04-23 (PR #1352, squash b4e46761d)**：close ea0973e7 ghost — explicit invocationId threaded through all event entry points (text/tool_use/tool_result/done/error/web_search/thinking/rich_block/invocation_created). Maine Coon LGTM-6 cycles + 9 cloud Codex P1 fix cycles. CVO 2026-04-23 拍板将剩余 multi-failure race scenarios (lost done + lost invocation_created + reconnect/hydration) defer 进 Phase B (AC-B5..B10) — thread-scoped runtime consolidation 会从结构上消除这些场景。
+> **Phase A hotfix merged 2026-04-23 (PR #1352, squash b4e46761d)**：close ea0973e7 ghost — explicit invocationId threaded through all event entry points (text/tool_use/tool_result/done/error/web_search/thinking/rich_block/invocation_created). Maine Coon LGTM-6 cycles + 9 cloud Codex P1 fix cycles. operator 2026-04-23 拍板将剩余 multi-failure race scenarios (lost done + lost invocation_created + reconnect/hydration) defer 进 Phase B (AC-B5..B10) — thread-scoped runtime consolidation 会从结构上消除这些场景。
 >
 > **Phase A hotfix2 merged 2026-04-24 (PR #1364, squash da928015e)**：close clowder-ai#573 dup-bubble — stream + callback + persistence 三条路径在同一逻辑响应的 invocation identity 上收口（统一用 OUTER `parentInvocationId ?? ownInvocationId`）。Hotfix 后 1352 的前端 dedup 把 dup 从偶发暴露为 100% 复现，根因是 QueueProcessor:761 broadcast 用 OUTER、route-serial/callbacks 持久化用 INNER 的 split-brain。Codex P1（A→B→A re-enqueue cross-turn merge）实测验证为 broadcast-layer pre-existing 行为，本 PR 不引入新 regression — 真要分 turn 显示需另立 Feature 改 broadcast 契约 + bubble identity。
 >
-> **Scope 扩展（2026-04-22 22:05 team lead指示）**：原 scope 仅 message pipeline；新事故诊断把 cancel 按钮缺失 / queue gating 失效 / spawn ENOENT 三个症状同源到 **liveness truth source fragmentation**，与 message dual-write 是同一个病。team experience："不要小修小改"——一锅端。
+> **Scope 扩展（2026-04-22 22:05 operator指示）**：原 scope 仅 message pipeline；新事故诊断把 cancel 按钮缺失 / queue gating 失效 / spawn ENOENT 三个症状同源到 **liveness truth source fragmentation**，与 message dual-write 是同一个病。operator experience："不要小修小改"——一锅端。
 
 ## Why
 
@@ -60,8 +60,8 @@ F081 Risk #1 早已预言："**写路径分散导致修复互相覆盖**"。
 - Maine Coon 4-21 修 active-handler callback 不收 invocationless rich placeholder
 - F39 force-send（2026-02-27）也是同源 liveness 漂移
 
-team experience（2026-04-22 21:44）："有问题你为什么不直接走 p2？呢？ 你是不是又在绕路和做脚手架了呢？"
-team experience（2026-04-22 22:05）："不要小修小改！！"
+operator experience（2026-04-22 21:44）："有问题你为什么不直接走 p2？呢？ 你是不是又在绕路和做脚手架了呢？"
+operator experience（2026-04-22 22:05）："不要小修小改！！"
 
 **P0 = 消除 thread-runtime state 双轨制**——messages + liveness 一起，不是再加 dedup 补丁。
 
@@ -106,7 +106,7 @@ team experience（2026-04-22 22:05）："不要小修小改！！"
 
 ### Phase D: 环境/缓存防腐（cli-resolve）
 
-> 与 thread-runtime state 是不同 layer，但同事故现场 + team lead"不要小修小改"指示 → 一锅端。
+> 与 thread-runtime state 是不同 layer，但同事故现场 + operator"不要小修小改"指示 → 一锅端。
 
 1. **`cli-resolve.ts` cache invalidation**：spawn ENOENT 时 `resolvedCache.delete(command)` 让下次重解析；可叠加 file mtime 校验（每次命中前 stat 一下，mtime 变了重解析）。
 2. 加单测覆盖"软链/二进制 rebuild 后 ENOENT 必须自愈"。
@@ -128,13 +128,13 @@ team experience（2026-04-22 22:05）："不要小修小改！！"
 
 ### Phase B（runtime refs 收口 + background 瘦身）
 - [ ] AC-B1: 所有 runtime refs 合并为 `Map<threadId, ThreadRuntimeRefs>`（active/finalized/replaced/sawStreamData/pendingTimeoutDiag/timeoutHandle/lastTouched），保持 runtime-only
-- [ ] AC-B2: ~~`useSocket-background.ts` 缩为 ≤ 30 行 shim~~ ~~**重新规划 2026-04-25**: end-state 是 0 行（删除整文件），不留 shim~~ ~~**再次重新规划 2026-04-26 (deferred / re-scoped → F177 接棒)**~~ — **2026-04-26 11:30: F177 stub 撤销，handler unification 直接做，归到 Phase E (AC-E1/E2)**。PR-D 开工实地审计揭示 `handleBackgroundAgentMessage` (~500 行) 不是 dead code，是 active live runtime path；删整文件等价于 KD-1 handler unification。把它抽到 F177 stub 是话术包装，team lead push back: debt = never。归到 Phase E 直接做。`recoverStreamingMessage` / `ensureBackgroundAssistantMessage` / `shouldSuppressLateBackgroundStreamChunk` / `markThreadInvocationActive/Complete` 不是 Phase C 后才 dead 的，它们是 `handleBackgroundAgentMessage` 的内部 helper，被 ~500 行 live business logic（active→bg stream 恢复 / callback replacement / late chunk suppression / tool placeholder / toast/status）调用。Phase C 关闭了 **writer 端**双路径（KD-2 mirror invariant），但 **event handler 端**（active 走 useAgentMessages.onMessage / background 走 handleBackgroundAgentMessage）仍是双实现。删整文件需要把 background handler 业务逻辑迁到 thread-aware useAgentMessages，是真正的 KD-1 handler unification 改动，不是 cleanup，单独立项再做。Phase C 主线（read 收口 + writer 收口 + hydration 收口 + liveness 收口）至此完成。
+- [ ] AC-B2: ~~`useSocket-background.ts` 缩为 ≤ 30 行 shim~~ ~~**重新规划 2026-04-25**: end-state 是 0 行（删除整文件），不留 shim~~ ~~**再次重新规划 2026-04-26 (deferred / re-scoped → F177 接棒)**~~ — **2026-04-26 11:30: F177 stub 撤销，handler unification 直接做，归到 Phase E (AC-E1/E2)**。PR-D 开工实地审计揭示 `handleBackgroundAgentMessage` (~500 行) 不是 dead code，是 active live runtime path；删整文件等价于 KD-1 handler unification。把它抽到 F177 stub 是话术包装，operator push back: debt = never。归到 Phase E 直接做。`recoverStreamingMessage` / `ensureBackgroundAssistantMessage` / `shouldSuppressLateBackgroundStreamChunk` / `markThreadInvocationActive/Complete` 不是 Phase C 后才 dead 的，它们是 `handleBackgroundAgentMessage` 的内部 helper，被 ~500 行 live business logic（active→bg stream 恢复 / callback replacement / late chunk suppression / tool placeholder / toast/status）调用。Phase C 关闭了 **writer 端**双路径（KD-2 mirror invariant），但 **event handler 端**（active 走 useAgentMessages.onMessage / background 走 handleBackgroundAgentMessage）仍是双实现。删整文件需要把 background handler 业务逻辑迁到 thread-aware useAgentMessages，是真正的 KD-1 handler unification 改动，不是 cleanup，单独立项再做。Phase C 主线（read 收口 + writer 收口 + hydration 收口 + liveness 收口）至此完成。
 - [ ] AC-B3: GC 三规则就位（delete 硬删 / done+empty 立刻删 / setCurrentThread+reconnect sweep idle）
 - [ ] AC-B4: thread switch 不再触发 ghost bubble（fixture 验证）— **重新规划 2026-04-25**: fixture 抽出作为 pre-Phase C 独立小 PR（B-3 fixture）由Ragdoll own，给 Phase C 大改动提供回归基础设施。**Fixture 已 merged via PR #1391 (squash `94180b490`, 2026-04-25 09:42)**：3 条 invariant 锁定（routing isolation / concurrent isolation / terminal correctness），Phase C 改 hydration 时此 fixture 必须保持绿。AC-B4 完整闭合（含真实 race window 修复）等 Phase C。
 
 #### Phase B Backlog: 双失/三失场景 race（hotfix PR #1352 cloud Codex 累积发现）
 
-`fix/f173-phase-a-hotfix` 是 Phase A merge 后的 ea0973e7 ghost hotfix。修了 8 处 fix（4-piece + 4 cloud P1）后云端 Codex 仍持续发现"done lost + invocation_created lost + reconnect/hydration"等多失场景的 race。team lead 2026-04-23 拍板：hotfix 现在 ship（原 ea0973e7 已修），剩余 race 进 Phase B 与 ledger consolidation 一并解决（thread-scoped runtime refs 会从结构上消除这些场景）。
+`fix/f173-phase-a-hotfix` 是 Phase A merge 后的 ea0973e7 ghost hotfix。修了 8 处 fix（4-piece + 4 cloud P1）后云端 Codex 仍持续发现"done lost + invocation_created lost + reconnect/hydration"等多失场景的 race。operator 2026-04-23 拍板：hotfix 现在 ship（原 ea0973e7 已修），剩余 race 进 Phase B 与 ledger consolidation 一并解决（thread-scoped runtime refs 会从结构上消除这些场景）。
 
 下表是 Phase B 必须覆盖的 follow-up backlog（来自 PR #1352 cloud Codex review 的真实 finding）：
 
@@ -189,19 +189,19 @@ team experience（2026-04-22 22:05）："不要小修小改！！"
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 不在 hydration merge 加 dedup 补丁 | team lead magic word "脚手架" + "绕路了"；F081 已预言写路径分散 = 反复出 bug | 2026-04-22 |
+| KD-1 | 不在 hydration merge 加 dedup 补丁 | operator magic word "脚手架" + "绕路了"；F081 已预言写路径分散 = 反复出 bug | 2026-04-22 |
 | KD-2 | flat state 降级 compatibility mirror，**不**在 Phase A 删 | Maine Coon push back：直接 selector-only 把"统一 writer"和"删 flat"绑成一刀，scope 过大；F123 已拍 shared helper + invariant 渐进路线。先收口写入，flat 由 writer 同步，读侧迁完后再决定退休（Phase E / TD） | 2026-04-22 |
 | KD-3 | runtime refs 保持 runtime-only（不进 zustand），用 `Map<threadId, ThreadRuntimeRefs>` 单一聚合 entry；GC 三规则（delete 硬删 / done+empty 立刻删 / switch+reconnect sweep idle），不引入后台定时器 | refs 是过程性数据不该污染 store；聚合 entry 避免散成多张 top-level Map；GC 由 lifecycle 事件驱动比定时器更可预测 | 2026-04-22 |
 | KD-4 | socket routing 一并收口 `intent_mode` / `spawn_started`，不只 `agent_message` | Maine Coon指出 race 不只在 message 路径；只收 message 路径，invocation owner 注册仍会双写，ghost 根因换壳回来 | 2026-04-22 |
-| KD-5 | **F173 scope 扩展为 thread-runtime state（messages + liveness）一起统一，不只 message pipeline** | 4-22 21:55 事故诊断把 cancel 按钮缺失 / queue gating 失效 / spawn ENOENT 同源到 liveness fragmentation；team experience"不要小修小改"——一锅端，避免 F173 v1 修完 cancel/queue 这条链还得另开 feat | 2026-04-22 |
-| KD-6 | cli-resolve cache invalidation 作 Phase D sidecar 一起合，不单独 hot fix | 同事故现场 + team lead"不要小修小改"指示；3-5 行代码 + 单测，独立 PR 即可，不污染 thread-runtime 主架构 | 2026-04-22 |
+| KD-5 | **F173 scope 扩展为 thread-runtime state（messages + liveness）一起统一，不只 message pipeline** | 4-22 21:55 事故诊断把 cancel 按钮缺失 / queue gating 失效 / spawn ENOENT 同源到 liveness fragmentation；operator experience"不要小修小改"——一锅端，避免 F173 v1 修完 cancel/queue 这条链还得另开 feat | 2026-04-22 |
+| KD-6 | cli-resolve cache invalidation 作 Phase D sidecar 一起合，不单独 hot fix | 同事故现场 + operator"不要小修小改"指示；3-5 行代码 + 单测，独立 PR 即可，不污染 thread-runtime 主架构 | 2026-04-22 |
 | KD-7 | 后端 `invocationTracker` ↔ Redis record 收口暂不纳入 F173 | 后端 liveness audit 是 layer 不同的工作（涉及跨进程一致性），独立立项更清晰；F173 已经覆盖前端 + 环境层 | 2026-04-22 |
 
 ## Review Gate
 
 - Phase A: Maine Coon（架构 review，writer + routing 正确性） + Siamese（视觉回归守护）
 - Phase B: Maine Coon（refs 迁移 + GC 策略） + Codex（测试覆盖）
-- Phase C: 跨家族 review（read-path migration） + team lead愿景守护（cancel/queue UX 一致性）
+- Phase C: 跨家族 review（read-path migration） + operator愿景守护（cancel/queue UX 一致性）
 - Phase D: Maine Coon / Codex（cli-resolve 单测）
 
 ## 需求点 Checklist

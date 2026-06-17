@@ -83,7 +83,7 @@ describe('POST /api/f163/promote', () => {
       payload: {
         anchor: 'test-promote-1',
         targetAuthority: 'validated',
-        reason: 'Validated by CVO',
+        reason: 'Validated by operator',
       },
       headers: f163OwnerHeaders(),
     });

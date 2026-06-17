@@ -32,13 +32,15 @@
     "prepare": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "ioredis": "^5.3.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.18"
   }
 }

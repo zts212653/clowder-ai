@@ -251,7 +251,7 @@ describe('Queue Integration (E2E scenarios)', () => {
     // 4. No auto-dequeue should have happened
     assert.strictEqual(routerMock.calls.length, 0, 'Should NOT auto-dequeue on cancel');
 
-    // 5. 铲屎官 manually triggers processNext
+    // 5. co-creator manually triggers processNext
     const processResult = await processor.processNext('thread-1', 'user-1');
     assert.strictEqual(processResult.started, true);
     await settle();

@@ -80,6 +80,6 @@ Hub 全链路支持 kimi 成员管理：
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 品种定为"梵花猫"(Turkish Van)，breedId='moonshot' | 社区贡献者选择，team lead未反对 | 2026-04-04 |
-| KD-2 | 尚未分配个性化昵称（如Ragdoll/Maine Coon/Siamese） | 等team lead拍板 | 2026-04-10 |
-| KD-3 | 先在 clowder-ai 合入社区 PR，再 intake 回 cat-cafe | Maine Coon建议，team lead同意 | 2026-04-10 |
+| KD-1 | 品种定为"梵花猫"(Turkish Van)，breedId='moonshot' | 社区贡献者选择，operator未反对 | 2026-04-04 |
+| KD-2 | 尚未分配个性化昵称（如Ragdoll/Maine Coon/Siamese） | 等operator拍板 | 2026-04-10 |
+| KD-3 | 先在 clowder-ai 合入社区 PR，再 intake 回 cat-cafe | Maine Coon建议，operator同意 | 2026-04-10 |

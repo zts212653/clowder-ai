@@ -14,12 +14,12 @@ description: >
 
 ## 核心原则
 
-**视频不是一只猫的活，是多猫流水线 + 铲屎官素材。** 角色按当前 roster 可用猫分配。
+**视频不是一只猫的活，是多猫流水线 + operator素材。** 角色按当前 roster 可用猫分配。
 
 - 主执行猫（当前持球猫）：video-spec 编排 + Remotion 渲染 + 对齐集成
 - QA/审查猫（跨 family）：音画同步 QA + 事实审查 + schema review
 - 视觉把关猫（跨 family）：节奏/调性审查 + 字幕/排版设计 + retiming 风格把关
-- 铲屎官：素材录制 + 粗标时间点 + 剧本确认 + 审片
+- operator：素材录制 + 粗标时间点 + 剧本确认 + 审片
 
 ### 铁规矩
 
@@ -49,20 +49,20 @@ description: >
 | 受众 | 谁看这个视频 | linux.do 社区 / B 站观众 / 内部 |
 | 配音方案 | 猫猫配音 / 纯字幕 / 原声 | 单猫旁白 / 多猫声线 / 无配音 |
 
-**没有开局参数 = 审查没有标准。开工前必须和铲屎官确认。**
+**没有开局参数 = 审查没有标准。开工前必须和operator确认。**
 
 ## 场景路由（路径 B）
 
 | 触发 | 场景 | 主导 | 说明 |
 |------|------|------|------|
-| 铲屎官说"做个视频" | **A: Brief + 素材盘点** | 主执行猫 | 确认开局参数 + 分镜表 + 素材需求清单 |
-| 铲屎官确认分镜 | **B: 素材入库** | 铲屎官录 + 主执行猫压缩归档 | 素材放 `docs/videos/{project}/assets/`，粗标写 `asset-markers.md` |
-| 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON（4 层 segment contract），铲屎官确认 |
+| operator说"做个视频" | **A: Brief + 素材盘点** | 主执行猫 | 确认开局参数 + 分镜表 + 素材需求清单 |
+| operator确认分镜 | **B: 素材入库** | operator录 + 主执行猫压缩归档 | 素材放 `docs/videos/{project}/assets/`，粗标写 `asset-markers.md` |
+| 素材到齐 | **C: video-spec 冻结** | 主执行猫 | 写 video-spec JSON（4 层 segment contract），operator确认 |
 | spec 确认 | **D: 全局配音 + 对齐** | 主执行猫 | CosyVoice 全局配音 → Qwen3-ForcedAligner → word_timestamps |
 | 对齐完成 | **E: Remotion 渲染** | 主执行猫 | schema → inputProps → preview render |
-| 预览版出来 | **F: 审查 Gate** | 全部参与猫 + 铲屎官 | 见下方审查标准 |
+| 预览版出来 | **F: 审查 Gate** | 全部参与猫 + operator | 见下方审查标准 |
 | 审查通过 | **G: Final Render + 交付** | 主执行猫 | 高质量渲染 + 封面导出 + 发布 |
-| 铲屎官不满意 | **R: Patch Loop** | 主执行猫 + 视觉把关猫 | retiming / 重录 / 重写段落 |
+| operator不满意 | **R: Patch Loop** | 主执行猫 + 视觉把关猫 | retiming / 重录 / 重写段落 |
 
 ## 审查 Gate（F 场景）
 
@@ -84,7 +84,7 @@ description: >
 | P2 | vibe 不连贯 | 整体情绪没有起承转合 |
 | P2 | 字幕风格不一致 | 不同段落字幕样式混乱 |
 
-### F3: 内容审查（铲屎官）
+### F3: 内容审查（operator）
 
 | 级别 | 维度 | 判定 |
 |------|------|------|
@@ -97,9 +97,9 @@ description: >
 ### 目录结构
 ```
 docs/videos/{project-name}/
-├── asset-markers.md       ← 素材标注表（铲屎官 + 主执行猫共同编辑）
+├── asset-markers.md       ← 素材标注表（operator + 主执行猫共同编辑）
 ├── video-spec.json        ← segment contract（主执行猫生成）
-├── voice-script.md        ← 配音剧本（主执行猫草稿 + 铲屎官确认）
+├── voice-script.md        ← 配音剧本（主执行猫草稿 + operator确认）
 └── assets/                ← 原始素材（gitignore, 仅本地）
     ├── 1-xxx.mov
     ├── 2-xxx.mov
@@ -112,10 +112,10 @@ ffmpeg -i input.mov -c:v libx264 -crf 23 -c:a aac -b:a 128k output.mp4
 # 目标：1080p, CRF 23, AAC 128k
 ```
 
-### 粗标格式（铲屎官填）
+### 粗标格式（operator填）
 ```
 时间 | 画面内容
-0:00 - 0:50 | 铲屎官在打字
+0:00 - 0:50 | operator在打字
 0:50 - 1:20 | Ragdoll开始回复，1:20 Maine Coon跟上
 ```
 

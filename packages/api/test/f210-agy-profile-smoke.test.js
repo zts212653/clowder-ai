@@ -97,7 +97,7 @@ describe('F210 AGY profile E2E smoke runner', () => {
         type: 'error',
         catId: target.catId,
         error:
-          'Antigravity CLI profile is not authenticated. Run `agy` with the same HOME/profile and complete login before unattended Cat Cafe use.',
+          'Antigravity CLI profile is not authenticated. Run `agy` with the same HOME/profile and complete login before unattended Clowder AI use.',
         metadata: { provider: 'google', model: `${target.modelLabel} (antigravity-cli profile)`, modelVerified: false },
       },
       {

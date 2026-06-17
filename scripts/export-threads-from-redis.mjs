@@ -52,7 +52,7 @@ function catLabel(catId) {
 }
 
 function userLabel(userId) {
-  if (userId === 'default-user') return '铲屎官';
+  if (userId === 'default-user') return 'co-creator';
   return userId || '用户';
 }
 

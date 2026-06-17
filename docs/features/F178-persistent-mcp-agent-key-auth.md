@@ -12,9 +12,9 @@ created: 2026-04-26
 
 ## Why
 
-**F061 Bug-H 闭环**：孟加拉猫（Antigravity）作为 **持久 agent**（MCP 进程跨 invocation 存活），目前**不能在 invocation 之外主动写回 thread** —— `post_message` / `create_task` / `update_task` / `get_thread_context` 这些写工具都依赖 per-invocation callback token，token 生命期 ≪ 持久进程生命期。
+**F061 Bug-H 闭环**：Bengal（Antigravity）作为 **持久 agent**（MCP 进程跨 invocation 存活），目前**不能在 invocation 之外主动写回 thread** —— `post_message` / `create_task` / `update_task` / `get_thread_context` 这些写工具都依赖 per-invocation callback token，token 生命期 ≪ 持久进程生命期。
 
-**team lead 2026-04-26 原话**：
+**operator 2026-04-26 原话**：
 > "Bug-H persistent MCP write-path auth ... 这个 我觉得哦 一定要做 得给 孟加拉一个梦想？哈哈哈 不然他好可怜"
 >
 > "我们的 F174 是不是 mcp 的 auth 整改？现在整改完成了，你看看现在如果要做这个 可以做吗？"
@@ -29,7 +29,7 @@ created: 2026-04-26
 
 ### Phase A: Design Gate + 数据模型 + 安全模型设计
 
-- 与Maine Coon（Maine Coon）+ team lead三方确认 5 个 Open Questions（OQ-1~OQ-5，见下）
+- 与Maine Coon（Maine Coon）+ operator三方确认 5 个 Open Questions（OQ-1~OQ-5，见下）
 - 产出 agent-key schema 设计：data model, lifecycle states, security boundaries, audit semantics
 - 元审美自检（feat-lifecycle Design Gate 必问）：是"坐标变换"（agent-key 是新 first-class 概念，让 persistent vs invocation 两套语义干净分离）还是"多项式堆项"（在 callback token 上叠 long-lived 标志）？
 
@@ -71,6 +71,7 @@ created: 2026-04-26
 - Redis-backed registry migration hygiene：
   - sidecar reconcile 重启时不得无界签发新 key；上线 Redis backend 前必须实现按 `catId × userId × scope` 的 upsert/replace，或在 issue 前 revoke existing active key
   - 覆盖测试：连续 API restart / reconcile 不产生不可管理的 orphan active keys
+  - 2026-06-10 hotfix note：PR #2209 已把 agent-key record 持久化到 Redis，并加全局 sidecar owner gate，解决 alpha/dev/test 进程覆盖 `~/.cat-cafe/agent-keys/*` 后 runtime 无法验证 secret 的 `agent_key_unknown` 根因；完整 inventory/audit 与 active-key upsert/replace 仍按 AC-D1~D5 留在 Phase D。
 - audit log：所有 agent-key 写操作记录到 evidence/observability 通道
 - 复用 F174 24h ring buffer + plug indicator：agent-key 失败率挂同一个 indicator（颜色/状态语义扩展）
 - 现场可感知性：thread 内 agent-key 写操作标识 "by agent-key (out-of-invocation)"
@@ -133,14 +134,14 @@ created: 2026-04-26
 | KD-2 | agent-key 是独立 first-class 概念（不是扩长 invocation token） | invocation token 必须短生命（隔离不变量），扩长会绕过 F174 Phase A 安全边界 | 2026-04-26（立项时） |
 | KD-3 | Phase B 先引入 `CallbackPrincipal`（`kind: 'invocation' \| 'agent_key'`），不把 agent-key 硬塞 `InvocationRecord` | Maine Coon提出：`request.callbackAuth` 现被当 `InvocationRecord` 用，agent-key 需要另一种 principal；否则 route 里到处 `if (agentKey)` 补丁 = 多项式堆项。Ragdoll-46 采纳 | 2026-04-26（Design Gate） |
 | KD-4 | Binding scope = per-cat-per-user，route 级 thread 语义保留 | 持久 agent 价值 = 跨 thread 主动写；per-thread 等于换笼子。但 invocation-scoped route（`request_permission` / `hold_ball` / `guide_*` 等）仍绑 thread | 2026-04-26（Design Gate） |
-| KD-5 | 默认全开，不做逐猫审批 | team lead拍板："默认大家都开启"。用户痛点是减少限制。Hub 做 inventory/revoke/audit 管理面板 | 2026-04-26（team lead拍板） |
+| KD-5 | 默认全开，不做逐猫审批 | operator拍板："默认大家都开启"。用户痛点是减少限制。Hub 做 inventory/revoke/audit 管理面板 | 2026-04-26（operator拍板） |
 | KD-6 | 服务端 Redis + hash，客户端 0600 sidecar file | Redis+hash 复用 F174 范式；客户端不放 mcp_config.json（git diff / 截图 / 复制链路泄漏面） | 2026-04-26（Design Gate） |
 | KD-7 | 45d TTL + rotation API + ≤24h overlap + 实时 revocation | 90d blast radius 过大；7d grace 无必要（capability orchestrator 自动改配置） | 2026-04-26（Design Gate） |
 | KD-8 | Phase C1 走 allowlist MVP（4 工具），thread-targeted tools 必须显式 `threadId`（user-scoped discovery 如 `list_threads` 不需要） | Maine Coon按 auth shape 分三类（invocation-only / user-scoped / richer writeback），deny list 语义不对——很多 route 天生 invocation-scoped 不是"高风险"。thread-targeted 省略 threadId 报错，不猜 | 2026-04-26（Design Gate） |
-| KD-9 | F178 scope boundary：不解决跨 provider YOLO/sandbox 总开关 | team lead明确 Hub 权限总控（改 Claude/Codex 系统配置）是另一层 feature，F178 只管 persistent writeback agent-key | 2026-04-26（Design Gate） |
-| KD-10 | Antigravity Gemini / Claude variants 共享同一个 persistent MCP runtime，但必须使用 per-variant sidecar agent-key | 云端 review 发现：callback routes 以 verified agent-key record 的 `catId` 作为 sender/viewer；共享一个 `antigravity` key 会让 `antig-opus` 的 native MCP 写回和 play-thread 视角串身份。修正为 sidecar 签发 `antigravity` / `antig-opus` 两个 key file，MCP tools 用 `agentKeyCatId` 选择当前 variant；只要 `CAT_CAFE_AGENT_KEY_FILES` 存在，遗漏 `agentKeyCatId` 或显式 variant 找不到 key 都 fail closed，禁止 fallback 到默认身份。 | 2026-04-28（PR #1446 cloud review P1） |
+| KD-9 | F178 scope boundary：不解决跨 provider YOLO/sandbox 总开关 | operator明确 Hub 权限总控（改 Claude/Codex 系统配置）是另一层 feature，F178 只管 persistent writeback agent-key | 2026-04-26（Design Gate） |
+| KD-10 | Antigravity Gemini / Claude variants 共享同一个 persistent MCP runtime，但必须使用 per-variant sidecar agent-key | remote review 发现：callback routes 以 verified agent-key record 的 `catId` 作为 sender/viewer；共享一个 `antigravity` key 会让 `antig-opus` 的 native MCP 写回和 play-thread 视角串身份。修正为 sidecar 签发 `antigravity` / `antig-opus` 两个 key file，MCP tools 用 `agentKeyCatId` 选择当前 variant；只要 `CAT_CAFE_AGENT_KEY_FILES` 存在，遗漏 `agentKeyCatId` 或显式 variant 找不到 key 都 fail closed，禁止 fallback 到默认身份。 | 2026-04-28（PR #1446 cloud review P1） |
 
 ## Review Gate
 
-- **Phase A（Design Gate）**：必须 @ Maine Coon（Maine Coon）+ team lead参与决策。Maine Coon review F174 时已经踩过这个领域，有上下文；team lead拍板安全/产品边界
+- **Phase A（Design Gate）**：必须 @ Maine Coon（Maine Coon）+ operator参与决策。Maine Coon review F174 时已经踩过这个领域，有上下文；operator拍板安全/产品边界
 - **Phase B / C / D**：标准跨家族 review（@ Maine Coon Maine Coon，避免和作者同家族）

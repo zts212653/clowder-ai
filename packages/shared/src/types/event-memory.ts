@@ -26,7 +26,7 @@ import { generateId } from './ids.js';
 
 /** Five collection signals (五类信号). */
 export const EVENT_TRIGGERS = [
-  'human_brake', // 铲屎官拉闸（magic word 等人工信号）
+  'human_brake', // co-creator拉闸（magic word 等人工信号）
   'cat_brake', // 猫主动刹车
   'cat_shout', // 猫喊回 / 互相提醒
   'flywheel_selffix', // 自进化 / 自修复

@@ -240,7 +240,7 @@ describe('F167 L1: route-serial ping-pong circuit breaker', { concurrency: false
     await loadRealRoster();
     try {
       const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-      const opusText = `PR #1355 已合入 main\n\nReview 历程：砚砚 review 2 轮放行 + 云端 review 3 轮（2 P1 + 2 P2 全修）\n\n请做愿景守护：对照 spec docs/features/F172-generated-image-publication.md 的 8 条需求点 (R1-R8)，判断交付物是否解决了铲屎官的问题。\n\n@gemini`;
+      const opusText = `PR #1355 已合入 main\n\nReview 历程：砚砚 review 2 轮放行 + 云端 review 3 轮（2 P1 + 2 P2 全修）\n\n请做愿景守护：对照 spec docs/features/F172-generated-image-publication.md 的 8 条需求点 (R1-R8)，判断交付物是否解决了co-creator的问题。\n\n@gemini`;
       const opusService = createCapturingService('opus', opusText);
       const geminiService = createCapturingService('gemini', '愿景守护完成，方向对上了');
       const deps = createMockDeps({ opus: opusService, gemini: geminiService });

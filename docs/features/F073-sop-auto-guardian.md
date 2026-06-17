@@ -16,16 +16,16 @@ created: 2026-03-07
 
 ## Why
 
-team lead反复手动提醒猫猫 SOP 步骤，这是系统设计缺陷，不是管理问题。
+operator反复手动提醒猫猫 SOP 步骤，这是系统设计缺陷，不是管理问题。
 
-**核心痛点**（team experience 2026-03-07）：
+**核心痛点**（operator experience 2026-03-07）：
 
 > "你看你们很多时候需要我一次次的提醒。如果不唠叨你们很容易走错，特别是上下文压缩之后。"
 > "我不想让你们变成一个 workflow 的 node，这样没有灵魂。"
 
-**本质问题**：SOP 上下文和接力棒没有外化到共享系统中，导致猫冷启动/压缩后失忆，team lead被迫当复读机。
+**本质问题**：SOP 上下文和接力棒没有外化到共享系统中，导致猫冷启动/压缩后失忆，operator被迫当复读机。
 
-## 设计哲学（team lead定调 + 全猫共识 2026-03-07）
+## 设计哲学（operator定调 + 全猫共识 2026-03-07）
 
 > **"外化上下文和接力棒，不外包判断力。"**
 > "A2A 出口检查之所以有效，是因为它外化了'传球意识'，但没有夺走猫的判断力。F073 也应该复制这个成功模式。" —— Maine Coon (GPT-5.4)
@@ -40,7 +40,7 @@ team lead反复手动提醒猫猫 SOP 步骤，这是系统设计缺陷，不是
 
 | 方案 | 不做原因 |
 |------|---------|
-| 强制状态机控制器 | 把猫变成 workflow node，没有灵魂（team experience） |
+| 强制状态机控制器 | 把猫变成 workflow node，没有灵魂（operator experience） |
 | 每步做成必须调用的 MCP 动作 | 猫会变成流程机器人 |
 | 常用话术编辑器 | 治标不治本 |
 | Hook/Mission Hub 代替判断 | 它们只能告诉猫"在哪、该看什么"，不能替猫决定 |
@@ -85,7 +85,7 @@ workflow:
 
 - `cat_cafe_handoff_feature(...)` — 原子操作：更新告示牌 + 写摘要 + 发 @mention + 挂 timeout
 - `cat_cafe_ack_handoff(...)` — 接球确认，切换 baton_holder
-- 超时 → 提醒/升级给 fallback reviewer 或team lead，**不卡死流程**
+- 超时 → 提醒/升级给 fallback reviewer 或operator，**不卡死流程**
 
 #### P3: 少量硬门禁
 
@@ -112,15 +112,15 @@ workflow:
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "压缩后提醒他的那个是不是也得拉出来看看为什么呢" | AC-1 | 诊断报告 + 修复验证 | [x] P0 |
 | R2 | "先更新 feat/backlog 在 main 上 commit push 然后才能开 worktree" | AC-2 | skill 检查步骤 | [x] P0 |
 | R3 | "feat close 是需要其他猫猫帮你做一次愿景守护的吧" | AC-3 | skill @ 模板 | [x] P0 |
 | R4 | "写完之后自己守护愿景...通知我你合入了就行" | AC-4 | 端到端验证（本 Feature） | [x] P0 |
 | R5 | "特别是上下文压缩之后" | AC-5 | hook + resume capsule | [x] P1 |
-| R6 | "所有猫都能用的综合机制"（team lead追问） | AC-6 | Mission Hub 共享 | [x] P1 |
-| R7 | "不想让你们变成 workflow 的 node"（team lead定调） | AC-7 | 架构 review（告示牌不是控制器） | [x] P1 |
+| R6 | "所有猫都能用的综合机制"（operator追问） | AC-6 | Mission Hub 共享 | [x] P1 |
+| R7 | "不想让你们变成 workflow 的 node"（operator定调） | AC-7 | 架构 review（告示牌不是控制器） | [x] P1 |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -163,7 +163,7 @@ workflow:
 
 | # | 决策 | 选择 | 放弃的方案 | 理由 | 日期 |
 |---|------|------|-----------|------|------|
-| KD-1 | 设计哲学 | 告示牌（信息共享） | 控制器（强制状态机） | team lead："不想让猫变成 workflow node" | 2026-03-07 |
+| KD-1 | 设计哲学 | 告示牌（信息共享） | 控制器（强制状态机） | operator："不想让猫变成 workflow node" | 2026-03-07 |
 | KD-2 | 阶段存储 | Mission Hub（所有猫共享） | `/tmp/` 文件（Ragdoll专属） | 跨猫可见 + 压缩不丢失 | 2026-03-07 |
 | KD-3 | 门禁范围 | 只守 worktree + close | 每步硬约束 | 信任猫的判断力，随模型能力松绑 | 2026-03-07 |
 | KD-4 | attested vs verified | 区分猫声明和系统验证 | 假装全自动 | 诚实比好看重要 | 2026-03-07 |
@@ -213,6 +213,6 @@ workflow:
 - 不吸收强制状态机——与 Cat Café 知识驱动协作哲学矛盾
 - Phase 顺序：告示牌 → 接力 → 门禁 → 加速器
 
-**team lead定调**：
+**operator定调**：
 > "我不想让你们变成一个 workflow 的 node，这样没有灵魂。"
 > "要相信未来的猫猫们会更聪明。"

@@ -322,7 +322,7 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const msg = await store.append({
       userId: 'u',
       catId: 'opus',
-      content: '@铲屎官 看看这个',
+      content: '@co-creator 看看这个',
       mentions: ['opus'],
       timestamp: Date.now(),
       threadId: 'thread-mention-user',

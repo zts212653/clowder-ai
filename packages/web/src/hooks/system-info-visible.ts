@@ -5,6 +5,20 @@ export interface VisibleSystemInfoResult {
   variant: VisibleSystemInfoVariant;
 }
 
+const INTERNAL_SYSTEM_INFO_TELEMETRY_TYPES = new Set([
+  'mcp_server_status',
+  'resume_failure_stats',
+  'strategy_allow_compress',
+  'tool_activity',
+  'turn_duration', // F230 P2: PTY carrier terminal event — silently consumed, never shown as bubble
+  'silent_completion', // Internal diagnostic — cat completed without text; noise for users
+  'context_briefing', // F148: Internal routing context for cats, not user-facing
+]);
+
+export function isInternalSystemInfoTelemetry(parsed: Record<string, unknown>): boolean {
+  return typeof parsed?.type === 'string' && INTERNAL_SYSTEM_INFO_TELEMETRY_TYPES.has(parsed.type);
+}
+
 function formatPingpongTerminated(parsed: Record<string, unknown>): VisibleSystemInfoResult {
   const fromCatId = typeof parsed.fromCatId === 'string' ? parsed.fromCatId : 'unknown';
   const targetCatId = typeof parsed.targetCatId === 'string' ? parsed.targetCatId : 'unknown';

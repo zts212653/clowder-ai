@@ -77,6 +77,9 @@ export interface FrustrationIssue {
   // Visibility marker (message ID of the card shown to user)
   cardMessageId?: string;
 
+  // F235: Community publisher draft (set when user triggers "Publish to Community")
+  communityIssueDraftId?: string;
+
   // Lifecycle
   createdAt: number;
   confirmedAt?: number;

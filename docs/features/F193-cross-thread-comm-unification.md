@@ -8,14 +8,14 @@ created: 2026-05-07
 
 # F193: Cross-Thread Communication Unification
 
-> **Status**: in-progress (Phase E; E1/E2/E4/E5 merged, E3 pending) | **Owner**: Ragdoll(Opus 4.6) | **Priority**: P1 | **Phase A-D Completed**: 2026-05-09 | **Reopened**: 2026-06-03 (CVO approved)
+> **Status**: in-progress (Phase E; E1/E2/E4/E5 merged, E3 pending) | **Owner**: Ragdoll(Opus 4.6) | **Priority**: P1 | **Phase A-D Completed**: 2026-05-09 | **Reopened**: 2026-06-03 (operator approved)
 
 ## Why
 
-team lead 2026-05-07 原话：
+operator 2026-05-07 原话：
 > "我们家的跨线程通讯这个功能 ... 让你们跨线程通讯，或者什么 有的时候想不到需要用这个 有的时候 跨线程的方式不太对 比如没at对面线程的猫猫等等 这个特性太早了和我们家harness实践脱节了。"
 
-team lead第二轮原话（接收侧补充）：
+operator第二轮原话（接收侧补充）：
 > "你们的跨线程通讯skills的优化  是不是也要考虑这个 ... 收到这个消息的猫丝毫没有意识到自己要发消息回去不能at自己thread内的那只得at 来自其他线程的那只"
 
 **Motivation evidence**: `/uploads/1778169018738-4cf75cfd.png` — 46 收到 47 跨线程传话后正确处理内容，但回复停在本 thread，47 thread 零回馈。证明缺**接收侧 reply hint**。
@@ -44,7 +44,7 @@ team lead第二轮原话（接收侧补充）：
 ### Phase B: 认知路径修复（system prompt 三处更新）
 
 - `SystemPromptBuilder.MCP_TOOLS_SECTION` 协作工具列表补 `cat_cafe_cross_post_message`，含最小认知路径示例：`list_threads → cross_post_message(threadId, targetCats, content) → get_thread_context 验证`
-- **接收侧 reply hint**（team lead motivation evidence 直击点）：检测到当前 invocation 由跨线程消息触发（`extra.crossPost.sourceThreadId` 存在）时，SystemPromptBuilder 注入一段 reply hint：
+- **接收侧 reply hint**（operator motivation evidence 直击点）：检测到当前 invocation 由跨线程消息触发（`extra.crossPost.sourceThreadId` 存在）时，SystemPromptBuilder 注入一段 reply hint：
   - 来源 thread ID
   - 发送猫 catId（句柄）
   - 提示文案："回复请用 `cross_post_message(threadId=<sourceThreadId>, targetCats=[<senderCatId>])`，本 thread 内的 @ 不会路由回对方"

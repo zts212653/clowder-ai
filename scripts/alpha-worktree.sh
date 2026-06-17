@@ -32,7 +32,7 @@ SOURCE_ONLY=false
 
 usage() {
   cat <<'EOF'
-Cat Cafe Alpha Worktree Manager
+Clowder AI Alpha Worktree Manager
 
 Usage:
   ./scripts/alpha-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
@@ -183,6 +183,7 @@ export EMBED_ENABLED=0
 export EMBED_MODE=off
 export AUDIO_SERVICE_ENABLED=0
 export AUDIO_SERVICE_PORT=$ALPHA_AUDIO_PORT
+export CONNECTOR_GATEWAY_AUTOSTART=0
 EOF
 }
 
@@ -249,6 +250,7 @@ apply_alpha_env() {
   export EMBED_MODE=off
   export AUDIO_SERVICE_ENABLED=0
   export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
+  export CONNECTOR_GATEWAY_AUTOSTART=0
 
   # Next.js dev only reads .env files relative to its own cwd (packages/web/),
   # not monorepo root .env, and does not always pick up exported NEXT_PUBLIC_*

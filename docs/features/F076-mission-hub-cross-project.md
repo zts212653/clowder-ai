@@ -14,7 +14,7 @@ created: 2026-03-07
 
 ## Why
 
-### 核心痛点（team lead采访 2026-03-07）
+### 核心痛点（operator采访 2026-03-07）
 
 猫猫团队不只做 cat-cafe 自己的项目，还会被派遣到外部甲方项目（如 studio-flow）。
 这类项目的管理痛点与自研项目截然不同：
@@ -24,7 +24,7 @@ created: 2026-03-07
 3. **没有完成确信** — 自研项目 AC 自己定，心里有数；甲方项目的 AC 在甲方脑子里，你写的可能和他想的不一样
 4. **救火员困境** — "当猫猫救火员的时候如何才能高质量完成任务？"
 
-### team experience
+### operator experience
 
 > "甲方根本就不知道自己想要啥...他给了一个他的 claude 写的需求 prd...一个不懂编程的人带着大猫猫传来一份不知道如何形容的 prd"
 >
@@ -79,7 +79,7 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 
 ### Mission Hub UX 整合方案
 
-> **重要决策 (2026-03-07 team lead反馈)**：F076 的 UI **不是**独立面板/dashboard，必须**集成到现有 Mission Hub 的 Tab 体系**中。
+> **重要决策 (2026-03-07 operator反馈)**：F076 的 UI **不是**独立面板/dashboard，必须**集成到现有 Mission Hub 的 Tab 体系**中。
 >
 
 **现有 Mission Hub 风格**（参考截图）：
@@ -89,14 +89,14 @@ Intent Card 槽位（v2）：actor / context-trigger / goal / object-state / suc
 - 右侧：详情面板（建议详情 / Suggestion Detail）
 - 状态栏：待审议 / 执行中 / 已完成 计数
 
-**新 UX 方案（team lead拍板 + 二次追问 2026-03-07 20:52）**：
+**新 UX 方案（operator拍板 + 二次追问 2026-03-07 20:52）**：
 
 1. **导入外部项目** — Mission Hub 新增「导入项目」按钮
 2. **项目 Tab** — 每个导入的外部项目成为一个新 Tab（如 "studio-flow"），与现有「功能列表」「告示面板」并列
 3. **Tab 内 Backlog 对齐** — 进入外部项目 Tab 后，首先展示**该项目的 backlog**（复用 Mission Hub 的 feature 列表风格），实现跨项目 backlog 可视化对齐
 4. **Need Audit 功能内嵌** — 在外部项目 Tab 内，逐步添加治理功能
 
-**关键决策：外部项目 Tab 内同时具备两层能力**（team lead追问 20:52）
+**关键决策：外部项目 Tab 内同时具备两层能力**（operator追问 20:52）
 
 **回答：兼容！** 外部项目 Tab 内是 **Mission Hub 原有能力 + Need Audit 新能力** 的融合，不是只有 Need Audit。
 
@@ -176,7 +176,7 @@ Five-layer architecture: Ingestion → Audit Workbench → Planning Bridge → M
 
 F076 经历了完整的多阶段讨论过程（2026-03-07 全天）：
 
-### Phase 1: team lead采访 + 产品定位
+### Phase 1: operator采访 + 产品定位
 - 5 轮 Q&A，从"跨项目面板"演化为"甲方项目治理引擎"
 - 核心痛点提炼：甲方不知道自己要什么 / 需求膨胀 / 没有完成确信 / 救火员困境
 
@@ -187,7 +187,7 @@ F076 经历了完整的多阶段讨论过程（2026-03-07 全天）：
 - GPT-5.2 Phase 5 review：+2 guardrails（展示治理产物不是原始数据；起步半自动不是全自动判断）
 
 ### Phase 3: GPT Pro 外部咨询
-- team lead创建咨询文档，带 5 个问题给云端 GPT Pro
+- operator创建咨询文档，带 5 个问题给云端 GPT Pro
 - GPT Pro 回复 ~250 行，含学术引用（Volere, BABOK, IEEE 29148 等）
 - Opus 评估 7 个建议：5 采纳 / 2 延迟
 - Pipeline v1 升级为 v2：+Stage 0(Frame) / +Stage 1.5(Domain Pass) / clarity+groundedness 拆分 / +Stage 3(Resolution Design)
@@ -202,6 +202,6 @@ F076 经历了完整的多阶段讨论过程（2026-03-07 全天）：
 - 获取：6 PRD 文件 / 25 features / 9 点验收基线 / 试跑建议
 
 ### Phase 6: UX 方向修正
-- team lead看了初版 wireframe（深色 dashboard 风格）→ **否决**
-- team lead拍板新方案：集成到现有 Mission Hub Tab 体系（导入项目 → 新 Tab → Backlog 对齐 → Need Audit 内嵌）
+- operator看了初版 wireframe（深色 dashboard 风格）→ **否决**
+- operator拍板新方案：集成到现有 Mission Hub Tab 体系（导入项目 → 新 Tab → Backlog 对齐 → Need Audit 内嵌）
 - 设计原则：延续暖色调 + 列表/详情布局，不割裂

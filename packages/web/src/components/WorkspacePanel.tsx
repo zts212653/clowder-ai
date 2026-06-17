@@ -9,6 +9,7 @@ import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { ArtifactsPanel } from './ArtifactsPanel';
 import { CommunityPanel } from './CommunityPanel';
 import { EventTimeline } from './event-memory/EventTimeline';
 import { RecallFeed } from './memory/RecallFeed';
@@ -291,10 +292,10 @@ export function WorkspacePanel() {
       ?.then((res) => res.json())
       .then((thread: { preferredWorkspaceMode?: string }) => {
         if (cancelled) return;
-        const valid = new Set(['dev', 'recall', 'schedule', 'tasks', 'community']);
+        const valid = new Set(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts']);
         if (thread.preferredWorkspaceMode && valid.has(thread.preferredWorkspaceMode)) {
           setWorkspaceMode(thread.preferredWorkspaceMode as typeof workspaceMode);
-        } else if (useChatStore.getState().workspaceMode === 'community') {
+        } else if (['community', 'artifacts'].includes(useChatStore.getState().workspaceMode)) {
           setWorkspaceMode('dev');
         }
       })
@@ -694,54 +695,58 @@ export function WorkspacePanel() {
             </div>
           )}
 
-          {/* Search bar */}
-          <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-cafe-subtle/40">
-            <div className="flex items-center gap-1.5 bg-cafe-surface/80 border border-cafe-subtle rounded-lg px-2.5 py-1.5 focus-within:border-cafe-accent focus-within:ring-1 focus-within:ring-cafe-accent/20 transition-all">
-              <SearchIcon />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setDidSearch(false);
-                  if (!e.target.value.trim()) setSearchResults([]);
-                }}
-                onCompositionStart={searchIme.onCompositionStart}
-                onCompositionEnd={searchIme.onCompositionEnd}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && searchIme.isComposing()) e.preventDefault();
-                }}
-                placeholder={
-                  searchMode === 'content'
-                    ? '搜索代码内容...'
-                    : searchMode === 'filename'
-                      ? '搜索文件名/路径...'
-                      : '搜索全部...'
-                }
-                className="flex-1 text-xs bg-transparent text-cafe-black placeholder:text-cafe-interactive/30 focus:outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => setSearchMode((m) => (m === 'all' ? 'filename' : m === 'filename' ? 'content' : 'all'))}
-                className={`text-micro px-1.5 py-0.5 rounded-md font-medium transition-colors ${
-                  searchMode === 'all'
-                    ? 'bg-cafe-accent/15 text-cafe-accent'
-                    : searchMode === 'filename'
-                      ? 'bg-cafe-surface-sunken text-cafe-interactive'
-                      : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-                }`}
-                title={
-                  searchMode === 'all'
-                    ? '全部搜索（文件名+内容）→ 点击切换到仅文件名'
-                    : searchMode === 'filename'
-                      ? '文件名搜索 → 点击切换到仅内容'
-                      : '内容搜索 → 点击切换到全部搜索'
-                }
-              >
-                {searchMode === 'all' ? 'All' : searchMode === 'filename' ? 'File' : 'Aa'}
-              </button>
-            </div>
-          </form>
+          {/* Search bar — dev mode only (repo file search is irrelevant for other modes) */}
+          {workspaceMode === 'dev' && (
+            <form onSubmit={handleSearchSubmit} className="px-3 py-2 border-b border-cafe-subtle/40">
+              <div className="flex items-center gap-1.5 bg-cafe-surface/80 border border-cafe-subtle rounded-lg px-2.5 py-1.5 focus-within:border-cafe-accent focus-within:ring-1 focus-within:ring-cafe-accent/20 transition-all">
+                <SearchIcon />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setDidSearch(false);
+                    if (!e.target.value.trim()) setSearchResults([]);
+                  }}
+                  onCompositionStart={searchIme.onCompositionStart}
+                  onCompositionEnd={searchIme.onCompositionEnd}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && searchIme.isComposing()) e.preventDefault();
+                  }}
+                  placeholder={
+                    searchMode === 'content'
+                      ? '搜索代码内容...'
+                      : searchMode === 'filename'
+                        ? '搜索文件名/路径...'
+                        : '搜索全部...'
+                  }
+                  className="flex-1 text-xs bg-transparent text-cafe-black placeholder:text-cafe-interactive/30 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSearchMode((m) => (m === 'all' ? 'filename' : m === 'filename' ? 'content' : 'all'))
+                  }
+                  className={`text-micro px-1.5 py-0.5 rounded-md font-medium transition-colors ${
+                    searchMode === 'all'
+                      ? 'bg-cafe-accent/15 text-cafe-accent'
+                      : searchMode === 'filename'
+                        ? 'bg-cafe-surface-sunken text-cafe-interactive'
+                        : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+                  }`}
+                  title={
+                    searchMode === 'all'
+                      ? '全部搜索（文件名+内容）→ 点击切换到仅文件名'
+                      : searchMode === 'filename'
+                        ? '文件名搜索 → 点击切换到仅内容'
+                        : '内容搜索 → 点击切换到全部搜索'
+                  }
+                >
+                  {searchMode === 'all' ? 'All' : searchMode === 'filename' ? 'File' : 'Aa'}
+                </button>
+              </div>
+            </form>
+          )}
 
           {/* Phase H: Workspace mode switcher */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cafe-surface/50">
@@ -841,9 +846,34 @@ export function WorkspacePanel() {
               </svg>
               社区
             </button>
+            {/* F232 AC-A8 修订：产物升为 workspaceMode 顶层入口 */}
+            <button
+              type="button"
+              onClick={() => setWorkspaceMode('artifacts')}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
+                workspaceMode === 'artifacts'
+                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
+                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
+              }`}
+            >
+              <svg
+                className="w-3 h-3"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+              产物
+            </button>
           </div>
 
-          {/* Knowledge / Schedule / Tasks / Dev mode routing */}
+          {/* Knowledge / Schedule / Tasks / Artifacts / Dev mode routing */}
           {workspaceMode === 'recall' ? (
             <div className="flex-1 min-h-0 flex flex-col">
               {/* F227: 记忆流 vs 拉闸记录 (Event Memory timeline) */}
@@ -873,6 +903,14 @@ export function WorkspacePanel() {
             <TaskBoardPanel />
           ) : workspaceMode === 'community' ? (
             <CommunityPanel threadId={currentThreadId} />
+          ) : workspaceMode === 'artifacts' ? (
+            currentThreadId ? (
+              <ArtifactsPanel threadId={currentThreadId} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-cafe-secondary text-sm">
+                选择一个对话以查看产物
+              </div>
+            )
           ) : (
             <>
               {/* Files / Changes toggle */}

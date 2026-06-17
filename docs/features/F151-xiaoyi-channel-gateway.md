@@ -295,4 +295,4 @@ onDeliveryBatchDone(chainDone=true):
 
 ## Review Gate
 
-- Phase A: Maine Coon review + team lead真机验证
+- Phase A: Maine Coon review + operator真机验证

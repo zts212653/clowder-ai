@@ -8,7 +8,7 @@ const EXPECTED_DEVELOPMENT_STAGES = ['kickoff', 'impl', 'quality_gate', 'review'
 
 const EXPECTED_PORTED_RULE_TEXTS = [
   'Feature spec 必须有 AC + 需求点 checklist',
-  '没有铲屎官确认就直接开始实现',
+  '没有co-creator确认就直接开始实现',
   'worktree 开之前必须 main 双向同步 (ahead=0 behind=0)',
   'Redis 只用 6398，禁碰 6399',
   '跳过 Design Gate 直接写代码',

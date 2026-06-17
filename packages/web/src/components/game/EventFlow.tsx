@@ -110,10 +110,10 @@ export function EventFlow({ events, catDisplayNames, seatToActor }: EventFlowPro
         const seatId = String(event.payload.seatId ?? '');
         // Resolve actorId: payload may have it directly, or map from seatId
         const rawActorId = String(event.payload.actorId ?? event.payload.senderName ?? seatToActor?.[seatId] ?? seatId);
-        // Human players have userId as actorId — show "铲屎官" instead of raw userId
+        // Human players have userId as actorId — show "co-creator" instead of raw userId
         const isHuman = !catDisplayNames?.[rawActorId] && rawActorId !== seatId && rawActorId !== 'system';
         const actorId = isHuman ? 'owner' : rawActorId;
-        const displayName = isHuman ? '铲屎官' : (catDisplayNames?.[rawActorId] ?? rawActorId) || seatId || '???';
+        const displayName = isHuman ? 'co-creator' : (catDisplayNames?.[rawActorId] ?? rawActorId) || seatId || '???';
         const content = String(event.payload.content ?? event.payload.message ?? event.payload.text ?? '');
         const isLastWords = event.type === 'last_words';
         const isNightThought = event.type === 'night_thought';

@@ -901,4 +901,55 @@ describe('RedisTaskStore unit behavior', () => {
     );
     assert.equal(await store.get(firstClaimedTaskId), null, 'stale claimed task hash must not be persisted');
   });
+
+  it('upsertBySubject with lower cursor values does not regress existing cursors (I5 — cursor anti-regression)', async () => {
+    // I5 invariant: upsertBySubject on an existing task must never overwrite already-advanced
+    // issue cursors with lower seed values (e.g. from a re-routing event with stale fetchCommentCursor).
+    //
+    // Bug: mergeAutomationState used { ...existing?.issue, ...patch.issue } — since patch.issue
+    // fields come last in the spread, they OVERWRITE existing cursor values even when lower.
+    // A re-routing with fetchCommentCursor=50 on a task with lastCommentCursor=100 would regress.
+    //
+    // Fix: Math.max semantics for lastCommentCursor and lastDeliveredCursor during merge.
+    const { RedisTaskStore } = await import('../dist/domains/cats/services/stores/redis/RedisTaskStore.js');
+    const redis = new FakeRedisForTaskStore();
+    const store = new RedisTaskStore(redis, { ttlSeconds: 0 });
+
+    // First upsert: create task with advanced cursors (simulating a task that has been polling for a while)
+    await store.upsertBySubject({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#900',
+      threadId: 'thread-i5',
+      title: 'Issue tracking: owner/repo#900',
+      why: 'track issue',
+      createdBy: 'system',
+      automationState: { issue: { lastCommentCursor: 100, lastDeliveredCursor: 90 } },
+    });
+
+    // Second upsert: re-routing fires with a stale seed (lower cursor values)
+    // This simulates a duplicate case.routed event where fetchCommentCursor returned a stale value.
+    const result = await store.upsertBySubject({
+      kind: 'issue_tracking',
+      subjectKey: 'issue:owner/repo#900',
+      threadId: 'thread-i5',
+      title: 'Issue tracking: owner/repo#900',
+      why: 'track issue re-routed',
+      createdBy: 'system',
+      automationState: { issue: { lastCommentCursor: 50, lastDeliveredCursor: 50 } },
+    });
+
+    // BUG: without fix, result.automationState.issue.lastCommentCursor would be 50 (regressed)
+    // FIX: cursors must remain at Math.max(existing, patch) = max(100, 50) = 100 and max(90, 50) = 90
+    assert.ok(result.automationState?.issue, 'automationState.issue must be present after re-upsert');
+    assert.strictEqual(
+      result.automationState.issue.lastCommentCursor,
+      100,
+      'lastCommentCursor must NOT be regressed to 50 — existing 100 must be preserved (I5)',
+    );
+    assert.strictEqual(
+      result.automationState.issue.lastDeliveredCursor,
+      90,
+      'lastDeliveredCursor must NOT be regressed to 50 — existing 90 must be preserved (I5)',
+    );
+  });
 });

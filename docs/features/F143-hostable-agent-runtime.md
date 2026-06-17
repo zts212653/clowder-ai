@@ -14,7 +14,7 @@ created: 2026-03-27
 
 我们已有 7 个 AgentService provider（Claude/Codex/Gemini/DARE/OpenCode/A2A/Antigravity），每个都是各自造轮子——各自解析不同的事件格式、各自处理 session resume、各自注入 MCP config。接一个新 agent = 写 ~450 行适配代码（Service + EventTransformer + 测试）。
 
-team experience：
+operator experience：
 > "以后对接某些 agent 是不是就可以不用我们写那么多适配代码？而是他们符合某些要求就能接入？"
 > "本地接任何一个，无论是 CLI 的 Agent，还是比如说别人是 WebSocket 写的那种 Agent……我们是不是得抽象一套什么样的东西给我们自己用？"
 
@@ -45,7 +45,7 @@ playground 分支的 ACP 实现验证了"配置接入"的可行性（填表 → 
 
 ### Phase C: Hub UI 接入表单 + 自动 probe
 
-让team lead/用户在 Hub 上填表接入新 agent：
+让operator/用户在 Hub 上填表接入新 agent：
 
 1. **必填**：名称 + 接入类型（Local Command / Remote A2A）+ 入口
 2. **自动 probe**：探测 binding → 拿到 capabilities → 推荐配置
@@ -116,5 +116,5 @@ playground 分支的 ACP 实现验证了"配置接入"的可行性（填表 → 
 
 ## Review Gate
 
-- Phase A: 架构级——猫猫讨论 → team lead拍板（ADR-023 审批）
+- Phase A: 架构级——猫猫讨论 → operator拍板（ADR-023 审批）
 - Phase B-D: 跨 family review

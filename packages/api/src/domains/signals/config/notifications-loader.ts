@@ -7,7 +7,7 @@ import type { SignalPaths } from './signal-paths.js';
 import { resolveSignalPaths } from './signal-paths.js';
 import { ensureSignalWorkspace } from './sources-loader.js';
 
-const NOTIFICATIONS_FILE_BANNER = '# Cat Cafe Signal Hunter notifications config\n';
+const NOTIFICATIONS_FILE_BANNER = '# Clowder AI Signal Hunter notifications config\n';
 
 const DailyDigestTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 
@@ -69,7 +69,7 @@ export const DEFAULT_SIGNAL_NOTIFICATIONS: SignalNotificationConfig = {
         secure: false,
       },
       to: 'owner@example.com',
-      from: 'Cat Cafe Signals <noreply@cat-cafe.local>',
+      from: 'Clowder AI Signals <noreply@cat-cafe.local>',
     },
     in_app: {
       enabled: true,

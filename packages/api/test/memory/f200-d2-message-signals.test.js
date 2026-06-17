@@ -4,12 +4,12 @@ import { before, describe, it } from 'node:test';
 /**
  * F200 AC-D2.1 — Message-based signal detection tests.
  *
- * Covers CVO acceptance + reviewer approval via thread message scanning:
+ * Covers operator acceptance + reviewer approval via thread message scanning:
  * keyword matching, negation guards, merge-pattern precision,
  * latest-decision-wins ordering, and connector source filtering.
  */
 
-describe('F200 AC-D2.1 — CVO acceptance signal', () => {
+describe('F200 AC-D2.1 — operator acceptance signal', () => {
   let ThreadAwareSignalSources;
 
   before(async () => {
@@ -24,21 +24,21 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
     },
   };
 
-  it('detects CVO accept from thread messages with Chinese keywords', async () => {
+  it('detects operator accept from thread messages with Chinese keywords', async () => {
     const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: '好的，可以合入' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true);
   });
 
-  it('detects CVO accept with "通过" keyword', async () => {
+  it('detects operator accept with "通过" keyword', async () => {
     const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: '看了，通过' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true);
   });
 
-  it('ignores CVO accept from cat messages (only human user counts)', async () => {
+  it('ignores operator accept from cat messages (only human user counts)', async () => {
     const messageStore = mockMessageStore([{ id: 'm1', userId: null, catId: 'opus-46', text: '可以合入了' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
@@ -47,7 +47,7 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
 
   // --- Negation guard ---
 
-  it('rejects CVO negation phrases (Chinese + English + word-boundary)', async () => {
+  it('rejects operator negation phrases (Chinese + English + word-boundary)', async () => {
     for (const text of [
       '看了，不通过，需要改',
       '不可以合入，有问题',
@@ -72,7 +72,7 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
     assert.equal(result, true, '"没问题" is a positive idiom, should still accept');
   });
 
-  it('rejects CVO non-approval context (questions, particles, conditionals)', async () => {
+  it('rejects operator non-approval context (questions, particles, conditionals)', async () => {
     for (const text of [
       '可以合入吗？',
       'LGTM?',
@@ -104,13 +104,13 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
       const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
-      assert.equal(result, false, `"${text}" is non-approval context, not CVO approval`);
+      assert.equal(result, false, `"${text}" is non-approval context, not operator approval`);
     }
   });
 
   // --- 通过 pattern precision: technical status ≠ approval ---
 
-  it('rejects CVO technical-status uses of "通过" (question + CI/test prefix + gap)', async () => {
+  it('rejects operator technical-status uses of "通过" (question + CI/test prefix + gap)', async () => {
     for (const text of [
       'CI 通过了吗？',
       '测试通过了',
@@ -122,11 +122,11 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
       const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
       const result = await sources.isCvoAcceptedForThread('thread-001');
-      assert.equal(result, false, `"${text}" is technical status, not CVO approval`);
+      assert.equal(result, false, `"${text}" is technical status, not operator approval`);
     }
   });
 
-  it('accepts CVO mixed tech-status + explicit approval in same message', async () => {
+  it('accepts operator mixed tech-status + explicit approval in same message', async () => {
     for (const text of ['CI 已通过，可以合入', '测试已经通过了，走起', 'CI 已通过，没问题']) {
       const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
@@ -137,7 +137,7 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
 
   // --- Merge pattern precision (whole-message anchored) ---
 
-  it('rejects CVO merge questions and conditionals (non-imperative)', async () => {
+  it('rejects operator merge questions and conditionals (non-imperative)', async () => {
     for (const text of [
       '什么时候 merge?',
       '先讨论再 merge',
@@ -153,14 +153,14 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
     }
   });
 
-  it('accepts CVO imperative "merge" as standalone approval', async () => {
+  it('accepts operator imperative "merge" as standalone approval', async () => {
     const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text: 'merge' }]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
     assert.equal(result, true, 'standalone "merge" is an approval signal');
   });
 
-  it('accepts CVO imperative "merge it" / "merge please"', async () => {
+  it('accepts operator imperative "merge it" / "merge please"', async () => {
     for (const text of ['merge it', 'merge this', 'merge please', 'please merge', 'merge!']) {
       const messageStore = mockMessageStore([{ id: 'm1', userId: 'user-landy', catId: null, text }]);
       const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
@@ -171,27 +171,27 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
 
   // --- Latest decision wins (newest→oldest) ---
 
-  it('CVO rejection after approval → latest decision wins (returns false)', async () => {
+  it('operator rejection after approval → latest decision wins (returns false)', async () => {
     const messageStore = mockMessageStore([
       { id: 'm1', userId: 'user-landy', catId: null, text: '可以合入' },
       { id: 'm2', userId: 'user-landy', catId: null, text: '等等，不通过' },
     ]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
-    assert.equal(result, false, 'later CVO rejection should override earlier approval');
+    assert.equal(result, false, 'later operator rejection should override earlier approval');
   });
 
-  it('CVO re-approval after rejection → latest decision wins (returns true)', async () => {
+  it('operator re-approval after rejection → latest decision wins (returns true)', async () => {
     const messageStore = mockMessageStore([
       { id: 'm1', userId: 'user-landy', catId: null, text: '不通过' },
       { id: 'm2', userId: 'user-landy', catId: null, text: '修好了，可以合入' },
     ]);
     const sources = new ThreadAwareSignalSources(mockDb(), messageStore, EMPTY_TASK_STORE);
     const result = await sources.isCvoAcceptedForThread('thread-001');
-    assert.equal(result, true, 'later CVO re-approval should win');
+    assert.equal(result, true, 'later operator re-approval should win');
   });
 
-  // --- Connector/system messages must not trigger CVO acceptance ---
+  // --- Connector/system messages must not trigger operator acceptance ---
 
   it('ignores connector message with "CI 通过" (has source field)', async () => {
     const messageStore = mockMessageStore([
@@ -208,7 +208,7 @@ describe('F200 AC-D2.1 — CVO acceptance signal', () => {
     assert.equal(result, false, 'connector message with "通过" should not trigger cvo_accepted');
   });
 
-  it('still detects real CVO acceptance when connector messages also present', async () => {
+  it('still detects real operator acceptance when connector messages also present', async () => {
     const messageStore = mockMessageStore([
       {
         id: 'm1',

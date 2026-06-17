@@ -97,7 +97,7 @@ export function TaskCard({
         <div className="mt-2 pt-2 border-t border-cafe">
           {task.why && <p className="text-xs text-cafe-muted leading-relaxed">{task.why}</p>}
           <p className="text-micro text-cafe-muted mt-1">
-            {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? '铲屎官' : task.createdBy}
+            {formatRelativeTime(task.createdAt)} · {task.createdBy === 'user' ? 'co-creator' : task.createdBy}
           </p>
         </div>
       )}

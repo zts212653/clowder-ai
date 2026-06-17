@@ -3,8 +3,8 @@
 // "node_modules" in extraResources (since v20.15.2), so we do it manually.
 // See: https://github.com/electron-userland/electron-builder/issues/3104
 
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 
 exports.default = async function afterPack(context) {
   if (context.electronPlatformName !== 'darwin') {

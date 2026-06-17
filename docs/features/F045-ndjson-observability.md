@@ -22,7 +22,7 @@ created: 2026-02-27
 | **Codex** | `agent_message`, `command_execution`, `file_change`, `thread.started` | reasoning, todo_list, mcp_tool_call, web_search, item-level error |
 | **Gemini** | `message/assistant`, `tool_use`, `init`, `result/error` | （暂不在本 Feature 范围，Gemini CLI 事件较少） |
 
-**team lead痛点**：
+**operator痛点**：
 1. 猫猫在想什么？前端看不到 thinking
 2. 猫猫的计划进度？只能从自然语言硬抽，很脆弱
 3. 出错了为什么？只显示笼统的 "error"，不知道是超 turn、超预算还是运行时异常
@@ -58,16 +58,16 @@ created: 2026-02-27
 
 **核心原则**：不碰现有 MessageStore schema，可观测层是纯增量。
 
-### team lead UX 决策（2026-02-27 采访）
+### operator UX 决策（2026-02-27 采访）
 
 | 问题 | 决策 | 理由 |
 |------|------|------|
 | Thinking 展示 | 方案 A：消息气泡内嵌折叠，默认折叠 | 直观，不干扰阅读 |
 | Thinking 跨猫 | **暂不转发/查阅**（遗留到未来） | CLI 输出已经很多，再加 thinking 上下文爆炸 |
 | Plan 位置 | 右侧看板（`RightStatusPanel`，已有） | 全局性，方便未来扩展 |
-| Plan 持久化 | **必须修复**：当前刷新/页面重载后进度丢失 | team lead痛点：刷新后右上角只显示"等待调用..."（V1 覆盖浏览器刷新；服务重启恢复为 follow-up） |
+| Plan 持久化 | **必须修复**：当前刷新/页面重载后进度丢失 | operator痛点：刷新后右上角只显示"等待调用..."（V1 覆盖浏览器刷新；服务重启恢复为 follow-up） |
 | Token/Cost | 保持原状（已有），不在 F045 范围 | F24 已实现 |
-| 优先级排序 | **Plan > Thinking > Error subtype** | team lead日常最想知道"猫做到哪了" |
+| 优先级排序 | **Plan > Thinking > Error subtype** | operator日常最想知道"猫做到哪了" |
 
 ### 现有 Plan 系统（F26 遗产）
 
@@ -123,7 +123,7 @@ Claude TodoWrite tool_use → extractTaskProgress() → system_info WS → Right
 
 ### 遗留（Future，不在本 Feature 范围）
 
-- ~~**跨猫 thinking 查阅**~~：team lead决策——"当真的需要的时候再设计，不然过度设计"
+- ~~**跨猫 thinking 查阅**~~：operator决策——"当真的需要的时候再设计，不然过度设计"
 - ~~**ToolPanel**~~（MCP 工具详情折叠区）：等 Codex mcp_tool_call 实测验证后再考虑
 - ~~**TokenHUD**~~：已有（F24 实现），不重做
 - ~~**CatTaskOverview 跨猫总览**~~：Plan 持久化做好后自然可扩展
@@ -147,8 +147,8 @@ Claude TodoWrite tool_use → extractTaskProgress() → system_info WS → Right
 | 决策 | 选择 | 放弃的方案 | 理由 |
 |------|------|-----------|------|
 | 数据分层 | 三层（Message/Observation/Telemetry） | 扩展 AgentMessageType | 不碰现有 schema，纯增量，前端向后兼容 |
-| thinking 展示 | 消息气泡内嵌折叠（方案 A） | 侧边栏 / 调试开关 | team lead选择：直观 |
-| thinking 跨猫 | **暂不做**（遗留） | 存+按需查阅 | team lead："不然过度设计" |
+| thinking 展示 | 消息气泡内嵌折叠（方案 A） | 侧边栏 / 调试开关 | operator选择：直观 |
+| thinking 跨猫 | **暂不做**（遗留） | 存+按需查阅 | operator："不然过度设计" |
 | plan 位置 | 右侧看板（复用 RightStatusPanel） | 消息流内嵌 | 已有基础设施，全局性 |
 | plan 互操作 | 全局可见 + TaskStore 同步 | 仅本猫可见 | 多猫协调基础 |
 | web_search query | 默认只计数，不落盘 | 完整记录 | 隐私安全（Maine Coon建议） |
@@ -197,11 +197,11 @@ Claude TodoWrite tool_use → extractTaskProgress() → system_info WS → Right
 
 **修复**：PR #91 将 thinking 嵌入 assistant 气泡内部，不再作为独立 system message 渲染。
 
-### Gap #1a: 🧠 Thinking 与 💭 心里话 并存显示 ✅ team lead已拍板 (2026-02-28)
+### Gap #1a: 🧠 Thinking 与 💭 心里话 并存显示 ✅ operator已拍板 (2026-02-28)
 
 **问题**：当消息同时有 🧠 Thinking（extended reasoning）和 💭 心里话（CLI stream output）时，如何显示？
 
-**team lead决策**：
+**operator决策**：
 - **两块并存，都保持折叠** — 🧠 Thinking 和 💭 心里话 是不同概念，各自独立折叠
 - **动态显示**：debug 模式默认展开（便于阅读）；play 模式保持折叠；且 thinkingMode 可随时切换，已渲染消息即时响应 ✅（PR #100）
 - **当前实现**：ChatMessage.tsx 两块并存；默认折叠/展开由 thread-level `thinkingMode` 控制 ✅
@@ -216,13 +216,13 @@ Claude TodoWrite tool_use → extractTaskProgress() → system_info WS → Right
 
 **发现者**：Maine Coon/GPT-52
 
-**问题（历史担忧）**：`RedisThreadStore` 的 `thinkingMode` 默认是 `debug`。我们担心 debug 模式下 🧠 Thinking 可能被传递给其他猫作为上下文，违背team lead“🧠 Thinking 永不跨猫”的约束。
+**问题（历史担忧）**：`RedisThreadStore` 的 `thinkingMode` 默认是 `debug`。我们担心 debug 模式下 🧠 Thinking 可能被传递给其他猫作为上下文，违背operator“🧠 Thinking 永不跨猫”的约束。
 
 **结论（已验证）**：🧠 Thinking 不会进入跨猫 prompt，上述担忧不成立：
 - **prompt 组装**只使用 `StoredMessage.content`（不读取 `thinking` 字段），因此即便 thinking 持久化到 MessageStore，也不会注入到其他猫上下文
 - `thinkingMode` 目前仅影响 **💭 心里话（CLI stream output）** 的跨猫可见性策略，以及前端折叠/展开默认行为（PR #100），不影响 🧠 Thinking 的跨猫隔离
 
-**处置**：本 gap 关闭；如未来引入“把 thinking 注入 prompt”的能力，必须重新走team lead拍板 + 安全评审。
+**处置**：本 gap 关闭；如未来引入“把 thinking 注入 prompt”的能力，必须重新走operator拍板 + 安全评审。
 
 ### Gap #3: 截图证据缺失 ✅ 已补齐 (2026-02-28)
 
@@ -242,7 +242,7 @@ Claude TodoWrite tool_use → extractTaskProgress() → system_info WS → Right
 
 ### Gap #4: Plan/Checklist 持久化到 Redis + 继续按钮 ✅ 进行中（2026-02-28）
 
-**team lead痛点**：CLI 进程被杀/异常退出时，计划（todo/checklist）仍有价值，需要可恢复展示，并提供“已中断（上次进度）+ 一键继续（新 invocation）”。
+**operator痛点**：CLI 进程被杀/异常退出时，计划（todo/checklist）仍有价值，需要可恢复展示，并提供“已中断（上次进度）+ 一键继续（新 invocation）”。
 
 **处置（实现中）**：
 - 将 task progress 从 module-level cache 升级为 **Redis-backed snapshots**（按 `(threadId, catId)` 存储，带 TTL）

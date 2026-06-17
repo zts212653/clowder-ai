@@ -16,7 +16,7 @@ updated: 2026-03-05
 
 2026 年 6 月 HCI 大会预热需要让三只猫能**自主产出和发布社交媒体内容**。当前瓶颈：
 
-1. 小红书 MCP 只在team lead的 Claude.ai App 上配置，猫猫们在 Cat Café runtime 中无法直接使用
+1. 小红书 MCP 只在operator的 Claude.ai App 上配置，猫猫们在 Cat Café runtime 中无法直接使用
 2. 抖音/B站 尚无 MCP 接入
 3. 没有系统化的"名场面"素材采集和管理流程
 4. 猫猫性格档案散落在各处，没有结构化的 profile 数据
@@ -32,11 +32,11 @@ updated: 2026-03-05
 1. **小红书 MCP 接入 Cat Café**
    - MCP Server 已确认：`mcp-remote http://<local-integration-endpoint>/mcp`（通过 `npx` 启动）
    - 接入方式：在 cat-cafe `.mcp.json` 中添加 xiaohongshu MCP server 配置，指向同一个 <local-integration-endpoint>（**已确认同一台机器，可直接接入**）
-   - 权限模型：**猫猫自主发布 + team lead可回溯**；内容含密码/token/内部吐槽时需审批
-   - 发布签名：用team lead的号，每只猫发帖时附带猫猫签名（如"—Ragdoll"）
+   - 权限模型：**猫猫自主发布 + operator可回溯**；内容含密码/token/内部吐槽时需审批
+   - 发布签名：用operator的号，每只猫发帖时附带猫猫签名（如"—Ragdoll"）
 
 2. **抖音 MCP 调研与接入**
-   - team lead只有个人账号（同小红书模式：team lead的号 + 猫猫签名）
+   - operator只有个人账号（同小红书模式：operator的号 + 猫猫签名）
    - 调研抖音开放平台 API / 现有 MCP 实现
    - 评估可行性（发布图文/短视频、读评论、数据看板）
 
@@ -49,7 +49,7 @@ updated: 2026-03-05
 猫猫专属表情包——**猫猫自己发自己的表情包，更被喜爱**。
 
 > 参考素材：`assets/stickers/opus/sheet.png`（GPT 画的Ragdoll sheet，已验证风格可行）
-> team lead反馈：Siamese之前画的"太人不够猫"，sheet.png 的风格对——Q 版、猫猫味、不拟人。
+> operator反馈：Siamese之前画的"太人不够猫"，sheet.png 的风格对——Q 版、猫猫味、不拟人。
 
 #### 1. 三猫视觉设定（基于头像确认）
 
@@ -157,7 +157,7 @@ NO human gestures.
 
 #### 4. 切割脚本
 
-team lead确认：出图后由Ragdoll写脚本自动切割。
+operator确认：出图后由Ragdoll写脚本自动切割。
 
 - 输入：4×4 sheet PNG（约 2048×2048）
 - 处理：sharp/canvas 按网格坐标切割 → trim 白边 → resize 统一尺寸
@@ -175,7 +175,7 @@ team lead确认：出图后由Ragdoll写脚本自动切割。
 系统化采集和管理一个月以来的协作素材：
 
 1. **素材采集**
-   - 从现有 thread 历史中提取"名场面"（猫猫吵架、review 拉锯、team lead骂猫、取名故事等）
+   - 从现有 thread 历史中提取"名场面"（猫猫吵架、review 拉锯、operator骂猫、取名故事等）
    - 脱敏处理：去除内部代码、token、URL、同事信息
    - 标注分类：搞笑 / 感动 / 技术 / 日常
 
@@ -215,7 +215,7 @@ team lead确认：出图后由Ragdoll写脚本自动切割。
 
 - [x] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
 - [x] AC-1: 至少一个社交媒体平台（小红书）的 MCP 工具可在 Cat Café runtime 中被任意猫猫调用（2026-03-04 完成：disabledMcpServers 修复 + 三层配置，三猫均成功发帖）
-- [x] AC-2: 发布内容有审核机制（2026-03-04 验证：猫猫自主发布 + 署名，team lead可在小红书回溯）
+- [x] AC-2: 发布内容有审核机制（2026-03-04 验证：猫猫自主发布 + 署名，operator可在小红书回溯）
 - [x] AC-3: 抖音/B站 MCP 可行性调研报告完成（2026-03-11 Maine Coon GPT-5.4 完成：B站优先，抖音后置）
 - [ ] AC-4: 至少 10 条名场面素材已采集、脱敏、格式化
 - [ ] AC-5: 三只猫（Ragdoll/Maine Coon/Siamese）的性格档案结构化数据完成
@@ -226,7 +226,7 @@ team lead确认：出图后由Ragdoll写脚本自动切割。
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "让每只猫都能自由使用小红书（虽然是我的号）" | AC-1, AC-2 | manual: 猫猫在 runtime 中成功发帖 | [x] 2026-03-04 三猫发帖成功 |
 | R2 | "甚至抖音" | AC-3 | doc: 调研报告 | [x] 2026-03-11 Maine Coon完成 |
@@ -235,7 +235,7 @@ team lead确认：出图后由Ragdoll写脚本自动切割。
 | R5 | 猫猫性格档案（会议共识） | AC-5, AC-6 | doc: profile 文件存在且结构完整 | [ ] |
 | R6 | "猫猫自己发自己的表情包似乎更被喜爱" | AC-7, AC-8 | manual: 三猫表情包存在 + manifest 可用 | [ ] |
 | R7 | "一次给全部方便画风统一且好切割" | AC-9 | test: 切割脚本输入 sheet → 输出 16 张 | [ ] |
-| R8 | "表情包是猫猫味道的！不够猫猫" | AC-7 | visual: team lead review 画风 | [ ] |
+| R8 | "表情包是猫猫味道的！不够猫猫" | AC-7 | visual: operator review 画风 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -367,13 +367,13 @@ AIRI 的 `personality-v1.velin.md` 结构（已验证可用）：
 
 | 决策 | 选项 | 结论 | 决策者 |
 |------|------|------|--------|
-| 主线路径 | A 传播优先 / B 开源增长优先 | **待外部讨论拍板**（团队倾向 A） | team lead |
-| 猫猫发帖权限 | 自由发布 / 审批后发布 | **默认自主发 + team lead可回溯；敏感内容需审批** | team lead (2026-03-03) |
+| 主线路径 | A 传播优先 / B 开源增长优先 | **待外部讨论拍板**（团队倾向 A） | operator |
+| 猫猫发帖权限 | 自由发布 / 审批后发布 | **默认自主发 + operator可回溯；敏感内容需审批** | operator (2026-03-03) |
 | 社交媒体优先级 | 小红书 > 抖音 > B站 | 小红书先行（已有基础） | 会议共识 |
-| 小红书 MCP 接入方式 | 代理 / 直连 | `mcp-remote http://<local-integration-endpoint>/mcp`（本地 MCP Server） | team lead (2026-03-03) |
-| 表情包出图方式 | 单张逐个生成 / Sheet 一次性 | **4×4 Sheet 一次性**（画风统一 + 方便切割） | team lead (2026-03-05) |
-| 表情包风格 | 写实 / 拟人 / Q 版猫猫 | **日系 Q 版，2.5 头身，猫猫肢体语言，禁止人类动作** | team lead (2026-03-05) |
-| 表情包切割 | 手动 PS / 脚本自动 | **脚本自动切割**（Ragdoll写，Siamese之前切不对） | team lead (2026-03-05) |
+| 小红书 MCP 接入方式 | 代理 / 直连 | `mcp-remote http://<local-integration-endpoint>/mcp`（本地 MCP Server） | operator (2026-03-03) |
+| 表情包出图方式 | 单张逐个生成 / Sheet 一次性 | **4×4 Sheet 一次性**（画风统一 + 方便切割） | operator (2026-03-05) |
+| 表情包风格 | 写实 / 拟人 / Q 版猫猫 | **日系 Q 版，2.5 头身，猫猫肢体语言，禁止人类动作** | operator (2026-03-05) |
+| 表情包切割 | 手动 PS / 脚本自动 | **脚本自动切割**（Ragdoll写，Siamese之前切不对） | operator (2026-03-05) |
 
 ## Dependencies
 
@@ -390,7 +390,7 @@ AIRI 的 `personality-v1.velin.md` 结构（已验证可用）：
 | 社交媒体 MCP 质量参差不齐 | 接入成本高 | 小红书先行验证，再推广 |
 | 内容持续产出的运营负担 | 猫猫 token 消耗 + 人力 | 先低频（每周 2-3 条）验证效果 |
 | AI 绘图三猫画风不一致 | 表情包风格割裂 | 用同一模型+同一 prompt 模板生成，sheet 方式保证单猫内一致 |
-| 表情包"太人不够猫" | 不符合team lead审美要求 | 风格铁律约束（禁止人类动作）+ team lead visual review |
+| 表情包"太人不够猫" | 不符合operator审美要求 | 风格铁律约束（禁止人类动作）+ operator visual review |
 
 ## Review Gate
 

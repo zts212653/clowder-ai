@@ -13,7 +13,7 @@ status: done
 
 ## Why
 
-Terminal 有历史补全能力（输入前缀 + Tab -> 补全历史输入），Cat Cafe Hub 没有。team lead经常重复输入类似内容（如"笨蛋猫猫"），需要 terminal 风格的输入效率提升。
+Terminal 有历史补全能力（输入前缀 + Tab -> 补全历史输入），Cat Cafe Hub 没有。operator经常重复输入类似内容（如"笨蛋猫猫"），需要 terminal 风格的输入效率提升。
 
 ## What
 
@@ -70,9 +70,9 @@ Terminal 有历史补全能力（输入前缀 + Tab -> 补全历史输入），C
 
 ### Why
 
-Terminal 的 Tab 不只是补全历史——还能补全文件路径。team lead经常在聊天中提到文件路径（如 `packages/web/src/...`），手动输入又长又容易打错。
+Terminal 的 Tab 不只是补全历史——还能补全文件路径。operator经常在聊天中提到文件路径（如 `packages/web/src/...`），手动输入又长又容易打错。
 
-team experience：
+operator experience：
 > "在 terminal 是不是 tab 也可以补全文件名路径什么的？我们的 f80 就暂时做不到？"
 
 ### What

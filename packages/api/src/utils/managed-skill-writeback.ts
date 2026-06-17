@@ -89,7 +89,7 @@ export async function mountManagedSkillSymlinks(
     }
     if (await isProviderRootSymlink(skillsDir)) {
       throw new ManagedSkillWritebackConflictError(
-        `Refusing to mount skill "${skillName}" at ${skillsDir}: provider skills root is not a managed Cat Cafe symlink.`,
+        `Refusing to mount skill "${skillName}" at ${skillsDir}: provider skills root is not a managed Clowder AI symlink.`,
       );
     }
 
@@ -98,7 +98,7 @@ export async function mountManagedSkillSymlinks(
     if (existing === 'managed') continue;
     if (existing === 'conflict') {
       throw new ManagedSkillWritebackConflictError(
-        `Refusing to mount skill "${skillName}" at ${linkPath}: path already exists and is not a managed Cat Cafe skill symlink.`,
+        `Refusing to mount skill "${skillName}" at ${linkPath}: path already exists and is not a managed Clowder AI skill symlink.`,
       );
     }
 

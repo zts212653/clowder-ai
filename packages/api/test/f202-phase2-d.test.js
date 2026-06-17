@@ -143,6 +143,16 @@ describe('Issue subject key helpers', () => {
   test('parseIssueSubjectKey returns null for malformed key', () => {
     assert.strictEqual(parseIssueSubjectKey('issue:nohash'), null);
   });
+
+  test('parseIssueSubjectKey returns null for partially-numeric issue number (Cloud R12 P2)', () => {
+    // parseInt("123abc") === 123 (not NaN), but the projector rejects non-pure-digit suffixes.
+    // The parser must be strict to prevent accepting keys that would cause projector 500s.
+    assert.strictEqual(
+      parseIssueSubjectKey('issue:owner/repo#123abc'),
+      null,
+      'partially numeric issue number must be rejected',
+    );
+  });
 });
 
 // ── AC-D2: IssueCommentRouter content building ────────────────────
@@ -267,6 +277,7 @@ describe('AC-D3: IssueCommentTaskSpec', () => {
       title: 'Issue #42',
       why: 'track',
       createdBy: 'cat1',
+      ownerCatId: 'cat1', // required: execute() guard enforces ownerCatId presence (F168 PR-3)
       userId: 'u1',
     });
 

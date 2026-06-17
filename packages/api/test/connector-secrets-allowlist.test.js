@@ -64,8 +64,9 @@ describe('CONNECTOR_SECRETS_ALLOWLIST', () => {
     assert.equal(CONNECTOR_SECRETS_ALLOWLIST.size, 26);
   });
 
-  it('connector gateway reload keys stay connector-only', () => {
-    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.size, 20);
+  it('connector gateway reload keys stay gateway-scoped', () => {
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.size, 21);
+    assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('CONNECTOR_GATEWAY_AUTOSTART'), true);
     assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_PUBLIC_KEY'), false);
     assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_PRIVATE_KEY'), false);
     assert.equal(CONNECTOR_GATEWAY_RELOAD_KEYS.has('VAPID_SUBJECT'), false);

@@ -32,7 +32,7 @@ triggers:
 | 前端改动已浏览器实测 | Playwright/Chrome 截图证据 | BLOCKED — 涉及前端必须真实打开浏览器验证 |
 | 根目录工件闸门通过 | 无根目录媒体/设计工件（工作树 + 已提交差异） | BLOCKED — 先归档/清理再发 |
 
-> **教训（F041）**：review 信只附了 spec，没附原始 Discussion。结果 10 轮云端 review 全在抓 edge case，没有一轮说"UI 不可用"。Reviewer 没有上下文，无法做愿景验证。
+> **教训（F041）**：review 信只附了 spec，没附原始 Discussion。结果 multiple remote review rounds 全在抓 edge case，没有一轮说"UI 不可用"。Reviewer 没有上下文，无法做愿景验证。
 
 ### Reviewer 匹配规则
 
@@ -60,7 +60,7 @@ BEFORE 发 review 请求:
 
 1. 确认 quality-gate 已通过（拿到本轮 gate report）
 2. 确认测试全绿（附这次真实运行的输出）
-3. 找到原始 Discussion 文档路径 + 摘录 ≤5 行铲屎官原话
+3. 找到原始 Discussion 文档路径 + 摘录 ≤5 行operator experience
 4. 抄入 Architecture ownership 三字段（F191）：
    - `Architecture cell: ...`
    - `Map delta: none | update required | new cell required`
@@ -79,9 +79,9 @@ BEFORE 发 review 请求:
 **使用 `refs/review-request-template.md` 模板**（单一真相源，不在此重复）。
 
 关键字段提醒：
-- **Original Requirements**: 必填，≤5 行铲屎官原话 + 来源文档路径，并明确请 reviewer 对照判断
+- **Original Requirements**: 必填，≤5 行operator experience + 来源文档路径，并明确请 reviewer 对照判断
 - **Architecture Ownership**: 必填，列 `Architecture cell` / `Map delta` / `Why`，并请 reviewer 检查 diff 是否与 `Map delta` 一致
-- **Open Questions**: 分为两类——**技术 OQ**（给 reviewer 的，如实现正确性）和 **价值 OQ**（需要 CVO 判断的，附 Decision Packet——格式见 `refs/decision-matrix.md`）。不混在一起
+- **Open Questions**: 分为两类——**技术 OQ**（给 reviewer 的，如实现正确性）和 **价值 OQ**（需要 operator 判断的，附 Decision Packet——格式见 `refs/decision-matrix.md`）。不混在一起
 - **自检证据**: 附 quality-gate report 摘要 + 测试命令输出 + 根目录工件闸门输出
 
 **F191 reviewer 视角**：
@@ -142,10 +142,10 @@ pnpm review:start
 ⚠️ BLOCKED — 缺少原始需求文档
 
 请附上：
-- 铲屎官 Discussion/Interview 文档路径
-- ≤5 行铲屎官原话摘录
+- operator Discussion/Interview 文档路径
+- ≤5 行operator experience摘录
 
-Reviewer 不只审代码质量，还要判断"这是铲屎官要的吗？"
+Reviewer 不只审代码质量，还要判断"这是operator要的吗？"
 没有原始需求 = Reviewer 无法做愿景验证 = 有权拒绝审查。
 ```
 
@@ -172,8 +172,8 @@ R2+ 且同型 finding 再次出现时，reviewer 应期待 author 在 PR comment
 | `quality-gate` | 自检（spec 对照 + 证据） | review **之前** |
 | **request-review（本 skill）** | 把改动送到 reviewer 面前 | 自检通过**之后** |
 | `receive-review` | 处理 reviewer 的反馈 | 收到 review **之后** |
-| `merge-gate` | 合入前的门禁 + PR + 云端 review | reviewer 放行**之后** |
+| `merge-gate` | 合入前的门禁 + PR + remote review | reviewer 放行**之后** |
 
 ## 下一步
 
-Review 请求发出后 → 等 reviewer 回复 → **直接加载 `receive-review`** skill 处理反馈（SOP stage `review`）。SOP 链条自动推进，不要停下来问铲屎官（§17）。
+Review 请求发出后 → 等 reviewer 回复 → **直接加载 `receive-review`** skill 处理反馈（SOP stage `review`）。SOP 链条自动推进，不要停下来问operator（§17）。

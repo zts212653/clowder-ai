@@ -24,9 +24,9 @@ created: 2026-05-01
 
 ## Why
 
-team lead 2026-05-01 报告：PR tracking event 唤醒Ragdoll时Maine Coon在跑，两猫频繁并发，外部 IM/GitHub 消息静默丢弃。
+operator 2026-05-01 报告：PR tracking event 唤醒Ragdoll时Maine Coon在跑，两猫频繁并发，外部 IM/GitHub 消息静默丢弃。
 
-根因：ADR-018 OQ-4 对所有入口统一用 slot 级判忙（`has(threadId, catId)`），把"用户主动 side-dispatch"和"系统自动 connector event"混为一谈。四猫审计一致确认，ADR-034 三猫 review 通过，team lead signoff（2026-05-01）。
+根因：ADR-018 OQ-4 对所有入口统一用 slot 级判忙（`has(threadId, catId)`），把"用户主动 side-dispatch"和"系统自动 connector event"混为一谈。四猫审计一致确认，ADR-034 三猫 review 通过，operator signoff（2026-05-01）。
 
 ## What
 
@@ -79,7 +79,7 @@ CI/review/conflict/scheduled 等 connector trigger policy 必须写入 `sourceCa
 ## Phase B: routeSerial text-scan fairness gate 扩展至 non-agent
 
 > **Status**: ✅ merged (PR #1747) | **Reopened**: 2026-05-17
-> **起因**: team lead报告 A2A @ 链期间外部消息堆积（截图 2026-05-17）。三猫独立诊断（46/47/55）收敛：Phase A 的 fairness gate 覆盖了 `tryAutoExecute` 但**漏了 `routeSerial` text-scan 路径**。
+> **起因**: operator报告 A2A @ 链期间外部消息堆积（截图 2026-05-17）。三猫独立诊断（46/47/55）收敛：Phase A 的 fairness gate 覆盖了 `tryAutoExecute` 但**漏了 `routeSerial` text-scan 路径**。
 
 ### Why
 

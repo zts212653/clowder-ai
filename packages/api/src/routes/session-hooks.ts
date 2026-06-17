@@ -8,7 +8,7 @@
  * GET  /api/sessions/sop-bookmark  — Read SOP stage bookmark (F073 P4)
  *
  * Both endpoints use `cliSessionId` (Claude Code's session_id) to look up the
- * corresponding Cat Cafe SessionRecord via `getByCliSessionId()`.
+ * corresponding Clowder AI SessionRecord via `getByCliSessionId()`.
  */
 
 import type { SessionRecord } from '@cat-cafe/shared';
@@ -87,7 +87,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
 
     const { cliSessionId, reason } = parseResult.data;
 
-    // Look up Cat Cafe session by CLI session ID
+    // Look up Clowder AI session by CLI session ID
     const record = await sessionChainStore.getByCliSessionId(cliSessionId);
     if (!record) {
       reply.status(404);

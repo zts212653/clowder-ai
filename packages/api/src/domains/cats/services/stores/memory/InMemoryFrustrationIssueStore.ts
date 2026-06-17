@@ -64,6 +64,13 @@ export class InMemoryFrustrationIssueStore implements IFrustrationIssueStore {
     }
   }
 
+  async setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void> {
+    const issue = this.issues.get(issueId);
+    if (issue) {
+      issue.communityIssueDraftId = draftId;
+    }
+  }
+
   async listByThread(threadId: string): Promise<FrustrationIssue[]> {
     return Array.from(this.issues.values())
       .filter((i) => i.threadId === threadId)

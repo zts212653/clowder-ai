@@ -14,7 +14,17 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -148,6 +158,83 @@ function readYamlTopLevelList(relPath, sectionName) {
 
 function readJsonFile(relPath) {
   return JSON.parse(readFileSync(resolve(ROOT, relPath), 'utf-8'));
+}
+
+function extractScriptRefs(command) {
+  const refs = new Set();
+  const matches = String(command).matchAll(
+    /(?:^|\s)(?:bash|node)\s+((?:\.\/)?scripts\/[^\s'"]+)|(?:^|\s)((?:\.\/)?scripts\/[^\s'"]+)/g,
+  );
+  for (const match of matches) {
+    const ref = match[1] ?? match[2];
+    if (ref) refs.add(ref.replace(/^\.\//, ''));
+  }
+  return [...refs];
+}
+
+function isManagedPath(relPath, managedRoots, managedFiles, managedScripts) {
+  if (managedFiles.has(relPath) || managedScripts.has(relPath)) return true;
+  for (const root of managedRoots) {
+    if (relPath === root || relPath.startsWith(`${root}/`)) return true;
+  }
+  return false;
+}
+
+function buildExportedRootScripts(sourceScripts) {
+  const scripts = { ...sourceScripts };
+  scripts['start:direct'] = 'node ./scripts/start-entry.mjs start:direct --profile=opensource';
+  scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
+  scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
+  scripts['check:pre-merge-gate'] =
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/test-bash-runtime.test.mjs';
+  if (scripts.check === 'node scripts/run-checks.mjs') {
+    scripts.check = [
+      'pnpm biome check . --diagnostic-level=error',
+      'pnpm check:features',
+      'pnpm check:sop-definitions',
+      'pnpm check:skills:manifest',
+      'pnpm check:skills:surfaces',
+      'pnpm check:env-ports',
+      'pnpm check:env-registry',
+      'pnpm check:env-example',
+      'pnpm check:start-profile-isolation',
+      'pnpm check:pre-merge-gate',
+      'pnpm check:guides',
+      'pnpm check:followup-tails',
+      'pnpm check:scripts-ascii-only',
+    ].join(' && ');
+  }
+  if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
+    scripts.check += ' && pnpm check:start-profile-isolation';
+  }
+  delete scripts['check:architecture-ownership'];
+  delete scripts['test:architecture-ownership'];
+
+  const internalScripts = [
+    'antigravity:smoke',
+    'check:hmac-salt',
+    'check:antigravity-smoke',
+    'check:biome-version',
+    'check:incident-containment',
+    'check:sync-export',
+    'check:web-global-css-imports',
+    'check:settings-primitives',
+    'check:root-debris',
+    'check:source-hygiene',
+    'check:f223-action-tracking',
+    // F238 Phase D: reverse-sanitizer detect-only CLI — internal boundary tooling
+    // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
+    'check:reverse-sanitizer',
+    'check:boundary-roundtrip',
+    'clean:root-debris',
+  ];
+  for (const scriptName of internalScripts) {
+    delete scripts[scriptName];
+  }
+  for (const key of Object.keys(scripts)) {
+    if (key.startsWith('desktop:')) delete scripts[key];
+  }
+  return scripts;
 }
 
 function loadWorkspacePackageRootsByName() {
@@ -404,6 +491,24 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
       fallback,
       expectedApiPort,
       `runtime-worktree.sh API port fallback should be ${expectedApiPort}, got ${fallback}`,
+    );
+  });
+
+  it('runtime-worktree.sh is the explicit global agent-key sidecar owner', () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/runtime-worktree.sh'), 'utf-8');
+    const ownerExports = content.match(/export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1/g) ?? [];
+    assert.ok(
+      ownerExports.length >= 2,
+      'runtime-worktree.sh must mark both in-place and runtime-worktree starts as global sidecar owner',
+    );
+  });
+
+  it('alpha-worktree.sh does not own the global agent-key sidecar', () => {
+    const content = readFileSync(resolve(ROOT, 'scripts/alpha-worktree.sh'), 'utf-8');
+    assert.doesNotMatch(
+      content,
+      /export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1/,
+      'alpha uses isolated Redis 6398 and must not overwrite runtime global agent-key sidecars',
     );
   });
 
@@ -863,6 +968,74 @@ excluded:
         content.includes('"check:f223-action-tracking"'),
         'public package.json should drop source-only F223 action tracking because its inventory truth source is not exported',
       );
+      assert.ok(
+        content.includes('"check:biome-version"'),
+        'public package.json should drop check:biome-version because its script target is not exported',
+      );
+    });
+
+    it('sync-manifest exports every scripts/* target referenced by exported package.json surfaces', () => {
+      const managedRoots = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_roots'));
+      const managedFiles = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_files'));
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const packageJsonSurfaces = ['package.json'];
+
+      for (const root of managedRoots) {
+        const packageJsonPath = `${root}/package.json`;
+        if (existsSync(resolve(ROOT, packageJsonPath))) {
+          packageJsonSurfaces.push(packageJsonPath);
+        }
+      }
+
+      const missing = [];
+      for (const packageJsonPath of packageJsonSurfaces) {
+        const pkg = readJsonFile(packageJsonPath);
+        const scripts =
+          packageJsonPath === 'package.json' ? buildExportedRootScripts(pkg.scripts ?? {}) : (pkg.scripts ?? {});
+        const packageRoot = packageJsonPath === 'package.json' ? '' : packageJsonPath.slice(0, -'/package.json'.length);
+
+        for (const [scriptName, command] of Object.entries(scripts)) {
+          for (const ref of extractScriptRefs(command)) {
+            const exportPath = packageRoot.length > 0 ? `${packageRoot}/${ref}` : ref;
+            if (!isManagedPath(exportPath, managedRoots, managedFiles, managedScripts)) {
+              missing.push(`${packageJsonPath}:${scriptName} -> ${exportPath}`);
+            }
+          }
+        }
+      }
+
+      assert.deepEqual(
+        missing,
+        [],
+        `sync-manifest should export every scripts/* target referenced by exported package.json surfaces:\n${missing.join('\n')}`,
+      );
+    });
+
+    it('sync-manifest exports public root script guard closure for stale-skill cleanup and brand checks', () => {
+      const managedFiles = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_files'));
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const requiredScripts = [
+        'scripts/clean-stale-skill-links.sh',
+        'scripts/brand-dictionary-helper.mjs',
+        'scripts/brand-dictionary-helper.test.mjs',
+        'scripts/intake-from-opensource.sh',
+        'scripts/intake-from-opensource.test.mjs',
+      ];
+      const requiredFiles = ['assets/brand-dictionary.yaml', '.githooks/pre-commit'];
+
+      for (const scriptPath of requiredScripts) {
+        assert.ok(
+          managedScripts.has(scriptPath),
+          `sync-manifest should export ${scriptPath} because public root package / test surfaces depend on it`,
+        );
+      }
+
+      for (const filePath of requiredFiles) {
+        assert.ok(
+          managedFiles.has(filePath),
+          `sync-manifest should export ${filePath} because public brand-guard tests depend on it`,
+        );
+      }
     });
 
     it('sync-manifest exports F180 user-level hook truth source', () => {
@@ -930,6 +1103,26 @@ excluded:
       }
     });
 
+    it('sync-manifest exports the GitHub plugin manifest used by public schedule factories', () => {
+      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
+      const pluginManifest = 'plugins/github/plugin.yaml';
+
+      assert.ok(
+        existsSync(resolve(ROOT, pluginManifest)),
+        `${pluginManifest} should exist in the source repo so outbound sync can export it`,
+      );
+      assert.ok(
+        managedFiles.includes(pluginManifest),
+        `${pluginManifest} must be exported because packages/api public schedule tests and runtime plugin loading depend on it`,
+      );
+      assert.equal(
+        targetOwnedFiles.includes(pluginManifest),
+        false,
+        `${pluginManifest} is source-managed after #906/#905 intake and must not be restored over from the target repo`,
+      );
+    });
+
     it('sync-manifest marks the F203 native L0 template as a sanitized transform', () => {
       const transformTargets = readYamlTransformTargets('sync-manifest.yaml');
 
@@ -947,7 +1140,156 @@ excluded:
       assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
       assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
       assert.match(sanitized, /\*\*Runtime data safety\*\*/);
-      assert.doesNotMatch(sanitized, /Cat Café 的护城河是情感壁垒不是技术壁垒/);
+      assert.doesNotMatch(sanitized, /Clowder AI 的护城河是情感壁垒不是技术壁垒/);
+    });
+
+    it('public docs and skill refs sanitize internal role, thread, and ops-cost markers', () => {
+      const source = [
+        'co-creator 原话',
+        '孟加拉猫 / 暹罗猫 / 缅因猫',
+        'thread_mq87iw5qmq93ygo6',
+        'thread_eval_a2a',
+        'cat_cafe_get_thread_context(<sub_thread_id>)',
+        '$30-50 and $23',
+        'shell examples may mention $1 and $2',
+        '21 轮云端 review',
+        'operator decision packet',
+      ].join('\n');
+      const sanitized = sanitizeFixture('docs/public-lessons.md', source);
+
+      assert.doesNotMatch(sanitized, /co-creator|孟加拉猫|暹罗猫|缅因猫/);
+      assert.doesNotMatch(sanitized, /\bthread_(?=[a-z0-9_]*[0-9])[a-z0-9_]{8,}\b/);
+      assert.doesNotMatch(sanitized, /\$[1-9][0-9]+(?:-[1-9][0-9]+)?\b/);
+      assert.doesNotMatch(sanitized, /云端 review|\bCVO\b/);
+      assert.match(sanitized, /operator/);
+      assert.match(sanitized, /Bengal/);
+      assert.match(sanitized, /\[thread-id\]/);
+      assert.match(sanitized, /operational cost/);
+      assert.match(sanitized, /remote review/);
+      assert.match(sanitized, /cat_cafe_get_thread_context\(<sub_thread_id>\)/);
+      assert.match(sanitized, /\$1 and \$2/);
+    });
+
+    it('public skill shell scripts keep positional parameters while sanitizing prose docs', () => {
+      const shell = sanitizeFixture(
+        'cat-cafe-skills/hyperfocus-brake/state.sh',
+        'local field="$1"\nlocal value="$2"\nprintf "%s=%s\\n" "$field" "$value"',
+      );
+
+      assert.match(shell, /local field="\$1"/);
+      assert.match(shell, /local value="\$2"/);
+    });
+
+    it('public harness eval domain registries keep systemThreadId as a runtime string', () => {
+      const yaml = sanitizeFixture(
+        'docs/harness-feedback/eval-domains/eval-a2a.yaml',
+        'domainId: eval:a2a\nsystemThreadId: thread_eval_a2a\n',
+      );
+
+      assert.match(yaml, /systemThreadId: thread_eval_a2a/);
+      assert.doesNotMatch(yaml, /systemThreadId: \[thread-id\]/);
+    });
+
+    it('sync-manifest excludes internal raw L0 staging content from public skill refs', () => {
+      const excluded = readYamlTopLevelList('sync-manifest.yaml', 'excluded');
+      const stagingContent = 'cat-cafe-skills/refs/l0-staging-content.md';
+
+      assert.ok(existsSync(resolve(ROOT, stagingContent)), `${stagingContent} must still exist in the source repo`);
+      assert.ok(
+        excluded.includes(stagingContent),
+        'ADR-038 raw L0 staging content contains internal routing/thread context and must not be exported as a public skill ref',
+      );
+
+      const stagingContentSource = readFileSync(
+        resolve(ROOT, 'packages/api/src/domains/cats/services/context/StagingContent.ts'),
+        'utf-8',
+      );
+      assert.match(
+        stagingContentSource,
+        /code === 'ENOENT'[\s\S]*EMPTY_STAGING_CONTENT/,
+        'public export may omit raw L0 staging content, so API must tolerate ENOENT with an empty staging manifest',
+      );
+
+      const invokeSingleCatTest = readFileSync(resolve(ROOT, 'packages/api/test/invoke-single-cat.test.js'), 'utf-8');
+      assert.match(
+        invokeSingleCatTest,
+        /hasSourceStagingContent/,
+        'invoke-single-cat ADR-038 tests must distinguish source repo staging from public export without raw L0 staging content',
+      );
+      assert.match(
+        invokeSingleCatTest,
+        /assertStagingPromptContract/,
+        'invoke-single-cat ADR-038 prompt assertions must keep source strict while allowing public export to omit raw staging strings',
+      );
+    });
+
+    it('public governance hash helper rebases drift guard to sanitized shared-rules headings', () => {
+      const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-public-governance-hash-'));
+      try {
+        const sharedRulesPath = resolve(tempRoot, 'cat-cafe-skills/refs/shared-rules.md');
+        const testFilePath = resolve(tempRoot, 'packages/api/test/system-prompt-builder.test.js');
+        const helperDir = resolve(tempRoot, 'helper path with spaces');
+        const helperPath = resolve(helperDir, 'update-public-governance-hash.mjs');
+        mkdirSync(dirname(sharedRulesPath), { recursive: true });
+        mkdirSync(dirname(testFilePath), { recursive: true });
+        mkdirSync(helperDir, { recursive: true });
+        copyFileSync(resolve(ROOT, 'scripts/update-public-governance-hash.mjs'), helperPath);
+
+        const publicSharedRules = [
+          '### P1. 面向终态，不绕路',
+          '### W3. 用户是 operator，不是甲方路由器',
+          '### W8. 共享视图——人猫共创家园，产物天然该在共享工作空间里可见',
+          '',
+        ].join('\n');
+        writeFileSync(sharedRulesPath, publicSharedRules);
+        writeFileSync(testFilePath, "const PINNED_HASH = '89989b48ac64c6ee';\n");
+
+        execFileSync('node', [helperPath, sharedRulesPath, testFilePath]);
+
+        const expectedHash = createHash('sha256')
+          .update(
+            publicSharedRules
+              .split('\n')
+              .filter((line) => /^###?\s+(P\d|W\d)/.test(line))
+              .sort()
+              .join('\n'),
+          )
+          .digest('hex')
+          .slice(0, 16);
+        const updatedTest = readFileSync(testFilePath, 'utf-8');
+        assert.match(updatedTest, new RegExp(`const PINNED_HASH = '${expectedHash}';`));
+        assert.doesNotMatch(updatedTest, /89989b48ac64c6ee/);
+      } finally {
+        rmSync(tempRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('sync-to-opensource.sh rebases public governance hash after comprehensive sanitization', () => {
+      const content = readSyncScript();
+
+      assert.match(
+        content,
+        /scripts\/update-public-governance-hash\.mjs/,
+        'sync should call the public governance hash helper after sanitizer changes shared-rules.md',
+      );
+      assert.match(
+        content,
+        /cat-cafe-skills\/refs\/shared-rules\.md[\s\S]*packages\/api\/test\/system-prompt-builder\.test\.js/,
+        'sync should derive the public PINNED_HASH from the exported shared-rules.md and patch the exported test',
+      );
+    });
+
+    it('sync-manifest exports the public governance hash helper used by public env-port checks', () => {
+      const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
+
+      assert.ok(
+        managedScripts.includes('scripts/check-env-port-drift.test.mjs'),
+        'public check:env-ports exports check-env-port-drift.test.mjs',
+      );
+      assert.ok(
+        managedScripts.includes('scripts/update-public-governance-hash.mjs'),
+        'check-env-port-drift.test.mjs copies the governance hash helper and needs it in public checkouts',
+      );
     });
 
     it('sync-to-opensource.sh hard-fails if public L0 still contains internal patterns', () => {
@@ -1082,7 +1424,7 @@ excluded:
       const inno = readFileSync(resolve(ROOT, 'desktop/installer/cat-cafe.iss'), 'utf-8');
       const postInstall = readFileSync(resolve(ROOT, 'desktop/scripts/post-install-offline.ps1'), 'utf-8');
       const adminPostInstallEntry = inno.match(
-        /Filename: "powershell\.exe";\s*\\\s*Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""\{app\}\\scripts\\post-install-offline\.ps1"" -AppDir ""\{app\}""";\s*\\\s*StatusMsg: "Configuring Cat Cafe\.\.\.";\s*\\\s*Flags: runhidden waituntilterminated(?:;[^\n]*)?/,
+        /Filename: "powershell\.exe";\s*\\\s*Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""\{app\}\\scripts\\post-install-offline\.ps1"" -AppDir ""\{app\}""";\s*\\\s*StatusMsg: "Configuring Clowder AI\.\.\.";\s*\\\s*Flags: runhidden waituntilterminated(?:;[^\n]*)?/,
       )?.[0];
 
       assert.match(
