@@ -5108,6 +5108,36 @@ export function useAgentMessages() {
               }
             }
             consumed = true;
+          } else if (parsed?.type === 'provider_capability') {
+            // #939 part A (kimi auth dual-path): capability telemetry from provider backends
+            // (kimi emits `thinking: unavailable` / `image_input: limited`, etc.). These are
+            // capability status reports — NOT user-facing errors. Before this branch they
+            // fell through to the default addMessage() path and surfaced as raw-JSON system
+            // bubbles, which first-time users read as "thinking failed" (the bug). Pattern
+            // mirrors F210-H1 agy_trajectory_progress + F045 rate_limit / compact_boundary:
+            // store on the invocation snapshot for a future capability UI (tooltip / badge);
+            // consumed silently here so the bubble layer never sees these.
+            const targetCatId = parsed.catId ?? msg.catId;
+            const capability = typeof parsed.capability === 'string' ? parsed.capability : 'unknown';
+            const status =
+              parsed.status === 'available' || parsed.status === 'limited' || parsed.status === 'unavailable'
+                ? parsed.status
+                : 'unavailable';
+            const reason = typeof parsed.reason === 'string' ? parsed.reason : '';
+            const provider = typeof parsed.provider === 'string' ? parsed.provider : 'unknown';
+            if (targetCatId) {
+              // Read-merge-write so multiple capabilities (thinking + image_input) coexist on
+              // the same cat invocation. setCatInvocation is a shallow zustand merge, so
+              // passing a fresh object would clobber other capabilities already stored.
+              const existing = useChatStore.getState().catInvocations?.[targetCatId]?.providerCapabilities ?? {};
+              setCatInvocation(targetCatId, {
+                providerCapabilities: {
+                  ...existing,
+                  [capability]: { status, reason, provider, receivedAt: Date.now() },
+                },
+              });
+            }
+            consumed = true;
           } else if (parsed?.type === 'governance_blocked') {
             const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
             const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';

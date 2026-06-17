@@ -490,6 +490,24 @@ export interface CatInvocationInfo {
   taskProgress?: TaskProgressState;
   /** F118 Phase C: Latest liveness warning snapshot */
   livenessWarning?: LivenessWarningSnapshot;
+  /** #939 part A (kimi auth dual-path): Latest provider capability reports keyed by capability
+   *  name (e.g. 'thinking', 'image_input'). Backend emits these as `system_info` events with
+   *  inner type `provider_capability`. Stored silently — MUST NOT render as a user-facing
+   *  system bubble (that was the bug: frontend fell through to default addMessage path and
+   *  surfaced raw JSON, which users read as "thinking failed"). A dedicated capability UI
+   *  (tooltip / status badge) is a future follow-up; for now the data is preserved here so
+   *  such UI can read it. */
+  providerCapabilities?: Record<string, ProviderCapabilityReport>;
+}
+
+/** #939 part A (kimi auth dual-path): per-capability report from a provider backend.
+ *  Populated by the `provider_capability` system_info handler in useAgentMessages.ts;
+ *  consumed silently there so the bubble layer never sees these. */
+export interface ProviderCapabilityReport {
+  status: 'available' | 'limited' | 'unavailable';
+  reason: string;
+  provider: string;
+  receivedAt: number;
 }
 
 /** F118 Phase C: Liveness warning snapshot from ProcessLivenessProbe */
