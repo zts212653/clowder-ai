@@ -18,6 +18,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { resolveCliTimeoutMs } from '../../../../../../utils/cli-timeout.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -102,6 +103,10 @@ export interface AcpCapacitySignal {
 }
 
 const CAPACITY_RE = /MODEL_CAPACITY_EXHAUSTED|No capacity available|status 429.*Retrying/i;
+
+export function resolveAcpPromptTimeoutMs(overrideMs?: number, env: NodeJS.ProcessEnv = process.env): number {
+  return resolveCliTimeoutMs(overrideMs, env);
+}
 
 export class AcpClient {
   private child: ChildProcess | null = null;
@@ -260,12 +265,12 @@ export class AcpClient {
     // after timeoutMs of SILENCE (no events). Idle stall (90s) catches true hangs
     // faster; this is the wider safety net for slow-but-alive sessions.
     // sendRequest gets a hard ceiling (1h) as absolute last-resort guard.
-    const timeoutMs = options?.timeoutMs ?? 900_000;
+    const timeoutMs = resolveAcpPromptTimeoutMs(options?.timeoutMs);
     const idleWarningMs = options?.idleWarningMs ?? 20_000;
     // Idle stall catches true hangs. Gemini CLI doesn't emit tool_call for MCP
     // tools, so pendingTool never activates. 90s covers most MCP calls (10-30s).
     const idleStallMs = options?.idleStallMs ?? 90_000;
-    const HARD_CEILING_MS = 3_600_000; // 1h — absolute last-resort for sendRequest promise
+    const hardCeilingMs = Math.max(3_600_000, timeoutMs > 0 ? timeoutMs * 2 : 3_600_000);
     const queue: AcpSessionUpdate[] = [];
     let waitResolve: (() => void) | null = null;
     let done = false;
@@ -284,7 +289,7 @@ export class AcpClient {
      *  Called once at prompt start and again on every incoming event. */
     const resetBudget = () => {
       if (budgetTimer) clearTimeout(budgetTimer);
-      if (done) return;
+      if (done || timeoutMs <= 0) return;
       budgetTimer = setTimeout(() => {
         if (done) return;
         log.error({ sessionId, eventCount, timeoutMs }, 'Turn budget exceeded — no activity for %dms', timeoutMs);
@@ -416,12 +421,13 @@ export class AcpClient {
     };
     this.capacityListeners.add(capacityInjector);
 
-    // Start activity-based budget timer — resets on each event from listener
+    // Start activity-based budget timer — resets on each event from listener.
+    // CLI_TIMEOUT_MS=0 disables the activity budget; the hard ceiling remains.
     resetBudget();
 
     // Fire prompt request — don't await, we'll drain the queue concurrently.
-    // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().
-    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, HARD_CEILING_MS)
+    // sendRequest uses a hard ceiling; actual budget is managed by resetBudget().
+    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, hardCeilingMs)
       .then((resp) => {
         const result = resp.result as unknown as AcpPromptResult;
         stopReason = result.stopReason;

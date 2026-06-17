@@ -269,12 +269,12 @@ export class GeminiAcpAdapter implements AgentService {
         log.info({ ...ctx }, 'ACP capacity warning yielded (catch path)');
         yield makeCapacityWarning(this.catId, capacitySignal, metadata);
       }
-      const { errorCode, errorMsg } = classifyError(err, capacitySignal, client.recentCapacitySignal);
+      const { errorCode, errorMsg, timeoutMs } = classifyError(err, capacitySignal, client.recentCapacitySignal);
       log.error({ ...ctx, errorCode, err: errorMsg, sessionId, eventCount, waitedMs }, 'ACP prompt failure');
       yield {
         type: 'error',
         catId: this.catId,
-        error: toUserFacingError(errorCode, errorMsg),
+        error: toUserFacingError(errorCode, errorMsg, timeoutMs),
         errorCode,
         metadata,
         timestamp: Date.now(),
@@ -348,11 +348,17 @@ const RECENT_SIGNAL_MAX_AGE_MS = 10 * 60 * 1000;
 /** Pattern for stream idle stall errors thrown by AcpClient idle watchdog. */
 const STREAM_IDLE_RE = /Stream idle|STREAM_IDLE_STALL/i;
 
+interface ClassifiedError {
+  errorCode: string;
+  errorMsg: string;
+  timeoutMs?: number;
+}
+
 function classifyError(
   err: unknown,
   capacitySignal: AcpCapacitySignal | null | undefined,
   clientRecentSignal?: AcpCapacitySignal | null,
-): { errorCode: string; errorMsg: string } {
+): ClassifiedError {
   if (err instanceof AcpProtocolError) {
     if (err.code === -32000 || err.message.includes('capacity')) {
       return { errorCode: 'model_capacity', errorMsg: err.message };
@@ -378,7 +384,7 @@ function classifyError(
         errorMsg: `Provider capacity exhausted (upstream 429, evidence: recent_process_signal, ${ageS}s ago). ${clientRecentSignal.message}`,
       };
     }
-    return { errorCode: 'turn_budget_exceeded', errorMsg: err.message };
+    return { errorCode: 'turn_budget_exceeded', errorMsg: err.message, timeoutMs: err.timeoutMs };
   }
   // F149: Stream idle stall — provider started responding then went silent
   const msg = err instanceof Error ? err.message : String(err);
@@ -394,7 +400,17 @@ function classifyError(
 /** Map internal error codes to user-friendly messages that clarify the failure source.
  *  Format: `{errorCode}: {errorMsg}\n{user-facing explanation}`
  *  The errorCode prefix is preserved for machine grep-ability (tests + invoke-helpers). */
-function toUserFacingError(errorCode: string, errorMsg: string): string {
+function formatTimeoutDuration(timeoutMs: number | undefined): string {
+  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return '当前配置';
+  }
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  if (seconds < 60) return `${seconds}秒`;
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return `${minutes}分钟`;
+}
+
+function toUserFacingError(errorCode: string, errorMsg: string, timeoutMs?: number): string {
   const base = `${errorCode}: ${errorMsg}`;
   switch (errorCode) {
     case 'model_capacity':
@@ -402,7 +418,7 @@ function toUserFacingError(errorCode: string, errorMsg: string): string {
     case 'stream_idle_stall':
       return `${base}\n⚠️ Gemini 服务端响应中断（Google 服务器可能繁忙或不稳定），非 Clowder AI 系统故障。`;
     case 'turn_budget_exceeded':
-      return `${base}\n⚠️ 本轮对话时间预算用完（${Math.round(900 / 60)}分钟），烁烁可能在执行复杂工具链。非故障，可重试。`;
+      return `${base}\n⚠️ 本轮对话时间预算用完（${formatTimeoutDuration(timeoutMs)}），烁烁可能在执行复杂工具链。非故障，可重试。`;
     case 'mcp_pollution':
       return `${base}\n⚠️ Gemini 工具调用异常（MCP 服务端错误）。`;
     case 'init_failure':

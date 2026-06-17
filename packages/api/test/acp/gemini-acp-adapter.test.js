@@ -829,6 +829,8 @@ describe('GeminiAcpAdapter integration', () => {
       'turn_budget_exceeded',
       `Expected turn_budget_exceeded when no capacity signal, got ${errorMsg.errorCode}`,
     );
+    assert.match(errorMsg.error, /2分钟/, 'Timeout message should reflect the actual AcpTimeoutError duration');
+    assert.doesNotMatch(errorMsg.error, /15分钟/, 'Timeout message must not be hard-coded to 15 minutes');
   });
 
   it('concurrent prompts on same client both capture provider-level capacity signal', async () => {

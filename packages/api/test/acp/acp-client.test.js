@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, it, mock } from 'node:test';
 
-const { AcpClient, AcpProtocolError } = await import(
+const { AcpClient, AcpProtocolError, resolveAcpPromptTimeoutMs } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpClient.js'
 );
 
@@ -64,6 +64,13 @@ describe('AcpClient', () => {
       await client.close();
       client = null;
     }
+  });
+
+  it('promptStream timeout follows shared CLI timeout configuration', () => {
+    assert.equal(resolveAcpPromptTimeoutMs(undefined, {}), 30 * 60 * 1000);
+    assert.equal(resolveAcpPromptTimeoutMs(undefined, { CLI_TIMEOUT_MS: '900000' }), 900000);
+    assert.equal(resolveAcpPromptTimeoutMs(undefined, { CLI_TIMEOUT_MS: '0' }), 0);
+    assert.equal(resolveAcpPromptTimeoutMs(120000, { CLI_TIMEOUT_MS: '1800000' }), 120000);
   });
 
   it('initialize sends protocolVersion and parses response', async () => {
