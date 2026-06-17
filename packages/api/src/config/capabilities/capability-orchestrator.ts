@@ -9,12 +9,15 @@
  * 连同 Clowder AI 自有 MCP 一起写入 capabilities.json。
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, rm, stat as statPath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { delimiter, extname, join, relative, resolve, sep } from 'node:path';
+import { delimiter, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
+import { resolveCatCafeSkillsSource } from '../../utils/skill-source.js';
+import { migrateCapabilitiesV1ToV2 } from '../governance/capabilities-migration.js';
 import {
   cleanStaleClaudeProjectOverrides,
   readAntigravityMcpConfig,
@@ -32,10 +35,21 @@ import {
 // ────────── F146: Per-project mutex for capability config writes ──────────
 
 const capabilityLocks = new Map<string, Promise<unknown>>();
+const capabilityLockContext = new AsyncLocalStorage<Set<string>>();
 
 export function withCapabilityLock<T>(projectRoot: string, fn: () => Promise<T>): Promise<T> {
+  const heldLocks = capabilityLockContext.getStore();
+  if (heldLocks?.has(projectRoot)) {
+    return Promise.resolve().then(fn);
+  }
+
   const prev = capabilityLocks.get(projectRoot) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
+  const run = () => {
+    const nextHeldLocks = new Set(heldLocks ?? []);
+    nextHeldLocks.add(projectRoot);
+    return capabilityLockContext.run(nextHeldLocks, fn);
+  };
+  const next = prev.then(run, run);
   capabilityLocks.set(projectRoot, next);
   const cleanup = () => {
     if (capabilityLocks.get(projectRoot) === next) capabilityLocks.delete(projectRoot);
@@ -151,6 +165,42 @@ const PROVIDER_WRITERS = {
   antigravity: writeAntigravityMcpConfig,
   kimi: writeKimiMcpConfig,
 } as const;
+
+type CliConfigSnapshot = { kind: 'missing' } | { kind: 'file'; data: Buffer; mode: number } | { kind: 'other' };
+
+async function snapshotCliConfigPath(path: string): Promise<CliConfigSnapshot> {
+  try {
+    const stat = await lstat(path);
+    if (stat.isFile()) return { kind: 'file', data: await readFile(path), mode: stat.mode & 0o7777 };
+    if (stat.isSymbolicLink()) {
+      const targetStat = await statPath(path).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT') return null;
+        throw err;
+      });
+      if (targetStat?.isFile()) return { kind: 'file', data: await readFile(path), mode: targetStat.mode & 0o7777 };
+    }
+    return { kind: 'other' };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' };
+    throw err;
+  }
+}
+
+async function restoreCliConfigPath(path: string, snapshot: CliConfigSnapshot): Promise<void> {
+  if (snapshot.kind === 'other') return;
+  if (snapshot.kind === 'missing') {
+    await rm(path, { recursive: true, force: true });
+    return;
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, snapshot.data, { mode: snapshot.mode });
+  await chmod(path, snapshot.mode);
+}
+
+export const __testing = {
+  snapshotCliConfigPath,
+  restoreCliConfigPath,
+};
 
 /** Check if a descriptor has a usable transport (stdio command, local resolver, or streamableHttp URL). */
 export function hasUsableTransport(desc: {
@@ -484,12 +534,73 @@ function safePath(projectRoot: string, ...segments: string[]): string {
   return normalized;
 }
 
+/**
+ * Read capabilities.json without side effects. If the file is v1,
+ * returns the in-memory v2-migrated form WITHOUT writing back to disk.
+ * Use `migrateAndPersistCapabilities()` for explicit owner-gated migration.
+ */
 export async function readCapabilitiesConfig(projectRoot: string): Promise<CapabilitiesConfig | null> {
   const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
   try {
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as CapabilitiesConfig;
-    if (data.version !== 1 || !Array.isArray(data.capabilities)) return null;
+    if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.capabilities)) return null;
+    let config: CapabilitiesConfig;
+    if (data.version === 1) {
+      config = await migrateCapabilitiesV1ToV2(projectRoot, data, await resolveCatCafeSkillsSource());
+    } else {
+      config = data;
+    }
+    // F228: Fill globalEnabled for skill entries that lack it (field migration).
+    // MCP/limb/schedule entries are left untouched — they still use `enabled`.
+    for (const cap of config.capabilities) {
+      if (cap.type === 'skill' && cap.globalEnabled === undefined) {
+        cap.globalEnabled = cap.enabled;
+      }
+    }
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * F228: Explicit owner-gated v1→v2 migration. Reads capabilities.json,
+ * migrates if v1, and persists the migrated config back to disk.
+ * Should only be called from write paths (bootstrap, PATCH, sync).
+ */
+export async function migrateAndPersistCapabilities(projectRoot: string): Promise<CapabilitiesConfig | null> {
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
+  try {
+    const raw = await readFile(filePath, 'utf-8');
+    const data = JSON.parse(raw) as CapabilitiesConfig;
+    if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.capabilities)) return null;
+    if (data.version === 1) {
+      const migrated = await migrateCapabilitiesV1ToV2(projectRoot, data, await resolveCatCafeSkillsSource());
+      try {
+        await writeCapabilitiesConfig(projectRoot, migrated);
+      } catch (err) {
+        console.warn(`[capabilities] Failed to persist v1->v2 migration for ${projectRoot}: ${(err as Error).message}`);
+      }
+      return migrated;
+    }
+    // F228: Fill globalEnabled for skill entries that lack it (field migration).
+    let needsPersist = false;
+    for (const cap of data.capabilities) {
+      if (cap.type === 'skill' && cap.globalEnabled === undefined) {
+        cap.globalEnabled = cap.enabled;
+        needsPersist = true;
+      }
+    }
+    if (needsPersist) {
+      try {
+        await writeCapabilitiesConfig(projectRoot, data);
+      } catch (err) {
+        console.warn(
+          `[capabilities] Failed to persist globalEnabled migration for ${projectRoot}: ${(err as Error).message}`,
+        );
+      }
+    }
     return data;
   } catch {
     return null;
@@ -1027,7 +1138,7 @@ export async function bootstrapCapabilities(
     capabilities.push(toCapabilityEntry(ext));
   }
 
-  const config: CapabilitiesConfig = { version: 1, capabilities };
+  const config: CapabilitiesConfig = { version: 2, capabilities };
   const resolverMigrated = migrateResolverBackedCapabilities(config);
   await writeCapabilitiesConfig(projectRoot, resolverMigrated.config);
   return resolverMigrated.config;
@@ -1210,6 +1321,12 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
   const perProvider = collectServersPerProvider(config);
   const projectRoot = resolve(paths.anthropic, '..');
   await resolveMachineSpecificServers(perProvider, { projectRoot });
+  const configPaths = Object.values(paths).filter(
+    (path): path is string => typeof path === 'string' && path.length > 0,
+  );
+  const snapshots = await Promise.all(
+    configPaths.map(async (path) => ({ path, snapshot: await snapshotCliConfigPath(path) })),
+  );
 
   const writes: Promise<void>[] = [];
   for (const [provider, servers] of Object.entries(perProvider)) {
@@ -1220,7 +1337,12 @@ export async function generateCliConfigs(config: CapabilitiesConfig, paths: CliC
     }
   }
 
-  await Promise.all(writes);
+  const results = await Promise.allSettled(writes);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failure) {
+    await Promise.all(snapshots.map(({ path, snapshot }) => restoreCliConfigPath(path, snapshot).catch(() => {})));
+    throw failure.reason;
+  }
 
   // Best-effort: clean resolver-managed per-project overrides from ~/.claude.json (F145 Phase D).
   // Per-project mcpServers shadow .mcp.json (higher priority), causing silent MCP failures

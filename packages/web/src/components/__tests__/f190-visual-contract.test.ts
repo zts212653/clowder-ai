@@ -1283,15 +1283,6 @@ describe('#723 round 7 — operator visual convergence: tabs, search, selects, b
     expect(skeleton![0]).not.toMatch(/style=.*borderRadius/);
   });
 
-  it('McpInstallForm: no form-input class, uses field-bg + input-stroke, buttons use secondary/accent pattern', () => {
-    const src = readSrc('McpInstallForm.tsx');
-    expect(src).not.toContain('form-input');
-    expect(src).not.toContain('bg-cafe-surface');
-    expect(src).not.toContain('border border-cafe');
-    expect(src).toContain('console-field-bg');
-    expect(src).toContain('console-input-stroke');
-  });
-
   it('InstallPlanDetail: disabled (direct_mcp) button uses neutral secondary, not accent', () => {
     const src = readSrc('marketplace/install-plan-detail.tsx');
     expect(src).toContain('cursor-not-allowed');

@@ -26,11 +26,11 @@ import type {
   CapabilityPatchRequest,
   CatFamily,
   McpToolInfo,
+  MountRules,
   SkillHealthSummary,
 } from '@cat-cafe/shared';
-import { catRegistry } from '@cat-cafe/shared';
+import { catRegistry, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { parse as parseYaml } from 'yaml';
 import { appendAuditEntry } from '../config/capabilities/capability-audit.js';
 import {
   bootstrapCapabilities,
@@ -51,22 +51,97 @@ import {
   requireLocalCapabilityWriteRequest,
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
-import { isManagedSkill, readSkillsState } from '../config/governance/skills-state.js';
+import { GovernanceRegistry } from '../config/governance/governance-registry.js';
+import { validateSkillName } from '../config/governance/skill-sync.js';
+import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
-import {
-  ManagedSkillWritebackConflictError,
-  mountManagedSkillSymlinks,
-  unmountManagedSkillSymlinks,
-} from '../utils/managed-skill-writeback.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { parseManifestSkillMeta, readSkillMeta, type SkillMeta } from '../skills/skill-meta.js';
+import { syncAll } from '../skills/skill-sync-all.js';
+import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
+import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
-  buildProviderSkillDirCandidates,
-  isSkillMountedForProvider,
+  buildMountPointDirCandidates,
+  buildSkillMountTargets,
+  isSkillMountedAtPoint,
   resolveMainRepoPath,
 } from '../utils/skill-mount.js';
+import { resolveCatCafeSkillsSource } from '../utils/skill-source.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
+
+// ────────── Capability config helpers ──────────
+
+function enabledMountTargetIds(rules: MountRules): string[] {
+  return [
+    ...STANDARD_MOUNT_POINT_IDS.filter((id) => rules.mountPoints[id].enabled),
+    ...(rules.customPaths ?? []).map((cp) => cp.alias),
+  ];
+}
+
+function currentSkillMountTargetIds(cap: CapabilityEntry, rules: MountRules): string[] {
+  if (Array.isArray(cap.mountPaths)) return cap.mountPaths;
+  const isEnabled = cap.globalEnabled ?? cap.enabled;
+  return isEnabled ? enabledMountTargetIds(rules) : [];
+}
+
+function findCatCafeSkillCapability(
+  config: { capabilities: CapabilityEntry[] } | null | undefined,
+  skillId: string,
+): CapabilityEntry | null {
+  return (
+    config?.capabilities.find(
+      (entry) => entry.type === 'skill' && entry.id === skillId && entry.source === 'cat-cafe' && !entry.pluginId,
+    ) ?? null
+  );
+}
+
+function createCatCafeSkillCapabilityFromGlobalPolicy(
+  skillId: string,
+  globalCap: CapabilityEntry | null,
+): CapabilityEntry {
+  const globalEnabled = globalCap ? (globalCap.globalEnabled ?? globalCap.enabled) : true;
+  const entry: CapabilityEntry = {
+    id: skillId,
+    type: 'skill',
+    enabled: globalEnabled,
+    globalEnabled,
+    source: 'cat-cafe',
+  };
+  if (!globalCap) return entry;
+  // P2: Only copy mountPaths for disabled skills (empty array = disabled state signal).
+  // Do NOT copy non-empty mountPaths — that would freeze specific mount point policy
+  // as a project-level override, preventing future global cascade changes.
+  if (!globalEnabled) {
+    entry.mountPaths = [];
+  }
+  return entry;
+}
+
+function findCapabilityPatchTargetIndex(
+  config: { capabilities: CapabilityEntry[] },
+  body: CapabilityPatchRequest,
+): number {
+  const hasSourceDiscriminator = body.source === 'cat-cafe' || body.source === 'external';
+  const hasPluginDiscriminator = typeof body.pluginId === 'string';
+  if (hasSourceDiscriminator || hasPluginDiscriminator) {
+    const explicitIndex = config.capabilities.findIndex((entry) => {
+      if (entry.id !== body.capabilityId || entry.type !== body.capabilityType) return false;
+      if (hasSourceDiscriminator && entry.source !== body.source) return false;
+      if (hasPluginDiscriminator) return entry.pluginId === body.pluginId;
+      return !entry.pluginId;
+    });
+    if (explicitIndex !== -1) return explicitIndex;
+  }
+  if (body.capabilityType === 'skill') {
+    const firstPartyIndex = config.capabilities.findIndex(
+      (entry) =>
+        entry.id === body.capabilityId && entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId,
+    );
+    if (firstPartyIndex !== -1) return firstPartyIndex;
+  }
+  return config.capabilities.findIndex((entry) => entry.id === body.capabilityId && entry.type === body.capabilityType);
+}
 
 // ────────── Helpers ──────────
 
@@ -192,6 +267,37 @@ function getProjectRoot(): string {
   return PROJECT_ROOT;
 }
 
+export async function buildKnownProjectPaths(
+  catCafeRoot: string,
+  projectRoot: string,
+  _registry?: GovernanceRegistry,
+): Promise<string[]> {
+  // F228: Only return catCafeRoot + projectRoot as server-known paths.
+  // The full project list is assembled client-side by merging these with
+  // thread-derived project paths (same source as the 新建对話 picker).
+  // Previously this scanned the governance registry, but test entries and
+  // temporary worktrees accumulated 100+ phantom projects in the dropdown.
+  const paths: string[] = [];
+  const addPath = (path: string): void => {
+    if (!paths.some((existing) => pathsEqual(existing, path))) paths.push(path);
+  };
+  addPath(catCafeRoot);
+  addPath(projectRoot);
+  return paths;
+}
+
+export function shouldPropagateManagedSkillToggle(
+  scope: 'global' | 'project',
+  shouldWritebackManagedSkill: boolean,
+  _projectRoot: string,
+  _catCafeRoot: string,
+): boolean {
+  if (!shouldWritebackManagedSkill) return false;
+  // F228: Only global scope cascades. Project scope (even on catCafeRoot) only
+  // modifies mountPaths — it never changes globalEnabled, so no cascade needed.
+  return scope === 'global';
+}
+
 function canReadSensitiveMcpConfig(request: FastifyRequest): boolean {
   const sessionUserId = resolveCapabilityWriteSessionUserId(request);
   return !!sessionUserId && !requireCapabilityWriteOwner(sessionUserId, { requireConfiguredOwner: true });
@@ -262,28 +368,24 @@ function getCliConfigPaths(projectRoot: string) {
   };
 }
 
-interface SkillMeta {
-  description?: string;
-  triggers?: string[];
-}
-
 interface SkillScanPlan {
   key: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'kimi';
+  provider: 'anthropic' | 'openai' | 'google' | 'kimi' | 'custom';
   path: string;
   exclude?: string[];
 }
 
 export async function scanProviderSkillDirs(plans: SkillScanPlan[]): Promise<{
+  mountPointSkills: Record<string, string[]>;
   providerSkills: Record<string, string[]>;
   scanResults: Record<string, string[] | null>;
   scansOk: boolean;
 }> {
-  const providerSkills: Record<string, string[]> = {};
+  const mountPointSkills: Record<string, string[]> = {};
   const scanResults: Record<string, string[] | null> = {};
 
   for (const plan of plans) {
-    if (!providerSkills[plan.provider]) providerSkills[plan.provider] = [];
+    if (!mountPointSkills[plan.provider]) mountPointSkills[plan.provider] = [];
   }
 
   const results = await Promise.all(
@@ -300,143 +402,11 @@ export async function scanProviderSkillDirs(plans: SkillScanPlan[]): Promise<{
       scansOk = false;
       continue;
     }
-    providerSkills[plan.provider] = [...new Set([...(providerSkills[plan.provider] ?? []), ...names])];
+    mountPointSkills[plan.provider] = [...new Set([...(mountPointSkills[plan.provider] ?? []), ...names])];
   }
 
-  return { providerSkills, scanResults, scansOk };
+  return { mountPointSkills, providerSkills: mountPointSkills, scanResults, scansOk };
 }
-/**
- * Extract description + triggers from a SKILL.md frontmatter.
- * Triggers are embedded in descriptions:
- *   'Triggers on "X", "Y", "Z"' or '触发词："X"、"Y"'
- */
-async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
-  const skillMdPath = join(skillDir, 'SKILL.md');
-  try {
-    const content = await readFile(skillMdPath, 'utf-8');
-    const match = content.match(/^---\n([\s\S]*?)\n---/);
-    if (!match) return {};
-    const fm = parseYaml(match[1]!) as { description?: unknown; triggers?: unknown } | null;
-    const desc = typeof fm?.description === 'string' ? fm.description.trim() : '';
-    if (!desc) return {};
-
-    // Prefer explicit frontmatter `triggers` when available.
-    const triggers: string[] = Array.isArray(fm?.triggers)
-      ? fm?.triggers
-          .filter((v): v is string => typeof v === 'string')
-          .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-
-    // Backward compatibility: extract triggers from description text for legacy skills.
-    if (triggers.length === 0) {
-      // English: Triggers on "X", "Y", "Z"
-      const enMatch = desc.match(/[Tt]riggers?\s+on\s+"([^"]+)"(,\s*"([^"]+)")*/);
-      if (enMatch) {
-        const allQuoted = desc.match(/[Tt]riggers?\s+on\s+(.*)/);
-        if (allQuoted) {
-          for (const m of allQuoted[1]?.matchAll(/"([^"]+)"/g)) {
-            triggers.push(m[1]!);
-          }
-        }
-      }
-      // Chinese: 触发词："X"、"Y" or 触发词：X、Y
-      const cnMatch = desc.match(/触发词[：:]\s*(.*)/);
-      if (cnMatch) {
-        const raw = cnMatch[1]!;
-        // Quoted: "X"、"Y"
-        for (const m of raw.matchAll(/["""]([^"""]+)["""]/g)) {
-          triggers.push(m[1]!);
-        }
-        // Unquoted fallback: X、Y、Z
-        if (triggers.length === 0) {
-          triggers.push(
-            ...raw
-              .split(/[、,，]/)
-              .map((s) => s.trim())
-              .filter(Boolean),
-          );
-        }
-      }
-    }
-
-    // Clean description: strip trigger suffix for display
-    let cleanDesc = desc
-      .replace(/\s*[Tt]riggers?\s+on\s+.*$/, '')
-      .replace(/\s*触发词[：:].*$/, '')
-      .replace(/\.\s*$/, '')
-      .trim();
-    if (!cleanDesc) cleanDesc = desc;
-
-    const result: SkillMeta = { description: cleanDesc };
-    if (triggers.length > 0) result.triggers = triggers;
-    return result;
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Parse BOOTSTRAP.md to extract skill → category mapping.
- * Categories come from ### headers, skills from table rows.
- */
-async function parseBootstrapCategories(skillsSrcDir: string): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  const bootstrapPath = join(skillsSrcDir, 'BOOTSTRAP.md');
-  try {
-    const content = await readFile(bootstrapPath, 'utf-8');
-    let currentCategory = '';
-    for (const line of content.split('\n')) {
-      const categoryMatch = line.match(/^###\s+(.+)/);
-      if (categoryMatch?.[1]) {
-        currentCategory = categoryMatch[1].trim();
-        continue;
-      }
-      const rowMatch = line.match(/^\|\s*`([a-z][-a-z0-9]*)`\s*\|/);
-      if (rowMatch?.[1] && currentCategory) {
-        result.set(rowMatch[1], currentCategory);
-      }
-    }
-  } catch {
-    // BOOTSTRAP.md not found — no categories
-  }
-  return result;
-}
-
-/**
- * Parse manifest.yaml and extract skill description/triggers.
- * F042: manifest is the routing source-of-truth.
- */
-async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string, SkillMeta>> {
-  const result = new Map<string, SkillMeta>();
-  const manifestPath = join(skillsSrcDir, 'manifest.yaml');
-  try {
-    const content = await readFile(manifestPath, 'utf-8');
-    const parsed = parseYaml(content) as {
-      skills?: Record<string, { description?: unknown; triggers?: unknown }>;
-    } | null;
-    if (!parsed?.skills || typeof parsed.skills !== 'object') return result;
-    for (const [name, meta] of Object.entries(parsed.skills)) {
-      const description = typeof meta?.description === 'string' ? meta.description.trim() : undefined;
-      const triggers = Array.isArray(meta?.triggers)
-        ? meta.triggers
-            .filter((v): v is string => typeof v === 'string')
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : undefined;
-      if (description || (triggers && triggers.length > 0)) {
-        result.set(name, {
-          ...(description ? { description } : {}),
-          ...(triggers && triggers.length > 0 ? { triggers } : {}),
-        });
-      }
-    }
-  } catch {
-    // manifest missing or invalid — fallback to SKILL.md metadata
-  }
-  return result;
-}
-
 /** Known MCP server descriptions */
 const MCP_DESCRIPTIONS: Record<string, string> = {
   'cat-cafe-collab': '三猫协作工具 — 消息、上下文、任务、权限等（协作核心）',
@@ -532,10 +502,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const home = homedir();
+    const mainRoot = getProjectRoot();
+    const mountRules = await readMountRules(projectRoot, mainRoot);
+    const enabledMountPoints = STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled);
+    const mountPointDirCandidates = buildMountPointDirCandidates(projectRoot, home, mountRules);
+    const customMountTargets = buildSkillMountTargets(projectRoot, home, mountRules).filter(
+      (target) => target.kind === 'custom',
+    );
     const catCafeRepoRoot = await resolveMainRepoPath();
 
     // 1. Load or bootstrap capabilities.json
     let config = await readCapabilitiesConfig(projectRoot);
+    const existingCapabilitiesCount = config?.capabilities.length ?? null;
     if (!config) {
       // Multi-project: when bootstrapping a non-cat-cafe project, still point the
       // Clowder AI MCP server to THIS repo (host), not the managed project root.
@@ -549,6 +527,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         await writeCapabilitiesConfig(projectRoot, config);
       }
     }
+    const isExternalProject = !pathsEqual(projectRoot, mainRoot);
+    // Always load global config for external projects so newly discovered skills
+    // inherit global disabled state (per-skill, not all-or-nothing bootstrap gate)
+    const globalConfig = isExternalProject ? await readCapabilitiesConfig(mainRoot) : null;
 
     // Always regenerate CLI configs so that config changes (e.g. new env
     // placeholders for Gemini MCP) are applied to existing environments
@@ -565,44 +547,60 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // null = scan failed (readdir/read error); [] = directory exists but empty.
     // Use listSkillSubdirs() for provider dirs so stale/broken symlinks do not
     // resurrect deleted skills in the board.
-    const projectSkillsDir = join(projectRoot, '.claude', 'skills');
+    const projectSkillsDir = join(projectRoot, mountRules.mountPoints.claude.path);
     const skillScanPlans: SkillScanPlan[] = [
       { key: 'claude-project', provider: 'anthropic', path: projectSkillsDir },
       { key: 'claude-user', provider: 'anthropic', path: join(home, '.claude', 'skills') },
-      { key: 'codex-project', provider: 'openai', path: join(projectRoot, '.codex', 'skills'), exclude: ['.system'] },
+      {
+        key: 'codex-project',
+        provider: 'openai',
+        path: join(projectRoot, mountRules.mountPoints.codex.path),
+        exclude: ['.system'],
+      },
       { key: 'codex-user', provider: 'openai', path: join(home, '.codex', 'skills'), exclude: ['.system'] },
-      { key: 'gemini-project', provider: 'google', path: join(projectRoot, '.gemini', 'skills') },
+      { key: 'gemini-project', provider: 'google', path: join(projectRoot, mountRules.mountPoints.gemini.path) },
       { key: 'gemini-user', provider: 'google', path: join(home, '.gemini', 'skills') },
-      { key: 'kimi-project', provider: 'kimi', path: join(projectRoot, '.kimi', 'skills') },
+      { key: 'kimi-project', provider: 'kimi', path: join(projectRoot, mountRules.mountPoints.kimi.path) },
       { key: 'kimi-user', provider: 'kimi', path: join(home, '.kimi', 'skills') },
+      // F228 P2: Scan custom mount targets so their skills appear in discovery/allSkillNames.
+      ...customMountTargets.map((target) => ({
+        key: `custom-${target.id}`,
+        provider: 'custom' as const,
+        path: target.candidates[0]!,
+      })),
     ];
-    const { providerSkills, scanResults, scansOk: allScansOk } = await scanProviderSkillDirs(skillScanPlans);
+    const { mountPointSkills, scanResults, scansOk: allScansOk } = await scanProviderSkillDirs(skillScanPlans);
     const claudeProjectSkills = scanResults['claude-project'];
     const codexProjectSkills = scanResults['codex-project'];
     const geminiProjectSkills = scanResults['gemini-project'];
     const projectKimiSkills = scanResults['kimi-project'];
 
-    // ADR-025: Use skills-state.json + catCafeOwnSkills as source for managed vs external.
-    // Merges both: skills-state.json may be stale (missing newly added official skills),
-    // so catCafeOwnSkills (filesystem scan of cat-cafe-skills/) covers new additions.
-    const skillsState = await readSkillsState(projectRoot);
-
     // F041 bug fix: Also scan cat-cafe-skills/ for project-level skill detection.
     const catCafeSkillsDir = CAT_CAFE_SKILLS_SRC;
     const catCafeOwnSkills = await listSkillSubdirs(catCafeSkillsDir);
     const hasProjectCatCafeSkillsDir = existsSync(catCafeSkillsDir);
+    const mountedSkillNames = new Set(Object.values(mountPointSkills).flat());
+    const hasMountedCatCafeSkillEvidence = (catCafeOwnSkills ?? []).some((skillName) =>
+      mountedSkillNames.has(skillName),
+    );
+    // Per-skill global policy: always inherit for external projects (not gated on
+    // "no existing capabilities" — a project with one mounted skill should still
+    // respect global disables for newly discovered skills)
 
+    // F228 P2: Include custom mount target skills in project-level discovery
+    const customProjectSkills = customMountTargets.flatMap((target) => scanResults[`custom-${target.id}`] ?? []);
     const projectSkillNames = new Set([
       ...(claudeProjectSkills ?? []),
       ...(codexProjectSkills ?? []),
       ...(geminiProjectSkills ?? []),
       ...(projectKimiSkills ?? []),
       ...(catCafeOwnSkills ?? []),
+      ...customProjectSkills,
     ]);
 
     // 3. Sync discovered skills into capabilities.json
     const allSkillNames = new Set<string>();
-    for (const skills of Object.values(providerSkills)) {
+    for (const skills of Object.values(mountPointSkills)) {
       for (const s of skills) allSkillNames.add(s);
     }
     // Cloud P2: include source-only Clowder AI skills (present in cat-cafe-skills/ but not mounted
@@ -614,32 +612,32 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     let configDirty = false;
     // Add newly discovered skills
     for (const skillName of allSkillNames) {
-      const exists = config.capabilities.some((c) => c.type === 'skill' && c.id === skillName);
+      const isCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName);
+      const exists = config.capabilities.some(
+        (c) => c.type === 'skill' && c.id === skillName && (!isCatCafe || (c.source === 'cat-cafe' && !c.pluginId)),
+      );
       if (!exists) {
-        // ADR-025: merge skills-state.json with catCafeOwnSkills to handle stale state.
-        // A skill is cat-cafe if it's in the managed set OR found in cat-cafe-skills/.
-        const isCatCafe =
-          isManagedSkill(skillsState, skillName) ||
-          (catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName)) ||
-          (!skillsState && projectSkillNames.has(skillName));
-        const source = isCatCafe ? ('cat-cafe' as const) : ('external' as const);
-        config.capabilities.push({
-          id: skillName,
-          type: 'skill',
-          enabled: true,
-          source,
-        });
+        config.capabilities.push(
+          isCatCafe
+            ? createCatCafeSkillCapabilityFromGlobalPolicy(
+                skillName,
+                findCatCafeSkillCapability(globalConfig, skillName),
+              )
+            : {
+                id: skillName,
+                type: 'skill',
+                enabled: true,
+                source: 'external',
+              },
+        );
         configDirty = true;
       }
     }
     // Also fix source for existing skills that were incorrectly classified
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
-      // ADR-025: merge skills-state.json with catCafeOwnSkills (handles stale state)
-      const shouldBeCatCafe =
-        isManagedSkill(skillsState, cap.id) ||
-        (catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id)) ||
-        (!skillsState && projectSkillNames.has(cap.id));
+      if (cap.pluginId || cap.source === 'external') continue;
+      const shouldBeCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id);
       // Upgrade is safe when we have evidence; downgrade is only safe when scans succeeded.
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
         cap.source = 'cat-cafe';
@@ -710,15 +708,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     // 4. Build skill metadata lookup (description + triggers + category)
     // Categories + registration must be parsed from the SAME root used for mount checks.
-    const mainRepo = await resolveMainRepoPath();
-    const mainSkillsSrc = join(mainRepo, 'cat-cafe-skills');
+    const mainSkillsSrc = await resolveCatCafeSkillsSource();
     // Use dir existence (not skill count) to avoid treating existing-but-empty as "missing".
     const mountSkillsSrc = catCafeOwnSkills !== null && hasProjectCatCafeSkillsDir ? catCafeSkillsDir : mainSkillsSrc;
 
-    const [skillCategoryMap, manifestMetaMap] = await Promise.all([
-      parseBootstrapCategories(mountSkillsSrc),
-      parseManifestSkillMeta(mountSkillsSrc),
-    ]);
+    const manifestMetaMap = await parseManifestSkillMeta(mountSkillsSrc);
     const skillMetaMap = new Map<string, SkillMeta>();
 
     const skillDirCandidates: { name: string; dir: string }[] = [];
@@ -782,20 +776,22 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       for (const catId of catIds) {
         const entry = catRegistry.tryGet(catId);
         const provider = entry?.config.clientId ?? 'unknown';
-        const presentForProvider = (providerSkills[provider] ?? []).includes(cap.id);
+        const presentForProvider = (mountPointSkills[provider] ?? []).includes(cap.id);
         if (!presentForProvider) continue; // Sparse cats: omit irrelevant cats so frontend filter works
         const override = cap.overrides?.find((o) => o.catId === catId);
-        const enabled = override ? override.enabled : cap.enabled;
+        const enabled = override ? override.enabled : (cap.globalEnabled ?? cap.enabled);
         cats[catId] = enabled;
       }
       const skillItem: CapabilityBoardItem = {
         id: cap.id,
         type: 'skill',
         source: cap.source,
-        enabled: cap.enabled,
+        enabled: cap.globalEnabled ?? cap.enabled,
+        globalEnabled: cap.globalEnabled ?? cap.enabled,
         cats,
         layer: cap.source === 'external' ? 'L3' : 'L2',
         pluginId: cap.pluginId,
+        mountPaths: cap.mountPaths,
       };
       const meta =
         cap.source === 'cat-cafe'
@@ -803,8 +799,10 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           : skillMetaMap.get(cap.id);
       if (meta?.description) skillItem.description = meta.description;
       if (meta?.triggers) skillItem.triggers = meta.triggers;
-      const category = skillCategoryMap.get(cap.id);
-      if (category) skillItem.category = category;
+      // Category from manifest.yaml (F228: moved from BOOTSTRAP.md)
+      const manifestCategory = manifestMetaMap.get(cap.id)?.category;
+      if (manifestCategory) skillItem.category = manifestCategory;
+      else if (meta?.category) skillItem.category = meta.category;
       items.push(skillItem);
     }
 
@@ -854,29 +852,56 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       mountSkillsSrc === catCafeSkillsDir ? (catCafeOwnSkills ?? []) : ((await listSkillSubdirs(mountSkillsSrc)) ?? []),
     );
     const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !i.pluginId);
-    const providerDirCandidates = buildProviderSkillDirCandidates(projectRoot, home);
+    const customMountsBySkill = new Map<string, boolean[]>();
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
         const [claude, codex, gemini, kimi] = await Promise.all([
-          isSkillMountedForProvider(providerDirCandidates.claude, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedForProvider(providerDirCandidates.codex, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedForProvider(providerDirCandidates.gemini, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedForProvider(providerDirCandidates.kimi, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.claude, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.codex, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.gemini, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.kimi, mountSkillsSrc, item.id, mainSkillsSrc),
         ]);
+        const customMounts = await Promise.all(
+          customMountTargets.map((target) =>
+            isSkillMountedAtPoint(target.candidates, mountSkillsSrc, item.id, mainSkillsSrc),
+          ),
+        );
         item.mounts = { claude, codex, gemini, kimi };
+        customMountsBySkill.set(item.id, customMounts);
       }),
     );
 
-    // Registration consistency: BOOTSTRAP.md vs source dir
-    const bootstrapNames = new Set(skillCategoryMap.keys());
-    const unregistered = [...mountSourceNames].filter((n) => !bootstrapNames.has(n));
-    const phantom = [...bootstrapNames].filter((n) => !mountSourceNames.has(n));
-    let allMounted =
-      catCafeSkillItems.length > 0 &&
-      catCafeSkillItems.every((item) => item.mounts && Object.values(item.mounts).every(Boolean));
+    // Registration consistency: capabilities.json vs source dir
+    // Source directory = truth for "which skills exist"
+    // capabilities.json = truth for "which skills are configured"
+    const capSkillNames = new Set(
+      config.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id),
+    );
+    const unregistered = [...mountSourceNames].filter((n) => !capSkillNames.has(n));
+    const phantom = [...capSkillNames].filter((n) => !mountSourceNames.has(n));
+    const mountRequiredCatCafeSkillItems = catCafeSkillItems.filter((item) =>
+      Array.isArray(item.mountPaths) ? item.mountPaths.length > 0 : item.enabled,
+    );
+    let allMounted = mountRequiredCatCafeSkillItems.every((item) => {
+      if (!item.mounts) return false;
+      const declaredMountPaths = Array.isArray(item.mountPaths) ? new Set(item.mountPaths) : null;
+      const requiredMountPoints = declaredMountPaths
+        ? STANDARD_MOUNT_POINT_IDS.filter(
+            (mountPointId) => declaredMountPaths.has(mountPointId) && mountRules.mountPoints[mountPointId].enabled,
+          )
+        : enabledMountPoints;
+      const requiredCustomTargetIds = declaredMountPaths
+        ? new Set(customMountTargets.filter((target) => declaredMountPaths.has(target.id)).map((target) => target.id))
+        : new Set(customMountTargets.map((target) => target.id));
+      const customMounts = customMountsBySkill.get(item.id) ?? [];
+      return (
+        requiredMountPoints.every((mountPointId) => item.mounts?.[mountPointId]) &&
+        customMountTargets.every((target, index) => !requiredCustomTargetIds.has(target.id) || customMounts[index])
+      );
+    });
     // If we have expected cat-cafe skills (source dir non-empty) but discovered none,
     // treat as unhealthy (likely broken mounts).
-    if (!allMounted && catCafeSkillItems.length === 0 && mountSourceNames.size > 0) allMounted = false;
+    if (catCafeSkillItems.length === 0 && mountSourceNames.size > 0) allMounted = false;
     const skillHealth: SkillHealthSummary = {
       allMounted,
       registrationConsistent: unregistered.length === 0 && phantom.length === 0,
@@ -886,18 +911,23 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     // 7. F070: Governance health for external projects
     const catCafeRoot = getProjectRoot();
+    const registry = new GovernanceRegistry(catCafeRoot);
     let governanceHealth: CapabilityBoardResponse['governanceHealth'];
     if (projectRoot !== catCafeRoot) {
-      const { GovernanceRegistry } = await import('../config/governance/governance-registry.js');
-      const registry = new GovernanceRegistry(catCafeRoot);
       governanceHealth = await registry.checkHealth(projectRoot);
     }
+
+    // Known project paths: main project + governance registry entries + queried project.
+    // Thread-derived projects are merged client-side via getProjectPaths(threads),
+    // mirroring the project discovery pattern in DirectoryPickerModal.
+    const knownProjectPaths = await buildKnownProjectPaths(catCafeRoot, projectRoot, registry);
 
     // 8. Build response with cat family + project metadata
     const response: CapabilityBoardResponse = {
       items,
       catFamilies: buildCatFamilies(),
       projectPath: projectRoot,
+      knownProjectPaths,
       skillHealth,
     };
     if (governanceHealth) {
@@ -930,7 +960,31 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const body = request.body as CapabilityPatchRequest | undefined;
     if (!body || !body.capabilityId || !body.capabilityType || !body.scope || typeof body.enabled !== 'boolean') {
       reply.status(400);
-      return { error: 'Required: capabilityId, capabilityType (mcp|skill), scope (global|cat), enabled (boolean)' };
+      return {
+        error:
+          'Required: capabilityId, capabilityType (mcp|skill), scope, enabled (boolean). Skill scope: "global"|"project". MCP scope: "global"|"cat".',
+      };
+    }
+    if (body.source !== undefined && body.source !== 'cat-cafe' && body.source !== 'external') {
+      reply.status(400);
+      return { error: 'source must be "cat-cafe" or "external" when provided' };
+    }
+    if (body.pluginId !== undefined && typeof body.pluginId !== 'string') {
+      reply.status(400);
+      return { error: 'pluginId must be a string when provided' };
+    }
+
+    // F228: Validate scope per capability type.
+    // Skills: "global" (enable/disable everywhere) or "project" (mount/unmount for one project).
+    // MCP: "global" or "cat" (per-agent override).
+    const validSkillScopes = new Set(['global', 'project']);
+    const validMcpScopes = new Set(['global', 'cat']);
+    const validScopes = body.capabilityType === 'skill' ? validSkillScopes : validMcpScopes;
+    if (!validScopes.has(body.scope)) {
+      reply.status(400);
+      return {
+        error: `Invalid scope "${body.scope}" for ${body.capabilityType}. ${body.capabilityType === 'skill' ? 'Skills accept "global" or "project".' : 'MCP accepts "global" or "cat".'}`,
+      };
     }
 
     if (body.scope === 'cat' && !body.catId) {
@@ -938,16 +992,26 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'catId required when scope is "cat"' };
     }
 
-    // Multi-project: accept projectPath in body
-    let projectRoot = getProjectRoot();
+    // F228: mountPointId is only valid for skill toggles (project or global scope)
+    if (body.mountPointId && (body.capabilityType !== 'skill' || body.scope === 'cat')) {
+      reply.status(400);
+      return { error: 'mountPointId is only supported for skill scope="project" or scope="global" toggles' };
+    }
+
+    // Multi-project: accept projectPath in body.
+    // scope=global always mutates the main project's global config; projectPath
+    // only selects the project for project/cat scoped toggles.
+    const mainProjectRoot = getProjectRoot();
+    let selectedProjectRoot = mainProjectRoot;
     if (body.projectPath) {
       const validated = await validateProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
       }
-      projectRoot = validated;
+      selectedProjectRoot = validated;
     }
+    const projectRoot = body.scope === 'global' ? mainProjectRoot : selectedProjectRoot;
 
     return withCapabilityLock(projectRoot, async () => {
       const rawConfig = await readCapabilitiesConfig(projectRoot);
@@ -965,9 +1029,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const catCafeRepoRoot = await resolveMainRepoPath();
       const config = healCatCafeMcpTopology(rawConfig, { catCafeRepoRoot }).config;
 
-      const capIndex = config.capabilities.findIndex(
-        (c) => c.id === body.capabilityId && c.type === body.capabilityType,
-      );
+      const capIndex = findCapabilityPatchTargetIndex(config, body);
       if (capIndex === -1) {
         reply.status(404);
         return {
@@ -987,49 +1049,168 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const beforeSnapshot = structuredClone(cap);
+      const shouldWritebackManagedSkill =
+        body.capabilityType === 'skill' &&
+        (body.scope === 'global' || body.scope === 'project') &&
+        cap.source === 'cat-cafe';
 
-      if (body.scope === 'global') {
-        cap.enabled = body.enabled;
+      if (shouldWritebackManagedSkill) {
+        try {
+          validateSkillName(body.capabilityId);
+        } catch (err) {
+          reply.status(400);
+          return { error: (err as Error).message };
+        }
+      }
+
+      // Update config: globalEnabled (skill) / enabled (mcp) + mountPaths
+      if (body.scope === 'global' || body.scope === 'project') {
+        if (body.mountPointId && shouldWritebackManagedSkill) {
+          // Per-mount-point toggle: validate + update mountPaths
+          const mountRules = await readMountRules(projectRoot, getProjectRoot());
+          const validMountPoints = new Set<string>([
+            ...STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled),
+            ...(mountRules.customPaths ?? []).map((cp) => cp.alias),
+          ]);
+          if (!validMountPoints.has(body.mountPointId)) {
+            reply.status(400);
+            return {
+              error: `mountPointId "${body.mountPointId}" is not an enabled mount point in current mount rules`,
+            };
+          }
+          const current = currentSkillMountTargetIds(cap, mountRules);
+          cap.mountPaths = body.enabled
+            ? [...new Set([...current, body.mountPointId])]
+            : current.filter((p) => p !== body.mountPointId);
+          // F228: project scope only changes mountPaths. enabled/globalEnabled
+          // are global/legacy state and must not be mutated by project toggles.
+          // Project enabled state is derived from mountPaths.
+          const derived = (cap.mountPaths ?? []).length > 0;
+          if (body.scope === 'global') {
+            cap.enabled = derived;
+            cap.globalEnabled = derived;
+          }
+        } else if (shouldWritebackManagedSkill) {
+          // Whole-skill toggle (skill)
+          // F228: project scope only changes mountPaths. enabled/globalEnabled
+          // are global/legacy state and must not be mutated by project toggles.
+          // Project enabled state is derived from mountPaths.
+          if (body.scope === 'global') {
+            cap.enabled = body.enabled;
+            cap.globalEnabled = body.enabled;
+          }
+          // Both scopes update mountPaths
+          const mountRules = await readMountRules(projectRoot, getProjectRoot());
+          cap.mountPaths = body.enabled ? enabledMountTargetIds(mountRules) : [];
+        } else {
+          // Non-skill (MCP/limb): write enabled as before
+          cap.enabled = body.enabled;
+        }
       } else {
+        // scope === 'cat' (MCP only — skills already rejected above)
         if (!cap.overrides) cap.overrides = [];
         const existing = cap.overrides.find((o) => o.catId === body.catId!);
-        if (existing) {
-          existing.enabled = body.enabled;
-        } else {
-          cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
-        }
+        if (existing) existing.enabled = body.enabled;
+        else cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
         if (body.enabled === cap.enabled) {
           cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
           if (cap.overrides.length === 0) delete cap.overrides;
         }
       }
 
-      if (body.scope === 'global' && cap.type === 'skill' && cap.source === 'cat-cafe') {
-        try {
-          const disabledSkillNames = config.capabilities
-            .filter(
-              (entry) => entry.type === 'skill' && entry.source === 'cat-cafe' && !entry.pluginId && !entry.enabled,
-            )
-            .map((entry) => entry.id);
+      try {
+        await writeCapabilitiesConfig(projectRoot, config);
+        await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      } catch (persistErr) {
+        // Rollback cap to pre-toggle state so config + CLI configs stay consistent
+        for (const key of Object.keys(cap)) {
+          if (!(key in beforeSnapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+        }
+        Object.assign(cap, beforeSnapshot);
+        await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
+        throw persistErr;
+      }
 
-          if (body.enabled) {
-            await mountManagedSkillSymlinks(projectRoot, cap.id, CAT_CAFE_SKILLS_SRC, { disabledSkillNames });
-          } else {
-            await unmountManagedSkillSymlinks(projectRoot, cap.id, CAT_CAFE_SKILLS_SRC, {
-              disabledSkillNames,
-            });
+      // Filesystem reconciliation via syncProject/syncAll
+      let localSyncConflicts: MountConflict[] = [];
+      const propagationConflicts: MountConflict[] = [];
+      const propagationWarnings: string[] = [];
+
+      if (shouldWritebackManagedSkill) {
+        const mountRules = await readMountRules(projectRoot, getProjectRoot());
+        const skillsSource = await resolveCatCafeSkillsSource();
+
+        // R14 P2-2: external projects need global cascade policy
+        let cascadeDisabledSkills: Set<string> | undefined;
+        let globalMountPathsBySkill: Map<string, readonly string[]> | undefined;
+        if (body.scope === 'global' && !pathsEqual(projectRoot, getProjectRoot())) {
+          const globalConfig = await readCapabilitiesConfig(getProjectRoot());
+          const globalManagedCaps =
+            globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId) ??
+            [];
+          const disabled = new Set<string>();
+          const mountMap = new Map<string, readonly string[]>();
+          for (const gc of globalManagedCaps) {
+            if (!(gc.globalEnabled ?? gc.enabled)) disabled.add(gc.id);
+            if (Array.isArray(gc.mountPaths)) mountMap.set(gc.id, gc.mountPaths);
           }
-        } catch (err) {
-          if (err instanceof ManagedSkillWritebackConflictError) {
-            reply.status(409);
-            return { error: err.message };
+          if (disabled.size > 0) cascadeDisabledSkills = disabled;
+          if (mountMap.size > 0) globalMountPathsBySkill = mountMap;
+        }
+
+        try {
+          // Sync this project's filesystem
+          const localMountPathsBySkill =
+            body.scope === 'project' && Array.isArray(cap.mountPaths)
+              ? new Map<string, readonly string[]>([[cap.id, cap.mountPaths]])
+              : undefined;
+          const syncResult = await syncProject(projectRoot, skillsSource, {
+            mountRules,
+            force: false,
+            cascadeDisabledSkills,
+            mountPathsBySkill: localMountPathsBySkill,
+            globalMountPathsBySkill,
+          });
+          localSyncConflicts = syncResult.conflicts;
+
+          // Global scope: cascade to all external projects
+          if (
+            shouldPropagateManagedSkillToggle(
+              body.scope as 'global' | 'project',
+              shouldWritebackManagedSkill,
+              projectRoot,
+              getProjectRoot(),
+            )
+          ) {
+            const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
+            propagationWarnings.push(...allResult.warnings);
+            for (const [, projResult] of allResult.perProject) {
+              propagationConflicts.push(...projResult.conflicts);
+            }
           }
-          throw err;
+        } catch (syncErr) {
+          // Rollback config to pre-toggle state so UI/config stays consistent with filesystem
+          // Delete properties added during toggle that weren't in snapshot (e.g. mountPaths)
+          for (const key of Object.keys(cap)) {
+            if (!(key in beforeSnapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+          }
+          Object.assign(cap, beforeSnapshot);
+          await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
+          await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
+          throw syncErr;
         }
       }
 
-      await writeCapabilitiesConfig(projectRoot, config);
-      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      // F228: per-mount-point enable with conflict is treated as partial success
+      // (same as whole-skill enable). Config records user intent; conflict is
+      // reported via propagationConflicts and shown by drift-check. No rollback.
+
+      const allSyncConflicts = [...localSyncConflicts, ...propagationConflicts];
+      // F228: only return conflicts relevant to the toggled skill.
+      // syncProject reconciles ALL skills, but the caller only cares about
+      // the skill they just toggled — other conflicts are already visible
+      // in the drift/conflict checker.
+      const syncConflicts = allSyncConflicts.filter((c) => c.skillName === body.capabilityId);
 
       await appendAuditEntry(projectRoot, {
         timestamp: new Date().toISOString(),
@@ -1040,6 +1221,24 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         after: cap,
       });
 
+      if (propagationWarnings.length > 0) {
+        reply.status(500);
+        const opLabel = body.mountPointId
+          ? `mount point toggle (${body.mountPointId})`
+          : body.enabled
+            ? 'enable'
+            : 'disable';
+        return {
+          ok: false,
+          error: `Global ${opLabel} persisted locally but failed to propagate to ${propagationWarnings.length} project(s).`,
+          capability: sanitizeCapabilityForResponse(cap),
+          failedProjects: propagationWarnings,
+          propagationConflicts: syncConflicts.length > 0 ? syncConflicts : undefined,
+        };
+      }
+      if (syncConflicts.length > 0) {
+        return { ok: true, capability: sanitizeCapabilityForResponse(cap), propagationConflicts: syncConflicts };
+      }
       return { ok: true, capability: sanitizeCapabilityForResponse(cap) };
     });
   });

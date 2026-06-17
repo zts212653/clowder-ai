@@ -139,7 +139,8 @@ describe('install scripts do not create HOME-level skill links (ADR-025)', () =>
  */
 describe('runtime governance creates project-level skill links (ADR-025)', () => {
   const BOOTSTRAP_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-bootstrap.ts');
-  const SKILL_SYNC_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'skill-sync.ts');
+  const SKILL_SYNC_ENGINE_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'skills', 'skill-sync-engine.ts');
+  const MOUNT_RULES_SRC = join(PROJECT_ROOT, 'packages', 'shared', 'src', 'types', 'mount-rules.ts');
   const PREFLIGHT_SRC = join(PROJECT_ROOT, 'packages', 'api', 'src', 'config', 'governance', 'governance-preflight.ts');
 
   it('GovernanceBootstrapService creates per-skill symlinks at project level', async () => {
@@ -152,12 +153,23 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
   });
 
   it('skill-sync creates per-skill symlinks at project level', async () => {
-    const content = await readFile(SKILL_SYNC_SRC, 'utf-8');
-    assert.ok(content.includes('.claude/skills'), 'skill-sync must reference .claude/skills');
-    assert.ok(content.includes('.codex/skills'), 'skill-sync must reference .codex/skills');
-    assert.ok(content.includes('.gemini/skills'), 'skill-sync must reference .gemini/skills');
-    assert.ok(content.includes('.kimi/skills'), 'skill-sync must reference .kimi/skills');
-    assert.ok(content.includes("process.platform === 'win32'"), 'skill-sync must handle Windows junction');
+    const [syncContent, mountRulesContent] = await Promise.all([
+      readFile(SKILL_SYNC_ENGINE_SRC, 'utf-8'),
+      readFile(MOUNT_RULES_SRC, 'utf-8'),
+    ]);
+    assert.ok(
+      syncContent.includes('join(projectRoot, rules.mountPoints[id].path)'),
+      'skill-sync engine must resolve standard mount dirs under projectRoot',
+    );
+    assert.ok(
+      syncContent.includes('await symlink(symlinkTargetFor(linkPath'),
+      'skill-sync engine must create per-skill symlinks',
+    );
+    assert.ok(syncContent.includes("process.platform === 'win32'"), 'skill-sync engine must handle Windows targets');
+    assert.ok(mountRulesContent.includes("claude: { enabled: true, path: '.claude/skills' }"));
+    assert.ok(mountRulesContent.includes("codex: { enabled: true, path: '.codex/skills' }"));
+    assert.ok(mountRulesContent.includes("gemini: { enabled: true, path: '.gemini/skills' }"));
+    assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi/skills' }"));
   });
 
   it('governance preflight checks skill symlinks are present', async () => {

@@ -8,16 +8,18 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { readAuditLog } from '../dist/config/capabilities/capability-audit.js';
 import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
+import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const OWNER_SESSION_HEADERS = { 'x-test-session-user': 'you' };
@@ -31,8 +33,18 @@ async function makeTmpDir(prefix) {
   return dir;
 }
 
+async function pathExists(path) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (err) {
+    if (err?.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
 function findRepoRoot() {
-  let dir = process.cwd();
+  let dir = dirname(fileURLToPath(import.meta.url));
   while (dir !== dirname(dir)) {
     if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
     dir = dirname(dir);
@@ -87,6 +99,20 @@ describe('scanProviderSkillDirs', () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('shouldPropagateManagedSkillToggle', () => {
+  it('propagates global toggles only, never project scope', async () => {
+    const { shouldPropagateManagedSkillToggle } = await import('../dist/routes/capabilities.js');
+    const mainRoot = '/repo/main';
+    const externalRoot = '/repo/external';
+
+    assert.equal(shouldPropagateManagedSkillToggle('global', true, mainRoot, mainRoot), true);
+    assert.equal(shouldPropagateManagedSkillToggle('project', true, mainRoot, mainRoot), false);
+    assert.equal(shouldPropagateManagedSkillToggle('project', true, externalRoot, mainRoot), false);
+    assert.equal(shouldPropagateManagedSkillToggle('project', false, mainRoot, mainRoot), false);
+    assert.equal(shouldPropagateManagedSkillToggle('cat', true, mainRoot, mainRoot), false);
   });
 });
 
@@ -719,15 +745,17 @@ describe('GET /api/capabilities (Fastify)', () => {
   });
 
   it('treats directory-level project skills symlinks as mounted for all providers', async () => {
+    const previousCwd = process.cwd();
     const Fastify = (await import('fastify')).default;
-    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
 
+    const mainDir = await makeTmpDir('dir-symlink-main');
     const projectDir = join('/tmp', `cap-route-test-dir-symlink-${Date.now()}`);
     const homeDir = join('/tmp', `cap-route-test-home-${Date.now()}`);
     const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
     const prevHome = process.env.HOME;
 
     await Promise.all([
+      writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n'),
       mkdir(join(projectDir, '.claude'), { recursive: true }),
       mkdir(join(projectDir, '.codex'), { recursive: true }),
       mkdir(join(projectDir, '.gemini'), { recursive: true }),
@@ -743,6 +771,10 @@ describe('GET /api/capabilities (Fastify)', () => {
     await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
 
     process.env.HOME = homeDir;
+    process.chdir(mainDir);
+
+    const routeModuleUrl = new URL(`../dist/routes/capabilities.js?dir-symlink=${Date.now()}`, import.meta.url);
+    const { capabilitiesRoutes } = await import(routeModuleUrl.href);
 
     const app = Fastify();
     await app.register(capabilitiesRoutes);
@@ -765,6 +797,374 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(debugging.cats.codex, true, 'project-level codex skills dir should enable OpenAI-family skills');
       assert.equal(debugging.cats.gemini, true, 'project-level gemini skills dir should enable Gemini-family skills');
       assert.equal(debugging.cats.kimi, true, 'project-level kimi skills dir should enable Kimi skills');
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      process.chdir(previousCwd);
+      await app.close();
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses project mount rules for capability skill health', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-mount-rules-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-mount-rules-home-${Date.now()}`);
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const customClaudeRoot = join(projectDir, '.project-claude', 'skills');
+    const prevHome = process.env.HOME;
+
+    await Promise.all([
+      mkdir(join(projectDir, '.project-claude'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    // Sequential: both write to the same capabilities.json.  Write capabilities
+    // first (full overwrite), then writeMountRules (read-modify-write adds mountRules).
+    await writeCapabilitiesConfig(projectDir, { version: 1, capabilities: [] });
+    await writeMountRules(projectDir, {
+      version: 1,
+      mountPoints: {
+        claude: { enabled: true, path: '.project-claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+      customPaths: [],
+    });
+    await symlink(sourceSkillsDir, customClaudeRoot);
+
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(
+        body.skillHealth?.allMounted,
+        true,
+        'custom enabled provider path should satisfy health while disabled providers are ignored',
+      );
+      const debugging = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'debugging');
+      assert.ok(debugging, 'debugging skill should be present');
+      assert.equal(debugging.mounts.claude, true);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses capability mountPaths as the required provider set for capability skill health', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-mountpaths-health-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-mountpaths-health-home-${Date.now()}`);
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const prevHome = process.env.HOME;
+    const sourceSkillNames = [];
+
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // reference folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 0, 'expected source cat-cafe skills');
+
+    await Promise.all([
+      mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+      writeCapabilitiesConfig(projectDir, {
+        version: 2,
+        capabilities: sourceSkillNames.map((id) => ({
+          id,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini'],
+        })),
+      }),
+    ]);
+    for (const provider of ['claude', 'codex', 'gemini']) {
+      await Promise.all(
+        sourceSkillNames.map((name) =>
+          symlink(join(sourceSkillsDir, name), join(projectDir, `.${provider}/skills`, name)),
+        ),
+      );
+    }
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.skillHealth?.allMounted, true, 'unlisted kimi mount should not keep health red');
+      const debugging = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'debugging');
+      assert.ok(debugging, 'debugging skill should be present');
+      assert.deepEqual(debugging.mounts, { claude: true, codex: true, gemini: true, kimi: false });
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses non-empty mountPaths for capability skill health even when cap.enabled is stale false', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-mountpaths-stale-enabled-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-mountpaths-stale-enabled-home-${Date.now()}`);
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const prevHome = process.env.HOME;
+    const sourceSkillNames = [];
+
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // reference folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 0, 'expected source cat-cafe skills');
+
+    await Promise.all([
+      mkdir(join(projectDir, '.claude/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.codex/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.gemini/skills'), { recursive: true }),
+      mkdir(join(projectDir, '.kimi/skills'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+      writeCapabilitiesConfig(projectDir, {
+        version: 2,
+        capabilities: sourceSkillNames.map((id) => ({
+          id,
+          type: 'skill',
+          enabled: false,
+          source: 'cat-cafe',
+          mountPaths: id === 'debugging' ? ['claude'] : [],
+        })),
+      }),
+    ]);
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.skillHealth?.allMounted, false, 'declared mountPaths without real symlink should be unhealthy');
+      const debugging = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'debugging');
+      assert.ok(debugging, 'debugging skill should be present');
+      assert.deepEqual(debugging.mountPaths, ['claude']);
+      assert.equal(debugging.mounts.claude, false, 'declared claude mount is missing on disk');
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('includes custom mount paths in capability skill health', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-custom-health-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-custom-health-home-${Date.now()}`);
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const customSkillsDir = join('custom-client', 'skills');
+    const customSkillsDirPath = join(projectDir, customSkillsDir);
+    const prevHome = process.env.HOME;
+    const sourceSkillNames = [];
+
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // reference folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 0, 'expected source cat-cafe skills');
+
+    await Promise.all([
+      mkdir(customSkillsDirPath, { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+      writeCapabilitiesConfig(projectDir, {
+        version: 2,
+        capabilities: [{ id: 'debugging', type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['acp'] }],
+        mountRules: [
+          { name: 'claude', path: '.claude/skills', enabled: false },
+          { name: 'codex', path: '.codex/skills', enabled: false },
+          { name: 'gemini', path: '.gemini/skills', enabled: false },
+          { name: 'kimi', path: '.kimi/skills', enabled: false },
+          { name: 'acp', path: customSkillsDir, enabled: true },
+        ],
+      }),
+    ]);
+
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const missingRes = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(missingRes.statusCode, 200);
+      const missingBody = missingRes.json();
+      assert.equal(
+        missingBody.skillHealth?.allMounted,
+        false,
+        'missing custom-path skill links should make health unhealthy',
+      );
+
+      await Promise.all(
+        sourceSkillNames.map((name) => symlink(join(sourceSkillsDir, name), join(customSkillsDirPath, name))),
+      );
+      const mountedRes = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(mountedRes.statusCode, 200);
+      const mountedBody = mountedRes.json();
+      assert.equal(
+        mountedBody.skillHealth?.allMounted,
+        true,
+        'custom-path skill links should satisfy health when standard providers are disabled',
+      );
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('excludes disabled cat-cafe skills from capability skill health', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const projectDir = join('/tmp', `cap-route-test-disabled-skill-health-${Date.now()}`);
+    const homeDir = join('/tmp', `cap-route-test-disabled-skill-health-home-${Date.now()}`);
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const claudeSkillsDir = join(projectDir, '.claude', 'skills');
+    const prevHome = process.env.HOME;
+    const sourceSkillNames = [];
+
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // reference folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 0, 'expected source cat-cafe skills');
+    const disabledSkill = sourceSkillNames.includes('debugging') ? 'debugging' : sourceSkillNames[0];
+
+    await Promise.all([mkdir(claudeSkillsDir, { recursive: true }), mkdir(homeDir, { recursive: true })]);
+    // Sequential: both write to the same capabilities.json.  Write capabilities
+    // first (full overwrite), then writeMountRules (read-modify-write adds mountRules).
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: sourceSkillNames.map((id) => ({
+        id,
+        type: 'skill',
+        enabled: id !== disabledSkill,
+        source: 'cat-cafe',
+      })),
+    });
+    await writeMountRules(projectDir, {
+      version: 1,
+      mountPoints: {
+        claude: { enabled: true, path: '.claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+      customPaths: [],
+    });
+    await Promise.all(
+      sourceSkillNames
+        .filter((name) => name !== disabledSkill)
+        .map((name) => symlink(join(sourceSkillsDir, name), join(claudeSkillsDir, name))),
+    );
+
+    process.env.HOME = homeDir;
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      assert.equal(body.skillHealth?.allMounted, true, 'disabled skills should not require provider mounts');
+      const disabledItem = (body.items ?? []).find((item) => item.type === 'skill' && item.id === disabledSkill);
+      assert.ok(disabledItem, 'disabled skill should remain visible in the board');
+      assert.equal(disabledItem.enabled, false);
+      assert.equal(disabledItem.mounts.claude, false, 'disabled skill symlink should be absent');
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
@@ -913,6 +1313,26 @@ describe('GET /api/capabilities (Fastify)', () => {
 
     await rm(projectDir, { recursive: true, force: true });
     await app.close();
+  });
+
+  it('returns only catCafeRoot and projectRoot (not governance registry)', async () => {
+    const { buildKnownProjectPaths } = await import('../dist/routes/capabilities.js');
+
+    const catCafeRoot = await makeTmpDir('known-projects-main');
+    const selectedProject = await makeTmpDir('known-projects-selected');
+
+    try {
+      const knownProjectPaths = await buildKnownProjectPaths(catCafeRoot, selectedProject);
+      assert.deepEqual(
+        new Set(knownProjectPaths),
+        new Set([catCafeRoot, selectedProject]),
+        'knownProjectPaths should only include catCafeRoot and selected project; ' +
+          'thread-derived project paths are merged client-side',
+      );
+    } finally {
+      await rm(catCafeRoot, { recursive: true, force: true });
+      await rm(selectedProject, { recursive: true, force: true });
+    }
   });
 
   it('discovers antigravity MCP from homedir instead of a stale project-local file', async () => {
@@ -1082,9 +1502,249 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(preserved.pluginId, pluginId);
       const stale = config?.capabilities.find((item) => item.id === 'old-project-skill');
       assert.equal(stale, undefined, 'project-local undeclared plugin-owned skill should still be pruned');
+      const body = res.json();
+      assert.equal(
+        body.skillHealth?.registrationConsistent,
+        true,
+        'plugin-owned skills should not be treated as phantom Cat Cafe source-tree registrations',
+      );
+      assert.deepEqual(body.skillHealth?.phantom, []);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates Cat Cafe source skill capability beside a same-id plugin-owned skill on GET', async () => {
+    const previousCwd = process.cwd();
+    const Fastify = (await import('fastify')).default;
+
+    const pluginId = `same-id-source-plugin-${Date.now()}`;
+    const mainDir = await makeTmpDir('source-plugin-main');
+    const projectDir = await makeTmpDir('source-plugin-same-id');
+    const pluginDir = join(projectDir, 'plugins', pluginId);
+    await writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await mkdir(join(pluginDir, 'skills', 'debugging'), { recursive: true });
+    await writeFile(join(pluginDir, 'skills', 'debugging', 'SKILL.md'), '# plugin debugging\n');
+    await writeFile(
+      join(pluginDir, 'plugin.yaml'),
+      [
+        `id: ${pluginId}`,
+        'name: Same ID Source Plugin',
+        'version: "1.0.0"',
+        'resources:',
+        '  - type: skill',
+        '    path: skills/debugging',
+      ].join('\n'),
+    );
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    process.chdir(mainDir);
+    const routeModuleUrl = new URL(`../dist/routes/capabilities.js?source-plugin=${Date.now()}`, import.meta.url);
+    const { capabilitiesRoutes } = await import(routeModuleUrl.href);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const pluginCap = config?.capabilities.find((item) => item.id === 'debugging' && item.pluginId === pluginId);
+      assert.ok(pluginCap, 'declared plugin-owned skill should survive');
+      assert.deepEqual(pluginCap.mountPaths, ['claude']);
+      const catCafeCap = config?.capabilities.find((item) => item.id === 'debugging' && !item.pluginId);
+      assert.ok(catCafeCap, 'source Cat Cafe skill should get its own non-plugin capability');
+      assert.equal(catCafeCap.source, 'cat-cafe');
+      assert.equal(catCafeCap.enabled, true);
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves same-id external skill capability when adding Cat Cafe source skill on GET', async () => {
+    const previousCwd = process.cwd();
+    const Fastify = (await import('fastify')).default;
+
+    const mainDir = await makeTmpDir('source-external-main');
+    const projectDir = await makeTmpDir('source-external-same-id');
+    await writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await mkdir(join(projectDir, '.claude', 'skills', 'debugging'), { recursive: true });
+    await writeFile(join(projectDir, '.claude', 'skills', 'debugging', 'SKILL.md'), '# external debugging\n');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'external',
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    process.chdir(mainDir);
+    const routeModuleUrl = new URL(`../dist/routes/capabilities.js?source-external=${Date.now()}`, import.meta.url);
+    const { capabilitiesRoutes } = await import(routeModuleUrl.href);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const externalCap = config?.capabilities.find(
+        (item) => item.id === 'debugging' && item.type === 'skill' && item.source === 'external',
+      );
+      assert.ok(externalCap, 'same-id external skill should remain external');
+      assert.deepEqual(externalCap.mountPaths, ['claude']);
+      const catCafeCap = config?.capabilities.find(
+        (item) => item.id === 'debugging' && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
+      );
+      assert.ok(catCafeCap, 'source Cat Cafe skill should get its own non-external capability');
+      assert.equal(catCafeCap.enabled, true);
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('seeds discovered Cat Cafe skills from global disabled policy on GET', async () => {
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+    const Fastify = (await import('fastify')).default;
+
+    const mainDir = await makeTmpDir('source-global-disabled-main');
+    const projectDir = await makeTmpDir('source-global-disabled-external');
+    const homeDir = await makeTmpDir('source-global-disabled-home');
+    const skillId = 'debugging';
+
+    await writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+    await writeCapabilitiesConfig(projectDir, { version: 2, capabilities: [] });
+    process.env.HOME = homeDir;
+    process.chdir(mainDir);
+
+    const { capabilitiesRoutes } = await import(`../dist/routes/capabilities.js?t=${Date.now()}`);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const catCafeCap = config?.capabilities.find(
+        (item) => item.id === skillId && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
+      );
+      assert.ok(catCafeCap, 'source Cat Cafe skill should get a project capability row');
+      assert.equal(catCafeCap.enabled, false, 'global disabled state should seed external discovery');
+      assert.deepEqual(catCafeCap.mountPaths, [], 'global empty mountPaths should seed external discovery');
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('seeds global disabled policy for external project with custom mount targets', async () => {
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+    const Fastify = (await import('fastify')).default;
+
+    const mainDir = await makeTmpDir('seed-custom-mount-main');
+    const projectDir = await makeTmpDir('seed-custom-mount-external');
+    const homeDir = await makeTmpDir('seed-custom-mount-home');
+    const skillId = 'debugging';
+
+    await writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+    // External project has custom mount target but empty capabilities
+    await writeMountRules(projectDir, {
+      version: 1,
+      mountPoints: {
+        claude: { enabled: true, path: '.claude/skills' },
+        codex: { enabled: true, path: '.codex/skills' },
+        gemini: { enabled: true, path: '.gemini/skills' },
+        kimi: { enabled: true, path: '.kimi/skills' },
+      },
+      customPaths: [{ alias: 'acp-client', path: '.acp/skills' }],
+    });
+    await writeCapabilitiesConfig(projectDir, { version: 2, capabilities: [] });
+    process.env.HOME = homeDir;
+    process.chdir(mainDir);
+
+    const routeModuleUrl = new URL(`../dist/routes/capabilities.js?seed-custom=${Date.now()}`, import.meta.url);
+    const { capabilitiesRoutes } = await import(routeModuleUrl.href);
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const catCafeCap = config?.capabilities.find(
+        (item) => item.id === skillId && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
+      );
+      assert.ok(catCafeCap, 'Cat Cafe skill should be seeded even with custom mount targets');
+      assert.equal(catCafeCap.enabled, false, 'global disabled state must seed despite custom mount target');
+      assert.deepEqual(catCafeCap.mountPaths, [], 'global empty mountPaths must seed despite custom mount target');
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
     }
   });
 
@@ -1564,6 +2224,28 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     return app;
   }
 
+  async function buildSessionAppWithProjectRoot(projectRoot) {
+    const Fastify = (await import('fastify')).default;
+    const previousCwd = process.cwd();
+    process.chdir(projectRoot);
+    try {
+      const routeModuleUrl = new URL(`../dist/routes/capabilities.js?projectRoot=${Date.now()}`, import.meta.url);
+      const { capabilitiesRoutes } = await import(routeModuleUrl.href);
+      const app = Fastify();
+      app.addHook('preHandler', async (request) => {
+        const raw = request.headers['x-test-session-user'];
+        if (typeof raw === 'string' && raw.trim()) {
+          request.sessionUserId = raw.trim();
+        }
+      });
+      await app.register(capabilitiesRoutes);
+      await app.ready();
+      return app;
+    } finally {
+      process.chdir(previousCwd);
+    }
+  }
+
   async function seedProject() {
     const projectDir = await makeTmpDir('patch-route-auth');
     await writeCapabilitiesConfig(projectDir, {
@@ -1595,7 +2277,8 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         projectPath: projectDir,
         capabilityId: 'secret-mcp',
         capabilityType: 'mcp',
-        scope: 'global',
+        scope: 'cat',
+        catId: 'ragdoll',
         enabled: false,
       },
     });
@@ -1634,7 +2317,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     });
   }
 
-  it('removes managed cat-cafe skill symlinks on global disable', async () => {
+  it('removes managed cat-cafe skill symlinks on project disable', async () => {
+    // F228: scope='project' targets the specified projectPath.
+    // scope='global' routes through main config — use project for single-project tests.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -1647,12 +2332,14 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       await mkdir(dirname(linkPath), { recursive: true });
       await symlink(join(sourceSkillsDir, skillId), linkPath);
 
-      const res = await patchSkillCapability(app, projectDir, skillId, false);
+      const res = await patchSkillCapability(app, projectDir, skillId, false, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
       await assert.rejects(() => lstat(linkPath), /ENOENT/);
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      assert.equal(config?.capabilities[0]?.enabled, true, 'project disable must NOT change enabled');
+      assert.equal(config?.capabilities[0]?.globalEnabled, true, 'project disable must NOT change globalEnabled');
+      assert.deepEqual(config?.capabilities[0]?.mountPaths, [], 'project disable is represented by empty mountPaths');
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -1682,7 +2369,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         ],
       });
 
-      const res = await patchSkillCapability(app, projectDir, disabledSkill, false);
+      const res = await patchSkillCapability(app, projectDir, disabledSkill, false, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
       const rootStat = await lstat(codexSkillsDir);
@@ -1691,7 +2378,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       await assert.rejects(() => lstat(join(codexSkillsDir, disabledSkill)), /ENOENT/);
       assert.equal(await realpath(join(codexSkillsDir, keptSkill)), await realpath(join(sourceSkillsDir, keptSkill)));
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities.find((cap) => cap.id === disabledSkill)?.enabled, false);
+      const disabledCap = config?.capabilities.find((cap) => cap.id === disabledSkill);
+      assert.equal(disabledCap?.enabled, true, 'project disable must NOT change enabled');
+      assert.equal(disabledCap?.globalEnabled, true, 'project disable must NOT change globalEnabled');
+      assert.deepEqual(disabledCap?.mountPaths, [], 'project disable is represented by empty mountPaths');
       assert.equal(config?.capabilities.find((cap) => cap.id === keptSkill)?.enabled, true);
     } finally {
       await app.close();
@@ -1701,7 +2391,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('creates managed cat-cafe skill symlinks on global enable', async () => {
+  it('creates managed cat-cafe skill symlinks on project enable', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -1710,7 +2400,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     const app = await buildSessionApp();
 
     try {
-      const res = await patchSkillCapability(app, projectDir, skillId, true);
+      const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
       for (const provider of ['.claude', '.codex', '.gemini', '.kimi']) {
@@ -1720,7 +2410,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         assert.equal(await realpath(linkPath), await realpath(join(sourceSkillsDir, skillId)));
       }
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, true);
+      assert.equal(config?.capabilities[0]?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(config?.capabilities[0]?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(config?.capabilities[0]?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -1750,7 +2442,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         ],
       });
 
-      const res = await patchSkillCapability(app, projectDir, enabledSkill, true);
+      const res = await patchSkillCapability(app, projectDir, enabledSkill, true, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
       const rootStat = await lstat(codexSkillsDir);
@@ -1762,7 +2454,10 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       );
       await assert.rejects(() => lstat(join(codexSkillsDir, stillDisabledSkill)), /ENOENT/);
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities.find((cap) => cap.id === enabledSkill)?.enabled, true);
+      const enabledCap = config?.capabilities.find((cap) => cap.id === enabledSkill);
+      assert.equal(enabledCap?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(enabledCap?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(enabledCap?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
       assert.equal(config?.capabilities.find((cap) => cap.id === stillDisabledSkill)?.enabled, false);
     } finally {
       await app.close();
@@ -1772,7 +2467,64 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('preserves user-owned skill paths when enabling managed skills', async () => {
+  it('converts legacy directory mount and reports conflict when enabling with user-owned path', async () => {
+    // F228 redesign: syncProject skip+record conflicts instead of throwing.
+    // Legacy directory-level mounts are converted, conflicts at individual
+    // providers are skipped, non-conflicting providers are mounted.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const skillId = 'debugging';
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const projectDir = await makeTmpDir('patch-enable-rollback-legacy-root');
+    await writeFile(join(projectDir, 'pnpm-workspace.yaml'), 'packages: []\n');
+    const codexSkillsDir = join(projectDir, '.codex', 'skills');
+    const claudeConflictDir = join(projectDir, '.claude', 'skills', skillId);
+    const app = await buildSessionAppWithProjectRoot(projectDir);
+
+    try {
+      await mkdir(dirname(codexSkillsDir), { recursive: true });
+      await symlink(sourceSkillsDir, codexSkillsDir);
+      await mkdir(claudeConflictDir, { recursive: true });
+      await writeFile(join(claudeConflictDir, 'SKILL.md'), '# user debugging\n');
+
+      await writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [{ id: skillId, type: 'skill', enabled: false, source: 'cat-cafe' }],
+      });
+
+      const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
+
+      // syncProject returns 200: mounts non-conflicting providers, reports conflict
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.ok, true);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
+      );
+      // Legacy codex root is converted to individual symlinks
+      const rootStat = await lstat(codexSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy codex root converted to directory');
+      // User-owned claude path preserved
+      assert.equal((await lstat(claudeConflictDir)).isDirectory(), true, 'user conflict preserved');
+      // Config IS updated (config write precedes sync)
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((c) => c.id === skillId);
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('reports conflict and mounts non-conflicting providers when enabling managed skills', async () => {
+    // F228 redesign: user-owned path at one provider is a conflict (skipped),
+    // other providers are mounted normally. Returns 200 with propagationConflicts.
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -1784,18 +2536,30 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       await mkdir(localSkillDir, { recursive: true });
       await writeFile(join(localSkillDir, 'SKILL.md'), '# user debugging\n');
 
-      const res = await patchSkillCapability(app, projectDir, skillId, true);
+      const res = await patchSkillCapability(app, projectDir, skillId, true, 'project');
 
-      assert.equal(res.statusCode, 409, res.payload);
-      assert.match(res.payload, /not a managed Clowder AI skill symlink/);
-      const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      // Skip+record: 200 with conflicts, non-conflicting providers mounted
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.codex')),
+        'codex conflict reported',
+      );
+      // User-owned codex path preserved
       assert.equal((await lstat(localSkillDir)).isDirectory(), true);
+      // Config IS updated (config write precedes sync)
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(config?.capabilities[0]?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(config?.capabilities[0]?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+      // Non-conflicting providers ARE mounted
       for (const provider of ['.claude', '.gemini', '.kimi']) {
-        await assert.rejects(
-          () => lstat(join(projectDir, provider, 'skills', skillId)),
-          /ENOENT/,
-          `${provider} must not get a partial managed symlink when another provider has a user-owned conflict`,
+        const linkPath = join(projectDir, provider, 'skills', skillId);
+        assert.equal(
+          (await lstat(linkPath)).isSymbolicLink(),
+          true,
+          `${provider} should have a managed symlink for non-conflicting provider`,
         );
       }
     } finally {
@@ -1825,7 +2589,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
         capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'external' }],
       });
 
-      const res = await patchSkillCapability(app, projectDir, skillId, false);
+      const res = await patchSkillCapability(app, projectDir, skillId, false, 'project');
 
       assert.equal(res.statusCode, 200, res.payload);
       assert.equal(await realpath(linkPath), await realpath(externalSource));
@@ -1839,7 +2603,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('does not mutate symlinks for per-cat skill overrides', async () => {
+  it('rejects per-cat skill overrides (F228: skills are filesystem-level)', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const skillId = 'debugging';
@@ -1854,11 +2618,13 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
 
       const res = await patchSkillCapability(app, projectDir, skillId, false, 'cat');
 
-      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(res.statusCode, 400, res.payload);
+      assert.match(res.payload, /invalid scope.*cat.*for skill/i);
+      // Symlinks and config must remain untouched
       assert.equal(await realpath(linkPath), await realpath(join(sourceSkillsDir, skillId)));
       const config = await readCapabilitiesConfig(projectDir);
       assert.equal(config?.capabilities[0]?.enabled, true);
-      assert.deepEqual(config?.capabilities[0]?.overrides, [{ catId: 'codex', enabled: false }]);
+      assert.equal(config?.capabilities[0]?.overrides, undefined, 'rejected PATCH must not create overrides');
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -1909,7 +2675,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       });
       assert.equal(missingOwner.statusCode, 200, missingOwner.payload);
       let config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      // scope=cat writes per-cat override, not cap.enabled
+      const override = config?.capabilities[0]?.overrides?.find((o) => o.catId === 'ragdoll');
+      assert.equal(override?.enabled, false);
 
       const nonLocalMissingOwner = await patchCapability(app, projectDir, {
         ...OWNER_SESSION_HEADERS,
@@ -1976,7 +2744,11 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.match(JSON.parse(ownerNonLocal.payload).error, /direct localhost/i);
 
       config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      // scope=cat writes per-cat override; cap.enabled stays true.
+      // Verify the override from the first successful call persists and
+      // the failed auth attempts didn't mutate it further.
+      const finalOverride = config?.capabilities[0]?.overrides?.find((o) => o.catId === 'ragdoll');
+      assert.equal(finalOverride?.enabled, false);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -2003,7 +2775,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(res.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
 
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      // scope=cat writes per-cat override, cap.enabled stays true
+      const redactOverride = config?.capabilities[0]?.overrides?.find((o) => o.catId === 'ragdoll');
+      assert.equal(redactOverride?.enabled, false);
       assert.equal(config?.capabilities[0]?.mcpServer?.env?.API_KEY, 'raw-secret');
       assert.equal(config?.capabilities[0]?.mcpServer?.headers?.Authorization, 'Bearer raw-secret');
 
@@ -2015,6 +2789,1337 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('reports conflict when mount writeback encounters directory-level conflict', async () => {
+    // F228 redesign: a wrong-pointing directory-level symlink is a conflict (not
+    // a managed mount). syncProject skips it and reports the conflict. Config IS
+    // persisted because config update runs before filesystem sync.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-skill-writeback-fails');
+    const wrongSource = join(projectDir, 'wrong-skills-source');
+    await mkdir(join(projectDir, '.claude'), { recursive: true });
+    await mkdir(wrongSource, { recursive: true });
+    await symlink(wrongSource, join(projectDir, '.claude/skills'));
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      // Skip+record: returns 200, reports claude conflict, other providers work
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
+      );
+      // Config IS updated (config write precedes sync)
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging');
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(
+        skill?.mountPaths,
+        ['claude', 'codex', 'gemini', 'kimi'],
+        'toggle persists through mountPaths even with conflicts',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('reports conflict for user-owned skill path and preserves the directory', async () => {
+    // F228 redesign: user-owned path at one provider is reported as a conflict.
+    // Other providers mount normally. The user-owned directory is preserved.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-preserve-user-skill-on-enable');
+    const mainProjectRoot = findRepoRoot();
+    const mainConfig = await readCapabilitiesConfig(mainProjectRoot);
+    const skillName = mainConfig?.capabilities.find(
+      (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && cap.enabled,
+    )?.id;
+    assert.ok(skillName, 'expected at least one globally enabled cat-cafe skill in the main config');
+    const localSkillDir = join(projectDir, `.claude/skills/${skillName}`);
+    await mkdir(localSkillDir, { recursive: true });
+    await writeFile(join(localSkillDir, 'SKILL.md'), `# user ${skillName}\n`);
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: skillName, type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: skillName,
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      // Skip+record: 200 with conflicts for the user-owned provider
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.ok(Array.isArray(body.propagationConflicts), 'should report conflicts');
+      assert.ok(
+        body.propagationConflicts.some((c) => c.path.includes('.claude')),
+        'claude conflict reported',
+      );
+      // Config IS updated
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillName);
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(
+        skill?.mountPaths,
+        ['claude', 'codex', 'gemini', 'kimi'],
+        'toggle persists through mountPaths with conflict reported',
+      );
+      // User-owned directory preserved
+      const localSkillStat = await lstat(localSkillDir);
+      assert.equal(localSkillStat.isDirectory(), true, 'user-owned skill directory should be preserved');
+      assert.equal(await readFile(join(localSkillDir, 'SKILL.md'), 'utf8'), `# user ${skillName}\n`);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('ignores same-id disabled plugin capabilities in external project enable guard', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = await makeTmpDir('patch-skill-main-plugin-global-guard');
+    const projectDir = await makeTmpDir('patch-skill-plugin-global-guard');
+    await writeFile(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: false,
+          source: 'cat-cafe',
+          pluginId: 'same-id-plugin',
+          mountPaths: [],
+        },
+      ],
+    });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+    const app = await buildSessionAppWithProjectRoot(mainRoot);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging' && !cap.pluginId);
+      assert.equal(skill?.enabled, false, 'project enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project enable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+      assert.equal((await lstat(join(projectDir, '.claude', 'skills', 'debugging'))).isSymbolicLink(), true);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(mainRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('allows external project provider enables even when excluded by global skill mountPaths', async () => {
+    // F228: Global policy cascades as default, but does NOT restrict project-level
+    // overrides. Projects can independently enable providers that are not in the
+    // global skill mountPaths — the global toggle is a convenience cascade, not
+    // a hard constraint.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = await makeTmpDir('patch-skill-main-provider-policy-guard');
+    const projectDir = await makeTmpDir('patch-skill-provider-policy-guard');
+    await writeFile(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+      mountRules: [
+        { name: 'claude', path: '.claude/skills', enabled: true },
+        { name: 'codex', path: '.codex/skills', enabled: true },
+        { name: 'gemini', path: '.gemini/skills', enabled: false },
+        { name: 'kimi', path: '.kimi/skills', enabled: false },
+      ],
+    });
+    const app = await buildSessionAppWithProjectRoot(mainRoot);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          mountPointId: 'codex',
+          enabled: true,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging');
+      assert.equal(skill?.enabled, false, 'project mount point enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project mount point enable must NOT change globalEnabled');
+      assert.ok(skill?.mountPaths?.includes('codex'), 'project should be able to mount codex independently');
+      assert.equal(
+        (await lstat(join(projectDir, '.codex/skills/debugging'))).isSymbolicLink(),
+        true,
+        'codex mount point should be mounted at project level even though globally excluded',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(mainRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('project whole-skill enable mounts all enabled providers regardless of global mountPaths', async () => {
+    // F228: Global mountPaths cascade as a default, but do NOT cap project-level
+    // enables. A whole-skill enable at project level mounts to all enabled providers
+    // in the project's own mount rules, not just those in the global mountPaths.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = await makeTmpDir('patch-skill-main-enable-provider-policy');
+    const projectDir = await makeTmpDir('patch-skill-enable-provider-policy');
+    await writeFile(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+      mountRules: [
+        { name: 'claude', path: '.claude/skills', enabled: true },
+        { name: 'codex', path: '.codex/skills', enabled: true },
+        { name: 'gemini', path: '.gemini/skills', enabled: false },
+        { name: 'kimi', path: '.kimi/skills', enabled: false },
+      ],
+    });
+    const app = await buildSessionAppWithProjectRoot(mainRoot);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging');
+      assert.equal(skill?.enabled, false, 'project whole-skill enable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, false, 'project whole-skill enable must NOT change globalEnabled');
+      // Both claude and codex are enabled providers in project mount rules,
+      // so whole-skill enable should mount to both, not just global's ['claude'].
+      assert.deepEqual(skill?.mountPaths, ['claude', 'codex']);
+      assert.equal((await lstat(join(projectDir, '.claude/skills/debugging'))).isSymbolicLink(), true);
+      assert.equal(
+        (await lstat(join(projectDir, '.codex/skills/debugging'))).isSymbolicLink(),
+        true,
+        'codex should be mounted — project enable is not capped by global mountPaths',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(mainRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('prefers same-id first-party Cat Cafe skill when toggling managed skills', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = await makeTmpDir('patch-skill-first-party-toggle-lookup');
+    await writeFile(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'same-id-plugin',
+          mountPaths: ['claude'],
+        },
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    const app = await buildSessionAppWithProjectRoot(mainRoot);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(mainRoot);
+      const firstParty = config?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.id === 'debugging' && !cap.pluginId,
+      );
+      const pluginOwned = config?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.id === 'debugging' && cap.pluginId === 'same-id-plugin',
+      );
+      // F228: project-scope disable only changes mountPaths; enabled/globalEnabled
+      // stay true so the global view is not affected (same-project scenario).
+      assert.equal(firstParty?.enabled, true, 'project disable must NOT change enabled (global state)');
+      assert.deepEqual(firstParty?.mountPaths, [], 'disabled first-party skill should have no mounts');
+      assert.equal(pluginOwned?.enabled, true, 'same-id plugin skill must stay enabled');
+      assert.deepEqual(pluginOwned?.mountPaths, ['claude'], 'same-id plugin mount policy must be preserved');
+    } finally {
+      await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('uses source discriminator when toggling a same-id external skill', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = await makeTmpDir('patch-skill-external-toggle-lookup');
+    await writeFile(join(mainRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude'],
+        },
+        {
+          id: 'debugging',
+          type: 'skill',
+          enabled: true,
+          source: 'external',
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+    const app = await buildSessionAppWithProjectRoot(mainRoot);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          source: 'external',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.capability.source, 'external', 'PATCH response should identify the external row');
+      const config = await readCapabilitiesConfig(mainRoot);
+      const firstParty = config?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.id === 'debugging' && cap.source === 'cat-cafe' && !cap.pluginId,
+      );
+      const external = config?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.id === 'debugging' && cap.source === 'external',
+      );
+      assert.equal(external?.enabled, false, 'external skill should be toggled');
+      assert.deepEqual(external?.mountPaths, ['claude'], 'external mount policy should be preserved');
+      assert.equal(firstParty?.enabled, true, 'first-party Cat Cafe skill must stay enabled');
+      assert.deepEqual(firstParty?.mountPaths, ['claude'], 'first-party mount policy must be preserved');
+    } finally {
+      await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('converts legacy directory-level mounts before disabling a managed skill', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-convert-legacy-root-on-disable');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const sourceSkillNames = [];
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // refs and support folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 1, 'expected multiple source skills');
+    const disabledSkill = sourceSkillNames.includes('debugging') ? 'debugging' : sourceSkillNames[0];
+    const keptSkill = sourceSkillNames.find((name) => name !== disabledSkill);
+    assert.ok(keptSkill, 'expected a second enabled skill');
+
+    const claudeSkillsDir = join(projectDir, '.claude/skills');
+    await mkdir(join(projectDir, '.claude'), { recursive: true });
+    await symlink(sourceSkillsDir, claudeSkillsDir);
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: sourceSkillNames.map((id) => ({
+        id,
+        type: 'skill',
+        enabled: true,
+        source: 'cat-cafe',
+      })),
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: disabledSkill,
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const disabledCap = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === disabledSkill);
+      assert.equal(disabledCap?.enabled, true, 'project disable must NOT change enabled');
+      assert.equal(disabledCap?.globalEnabled, true, 'project disable must NOT change globalEnabled');
+      assert.deepEqual(disabledCap?.mountPaths, [], 'project disable is represented by empty mountPaths');
+      const rootStat = await lstat(claudeSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy root should become a real provider directory');
+      assert.equal(rootStat.isSymbolicLink(), false, 'legacy directory-level symlink should be removed');
+      await assert.rejects(
+        () => lstat(join(claudeSkillsDir, disabledSkill)),
+        /ENOENT/,
+        'disabled skill must no longer be loadable through the provider root',
+      );
+      assert.equal(
+        (await lstat(join(claudeSkillsDir, keptSkill))).isSymbolicLink(),
+        true,
+        'other enabled skills should remain mounted after conversion',
+      );
+      assert.equal(
+        (await lstat(join(sourceSkillsDir, disabledSkill))).isDirectory(),
+        true,
+        'source skill directory must not be removed',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('preserves per-skill mountPaths when converting legacy roots during managed skill disable', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-convert-legacy-root-preserve-mountpaths');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const sourceSkillNames = [];
+    for (const entry of await readdir(sourceSkillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      try {
+        await readFile(join(sourceSkillsDir, entry.name, 'SKILL.md'), 'utf-8');
+        sourceSkillNames.push(entry.name);
+      } catch {
+        // refs and support folders are not skills
+      }
+    }
+    assert.ok(sourceSkillNames.length > 1, 'expected multiple source skills');
+    const disabledSkill = sourceSkillNames.includes('debugging') ? 'debugging' : sourceSkillNames[0];
+    const codexOnlySkill = sourceSkillNames.find((name) => name !== disabledSkill);
+    assert.ok(codexOnlySkill, 'expected a second enabled skill');
+
+    const claudeSkillsDir = join(projectDir, '.claude/skills');
+    await mkdir(join(projectDir, '.claude'), { recursive: true });
+    await symlink(sourceSkillsDir, claudeSkillsDir);
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: disabledSkill,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude'],
+        },
+        {
+          id: codexOnlySkill,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['codex'],
+        },
+      ],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: disabledSkill,
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const rootStat = await lstat(claudeSkillsDir);
+      assert.equal(rootStat.isDirectory(), true, 'legacy root should become a real provider directory');
+      assert.equal(rootStat.isSymbolicLink(), false, 'legacy directory-level symlink should be removed');
+      await assert.rejects(
+        () => lstat(join(claudeSkillsDir, disabledSkill)),
+        /ENOENT/,
+        'disabled skill must no longer be loadable through the provider root',
+      );
+      await assert.rejects(
+        () => lstat(join(claudeSkillsDir, codexOnlySkill)),
+        /ENOENT/,
+        'codex-only skill must not become loadable through the claude provider root',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('removes custom skill mounts when disabling a managed skill', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-remove-custom-mount-on-disable');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const customSkillsDir = join('custom-client', 'skills');
+    const customSkillsDirPath = join(projectDir, customSkillsDir);
+    await mkdir(customSkillsDirPath, { recursive: true });
+    await symlink(join(sourceSkillsDir, 'debugging'), join(customSkillsDirPath, 'debugging'));
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: true, source: 'cat-cafe' }],
+    });
+    await writeMountRules(projectDir, {
+      version: 1,
+      mountPoints: {
+        claude: { enabled: false, path: '.claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+      customPaths: [{ alias: 'acp', path: customSkillsDir }],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging');
+      assert.equal(skill?.enabled, true, 'project disable must NOT change enabled');
+      assert.equal(skill?.globalEnabled, true, 'project disable must NOT change globalEnabled');
+      assert.deepEqual(skill?.mountPaths, [], 'project disable is represented by empty mountPaths');
+      await assert.rejects(
+        () => lstat(join(customSkillsDirPath, 'debugging')),
+        /ENOENT/,
+        'disabled skill must no longer be loadable through custom mount targets',
+      );
+      assert.equal(
+        (await lstat(join(sourceSkillsDir, 'debugging'))).isDirectory(),
+        true,
+        'source skill directory must not be removed',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('seeds missing mountPaths from enabled providers before a per-provider disable', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-seed-missing-mountpaths-provider-disable');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const skillId = 'debugging';
+    const claudeSkillsDir = join(projectDir, '.claude/skills');
+    const codexSkillsDir = join(projectDir, '.codex/skills');
+    await mkdir(claudeSkillsDir, { recursive: true });
+    await mkdir(codexSkillsDir, { recursive: true });
+    await symlink(join(sourceSkillsDir, skillId), join(claudeSkillsDir, skillId));
+    await symlink(join(sourceSkillsDir, skillId), join(codexSkillsDir, skillId));
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'cat-cafe' }],
+      mountRules: [
+        { name: 'claude', path: '.claude/skills', enabled: true },
+        { name: 'codex', path: '.codex/skills', enabled: true },
+        { name: 'gemini', path: '.gemini/skills', enabled: false },
+        { name: 'kimi', path: '.kimi/skills', enabled: false },
+      ],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: skillId,
+          capabilityType: 'skill',
+          scope: 'project',
+          mountPointId: 'codex',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const config = await readCapabilitiesConfig(projectDir);
+      const skill = config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
+      assert.equal(skill?.enabled, true, 'disabling one mount point must not globally disable the skill');
+      assert.deepEqual(skill?.mountPaths, ['claude'], 'remaining enabled mount point should seed mountPaths');
+      assert.equal((await lstat(join(claudeSkillsDir, skillId))).isSymbolicLink(), true);
+      await assert.rejects(() => lstat(join(codexSkillsDir, skillId)), /ENOENT/);
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('routes global skill toggles through the main config when an external project is selected', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-global-selected-external');
+    const externalOnlySkill = `external-only-global-${Date.now()}`;
+
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        { id: externalOnlySkill, type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] },
+      ],
+      mountRules: [
+        { name: 'claude', path: '.claude/skills', enabled: true },
+        { name: 'codex', path: '.codex/skills', enabled: false },
+        { name: 'gemini', path: '.gemini/skills', enabled: false },
+        { name: 'kimi', path: '.kimi/skills', enabled: false },
+      ],
+    });
+
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: externalOnlySkill,
+          capabilityType: 'skill',
+          scope: 'global',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 404, 'global toggle must resolve capability from main config, not selected project');
+      const selectedAfter = await readCapabilitiesConfig(projectDir);
+      const selectedSkillAfter = selectedAfter?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.id === externalOnlySkill,
+      );
+      assert.equal(
+        selectedSkillAfter?.enabled,
+        true,
+        'selected external config must not be mutated when the global capability is absent from main config',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('does not propagate main-project project skill disables to registered external projects', async () => {
+    // Project scope NEVER cascades — only global scope does.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousHome = process.env.HOME;
+    const previousCwd = process.cwd();
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+
+    const mainDir = await makeTmpDir('patch-main-project-disable-propagates');
+    const externalDir = await makeTmpDir('patch-main-project-disable-external');
+    const homeDir = await makeTmpDir('patch-main-project-disable-home');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const skillId = 'debugging';
+    const externalLink = join(externalDir, '.claude', 'skills', skillId);
+
+    await Promise.all([
+      writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n'),
+      mkdir(join(externalDir, '.claude', 'skills'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+    await writeFile(
+      join(mainDir, '.cat-cafe', 'governance-registry.json'),
+      `${JSON.stringify(
+        {
+          entries: [{ projectPath: externalDir, packVersion: 'test', syncedAt: new Date().toISOString() }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeCapabilitiesConfig(externalDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+    await symlink(join(sourceSkillsDir, skillId), externalLink);
+
+    process.env.HOME = homeDir;
+    process.chdir(mainDir);
+
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import(`../dist/routes/capabilities.js?t=${Date.now()}`);
+    const app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const raw = request.headers['x-test-session-user'];
+      if (typeof raw === 'string' && raw.trim()) {
+        request.sessionUserId = raw.trim();
+      }
+    });
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          capabilityId: skillId,
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+
+      const mainConfig = await readCapabilitiesConfig(mainDir);
+      const mainSkill = mainConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
+      // F228: project scope only changes mountPaths, not enabled/globalEnabled
+      assert.equal(mainSkill?.enabled, true, 'project disable must NOT change enabled (global state)');
+      assert.deepEqual(mainSkill?.mountPaths, [], 'project disable sets mountPaths to empty');
+
+      // Project scope NEVER cascades — external project is completely untouched
+      const externalConfig = await readCapabilitiesConfig(externalDir);
+      const externalSkill = externalConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
+      assert.equal(externalSkill?.enabled, true, 'external project untouched — no cascade for project scope');
+      assert.deepEqual(externalSkill?.mountPaths, ['claude'], 'external mountPaths untouched — no cascade');
+      assert.equal((await lstat(externalLink)).isSymbolicLink(), true, 'external symlink preserved — no cascade');
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(externalDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('persists global disabled skill policy for registered external projects without config', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousHome = process.env.HOME;
+    const previousCwd = process.cwd();
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+
+    const mainDir = await makeTmpDir('patch-global-disable-propagates-missing-config');
+    const externalDir = await makeTmpDir('patch-global-disable-missing-config-external');
+    const homeDir = await makeTmpDir('patch-global-disable-missing-config-home');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const skillId = 'debugging';
+    const externalLink = join(externalDir, '.claude', 'skills', skillId);
+
+    await Promise.all([
+      writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n'),
+      mkdir(join(externalDir, '.claude', 'skills'), { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+    await writeFile(
+      join(mainDir, '.cat-cafe', 'governance-registry.json'),
+      `${JSON.stringify(
+        {
+          entries: [{ projectPath: externalDir, packVersion: 'test', syncedAt: new Date().toISOString() }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await symlink(join(sourceSkillsDir, skillId), externalLink);
+
+    process.env.HOME = homeDir;
+    process.chdir(mainDir);
+
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import(`../dist/routes/capabilities.js?t=${Date.now()}`);
+    const app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const raw = request.headers['x-test-session-user'];
+      if (typeof raw === 'string' && raw.trim()) {
+        request.sessionUserId = raw.trim();
+      }
+    });
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          capabilityId: skillId,
+          capabilityType: 'skill',
+          scope: 'global',
+          enabled: false,
+        },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      assert.equal(await pathExists(externalLink), false, 'global disable should remove external project mount');
+
+      const externalConfig = await readCapabilitiesConfig(externalDir);
+      const externalSkill = externalConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
+      assert.equal(externalConfig?.version, 2, 'external project should get a v2 capabilities config');
+      assert.equal(externalSkill?.enabled, false, 'global disable should persist externally without prior config');
+      assert.deepEqual(externalSkill?.mountPaths, []);
+    } finally {
+      await app.close();
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(externalDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves existing external provider mounts when global enable encounters per-provider conflict', async () => {
+    // F228: Per-provider conflict handling — when the claude provider directory
+    // is a conflict (user-owned directory), propagation skips it and preserves
+    // existing codex mounts. Returns 200 with propagationConflicts instead of 500.
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousHome = process.env.HOME;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+
+    const mainDir = await makeTmpDir('patch-global-enable-rollback-main');
+    const externalDir = await makeTmpDir('patch-global-enable-rollback-external');
+    const homeDir = await makeTmpDir('patch-global-enable-rollback-home');
+    const sourceSkillsDir = join(findRepoRoot(), 'cat-cafe-skills');
+    const skillId = 'debugging';
+    const externalCodexLink = join(externalDir, '.codex', 'skills', skillId);
+    const externalClaudeConflict = join(externalDir, '.claude', 'skills', skillId);
+
+    await Promise.all([
+      writeFile(join(mainDir, 'pnpm-workspace.yaml'), 'packages: []\n'),
+      mkdir(dirname(externalCodexLink), { recursive: true }),
+      mkdir(externalClaudeConflict, { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+    await writeMountRules(mainDir, {
+      version: 1,
+      mountPoints: {
+        claude: { enabled: true, path: '.claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+      customPaths: [],
+    });
+    await writeFile(
+      join(mainDir, '.cat-cafe', 'governance-registry.json'),
+      `${JSON.stringify(
+        {
+          entries: [{ projectPath: externalDir, packVersion: 'test', syncedAt: new Date().toISOString() }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeCapabilitiesConfig(externalDir, {
+      version: 2,
+      capabilities: [{ id: skillId, type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['codex'] }],
+    });
+    await symlink(join(sourceSkillsDir, skillId), externalCodexLink);
+
+    process.env.HOME = homeDir;
+    const app = await buildSessionAppWithProjectRoot(mainDir);
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          capabilityId: skillId,
+          capabilityType: 'skill',
+          scope: 'global',
+          enabled: true,
+        },
+      });
+
+      // F228 redesign: syncProject skips conflicts and mounts non-conflicting
+      // providers. The external project has mountPaths=['codex'], but codex is
+      // disabled in mount rules. The user-owned claude dir is preserved. The
+      // skill stays enabled in external config (cascade respects local config).
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.ok, true);
+      // User-owned claude path preserved
+      assert.equal((await lstat(externalClaudeConflict)).isDirectory(), true);
+      const externalConfig = await readCapabilitiesConfig(externalDir);
+      const externalSkill = externalConfig?.capabilities.find((cap) => cap.type === 'skill' && cap.id === skillId);
+      assert.equal(externalSkill?.enabled, true);
+    } finally {
+      await app.close();
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(externalDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsafe cat-cafe skill ids before filesystem writeback', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-unsafe-skill-id');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: '../escape', type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: {
+          ...OWNER_SESSION_HEADERS,
+          host: 'localhost:3004',
+          origin: 'http://localhost:3003',
+        },
+        payload: {
+          projectPath: projectDir,
+          capabilityId: '../escape',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.equal(res.statusCode, 400, res.payload);
+      assert.match(res.json().error, /Invalid skill name/);
+      await assert.rejects(
+        () => lstat(join(projectDir, '.claude', 'escape')),
+        /ENOENT/,
+        'unsafe skill id must not escape the provider skills directory',
+      );
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(config?.capabilities[0]?.enabled, false, 'invalid skill id must not persist the toggle');
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('does not rollback when initial skill mount writeback fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-skill-initial-writeback-fails');
+    const externalSkillsDir = join(projectDir, 'external-skills');
+    const externalSkillLink = join(externalSkillsDir, 'debugging');
+    await mkdir(join(projectDir, '.claude'), { recursive: true });
+    await mkdir(externalSkillsDir, { recursive: true });
+    await symlink(join(projectDir, 'user-owned-debugging'), externalSkillLink);
+    await symlink(externalSkillsDir, join(projectDir, '.claude/skills'));
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: OWNER_SESSION_HEADERS,
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.notEqual(res.statusCode, 200, 'invalid provider root symlink should fail the toggle');
+      const externalLinkStat = await lstat(externalSkillLink);
+      assert.equal(
+        externalLinkStat.isSymbolicLink(),
+        true,
+        'failed initial writeback must not rollback-delete user-owned symlinks outside project mounts',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('rolls back cat-cafe skill mount when config persistence fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-skill-config-write-fails');
+    const capabilitiesPath = join(projectDir, '.cat-cafe/capabilities.json');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    await chmod(capabilitiesPath, 0o444);
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: OWNER_SESSION_HEADERS,
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.notEqual(res.statusCode, 200, 'config write failure should fail the toggle');
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(
+        config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging')?.enabled,
+        false,
+        'capabilities.json should remain disabled when persistence fails',
+      );
+      for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+        await assert.rejects(
+          () => lstat(join(projectDir, `.${provider}/skills/debugging`)),
+          /ENOENT/,
+          `${provider} mount should be rolled back`,
+        );
+      }
+    } finally {
+      await app.close();
+      await chmod(capabilitiesPath, 0o644).catch(() => {});
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('restores preexisting local skill path when skill enable rollback runs', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-skill-restore-local-on-rollback');
+    const capabilitiesPath = join(projectDir, '.cat-cafe/capabilities.json');
+    const localSkillDir = join(projectDir, '.claude/skills/debugging');
+    await mkdir(localSkillDir, { recursive: true });
+    await writeFile(join(localSkillDir, 'local.txt'), 'keep local skill');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [{ id: 'debugging', type: 'skill', enabled: false, source: 'cat-cafe' }],
+    });
+    await chmod(capabilitiesPath, 0o444);
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: OWNER_SESSION_HEADERS,
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'debugging',
+          capabilityType: 'skill',
+          scope: 'project',
+          enabled: true,
+        },
+      });
+
+      assert.notEqual(res.statusCode, 200, 'config write failure should fail the toggle');
+      const config = await readCapabilitiesConfig(projectDir);
+      assert.equal(
+        config?.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'debugging')?.enabled,
+        false,
+        'capabilities.json should remain disabled when persistence fails',
+      );
+      const restored = await lstat(localSkillDir);
+      assert.equal(restored.isDirectory(), true, 'pre-existing local skill directory should be restored');
+      assert.equal(await readFile(join(localSkillDir, 'local.txt'), 'utf8'), 'keep local skill');
+    } finally {
+      await app.close();
+      await chmod(capabilitiesPath, 0o644).catch(() => {});
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('rolls back capabilities and provider configs when CLI config generation fails', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousHome = process.env.HOME;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const projectDir = await makeTmpDir('patch-cli-generation-fails');
+    const homeDir = await makeTmpDir('patch-cli-generation-fails-home');
+    const claudeConfigPath = join(projectDir, '.mcp.json');
+    const oldClaudeConfig = '{"mcpServers":{"old-server":{"command":"old","args":[]}}}\n';
+    process.env.HOME = homeDir;
+    await mkdir(join(projectDir, '.codex', 'config.toml'), { recursive: true });
+    await writeFile(claudeConfigPath, oldClaudeConfig);
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'toggle-mcp',
+          type: 'mcp',
+          enabled: false,
+          source: 'external',
+          mcpServer: { command: 'node', args: ['server.js'] },
+        },
+      ],
+    });
+    const app = await buildSessionApp();
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/capabilities',
+        headers: OWNER_SESSION_HEADERS,
+        payload: {
+          projectPath: projectDir,
+          capabilityId: 'toggle-mcp',
+          capabilityType: 'mcp',
+          scope: 'cat',
+          catId: 'test-cat',
+          enabled: true,
+        },
+      });
+
+      assert.notEqual(res.statusCode, 200, 'blocked CLI config path should fail the toggle');
+      const config = await readCapabilitiesConfig(projectDir);
+      const mcp = config?.capabilities.find((cap) => cap.type === 'mcp' && cap.id === 'toggle-mcp');
+      assert.equal(mcp?.enabled, false, 'capabilities.json should be restored when CLI config generation fails');
+      assert.equal(mcp?.overrides, undefined, 'cat override should be rolled back');
+      assert.equal(
+        await readFile(claudeConfigPath, 'utf8'),
+        oldClaudeConfig,
+        'provider configs already written before a peer writer failed should be restored',
+      );
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+      await rm(homeDir, { recursive: true, force: true });
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
     }

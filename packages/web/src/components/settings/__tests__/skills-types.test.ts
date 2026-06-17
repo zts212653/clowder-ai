@@ -8,11 +8,14 @@ function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkil
     name: 'test-skill',
     category: '工具',
     trigger: '/test',
+    source: 'cat-cafe',
     governance: {
       mounts: { claude: true, codex: true, gemini: false, kimi: false },
       mountedCount: 2,
+      requiredMountCount: 4,
+      allMounted: false,
+      enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
       requiresMcp: [],
-      hasConflict: false,
       isStaleNew: false,
       isStaleRemoved: false,
     },
@@ -68,7 +71,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: true, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const result = composeSkillItems(governance, []);
     expect(result[0].description).toBe('开发完成后的自检门禁');
@@ -87,7 +89,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: false, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const result = composeSkillItems(governance, []);
     expect(result[0].description).toBeUndefined();
@@ -106,7 +107,6 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: false, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const caps: CapabilityBoardItem[] = [
       {
@@ -135,10 +135,102 @@ describe('composeSkillItems', () => {
       ],
       summary: { total: 1, allMounted: true, registrationConsistent: true },
       staleness: null,
-      conflicts: [],
     };
     const caps: CapabilityBoardItem[] = [{ id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: true, cats: {} }];
     const result = composeSkillItems(governance, caps);
     expect(result[0].pluginId).toBeUndefined();
+  });
+
+  it('prefers globalEnabled for skill controls when present', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'tdd',
+          category: 'SOP',
+          trigger: '/tdd',
+          mounts: { claude: true, codex: true, gemini: true, kimi: true },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: true, registrationConsistent: true },
+      staleness: null,
+    };
+    const caps: CapabilityBoardItem[] = [
+      { id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: false, globalEnabled: true, cats: {} },
+    ];
+
+    const result = composeSkillItems(governance, caps);
+
+    expect(result[0].controls?.enabled).toBe(true);
+  });
+
+  it('prefers non-plugin Cat Cafe capabilities for same-id source skills', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'debugging',
+          category: 'SOP',
+          trigger: '/debugging',
+          source: 'cat-cafe',
+          globalEnabled: true,
+          mountPaths: ['claude'],
+          mounts: { claude: true, codex: false, gemini: false, kimi: false },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: false, registrationConsistent: true },
+      staleness: null,
+    };
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: { codex: true },
+        mountPaths: ['claude'],
+      },
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: false,
+        cats: { codex: false },
+        pluginId: 'same-id-plugin',
+        mountPaths: [],
+      },
+    ];
+
+    const result = composeSkillItems(governance, caps);
+
+    expect(result[0].pluginId).toBeUndefined();
+    expect(result[0].mountPaths).toEqual(['claude']);
+    expect(result[0].controls?.enabled).toBe(true);
+  });
+
+  it('uses mount-point-aware mount health when disabled mount points are intentionally unmounted', () => {
+    const governance: SkillsData = {
+      skills: [
+        {
+          name: 'debugging',
+          category: '工具',
+          trigger: '/debug',
+          mounts: { claude: true, codex: true, gemini: true, kimi: false },
+          mountHealth: {
+            enabledMountPoints: ['claude', 'codex', 'gemini'],
+            mountedCount: 3,
+            requiredCount: 3,
+            allMounted: true,
+          },
+          requiresMcp: [],
+        },
+      ],
+      summary: { total: 1, allMounted: true, registrationConsistent: true },
+      staleness: null,
+    };
+    const result = composeSkillItems(governance, []);
+    expect(result[0].governance.mountedCount).toBe(3);
+    expect(result[0].governance.requiredMountCount).toBe(3);
+    expect(result[0].governance.allMounted).toBe(true);
   });
 });

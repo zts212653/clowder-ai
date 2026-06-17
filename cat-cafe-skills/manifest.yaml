@@ -16,6 +16,7 @@ skills:
 
   # ── 功能生命周期 ──
   feat-lifecycle:
+    category: "开发流程"
     description: >
       Feature 立项、讨论、完成的全生命周期管理。
       Use when: 开个新功能、new feature、F0xx、立项、feature 完成、验收通过、讨论新功能需求。
@@ -41,6 +42,7 @@ skills:
 
   # ── 引导流程设计 ──
   guide-authoring:
+    category: "引导与协作"
     description: >
       标准引导流程设计 SOP：场景识别 → YAML 编排 → 标签标注 → 注册发现 → 测试验证。
       Use when: 新建引导流程、添加场景引导、维护 Guide Catalog、编写引导 YAML。
@@ -61,6 +63,7 @@ skills:
     sop_step: null
 
   guide-interaction:
+    category: "引导与协作"
     description: >
       场景引导交互模式：用户明确在问某项功能怎么做时，先判断该直接解释还是进入交互引导；
       系统注入了 Guide Matched / Guide Pending / Guide Selection / Guide Active / Guide Completed 时，
@@ -81,6 +84,7 @@ skills:
 
   # ── 协作思考 ──
   collaborative-thinking:
+    category: "引导与协作"
     description: >
       单人或多猫的创意探索、独立思考、讨论收敛。
       Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
@@ -103,6 +107,7 @@ skills:
 
   # ── 专家辩论团 ──
   expert-panel:
+    category: "引导与协作"
     description: >
       多猫专家辩论团：独立分析→挑战→收敛→风险预演→语音汇报→文档交付。
       Use when: 技术趋势判断、竞品分析、行业事件分析、需要多视角决策支持、operator说"帮我分析一下"。
@@ -131,6 +136,7 @@ skills:
 
   # ── 计划编写 ──
   writing-plans:
+    category: "开发流程"
     description: >
       将 spec/需求拆分为可执行的分步实施计划。
       Use when: 有 spec 或需求，准备动手前需要拆分步骤。
@@ -150,6 +156,7 @@ skills:
 
   # ── Worktree 隔离 ──
   worktree:
+    category: "开发流程"
     description: >
       创建 Git worktree 隔离开发环境，含 Redis 6398 安全配置。
       Use when: 开始任何代码修改、新功能开发、bug fix。
@@ -169,6 +176,7 @@ skills:
 
   # ── TDD ──
   tdd:
+    category: "开发流程"
     description: >
       Red-Green-Refactor 测试驱动开发纪律。
       Use when: 写新功能代码、修 bug、任何实现工作。
@@ -189,6 +197,7 @@ skills:
 
   # ── 调试 ──
   debugging:
+    category: "开发流程"
     description: >
       系统化 bug 定位：根因调查 → 模式分析 → 假设验证 → 修复。
       Use when: 遇到 bug、测试失败、unexpected behavior。
@@ -209,6 +218,7 @@ skills:
 
   # ── Code as Harness（用代码修自己 / 建新能力） ──
   code-as-harness:
+    category: "治理"
     description: >
       检测摩擦信号 → 搜证据确认重复 → 诊断根因 → 用代码修已有 harness 或沉淀新 harness。
       Fix（确认重复→hook/lint/guard）+ Build（反复出现的新任务→规划新 skill）。
@@ -237,6 +247,7 @@ skills:
 
   # ── 质量门禁 ──
   quality-gate:
+    category: "开发流程"
     description: >
       开发完成后的自检门禁：愿景对照 + spec 合规 + 验证。
       Use when: 开发完了准备提 review、声称完成了、准备交付。
@@ -257,6 +268,7 @@ skills:
 
   # ── 请求 Review ──
   request-review:
+    category: "开发流程"
     description: >
       向跨家族 peer-reviewer 发送 review 请求（含五件套）。
       Use when: 自检通过后准备请其他猫 review。
@@ -276,6 +288,7 @@ skills:
 
   # ── 接收 Review ──
   receive-review:
+    category: "开发流程"
     description: >
       处理 reviewer 反馈：Red→Green 修复 + 技术论证（禁止表演性同意）。
       Use when: 收到 review 结果、reviewer 提了 P1/P2、需要处理反馈。
@@ -296,6 +309,7 @@ skills:
 
   # ── 合入门禁 ──
   merge-gate:
+    category: "开发流程"
     description: >
       合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → 清理。
       Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
@@ -318,6 +332,7 @@ skills:
 
   # ── Thread 整理 ──
   organize-threads:
+    category: "工具"
     description: >
       猫猫辅助整理未分类 thread，分析标题和元数据，建议合适的标签。
       Use when: 用户说"帮我整理"、"分类 thread"、点击整理按钮。
@@ -337,6 +352,7 @@ skills:
 
   # ── 开源项目拆解 ──
   open-source-teardown:
+    category: "调研与知识"
     description: >
       明星开源项目拆解：从宣传/PPT/README 进入源码，验证真实架构、明星特性、算法含量、营销水分、可学习点和不 follow 的 tradeoff。
       Use when: operator要求拆解热门 GitHub 项目、竞品 agent/runtime、外部 skill/tool 框架，或问“它到底有什么真本事/我们能学什么”。
@@ -367,6 +383,7 @@ skills:
 
   # ── 自我进化 ──
   self-evolution:
+    category: "治理"
     description: >
       Scope Guard + Process Evolution + Knowledge Evolution — 主动护栏与自我进化。
       Use when: operator scope 发散偏离愿景、同类错误反复出现、SOP 流程缺口、有价值的知识/方法论值得沉淀。
@@ -400,6 +417,7 @@ skills:
 
   # ── 绝境反转 ──
   vision-rescue:
+    category: "治理"
     description: >
       绝境反转方法论：当任务似乎没有希望、反复摆动、准备放弃愿景时的五步突破框架。
       Use when: 任务看起来无解、多次尝试失败后想放弃、输出投降修辞（"现状最优"/"没救了"/"接受现实"）、连续 3+ 轮在希望与绝望间摆动。
@@ -433,6 +451,7 @@ skills:
 
   # ── 跨猫交接 ──
   cross-cat-handoff:
+    category: "引导与协作"
     description: >
       跨猫传话/交接的五件套结构（What/Why/Tradeoff/Open/Next）。
       Use when: 交接工作给其他猫、传话、写 review 信。
@@ -472,6 +491,7 @@ skills:
 
   # ── 跨 Thread 协同 ──
   cross-thread-sync:
+    category: "引导与协作"
     description: >
       跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
       Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
@@ -493,6 +513,7 @@ skills:
 
   # ── Thread 编排 ──
   thread-orchestration:
+    category: "引导与协作"
     description: >
       大任务的主动拆解与多 thread 并行编排。
       Use when: 任务涉及 2+ 个独立可交付子任务，需要不同猫参与、不同 thread 并行推进。
@@ -516,6 +537,7 @@ skills:
 
   # ── 深度调研 ──
   deep-research:
+    category: "调研与知识"
     description: >
       多源深度调研管道（Web Deep Research + Coder 合成）。
       Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"。
@@ -535,6 +557,7 @@ skills:
 
   # ── 信源审计（F218）──
   source-audit:
+    category: "调研与知识"
     description: >
       外部证据信源卫生中档闸门。
       Use when: 准备引用外部 claim，且命中数字/百分比、benchmark、因果归因、趋势判断、模型能力对比、论文/医学/金融、或会落 docs/ADR/PPT 的高风险特征。
@@ -560,6 +583,7 @@ skills:
 
   # ── 记忆系统三入口路由（F188 Phase F）──
   memory-navigation:
+    category: "调研与知识"
     description: >
       记忆系统三入口路由（search_evidence / graph_resolve / list_recent）决策树 + 噪音控制 + 加载时机。F188 Phase F (AC-F6) 配套 skill。
       Use when: 没先验、压缩后回顾、"我记得最近讨论过 X"、search_evidence 反复 low-hit。
@@ -583,6 +607,7 @@ skills:
     merged_from: null
 
   memory-search-best-practices:
+    category: "调研与知识"
     description: >
       记忆系统多刀检索 + recall coverage 策略（8 类题型 recipe）。F200 v1.2 SW-1 配套 skill。
       Use when: "哪些地方提过 X" / source-map / absence check / delta / coverage 全集 / 冷启动 onboard / 召回任务搜了 1 刀觉得不够。
@@ -617,6 +642,7 @@ skills:
 
   # ── 知识工程（F152 Phase 0）──
   knowledge-engineering:
+    category: "调研与知识"
     description: >
       猫猫指导外部项目文档重构 — AI FDE 知识工程方法论。
       Use when: 猫猫部署到外部项目、用户项目缺少结构化文档、需要知识工程指导、冷启动理解业务。
@@ -640,6 +666,7 @@ skills:
 
   # ── 定时任务 ──
   schedule-tasks:
+    category: "工具"
     description: >
       定时任务注册、管理、能力指南。支持周期任务和一次性延迟任务。
       Use when: 用户想设定时任务、定期提醒、周期巡检、定时发送内容、延迟执行一次性操作。
@@ -672,6 +699,7 @@ skills:
 
   # ── 视频制作 ──
   video-forge:
+    category: "创作与媒体"
     description: >
       视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
       Use when: 做视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
@@ -721,6 +749,7 @@ skills:
 
   # ── Skill 编写 ──
   writing-skills:
+    category: "工具"
     description: >
       创建或修改 Clowder AI skill / MCP tool description 的元技能（含质量标准、范本、发布）。
       Use when: 写新 skill、修改现有 skill、写/改 MCP tool description、验证 skill 质量；
@@ -749,6 +778,7 @@ skills:
 
   # ── Pencil 设计 ──
   pencil-design:
+    category: "创作与媒体"
     description: >
       使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
       Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -769,6 +799,7 @@ skills:
 
   # ── 富媒体消息 ──
   rich-messaging:
+    category: "创作与媒体"
     description: >
       富媒体消息发送：语音、图片、卡片、清单、代码 diff。
       Use when: 发语音、发图、发卡片、展示结构化信息、庆祝、给我听听、给我看看。
@@ -807,6 +838,7 @@ skills:
 
   # ── 企业 IM 工作流 (F162) ──
   enterprise-workflow:
+    category: "创作与媒体"
     description: >
       企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
       Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
@@ -857,6 +889,7 @@ skills:
 
   # ── Workspace 导航 (F131) ──
   workspace-navigator:
+    category: "工具"
     description: >
       猫猫可编程导航 Workspace 面板：operator说模糊意图，猫猫找到路径，自动打开文件/目录。
       Use when: operator说"打开日志""看看代码""打开设计图""帮我打开那个文档"等模糊指令。
@@ -887,6 +920,7 @@ skills:
 
   # ── 浏览器预览 (F120) ──
   browser-preview:
+    category: "工具"
     description: >
       Hub 内嵌浏览器预览 localhost 应用。
       Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
@@ -916,6 +950,7 @@ skills:
 
   # ── Console 前端交付范式 ──
   console-dev:
+    category: "工具"
     description: >
       Console 前端交付范式：4 道门禁驱动的前端开发流程。
       Use when: 新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。
@@ -940,6 +975,7 @@ skills:
     feature: "F190"
 
   browser-automation:
+    category: "工具"
     description: >
       浏览器工作流总路由：为外部网站浏览、登录态流程、浏览器自动化、证据采集选择合适后端。
       Use when: 需要操作外部网站、登录页、JS 重页面、没有 webfetch/VL 但需要浏览器、或需要在多种浏览器工具之间路由。
@@ -976,6 +1012,7 @@ skills:
 
   # ── 健康提醒 (F085) ──
   hyperfocus-brake:
+    category: "治理"
     description: >
       operator健康提醒：三猫撒娇打断 hyperfocus。
       Use when: hook 触发提醒、用户输入 /hyperfocus-brake。
@@ -997,6 +1034,7 @@ skills:
 
   # ── 事故应急 ──
   incident-response:
+    category: "治理"
     description: >
       不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。
       Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。
@@ -1022,6 +1060,7 @@ skills:
 
   # ── 猫猫训练营引导 (F087) ──
   bootcamp-guide:
+    category: "治理"
     description: >
       operator 新手训练营引导模式：Phase 驱动的新手引导行为。
       Use when: thread 有 bootcampState（SystemPromptBuilder 自动注入）。
@@ -1042,6 +1081,7 @@ skills:
 
   # ── AI 图片生成 ──
   image-generation:
+    category: "创作与媒体"
     description: >
       通过 Chrome MCP 浏览器自动化，在 Gemini / ChatGPT 上生成图片并下载。
       Use when: 需要生成概念图、UI 参考图、像素画素材、猫猫头像、任何图片资产。
@@ -1064,6 +1104,7 @@ skills:
 
   # ── PPT 制作全链路 (F144) ──
   ppt-forge:
+    category: "创作与媒体"
     description: >
       PPT 制作全链路：内容规划 → 风格定调 → Slide 制作 → 视觉审查 → 导出验证 → 交付。
       Use when: 做 PPT、做演示文稿、做 slide、做海报、PPT review、视觉审查。
@@ -1091,6 +1132,7 @@ skills:
 
   # ── 技术文章对外写作 ──
   tech-writing:
+    category: "创作与媒体"
     description: >
       技术文章对外写作：从内部实践到读者能代入的叙事。
       Use when: 写技术博客、公众号文章、社区分享、对外 longform、技术文章 review、写推广语。
@@ -1118,6 +1160,7 @@ skills:
 
   # ── 金融数据 ──
   ttfund-skills:
+    category: "垂直领域"
     description: >
       天天基金官方 Skills 网关调用封装。
       Use when: 查询天天基金/天天财富基金数据、基金搜索、基金净值、基金持仓、基金经理、指数、黄金、债市、活期宝或官方 ttfund skills。

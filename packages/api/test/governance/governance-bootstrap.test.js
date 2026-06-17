@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-
+import {
+  readCapabilitiesConfig,
+  writeCapabilitiesConfig,
+} from '../../dist/config/capabilities/capability-orchestrator.js';
 import { GovernanceBootstrapService } from '../../dist/config/governance/governance-bootstrap.js';
 import {
   GOVERNANCE_PACK_VERSION,
@@ -82,15 +85,180 @@ describe('GovernanceBootstrapService', () => {
     }
   });
 
-  it('writes skills-state.json with managed skill names (ADR-025)', async () => {
+  it('writes capabilities skillsSync and managed skill mountPaths (F228)', async () => {
     const svc = new GovernanceBootstrapService(catCafeRoot);
     await svc.bootstrap(targetProject, { dryRun: false });
 
-    const raw = await readFile(join(targetProject, '.cat-cafe', 'skills-state.json'), 'utf-8');
-    const state = JSON.parse(raw);
-    assert.deepStrictEqual(state.managedSkillNames, ['quality-gate', 'tdd', 'worktree']); // sorted
-    assert.ok(state.sourceManifestHash.startsWith('sha256:'));
-    assert.ok(state.lastSyncedAt);
+    const config = await readCapabilitiesConfig(targetProject);
+    assert.equal(config.version, 2);
+    assert.ok(config.skillsSync?.sourceManifestHash.startsWith('sha256:'));
+    assert.ok(config.skillsSync?.lastSyncedAt);
+    assert.deepStrictEqual(
+      config.capabilities
+        .filter((cap) => cap.type === 'skill' && cap.source === 'cat-cafe')
+        .map((cap) => [cap.id, cap.mountPaths])
+        .sort(([a], [b]) => a.localeCompare(b)),
+      [
+        ['quality-gate', ['claude', 'codex', 'gemini', 'kimi']],
+        ['tdd', ['claude', 'codex', 'gemini', 'kimi']],
+        ['worktree', ['claude', 'codex', 'gemini', 'kimi']],
+      ],
+    );
+  });
+
+  it('derives bootstrap skill mounts and mountPaths from effective mount rules', async () => {
+    await writeCapabilitiesConfig(catCafeRoot, {
+      version: 2,
+      capabilities: [],
+      defaultMountRules: [
+        { name: 'claude', path: '.claude/skills', enabled: true },
+        { name: 'codex', path: '.codex/skills', enabled: false },
+        { name: 'gemini', path: '.gemini/skills', enabled: false },
+        { name: 'kimi', path: '.kimi/skills', enabled: false },
+        { name: 'acp', path: '.acp/skills', enabled: true },
+      ],
+    });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    for (const skill of ['tdd', 'worktree', 'quality-gate']) {
+      assert.ok((await lstat(join(targetProject, '.claude', 'skills', skill))).isSymbolicLink());
+      assert.ok((await lstat(join(targetProject, '.acp', 'skills', skill))).isSymbolicLink());
+      await assert.rejects(lstat(join(targetProject, '.codex', 'skills', skill)), { code: 'ENOENT' });
+      await assert.rejects(lstat(join(targetProject, '.gemini', 'skills', skill)), { code: 'ENOENT' });
+      await assert.rejects(lstat(join(targetProject, '.kimi', 'skills', skill)), { code: 'ENOENT' });
+    }
+
+    const config = await readCapabilitiesConfig(targetProject);
+    assert.deepStrictEqual(
+      config.capabilities
+        .filter((cap) => cap.type === 'skill' && cap.source === 'cat-cafe')
+        .map((cap) => [cap.id, cap.mountPaths])
+        .sort(([a], [b]) => a.localeCompare(b)),
+      [
+        ['quality-gate', ['claude', 'acp']],
+        ['tdd', ['claude', 'acp']],
+        ['worktree', ['claude', 'acp']],
+      ],
+    );
+  });
+
+  it('applies global per-skill mountPaths during project bootstrap', async () => {
+    await writeCapabilitiesConfig(catCafeRoot, {
+      version: 2,
+      capabilities: [{ id: 'tdd', type: 'skill', enabled: true, source: 'cat-cafe', mountPaths: ['claude'] }],
+    });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    assert.ok((await lstat(join(targetProject, '.claude', 'skills', 'tdd'))).isSymbolicLink());
+    for (const provider of ['codex', 'gemini', 'kimi']) {
+      await assert.rejects(lstat(join(targetProject, `.${provider}`, 'skills', 'tdd')), { code: 'ENOENT' });
+      assert.ok(
+        (await lstat(join(targetProject, `.${provider}`, 'skills', 'worktree'))).isSymbolicLink(),
+        `${provider} should still receive skills without a narrowed global policy`,
+      );
+    }
+
+    const config = await readCapabilitiesConfig(targetProject);
+    const tdd = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'tdd' && !cap.pluginId);
+    const worktree = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'worktree' && !cap.pluginId);
+    assert.deepStrictEqual(tdd?.mountPaths, ['claude']);
+    assert.deepStrictEqual(worktree?.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+  });
+
+  it('excludes globally disabled skills when bootstrapping project mounts', async () => {
+    await writeCapabilitiesConfig(catCafeRoot, {
+      version: 2,
+      capabilities: [{ id: 'worktree', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
+      assert.ok((await lstat(join(targetProject, dir, 'tdd'))).isSymbolicLink());
+      await assert.rejects(lstat(join(targetProject, dir, 'worktree')), { code: 'ENOENT' });
+    }
+
+    const config = await readCapabilitiesConfig(targetProject);
+    const worktree = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'worktree');
+    assert.ok(worktree, 'disabled global skill should be persisted as disabled in target capabilities');
+    assert.equal(worktree.enabled, false);
+    assert.deepStrictEqual(worktree.mountPaths, []);
+    assert.equal(
+      config.capabilities.some((cap) => cap.type === 'skill' && cap.id === 'worktree' && cap.enabled !== false),
+      false,
+      'disabled skill must not be upserted as enabled during bootstrap',
+    );
+  });
+
+  it('ignores same-id plugin skill disables when bootstrapping project mounts', async () => {
+    await writeCapabilitiesConfig(catCafeRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'worktree',
+          type: 'skill',
+          enabled: false,
+          source: 'cat-cafe',
+          pluginId: 'same-id-plugin',
+          mountPaths: [],
+        },
+      ],
+    });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
+      assert.ok((await lstat(join(targetProject, dir, 'worktree'))).isSymbolicLink());
+    }
+
+    const config = await readCapabilitiesConfig(targetProject);
+    const worktree = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'worktree' && !cap.pluginId);
+    assert.ok(worktree, 'source Cat Cafe skill should be bootstrapped independently from same-id plugin policy');
+    assert.equal(worktree.enabled, true);
+    assert.deepStrictEqual(worktree.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
+  });
+
+  it('preserves same-id external skill entries when seeding disabled Cat Cafe skills', async () => {
+    await writeCapabilitiesConfig(catCafeRoot, {
+      version: 2,
+      capabilities: [{ id: 'worktree', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
+    });
+    await writeCapabilitiesConfig(targetProject, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'worktree',
+          type: 'skill',
+          enabled: true,
+          source: 'external',
+          mountPaths: ['claude'],
+        },
+      ],
+    });
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    await svc.bootstrap(targetProject, { dryRun: false });
+
+    const config = await readCapabilitiesConfig(targetProject);
+    const external = config.capabilities.find(
+      (cap) => cap.type === 'skill' && cap.id === 'worktree' && cap.source === 'external',
+    );
+    assert.ok(external, 'same-id external skill capability should remain persisted');
+    assert.equal(external.enabled, true);
+    assert.deepStrictEqual(external.mountPaths, ['claude']);
+
+    const catCafe = config.capabilities.find(
+      (cap) => cap.type === 'skill' && cap.id === 'worktree' && cap.source === 'cat-cafe' && !cap.pluginId,
+    );
+    assert.ok(catCafe, 'disabled first-party Cat Cafe policy should be created separately');
+    assert.equal(catCafe.enabled, false);
+    assert.deepStrictEqual(catCafe.mountPaths, []);
   });
 
   it('appends managed block to existing CLAUDE.md', async () => {
@@ -245,5 +413,28 @@ describe('GovernanceBootstrapService', () => {
     assert.equal(hooksAction, undefined, 'no hooks action when source hooks dir missing');
     // hooks dir should not exist in target
     await assert.rejects(lstat(join(targetProject, '.claude', 'hooks')), { code: 'ENOENT' });
+  });
+
+  it('bootstrap skips per-skill symlinks when provider dir is already a symlink', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'bootstrap-outside-'));
+    // Pre-create .claude/skills as a symlink pointing outside the project
+    await mkdir(join(targetProject, '.claude'), { recursive: true });
+    await symlink(outsideDir, join(targetProject, '.claude', 'skills'));
+
+    const svc = new GovernanceBootstrapService(catCafeRoot);
+    const report = await svc.bootstrap(targetProject, { dryRun: false });
+
+    // Skills must NOT have been written into the symlink target (outside dir)
+    const outsideEntries = await readdir(outsideDir);
+    for (const skill of ['tdd', 'worktree', 'quality-gate']) {
+      assert.ok(!outsideEntries.includes(skill), `${skill} must not be written into symlink target`);
+    }
+
+    // Report should indicate skipping for this provider dir
+    const claudeSkillsActions = report.actions.filter((a) => a.file.startsWith('.claude/skills'));
+    const allSkipped = claudeSkillsActions.every((a) => a.action === 'skipped');
+    assert.ok(allSkipped || claudeSkillsActions.length === 0, 'symlinked provider dir should be skipped entirely');
+
+    await rm(outsideDir, { recursive: true, force: true });
   });
 });

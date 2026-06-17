@@ -1,4 +1,3 @@
-import type { CatFamily } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
 import {
   SettingsResourceToggleSwitch,
@@ -13,85 +12,56 @@ import {
   SettingsEmptyState,
   SettingsFilterTabs,
   SettingsIconButton,
-  SettingsPrimaryButton,
   SettingsSearchInput,
-  SettingsStatusStrip,
   SettingsText,
   SettingsToolbar,
 } from './primitives';
-import type { SettingsSkillItem, SkillsData, SkillsStaleness } from './skills-types';
-import { PROVIDER_KEYS } from './skills-types';
-
-export function HealthStrip({
-  summary,
-  staleness,
-  conflictCount,
-  syncing,
-  onSync,
-}: {
-  summary: SkillsData['summary'];
-  staleness: SkillsStaleness | null;
-  conflictCount: number;
-  syncing: boolean;
-  onSync: () => void;
-}) {
-  const hasIssues = !summary.allMounted || !summary.registrationConsistent || conflictCount > 0;
-  const isStale = staleness?.stale ?? false;
-
-  return (
-    <SettingsStatusStrip
-      tone={hasIssues ? 'warn' : 'success'}
-      bordered
-      size="xs"
-      actions={
-        isStale ? (
-          <SettingsPrimaryButton onClick={onSync} disabled={syncing}>
-            {syncing ? 'Syncing...' : 'Sync'}
-          </SettingsPrimaryButton>
-        ) : undefined
-      }
-    >
-      {summary.allMounted ? <SettingsText tone="emerald">挂载正常</SettingsText> : <span>挂载异常</span>}
-      <SettingsText tone="muted">·</SettingsText>
-      {summary.registrationConsistent ? <SettingsText tone="emerald">注册一致</SettingsText> : <span>注册不一致</span>}
-      {conflictCount > 0 && (
-        <>
-          <SettingsText tone="muted">·</SettingsText>
-          <span>{conflictCount} 冲突</span>
-        </>
-      )}
-      {isStale && (
-        <>
-          <SettingsText tone="muted">·</SettingsText>
-          <span className="font-semibold">有更新</span>
-          {(staleness?.newSkills.length ?? 0) > 0 && <span>+{staleness?.newSkills.length} 新增</span>}
-          {(staleness?.removedSkills.length ?? 0) > 0 && <span>-{staleness?.removedSkills.length} 移除</span>}
-        </>
-      )}
-    </SettingsStatusStrip>
-  );
-}
+import type { SettingsSkillItem, SkillMount, SkillProjectSyncSummary, SkillScope, SkillsData } from './skills-types';
+import { MOUNT_POINT_KEYS, SCOPE_ALL, SCOPE_PROJECT } from './skills-types';
 
 export function SkillRow({
   skill,
-  catFamilies,
+  scope,
+  syncSummary,
   toggling,
-  expandedCats,
+  expandedMounts,
   onPreview,
   onToggle,
-  onExpandCats,
+  onExpandMounts,
+  onMountPointToggle,
 }: {
   skill: SettingsSkillItem;
-  catFamilies: CatFamily[];
+  scope: SkillScope;
+  syncSummary?: SkillProjectSyncSummary;
   toggling: string | null;
-  expandedCats: string | null;
+  expandedMounts: string | null;
   onPreview: () => void;
-  onToggle: (skillId: string, enabled: boolean, catId?: string) => void;
-  onExpandCats: (skillId: string) => void;
+  onToggle: (skill: SettingsSkillItem, enabled: boolean) => void;
+  onExpandMounts: (skillId: string) => void;
+  onMountPointToggle: (
+    skill: SettingsSkillItem,
+    mountPointId: string,
+    enabled: boolean,
+    scope: 'global' | 'project',
+  ) => void;
 }) {
-  const allMounted = skill.governance.mountedCount === PROVIDER_KEYS.length;
-  const isExpanded = expandedCats === skill.id;
+  const allMounted = skill.governance.allMounted;
   const isGlobalToggling = toggling === skill.id;
+  const isMountExpanded = expandedMounts === skill.id;
+  const isProject = scope === SCOPE_PROJECT;
+  const effectiveEnabled = isProject ? (skill.mountPaths?.length ?? 0) > 0 : (skill.controls?.enabled ?? false);
+  const toggleTitle = `${isProject ? '项目' : '全局'}${effectiveEnabled ? '禁用' : '启用'}`;
+  const ss = syncSummary;
+  const syncLabel = !ss
+    ? '同步检测中'
+    : ss.status === 'all'
+      ? '全部项目一致'
+      : ss.status === 'partial'
+        ? `部分一致 ${ss.syncedProjects}/${ss.totalProjects}`
+        : `待同步 0/${ss.totalProjects}`;
+  const syncTone = !ss
+    ? 'slate'
+    : (({ all: 'emerald', partial: 'amber', none: 'red', unknown: 'slate' } as const)[ss.status] ?? 'slate');
 
   return (
     <div className={settingsResourceCardClass}>
@@ -117,34 +87,38 @@ export function SkillRow({
         </button>
 
         <div className="flex shrink-0 items-center gap-2">
-          <SettingsBadge tone={allMounted ? 'emerald' : 'amber'}>
-            {allMounted ? '全部挂载' : `${skill.governance.mountedCount}/${PROVIDER_KEYS.length} 已挂载`}
-          </SettingsBadge>
+          {scope === SCOPE_ALL ? (
+            <SettingsBadge tone={syncTone}>{syncLabel}</SettingsBadge>
+          ) : (
+            <SettingsBadge tone={allMounted ? 'emerald' : 'amber'}>
+              {allMounted
+                ? '全部挂载'
+                : `${skill.governance.mountedCount}/${skill.governance.requiredMountCount} 已挂载`}
+            </SettingsBadge>
+          )}
         </div>
 
         <div className="flex shrink-0 items-center gap-2 pl-2">
           {skill.controls && (
             <>
               <SettingsResourceToggleSwitch
-                enabled={skill.controls.enabled}
+                enabled={effectiveEnabled}
                 busy={isGlobalToggling}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onToggle(skill.id, !skill.controls?.enabled);
+                  onToggle(skill, !effectiveEnabled);
                 }}
-                title={skill.controls.enabled ? '全局禁用' : '全局启用'}
+                title={toggleTitle}
               />
-              {catFamilies.length > 0 && Object.keys(skill.controls.cats).length > 0 && (
-                <SettingsIconButton
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onExpandCats(skill.id);
-                  }}
-                  title="按猫开关"
-                >
-                  <HubIcon name="users" className="h-3.5 w-3.5" />
-                </SettingsIconButton>
-              )}
+              <SettingsIconButton
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExpandMounts(skill.id);
+                }}
+                title="按挂载规则"
+              >
+                <HubIcon name="layers" className="h-3.5 w-3.5" />
+              </SettingsIconButton>
             </>
           )}
         </div>
@@ -164,67 +138,168 @@ export function SkillRow({
         </div>
       )}
 
-      {isExpanded && skill.controls && catFamilies.length > 0 && (
-        <PerCatSkillToggles
+      {isMountExpanded && skill.controls && (
+        <PerMountPointToggles
           skillId={skill.id}
-          cats={skill.controls.cats}
-          catFamilies={catFamilies}
+          scope={scope}
+          mounts={skill.governance.mounts}
+          mountPaths={skill.mountPaths}
+          enabledMountPoints={skill.governance.enabledMountPoints}
           toggling={toggling}
-          onToggle={onToggle}
+          onMountPointToggle={(mountPointId, enabled, toggleScope) =>
+            onMountPointToggle(skill, mountPointId, enabled, toggleScope)
+          }
         />
       )}
     </div>
   );
 }
 
-function PerCatSkillToggles({
+/**
+ * F228: Per-mount-point toggles — replaces legacy per-cat toggles.
+ *
+ * Toggle state = config intent (mountPaths), NOT filesystem reality (mounts).
+ * When a mount point is in mountPaths but not actually mounted (e.g. conflict),
+ * the toggle stays ON — the anomaly detection banner surfaces the gap.
+ */
+function PerMountPointToggles({
   skillId,
-  cats,
-  catFamilies,
+  scope,
+  mounts,
+  mountPaths,
+  enabledMountPoints,
   toggling,
-  onToggle,
+  onMountPointToggle,
 }: {
   skillId: string;
-  cats: Record<string, boolean>;
-  catFamilies: CatFamily[];
+  scope: SkillScope;
+  mounts: SkillMount;
+  mountPaths?: string[];
+  enabledMountPoints: string[];
   toggling: string | null;
-  onToggle: (skillId: string, enabled: boolean, catId?: string) => void;
+  onMountPointToggle: (mountPointId: string, enabled: boolean, scope: 'global' | 'project') => void;
 }) {
+  const toggleScope = scope === SCOPE_PROJECT ? 'project' : 'global';
+  // Config intent: mountPaths lists which mount points the user WANTS mounted.
+  // Falls back to filesystem reality (mounts) when mountPaths is unavailable.
+  const mountPathSet = mountPaths ? new Set(mountPaths) : null;
   return (
-    <SettingsCardSubSection label="按猫开关">
+    <SettingsCardSubSection label="挂载规则">
       <div className="mt-1.5 space-y-1">
-        {catFamilies.map((family) => {
-          const relevantCats = family.catIds.filter((catId) => catId in cats);
-          if (relevantCats.length === 0) return null;
+        {MOUNT_POINT_KEYS.map((mountPointId) => {
+          const intended = mountPathSet ? mountPathSet.has(mountPointId) : (mounts[mountPointId] ?? false);
+          const actuallyMounted = mounts[mountPointId] ?? false;
+          const mountPointEnabled = enabledMountPoints.includes(mountPointId);
+          const busy = toggling === `${skillId}:${mountPointId}`;
+          const hasConflict = intended && !actuallyMounted;
           return (
-            <div key={family.id} className="space-y-1">
-              {relevantCats.length > 1 && (
-                <SettingsText variant="micro" tone="muted">
-                  {family.name}
-                </SettingsText>
-              )}
-              {relevantCats.map((catId) => {
-                const enabled = cats[catId] ?? false;
-                const busy = toggling === `${skillId}:${catId}`;
-                return (
-                  <div key={catId} className="flex items-center justify-between">
-                    <SettingsText tone="secondary">{catId}</SettingsText>
-                    <SettingsResourceToggleSwitch
-                      enabled={enabled}
-                      busy={busy}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggle(skillId, !enabled, catId);
-                      }}
-                    />
-                  </div>
-                );
-              })}
+            <div key={mountPointId} className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SettingsText tone={mountPointEnabled ? 'secondary' : 'muted'}>{mountPointId}</SettingsText>
+                {!mountPointEnabled && (
+                  <SettingsBadge tone="slate" size="xxs">
+                    挂载点已禁用
+                  </SettingsBadge>
+                )}
+                {hasConflict && mountPointEnabled && (
+                  <SettingsBadge tone="amber" size="xxs">
+                    挂载异常
+                  </SettingsBadge>
+                )}
+              </div>
+              <SettingsResourceToggleSwitch
+                enabled={intended}
+                busy={busy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMountPointToggle(mountPointId, !intended, toggleScope);
+                }}
+                disabled={!mountPointEnabled}
+                title={`${intended ? '禁用' : '启用'} ${mountPointId} 挂载`}
+                ariaLabel={`${intended ? '禁用' : '启用'} ${mountPointId} 挂载`}
+              />
             </div>
           );
         })}
+        {enabledMountPoints
+          .filter((p) => !(MOUNT_POINT_KEYS as readonly string[]).includes(p))
+          .map((customId) => {
+            const intended = mountPathSet ? mountPathSet.has(customId) : (mounts[customId] ?? false);
+            const actuallyMounted = mounts[customId] ?? false;
+            const busy = toggling === `${skillId}:${customId}`;
+            const hasConflict = intended && !actuallyMounted;
+            return (
+              <div key={customId} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <SettingsText tone="secondary">{customId}</SettingsText>
+                  <SettingsBadge tone="slate" size="xxs">
+                    自定义路径
+                  </SettingsBadge>
+                  {hasConflict && (
+                    <SettingsBadge tone="amber" size="xxs">
+                      挂载异常
+                    </SettingsBadge>
+                  )}
+                </div>
+                <SettingsResourceToggleSwitch
+                  enabled={intended}
+                  busy={busy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMountPointToggle(customId, !intended, toggleScope);
+                  }}
+                  title={`${intended ? '禁用' : '启用'} ${customId} 挂载`}
+                  ariaLabel={`${intended ? '禁用' : '启用'} ${customId} 挂载`}
+                />
+              </div>
+            );
+          })}
       </div>
     </SettingsCardSubSection>
+  );
+}
+
+export function SkillsScopeTabs({
+  scope,
+  onScopeChange,
+  allCount,
+  projectCount,
+}: {
+  scope: SkillScope;
+  onScopeChange: (scope: SkillScope) => void;
+  allCount: number;
+  projectCount: number;
+}) {
+  const tabs = [
+    { key: SCOPE_ALL, label: '全部 Skill', count: allCount },
+    { key: SCOPE_PROJECT, label: '项目 Skill', count: projectCount },
+  ];
+  return (
+    <nav
+      aria-label="Skill scope"
+      data-testid="skills-scope-tabs"
+      className="flex border-b border-[var(--console-border-soft)]"
+    >
+      {tabs.map((tab) => {
+        const active = tab.key === scope;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            aria-current={active ? 'page' : undefined}
+            onClick={() => onScopeChange(tab.key)}
+            className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
+              active
+                ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                : 'text-cafe-muted hover:text-cafe-secondary'
+            }`}
+          >
+            {tab.label}
+            <span className={`ml-1 text-xs ${active ? 'opacity-80' : 'text-cafe-muted'}`}>{tab.count}</span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -241,10 +316,10 @@ export function SkillsFilterToolbar({
   query: string;
   onQueryChange: (q: string) => void;
 }) {
-  const tabs = categories.map((c) => ({ key: c, label: c }));
+  const categoryTabs = categories.map((c) => ({ key: c, label: c }));
   return (
     <SettingsToolbar>
-      <SettingsFilterTabs tabs={tabs} activeKey={activeCategory} onTabChange={onCategoryChange} />
+      <SettingsFilterTabs tabs={categoryTabs} activeKey={activeCategory} onTabChange={onCategoryChange} />
       <SettingsSearchInput
         icon={<HubIcon name="search" className="h-3.5 w-3.5" />}
         value={query}
@@ -265,7 +340,40 @@ export function SkillsEmptyState() {
   );
 }
 
-export function SkillsSummaryFooter({ summary }: { summary: SkillsData['summary'] }) {
+export function SkillsSummaryFooter({
+  summary,
+  scope,
+  projectCount,
+  syncedProjects,
+}: {
+  summary: SkillsData['summary'];
+  scope: SkillScope;
+  projectCount: number;
+  syncedProjects: number;
+}) {
+  if (scope === SCOPE_ALL) {
+    const status =
+      projectCount === 0
+        ? '未发现项目'
+        : syncedProjects === projectCount
+          ? '全部项目一致'
+          : syncedProjects > 0
+            ? `部分项目一致 ${syncedProjects}/${projectCount}`
+            : `待同步 0/${projectCount}`;
+    return (
+      <SettingsCard>
+        <div className="flex items-center gap-4">
+          <SettingsText tone="secondary" className="font-semibold">
+            {summary.total} skills
+          </SettingsText>
+          <SettingsText tone={syncedProjects === projectCount && projectCount > 0 ? 'green' : 'amber'}>
+            {status}
+          </SettingsText>
+        </div>
+      </SettingsCard>
+    );
+  }
+
   return (
     <SettingsCard>
       <div className="flex items-center gap-4">

@@ -233,6 +233,7 @@ import {
   signalStudyRoutes,
   signalsRoutes,
   skillsRoutes,
+  skillsWriteRoutes,
   sliceRoutes,
   summariesRoutes,
   tasksRoutes,
@@ -2140,6 +2141,7 @@ async function main(): Promise<void> {
 
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
+      resolveMainProjectRoot: () => monorepoRoot,
       pluginsDir,
       limbRegistry,
       readCapabilities: () => readCapabilitiesConfig(resolveActiveProjectRoot()),
@@ -2796,6 +2798,9 @@ async function main(): Promise<void> {
   });
   await app.register(avatarsRoutes);
   await app.register(skillsRoutes);
+  await app.register(skillsWriteRoutes);
+  await app.register((await import('./routes/mount-rules.js')).mountRulesRoutes);
+  await app.register((await import('./routes/skills-drift.js')).skillsDriftRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 
   // Session chain (F24)

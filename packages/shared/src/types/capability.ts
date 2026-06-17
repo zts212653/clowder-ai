@@ -6,6 +6,7 @@
  */
 
 import type { MarketplaceEcosystem } from './marketplace.js';
+import type { MountRuleEntry, SkillsSyncState } from './mount-rules.js';
 
 /** MCP transport type — stdio (default) or remote HTTP (TD104) */
 export type McpTransport = 'stdio' | 'streamableHttp';
@@ -50,14 +51,27 @@ export interface CapabilityEntry {
   id: string;
   /** Type of capability (F126: 'limb' for device/hardware nodes; F202 Phase 2: 'schedule' for plugin-managed tasks) */
   type: 'mcp' | 'skill' | 'limb' | 'schedule';
-  /** Global enabled state */
+  /** Global enabled state (MCP/limb/schedule still use this; skill uses globalEnabled) */
   enabled: boolean;
-  /** Per-cat overrides (only stores differences from global) */
+  /**
+   * F228: Global enabled state for skills. Skill code reads/writes this field exclusively.
+   * MCP/limb/schedule continue using `enabled` until their migration.
+   * Migration: startup fills this from `enabled` for skill entries that lack it.
+   */
+  globalEnabled?: boolean;
+  /** Per-cat overrides (only stores differences from global; MCP only — not applicable to skills) */
   overrides?: CatCapabilityOverride[];
   /** MCP server descriptor (only for type: 'mcp') */
   mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
   /** Source origin */
   source: 'cat-cafe' | 'external';
+  /**
+   * F228: Mount point IDs where this skill is actually mounted in the current project.
+   * Only for type: 'skill'. Values are mount point IDs from mountRules (e.g. 'claude', 'codex').
+   * Empty array = skill is available globally but not mounted in this project.
+   * Absent = pre-v2 entry (migration will populate from filesystem).
+   */
+  mountPaths?: string[];
   /** F146-D: Source ecosystem when installed from marketplace */
   ecosystem?: MarketplaceEcosystem;
   /** F146-C: Version lock (AC-C2) */
@@ -94,12 +108,29 @@ export interface CapabilityBoardMcpServer {
 
 /** Root schema for .cat-cafe/capabilities.json */
 export interface CapabilitiesConfig {
-  /** Schema version */
-  version: 1;
+  /** Schema version (v2 adds mountRules/defaultMountRules/skillsSync) */
+  version: 1 | 2;
   /** All registered capabilities */
   capabilities: CapabilityEntry[];
   /** F070: Governance pack metadata for this project */
   governancePack?: GovernancePackMeta;
+  /**
+   * F228: Global default mount rules — only present in the main project.
+   * Defines which mount points are enabled and their skills directory paths.
+   * External projects inherit these when their own mountRules is null/absent.
+   */
+  defaultMountRules?: MountRuleEntry[];
+  /**
+   * F228: Project-level mount rule overrides.
+   * null/absent = inherit defaultMountRules from the main project.
+   * Present = this project's own mount point configuration.
+   */
+  mountRules?: MountRuleEntry[] | null;
+  /**
+   * F228: Sync tracking — replaces skills-state.json.
+   * Records the last sync hash and timestamp per project.
+   */
+  skillsSync?: SkillsSyncState;
 }
 
 /** Capabilities board response — what the GET API returns */
@@ -108,16 +139,20 @@ export interface CapabilityBoardItem {
   type: 'mcp' | 'skill' | 'limb';
   source: 'cat-cafe' | 'external';
   enabled: boolean;
+  /** F228: Global enabled for skills (mirrors CapabilityEntry.globalEnabled in board response) */
+  globalEnabled?: boolean;
   /** Per-cat effective state (global + overrides resolved) */
   cats: Record<string, boolean>;
   /** Description if available */
   description?: string;
   /** Skill trigger keywords (from SKILL.md frontmatter) */
   triggers?: string[];
-  /** Skill category (from BOOTSTRAP.md, e.g. '三猫协作规则') */
+  /** Skill category (from manifest.yaml, e.g. '开发流程') */
   category?: string;
-  /** Skill mount status per provider (symlink correctness check) */
+  /** Skill mount status per mount point (symlink correctness check) */
   mounts?: Record<string, boolean>;
+  /** Mount point aliases where this skill is intentionally mounted in the selected project. */
+  mountPaths?: string[];
   /** MCP tools discovered via probe (only when ?probe=true) */
   tools?: McpToolInfo[];
   /** MCP connection status (only when ?probe=true) */
@@ -152,13 +187,13 @@ export interface CatFamily {
 
 /** Skill mount health summary */
 export interface SkillHealthSummary {
-  /** All Clowder AI skills correctly symlinked to all providers */
+  /** All Cat Cafe skills correctly symlinked to all mount points */
   allMounted: boolean;
-  /** No orphaned skills or phantom BOOTSTRAP entries */
+  /** Source dir and capabilities.json skill sets are consistent */
   registrationConsistent: boolean;
-  /** Skills in source dir but not in BOOTSTRAP.md */
+  /** Skills in source dir but not in capabilities.json */
   unregistered: string[];
-  /** Skills in BOOTSTRAP.md but not in source dir */
+  /** Skills in capabilities.json but not in source dir */
   phantom: string[];
 }
 
@@ -168,6 +203,8 @@ export interface CapabilityBoardResponse {
   catFamilies: CatFamily[];
   /** The resolved project path this response pertains to */
   projectPath: string;
+  /** All known project paths (main project + governance registry entries) for multi-project selector */
+  knownProjectPaths?: string[];
   /** Skill mount health (only for cat-cafe skills) */
   skillHealth?: SkillHealthSummary;
   /** F070: Governance health for this project */
@@ -330,10 +367,25 @@ export interface CapabilityPatchRequest {
   capabilityId: string;
   /** Capability type — required to disambiguate same-name MCP/skill entries */
   capabilityType: 'mcp' | 'skill' | 'limb';
-  /** Scope: global toggle or per-cat override */
-  scope: 'global' | 'cat';
+  /** Optional source discriminator for same-name capability rows returned by GET. */
+  source?: 'cat-cafe' | 'external';
+  /** Optional plugin discriminator for plugin-owned same-name rows returned by GET. */
+  pluginId?: string;
+  /**
+   * Scope of the toggle:
+   * - 'global': toggle global enabled state (for skills: propagates to all projects)
+   * - 'project': toggle project-level mount (for skills: only affects mountPaths + symlinks, not enabled)
+   * - 'cat': per-cat override (MCP only — rejected for skills since file-level symlinks can't differentiate cats)
+   */
+  scope: 'global' | 'project' | 'cat';
   /** Required when scope is 'cat' */
   catId?: string;
+  /**
+   * F228: Target mount point for per-mount-point toggle (skill scope='project' only).
+   * When set, only the specified mount point's symlink is created/removed.
+   * Omit to toggle all enabled mount points at once.
+   */
+  mountPointId?: string;
   /** New enabled state */
   enabled: boolean;
   /** Target project path (multi-project support). If omitted, uses server default. */

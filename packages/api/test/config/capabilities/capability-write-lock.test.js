@@ -43,4 +43,15 @@ describe('withCapabilityLock', () => {
     const result = await withCapabilityLock('error-project', async () => 'recovered');
     assert.equal(result, 'recovered');
   });
+
+  test('same project lock is reentrant within the active write context', async () => {
+    const result = await Promise.race([
+      withCapabilityLock('reentrant-project', async () =>
+        withCapabilityLock('reentrant-project', async () => 'nested lock completed'),
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('nested lock timed out')), 100)),
+    ]);
+
+    assert.equal(result, 'nested lock completed');
+  });
 });

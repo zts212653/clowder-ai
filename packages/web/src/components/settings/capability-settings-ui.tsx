@@ -38,11 +38,14 @@ export function ProjectSelector({
   knownProjects,
   currentSelection,
   onSwitch,
+  alwaysShow,
 }: {
   resolvedPath: string;
   knownProjects: string[];
   currentSelection: string | null;
   onSwitch: (path: string | null) => void;
+  /** When true, show a read-only project label even when there's only one project */
+  alwaysShow?: boolean;
 }) {
   const allPaths = useMemo(() => {
     const set = new Set<string>();
@@ -51,7 +54,22 @@ export function ProjectSelector({
     return Array.from(set);
   }, [resolvedPath, knownProjects]);
 
-  if (allPaths.length <= 1) return null;
+  if (allPaths.length === 0 && !alwaysShow) return null;
+  if (allPaths.length <= 1 && !alwaysShow) return null;
+
+  // Single project with alwaysShow: read-only label showing current project
+  if (allPaths.length <= 1) {
+    const displayPath = allPaths[0] || resolvedPath;
+    if (!displayPath) return null;
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="whitespace-nowrap text-cafe-muted">项目:</span>
+        <code className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary">
+          {projectDisplayName(displayPath)}
+        </code>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -66,7 +84,7 @@ export function ProjectSelector({
       >
         <option value="">{projectDisplayName(resolvedPath)}</option>
         {allPaths
-          .filter((path) => path !== resolvedPath || currentSelection !== null)
+          .filter((path) => path !== resolvedPath)
           .map((path) => (
             <option key={path} value={path}>
               {projectDisplayName(path)}

@@ -10,7 +10,7 @@
  *   - resolveOwnerGate (unified gate function — packages/api/src/utils/owner-gate.ts)
  *   - requireConnectorWriteOwner (delegates to resolveOwnerGate)
  *   - checkOwnerGate in callback-auth-debug (delegates to resolveOwnerGate)
- *   - requireSkillsOwner in skills.ts (delegates to resolveOwnerGate)
+ *   - skills write routes (owner gate + local capability write boundary)
  *   - config.ts inline sensitive env check (delegates to resolveOwnerGate)
  */
 
@@ -24,6 +24,11 @@ import {
 import { resolveOwnerGate } from '../dist/utils/owner-gate.js';
 
 const SAVED_OWNER = process.env.DEFAULT_OWNER_USER_ID;
+const LOCAL_SKILLS_WRITE_HEADERS = {
+  'x-test-session-user': 'default-user',
+  origin: 'http://localhost:3003',
+  host: 'localhost:3003',
+};
 
 describe('Issue #794 — owner gate single-user fallthrough', () => {
   beforeEach(() => {
@@ -215,7 +220,9 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
         }
       });
       const { skillsRoutes } = await import('../dist/routes/skills.js');
+      const { skillsWriteRoutes } = await import('../dist/routes/skills-write.js');
       await app.register(skillsRoutes);
+      await app.register(skillsWriteRoutes);
       await app.ready();
     });
 
@@ -227,7 +234,7 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/skills/sync',
-        headers: { 'x-test-session-user': 'default-user' },
+        headers: LOCAL_SKILLS_WRITE_HEADERS,
         payload: {},
       });
       // Should not be 403 — may fail for other reasons (missing files etc.)
@@ -266,17 +273,19 @@ describe('Issue #794 — owner gate single-user fallthrough', () => {
       assert.equal(res.statusCode, 403, 'non-loopback skill write without owner must be rejected');
     });
 
-    it('allows non-loopback when owner IS configured and matches (#794 loopback guard)', async () => {
+    it('rejects non-loopback even when owner IS configured and matches (local write boundary)', async () => {
       process.env.DEFAULT_OWNER_USER_ID = 'the-owner';
       const res = await app.inject({
         method: 'POST',
         url: '/api/skills/sync',
-        headers: { 'x-test-session-user': 'the-owner' },
+        headers: {
+          ...LOCAL_SKILLS_WRITE_HEADERS,
+          'x-test-session-user': 'the-owner',
+        },
         payload: {},
         remoteAddress: '192.168.1.100',
       });
-      // Should not be 403 — may fail for other reasons (missing files etc.)
-      assert.notEqual(res.statusCode, 403, 'non-loopback with matching owner should not 403');
+      assert.equal(res.statusCode, 403, 'skills writes require direct local Hub access even with matching owner');
     });
 
     it('rejects proxy-forwarded loopback when owner is NOT configured (#794 proxy guard)', async () => {

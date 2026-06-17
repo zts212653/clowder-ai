@@ -1,7 +1,7 @@
 // @ts-check
 
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -10,6 +10,7 @@ import './helpers/setup-cat-registry.js';
 import {
   bootstrapCapabilities,
   buildCatCafeMcpDescriptor,
+  __testing as capabilityOrchestratorTesting,
   comparePencilDirs,
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
@@ -61,7 +62,7 @@ describe('readCapabilitiesConfig', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('reads valid capabilities.json', async () => {
+  it('reads valid v1 capabilities.json as migrated v2 config', async () => {
     await mkdir(join(dir, '.cat-cafe'), { recursive: true });
     await writeFile(
       join(dir, '.cat-cafe', 'capabilities.json'),
@@ -80,7 +81,7 @@ describe('readCapabilitiesConfig', () => {
 
     const config = await readCapabilitiesConfig(dir);
     assert.ok(config);
-    assert.equal(config.version, 1);
+    assert.equal(config.version, 2);
     assert.equal(config.capabilities.length, 1);
     assert.equal(config.capabilities[0].id, 'cat-cafe');
   });
@@ -260,7 +261,7 @@ describe('writeCapabilitiesConfig', () => {
 
     await writeCapabilitiesConfig(dir, config);
     const read = await readCapabilitiesConfig(dir);
-    assert.deepEqual(read, config);
+    assert.deepEqual(read, { ...config, version: 2 });
   });
 });
 
@@ -733,7 +734,7 @@ describe('bootstrapCapabilities', () => {
       geminiConfig: join(dir, 'nonexistent.json'),
     });
 
-    assert.equal(config.version, 1);
+    assert.equal(config.version, 2);
     // F193/F207 split-only — 5 split servers (collab/memory/signals/limb/finance) + filesystem.
     assert.equal(config.capabilities.length, 6);
 
@@ -2221,6 +2222,45 @@ describe('generateCliConfigs', () => {
     assert.ok(configCount > 0, 'At least one CLI config should be generated');
   });
 
+  it('restores CLI config file permissions during rollback', async () => {
+    const configPath = join(dir, '.mcp.json');
+    const originalUmask = process.umask(0o022);
+    try {
+      await writeFile(configPath, '{"mcpServers":{"secret":{"command":"old","args":[]}}}\n', { mode: 0o600 });
+      const snapshot = await capabilityOrchestratorTesting.snapshotCliConfigPath(configPath);
+
+      await rm(configPath);
+      await capabilityOrchestratorTesting.restoreCliConfigPath(configPath, snapshot);
+
+      const restoredMode = (await stat(configPath)).mode & 0o777;
+      assert.equal(restoredMode, 0o600, 'rollback should preserve strict config file permissions');
+    } finally {
+      process.umask(originalUmask);
+    }
+  });
+
+  it('restores symlinked CLI config targets during rollback', async () => {
+    const configPath = join(dir, '.mcp.json');
+    const targetPath = join(dir, 'dotfiles', 'claude-mcp.json');
+    const originalContent = '{"mcpServers":{"secret":{"command":"old","args":[]}}}\n';
+    const originalUmask = process.umask(0o022);
+    try {
+      await mkdir(join(dir, 'dotfiles'), { recursive: true });
+      await writeFile(targetPath, originalContent, { mode: 0o600 });
+      await symlink(targetPath, configPath);
+
+      const snapshot = await capabilityOrchestratorTesting.snapshotCliConfigPath(configPath);
+      await writeFile(configPath, '{"mcpServers":{"cat-cafe":{"command":"node","args":["new.js"]}}}\n');
+      await capabilityOrchestratorTesting.restoreCliConfigPath(configPath, snapshot);
+
+      assert.equal(await readFile(targetPath, 'utf-8'), originalContent);
+      assert.equal((await stat(targetPath)).mode & 0o777, 0o600);
+      assert.equal((await lstat(configPath)).isSymbolicLink(), true, 'rollback should preserve the symlink path');
+    } finally {
+      process.umask(originalUmask);
+    }
+  });
+
   it('removes managed commandless entries from Gemini settings', async () => {
     const hasGoogleCat = catRegistry.getAllIds().some((id) => {
       const entry = catRegistry.tryGet(id);
@@ -2725,7 +2765,7 @@ describe('orchestrate', () => {
     );
 
     assert.ok(config);
-    assert.equal(config.version, 1);
+    assert.equal(config.version, 2);
     // At minimum, split cat-cafe MCP servers should be present
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-collab'));
     assert.ok(config.capabilities.find((c) => c.id === 'cat-cafe-memory'));

@@ -74,6 +74,7 @@ export { signalPodcastRoutes } from './signal-podcast-routes.js';
 export { signalStudyRoutes } from './signal-study-routes.js';
 export { signalsRoutes } from './signals.js';
 export { skillsRoutes } from './skills.js';
+export { skillsWriteRoutes } from './skills-write.js';
 export { sliceRoutes } from './slice-routes.js';
 export { summariesRoutes } from './summaries.js';
 export { tasksRoutes } from './tasks.js';
