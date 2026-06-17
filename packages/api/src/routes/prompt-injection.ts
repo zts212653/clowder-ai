@@ -18,6 +18,7 @@ import {
   requireCapabilityWriteOwner,
   requireLocalCapabilityWriteRequest,
 } from '../config/capabilities/capability-write-guards.js';
+import { clearL0Cache } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import {
   getOverrideStatus,
   getTemplateFileInfo,
@@ -114,6 +115,12 @@ function atomicCopyFileSync(sourcePath: string, targetPath: string): void {
     renameSync(tmpPath, targetPath);
   } finally {
     removeIfExists(tmpPath);
+  }
+}
+
+function invalidateNativeL0CacheForSegment(segmentId: string): void {
+  if (segmentId === 'S6') {
+    clearL0Cache();
   }
 }
 
@@ -303,6 +310,7 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       atomicWriteFileSync(localPath, content);
+      invalidateNativeL0CacheForSegment(id);
 
       return { segmentId: id, saved: true, path: fileInfo.local };
     },
@@ -333,6 +341,7 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
     const localPath = join(TEMPLATES_DIR, fileInfo.local);
     if (existsSync(localPath)) {
       unlinkSync(localPath);
+      invalidateNativeL0CacheForSegment(id);
       return { segmentId: id, deleted: true };
     }
     return { segmentId: id, deleted: false, reason: 'No override file exists' };
@@ -381,6 +390,7 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
 
     const localPath = join(TEMPLATES_DIR, fileInfo.local);
     atomicCopyFileSync(bakPath, localPath);
+    invalidateNativeL0CacheForSegment(id);
     return { segmentId: id, restored: true };
   });
 };

@@ -54,4 +54,43 @@ describe('prompt-injection review guard scripts', () => {
     );
     assert.doesNotMatch(loaderSource, /\n\s*B1:\s*\{/, 'B1 must not be exposed as a template-backed segment');
   });
+
+  it('S6 overlay mutations invalidate the native L0 cache', () => {
+    const source = readFileSync('packages/api/src/routes/prompt-injection.ts', 'utf-8');
+    assert.match(source, /clearL0Cache/, 'overlay write route must import native L0 cache invalidation');
+    assert.match(
+      source,
+      /function\s+invalidateNativeL0CacheForSegment\s*\(\s*segmentId:\s*string\s*\)/,
+      'cache invalidation should be centralized by segment id',
+    );
+    assert.match(
+      source,
+      /segmentId\s*===\s*['"]S6['"][\s\S]*?clearL0Cache\(\)/,
+      'S6 is the workflow-trigger overlay consumed by native L0 and must clear all cached compiled prompts',
+    );
+    const invalidationCalls = source.match(/invalidateNativeL0CacheForSegment\(id\)/g) ?? [];
+    assert.ok(
+      invalidationCalls.length >= 3,
+      'S6 cache invalidation must run after save, delete, and restore-backup mutations',
+    );
+  });
+
+  it('compiled preview reads the effective C1 template including local overrides', () => {
+    const source = readFileSync('packages/api/src/routes/prompt-injection-preview.ts', 'utf-8');
+    assert.match(
+      source,
+      /const\s+tpl\s*=\s*\(\s*id:\s*string,\s*useOverride\s*=\s*false\s*\)/,
+      'compiled preview helper should support choosing effective template content',
+    );
+    assert.match(
+      source,
+      /getTemplateRawContent\(id,\s*useOverride\)/,
+      'compiled preview helper should pass the override flag through to the template loader',
+    );
+    assert.match(
+      source,
+      /tpl\(['"]C1['"],\s*true\)/,
+      'C1 preview must show c1-mcp-callback.local.md when an override exists',
+    );
+  });
 });

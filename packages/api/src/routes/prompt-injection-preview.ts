@@ -68,8 +68,8 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
 
       // D-segments: load real template content with {{VAR}} placeholders visible
       // tpl() returns raw template stripped of HTML comments, or '' if not template-backed
-      const tpl = (id: string): string => {
-        const raw = getTemplateRawContent(id, false);
+      const tpl = (id: string, useOverride = false): string => {
+        const raw = getTemplateRawContent(id, useOverride);
         return raw ? stripComments(raw) : '';
       };
 
@@ -141,7 +141,7 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
         tpl('D21'),
         '',
         '── [C1] MCP 回调指令（条件：非 Claude 客户端）──',
-        tpl('C1'),
+        tpl('C1', true),
         '',
         '── [N1] 导航上下文 ──',
         tpl('N1'),
