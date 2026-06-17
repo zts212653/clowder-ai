@@ -190,7 +190,7 @@ describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => 
   });
 
   test('@ only inside blockquote → NO routing-syntax-hint', async () => {
-    const { appended } = await runRoute('> 铲屎官说：让 @codex 看看', 'thread-ph-4');
+    const { appended } = await runRoute('> co-creator说：让 @codex 看看', 'thread-ph-4');
     const hint = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     assert.equal(hint, undefined, 'blockquote exempts @; no hint');
   });

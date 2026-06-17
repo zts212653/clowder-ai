@@ -31,4 +31,4 @@ created: 2026-05-21
 
 Status: `pending`
 
-Reason: E-pilot has proven the contract mechanics can produce a structured packet from representative A2A data. Live telemetry trend, owner response, and later re-eval result are intentionally not faked; AC-E7 requires a later eval pass or explicit CVO suppress before closure.
+Reason: E-pilot has proven the contract mechanics can produce a structured packet from representative A2A data. Live telemetry trend, owner response, and later re-eval result are intentionally not faked; AC-E7 requires a later eval pass or explicit operator suppress before closure.

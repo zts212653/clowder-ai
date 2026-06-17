@@ -96,7 +96,7 @@ function toneFor(status: AgentHookHealthStatus | 'syncing' | 'synced' | 'error')
     return {
       icon: 'wrench',
       title: '正在同步 Agent 运行 Hook',
-      body: '正在写入 Cat Cafe 管理的 Hook 脚本和 settings 挂载项。',
+      body: '正在写入 Clowder AI 管理的 Hook 脚本和 settings 挂载项。',
       classes: 'border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text',
     };
   }

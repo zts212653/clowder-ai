@@ -5,15 +5,33 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const hasSourceStagingContent = existsSync(
+  new URL('../../../cat-cafe-skills/refs/l0-staging-content.md', import.meta.url),
+);
 
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
+
+function assertStagingPromptContract(prompt, mode) {
+  if (hasSourceStagingContent) {
+    assert.ok(
+      prompt.includes('摩擦上报'),
+      `staging wipers core trigger MUST appear in ${mode} prompt (ADR-038 每轮注入生效)`,
+    );
+    assert.ok(prompt.includes('[爪感差:'), `staging wipers report format MUST appear in ${mode} prompt`);
+    return;
+  }
+
+  assert.ok(!prompt.includes('摩擦上报'), `public export omits raw L0 staging content in ${mode} prompt`);
+  assert.ok(!prompt.includes('[爪感差:'), `public export omits staging wipers format in ${mode} prompt`);
+}
 
 async function collect(iterable) {
   const msgs = [];
@@ -4015,6 +4033,82 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'F-BLOAT: systemPrompt should be prepended to prompt on new session',
     );
     assert.ok(promptsSeen[0].includes('test'), 'F-BLOAT: original prompt should still be present');
+  });
+
+  // L0-budget-defense PR-B-impl (ADR-038 件套 ④, Cloud R2 P1 + 砚砚 R4 P1 #2237):
+  // staging must reach service.invoke prompt on EVERY turn including resumes
+  // where systemPrompt is skipped. This regression directly tests the
+  // architectural contract: 折叠 staging into staticIdentity → resume drops it.
+  // 修法 = wire staging in invoke-single-cat at the same level as F225
+  // contextHintPrefix, independent of injectSystemPrompt.
+  it('PR-B-impl ADR-038: staging reaches service.invoke prompt on RESUME (systemPrompt skipped, staging still delivered)', async () => {
+    const promptsSeen = [];
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(prompt, options) {
+        promptsSeen.push(prompt);
+        optionsSeen.push({ ...options });
+        yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'existing-sess',
+      store: async () => {},
+      delete: async () => {},
+    };
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'user message',
+        systemPrompt: 'static identity here',
+        userId: 'u1',
+        threadId: 'thread-staging-resume',
+        isLastCat: true,
+      }),
+    );
+    assert.equal(optionsSeen[0].sessionId, 'existing-sess', 'should resume existing session');
+    assert.ok(
+      !promptsSeen[0].includes('static identity here'),
+      'systemPrompt is skipped on resume (baseline, mirrors F-BLOAT)',
+    );
+    assertStagingPromptContract(promptsSeen[0], 'resume');
+    assert.ok(promptsSeen[0].includes('user message'), 'original user prompt still present');
+  });
+
+  it('PR-B-impl ADR-038: staging reaches service.invoke prompt on NEW SESSION (systemPrompt injected, staging also delivered)', async () => {
+    const promptsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(prompt, _options) {
+        promptsSeen.push(prompt);
+        yield { type: 'text', catId: 'opus', content: 'hi', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => undefined,
+      store: async () => {},
+      delete: async () => {},
+    };
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'user message',
+        systemPrompt: 'static identity here',
+        userId: 'u1',
+        threadId: 'thread-staging-new',
+        isLastCat: true,
+      }),
+    );
+    assert.ok(promptsSeen[0].includes('static identity here'), 'systemPrompt prepended on new session');
+    assertStagingPromptContract(promptsSeen[0], 'new-session');
+    assert.ok(promptsSeen[0].includes('user message'), 'original user prompt still present');
   });
 
   it('F053: Gemini (sessionChain=true) skips systemPrompt on resume like other cats', async () => {

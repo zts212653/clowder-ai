@@ -57,6 +57,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '搜索和安装 MCP、Skill、插件等能力包。',
   },
   {
+    id: 'concierge',
+    label: '前台猫',
+    icon: 'cat',
+    color: 'var(--cafe-accent)',
+    description: '猫猫球的形象、人设、值班猫和主动性策略。',
+  },
+  {
     id: 'voice',
     label: '语音管理',
     icon: 'mic',

@@ -12,7 +12,7 @@ created: 2026-03-27
 
 ## Why
 
-**team experience（2026-03-27）**：
+**operator experience（2026-03-27）**：
 > "我搞了一个新电脑，要把你们从 GitHub 下载回来，然后我这些 MCP 如果还要我自己一个个去挂就很奇怪了。"
 > "我们现在就有个 bug，pencil MCP 写死用 antigravity 的插件，但是 vscode 其实也有插件，是一个东西。"
 
@@ -23,7 +23,7 @@ created: 2026-03-27
 3. **Gemini 被迫做 workaround**：`mcp-config-adapters.ts` 里 `shouldSkipGeminiProjectServer('pencil')` + `delete existingMcp.pencil` 就是为了绕 stale path
 4. **Skill 声明了 MCP 依赖但无法校验**：`browser-automation` 需要 `playwright`，`pencil-design` 需要 `pencil`，但 manifest 里没有这层关系，看板无法显示"skill 已挂但 backend 未就绪"
 
-**愿景**：team lead在新电脑上 `git clone` + 一条命令，所有 MCP 自动解析、配置生成、就绪报告。不需要手动挂任何 MCP。
+**愿景**：operator在新电脑上 `git clone` + 一条命令，所有 MCP 自动解析、配置生成、就绪报告。不需要手动挂任何 MCP。
 
 ## What
 
@@ -208,8 +208,8 @@ Claude Code 读配置时 per-project override > `.mcp.json` > global，拿到不
 
 | # | 需求点 | AC | Phase | 来源 |
 |---|--------|-----|-------|------|
-| R1 | capabilities.json 不存机器特定路径 | AC-A1 | A | team experience |
-| R2 | Pencil 支持 Antigravity + VS Code 双宿主 | AC-A2 | A | team experience |
-| R3 | 新机器 clone 后 MCP 自动解析 | AC-A3,A4,B5 | A+B | team lead愿景 |
+| R1 | capabilities.json 不存机器特定路径 | AC-A1 | A | operator experience |
+| R2 | Pencil 支持 Antigravity + VS Code 双宿主 | AC-A2 | A | operator experience |
+| R3 | 新机器 clone 后 MCP 自动解析 | AC-A3,A4,B5 | A+B | operator愿景 |
 | R4 | Skill 能声明 MCP 依赖 | AC-B1,B2,B3 | B | Maine Coon提议 |
-| R5 | 一条命令看全局 MCP 就绪状态 | AC-B4,B5 | B | team lead愿景 |
+| R5 | 一条命令看全局 MCP 就绪状态 | AC-B4,B5 | B | operator愿景 |

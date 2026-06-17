@@ -38,7 +38,7 @@ describe('F194 Phase Z9 AC-Z24 — buildProjectionDiagnostic', () => {
   });
 
   it('R13 reproduction: same parent + missing turn → projection key collapses to parent', () => {
-    // 铲屎官 catch："布偶猫1+布偶猫3 合并, 缅因猫2+缅因猫4 合并"
+    // co-creator catch："布偶猫1+布偶猫3 合并, 缅因猫2+缅因猫4 合并"
     // 诊断 thread_mp0o2lf7d2gu5j3y 真实形态：3 个跨 cat-turn record 共享 parent，全部 turnInvocationId=null
     const records: ChatMessage[] = [
       {

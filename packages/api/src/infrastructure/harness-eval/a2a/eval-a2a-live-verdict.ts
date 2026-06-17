@@ -19,7 +19,7 @@ interface GenerateA2aLiveVerdictInput {
   domain: EvalDomainRegistryEntry;
   generatedAt?: string;
   generatorCommit?: string;
-  submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1: Phase H cat-mediated (cat owns verdict; undefined = CVO regen)
+  submittedPacket?: VerdictHandoffPacket; // 砚砚 R8 P1: Phase H cat-mediated (cat owns verdict; undefined = operator regen)
 }
 
 export interface A2aLiveVerdictArtifact {
@@ -110,7 +110,7 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
   writeJson(join(bundleDir, 'provenance.json'), provenance);
 
   const resolved = resolveA2aEvidenceBundle({ bundleDir, verdictId: input.verdictId });
-  // 砚砚 R8 P1: cat owns verdict (only override bundle refs below); undefined = CVO regen.
+  // 砚砚 R8 P1: cat owns verdict (only override bundle refs below); undefined = operator regen.
   const submitted = input.submittedPacket;
   if (submitted && submitted.harnessUnderEval.featureId !== rawSnapshot.featureId) {
     throw new Error(

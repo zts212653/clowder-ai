@@ -189,6 +189,8 @@ export async function generateScriptViaThread(
         parentInvocationId: createResult.invocationId,
         // F222 P1: System-internal podcast generation is not user-origin
         frustrationAutoIssueEligible: false,
+        // #949 P2-1: No ball-pass expectation in system-internal podcast generation
+        verdictPassWarningEnabled: false,
       },
     )) {
       if (msg.type === 'text' && msg.content) {

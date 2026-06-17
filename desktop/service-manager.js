@@ -1,12 +1,12 @@
 // ServiceManager — spawns and monitors Redis, API, and Web processes.
 // Used by the Electron main process to manage backend services.
 
-const { spawn, execSync } = require('child_process');
-const path = require('path');
-const net = require('net');
-const fs = require('fs');
-const os = require('os');
-const crypto = require('crypto');
+const { spawn, execSync } = require('node:child_process');
+const path = require('node:path');
+const net = require('node:net');
+const fs = require('node:fs');
+const os = require('node:os');
+const crypto = require('node:crypto');
 
 const POLL_INTERVAL_MS = 500;
 const MAX_WAIT_MS = 120_000;
@@ -163,7 +163,7 @@ class ServiceManager {
     // ---- Web ----
     this.onStatus('Starting Web frontend...');
     this._startNextJs();
-    log('Web process spawned, waiting for port ' + this.frontendPort);
+    log(`Web process spawned, waiting for port ${this.frontendPort}`);
     await this._waitForPort(this.frontendPort, 'Web');
 
     this.onStatus('Ready!');
@@ -405,7 +405,7 @@ class ServiceManager {
     // cwd must be a writable dir containing pnpm-workspace.yaml so that the
     // API's findMonorepoRoot() anchors on it, not on Program Files.
     this._startProcess('api', nodeExe, [apiEntry], { envOverrides, cwd: userProjectDir });
-    log('API process spawned, waiting for port ' + this.apiPort);
+    log(`API process spawned, waiting for port ${this.apiPort}`);
     await this._waitForPort(this.apiPort, 'API');
   }
 
@@ -487,7 +487,7 @@ class ServiceManager {
   _testRedisBinary(exe, cwd) {
     try {
       // spawnSync handles quoting correctly on both platforms without shell
-      const r = require('child_process').spawnSync(exe, ['--version'], {
+      const r = require('node:child_process').spawnSync(exe, ['--version'], {
         cwd,
         timeout: 3000,
         windowsHide: true,

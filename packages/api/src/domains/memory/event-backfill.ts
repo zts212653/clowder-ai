@@ -24,7 +24,7 @@ export interface StoredMessageLike {
   threadId: string;
   content: string;
   timestamp: number;
-  /** null = user (铲屎官) message; a CatId = cat message. */
+  /** null = user (co-creator) message; a CatId = cat message. */
   catId: string | null;
   /**
    * Message author's userId. Backfill only marks the OWNER's own rows: getByThreadAfter

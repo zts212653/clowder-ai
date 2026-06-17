@@ -15,7 +15,7 @@ created: 2026-03-05
 
 ## Why
 
-我们当前在 Hub 能管理 MCP/Skills，但不能在 Cat Cafe 内统一管理“Ragdoll走订阅”与“Ragdoll走赞助 API”两种通道。team lead要的是：
+我们当前在 Hub 能管理 MCP/Skills，但不能在 Cat Cafe 内统一管理“Ragdoll走订阅”与“Ragdoll走赞助 API”两种通道。operator要的是：
 
 1. 在 Cat Cafe 里录入赞助方提供的 `BASE_URL + API Key`
 2. 在配置中枢一键切换“自有订阅”或“赞助 API”
@@ -44,7 +44,7 @@ created: 2026-03-05
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | “做一个Ragdoll的这个管理” | AC-1 | web test + manual | [x] |
 | R2 | “把他们赞助的 url 和 api key 放进去” | AC-3, AC-4 | api/provider test | [x] |
@@ -60,7 +60,7 @@ created: 2026-03-05
 
 - **KD-1 (2026-03-05)**: 首版范围限定为Ragdoll/Anthropic，不把 Codex/Gemini 一次性打包进来。理由：用户当前痛点是Ragdoll账号切换，先做最短价值链，再复用结构扩展多 provider。
 - **KD-2 (2026-03-05)**: profile 元信息与 secrets 分文件存储，避免明文 key 混入普通配置回读接口。
-- **KD-3 (2026-03-05)**: secrets 持久化采用本机落盘 `local secrets file`（team lead拍板）。
+- **KD-3 (2026-03-05)**: secrets 持久化采用本机落盘 `local secrets file`（operator拍板）。
 
 ## Dependencies
 
@@ -78,9 +78,9 @@ created: 2026-03-05
 
 ### Step 0 三问（2026-03-05）
 
-1. team lead最初核心问题：Ragdoll额度不足时，能在 Cat Cafe 内直接切换“订阅 / 赞助 API”，且不用外部脚本手改配置。
+1. operator最初核心问题：Ragdoll额度不足时，能在 Cat Cafe 内直接切换“订阅 / 赞助 API”，且不用外部脚本手改配置。
 2. 交付物是否命中：命中。Hub 已支持 profile 管理、切换、测试，runtime 已按 active profile 生效，secrets 已做本机分层落盘与脱敏回读。
-3. team lead实际体验：已完成半小时连续验证，Ragdoll调用链稳定，未再出现此前的误封/误切换抖动。
+3. operator实际体验：已完成半小时连续验证，Ragdoll调用链稳定，未再出现此前的误封/误切换抖动。
 
 ### 跨猫交叉验证（强制）
 
@@ -91,4 +91,4 @@ created: 2026-03-05
 ## Review Gate
 
 - Reviewer: 跨家族优先（Ragdoll）
-- 验收: team lead在 Hub 完成“新增赞助 profile → 测试 → 切换 → 实际调用”完整链路
+- 验收: operator在 Hub 完成“新增赞助 profile → 测试 → 切换 → 实际调用”完整链路

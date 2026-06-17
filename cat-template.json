@@ -102,12 +102,12 @@
     }
   },
   "coCreator": {
-    "name": "铲屎官",
+    "name": "co-creator",
     "nickname": "大当家",
     "avatar": "/avatars/keeper.png",
     "timeZone": "America/Los_Angeles",
     "aliases": ["You", "Owner"],
-    "mentionPatterns": ["@co-creator", "@owner", "@铲屎官"]
+    "mentionPatterns": ["@co-creator", "@owner"]
   },
   "roster": {
     "opus": {
@@ -130,6 +130,13 @@
       "lead": true,
       "available": true,
       "evaluation": "热血创意，富文本与语音，表达力强，禁写代码"
+    },
+    "gemini25": {
+      "family": "siamese",
+      "roles": ["designer", "triage"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Gemini 3.5 Flash 轻量 triage/narrator，适合高频社区初筛，强 review，禁自合"
     },
     "dare": {
       "family": "dragon-li",
@@ -553,7 +560,7 @@
           "catId": "gemini25",
           "variantLabel": "Gemini 3.5",
           "displayName": "暹罗猫",
-          "mentionPatterns": ["@gemini35", "@gemini-35", "@暹罗gemini35", "@gemini25", "@gemini-25", "@暹罗gemini25"],
+          "mentionPatterns": ["@gemini25", "@gemini-25", "@暹罗gemini25"],
           "clientId": "google",
           "defaultModel": "gemini-3.5-flash",
           "mcpSupport": true,
@@ -583,6 +590,57 @@
             "maxContextTokens": 300000,
             "maxMessages": 300,
             "maxContentLengthPerMsg": 100000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/米卡/vo_mika_dialog_annoyed.wav",
+            "refText": "说实在的，我不擅长和陌生人打交道，也许是我不懂说话的技巧吧。这方面的窍门，能请你教一教我吗？",
+            "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
+            "temperature": 0.3
+          }
+        }
+      ]
+    },
+    {
+      "id": "gemini35",
+      "catId": "gemini35",
+      "name": "暹罗猫 Gemini 3.5 Flash",
+      "displayName": "暹罗猫",
+      "nickname": "烁烁",
+      "avatar": "/avatars/gemini25.png",
+      "color": {
+        "primary": "#2563EB",
+        "secondary": "#DBEAFE"
+      },
+      "mentionPatterns": ["@gemini35", "@gemini-35", "@gemini3.5", "@flash", "@暹罗flash", "@暹罗gemini35"],
+      "roleDescription": "暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问",
+      "teamStrengths": "审美、前端设计风格、打破常规",
+      "caution": "新猫加入还在测评；开发任务需要强 reviewer 守门",
+      "defaultVariantId": "gemini35-default",
+      "features": {
+        "sessionChain": true
+      },
+      "variants": [
+        {
+          "id": "gemini35-default",
+          "clientId": "google",
+          "variantLabel": "Gemini 3.5 Flash",
+          "defaultModel": "Gemini 3.5 Flash (High)",
+          "mcpSupport": true,
+          "cli": {
+            "command": "gemini",
+            "outputFormat": "stream-json"
+          },
+          "accountRef": "gemini",
+          "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
+          "strengths": ["visual-design", "creativity", "multimodal"],
+          "contextBudget": {
+            "maxPromptTokens": 350000,
+            "maxContextTokens": 300000,
+            "maxMessages": 300,
+            "maxContentLengthPerMsg": 15000
           },
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -729,7 +787,7 @@
       "mentionPatterns": ["@opencode", "@金渐层", "@golden", "@golden-chinchilla"],
       "roleDescription": "开源多模型编码 agent，自带 Oh My OpenCode 多专家编排 + LSP + 主题生态",
       "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic",
-      "caution": "OMOC Sisyphus 只编排自己的子 agent，不编排其他猫；opencode 原生 MCP 和 Cat Cafe MCP 需避免冲突",
+      "caution": "OMOC Sisyphus 只编排自己的子 agent，不编排其他猫；opencode 原生 MCP 和 Clowder AI MCP 需避免冲突",
       "defaultVariantId": "opencode-default",
       "features": {
         "sessionChain": true
@@ -833,7 +891,7 @@
             "defaultArgs": ["--output-format", "stream-json", "--model", "claude-opus-4-7"],
             "effort": "max"
           },
-          "personality": "试用中——猫格待观察，据铲屎官反馈风格偏缅因猫",
+          "personality": "试用中——猫格待观察，据co-creator反馈风格偏缅因猫",
           "strengths": ["architecture", "reasoning", "coding"],
           "contextBudget": {
             "maxPromptTokens": 180000,

@@ -88,12 +88,12 @@ describe('F093 world context prompt injection', () => {
         recall: { canonMatches: [], eventMatches: [] },
         careLoopHint: {
           trigger: '角色低落',
-          suggestion: '关心铲屎官',
+          suggestion: '关心co-creator',
           realityBridge: '你今天怎么样？',
         },
       },
     });
     assert.ok(result.includes('角色低落'), 'should contain care trigger');
-    assert.ok(result.includes('关心铲屎官'), 'should contain care suggestion');
+    assert.ok(result.includes('关心co-creator'), 'should contain care suggestion');
   });
 });

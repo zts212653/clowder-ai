@@ -121,7 +121,7 @@ describe('eval:a2a adapter', () => {
     assert.match(packet.ownerAsk.requestedAction, /Build/);
   });
 
-  it('maps sunset findings to delete_sunset verdicts with a CVO gate', () => {
+  it('maps sunset findings to delete_sunset verdicts with a operator gate', () => {
     const packet = buildA2aVerdictHandoff({
       domain,
       snapshot,

@@ -7,7 +7,7 @@ import { basename, isAbsolute, relative, resolve } from 'node:path';
  * Returns resolved absolute path on success.
  *
  * Shared between:
- * - manual-trigger/generate-now.ts (CVO triggers eval cat to regenerate verdict)
+ * - manual-trigger/generate-now.ts (operator triggers eval cat to regenerate verdict)
  * - publish-verdict/publish-verdict.ts (eval cat publishes verdict via MCP)
  *
  * Both surfaces accept basenames inside harnessFeedbackRoot/{snapshots,attributions}/

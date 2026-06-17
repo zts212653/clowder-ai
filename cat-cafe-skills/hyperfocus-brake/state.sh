@@ -4,30 +4,30 @@
 
 set -euo pipefail
 
-# 用户级状态文件（跨 session 共享，保护铲屎官而非猫猫 session）
+# 用户级状态文件（跨 session 共享，保护operator而非猫猫 session）
 # 5 分钟间隔检测已确保真正休息时不累加
 _resolve_state_file() {
   STATE_FILE="${TMPDIR:-/tmp}/hyperfocus-brake-state-${USER:-default}.json"
 }
 
-# 铲屎官活跃心跳文件（UserPromptSubmit hook 写入）
+# operator活跃心跳文件（UserPromptSubmit hook 写入）
 _resolve_heartbeat_file() {
   HEARTBEAT_FILE="${TMPDIR:-/tmp}/hyperfocus-brake-heartbeat-${USER:-default}"
 }
 
-# 记录铲屎官发了消息（由 UserPromptSubmit hook 调用）
+# 记录operator发了消息（由 UserPromptSubmit hook 调用）
 touch_user_heartbeat() {
   _resolve_heartbeat_file
   date +%s > "$HEARTBEAT_FILE"
 }
 
-# 检查铲屎官是否在（15 分钟内有消息 = 在）
+# 检查operator是否在（15 分钟内有消息 = 在）
 is_human_active() {
   local timeout_sec="${1:-900}"  # 默认 15 分钟
   _resolve_heartbeat_file
 
   if [[ ! -f "$HEARTBEAT_FILE" ]]; then
-    # 没有心跳文件 = 首次运行，假设铲屎官在
+    # 没有心跳文件 = 首次运行，假设operator在
     return 0
   fi
 
@@ -38,9 +38,9 @@ is_human_active() {
   local gap=$((now - last_beat))
 
   if [[ $gap -le $timeout_sec ]]; then
-    return 0  # 铲屎官在
+    return 0  # operator在
   else
-    return 1  # 铲屎官可能睡着了
+    return 1  # operator可能睡着了
   fi
 }
 

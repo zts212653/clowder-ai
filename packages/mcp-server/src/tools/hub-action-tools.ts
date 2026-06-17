@@ -7,12 +7,12 @@ const optionalContextSchemas = {
     .string()
     .min(1)
     .optional()
-    .describe('Current Cat Cafe thread id; pass when available to avoid tab leakage.'),
+    .describe('Current Clowder AI thread id; pass when available to avoid tab leakage.'),
   worktreeId: z
     .string()
     .min(1)
     .optional()
-    .describe('Target Cat Cafe worktree id; pass when the action is worktree-scoped.'),
+    .describe('Target Clowder AI worktree id; pass when the action is worktree-scoped.'),
   catId: z.string().min(1).optional().describe('Calling cat id for audit/probe correlation.'),
   agentKeyCatId: z
     .string()

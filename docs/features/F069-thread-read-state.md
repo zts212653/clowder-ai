@@ -13,7 +13,7 @@ status: spec
 
 ## Why
 
-F5 刷新后，线程列表的未读 badge（绿色/橙色猫猫标签）全部消失。team lead报告："一按 F5 没读过的消息也都消失了，比如原本有 5 条没读，现在就会变成空的。"
+F5 刷新后，线程列表的未读 badge（绿色/橙色猫猫标签）全部消失。operator报告："一按 F5 没读过的消息也都消失了，比如原本有 5 条没读，现在就会变成空的。"
 
 根因：`unreadCount` / `hasUserMention` 是纯前端内存状态（Zustand `threadStates` map），无持久化，无后端真相源。`GET /api/threads` 不返回未读数据。
 

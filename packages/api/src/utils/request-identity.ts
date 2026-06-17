@@ -54,6 +54,15 @@ export function resolveHeaderUserId(request: FastifyRequest): string | null {
   return nonEmptyString(request.headers['x-cat-cafe-user']);
 }
 
+/**
+ * Session-only identity resolver (strict auth for write endpoints).
+ * Unlike resolveUserId, does NOT fall back to headers or defaults.
+ */
+export function resolveSessionUserId(request: FastifyRequest): string | null {
+  const userId = (request as FastifyRequest & { sessionUserId?: string }).sessionUserId;
+  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
+}
+
 export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOptions): string | null {
   // F156 D-1: session cookie is the primary identity source
   const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
@@ -78,4 +87,29 @@ export function resolveUserId(request: FastifyRequest, options?: ResolveUserIdOp
   if (fromFallback) return fromFallback;
 
   return nonEmptyString(options?.defaultUserId);
+}
+
+/**
+ * Strict identity resolver for mutation endpoints.
+ *
+ * Unlike resolveUserId, trusted-origin browser requests with no session are
+ * treated as unauthenticated (returns null → 401). Prevents unauthenticated
+ * browser callers from overwriting TTL=0 user data under 'default-user'.
+ *
+ * Accepted identity sources (in priority order):
+ *   1. Session cookie (browser or CLI)
+ *   2. X-Cat-Cafe-User header (non-browser / agent / CLI path only)
+ *
+ * Browser requests without a session always return null regardless of origin.
+ */
+export function resolveStrictUserId(request: FastifyRequest): string | null {
+  // Session cookie is the only accepted identity for browser paths
+  const fromSession = nonEmptyString((request as FastifyRequest & { sessionUserId?: string }).sessionUserId);
+  if (fromSession) return fromSession;
+
+  // Any request with an Origin header is a browser request — reject if no session
+  if (request.headers.origin) return null;
+
+  // Non-browser path (CLI / agent): accept the explicit X-Cat-Cafe-User header
+  return nonEmptyString(request.headers['x-cat-cafe-user'] as string);
 }

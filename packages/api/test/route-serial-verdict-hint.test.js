@@ -258,17 +258,17 @@ describe('F167 C2 AC-C7: route-serial verdict-no-pass hint emission', () => {
     // route-serial now also calls detectUserMention and passes hasCoCreatorLineStartMention.
     //
     // NOTE: test fixture's coCreator config is `{mentionPatterns: ['@co-creator']}` +
-    // defaults `['@co-creator', '@铲屎官']`. Production cat-config.json adds
+    // defaults `['@co-creator', '@co-creator']`. Production cat-config.json adds
     // ['@co-creator', '@co-creator', '@co-creator']; the same code path covers all configured patterns.
     const { appended } = await runRoute('放行延续到 abc12345。\n\n@co-creator', 'thread-vh-10');
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
     assert.equal(hint, undefined, 'line-start co-creator mention is a legitimate exit; no hint');
   });
 
-  test('verdict + line-start @铲屎官 (CJK co-creator) → NO hint', async () => {
-    const { appended } = await runRoute('LGTM\n\n@铲屎官 已确认', 'thread-vh-11');
+  test('verdict + line-start @co-creator (CJK co-creator) → NO hint', async () => {
+    const { appended } = await runRoute('LGTM\n\n@co-creator 已确认', 'thread-vh-11');
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.equal(hint, undefined, 'CJK co-creator handle 铲屎官 is also a legitimate exit');
+    assert.equal(hint, undefined, 'CJK co-creator handle co-creator is also a legitimate exit');
   });
 
   test('verdict + inline @co-creator (NOT line-start) + no other exit → hint fires (control)', async () => {

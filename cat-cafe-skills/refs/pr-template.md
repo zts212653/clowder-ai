@@ -1,6 +1,6 @@
 # PR 模板 + 云端 Review 触发模板
 
-> 单一真相源。所有猫猫开 PR 和触发云端 review 都用这些模板。
+> 单一真相源。所有猫猫开 PR 和触发remote review 都用这些模板。
 > 修改本文件 = 三猫行为同步，不再有格式不一致问题。
 
 ## PR Body 模板
@@ -21,10 +21,10 @@
 ## Original Requirements（必填）
 
 - Discussion/Interview: `feature-discussions/{date}-{topic}/README.md`
-- **原始需求摘录（≤5 行，直接粘贴铲屎官原话）**：
+- **原始需求摘录（≤5 行，直接粘贴operator experience）**：
   > {例："我要能看到三只猫分别挂了哪些 Skill，按猫分类，一目了然"}
-- 铲屎官核心痛点：{用铲屎官自己的话概括}
-- **请 Reviewer 对照上面的摘录判断：交付物是否解决了铲屎官的问题？**
+- operator核心痛点：{用operator自己的话概括}
+- **请 Reviewer 对照上面的摘录判断：交付物是否解决了operator的问题？**
 
 ## Plan / ADR
 
@@ -68,7 +68,7 @@ PR 创建后，**立刻发一条 comment**（不是在 PR body 里写）。
 
 **就这两个词。** 不带 SHA、不带规则描述、不带审查标准。Codex connector 会自动 review 当前 HEAD。
 
-> **为什么不能用详细格式**：Codex connector 的解析规则变了——comment body 带多行描述（”Please review latest commit...”、审查标准等）会被解析为**代码修改请求**（code-write intent），而非 review 请求。极简格式经铲屎官 2026-04-20 PR #1300 实战验证：5 分钟内收到 👀 + review。
+> **为什么不能用详细格式**：Codex connector 的解析规则变了——comment body 带多行描述（”Please review latest commit...”、审查标准等）会被解析为**代码修改请求**（code-write intent），而非 review 请求。极简格式经operator 2026-04-20 PR #1300 实战验证：5 分钟内收到 👀 + review。
 
 ```bash
 # 触发命令
@@ -134,7 +134,7 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 ### Q2: PR comment 区出现小眼睛（👀）是什么意思？
 
-**小眼睛 = 云端 reviewer 已接单/已看到请求。**
+**小眼睛 = remote reviewer 已接单/已看到请求。**
 
 **⚠️ EYES ICON MEANS “REQUEST RECEIVED”, NOT “FAILED”.**
 

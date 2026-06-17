@@ -14,7 +14,7 @@ created: 2026-02-26
 ## Why
 
 ## What
-- **F38**: 当前：方向 A（分类标记），skill bug 已修（项目级 .claude/skills/ symlinks 5257e1c）。未来：方向 B（类 ToolSearch 延迟加载，BM25/regex，触发条件 skills 50+）。ToolSearch 不用向量数据库，用 BM25 词频排序。team lead决策：simple is better, build when you need。
+- **F38**: 当前：方向 A（分类标记），skill bug 已修（项目级 .claude/skills/ symlinks 5257e1c）。未来：方向 B（类 ToolSearch 延迟加载，BM25/regex，触发条件 skills 50+）。ToolSearch 不用向量数据库，用 BM25 词频排序。operator决策：simple is better, build when you need。
 
 ## Acceptance Criteria
 - [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。

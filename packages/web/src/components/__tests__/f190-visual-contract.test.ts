@@ -764,10 +764,10 @@ describe('#723 interactive button guard — no grey pill on action/toggle contro
     expect(src).toContain('text-cafe-secondary');
   });
 
-  it('ChatContainerHeader: RightPanelToggle text color in conditional branches, no cascade conflict', () => {
+  it('ChatContainerHeader: PanelToggle text color in conditional branches, no cascade conflict', () => {
     const src = readSrc('ChatContainerHeader.tsx');
     const lines = src.split('\n');
-    const start = lines.findIndex((l) => l.includes('function RightPanelToggle'));
+    const start = lines.findIndex((l) => l.includes('function PanelToggle'));
     const fnSrc = lines.slice(start, start + 50).join('\n');
     expect(fnSrc).not.toContain('hover:bg-[var(--console-hover-bg)]');
     expect(fnSrc).toContain('hover:text-cafe-accent');
@@ -1165,7 +1165,7 @@ describe('#723 round 6 — select/toggle/button primitive convergence', () => {
   });
 });
 
-describe('#723 round 7 — CVO visual convergence: tabs, search, selects, buttons, cards', () => {
+describe('#723 round 7 — operator visual convergence: tabs, search, selects, buttons, cards', () => {
   it('OpsContent: active tab uses Memory underline (border-b-2 + emphasis)', () => {
     const src = readSrc('settings/OpsContent.tsx');
     expect(src).toContain('border-b-2');
@@ -1283,15 +1283,6 @@ describe('#723 round 7 — CVO visual convergence: tabs, search, selects, button
     expect(skeleton![0]).not.toMatch(/style=.*borderRadius/);
   });
 
-  it('McpInstallForm: no form-input class, uses field-bg + input-stroke, buttons use secondary/accent pattern', () => {
-    const src = readSrc('McpInstallForm.tsx');
-    expect(src).not.toContain('form-input');
-    expect(src).not.toContain('bg-cafe-surface');
-    expect(src).not.toContain('border border-cafe');
-    expect(src).toContain('console-field-bg');
-    expect(src).toContain('console-input-stroke');
-  });
-
   it('InstallPlanDetail: disabled (direct_mcp) button uses neutral secondary, not accent', () => {
     const src = readSrc('marketplace/install-plan-detail.tsx');
     expect(src).toContain('cursor-not-allowed');
@@ -1308,7 +1299,7 @@ describe('#723 round 7 — CVO visual convergence: tabs, search, selects, button
   });
 });
 
-describe('#723 round 8 — CVO: refresh button, ops underline tabs, service toggle state machine', () => {
+describe('#723 round 8 — operator: refresh button, ops underline tabs, service toggle state machine', () => {
   it('HubGovernanceTab refresh: standard secondary pattern (px-3 py-1.5 + transition-colors)', () => {
     const src = readSrc('HubGovernanceTab.tsx');
     const refreshBtn = src.match(/<button[^>]*onClick=\{fetchHealth\}[^>]*>/);

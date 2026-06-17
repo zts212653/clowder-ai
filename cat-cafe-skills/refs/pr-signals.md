@@ -47,7 +47,7 @@ Commit: `abc1234`
 
 1. 在 worktree 中 `git fetch origin main && git rebase origin/main`
 2. 自动解决简单冲突 → push → 等下一轮 CI 通知
-3. 复杂冲突（无法自动 resolve）→ 通知铲屎官
+3. 复杂冲突（无法自动 resolve）→ 通知operator
 
 ### 收到 Review Feedback
 
@@ -78,9 +78,9 @@ Commit: `abc1234`
    git rebase origin/main
    ```
 3. **评估结果**：
-   - **rebase clean**（无冲突）→ `git push --force-with-lease` → 通知铲屎官"已自动 resolve"
+   - **rebase clean**（无冲突）→ `git push --force-with-lease` → 通知operator"已自动 resolve"
    - **冲突 ≤3 个文件 + 非 binary** → 尝试手动解决 → 成功则 push + 通知
-   - **复杂冲突**（>3 文件 / binary / 语义冲突）→ `git rebase --abort` → 通知铲屎官附冲突文件列表
+   - **复杂冲突**（>3 文件 / binary / 语义冲突）→ `git rebase --abort` → 通知operator附冲突文件列表
 
 ### Review Feedback 自动处理（AC-B3）
 
@@ -95,7 +95,7 @@ Commit: `abc1234`
 
 ### 事后通知
 
-所有自动行动完成后，通知铲屎官结果：
+所有自动行动完成后，通知operator结果：
 - 成功: "已自动 rebase 并 push PR #42"
 - 失败: "PR #42 冲突无法自动解决，需要人工介入" + 冲突文件列表
 - cloud/GitHub review 处理完: "已按 receive-review 模式处理 PR #42 的 cloud review 意见，已重新触发 cloud review，等待 PR tracking"

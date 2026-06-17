@@ -378,6 +378,42 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
     expect(ref?.textContent).toMatch(/…/);
   });
 
+  it('debugRef strip surfaces path-safe provider spawn context', async () => {
+    const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
+    const diag = build({
+      reasonCode: 'auth_failed',
+      debugRef: {
+        command: 'agy',
+        exitCode: 0,
+        signal: null,
+        invocationId: 'inv-agy-auth',
+        homeMode: 'agy_profile_home',
+        spawnCwdMode: 'agy_profile_cwd',
+        spawnCwdKey: '230809973b9c83ac',
+        profileId: 'f210-gemini35-flash-high',
+      },
+    });
+
+    act(() => {
+      root.render(
+        React.createElement(CliDiagnosticsPanel, {
+          errorMessage: 'Error: auth failed',
+          diagnostics: diag,
+        }),
+      );
+    });
+
+    const ref = container.querySelector('[data-testid="cli-diagnostics-debug-ref"]');
+    expect(ref?.textContent).toContain('homeMode:');
+    expect(ref?.textContent).toContain('agy_profile_home');
+    expect(ref?.textContent).toContain('spawnCwdMode:');
+    expect(ref?.textContent).toContain('agy_profile_cwd');
+    expect(ref?.textContent).toContain('spawnCwdKey:');
+    expect(ref?.textContent).toContain('230809973b9c83ac');
+    expect(ref?.textContent).toContain('profileId:');
+    expect(ref?.textContent).toContain('f210-gemini35-flash-high');
+  });
+
   it('falls back to errorMessage when publicSummary is empty', async () => {
     const { CliDiagnosticsPanel } = await import('../CliDiagnosticsPanel');
     const diag = build({ publicSummary: '' });

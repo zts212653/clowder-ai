@@ -9,7 +9,7 @@ decision_id: ADR-021
 # ADR-021: F129 Pack System 架构 — Multi-Agent 共创世界的声明式 Mod 生态
 
 > **Status**: accepted
-> **Deciders**: 铲屎官 + Ragdoll(opus) + Maine Coon(gpt52) + Siamese(gemini) + 金渐层(opencode)
+> **Deciders**: operator + Ragdoll(opus) + Maine Coon(gpt52) + Siamese(gemini) + 金渐层(opencode)
 > **Date**: 2026-03-25
 > **Feature Spec**: `docs/features/F129-pack-system-multi-agent-mod.md`
 
@@ -19,7 +19,7 @@ Cat Café 已有 120+ features，cat-config + skills + shared-rules 体系经过
 
 ### 核心问题
 
-铲屎官的原话：*"如果我是金融从业者？如果我是跑团爱好者？如果我是律师？……me & world & cats，我可以是任何身份的我。"*
+operator的原话：*"如果我是金融从业者？如果我是跑团爱好者？如果我是律师？……me & world & cats，我可以是任何身份的我。"*
 
 **需要一个机制，让"多 agent 协作世界"可定义、可分享、可组合。**
 

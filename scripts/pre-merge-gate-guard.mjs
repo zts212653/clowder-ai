@@ -129,7 +129,7 @@ function readRedisListeners() {
 
 // True ownership proof: query Redis-owned filesystem paths via CONFIG GET.
 // Redis 8 can report an empty `dir` while still exposing absolute pidfile/logfile
-// paths, so check the whole read-only CONFIG response for known Cat Cafe test
+// paths, so check the whole read-only CONFIG response for known Clowder AI test
 // tempdir prefixes.
 function isOwnedTestRedis(port) {
   const text = readFixtureOrCommand('CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE', 'redis-cli', [
@@ -185,7 +185,7 @@ function runPressureChecks(holderPid) {
   // Phase 1: clean orphan Redis with TRUE ownership proof.
   // Step 1: find candidates (ppid=1 + redis-server proctitle + non-sanctuary port).
   // Step 2: for each candidate, query read-only CONFIG paths. If dir/pidfile/logfile
-  //   matches a known Cat Cafe test tmpdir prefix, it's ours.
+  //   matches a known Clowder AI test tmpdir prefix, it's ours.
   // Step 3: port-based shutdown on OWNED instances only.
   // Non-owned Redis (different datadir) is never touched — fails to manual guidance.
   const orphanRedisPattern = /(?:^|\/)redis-server\s+\S*:(\d{2,5})\b/;

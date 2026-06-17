@@ -47,7 +47,7 @@ const CONTENT_DEDUP_MAX_ENTRIES = 10_000;
  * - `playtime-encode`: send `{ media, encode_type: 6, playtime }` — confirmed broken (encode_type is poison).
  * - `metadata`: send all SILK fields — confirmed broken (voice "completely gone").
  *
- * Runtime-configurable via WEIXIN_VOICE_ITEM_MODE so 铲屎官 can A/B test without code changes.
+ * Runtime-configurable via WEIXIN_VOICE_ITEM_MODE so co-creator can A/B test without code changes.
  * Default audio delivery stays on file_item attachment because native voice_item is unreliable.
  */
 const VOICE_ITEM_MODES = ['minimal', 'playtime', 'playtime-sec', 'playtime-encode', 'metadata'] as const;

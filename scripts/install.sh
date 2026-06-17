@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cat Cafe — Cross-Platform One-Click Install Helper (F113)
+# Clowder AI — Cross-Platform One-Click Install Helper (F113)
 # Usage: bash scripts/install.sh [--start] [--memory] [--registry=URL] [--skip-preflight]
 # Supported: macOS (Homebrew), Debian/Ubuntu, CentOS/RHEL/Fedora
 
@@ -693,7 +693,7 @@ case "$PLATFORM" in
         fi
         # Persist brew shellenv to login profiles so new terminals find brew, node, etc.
         if [[ "$_brew_recovered" == true ]]; then
-            _shellenv_line="eval \"\$($(command -v brew) shellenv)\"  # Homebrew (added by Cat Cafe)"
+            _shellenv_line="eval \"\$($(command -v brew) shellenv)\"  # Homebrew (added by Clowder AI)"
             for _prof in $(darwin_login_profiles); do
                 append_to_profile "$_shellenv_line" "$_prof"
             done
@@ -739,7 +739,7 @@ esac
 # distros already include ~/.local/bin in PATH via ~/.profile / ~/.bashrc.
 if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
     for _prof in $(darwin_login_profiles); do
-        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
+        append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
     done
     unset _prof
 fi
@@ -895,7 +895,7 @@ if node_needs_install; then
     # Persist PATH additions to login profiles (zsh + bash) for new terminals.
     if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
         for _prof in $(darwin_login_profiles); do
-            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
             if [[ "$USED_FNM" == true ]]; then
                 _fnm_shell="zsh"
                 [[ "$_prof" == *bash* || "$_prof" == *profile ]] && _fnm_shell="bash"
@@ -925,7 +925,7 @@ if ! command -v pnpm &>/dev/null; then
     # if Node was already present and the Node install step was skipped).
     if [[ "$DISTRO_FAMILY" == "darwin" ]]; then
         for _prof in $(darwin_login_profiles); do
-            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Cat Cafe user binaries' "$_prof"
+            append_to_profile 'export PATH="$HOME/.local/bin:$PATH"  # Clowder AI user binaries' "$_prof"
         done
         unset _prof
     fi
@@ -983,7 +983,7 @@ sync_agent_hooks_best_effort
 
 # ── [6/8] Install AI agent CLI tools ─────────────────────
 step "[6/8] Installing AI CLI tools / 安装 AI 命令行工具..."
-info "  Cat Cafe spawns CLI subprocesses — these are required"
+info "  Clowder AI spawns CLI subprocesses — these are required"
 install_npm_cli() {
     local name="$1" cmd="$2" pkg="$3"
     info "  Installing $name ($pkg)..."
@@ -1169,7 +1169,7 @@ chmod 600 .env 2>/dev/null || true
 
 # ── [8/8] Done ──────────────────────────────────────────────
 step "[8/8] Installation complete! / 安装完成！"
-echo -e "\n  ${GREEN}══ Cat Cafe is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
+echo -e "\n  ${GREEN}══ Clowder AI is ready! 猫猫咖啡已就绪！══${NC}\n  Project: $PROJECT_DIR"
 START_CMD="cd $PROJECT_DIR && pnpm start"; [[ "$MEMORY_MODE" == true ]] && START_CMD+=" --memory"
 # The script runs as a subprocess — PATH changes don't propagate to the parent
 # shell. On macOS, prefix the banner command with `source ~/.zprofile` so the

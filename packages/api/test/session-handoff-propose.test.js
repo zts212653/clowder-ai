@@ -37,7 +37,9 @@ describe('proposeSessionHandoff + confirmation card (F225 A3/A4)', () => {
     assert.equal(res.proposal.sourceSessionId, chainStore.getActive('opus-45', 't1').id);
     const card = buildHandoffProposalCardBlock(res.proposal);
     assert.equal(card.kind, 'card');
+    assert.equal(card.title, '提议 session 接力（封印当前 → 续接 fresh 自己）');
     const cardStr = JSON.stringify(card);
+    assert.equal(cardStr.includes(String.fromCodePoint(0x1f504)), false, 'card title does not ship emoji glyphs');
     assert.match(cardStr, /handoff:approve/);
     assert.match(cardStr, /handoff:reject/);
     assert.match(cardStr, /abc123/, 'commits surfaced on card');

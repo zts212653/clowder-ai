@@ -11,7 +11,7 @@ export const GREP_STORY_CARDS: StoryCard[] = [
   // ── Card 1: 卡词 ──
   {
     title: '卡词',
-    subtitle: '铲屎官忘了一个经常用的词',
+    subtitle: 'co-creator忘了一个经常用的词',
     messages: [
       {
         speaker: 'user',
@@ -62,7 +62,7 @@ export const GREP_STORY_CARDS: StoryCard[] = [
   // ── Card 3: You 发现不对 ──
   {
     title: '等一下',
-    subtitle: '铲屎官开始觉得哪里不对',
+    subtitle: 'co-creator开始觉得哪里不对',
     messages: [
       {
         speaker: 'user',

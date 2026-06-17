@@ -62,7 +62,7 @@ function buildReportingProtocol(
       return [
         '**回报模式：autonomous（无强制回报）** — 本 Thread 自治推进，源 Thread 不默认持有回执责任。',
         // AC-AA7: even voluntary cross-posts need routing credentials
-        `遇 CVO 决策 / 阻塞 / 不可逆操作 / 跨 feature 冲突 / 共享文件争用，仍按家规主动用 \`cat_cafe_cross_post_message\` 上报（"无强制回报"≠"禁止上报"）。上报时必须携带 targetCats 或行首 @ 源猫 handle 确保消息被接收。`,
+        `遇 operator 决策 / 阻塞 / 不可逆操作 / 跨 feature 冲突 / 共享文件争用，仍按家规主动用 \`cat_cafe_cross_post_message\` 上报（"无强制回报"≠"禁止上报"）。上报时必须携带 targetCats 或行首 @ 源猫 handle 确保消息被接收。`,
         routingLine,
       ];
     case 'final-only':

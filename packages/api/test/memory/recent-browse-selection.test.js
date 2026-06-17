@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
+// Time-bomb fix (宪宪/opus-4.8, 2026-06-14): fixtures hardcoded 2026-05-* dates against a
+// relative `since: '30d'` window. As wall-clock advances past those fixed dates the window
+// slides and fixtures fall out of range → "flaky by calendar" (this file started failing on
+// 06-14, blocking all merges). Use relative-to-now dates so selection tests are date-stable.
+const hoursAgo = (h) => new Date(Date.now() - h * 3600000).toISOString();
+
 async function setupStoreWithDocs(dir, collectionId, docs) {
   const { SqliteEvidenceStore } = await import('../../dist/domains/memory/SqliteEvidenceStore.js');
   const { CollectionIndexBuilder } = await import('../../dist/domains/memory/CollectionIndexBuilder.js');
@@ -70,31 +76,31 @@ describe('guaranteed minimum selection (AC-H2)', () => {
     const catalog = new LibraryCatalog();
     const stores = new Map();
 
-    // collA: 15 items all from today
+    // collA: 15 items all from "today" (relative to now)
     const docsA = Array.from({ length: 15 }, (_, i) => ({
       name: `a-doc-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-19T12:00:00.000Z',
+      isoDate: hoursAgo(1),
     }));
     const { store: storeA, manifest: mA } = await setupStoreWithDocs(dir, 'project:alpha', docsA);
     catalog.register(mA);
     stores.set('project:alpha', storeA);
 
-    // collB: 3 items from yesterday
+    // collB: 3 items from "yesterday" (relative to now)
     const docsB = Array.from({ length: 3 }, (_, i) => ({
       name: `b-doc-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-18T12:00:00.000Z',
+      isoDate: hoursAgo(25),
     }));
     const { store: storeB, manifest: mB } = await setupStoreWithDocs(dir, 'project:beta', docsB);
     catalog.register(mB);
     stores.set('project:beta', storeB);
 
-    // collC: 3 items from yesterday
+    // collC: 3 items from "yesterday", 2h earlier than collB (preserve B > C ordering)
     const docsC = Array.from({ length: 3 }, (_, i) => ({
       name: `c-doc-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-18T10:00:00.000Z',
+      isoDate: hoursAgo(27),
     }));
     const { store: storeC, manifest: mC } = await setupStoreWithDocs(dir, 'project:gamma', docsC);
     catalog.register(mC);
@@ -139,7 +145,9 @@ describe('guaranteed minimum selection (AC-H2)', () => {
         {
           name: `doc-${c}`,
           subdir: 'docs',
-          isoDate: `2026-05-${String(19 - c).padStart(2, '0')}T12:00:00.000Z`,
+          // c=0 → 1h ago (most recent) ... c=7 → ~7d ago; all within the 30d `since` window,
+          // strictly descending so limit=5 deterministically picks coll-0..4.
+          isoDate: hoursAgo(c * 24 + 1),
         },
       ];
       const { store, manifest } = await setupStoreWithDocs(dir, id, docs);
@@ -172,7 +180,8 @@ describe('guaranteed minimum selection (AC-H2)', () => {
     const docs = Array.from({ length: 5 }, (_, i) => ({
       name: `doc-${i}`,
       subdir: 'docs',
-      isoDate: `2026-05-${String(19 - i).padStart(2, '0')}T12:00:00.000Z`,
+      // i=0 → 1h ago ... i=4 → ~4d ago; all within 30d, descending → limit=3 picks 3 most recent.
+      isoDate: hoursAgo(i * 24 + 1),
     }));
     const { store, manifest } = await setupStoreWithDocs(dir, 'project:solo', docs);
     catalog.register(manifest);
@@ -198,7 +207,7 @@ describe('guaranteed minimum selection (AC-H2)', () => {
     const docsA = Array.from({ length: 10 }, (_, i) => ({
       name: `a-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-19T12:00:00.000Z',
+      isoDate: hoursAgo(1),
     }));
     const { store: sA, manifest: mA } = await setupStoreWithDocs(dir, 'project:alpha', docsA);
     catalog.register(mA);
@@ -208,7 +217,7 @@ describe('guaranteed minimum selection (AC-H2)', () => {
     const docsB = Array.from({ length: 5 }, (_, i) => ({
       name: `b-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-18T12:00:00.000Z',
+      isoDate: hoursAgo(25),
     }));
     const { store: sB, manifest: mB } = await setupStoreWithDocs(dir, 'project:beta', docsB);
     catalog.register(mB);
@@ -254,7 +263,7 @@ describe('AC-H5 regression fixtures', () => {
     const docsA = Array.from({ length: 50 }, (_, i) => ({
       name: `burst-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-19T12:00:00.000Z',
+      isoDate: hoursAgo(1),
     }));
     const { store: sA, manifest: mA } = await setupStoreWithDocs(dir, 'project:dominant', docsA);
     catalog.register(mA);
@@ -264,7 +273,7 @@ describe('AC-H5 regression fixtures', () => {
     const docsB = Array.from({ length: 3 }, (_, i) => ({
       name: `minor-b-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-18T12:00:00.000Z',
+      isoDate: hoursAgo(25),
     }));
     const { store: sB, manifest: mB } = await setupStoreWithDocs(dir, 'project:minor-b', docsB);
     catalog.register(mB);
@@ -274,7 +283,7 @@ describe('AC-H5 regression fixtures', () => {
     const docsC = Array.from({ length: 3 }, (_, i) => ({
       name: `minor-c-${i}`,
       subdir: 'docs',
-      isoDate: '2026-05-17T12:00:00.000Z',
+      isoDate: hoursAgo(49),
     }));
     const { store: sC, manifest: mC } = await setupStoreWithDocs(dir, 'project:minor-c', docsC);
     catalog.register(mC);

@@ -14,7 +14,7 @@
  *     that happens to include the setup footer must not be suppressed)
  *
  * Trigger-template noise (裸 `@codex review` / 触发模板) is NOT handled here —
- * those are self-authored by cats/铲屎官 and are covered by Rule A
+ * those are self-authored by cats/co-creator and are covered by Rule A
  * (`shouldSkipComment` self-authored skip).
  */
 

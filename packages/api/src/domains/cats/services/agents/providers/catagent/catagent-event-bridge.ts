@@ -1,7 +1,7 @@
 /**
  * CatAgent Event Bridge — F159: Native Provider Security Baseline (AC-B4)
  *
- * Maps Anthropic Messages API responses to Cat Cafe AgentMessage events,
+ * Maps Anthropic Messages API responses to Clowder AI AgentMessage events,
  * ensuring done/error/usage signals enter the existing audit chain.
  *
  * Inline types for Anthropic API shapes — no @anthropic-ai/sdk dependency.

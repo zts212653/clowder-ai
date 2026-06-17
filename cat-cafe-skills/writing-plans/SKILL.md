@@ -39,6 +39,23 @@ triggers:
 
 **Steps are internal implementation rhythm, NOT delivery batches.** The deliverable to the user is a complete feat matching the full spec — not a step's output. Do not expose intermediate steps as "验收点" to the user.
 
+## Stateful Object Gate（F229 PR-A1 20 轮教训）🔴
+
+Plan 涉及**有生命周期的状态对象**（thread 标记 / carrier / session / 持久 config / cache / 索引 / 注册表）时，「功能描述 + 幂等测试点」**不够**——那是把状态机的边留给 reviewer 逐轮补（PR #2202 实测：4 P1 + 16 P2 全是同一对象的状态转移边——crash window / restore 复活 / deleted-list 漏过滤 / 并发 race / self-heal，打了 20 轮才合入）。
+
+**Census 先行（F229 A3a 二次教训 2026-06-11）**：gate 第一步是**普查**——列出 plan 涉及的全部有生命周期对象再逐个三件套。特别注意"复用现有 API"场景下的**新消费侧状态**（轮询循环、发送闸门、到达判定器都是状态机）。漏报对象 = gate 形同虚设：F229 A3b 三对象三件套齐全，A3a 的 ConversationSendCycle 漏普查 → 云端同型 5 轮逐边补课。
+
+**三件套，缺一 = plan 不完整，不准发给实现猫：**
+
+1. **状态×事件转移表** — 含「唯一 lifecycle owner 是谁」+「旁路 API（generic restore / delete / list）禁止哪些操作」
+2. **不变量清单** — INV-N 编号，每条标注可测方式，test matrix 逐条对应
+3. **对抗场景** — crash window / 并发双写 / 恢复路径 / 旁路 API 误用，每个场景一条测试
+
+**派生值规则**：能用纯投影（pure selector，零存储）表达的状态，禁止落独立存储——无同步即无失同步。
+
+- 范例：*(internal reference removed)*（球态纯投影 + INV-1~9 + test matrix 即写码顺序）
+- 反例：同 feature PR-A1 plan 段（一行"幂等懒创建"→ remote review 20 轮逐边补课）
+
 ## Bite-Sized Task Granularity
 
 **Each step is one action (2-5 minutes):**
@@ -117,9 +134,9 @@ git commit -m "feat: add specific feature"
 
 计划中的 Open Question 必须分类：
 - **技术 OQ**：实现过程中自行解决
-- **价值 OQ**：需要 CVO 判断 → 附 Decision Packet（格式见 `refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
+- **价值 OQ**：需要 operator 判断 → 附 Decision Packet（格式见 `refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
 
-先判断可逆性：回滚成本低的不升级 CVO，猫猫自决。
+先判断可逆性：回滚成本低的不升级 operator，猫猫自决。
 
 ## Remember
 - Exact file paths always

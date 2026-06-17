@@ -55,5 +55,5 @@ mcp__claude-in-chrome__form_input / find / javascript_tool
 
 ## 官方来源
 
-- claude-in-chrome: Chrome 扩展（铲屎官已安装）
+- claude-in-chrome: Chrome 扩展（operator已安装）
 - Playwriter 参考: https://playwriter.dev/ / https://github.com/remorses/playwriter

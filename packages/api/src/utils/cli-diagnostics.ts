@@ -51,7 +51,7 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
   },
   auth_failed: {
     summary: 'API 认证失败',
-    hint: '检查 .env 或 Console 里 provider 的 API key 是否正确、未过期。',
+    hint: '检查 provider API key 或 CLI 登录态是否正确、未过期。AGY/Antigravity CLI 需要用同一个 HOME/profile 先运行 `agy` 完成登录。',
   },
   quota_exceeded: {
     summary: 'API 配额超限',
@@ -101,7 +101,7 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     // sessionIdPrefix / stderrPresent) lives in `safeExcerpt` (JSON), surfaced by the
     // panel's expandable disclosure. debugRef only carries command / exit / signal /
     // invocationId. Previous hint sent users to debugRef — wrong place, killed UX value.
-    hint: 'CLI 进程正常退出且收到了事件流，但没有 text event（常见于 OpenCode + DeepSeek 上游问题）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
+    hint: 'CLI 进程正常退出，但没有可显示的文字输出（事件流没有 text event，或 plain-text stdout 为空）。建议：换一只猫试同样 prompt；换 model；或直接在终端跑 CLI 看 raw output 判断是 upstream / auth / profile 还是 prompt 问题。展开下方"详细诊断"查看 event 类型/数量、model、session 前缀等结构化证据；debugRef.invocationId 可用于后端日志检索。',
   },
 };
 
@@ -138,8 +138,14 @@ const MAX_SILENT_STDERR_CHARS = 500;
 /** AC-A6: stack frame patterns — rust frame numbers / `at <file>` / cargo / node_modules */
 const FRAME_REGEX = /^\s*\d+:\s|^\s*at\s/;
 
-function truncateEvidenceString(value: string, maxChars: number): string {
-  const sanitized = sanitizeCliStderr(value).replace(/\s+/g, ' ').trim();
+function childHomeSanitizerOptions(additionalHomePaths?: readonly string[]) {
+  return additionalHomePaths ? { additionalHomePaths } : undefined;
+}
+
+function truncateEvidenceString(value: string, maxChars: number, additionalHomePaths?: readonly string[]): string {
+  const sanitized = sanitizeCliStderr(value, childHomeSanitizerOptions(additionalHomePaths))
+    .replace(/\s+/g, ' ')
+    .trim();
   if (sanitized.length <= maxChars) return sanitized;
   if (maxChars <= 3) return sanitized.slice(0, maxChars);
   return `${sanitized.slice(0, maxChars - 3)}...`;
@@ -158,16 +164,26 @@ function redactNonHomePaths(input: string): string {
     .replace(/(^|[\s"'`(=:[{,])\/(?!tmp\/\[REDACTED\])(?:[^\s"'`<>{}|]+\/)+[^\s"'`<>{}|]+/g, '$1[PATH_REDACTED]');
 }
 
-function truncateSilentEvidenceString(value: string, maxChars: number): string {
-  const sanitized = redactNonHomePaths(sanitizeCliStderr(value)).replace(/\s+/g, ' ').trim();
+function truncateSilentEvidenceString(
+  value: string,
+  maxChars: number,
+  additionalHomePaths?: readonly string[],
+): string {
+  const sanitized = redactNonHomePaths(sanitizeCliStderr(value, childHomeSanitizerOptions(additionalHomePaths)))
+    .replace(/\s+/g, ' ')
+    .trim();
   if (sanitized.length <= maxChars) return sanitized;
   if (maxChars <= 3) return sanitized.slice(0, maxChars);
   return `${sanitized.slice(0, maxChars - 3)}...`;
 }
 
-function extractSafeExcerpt(rawText: string, reasonCode: CliErrorReasonCode): string {
+function extractSafeExcerpt(
+  rawText: string,
+  reasonCode: CliErrorReasonCode,
+  additionalHomePaths?: readonly string[],
+): string {
   // KD-2: sanitize entire blob first; truncation happens on sanitized output.
-  const sanitized = sanitizeCliStderr(rawText);
+  const sanitized = sanitizeCliStderr(rawText, childHomeSanitizerOptions(additionalHomePaths));
   const allLines = sanitized.split('\n');
   // Keep meaningful lines (non-empty after trim) but preserve original line content (don't trim away whitespace details).
   const lines = allLines.filter((l) => l.trim().length > 0);
@@ -208,17 +224,28 @@ function extractSafeExcerpt(rawText: string, reasonCode: CliErrorReasonCode): st
   return kept.join('\n').slice(0, MAX_CHARS);
 }
 
+function maybeExtractSafeExcerpt(args: {
+  rawText: string;
+  reasonCode: CliErrorReasonCode;
+  additionalHomePaths?: readonly string[];
+  requireClassifierMatch: boolean;
+}): string | undefined {
+  if (!args.rawText.trim()) return undefined;
+  if (args.requireClassifierMatch && classifyCliError(args.rawText) !== args.reasonCode) return undefined;
+  return extractSafeExcerpt(args.rawText, args.reasonCode, args.additionalHomePaths) || undefined;
+}
+
 // =============================================================================
 // Panic detection (AC-A6: headline surfaces in publicSummary regardless of reasonCode)
 // =============================================================================
 
 const PANIC_HEADLINE_REGEX = /thread\s+["'][^"']+["']\s+panicked at[^\n]*/i;
 
-function extractPanicHeadline(rawText: string): string | null {
+function extractPanicHeadline(rawText: string, additionalHomePaths?: readonly string[]): string | null {
   const m = PANIC_HEADLINE_REGEX.exec(rawText);
   if (!m) return null;
   // Sanitize the headline (could embed a path like src/foo.rs:42:9)
-  const sanitized = sanitizeCliStderr(m[0]).trim();
+  const sanitized = sanitizeCliStderr(m[0], childHomeSanitizerOptions(additionalHomePaths)).trim();
   // Cap to 200 chars to keep summary readable in error bubble
   return sanitized.slice(0, 200);
 }
@@ -252,11 +279,29 @@ export function buildCliDiagnostics(args: {
    *  honest unknown-fallback hint (don't dangle LOG_CLI_STDERR=1 for empty-stderr cases).
    *  Omitted = legacy hint (backward-compat for callers not yet on Phase F contract). */
   stderrEmpty?: boolean;
+  /**
+   * Optional public excerpt source. rawText is still used for classification, but callers with
+   * mixed private streams (for example stderr + model stdout) can restrict user-visible excerpts
+   * to stderr or another provider-safe message.
+   */
+  safeExcerptRawText?: string;
+  /** Extra HOME roots used by an isolated child CLI spawn, redacted before public excerpts. */
+  additionalHomePaths?: readonly string[];
 }): CliDiagnostics {
   const reasonCode = classifyCliError(args.rawText);
+  const additionalHomePaths = args.additionalHomePaths;
+  const excerptRawText = args.safeExcerptRawText ?? args.rawText;
+  const classifierSafeExcerpt = reasonCode
+    ? maybeExtractSafeExcerpt({
+        rawText: excerptRawText,
+        reasonCode,
+        additionalHomePaths,
+        requireClassifierMatch: args.safeExcerptRawText !== undefined,
+      })
+    : undefined;
 
   // AC-A6: panic headline takes precedence in summary (still keep reasonCode hint if known)
-  const panicHeadline = extractPanicHeadline(args.rawText);
+  const panicHeadline = extractPanicHeadline(excerptRawText, additionalHomePaths);
 
   // Known reasonCode → humanized text + whitelisted safeExcerpt (Phase A behavior).
   // Phase D P2 fix (cloud codex 2026-05-29): tag excerptSource='classifier' so the frontend
@@ -268,8 +313,7 @@ export function buildCliDiagnostics(args: {
       publicHint: baseText.hint,
       debugRef: args.debugRef,
       reasonCode,
-      safeExcerpt: extractSafeExcerpt(args.rawText, reasonCode),
-      excerptSource: 'classifier',
+      ...(classifierSafeExcerpt ? { safeExcerpt: classifierSafeExcerpt, excerptSource: 'classifier' as const } : {}),
     };
   }
 
@@ -281,7 +325,10 @@ export function buildCliDiagnostics(args: {
   // KNOWN_EXCERPT_SOURCES membership check admits this for disclosure — previously the frontend's
   // reasonCode-only guard hid this excerpt and users only saw the 200-char publicSummary.
   if (args.structuredErrorText) {
-    const sanitized = sanitizeCliStderr(args.structuredErrorText).trim();
+    const sanitized = sanitizeCliStderr(
+      args.structuredErrorText,
+      childHomeSanitizerOptions(additionalHomePaths),
+    ).trim();
     if (sanitized) {
       const headline =
         sanitized
@@ -299,22 +346,26 @@ export function buildCliDiagnostics(args: {
   }
 
   // Truly unknown (no structured CC error).
-  // #857: when rawText is available, sanitize + truncate and surface as safeExcerpt so
-  // users see a desensitized message instead of having to check backend logs.
+  // #857: when rawText is available and caller has not constrained the public excerpt
+  // source, sanitize + truncate and surface as safeExcerpt so users see a desensitized
+  // message instead of having to check backend logs. If safeExcerptRawText is supplied,
+  // unknown_raw stays closed: the caller is deliberately preventing rawText admission.
   // F212 Phase F (AC-F4/F5): pick honest unknown hint by stderrEmpty signal when caller
   // provides it; fall back to legacy hint for backward-compat (callers without Phase F awareness).
   let unknownHint: string = UNKNOWN_TEXT.hint;
   if (args.stderrEmpty === true) unknownHint = UNKNOWN_HINT_EMPTY_STDERR;
   else if (args.stderrEmpty === false) unknownHint = UNKNOWN_HINT_HAS_STDERR;
 
-  const trimmedRaw = args.rawText?.trim();
+  const trimmedRaw = args.safeExcerptRawText === undefined ? args.rawText?.trim() : undefined;
   let safeExcerpt: string | undefined;
   let excerptSource: CliDiagnostics['excerptSource'] | undefined;
   if (trimmedRaw) {
     // R3 P1 fix (#857): sanitize + redact non-HOME paths. sanitizeCliStderr only
     // covers HOME/USERPROFILE/C:\Users/tmp; server installs under /srv, /workspace,
     // /var/lib, D:\work would leak raw paths without the extra redaction layer.
-    safeExcerpt = redactNonHomePaths(sanitizeCliStderr(trimmedRaw)).slice(0, MAX_CHARS);
+    safeExcerpt = redactNonHomePaths(
+      sanitizeCliStderr(trimmedRaw, childHomeSanitizerOptions(additionalHomePaths)),
+    ).slice(0, MAX_CHARS);
     excerptSource = 'unknown_raw';
   }
 
@@ -433,6 +484,10 @@ export function buildSilentCompletionDiagnostic(input: {
   stderrPresent: boolean;
   /** Optional sanitized stderr excerpt (caller should pre-sanitize OR let helper do it) */
   stderrExcerpt?: string;
+  /** Extra HOME roots used by an isolated child CLI spawn, redacted before public excerpts. */
+  additionalHomePaths?: readonly string[];
+  /** Path-safe provider spawn context, if the provider has one. */
+  debugRefExtras?: Pick<CliDiagnostics['debugRef'], 'homeMode' | 'spawnCwdMode' | 'spawnCwdKey' | 'profileId'>;
 }): CliDiagnostics {
   const base = REASON_TEXT.silent_completion;
   // Safety: only first 8 chars of sessionId (CCID-style prefix), never the full ID
@@ -441,14 +496,20 @@ export function buildSilentCompletionDiagnostic(input: {
   // Cloud codex P2 (2026-06-09): event type strings come from NDJSON stream metadata and can be
   // numerous/long in malformed streams; cap count + item length before JSON-stringifying.
   const normalizedEventTypes = Array.from(
-    new Set(input.eventTypes.map((type) => truncateEvidenceString(type, MAX_SILENT_EVENT_TYPE_CHARS)).filter(Boolean)),
+    new Set(
+      input.eventTypes
+        .map((type) => truncateEvidenceString(type, MAX_SILENT_EVENT_TYPE_CHARS, input.additionalHomePaths))
+        .filter(Boolean),
+    ),
   ).sort();
   const safeEventTypes = normalizedEventTypes.slice(0, MAX_SILENT_EVENT_TYPES);
   const eventTypesTruncated = normalizedEventTypes.length > safeEventTypes.length;
-  const safeModel = input.model ? truncateEvidenceString(input.model, MAX_SILENT_MODEL_CHARS) : undefined;
+  const safeModel = input.model
+    ? truncateEvidenceString(input.model, MAX_SILENT_MODEL_CHARS, input.additionalHomePaths)
+    : undefined;
   // Optional safeExcerpt: pre-sanitize through the shared sanitizer, then cap for the structured JSON budget.
   const safeStderrExcerpt = input.stderrExcerpt
-    ? truncateSilentEvidenceString(input.stderrExcerpt, MAX_SILENT_STDERR_CHARS)
+    ? truncateSilentEvidenceString(input.stderrExcerpt, MAX_SILENT_STDERR_CHARS, input.additionalHomePaths)
     : undefined;
   const evidence = {
     eventCount: input.eventCount,
@@ -472,6 +533,7 @@ export function buildSilentCompletionDiagnostic(input: {
       exitCode: input.exitCode ?? 0,
       signal: null,
       ...(input.invocationId ? { invocationId: input.invocationId } : {}),
+      ...input.debugRefExtras,
     },
     // safeExcerpt slot holds the structured evidence (JSON-stringified — frontend renders
     // as raw text in disclosure section). KD-1: this is admitted because the content is

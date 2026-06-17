@@ -35,6 +35,9 @@ export interface IFrustrationIssueStore {
   /** Set the card message ID (visibility marker). */
   setCardMessageId(issueId: string, cardMessageId: string): Promise<void>;
 
+  /** Link a community issue draft to this frustration issue (F235). */
+  setCommunityIssueDraftId(issueId: string, draftId: string): Promise<void>;
+
   /** List issues in a thread, sorted by createdAt desc. */
   listByThread(threadId: string): Promise<FrustrationIssue[]>;
 

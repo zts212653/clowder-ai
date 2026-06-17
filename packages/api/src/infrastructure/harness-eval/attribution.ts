@@ -236,9 +236,13 @@ function buildFrictionFinding(
   };
 
   // sampleCoverage: only when samples are expected (metric is supported by sampling).
-  // For now, only `c2.verdict_without_pass_count` is sampled. Other metrics get no
+  // F192 Phase D — eval:a2a sampled-metrics roster (extended across multiple verdicts):
+  //   - `c2.verdict_without_pass_count`     (2026-06-08 build verdict, PR #2144)
+  //   - `c2.void_hold_hint_emitted`         (2026-06-10 build verdict, PR #2222)
+  //   - `c1.zombie_hold_count`              (2026-06-12 build verdict, PR #2250)
+  // See `SAMPLED_METRICS` below for the canonical set. Other metrics get no
   // sampleCoverage field — silent absence ≠ incomplete coverage, just "not sampled here".
-  if (metric === 'c2.verdict_without_pass_count') {
+  if (SAMPLED_METRICS.has(metric)) {
     record.sampleCoverage = {
       sampleCount: samples.length,
       metricCount: value,
@@ -248,6 +252,22 @@ function buildFrictionFinding(
 
   return record;
 }
+
+/**
+ * F192 Phase D — metrics that emit per-fire sample evidence via span events.
+ * Adding a metric here requires:
+ *   1. route-serial emits a span event at the counter point (with HMAC ids + trigger)
+ *   2. f167-eval `buildC2` populates `frictionSamples[metric]` from the extractor
+ *   3. eval-yaml formatter renders the samples (renders any metric in frictionSamples)
+ */
+const SAMPLED_METRICS: ReadonlySet<string> = new Set([
+  'c2.verdict_without_pass_count',
+  'c2.void_hold_hint_emitted',
+  // F192 Phase D — eval:a2a 2026-06-12 build verdict: C1 zombie-hold joins the sampled
+  // metrics so findings carry per-fire drilldown refs + sampleCoverage. Trigger is
+  // the wake-delay bucket (prior_overdue / prior_imminent / prior_short / prior_long).
+  'c1.zombie_hold_count',
+]);
 
 function detectFrictionFromCounts(component: AttributionInput['snapshot']['components'][0]): AttributionRecord[] {
   const findings: AttributionRecord[] = [];

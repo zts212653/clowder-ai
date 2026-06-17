@@ -12,13 +12,13 @@ created: 2026-04-28
 >
 > **Phase A done (2026-04-28, PR #1445 merged at b25b73034)**: 基础设施搭建完成。Maine Coon六轮 review 抓 5 个 P1 + 1 个 P2 全部 0 误报，每条都不在 diff 内的依赖闭包问题（permissions / sync-manifest workflow / rerun semantics / desktop 闭包 / regex \b 边界 / extraResources cross-platform 漂移 / darwin leak regex slash+dest path）。
 >
-> **Phase B done (2026-05-26)**: `v0.9.1` release 已连续运行 25 天，release page 持续提供 3 个 installer assets；截至关闭时 GitHub release 下载数为 `CatCafe-0.9.1-arm64.dmg = 30`、`CatCafe-0.9.1-x64.dmg = 5`、`CatCafe-Setup-0.9.1.exe = 53`。按 CVO 口径，这个 post-release field evidence 已强于“一只非作者猫单次手工点装”。
+> **Phase B done (2026-05-26)**: `v0.9.1` release 已连续运行 25 天，release page 持续提供 3 个 installer assets；截至关闭时 GitHub release 下载数为 `CatCafe-0.9.1-arm64.dmg = 30`、`CatCafe-0.9.1-x64.dmg = 5`、`CatCafe-Setup-0.9.1.exe = 53`。按 operator 口径，这个 post-release field evidence 已强于“一只非作者猫单次手工点装”。
 
 ## Why
 
 **社区反馈触发**：v0.9.0 release notes 写了 "Windows NSIS installer + macOS DMG packaging pipeline"（卖点之一），但 [release page](https://github.com/zts212653/clowder-ai/releases/tag/v0.9.0) 0 个 assets。社区小伙伴提问「release 里好像没看到 exe 安装包，是我看漏了吗」——他没看漏，是我们写得超前于交付。
 
-**team experience（2026-04-28）**：
+**operator experience（2026-04-28）**：
 > 「也就是我们的开源社区管理 skills 里要新增一个发版本要发安装包？exe 和 mac 的？两个？」
 >
 > 「那我们先搭建基础设施吧？skills 写了 然后 github 的 action 先配置？先把基础设施做了再发包？」

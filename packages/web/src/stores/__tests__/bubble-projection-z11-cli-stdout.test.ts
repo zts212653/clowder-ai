@@ -1,11 +1,11 @@
 /**
- * F194 Phase Z11 — CLI Output stdout consistency (铲屎官 R15, 2026-05-16).
+ * F194 Phase Z11 — CLI Output stdout consistency (co-creator R15, 2026-05-16).
  *
  * Bug: when projection merges a stream record + a post_message callback into one
  * canonical bubble (Z8 KD-27), bubble origin becomes `callback`. ChatMessage.tsx:122
  * only feeds content to `toCliEvents` when `origin === 'stream'`, so the merged
  * (callback-origin) bubble's CLI Output loses its stdout — only tools remain.
- * 铲屎官 wants CLI Output behavior IDENTICAL whether or not there's a post_msg.
+ * co-creator wants CLI Output behavior IDENTICAL whether or not there's a post_msg.
  *
  * Z11 initial fix kept Z8 merge and exposed cliStdout/speechContent. Runtime
  * evidence later showed this still violates the user's expected model:

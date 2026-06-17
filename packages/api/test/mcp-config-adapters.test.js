@@ -353,7 +353,7 @@ describe('writeClaudeMcpConfig', () => {
     assert.equal(data.mcpServers.test.cwd, '/tmp');
   });
 
-  it('injects workspace env into managed Cat Cafe servers', async () => {
+  it('injects workspace env into managed Clowder AI servers', async () => {
     const file = join(dir, '.mcp.json');
     const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
@@ -482,7 +482,7 @@ describe('writeCodexMcpConfig', () => {
     assert.ok(raw.includes('[mcp_servers.test]'));
   });
 
-  it('injects workspace env into managed Cat Cafe servers', async () => {
+  it('injects workspace env into managed Clowder AI servers', async () => {
     const file = join(dir, 'config.toml');
     const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
     const originalWs = process.env.CAT_CAFE_WORKSPACE_ROOT;
@@ -1323,7 +1323,7 @@ describe('P1-2: writers preserve non-managed MCP servers', () => {
       }),
     );
 
-    // Cat Cafe orchestrator writes only managed servers
+    // Clowder AI orchestrator writes only managed servers
     await writeClaudeMcpConfig(file, [
       { name: 'cat-cafe', command: 'node', args: ['new-server.js'], enabled: true, source: 'cat-cafe' },
     ]);

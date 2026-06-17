@@ -50,11 +50,11 @@ describe('AchievementStore', () => {
     assert.ok(lvl.needed);
   });
 
-  it('getCvoLevel advances with CVO achievements', () => {
+  it('getCvoLevel advances with operator achievements', () => {
     const store = new AchievementStore();
     store.unlock('user1', 'cvo-first-review');
     store.unlock('user1', 'cvo-5-reviews');
-    // 2 CVO achievements → level 2
+    // 2 operator achievements → level 2
     const lvl = store.getCvoLevel('user1');
     assert.equal(lvl.level, 2);
     assert.equal(lvl.title, '正式员工');
@@ -72,13 +72,13 @@ describe('AchievementStore', () => {
 });
 
 describe('computeCvoLevel', () => {
-  it('level 1 at 0 CVO achievements', () => {
+  it('level 1 at 0 operator achievements', () => {
     const lvl = computeCvoLevel(0);
     assert.equal(lvl.level, 1);
     assert.equal(lvl.progress, 0); // 0/2
   });
 
-  it('level 5 at max CVO achievements', () => {
+  it('level 5 at max operator achievements', () => {
     const lvl = computeCvoLevel(7);
     assert.equal(lvl.level, 5);
     assert.equal(lvl.title, '首席铲码官');

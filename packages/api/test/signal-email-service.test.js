@@ -20,7 +20,7 @@ function createNotificationsConfig(overrides = {}) {
           },
         },
         to: 'owner@example.com',
-        from: 'Cat Cafe Signals <noreply@example.com>',
+        from: 'Clowder AI Signals <noreply@example.com>',
       },
       in_app: {
         enabled: true,
@@ -93,7 +93,7 @@ describe('signal email service', () => {
     assert.equal(result.status, 'sent');
     assert.equal(result.messageId, 'msg_123');
     assert.equal(sendMailCalls.length, 1);
-    assert.equal(sendMailCalls[0].from, 'Cat Cafe Signals <noreply@example.com>');
+    assert.equal(sendMailCalls[0].from, 'Clowder AI Signals <noreply@example.com>');
     assert.equal(sendMailCalls[0].to, 'owner@example.com');
     assert.equal(sendMailCalls[0].subject, '🐱 Clowder AI 信号日报 - 2026-02-19');
     assert.equal(sendMailCalls[0].html, '<h1>Digest</h1>');

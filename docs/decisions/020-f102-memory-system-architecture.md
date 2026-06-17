@@ -9,9 +9,9 @@ decision_id: ADR-020
 # ADR-020: F102 Memory System Architecture — Conversation Identity + 检索 + 摘要
 
 > **Status**: accepted
-> **Deciders**: 铲屎官 + Ragdoll(opus) + Maine Coon(gpt52) + 金渐层(opencode)
+> **Deciders**: operator + Ragdoll(opus) + Maine Coon(gpt52) + 金渐层(opencode)
 > **Date**: 2026-03-22
-> **Architecture Diagram**: 见 thread `thread_mmygpnn83c3m0oiq` 的 html_widget `f102-architecture-v2`
+> **Architecture Diagram**: 见 thread `[thread-id]` 的 html_widget `f102-architecture-v2`
 
 ## Context
 
@@ -25,7 +25,7 @@ Cat Café 需要一个记忆系统，让猫猫能：
 
 | Era | 方案 | 结局 |
 |-----|------|------|
-| 1 | Hindsight（外部 SaaS） | 铲屎官说"实在难用"，Phase D 全量清理 -5000 行 |
+| 1 | Hindsight（外部 SaaS） | operator说"实在难用"，Phase D 全量清理 -5000 行 |
 | 2 | grep docs/ + threadId 手翻 | 4 条平行链路不知道用哪个，中英混搜不行 |
 | 3 | **F102 当前方案** | SQLite 本地索引 + GPU Embedding + LSM Compaction |
 
@@ -123,7 +123,7 @@ AND (cooldown ≥ 2h OR carry_over)
 - `# 标题` → topicLabel + topicKey
 - 正文 → summary
 - `[decision]` `[lesson]` `[method]` → DurableCandidate
-- 格式由程序解析填充（铲屎官："让模型说人话，格式交给程序"）
+- 格式由程序解析填充（operator："让模型说人话，格式交给程序"）
 
 **双写路径**：
 - evidence_docs.summary = read model（搜索/bootstrap 直接读）

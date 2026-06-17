@@ -36,6 +36,20 @@ describe('createConnectorReloadSubscriber', () => {
     assert.equal(called, 1);
   });
 
+  it('calls onRestart when connector autostart policy changes', async () => {
+    let called = 0;
+    unsub = createConnectorReloadSubscriber({
+      onRestart: async () => {
+        called++;
+      },
+      debounceMs: 0,
+      log: silentLog,
+    });
+    configEventBus.emitChange(makeEvent(['CONNECTOR_GATEWAY_AUTOSTART'], 'env'));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(called, 1);
+  });
+
   it('does NOT call onRestart for non-connector keys', async () => {
     let called = 0;
     unsub = createConnectorReloadSubscriber({

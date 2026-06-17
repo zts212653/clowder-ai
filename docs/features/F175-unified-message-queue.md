@@ -11,7 +11,7 @@ intake_source: clowder-ai#575
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1
 >
-> **Close 2026-05-27**：Phase A/B/C 全部在 clowder-ai#575 中完成（gpt52 code review 8 轮全 approved），经 cat-cafe PR #1443 absorbed。team lead 2026-05-27 实测确认拖动排序/独立显示/视觉分组/折叠全部工作。之前审计误判"Phase B/C 未完成"是因为 doc AC 未打勾但代码已在 absorbed PR 中。
+> **Close 2026-05-27**：Phase A/B/C 全部在 clowder-ai#575 中完成（gpt52 code review 8 轮全 approved），经 cat-cafe PR #1443 absorbed。operator 2026-05-27 实测确认拖动排序/独立显示/视觉分组/折叠全部工作。之前审计误判"Phase B/C 未完成"是因为 doc AC 未打勾但代码已在 absorbed PR 中。
 >
 > **Inbound source**: [clowder-ai#575](https://github.com/zts212653/clowder-ai/pull/575)
 > **Original tag**: clowder-ai 仓内编号为 F169（unified-queue-design）
@@ -178,7 +178,7 @@ QueueProcessor 出队时：
 | KD-2 | Priority 是排序维度不是旁路 | urgent 消息自动置顶但在队列内，用户可见可控；不再有绕过队列的抢占路径 | 2026-04-23 |
 | KD-3 | 队列容量按 source 分别限制 | user 消息有上限（防刷屏），connector/agent 不限制 — 系统消息不应因队列满而丢弃 | 2026-04-23 |
 | KD-4 | 跨优先级自动 dequeue | "猫猫不主动停"的协作语义；用户要停可以 steer/cancel | 2026-04-24 |
-| KD-5 | 拖动排序覆盖 priority（仅同 userId 内显式 position） | CVO 用户意图至上；跨用户不干扰，未手动排序的 entry 仍按 priority 排序 | 2026-04-24 |
+| KD-5 | 拖动排序覆盖 priority（仅同 userId 内显式 position） | operator 用户意图至上；跨用户不干扰，未手动排序的 entry 仍按 priority 排序 | 2026-04-24 |
 | KD-6 | 不做通用 targetCat batching | 跨 source 的 batching 是新执行语义，回归面不可控，留作独立 design issue | 2026-04-24 |
 | KD-7 | signal.aborted 安全门控保留 | 正确的并发保护，修复的是 signal 被错误 abort，不是门控本身 | 2026-04-24 |
 
@@ -186,4 +186,4 @@ QueueProcessor 出队时：
 
 - Phase A: maintainer review（zts212653 家的猫）+ 跨家族 review
 - Phase B: 跨家族 review
-- Phase C: team lead确认 spec 变更
+- Phase C: operator确认 spec 变更

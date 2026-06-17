@@ -11,7 +11,7 @@ completed: 2026-03-10
 # F081 Appendix — Bubble/Thread State Write-Path Audit
 
 > **Status**: done | **Owner**: Ragdoll
-> 起因：team lead 2026-03-09 "别让team lead发现什么你们修什么？修了一个另一个又出现问？"
+> 起因：operator 2026-03-09 "别让operator发现什么你们修什么？修了一个另一个又出现问？"
 > gpt52 提议系统级全量审计，opus 对齐到 F081 scope。
 
 ## Why

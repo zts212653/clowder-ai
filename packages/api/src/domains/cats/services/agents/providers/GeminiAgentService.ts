@@ -22,9 +22,10 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { type AgyProfileConfig, type CatId, createCatId } from '@cat-cafe/shared';
+import { type AgyProfileConfig, type CatId, type CliDiagnostics, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
@@ -38,6 +39,7 @@ import {
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { readJsonlTail } from '../../../../../utils/jsonl-tail-reader.js';
+import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
 import { extractImagePaths } from '../providers/image-paths.js';
@@ -65,6 +67,10 @@ const log = createModuleLogger('gemini-agent');
 
 type GeminiAdapter = 'gemini-cli' | 'antigravity-cli' | 'antigravity';
 const DEFAULT_GEMINI_ADAPTER: GeminiAdapter = 'antigravity-cli';
+
+function resolveDiagnosticInvocationId(options: AgentServiceOptions | undefined): string | undefined {
+  return options?.invocationId ?? options?.auditContext?.invocationId;
+}
 
 interface GeminiStoredThought {
   readonly subject?: string;
@@ -368,6 +374,62 @@ function removeAntigravityLogFile(logPath: string): void {
   } catch {
     // Best-effort cleanup only; provider result delivery should not fail on temp-file deletion.
   }
+}
+
+function resolveAgyDebugHomeMode(
+  agyProfile: AgyProfile | null,
+  childEnv: NodeJS.ProcessEnv | undefined,
+): NonNullable<CliDiagnostics['debugRef']['homeMode']> {
+  if (agyProfile) return 'agy_profile_home';
+  return typeof childEnv?.HOME === 'string' && childEnv.HOME.trim().length > 0 ? 'child_env_home' : 'process_home';
+}
+
+function buildAgyDebugRef(input: {
+  readonly agyProfile: AgyProfile | null;
+  readonly childEnv: NodeJS.ProcessEnv | undefined;
+  readonly spawnCwd: string;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | string | null;
+  readonly invocationId?: string;
+}): CliDiagnostics['debugRef'] {
+  const spawnCwdBasename = basename(input.spawnCwd);
+  const spawnCwdKey = /^[a-f0-9]{16}$/.test(spawnCwdBasename) ? spawnCwdBasename : undefined;
+  return {
+    command: 'agy',
+    exitCode: input.exitCode,
+    signal: input.signal,
+    ...(input.invocationId ? { invocationId: input.invocationId } : {}),
+    homeMode: resolveAgyDebugHomeMode(input.agyProfile, input.childEnv),
+    spawnCwdMode: input.agyProfile ? 'agy_profile_cwd' : 'cat_cafe_agy_cwd',
+    ...(spawnCwdKey ? { spawnCwdKey } : {}),
+    ...(input.agyProfile ? { profileId: input.agyProfile.profileId } : {}),
+  };
+}
+
+function pickAgyDebugRefExtras(
+  debugRef: CliDiagnostics['debugRef'],
+): Pick<CliDiagnostics['debugRef'], 'homeMode' | 'spawnCwdMode' | 'spawnCwdKey' | 'profileId'> {
+  return {
+    ...(debugRef.homeMode ? { homeMode: debugRef.homeMode } : {}),
+    ...(debugRef.spawnCwdMode ? { spawnCwdMode: debugRef.spawnCwdMode } : {}),
+    ...(debugRef.spawnCwdKey ? { spawnCwdKey: debugRef.spawnCwdKey } : {}),
+    ...(debugRef.profileId ? { profileId: debugRef.profileId } : {}),
+  };
+}
+
+function withAgyDebugRefExtras(
+  diagnostics: CliDiagnostics | undefined,
+  extras: Pick<CliDiagnostics['debugRef'], 'homeMode' | 'spawnCwdMode' | 'spawnCwdKey' | 'profileId'>,
+): CliDiagnostics | undefined {
+  return diagnostics
+    ? {
+        ...diagnostics,
+        debugRef: {
+          ...diagnostics.debugRef,
+          ...extras,
+        },
+      }
+    : undefined;
 }
 
 /**
@@ -1142,6 +1204,89 @@ export class GeminiAgentService implements AgentService {
         agyLogText,
         resumedFinalText,
       });
+      const diagnosticInvocationId = resolveDiagnosticInvocationId(options);
+      const agyDebugRef = buildAgyDebugRef({
+        agyProfile,
+        childEnv,
+        spawnCwd: agySpawnCwd,
+        exitCode,
+        signal: exitSignal,
+        ...(diagnosticInvocationId ? { invocationId: diagnosticInvocationId } : {}),
+      });
+      const agyDebugRefExtras = pickAgyDebugRefExtras(agyDebugRef);
+      const agyDiagnosticHomePaths =
+        typeof childEnv?.HOME === 'string' && childEnv.HOME.trim().length > 1 ? [childEnv.HOME] : undefined;
+      const stderrPresent = stderr.trim().length > 0;
+      const sanitizedAgyStderr = stderrPresent
+        ? sanitizeCliStderr(
+            stderr,
+            agyDiagnosticHomePaths ? { additionalHomePaths: agyDiagnosticHomePaths } : undefined,
+          )
+        : '';
+      const agyExitDiagnostics =
+        exitCode !== 0 || exitSignal !== null || cliErrorEvent
+          ? buildCliDiagnostics({
+              // Exit fallback diagnostics are user-visible, so they only classify
+              // stderr. AGY stdout may contain partial/private model text; stdout
+              // is admitted separately only through the provider-safe plain-text parser.
+              rawText: stderr,
+              // rawText still drives classification, but public excerpts are admitted
+              // only from sanitized stderr; unknown debug stderr stays closed.
+              safeExcerptRawText: sanitizedAgyStderr,
+              debugRef: agyDebugRef,
+              stderrEmpty: !stderrPresent,
+              ...(agyDiagnosticHomePaths ? { additionalHomePaths: agyDiagnosticHomePaths } : {}),
+            })
+          : undefined;
+      const parsedPlainTextDiagnostics =
+        parsedPlainText.kind === 'error'
+          ? buildCliDiagnostics({
+              // Use the parser's provider-safe message here, not raw stdout, so AGY OAuth URLs
+              // never leak into the user-facing diagnostics payload.
+              rawText: parsedPlainText.error,
+              debugRef: agyDebugRef,
+              stderrEmpty: !stderrPresent,
+              ...(agyDiagnosticHomePaths ? { additionalHomePaths: agyDiagnosticHomePaths } : {}),
+            })
+          : undefined;
+      const emptyPlainTextStderrDiagnostics =
+        parsedPlainText.kind === 'empty' && stderrPresent
+          ? buildCliDiagnostics({
+              rawText: stderr,
+              // rawText still drives classification, but the public excerpt is pre-sanitized
+              // before admission so OAuth fragments and child HOME paths cannot leak.
+              safeExcerptRawText: sanitizedAgyStderr,
+              debugRef: agyDebugRef,
+              stderrEmpty: false,
+              ...(agyDiagnosticHomePaths ? { additionalHomePaths: agyDiagnosticHomePaths } : {}),
+            })
+          : undefined;
+      const emptyPlainTextDiagnostics =
+        parsedPlainText.kind === 'empty'
+          ? emptyPlainTextStderrDiagnostics?.reasonCode
+            ? emptyPlainTextStderrDiagnostics
+            : buildSilentCompletionDiagnostic({
+                command: 'agy',
+                ...(diagnosticInvocationId ? { invocationId: diagnosticInvocationId } : {}),
+                // AGY --print is plain text, not NDJSON. Use a synthetic event marker so
+                // the F212 silent-completion panel can distinguish this path honestly.
+                eventCount: 1,
+                eventTypes: ['plain_text_empty'],
+                model: metadata.model,
+                sessionId: options?.sessionId ?? metadata.sessionId,
+                exitCode,
+                stderrPresent,
+                ...(stderrPresent ? { stderrExcerpt: stderr } : {}),
+                ...(agyDiagnosticHomePaths ? { additionalHomePaths: agyDiagnosticHomePaths } : {}),
+                debugRefExtras: agyDebugRefExtras,
+              })
+          : undefined;
+      const actionableEmptyPlainTextDiagnostics =
+        emptyPlainTextDiagnostics?.reasonCode && emptyPlainTextDiagnostics.reasonCode !== 'silent_completion'
+          ? emptyPlainTextDiagnostics
+          : undefined;
+      const timeoutCliDiagnostics = withAgyDebugRefExtras(timeoutEvent?.cliDiagnostics, agyDebugRefExtras);
+      const cliErrorEventDiagnostics = withAgyDebugRefExtras(cliErrorEvent?.cliDiagnostics, agyDebugRefExtras);
       const canRecordFreshConversation =
         !emittedSessionInit &&
         parsedPlainText.kind === 'text' &&
@@ -1189,9 +1334,7 @@ export class GeminiAgentService implements AgentService {
           type: 'error',
           catId: this.catId,
           error: `Antigravity CLI 响应超时 (${Math.round(timeoutEvent.timeoutMs / 1000)}s)`,
-          metadata: timeoutEvent.cliDiagnostics
-            ? { ...metadata, cliDiagnostics: timeoutEvent.cliDiagnostics }
-            : metadata,
+          metadata: timeoutCliDiagnostics ? { ...metadata, cliDiagnostics: timeoutCliDiagnostics } : metadata,
           timestamp: Date.now(),
         };
       } else if (cancelled) {
@@ -1202,18 +1345,23 @@ export class GeminiAgentService implements AgentService {
           type: 'error',
           catId: this.catId,
           error: parsedPlainText.error,
-          metadata,
+          metadata: parsedPlainTextDiagnostics ? { ...metadata, cliDiagnostics: parsedPlainTextDiagnostics } : metadata,
           timestamp: Date.now(),
         };
       } else if (cliErrorEvent) {
         // F212 Phase A: forward cliDiagnostics on metadata for frontend folded panel (Phase B).
+        // AGY plain-text spawn yields __cliPlainText followed by __cliError on nonzero exit; rebuild
+        // diagnostics here so raw stdout/stderr, auditContext invocation, and isolated child HOME
+        // redaction are applied before the public payload.
         yield {
           type: 'error',
           catId: this.catId,
           error: formatCliExitError('Antigravity CLI', cliErrorEvent),
-          metadata: cliErrorEvent.cliDiagnostics
-            ? { ...metadata, cliDiagnostics: cliErrorEvent.cliDiagnostics }
-            : metadata,
+          metadata: agyExitDiagnostics
+            ? { ...metadata, cliDiagnostics: agyExitDiagnostics }
+            : cliErrorEventDiagnostics
+              ? { ...metadata, cliDiagnostics: cliErrorEventDiagnostics }
+              : metadata,
           timestamp: Date.now(),
         };
       } else if (exitCode !== 0 || exitSignal !== null) {
@@ -1225,7 +1373,15 @@ export class GeminiAgentService implements AgentService {
             signal: exitSignal,
             message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`,
           }),
-          metadata,
+          metadata: agyExitDiagnostics ? { ...metadata, cliDiagnostics: agyExitDiagnostics } : metadata,
+          timestamp: Date.now(),
+        };
+      } else if (parsedPlainText.kind === 'empty' && actionableEmptyPlainTextDiagnostics) {
+        yield {
+          type: 'error',
+          catId: this.catId,
+          error: actionableEmptyPlainTextDiagnostics.publicSummary,
+          metadata: { ...metadata, cliDiagnostics: actionableEmptyPlainTextDiagnostics },
           timestamp: Date.now(),
         };
       } else if (agyProfile && profileModelMismatch) {
@@ -1242,6 +1398,17 @@ export class GeminiAgentService implements AgentService {
           catId: this.catId,
           error: `AGY profile selected model was not verified: expected "${agyProfile.expectedModel}", but no selected model label was observed in AGY logs.`,
           metadata,
+          timestamp: Date.now(),
+        };
+      } else if (parsedPlainText.kind === 'empty') {
+        yield {
+          type: 'system_info' as const,
+          catId: this.catId,
+          content: JSON.stringify({
+            type: 'silent_completion',
+            detail: 'Antigravity CLI completed without textual output.',
+          }),
+          metadata: emptyPlainTextDiagnostics ? { ...metadata, cliDiagnostics: emptyPlainTextDiagnostics } : metadata,
           timestamp: Date.now(),
         };
       } else if (parsedPlainText.kind === 'text') {

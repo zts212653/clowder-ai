@@ -267,6 +267,57 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
   };
 }
 
+type ConnectorAutostartEnv = {
+  readonly [key: string]: string | undefined;
+  readonly CONNECTOR_GATEWAY_AUTOSTART?: string | undefined;
+  readonly CAT_CAFE_RUNTIME_ROOT?: string | undefined;
+  readonly NODE_ENV?: string | undefined;
+};
+
+function parseBooleanOverride(value: string | undefined): boolean | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
+export function isPreconfiguredConnectorAutostartEnabled(env: ConnectorAutostartEnv = process.env): boolean {
+  const explicit = parseBooleanOverride(env.CONNECTOR_GATEWAY_AUTOSTART);
+  if (explicit !== undefined) return explicit;
+  return env.NODE_ENV === 'production' && Boolean(env.CAT_CAFE_RUNTIME_ROOT?.trim());
+}
+
+export function applyConnectorGatewayAutostartPolicy(
+  config: ConnectorGatewayConfig,
+  env: ConnectorAutostartEnv = process.env,
+): ConnectorGatewayConfig {
+  if (isPreconfiguredConnectorAutostartEnabled(env)) return config;
+
+  return {
+    ...config,
+    telegramBotToken: undefined,
+    feishuAppId: undefined,
+    feishuAppSecret: undefined,
+    feishuVerificationToken: undefined,
+    feishuBotOpenId: undefined,
+    feishuAdminOpenIds: undefined,
+    dingtalkAppKey: undefined,
+    dingtalkAppSecret: undefined,
+    weixinBotToken: undefined,
+    wecomBotId: undefined,
+    wecomBotSecret: undefined,
+    wecomCorpId: undefined,
+    wecomAgentId: undefined,
+    wecomAgentSecret: undefined,
+    wecomToken: undefined,
+    wecomEncodingAesKey: undefined,
+    xiaoyiAk: undefined,
+    xiaoyiSk: undefined,
+    xiaoyiAgentId: undefined,
+  };
+}
+
 export async function startConnectorGateway(
   config: ConnectorGatewayConfig,
   deps: ConnectorGatewayDeps,
@@ -667,6 +718,23 @@ export async function startConnectorGateway(
     const ghReconciliationDedup = new ReconciliationDedup(
       deps.redis as import('./github-repo-event/ReconciliationDedup.js').ReconciliationRedisLike,
     );
+
+    // F168 Phase A P1-1b: create community event services from deps.redis for webhook handler
+    let ghEventLog: import('../../domains/community/CommunityEventLog.js').ICommunityEventLog | undefined;
+    let ghProjector: { apply(event: unknown): Promise<void> } | undefined;
+    try {
+      const [elMod, osMod, pjMod] = await Promise.all([
+        import('../../domains/community/CommunityEventLog.js'),
+        import('../../domains/community/CommunityObjectStore.js'),
+        import('../../domains/community/community-projector.js'),
+      ]);
+      const ghObjectStore = new osMod.RedisCommunityObjectStore(deps.redis);
+      ghEventLog = new elMod.RedisCommunityEventLog(deps.redis);
+      ghProjector = new pjMod.CommunityProjector(ghEventLog, ghObjectStore);
+    } catch (err) {
+      log.warn({ err }, '[F168] Failed to initialize community event services for webhook handler — events disabled');
+    }
+
     const ghHandler = new GitHubRepoWebhookHandler(
       {
         webhookSecret: ghWebhookSecret,
@@ -687,6 +755,10 @@ export async function startConnectorGateway(
             deps.messageStore as import('../../domains/cats/services/stores/ports/MessageStore.js').IMessageStore,
           socketManager: deps.socketManager,
         },
+        // F168 Phase A P1-1b: pass community event services to webhook handler
+        eventLog: ghEventLog,
+        projector:
+          ghProjector as import('./github-repo-event/GitHubRepoWebhookHandler.js').GitHubRepoHandlerDeps['projector'],
       },
     );
     webhookHandlers.set('github-repo-event', ghHandler);

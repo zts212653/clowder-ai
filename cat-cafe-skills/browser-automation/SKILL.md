@@ -51,7 +51,7 @@ triggers:
 
 ## 不要用在这里
 
-- `localhost` 页面预览、HMR、给铲屎官看效果
+- `localhost` 页面预览、HMR、给operator看效果
   → 用 `browser-preview`
 - 本地 WebApp 的确定性测试、Console、截图、回归验证
   → 用 `webapp-testing`

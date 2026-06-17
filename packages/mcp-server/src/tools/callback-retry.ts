@@ -20,6 +20,9 @@ export interface CallbackPostFailure {
 }
 
 export type CallbackPostResult = { ok: true; data: unknown } | { ok: false; failure: CallbackPostFailure };
+export interface PostJsonRetryOptions {
+  fetchTimeoutMs?: number;
+}
 
 export function getRetryDelaysMs(): number[] {
   const raw = process.env['CAT_CAFE_CALLBACK_RETRY_DELAYS_MS'];
@@ -77,9 +80,11 @@ export async function postJsonWithRetry(
   payload: string,
   retryDelaysMs: number[],
   extraHeaders?: Record<string, string>,
+  options?: PostJsonRetryOptions,
 ): Promise<CallbackPostResult> {
   let lastError = 'Callback failed';
   let retryable = true;
+  const fetchTimeoutMs = options?.fetchTimeoutMs ?? getFetchTimeoutMs();
 
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     try {
@@ -89,7 +94,7 @@ export async function postJsonWithRetry(
         body: payload,
         // #1368-class fix: bound each attempt so a hung socket aborts (→ a
         // timeout error, caught below as retryable) instead of pending forever.
-        signal: AbortSignal.timeout(getFetchTimeoutMs()),
+        signal: AbortSignal.timeout(fetchTimeoutMs),
       });
 
       if (response.ok) {

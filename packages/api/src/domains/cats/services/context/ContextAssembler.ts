@@ -51,11 +51,11 @@ export function buildMessageMap(messages: readonly StoredMessage[]): ReadonlyMap
 
 /**
  * Get display name for a message sender.
- * catId === null → user ("铲屎官"), otherwise look up catRegistry.
+ * catId === null → user ("co-creator"), otherwise look up catRegistry.
  * For variant cats (e.g. sonnet, opus-45), includes variantLabel to distinguish same-family members.
  */
 export function getSenderName(catId: string | null): string {
-  if (catId === null) return '铲屎官';
+  if (catId === null) return 'co-creator';
   const entry = catRegistry.tryGet(catId);
   const config = entry?.config;
   if (!config) return catId;
@@ -143,7 +143,7 @@ export function assembleContext(messages: StoredMessage[], options?: ContextAsse
 
   // F117: exclude undelivered messages (queued/canceled) from prompt context
   // Also exclude system-generated messages (userId='system') — these are display-only
-  // (e.g. persisted error badges) and must not re-enter the prompt as "铲屎官" messages.
+  // (e.g. persisted error badges) and must not re-enter the prompt as "co-creator" messages.
   // #699: exclude briefing messages (origin='briefing') — non-routing internal artifacts
   // that must not appear in prompt context or reply preview maps (consistent with
   // isEligibleReplyParent and incremental context paths which already exclude them).

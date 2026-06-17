@@ -27,7 +27,7 @@ describe('format-time — formatPromptTime (UTC-consistent prompt timestamps)', 
     const { formatPromptTime } = await load();
     assert.equal(
       formatPromptTime(Date.UTC(2026, 5, 1, 6, 20, 0, 0), { timeZone: 'America/Los_Angeles' }),
-      '铲屎官本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC',
+      'co-creator本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC',
     );
   });
 
@@ -68,7 +68,7 @@ describe('format-time — formatPromptTimeRange', () => {
     const to = Date.UTC(2026, 5, 1, 7, 5, 0, 0);
     assert.equal(
       formatPromptTimeRange(from, to, { timeZone: 'America/Los_Angeles' }),
-      '铲屎官本地 2026-05-31 23:20 — 2026-06-01 00:05 America/Los_Angeles / 06:20 — 07:05 UTC',
+      'co-creator本地 2026-05-31 23:20 — 2026-06-01 00:05 America/Los_Angeles / 06:20 — 07:05 UTC',
     );
   });
 

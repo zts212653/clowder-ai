@@ -40,7 +40,7 @@ close_gate_report:
           ref: "0001777429046142-000045"
       resolution:
         kind: cvo_signoff    # immediate | delete | cvo_signoff
-        reason: "铲屎官认为自然语言表态足够，不需要固定 token"
+        reason: "operator认为自然语言表态足够，不需要固定 token"
         cvo_signoff:
           proposal_message_id: "0001777428xxx-000040"
           cvo_message_id: "0001777429046142-000045"
@@ -62,7 +62,7 @@ close_gate_report:
 | `met` | AC 已实现 | evidence 至少一条（commit/test/screenshot/doc） |
 | `unmet` | AC 未实现 | **必须当场处置**，见 Resolution |
 | `deleted` | AC 已删除 | resolution.kind = `delete`，reason 必填 |
-| `cvo_signed_off` | CVO 签字降级 | resolution.kind = `cvo_signoff`，四件套必填 |
+| `cvo_signed_off` | operator 签字降级 | resolution.kind = `cvo_signoff`，四件套必填 |
 
 ## Resolution（unmet AC 三选一）
 
@@ -70,18 +70,18 @@ close_gate_report:
 |------|------|------|
 | `immediate` | 当前 session inline 做完 | 做完后 status 改为 `met`，补 evidence |
 | `delete` | 删除 AC | reason 必填，说明为什么不需要 |
-| `cvo_signoff` | CVO 明确表态同意降级 | 四件套：`proposal_message_id` + `cvo_message_id` + `cvo_quote` + `accepted_scope` |
+| `cvo_signoff` | operator 明确表态同意降级 | 四件套：`proposal_message_id` + `cvo_message_id` + `cvo_quote` + `accepted_scope` |
 
 **没有第四选项。** 以下字样出现在 resolution 中 = 自动阻塞：
 `follow-up` / `deferred` / `next phase` / `P2` / `stub` / `TD` / `后续` / `留个尾巴` / `先这样` / `下次一定` / `回头` / `以后再` / `next PR` / `will address later` / `out of scope`（作为 close 借口时）/ `MVP 先上`（作为 close 借口时）
 
-## CVO Signoff 机制
+## operator Signoff 机制
 
-铲屎官的实际交互模式：猫提出 tradeoff + 判断 → 铲屎官自然语言表态（"ok"/"全部 ok"/"同意"）→ 猫录入。
+operator的实际交互模式：猫提出 tradeoff + 判断 → operator自然语言表态（"ok"/"全部 ok"/"同意"）→ 猫录入。
 
 **有效条件**：
 1. 猫的 proposal 消息已明确列出 tradeoff 和 AC 范围
-2. 铲屎官的表态消息可追溯（有消息 ID）
+2. operator的表态消息可追溯（有消息 ID）
 3. 单独一句"ok"但找不到前置 proposal = **不允许当降级证据**
 
 ## 愿景守护猫检查项

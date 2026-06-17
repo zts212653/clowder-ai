@@ -5,11 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --exclude \"dist/**\" --exclude \"../shared/dist/**\" src/index.ts",
     "build": "pnpm --dir ../shared build && tsc && node ./scripts/copy-marketplace-catalog-data.mjs",
     "start": "node dist/index.js",
-    "test": "pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js",
-    "test:public": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-concurrency=1 $(ls test/*.test.js test/**/*.test.js 2>/dev/null | grep -v 'redis-' | grep -v 'concurrent-fault-drill' | grep -v 'task-progress-store' | grep -v 'session-strategy-phase3' | grep -v 'signal-article-store' | grep -v 'persistence-fault-drill' | grep -v 'cursor-store-atomicity' | grep -v 'workflow-sop-store' | grep -v 'dare-agent-service' | grep -v 'dare-l1-acceptance' | grep -v 'codex-agent-service' | grep -v 'kimi-agent-service' | grep -v 'claude-settings-hooks\\.test' | grep -v 'game-store\\.test' | grep -v 'test/memory/' | grep -v 'cross-cat-context\\.test' | grep -v 'thread-wiring\\.test' | grep -v 'integration/wiring\\.test' | grep -v 'antigravity-cdp-client\\.test' | grep -v 'shared-state-wiring\\.test' | grep -v 'signal-fetcher-launchd' | grep -v 'reflection-capsule-m3' | grep -v 'workspace-project-context\\.test' | grep -v 'projects-setup\\.test' | grep -v 'projects-mkdir\\.test' | grep -v 'governance-status\\.test' | grep -v 'governance-pack\\.test' | grep -v 'pack-integration\\.test' | grep -v 'project-setup-flow\\.test' | grep -v 'process-liveness-probe\\.test' | grep -v 'expedition-bootstrap\\.test' | grep -v 'rules-route\\.test' | grep -v 'root-md-slim\\.test' | grep -v 'audit-cc-system-prompt\\.test' | grep -v 'f188-cold-start-fixtures\\.test' | grep -v 'f188-harness-consistency\\.test' | grep -v 'orphan-chrome-cleaner\\.test' | grep -v 'capabilities-route\\.test' | grep -v 'antigravity-run-command-executor\\.test' | grep -v 'f203-phase-i-opencode-l0\\.test' | grep -v 'github-schedule-factories\\.test' | grep -v 'harness-eval/eval-hub-read-model\\.test' | grep -v 'harness-eval/merge-gate-provenance-contract\\.test' | tr '\\n' ' ')",
+    "test": "pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js && pnpm run test:cli",
+    "test:public": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh bash ./scripts/run-public-tests.sh",
     "test:antigravity-smoke": "RUN_ANTIGRAVITY_SMOKE=true pnpm run build && RUN_ANTIGRAVITY_SMOKE=true bash ./scripts/with-test-home.sh node --test test/antigravity-smoke.test.js",
     "smoke:f210-agy-profiles": "pnpm run build && node dist/scripts/f210-agy-profile-smoke.js",
     "fetch-signals": "node dist/scripts/fetch-signals.js",
@@ -19,6 +19,8 @@
     "test:redis": "bash ./scripts/with-test-home.sh bash ./scripts/run-isolated-redis-tests.sh",
     "test:redis:repeat": "bash ./scripts/with-test-home.sh bash ./scripts/run-isolated-redis-tests.sh --repeat 2",
     "test:integration": "bash ./scripts/with-test-home.sh node --test test/integration/*.test.js",
+    "test:pty": "pnpm run build && node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=120000 test/f230-pty-driver.test.js",
+    "test:cli": "node --import tsx --test test/cli/*.test.ts",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

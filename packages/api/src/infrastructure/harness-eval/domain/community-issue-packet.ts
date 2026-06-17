@@ -23,7 +23,7 @@ const sanitizedIssuePacketSchema = z.object({
   /** ISO 8601 timestamp when the packet was exported. */
   exportedAt: z.string().datetime({ offset: true }),
 
-  /** Identifies the Cat Cafe instance that produced this packet. */
+  /** Identifies the Clowder AI instance that produced this packet. */
   sourceInstanceId: z.string().min(1),
 
   /** What happened — the core eval observation. */

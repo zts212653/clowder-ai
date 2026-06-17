@@ -33,7 +33,7 @@ describe('extractBatonContext', () => {
   it('identifies human speaker as "user"', () => {
     const baton = extractBatonContext(messages, 'opus');
     assert.equal(baton.fromSpeaker, 'user');
-    assert.equal(baton.fromSpeakerDisplay, '铲屎官');
+    assert.equal(baton.fromSpeakerDisplay, 'co-creator');
   });
 
   it('detects stale hold contradiction', () => {
@@ -234,14 +234,14 @@ describe('extractBatonContext', () => {
     assert.ok(baton.mentionExcerpt.includes('验收'));
   });
 
-  it('shows 铲屎官 instead of internal userId for human speaker display (Bug: default-user leak)', () => {
+  it('shows co-creator instead of internal userId for human speaker display (Bug: default-user leak)', () => {
     const msgs = [{ id: 'm100', catId: null, content: '@opus 帮我看看', timestamp: 1000, userId: 'default-user' }];
     const baton = extractBatonContext(msgs, 'opus');
     assert.ok(baton !== null);
     assert.equal(
       baton.fromSpeakerDisplay,
-      '铲屎官',
-      `expected '铲屎官', got '${baton.fromSpeakerDisplay}' — internal userId leaked to display`,
+      'co-creator',
+      `expected 'co-creator', got '${baton.fromSpeakerDisplay}' — internal userId leaked to display`,
     );
   });
 
@@ -258,7 +258,7 @@ describe('extractBatonContext', () => {
     ];
     const baton = extractBatonContext(msgs, 'opus');
     assert.ok(baton !== null);
-    assert.equal(baton.fromSpeakerDisplay, 'GitHub CI', 'connector baton must show source.label, not 铲屎官');
+    assert.equal(baton.fromSpeakerDisplay, 'GitHub CI', 'connector baton must show source.label, not co-creator');
   });
 
   it('still detects real hold instructions after P2-R2 narrowing', () => {
@@ -328,14 +328,14 @@ describe('formatNavigationHeader', () => {
       baton: {
         fromMessageId: 'm1',
         fromSpeaker: 'user',
-        fromSpeakerDisplay: '铲屎官',
+        fromSpeakerDisplay: 'co-creator',
         timestamp: Date.UTC(2026, 5, 1, 6, 20, 0, 0),
         mentionExcerpt: '现在不是凌晨',
         staleHoldWarning: false,
       },
       tasks: [],
     });
-    assert.ok(header.includes('铲屎官本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC'), header);
+    assert.ok(header.includes('co-creator本地 2026-05-31 23:20 America/Los_Angeles / 06:20 UTC'), header);
   });
 
   it('includes stale hold warning when present', () => {

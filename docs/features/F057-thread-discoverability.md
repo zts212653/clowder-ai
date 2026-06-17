@@ -18,17 +18,17 @@ created: 2026-03-04
 
 > **一句话**：Thread 多了不可怕，找得到、猫猫也找得到才行。
 
-### team experience（2026-03-04）
+### operator experience（2026-03-04）
 
 > "现在 thread 太多了！希望活跃的 thread 自己跑到前面"
 > "比如置顶的 有猫猫回复我 他也要能跳到上面去"
 > "通过 thread id 搜索？不然我找不到！"
 > "你们也要有 list_threads MCP 工具 不然如何回答我哪些 thread 举办过猫猫杀？"
-> "你们都不会 at 我呀！其实也应该增加 at team lead"
+> "你们都不会 at 我呀！其实也应该增加 at operator"
 
 ### 期望体验
 
-team lead打开 Cat Café Hub 侧边栏：
+operator打开 Cat Café Hub 侧边栏：
 1. **置顶区**里最近有猫回复的 thread 自动浮到最前面，不用翻
 2. **非置顶区**也按活跃度排序，刚有动静的在上面
 3. 想找特定 thread 时，**搜索框**输入名字或 ID 就能找到
@@ -37,15 +37,15 @@ team lead打开 Cat Café Hub 侧边栏：
 
 ## Why
 
-### 当前痛点（截图证据：2026-03-04 team lead侧边栏）
+### 当前痛点（截图证据：2026-03-04 operator侧边栏）
 
 | 问题 | 影响 |
 |------|------|
-| 置顶 thread 太多，活跃的和沉寂的平级排列 | team lead翻不到正在活跃的 thread |
+| 置顶 thread 太多，活跃的和沉寂的平级排列 | operator翻不到正在活跃的 thread |
 | 没有搜索功能 | 只能肉眼滚动找 |
 | 猫猫没有 list_threads 工具 | 无法回答"哪个 thread 做过 X" |
 | 跨线程 badge 只显示 hash 前 8 位 | 认不出来源 thread |
-| 猫猫不会 @ team lead | team lead不知道哪个 thread 有新动态 |
+| 猫猫不会 @ operator | operator不知道哪个 thread 有新动态 |
 
 ## What
 
@@ -83,7 +83,7 @@ team lead打开 Cat Café Hub 侧边栏：
 - 返回：thread ID、名称、最后活跃时间、置顶状态、消息数
 - 猫猫可以用来回答"哪个 thread 做过 X"
 
-#### C2: 猫 @ team lead能力
+#### C2: 猫 @ operator能力
 - MCP `post_message` 支持 `@user` mention
 - 前端 thread 列表对有 `@user` 未读的 thread 加强高亮
 
@@ -100,18 +100,18 @@ team lead打开 Cat Café Hub 侧边栏：
 
 ### Phase C
 - [x] AC-C1: `list_threads` MCP 工具可用，猫猫能按名称搜索 thread
-- [x] AC-C2: 猫猫能 @ team lead，team lead在 thread 列表看到未读高亮
+- [x] AC-C2: 猫猫能 @ operator，operator在 thread 列表看到未读高亮
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "活跃的 thread 自己跑到前面" | AC-A1, AC-A2 | 截图对比排序 | [x] |
 | R2 | "有猫猫回复他也要能跳到上面去" | AC-A1 | 发消息后观察排序变化 | [x] |
 | R3 | "未读要在前面" | AC-A3 | 截图对比 | [x] |
 | R4 | "通过 thread id 搜索" | AC-B1 | 搜索框输入 ID 验证 | [x] |
 | R5 | "你们也要有 list_threads MCP 工具" | AC-C1 | 猫猫调用工具回答问题 | [x] |
-| R6 | "应该增加 at team lead" | AC-C2 | 猫猫 @ user + 高亮验证 | [x] |
+| R6 | "应该增加 at operator" | AC-C2 | 猫猫 @ user + 高亮验证 | [x] |
 | R7 | "转发自 badge 显示不全" | AC-B2 | badge 显示 ID+名称 | [x] |
 
 ### 覆盖检查
@@ -122,7 +122,7 @@ team lead打开 Cat Café Hub 侧边栏：
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 排序用最后消息时间，不用 @ 优先 | team lead说"猫猫不会 at 我"，目前 @ user 不存在 | 2026-03-04 |
+| KD-1 | 排序用最后消息时间，不用 @ 优先 | operator说"猫猫不会 at 我"，目前 @ user 不存在 | 2026-03-04 |
 | KD-2 | 搜索做在前端（过滤已加载的 thread 列表） | thread 数量有限（< 100），不需要后端搜索 | 2026-03-04 |
 | KD-3 | badge 增强归入 F057 而非 F052 | F052 done，badge 增强本质是 thread 可发现性问题 | 2026-03-04 |
 
@@ -147,5 +147,5 @@ team lead打开 Cat Café Hub 侧边栏：
 
 | 猫猫 | 读了哪些文档 | 三问结论 | 签收 |
 |------|-------------|---------|------|
-| Ragdoll (opus) | F057 spec, thread-utils.ts, ThreadSidebar.tsx, ChatMessage.tsx, callback-tools.ts, user-mention.ts | 7/7 AC 代码已实现，team lead体验路径完整 | ✅ |
-| Maine Coon (codex) | F057 spec, thread-utils.ts:42, ThreadSidebar.tsx:220, ChatMessage.tsx:385, callbacks.ts:230+551, ThreadCatStatus.tsx:45, chatStore.ts:592 | 7/7 AC 独立核实，team lead体验完整 | ✅ |
+| Ragdoll (opus) | F057 spec, thread-utils.ts, ThreadSidebar.tsx, ChatMessage.tsx, callback-tools.ts, user-mention.ts | 7/7 AC 代码已实现，operator体验路径完整 | ✅ |
+| Maine Coon (codex) | F057 spec, thread-utils.ts:42, ThreadSidebar.tsx:220, ChatMessage.tsx:385, callbacks.ts:230+551, ThreadCatStatus.tsx:45, chatStore.ts:592 | 7/7 AC 独立核实，operator体验完整 | ✅ |

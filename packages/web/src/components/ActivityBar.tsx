@@ -5,6 +5,7 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useCallbackAuthAggregate, useCallbackAuthAvailable } from '@/stores/callbackAuthStore';
 import { useChatStore } from '@/stores/chatStore';
+import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
@@ -287,6 +288,8 @@ export function ActivityBar({ className }: ActivityBarProps) {
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
+        {/* F229: concierge re-entry —唤回入口，muted 时是唯一入口 (INV-3) */}
+        <ConciergeRailToggle />
         <PresentationRailToggle />
         <ThemeMenu onEditTheme={() => setTunerOpen(true)} />
         <Suspense

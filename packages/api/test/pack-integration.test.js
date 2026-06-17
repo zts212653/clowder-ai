@@ -248,7 +248,7 @@ describe('AC-B1: Coding World dogfood pack', () => {
       ],
     };
     const sharedRules =
-      '## 铁律\n\n### 铁律 1: Redis 圣域\n不碰 6399\n\n## 首要原则\n\n### P1: Final State\n直达最终形态\n\n## 世界观\n\n### W1: Agents\n猫猫是 Agent\n\n## 操作规则\n\n### §1 交接\n五件套';
+      '## 铁律\n\n### 铁律 1: production data boundary\n不碰 6399\n\n## 首要原则\n\n### P1: Final State\n直达最终形态\n\n## 世界观\n\n### W1: Agents\n猫猫是 Agent\n\n## 操作规则\n\n### §1 交接\n五件套';
     const skills = 'skills:\n  tdd:\n    description: TDD\n    triggers: ["test"]\n    sop_step: 2\n';
 
     // 1. Export

@@ -4,8 +4,9 @@ import type { ConnectorSource } from '@cat-cafe/shared';
 import type { RichBlock, RichInteractiveBlock } from '@/stores/chat-types';
 import { AudioBlock } from './AudioBlock';
 import { CallbackAuthFailureBlock } from './CallbackAuthFailureBlock';
-import { CardBlock } from './CardBlock';
+import { CardBlock, type CardConfirmationEntry } from './CardBlock';
 import { ChecklistBlock } from './ChecklistBlock';
+import { CommunityIssuePreviewCard, isCommunityIssuePreviewBlock } from './CommunityIssuePreviewCard';
 import { DiffBlock } from './DiffBlock';
 import { FileBlock } from './FileBlock';
 import { FrustrationIssueCard, isFrustrationIssueCardBlock } from './FrustrationIssueCard';
@@ -21,11 +22,16 @@ function RichBlockRenderer({
   catId,
   messageId,
   messageSource,
+  confirmations,
+  sendContext,
 }: {
   block: RichBlock;
   catId?: string;
   messageId?: string;
   messageSource?: ConnectorSource;
+  confirmations?: CardConfirmationEntry[];
+  /** F229 Bug 2 fix: propagated to InteractiveBlock to tag interactive-send events */
+  sendContext?: string;
 }) {
   switch (block.kind) {
     case 'card': {
@@ -37,6 +43,10 @@ function RichBlockRenderer({
       // F222: frustration auto-issue cards with trusted provenance get dedicated renderer
       if (isFrustrationIssueCardBlock(block, messageSource)) {
         return <FrustrationIssueCard block={block} messageId={messageId} />;
+      }
+      // F235: community issue preview cards (edit + publish flow)
+      if (isCommunityIssuePreviewBlock(block, messageSource)) {
+        return <CommunityIssuePreviewCard block={block} messageId={messageId} />;
       }
       // F174 D2b-1: cards tagged with meta.kind = 'callback_auth_failure' get the
       // dedicated in-context observability renderer ("明厨亮灶" — entity carries its
@@ -52,7 +62,7 @@ function RichBlockRenderer({
       if (isTrustedCallbackAuth) {
         return <CallbackAuthFailureBlock block={block} />;
       }
-      return <CardBlock block={block} messageId={messageId} />;
+      return <CardBlock block={block} messageId={messageId} confirmations={confirmations} />;
     }
     case 'diff':
       return <DiffBlock block={block} />;
@@ -63,7 +73,7 @@ function RichBlockRenderer({
     case 'audio':
       return <AudioBlock block={block} catId={catId} />;
     case 'interactive':
-      return <InteractiveBlock block={block} messageId={messageId} />;
+      return <InteractiveBlock block={block} messageId={messageId} sendContext={sendContext} />;
     case 'html_widget':
       return <HtmlWidgetBlock block={block} />;
     case 'file':
@@ -161,6 +171,8 @@ export function RichBlocks({
   catId,
   messageId,
   messageSource,
+  confirmations,
+  sendContext,
 }: {
   blocks: RichBlock[];
   catId?: string;
@@ -172,6 +184,10 @@ export function RichBlocks({
    * as a system warning + trigger hide-similar. Other renderers ignore this.
    */
   messageSource?: ConnectorSource;
+  confirmations?: CardConfirmationEntry[];
+  /** F229 Bug 2 fix: context tag for interactive-send events (e.g. 'concierge').
+   *  Prevents InteractiveBlock events from leaking to the wrong thread's handler. */
+  sendContext?: string;
 }) {
   if (blocks.length === 0) return null;
   const items = groupBlocks(blocks);
@@ -179,7 +195,12 @@ export function RichBlocks({
     <div className="mt-2 space-y-2">
       {items.map((item) =>
         'grouped' in item ? (
-          <InteractiveBlockGroup key={item.groupId} blocks={item.blocks} messageId={messageId} />
+          <InteractiveBlockGroup
+            key={item.groupId}
+            blocks={item.blocks}
+            messageId={messageId}
+            sendContext={sendContext}
+          />
         ) : (
           <RichBlockRenderer
             key={item.id}
@@ -187,6 +208,8 @@ export function RichBlocks({
             catId={catId}
             messageId={messageId}
             messageSource={messageSource}
+            confirmations={confirmations}
+            sendContext={sendContext}
           />
         ),
       )}

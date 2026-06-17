@@ -18,7 +18,7 @@ created: 2026-03-20
 
 ## Why
 
-team lead在排查飞书语音上传问题时发现（2026-03-20）：Fastify logger 只配了 stdout，没有 file transport。所有运行日志只在终端输出，terminal 关了就没了。一个多月裸奔。
+operator在排查飞书语音上传问题时发现（2026-03-20）：Fastify logger 只配了 stdout，没有 file transport。所有运行日志只在终端输出，terminal 关了就没了。一个多月裸奔。
 
 Issue: [#594](https://github.com/zts212653/clowder-ai/issues/594)
 

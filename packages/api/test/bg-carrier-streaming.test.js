@@ -812,7 +812,7 @@ test('invoke() legacy fallback: no linkScanPath but state.output.result present 
 
 test('F198 Phase D carrier parity (2026-05-19 hotfix): --bg spawn args include `--permission-mode bypassPermissions`', async () => {
   // Regression guard for the F198 Phase D carrier-parity bug realized when
-  // 铲屎官 flipped CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫
+  // co-creator flipped CAT_CAFE_CLAUDE_CARRIER=bg_daemon in runtime and布偶猫
   // sessions stalled on first Bash call: ClaudeAgentService ('-p' carrier)
   // passes `--permission-mode bypassPermissions` so tool calls don't prompt
   // per-call, but ClaudeBgCarrierService ('--bg' carrier) was missing this

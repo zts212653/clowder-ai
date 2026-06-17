@@ -85,6 +85,13 @@ export interface DrillDownDeps {
   hmac: HmacFn;
   /** Default scan window cap (defaults to 500 — bounded brute-force per 砚砚 spec). */
   maxCandidates?: number;
+  /**
+   * F192 Phase D — eval:a2a 2026-06-10 build verdict: parameterize the event
+   * name so the same helper can drilldown either C2 verdict-without-pass fires
+   * (`c2.verdict_without_pass_fired`) or C2 void-hold fires (`c2.void_hold_fired`).
+   * Defaults to `C2_SAMPLE_EVENT_NAME` (verdict-without-pass) for back-compat.
+   */
+  eventName?: string;
 }
 
 const DEFAULT_MAX_CANDIDATES = 500;
@@ -123,7 +130,8 @@ export async function lookupByEvalSampleRef(
     };
   }
 
-  const event = (span.events ?? []).find((e) => e.name === C2_SAMPLE_EVENT_NAME);
+  const eventName = deps.eventName ?? C2_SAMPLE_EVENT_NAME;
+  const event = (span.events ?? []).find((e) => e.name === eventName);
   if (!event) {
     return {
       span,

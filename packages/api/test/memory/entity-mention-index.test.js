@@ -20,7 +20,7 @@ describe('F209 entity mention indexing', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', '铲屎官', 'CVO'],
+        aliases: ['you', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -38,7 +38,7 @@ describe('F209 entity mention indexing', () => {
     const messageListFn = () => [
       {
         id: 'm1',
-        content: '铲屎官要求 alias registry 不能变成 classifier。',
+        content: 'co-creator要求 alias registry 不能变成 classifier。',
         catId: 'codex',
         timestamp: Date.parse('2026-05-22T02:00:00Z'),
       },
@@ -57,12 +57,12 @@ describe('F209 entity mention indexing', () => {
           r.entity_id === 'person:landy' &&
           r.doc_anchor === 'thread-thread_entity_index' &&
           r.passage_id === 'msg-m1' &&
-          r.surface === '铲屎官' &&
+          r.surface === 'co-creator' &&
           r.source === 'passage',
       ),
     );
 
-    const results = await store.search('CVO', { depth: 'raw', scope: 'threads', limit: 5 });
+    const results = await store.search('operator', { depth: 'raw', scope: 'threads', limit: 5 });
     assert.equal(results[0].anchor, 'thread-thread_entity_index');
     assert.equal(results[0].passages?.[0]?.messageId, 'm1');
     assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:landy');
@@ -78,7 +78,7 @@ describe('F209 entity mention indexing', () => {
         entityId: 'person:landy',
         type: 'person',
         canonicalName: 'You',
-        aliases: ['you', '铲屎官', 'CVO'],
+        aliases: ['you', 'co-creator', 'operator'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -92,7 +92,7 @@ describe('F209 entity mention indexing', () => {
     ).run(
       'deleted-thread-anchor',
       'msg-orphan',
-      '铲屎官 mentioned in an orphan passage row.',
+      'co-creator mentioned in an orphan passage row.',
       'codex',
       0,
       '2026-05-22T03:00:00Z',
@@ -114,7 +114,7 @@ describe('F209 entity mention indexing', () => {
         kind: 'thread',
         status: 'active',
         title: 'Entity seed no-op thread',
-        summary: '铲屎官 asked whether restart should reindex every entity mention.',
+        summary: 'co-creator asked whether restart should reindex every entity mention.',
         updatedAt: '2026-05-23T00:00:00.000Z',
       },
     ]);
@@ -123,7 +123,7 @@ describe('F209 entity mention indexing', () => {
       entityId: 'person:landy',
       type: 'person',
       canonicalName: 'You',
-      aliases: ['you', '铲屎官', 'CVO'],
+      aliases: ['you', 'co-creator', 'operator'],
       provenance: [{ source: 'F209 Phase B.1 test seed' }],
       updatedAt: '2026-05-23T00:00:00Z',
     };

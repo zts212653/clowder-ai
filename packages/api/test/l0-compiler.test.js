@@ -98,7 +98,13 @@ test('compileL0ViaSubprocess (no outPath) returns stdout as compiled L0', async 
   const out = await compileL0ViaSubprocess({ catId: 'opus-47', cwd: root, spawnFn });
   assert.match(out, /布偶猫/);
   const call = spawnFn.calls[0];
-  assert.deepEqual(call.args, [resolve(root, SCRIPT_REL), '--cat', 'opus-47']);
+  assert.deepEqual(call.args, [
+    resolve(root, SCRIPT_REL),
+    '--cat',
+    'opus-47',
+    '--profile-dir',
+    resolve(root, 'private/profile'),
+  ]);
   assert.ok(!call.args.includes('--out'), 'no --out when outPath omitted');
 });
 
@@ -110,7 +116,15 @@ test('compileL0ViaSubprocess (outPath) passes --out and returns file content', a
   const out = await compileL0ViaSubprocess({ catId: 'codex', cwd: root, outPath, spawnFn });
   assert.equal(out, 'COMPILED-L0-FILE-CONTENT');
   const call = spawnFn.calls[0];
-  assert.deepEqual(call.args, [resolve(root, SCRIPT_REL), '--cat', 'codex', '--out', outPath]);
+  assert.deepEqual(call.args, [
+    resolve(root, SCRIPT_REL),
+    '--cat',
+    'codex',
+    '--profile-dir',
+    resolve(root, 'private/profile'),
+    '--out',
+    outPath,
+  ]);
 });
 
 test('compileL0ViaSubprocess fail-closed: unresolvable script path throws', async () => {
@@ -174,6 +188,54 @@ test('compileL0ViaSubprocess caches result and clearL0Cache invalidates', async 
   const out3 = await compileL0ViaSubprocess({ catId: 'cache-test-cat', cwd: root, spawnFn: spawnFn2 });
   assert.equal(out3, 'REFRESHED L0');
   assert.equal(spawnFn2.calls.length, 1);
+});
+
+// --- F231: profileDir cwd-first resolution (gpt52 封板 review) ---
+
+test('F231: profileDir prefers cwd/private/profile when it exists (packaged install scenario)', async () => {
+  clearL0Cache();
+  // Simulate packaged install: cwd (project dir) has private/profile/,
+  // but scripts/ lives elsewhere (install dir).
+  const projectDir = mkdtempSync(join(tmpdir(), 'l0-project-'));
+  const installDir = mkdtempSync(join(tmpdir(), 'l0-install-'));
+
+  // Install dir has the compile script
+  mkdirSync(join(installDir, 'scripts'), { recursive: true });
+  writeFileSync(join(installDir, 'scripts', 'compile-system-prompt-l0.mjs'), '// fake');
+
+  // Project dir has private/profile/ (user data)
+  mkdirSync(join(projectDir, 'private', 'profile'), { recursive: true });
+
+  // Symlink scripts into project dir so resolveL0CompilerScriptPath can find it from cwd
+  // (in real packaged install, this would be an NTFS junction — but cwd-based candidate
+  // would find it. The key is that profileDir should prefer projectDir.)
+  mkdirSync(join(projectDir, 'scripts'), { recursive: true });
+  writeFileSync(join(projectDir, 'scripts', 'compile-system-prompt-l0.mjs'), '// fake');
+
+  const spawnFn = buildFakeSpawn({ stdout: 'PACKAGED-L0' });
+  await compileL0ViaSubprocess({ catId: 'packaged-cat', cwd: projectDir, spawnFn });
+  const call = spawnFn.calls[0];
+  // profileDir should be project dir (cwd), not install dir
+  assert.equal(
+    call.args[call.args.indexOf('--profile-dir') + 1],
+    resolve(projectDir, 'private/profile'),
+    'profileDir must prefer cwd-based path when private/profile/ exists at cwd',
+  );
+});
+
+test('F231: profileDir falls back to script-path-based when cwd has no private/profile/', async () => {
+  clearL0Cache();
+  // Simulate cwd=packages/api: no private/profile/ at cwd, script is at ../../scripts/
+  const root = seedRepoRoot();
+  const spawnFn = buildFakeSpawn({ stdout: 'FALLBACK-L0' });
+  await compileL0ViaSubprocess({ catId: 'fallback-cat', cwd: root, spawnFn });
+  const call = spawnFn.calls[0];
+  // Should fall back to script-path-based derivation
+  assert.equal(
+    call.args[call.args.indexOf('--profile-dir') + 1],
+    resolve(root, 'private/profile'),
+    'profileDir must fall back to script-path-based when cwd has no private/profile/',
+  );
 });
 
 // --- L0 template content guard ---

@@ -497,6 +497,8 @@ try {
     # Profile controls data isolation (Redis, TTLs, sidecar features);
     # -Dev controls whether the API runs in development or production mode.
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
+    $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
+    $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
         MEMORY_STORE = $env:MEMORY_STORE
@@ -513,6 +515,8 @@ try {
         CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED = $env:CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED
         CAT_CAFE_SERVICE_EMBED_ENABLED = $env:CAT_CAFE_SERVICE_EMBED_ENABLED
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
+        CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
+        CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
     }
 
     # Embedding sidecar (and other Cat Cafe ML services) are reconciled by the

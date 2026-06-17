@@ -77,6 +77,9 @@ import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
 import { resolveBootcampWorkspaceRoot } from '../../bootcamp/workspace-root.js';
 import { createPromptDigest } from '../../context/prompt-digest.js';
+// L0-budget-defense PR-B-impl (ADR-038): staging layer prepend, wired here
+// (next to F225 contextHintPrefix) so it lands every turn including resumes.
+import { buildStagingPrepend } from '../../context/StagingContent.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
 import { compileL0ViaSubprocess } from '../providers/l0-compiler.js';
@@ -539,6 +542,12 @@ export interface InvocationDeps {
       relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
     }[]
   >;
+  /** F229: Concierge config store for duty-cat岗位 prompt injection (optional, fail-open) */
+  readonly conciergeConfigStore?: import('../../../../concierge/ConciergeConfigStore.js').IConciergeConfigStore;
+  /** F229 KD-17: HandleMap store for concierge R1/R2 short-handle → anchor mapping (optional, fail-open) */
+  readonly conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
+  /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions (optional, fail-open) */
+  readonly conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
 }
 
 /**
@@ -656,9 +665,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // to one. Model comes from getCatModel(catId) — the SAME source as the system-prompt
     // identity line (env CAT_{CATID}_MODEL > runtime catRegistry), so the author name
     // tracks the cat's real model (opus-45 → claude-opus-4-8), not the catId or a stale
-    // catalog copy. Email is intentionally NOT set — it inherits git config (the CVO's
+    // catalog copy. Email is intentionally NOT set — it inherits git config (the operator's
     // GitHub noreply account) so contribution-graph attribution stays on one account
-    // while the name distinguishes the cat. (CVO directive 2026-05-28)
+    // while the name distinguishes the cat. (operator directive 2026-05-28)
     ...buildCatGitIdentityEnv(
       catId as string,
       catRegistry.tryGet(catId as string)?.config?.breedId,
@@ -1386,7 +1395,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // config when the fully-qualified model is not already routable by `opencode models`.
     //
     // MCP injection: even known models need a runtime config to get deterministic
-    // Cat Cafe MCP server access (especially in game threads where project-level
+    // Clowder AI MCP server access (especially in game threads where project-level
     // opencode.json may not be discoverable).
     const hasExplicitOcProvider = Boolean(modelProviderName);
     const configuredMcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH?.trim();
@@ -1575,6 +1584,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const contextHintPrefix = takeContextHintPrefix(compressionKey);
     if (contextHintPrefix) {
       effectivePrompt = `${contextHintPrefix}\n\n---\n\n${effectivePrompt}`;
+    }
+
+    // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging layer prepend.
+    // Wired here (next to F225 contextHintPrefix) and NOT folded into
+    // staticIdentity — Cloud R2 P1 #2237 L1099: folding into staticIdentity
+    // would let resumed session-chain turns drop staging because the
+    // staticIdentity injection is skipped on canSkipOnResume + isResume
+    // turns. ADR-038 contract is "每轮注入生效" → must mirror F225 pattern
+    // (independent of injectSystemPrompt). Staging content goes to runtime
+    // prompt path, NOT compiled native L0 (砚砚 PR #2221 R1 P2 boundary).
+    const stagingPrepend = buildStagingPrepend(catId);
+    if (stagingPrepend) {
+      effectivePrompt = `${stagingPrepend}\n\n---\n\n${effectivePrompt}`;
     }
 
     effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);

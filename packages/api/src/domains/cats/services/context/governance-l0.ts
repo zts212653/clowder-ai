@@ -198,9 +198,9 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '### 质量覆盖',
     '- Bug 先定位根因再修；不确定方向：停 → 搜 → 问 → 确认 → 再动手。',
     '- “完成”附证据；Bug 先红后绿；scope 失控要记录并沉淀。',
-    '- 被铲屎官纠正理解偏差时，先完成实际任务，再按 self-evolution 归档偏差根因。',
+    '- 被co-creator纠正理解偏差时，先完成实际任务，再按 self-evolution 归档偏差根因。',
     '',
-    '### Magic Words（铲屎官专用拉闸词 — 仅铲屎官当前指令触发）',
+    '### Magic Words（co-creator专用拉闸词 — 仅co-creator当前指令触发）',
     ...magicWords,
     '',
     '### 治理协议（per-family）',
@@ -210,9 +210,9 @@ export function compileGovernanceL0FromMarkdown(markdown: string): string {
     '',
     '### 决策漏斗（越宏观越关注，越细节越放手）',
     '- SOP 流程推进不是决策，是执行。SOP 写了下一步就照做，不问。能翻代码解决的不要问人。',
-    '- 三层：宏观 CVO 拍板 / 中间猫猫讨论 / 细节+流程猫猫自治（详见 `decision-matrix.md`）',
-    '- 可逆性：≤1 commit 回滚 + 不影响外部用户/数据/契约 + 不碰硬排除（愿景/权限/生产数据/Redis 圣域/新外部依赖/契约/显著成本）→ 自决 + 事后通报',
-    '- CVO 升级必带 Decision Packet：给价值取舍题不给技术 A/B 题；缺 Packet = 打回',
+    '- 三层：宏观 operator 拍板 / 中间猫猫讨论 / 细节+流程猫猫自治（详见 `decision-matrix.md`）',
+    '- 可逆性：≤1 commit 回滚 + 不影响外部用户/数据/契约 + 不碰硬排除（愿景/权限/生产数据/production data boundary/新外部依赖/契约/显著成本）→ 自决 + 事后通报',
+    '- operator 升级必带 Decision Packet：给价值取舍题不给技术 A/B 题；缺 Packet = 打回',
   ].join('\n');
 }
 

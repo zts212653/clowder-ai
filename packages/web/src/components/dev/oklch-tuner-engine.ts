@@ -122,7 +122,7 @@ export const NEUTRAL_ROWS: [keyof NeutralP, string][] = [
   ['codeTextL', '代码字'],
 ];
 
-/* ── Per-theme INIT defaults (CVO-tuned 2026-06-10) ──
+/* ── Per-theme INIT defaults (operator-tuned 2026-06-10) ──
  * Light and Dark themes have different accent hue, inset/msgText tuning,
  * surface elevation, and catText color. INIT = INIT_DARK (migration fallback). */
 export const INIT_LIGHT: TunerState = {

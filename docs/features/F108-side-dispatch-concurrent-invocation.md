@@ -12,18 +12,18 @@ created: 2026-03-12
 
 ## Why
 
-team lead作为 CVO，需要在**任何时刻**向**任何猫**派活，且**不打断**正在工作的猫。
+operator作为 operator，需要在**任何时刻**向**任何猫**派活，且**不打断**正在工作的猫。
 
-当前架构的限制：InvocationTracker 对每个 thread 持有单一执行锁——当Ragdoll在 thread 里修 bug 时，team lead无法同时派Maine Coon在同一 thread 里做架构反思。只能开新 thread（信息孤岛）或等当前猫完成（阻塞 CVO）。
+当前架构的限制：InvocationTracker 对每个 thread 持有单一执行锁——当Ragdoll在 thread 里修 bug 时，operator无法同时派Maine Coon在同一 thread 里做架构反思。只能开新 thread（信息孤岛）或等当前猫完成（阻塞 operator）。
 
-team experience（2026-03-12）：
+operator experience（2026-03-12）：
 
 > "赶紧开 worktree 修了他 记住只有Ragdoll去修这个问题！@opus"
 > "@gpt52 你Maine Coon反思你为什么给Ragdoll过了？你回答我这个不要碰代码"
 
 > "这样的情况我会需要一直和不同的你们交流 甚至我可能就是给Maine Coon一直发悄悄话避免影响你的修复。我会想要 1. 让你修复问题 2. 并发让Maine Coon反思为什么他做的不好 然后如何从架构上改进"
 
-**核心诉求**：同一 feat、同一 thread，team lead并发派不同的猫干相关但不同的事——一边修 bug 一边反思，互不干扰，结果都在同一 thread 可见。
+**核心诉求**：同一 feat、同一 thread，operator并发派不同的猫干相关但不同的事——一边修 bug 一边反思，互不干扰，结果都在同一 thread 可见。
 
 ## What
 
@@ -38,15 +38,15 @@ team experience（2026-03-12）：
    - 同一 catId 在同一 thread 不能有多个并发 invocation（保留原有单锁语义，只是粒度从 thread 细化到 thread+cat）
    - 文件锁/worktree 冲突检测（两只猫不能同时改同一个文件）
 
-### Phase B: 双模发送 UX（team lead 2026-03-12 定义）
+### Phase B: 双模发送 UX（operator 2026-03-12 定义）
 
-team lead发消息有两种模式：
+operator发消息有两种模式：
 
 #### 模式 A：悄悄话（Whisper） — 锁头按钮
 
 ```
 交互流：
-1. team lead点击输入框旁的 🔒 锁头按钮 → 进入悄悄话模式
+1. operator点击输入框旁的 🔒 锁头按钮 → 进入悄悄话模式
 2. 出现猫选择器（⚠️ 不能选当前正在执行的猫）
 3. 选择目标猫 → 输入消息 → 发送
 4. 目标猫开始旁路执行（不打断当前执行猫）
@@ -61,7 +61,7 @@ team lead发消息有两种模式：
 
 ```
 交互流：
-1. team lead直接在输入框打字 → 发送
+1. operator直接在输入框打字 → 发送
 2. 消息对所有猫可见（广播）
 3. 当前正在执行的猫**不被打断**，下一次拉起 CLI 时收到这条广播
 4. 如果消息里 @ 了特定猫，那只猫开始旁路执行
@@ -96,7 +96,7 @@ team lead发消息有两种模式：
 
 ## Dependencies
 
-- **Evolved from**: F086（多猫并行编排——F086 解决了猫发起的并行，F108 解决team lead发起的并行）
+- **Evolved from**: F086（多猫并行编排——F086 解决了猫发起的并行，F108 解决operator发起的并行）
 - **Related**: F039（消息排队——需要适配多槽模型）
 - **Related**: F048（Restart Recovery——InvocationRecord 结构变更需要迁移）
 - **Related**: F052（跨线程身份隔离——同 thread 多 cat 的身份隔离复用）
@@ -136,7 +136,7 @@ team lead发消息有两种模式：
 ### 待决策
 
 - ~~Scene 2 下拉选择器~~：✅ 已实现（PR #842）
-- ~~Scene 5C 强制按钮~~：team lead已接受现状（"小闪电可以用 原本的 这个无所谓 原本也挺好"）
+- ~~Scene 5C 强制按钮~~：operator已接受现状（"小闪电可以用 原本的 这个无所谓 原本也挺好"）
 
 ## Review Gate
 
@@ -144,7 +144,7 @@ team lead发消息有两种模式：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "让你修复问题，并发让Maine Coon反思" — 同一 thread 同时派两只猫干不同的事 | AC-A1 | integration test: 两猫并发 invocation 互不 abort | [x] |
 | R2 | "给Maine Coon一直发悄悄话避免影响你的修复" — 锁头 → 选猫 → 悄悄话 | AC-B1, AC-B2 | test: 锁头模式发消息不打断当前猫 + 不能选执行中的猫 | [x] |
@@ -157,25 +157,25 @@ team lead发消息有两种模式：
 - [x] 每个 AC 都有验证方式
 - [x] 前端需求已准备需求→证据映射表（Phase B 适用）
 
-## team lead用例示例
+## operator用例示例
 
 ```
 场景 1：悄悄话模式（锁头）
   Ragdoll正在修 bug...
-  team lead → 点 🔒 锁头 → 猫选择器出现（Ragdoll灰掉不能选）
-  team lead → 选Maine Coon → "你反思一下为什么 review 放过了"
+  operator → 点 🔒 锁头 → 猫选择器出现（Ragdoll灰掉不能选）
+  operator → 选Maine Coon → "你反思一下为什么 review 放过了"
   ✅ Maine Coon开始旁路执行（反思）
   ✅ Ragdoll不被打断，也看不到这条消息
-  ✅ team lead可以继续用锁头和Maine Coon对话
+  ✅ operator可以继续用锁头和Maine Coon对话
 
 场景 2：广播模式（不点锁头）
   Ragdoll正在修 bug...
-  team lead → 直接输入 "大家注意，这个 API 的 breaking change 影响范围可能更大"
+  operator → 直接输入 "大家注意，这个 API 的 breaking change 影响范围可能更大"
   ✅ Ragdoll不被打断，下次拉起 CLI 时收到这条广播
   ✅ 如果消息里写了 @gpt52，Maine Coon立即开始旁路执行
 
 场景 3：给空闲猫发消息
   没有猫在执行...
-  team lead → 直接发消息（不需要锁头）→ 按正常流程路由
+  operator → 直接发消息（不需要锁头）→ 按正常流程路由
   ✅ 和现在行为一样，向后兼容
 ```

@@ -80,4 +80,59 @@ describe('cat_cafe_publish_verdict task-outcome wrapper', () => {
       ],
     });
   });
+
+  it('uses a long callback timeout and avoids retrying long-running publish requests', async () => {
+    process.env.CAT_CAFE_CALLBACK_FETCH_TIMEOUT_MS = '10';
+
+    let attemptCount = 0;
+    const fetchMock = mock.method(globalThis, 'fetch', (_url, opts) => {
+      attemptCount++;
+      return new Promise((resolve, reject) => {
+        const signal = opts?.signal;
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+          });
+        }
+        setTimeout(
+          () =>
+            resolve(
+              new Response(JSON.stringify({ ok: true, status: 'published' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              }),
+            ),
+          60,
+        );
+      });
+    });
+
+    const { handlePublishVerdict } = await import(`../dist/tools/publish-verdict-tool.js?t=${Date.now()}`);
+    const result = await handlePublishVerdict({
+      domainId: 'eval:task-outcome',
+      packet: {
+        id: 'vhp-task-outcome-slow-success',
+        domainId: 'eval:task-outcome',
+        createdAt: '2026-06-10T03:30:00.000Z',
+        phenomenon: 'slow publish request',
+        verdict: 'keep_observe',
+      },
+      sourceRefs: {
+        kind: 'task-outcome-snapshot',
+        windowStartMs: 1700000000000,
+        windowEndMs: 1700086400000,
+      },
+    });
+
+    assert.equal(fetchMock.mock.calls.length, 1, 'publish_verdict must not retry non-idempotent callback POSTs');
+    assert.deepEqual(result, {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ ok: true, status: 'published' }),
+        },
+      ],
+    });
+    assert.equal(attemptCount, 1);
+  });
 });

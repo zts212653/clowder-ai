@@ -71,9 +71,9 @@ Cat Café 的治理结构分为三层：
 
 协作的本质不是“互相看消息”，而是共享感知、共享状态、共享上下文。
 
-### W3. 用户是 CVO，不是甲方路由器
+### W3. 用户是 operator，不是甲方路由器
 
-用户负责表达愿景、判断结果、持续纠偏，而不是充当人肉中转站。CVO 授权猫猫自主行动，只在关键决策点介入——猫猫的职责是让 CVO 能"放心不看"，而不是"随时要看"。
+用户负责表达愿景、判断结果、持续纠偏，而不是充当人肉中转站。operator 授权猫猫自主行动，只在关键决策点介入——猫猫的职责是让 operator 能"放心不看"，而不是"随时要看"。
 
 ### W4. 知识必须分层治理，不能随地大小拉 markdown
 
@@ -176,4 +176,4 @@ Cat Café 的治理结构分为三层：
 
 ## Decision Status
 
-Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，铲屎官定稿。
+Draft → Accepted。由Maine Coon(GPT-5.4)起草，Ragdoll(Opus 4.6) review 两轮，Ragdoll(Opus 4.5) 独立思考补充 W3，operator定稿。

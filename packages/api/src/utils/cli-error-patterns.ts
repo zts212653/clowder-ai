@@ -35,6 +35,9 @@ const PEM = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE K
 
 // URL query — everything after ? until whitespace or closing quote/paren
 const URL_QUERY = /(\?)([^\s'"<>)]+)/g;
+// URL fragment — OAuth implicit/callback flows often place access_token/state after #.
+// Redact only fragments carrying sensitive keys so ordinary issue anchors remain readable.
+const URL_FRAGMENT = /(#)(?=[^\s'"<>)\n]*(?:access_token|id_token|refresh_token|state|code)=)([^\s'"<>)]+)/gi;
 
 // Cookie / set-cookie header value (case-insensitive, until ; or newline)
 const COOKIE_HEADER = /((?:set-)?cookie)\s*:\s*[^;\n\r]+/gi;
@@ -67,6 +70,7 @@ export const SANITIZER_PATTERNS = {
   jwt: JWT,
   pem: PEM,
   urlQuery: URL_QUERY,
+  urlFragment: URL_FRAGMENT,
   cookieHeader: COOKIE_HEADER,
   openaiAnthropic: OPENAI_ANTHROPIC,
   githubPat: GITHUB_PAT,
@@ -109,11 +113,13 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   // New 7 (AC-A4) — ordered most-specific first to avoid mis-classification
   {
     code: 'model_not_found',
-    regex: /(model.*not found|Unknown model|supported API model names|model.*not supported|deployment.*not found)/i,
+    regex:
+      /(model.*not found|Unknown model|supported API model names|model.*not supported|deployment.*not found|neither PlanModel nor RequestedModel specified|Please use the \/model command|没有可用的账号侧默认模型)/i,
   },
   {
     code: 'auth_failed',
-    regex: /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api)/i,
+    regex:
+      /(\b401\b|Unauthorized|invalid api key|authentication failed|forbidden.*api|profile is not authenticated|Authentication required\. Please visit the URL to log in|authentication interrupted)/i,
   },
   // F212 Phase E (cloud codex P1 fix per @co-creator organic 2026-05-29): server-side temporary
   // throttling is NOT a user quota problem. CC explicitly disambiguates with "(not your usage

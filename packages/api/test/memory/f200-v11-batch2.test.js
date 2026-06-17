@@ -25,10 +25,12 @@ describe('DF-6: list_recent scope/kinds intersection nudge', () => {
   async function setupStore() {
     const store = new SqliteEvidenceStore(':memory:');
     await store.initialize();
+    // Dynamic relative dates — never hardcode absolute dates (time-bomb, see PR #2284 block)
+    const day = (daysAgo) => new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
     await store.upsert([
-      { anchor: 'doc/plan-a', kind: 'plan', status: 'active', title: 'Plan A', updatedAt: '2026-05-15' },
-      { anchor: 'doc/discussion-1', kind: 'discussion', status: 'active', title: 'Disc 1', updatedAt: '2026-05-14' },
-      { anchor: 'doc/thread-1', kind: 'thread', status: 'active', title: 'Thread 1', updatedAt: '2026-05-13' },
+      { anchor: 'doc/plan-a', kind: 'plan', status: 'active', title: 'Plan A', updatedAt: day(1) },
+      { anchor: 'doc/discussion-1', kind: 'discussion', status: 'active', title: 'Disc 1', updatedAt: day(2) },
+      { anchor: 'doc/thread-1', kind: 'thread', status: 'active', title: 'Thread 1', updatedAt: day(3) },
     ]);
     const catalog = {
       list: () => [{ id: 'project:test', sensitivity: 'internal', kind: 'project' }],

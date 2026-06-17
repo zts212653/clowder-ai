@@ -122,7 +122,7 @@ describe('ProposalCard', () => {
 
   it('renders title, body, prefilled fields, and pending action buttons', async () => {
     await render();
-    expect(container.textContent).toContain('📥 提议新建 thread：F128 verification');
+    expect(container.textContent).toContain('提议新建 thread：F128 verification');
     expect(container.textContent).toContain('Need a dedicated thread for review.');
     expect(container.textContent).toContain('thread_parent');
     expect(container.textContent).toContain('codex, gemini');
@@ -150,7 +150,7 @@ describe('ProposalCard', () => {
       `/api/proposals/${PROPOSAL_ID}/approve`,
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(container.textContent).toContain('✓ 已批准');
+    expect(container.textContent).toContain('已批准');
     expect(container.textContent).toContain('thread_new');
   });
 
@@ -169,7 +169,7 @@ describe('ProposalCard', () => {
       `/api/proposals/${PROPOSAL_ID}/reject`,
       expect.objectContaining({ method: 'POST' }),
     );
-    expect(container.textContent).toContain('✗ 已驳回');
+    expect(container.textContent).toContain('已驳回');
   });
 
   it('edit mode sends user overrides in approve payload', async () => {
@@ -205,7 +205,7 @@ describe('ProposalCard', () => {
 
   it('cat-cafe:proposal-updated CustomEvent flips status without refetching', async () => {
     await render();
-    expect(container.textContent).not.toContain('✓ 已批准');
+    expect(container.textContent).not.toContain('已批准');
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent('cat-cafe:proposal-updated', {
@@ -213,7 +213,7 @@ describe('ProposalCard', () => {
         }),
       );
     });
-    expect(container.textContent).toContain('✓ 已批准');
+    expect(container.textContent).toContain('已批准');
     expect(container.textContent).toContain('thread_socket');
   });
 

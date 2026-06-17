@@ -133,4 +133,23 @@ describe('useAgentMessages telemetry suppression', () => {
 
     expect(mockAddMessage).not.toHaveBeenCalled();
   });
+
+  // F230 P2 turn_duration: PTY carrier emits turn_duration as system_info terminal event.
+  // It must be silently consumed — never surfaced as a raw JSON bubble.
+  // Real observed bubble: {"type":"turn_duration","catId":"sonnet","durationMs":9488,"messageCount":38}
+  it('suppresses turn_duration — no system bubble (F230 P2)', () => {
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'sonnet',
+        content: JSON.stringify({ type: 'turn_duration', catId: 'sonnet', durationMs: 9488, messageCount: 38 }),
+      });
+    });
+
+    expect(mockAddMessage).not.toHaveBeenCalled();
+  });
 });

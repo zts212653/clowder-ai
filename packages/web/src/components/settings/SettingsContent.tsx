@@ -12,6 +12,7 @@ import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
+import { ConciergeSettingsContent } from './ConciergeSettingsContent';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
@@ -202,6 +203,8 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
         return <McpManageContent />;
       case 'plugins':
         return <PluginsContent />;
+      case 'concierge':
+        return <ConciergeSettingsContent />;
       default:
         return <SettingsPlaceholder section={meta.label} description="此分区即将上线" />;
     }

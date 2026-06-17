@@ -80,16 +80,10 @@ export class MaterializationService implements IMaterializationService {
     const md = [...frontmatter, '', marker.content, ''].join('\n');
     writeFileSync(outputPath, md);
 
-    // Git commit the materialized file (parameterized — no shell interpolation)
-    let committed = false;
-    try {
-      const cwd = dirname(outputPath);
-      execFileSync('git', ['add', outputPath], { cwd, stdio: 'pipe' });
-      execFileSync('git', ['commit', '-m', `materialize: ${anchor}`], { cwd, stdio: 'pipe' });
-      committed = true;
-    } catch {
-      // Not in a git repo or commit failed — continue gracefully
-    }
+    // Git commit the materialized file — OPT-IN only (default off). Auto-committing
+    // onto the current branch (e.g. runtime/main-sync) silently diverges it and
+    // breaks the next ff-only sync; callers must opt in explicitly.
+    const committed = options?.commit === true ? this.commitFile(outputPath, anchor) : false;
 
     // Trigger reindex: use override if provided, null = skip, undefined = default
     let reindexed = false;
@@ -107,5 +101,18 @@ export class MaterializationService implements IMaterializationService {
     await this.markerQueue.transition(markerId, 'materialized');
 
     return { markerId, outputPath, anchor, committed, reindexed };
+  }
+
+  /** Git-commit a materialized file (opt-in). Returns false if not in a repo or the commit fails. */
+  private commitFile(outputPath: string, anchor: string): boolean {
+    try {
+      const cwd = dirname(outputPath);
+      execFileSync('git', ['add', outputPath], { cwd, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', `materialize: ${anchor}`], { cwd, stdio: 'pipe' });
+      return true;
+    } catch {
+      // Not in a git repo or commit failed — continue gracefully
+      return false;
+    }
   }
 }

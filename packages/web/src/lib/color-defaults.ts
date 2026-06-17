@@ -33,7 +33,7 @@ export const UNKNOWN_CAT_COLOR: CatColorPair = { primary: '#9B7EBD', secondary: 
 /** Neutral gray for status dots when no cat color is available (PlanBoard, etc.). */
 export const NEUTRAL_DOT_COLOR = '#9CA3AF';
 
-/** Co-creator (铲屎官) default colors — matches cat-persona-tokens.css hue=40 chroma=0.13. */
+/** Co-creator (co-creator) default colors — matches cat-persona-tokens.css hue=40 chroma=0.13. */
 export const CO_CREATOR_COLOR: CatColorPair = { primary: '#D4A76A', secondary: '#FFF8F0' };
 
 /** Co-creator @mention highlight (warm gold, visually distinct from bubble primary). */

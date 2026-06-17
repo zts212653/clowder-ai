@@ -22,7 +22,7 @@ function storedMsg(over = {}) {
     threadId: 't1',
     content: '',
     timestamp: 1000,
-    catId: null, // null = user (铲屎官) message
+    catId: null, // null = user (co-creator) message
     userId: 'default-user', // owner; runCorpusBackfill only marks rows whose userId === owner (P1)
     mentions: [],
     extra: undefined,

@@ -12,7 +12,7 @@ created: 2026-02-26
 > **Created**: 2026-02-26
 
 ## Why
-- team lead 2026-02-13
+- operator 2026-02-13
 
 ## What
 - **F24**: 三个子能力全部完成：(1) 中途消息注入 [x]：4e85883 ChatInputActionButton 改为 hasActiveInvocation 时同时展示 Stop + Send 按钮。(2) Context 存活监控 [x]：fcf949d SessionChainPanel + ContextHealthBar。(3) 自动交接触发 [x]：3772cd9 SessionSealer + per-cat seal thresholds + hook 注入。

@@ -31,7 +31,7 @@ const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
   icon: 'github',
   iconBg: '#24292e',
   docsUrl: 'https://cli.github.com/manual/gh_auth_login',
-  setupSteps: ['在运行 Cat Cafe 的机器上执行 gh auth login', '可选：仅在需要显式覆盖 gh 登录态时配置插件 token'],
+  setupSteps: ['在运行 Clowder AI 的机器上执行 gh auth login', '可选：仅在需要显式覆盖 gh 登录态时配置插件 token'],
   status: 'configured',
   configured: true,
   config: [],

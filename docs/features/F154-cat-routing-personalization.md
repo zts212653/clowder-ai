@@ -14,7 +14,7 @@ community_issue: "clowder-ai#385, clowder-ai#391"
 
 ## Why
 
-team experience（2026-04-09）：
+operator experience（2026-04-09）：
 > "这个应该和 #385 的 issue 联合立项，是一个完整的东西"
 > "他的飞书那样用，那我们应该自己思考，除了飞书呢？在猫猫咖啡里面如何设定，以及如何知道这个 thread 的首选猫是谁？"
 
@@ -91,7 +91,7 @@ team experience（2026-04-09）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "在猫猫咖啡里面如何设定（首选猫）" | AC-A1, AC-B1 | connector 输入 + Hub UI 截图 | [ ] |
 | R2 | "如何知道这个 thread 的首选猫是谁" | AC-B1, AC-B3 | Hub header 截图 + /status 输出 | [ ] |
@@ -126,7 +126,7 @@ team experience（2026-04-09）：
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 不挂 F142（已关闭），独立立项 F154 | F142 是框架，F154 是产品能力；路由优先级变更超出"加命令"范畴 | 2026-04-09 |
-| KD-2 | 联合 #385 + #391 概念，跨 surface 统一设计 | team lead："除了飞书呢？在猫猫咖啡里面如何设定？" | 2026-04-09 |
+| KD-2 | 联合 #385 + #391 概念，跨 surface 统一设计 | operator："除了飞书呢？在猫猫咖啡里面如何设定？" | 2026-04-09 |
 | KD-3 | 猫名解析复用 catRegistry aliases，不硬编码 | 与 F127 动态别名方向一致；社区 PR 的硬编码方式不可维护 | 2026-04-09 |
 | KD-4 | `/ask` 必须走正常 ConnectorRouter → append → route 流程，禁止旁路 invokeTrigger | 安全边界：invokeTrigger 绕过 ACL / rate-limit / audit trail；Maine Coon P1 review | 2026-04-09 |
 | KD-5 | v1 `/focus` 仅支持单猫，多猫语法暂不实现 | 技术上 preferredCats 是数组，但 UX 复杂度不值得 MVP 投入；Maine Coon P2 review | 2026-04-09 |

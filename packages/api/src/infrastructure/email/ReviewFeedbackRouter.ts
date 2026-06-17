@@ -22,6 +22,9 @@ export interface PrFeedbackComment {
   readonly commentType: 'inline' | 'conversation';
   readonly filePath?: string;
   readonly line?: number;
+  /** GitHub author_association field. Used by delivery policy to silence OWNER/MEMBER activity.
+   * Undefined when fetched via legacy paths or when association is unavailable. */
+  readonly authorAssociation?: string;
 }
 
 export interface PrReviewDecision {
@@ -31,6 +34,9 @@ export interface PrReviewDecision {
   readonly body: string;
   readonly submittedAt: string;
   readonly commitId?: string;
+  /** GitHub author_association field. Used by delivery policy to silence OWNER/MEMBER activity.
+   * Undefined when fetched via legacy paths or when association is unavailable. */
+  readonly authorAssociation?: string;
 }
 
 export interface ReviewFeedbackSignal {

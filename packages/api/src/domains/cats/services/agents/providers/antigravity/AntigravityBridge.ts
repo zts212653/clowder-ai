@@ -102,7 +102,7 @@ export interface BridgeConnection {
 export interface TrajectoryStep {
   type: string;
   status: string;
-  /** Internal replay hint for Cat Cafe consumers; never sent by Antigravity LS directly. */
+  /** Internal replay hint for Clowder AI consumers; never sent by Antigravity LS directly. */
   catCafeTextMode?: 'append' | 'replace';
   plannerResponse?: {
     response?: string;
@@ -679,7 +679,7 @@ export class AntigravityBridge {
       return true;
     }
 
-    // Antigravity has no usable approval surface in Cat Cafe's runtime path.
+    // Antigravity has no usable approval surface in Clowder AI's runtime path.
     // Default to YOLO for run_command, matching Codex/Claude/OpenCode behavior,
     // while retaining an env opt-out for emergency rollback. Local hard refusal
     // rules above still run before any LS approval/execution.

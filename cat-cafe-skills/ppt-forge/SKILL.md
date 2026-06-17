@@ -16,7 +16,7 @@ description: >
 
 - **架构猫**（当前持球猫）：内容分析 + 分页规划 + 低保真 MD 写作
 - **imagegen 猫**（imagegen 猫/云端 Codex）：逐页生成精美 raster PNG
-- **铲屎官**：审稿 + 确认风格
+- **operator**：审稿 + 确认风格
 
 产出是 **AI 原生图片**——视觉质量远高于 HTML/CSS 手工画，且速度快。
 
@@ -35,12 +35,12 @@ description: >
 
 | 触发 | 场景 | 主导 | 详细文档 |
 |------|------|------|---------|
-| 铲屎官说"做个 PPT" | **1: 内容分析 + 分页规划** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
+| operator说"做个 PPT" | **1: 内容分析 + 分页规划** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
 | 分页确认 | **2: 低保真 MD 写作** | 架构猫 | [ppt-lofi-authoring.md](../refs/ppt-lofi-authoring.md) |
-| 低保真 MD 完成 | **3: 铲屎官审稿** | 铲屎官 | — |
+| 低保真 MD 完成 | **3: operator审稿** | operator | — |
 | 审稿通过 | **4: imagegen 出图** | imagegen 猫/云端 Codex | 逐页生成精美图 |
 | 出图完成 | **5: 交付** | 主执行猫 | 图片打包 + 预览 |
-| 铲屎官不满意 | **R: 回到 1 或 2** | — | 改分页/改内容/改风格 |
+| operator不满意 | **R: 回到 1 或 2** | — | 改分页/改内容/改风格 |
 
 ## 场景 1-2: 低保真 MD 写作
 
@@ -56,7 +56,7 @@ description: >
 
 2. **分页规划**：确定每页的类型和内容分配
    - 页面类型：封面 / 总览 / 详情 / 方法论 / 路线图 / 总结
-   - 先给铲屎官看分页表，确认再动手写
+   - 先给operator看分页表，确认再动手写
 
 3. **风格锁定**：选择风格 preset，配色方案一次锁定
 
@@ -116,7 +116,7 @@ status: lofi-draft
 ## 场景 5: 交付
 
 - 图片生成完成后，打包到 `assets/` 子目录
-- 用 `media_gallery` rich block 或直接展示给铲屎官
+- 用 `media_gallery` rich block 或直接展示给operator
 - 说清每页对应关系
 
 ## 风格 Preset

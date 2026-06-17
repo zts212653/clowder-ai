@@ -14,7 +14,7 @@ describe('F163 shared-rules condensation (AC-B4)', () => {
 
 ## §1 Redis Safety
 
-Redis 6399 是用户数据圣域。开发只用 6398，误触 6399 立即停服务通知铲屎官。
+Redis 6399 是用户数据圣域。开发只用 6398，误触 6399 立即停服务通知co-creator。
 
 ## §2 Redis Connection Isolation
 

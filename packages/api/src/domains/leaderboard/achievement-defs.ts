@@ -1,12 +1,12 @@
 /**
  * F075 Phase C — Achievement badge definitions
- * Static catalog of all unlockable achievements (CVO + daily).
+ * Static catalog of all unlockable achievements (operator + daily).
  */
 import type { Achievement } from '@cat-cafe/shared';
 
 type AchievementDef = Omit<Achievement, 'unlockedAt'>;
 
-/** CVO (Cat Virtual Officer) progression badges */
+/** operator (Cat Virtual Officer) progression badges */
 const CVO_ACHIEVEMENTS: AchievementDef[] = [
   { id: 'cvo-first-review', icon: 'search', label: '初审官', description: '完成第一次 code review', category: 'cvo' },
   { id: 'cvo-5-reviews', icon: 'test', label: '审计达人', description: '完成 5 次 code review', category: 'cvo' },
@@ -29,7 +29,7 @@ const CVO_ACHIEVEMENTS: AchievementDef[] = [
   { id: 'cvo-mentor', icon: 'graduation', label: '带教官', description: '帮助其他猫完成第一个 PR', category: 'cvo' },
 ];
 
-/** Bootcamp CVO progression badges (F087 Phase D) */
+/** Bootcamp operator progression badges (F087 Phase D) */
 const BOOTCAMP_ACHIEVEMENTS: AchievementDef[] = [
   { id: 'bootcamp-enrolled', icon: 'backpack', label: '入营新兵', description: '开始猫猫训练营', category: 'cvo' },
   { id: 'bootcamp-env-ready', icon: 'tool', label: '装备齐全', description: '通过环境检测', category: 'cvo' },
@@ -37,7 +37,7 @@ const BOOTCAMP_ACHIEVEMENTS: AchievementDef[] = [
     id: 'bootcamp-first-decision',
     icon: 'target',
     label: '第一次拍板',
-    description: '做出第一个 CVO 决策',
+    description: '做出第一个 operator 决策',
     category: 'cvo',
   },
   {
@@ -69,13 +69,13 @@ export const ALL_ACHIEVEMENTS: ReadonlyMap<string, AchievementDef> = new Map(
   [...CVO_ACHIEVEMENTS, ...BOOTCAMP_ACHIEVEMENTS, ...DAILY_ACHIEVEMENTS].map((a) => [a.id, a]),
 );
 
-/** CVO level thresholds */
+/** operator level thresholds */
 const CVO_LEVELS = [
   { level: 1, title: '实习猫猫', description: '刚入职的小猫', threshold: 0 },
   { level: 2, title: '正式员工', description: '能独立完成任务', threshold: 2 },
   { level: 3, title: '高级工程猫', description: '技术骨干', threshold: 4 },
   { level: 4, title: '技术专家猫', description: '架构级能力', threshold: 6 },
-  { level: 5, title: '首席铲码官', description: 'CVO — Chief Vibe Officer', threshold: 7 },
+  { level: 5, title: '首席铲码官', description: 'operator — Chief Vibe Officer', threshold: 7 },
 ] as const;
 
 /**

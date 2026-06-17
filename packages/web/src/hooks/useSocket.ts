@@ -871,6 +871,8 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('connector_message', (data: ConnectorMessageEvent) => {
       if (!data?.threadId || !data?.message?.id) return;
+      // Suppress internal routing diagnostics from user timeline
+      if (data.message.source?.connector === 'routing-guard-failure') return;
       const toast = data.message.extra?.scheduler?.toast;
       if (data.message.source?.connector === 'scheduler' && toast) {
         useToastStore.getState().addToast({

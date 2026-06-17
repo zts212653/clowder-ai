@@ -1,20 +1,24 @@
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
-import type {
-  CapabilitiesConfig,
-  CapabilityEntry,
-  ILimbNode,
-  PluginManifest,
-  PluginResourceDef,
+import {
+  type CapabilitiesConfig,
+  type CapabilityEntry,
+  type ILimbNode,
+  type PluginManifest,
+  type PluginResourceDef,
+  STANDARD_MOUNT_POINT_IDS,
 } from '@cat-cafe/shared';
+import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
+import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
+import { classifyMountPath } from '../../skills/skill-sync-engine.js';
+import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
 import type { ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
-
-const PROVIDER_DIRS = ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills'];
 
 export interface ActivationResult {
   type: string;
@@ -40,6 +44,7 @@ export interface ScheduleTaskRunner {
 
 export interface PluginResourceActivatorDeps {
   resolveProjectRoot: () => string;
+  resolveMainProjectRoot?: () => string;
   pluginsDir: string;
   limbRegistry: LimbRegistry;
   readCapabilities: () => Promise<CapabilitiesConfig | null>;
@@ -257,20 +262,68 @@ export class PluginResourceActivator {
       throw new Error(`Skill resource directory must contain SKILL.md: ${skillSourceDir}`);
     }
     const skillName = resourcePathBasename(resource.path);
+    const projectRoot = this.deps.resolveProjectRoot();
+    const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
+    const mountRules = await readMountRules(projectRoot, mainProjectRoot);
+    const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
 
-    const createdLinks: string[] = [];
-    try {
-      for (const providerDir of PROVIDER_DIRS) {
-        const skillsDir = join(this.deps.resolveProjectRoot(), providerDir);
-        if (await this.shouldSkipDirectoryLevelSkillsSymlink(skillsDir, dirname(skillSourceDir))) continue;
-        await mkdir(skillsDir, { recursive: true });
-        const linkPath = join(skillsDir, skillName);
-        if (await this.ensureSymlink(linkPath, skillSourceDir)) createdLinks.push(linkPath);
+    // F228: Use mountSkillSymlinks for filesystem + injected deps for config.
+    // Directory-level symlink pre-check: if a mount point skills dir is a symlink
+    // pointing to a different source (e.g. cat-cafe-skills), mountSkillSymlinks
+    // will record a conflict — not a hard error for plugin activation.
+    const skillsSource = dirname(skillSourceDir);
+    for (const mountPointId of STANDARD_MOUNT_POINT_IDS) {
+      if (!mountRules.mountPoints[mountPointId].enabled) continue;
+      const skillsDir = join(projectRoot, mountRules.mountPoints[mountPointId].path);
+      try {
+        await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+      } catch (err) {
+        // Legacy directory-level mount to a different source (e.g. cat-cafe-skills).
+        // Only skip mount points not targeted by this plugin skill — for target mount points,
+        // an invalid root symlink must hard-fail to prevent writing outside project.
+        const isTarget = !mountPaths || mountPaths.includes(mountPointId);
+        if (isTarget) throw err as Error;
       }
+    }
+
+    // Mount symlinks first (rollback only newly created if config write fails)
+    const mountResult = await mountSkillSymlinks(
+      projectRoot,
+      skillName,
+      skillsSource,
+      mountRules,
+      mountPaths ?? undefined,
+    );
+
+    // P1-2: Fail activation when all mount points conflict and nothing is mounted
+    // (including already-managed symlinks from previous activation)
+    if (mountResult.mounted.length === 0 && mountResult.conflicts.length > 0) {
+      const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+      let existingManagedCount = 0;
+      for (const target of targets) {
+        for (const dir of target.candidates) {
+          const status = await classifyMountPath(join(dir, skillName), skillsSource, skillName);
+          if (status === 'managed') existingManagedCount++;
+        }
+      }
+      if (existingManagedCount === 0) {
+        throw new Error(
+          `All mount points conflict for skill '${skillName}': ${mountResult.conflicts.map((c) => c.path).join(', ')}`,
+        );
+      }
+    }
+
+    try {
       await this.upsertCapabilityEntry(manifest, resource, true);
     } catch (err) {
-      for (const linkPath of createdLinks) {
-        await this.removeOwnedSymlink(linkPath, skillSourceDir);
+      // P2-1: Rollback uses exact paths from mount result (covers standard + custom)
+      const { rm: rmFile } = await import('node:fs/promises');
+      for (const m of mountResult.mounted) {
+        try {
+          await rmFile(m.path);
+        } catch {
+          /* best-effort rollback */
+        }
       }
       throw err;
     }
@@ -281,13 +334,26 @@ export class PluginResourceActivator {
 
     const skillSourceDir = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     const skillName = resourcePathBasename(resource.path);
+    const projectRoot = this.deps.resolveProjectRoot();
+    const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
+    const mountRules = await readMountRules(projectRoot, mainProjectRoot);
 
-    for (const providerDir of PROVIDER_DIRS) {
-      const linkPath = join(this.deps.resolveProjectRoot(), providerDir, skillName);
-      await this.removeOwnedSymlink(linkPath, skillSourceDir);
-    }
-
+    // Unmount symlinks + update config using injected deps
+    await unmountSkillSymlinks(projectRoot, skillName, dirname(skillSourceDir), mountRules);
     await this.upsertCapabilityEntry(manifest, resource, false);
+  }
+
+  private async readExistingPluginSkillMountPaths(
+    manifest: PluginManifest,
+    resource: PluginResourceDef,
+  ): Promise<readonly string[] | undefined> {
+    const config = await this.deps.readCapabilities();
+    if (!config) return undefined;
+    const capId = resourceCapId(manifest.id, resource);
+    const existing = config.capabilities.find(
+      (c) => normalizeCapId(c.id) === capId && c.pluginId === manifest.id && c.type === 'skill',
+    );
+    return Array.isArray(existing?.mountPaths) ? [...existing.mountPaths] : undefined;
   }
 
   private async activateLimb(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -686,69 +752,6 @@ export class PluginResourceActivator {
       });
     } catch {
       /* Preserve the original activation error; best-effort rollback already attempted. */
-    }
-  }
-
-  private async shouldSkipDirectoryLevelSkillsSymlink(skillsDir: string, expectedRoot: string): Promise<boolean> {
-    try {
-      const stat = await lstat(skillsDir);
-      if (!stat.isSymbolicLink()) return false;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
-      throw err;
-    }
-
-    let mountedRoot: string;
-    let expectedRealRoot: string;
-    try {
-      mountedRoot = await realpath(skillsDir);
-      expectedRealRoot = await realpath(expectedRoot);
-    } catch (err) {
-      throw new Error(
-        `Invalid directory-level plugin skill mount at ${skillsDir}: symlink must resolve to ${expectedRoot}. ${
-          (err as Error).message
-        }`,
-      );
-    }
-
-    if (mountedRoot !== expectedRealRoot) {
-      throw new Error(
-        `Refusing to mount plugin skill into directory-level skills symlink at ${skillsDir}: resolves to ${mountedRoot}, expected ${expectedRealRoot}`,
-      );
-    }
-
-    return true;
-  }
-
-  private async ensureSymlink(linkPath: string, target: string): Promise<boolean> {
-    try {
-      const s = await lstat(linkPath);
-      if (s.isSymbolicLink()) {
-        const { readlink } = await import('node:fs/promises');
-        const existing = await readlink(linkPath);
-        if (existing === target) return false;
-        throw new Error(`Refusing to overwrite existing symlink at ${linkPath} (current target: ${existing})`);
-      } else {
-        throw new Error(`Refusing to overwrite non-symlink at ${linkPath}`);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('Refusing')) throw err;
-    }
-    await symlink(target, linkPath);
-    return true;
-  }
-
-  private async removeOwnedSymlink(linkPath: string, expectedTarget: string): Promise<void> {
-    try {
-      const s = await lstat(linkPath);
-      if (!s.isSymbolicLink()) return;
-      const { readlink } = await import('node:fs/promises');
-      const actual = await readlink(linkPath);
-      if (actual !== expectedTarget) return;
-      await rm(linkPath);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw err;
     }
   }
 }

@@ -79,10 +79,10 @@ export const f163AdminRoutes: FastifyPluginAsync<F163AdminRoutesOptions> = async
     const currentLevel = AUTHORITY_LEVELS.indexOf(currentAuthority);
     const targetLevel = AUTHORITY_LEVELS.indexOf(targetAuthority);
 
-    // Constitutional requires CVO-only flag (not implemented yet — block for now)
+    // Constitutional requires operator-only flag (not implemented yet — block for now)
     if (targetAuthority === 'constitutional') {
       reply.status(403);
-      return { error: 'Promotion to constitutional requires CVO approval (not yet available via API)' };
+      return { error: 'Promotion to constitutional requires operator approval (not yet available via API)' };
     }
 
     // Only allow upward promotion

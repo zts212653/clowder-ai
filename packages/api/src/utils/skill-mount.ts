@@ -1,22 +1,141 @@
-import { execFile } from 'node:child_process';
 import { lstat, readlink, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
+import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from './project-path.js';
+import { resolveStartupProjectRoot } from './startup-root.js';
 
-export type SkillProviderMountKey = 'claude' | 'codex' | 'gemini' | 'kimi';
+export type SkillMountPointKey = 'claude' | 'codex' | 'gemini' | 'kimi';
 
-export function buildProviderSkillDirCandidates(
+export function buildMountPointDirCandidates(
   projectRoot: string,
   home: string,
-): Record<SkillProviderMountKey, string[]> {
+  rules: MountRules = DEFAULT_MOUNT_RULES,
+): Record<SkillMountPointKey, string[]> {
+  const candidatesFor = (id: SkillMountPointKey): string[] => [
+    ...new Set([join(projectRoot, rules.mountPoints[id].path), join(home, DEFAULT_MOUNT_RULES.mountPoints[id].path)]),
+  ];
   return {
-    claude: [...new Set([join(projectRoot, '.claude', 'skills'), join(home, '.claude', 'skills')])],
-    codex: [...new Set([join(projectRoot, '.codex', 'skills'), join(home, '.codex', 'skills')])],
-    gemini: [...new Set([join(projectRoot, '.gemini', 'skills'), join(home, '.gemini', 'skills')])],
-    kimi: [...new Set([join(projectRoot, '.kimi', 'skills'), join(home, '.kimi', 'skills')])],
+    claude: candidatesFor('claude'),
+    codex: candidatesFor('codex'),
+    gemini: candidatesFor('gemini'),
+    kimi: candidatesFor('kimi'),
   };
+}
+
+/**
+ * F228: A skill mount target — a mount point directory where a skill symlink
+ * may already live or should be created. Replaces the hardcoded 4-mount-point
+ * shape returned by `buildMountPointDirCandidates`, and adds support for
+ * custom paths (ACP/A2A/unknown clients) via `MountRules.customPaths`.
+ */
+export interface MountTarget {
+  /** Mount point id — standard ('claude' | 'codex' | 'gemini' | 'kimi') or custom alias. */
+  id: string;
+  /** Standard built-in client vs custom path. */
+  kind: 'standard' | 'custom';
+  /** Candidate directories (deduped). Standard: [projectDir, homeDir]; Custom: [resolvedPath]. */
+  candidates: string[];
+}
+
+/**
+ * Resolve custom mount paths from MountRules.
+ * - absolute paths stay absolute
+ * - `~` / `~/...` expands against the user's home directory
+ * - project-relative paths resolve under the selected project root
+ */
+function resolveCustomMountPath(projectRoot: string, path: string, home: string): string {
+  if (path === '~') return home;
+  if (path.startsWith('~/') || path.startsWith('~\\')) return join(home, path.slice(2));
+  if (isAbsolute(path)) return path;
+  return join(projectRoot, path);
+}
+
+/**
+ * F228: Build the full set of skill mount targets a project should consider,
+ * derived from `MountRules`. Disabled standard mount points are omitted (their
+ * skills directory is not a mount target). Custom paths get one candidate each.
+ *
+ * Replaces direct callers of `buildMountPointDirCandidates` once mount
+ * rules are wired through to API routes (Phase 5).
+ */
+export function buildSkillMountTargets(
+  projectRoot: string,
+  home: string,
+  rules: MountRules = DEFAULT_MOUNT_RULES,
+): MountTarget[] {
+  const targets: MountTarget[] = [];
+  for (const id of STANDARD_MOUNT_POINT_IDS) {
+    const rule = rules.mountPoints[id];
+    if (!rule.enabled) continue;
+    targets.push({
+      id,
+      kind: 'standard',
+      candidates: [...new Set([join(projectRoot, rule.path), join(home, DEFAULT_MOUNT_RULES.mountPoints[id].path)])],
+    });
+  }
+  for (const cp of rules.customPaths) {
+    targets.push({
+      id: cp.alias,
+      kind: 'custom',
+      candidates: [resolveCustomMountPath(projectRoot, cp.path, home)],
+    });
+  }
+  return targets;
+}
+
+/**
+ * Project-local skill directories where managed skill links can be mounted or
+ * cleaned up. Standard mount points intentionally use only the project path here;
+ * home-level mount point candidates are for detection/read paths, not writeback.
+ */
+export function buildProjectSkillMountDirs(
+  projectRoot: string,
+  home: string,
+  rules: MountRules = DEFAULT_MOUNT_RULES,
+  opts?: { includeDisabledStandardMountPoints?: boolean },
+): string[] {
+  const standardDirs = STANDARD_MOUNT_POINT_IDS.flatMap((id) => {
+    const rule = rules.mountPoints[id];
+    if (!opts?.includeDisabledStandardMountPoints && !rule.enabled) return [];
+    return [join(projectRoot, rule.path)];
+  });
+  const customDirs = buildSkillMountTargets(projectRoot, home, rules)
+    .filter((target) => target.kind === 'custom')
+    .flatMap((target) => target.candidates);
+  return [...new Set([...standardDirs, ...customDirs])];
+}
+
+export async function isManagedDirectoryLevelSkillsSymlink(
+  skillsDir: string,
+  skillsSource: string,
+  platformName: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  try {
+    if (!(await lstat(skillsDir)).isSymbolicLink()) return false;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+
+  let mountedRoot: string;
+  let expectedRoot: string;
+  try {
+    mountedRoot = await realpath(skillsDir);
+    expectedRoot = await realpath(skillsSource);
+  } catch (err) {
+    throw new Error(
+      `Invalid directory-level skills mount at ${skillsDir}: symlink must resolve to the current skills source ${skillsSource}. ${
+        (err as Error).message
+      }`,
+    );
+  }
+
+  if (!pathsEqual(mountedRoot, expectedRoot, platformName)) {
+    throw new Error(
+      `Invalid directory-level skills mount at ${skillsDir}: resolves to ${mountedRoot}, expected ${expectedRoot}.`,
+    );
+  }
+  return true;
 }
 
 /** Accept symlink target when it points to expected path OR main-repo cat-cafe-skills/{skillName}. */
@@ -64,7 +183,7 @@ export async function isCorrectSymlink(
   }
 }
 
-export async function isSkillMountedForProvider(
+export async function isSkillMountedAtPoint(
   dirCandidates: string[],
   expectedSkillsRoot: string,
   skillName: string,
@@ -82,30 +201,13 @@ export async function isSkillMountedForProvider(
   return false;
 }
 
-const execFileAsync = promisify(execFile);
-let cachedMainRepoPath: string | null = null;
-let cachedMainRepoPathPromise: Promise<string> | null = null;
-
+/**
+ * Resolve the project root where this process was started.
+ *
+ * Delegates to `resolveStartupProjectRoot()` which walks upward from the
+ * compiled module directory looking for `cat-cafe-skills/manifest.yaml`.
+ * This correctly returns the startup worktree (not the git main worktree).
+ */
 export async function resolveMainRepoPath(): Promise<string> {
-  if (cachedMainRepoPath) return cachedMainRepoPath;
-  if (cachedMainRepoPathPromise) return cachedMainRepoPathPromise;
-  cachedMainRepoPathPromise = (async () => {
-    const moduleRepoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-    try {
-      const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain']);
-      const firstLine = stdout.split('\n')[0] ?? '';
-      return firstLine.replace(/^worktree\s+/, '').trim();
-    } catch {
-      try {
-        const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
-        return stdout.trim();
-      } catch {
-        return moduleRepoRoot;
-      }
-    }
-  })().then((p) => {
-    cachedMainRepoPath = p;
-    return p;
-  });
-  return cachedMainRepoPathPromise;
+  return resolveStartupProjectRoot();
 }

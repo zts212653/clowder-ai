@@ -6,6 +6,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, TokenUsage } from '../../types.js';
+import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
 
 /**
  * Transform a raw Claude CLI NDJSON event into AgentMessage(s).
@@ -151,12 +152,30 @@ export function transformClaudeEvent(
   if (e.type === 'system' && e.subtype === 'init') {
     const sessionId = e.session_id;
     if (typeof sessionId === 'string') {
-      return {
+      const sessionInit = {
         type: 'session_init',
         catId,
         sessionId,
         timestamp: Date.now(),
-      };
+      } satisfies AgentMessage;
+      const mcpStatus = extractClaudeMcpStatusSnapshot(e.mcp_servers);
+      if (!mcpStatus) return sessionInit;
+      return [
+        sessionInit,
+        {
+          type: 'system_info',
+          catId,
+          content: JSON.stringify({
+            type: 'mcp_server_status',
+            provider: 'claude',
+            catId,
+            sessionId,
+            pendingMeaning: 'deferred_tool_loading',
+            ...mcpStatus,
+          }),
+          timestamp: Date.now(),
+        },
+      ];
     }
     return null;
   }

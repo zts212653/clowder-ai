@@ -57,9 +57,9 @@ describe('applyTermDictionary', () => {
     expect(applyTermDictionary('免疫猫')).toBe('缅因猫');
     expect(applyTermDictionary('先罗猫')).toBe('暹罗猫');
     expect(applyTermDictionary('仙罗猫')).toBe('暹罗猫');
-    expect(applyTermDictionary('产屎官')).toBe('铲屎官');
-    expect(applyTermDictionary('铲史官')).toBe('铲屎官');
-    expect(applyTermDictionary('铲是官')).toBe('铲屎官');
+    expect(applyTermDictionary('产屎官')).toBe('co-creator');
+    expect(applyTermDictionary('铲史官')).toBe('co-creator');
+    expect(applyTermDictionary('铲是官')).toBe('co-creator');
     expect(applyTermDictionary('不偶猫很可爱')).toBe('布偶猫很可爱');
   });
 

@@ -21,7 +21,7 @@ if [ -z "$REPO_ROOT" ]; then
   exit 1
 fi
 
-echo "🛡️  Cat Café Git Guards 安装"
+echo "🛡️  Clowder AI Git Guards 安装"
 echo "==========================="
 
 # 1. 设置 core.hooksPath → .githooks（版本化目录）

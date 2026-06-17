@@ -54,7 +54,7 @@
           "value": "#3A4658",
           "line": 99,
           "confidence": "medium",
-          "context": "<p style={{ fontSize: '12px', color: '#3A4658', margin: 0 }}>Cat Caf&eacute; Fighting Demo</p>"
+          "context": "<p style={{ fontSize: '12px', color: '#3A4658', margin: 0 }}>Clowder AI Fighting Demo</p>"
         },
         {
           "type": "hex",

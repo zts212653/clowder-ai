@@ -12,9 +12,9 @@ created: 2026-05-11
 
 ## Why
 
-F188 Phase F 上线 LIVE Recall sidebar 后team lead发现：ACP 路径下的 search_evidence 调用，UI 卡片只显示 query/mode/scope/time，**永远不显示 `[N hits]` 也永远展开不出 results**。其它 provider（catagent 直连 Anthropic / Codex）显示正常。（**初诊误称 "Claude Code CLI via ACP"，Maine Coon 一审 P1-1 校正：repo 里 ACP 当前仅服务 Gemini。详见后文 ACP scope 节。**）
+F188 Phase F 上线 LIVE Recall sidebar 后operator发现：ACP 路径下的 search_evidence 调用，UI 卡片只显示 query/mode/scope/time，**永远不显示 `[N hits]` 也永远展开不出 results**。其它 provider（catagent 直连 Anthropic / Codex）显示正常。（**初诊误称 "Claude Code CLI via ACP"，Maine Coon 一审 P1-1 校正：repo 里 ACP 当前仅服务 Gemini。详见后文 ACP scope 节。**）
 
-team experience（2026-05-11 跟 47 dogfooding F188 Phase F 时）：
+operator experience（2026-05-11 跟 47 dogfooding F188 Phase F 时）：
 > "为啥我这里看到的是你啥也没生效？是没搜到吗？"
 > "截图里 你看到第一个嘛？有 hit 才能展开！然后剩下的 都不行 你说我没展开是错的我就是展开了啥也没看到才以为你什么都没搜到的"
 
@@ -94,7 +94,7 @@ Why: 这是 cell 内部行为修复（ACP sessionUpdate kind → AgentMessage ty
 
 - **Users**：
   - Siamese/Gemini（当前唯一跑在 ACP path 的猫——`index.ts:990` 只在 `clientId: google` 分支 instantiate `GeminiAcpAdapter`）
-  - team lead（Recall sidebar 用户）
+  - operator（Recall sidebar 用户）
   - F188 Phase F FM-5 / FM-2 metric 消费者（Memory Health Dashboard）
 - **Activation signal**：
   - AS-1：Gemini-on-ACP 路径下 search_evidence 调用，UI Recall sidecar 卡片显示 `[N hits]`（>0）
@@ -145,7 +145,7 @@ Why: 这是 cell 内部行为修复（ACP sessionUpdate kind → AgentMessage ty
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 走完整 spec + Design Gate 流程，不当 quick hotfix 偷渡 | team experience「按家规先把 spec 写好 commit push 然后和Maine Coon确定清楚之后再开 wktree」；这个 bug 影响 F188/F102/F149 的 telemetry / observability path，必须 reviewer 把关 | 2026-05-11 |
+| KD-1 | 走完整 spec + Design Gate 流程，不当 quick hotfix 偷渡 | operator experience「按家规先把 spec 写好 commit push 然后和Maine Coon确定清楚之后再开 wktree」；这个 bug 影响 F188/F102/F149 的 telemetry / observability path，必须 reviewer 把关 | 2026-05-11 |
 | KD-2 | scope = Gemini-on-ACP path（当前 ACP 唯一使用者） | Maine Coon 一审 P1-1 校正：repo 里 ACP 只在 `clientId: google` 分支 instantiate `GeminiAcpAdapter`；不是 Claude Code ACP（不存在）。本 fix 直接覆盖 F149 path，不拆 Phase B | 2026-05-11 |
 | KD-3 | 单事件拆双消息（先 `tool_use` 后 `tool_result`） | Maine Coon 一审 P1-3：UI / ToolEventLog 都基于 pending+pair 模型；Gemini v0.36 实际 format 把 completed+content 打包到 `tool_call`，transformer 必须在内部拆成两条 stream message 保证 pair 模型成立 | 2026-05-11 |
 | KD-4 | `transformAcpEvent` 返回值从 `AgentMessage \| null` 扩展为 `AgentMessage \| AgentMessage[] \| null` | 拆双消息的实现必需；array vs generator 的 caller 改动量评估留到 wktree 时实测（OQ-4） | 2026-05-11 |

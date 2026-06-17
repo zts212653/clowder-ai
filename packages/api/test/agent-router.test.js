@@ -84,6 +84,7 @@ function createMockThreadStore(
   threadProjectPaths = {},
   threadRoutingPolicies = {},
   threadPreferredCats = {},
+  threadKinds = {},
 ) {
   const participants = { ...initialParticipants };
   // F032 P1-2: Track activity timestamps for each participant
@@ -110,6 +111,7 @@ function createMockThreadStore(
       createdAt: Date.now(),
       routingPolicy: threadRoutingPolicies[threadId],
       preferredCats: threadPreferredCats[threadId],
+      threadKind: threadKinds[threadId],
     }),
     list: () => [],
     listByProject: () => [],
@@ -2932,7 +2934,7 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
 
   // F194 Phase Z5 AC-Z16: 无 @ fallback 优先用上一条 user message 的 mentions，
   // 不让 thread 里其他猫的发言（如 vision guard）抢路由 fallback。
-  // 铲屎官 alpha catch 2026-05-10 04:51："明明 at 的最后一只猫是 47 or 55 但是召唤出来的却是 46"
+  // co-creator alpha catch 2026-05-10 04:51："明明 at 的最后一只猫是 47 or 55 但是召唤出来的却是 46"
   // user message 严格定义：userId !== null && catId === null（cat-to-cat handoff/vision guard 不计）
   test('AC-Z16: no-mention msg falls back to PREVIOUS user message mentions, not thread activity', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
@@ -3628,5 +3630,134 @@ describe('#58: preferredCats candidate scope (not dispatch list)', () => {
     const result = await router.resolveTargetsAndIntent('first message', 't_z16c');
     // No prev user mentions → falls back to legacy participantsWithActivity → codex (most recent)
     assert.deepEqual(result.targetCats, ['codex'], 'no prev user mentions → falls back to legacy');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F229: Concierge thread routing bypass
+// ---------------------------------------------------------------------------
+// Concierge threads must ALWAYS route to the configured duty cat (preferredCats),
+// even when a previous cat already has conversation history in the thread.
+// The F078 healthyReplier rule ("last-replier takes absolute priority") must be
+// bypassed for threadKind='concierge' threads so that duty-cat config changes
+// take effect immediately.
+describe('F229: Concierge thread routing (duty-cat always takes priority)', () => {
+  test('concierge thread routes to preferredCats duty cat even when old cat has activity', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus'); // duty cat (new)
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini'); // old cat (has activity)
+
+    // Thread: threadKind='concierge', preferredCats=['opus'] (new duty cat)
+    // 'gemini' already has messageCount > 0 (was the previous duty cat)
+    const threadStore = createMockThreadStore(
+      { t_concierge: ['gemini'] }, // initialParticipants: gemini already in thread
+      {}, // threadProjectPaths
+      {}, // threadRoutingPolicies
+      { t_concierge: ['opus'] }, // threadPreferredCats: opus is new duty cat
+      { t_concierge: 'concierge' }, // threadKinds: this is a concierge thread
+    );
+    // Simulate gemini having replied before duty-cat change
+    threadStore.updateParticipantActivity('t_concierge', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello', 't_concierge');
+
+    // F229: concierge thread MUST route to duty cat (opus / preferredCats),
+    // NOT to gemini (healthyReplier) — F078 healthyReplier bypass.
+    assert.deepEqual(result.targetCats, ['opus'], 'concierge duty cat overrides last-replier');
+    assert.equal(mockClaudeService.invoke.mock.callCount(), 0, 'opus not invoked by resolveTargetsAndIntent');
+    assert.equal(mockGeminiService.invoke.mock.callCount(), 0, 'gemini not invoked');
+  });
+
+  test('normal thread (no threadKind) still applies F078 healthyReplier rule', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus');
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini');
+
+    // Normal thread (no threadKind): preferredCats=['opus'] but gemini has activity
+    const threadStore = createMockThreadStore(
+      { t_normal: ['gemini'] },
+      {},
+      {},
+      { t_normal: ['opus'] }, // preferredCats = opus
+      {}, // no threadKind
+    );
+    threadStore.updateParticipantActivity('t_normal', 'gemini');
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const result = await router.resolveTargetsAndIntent('hello', 't_normal');
+
+    // F078: normal thread still uses healthyReplier (gemini has activity)
+    assert.deepEqual(result.targetCats, ['gemini'], 'normal thread: healthyReplier (gemini) takes priority');
+  });
+
+  test('concierge thread: duty cat takes priority over findRecentUserMentionFallback (prior @mention)', async () => {
+    // Scenario: user sent "@gemini hello" in a concierge thread, then sends a plain
+    // follow-up "thanks" with no @mention. findRecentUserMentionFallback would return
+    // ['gemini'] for the follow-up — but the F229 bypass must fire first so the duty
+    // cat (opus) handles the follow-up, not gemini.
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const mockClaudeService = createMockAgentService('opus'); // duty cat
+    const mockCodexService = createMockAgentService('codex');
+    const mockGeminiService = createMockAgentService('gemini'); // was previously @mentioned
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {},
+      { t_concierge_mention: ['opus'] }, // preferredCats: opus is duty cat
+      { t_concierge_mention: 'concierge' }, // threadKind: concierge
+    );
+
+    // Simulate: previous user message had @gemini mention
+    const messageStore = createMockMessageStore();
+    messageStore.append({
+      threadId: 't_concierge_mention',
+      role: 'user',
+      content: '@gemini hello',
+      mentions: ['gemini'],
+      timestamp: Date.now() - 5000,
+    });
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: mockClaudeService,
+        codexService: mockCodexService,
+        geminiService: mockGeminiService,
+        registry: createMockRegistry(),
+        messageStore,
+        threadStore,
+      }),
+    );
+
+    // Follow-up with NO @mention — must route to duty cat (opus), not gemini
+    const result = await router.resolveTargetsAndIntent('thanks', 't_concierge_mention');
+
+    assert.deepEqual(result.targetCats, ['opus'], 'concierge duty cat wins over prior user @mention fallback');
   });
 });

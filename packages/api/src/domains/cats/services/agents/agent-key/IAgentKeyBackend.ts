@@ -10,4 +10,5 @@ export interface IAgentKeyBackend {
   revoke(agentKeyId: string, reason: string): Promise<boolean>;
   updateGrace(agentKeyId: string, graceUntil: number): Promise<boolean>;
   touchLastUsed(agentKeyId: string, timestamp: number): Promise<void>;
+  claimClientMessageId(agentKeyId: string, clientMessageId: string): Promise<boolean>;
 }

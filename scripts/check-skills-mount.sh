@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-skills-mount.sh — Cat Café Skills 挂载看板
+# check-skills-mount.sh — Clowder AI Skills 挂载看板
 # 检查 cat-cafe-skills/ 下所有 skill 是否按 project-level-first 口径挂载：
 # 1. 目录级 symlink（<project>/.{claude,codex,gemini,kimi}/skills -> cat-cafe-skills）
 # 2. per-skill symlink（<project>/.xxx/skills/<skill> 或 ~/.xxx/skills/<skill>）
@@ -84,7 +84,7 @@ is_skill_mounted_for_provider() {
 
 # ─── Part 1: Symlink Mount Check ───
 
-printf "\n${BOLD}Cat Café Skills 挂载看板${NC}\n"
+printf "\n${BOLD}Clowder AI Skills 挂载看板${NC}\n"
 printf "源目录: %s\n\n" "$SKILLS_SRC"
 printf "%-35s  %-8s  %-8s  %-8s  %-8s\n" "Skill" "Claude*" "Codex" "Gemini" "Kimi"
 printf "%-35s  %-8s  %-8s  %-8s  %-8s\n" "-----------------------------------" "--------" "--------" "--------" "--------"

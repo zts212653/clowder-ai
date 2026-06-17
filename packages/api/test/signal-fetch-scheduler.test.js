@@ -34,7 +34,7 @@ function createNotificationsConfig() {
           secure: false,
         },
         to: 'owner@example.com',
-        from: 'Cat Cafe Signals <noreply@example.com>',
+        from: 'Clowder AI Signals <noreply@example.com>',
       },
       in_app: {
         enabled: true,

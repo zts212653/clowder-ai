@@ -110,7 +110,7 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
   beforeEach(() => {
     resetCoCreatorConfigCacheForTest();
     primeCoCreatorConfigCache({
-      name: '铲屎官',
+      name: 'co-creator',
       aliases: [],
       mentionPatterns: ['@owner'],
       avatar: '/uploads/owner.png',

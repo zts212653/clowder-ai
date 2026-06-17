@@ -148,7 +148,7 @@ function main() {
   console.error('Resolution: for each hit, choose one of:');
   console.error('  1. immediate — do it now in this PR');
   console.error('  2. delete(why) — remove the AC with justification');
-  console.error('  3. cvo_signoff — get CVO explicit approval to defer');
+  console.error('  3. cvo_signoff — get operator explicit approval to defer');
   console.error('');
   console.error('Schema: cat-cafe-skills/refs/close-gate.md');
   process.exit(1);

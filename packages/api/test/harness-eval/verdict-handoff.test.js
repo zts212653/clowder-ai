@@ -95,7 +95,7 @@ describe('Verdict Handoff Packet contract', () => {
     assert.match(decision.reason, /evidence/);
   });
 
-  it('rejects delete/sunset without an explicit CVO accept gate', () => {
+  it('rejects delete/sunset without an explicit operator accept gate', () => {
     assert.throws(
       () =>
         parseVerdictHandoffPacket({
@@ -110,11 +110,11 @@ describe('Verdict Handoff Packet contract', () => {
             closureCondition: 'owner says this can be removed',
           },
         }),
-      /CVO/,
+      /operator/,
     );
   });
 
-  it('rejects delete/sunset when CVO accept is only mentioned as not required', () => {
+  it('rejects delete/sunset when operator accept is only mentioned as not required', () => {
     assert.throws(
       () =>
         parseVerdictHandoffPacket({
@@ -122,18 +122,18 @@ describe('Verdict Handoff Packet contract', () => {
           verdict: 'delete_sunset',
           ownerAsk: {
             ...basePacket.ownerAsk,
-            requestedAction: 'Sunset the C2 guard; no CVO accept required for this cleanup.',
+            requestedAction: 'Sunset the C2 guard; no operator accept required for this cleanup.',
           },
           acceptanceReevalPlan: {
             ...basePacket.acceptanceReevalPlan,
             closureCondition: 'next eval confirms no regression after sunset.',
           },
         }),
-      /CVO/,
+      /operator/,
     );
   });
 
-  it('accepts delete/sunset when CVO accept is explicit', () => {
+  it('accepts delete/sunset when operator accept is explicit', () => {
     const packet = parseVerdictHandoffPacket({
       ...basePacket,
       verdict: 'delete_sunset',
@@ -142,11 +142,11 @@ describe('Verdict Handoff Packet contract', () => {
       },
       ownerAsk: {
         ...basePacket.ownerAsk,
-        requestedAction: 'Prepare sunset plan; requires CVO accept before disabling the guard.',
+        requestedAction: 'Prepare sunset plan; requires operator accept before disabling the guard.',
       },
       acceptanceReevalPlan: {
         ...basePacket.acceptanceReevalPlan,
-        closureCondition: 'CVO accept is recorded, then next eval confirms no regression after sunset.',
+        closureCondition: 'operator accept is recorded, then next eval confirms no regression after sunset.',
       },
     });
 

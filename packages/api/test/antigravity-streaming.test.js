@@ -255,7 +255,7 @@ describe('G2: pollForSteps yields steps incrementally', () => {
         type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
         status: 'CORTEX_STEP_STATUS_DONE',
         plannerResponse: {
-          response: '铲屎官催我了！来了来了！我已经把所有核心文档全部读完。',
+          response: 'co-creator催我了！来了来了！我已经把所有核心文档全部读完。',
           stopReason: 'STOP_REASON_CLIENT_CANCELED',
         },
       },
@@ -314,7 +314,7 @@ describe('G2: pollForSteps yields steps incrementally', () => {
             {
               type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
               status: 'DONE',
-              plannerResponse: { modifiedResponse: '铲屎官，我活着，' },
+              plannerResponse: { modifiedResponse: 'co-creator，我活着，' },
             },
           ],
         },
@@ -327,7 +327,7 @@ describe('G2: pollForSteps yields steps incrementally', () => {
             {
               type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
               status: 'DONE',
-              plannerResponse: { modifiedResponse: '铲屎官，我活着，喵。' },
+              plannerResponse: { modifiedResponse: 'co-creator，我活着，喵。' },
             },
           ],
         },
@@ -342,7 +342,7 @@ describe('G2: pollForSteps yields steps incrementally', () => {
     }
 
     assert.equal(yielded.length, 2, `should emit partial + terminal delta, got ${yielded.length} batches`);
-    assert.equal(yielded[0].steps[0].plannerResponse.modifiedResponse, '铲屎官，我活着，');
+    assert.equal(yielded[0].steps[0].plannerResponse.modifiedResponse, 'co-creator，我活着，');
     assert.equal(yielded[0].cursor.terminalSeen, false);
     assert.equal(yielded[1].steps[0].plannerResponse.modifiedResponse, '喵。');
     assert.equal(yielded[1].cursor.lastDeliveredStepCount, 1);

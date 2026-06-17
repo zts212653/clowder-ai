@@ -35,6 +35,7 @@ export const CONNECTOR_SECRETS_ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 export const CONNECTOR_GATEWAY_RELOAD_KEYS: ReadonlySet<string> = new Set([
+  'CONNECTOR_GATEWAY_AUTOSTART',
   'TELEGRAM_BOT_TOKEN',
   'FEISHU_APP_ID',
   'FEISHU_APP_SECRET',

@@ -31,7 +31,7 @@ triggers:
 >
 > 自问："我是这次真的运行了命令并看到输出，还是我只是相信它能工作？"
 
-**为什么 AC 可能不够**：AC 是人写的，可能遗漏 UX 要求或场景覆盖。F041 教训：AC 全打勾，但铲屎官的原始需求（能力显示描述、多项目管理）根本没进 AC——spec compliance check 检查了 AC，但 AC 本身就是错的。
+**为什么 AC 可能不够**：AC 是人写的，可能遗漏 UX 要求或场景覆盖。F041 教训：AC 全打勾，但operator的原始需求（能力显示描述、多项目管理）根本没进 AC——spec compliance check 检查了 AC，但 AC 本身就是错的。
 
 ## 流程
 
@@ -39,23 +39,23 @@ triggers:
 BEFORE 声称完成 / 提 review:
 
 Step 0: VISION CHECK（愿景核对）
-  ① 找原始 Discussion/Interview 文档（铲屎官原话在里面）
+  ① 找原始 Discussion/Interview 文档（operator experience在里面）
   ② 读核心痛点："我要..."、"我不想..."
-  ③ 问自己：铲屎官坐在 Hub 前用这个功能，体验是什么样的？
-  ④ AC 是否完整覆盖了铲屎官的原始需求？
+  ③ 问自己：operator坐在 Hub 前用这个功能，体验是什么样的？
+  ④ AC 是否完整覆盖了operator的原始需求？
      → 如有遗漏，先补 AC 再继续
 
 Step 0.5: DELIVERY COMPLETENESS CHECK
   ① 这次交付的是完整 feat 还是 feat 的一部分？
      → 完整 feat：继续
-     → 部分：有铲屎官明确同意分批交付的记录吗？没有就继续做完
+     → 部分：有operator明确同意分批交付的记录吗？没有就继续做完
   ② 本次产出后续需要"重写"还是"扩展"？
      → 扩展：通过
      → 重写：如果是已标注 Spike 且有结论，通过；否则不通过，回去重做
 
 Step 1: FIND — 找 spec/plan 文档
   - the active feature spec or implementation plan
-  - 同时找 Discussion/Interview（铲屎官原话所在）
+  - 同时找 Discussion/Interview（operator experience所在）
 
 Step 2: CREATE — 建检查清单
   - 列出每一个 AC / 功能点 / 边界条件
@@ -110,7 +110,7 @@ Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
   - 服务已在线时直接复用，禁止在该会话执行 `pnpm start` / `pnpm runtime:start` / `./scripts/start-dev.sh`
   - `localhost:3003/3004` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
   - 证明“这是我当前 worktree 的验证证据”时，必须同时说清：`worktree/cwd` + 目标 URL。两者对不上 = 证据无效
-  - 确需重启时，先获铲屎官明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
+  - 确需重启时，先获operator明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行
   - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6398）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
 
 Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 2026-05-23）🔴
@@ -130,7 +130,7 @@ Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 20
 
   Why（F209 反思 2026-05-23）:
     "AC pass 但用户感受不到" + "dogfood bug post-merge 才暴露" 是同型走偏。
-    - Phase B alias registry: AC-B1~B5 全 ✅、跨族 review APPROVE、merge 闭环 — 但生产 `entity_registry` 是空的，真实用户搜 `CVO` 找不到 `铲屎官`。
+    - Phase B alias registry: AC-B1~B5 全 ✅、跨族 review APPROVE、merge 闭环 — 但生产 `entity_registry` 是空的，真实用户搜 `operator` 找不到 `operator`。
     - Phase C drillDown: 测试 / cloud review / merge 都过 — 但 author 自己 post-merge 用一次刚发现 file-slice 路径口径不一致。
     根因是没人 pre-review 真用一次自己刚做的东西。pre-merge dogfood 把这一类 bug 提前到 author 自检阶段。
 
@@ -140,7 +140,7 @@ Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 20
     Scope verdict: ✅ 必做 / 🆗 可豁免（理由：xxx）
 
     （必做时）
-    端到端路径: search_evidence("CVO") → drillDown → cat_cafe_get_thread_context
+    端到端路径: search_evidence("operator") → drillDown → cat_cafe_get_thread_context
     实际命令 / 输出（粘贴）: ...
     发现的 bug: 无 / 列表（含修复 commit SHA）
     ```
@@ -161,7 +161,7 @@ Step 6: RUN — 运行验证命令（必须这次真实运行）
   pnpm --filter @cat-cafe/api test:redis
   # ⚠️ pnpm check 包含 biome format + lint 规则。
   # 如果有 format 问题，先跑 pnpm check:fix 自动修复。
-  # 不能带着 biome errors 提 review！（2026-03-12 铲屎官定调）
+  # 不能带着 biome errors 提 review！（2026-03-12 operator定调）
 
 Step 7: READ — 完整读输出，看 exit code，数失败数
 
@@ -213,7 +213,7 @@ Spec: feature spec or implementation note
 检查时间: YYYY-MM-DD HH:MM
 
 ### 愿景覆盖（Step 0）
-| # | 铲屎官原始需求 | AC 覆盖？ | 实现？ |
+| # | operator原始需求 | AC 覆盖？ | 实现？ |
 |---|---------------|-----------|--------|
 | 1 | "我要 XXX"    | AC#3      | ✅     |
 
@@ -257,7 +257,7 @@ pnpm -r --if-present run build → exit 0 ✅
 | "应该没问题" / "probably works" | Run the command. Read the output. |
 | 测试通过就声称 phase 完成 | 还要对照 spec 逐项检查 |
 | 部分实现就提 review | P1/P2 遗漏必须当轮补完再提 review |
-| 交付半成品让铲屎官"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
+| 交付半成品让operator"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
 | 产出后续要重写而非扩展 | 如果要重写，说明绕路了（Spike 除外） |
 | 前端功能没有截图证据 | ≤3 张截图 + 15s 录屏 + 映射表 |
 | 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
@@ -286,7 +286,7 @@ pnpm -r --if-present run build → exit 0 ✅
 
 ## 下一步
 
-Quality Gate 通过后 → **直接加载 `request-review`** skill 请求 review（SOP stage `review`）。不要停下来问铲屎官"要不要继续"（§17）。
+Quality Gate 通过后 → **直接加载 `request-review`** skill 请求 review（SOP stage `review`）。不要停下来问operator"要不要继续"（§17）。
 
 Gate 未通过时：
 - **P1 遗漏** → 补完再过 gate

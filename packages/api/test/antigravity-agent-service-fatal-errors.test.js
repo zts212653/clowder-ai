@@ -240,7 +240,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     assert.equal(bridge.resetSession.mock.callCount(), 1, 'should reset once for quota-style capacity retry');
     assert.equal(bridge.sendMessage.mock.callCount(), 2, 'should resend prompt after quota-style capacity retry');
     const resentPrompt = bridge.sendMessage.mock.calls[1].arguments[1];
-    assert.match(resentPrompt, /Cat Cafe callback fallback/, 'retry prompt must preserve callback fallback');
+    assert.match(resentPrompt, /Clowder AI callback fallback/, 'retry prompt must preserve callback fallback');
     assert.match(resentPrompt, /thread-context\?invocationId=inv-123&callbackToken=tok-456/);
     assert.match(resentPrompt, /post-message/, 'retry prompt must preserve reply path');
     const capacityErrors = messages.filter((m) => m.type === 'error' && m.errorCode === 'model_capacity');
@@ -2163,7 +2163,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
 
   // Bug-E: after a fatal terminal error (stream_error / upstream_error / model_capacity
   // retries exhausted), a subsequent invocation with the same callbackEnv must still
-  // have `[Cat Cafe callback fallback]` injected into the prompt. The service is
+  // have `[Clowder AI callback fallback]` injected into the prompt. The service is
   // stateless per-invoke by construction; this test locks that invariant so future
   // stateful optimizations (e.g. caching resolved session info across invokes) don't
   // accidentally skip injection on the "continuity" path.
@@ -2245,12 +2245,12 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     const [, round2Text] = sendCalls[1].arguments;
 
     // Invocation 1 prompt: must contain callback fallback + the prompt body
-    assert.match(round1Text, /\[Cat Cafe callback fallback\]/);
+    assert.match(round1Text, /\[Clowder AI callback fallback\]/);
     assert.ok(round1Text.includes('inv-continuity-42'), 'round 1 prompt carries invocationId');
     assert.ok(round1Text.includes('token-xyz'), 'round 1 prompt carries callbackToken');
 
     // Invocation 2 prompt: fatal did NOT invalidate fallback injection
-    assert.match(round2Text, /\[Cat Cafe callback fallback\]/);
+    assert.match(round2Text, /\[Clowder AI callback fallback\]/);
     assert.ok(round2Text.includes('inv-continuity-42'), 'round 2 prompt keeps invocationId after fatal');
     assert.ok(round2Text.includes('token-xyz'), 'round 2 prompt keeps callbackToken after fatal');
     assert.ok(round2Text.includes('round-2 question'), 'round 2 prompt body present');
@@ -2716,7 +2716,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     );
 
     const resumedPrompt = bridge.sendMessage.mock.calls[1].arguments[1];
-    assert.match(resumedPrompt, /Cat Cafe Antigravity safe auto-resume/);
+    assert.match(resumedPrompt, /Clowder AI Antigravity safe auto-resume/);
     assert.match(resumedPrompt, /continue_without_repeating_completed_side_effects/);
     assert.match(resumedPrompt, /tier2_auto_probe_owned/);
     assert.match(resumedPrompt, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -2810,7 +2810,7 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
     });
 
     const resumedPrompt = bridge.sendMessage.mock.calls[1].arguments[1];
-    assert.match(resumedPrompt, /Cat Cafe Antigravity safe auto-resume/);
+    assert.match(resumedPrompt, /Clowder AI Antigravity safe auto-resume/);
     assert.match(resumedPrompt, /continue_without_repeating_completed_side_effects/);
     assert.match(resumedPrompt, /tier2_auto_probe_owned/);
     assert.match(resumedPrompt, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -2912,8 +2912,8 @@ describe('AntigravityAgentService (Bridge) — fatal errors', () => {
 
     const firstResumePrompt = bridge.sendMessage.mock.calls[1].arguments[1];
     const secondResumePrompt = bridge.sendMessage.mock.calls[2].arguments[1];
-    assert.match(firstResumePrompt, /Cat Cafe Antigravity safe auto-resume/);
-    assert.match(secondResumePrompt, /Cat Cafe Antigravity safe auto-resume/);
+    assert.match(firstResumePrompt, /Clowder AI Antigravity safe auto-resume/);
+    assert.match(secondResumePrompt, /Clowder AI Antigravity safe auto-resume/);
     assert.match(secondResumePrompt, /continue_without_repeating_completed_side_effects/);
     assert.match(secondResumePrompt, /tier2_auto_probe_owned/);
     assert.match(secondResumePrompt, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

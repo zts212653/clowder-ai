@@ -1005,12 +1005,14 @@ describe('ReviewFeedbackTaskSpec', () => {
     await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
 
     // Verify patchAutomationState was called with correct cursor values
-    assert.equal(store._patchCalls.length, 1);
-    const call = store._patchCalls[0];
-    assert.equal(call.taskId, mockTaskItem.id);
-    assert.equal(call.patch.review.lastCommentCursor, 7);
-    assert.equal(call.patch.review.lastDecisionCursor, 4);
-    assert.equal(typeof call.patch.review.lastNotifiedAt, 'number');
+    // #949: now 2 calls — cursor commit + completedReviewCount increment
+    assert.ok(store._patchCalls.length >= 1, 'should have at least 1 patchAutomationState call');
+    const cursorCall = store._patchCalls.find((c) => c.patch.review?.lastCommentCursor !== undefined);
+    assert.ok(cursorCall, 'should have a cursor commit patch');
+    assert.equal(cursorCall.taskId, mockTaskItem.id);
+    assert.equal(cursorCall.patch.review.lastCommentCursor, 7);
+    assert.equal(cursorCall.patch.review.lastDecisionCursor, 4);
+    assert.equal(typeof cursorCall.patch.review.lastNotifiedAt, 'number');
   });
 
   it('echo-skip path also persists cursor to automationState (#406)', async () => {

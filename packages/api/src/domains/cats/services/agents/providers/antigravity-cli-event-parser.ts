@@ -146,7 +146,7 @@ function isAgyAuthRequiredDiagnostic(text: string): boolean {
 function formatAgyAuthRequiredError(): string {
   return [
     'Antigravity CLI profile is not authenticated.',
-    'Run `agy` with the same HOME/profile and complete login before unattended Cat Cafe use.',
+    'Run `agy` with the same HOME/profile and complete login before unattended Clowder AI use.',
     'For isolated AGY profiles, each profile HOME must be onboarded separately.',
   ].join(' ');
 }

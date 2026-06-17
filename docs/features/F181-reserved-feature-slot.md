@@ -14,7 +14,7 @@ created: 2026-04-30
 
 ## Why
 
-team experience（2026-04-30）：
+operator experience（2026-04-30）：
 
 > "我们家里记得f181立项一下？为他保留一下？"
 
@@ -30,7 +30,7 @@ team experience（2026-04-30）：
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "f181立项一下？为他保留一下？" | AC-A1 | feature doc + BACKLOG row | [x] |
 | R2 | 正式开发前补齐"他"的指代和完整需求范围 | AC-A2 | spec review | [ ] |
@@ -53,7 +53,7 @@ team experience（2026-04-30）：
 ## Dependencies
 
 - **Evolved from**: none（待确认）
-- **Blocked by**: CVO scope confirmation（确认"他"指代与需求范围）
+- **Blocked by**: operator scope confirmation（确认"他"指代与需求范围）
 - **Related**: none（待关联检测后补齐）
 
 ## Risk
@@ -62,10 +62,10 @@ team experience（2026-04-30）：
 |------|------|
 | 占号文档被误认为完整 spec，导致猫猫直接开工 | Status 保持 `idea`，并在文档头部写明未补齐前不得实现 |
 | 后续发现其实是已有 feature 子任务 | AC-A3 要求推进前做重复/关联检测，必要时把 F181 改为 related/parking anchor |
-| 未知上下文长期悬空 | BACKLOG 保留 `idea` 状态，后续由 CVO 或接球猫补 scope 后推进 |
+| 未知上下文长期悬空 | BACKLOG 保留 `idea` 状态，后续由 operator 或接球猫补 scope 后推进 |
 
 ## Key Decisions
 
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
-| KD-1 | 先占号，不推断需求范围 | team lead只要求"为他保留"，当前证据不足，编造 scope 会污染真相源 | 2026-04-30 |
+| KD-1 | 先占号，不推断需求范围 | operator只要求"为他保留"，当前证据不足，编造 scope 会污染真相源 | 2026-04-30 |

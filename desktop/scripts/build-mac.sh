@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-mac.sh — Produces macOS DMG installers for Cat Cafe.
+# build-mac.sh — Produces macOS DMG installers for Clowder AI.
 #
 # Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs two DMGs
 # (arm64 + x64) under dist/:
@@ -258,7 +258,7 @@ for arch in "${ARCHS[@]}"; do
     x64) app_dir="${DESKTOP_DIR}/dist/mac" ;;
     *) continue ;;
   esac
-  app_bundle="${app_dir}/Cat Cafe.app"
+  app_bundle="${app_dir}/Clowder AI.app"
   if [[ -d "$app_bundle" ]]; then
     echo "  Ad-hoc signing ${arch} bundle ..."
     codesign -s - --deep --force "$app_bundle" || die "codesign ${arch} failed"
@@ -287,11 +287,11 @@ for arch in "${ARCHS[@]}"; do
   fi
   # Stage .app + /Applications symlink in a temp directory for the DMG.
   dmg_staging="$(mktemp -d)"
-  cp -R "${app_dir}/Cat Cafe.app" "$dmg_staging/"
+  cp -R "${app_dir}/Clowder AI.app" "$dmg_staging/"
   ln -s /Applications "$dmg_staging/Applications"
   echo "  Creating ${dmg_name} via hdiutil ..."
   rm -f "$dmg_out"
-  hdiutil create -volname "Cat Cafe" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_out" \
+  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_out" \
     || die "hdiutil create failed for ${arch}"
   rm -rf "$dmg_staging"
   ok "Created ${dmg_name}"

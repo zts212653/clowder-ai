@@ -87,6 +87,8 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
         const body: Record<string, unknown> = {
           capabilityId: item.id,
           capabilityType: 'mcp',
+          source: item.source,
+          pluginId: item.pluginId,
           scope: catId ? 'cat' : 'global',
           enabled,
           projectPath: projectPath ?? undefined,

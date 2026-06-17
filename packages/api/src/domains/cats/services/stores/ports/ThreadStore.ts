@@ -150,7 +150,7 @@ export interface Thread {
   voiceMode?: boolean;
   /** F095 Phase D: Soft-delete timestamp. null/undefined = not deleted. */
   deletedAt?: number | null;
-  /** F087: CVO Bootcamp onboarding state. */
+  /** F087: operator Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
   /** F128: Parent thread ID for orchestration tracking (sub-threads report back here). */
   parentThreadId?: string;
@@ -172,9 +172,12 @@ export interface Thread {
   /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
   externalRuntimeAnchorState?: ExternalRuntimeAnchorStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
-  preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community';
+  preferredWorkspaceMode?: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts';
   /** F187: User-defined label IDs for thread categorization. */
   labels?: string[];
+  /** F229: Thread kind marker. 'concierge' = 专属前台猫载体（per-user，sidebar 默认隐藏）。
+   *  undefined/absence = 普通 thread。 */
+  threadKind?: 'concierge';
   /** #813: Per-cat pending continuation capsule — written at session seal,
    *  consumed at next invocation start. Passive/lazy session renewal. */
   pendingContinuation?: Record<string, PendingContinuationEntry>;
@@ -215,7 +218,7 @@ export interface ConnectorHubStateV1 {
   lastCommandAt?: number;
 }
 
-/** F087: Bootcamp phase for CVO onboarding (F171 v2 flow) */
+/** F087: Bootcamp phase for operator onboarding (F171 v2 flow) */
 export type BootcampPhase =
   | 'phase-1-intro'
   | 'phase-2-env-check'
@@ -402,7 +405,7 @@ export interface IThreadStore {
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
   updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
+    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | null,
   ): void | Promise<void>;
   /** F187: Update thread labels (replaces entire array). */
   updateLabels(threadId: string, labelIds: string[]): void | Promise<void>;
@@ -460,6 +463,8 @@ export interface IThreadStore {
    * skips user-list indexing. Idempotent — re-indexing an already-visible thread is a no-op.
    */
   indexForUser(threadId: string, userId: string): void | Promise<void>;
+  /** F229: Set or clear threadKind marker. 'concierge' = 专属前台猫载体（sidebar 默认隐藏）。null 清除。 */
+  updateThreadKind(threadId: string, kind: 'concierge' | null): void | Promise<void>;
   /** Repair sparse/missing per-user thread indexes from authoritative thread detail hashes. */
   repairIndex?(userId?: string): Promise<{ repairedUsers: number; repairedMembers: number }>;
 }
@@ -849,6 +854,17 @@ export class ThreadStore implements IThreadStore {
     }
   }
 
+  /** F229: Set or clear threadKind marker for concierge thread. */
+  updateThreadKind(threadId: string, kind: 'concierge' | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (kind === null) {
+      delete thread.threadKind;
+    } else {
+      thread.threadKind = kind;
+    }
+  }
+
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void {
     const thread = this.get(threadId);
     if (!thread) return;
@@ -861,7 +877,7 @@ export class ThreadStore implements IThreadStore {
 
   updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | null,
+    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | null,
   ): void {
     const thread = this.get(threadId);
     if (!thread) return;

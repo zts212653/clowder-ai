@@ -195,7 +195,7 @@
       "relevance": { "docs/features/F144-ppt-forge.md": 3 }
     },
     {
-      "query": "CVO bootcamp onboarding",
+      "query": "operator bootcamp onboarding",
       "relevantAnchors": ["docs/features/F087-cvo-bootcamp.md"],
       "relevance": { "docs/features/F087-cvo-bootcamp.md": 3 }
     },

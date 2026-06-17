@@ -114,6 +114,8 @@ function setupMocks(fileOverrides: Record<string, unknown> = {}) {
       setWorkspaceExpanded: vi.fn(),
       currentWorktree: { id: 'main', branch: 'main', root: '/tmp/repo' },
       _workspaceFileSetAt: { ts: 0, threadId: null },
+      workspaceMode: 'dev',
+      setWorkspaceMode: vi.fn(),
     };
     return sel(store);
   });

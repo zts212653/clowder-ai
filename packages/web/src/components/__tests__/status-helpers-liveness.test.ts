@@ -92,7 +92,7 @@ describe('deriveActiveCats — slot-first truth source', () => {
 });
 
 describe('F194 Phase Z5 AC-Z15: ideate mode preserves targetCats union', () => {
-  // 铲屎官 alpha catch 2026-05-10 04:51："并发 at 47 和 55 但是观点采样面板只显示 47"
+  // co-creator alpha catch 2026-05-10 04:51："并发 at 47 和 55 但是观点采样面板只显示 47"
   // 根因：opus-47 完成后其 slot 被 markThreadInvocationComplete 清掉 →
   // deriveActiveCats 从两只猫塌成一只还在 streaming 的猫 → 47 卡片消失
   //

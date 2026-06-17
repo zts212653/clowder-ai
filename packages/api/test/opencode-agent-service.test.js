@@ -728,7 +728,7 @@ describe('OpenCodeAgentService', () => {
 
   // F212 Phase G (AC-G3, clowder-ai#875): silent-stdout case where OpenCode produces
   // only step_start events and no text. Reporter's direct OpenCode CLI checks proved
-  // this is upstream behavior (fresh CLI reproduces), so Cat Cafe responsibility is
+  // this is upstream behavior (fresh CLI reproduces), so Clowder AI responsibility is
   // surfacing the diagnostic instead of swallowing it into generic message.
   test('AC-G3: step_start-only NDJSON → yields system_info notice with silent_completion cliDiagnostics', async () => {
     const proc = createMockProcess();

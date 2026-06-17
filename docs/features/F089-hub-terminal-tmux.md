@@ -13,9 +13,9 @@ created: 2026-03-09
 
 ## Why
 
-### 核心需求（team lead 2026-03-08）
+### 核心需求（operator 2026-03-08）
 
-1. **观察猫猫操作**：agent 在 Claude CLI 里跑的子进程（Bash tool、subagent 等）team lead看不到
+1. **观察猫猫操作**：agent 在 Claude CLI 里跑的子进程（Bash tool、subagent 等）operator看不到
 2. **崩溃恢复**：agent 卡死时想看现场（而不是只能杀进程重来）
 3. **手动接管**：agent 做到一半想人工接手继续
 4. **浏览器内 terminal**：不想切 iTerm，在 Hub 里直接操作
@@ -37,7 +37,7 @@ tmux pane（agent 跑在这里）─┤
 
 **一个 agent = 一个 tmux pane。** 机器侧和人类侧消费同一个运行时的输出，不是两套进程。
 
-旧版"双轨制"的问题：机器轨 spawn+pipe 是独立进程，人类轨 tmux pane 是另一个——team lead在浏览器里看到的不是 agent 真正在干的事。
+旧版"双轨制"的问题：机器轨 spawn+pipe 是独立进程，人类轨 tmux pane 是另一个——operator在浏览器里看到的不是 agent 真正在干的事。
 
 ### tmux 架构
 
@@ -136,10 +136,10 @@ tmux pane（agent 跑在这里）─┤
 
 | # | 需求点 | 来源 | 状态 |
 |---|--------|------|------|
-| 1 | 浏览器内打开 terminal（单 shell） | team lead 2026-03-08 | done (Phase 1, PR #326 + #332) |
-| 1b | 浏览器内 tmux pane 列表 UI | team lead 2026-03-08 | done (Phase 3a, AgentPaneList) |
-| 2 | 观察 agent 操作（后端 plumbing） | team lead 2026-03-08 | done (Phase 2, PR #334) |
-| 2b | 观察 agent 操作（前端 UI 入口） | team lead 2026-03-08 | done (Phase 3a, AgentPaneViewer) |
-| 3 | 崩溃现场保留 | team lead 2026-03-08 | done (Phase 2, remain-on-exit) |
-| 4 | 手动接管 agent | team lead 2026-03-08 | pending (Phase 3) |
-| 5 | 进程树可视化 | team lead 2026-03-08 | pending (Phase 3) |
+| 1 | 浏览器内打开 terminal（单 shell） | operator 2026-03-08 | done (Phase 1, PR #326 + #332) |
+| 1b | 浏览器内 tmux pane 列表 UI | operator 2026-03-08 | done (Phase 3a, AgentPaneList) |
+| 2 | 观察 agent 操作（后端 plumbing） | operator 2026-03-08 | done (Phase 2, PR #334) |
+| 2b | 观察 agent 操作（前端 UI 入口） | operator 2026-03-08 | done (Phase 3a, AgentPaneViewer) |
+| 3 | 崩溃现场保留 | operator 2026-03-08 | done (Phase 2, remain-on-exit) |
+| 4 | 手动接管 agent | operator 2026-03-08 | pending (Phase 3) |
+| 5 | 进程树可视化 | operator 2026-03-08 | pending (Phase 3) |

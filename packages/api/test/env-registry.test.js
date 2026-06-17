@@ -495,6 +495,41 @@ describe('PATCH /api/config/env (route)', () => {
     }
   });
 
+  it('rejects CONNECTOR_GATEWAY_AUTOSTART hub writes because IM autostart is a startup trust boundary', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'CONNECTOR_GATEWAY_AUTOSTART=0\n', 'utf8');
+    setEnv('CONNECTOR_GATEWAY_AUTOSTART', '0');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'CONNECTOR_GATEWAY_AUTOSTART', value: '1' }],
+        },
+      });
+
+      assert.equal(res.statusCode, 400);
+      assert.match(JSON.parse(res.payload).error, /not editable/i);
+      assert.equal(readFileSync(envFilePath, 'utf8'), 'CONNECTOR_GATEWAY_AUTOSTART=0\n');
+      assert.equal(process.env.CONNECTOR_GATEWAY_AUTOSTART, '0');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects client-bundled NEXT_PUBLIC vars from hub writes because the browser reads them at build time', async () => {
     const { configRoutes } = await import('../dist/routes/config.js');
     const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));

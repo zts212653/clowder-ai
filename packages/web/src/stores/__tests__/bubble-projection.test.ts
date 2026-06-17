@@ -20,7 +20,7 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     const callbackBubble = messages.find((m) => m.origin === 'callback')!;
     expect(streamBubble.type).toBe('assistant');
     expect(streamBubble.catId).toBe('opus');
-    expect(streamBubble.content).toContain('好，铲屎官同意了'); // first stream
+    expect(streamBubble.content).toContain('好，co-creator同意了'); // first stream
     expect(streamBubble.content).toContain('砚砚三个 findings 全对'); // second stream
     expect(callbackBubble.id).toBe('0001778468150545-000021-b0d93885');
     expect(callbackBubble.content).toContain('@codex 砚砚');
@@ -261,7 +261,7 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
         // Fields that previously got dropped:
         metadata: { provider: 'anthropic', model: 'opus-4' } as ChatMessage['metadata'],
         replyTo: 'msg-replied-to',
-        replyPreview: { senderCatId: '铲屎官', content: '原始消息' } as ChatMessage['replyPreview'],
+        replyPreview: { senderCatId: 'co-creator', content: '原始消息' } as ChatMessage['replyPreview'],
         visibility: 'whisper',
         whisperTo: ['codex'],
         revealedAt: 999,
@@ -275,7 +275,7 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     expect(m.id).toBe('callback-b');
     expect(m.metadata).toEqual({ provider: 'anthropic', model: 'opus-4' });
     expect(m.replyTo).toBe('msg-replied-to');
-    expect(m.replyPreview).toEqual({ senderCatId: '铲屎官', content: '原始消息' });
+    expect(m.replyPreview).toEqual({ senderCatId: 'co-creator', content: '原始消息' });
     expect(m.visibility).toBe('whisper');
     expect(m.whisperTo).toEqual(['codex']);
     expect(m.revealedAt).toBe(999);

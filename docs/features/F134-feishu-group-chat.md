@@ -15,9 +15,9 @@ created: 2026-03-24
 
 ## Why
 
-Cat Café 目前的飞书接入只支持 **1v1 私聊（DM）**，team lead希望把机器人拉进飞书群聊，让群里的人都能 @机器人提问，且猫回复时能 @发送者，区分不同用户。
+Cat Café 目前的飞书接入只支持 **1v1 私聊（DM）**，operator希望把机器人拉进飞书群聊，让群里的人都能 @机器人提问，且猫回复时能 @发送者，区分不同用户。
 
-team experience：
+operator experience：
 > *"如果我们的飞书的机器人加入多个群，比如不同的人 at 你，我们需要区分不同的用户，以及加入不同的群，我们可以优化一下 🤔 这样的话得区分到底哪个群聊给哪个 thread 发了信息？"*
 
 > *"改动 1：FeishuAdapter — 解除群聊限制 + 提取用户信息。改动 2：ConnectorRouter — 携带发送者身份。改动 3：回复路由 — 群聊回复应 @发送者。改动 4：权限控制——好像可以先做1-3 然后再做4？"*
@@ -118,26 +118,26 @@ export interface FeishuInboundMessage {
 
 ### Phase D: 权限控制
 
-> team lead场景：演示时别人拉人进群，担心 token 被刷爆、thread 被乱切。需要控制谁能做什么。
+> operator场景：演示时别人拉人进群，担心 token 被刷爆、thread 被乱切。需要控制谁能做什么。
 
-**三层权限模型**（team lead 2026-03-25 确认）：
+**三层权限模型**（operator 2026-03-25 确认）：
 
 1. **群白名单（第一层）**：哪些群允许 bot 响应
    - 未授权群的 @bot 消息静默忽略或回复权限提示
-   - 管理命令 `/allow-group`、`/deny-group`（仅team lead可用）
+   - 管理命令 `/allow-group`、`/deny-group`（仅operator可用）
    - 存储：Redis 或 env 配置
 
 2. **@bot 对话全开放（第二层 — 不做限制）**：群里所有人都能 @bot 对话
-   - team lead确认不需要用户级白名单
+   - operator确认不需要用户级白名单
 
-3. **/command 只限管理员（第三层）**：`/threads`、`/new`、`/use` 等管理命令只有team lead能用
+3. **/command 只限管理员（第三层）**：`/threads`、`/new`、`/use` 等管理命令只有operator能用
    - 防止群里其他人随意 `/new` 创建 thread 或 `/use` 切换 thread
-   - 管理员身份：匹配team lead的飞书 open_id（env 配置 `FEISHU_ADMIN_OPEN_IDS`）
+   - 管理员身份：匹配operator的飞书 open_id（env 配置 `FEISHU_ADMIN_OPEN_IDS`）
    - 非管理员发 /command → 回复"只有管理员可以使用此命令"
 
 ### Phase E: WebSocket 长连接模式支持（双模式共存）
 
-> team lead 2026-03-25 提出：飞书应同时支持 Webhook 和 WebSocket 长连接两种模式，由team lead在 IM Hub 配置面板选择，而不是非此即彼推翻现有实现。
+> operator 2026-03-25 提出：飞书应同时支持 Webhook 和 WebSocket 长连接两种模式，由operator在 IM Hub 配置面板选择，而不是非此即彼推翻现有实现。
 
 **背景**：
 - 当前 Cat Café 飞书接入仅支持 **Webhook 模式**（需要公网 IP / 反向代理）
@@ -148,7 +148,7 @@ export interface FeishuInboundMessage {
 **设计原则**：
 - **两种模式并存**，不推翻现有 Webhook 实现
 - **配置驱动**：通过 `FEISHU_CONNECTION_MODE` 选择 `webhook`（默认）或 `websocket`
-- **IM Hub 可见**：配置项在 Hub 连接器配置面板可视化选择，而非仅藏在 env（team lead明确要求）
+- **IM Hub 可见**：配置项在 Hub 连接器配置面板可视化选择，而非仅藏在 env（operator明确要求）
 - **Inbound 差异化，Outbound 不变**：只有收消息的方式变了（webhook route vs WSClient），发消息仍走 REST API
 
 **改动范围**：
@@ -238,16 +238,16 @@ if (connectionMode === 'websocket') {
 
 ## 需求点 Checklist
 
-| ID | 需求点（team experience/转述） | AC 编号 | 验证方式 | 状态 |
+| ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
 |----|---------------------------|---------|----------|------|
 | R1 | "飞书机器人加入多个群" | AC-A1, AC-A5 | test + manual | [x] |
 | R2 | "不同的人 at 你，我们需要区分不同的用户" | AC-A4, AC-B2, AC-B3 | test + screenshot | [x] |
 | R3 | "区分到底哪个群聊给哪个 thread 发了信息" | AC-B4 | test + manual | [x] |
-| R4 | 群聊回复应 @发送者（team lead确认的改动 3） | AC-C1, AC-C3 | test + manual | [x] |
+| R4 | 群聊回复应 @发送者（operator确认的改动 3） | AC-C1, AC-C3 | test + manual | [x] |
 | R5 | 先做 1-3 再做 4（权限后做） | Phase D 暂不开工 | — | [x] |
 | R6 | "@所有人的时候bot不要响应，明确@bot才响应" | AC-A6 | test | [x] |
 | R7 | "群聊名字+群聊ID+发送消息的人"在 UI 展示 | AC-B3, AC-B4 | screenshot | [x] |
-| R8 | "飞书支持长连接吗？应该两种都支持，在配置里让team lead选" | AC-E1~E7 | test + manual | [x] |
+| R8 | "飞书支持长连接吗？应该两种都支持，在配置里让operator选" | AC-E1~E7 | test + manual | [x] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC
@@ -268,7 +268,7 @@ if (connectionMode === 'websocket') {
 | Bot 自身 open_id 获取方式可能因飞书 API 变更 | 双策略：API 查询 + env 配置 fallback（KD-5） |
 | ConnectorSource 扩展 sender 可能影响前端渲染 | sender 字段可选，前端 graceful fallback |
 | 公共层改动（Phase B）影响其他 adapter | sender 参数可选，不传 = 不影响；跨 family review Maine Coon |
-| 新增飞书权限（contact/chat）需team lead手动配置 | 文档中列出具体权限名，提醒team lead在开发者后台添加 |
+| 新增飞书权限（contact/chat）需operator手动配置 | 文档中列出具体权限名，提醒operator在开发者后台添加 |
 | 发送者姓名 API 调用频率限制 | 内存 Map 缓存，同一 open_id 只调一次（KD-6） |
 | WebSocket 长连接模式下飞书侧中断 | SDK 内置自动重连 + 日志可观测；Webhook 模式作为 fallback 始终可用 |
 | Lark 国际版不支持 WebSocket | 双模式共存设计，Lark 用户配置 `webhook` 模式即可 |
@@ -279,18 +279,18 @@ if (connectionMode === 'websocket') {
 | # | 决策 | 理由 | 日期 |
 |---|------|------|------|
 | KD-1 | 飞书群聊从 F088 拆出为独立 Feature F134 | F088 已有 19 个 ISSUE 太重；F132 已验证拆分模式可行；公共层改动记 F088 Phase 7 | 2026-03-24 |
-| KD-2 | 先做 Phase A-C，Phase D 权限控制后做 | team lead确认："好像可以先做 1-3 然后再做 4" | 2026-03-24 |
+| KD-2 | 先做 Phase A-C，Phase D 权限控制后做 | operator确认："好像可以先做 1-3 然后再做 4" | 2026-03-24 |
 | KD-3 | 群消息必须 @机器人才处理 | 飞书会推送所有群消息给订阅的 bot，不过滤会导致垃圾消息涌入 | 2026-03-24 |
 | KD-4 | 公共层 sender 扩展属于 F088 Phase 7，在 F134 开发中联动推进 | 保持 F088 作为公共层唯一真相源，避免平台特定 Feature 改动公共层接口后忘记更新 F088 | 2026-03-24 |
 | KD-5 | Bot open_id 双策略获取 | 启动时调 `GET /open-apis/bot/v3/info` 自动获取 + `FEISHU_BOT_OPEN_ID` env 兜底。原因：open_id 是 app-scoped（同一 bot 不同 app token 看到不同 open_id，见 openclaw/openclaw#40768），env 兜底防 API 失败 | 2026-03-25 |
 | KD-6 | 发送者姓名通过 Contact API 获取 + 内存缓存 | `event.sender` 只有 `sender_id`（含 open_id/user_id/union_id），无 name 字段。需调 `GET /contact/v3/users/:open_id` 获取。用 Map 缓存避免重复调用。需 `contact:user.base:readonly` 权限 | 2026-03-25 |
-| KD-7 | @所有人（@_all）不触发 bot | team lead确认："我@所有人的时候，bot我觉得应该不要响应，而是要明确@bot时候才响应"。`@_all` 在 mentions 中 key 为 `@_all`，与 `@_user_N` 不同，过滤即可 | 2026-03-25 |
-| KD-8 | ~~群聊中禁用 /命令~~ → 群聊支持 /命令 + 每群独立 IM Hub | 初版 KD-8 禁用了群聊 /command，team lead实测发现 `/threads` 被猫猫"扮演系统"回复。PR #699 移除限制，群聊恢复 /slash 命令支持，Hub 标题含群名（`飞书群聊 · {群名} IM Hub`）区分多群 | 2026-03-25 |
+| KD-7 | @所有人（@_all）不触发 bot | operator确认："我@所有人的时候，bot我觉得应该不要响应，而是要明确@bot时候才响应"。`@_all` 在 mentions 中 key 为 `@_all`，与 `@_user_N` 不同，过滤即可 | 2026-03-25 |
+| KD-8 | ~~群聊中禁用 /命令~~ → 群聊支持 /命令 + 每群独立 IM Hub | 初版 KD-8 禁用了群聊 /command，operator实测发现 `/threads` 被猫猫"扮演系统"回复。PR #699 移除限制，群聊恢复 /slash 命令支持，Hub 标题含群名（`飞书群聊 · {群名} IM Hub`）区分多群 | 2026-03-25 |
 | KD-9 | `@sender` 采用 message-level 绑定（`source.sender` 写入 messageStore）而非 thread-level lastSender | 原设计的 `lastSender` 是 thread 级覆盖存储，群聊并发时后到消息会覆盖先到的 sender，导致错 @。改用 message-level：每条入站消息的 `ConnectorSource.sender` 已持久化在 messageStore，deliver 时通过 `triggerMessageId` 回溯原始消息的 sender。详见 KD-9 技术设计章节 | 2026-03-25 |
-| KD-10 | Contact API + Chat API 放在 FeishuAdapter，不预抽服务 | `resolveSenderName(openId)` + `resolveChatName(chatId)` 带 TTL Map cache，直接放在 FeishuAdapter 内。只有第二个 connector 也需要时才抽 `FeishuContactService`。需权限：`contact:user.base:readonly` + `im:chat:readonly`（team lead已配） | 2026-03-25 |
+| KD-10 | Contact API + Chat API 放在 FeishuAdapter，不预抽服务 | `resolveSenderName(openId)` + `resolveChatName(chatId)` 带 TTL Map cache，直接放在 FeishuAdapter 内。只有第二个 connector 也需要时才抽 `FeishuContactService`。需权限：`contact:user.base:readonly` + `im:chat:readonly`（operator已配） | 2026-03-25 |
 | KD-11 | Connector source 队列禁止 merge | `source === 'connector'` 的消息直接禁止 merge（快速稳妥方案）。QueueEntry 新增可选 `senderMeta` 字段用于 UI 展示，但不参与 merge 判断。这避免群聊中不同 sender 的消息被合并 | 2026-03-25 |
-| KD-12 | Phase D 三层权限模型 | 第一层：群白名单（`/allow-group` `/deny-group`）；第二层：@bot 对话全开放不限制；第三层：/command 管理命令仅管理员可用（`FEISHU_ADMIN_OPEN_IDS` env）。team lead场景：演示时防别人刷 token、乱切 thread | 2026-03-25 |
-| KD-13 | WebSocket 长连接 + Webhook 双模式共存 | 飞书官方支持 WebSocket 长连接（不需要公网 IP），`@larksuiteoapi/node-sdk` 原生支持 `WSClient`。team lead明确要求两种模式都支持、在 IM Hub 配置面板可选（不能只藏在 env）、默认 webhook 向后兼容。Lark 国际版不支持长连接，webhook 必须保留 | 2026-03-25 |
+| KD-12 | Phase D 三层权限模型 | 第一层：群白名单（`/allow-group` `/deny-group`）；第二层：@bot 对话全开放不限制；第三层：/command 管理命令仅管理员可用（`FEISHU_ADMIN_OPEN_IDS` env）。operator场景：演示时防别人刷 token、乱切 thread | 2026-03-25 |
+| KD-13 | WebSocket 长连接 + Webhook 双模式共存 | 飞书官方支持 WebSocket 长连接（不需要公网 IP），`@larksuiteoapi/node-sdk` 原生支持 `WSClient`。operator明确要求两种模式都支持、在 IM Hub 配置面板可选（不能只藏在 env）、默认 webhook 向后兼容。Lark 国际版不支持长连接，webhook 必须保留 | 2026-03-25 |
 
 ## Design Gate Results（2026-03-25）
 
@@ -312,7 +312,7 @@ if (connectionMode === 'websocket') {
 
 ### 新增飞书权限需求
 
-team lead需在飞书开发者后台添加以下权限：
+operator需在飞书开发者后台添加以下权限：
 
 | 权限 | 用途 | 阶段 |
 |------|------|------|
@@ -436,7 +436,7 @@ Follow-up 验收口径：
 
 ## KD-9 技术设计：Message-Level Sender 绑定 + 全链路 @sender
 
-> 此章节记录 Review Round 1-2 发现的 P1 问题及最终技术方案（team lead拍板不降级 spec）。
+> 此章节记录 Review Round 1-2 发现的 P1 问题及最终技术方案（operator拍板不降级 spec）。
 
 ### 问题根因
 
@@ -719,4 +719,4 @@ class FeishuAdapter {
 }
 ```
 
-**权限**：team lead已在飞书开发者后台配好 `contact:user.base:readonly` + `im:chat:readonly`。
+**权限**：operator已在飞书开发者后台配好 `contact:user.base:readonly` + `im:chat:readonly`。

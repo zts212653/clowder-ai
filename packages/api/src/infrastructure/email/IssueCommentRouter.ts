@@ -17,6 +17,10 @@ export interface IssueComment {
   readonly author: string;
   readonly body: string;
   readonly createdAt: string;
+  /** GitHub author_association field — present when fetched via GitHub API.
+   * Undefined in legacy paths or when association cannot be determined.
+   * Delivery policy uses this to silence OWNER/MEMBER activity (F168 Phase B). */
+  readonly authorAssociation?: string;
 }
 
 export interface IssueCommentSignal {

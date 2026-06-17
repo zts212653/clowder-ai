@@ -20,7 +20,7 @@ created: 2026-02-26
 - [ ] AC-A1: 本文档需在本轮迁移后维持模板核心结构（Status/Why/What/Dependencies/Risk/Timeline）。
 
 ## Closure Note
-从未实现。仅有调研报告（*(internal reference removed)*），零个 `feat(F014)` commit。2026-03-30 team lead确认关闭。
+从未实现。仅有调研报告（*(internal reference removed)*），零个 `feat(F014)` commit。2026-03-30 operator确认关闭。
 
 ## Key Decisions
 - 历史记录未单列关键决策

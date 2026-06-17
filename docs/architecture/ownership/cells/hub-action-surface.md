@@ -2,7 +2,7 @@
 cell_id: hub-action-surface
 title: Hub Action Surface
 summary: First-party Hub user-visible actions that let cats surface files, previews, rich blocks, workflow state, and other in-context artifacts to the user.
-canonical_features: [F022, F096, F120, F131, F223]
+canonical_features: [F022, F096, F120, F131, F223, F232]
 code_anchors:
   - packages/api/src/routes/workspace.ts
   - packages/web/src/hooks/useWorkspaceNavigate.ts
@@ -12,16 +12,20 @@ code_anchors:
   - packages/mcp-server/src/tools/hub-action-tools.ts
   - packages/mcp-server/src/tools/callback-tools.ts
   - packages/mcp-server/src/tools/rich-block-rules-tool.ts
+  - packages/api/src/domains/cats/services/agents/routing/thread-artifacts-aggregator.ts
+  - packages/web/src/components/ArtifactsPanel.tsx
 doc_anchors:
   - docs/features/F022-rich-blocks.md
   - docs/features/F096-interactive-rich-blocks.md
   - docs/features/F120-hub-embedded-browser.md
   - docs/features/F131-workspace-navigator.md
   - docs/features/F223-capability-surface-registry.md
+  - docs/features/F232-thread-artifacts-panel.md
   - cat-cafe-skills/refs/capability-wakeup-index.md
 static_scan_hints: [workspace:navigate, preview:auto-open, create_rich_block, rich block, workspace panel, browser preview, surface to user, in-context artifact]
 cited_by:
   - {feature: F223, date: 2026-06-03, delta: new cell}
+  - {feature: F232, date: 2026-06-12, delta: update — thread artifacts aggregation endpoint + ArtifactsPanel drawer}
 ---
 
 # Hub Action Surface

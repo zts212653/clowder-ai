@@ -19,7 +19,7 @@ created: 2026-02-26
 
 ### 痛点来源
 
-team lead 2026-02-26 提出：
+operator 2026-02-26 提出：
 > "我们这套机制有大问题了，现在这个我们最重要的真相源头发散出不同 feat md 的蜘蛛网乱七八糟的。"
 
 ### 核心问题
@@ -31,7 +31,7 @@ team lead 2026-02-26 提出：
 
 ### 设计灵感
 
-team lead的记忆系统设计 proposal（三层记忆）：
+operator的记忆系统设计 proposal（三层记忆）：
 - **热层**：直接在 context（BACKLOG 索引表）
 - **温层**：轻量索引，快速召回（feat 聚合文件）
 - **冷层**：需要搜索（散落的 feature-specs/discussions）
@@ -239,14 +239,14 @@ created: 2026-02-26           # 创建日期
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| **Discussion** | 本 thread（2026-02-26 team lead + Ragdoll）| BACKLOG 问题诊断 |
+| **Discussion** | 本 thread（2026-02-26 operator + Ragdoll）| BACKLOG 问题诊断 |
 | **BACKLOG 条目** | 待登记 | - |
 
 ---
 
-## Feature 演化图（team lead梳理 2026-02-26）
+## Feature 演化图（operator梳理 2026-02-26）
 
-team lead用 Mermaid 可视化了 Cat Café 的 Feature 演化关系，分为 5 个逻辑栈：
+operator用 Mermaid 可视化了 Cat Café 的 Feature 演化关系，分为 5 个逻辑栈：
 
 ### 1. 语音栈（Voice Stack）
 ```
@@ -323,7 +323,7 @@ F014 → F015 → F036
 - [x] 历史文档补 frontmatter（research/discussion/bug-report 共 50+ 文件）— **Maine Coon**
 - [x] TECH-DEBT commit 标注（52/83 条，剩余 31 条无对应 commit）— **Maine Coon**
 - [x] 创建维护脚本 `scripts/tech-debt-maintain.mjs` — **Maine Coon**
-- [x] 验收 F021 重新开放（F21++ 未完成，不能标 done）— **Ragdoll+team lead**
+- [x] 验收 F021 重新开放（F21++ 未完成，不能标 done）— **Ragdoll+operator**
 - [x] 扩展 frontmatter contract 加入 `debt_ids` 字段 — **Ragdoll**（commit `3fb8aa9`）
 - [x] 更新 SOP.md "完成后真相源同步" 章节 — **Ragdoll**（commit `3fb8aa9`）
 
@@ -375,9 +375,9 @@ F014 → F015 → F036
 ### `feat-completion` skill 设计草案
 
 **触发条件**（任一）：
-- team lead说"这个 Feature 完成了"、"F0xx done"
+- operator说"这个 Feature 完成了"、"F0xx done"
 - 所有 Acceptance Criteria 都打勾
-- PR 合入且云端 review 通过
+- PR 合入且remote review 通过
 
 **详细步骤**：
 

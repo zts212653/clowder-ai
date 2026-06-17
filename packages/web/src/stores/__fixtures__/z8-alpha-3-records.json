@@ -3,7 +3,7 @@
     "id": "0001778467517540-000009-7a9ac742",
     "type": "assistant",
     "catId": "opus",
-    "content": "好，铲屎官同意了。更新 feature spec：补 Phase 级 AC + 正式化 MVP AC + 清理已决 OQ。Now formalize the MVP ACs and clean up resolved OQs.Commit and push immediately (shared document).Feature spec 已更新并推送。变更：\n\n- **Phase A**：6 条 AC（会前 3 + 会后 3），全部 `[ ]`\n- **Phase B**：7 条 AC 全部 `[x]`，附完整交付物清单\n- **Phase C**：4 条 AC，全部 `[ ]`\n- **MVP AC**：从\"草案\"正式化（铲屎官确认 2026-05-11）\n- **OQ**：4 条已决标记删除线，1 条待定\n\n下一步按铲屎官说的：找砚砚看看更新后的 spec。\n\n@codex F195 feature spec 刚做了结构升级（`db7d14b61`），请 review 以下改动：\n\n1. **Phase A/B/C 补了正式 AC checkbox**——之前只有叙述没有可勾选验收项，未来冷启动的猫看不出每个 Phase 具体交付了什么\n2. **Phase B 的 7 条 AC 从 plan doc 回写并打勾**，附交付物清单（PR #1624）\n3. **MVP AC 从\"草案，待铲屎官确认\"改为正式版**（铲屎官刚确认）\n4. **4 条已决 OQ 标了删除线**\n\n重点看：AC 拆分粒度是否合理、Phase C 的 4 条 AC 是否覆盖了之前讨论的关键点（turn-taking + speaker identity + 主动推送 + context 注入）、有没有遗漏的讨论决策应该沉淀但没写进去的。",
+    "content": "好，co-creator同意了。更新 feature spec：补 Phase 级 AC + 正式化 MVP AC + 清理已决 OQ。Now formalize the MVP ACs and clean up resolved OQs.Commit and push immediately (shared document).Feature spec 已更新并推送。变更：\n\n- **Phase A**：6 条 AC（会前 3 + 会后 3），全部 `[ ]`\n- **Phase B**：7 条 AC 全部 `[x]`，附完整交付物清单\n- **Phase C**：4 条 AC，全部 `[ ]`\n- **MVP AC**：从\"草案\"正式化（co-creator确认 2026-05-11）\n- **OQ**：4 条已决标记删除线，1 条待定\n\n下一步按co-creator说的：找砚砚看看更新后的 spec。\n\n@codex F195 feature spec 刚做了结构升级（`db7d14b61`），请 review 以下改动：\n\n1. **Phase A/B/C 补了正式 AC checkbox**——之前只有叙述没有可勾选验收项，未来冷启动的猫看不出每个 Phase 具体交付了什么\n2. **Phase B 的 7 条 AC 从 plan doc 回写并打勾**，附交付物清单（PR #1624）\n3. **MVP AC 从\"草案，待co-creator确认\"改为正式版**（co-creator刚确认）\n4. **4 条已决 OQ 标了删除线**\n\n重点看：AC 拆分粒度是否合理、Phase C 的 4 条 AC 是否覆盖了之前讨论的关键点（turn-taking + speaker identity + 主动推送 + context 注入）、有没有遗漏的讨论决策应该沉淀但没写进去的。",
     "origin": "stream",
     "timestamp": 1778467517540,
     "isStreaming": false,
@@ -26,7 +26,7 @@
         "id": "tool-1778467617467-3470",
         "type": "tool_use",
         "label": "opus → Edit",
-        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## MVP Acceptance Criteria（草案，待铲屎官确认）\\n\\n进入设计前至少需要定…",
+        "detail": "{\"replace_all\":false,\"file_path\":\"/home/user/cat-cafe/docs/features/F195-meeting-copilot-live-advisory.md\",\"old_string\":\"## MVP Acceptance Criteria（草案，待co-creator确认）\\n\\n进入设计前至少需要定…",
         "timestamp": 1778467617467
       },
       {

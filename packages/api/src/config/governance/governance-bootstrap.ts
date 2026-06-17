@@ -8,8 +8,18 @@
 
 import { lstat, mkdir, readdir, readFile, readlink, stat, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import type { BootstrapAction, BootstrapReport } from '@cat-cafe/shared';
+import {
+  type BootstrapAction,
+  type BootstrapReport,
+  type CapabilitiesConfig,
+  type MountRules,
+  STANDARD_MOUNT_POINT_IDS,
+} from '@cat-cafe/shared';
+import { updateSkillMountPaths, writeSkillsSyncState } from '../../skills/skill-sync-config.js';
 import { pathsEqual } from '../../utils/project-path.js';
+import { computeSourceManifestHash } from '../../utils/skill-source.js';
+import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../capabilities/capability-orchestrator.js';
+import { readMountRules } from '../mount/mount-rules-store.js';
 import type { Provider } from './governance-pack.js';
 import {
   computePackChecksum,
@@ -20,7 +30,6 @@ import {
 } from './governance-pack.js';
 import { GovernanceRegistry } from './governance-registry.js';
 import { getMethodologyTemplates } from './methodology-templates.js';
-import { computeSourceManifestHash, writeSkillsState } from './skills-state.js';
 
 const IS_WIN32 = process.platform === 'win32';
 
@@ -48,6 +57,97 @@ const PROVIDER_HOOKS_DIRS: Record<Provider, string> = {
   kimi: '.kimi/hooks',
 };
 
+function enabledSkillMountTargets(targetProject: string, rules: MountRules): Array<{ id: string; dir: string }> {
+  const standardTargets = STANDARD_MOUNT_POINT_IDS.flatMap((id) =>
+    rules.mountPoints[id].enabled ? [{ id, dir: resolve(targetProject, rules.mountPoints[id].path) }] : [],
+  );
+  const customTargets = (rules.customPaths ?? []).map((cp) => ({
+    id: cp.alias,
+    dir: resolve(targetProject, cp.path),
+  }));
+  return [...standardTargets, ...customTargets];
+}
+
+function enabledSkillMountTargetIds(rules: MountRules): string[] {
+  return [
+    ...STANDARD_MOUNT_POINT_IDS.filter((id) => rules.mountPoints[id].enabled),
+    ...(rules.customPaths ?? []).map((cp) => cp.alias),
+  ];
+}
+
+function findCatCafeSkillCapability(config: CapabilitiesConfig | null | undefined, skillName: string) {
+  return config?.capabilities.find(
+    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.pluginId,
+  );
+}
+
+function globalSkillMountPolicy(
+  config: CapabilitiesConfig | null | undefined,
+  skillName: string,
+  rules: MountRules,
+): Set<string> | null {
+  const cap = findCatCafeSkillCapability(config, skillName);
+  if (!cap) return null;
+  if (Array.isArray(cap.mountPaths)) return new Set(cap.mountPaths);
+  return (cap.globalEnabled ?? cap.enabled) ? new Set(enabledSkillMountTargetIds(rules)) : new Set();
+}
+
+async function readDisabledCatCafeSkillNames(projectRoot: string): Promise<Set<string>> {
+  const config = await readCapabilitiesConfig(projectRoot);
+  return new Set(
+    config?.capabilities
+      .filter(
+        (cap) =>
+          cap.type === 'skill' &&
+          cap.source === 'cat-cafe' &&
+          !cap.pluginId &&
+          (cap.globalEnabled ?? cap.enabled) === false,
+      )
+      .map((cap) => cap.id) ?? [],
+  );
+}
+
+function ensureDisabledSkillPolicy(config: CapabilitiesConfig, skillName: string): boolean {
+  const existing = config.capabilities.find(
+    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.pluginId,
+  );
+  if (!existing) {
+    config.capabilities.push({
+      id: skillName,
+      type: 'skill',
+      source: 'cat-cafe',
+      enabled: false,
+      globalEnabled: false,
+      mountPaths: [],
+    });
+    return true;
+  }
+
+  const dirty =
+    (existing.globalEnabled ?? existing.enabled) !== false ||
+    !Array.isArray(existing.mountPaths) ||
+    existing.mountPaths.length > 0;
+  existing.source = 'cat-cafe';
+  existing.enabled = false;
+  existing.globalEnabled = false;
+  existing.mountPaths = [];
+  return dirty;
+}
+
+async function writeDisabledSkillPolicies(projectRoot: string, skillNames: readonly string[]): Promise<void> {
+  if (skillNames.length === 0) return;
+  let config: CapabilitiesConfig | null = await readCapabilitiesConfig(projectRoot);
+  if (!config) config = { version: 2, capabilities: [] };
+  if (config.version === 1) config.version = 2;
+
+  let dirty = false;
+  for (const skillName of skillNames) {
+    dirty = ensureDisabledSkillPolicy(config, skillName) || dirty;
+  }
+
+  if (dirty) await writeCapabilitiesConfig(projectRoot, config);
+}
+
 export interface BootstrapOptions {
   dryRun: boolean;
 }
@@ -74,23 +174,49 @@ export class GovernanceBootstrapService {
       actions.push(action);
     }
 
-    // 2. Per-skill symlinks for all supported providers (ADR-025)
-    const skillNames = await this.discoverSkillNames();
-    for (const [_provider, skillsDir] of Object.entries(PROVIDER_SKILLS_DIRS) as [Provider, string][]) {
-      const skillActions = await this.symlinkSkillsPerSkill(targetProject, skillsDir, skillNames, opts.dryRun);
+    // 2. Per-skill symlinks for effective mount targets (ADR-025 + F228)
+    const discoveredSkillNames = await this.discoverSkillNames();
+    const globallyDisabledSkillNames = await readDisabledCatCafeSkillNames(this.catCafeRoot);
+    const skillNames = discoveredSkillNames.filter((name) => !globallyDisabledSkillNames.has(name));
+    const disabledSkillNames = discoveredSkillNames.filter((name) => globallyDisabledSkillNames.has(name));
+    const globalConfig = await readCapabilitiesConfig(this.catCafeRoot);
+    const globalMountRules = await readMountRules(this.catCafeRoot, this.catCafeRoot);
+    const mountRules = await readMountRules(targetProject, this.catCafeRoot);
+    const skillMountTargets = enabledSkillMountTargets(targetProject, mountRules);
+    const targetIdsBySkill = new Map<string, string[]>();
+    const mountTargetIds = skillMountTargets.map((target) => target.id);
+    for (const skillName of skillNames) {
+      const policy = globalSkillMountPolicy(globalConfig, skillName, globalMountRules);
+      targetIdsBySkill.set(
+        skillName,
+        policy ? mountTargetIds.filter((targetId) => policy.has(targetId)) : mountTargetIds,
+      );
+    }
+    for (const target of skillMountTargets) {
+      const displayDir = relative(targetProject, target.dir);
+      const skillNamesForTarget = skillNames.filter((skillName) =>
+        targetIdsBySkill.get(skillName)?.includes(target.id),
+      );
+      const skillActions = await this.symlinkSkillsPerSkill(target.dir, displayDir, skillNamesForTarget, opts.dryRun);
       actions.push(...skillActions);
     }
 
-    // 2a. Write skills-state.json (ADR-025 Phase 1)
-    if (!opts.dryRun && skillNames.length > 0) {
+    // 2a. Write capabilities.json#skillsSync (v2, ADR-025 Phase 1)
+    if (!opts.dryRun && discoveredSkillNames.length > 0) {
       const sourceRoot = resolve(this.catCafeRoot, 'cat-cafe-skills');
       const hash = await computeSourceManifestHash(sourceRoot);
-      await writeSkillsState(targetProject, {
-        managedSkillNames: skillNames,
-        sourceRoot: relative(targetProject, sourceRoot),
+      const sourceRootRelative = relative(targetProject, sourceRoot);
+      const lastSyncedAt = new Date().toISOString();
+      await writeSkillsSyncState(targetProject, {
+        sourceRoot: sourceRootRelative,
         sourceManifestHash: hash,
-        lastSyncedAt: new Date().toISOString(),
+        lastSyncedAt,
+        ...(disabledSkillNames.length > 0 ? { cascadeDisabledSkills: [...disabledSkillNames].sort() } : {}),
       });
+      for (const skillName of skillNames) {
+        await updateSkillMountPaths(targetProject, [skillName], targetIdsBySkill.get(skillName) ?? []);
+      }
+      await writeDisabledSkillPolicies(targetProject, disabledSkillNames);
     }
 
     // 2b. Hooks symlinks for providers that have source hooks
@@ -202,16 +328,33 @@ export class GovernanceBootstrapService {
 
   /** ADR-025: Create per-skill symlinks instead of directory-level. */
   private async symlinkSkillsPerSkill(
-    targetProject: string,
-    skillsDir: string,
+    targetDir: string,
+    displayDir: string,
     skillNames: string[],
     dryRun: boolean,
   ): Promise<BootstrapAction[]> {
-    const targetDir = resolve(targetProject, skillsDir);
     const sourceRoot = resolve(this.catCafeRoot, 'cat-cafe-skills');
     const actions: BootstrapAction[] = [];
 
-    if (!dryRun) await mkdir(targetDir, { recursive: true });
+    if (!dryRun) {
+      // Guard: reject symlinked target dirs to prevent writing outside project
+      try {
+        const dirStat = await lstat(targetDir);
+        if (dirStat.isSymbolicLink()) {
+          return [{ file: displayDir, action: 'skipped', reason: 'target directory is a symlink' }];
+        }
+        if (!dirStat.isDirectory()) {
+          return [{ file: displayDir, action: 'skipped', reason: 'target path exists but is not a directory' }];
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          return [
+            { file: displayDir, action: 'skipped', reason: `target path check failed: ${(err as Error).message}` },
+          ];
+        }
+      }
+      await mkdir(targetDir, { recursive: true });
+    }
 
     for (const name of skillNames) {
       const linkPath = join(targetDir, name);
@@ -223,7 +366,7 @@ export class GovernanceBootstrapService {
           const current = await readlink(linkPath);
           const resolved = resolve(dirname(linkPath), current);
           if (pathsEqual(resolved, sourceSkill)) {
-            actions.push({ file: `${skillsDir}/${name}`, action: 'skipped', reason: 'symlink already correct' });
+            actions.push({ file: `${displayDir}/${name}`, action: 'skipped', reason: 'symlink already correct' });
             continue;
           }
           // Wrong target — remove and recreate
@@ -234,7 +377,7 @@ export class GovernanceBootstrapService {
         } else {
           // Exists but not a symlink — skip to avoid damage
           actions.push({
-            file: `${skillsDir}/${name}`,
+            file: `${displayDir}/${name}`,
             action: 'skipped',
             reason: 'path exists but is not a symlink',
           });
@@ -248,7 +391,7 @@ export class GovernanceBootstrapService {
         const relPath = IS_WIN32 ? sourceSkill : relative(dirname(linkPath), sourceSkill);
         await symlink(relPath, linkPath, IS_WIN32 ? 'junction' : undefined);
       }
-      actions.push({ file: `${skillsDir}/${name}`, action: 'symlinked', reason: `linked to ${sourceSkill}` });
+      actions.push({ file: `${displayDir}/${name}`, action: 'symlinked', reason: `linked to ${sourceSkill}` });
     }
 
     return actions;

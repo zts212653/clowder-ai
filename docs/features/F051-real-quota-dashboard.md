@@ -17,7 +17,7 @@ updated: 2026-03-20
 
 ## Why
 
-team lead需要**一眼看到三只猫的真实额度**，服务两个目的：
+operator需要**一眼看到三只猫的真实额度**，服务两个目的：
 
 1. **调度降级** — 哪只猫额度快没了？路由到谁？review 用谁？
 2. **心里有数** — 不用挨个打开官方页面，扫一眼就知道全局
@@ -29,15 +29,15 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 | 问题 | 表现 |
 |------|------|
 | **额度粒度错误** | "Codex 和 GPT-5.2 同一额度池只展示一张卡" — 实际上 OpenAI 有 4 个独立池 |
-| **UI 是运维面板** | 探针状态、CDP 配置提示、止血模式 — 这些是给开发者看的，不是给team lead看的 |
+| **UI 是运维面板** | 探针状态、CDP 配置提示、止血模式 — 这些是给开发者看的，不是给operator看的 |
 | **三个表面各自为政** | Hub 看板 / SwiftBar 脚本 / Widget 页面，视觉语言不统一 |
-| **过度工程** | Web Push 基建、通知能力矩阵、VAPID 配置 — team lead只想看个额度 |
+| **过度工程** | Web Push 基建、通知能力矩阵、VAPID 配置 — operator只想看个额度 |
 
-### team experience（2026-03-04，v2 触发）
+### operator experience（2026-03-04，v2 触发）
 
 > "Maine Coon没理解我想要什么，他的小组件也还是 PWA 的组件，而且也有点丑。ClaudeBar（macOS 菜单栏，一锅端多家）可以参考这个开源项目他的做法。我是想把猫猫们的猫粮以及通知能在我们的 Hub 以及 macOS 菜单和通知中心对上。"
 
-> "Maine Coon的额度人家是有区隔的，你不应该笼统归因。至少要知道 Codex 云端 review 额度和 Codex 本地额度还有 Spark 的额度。"
+> "Maine Coon的额度人家是有区隔的，你不应该笼统归因。至少要知道 Codex remote review 额度和 Codex 本地额度还有 Spark 的额度。"
 
 ### 仍然成立的原则
 
@@ -196,7 +196,7 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 - 开源免费
 
 **我们的策略**：
-- team lead直接安装 ClaudeBar 获得 macOS 菜单栏 + 原生通知
+- operator直接安装 ClaudeBar 获得 macOS 菜单栏 + 原生通知
 - Cat Café Hub 专注做好"调度决策台"这个 ClaudeBar 不做的事
 - 不维护 SwiftBar 脚本、不维护 Web Push 基建
 
@@ -242,10 +242,10 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 
 ## 需求点 Checklist (v2)
 
-| ID | 需求点（team experience） | AC 编号 | 状态 |
+| ID | 需求点（operator experience） | AC 编号 | 状态 |
 |----|---------------------|---------|------|
 | R-v2-1 | "Maine Coon的额度人家是有区隔的，你不应该笼统归因" | AC-v2-1, AC-v2-6 | [ ] |
-| R-v2-2 | "至少要知道 codex 云端 review 额度和 codex 本地额度还有 spark 的额度" | AC-v2-1 | [ ] |
+| R-v2-2 | "至少要知道 codex remote review 额度和 codex 本地额度还有 spark 的额度" | AC-v2-1 | [ ] |
 | R-v2-3 | "直接用 ClaudeBar ok" | AC-v2-4, AC-v2-9 | [ ] |
 | R-v2-4 | "重写 f51 保证我们未来做愿景审计不偏航" | 本文件 | [ ] |
 | R-v2-5 | "Maine Coon没理解我想要什么，他的小组件也还是 PWA 的组件，而且也有点丑" | AC-v2-2, AC-v2-3 | [ ] |
@@ -260,7 +260,7 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 | OpenAI 额度粒度 | 4 个独立池分开显示 | 合并为一张卡 | 官方页面就是分开的，且影响调度决策 |
 | macOS Menu Bar | 直接用 ClaudeBar | 自建 Swift app / Tauri / SwiftBar | 不造轮子，ClaudeBar 已支持全部 provider |
 | 通知方案 | ClaudeBar 原生 + Hub in-app | Web Push (SW + VAPID) | Web Push 在 macOS 上不可靠，ClaudeBar 完全替代 |
-| UI 风格 | ClaudeBar 式 glanceable list | 运维面板三大卡 | team lead要"好看"和"一眼看到" |
+| UI 风格 | ClaudeBar 式 glanceable list | 运维面板三大卡 | operator要"好看"和"一眼看到" |
 | 看板定位 | 调度决策台（额度→路由建议） | 纯展示面板 | 额度的价值在于指导调度，不是看个数字 |
 | Gemini 数据源 | ClaudeBar 同源 (Google internal API + OAuth) | 自建 scraper | ClaudeBar 已验证可行，不造轮子 |
 | Antigravity 数据源 | ClaudeBar 同源 (本地 Language Server RPC) | 无 | 本地进程自动发现，无需外部 API |
@@ -279,7 +279,7 @@ v1（Phase 1-5，Maine Coon实现）的核心问题：
 
 | 决策 | 选择 | 否决 | 原因 |
 |------|------|------|------|
-| 数据源 | 官方 usage 页面抓取 | 本地文件解析 / telemetry | team lead明确要求"官方页面同值" |
+| 数据源 | 官方 usage 页面抓取 | 本地文件解析 / telemetry | operator明确要求"官方页面同值" |
 | Codex+GPT 展示 | ~~单卡共享额度~~ **v2 已纠正** | — | v2: 分开显示 4 个独立池 |
 | Probe 语义 | `enabled`=配置开关, `status`=运行态 | 单一混合语义 | 防止 UI/后端语义漂移 |
 

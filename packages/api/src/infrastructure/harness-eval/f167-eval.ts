@@ -1,4 +1,6 @@
+import { extractC1ZombieHoldSamples } from './c1-zombie-hold-sample-evidence.js';
 import { extractC2VerdictWithoutPassSamples, type PerFireSample } from './c2-sample-evidence.js';
+import { extractC2VoidHoldSamples } from './c2-void-hold-sample-evidence.js';
 import type {
   EvalMetricsHistoryResponse,
   EvalTraceSpan,
@@ -25,9 +27,12 @@ export interface ComponentHealth {
   frictionCounts: Record<string, number | null>;
   /**
    * F192 Phase D — per-fire sample evidence keyed by friction metric name.
-   * Currently only `c2.verdict_without_pass_count` is sampled (per verdict
-   * 2026-06-08-eval-a2a-c2-sample-evidence-build scope). Other components
-   * populate empty objects until their respective fire events are emitted.
+   * Sampled metrics (see `attribution.SAMPLED_METRICS` for the canonical set):
+   *   - `c2.verdict_without_pass_count`     (PR #2144)
+   *   - `c2.void_hold_hint_emitted`         (PR #2222)
+   *   - `c1.zombie_hold_count`              (PR #2250)
+   * Other components / metrics populate empty objects until their respective
+   * fire events are emitted.
    */
   frictionSamples: Record<string, PerFireSample[]>;
   falsePositiveCandidates: string[];
@@ -165,12 +170,21 @@ function buildC1(spans: EvalTraceSpan[], metrics: Record<string, number>): Compo
     frictionCounts['c1.hold_cancel_count'] = holdCancel ?? 0;
   }
 
+  // F192 Phase D — eval:a2a 2026-06-12 build verdict: per-fire sample evidence
+  // for `c1.zombie_hold_count` fires so attribution can classify replacements
+  // by wake-delay bucket (parallel to C2 verdict-without-pass / void-hold samples).
+  const zombieHoldSamples = extractC1ZombieHoldSamples(spans);
+  const frictionSamples: Record<string, PerFireSample[]> = {};
+  if (zombieHoldSamples.length > 0) {
+    frictionSamples['c1.zombie_hold_count'] = zombieHoldSamples;
+  }
+
   return {
     componentId: 'C1',
     componentName: 'hold_ball (MCP tool)',
     activationCounts: { hold_ball_calls: holdBallCalls },
     frictionCounts,
-    frictionSamples: {},
+    frictionSamples,
     falsePositiveCandidates: [],
     bypassCandidates: [],
     confidence: hasData ? (hasCounters ? 'medium' : 'low') : 'no-data',
@@ -217,9 +231,17 @@ function buildC2(spans: EvalTraceSpan[], metrics: Record<string, number>): Compo
   // Extracted regardless of `hasSplitCounters`: if events exist but counters are
   // (somehow) missing, samples are still surfaced so attribution can still drill down.
   const verdictWithoutPassSamples = extractC2VerdictWithoutPassSamples(spans);
+  // F192 Phase D — eval:a2a 2026-06-10 build verdict: parallel per-fire samples
+  // for void_hold_hint fires. Same extraction discipline, different event name.
+  // The C2 finding can now classify void-hold fires (e.g. distinguish a noisy
+  // `cn_chiqiu` regex from a rare `mcp_tool_name` narrative reference).
+  const voidHoldSamples = extractC2VoidHoldSamples(spans);
   const frictionSamples: Record<string, PerFireSample[]> = {};
   if (verdictWithoutPassSamples.length > 0) {
     frictionSamples['c2.verdict_without_pass_count'] = verdictWithoutPassSamples;
+  }
+  if (voidHoldSamples.length > 0) {
+    frictionSamples['c2.void_hold_hint_emitted'] = voidHoldSamples;
   }
 
   const activationCounts: Record<string, number | null> = {

@@ -3,7 +3,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { join } from 'node:path';
@@ -699,7 +699,8 @@ describe('PluginResourceActivator skill safety', () => {
 
     assert.equal(enableResult.status, 'success');
     const codexLink = join(projectRoot, '.codex', 'skills', 'plugin-skill');
-    assert.equal(readlinkSync(codexLink), skillSourceDir);
+    // F228: mountSkillForProject creates relative symlinks; compare resolved targets
+    assert.equal(realpathSync(codexLink), realpathSync(skillSourceDir));
     assert.equal(existsSync(join(projectRoot, '.codex', 'skills', 'skills')), false);
     assert.equal(persisted.capabilities[0].id, 'plugin-skill');
     assert.equal(persisted.capabilities[0].enabled, true);
@@ -710,6 +711,116 @@ describe('PluginResourceActivator skill safety', () => {
     assert.equal(existsSync(codexLink), false);
     assert.equal(persisted.capabilities[0].id, 'plugin-skill');
     assert.equal(persisted.capabilities[0].enabled, false);
+  });
+
+  it('inherits main default mount rules when activating external project skills', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
+    const mainRoot = join(root, 'main');
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'external-project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'plugin-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    mkdirSync(join(mainRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+    writeFileSync(
+      join(mainRoot, '.cat-cafe', 'capabilities.json'),
+      JSON.stringify({
+        version: 2,
+        capabilities: [],
+        defaultMountRules: [
+          { name: 'claude', path: '.claude/skills', enabled: true },
+          { name: 'codex', path: '.codex/skills', enabled: false },
+          { name: 'gemini', path: '.gemini/skills', enabled: false },
+          { name: 'kimi', path: '.kimi/skills', enabled: false },
+          { name: 'acp', path: '.acp/skills', enabled: true },
+        ],
+      }),
+    );
+
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      resolveMainProjectRoot: () => mainRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/plugin-skill' }],
+    };
+
+    const enableResult = await activator.enablePlugin(manifest);
+
+    assert.equal(enableResult.status, 'success');
+    assert.equal(realpathSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')), realpathSync(skillSourceDir));
+    assert.equal(realpathSync(join(projectRoot, '.acp', 'skills', 'plugin-skill')), realpathSync(skillSourceDir));
+    assert.equal(
+      existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')),
+      false,
+      'plugin skill activation must honor disabled default providers inherited from main project',
+    );
+  });
+
+  it('honors existing plugin skill mountPaths policy during activation', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'plugin-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    let persisted = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'plugin-skill',
+          type: 'skill',
+          enabled: false,
+          source: 'cat-cafe',
+          pluginId: 'test-plugin',
+          mountPaths: ['claude'],
+        },
+      ],
+    };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/plugin-skill' }],
+    };
+
+    const enableResult = await activator.enablePlugin(manifest);
+
+    assert.equal(enableResult.status, 'success');
+    assert.equal(realpathSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')), realpathSync(skillSourceDir));
+    assert.equal(
+      existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')),
+      false,
+      'activation must not mount outside existing plugin mountPaths',
+    );
+    assert.deepEqual(persisted.capabilities[0].mountPaths, ['claude']);
+    assert.equal(persisted.capabilities[0].enabled, true);
   });
 
   it('rejects plugin skill activation through provider skills root symlink', async () => {
@@ -744,7 +855,9 @@ describe('PluginResourceActivator skill safety', () => {
     const result = await activator.enablePlugin(manifest);
 
     assert.equal(result.status, 'failed');
-    assert.match(result.resources[0].error, /directory-level skills symlink/);
+    // F228: mountSkillForProject delegates to isManagedDirectoryLevelSkillsSymlink
+    // which uses "directory-level skills mount" in its error messages
+    assert.match(result.resources[0].error, /directory-level skills mount/);
     assert.equal(existsSync(join(sharedSkillsDir, 'plugin-skill')), false);
   });
 
@@ -899,6 +1012,64 @@ describe('PluginResourceActivator skill safety', () => {
     assert.equal(existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')), false);
   });
 
+  it('preserves existing plugin skill mounts when activation capability write fails', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'plugin-skill');
+    const codexLink = join(projectRoot, '.codex', 'skills', 'plugin-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    mkdirSync(join(projectRoot, '.codex', 'skills'), { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+    symlinkSync(skillSourceDir, codexLink, 'dir');
+
+    let persisted = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'plugin-skill',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'test-plugin',
+        },
+      ],
+    };
+    let writes = 0;
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+        if (writes++ === 0) throw new Error('generateCliConfigs failed');
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+
+    const result = await activator.enablePlugin({
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/plugin-skill' }],
+    });
+
+    assert.equal(result.status, 'failed');
+    assert.equal(realpathSync(codexLink), realpathSync(skillSourceDir));
+    assert.deepEqual(persisted.capabilities, [
+      {
+        id: 'plugin-skill',
+        type: 'skill',
+        enabled: true,
+        source: 'cat-cafe',
+        pluginId: 'test-plugin',
+      },
+    ]);
+  });
+
   it('persists plugin MCP workingDir and env from resolved config sources', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
     const pluginsDir = join(root, 'plugins');
@@ -1034,6 +1205,127 @@ describe('PluginResourceActivator skill safety', () => {
       ['plugin:other-plugin:keep'],
     );
     assert.deepEqual(deregistered, ['old-node']);
+  });
+});
+
+describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () => {
+  it('P1-2: enablePlugin fails when all mount points conflict (no silent success)', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p12-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'my-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    // Create user-owned directories at ALL standard provider paths → all conflict
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const userDir = join(projectRoot, `.${provider}`, 'skills', 'my-skill');
+      mkdirSync(userDir, { recursive: true });
+      writeFileSync(join(userDir, 'user-file.md'), 'user content');
+    }
+
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/my-skill' }],
+    };
+
+    const result = await activator.enablePlugin(manifest);
+
+    // Must report failure — not silent success with zero mounts
+    assert.equal(result.status, 'failed', 'all-conflict activation must fail');
+    const skillResult = result.resources?.find((r) => r.type === 'skill');
+    assert.ok(skillResult, 'skill result should exist in resources');
+    assert.equal(skillResult.ok, false, 'skill activation should report ok=false');
+    assert.ok(skillResult.error, 'skill result should have an error message');
+    assert.ok(skillResult.error.includes('All mount points conflict'), 'error should mention all-conflict');
+  });
+
+  it('P2-1: rollback cleans up custom mount alias symlinks (not just standard providers)', async () => {
+    // Original bug: rollback used mountRules.mountPoints[m.mountPointId].path to rebuild
+    // the link path, which misses custom aliases entirely. Fix uses m.path directly.
+    // This test disables ALL standard providers and uses ONLY a custom alias (acp)
+    // so the old buggy code would leave the symlink behind.
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p21-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'rollback-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    // Write capabilities.json with custom-only mount rules (standard providers disabled)
+    const catCafeDir = join(projectRoot, '.cat-cafe');
+    mkdirSync(catCafeDir, { recursive: true });
+    writeFileSync(
+      join(catCafeDir, 'capabilities.json'),
+      JSON.stringify({
+        version: 2,
+        capabilities: [],
+        mountRules: [
+          { name: 'claude', path: '.claude/skills', enabled: false },
+          { name: 'codex', path: '.codex/skills', enabled: false },
+          { name: 'gemini', path: '.gemini/skills', enabled: false },
+          { name: 'kimi', path: '.kimi/skills', enabled: false },
+          { name: 'acp', path: '.acp/skills', enabled: true },
+        ],
+      }),
+    );
+
+    let writeCallCount = 0;
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => {
+        // Read real config for mount rules resolution, but fail on write
+        const { readCapabilitiesConfig } = await import('../dist/config/capabilities/capability-orchestrator.js');
+        return readCapabilitiesConfig(projectRoot);
+      },
+      writeCapabilities: async () => {
+        writeCallCount++;
+        throw new Error('Simulated config write failure');
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/rollback-skill' }],
+    };
+
+    const result = await activator.enablePlugin(manifest);
+
+    assert.equal(result.status, 'failed', 'config write failure should fail activation');
+    const skillResult = result.resources?.find((r) => r.type === 'skill');
+    assert.equal(skillResult?.ok, false, 'skill activation should report ok=false');
+    assert.ok(skillResult?.error?.includes('Simulated config write failure'), 'error should propagate');
+
+    // The custom acp symlink must be cleaned up by rollback
+    const acpLink = join(projectRoot, '.acp', 'skills', 'rollback-skill');
+    assert.equal(existsSync(acpLink), false, 'custom alias symlink should be removed by rollback');
+
+    // Standard providers were disabled — no symlinks should exist there either
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const linkPath = join(projectRoot, `.${provider}`, 'skills', 'rollback-skill');
+      assert.equal(existsSync(linkPath), false, `disabled ${provider} should have no symlink`);
+    }
   });
 });
 

@@ -70,6 +70,8 @@ export interface RouteStrategyDeps {
   worldContextProvider?: import('../../../../world/WorldContextProvider.js').WorldContextProvider;
   /** F093: World store for thread→world lookup (optional, fail-open) */
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
+  /** F233 Phase B (B2): Ball-custody ingest — fire-and-forget 旁路写球权事件（append + appended-guard apply）。optional, fail-open */
+  ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
@@ -159,6 +161,12 @@ export interface RouteOptions {
    *  false = agent/connector-origin (A2A handoff, connector trigger) — suppress
    *  frustration detection to avoid surfacing system-internal errors as user-facing issues. */
   frustrationAutoIssueEligible?: boolean | undefined;
+  /** #949 P2: Whether the verdict-without-pass warning should fire at route end.
+   *  true/undefined = warn (default). false = suppress — ONLY for connector-sourced
+   *  flows (MR review, CI notification) where ball-pass is not expected.
+   *  Separate from frustrationAutoIssueEligible because A2A/multi-mention callbacks
+   *  suppress frustration issues but still need verdict-pass handoff guards. */
+  verdictPassWarningEnabled?: boolean | undefined;
 }
 
 export interface IncrementalContextResult {

@@ -9,7 +9,7 @@ created: 2026-02-26
 
 > 日期: 2026-02-08
 > 状态: 已拍板
-> 参与者: Ragdoll (Opus 4.5) + 铲屎官 🐬
+> 参与者: Ragdoll (Opus 4.5) + operator 🐬
 > 背景: Phase 5 上下文工程规划
 
 ---
@@ -44,7 +44,7 @@ Phase 5 要集成 Hindsight 作为协作记忆系统。在开工前需要拍板 
 
 Ragdoll推荐 B：共享知识放 `cat-cafe-shared`，个人经验放 `cat-cafe-{catId}`。
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "如果缅因大猫不知道你为什么如此架构他要如何 review 你的代码呢？他可能会猫猫疑惑你这到底是 bug 还是 feature。"
 
@@ -130,7 +130,7 @@ Ragdoll推荐 B：共享知识放 `cat-cafe-shared`，个人经验放 `cat-cafe-
 | B | 分层：F3-lite 做临时记忆，Hindsight 做持久记忆 |
 | C | 保持两套，用户自己选 |
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "F3-lite 像快速的短期记忆。猫猫压缩后丢失完整记忆，但有摘要。用摘要去 F3-lite 找，找不到就去 thread log 找。"
 
@@ -167,7 +167,7 @@ Hindsight Recall (语义检索)
 | B | 用 Hindsight 的 metadata/tags 存状态 |
 | C | 不做门禁，全部写入即生效 |
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "可以注意做好优雅的实现，别丢东西 🤣 什么优雅停机之类的保障都搞上"
 
@@ -201,7 +201,7 @@ Hindsight Recall (语义检索)
 
 Ragdoll推荐 A，创建 `cat-cafe-evidence` bank。
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "好像可以直接到 shared 里面。Hindsight 本身就有 world facts, experience, opinions。"
 >
@@ -232,7 +232,7 @@ Ragdoll推荐 A，创建 `cat-cafe-evidence` bank。
 | 讨论结束时 | thread 关闭时触发 | 按需 |
 | 手动命令 | `/reflect` 触发 | 最可控 |
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "优先让猫猫和人自己主动调用，比如猫猫通过 MCP，人通过 slash magic word"
 
@@ -257,13 +257,13 @@ Ragdoll推荐 A，创建 `cat-cafe-evidence` bank。
 
 Ragdoll推荐 B（卡片）。
 
-### 铲屎官反馈 🐬
+### operator反馈 🐬
 
 > "我同意你的方式，但是放的位置可能都是在右边？参考 Claude Code 的 cowork 截图。"
 >
 > "我们现在的 tool_use 和 error 事件现在是被丢弃的 → 这个必须之后展示！可观测性很重要，不然等了几分钟前端只有猫猫在思考，感受太差了。"
 >
-> "这估计就是你这只猫猫写的 bug（还是 feature？🤣 这里就说明了问题 2 —— 你的架构决策如果只是你的记忆，铲屎官都无法判断到底为什么了！）"
+> "这估计就是你这只猫猫写的 bug（还是 feature？🤣 这里就说明了问题 2 —— 你的架构决策如果只是你的记忆，operator都无法判断到底为什么了！）"
 
 ### 最终决策: 卡片组件 + 右侧面板 + 可观测性修复
 
@@ -274,8 +274,8 @@ Ragdoll推荐 B（卡片）。
 - `error` 事件当前被丢弃 → 必须展示
 - 这是可观测性问题，也是 UX 问题
 
-**铲屎官的灵魂拷问**:
-> "这到底是 bug 还是 feature？你的架构决策如果只是你的记忆，铲屎官都无法判断！"
+**operator的灵魂拷问**:
+> "这到底是 bug 还是 feature？你的架构决策如果只是你的记忆，operator都无法判断！"
 
 → 这正是为什么决策必须共享、必须记录 why 的原因。
 
@@ -336,20 +336,20 @@ Ragdoll推荐 B（卡片）。
 ---
 
 *附录 B 补充整理：Maine Coon 🐾（2026-02-13）*
-*原始签名: Ragdoll 🐾 + 铲屎官 🐬*
+*原始签名: Ragdoll 🐾 + operator 🐬*
 
 ---
 
 ## 附录 C：Hindsight 导入治理五项共识（2026-02-13，已收敛）
 
-> 说明：本节记录Ragdoll与Maine Coon讨论后达成的五项共识，已获铲屎官确认。附录 B 中的"待决"项在此正式拍板。
+> 说明：本节记录Ragdoll与Maine Coon讨论后达成的五项共识，已获operator确认。附录 B 中的"待决"项在此正式拍板。
 
 ### 讨论过程
 
 - Ragdoll独立判断：*(internal reference removed)*
 - Maine Coon独立判断：*(internal reference removed)*
 - 收敛确认：*(internal reference removed)*
-- 铲屎官挑战（教训沉淀）：*(internal reference removed)*
+- operator挑战（教训沉淀）：*(internal reference removed)*
 
 ### 五项共识
 
@@ -363,7 +363,7 @@ Ragdoll推荐 B（卡片）。
 - Phase/Discussion/Research 延后到 P1
 
 **否决理由**：
-- "只导 ADR" → 缺少"为什么有这条规则"的教训知识（铲屎官挑战暴露）
+- "只导 ADR" → 缺少"为什么有这条规则"的教训知识（operator挑战暴露）
 - "全量导入 docs/" → 噪音太大，未归档的讨论会污染 evidence
 
 #### 共识 2：document_id 策略
@@ -416,7 +416,7 @@ Ragdoll推荐 B（卡片）。
 
 ### 补充决策：教训沉淀机制
 
-在铲屎官挑战下，新增第六项共识：
+在operator挑战下，新增第六项共识：
 
 **决策**：建立 `docs/public-lessons.md` 作为集中化教训载体，纳入 P0 导入源
 

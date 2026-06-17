@@ -11,7 +11,7 @@ community_issue: https://github.com/zts212653/clowder-ai/issues/14
 
 > **Status**: done | **Source**: clowder-ai #14 (mindfn) | **Priority**: P2
 >
-> **Close 2026-05-26**：18/18 AC done。AC-B6 macOS 验收由社区多位小伙伴实际使用验证通过（team lead 2026-05-26 确认）。社区 issue clowder-ai#14 已关闭。
+> **Close 2026-05-26**：18/18 AC done。AC-B6 macOS 验收由社区多位小伙伴实际使用验证通过（operator 2026-05-26 确认）。社区 issue clowder-ai#14 已关闭。
 
 ## Why
 
@@ -123,7 +123,7 @@ API 契约：
 - [x] AC-B3: 安装结束后，当前 shell 立即可用 `pnpm`/`claude`/`codex`/`gemini`，新终端也可用
 - [x] AC-B4: 兼容 macOS 自带 bash 3.2 / `set -u` / 空数组迭代
 - [x] AC-B5: 重跑安装不破坏 profile，不重复写坏 PATH，不因 profile 无 trailing newline 破坏 shell
-- [x] AC-B6: ~~team lead在 macOS 真机上完成端到端验收~~ 社区多位小伙伴实际使用验证（team lead 2026-05-26 确认通过）
+- [x] AC-B6: ~~operator在 macOS 真机上完成端到端验收~~ 社区多位小伙伴实际使用验证（operator 2026-05-26 确认通过）
 
 ### Phase C（Windows 一键安装）✅
 - [x] AC-C1: Windows 用户通过 `.\scripts\install.ps1` 完成安装并能启动，不以 WSL 为前提
@@ -157,7 +157,7 @@ API 契约：
 
 | 风险 | 缓解 |
 |------|------|
-| 无 macOS CI runner — PR #174 只有 Linux CI + Windows Smoke，无原生 macOS smoke | team lead真机验收（AC-B6）+ 20+ 平台测试静态断言 |
+| 无 macOS CI runner — PR #174 只有 Linux CI + Windows Smoke，无原生 macOS smoke | operator真机验收（AC-B6）+ 20+ 平台测试静态断言 |
 | 依赖上游 brew cask token 稳定性（`claude-code`/`codex`） | 测试精确断言 cask token，上游改名时 CI 立即失败 |
 | macOS bash 3.2 兼容性 | 空数组用 `${arr[@]+"${arr[@]}"}`，已有测试覆盖 |
 
@@ -167,7 +167,7 @@ QG 通过后追加的改动（均已 push 到 clowder-ai PR #299）：
 
 | Commit | 改动 | 原因 |
 |--------|------|------|
-| `424269e` | SVG → Gemini 动漫风格 PNG 插画 + Bug 1 修复（`govRefetch`） | team lead要求动漫猫猫风格；切换 thread 后治理状态不刷新 |
+| `424269e` | SVG → Gemini 动漫风格 PNG 插画 + Bug 1 修复（`govRefetch`） | operator要求动漫猫猫风格；切换 thread 后治理状态不刷新 |
 | `770712a` | 去除 PNG 白色背景（PIL 阈值抠图） | 白底与卡片背景色不融合 |
 | `f1742a2` | `items-center` 对齐 + 1.2s 最小展示时间 | 图文错落；init/skip 闪烁 |
 | `70a69a1` | `key={threadId}` 强制重挂载 | Bug 1 复现：组件内部 state 残留 |
@@ -176,7 +176,7 @@ QG 通过后追加的改动（均已 push 到 clowder-ai PR #299）：
 - Biome: 0 error, 8 warning（均为 `<img>` vs `<Image />`，可接受）
 - TypeScript: 0 error
 - Tests: 252/254 pass（2 failures 为 pre-existing `ROADMAP.md` vs `ROADMAP.md` 路径不一致，非 F113-E 引入）
-- UX 手测：team lead确认对齐、融合、闪烁均已修复
+- UX 手测：operator确认对齐、融合、闪烁均已修复
 
 ## Post-Review Delta (Phase B, 2026-04-03)
 
@@ -184,12 +184,12 @@ PR #174（已 rebase 到最新 main，CI 状态以 GitHub PR 页面为准）revi
 
 | Commit | 改动 | 来源 |
 |--------|------|------|
-| `395070b2` | macOS Claude/Codex 改为 brew 安装，Linux Claude 改为 npm | team lead报告 `claude.ai/install.sh` 在中国被地域限制 |
+| `395070b2` | macOS Claude/Codex 改为 brew 安装，Linux Claude 改为 npm | operator报告 `claude.ai/install.sh` 在中国被地域限制 |
 | `f8f8432a` | Claude cask 从 `claude` 改为 `claude-code` + `--cask` flag | @gpt52 review P1：`claude` 是桌面 App |
-| `7f94683a` | `set -u` 空数组 guard（bash <4.4 兼容） | team lead报告 macOS 安装到 [8/9] 步骤崩溃 |
-| `61f0a663` | pnpm 安装后无条件 `persist_user_bin` + profile 写入 | team lead报告安装后 `pnpm: command not found` |
+| `7f94683a` | `set -u` 空数组 guard（bash <4.4 兼容） | operator报告 macOS 安装到 [8/9] 步骤崩溃 |
+| `61f0a663` | pnpm 安装后无条件 `persist_user_bin` + profile 写入 | operator报告安装后 `pnpm: command not found` |
 | `ff7e7eb6` | `~/.local/bin` 加入当前 session PATH（缺失时） | 同上 — 当前终端也需要立即可用 |
-| `12411fa5` | npm global bin PATH 发现 + `persist_user_bin` | team lead报告 Gemini 安装成功但 `command -v` 失败 |
+| `12411fa5` | npm global bin PATH 发现 + `persist_user_bin` | operator报告 Gemini 安装成功但 `command -v` 失败 |
 | `90581a2f` | Biome 格式修复 | CI Lint 失败 |
 
 ## Dependencies

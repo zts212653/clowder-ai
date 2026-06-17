@@ -1315,4 +1315,34 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       }),
     );
   });
+
+  it('routing-guard-failure connector_message is suppressed from user timeline', () => {
+    mockStoreCurrentThreadId = 'thread-B';
+    const callbacks: SocketCallbacks = { onMessage: vi.fn() };
+
+    act(() => {
+      root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-B' }));
+    });
+
+    act(() => {
+      simulateServerEvent('connector_message', {
+        threadId: 'thread-B',
+        message: {
+          id: 'guard-fail-1',
+          type: 'connector',
+          content: '[路由守卫]: 补救失败，第二次回复仍没有合法的路由出口；已停止自动重试以避免重复调用。',
+          source: {
+            connector: 'routing-guard-failure',
+            label: '路由守卫失败',
+            icon: '🏓',
+            meta: { presentation: 'system_notice', noticeTone: 'warning' },
+          },
+          timestamp: Date.now(),
+        },
+      });
+    });
+
+    // Internal routing diagnostic — must not reach user-facing store
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
+  });
 });

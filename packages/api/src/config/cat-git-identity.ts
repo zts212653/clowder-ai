@@ -8,8 +8,8 @@
  * injected as GIT_AUTHOR_NAME / GIT_COMMITTER_NAME (env overrides git config).
  *
  * Email is intentionally NOT set here — it inherits the existing git config (the
- * CVO's GitHub noreply account) so contribution-graph attribution stays on one
- * account while the *name* distinguishes the cat. (CVO directive 2026-05-28)
+ * operator's GitHub noreply account) so contribution-graph attribution stays on one
+ * account while the *name* distinguishes the cat. (operator directive 2026-05-28)
  *
  * Model is the SAME source as the identity injected into the system prompt:
  * `getCatModel(catId)` (env CAT_{CATID}_MODEL override > runtime catRegistry), NOT
@@ -17,7 +17,7 @@
  * handle that can lag the model (opus-45 runs claude-opus-4-8); the worktree catalog
  * is a dev copy that lags the runtime catalog. Using getCatModel keeps the git author
  * name consistent with "model=..." in the system-prompt identity line.
- * (CVO 2026-05-28: "看 claude code / anthropic 给你的模型身份")
+ * (operator 2026-05-28: "看 claude code / anthropic 给你的模型身份")
  */
 
 /**

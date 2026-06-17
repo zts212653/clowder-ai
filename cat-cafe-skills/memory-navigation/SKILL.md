@@ -62,7 +62,7 @@ Not for:
   ├─ 是 → list_recent(scope="all", since="7d")
   │        不带 query，按时间倒序看最近活动
   │
-  └─ 否 → 用 cross-cat-handoff 找人问，或问铲屎官澄清需求
+  └─ 否 → 用 cross-cat-handoff 找人问，或问operator澄清需求
 ```
 
 ## 噪音控制
