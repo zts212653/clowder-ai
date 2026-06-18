@@ -93,4 +93,18 @@ describe('prompt-injection review guard scripts', () => {
       'C1 preview must show c1-mcp-callback.local.md when an override exists',
     );
   });
+
+  it('compiled preview surfaces native L0 compile failures instead of falling back', () => {
+    const source = readFileSync('packages/api/src/routes/prompt-injection-preview.ts', 'utf-8');
+    assert.doesNotMatch(
+      source,
+      /Fallback to S-segment view if L0 compilation fails/,
+      'native-L0 preview must not claim success with the non-native S-segment fallback',
+    );
+    assert.match(
+      source,
+      /nativeL0CompileError/,
+      'native-L0 preview errors should expose the compiler failure explicitly',
+    );
+  });
 });

@@ -61,8 +61,16 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
       if (isNativeL0) {
         try {
           systemPromptContent = await compileL0ViaSubprocess({ catId });
-        } catch {
-          // Fallback to S-segment view if L0 compilation fails
+        } catch (e) {
+          const nativeL0CompileError = e instanceof Error ? e.message : String(e);
+          reply.status(500);
+          return {
+            error: `Native L0 compilation failed: ${nativeL0CompileError}`,
+            nativeL0CompileError,
+            catId,
+            isNativeL0,
+            clientId: catConfig?.clientId ?? 'unknown',
+          };
         }
       }
 
