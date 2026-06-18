@@ -40,6 +40,8 @@
 
   /* ============ Shadows — elevation tokens（dark mode 自动 inset 高光） ============ */
   --console-shadow-soft: var(--shadow-elevation-1);
+  /* Card lift — brown-tinted, used by dashboard cards across Mission Hub */
+  --console-card-shadow: 0 8px 22px oklch(0.22 0.02 50 / 0.04);
   /* Rail (ActivityBar) active/hover lift — wider/softer than elevation-1, brown-tinted */
   --console-rail-shadow: 0 5px 14px oklch(0.22 0.02 50 / 0.07);
 
@@ -198,6 +200,8 @@
 [data-theme="dark"] {
   /* Dark rail shadow — deeper, no brown tint to avoid muddy look on dark surfaces */
   --console-rail-shadow: 0 5px 14px oklch(0 0 0 / 0.4), inset 0 1px 0 oklch(1 0 0 / 0.08);
+  /* Dark card lift — deeper, no brown tint */
+  --console-card-shadow: 0 8px 22px oklch(0 0 0 / 0.35), inset 0 1px 0 oklch(1 0 0 / 0.06);
 
   /* Mission Control dark */
   --mc-status-open-dot: #b8a88f;
