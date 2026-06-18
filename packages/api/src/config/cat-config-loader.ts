@@ -718,7 +718,11 @@ function isKnownAvailableDefaultCat(catId: string): boolean {
   const config = getCachedConfig();
   if (!config) {
     const id = createCatId(catId);
-    return catRegistry.getAllIds().length === 0 || catRegistry.has(id);
+    // Empty registry = bootstrap/no members → nothing is "known available".
+    // Returning true here would let any catId pass (including hardcoded ones
+    // that don't exist), causing "Unknown cat ID" errors downstream (#937).
+    if (catRegistry.getAllIds().length === 0) return false;
+    return catRegistry.has(id);
   }
 
   if (!_catIdToBreed || _catIdToBreedSource !== config) {
@@ -758,8 +762,17 @@ export function getDefaultCatId(): CatId {
     return _defaultCatId;
   }
 
-  // Ultimate fallback for zero-member bootstrap mode.
-  return createCatId('opus');
+  // Ultimate fallback: prefer DEFAULT_CAT_ID env even if not yet "known available"
+  // (config may not be loaded yet on first message), then try first registered cat,
+  // then fall back to env value raw. Never hardcode a specific cat ID (#937).
+  const envFallback = process.env.DEFAULT_CAT_ID?.trim();
+  const registeredIds = catRegistry.getAllIds();
+  if (registeredIds.length > 0) return registeredIds[0]!;
+  if (envFallback) return createCatId(envFallback);
+  // Truly empty — no config, no env, no registered cats. Return a sentinel
+  // that callers (AgentRouter) should handle as "no targets available".
+  log.warn('No cats registered and no DEFAULT_CAT_ID set — returning __none__ sentinel');
+  return createCatId('__none__');
 }
 
 /** F154 AC-A4: Set runtime default cat override. Owner-gated at the API layer. */

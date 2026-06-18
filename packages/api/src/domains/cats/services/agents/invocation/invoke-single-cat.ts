@@ -1466,6 +1466,18 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    const openCodeExternalDirs: string[] = [];
+    if (provider === 'opencode') {
+      if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
+        // External project — grant access to Cat Cafe host root (configs, MCP, etc.)
+        openCodeExternalDirs.push(hostProjectRoot);
+      }
+      if (workingProjectRoot && workingProjectRoot !== workingDirectory) {
+        // Working directory is a subdirectory of a monorepo — grant monorepo root.
+        openCodeExternalDirs.push(workingProjectRoot);
+      }
+    }
+
     // authType is either 'api_key' or 'oauth' — both need runtime config (MCP +
     // L0 + model routing). The only difference is credential injection below.
     const isApiKey = resolvedAccount?.authType === 'api_key';
@@ -1497,6 +1509,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         mcpServerPath,
         // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.
         instructions: openCodeL0InstructionPaths,
+        // #935: External directory permissions for Windows/cross-project access.
+        ...(openCodeExternalDirs.length > 0 ? { externalDirectories: openCodeExternalDirs } : {}),
       } as const;
       openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
         projectRoot,
@@ -1544,6 +1558,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         catId as string,
         invocationId,
         openCodeL0InstructionPaths,
+        openCodeExternalDirs,
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       callbackEnv[OC_INSTRUCTIONS_ONLY_ENV] = '1';

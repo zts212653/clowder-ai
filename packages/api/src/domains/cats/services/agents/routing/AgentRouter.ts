@@ -111,6 +111,21 @@ interface MentionPattern {
   catId: CatId;
 }
 
+/**
+ * #969: Zero-width Unicode characters that LLMs may insert before mentions.
+ * These are invisible in consoles but break line-start `@` detection.
+ */
+function isZeroWidthChar(code: number): boolean {
+  return (
+    code === 0x200b || // Zero Width Space
+    code === 0x200c || // Zero Width Non-Joiner
+    code === 0x200d || // Zero Width Joiner
+    code === 0xfeff || // Zero Width No-Break Space (BOM)
+    code === 0x00ad || // Soft Hyphen
+    code === 0x2060 // Word Joiner
+  );
+}
+
 function getRouteLineStart(line: string): number | null {
   let cursor = line.match(LINE_START_MENTION_PREFIX_RE)?.[0].length ?? 0;
 
@@ -122,6 +137,10 @@ function getRouteLineStart(line: string): number | null {
   }
 
   while (line[cursor] === ' ' || line[cursor] === '\t') cursor++;
+  // #969: Skip zero-width chars and markdown bold/italic markers before @
+  while (cursor < line.length && isZeroWidthChar(line.charCodeAt(cursor))) cursor++;
+  while (cursor < line.length && (line[cursor] === '*' || line[cursor] === '_')) cursor++;
+  while (cursor < line.length && isZeroWidthChar(line.charCodeAt(cursor))) cursor++;
   return line[cursor] === '@' ? cursor : null;
 }
 

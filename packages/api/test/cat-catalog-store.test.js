@@ -241,7 +241,7 @@ describe('cat-catalog-store', () => {
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
   });
 
-  it('bootstraps an empty catalog by default (first-run quest)', () => {
+  it('bootstraps with one seed breed from template (#948)', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-f127-default-'));
     const templatePath = join(projectRoot, 'cat-template.json');
     const template = makeF127BootstrapTemplate();
@@ -250,10 +250,11 @@ describe('cat-catalog-store', () => {
     const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
     const runtimeCatalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
 
-    assert.deepEqual(runtimeCatalog.breeds, []);
-    assert.deepEqual(runtimeCatalog.roster, {
-      owner: { family: 'owner', roles: ['owner'], lead: false, available: true, evaluation: 'co-creator / 大当家' },
-    });
+    // #948: New catalogs seed the first breed from template so the app starts
+    // with at least one usable member (empty registry crashes before wizard).
+    assert.equal(runtimeCatalog.breeds.length, 1, 'should seed exactly one breed');
+    assert.equal(runtimeCatalog.breeds[0].id, 'ragdoll', 'seed breed should be the first template breed');
+    assert.ok(runtimeCatalog.roster?.owner, 'owner roster entry must be present');
     // Non-breed config (reviewPolicy, coCreator) is preserved from template.
     assert.deepEqual(runtimeCatalog.reviewPolicy, template.reviewPolicy);
     assert.deepEqual(runtimeCatalog.coCreator, template.coCreator);

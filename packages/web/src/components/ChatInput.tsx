@@ -23,11 +23,24 @@ import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
-import { hasPendingThreadDraft, syncDraftToStorage, threadDrafts, threadImageDrafts } from './thread-drafts';
+import {
+  hasPendingThreadDraft,
+  syncDraftToStorage,
+  syncReplyDraftToStorage,
+  threadDrafts,
+  threadImageDrafts,
+  threadReplyDrafts,
+} from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
 
 /** Module-level draft storage — survives component unmount/remount across thread switches */
-export { syncDraftToStorage, threadDrafts, threadImageDrafts } from './thread-drafts';
+export {
+  syncDraftToStorage,
+  syncReplyDraftToStorage,
+  threadDrafts,
+  threadImageDrafts,
+  threadReplyDrafts,
+} from './thread-drafts';
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
 
@@ -67,9 +80,23 @@ export function ChatInput({
 
   // #699: Reply-to (quote) state — thread-scoped to prevent split-pane leaks
   const rawReplyToMessage = useChatStore((s) => s.replyToMessage);
+  const setReplyToStore = useChatStore((s) => s.setReplyTo);
   const clearReplyTo = useChatStore((s) => s.clearReplyTo);
   // Only surface the reply when it belongs to this ChatInput's thread
   const replyToMessage = rawReplyToMessage?.threadId === threadId ? rawReplyToMessage : null;
+  const replyHydrationThreadRef = useRef<string | null>(null);
+  const replyPersistenceThreadRef = useRef<string | null>(null);
+
+  // #934: Restore reply context from thread draft store before mount-time persistence.
+  // ChatInput is keyed by threadId so this runs once per thread visit.
+  useLayoutEffect(() => {
+    if (!threadId || replyHydrationThreadRef.current === threadId) return;
+    replyHydrationThreadRef.current = threadId;
+    const savedReply = threadReplyDrafts.get(threadId);
+    if (savedReply && rawReplyToMessage?.threadId !== threadId) {
+      setReplyToStore(savedReply);
+    }
+  }, [threadId, rawReplyToMessage, setReplyToStore]);
 
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const activeInvocations = useChatStore((s) => s.activeInvocations);
@@ -186,7 +213,7 @@ export function ChatInput({
     }
     setPendingChatInsert(null);
     textareaRef.current?.focus();
-  }, [pendingChatInsert, setPendingChatInsert, threadId]);
+  }, [pendingChatInsert, setPendingChatInsert, setThreadHasDraft, threadId]);
 
   const handleTranscript = useCallback((text: string) => {
     setInput((prev) => {
@@ -583,14 +610,18 @@ export function ChatInput({
     });
   }, []);
 
-  // Sync input text + images to module-level draft maps (covers all sources: typing, voice, mentions)
+  // Sync input text + images + reply context to module-level draft maps (covers all sources: typing, voice, mentions)
   // useLayoutEffect runs synchronously before browser paint and before unmount,
   // ensuring the draft is written to the Map before the component is destroyed
   // on thread switch (key={threadId}). useEffect would lose the final keystroke.
   useLayoutEffect(() => {
     if (!threadId) return;
     const hasDraft = input.trim().length > 0 || images.length > 0;
+    const firstPersistenceForThread = replyPersistenceThreadRef.current !== threadId;
+    const replyDraft = replyToMessage ?? (firstPersistenceForThread ? (threadReplyDrafts.get(threadId) ?? null) : null);
     syncDraftToStorage(threadId, input || undefined);
+    // #934: Persist reply context alongside text/image drafts
+    syncReplyDraftToStorage(threadId, replyDraft);
     if (images.length > 0) {
       threadImageDrafts.delete(threadId); // move to end (Map insertion order)
       threadImageDrafts.set(threadId, images);
@@ -605,8 +636,9 @@ export function ChatInput({
     } else {
       threadImageDrafts.delete(threadId);
     }
-    setThreadHasDraft(threadId, hasDraft);
-  }, [input, images, threadId, setThreadHasDraft]);
+    setThreadHasDraft(threadId, hasDraft || Boolean(replyDraft));
+    replyPersistenceThreadRef.current = threadId;
+  }, [input, images, threadId, setThreadHasDraft, replyToMessage]);
 
   // F080: recalculate ghost suggestion whenever input changes (covers all setInput paths)
   useEffect(() => {

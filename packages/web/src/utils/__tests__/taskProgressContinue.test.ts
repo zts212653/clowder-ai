@@ -20,4 +20,15 @@ describe('buildContinueMessage', () => {
     expect(msg).toContain('- [ ] Fix bug');
     expect(msg).toContain('- [ ] Run tests');
   });
+
+  it('does not duplicate an existing @ mention prefix', () => {
+    const msg = buildContinueMessage('@opus', {
+      tasks: [],
+      lastUpdate: 1,
+      snapshotStatus: 'interrupted',
+    });
+
+    expect(msg).toContain('@opus 🔁');
+    expect(msg).not.toContain('@@opus');
+  });
 });

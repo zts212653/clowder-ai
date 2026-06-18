@@ -58,6 +58,7 @@ import { MessageActions } from './MessageActions';
 import { MessageNavigator } from './MessageNavigator';
 import { MobileStatusSheet } from './MobileStatusSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
+import { PendingMemberBubble } from './PendingMemberBubble';
 import { ProjectSetupCard } from './ProjectSetupCard';
 
 import { QueuePanel } from './QueuePanel';
@@ -668,6 +669,26 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     intentMode === 'execute' ||
     (intentMode == null && hasActiveInvocation && (activeInvocationCount === 1 || singleSpawningTarget));
 
+  // #936: Identify active invocations that don't yet have a corresponding message
+  // bubble — these need a pending placeholder with member avatar + animation.
+  const pendingInvocations = useMemo(() => {
+    if (!hasActiveInvocation || activeInvocationCount === 0) return [];
+    // Collect catIds that already have a streaming/recent assistant message
+    const streamingCatIds = new Set<string>();
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.type === 'user') break; // stop at last user message boundary
+      if (m.type === 'assistant' && m.catId) {
+        streamingCatIds.add(m.catId);
+      }
+    }
+    // Active invocations without a corresponding bubble = pending
+    return Object.entries(activeInvocations)
+      .filter(([, inv]) => !streamingCatIds.has(inv.catId))
+      .map(([invId, inv]) => ({ invocationId: invId, catId: inv.catId }));
+  }, [hasActiveInvocation, activeInvocationCount, activeInvocations, messages]);
+
   useVoiceAutoPlay();
   useVoiceStream();
   useVadInterrupt();
@@ -998,7 +1019,16 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                 })()}
               </div>
             ) : (
-              messages.map(renderSingleMessage)
+              <>
+                {messages.map(renderSingleMessage)}
+                {pendingInvocations.map((inv) => (
+                  <PendingMemberBubble
+                    key={`pending-${inv.invocationId}`}
+                    catId={inv.catId}
+                    invocationId={inv.invocationId}
+                  />
+                ))}
+              </>
             )}
             <div ref={messagesEndRef} />
           </main>

@@ -12,6 +12,7 @@ import {
   OC_BASE_URL_ENV,
   parseOpenCodeModel,
   summarizeOpenCodeRuntimeConfigForDebug,
+  writeOpenCodeInstructionsOnlyConfig,
   writeOpenCodeRuntimeConfig,
 } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 
@@ -468,6 +469,23 @@ describe('generateOpenCodeRuntimeConfig', () => {
     assert.strictEqual(config.mcp, undefined, 'config must not have mcp section without mcpServerPath');
   });
 
+  test('#935: externalDirectories emits OpenCode external_directory permission globs', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      externalDirectories: ['/Users/lysander/projects/cat-cafe/', 'C:\\Users\\lysander\\monorepo'],
+    });
+
+    assert.deepStrictEqual(config.permission, {
+      external_directory: {
+        '/Users/lysander/projects/cat-cafe/**': 'allow',
+        'C:/Users/lysander/monorepo/**': 'allow',
+      },
+    });
+  });
+
   test('summarizeOpenCodeRuntimeConfigForDebug reports provider adapter and model keys', () => {
     const summary = summarizeOpenCodeRuntimeConfigForDebug({
       providerName: 'anthropic',
@@ -489,6 +507,34 @@ describe('generateOpenCodeRuntimeConfig', () => {
         baseUrlSource: `env:${OC_BASE_URL_ENV}`,
       },
     });
+  });
+});
+
+describe('writeOpenCodeInstructionsOnlyConfig', () => {
+  test('#935: writes external_directory permission rules without provider config', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'oc-instructions-only-external-'));
+    try {
+      const configPath = writeOpenCodeInstructionsOnlyConfig(
+        tmpRoot,
+        'opencode',
+        'inv-external',
+        ['/tmp/l0.md', '/project/OPENCODE.md'],
+        ['/opt/cat-cafe'],
+      );
+
+      const content = JSON.parse(readFileSync(configPath, 'utf-8'));
+      assert.deepStrictEqual(content.instructions, ['/tmp/l0.md', '/project/OPENCODE.md']);
+      assert.deepStrictEqual(content.permission, {
+        external_directory: {
+          '/opt/cat-cafe/**': 'allow',
+        },
+      });
+      assert.strictEqual(content.provider, undefined, 'instructions-only config must not add provider');
+      assert.strictEqual(content.model, undefined, 'instructions-only config must not add model');
+      assert.strictEqual(content.mcp, undefined, 'instructions-only config must not add mcp');
+    } finally {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
 

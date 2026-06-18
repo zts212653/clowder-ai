@@ -17,12 +17,19 @@ function buildMentionToCat(cats: Array<{ id: string; mentionPatterns: string[] }
   );
 }
 
+// #969: Zero-width Unicode chars LLMs may insert before/around mentions
+const ZW_CLASS = '[​‌‍﻿­⁠]*';
+
 function buildMentionRe(toCat: Record<string, string>): RegExp {
   const aliases = Object.keys(toCat).sort((a, b) => b.length - a.length);
   if (aliases.length === 0) return /(?!)/g; // never-match fallback
   const pattern = aliases.map(escapeRegExp).join('|');
   // Boundary chars aligned with backend AgentRouter.parseMentions
-  return new RegExp(`@(${pattern})(?=$|\\s|[,.:;!?()\\[\\]{}<>，。！？、：；（）【】《》「」『』〈〉])`, 'gi');
+  // #969: optionally match zero-width chars and markdown bold/italic before @
+  return new RegExp(
+    `(?:[*_]{0,2})${ZW_CLASS}@(${pattern})(?=$|\\s|[,.:;!?()\\[\\]{}<>，。！？、：；（）【】《》「」『』〈〉])`,
+    'gi',
+  );
 }
 
 function buildMentionColor(cats: Array<{ id: string; color: { primary: string } }>): Record<string, string> {

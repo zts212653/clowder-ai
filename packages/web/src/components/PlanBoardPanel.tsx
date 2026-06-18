@@ -97,7 +97,8 @@ function PlanCard({ catId, threadId, inv }: { catId: string; threadId: string; i
             className="text-micro px-2 py-0.5 rounded-full border border-[var(--console-border-soft)] hover:bg-[var(--console-hover-bg)] transition-colors"
             onClick={async () => {
               if (await confirm({ title: '继续任务', message: '确认继续上次任务？' })) {
-                void handleSend(buildContinueMessage(catId, tp), undefined, threadId);
+                const mentionHandle = cat?.mentionPatterns?.[0] ?? `@${catId}`;
+                void handleSend(buildContinueMessage(mentionHandle, tp), undefined, threadId);
               }
             }}
           >

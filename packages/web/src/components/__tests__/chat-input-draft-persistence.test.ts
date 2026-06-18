@@ -10,7 +10,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatInput, threadDrafts, threadImageDrafts } from '@/components/ChatInput';
+import { ChatInput, threadDrafts, threadImageDrafts, threadReplyDrafts } from '@/components/ChatInput';
 import { useChatStore } from '@/stores/chatStore';
 
 // ── Mocks ──
@@ -68,11 +68,13 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 beforeEach(() => {
   threadDrafts.clear();
   threadImageDrafts.clear();
+  threadReplyDrafts.clear();
   useChatStore.setState({
     currentThreadId: 'default',
     hasDraft: false,
     threadStates: {},
     pendingChatInsert: null,
+    replyToMessage: null,
   });
   URL.createObjectURL = vi.fn((file: Blob) => `blob:${(file as File).name ?? 'image'}`);
   URL.revokeObjectURL = vi.fn();
@@ -146,6 +148,24 @@ describe('ChatInput draft persistence', () => {
 
     // Draft should be restored
     expect(getTextarea().value).toBe('hello from A');
+  });
+
+  it('hydrates saved reply drafts before mount-time persistence can clear them', () => {
+    const onSend = vi.fn();
+    const savedReply = {
+      id: 'msg-parent',
+      content: 'quoted parent',
+      senderCatId: 'opus',
+      threadId: 'thread-REPLY',
+    };
+    threadReplyDrafts.set('thread-REPLY', savedReply);
+
+    act(() => {
+      root.render(React.createElement(ChatInput, { threadId: 'thread-REPLY', onSend }));
+    });
+
+    expect(useChatStore.getState().replyToMessage).toEqual(savedReply);
+    expect(threadReplyDrafts.get('thread-REPLY')).toEqual(savedReply);
   });
 
   it('maintains independent drafts per thread', () => {

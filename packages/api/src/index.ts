@@ -2074,12 +2074,13 @@ async function main(): Promise<void> {
         : {}),
     };
   };
-  const fetchIssueCommentCursor = async (repoFullName: string, issueNumber: number): Promise<number> => {
-    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
-    const comments = await fetchPaginated(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
-      ghToken: getGitHubToken(),
-    });
-    return maxGithubId(comments as { id?: unknown }[]);
+  // #957: Seed to 0 so the first poll discovers ALL existing comments.
+  // The echo filter (isEchoIssueComment) in IssueCommentTaskSpec already
+  // skips self-authored comments, and commitCursor advances the cursor
+  // after processing — so late-registered tracking correctly notifies
+  // about unprocessed external comments without risk of replay.
+  const fetchIssueCommentCursor = async (_repoFullName: string, _issueNumber: number): Promise<number> => {
+    return 0;
   };
 
   // F202: Plugin framework — discovery + config + resource activation

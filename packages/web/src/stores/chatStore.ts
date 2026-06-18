@@ -2282,7 +2282,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [state.currentThreadId]: saved,
         },
         ...flattened,
-        // #699: Clear reply-to when switching threads
+        // #934: Clear reply-to on switch — ChatInput will restore from threadReplyDrafts on mount.
+        // This prevents stale reply context from the outgoing thread leaking into the new thread.
         replyToMessage: null,
       };
     }),

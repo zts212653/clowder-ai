@@ -95,12 +95,21 @@ export function IdentitySection({
           <input type="hidden" aria-label="Cat ID" value={form.catId} />
         </>
       ) : (
-        <TextField
-          label="名称"
-          ariaLabel="Name"
-          value={form.name}
-          onChange={(value) => onChange({ name: value, displayName: value })}
-        />
+        <>
+          <TextField
+            label="名称"
+            ariaLabel="Name"
+            value={form.name}
+            onChange={(value) => onChange({ name: value, displayName: value })}
+          />
+          {/* #968: Show catId (read-only) so users can correlate notifications with members */}
+          <div className="flex items-center gap-2 text-xs text-cafe-fg-muted">
+            <span className="font-medium">Cat ID:</span>
+            <code className="rounded bg-cafe-surface-sunken px-1.5 py-0.5 font-mono text-[11px] select-all">
+              {form.catId}
+            </code>
+          </div>
+        </>
       )}
 
       <TextField

@@ -456,7 +456,22 @@ class ServiceManager {
     // Persist data to writable user directory so sessions survive app restart.
     const redisDataDir = path.join(userDataDir, 'data', 'redis');
     let redisCmd = 'redis-server';
-    const redisArgs = ['--port', '6399', '--dir', redisDataDir, '--save', '60 1', '--appendonly', 'yes'];
+    // Cap maxclients to a conservative desktop value so Redis does not emit a
+    // scary "Server can't set maximum open files" warning on low-ulimit systems
+    // (e.g. packaged Windows installs where the default 10000 exceeds the
+    // process file descriptor limit).  512 is far above local desktop needs.
+    const redisArgs = [
+      '--port',
+      '6399',
+      '--dir',
+      redisDataDir,
+      '--save',
+      '60 1',
+      '--appendonly',
+      'yes',
+      '--maxclients',
+      '512',
+    ];
     let redisCwd = this.root;
 
     if (hasPortable) {
