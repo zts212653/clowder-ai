@@ -363,8 +363,18 @@ export interface CapabilityAuditEntry {
 
 /** PATCH request body for toggling capabilities */
 export interface CapabilityPatchRequest {
-  /** Capability ID to modify */
-  capabilityId: string;
+  /**
+   * Capability ID to modify (single skill).
+   * Optional when capabilityIds[] is provided (batch mode).
+   * At least one of capabilityId or capabilityIds[] must be present.
+   */
+  capabilityId?: string;
+  /**
+   * F228 batch mode: toggle multiple skills in one request.
+   * When provided, overrides capabilityId — all skills share the same
+   * scope/enabled/mountPointId. Config is written once and sync runs once.
+   */
+  capabilityIds?: string[];
   /** Capability type — required to disambiguate same-name MCP/skill entries */
   capabilityType: 'mcp' | 'skill' | 'limb';
   /** Optional source discriminator for same-name capability rows returned by GET. */

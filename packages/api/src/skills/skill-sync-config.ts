@@ -131,9 +131,6 @@ export interface ConfigSyncCtx {
   projectConfigMountPaths: ReadonlyMap<string, readonly string[]>;
   explicitMountPathSkills: ReadonlySet<string>;
   activeTargetIds: string[];
-  cascadeDisabledInThisSync: Set<string>;
-  prevCascadeDisabled: Set<string>;
-  configDisabledSet: Set<string>;
   globalMountPathsBySkill?: ReadonlyMap<string, readonly string[]>;
   mountRules: MountRules;
   pruneMountPaths?: boolean;
@@ -155,12 +152,7 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
         ctx.globalMountPathsBySkill?.get(name),
       );
       if (declared) {
-        // Exclude previous cascade-disabled entries from "local policy" — those empty
-        // mountPaths rows are cascade-origin, not user-set. Treating them as local would
-        // freeze inherited paths on re-enable, blocking future global cascade changes.
-        const hasLocalPolicy =
-          (ctx.projectConfigMountPaths.has(name) && !ctx.prevCascadeDisabled.has(name)) ||
-          ctx.explicitMountPathSkills.has(name);
+        const hasLocalPolicy = ctx.projectConfigMountPaths.has(name) || ctx.explicitMountPathSkills.has(name);
         // Skip writing inherited-only mount paths to project config — preserve global cascade.
         // Only active in drift-resolve context (preserveGlobalCascade=true) where global
         // policy changes should propagate without freezing. Explicit sync operations
@@ -184,17 +176,9 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
     }
     for (const { skillNames, mountPointIds } of grouped.values())
       await updateSkillMountPaths(projectRoot, skillNames, mountPointIds);
+    // F228: no-policy skills (no declared mountPaths) get all active mount points.
     if (noPolicySkills.length > 0) {
-      const reEnabled = new Set(
-        noPolicySkills.filter(
-          (n) =>
-            ctx.prevCascadeDisabled.has(n) && ctx.configDisabledSet.has(n) && !ctx.cascadeDisabledInThisSync.has(n),
-        ),
-      );
-      if (reEnabled.size > 0)
-        await updateSkillMountPaths(projectRoot, [...reEnabled], ctx.activeTargetIds, { forceEnabled: true });
-      const rest = noPolicySkills.filter((n) => !reEnabled.has(n));
-      if (rest.length > 0) await updateSkillMountPaths(projectRoot, rest, ctx.activeTargetIds);
+      await updateSkillMountPaths(projectRoot, noPolicySkills, ctx.activeTargetIds);
     }
   }
   if (ctx.removedNames.length > 0) {
@@ -215,17 +199,17 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
     if (deferredList.length > 0) await updateSkillMountPaths(projectRoot, deferredList, [], { forceDisabled: true });
     if (fullList.length > 0) await removeCatCafeSkillCapabilities(projectRoot, fullList);
   }
+  // F228 scenario 4: disabled skills get mountPaths:[]. Per feat doc, only mountPaths
+  // changes — enabled/globalEnabled are not modified by project-scope operations.
+  // forceDisabled is only used for skills not yet in config (new entries need enabled:false).
   if (ctx.disabledNames.length > 0) {
-    const localMountPathDisabled: string[] = [];
-    const forcedDisabled: string[] = [];
+    const hasConfig: string[] = [];
+    const noConfig: string[] = [];
     for (const name of ctx.disabledNames) {
-      const hasProjectMountPolicy = ctx.projectConfigMountPaths.has(name) || ctx.explicitMountPathSkills.has(name);
-      if (hasProjectMountPolicy && !ctx.cascadeDisabledInThisSync.has(name)) localMountPathDisabled.push(name);
-      else forcedDisabled.push(name);
+      if (ctx.projectConfigMountPaths.has(name) || ctx.explicitMountPathSkills.has(name)) hasConfig.push(name);
+      else noConfig.push(name);
     }
-
-    if (localMountPathDisabled.length > 0) await updateSkillMountPaths(projectRoot, localMountPathDisabled, []);
-    if (forcedDisabled.length > 0)
-      await updateSkillMountPaths(projectRoot, forcedDisabled, [], { forceDisabled: true });
+    if (hasConfig.length > 0) await updateSkillMountPaths(projectRoot, hasConfig, []);
+    if (noConfig.length > 0) await updateSkillMountPaths(projectRoot, noConfig, [], { forceDisabled: true });
   }
 }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
 import { AllProjectsSyncBanner } from './AllProjectsSyncBanner';
 import { ProjectSelector } from './capability-settings-ui';
 import { MountRulesPanel } from './MountRulesPanel';
@@ -145,6 +146,34 @@ export function SkillsContent() {
     });
   }, [activeCategory, scopeItems, query]);
 
+  // F228: Batch toggle — enable/disable all currently filtered skills at once.
+  // Uses capabilityIds[] so config is written once and syncProject runs once.
+  // Placed after filteredSkills to avoid block-scoped variable reference error.
+  const handleBatchToggle = useCallback(
+    async (enabled: boolean) => {
+      const toggleScope = scope === SCOPE_PROJECT ? 'project' : 'global';
+      // Only toggle managed cat-cafe skills (those with controls).
+      const ids = filteredSkills.filter((s) => s.controls).map((s) => s.id);
+      if (ids.length === 0) return;
+      await controls.handleBatchToggle(ids, enabled, toggleScope);
+      await fetchSkills(scope === SCOPE_PROJECT ? selectedProjectPath : undefined);
+      setDriftRefreshToken((v) => v + 1);
+    },
+    [controls, scope, filteredSkills, fetchSkills, selectedProjectPath],
+  );
+
+  // F228: Compute whether the majority of visible managed skills are enabled
+  // to drive the batch toggle's initial state.
+  const batchEnabled = useMemo(() => {
+    const managed = filteredSkills.filter((s) => s.controls);
+    if (managed.length === 0) return false;
+    const isProject = scope === SCOPE_PROJECT;
+    const enabledCount = managed.filter((s) =>
+      isProject ? (s.mountPaths?.length ?? 0) > 0 : (s.controls?.enabled ?? false),
+    ).length;
+    return enabledCount > managed.length / 2;
+  }, [filteredSkills, scope]);
+
   const combinedError = error || controls.error;
   return (
     <div className="space-y-5">
@@ -198,6 +227,16 @@ export function SkillsContent() {
 
       {scope === SCOPE_ALL && <MountRulesPanel scope="default" onSaved={handleMountRulesSaved} />}
 
+      {data && (
+        <SkillsFilterToolbar
+          categories={categories}
+          activeCategory={activeCategory}
+          onCategoryChange={setActiveCategory}
+          query={query}
+          onQueryChange={setQuery}
+        />
+      )}
+
       {scope === SCOPE_ALL && data && (
         <AllProjectsSyncBanner
           scopes={sync.scopeIssues}
@@ -209,14 +248,18 @@ export function SkillsContent() {
         />
       )}
 
-      {data && (
-        <SkillsFilterToolbar
-          categories={categories}
-          activeCategory={activeCategory}
-          onCategoryChange={setActiveCategory}
-          query={query}
-          onQueryChange={setQuery}
-        />
+      {data && filteredSkills.some((s) => s.controls) && (
+        <div className="flex items-center justify-between">
+          <p className="text-xs text-cafe-muted">
+            {batchEnabled ? '批量禁用当前筛选的 Skill' : '批量启用当前筛选的 Skill'}
+          </p>
+          <SettingsResourceToggleSwitch
+            enabled={batchEnabled}
+            busy={controls.toggling === '__batch__'}
+            onClick={() => handleBatchToggle(!batchEnabled)}
+            title={batchEnabled ? '批量禁用当前筛选的 Skill' : '批量启用当前筛选的 Skill'}
+          />
+        </div>
       )}
 
       {!data && !error && <SettingsStatusStrip tone="muted">加载中...</SettingsStatusStrip>}

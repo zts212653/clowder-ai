@@ -96,19 +96,21 @@ export function IdentitySection({
         </>
       ) : (
         <>
+          {/* #968: Show catId (read-only) — above name so identity is first */}
+          <label className="flex flex-col gap-1.5 text-cafe sm:flex-row sm:items-center sm:gap-[14px]">
+            <span className="text-xs font-bold text-cafe-secondary sm:w-[150px] sm:shrink-0">Cat ID</span>
+            <div className="min-w-0 flex-1">
+              <code className="block w-full rounded-lg border border-transparent bg-[var(--console-field-bg)] px-3 py-1.5 font-mono text-xs text-cafe-secondary select-all">
+                {form.catId}
+              </code>
+            </div>
+          </label>
           <TextField
             label="名称"
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => onChange({ name: value, displayName: value })}
           />
-          {/* #968: Show catId (read-only) so users can correlate notifications with members */}
-          <div className="flex items-center gap-2 text-xs text-cafe-fg-muted">
-            <span className="font-medium">Cat ID:</span>
-            <code className="rounded bg-cafe-surface-sunken px-1.5 py-0.5 font-mono text-[11px] select-all">
-              {form.catId}
-            </code>
-          </div>
         </>
       )}
 

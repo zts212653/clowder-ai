@@ -67,15 +67,6 @@ export interface SkillsSyncState {
   sourceManifestHash: string;
   /** ISO 8601 timestamp of last successful sync. */
   lastSyncedAt: string;
-  /**
-   * F228: Skills whose project-config disabled entry originated from a global
-   * cascade default (not from explicit user action). On the next sync, these
-   * entries are treated as "no local opinion" so a global re-enable cascades
-   * correctly instead of being blocked by the stale project-config entry.
-   *
-   * Absent/empty = no cascade-disabled skills tracked.
-   */
-  cascadeDisabledSkills?: string[];
 }
 
 /** Canonical default mount rules — used when capabilities.json has no mountRules. */

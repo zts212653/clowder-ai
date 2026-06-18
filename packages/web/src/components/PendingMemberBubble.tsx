@@ -1,6 +1,6 @@
 'use client';
 
-import { useCatData } from '@/hooks/useCatData';
+import { formatCatName, useCatData } from '@/hooks/useCatData';
 import { CatAvatar } from './CatAvatar';
 import { MessageBubble } from './MessageBubble';
 
@@ -20,13 +20,17 @@ interface PendingMemberBubbleProps {
 export function PendingMemberBubble({ catId, invocationId }: PendingMemberBubbleProps) {
   const { getCatById } = useCatData();
   const catData = getCatById(catId);
-  const catName = catData?.name ?? catId;
+  const catName = catData ? formatCatName(catData) : catId;
 
   return (
     <MessageBubble
       messageId={`pending-${invocationId}`}
       avatar={<CatAvatar catId={catId} size={32} status="streaming" />}
-      header={<span className="text-sm font-medium text-cafe-fg-secondary">{catName}</span>}
+      header={
+        <span className="text-xs font-semibold" style={{ color: catData?.color?.primary, opacity: 0.8 }}>
+          {catName}
+        </span>
+      }
       wrapperClassName="group cat-persona-derived"
     >
       <div className="flex items-center gap-1 py-2 text-cafe-fg-muted">

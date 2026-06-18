@@ -162,7 +162,7 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
       'skill-sync engine must resolve standard mount dirs under projectRoot',
     );
     assert.ok(
-      syncContent.includes('await symlink(symlinkTargetFor(linkPath'),
+      syncContent.includes('await createSkillSymlink(symlinkTargetFor(linkPath'),
       'skill-sync engine must create per-skill symlinks',
     );
     assert.ok(syncContent.includes("process.platform === 'win32'"), 'skill-sync engine must handle Windows targets');

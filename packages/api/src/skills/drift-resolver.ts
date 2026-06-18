@@ -31,7 +31,6 @@ export interface SyncDriftOptions {
   disabledSkills?: Iterable<string>;
   skillMountPaths?: Record<string, readonly string[]>;
   globalSkillMountPaths?: Record<string, readonly string[]>;
-  cascadeDisabledSkills?: Iterable<string>;
   configOrphans?: Iterable<string>;
 }
 
@@ -108,7 +107,6 @@ async function syncDriftUnlocked(
     const syncResult = await syncProject(projectRoot, skillsSource, {
       mountRules,
       disabledSkills: new Set(opts?.disabledSkills ?? []),
-      cascadeDisabledSkills: new Set(opts?.cascadeDisabledSkills ?? []),
       mountPathsBySkill: new Map(Object.entries(opts?.skillMountPaths ?? {})),
       globalMountPathsBySkill: new Map(Object.entries(opts?.globalSkillMountPaths ?? {})),
       additionalRemovedSkills: new Set(opts?.configOrphans ?? []),

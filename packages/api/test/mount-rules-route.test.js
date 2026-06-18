@@ -644,6 +644,64 @@ describe('Mount Rules Route (F228)', () => {
     }
   });
 
+  it('syncAll restores globally re-enabled skill in external project with stale mountPaths:[] (P1-1 regression)', async () => {
+    const mainDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-reenable-main-'));
+    const externalDir = await mkdtemp(join(tmpdir(), 'mount-rules-route-reenable-ext-'));
+
+    // Set up governance registry so syncAll discovers the external project
+    await mkdir(join(mainDir, '.cat-cafe'), { recursive: true });
+    const registryFile = join(mainDir, '.cat-cafe/governance-registry.json');
+    await writeFile(
+      registryFile,
+      `${JSON.stringify({ entries: [{ projectPath: externalDir, confirmedByUser: true, packVersion: 'test', syncedAt: new Date().toISOString() }] }, null, 2)}\n`,
+    );
+
+    // Main project: skill globally enabled with mountPaths
+    await writeCapabilitiesConfig(mainDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'tdd',
+          type: 'skill',
+          enabled: true,
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+
+    // External project: stale mountPaths:[] from a previous global disable
+    // This is the exact state that caused the P1-1 regression — syncAll
+    // included this [] as explicit policy, blocking scenario 7 re-enable.
+    await writeCapabilitiesConfig(externalDir, {
+      version: 2,
+      capabilities: [
+        { id: 'tdd', type: 'skill', enabled: false, globalEnabled: false, source: 'cat-cafe', mountPaths: [] },
+      ],
+    });
+
+    try {
+      const skillsSource = await resolveRepoSkillsDir();
+      const syncResult = await syncAll(mainDir, skillsSource, { mountRules: DEFAULT_MOUNT_RULES });
+
+      assert.deepEqual(syncResult.warnings, [], 'syncAll must not produce warnings');
+      assert.ok(syncResult.perProject.has(externalDir), 'external project must be in perProject results');
+
+      // External project must now have non-empty mountPaths — re-enabled
+      const extConfig = await readCapabilitiesConfig(externalDir);
+      const tdd = extConfig?.capabilities.find((c) => c.id === 'tdd' && c.type === 'skill');
+      assert.ok(tdd, 'tdd capability must exist in external project config');
+      assert.ok(
+        Array.isArray(tdd.mountPaths) && tdd.mountPaths.length > 0,
+        `stale mountPaths:[] must be restored after global re-enable, got: ${JSON.stringify(tdd.mountPaths)}`,
+      );
+    } finally {
+      await rm(mainDir, { recursive: true, force: true });
+      await rm(externalDir, { recursive: true, force: true });
+    }
+  });
+
   it('PUT /api/mount-rules preserves provider roots that remain disabled across rule edits', async () => {
     const prevOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = OWNER_ID;

@@ -655,79 +655,60 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.deepEqual(pluginOwned?.mountPaths, ['claude'], 'same-id plugin mount policy must be preserved');
   });
 
-  test('syncDrift preserves cascade tracking so syncProject can re-enable on global re-enable (P1-1 cross-path)', async () => {
+  test('syncProject with disabledSkills directly controls disabled state (F228 unconditional cascade)', async () => {
     await makeSkill('tdd');
 
-    // Step 1: syncProject with cascade disabled — writes cascadeDisabledSkills
+    // Step 1: syncProject with tdd disabled (simulates global cascade disable — scenario 6)
     await syncProject(projectRoot, skillsSource, {
       mountRules: DEFAULT_MOUNT_RULES,
-      cascadeDisabledSkills: new Set(['tdd']),
+      disabledSkills: new Set(['tdd']),
     });
     let config = await readCapabilitiesConfig(projectRoot);
     let tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
-    assert.equal(tdd?.enabled, false, 'tdd should be cascade-disabled after syncProject');
+    assert.deepEqual(tdd?.mountPaths, [], 'tdd should have empty mountPaths after disable');
 
-    // Step 2: syncDrift with disabled (simulates drift-resolve while global still disables)
-    await syncDriftCompat(
-      projectRoot,
-      skillsSource,
-      DEFAULT_MOUNT_RULES,
-      {},
-      { disabledSkills: ['tdd'], cascadeDisabledSkills: ['tdd'] },
-    );
-    config = await readCapabilitiesConfig(projectRoot);
-    tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
-    assert.equal(tdd?.enabled, false, 'tdd should remain disabled after syncDrift');
+    // Step 2: syncProject with empty disabledSkills — global re-enables (scenario 7, unconditional)
+    await syncProject(projectRoot, skillsSource, {
+      mountRules: DEFAULT_MOUNT_RULES,
+      disabledSkills: new Set(),
+    });
 
-    // Step 3: syncProject WITHOUT cascade disabled — global re-enables
-    await syncProject(projectRoot, skillsSource, { mountRules: DEFAULT_MOUNT_RULES });
-
-    // tdd must re-enable — cascade tracking preserved across syncDrift
+    // tdd must re-enable — no cascade tracking needed, disabledSkills is authoritative
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
       assert.ok(
         await exists(join(projectRoot, `.${provider}/skills/tdd`)),
-        `${provider} symlink must exist after global re-enable (cross-path cascade tracking)`,
+        `${provider} symlink must exist after global re-enable`,
       );
     }
     config = await readCapabilitiesConfig(projectRoot);
     tdd = config?.capabilities.find((c) => c.type === 'skill' && c.id === 'tdd');
-    assert.equal(tdd?.enabled, true, 'cascade-disabled skill must re-enable after syncDrift + syncProject');
+    assert.ok(tdd?.mountPaths?.length > 0, 'tdd must have non-empty mountPaths after re-enable');
   });
 
-  test('mergeSkillMountPolicies preserves cascade marker when skill already in project disabledSkills (R4 P1)', async () => {
-    // Directly test the merge function that drift-check route uses.
-    // Bug: when a skill is in both project disabledSkills (from prev cascade)
-    // AND global disabledSkills, the second loop skipped cascade tracking.
+  test('mergeSkillMountPolicies cascades global disabled to unconfigured project skills', async () => {
     const { mergeSkillMountPolicies } = await import('../../dist/routes/skills-drift.js');
 
     const projectPolicy = {
-      disabledSkills: ['tdd'],
+      disabledSkills: [],
       skillMountPaths: {},
-      configuredSkills: new Set(['tdd']),
+      configuredSkills: new Set(),
     };
     const globalPolicy = {
       disabledSkills: ['tdd'],
       skillMountPaths: {},
       configuredSkills: new Set(['tdd']),
     };
-    const prevCascadeDisabled = new Set(['tdd']);
 
-    const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy, prevCascadeDisabled);
+    const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
 
-    // tdd must appear in cascadeDisabledSkills even though first loop already
-    // added it to disabledSkills — otherwise next syncProject can't detect
-    // cascade origin and the skill stays permanently disabled.
-    assert.ok(
-      merged.cascadeDisabledSkills?.includes('tdd'),
-      'cascade marker must be preserved when skill is in both project and global disabled lists',
-    );
-    assert.ok(merged.disabledSkills.includes('tdd'), 'tdd must still be in disabledSkills (disabled by both layers)');
+    // tdd is globally disabled and not configured in project → cascaded to disabled
+    assert.ok(merged.disabledSkills.includes('tdd'), 'globally disabled skill must cascade to unconfigured project');
   });
 
-  test('mergeSkillMountPolicies drops stale cascade entry when global re-enables', async () => {
+  test('mergeSkillMountPolicies preserves project disabled even when global is enabled', async () => {
     const { mergeSkillMountPolicies } = await import('../../dist/routes/skills-drift.js');
 
-    // Scenario: tdd was previously cascade-disabled, now global re-enables
+    // Project has tdd disabled locally; global has tdd enabled
     const projectPolicy = {
       disabledSkills: ['tdd'],
       skillMountPaths: {},
@@ -735,16 +716,41 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     };
     const globalPolicy = {
       disabledSkills: [],
-      skillMountPaths: {},
-      configuredSkills: new Set(),
+      skillMountPaths: { tdd: ['claude', 'codex'] },
+      configuredSkills: new Set(['tdd']),
     };
-    const prevCascadeDisabled = new Set(['tdd']);
 
-    const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy, prevCascadeDisabled);
+    const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
 
-    // Stale cascade entry must be dropped — global re-enabled
-    assert.ok(!merged.disabledSkills.includes('tdd'), 'stale cascade entry must be dropped when global re-enables');
-    assert.deepEqual(merged.cascadeDisabledSkills ?? [], [], 'no cascade entries when global has no disabled skills');
+    // In drift context: project's local disabled state is preserved (project config is truth for this project)
+    assert.ok(merged.disabledSkills.includes('tdd'), 'project-disabled skill stays disabled in drift merge');
+  });
+
+  test('mergeSkillMountPolicies cascades global disabled to CONFIGURED project skills (P1-2 regression)', async () => {
+    const { mergeSkillMountPolicies } = await import('../../dist/routes/skills-drift.js');
+
+    // Project has tdd configured AND enabled; global disables it.
+    // Per F228 scenarios 6/7: global disable is UNCONDITIONAL — must cascade
+    // regardless of whether the project has configured that skill.
+    // Regression: 97c522e6a2 introduced a configuredSkills.has() guard that
+    // blocked cascade for configured skills; fixed in 70d78194c.
+    const projectPolicy = {
+      disabledSkills: [],
+      skillMountPaths: { tdd: ['claude', 'codex'] },
+      configuredSkills: new Set(['tdd']),
+    };
+    const globalPolicy = {
+      disabledSkills: ['tdd'],
+      skillMountPaths: {},
+      configuredSkills: new Set(['tdd']),
+    };
+
+    const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
+
+    assert.ok(
+      merged.disabledSkills.includes('tdd'),
+      'globally disabled skill must cascade even when project has it configured and enabled',
+    );
   });
 
   test('readCatCafeSkillMountPolicy treats non-empty mountPaths as desired mounts even with enabled:false (maintainer P1)', async () => {

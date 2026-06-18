@@ -73,80 +73,81 @@ interface ProjectSkillMountPolicy {
   /** F228: Set of skill IDs that appear in this config (enabled or disabled).
    *  Used to distinguish "project has no opinion" from "project explicitly enabled." */
   configuredSkills: Set<string>;
-  /** F228: Skills disabled by global cascade in this merge. Passed to syncDrift so it
-   *  can persist the cascade origin in skillsSync.cascadeDisabledSkills. */
-  cascadeDisabledSkills?: string[];
 }
 
 interface SkillsDriftRouteOptions {
   mainProjectRoot?: string;
 }
 
-/** @internal Exported for unit testing only. */
-export function readCatCafeSkillMountPolicy(config: CapabilitiesConfig | null | undefined): ProjectSkillMountPolicy {
+/**
+ * @internal Exported for unit testing only.
+ *
+ * When `useGlobalEnabledForDisabled` is true, the disabled/enabled state is
+ * derived from `globalEnabled` (the global policy flag) rather than `mountPaths`.
+ * This is needed when reading the main project's config AS the global policy for
+ * project-level cascade comparison — on the main project, `mountPaths` represents
+ * the local mount state (project-scope toggle), while `globalEnabled` represents
+ * the global enable/disable policy. Without this, a project-scope enable on the
+ * main project (`globalEnabled: false, mountPaths: [all]`) would make external
+ * projects incorrectly see the skill as globally enabled.
+ */
+export function readCatCafeSkillMountPolicy(
+  config: CapabilitiesConfig | null | undefined,
+  opts?: { useGlobalEnabledForDisabled?: boolean },
+): ProjectSkillMountPolicy {
   if (!config) return { disabledSkills: [], skillMountPaths: {}, configuredSkills: new Set() };
 
+  const useGlobalEnabled = opts?.useGlobalEnabledForDisabled ?? false;
   const disabledSkills: string[] = [];
   const skillMountPaths: Record<string, string[]> = {};
   const configuredSkills = new Set<string>();
   for (const cap of config.capabilities) {
     if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
     configuredSkills.add(cap.id);
-    // F228: mountPaths is authoritative when present.
-    // Non-empty mountPaths = desired mounts (even if enabled:false — data inconsistency from
-    // v1 migration or manual repair should not discard declared providers).
-    // Empty mountPaths = disabled. No mountPaths + enabled:false = disabled.
-    if (Array.isArray(cap.mountPaths)) {
-      if (cap.mountPaths.length > 0) {
+    if (useGlobalEnabled) {
+      // Global policy mode: use globalEnabled for cascade decisions.
+      // mountPaths still populates skillMountPaths (for mount target resolution),
+      // but disabled state comes from globalEnabled, not mountPaths emptiness.
+      if ((cap.globalEnabled ?? cap.enabled) === false) {
+        disabledSkills.push(cap.id);
+      } else if (Array.isArray(cap.mountPaths) && cap.mountPaths.length > 0) {
         skillMountPaths[cap.id] = [...cap.mountPaths];
-      } else {
+      }
+    } else {
+      // Default mode: mountPaths is authoritative when present.
+      // Non-empty mountPaths = desired mounts (even if enabled:false — data inconsistency from
+      // v1 migration or manual repair should not discard declared providers).
+      // Empty mountPaths = disabled. No mountPaths + enabled:false = disabled.
+      if (Array.isArray(cap.mountPaths)) {
+        if (cap.mountPaths.length > 0) {
+          skillMountPaths[cap.id] = [...cap.mountPaths];
+        } else {
+          disabledSkills.push(cap.id);
+        }
+      } else if ((cap.globalEnabled ?? cap.enabled) === false) {
         disabledSkills.push(cap.id);
       }
-    } else if ((cap.globalEnabled ?? cap.enabled) === false) {
-      disabledSkills.push(cap.id);
     }
   }
   return { disabledSkills, skillMountPaths, configuredSkills };
 }
 
-/** @internal Exported for unit testing only. */
+/** @internal Exported for unit testing only.
+ *  F228: Merge project + global policies. Global disabled overrides project state
+ *  (scenarios 6/7 unconditional cascade). Project mountPaths is authoritative when
+ *  present; global is fallback. */
 export function mergeSkillMountPolicies(
   projectPolicy: ProjectSkillMountPolicy,
   globalPolicy: ProjectSkillMountPolicy,
-  prevCascadeDisabled?: ReadonlySet<string>,
 ): ProjectSkillMountPolicy {
-  const projectDisabledSet = new Set(projectPolicy.disabledSkills);
-  const globalDisabledSet = new Set(globalPolicy.disabledSkills);
-
-  // F228: Exclude previous cascade entries from "configured" unless user changed state.
-  // A cascade-disabled entry that the user re-enabled IS treated as user-configured.
-  const effectiveConfigured =
-    prevCascadeDisabled && prevCascadeDisabled.size > 0
-      ? new Set(
-          [...projectPolicy.configuredSkills].filter((name) => {
-            if (!prevCascadeDisabled.has(name)) return true;
-            // Was cascade-disabled — user-configured only if they changed the state
-            return !projectDisabledSet.has(name);
-          }),
-        )
-      : projectPolicy.configuredSkills;
-
-  // F228: Project-local disabled skills are honored, but stale cascade entries
-  // that are no longer globally disabled are dropped so global re-enable cascades.
-  const disabledSkills: string[] = [];
-  const cascadeDisabledSkills: string[] = [];
-  for (const skillName of projectPolicy.disabledSkills) {
-    if (prevCascadeDisabled?.has(skillName) && !globalDisabledSet.has(skillName)) {
-      continue; // Stale cascade entry — global re-enabled, drop
-    }
-    disabledSkills.push(skillName);
-  }
+  // F228 scenarios 6/7: global disabled cascades unconditionally to all projects,
+  // regardless of whether the project has configured that skill.
+  // P1-2 fix: removed the `!projectPolicy.configuredSkills.has(skillName)` guard
+  // which was incorrectly blocking global disable from overriding project state.
+  const disabledSkills: string[] = [...projectPolicy.disabledSkills];
   for (const skillName of globalPolicy.disabledSkills) {
-    if (!effectiveConfigured.has(skillName)) {
-      if (!disabledSkills.includes(skillName)) {
-        disabledSkills.push(skillName);
-      }
-      cascadeDisabledSkills.push(skillName);
+    if (!disabledSkills.includes(skillName)) {
+      disabledSkills.push(skillName);
     }
   }
 
@@ -166,8 +167,7 @@ export function mergeSkillMountPolicies(
   return {
     disabledSkills,
     skillMountPaths,
-    configuredSkills: effectiveConfigured,
-    cascadeDisabledSkills,
+    configuredSkills: projectPolicy.configuredSkills,
   };
 }
 
@@ -178,9 +178,13 @@ async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string)
     readCapabilitiesConfig(globalProjectRoot),
   ]);
   const projectPolicy = readCatCafeSkillMountPolicy(projectConfig);
-  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig);
-  const prevCascadeDisabled = new Set<string>(projectConfig?.skillsSync?.cascadeDisabledSkills ?? []);
-  const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy, prevCascadeDisabled);
+  // F228: For global policy used in project-level cascade, use globalEnabled
+  // (the global policy flag) for disabled state. On the main project, mountPaths
+  // represents the local mount state, while globalEnabled represents the global
+  // enable/disable policy. Without this, a project-scope enable on the main
+  // project makes external projects incorrectly see the skill as globally enabled.
+  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig, { useGlobalEnabledForDisabled: true });
+  const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy);
   return { projectPolicy, globalPolicy, mergedPolicy };
 }
 
@@ -236,7 +240,6 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
         disabledSkills: mergedPolicy.disabledSkills,
         skillMountPaths: projectPolicy.skillMountPaths,
         globalSkillMountPaths: globalPolicy.skillMountPaths,
-        cascadeDisabledSkills: mergedPolicy.cascadeDisabledSkills,
         configOrphans,
       },
     };

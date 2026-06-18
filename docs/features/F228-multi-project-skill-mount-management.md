@@ -112,6 +112,7 @@ capabilities.json v2
 │   ├─ source              # "cat-cafe" | "external"
 │   └─ type, id, ...
 ├─ skillsSync              # 源同步追踪
+│   ├─ sourceRoot          # skill 源目录相对路径（相对于 projectRoot）
 │   ├─ sourceManifestHash  # 源 skill 集合的 hash
 │   └─ lastSyncedAt        # 上次同步时间
 └─ mountRules              # 挂载点配置（哪些挂载点启用）
@@ -262,7 +263,7 @@ cat-cafe-skills/ 源目录
    - 效果：禁用挂载点 → mountPaths 移除该 ID → 结果为空则写空
 
 4. **drift-resolver 同 Gap 1 → 已修复** ✅
-   - 修复：`drift-resolver.ts` noPolicySkills 写 `activeMountProviderIds()` 替代 `[]`
+   - 修复：`drift-resolver.ts` noPolicySkills 写 `activeTargetIds`（所有启用的挂载点 ID 列表）替代 `[]`
    - 测试：`drift-resolver.test.js`
 
 ## 模块架构（最终布局）

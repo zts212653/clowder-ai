@@ -10,7 +10,6 @@ import { stat } from 'node:fs/promises';
 import type { MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
-import { readSkillsSyncState } from './skill-sync-config.js';
 import { type SyncProjectResult, syncProject } from './skill-sync-engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -114,24 +113,20 @@ async function syncAllUnlocked(
             (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId,
           ) ?? [];
 
-        // Exclude skills that were cascade-disabled (no local opinion) from disabledSkills.
-        // Without this filter, a globally re-enabled skill stays disabled because
-        // syncProject seeds disabledSet from opts.disabledSkills before consulting
-        // prevCascadeDisabled, blocking the re-enable path.
-        const prevCascade = new Set((await readSkillsSyncState(projectPath))?.cascadeDisabledSkills ?? []);
-        const locallyDisabledSkills = new Set(
-          projectManagedCaps
-            .filter(
-              (cap) =>
-                (Array.isArray(cap.mountPaths) ? cap.mountPaths.length === 0 : !(cap.globalEnabled ?? cap.enabled)) &&
-                !prevCascade.has(cap.id),
-            )
-            .map((cap) => cap.id),
-        );
+        // F228 scenarios 6/7: global cascade is unconditional.
+        // disabledSkills = globalDisabledSkills — global state is authoritative.
+        // Per feat doc: "全局禁用 skill → 逐项目执行场景 4" (unconditional),
+        // "全局启用 skill → 逐项目执行场景 5" (unconditional).
 
         // F228: per-mount-point cascade — if a mount point was removed globally
         // for a skill, remove it from the project's mountPaths too. Without this,
         // the project's own mountPaths take precedence and block the cascade.
+        //
+        // P1-1 fix: When a skill is globally enabled (NOT in globalDisabledSkills)
+        // but has empty mountPaths in the project config (from a previous global
+        // disable), do NOT include it as explicit policy. This allows syncProject's
+        // scenario 7 logic to clear the stale empty mountPaths and re-enable the
+        // skill with all active mount points.
         const projectMountPathsBySkill = new Map(
           projectManagedCaps.flatMap((cap) => {
             if (!Array.isArray(cap.mountPaths)) return [];
@@ -139,6 +134,9 @@ async function syncAllUnlocked(
             // Constrain: keep only mount points that exist in the global list.
             // Global removal cascades; global addition is handled by newlyEnabled logic.
             const paths = globalPaths ? cap.mountPaths.filter((p) => globalPaths.includes(p)) : cap.mountPaths;
+            // Globally enabled + empty project paths = stale disable state.
+            // Omit from explicit policy so syncProject scenario 7 can re-enable.
+            if (paths.length === 0 && !globalDisabledSkills.has(cap.id)) return [];
             return [[cap.id, paths] as const];
           }),
         );
@@ -147,8 +145,7 @@ async function syncAllUnlocked(
           mountRules: projectMountRules,
           previousMountRules: opts.previousMountRules,
           pruneMountPaths: !!opts.previousMountRules,
-          disabledSkills: locallyDisabledSkills,
-          cascadeDisabledSkills: globalDisabledSkills,
+          disabledSkills: globalDisabledSkills,
           mountPathsBySkill: projectMountPathsBySkill,
           globalMountPathsBySkill,
           force,

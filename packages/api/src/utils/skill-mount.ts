@@ -1,4 +1,4 @@
-import { lstat, readlink, realpath } from 'node:fs/promises';
+import { lstat, readlink, realpath, symlink } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { DEFAULT_MOUNT_RULES, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { pathsEqual } from './project-path.js';
@@ -136,6 +136,27 @@ export async function isManagedDirectoryLevelSkillsSymlink(
     );
   }
   return true;
+}
+
+/**
+ * Create a symlink with Windows junction fallback.
+ *
+ * On Windows, `fs.symlink()` requires Developer Mode or admin privileges.
+ * When it fails with EPERM, we fall back to a junction — junctions work
+ * without special privileges for directories. `symlinkTargetFor()` already
+ * returns an absolute path on Windows, which junctions require.
+ */
+export async function createSkillSymlink(target: string, path: string): Promise<void> {
+  try {
+    await symlink(target, path);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (process.platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) {
+      await symlink(target, path, 'junction');
+    } else {
+      throw err;
+    }
+  }
 }
 
 /** Accept symlink target when it points to expected path OR main-repo cat-cafe-skills/{skillName}. */

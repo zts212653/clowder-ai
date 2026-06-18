@@ -178,6 +178,50 @@ export function useSkillControls() {
     [fetchItems],
   );
 
+  // F228: batch toggle — enable/disable multiple skills in one request.
+  // Uses capabilityIds[] so the API writes config once and runs syncProject once.
+  const handleBatchToggle = useCallback(
+    async (skillIds: string[], enabled: boolean, toggleScope: 'global' | 'project' = 'global') => {
+      if (skillIds.length === 0) return;
+      setError(null);
+      setToggling('__batch__');
+      try {
+        const projectContext = toggleScope === 'project' ? (projectPathRef.current ?? undefined) : undefined;
+        const body: Record<string, unknown> = {
+          capabilityIds: skillIds,
+          capabilityType: 'skill',
+          scope: toggleScope,
+          enabled,
+          projectPath: projectContext,
+        };
+        const res = await apiFetch('/api/capabilities', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res as Response));
+          return;
+        }
+        const data = (await res.json().catch(() => ({}))) as {
+          propagationConflicts?: { projectPath: string; mountPoint: string }[];
+        };
+        const conflictCount = data.propagationConflicts?.length ?? 0;
+        await fetchItems(projectContext);
+        if (conflictCount > 0) {
+          setError(
+            `批量操作成功，但 ${conflictCount} 个挂载冲突已跳过（目标路径已有用户自定义内容，可在 Skill 同步中处理）`,
+          );
+        }
+      } catch {
+        setError('网络错误');
+      } finally {
+        setToggling(null);
+      }
+    },
+    [fetchItems],
+  );
+
   // F228: per-mount-point toggle (scope from caller + mountPointId)
   const handleMountPointToggle = useCallback(
     async (
@@ -241,6 +285,7 @@ export function useSkillControls() {
     error,
     switchProject,
     handleToggle,
+    handleBatchToggle,
     handleMountPointToggle,
     refetch,
   };

@@ -274,3 +274,56 @@ describe('fillDefaultMountPaths (P1-3 regression)', () => {
     assert.deepEqual(policy.skillMountPaths['tdd'], ['gemini']);
   });
 });
+
+// ── Bug 1 regression: project-scope enable on main project must not make
+// ── external projects see the skill as globally enabled in drift detection ──
+
+describe('readCatCafeSkillMountPolicy useGlobalEnabledForDisabled (Bug 1 regression)', () => {
+  it('treats globalEnabled:false skill as disabled even with non-empty mountPaths', () => {
+    // After project-scope enable on main project: globalEnabled:false, mountPaths:[all].
+    // Default mode (for main project mount drift): uses mountPaths → enabled.
+    // Global policy mode (for project cascade): uses globalEnabled → disabled.
+    const config = {
+      version: 2,
+      capabilities: [
+        {
+          id: 'tdd',
+          type: 'skill',
+          source: 'cat-cafe',
+          enabled: false,
+          globalEnabled: false,
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    };
+
+    // Default mode: mountPaths is authoritative → skill is NOT disabled
+    const defaultPolicy = readCatCafeSkillMountPolicy(config);
+    assert.ok(!defaultPolicy.disabledSkills.includes('tdd'), 'default mode: non-empty mountPaths = not disabled');
+    assert.deepEqual(defaultPolicy.skillMountPaths['tdd'], ['claude', 'codex', 'gemini', 'kimi']);
+
+    // Global policy mode: globalEnabled is authoritative → skill IS disabled
+    const globalPolicy = readCatCafeSkillMountPolicy(config, { useGlobalEnabledForDisabled: true });
+    assert.ok(globalPolicy.disabledSkills.includes('tdd'), 'global mode: globalEnabled:false = disabled');
+    assert.equal(globalPolicy.skillMountPaths['tdd'], undefined, 'global mode: disabled skill has no mount paths');
+  });
+
+  it('uses globalEnabled for enabled state in global policy mode', () => {
+    const config = {
+      version: 2,
+      capabilities: [
+        {
+          id: 'tdd',
+          type: 'skill',
+          source: 'cat-cafe',
+          enabled: true,
+          globalEnabled: true,
+          mountPaths: ['claude', 'codex'],
+        },
+      ],
+    };
+    const policy = readCatCafeSkillMountPolicy(config, { useGlobalEnabledForDisabled: true });
+    assert.ok(!policy.disabledSkills.includes('tdd'), 'globalEnabled:true = not disabled');
+    assert.deepEqual(policy.skillMountPaths['tdd'], ['claude', 'codex']);
+  });
+});

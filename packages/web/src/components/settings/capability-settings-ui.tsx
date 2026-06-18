@@ -63,7 +63,6 @@ export function ProjectSelector({
     if (!displayPath) return null;
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="whitespace-nowrap text-cafe-muted">项目:</span>
         <code className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary">
           {projectDisplayName(displayPath)}
         </code>
@@ -73,11 +72,9 @@ export function ProjectSelector({
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <label htmlFor="cap-project-select" className="whitespace-nowrap text-cafe-muted">
-        项目:
-      </label>
       <select
         id="cap-project-select"
+        aria-label="选择项目"
         value={currentSelection ?? ''}
         onChange={(event) => onSwitch(event.target.value || null)}
         className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary"

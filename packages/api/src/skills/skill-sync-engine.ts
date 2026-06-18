@@ -1,6 +1,6 @@
 /** Skill Sync Engine — F228: syncProject reconciles symlinks with config. */
 
-import { lstat, mkdir, readdir, readlink, realpath, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readlink, realpath, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
@@ -16,9 +16,13 @@ import {
   validateSkillName,
 } from '../config/governance/skill-sync.js';
 import { pathsEqual } from '../utils/project-path.js';
-import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../utils/skill-mount.js';
+import {
+  buildSkillMountTargets,
+  createSkillSymlink,
+  isManagedDirectoryLevelSkillsSymlink,
+} from '../utils/skill-mount.js';
 import { computeSourceManifestHash, listSourceSkillNames } from '../utils/skill-source.js';
-import { readSkillsSyncState, updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
+import { updateConfigAfterSync, writeSkillsSyncState } from './skill-sync-config.js';
 
 function symlinkTargetFor(linkPath: string, sourcePath: string): string {
   return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);
@@ -65,7 +69,7 @@ async function convertDirectoryLevelMount(
   await mkdir(skillsDir, { recursive: true });
   for (const skillName of enabledSkillNames) {
     const linkPath = join(skillsDir, skillName);
-    await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+    await createSkillSymlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
   }
   return true;
 }
@@ -111,8 +115,10 @@ export interface SyncProjectResult {
 export interface SyncProjectOptions {
   mountRules: MountRules;
   previousMountRules?: MountRules;
+  /** Authoritative disabled set. When provided, replaces config-derived disabled
+   *  state entirely (used by syncAll for unconditional global cascade per F228
+   *  scenarios 6/7). When omitted, disabled state is read from project config. */
   disabledSkills?: ReadonlySet<string>;
-  cascadeDisabledSkills?: ReadonlySet<string>;
   mountPathsBySkill?: ReadonlyMap<string, readonly string[]>;
   globalMountPathsBySkill?: ReadonlyMap<string, readonly string[]>;
   force?: boolean;
@@ -169,33 +175,30 @@ async function syncProjectUnlocked(
     managedCaps.flatMap((cap) => (Array.isArray(cap.mountPaths) ? [[cap.id, [...cap.mountPaths]] as const] : [])),
   );
 
-  const prevCascadeDisabled = new Set((await readSkillsSyncState(projectRoot))?.cascadeDisabledSkills ?? []);
-  // When caller doesn't provide disabledSkills, fall back to config — but exclude
-  // entries that were only there from a previous cascade (not user choice).
-  // Without this exclusion, a globally re-enabled skill stays stuck disabled because
-  // configDisabledSet includes the stale cascade entry.
-  const disabledSet = new Set<string>(
-    opts.disabledSkills ?? [...configDisabledSet].filter((s) => !prevCascadeDisabled.has(s)),
-  );
-  const cascadeDisabledInThisSync = new Set<string>();
-  // F228 scenario 6/7: global cascade is unconditional.
-  // When a skill is globally disabled, ALL projects get it disabled (scenario 6 → 4).
-  // When globally re-enabled, the cascade-disabled record drives restoration.
-  // No "local override" check — per feat doc, global operations override project state.
-  for (const sn of opts.cascadeDisabledSkills ?? []) {
-    disabledSet.add(sn);
-    cascadeDisabledInThisSync.add(sn);
-  }
+  // F228: disabledSkills is authoritative when provided (global cascade — scenarios 6/7).
+  // When omitted (project-scope toggle), fall back to config-derived disabled state.
+  const disabledSet = new Set<string>(opts.disabledSkills ?? configDisabledSet);
   const mountPathsBySkill = new Map(configMountPaths);
   const explicitMountPathSkills = new Set(opts.mountPathsBySkill ? opts.mountPathsBySkill.keys() : []);
   if (opts.mountPathsBySkill) {
     for (const [k, v] of opts.mountPathsBySkill) mountPathsBySkill.set(k, [...v]);
   }
-  for (const sn of prevCascadeDisabled) {
-    if (!disabledSet.has(sn) && configDisabledSet.has(sn)) mountPathsBySkill.delete(sn);
-  }
   const enabledNames = sourceNames.filter((n) => !disabledSet.has(n));
   const disabledNames = sourceNames.filter((n) => disabledSet.has(n));
+
+  // F228 scenario 7: When disabledSkills is authoritative (global cascade) and a skill
+  // is enabled (not in disabledSet), clear config-derived empty mountPaths so the skill
+  // falls through to the "no policy" path and gets all active mount points.
+  // Without this, a previously cascade-disabled skill (mountPaths:[]) would stay disabled
+  // even after the global source re-enables it.
+  if (opts.disabledSkills) {
+    for (const name of enabledNames) {
+      if (!explicitMountPathSkills.has(name)) {
+        const mps = mountPathsBySkill.get(name);
+        if (mps && mps.length === 0) mountPathsBySkill.delete(name);
+      }
+    }
+  }
   const sourceSet = new Set(sourceNames);
   const removedNames = [
     ...previousNames.filter((n) => !sourceSet.has(n)),
@@ -297,7 +300,7 @@ async function syncProjectUnlocked(
         const status = await classifyMountPath(linkPath, skillsSource, skillName);
         if (status === 'missing' || (status === 'conflict' && force)) {
           if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
-          await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+          await createSkillSymlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
           result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
         } else if (status === 'conflict') {
           result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
@@ -390,9 +393,6 @@ async function syncProjectUnlocked(
       projectConfigMountPaths: configMountPaths,
       explicitMountPathSkills,
       activeTargetIds,
-      cascadeDisabledInThisSync,
-      prevCascadeDisabled,
-      configDisabledSet,
       globalMountPathsBySkill: opts.globalMountPathsBySkill,
       mountRules,
       pruneMountPaths: opts.pruneMountPaths,
@@ -406,7 +406,6 @@ async function syncProjectUnlocked(
       sourceRoot: relative(projectRoot, skillsSource),
       sourceManifestHash: newHash,
       lastSyncedAt: new Date().toISOString(),
-      ...(cascadeDisabledInThisSync.size > 0 ? { cascadeDisabledSkills: [...cascadeDisabledInThisSync].sort() } : {}),
     });
   } catch (configWriteErr) {
     // Rollback filesystem mutations so symlinks stay consistent with config.
@@ -417,7 +416,7 @@ async function syncProjectUnlocked(
     for (const op of result.unmounted) {
       if (!op.path || op.skillName === '*') continue; // No path or directory-level rollback not feasible
       const target = join(skillsSource, op.skillName);
-      await symlink(symlinkTargetFor(op.path, target), op.path).catch(() => {});
+      await createSkillSymlink(symlinkTargetFor(op.path, target), op.path).catch(() => {});
     }
     throw configWriteErr;
   }

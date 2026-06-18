@@ -958,13 +958,26 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const body = request.body as CapabilityPatchRequest | undefined;
-    if (!body || !body.capabilityId || !body.capabilityType || !body.scope || typeof body.enabled !== 'boolean') {
+    if (!body || !body.capabilityType || !body.scope || typeof body.enabled !== 'boolean') {
       reply.status(400);
       return {
         error:
-          'Required: capabilityId, capabilityType (mcp|skill), scope, enabled (boolean). Skill scope: "global"|"project". MCP scope: "global"|"cat".',
+          'Required: capabilityId (or capabilityIds[]), capabilityType (mcp|skill), scope, enabled (boolean). Skill scope: "global"|"project". MCP scope: "global"|"cat".',
       };
     }
+    // F228 batch: capabilityIds[] overrides capabilityId when present.
+    const effectiveIds: string[] =
+      Array.isArray(body.capabilityIds) && body.capabilityIds.length > 0
+        ? body.capabilityIds
+        : body.capabilityId
+          ? [body.capabilityId]
+          : [];
+    if (effectiveIds.length === 0) {
+      reply.status(400);
+      return { error: 'At least one capability ID required (capabilityId or capabilityIds[])' };
+    }
+    const isBatch = effectiveIds.length > 1;
+
     if (body.source !== undefined && body.source !== 'cat-cafe' && body.source !== 'external') {
       reply.status(400);
       return { error: 'source must be "cat-cafe" or "external" when provided' };
@@ -975,8 +988,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // F228: Validate scope per capability type.
-    // Skills: "global" (enable/disable everywhere) or "project" (mount/unmount for one project).
-    // MCP: "global" or "cat" (per-agent override).
     const validSkillScopes = new Set(['global', 'project']);
     const validMcpScopes = new Set(['global', 'cat']);
     const validScopes = body.capabilityType === 'skill' ? validSkillScopes : validMcpScopes;
@@ -999,8 +1010,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Multi-project: accept projectPath in body.
-    // scope=global always mutates the main project's global config; projectPath
-    // only selects the project for project/cat scoped toggles.
     const mainProjectRoot = getProjectRoot();
     let selectedProjectRoot = mainProjectRoot;
     if (body.projectPath) {
@@ -1020,128 +1029,132 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         return { error: 'capabilities.json not found. Run GET first to bootstrap.' };
       }
 
-      // F193 Phase C (cloud round 8 P2 #4): heal BEFORE locating + mutating
-      // the toggle target. Otherwise toggling legacy `cat-cafe` in a pre-
-      // Phase-C config would mutate an entry that the subsequent heal removes,
-      // and the audit/response would report a capability not present in the
-      // written finalConfig. Healing first ensures the toggle operates on
-      // the canonical post-Phase-C state.
       const catCafeRepoRoot = await resolveMainRepoPath();
       const config = healCatCafeMcpTopology(rawConfig, { catCafeRepoRoot }).config;
 
-      const capIndex = findCapabilityPatchTargetIndex(config, body);
-      if (capIndex === -1) {
-        reply.status(404);
-        return {
-          error: `Capability "${body.capabilityId}" (type=${body.capabilityType}) not found in canonical config (may have been migrated by F193 Phase C — try the corresponding split server id)`,
-        };
-      }
-
-      const cap = config.capabilities[capIndex]!;
-
-      // Plugin-owned capabilities must be toggled through /api/plugins/:id/enable|disable
-      // to keep lifecycle state (symlinks, limb nodes, CLI configs) consistent.
-      if (cap.pluginId) {
-        reply.status(409);
-        return {
-          error: `Capability "${body.capabilityId}" is managed by plugin "${cap.pluginId}". Use /api/plugins/${cap.pluginId}/enable or /disable instead.`,
-        };
-      }
-
-      const beforeSnapshot = structuredClone(cap);
-      const shouldWritebackManagedSkill =
-        body.capabilityType === 'skill' &&
-        (body.scope === 'global' || body.scope === 'project') &&
-        cap.source === 'cat-cafe';
-
-      if (shouldWritebackManagedSkill) {
-        try {
-          validateSkillName(body.capabilityId);
-        } catch (err) {
-          reply.status(400);
-          return { error: (err as Error).message };
+      // Resolve all capabilities up front — fail fast on missing/plugin-owned
+      const targets: Array<{ cap: CapabilityEntry; index: number; skillId: string }> = [];
+      for (const skillId of effectiveIds) {
+        const lookupBody = { ...body, capabilityId: skillId };
+        const capIndex = findCapabilityPatchTargetIndex(config, lookupBody);
+        if (capIndex === -1) {
+          reply.status(404);
+          return { error: `Capability "${skillId}" (type=${body.capabilityType}) not found` };
         }
+        const cap = config.capabilities[capIndex]!;
+        if (cap.pluginId) {
+          reply.status(409);
+          return {
+            error: `Capability "${skillId}" is managed by plugin "${cap.pluginId}". Use /api/plugins/${cap.pluginId}/enable or /disable instead.`,
+          };
+        }
+        targets.push({ cap, index: capIndex, skillId });
       }
 
-      // Update config: globalEnabled (skill) / enabled (mcp) + mountPaths
-      if (body.scope === 'global' || body.scope === 'project') {
-        if (body.mountPointId && shouldWritebackManagedSkill) {
-          // Per-mount-point toggle: validate + update mountPaths
-          const mountRules = await readMountRules(projectRoot, getProjectRoot());
-          const validMountPoints = new Set<string>([
-            ...STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled),
-            ...(mountRules.customPaths ?? []).map((cp) => cp.alias),
-          ]);
-          if (!validMountPoints.has(body.mountPointId)) {
+      // Snapshot all before mutation for rollback
+      const beforeSnapshots = new Map(targets.map(({ cap, skillId }) => [skillId, structuredClone(cap)]));
+
+      // Determine if any target is a managed skill requiring filesystem writeback
+      let anyManagedSkill = false;
+      const managedSkillIds = new Set<string>();
+
+      for (const { cap, skillId } of targets) {
+        const isManaged =
+          body.capabilityType === 'skill' &&
+          (body.scope === 'global' || body.scope === 'project') &&
+          cap.source === 'cat-cafe';
+        if (isManaged) {
+          try {
+            validateSkillName(skillId);
+          } catch (err) {
             reply.status(400);
-            return {
-              error: `mountPointId "${body.mountPointId}" is not an enabled mount point in current mount rules`,
-            };
+            return { error: (err as Error).message };
           }
-          const current = currentSkillMountTargetIds(cap, mountRules);
-          cap.mountPaths = body.enabled
-            ? [...new Set([...current, body.mountPointId])]
-            : current.filter((p) => p !== body.mountPointId);
-          // F228: project scope only changes mountPaths. enabled/globalEnabled
-          // are global/legacy state and must not be mutated by project toggles.
-          // Project enabled state is derived from mountPaths.
-          const derived = (cap.mountPaths ?? []).length > 0;
-          if (body.scope === 'global') {
-            cap.enabled = derived;
-            cap.globalEnabled = derived;
-          }
-        } else if (shouldWritebackManagedSkill) {
-          // Whole-skill toggle (skill)
-          // F228: project scope only changes mountPaths. enabled/globalEnabled
-          // are global/legacy state and must not be mutated by project toggles.
-          // Project enabled state is derived from mountPaths.
-          if (body.scope === 'global') {
-            cap.enabled = body.enabled;
-            cap.globalEnabled = body.enabled;
-          }
-          // Both scopes update mountPaths
-          const mountRules = await readMountRules(projectRoot, getProjectRoot());
-          cap.mountPaths = body.enabled ? enabledMountTargetIds(mountRules) : [];
-        } else {
-          // Non-skill (MCP/limb): write enabled as before
-          cap.enabled = body.enabled;
-        }
-      } else {
-        // scope === 'cat' (MCP only — skills already rejected above)
-        if (!cap.overrides) cap.overrides = [];
-        const existing = cap.overrides.find((o) => o.catId === body.catId!);
-        if (existing) existing.enabled = body.enabled;
-        else cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
-        if (body.enabled === cap.enabled) {
-          cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
-          if (cap.overrides.length === 0) delete cap.overrides;
+          anyManagedSkill = true;
+          managedSkillIds.add(skillId);
         }
       }
 
+      // Apply toggle to each capability — config mutation only, no I/O yet
+      const mountRules =
+        body.scope === 'global' || body.scope === 'project'
+          ? await readMountRules(projectRoot, getProjectRoot())
+          : undefined;
+
+      for (const { cap, skillId } of targets) {
+        const isManaged = managedSkillIds.has(skillId);
+
+        if (body.scope === 'global' || body.scope === 'project') {
+          if (body.mountPointId && isManaged && mountRules) {
+            // Per-mount-point toggle
+            const validMountPoints = new Set<string>([
+              ...STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled),
+              ...(mountRules.customPaths ?? []).map((cp) => cp.alias),
+            ]);
+            if (!validMountPoints.has(body.mountPointId)) {
+              reply.status(400);
+              return { error: `mountPointId "${body.mountPointId}" is not an enabled mount point` };
+            }
+            const current = currentSkillMountTargetIds(cap, mountRules);
+            cap.mountPaths = body.enabled
+              ? [...new Set([...current, body.mountPointId])]
+              : current.filter((p) => p !== body.mountPointId);
+            const derived = (cap.mountPaths ?? []).length > 0;
+            if (body.scope === 'global') {
+              cap.enabled = derived;
+              cap.globalEnabled = derived;
+            }
+          } else if (isManaged && mountRules) {
+            // Whole-skill toggle
+            if (body.scope === 'global') {
+              cap.enabled = body.enabled;
+              cap.globalEnabled = body.enabled;
+            }
+            cap.mountPaths = body.enabled ? enabledMountTargetIds(mountRules) : [];
+          } else {
+            // Non-skill (MCP/limb)
+            cap.enabled = body.enabled;
+          }
+        } else {
+          // scope === 'cat' (MCP only)
+          if (!cap.overrides) cap.overrides = [];
+          const existing = cap.overrides.find((o) => o.catId === body.catId!);
+          if (existing) existing.enabled = body.enabled;
+          else cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
+          if (body.enabled === cap.enabled) {
+            cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
+            if (cap.overrides.length === 0) delete cap.overrides;
+          }
+        }
+      }
+
+      // Persist config (once for all skills)
       try {
         await writeCapabilitiesConfig(projectRoot, config);
         await generateCliConfigs(config, getCliConfigPaths(projectRoot));
       } catch (persistErr) {
-        // Rollback cap to pre-toggle state so config + CLI configs stay consistent
-        for (const key of Object.keys(cap)) {
-          if (!(key in beforeSnapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+        // Rollback all caps
+        for (const { cap, skillId } of targets) {
+          const snapshot = beforeSnapshots.get(skillId)!;
+          for (const key of Object.keys(cap)) {
+            if (!(key in snapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+          }
+          Object.assign(cap, snapshot);
         }
-        Object.assign(cap, beforeSnapshot);
         await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
         throw persistErr;
       }
 
-      // Filesystem reconciliation via syncProject/syncAll
+      // Filesystem reconciliation (once for all skills)
       let localSyncConflicts: MountConflict[] = [];
       const propagationConflicts: MountConflict[] = [];
       const propagationWarnings: string[] = [];
 
-      if (shouldWritebackManagedSkill) {
-        const mountRules = await readMountRules(projectRoot, getProjectRoot());
+      if (anyManagedSkill) {
+        const syncMountRules = mountRules ?? (await readMountRules(projectRoot, getProjectRoot()));
         const skillsSource = await resolveCatCafeSkillsSource();
 
-        // R14 P2-2: external projects need global cascade policy
-        let cascadeDisabledSkills: Set<string> | undefined;
+        let globalDisabledSkills: Set<string> | undefined;
         let globalMountPathsBySkill: Map<string, readonly string[]> | undefined;
         if (body.scope === 'global' && !pathsEqual(projectRoot, getProjectRoot())) {
           const globalConfig = await readCapabilitiesConfig(getProjectRoot());
@@ -1154,72 +1167,75 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
             if (!(gc.globalEnabled ?? gc.enabled)) disabled.add(gc.id);
             if (Array.isArray(gc.mountPaths)) mountMap.set(gc.id, gc.mountPaths);
           }
-          if (disabled.size > 0) cascadeDisabledSkills = disabled;
+          if (disabled.size > 0) globalDisabledSkills = disabled;
           if (mountMap.size > 0) globalMountPathsBySkill = mountMap;
         }
 
         try {
-          // Sync this project's filesystem
+          // Build mountPathsBySkill for all toggled skills (project scope)
           const localMountPathsBySkill =
-            body.scope === 'project' && Array.isArray(cap.mountPaths)
-              ? new Map<string, readonly string[]>([[cap.id, cap.mountPaths]])
+            body.scope === 'project'
+              ? new Map(
+                  targets
+                    .filter(({ skillId }) => managedSkillIds.has(skillId))
+                    .flatMap(({ cap }) => (Array.isArray(cap.mountPaths) ? [[cap.id, cap.mountPaths] as const] : [])),
+                )
               : undefined;
+
           const syncResult = await syncProject(projectRoot, skillsSource, {
-            mountRules,
+            mountRules: syncMountRules,
             force: false,
-            cascadeDisabledSkills,
-            mountPathsBySkill: localMountPathsBySkill,
+            disabledSkills: globalDisabledSkills,
+            mountPathsBySkill: localMountPathsBySkill?.size ? localMountPathsBySkill : undefined,
             globalMountPathsBySkill,
           });
           localSyncConflicts = syncResult.conflicts;
 
-          // Global scope: cascade to all external projects
           if (
-            shouldPropagateManagedSkillToggle(
-              body.scope as 'global' | 'project',
-              shouldWritebackManagedSkill,
-              projectRoot,
-              getProjectRoot(),
-            )
+            shouldPropagateManagedSkillToggle(body.scope as 'global' | 'project', true, projectRoot, getProjectRoot())
           ) {
-            const allResult = await syncAll(getProjectRoot(), skillsSource, { mountRules, force: false });
+            const allResult = await syncAll(getProjectRoot(), skillsSource, {
+              mountRules: syncMountRules,
+              force: false,
+            });
             propagationWarnings.push(...allResult.warnings);
             for (const [, projResult] of allResult.perProject) {
               propagationConflicts.push(...projResult.conflicts);
             }
           }
         } catch (syncErr) {
-          // Rollback config to pre-toggle state so UI/config stays consistent with filesystem
-          // Delete properties added during toggle that weren't in snapshot (e.g. mountPaths)
-          for (const key of Object.keys(cap)) {
-            if (!(key in beforeSnapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+          for (const { cap, skillId } of targets) {
+            const snapshot = beforeSnapshots.get(skillId)!;
+            for (const key of Object.keys(cap)) {
+              if (!(key in snapshot)) delete (cap as unknown as Record<string, unknown>)[key];
+            }
+            Object.assign(cap, snapshot);
           }
-          Object.assign(cap, beforeSnapshot);
           await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
           await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
           throw syncErr;
         }
       }
 
-      // F228: per-mount-point enable with conflict is treated as partial success
-      // (same as whole-skill enable). Config records user intent; conflict is
-      // reported via propagationConflicts and shown by drift-check. No rollback.
-
       const allSyncConflicts = [...localSyncConflicts, ...propagationConflicts];
-      // F228: only return conflicts relevant to the toggled skill.
-      // syncProject reconciles ALL skills, but the caller only cares about
-      // the skill they just toggled — other conflicts are already visible
-      // in the drift/conflict checker.
-      const syncConflicts = allSyncConflicts.filter((c) => c.skillName === body.capabilityId);
+      const toggledIdSet = new Set(effectiveIds);
+      const syncConflicts = allSyncConflicts.filter((c) => toggledIdSet.has(c.skillName));
 
-      await appendAuditEntry(projectRoot, {
-        timestamp: new Date().toISOString(),
-        userId,
-        action: 'toggle',
-        capabilityId: body.capabilityId,
-        before: beforeSnapshot,
-        after: cap,
-      });
+      // Audit: one entry per toggled skill
+      const ts = new Date().toISOString();
+      for (const { cap, skillId } of targets) {
+        await appendAuditEntry(projectRoot, {
+          timestamp: ts,
+          userId,
+          action: 'toggle',
+          capabilityId: skillId,
+          before: beforeSnapshots.get(skillId)!,
+          after: cap,
+        });
+      }
+
+      // Response: batch returns capabilities[] array, single returns capability
+      const resultCaps = targets.map(({ cap }) => sanitizeCapabilityForResponse(cap));
 
       if (propagationWarnings.length > 0) {
         reply.status(500);
@@ -1231,15 +1247,19 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         return {
           ok: false,
           error: `Global ${opLabel} persisted locally but failed to propagate to ${propagationWarnings.length} project(s).`,
-          capability: sanitizeCapabilityForResponse(cap),
+          ...(isBatch ? { capabilities: resultCaps } : { capability: resultCaps[0] }),
           failedProjects: propagationWarnings,
           propagationConflicts: syncConflicts.length > 0 ? syncConflicts : undefined,
         };
       }
       if (syncConflicts.length > 0) {
-        return { ok: true, capability: sanitizeCapabilityForResponse(cap), propagationConflicts: syncConflicts };
+        return {
+          ok: true,
+          ...(isBatch ? { capabilities: resultCaps } : { capability: resultCaps[0] }),
+          propagationConflicts: syncConflicts,
+        };
       }
-      return { ok: true, capability: sanitizeCapabilityForResponse(cap) };
+      return { ok: true, ...(isBatch ? { capabilities: resultCaps } : { capability: resultCaps[0] }) };
     });
   });
 

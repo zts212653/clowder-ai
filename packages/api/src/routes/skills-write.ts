@@ -7,7 +7,7 @@
  * Plugin skills use classifyMountPath for lightweight mount/unmount.
  */
 
-import { lstat, mkdir, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
@@ -21,7 +21,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
-import { buildSkillMountTargets, resolveMainRepoPath } from '../utils/skill-mount.js';
+import { buildSkillMountTargets, createSkillSymlink, resolveMainRepoPath } from '../utils/skill-mount.js';
 import { listSourceSkillNames } from '../utils/skill-source.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
@@ -76,18 +76,18 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
         readCapabilitiesConfig(globalProjectRoot),
       ]);
 
-      // Extract global policy for cascade
-      const cascadeDisabled = new Set<string>();
+      // Extract global policy for external projects
+      const globalDisabledSkills = new Set<string>();
       const globalMountPaths = new Map<string, readonly string[]>();
       for (const cap of globalConfig?.capabilities ?? []) {
         if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
-        if (!(cap.globalEnabled ?? cap.enabled)) cascadeDisabled.add(cap.id);
+        if (!(cap.globalEnabled ?? cap.enabled)) globalDisabledSkills.add(cap.id);
         if (Array.isArray(cap.mountPaths)) globalMountPaths.set(cap.id, cap.mountPaths);
       }
 
       const result = await syncProject(projectRoot, skillsSrc, {
         mountRules,
-        cascadeDisabledSkills: projectRoot !== globalProjectRoot ? cascadeDisabled : undefined,
+        disabledSkills: projectRoot !== globalProjectRoot ? globalDisabledSkills : undefined,
         globalMountPathsBySkill: globalMountPaths,
       });
 
@@ -121,7 +121,7 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
                 process.platform === 'win32'
                   ? join(ps.skillsSource, ps.skillName)
                   : relative(dirname(linkPath), join(ps.skillsSource, ps.skillName));
-              await symlink(rel, linkPath);
+              await createSkillSymlink(rel, linkPath);
               pluginMounted.push(ps.skillName);
             } else if (!shouldMount && status === 'managed') {
               await rm(linkPath);
@@ -191,18 +191,18 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
       const mainRoot = opts.mainProjectRoot ?? (await resolveMainRepoPath());
       const mountRules = await readMountRules(projectRoot, mainRoot);
       const globalConfig = await readCapabilitiesConfig(globalProjectRoot);
-      const cascadeDisabled = new Set<string>();
+      const globalDisabledSkills = new Set<string>();
       const globalMountPaths = new Map<string, readonly string[]>();
       for (const cap of globalConfig?.capabilities ?? []) {
         if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
-        if (!(cap.globalEnabled ?? cap.enabled)) cascadeDisabled.add(cap.id);
+        if (!(cap.globalEnabled ?? cap.enabled)) globalDisabledSkills.add(cap.id);
         if (Array.isArray(cap.mountPaths)) globalMountPaths.set(cap.id, cap.mountPaths);
       }
 
       // syncProject reconciles all skills including the target — idempotent
       const result = await syncProject(projectRoot, skillsSrc, {
         mountRules,
-        cascadeDisabledSkills: projectRoot !== globalProjectRoot ? cascadeDisabled : undefined,
+        disabledSkills: projectRoot !== globalProjectRoot ? globalDisabledSkills : undefined,
         globalMountPathsBySkill: globalMountPaths,
       });
       const updatedConfig = await readCapabilitiesConfig(projectRoot);

@@ -6,13 +6,13 @@
  * call these functions. Config writes + symlink operations are handled internally.
  */
 
-import { lstat, mkdir, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
 import { type CapabilityEntry, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
-import { buildSkillMountTargets } from '../utils/skill-mount.js';
+import { buildSkillMountTargets, createSkillSymlink } from '../utils/skill-mount.js';
 import { parseManifestSkillMeta, readSkillMeta } from './skill-meta.js';
 import { classifyMountPath, type MountConflict } from './skill-sync-engine.js';
 
@@ -143,7 +143,7 @@ export async function mountSkillSymlinks(
       const linkPath = join(dir, skillName);
       const status = await classifyMountPath(linkPath, skillsSource, skillName);
       if (status === 'missing') {
-        await symlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+        await createSkillSymlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
         result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
       } else if (status === 'conflict') {
         result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
