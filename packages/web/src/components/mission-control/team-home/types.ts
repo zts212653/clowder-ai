@@ -39,8 +39,8 @@ export interface TeamHomeMissionSummary {
   name: string;
   owner: TeamHomeParticipantId;
   stage: TeamHomeSOPStage;
-  evidenceCount: number;
-  requiredEvidence: number;
+  evidenceCount?: number;
+  requiredEvidence?: number;
   nextAction: string;
   updatedAt: string;
 }

@@ -1,6 +1,7 @@
 import type { BacklogItem, CatId } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
 import { adaptTeamHomeData } from '../mission-control/team-home/adapter';
+import { teamHomeFixture } from '../mission-control/team-home/fixture';
 
 function catId(id: string): CatId {
   return id as CatId;
@@ -69,5 +70,32 @@ describe('adaptTeamHomeData', () => {
     expect(data.team.find((member) => member.id === 'codex')?.lastActiveAt).toBe(new Date(lastActiveAt).toISOString());
     expect(data.team.find((member) => member.id === 'claude')?.currentContext).toBe('参与：Team Home MVP');
     expect(data.team.find((member) => member.id === 'claude')?.lastActiveAt).toBe(new Date(lastActiveAt).toISOString());
+  });
+
+  it('does not treat audit lifecycle logs as evidence items', () => {
+    const data = adaptTeamHomeData({
+      items: [
+        makeBacklogItem({
+          audit: [
+            { id: 'audit-created', action: 'created', actor: { kind: 'user', id: 'u_test' }, timestamp: 1 },
+            { id: 'audit-dispatched', action: 'dispatched', actor: { kind: 'user', id: 'u_test' }, timestamp: 2 },
+            { id: 'audit-heartbeat', action: 'lease_heartbeat', actor: { kind: 'cat', id: 'codex' }, timestamp: 3 },
+          ],
+        }),
+      ],
+    });
+
+    expect(data.missions[0]?.evidenceCount).toBeUndefined();
+    expect(data.missions[0]?.requiredEvidence).toBeUndefined();
+  });
+
+  it('only treats approved or dispatched items as active work', () => {
+    const suggested = makeBacklogItem({ id: 'suggested-1', status: 'suggested' });
+    const done = makeBacklogItem({ id: 'done-1', status: 'done' });
+    const data = adaptTeamHomeData({ items: [suggested, done] });
+
+    expect(data.missions).toHaveLength(0);
+    expect(data.baton.scope).toBe(teamHomeFixture.baton.scope);
+    expect(data.mission.activeFeatureId).toBe('—');
   });
 });

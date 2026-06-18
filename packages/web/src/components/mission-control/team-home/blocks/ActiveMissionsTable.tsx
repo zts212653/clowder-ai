@@ -51,7 +51,9 @@ export function ActiveMissionsTable({ missions }: ActiveMissionsTableProps) {
                   </span>
                 </td>
                 <td className="py-2.5 text-xs text-cafe-secondary">
-                  {mission.evidenceCount}/{mission.requiredEvidence}
+                  {mission.evidenceCount != null && mission.requiredEvidence != null
+                    ? `${mission.evidenceCount}/${mission.requiredEvidence}`
+                    : '—'}
                 </td>
                 <td className="max-w-xs truncate py-2.5 text-xs text-cafe-secondary">{mission.nextAction}</td>
               </tr>

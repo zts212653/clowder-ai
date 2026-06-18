@@ -57,6 +57,8 @@ function inferOwner(item: BacklogItem): TeamHomeParticipantId {
   return 'kiimi' as CatId;
 }
 
+const MAX_VISIBLE_MISSIONS = 8;
+
 function inferNextAction(item: BacklogItem): string {
   const stage = inferSOPStage(item);
   const owner = inferOwner(item);
@@ -65,12 +67,6 @@ function inferNextAction(item: BacklogItem): string {
       return `等待 @${owner} 领取或进入 kickoff`;
     case 'impl':
       return `@${owner} 正在实现中`;
-    case 'quality_gate':
-      return `@${owner} 自检中，等待 quality gate 通过`;
-    case 'review':
-      return `@${owner} 完成后进入 cross-cat review`;
-    case 'merge':
-      return '等待 merge gate 与最终合入';
     case 'completion':
       return '已完成';
     default:
@@ -93,13 +89,8 @@ function extractFeatureIdFromTags(tags: readonly string[]): string | undefined {
 }
 
 function pickActiveItem(items: BacklogItem[]): BacklogItem | undefined {
-  return (
-    items.find((item) => item.lease?.state === 'active') ??
-    items.find((item) => item.status === 'dispatched') ??
-    items.find((item) => item.status === 'approved') ??
-    items.find((item) => item.status === 'suggested') ??
-    items[0]
-  );
+  const activeStatuses = new Set<BacklogItem['status']>(['approved', 'dispatched']);
+  return items.find((item) => activeStatuses.has(item.status));
 }
 
 function deriveMissionFromItem(
@@ -219,14 +210,12 @@ export function adaptTeamHomeData(input: TeamHomeAdapterInput): TeamHomeData {
 
   const missions: TeamHomeMissionSummary[] = items
     .filter((item) => activeStatuses.has(item.status))
-    .slice(0, 8)
+    .slice(0, MAX_VISIBLE_MISSIONS)
     .map((item) => ({
       id: item.id,
       name: item.title,
       owner: inferOwner(item),
       stage: inferSOPStage(item),
-      evidenceCount: item.audit?.length ?? 0,
-      requiredEvidence: 4,
       nextAction: inferNextAction(item),
       updatedAt: new Date(item.updatedAt).toISOString(),
     }));
