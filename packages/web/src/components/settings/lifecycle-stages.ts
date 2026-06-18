@@ -1,5 +1,5 @@
 /**
- * F226 — Session lifecycle stage definitions (user-facing).
+ * F237 — Session lifecycle stage definitions (user-facing).
  *
  * Multi-level nesting matches the actual execution architecture:
  *   Thread → Session(s) → Turn(s) → Client Invoke

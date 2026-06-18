@@ -1,6 +1,6 @@
-# Review Request: F226 Phase 1 — Console Prompt Injection Visibility Cleanup
+# Review Request: F237 Phase 1 — Console Prompt Injection Visibility Cleanup
 
-Review-Target-ID: f219
+Review-Target-ID: f237
 Branch: feat/f219-injection-visibility
 
 ## What
@@ -36,7 +36,7 @@ CVO 在验收过程中逐项驱动的视觉和功能改进。核心目标：让 
 > "注入位置: 这个应该是注释不应该用卡片的"
 > "L0 系统提示词模板是在L0 系统提示词上面 和注入位置下面"
 
-- 来源：当前 thread 直接对话（F226 Phase 1 验收）
+- 来源：当前 thread 直接对话（F237 Phase 1 验收）
 - **请对照上面的摘录判断交付物是否解决了铲屎官的问题**
 
 ## Tradeoff
@@ -48,7 +48,7 @@ CVO 在验收过程中逐项驱动的视觉和功能改进。核心目标：让 
 
 Architecture cell: harness/system-prompt-injection + action-plane/settings
 Map delta: none
-Why: 本 PR 是 F226 manifest/template 体系的 Console 展示层清理，不改变 injection 架构本身。新增 `prompt-injection-hooks.ts` 是路由层代码提取，非新架构概念。
+Why: 本 PR 是 F237 manifest/template 体系的 Console 展示层清理，不改变 injection 架构本身。新增 `prompt-injection-hooks.ts` 是路由层代码提取，非新架构概念。
 
 请 reviewer 检查：
 - diff 是否与 `Map delta: none` 一致

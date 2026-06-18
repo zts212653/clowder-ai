@@ -192,7 +192,7 @@ export function RuleFileCard({
 }
 
 /**
- * F203 Phase F / F226 — L0 system prompt template viewer.
+ * F203 Phase F / F237 — L0 system prompt template viewer.
  * Styled as a segment row to be consistent with StageDetailPanels SegmentRow.
  */
 export function L0PromptsSection({

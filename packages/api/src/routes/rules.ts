@@ -2,7 +2,7 @@
  * Rules & Prompts Route
  * GET /api/rules — shared rules + provider guides for console transparency
  * GET /api/rules/skill/:name — SKILL.md content preview (allowlisted paths only)
- * GET /api/prompt-injection/manifest — F226 injection manifest for console visibility
+ * GET /api/prompt-injection/manifest — F237 injection manifest for console visibility
  */
 
 import { existsSync } from 'node:fs';
@@ -310,7 +310,7 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  // F226: Prompt Injection Manifest — full segment registry for Console visibility
+  // F237: Prompt Injection Manifest — full segment registry for Console visibility
   app.get('/api/prompt-injection/manifest', async (request, reply) => {
     if (!resolveUserId(request)) {
       reply.status(401);

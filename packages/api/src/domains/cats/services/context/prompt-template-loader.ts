@@ -1,5 +1,5 @@
 /**
- * Prompt Template Loader (F226 Checkpoint B+C)
+ * Prompt Template Loader (F237 Checkpoint B+C)
  *
  * Loads prompt injection segments from external template files in
  * assets/prompt-templates/ instead of inline TypeScript constants.
@@ -167,7 +167,7 @@ export interface OverrideStatus {
 }
 
 /** Known template-backed segments and their file mappings.
- *  Tier A (F226 template unification): simple {{VAR}} substitution.
+ *  Tier A (F237 template unification): simple {{VAR}} substitution.
  *  Existing: S6, S13, D8, D21. New Tier A: S1, S2, S8, D1, D5, D9-D11, D14, D16. */
 const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   // ── L0 section templates (compiled by compile-system-prompt-l0.mjs) ──
@@ -188,8 +188,8 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   S13: { base: 'mcp-tools.md', local: 'mcp-tools.local.md' },
   D8: { base: 'a2a-ball-check.md', local: '' },
   D21: { base: 'handoff-decision-tree.md', local: '' },
-  // ── Tier A: simple variable substitution (F226 template unification) ──
-  S1: { base: 's1-identity.md', local: '' }, // F226: identity is config-driven, not user-editable
+  // ── Tier A: simple variable substitution (F237 template unification) ──
+  S1: { base: 's1-identity.md', local: '' }, // F237: identity is config-driven, not user-editable
   S2: { base: 's2-restrictions.md', local: '' },
   S8: { base: 's8-cvo-reference.md', local: '' },
   D1: { base: 'd1-identity-anchor.md', local: '' },
@@ -199,13 +199,13 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   D11: { base: 'd11-skill-trigger.md', local: '' },
   D14: { base: 'd14-sop-stage.md', local: '' },
   D16: { base: 'd16-bootcamp.md', local: '' },
-  // ── Tier B: computed placeholders (F226 template unification) ──
+  // ── Tier B: computed placeholders (F237 template unification) ──
   S4: { base: 's4-collaboration.md', local: '' },
   D2: { base: 'd2-direct-message.md', local: '' },
   D3: { base: 'd3-same-breed-warning.md', local: '' },
   D4: { base: 'd4-cross-thread-reply.md', local: '' },
   D6: { base: 'd6-teammates.md', local: '' },
-  D7: { base: 'd7-mode-serial.md', local: '' }, // F226: default variant for manifest D7 viewing
+  D7: { base: 'd7-mode-serial.md', local: '' }, // F237: default variant for manifest D7 viewing
   D7_serial: { base: 'd7-mode-serial.md', local: '' },
   D7_parallel: { base: 'd7-mode-parallel.md', local: '' },
   D7_solo: { base: 'd7-mode-solo.md', local: '' },
@@ -214,7 +214,7 @@ const TEMPLATE_FILES: Record<string, { base: string; local: string }> = {
   D15: { base: 'd15-voice-off.md', local: '' },
   D15_on: { base: 'd15-voice-on.md', local: '' },
   D15_off: { base: 'd15-voice-off.md', local: '' },
-  // ── Tier C: external delegates / pack passthroughs (F226 template unification) ──
+  // ── Tier C: external delegates / pack passthroughs (F237 template unification) ──
   S3: { base: 's3-pack-masks.md', local: '' },
   S5: { base: 's5-teammate-roster.md', local: '' },
   S7: { base: 's7-pack-workflows.md', local: '' },
@@ -273,7 +273,7 @@ export function getTemplateFileInfo(segmentId: string): { base: string; local: s
   return TEMPLATE_FILES[segmentId] ?? null;
 }
 
-// ── Generic segment rendering (F226 template unification) ───
+// ── Generic segment rendering (F237 template unification) ───
 
 /**
  * Load and render a template-backed segment with variable substitution.

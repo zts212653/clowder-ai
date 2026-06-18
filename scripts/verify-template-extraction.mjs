@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * F226 Checkpoint B — Template extraction regression verifier.
+ * F237 Checkpoint B — Template extraction regression verifier.
  * Compares template-loaded output against the original hardcoded strings
  * to ensure byte-level equivalence after extraction.
  *

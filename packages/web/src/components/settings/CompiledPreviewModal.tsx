@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 — Client injection preview modal with scenario dimensions.
+ * F237 — Client injection preview modal with scenario dimensions.
  * Two dimensions: scenario (首轮/后续轮/Handoff后) × content (系统提示词/用户消息).
  * Content adapts to native-L0 vs non-native clients automatically.
  *

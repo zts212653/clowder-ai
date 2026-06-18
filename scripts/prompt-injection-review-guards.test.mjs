@@ -1,10 +1,45 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import YAML from 'yaml';
 
 describe('prompt-injection review guard scripts', () => {
+  it('durable prompt-injection files do not keep the old F226 feature anchor', () => {
+    const reviewNotes = spawnSync('git', ['ls-files', 'review-notes'], {
+      encoding: 'utf-8',
+    })
+      .stdout.split('\n')
+      .filter((path) => path.includes('injection') || path.includes('cleanup'));
+    const files = [
+      'assets/prompt-injection-manifest.yaml',
+      'packages/api/src/domains/cats/services/context/SystemPromptBuilder.ts',
+      'packages/api/src/domains/cats/services/context/prompt-template-loader.ts',
+      'packages/api/src/routes/prompt-injection-hooks.ts',
+      'packages/api/src/routes/prompt-injection-preview.ts',
+      'packages/api/src/routes/prompt-injection.ts',
+      'packages/api/src/routes/rules.ts',
+      'packages/api/test/l0-compiler.test.js',
+      'packages/web/src/components/settings/CatDimensionSelector.tsx',
+      'packages/web/src/components/settings/CompiledPreviewModal.tsx',
+      'packages/web/src/components/settings/InjectionManifestContent.tsx',
+      'packages/web/src/components/settings/LifecycleFlowDiagram.tsx',
+      'packages/web/src/components/settings/RulesPromptsParts.tsx',
+      'packages/web/src/components/settings/SegmentEditorModal.tsx',
+      'packages/web/src/components/settings/StageDetailPanels.tsx',
+      'packages/web/src/components/settings/lifecycle-stages.ts',
+      'scripts/check-manifest-drift.mjs',
+      'scripts/verify-template-extraction.mjs',
+      ...reviewNotes,
+    ];
+
+    const pathOffenders = files.filter((path) => /f226/i.test(path));
+    assert.deepEqual(pathOffenders, [], 'prompt-injection review artifact paths must not anchor to F226');
+
+    const contentOffenders = files.filter((path) => readFileSync(path, 'utf-8').includes('F226'));
+    assert.deepEqual(contentOffenders, [], 'prompt-injection source/docs must use F237 or omit feature anchors');
+  });
+
   it('verify-template-extraction discloses exact byte-identity coverage', () => {
     const result = spawnSync(process.execPath, ['scripts/verify-template-extraction.mjs'], {
       encoding: 'utf-8',
@@ -53,6 +88,11 @@ describe('prompt-injection review guard scripts', () => {
       'utf-8',
     );
     assert.doesNotMatch(loaderSource, /\n\s*B1:\s*\{/, 'B1 must not be exposed as a template-backed segment');
+    assert.equal(
+      existsSync('assets/prompt-templates/b1-session-bootstrap.md'),
+      false,
+      'B1 must not leave a realistic but unreferenced prompt template file behind',
+    );
   });
 
   it('S6 overlay mutations invalidate the native L0 cache', () => {

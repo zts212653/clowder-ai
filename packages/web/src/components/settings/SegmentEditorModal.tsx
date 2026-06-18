@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 Checkpoint C — Segment overlay editor modal.
+ * F237 Checkpoint C — Segment overlay editor modal.
  * Portal-based modal matching SkillPreviewModal pattern.
  * Edits template-backed segments via .local overlay files.
  */

@@ -1,5 +1,5 @@
 /**
- * Hook script content resolver for prompt injection viewer (F226).
+ * Hook script content resolver for prompt injection viewer (F237).
  * Reads .claude/hooks/ shell scripts for H-prefixed segments.
  * Extracted from prompt-injection.ts to respect the 350-line limit.
  */

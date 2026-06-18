@@ -1,10 +1,10 @@
-# F226: Prompt Injection Manifest
+# F237: Prompt Injection Manifest
 # Machine-readable registry of all segments injected into the effective prompt.
 # Source of truth for Console visibility, drift checking, and Phase 2 lifecycle migration.
 #
 # Schema version: 1.0.0
 # Total active segments: 52 (L1-L7, S1-S13, D1-D21, R1-R2, M1-M2, B1, C1, N1-N2, H1-H3)
-# Excluded (dead code): 0 (X1 fully removed in F226 Phase 1 including source function)
+# Excluded (dead code): 0 (X1 fully removed in F237 Phase 1 including source function)
 #
 # Three-axis classification (orthogonal):
 #   safetyTier        — Can a human edit this?        (readonly | limited-edit | editable)
@@ -992,6 +992,6 @@ segments:
     consumer: governance-hook
     relatedFeature: null
 
-  # X1 (Reviewer Section) — physically removed in F226 Phase 1.
+  # X1 (Reviewer Section) — physically removed in F237 Phase 1.
   # buildReviewerSection() was dead code: exported but never called by any production route.
   # Source function deletion tracked separately (SystemPromptBuilder.ts cleanup).

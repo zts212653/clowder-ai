@@ -1,6 +1,6 @@
-# Review Request: F226 Phase 1 — Prompt Injection Visibility
+# Review Request: F237 Phase 1 — Prompt Injection Visibility
 
-Review-Target-ID: f219
+Review-Target-ID: f237
 Branch: feat/f219-injection-visibility
 
 ## What
@@ -81,7 +81,7 @@ Quality Gate 通过。12 条 AC 全部 ✅（AC-Trust 待铲屎官体验测试�
 ### 测试结果
 
 ```
-pnpm test           → 2 failures (pre-existing: signal-fetcher-launchd.sh missing, 非 F226)
+pnpm test           → 2 failures (pre-existing: signal-fetcher-launchd.sh missing, 非 F237)
 pnpm lint           → 0 errors (pre-existing warnings only)
 pnpm biome check    → 0 errors, 3296 files checked
 pnpm build          → exit 0
@@ -93,4 +93,4 @@ verify-template-extraction.mjs → "All 4 templates produce identical output"
 
 - Spec: `docs/features/F237-prompt-injection-visibility.md`
 - Issue: https://github.com/zts212653/clowder-ai/issues/839
-- Feature: F226 / Phase 1
+- Feature: F237 / Phase 1

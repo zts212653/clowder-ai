@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 — Injection manifest viewer with lifecycle flow diagram.
+ * F237 — Injection manifest viewer with lifecycle flow diagram.
  * User-facing lifecycle pipeline with sub-stage grouping.
  * client-invoke = assembled prompt preview point (system + turn + user).
  * hook-events = event-driven, separate HookManagementPanel.

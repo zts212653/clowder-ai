@@ -1,5 +1,5 @@
 /**
- * Prompt Injection Template Overlay API (F226 Checkpoint C)
+ * Prompt Injection Template Overlay API (F237 Checkpoint C)
  *
  * Endpoints for reading, editing, previewing, and resetting
  * prompt injection template overlays (.local files).

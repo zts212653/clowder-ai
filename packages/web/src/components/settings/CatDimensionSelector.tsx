@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 AC-10 — Per-cat dimension selector.
+ * F237 AC-10 — Per-cat dimension selector.
  * Shows a dropdown of available cats and highlights which segments
  * would be active for the selected cat based on breed and provider.
  */

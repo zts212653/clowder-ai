@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 — Session lifecycle flow diagram with multi-level nesting.
+ * F237 — Session lifecycle flow diagram with multi-level nesting.
  *
  * Shows the actual execution hierarchy:
  *   Thread → Session Loop → Turn Loop → Client Invoke

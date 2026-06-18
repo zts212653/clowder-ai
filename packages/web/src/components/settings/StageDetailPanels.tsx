@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F226 — Stage detail sub-components for the injection manifest viewer.
+ * F237 — Stage detail sub-components for the injection manifest viewer.
  * Extracted from InjectionManifestContent to respect the 350-line limit.
  *
  * Contains: StageDetailPanel, SubStageGroup, SegmentRow,
@@ -113,7 +113,7 @@ export function CarrierInfoPanel({ carrier }: { carrier: CarrierInfo }) {
 }
 
 // ── Event-driven stage panel (hook-events) ────────────────
-// Hook toggle/dry-run removed from F226 scope (CVO: "当前 PR 多余").
+// Hook toggle/dry-run removed from F237 scope (CVO: "当前 PR 多余").
 // Hook events stage now uses the same StageDetailPanel as all others.
 
 // ── Stage detail panel ────────────────────────────────────────

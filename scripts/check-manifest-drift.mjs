@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * F226 Manifest Drift Check
+ * F237 Manifest Drift Check
  *
  * Ensures `@segment ID` annotations in source code match the IDs declared in
  * `assets/prompt-injection-manifest.yaml`. Run as CI lint step.
@@ -176,7 +176,7 @@ for (const seg of manifest.segments) {
 
 // ── 6. Report ─────────────────────────────────────────────────
 
-console.log(`F226 Manifest Drift Check`);
+console.log(`F237 Manifest Drift Check`);
 console.log(`  Manifest segments: ${manifestIds.size} (${activeIds.size} active)`);
 console.log(`  Code annotations:  ${codeIds.size}`);
 console.log(`  .ts sources scanned: ${sourceFiles.size}`);

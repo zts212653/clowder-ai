@@ -303,7 +303,7 @@ const PROVIDER_LABELS: Record<string, string> = {
  * @segment S13 — MCP tools section (loaded from template)
  * Skills-as-source-of-truth: MCP tools section is minimal.
  * Full specs live in cat-cafe-skills/refs/ (rich-blocks.md, mcp-callbacks.md).
- * Lazy-evaluated to pick up .local overlay changes (F226 Checkpoint C).
+ * Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C).
  */
 function getMcpToolsSection(): string {
   return `\n${loadMcpToolsSection({ RICH_BLOCK_SHORT })}`;
@@ -331,7 +331,7 @@ export function getGovernanceDigest(): string {
 
 /** @segment S6 — Per-breed workflow triggers (loaded from template)
  *  Keyed by breedId so all variants of a breed share the same workflow.
- *  Lazy-evaluated to pick up .local overlay changes (F226 Checkpoint C). */
+ *  Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C). */
 function getWorkflowTriggers(): Record<string, string> {
   return loadWorkflowTriggers();
 }
@@ -418,7 +418,7 @@ export interface StaticIdentityOptions {
    */
   packBlocks?: CompiledPackBlocks | null;
   /**
-   * F226: When true, insert `── [SN] Name ──` markers before each segment.
+   * F237: When true, insert `── [SN] Name ──` markers before each segment.
    * Used by compiled-preview to show which segment generated which content.
    */
   annotateSegments?: boolean;
@@ -436,7 +436,7 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   const providerLabel = PROVIDER_LABELS[config.clientId] ?? config.clientId;
   const lines: string[] = [];
-  // F226: segment annotation — preview inserts `── [SN] Name ──` markers
+  // F237: segment annotation — preview inserts `── [SN] Name ──` markers
   const mark = options?.annotateSegments
     ? (id: string, name: string) => {
         lines.push(`── [${id}] ${name} ──`);
