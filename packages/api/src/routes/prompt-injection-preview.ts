@@ -16,7 +16,10 @@ import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveDefaultClaudeMcpServerPath } from '../domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { compileL0ViaSubprocess } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import { getTemplateRawContent, stripComments } from '../domains/cats/services/context/prompt-template-loader.js';
-import { buildStaticIdentity } from '../domains/cats/services/context/SystemPromptBuilder.js';
+import {
+  buildStaticIdentity,
+  buildStaticIdentityPackOnly,
+} from '../domains/cats/services/context/SystemPromptBuilder.js';
 import { getActivePackBlocks } from '../domains/packs/getActivePackBlocks.js';
 import { PackStore } from '../domains/packs/PackStore.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
@@ -58,9 +61,11 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
       // For native-L0: show actual compiled L0 (includes L1-L7, identity, governance, etc.)
       // For non-native: show S-segment view from buildStaticIdentity
       let systemPromptContent = compiled;
+      let nativePackContext = '';
       if (isNativeL0) {
         try {
           systemPromptContent = await compileL0ViaSubprocess({ catId });
+          nativePackContext = buildStaticIdentityPackOnly(catId as CatId, { packBlocks });
         } catch (e) {
           const nativeL0CompileError = e instanceof Error ? e.message : String(e);
           reply.status(500);
@@ -183,6 +188,7 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
         dynamicContext,
         bootstrapContext,
         userInput,
+        nativePackContext,
         isNativeL0,
         clientId: catConfig?.clientId ?? 'unknown',
         staticLength: systemPromptContent.length,

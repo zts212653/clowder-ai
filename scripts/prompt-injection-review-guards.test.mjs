@@ -107,4 +107,26 @@ describe('prompt-injection review guard scripts', () => {
       'native-L0 preview errors should expose the compiler failure explicitly',
     );
   });
+
+  it('compiled preview includes native pack-only context in the user-message preview', () => {
+    const apiSource = readFileSync('packages/api/src/routes/prompt-injection-preview.ts', 'utf-8');
+    const webSource = readFileSync('packages/web/src/components/settings/CompiledPreviewModal.tsx', 'utf-8');
+
+    assert.match(apiSource, /buildStaticIdentityPackOnly/, 'API preview should compute native pack-only context');
+    assert.match(
+      apiSource,
+      /nativePackContext\s*=\s*buildStaticIdentityPackOnly\(catId\s+as\s+CatId,\s*\{\s*packBlocks\s*\}\)/,
+      'native pack context must use the same pack-only builder as native runtime routes',
+    );
+    assert.match(
+      webSource,
+      /nativePackContext\?:\s*string/,
+      'frontend preview contract should expose native pack context',
+    );
+    assert.match(
+      webSource,
+      /isNativeL0\s*&&\s*scenario\s*!==\s*['"]subsequent['"][\s\S]*?msgParts\.push\(nativePackContext\)/,
+      'native pack context should render in the user-message preview for first-turn and handoff scenarios',
+    );
+  });
 });

@@ -19,6 +19,7 @@ interface CompiledPreviewData {
   dynamicContext: string;
   bootstrapContext: string;
   userInput: string;
+  nativePackContext?: string;
   isNativeL0: boolean;
   clientId: string;
   staticLength: number;
@@ -102,7 +103,7 @@ export function CompiledPreviewModal({ catId, catName, onClose }: CompiledPrevie
 
   const content = useMemo(() => {
     if (!data) return null;
-    const { isNativeL0, systemPrompt, dynamicContext, bootstrapContext, userInput } = data;
+    const { isNativeL0, systemPrompt, dynamicContext, bootstrapContext, userInput, nativePackContext } = data;
 
     // ── System prompt: what goes into the system role channel ──
     let sys: string | null;
@@ -119,6 +120,9 @@ export function CompiledPreviewModal({ catId, catName, onClose }: CompiledPrevie
 
     // ── User message: what gets prepended to the user's actual input ──
     const msgParts: string[] = [];
+    if (isNativeL0 && scenario !== 'subsequent' && nativePackContext) {
+      msgParts.push(nativePackContext);
+    }
     if (!isNativeL0 && scenario !== 'subsequent') {
       // Non-native first-turn / after-handoff: system prompt prepended into user message.
       // Subsequent turns: runtime gates via injectSystemPrompt (no re-injection).
