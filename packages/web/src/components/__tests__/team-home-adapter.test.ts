@@ -89,6 +89,32 @@ describe('adaptTeamHomeData', () => {
     expect(data.missions[0]?.requiredEvidence).toBeUndefined();
   });
 
+  it('prefers active lease over dispatched over approved regardless of item order', () => {
+    const approved = makeBacklogItem({
+      id: 'approved-1',
+      status: 'approved',
+      title: 'Approved Mission',
+    });
+    const dispatchedWithLease = makeBacklogItem({
+      id: 'dispatched-1',
+      status: 'dispatched',
+      title: 'Dispatched With Lease',
+      lease: {
+        ownerCatId: catId('claude'),
+        state: 'active',
+        acquiredAt: Date.UTC(2026, 5, 18, 9, 10, 0),
+        heartbeatAt: Date.UTC(2026, 5, 18, 9, 20, 0),
+        expiresAt: Date.UTC(2026, 5, 18, 10, 0, 0),
+      },
+    });
+
+    const data = adaptTeamHomeData({ items: [approved, dispatchedWithLease] });
+
+    expect(data.baton.scope).toBe('Dispatched With Lease');
+    expect(data.baton.holder).toBe('claude');
+    expect(data.mission.activeFeatureId).toBe('F049');
+  });
+
   it('only treats approved or dispatched items as active work', () => {
     const suggested = makeBacklogItem({ id: 'suggested-1', status: 'suggested' });
     const done = makeBacklogItem({ id: 'done-1', status: 'done' });

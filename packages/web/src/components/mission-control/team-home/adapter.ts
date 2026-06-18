@@ -88,9 +88,17 @@ function extractFeatureIdFromTags(tags: readonly string[]): string | undefined {
   return undefined;
 }
 
+function isActiveMissionItem(item: BacklogItem): boolean {
+  return item.status === 'approved' || item.status === 'dispatched';
+}
+
 function pickActiveItem(items: BacklogItem[]): BacklogItem | undefined {
-  const activeStatuses = new Set<BacklogItem['status']>(['approved', 'dispatched']);
-  return items.find((item) => activeStatuses.has(item.status));
+  const activeItems = items.filter(isActiveMissionItem);
+  return (
+    activeItems.find((item) => item.lease?.state === 'active') ??
+    activeItems.find((item) => item.status === 'dispatched') ??
+    activeItems.find((item) => item.status === 'approved')
+  );
 }
 
 function deriveMissionFromItem(
