@@ -47,6 +47,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0.md');
 const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
+const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+ ──$/;
 
 /** L1-L7 section template files — static content extracted from the monolithic L0 template. */
 const L0_SECTION_TEMPLATES = {
@@ -60,7 +61,7 @@ const L0_SECTION_TEMPLATES = {
 };
 
 /**
- * Load an L0 section template file, stripping HTML comment lines.
+ * Load an L0 section template file, stripping compiler-only annotation lines.
  * Returns the content with leading/trailing whitespace trimmed.
  */
 function loadL0SectionTemplate(filename) {
@@ -68,9 +69,14 @@ function loadL0SectionTemplate(filename) {
   const raw = readFileSync(filePath, 'utf8');
   return raw
     .split('\n')
-    .filter((line) => !line.trimStart().startsWith('<!--'))
+    .filter((line) => !isCompilerAnnotationLine(line))
     .join('\n')
     .trim();
+}
+
+function isCompilerAnnotationLine(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith('<!--') || DISPLAY_SEGMENT_LABEL_RE.test(trimmed);
 }
 
 let _bootstrapped = false;
@@ -428,12 +434,12 @@ export async function compileL0(options) {
     throw new Error(`compileL0: unknown catId "${catId}". Registered: ${catRegistry.getAllIds().join(', ')}`);
   }
   const config = { ...entry.config, catId };
-  // Strip HTML comment lines from the main template (same as loadL0SectionTemplate
-  // does for L-section files). Allows rich annotations in the .md source that
-  // don't bloat the compiled output sent to the model.
+  // Strip compiler-only annotation lines from the main template (same as
+  // loadL0SectionTemplate does for L-section files). Allows rich source labels
+  // without changing the compiled output sent to the model.
   const template = readFileSync(TEMPLATE_PATH, 'utf8')
     .split('\n')
-    .filter((line) => !line.trimStart().startsWith('<!--'))
+    .filter((line) => !isCompilerAnnotationLine(line))
     .join('\n');
   const governanceL0 = await _loadCompiledGovernanceL0(REPO_ROOT);
 

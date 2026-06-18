@@ -5,6 +5,16 @@ import { describe, it } from 'node:test';
 import YAML from 'yaml';
 
 describe('prompt-injection review guard scripts', () => {
+  const firstAvailableCatId = () => {
+    const catalogPath = existsSync('.cat-cafe/cat-catalog.json') ? '.cat-cafe/cat-catalog.json' : 'cat-template.json';
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const entry = Object.entries(catalog.roster ?? {}).find(([catId, rosterEntry]) => {
+      return catId !== 'owner' && rosterEntry && rosterEntry.available !== false;
+    });
+    assert.ok(entry, `${catalogPath} must contain at least one available non-owner cat`);
+    return entry[0];
+  };
+
   it('durable prompt-injection files do not keep the old F226 feature anchor', () => {
     const reviewNotes = spawnSync('git', ['ls-files', 'review-notes'], {
       encoding: 'utf-8',
@@ -92,6 +102,17 @@ describe('prompt-injection review guard scripts', () => {
       existsSync('assets/prompt-templates/b1-session-bootstrap.md'),
       false,
       'B1 must not leave a realistic but unreferenced prompt template file behind',
+    );
+  });
+
+  it('compiled native L0 strips display-only segment labels', async () => {
+    const { compileL0 } = await import('./compile-system-prompt-l0.mjs');
+    const compiled = await compileL0({ catId: firstAvailableCatId() });
+
+    assert.doesNotMatch(
+      compiled,
+      /^── \[[A-Z]\d+] .+ ──$/m,
+      'compiled native L0 must not send source/template display labels to the model',
     );
   });
 
