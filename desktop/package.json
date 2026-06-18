@@ -116,8 +116,8 @@
         "to": "guides"
       },
       {
-        "from": "../assets/system-prompts",
-        "to": "assets/system-prompts"
+        "from": "../assets",
+        "to": "assets"
       },
       {
         "from": "../plugins",

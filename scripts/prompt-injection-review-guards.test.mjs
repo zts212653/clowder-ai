@@ -85,6 +85,22 @@ describe('prompt-injection review guard scripts', () => {
     assert.match(source, /YAML\.parse/, 'native L0 compiler must load S6 workflow trigger YAML');
   });
 
+  it('desktop package manifests ship prompt template assets used at runtime', () => {
+    const desktopPackage = JSON.parse(readFileSync('desktop/package.json', 'utf-8'));
+    const innoInstaller = readFileSync('desktop/installer/cat-cafe.iss', 'utf-8');
+
+    const resourceEntries = desktopPackage.build.extraResources ?? [];
+    assert.ok(
+      resourceEntries.some((entry) => entry.from === '../assets' && entry.to === 'assets'),
+      'electron-builder packages must include the full runtime assets tree, including prompt-templates and manifest',
+    );
+    assert.match(
+      innoInstaller,
+      /Source:\s*"\.\.\\\.\.\\assets\\\*";\s*DestDir:\s*"\{app\}\\assets"/,
+      'Windows installer must include the full runtime assets tree, including prompt-templates and manifest',
+    );
+  });
+
   it('B1 manifest points at the runtime SessionBootstrap source, not an unused template', () => {
     const manifest = YAML.parse(readFileSync('assets/prompt-injection-manifest.yaml', 'utf-8'));
     const b1 = manifest.segments.find((segment) => segment.id === 'B1');
