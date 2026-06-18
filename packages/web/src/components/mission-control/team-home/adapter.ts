@@ -2,9 +2,20 @@ import type { BacklogItem, CatId, ThreadPhase } from '@cat-cafe/shared';
 import { teamHomeFixture } from './fixture';
 import type { TeamHomeData, TeamHomeMissionSummary, TeamHomeParticipantId, TeamHomeSOPStage } from './types';
 
+interface TeamHomeThreadSummary {
+  lastActiveAt: number;
+  participants: CatId[];
+}
+
+interface TeamMemberUpdate {
+  currentContext: string;
+  lastActiveAt: number;
+  priority: number;
+}
+
 export interface TeamHomeAdapterInput {
   items: BacklogItem[];
-  threadsByBacklogId?: Record<string, { lastActiveAt: number; participants: CatId[] }>;
+  threadsByBacklogId?: Record<string, TeamHomeThreadSummary>;
 }
 
 function mapThreadPhaseToSOP(phase: ThreadPhase | undefined): TeamHomeSOPStage {
@@ -67,33 +78,144 @@ function inferNextAction(item: BacklogItem): string {
   }
 }
 
-function extractFeatureIdFromTags(tags: readonly string[]): string | undefined {
-  const featureTag = tags.find((tag) => /^F\d+$/i.test(tag));
-  return featureTag ? featureTag.toUpperCase() : undefined;
+function normalizeFeatureId(raw: string): string | undefined {
+  const match = raw.match(/^f0*(\d+)$/i);
+  return match ? `F${match[1].padStart(3, '0')}` : undefined;
 }
 
-function deriveMissionFromItems(
-  items: BacklogItem[],
+function extractFeatureIdFromTags(tags: readonly string[]): string | undefined {
+  for (const tag of tags) {
+    const prefixed = tag.match(/^feature:(f\d+)$/i);
+    if (prefixed) return normalizeFeatureId(prefixed[1]);
+    if (/^F\d+$/i.test(tag)) return normalizeFeatureId(tag);
+  }
+  return undefined;
+}
+
+function pickActiveItem(items: BacklogItem[]): BacklogItem | undefined {
+  return (
+    items.find((item) => item.lease?.state === 'active') ??
+    items.find((item) => item.status === 'dispatched') ??
+    items.find((item) => item.status === 'approved') ??
+    items.find((item) => item.status === 'suggested') ??
+    items[0]
+  );
+}
+
+function deriveMissionFromItem(
+  item: BacklogItem | undefined,
 ): Pick<TeamHomeData['mission'], 'phase' | 'activeFeatureId' | 'truthSourceUrl'> {
-  if (items.length === 0) {
+  if (!item) {
     return { phase: 'kickoff', activeFeatureId: '—' };
   }
 
-  const dispatched = items.find((i) => i.status === 'dispatched');
-  const candidate = dispatched ?? items.find((i) => i.status === 'approved') ?? items[0];
-  const featureId = extractFeatureIdFromTags(candidate?.tags ?? []);
+  const featureId = extractFeatureIdFromTags(item.tags);
 
   return {
-    phase: inferSOPStage(candidate),
-    activeFeatureId: candidate?.id ?? '—',
-    truthSourceUrl: featureId ? `/docs/features/${featureId}.md` : undefined,
+    phase: inferSOPStage(item),
+    activeFeatureId: featureId ?? item.id,
+    truthSourceUrl: featureId
+      ? `/api/backlog/feature-doc-detail?featureId=${encodeURIComponent(featureId)}`
+      : undefined,
   };
 }
 
+function deriveBatonFromItem(item: BacklogItem | undefined): TeamHomeData['baton'] {
+  if (!item) return teamHomeFixture.baton;
+
+  const holder = inferOwner(item);
+  const since = item.lease?.state === 'active' ? item.lease.acquiredAt : (item.dispatchedAt ?? item.updatedAt);
+  return {
+    ...teamHomeFixture.baton,
+    holder,
+    scope: item.title,
+    since: new Date(since).toISOString(),
+    nextStep: inferNextAction(item),
+    nextOwner: undefined,
+    blocker: null,
+  };
+}
+
+function shouldReplaceTeamUpdate(existing: TeamMemberUpdate | undefined, next: TeamMemberUpdate): boolean {
+  return (
+    !existing ||
+    next.priority > existing.priority ||
+    (next.priority === existing.priority && next.lastActiveAt > existing.lastActiveAt)
+  );
+}
+
+function setTeamUpdate(
+  updates: Map<string, TeamMemberUpdate>,
+  id: TeamHomeParticipantId,
+  currentContext: string,
+  lastActiveAt: number,
+  priority: number,
+): void {
+  const next = { currentContext, lastActiveAt, priority };
+  if (shouldReplaceTeamUpdate(updates.get(id), next)) {
+    updates.set(id, next);
+  }
+}
+
+function isVisibleTeamItem(item: BacklogItem): boolean {
+  return item.status === 'approved' || item.status === 'dispatched';
+}
+
+function ownerContextPrefix(item: BacklogItem): string {
+  if (item.lease?.state === 'active') return '持球';
+  if (item.status === 'dispatched') return '执行';
+  return '待派发';
+}
+
+function addItemTeamUpdates(
+  updates: Map<string, TeamMemberUpdate>,
+  item: BacklogItem,
+  thread: TeamHomeThreadSummary | undefined,
+): void {
+  const owner = inferOwner(item);
+  const ownerTimestamp = thread?.lastActiveAt ?? item.lease?.heartbeatAt ?? item.updatedAt;
+  setTeamUpdate(updates, owner, `${ownerContextPrefix(item)}：${item.title}`, ownerTimestamp, 2);
+
+  if (!thread) return;
+  for (const participant of thread.participants) {
+    if (participant === owner) continue;
+    setTeamUpdate(updates, participant, `参与：${item.title}`, thread.lastActiveAt, 1);
+  }
+}
+
+function collectTeamUpdates(
+  items: BacklogItem[],
+  threadsByBacklogId: Record<string, TeamHomeThreadSummary>,
+): Map<string, TeamMemberUpdate> {
+  const updates = new Map<string, TeamMemberUpdate>();
+  for (const item of items) {
+    if (isVisibleTeamItem(item)) addItemTeamUpdates(updates, item, threadsByBacklogId[item.id]);
+  }
+  return updates;
+}
+
+function deriveTeamFromItems(
+  items: BacklogItem[],
+  threadsByBacklogId: Record<string, TeamHomeThreadSummary>,
+): TeamHomeData['team'] {
+  const updates = collectTeamUpdates(items, threadsByBacklogId);
+  return teamHomeFixture.team.map((member) => {
+    const update = updates.get(member.id);
+    const baseMember = { ...member, capabilities: [...member.capabilities] };
+    if (!update) return baseMember;
+    return {
+      ...baseMember,
+      currentContext: update.currentContext,
+      lastActiveAt: new Date(update.lastActiveAt).toISOString(),
+    };
+  });
+}
+
 export function adaptTeamHomeData(input: TeamHomeAdapterInput): TeamHomeData {
-  const { items } = input;
+  const { items, threadsByBacklogId = {} } = input;
 
   const activeStatuses = new Set<BacklogItem['status']>(['approved', 'dispatched']);
+  const activeItem = pickActiveItem(items);
 
   const missions: TeamHomeMissionSummary[] = items
     .filter((item) => activeStatuses.has(item.status))
@@ -109,7 +231,7 @@ export function adaptTeamHomeData(input: TeamHomeAdapterInput): TeamHomeData {
       updatedAt: new Date(item.updatedAt).toISOString(),
     }));
 
-  const missionOverride = deriveMissionFromItems(items);
+  const missionOverride = deriveMissionFromItem(activeItem);
 
   return {
     ...teamHomeFixture,
@@ -117,6 +239,8 @@ export function adaptTeamHomeData(input: TeamHomeAdapterInput): TeamHomeData {
       ...teamHomeFixture.mission,
       ...missionOverride,
     },
+    baton: deriveBatonFromItem(activeItem),
+    team: deriveTeamFromItems(items, threadsByBacklogId),
     missions,
   };
 }
