@@ -184,27 +184,25 @@ test('Windows OAuth helpers do not force-remove global installer accounts before
 });
 
 test('Windows installer probes the npm shim path when pnpm is installed but not yet on PATH', () => {
-  assert.match(
-    commandHelpersScript,
-    /@\(\(Join-Path \$env:APPDATA "npm\\\$Name\.cmd"\), \(Join-Path \$env:APPDATA "npm\\\$Name\.ps1"\), \(Join-Path \$env:APPDATA "npm\\\$Name"\)\)/,
-  );
-  assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.cmd"/);
-  assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.ps1"/);
+  assert.match(commandHelpersScript, /\$npmDir = Join-Path \$env:APPDATA "npm"/);
+  assert.match(commandHelpersScript, /Join-Path \$npmDir "\$Name\.cmd"/);
+  assert.match(commandHelpersScript, /Join-Path \$npmDir "\$Name\.ps1"/);
   assert.match(commandHelpersScript, /prefix -g/);
   assert.match(commandHelpersScript, /Select-Object -Last 1/);
-  assert.match(
-    commandHelpersScript,
-    /@\(\(Join-Path \$npmPrefix "\$Name\.cmd"\), \(Join-Path \$npmPrefix "\$Name\.ps1"\), \(Join-Path \$npmPrefix \$Name\)\)/,
-  );
   assert.match(commandHelpersScript, /Join-Path \$npmPrefix "\$Name\.cmd"/);
   assert.match(commandHelpersScript, /Join-Path \$npmPrefix "\$Name\.ps1"/);
+  assert.ok(
+    commandHelpersScript.indexOf('$preferredCandidates += @((Join-Path $npmPrefix "$Name.cmd"') <
+      commandHelpersScript.indexOf('$fallbackCandidates += @((Join-Path $npmPrefix "$Name.ps1"))'),
+    'expected .cmd shim candidates to be tried before .ps1 fallbacks',
+  );
   assert.match(installScript, /Resolve-PnpmCommand/);
   assert.match(installScript, /Invoke-Pnpm/);
   assert.match(installScript, /Resolve-ToolCommand -Name "pnpm"/);
 });
 
 test('Windows pnpm resolver validates npm prefix output with Test-Path', () => {
-  const appDataShimIndex = commandHelpersScript.indexOf('Join-Path $env:APPDATA "npm\\$Name.cmd"');
+  const appDataShimIndex = commandHelpersScript.indexOf('$npmDir = Join-Path $env:APPDATA "npm"');
   const npmCommandIndex = commandHelpersScript.indexOf('$npmCommand = Get-Command npm -ErrorAction SilentlyContinue');
   const npmPrefixIndex = commandHelpersScript.indexOf(
     '$npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1',
@@ -269,7 +267,7 @@ test('Windows installer prints pnpm resolver diagnostics before giving up', () =
 test('Windows scripts share a generic npm shim resolver for pnpm and agent CLIs', () => {
   assert.match(commandHelpersScript, /function Resolve-ToolCommand/);
   assert.match(commandHelpersScript, /function Resolve-ToolCommandWithRetry/);
-  assert.match(commandHelpersScript, /Join-Path \$env:APPDATA "npm\\\$Name\.cmd"/);
+  assert.match(commandHelpersScript, /Join-Path \$npmDir "\$Name\.cmd"/);
   assert.match(commandHelpersScript, /function Invoke-ToolCommand/);
   assert.match(helpersScript, /\$hasClaude = \$null -ne \(Resolve-ToolCommandWithRetry -Name "claude" -Attempts 6\)/);
   assert.match(helpersScript, /\$hasCodex = \$null -ne \(Resolve-ToolCommandWithRetry -Name "codex" -Attempts 6\)/);
@@ -291,6 +289,15 @@ test('Windows tool resolution prefers explicit shim candidates before generic Ge
     candidatesIndex < getCommandIndex,
     'expected shim candidates to be preferred before generic Get-Command lookup',
   );
+});
+
+test('Windows tool resolution normalizes PowerShell shim fallbacks to cmd shims', () => {
+  assert.match(commandHelpersScript, /function Resolve-WindowsCommandShim/);
+  assert.match(commandHelpersScript, /\[System\.IO\.Path\]::GetExtension\(\$CommandPath\)/);
+  assert.match(commandHelpersScript, /if \(\$extension -ine "\.ps1"\) \{ return \$CommandPath \}/);
+  assert.match(commandHelpersScript, /Join-Path \$directory "\$nameWithoutExtension\.cmd"/);
+  assert.match(commandHelpersScript, /Resolve-WindowsCommandShim -CommandPath \$toolCommand\.Path/);
+  assert.match(commandHelpersScript, /Resolve-WindowsCommandShim -CommandPath \$toolCommand\.Source/);
 });
 
 test('Windows tool resolution validates shim candidates before returning the first existing path', () => {

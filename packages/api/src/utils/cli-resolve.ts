@@ -6,7 +6,7 @@
 
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -40,6 +40,48 @@ function collectNvmBinDirs(): string[] {
 }
 
 const resolvedCache = new Map<string, string>();
+
+function isExecutableCandidate(path: string): boolean {
+  return existsSync(path);
+}
+
+function isWindowsCodexDesktopRuntime(path: string): boolean {
+  const normalized = path.replace(/\//g, '\\').toLowerCase();
+  return (
+    normalized.endsWith('\\codex.exe') &&
+    (normalized.includes('\\appdata\\local\\openai\\codex\\bin\\') ||
+      normalized.includes('\\windowsapps\\openai.codex_'))
+  );
+}
+
+function collectWindowsCodexDesktopCandidates(): string[] {
+  const candidates: string[] = [];
+  const explicit = process.env.CODEX_CLI_PATH?.trim();
+  if (explicit) candidates.push(explicit);
+
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    const binRoot = resolve(localAppData, 'OpenAI', 'Codex', 'bin');
+    try {
+      for (const entry of readdirSync(binRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        candidates.push(resolve(binRoot, entry.name, 'codex.exe'));
+      }
+    } catch {
+      // Optional desktop-app install location; fall through to PATH/npm probes.
+    }
+  }
+
+  return candidates;
+}
+
+function resolveWindowsCodexDesktopRuntime(): string | null {
+  for (const candidate of collectWindowsCodexDesktopCandidates()) {
+    if (basename(candidate).toLowerCase() !== 'codex.exe') continue;
+    if (isExecutableCandidate(candidate)) return candidate;
+  }
+  return null;
+}
 
 /**
  * Drop a cache entry. Accepts EITHER the bare command name (cache key) OR the
@@ -81,6 +123,14 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     resolvedCache.delete(command);
   }
 
+  if (IS_WINDOWS && command === 'codex') {
+    const desktopRuntime = resolveWindowsCodexDesktopRuntime();
+    if (desktopRuntime) {
+      resolvedCache.set(command, desktopRuntime);
+      return desktopRuntime;
+    }
+  }
+
   // Fast path: already in PATH
   // #894: caller can skip this when PATH was already probed (e.g. client-detection
   // does its own `command -v`; repeating `which` is redundant + slower).
@@ -93,8 +143,15 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
           .split('\n')
           .map((l) => l.trim())
           .filter(Boolean);
-        // On Windows, prefer the .cmd shim (more reliable for shim resolution)
-        const resolved = (IS_WINDOWS && lines.find((l) => /\.cmd$/i.test(l))) || lines[0];
+        // On Windows, prefer the official Codex desktop runtime over the npm shim:
+        // the npm-packaged Windows sandbox setup may require elevation (os error
+        // 740), while the desktop runtime ships with the app-managed helper.
+        const resolved =
+          (IS_WINDOWS && command === 'codex' && lines.find(isWindowsCodexDesktopRuntime)) ||
+          // On Windows, prefer the .cmd shim for generic npm CLIs (more reliable
+          // for shim resolution).
+          (IS_WINDOWS && lines.find((l) => /\.cmd$/i.test(l))) ||
+          lines[0];
         resolvedCache.set(command, resolved);
         return resolved;
       }
