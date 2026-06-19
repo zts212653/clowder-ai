@@ -48,6 +48,7 @@ function emitConnectorMessage(
 
 function connectorSourceIcon(def: ConnectorDefinition | undefined): string {
   if (!def) return 'message';
+  if ('src' in def.icon && def.icon.src) return def.icon.src;
   return def.icon.type === 'png' ? def.icon.src : def.icon.iconId;
 }
 
@@ -124,13 +125,6 @@ export interface ConnectorRouterOptions {
       }
     | undefined;
   readonly defaultUserId: string;
-  /**
-   * Default cat to invoke when an IM message has no @mention and the target
-   * thread has no recent active cat. Accepts either a static id (used by tests
-   * and historical callers) or a getter (cloud P1 #2253: bootstrap passes a
-   * `() => getDefaultCatId()` so runtime `PUT /api/config/default-cat` is
-   * honored without a gateway restart). Resolved at every parseMentions call.
-   */
   readonly defaultCatId: CatId | (() => CatId);
   readonly log: FastifyBaseLogger;
   readonly commandLayer?: ConnectorCommandLayer | undefined;
@@ -162,16 +156,8 @@ export class ConnectorRouter {
 
   constructor(private readonly opts: ConnectorRouterOptions) {}
 
-  /**
-   * Resolve `opts.defaultCatId` whether it was passed as a static id or a
-   * getter. Called per parseMentions site so runtime
-   * `PUT /api/config/default-cat` propagates without a gateway restart
-   * (cloud P1 #2253). Tests historically pass a string; production passes
-   * `() => getDefaultCatId()`.
-   */
-  private resolveDefaultCatId(): CatId {
-    const d = this.opts.defaultCatId;
-    return typeof d === 'function' ? d() : d;
+  private getDefaultCatId(): CatId {
+    return typeof this.opts.defaultCatId === 'function' ? this.opts.defaultCatId() : this.opts.defaultCatId;
   }
 
   /** Build @-mention patterns from catRegistry for parseMentions. */
@@ -315,7 +301,7 @@ export class ConnectorRouter {
             icon: connectorSourceIcon(def2),
           };
           const mentionPatterns = this.getMentionPatterns();
-          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.resolveDefaultCatId());
+          const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.getDefaultCatId());
           const fwdTimestamp = Date.now();
           const fwdStored = await messageStore.append({
             threadId: fwdThreadId,
@@ -461,7 +447,7 @@ export class ConnectorRouter {
 
     // Parse @-mentions to determine target cat
     const mentionPatterns = this.getMentionPatterns();
-    const mentionResult = parseMentions(resolvedText, mentionPatterns, this.resolveDefaultCatId());
+    const mentionResult = parseMentions(resolvedText, mentionPatterns, this.getDefaultCatId());
     let targetCatId = mentionResult.targetCatId;
     if (!mentionResult.matched && this.opts.threadStore.getParticipantsWithActivity) {
       const participants = await this.opts.threadStore.getParticipantsWithActivity(binding.threadId);

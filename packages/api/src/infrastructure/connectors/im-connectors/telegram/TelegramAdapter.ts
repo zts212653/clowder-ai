@@ -12,7 +12,7 @@
 import type { RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { Bot, GrammyError, InputFile } from 'grammy';
-import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
+import type { IStreamableOutboundAdapter } from '../../OutboundDeliveryHook.js';
 import { formatTelegramHtml } from './telegram-html-formatter.js';
 
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;

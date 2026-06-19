@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { formatTelegramHtml } from '../dist/infrastructure/connectors/adapters/telegram-html-formatter.js';
+import { formatTelegramHtml } from '../dist/infrastructure/connectors/im-connectors/telegram/telegram-html-formatter.js';
 
 describe('formatTelegramHtml', () => {
   it('formats card with title and body', () => {

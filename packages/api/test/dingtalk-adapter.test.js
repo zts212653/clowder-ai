@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { DingTalkAdapter } from '../dist/infrastructure/connectors/adapters/DingTalkAdapter.js';
+import { DingTalkAdapter } from '../dist/infrastructure/connectors/im-connectors/dingtalk/DingTalkAdapter.js';
 
 function noopLog() {
   const noop = () => {};

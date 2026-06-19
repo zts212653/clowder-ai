@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
-import type { PluginConfigField, PluginHealthCheck, PluginManifest, PluginResourceDef } from '@cat-cafe/shared';
+import type { PluginHealthCheck, PluginManifest, PluginResourceDef, ValueConfigField } from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
+import { getValueFields, parseConfigFields } from '../../infrastructure/config-field-parser.js';
 import { resourceCapId } from './PluginRegistry.js';
 
 const SYSTEM_ENV_DENYLIST_PREFIXES = [
@@ -86,25 +87,18 @@ export function parsePluginManifest(yamlPath: string): PluginManifest {
     );
   }
 
-  const config: PluginConfigField[] = [];
+  // F240 KD-15: use shared parser, plugins only have value fields (no operations)
   const rawConfig = doc['config'];
+  let config: ValueConfigField[];
   if (Array.isArray(rawConfig)) {
-    for (const c of rawConfig) {
-      const rc = c as Record<string, unknown>;
-      if (typeof rc['envName'] !== 'string' || typeof rc['label'] !== 'string') {
-        throw new Error(`Invalid config entry in ${yamlPath}: envName and label must be strings`);
-      }
-      const envName = rc['envName'];
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
-        throw new Error(`Invalid envName '${envName}': must be a valid shell variable name`);
-      }
-      config.push({
-        envName,
-        label: rc['label'],
-        sensitive: rc['sensitive'] === true,
-        required: rc['required'] !== false,
-      });
+    const allFields = parseConfigFields(rawConfig, `${yamlPath}/config`);
+    config = getValueFields(allFields);
+    // Warn if someone puts operation fields in a plugin.yaml (not supported)
+    if (config.length < allFields.length) {
+      console.warn(`[PluginManifest] ${yamlPath}: operation fields are not supported in plugin.yaml, skipped`);
     }
+  } else {
+    config = [];
   }
 
   const resources: PluginResourceDef[] = [];

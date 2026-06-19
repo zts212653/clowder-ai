@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { WeComBotAdapter } from '../dist/infrastructure/connectors/adapters/WeComBotAdapter.js';
+import { WeComBotAdapter } from '../dist/infrastructure/connectors/im-connectors/wecom-bot/WeComBotAdapter.js';
 
 function noopLog() {
   const noop = () => {};

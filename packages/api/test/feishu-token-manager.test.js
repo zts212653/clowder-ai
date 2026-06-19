@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, mock, test } from 'node:test';
 
-import { FeishuTokenManager } from '../dist/infrastructure/connectors/adapters/FeishuTokenManager.js';
+import { FeishuTokenManager } from '../dist/infrastructure/connectors/im-connectors/feishu/FeishuTokenManager.js';
 
 describe('FeishuTokenManager', () => {
   test('fetches tenant_access_token from Feishu API', async () => {

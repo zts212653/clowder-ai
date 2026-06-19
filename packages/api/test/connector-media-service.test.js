@@ -11,10 +11,8 @@ describe('ConnectorMediaService', () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
 
     const mockFeishuDownload = mock.fn(async () => Buffer.from('fake-image-data'));
-    const service = new ConnectorMediaService({
-      mediaDir: tempDir,
-      feishuDownloadFn: mockFeishuDownload,
-    });
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+    service.registerDownloadFn('feishu', mockFeishuDownload);
 
     const result = await service.download('feishu', {
       type: 'image',
@@ -38,10 +36,8 @@ describe('ConnectorMediaService', () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
 
     const mockTelegramDownload = mock.fn(async () => Buffer.from('fake-voice-data'));
-    const service = new ConnectorMediaService({
-      mediaDir: tempDir,
-      telegramDownloadFn: mockTelegramDownload,
-    });
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+    service.registerDownloadFn('telegram', mockTelegramDownload);
 
     const result = await service.download('telegram', {
       type: 'audio',
@@ -60,10 +56,8 @@ describe('ConnectorMediaService', () => {
     const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
 
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
-    const service = new ConnectorMediaService({
-      mediaDir: tempDir,
-      feishuDownloadFn: async () => Buffer.from('data'),
-    });
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+    service.registerDownloadFn('feishu', async () => Buffer.from('data'));
 
     const result = await service.download('feishu', {
       type: 'file',
@@ -78,16 +72,14 @@ describe('ConnectorMediaService', () => {
     await rm(tempDir, { recursive: true });
   });
 
-  it('passes messageId to feishu download function', async () => {
+  it('passes messageId to download function', async () => {
     const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
 
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
 
     const mockFeishuDownload = mock.fn(async () => Buffer.from('img-with-msgid'));
-    const service = new ConnectorMediaService({
-      mediaDir: tempDir,
-      feishuDownloadFn: mockFeishuDownload,
-    });
+    const service = new ConnectorMediaService({ mediaDir: tempDir });
+    service.registerDownloadFn('feishu', mockFeishuDownload);
 
     await service.download('feishu', {
       type: 'image',
@@ -104,7 +96,7 @@ describe('ConnectorMediaService', () => {
     await rm(tempDir, { recursive: true });
   });
 
-  it('setFeishuDownloadFn wires late-bound download function', async () => {
+  it('registerDownloadFn wires late-bound download function', async () => {
     const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
 
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
@@ -117,7 +109,7 @@ describe('ConnectorMediaService', () => {
     );
 
     const lateFn = mock.fn(async () => Buffer.from('late-bound-data'));
-    service.setFeishuDownloadFn(lateFn);
+    service.registerDownloadFn('feishu', lateFn);
 
     const result = await service.download('feishu', {
       type: 'image',
@@ -134,7 +126,7 @@ describe('ConnectorMediaService', () => {
     await rm(tempDir, { recursive: true });
   });
 
-  it('setTelegramDownloadFn wires late-bound download function', async () => {
+  it('registerDownloadFn replaces previous download function', async () => {
     const { ConnectorMediaService } = await import('../dist/infrastructure/connectors/media/ConnectorMediaService.js');
 
     const tempDir = await mkdtemp(path.join(tmpdir(), 'media-test-'));
@@ -142,7 +134,7 @@ describe('ConnectorMediaService', () => {
     const service = new ConnectorMediaService({ mediaDir: tempDir });
 
     const lateFn = mock.fn(async () => Buffer.from('tg-late'));
-    service.setTelegramDownloadFn(lateFn);
+    service.registerDownloadFn('telegram', lateFn);
 
     const result = await service.download('telegram', {
       type: 'audio',

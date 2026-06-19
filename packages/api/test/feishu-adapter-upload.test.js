@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, mock, test } from 'node:test';
 
-import { FeishuAdapter } from '../dist/infrastructure/connectors/adapters/FeishuAdapter.js';
-import { FeishuTokenManager } from '../dist/infrastructure/connectors/adapters/FeishuTokenManager.js';
+import { FeishuAdapter } from '../dist/infrastructure/connectors/im-connectors/feishu/FeishuAdapter.js';
+import { FeishuTokenManager } from '../dist/infrastructure/connectors/im-connectors/feishu/FeishuTokenManager.js';
 
 const TMP = join(tmpdir(), 'feishu-upload-test');
 

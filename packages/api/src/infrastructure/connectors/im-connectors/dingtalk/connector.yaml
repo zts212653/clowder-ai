@@ -1,0 +1,27 @@
+id: dingtalk
+name: 钉钉
+nameEn: DingTalk
+version: 1.0.0
+icon:
+  type: png
+  src: /images/connectors/dingtalk.png
+themeColor: '#3296FA'
+docsUrl: https://open.dingtalk.com/document/orgapp/create-an-enterprise-internal-application
+
+config:
+  - envName: DINGTALK_APP_KEY
+    label: App Key
+    sensitive: false
+    required: true
+  - envName: DINGTALK_APP_SECRET
+    label: App Secret
+    sensitive: true
+    required: true
+
+permissions:
+  label: 钉钉
+
+steps:
+  - text: 在钉钉开放平台创建企业内部应用，获取 App Key 和 App Secret
+  - text: 在「机器人与消息推送」中开启机器人能力
+  - text: 填写以下配置并保存，重启 API 服务后生效

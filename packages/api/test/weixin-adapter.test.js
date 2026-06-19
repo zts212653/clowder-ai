@@ -3,7 +3,7 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { WeixinAdapter } from '../dist/infrastructure/connectors/adapters/WeixinAdapter.js';
+import { WeixinAdapter } from '../dist/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.js';
 
 function noopLog() {
   const noop = () => {};
@@ -1108,6 +1108,56 @@ describe('WeixinAdapter', () => {
       releaseHandler();
       await waitForCondition(() => saves.some((state) => state.getUpdatesBuf === 'cursor-after-handler'));
       assert.equal(adapter._getCursor(), 'cursor-after-handler');
+    });
+
+    it('leaves cursor unadvanced after handler rejection', async () => {
+      /** @type {Array<{ getUpdatesBuf?: string, contextTokens?: Record<string, string> }>} */
+      const saves = [];
+      const adapter = new WeixinAdapter('test-token', noopLog(), {
+        load: async () => null,
+        save: async (state) => {
+          saves.push(state);
+        },
+        clear: async () => {},
+      });
+
+      adapter._injectFetch(async (url) => {
+        if (String(url).includes('/ilink/bot/getupdates')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ret: 0,
+              get_updates_buf: 'cursor-after-failed-handler',
+              msgs: [
+                {
+                  message_id: 10003,
+                  from_user_id: 'user-1',
+                  context_token: 'ctx-failed-handler',
+                  create_time_ms: 1700000000000,
+                  item_list: [{ type: 1, text_item: { text: 'retry me' } }],
+                },
+              ],
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      });
+
+      let handled = 0;
+      adapter.startPolling(async () => {
+        handled++;
+        await adapter.stopPolling();
+        throw new Error('route failed');
+      });
+
+      await waitForCondition(() => !adapter.isPolling());
+      assert.equal(handled, 1);
+      assert.equal(adapter._getCursor(), '', 'cursor must not advance when routing rejects');
+      assert.equal(
+        saves.some((state) => state.getUpdatesBuf === 'cursor-after-failed-handler'),
+        false,
+        'persisted cursor must not advance when routing rejects',
+      );
     });
   });
 

@@ -14,7 +14,7 @@ import {
   decryptMessage,
   encryptMessage,
   WeComAgentAdapter,
-} from '../dist/infrastructure/connectors/adapters/WeComAgentAdapter.js';
+} from '../dist/infrastructure/connectors/im-connectors/wecom-agent/WeComAgentAdapter.js';
 
 // ── Helpers ──
 

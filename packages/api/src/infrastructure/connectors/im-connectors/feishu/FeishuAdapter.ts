@@ -21,8 +21,8 @@ const execFileAsync = promisify(execFile);
 
 import * as lark from '@larksuiteoapi/node-sdk';
 import type { FastifyBaseLogger } from 'fastify';
-import { DEFAULT_QUICK_ACTIONS, type MessageEnvelope } from '../ConnectorMessageFormatter.js';
-import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
+import { DEFAULT_QUICK_ACTIONS, type MessageEnvelope } from '../../ConnectorMessageFormatter.js';
+import type { IStreamableOutboundAdapter } from '../../OutboundDeliveryHook.js';
 import type { FeishuTokenManager } from './FeishuTokenManager.js';
 import { formatFeishuCard } from './feishu-card-formatter.js';
 

@@ -181,6 +181,7 @@ import {
   configRoutes,
   connectorHubRoutes,
   connectorMediaRoutes,
+  connectorPluginRoutes,
   distillationRoutes,
   eventsRoutes,
   evidenceRoutes,
@@ -1897,8 +1898,9 @@ async function main(): Promise<void> {
     evidenceStore: memoryServices?.evidenceStore,
     messageStore,
   });
-  const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore };
+  const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore, redis: redisClient ?? undefined };
   await app.register(connectorHubRoutes, connectorHubOpts);
+  await app.register(connectorPluginRoutes);
   await app.register(brakeRoutes, { activityTracker });
 
   // F101: Game routes (store created earlier for /game command interception)
@@ -3906,12 +3908,6 @@ async function main(): Promise<void> {
     invokeTrigger,
     socketManager,
     defaultUserId: 'default-user' as const,
-    // clowder-ai#910 + cloud P1: pass a getter (not a value) so runtime
-    // `PUT /api/config/default-cat` (which calls `setRuntimeDefaultCatId` →
-    // updates `_runtimeDefaultCatId`) propagates to ConnectorRouter's
-    // per-message parseMentions resolve, without needing a gateway restart.
-    // An object getter or a one-shot value would still be copied as a
-    // string into `new ConnectorRouter({ defaultCatId, ... })` and frozen.
     defaultCatId: getDefaultCatId,
     redis: redisClient ?? undefined,
     log: app.log,
@@ -3922,6 +3918,14 @@ async function main(): Promise<void> {
   };
 
   /** Re-wire all hook consumers after gateway (re)start */
+  function syncConnectorWebhookHandlers(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
+    // P1-1 fix: clear stale handlers before re-populating (hot-reload may remove connectors)
+    connectorWebhookHandlers.clear();
+    for (const [id, handler] of handle.webhookHandlers) {
+      connectorWebhookHandlers.set(id, handler);
+    }
+  }
+
   function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
     invokeTrigger.setOutboundHook(handle.outboundHook);
     invokeTrigger.setStreamingHook(handle.streamingHook);
@@ -3930,14 +3934,9 @@ async function main(): Promise<void> {
     (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
     (messagesOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
     (messagesOpts as { streamingHook?: typeof handle.streamingHook }).streamingHook = handle.streamingHook;
-    // P1-1 fix: clear stale handlers before re-populating (hot-reload may remove connectors)
-    connectorWebhookHandlers.clear();
-    for (const [id, handler] of handle.webhookHandlers) {
-      connectorWebhookHandlers.set(id, handler);
-    }
+    syncConnectorWebhookHandlers(handle);
     (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = handle.weixinAdapter;
     (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling = handle.startWeixinPolling;
-    // F132 Phase E: WeCom Bot dynamic start/stop
     (
       connectorHubOpts as { startWeComBotStream?: (botId: string, secret: string) => Promise<void> }
     ).startWeComBotStream = handle.startWeComBotStream;
@@ -3945,6 +3944,21 @@ async function main(): Promise<void> {
     // F132 bugfix: live health getter for status endpoint
     (connectorHubOpts as { getWeComBotAdapter?: () => unknown }).getWeComBotAdapter = handle.getWeComBotAdapter;
     (connectorHubOpts as { permissionStore?: unknown }).permissionStore = handle.permissionStore;
+    // F240 A-3: plugin + adapter registries + activation for generic action endpoint
+    (connectorHubOpts as { pluginRegistry?: unknown }).pluginRegistry = handle.pluginRegistry;
+    (connectorHubOpts as { adapterRegistry?: unknown }).adapterRegistry = handle.adapterRegistry;
+    (connectorHubOpts as { activateConnector?: (connectorId: string) => Promise<void> }).activateConnector = async (
+      connectorId,
+    ) => {
+      await handle.activateConnector(connectorId);
+      syncConnectorWebhookHandlers(handle);
+    };
+    (connectorHubOpts as { deactivateConnector?: (connectorId: string) => Promise<void> }).deactivateConnector = async (
+      connectorId,
+    ) => {
+      await handle.deactivateConnector(connectorId);
+      syncConnectorWebhookHandlers(handle);
+    };
   }
 
   let connectorGatewayHandle: Awaited<ReturnType<typeof startConnectorGateway>> = null;

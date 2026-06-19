@@ -41,6 +41,32 @@ const ALLOWLIST = new Map([
   ['npm_config_user_agent', 'Package-manager metadata injected by npm/pnpm; not user-configurable'],
   ['INIT_CWD', 'Package-manager metadata injected by npm/pnpm; original invocation directory'],
   ['COGVIDEO_API_KEY', 'F139 MediaHub CogVideoX provider — mcp-server-local credential'],
+  // F240: Per-connector env vars migrated to YAML manifests (connector.yaml / plugin.yaml).
+  // Runtime still reads process.env as fallback in resolveConnectorEnv() chain, but
+  // documentation/display is now driven by the YAML config.fields declarations.
+  ['TELEGRAM_BOT_TOKEN', 'F240: defined in connectors/telegram/connector.yaml'],
+  ['FEISHU_APP_ID', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['FEISHU_APP_SECRET', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['FEISHU_VERIFICATION_TOKEN', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['FEISHU_BOT_OPEN_ID', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['FEISHU_ADMIN_OPEN_IDS', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['FEISHU_CONNECTION_MODE', 'F240: defined in connectors/feishu/connector.yaml'],
+  ['DINGTALK_APP_KEY', 'F240: defined in connectors/dingtalk/connector.yaml'],
+  ['DINGTALK_APP_SECRET', 'F240: defined in connectors/dingtalk/connector.yaml'],
+  ['XIAOYI_AK', 'F240: defined in connectors/xiaoyi/connector.yaml'],
+  ['XIAOYI_SK', 'F240: defined in connectors/xiaoyi/connector.yaml'],
+  ['XIAOYI_AGENT_ID', 'F240: defined in connectors/xiaoyi/connector.yaml'],
+  ['WEIXIN_BOT_TOKEN', 'F240: defined in connectors/weixin/connector.yaml'],
+  ['WECOM_BOT_ID', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_BOT_SECRET', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_CORP_ID', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_AGENT_ID', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_AGENT_SECRET', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_TOKEN', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['WECOM_ENCODING_AES_KEY', 'F240: defined in connectors/wecom/connector.yaml'],
+  ['GITHUB_AUTHORITATIVE_REVIEW_LOGINS', 'F240: deprecated, defined in plugins/github/plugin.yaml'],
+  ['GITHUB_SETUP_NOISE_BOT_LOGINS', 'F240: defined in plugins/github/plugin.yaml'],
+  ['GITHUB_TOKEN', 'F240: defined in plugins/github/plugin.yaml'],
 ]);
 
 // ── Extract registered names from env-registry.ts ──
@@ -123,10 +149,38 @@ function extractEnvRefs(dirs) {
 describe('env-registry completeness', () => {
   const registeredNames = loadRegisteredNames();
   const envRefs = extractEnvRefs(['packages/api/src', 'packages/mcp-server/src']);
+  const repoInboxEnvNames = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'];
+  const githubSelfFilterEnvNames = ['GITHUB_SELF_LOGIN'];
+  const weixinRuntimeFlagNames = [
+    'WEIXIN_VOICE_ITEM_MODE',
+    'WEIXIN_ENABLE_UNSAFE_VOICE_MODES',
+    'WEIXIN_CAPTURE_INBOUND_VOICE_MEDIA',
+  ];
 
   it('every allowlist entry has a non-empty reason', () => {
     for (const [name, reason] of ALLOWLIST) {
       assert.ok(reason && reason.length > 0, `ALLOWLIST entry "${name}" has no reason`);
+    }
+  });
+
+  it('keeps GitHub Repo Inbox process env vars in env-registry', () => {
+    for (const name of repoInboxEnvNames) {
+      assert.ok(registeredNames.has(name), `${name} should be registered in env-registry.ts`);
+      assert.ok(!ALLOWLIST.has(name), `${name} is runtime user config and must not be allowlisted`);
+    }
+  });
+
+  it('keeps GitHub feedback self-filter fallback in env-registry', () => {
+    for (const name of githubSelfFilterEnvNames) {
+      assert.ok(registeredNames.has(name), `${name} should be registered in env-registry.ts`);
+      assert.ok(!ALLOWLIST.has(name), `${name} is runtime user config and must not be allowlisted`);
+    }
+  });
+
+  it('keeps Weixin runtime voice flags in env-registry', () => {
+    for (const name of weixinRuntimeFlagNames) {
+      assert.ok(registeredNames.has(name), `${name} should stay registered; it is not a connector credential`);
+      assert.ok(!ALLOWLIST.has(name), `${name} is not declared in connectors/weixin/connector.yaml`);
     }
   });
 

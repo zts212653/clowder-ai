@@ -6,11 +6,11 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { FeishuAdapter } from '../dist/infrastructure/connectors/adapters/FeishuAdapter.js';
-import { TelegramAdapter } from '../dist/infrastructure/connectors/adapters/TelegramAdapter.js';
 import { ConnectorRouter } from '../dist/infrastructure/connectors/ConnectorRouter.js';
 import { MemoryConnectorThreadBindingStore } from '../dist/infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { InboundMessageDedup } from '../dist/infrastructure/connectors/InboundMessageDedup.js';
+import { FeishuAdapter } from '../dist/infrastructure/connectors/im-connectors/feishu/FeishuAdapter.js';
+import { TelegramAdapter } from '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js';
 import { OutboundDeliveryHook } from '../dist/infrastructure/connectors/OutboundDeliveryHook.js';
 
 function assertFeishuCardContains(content, expectedHeader, expectedBody) {

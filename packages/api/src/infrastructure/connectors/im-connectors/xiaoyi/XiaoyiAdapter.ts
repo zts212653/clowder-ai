@@ -10,7 +10,7 @@
  */
 
 import type { FastifyBaseLogger } from 'fastify';
-import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
+import type { IStreamableOutboundAdapter } from '../../OutboundDeliveryHook.js';
 import {
   type A2AInbound,
   agentResponse,

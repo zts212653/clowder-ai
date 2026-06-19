@@ -4,6 +4,7 @@ import type { PluginInfo } from '@cat-cafe/shared';
 import { useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { ExternalLinkIcon, StepBadge } from '../HubConfigIcons';
+import { ConfigFieldRenderer } from './primitives/ConfigFieldRenderer';
 
 function isSafeUrl(url: string): boolean {
   try {
@@ -167,27 +168,13 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
           )}
           <div className={hasSteps ? 'ml-[26px] space-y-2.5' : 'space-y-2.5'}>
             {plugin.config.map((f) => (
-              <div key={f.envName}>
-                <label
-                  htmlFor={`plugin-${f.envName}`}
-                  className="mb-1 block font-medium"
-                  style={{ fontSize: 'var(--console-font-xs)', color: 'var(--cafe-text-secondary)' }}
-                >
-                  {f.label}
-                </label>
-                <input
-                  id={`plugin-${f.envName}`}
-                  type={f.sensitive ? 'password' : 'text'}
-                  placeholder={
-                    f.sensitive ? (f.currentValue ? '已设置（输入新值覆盖）' : '未设置') : (f.currentValue ?? '未设置')
-                  }
-                  value={fieldValues[f.envName] ?? ''}
-                  onChange={(e) => setFieldValues((prev) => ({ ...prev, [f.envName]: e.target.value }))}
-                  className="console-form-input"
-                  style={{ paddingBlock: '0.625rem', fontSize: 'var(--console-font-compact)' }}
-                  data-testid={`field-${f.envName}`}
-                />
-              </div>
+              <ConfigFieldRenderer
+                key={f.envName}
+                field={f}
+                value={fieldValues[f.envName] ?? ''}
+                onChange={(envName, val) => setFieldValues((prev) => ({ ...prev, [envName]: val }))}
+                idPrefix="plugin"
+              />
             ))}
           </div>
         </div>

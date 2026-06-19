@@ -1,8 +1,8 @@
-import Image from 'next/image';
-import type { ReactNode } from 'react';
+'use client';
 
-// F206 exempt: connector/icon palette colors — fixed per platform identity, not theme-dependent
-// ── Per-platform visual config (matches .pen wireframe Screen C) ──
+import { type ReactNode, useState } from 'react';
+
+// ── Manifest-driven visual config (F240: replaces hardcoded PLATFORM_VISUALS) ──
 
 export interface PlatformVisual {
   iconBg: string;
@@ -17,53 +17,46 @@ const SVG_PROPS = {
   strokeLinejoin: 'round' as const,
 };
 
-export const PLATFORM_VISUALS: Record<string, PlatformVisual> = {
-  feishu: {
-    iconBg: 'var(--conn-blue-bg)',
-    iconColor: 'var(--conn-blue-text)',
-    icon: <Image src="/images/connectors/feishu.png" alt="Feishu" width={18} height={18} />,
-  },
-  telegram: {
-    iconBg: 'var(--conn-sky-bg)',
-    iconColor: 'var(--conn-sky-text)',
-    icon: <Image src="/images/connectors/telegram.png" alt="Telegram" width={18} height={18} />,
-  },
-  weixin: {
-    iconBg: 'var(--conn-emerald-bg)',
-    iconColor: 'var(--conn-weixin-bg)',
-    icon: <Image src="/images/connectors/weixin.png" alt="WeChat" width={18} height={18} />,
-  },
-  dingtalk: {
-    iconBg: 'var(--conn-cyan-bg)',
-    iconColor: 'var(--conn-dingtalk-fg)',
-    icon: <Image src="/images/connectors/dingtalk.png" alt="DingTalk" width={18} height={18} />,
-  },
-  'wecom-bot': {
-    iconBg: 'var(--conn-indigo-bg)',
-    iconColor: 'var(--conn-indigo-text)',
-    icon: <Image src="/images/connectors/wecom-bot.png" alt="WeCom" width={18} height={18} />,
-  },
-  'wecom-agent': {
-    iconBg: 'var(--conn-violet-bg)',
-    iconColor: 'var(--conn-violet-text)',
-    icon: <Image src="/images/connectors/wecom-agent.png" alt="WeCom Agent" width={18} height={18} />,
-  },
-  xiaoyi: {
-    iconBg: 'var(--conn-red-bg)',
-    iconColor: 'var(--conn-xiaoyi-fg)',
-    icon: <Image src="/images/connectors/xiaoyi.png" alt="XiaoYi" width={18} height={18} />,
-  },
-};
+/** Name-initial text avatar — first character as fallback icon. */
+function NameInitial({ name }: { name: string }) {
+  return <span className="text-sm font-bold leading-none">{name.charAt(0)}</span>;
+}
 
-export const DEFAULT_VISUAL: PlatformVisual = {
-  iconBg: 'var(--conn-gray-bg)',
-  iconColor: 'var(--conn-icon-default)',
-  icon: (
-    <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
-      <path d="M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0" />
-    </svg>
-  ),
-};
+/**
+ * Connector icon with 404 fallback.
+ * Uses native <img> instead of next/image — SVG files render correctly
+ * and external plugin icons don't need next.config image domain allowlist.
+ * On load error, swaps to name-initial text avatar.
+ */
+function ConnectorIcon({ src, name }: { src: string; name: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <NameInitial name={name} />;
+  /* eslint-disable-next-line @next/next/no-img-element */
+  return <img src={src} alt="" width={18} height={18} className="object-contain" onError={() => setFailed(true)} />;
+}
+
+/** Build visual from manifest icon + themeColor — no per-platform hardcoded map. */
+export function buildPlatformVisual(platform: PlatformStatus): PlatformVisual {
+  const icon = platform.icon;
+  const themeColor = platform.themeColor;
+
+  // Render file-based icon (PNG or SVG) when src is available
+  let iconElement: ReactNode;
+  if (icon?.src) {
+    iconElement = <ConnectorIcon src={icon.src} name={platform.name} />;
+  } else {
+    iconElement = <NameInitial name={platform.name} />;
+  }
+
+  if (!themeColor) {
+    return { iconBg: 'var(--conn-gray-bg)', iconColor: 'var(--conn-icon-default)', icon: iconElement };
+  }
+  return {
+    iconBg: `color-mix(in srgb, ${themeColor} 12%, transparent)`,
+    iconColor: themeColor,
+    icon: iconElement,
+  };
+}
 
 export function StepBadge({ num }: { num: number }) {
   return (
@@ -85,6 +78,14 @@ export function ChevronDown() {
   return (
     <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
       <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+export function TrashIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" stroke="currentColor" {...SVG_PROPS}>
+      <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6" />
     </svg>
   );
 }
@@ -192,6 +193,10 @@ export interface PlatformFieldStatus {
   envName: string;
   label: string;
   sensitive: boolean;
+  /** Field type from manifest (AC-A24). Frontend renders generically based on this. */
+  type?: 'input' | 'select' | 'toggle' | 'list';
+  /** Select options (only for type: select). */
+  options?: Array<{ value: string; label: string }>;
   currentValue: string | null;
 }
 
@@ -200,24 +205,50 @@ export interface PlatformStepStatus {
   mode?: string;
 }
 
+/** Action definition from YAML manifest (AC-A26). */
+export interface PlatformActionDef {
+  id: string;
+  label: string;
+  render: string;
+  resultRender?: string;
+  next?: string;
+  rollback?: string;
+  timeout?: number;
+}
+
+/** Operation definition + runtime state (AC-A26). */
+export interface PlatformOperationStatus {
+  name: string;
+  label: string;
+  actions: PlatformActionDef[];
+  currentAction?: string;
+  lastResult?: { render: string; data: unknown; label?: string };
+  updatedAt?: number;
+}
+
 export interface PlatformStatus {
   id: string;
   name: string;
   nameEn: string;
-  category?: 'im' | 'plugin';
+  /** 'external' for user-installed connectors. Absent = builtin. */
+  source?: 'builtin' | 'external';
   configured: boolean;
   connectionState?: 'connected' | 'disconnected' | 'reconnecting' | 'unknown';
   lastHeartbeat?: number | null;
   fields: PlatformFieldStatus[];
   docsUrl: string;
   steps: PlatformStepStatus[];
+  /** Manifest icon (AC-A23). */
+  icon?: { type: string; src?: string; iconId?: string };
+  /** Theme color from manifest (AC-A23). */
+  themeColor?: string;
+  /** Operation definitions + state for ActionRenderer (AC-A26). */
+  operations?: PlatformOperationStatus[];
+  /** AC-A25: manifest-driven permission label — renders HubPermissionsTab when present. */
+  permissionLabel?: string;
+  /** F240: YAML-declared health-check — controls test button visibility. */
+  testable?: boolean;
 }
-
-export const PERMISSION_CONNECTORS: Record<string, string> = {
-  feishu: '飞书',
-  'wecom-bot': '企业微信',
-  dingtalk: '钉钉',
-};
 
 export function connStatePill(p: PlatformStatus): { label: string; className: string } {
   if (p.connectionState === 'connected')

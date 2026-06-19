@@ -20,12 +20,6 @@ export interface DownloadedMedia {
 
 export interface ConnectorMediaServiceOptions {
   mediaDir: string;
-  feishuDownloadFn?: (key: string, type: string, messageId?: string) => Promise<Buffer>;
-  telegramDownloadFn?: (fileId: string) => Promise<Buffer>;
-  dingtalkDownloadFn?: (downloadCode: string) => Promise<Buffer>;
-  weixinDownloadFn?: (platformKey: string) => Promise<Buffer>;
-  wecomBotDownloadFn?: (url: string, aesKey?: string) => Promise<Buffer>;
-  wecomAgentDownloadFn?: (mediaId: string) => Promise<Buffer>;
 }
 
 const TYPE_TO_EXT: Record<string, string> = {
@@ -34,67 +28,43 @@ const TYPE_TO_EXT: Record<string, string> = {
   file: '.bin',
 };
 
+/**
+ * F240: All connectors register download functions via registerDownloadFn().
+ * Per-connector setter methods have been removed — plugins use the unified registry.
+ */
 export class ConnectorMediaService {
-  private feishuDl: ConnectorMediaServiceOptions['feishuDownloadFn'];
-  private telegramDl: ConnectorMediaServiceOptions['telegramDownloadFn'];
-  private dingtalkDl: ConnectorMediaServiceOptions['dingtalkDownloadFn'];
-  private weixinDl: ConnectorMediaServiceOptions['weixinDownloadFn'];
-  private wecomBotDl: ConnectorMediaServiceOptions['wecomBotDownloadFn'];
-  private wecomAgentDl: ConnectorMediaServiceOptions['wecomAgentDownloadFn'];
+  private readonly downloadFns = new Map<
+    string,
+    (platformKey: string, type: string, messageId?: string) => Promise<Buffer>
+  >();
 
-  constructor(private readonly opts: ConnectorMediaServiceOptions) {
-    this.feishuDl = opts.feishuDownloadFn;
-    this.telegramDl = opts.telegramDownloadFn;
-    this.dingtalkDl = opts.dingtalkDownloadFn;
-    this.weixinDl = opts.weixinDownloadFn;
-    this.wecomBotDl = opts.wecomBotDownloadFn;
-    this.wecomAgentDl = opts.wecomAgentDownloadFn;
+  constructor(private readonly opts: ConnectorMediaServiceOptions) {}
+
+  /**
+   * Register a download function for a connector plugin.
+   * Called by the bootstrap during plugin initialization.
+   */
+  registerDownloadFn(
+    connectorId: string,
+    fn: (platformKey: string, type: string, messageId?: string) => Promise<Buffer>,
+  ): void {
+    this.downloadFns.set(connectorId, fn);
   }
 
-  setFeishuDownloadFn(fn: (key: string, type: string, messageId?: string) => Promise<Buffer>): void {
-    this.feishuDl = fn;
-  }
-
-  setTelegramDownloadFn(fn: (fileId: string) => Promise<Buffer>): void {
-    this.telegramDl = fn;
-  }
-
-  setDingtalkDownloadFn(fn: (downloadCode: string) => Promise<Buffer>): void {
-    this.dingtalkDl = fn;
-  }
-
-  setWeixinDownloadFn(fn: (platformKey: string) => Promise<Buffer>): void {
-    this.weixinDl = fn;
-  }
-
-  setWeComBotDownloadFn(fn: (url: string, aesKey?: string) => Promise<Buffer>): void {
-    this.wecomBotDl = fn;
-  }
-
-  setWeComAgentDownloadFn(fn: (mediaId: string) => Promise<Buffer>): void {
-    this.wecomAgentDl = fn;
+  /** Remove a download function (called during connector deactivation). */
+  unregisterDownloadFn(connectorId: string): void {
+    this.downloadFns.delete(connectorId);
   }
 
   async download(connectorId: string, attachment: MediaAttachment): Promise<DownloadedMedia> {
     await mkdir(this.opts.mediaDir, { recursive: true });
 
-    let buffer: Buffer;
-    if (connectorId === 'feishu' && this.feishuDl) {
-      buffer = await this.feishuDl(attachment.platformKey, attachment.type, attachment.messageId);
-    } else if (connectorId === 'telegram' && this.telegramDl) {
-      buffer = await this.telegramDl(attachment.platformKey);
-    } else if (connectorId === 'dingtalk' && this.dingtalkDl) {
-      buffer = await this.dingtalkDl(attachment.platformKey);
-    } else if (connectorId === 'weixin' && this.weixinDl) {
-      buffer = await this.weixinDl(attachment.platformKey);
-    } else if (connectorId === 'wecom-bot' && this.wecomBotDl) {
-      const [url, aesKey] = attachment.platformKey.split('|aeskey=');
-      buffer = await this.wecomBotDl(url, aesKey);
-    } else if (connectorId === 'wecom-agent' && this.wecomAgentDl) {
-      buffer = await this.wecomAgentDl(attachment.platformKey);
-    } else {
+    const dl = this.downloadFns.get(connectorId);
+    if (!dl) {
       throw new Error(`No download function for connector: ${connectorId}`);
     }
+
+    const buffer = await dl(attachment.platformKey, attachment.type, attachment.messageId);
 
     let ext: string;
     if (attachment.fileName) {

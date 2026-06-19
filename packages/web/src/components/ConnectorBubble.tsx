@@ -65,11 +65,13 @@ function renderContentBlocks(blocks: MessageContent[]) {
 function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpec; fallbackIcon: string }) {
   // Registered connector → always use registry icon
   if (iconSpec) {
-    if (iconSpec.type === 'png') {
+    if ('src' in iconSpec && iconSpec.src) {
       return <ConnectorImage src={iconSpec.src} alt="connector" className="w-5 h-5" />;
     }
-    const SvgComponent = SVG_ICON_MAP[iconSpec.iconId];
-    if (SvgComponent) return <SvgComponent className="w-4 h-4" />;
+    if (iconSpec.type === 'svg') {
+      const SvgComponent = SVG_ICON_MAP[iconSpec.iconId];
+      if (SvgComponent) return <SvgComponent className="w-4 h-4" />;
+    }
   }
 
   // Fallback for unregistered connectors

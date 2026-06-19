@@ -41,6 +41,16 @@ describe('cat-template.json — 金渐层 (opencode) validation', () => {
     assert.strictEqual(variant.mcpSupport, true);
   });
 
+  test('opencode breed has sessionChain enabled in real cat-template.json (clowder#915)', () => {
+    const breed = config.breeds.find((b) => b.id === 'golden-chinchilla');
+    assert.ok(breed, 'golden-chinchilla breed should exist');
+    assert.notStrictEqual(
+      breed.features?.sessionChain,
+      false,
+      'clowder#915 root cause 1: opencode breed must not disable sessionChain',
+    );
+  });
+
   test('defaultVariantId matches a variant', () => {
     const breed = config.breeds.find((b) => b.id === 'golden-chinchilla');
     const match = breed.variants.find((v) => v.id === breed.defaultVariantId);

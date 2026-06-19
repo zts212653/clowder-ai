@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { formatFeishuCard } from '../dist/infrastructure/connectors/adapters/feishu-card-formatter.js';
+import { formatFeishuCard } from '../dist/infrastructure/connectors/im-connectors/feishu/feishu-card-formatter.js';
 
 describe('formatFeishuCard', () => {
   it('formats card block as Lark interactive card', () => {

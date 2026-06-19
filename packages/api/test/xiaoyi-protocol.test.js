@@ -5,7 +5,9 @@ import { describe, it } from 'node:test';
 
 describe('xiaoyi-protocol: generateXiaoyiSignature', () => {
   it('produces consistent HMAC-SHA256 base64', async () => {
-    const { generateXiaoyiSignature } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { generateXiaoyiSignature } = await import(
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
+    );
     const sig = generateXiaoyiSignature('test-sk', '1234567890');
     assert.match(sig, /^[A-Za-z0-9+/]+=*$/);
     assert.equal(sig, generateXiaoyiSignature('test-sk', '1234567890'), 'deterministic');
@@ -15,7 +17,9 @@ describe('xiaoyi-protocol: generateXiaoyiSignature', () => {
 
   it('input is timestamp only (not ak=...&timestamp=...)', async () => {
     const { createHmac } = await import('node:crypto');
-    const { generateXiaoyiSignature } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { generateXiaoyiSignature } = await import(
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
+    );
     const ts = '1234567890';
     const expected = createHmac('sha256', 'sk').update(ts).digest('base64');
     assert.equal(generateXiaoyiSignature('sk', ts), expected);
@@ -24,7 +28,7 @@ describe('xiaoyi-protocol: generateXiaoyiSignature', () => {
 
 describe('xiaoyi-protocol: envelope', () => {
   it('builds correct JSON', async () => {
-    const { envelope } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { envelope } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const msg = JSON.parse(envelope('agent-1', 'heartbeat'));
     assert.deepEqual(msg, { msgType: 'heartbeat', agentId: 'agent-1' });
   });
@@ -32,7 +36,7 @@ describe('xiaoyi-protocol: envelope', () => {
 
 describe('xiaoyi-protocol: agentResponse', () => {
   it('wraps detail with stringified msgDetail', async () => {
-    const { agentResponse } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { agentResponse } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const detail = { kind: 'test', value: 42 };
     const parsed = JSON.parse(agentResponse('agent-1', 'session-1', 'task-1', detail));
     assert.equal(parsed.msgType, 'agent_response');
@@ -46,7 +50,9 @@ describe('xiaoyi-protocol: agentResponse', () => {
 
 describe('xiaoyi-protocol: artifactUpdate', () => {
   it('builds A2A artifact-update with explicit artifactId and final=false (D12)', async () => {
-    const { artifactUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { artifactUpdate } = await import(
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
+    );
     const art = artifactUpdate('task-1', 'art-001', 'hello', { append: false, lastChunk: true });
     assert.equal(art.jsonrpc, '2.0');
     assert.match(String(art.id), /^msg_\d+_\d+$/);
@@ -61,7 +67,9 @@ describe('xiaoyi-protocol: artifactUpdate', () => {
   });
 
   it('append mode', async () => {
-    const { artifactUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { artifactUpdate } = await import(
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
+    );
     const art = artifactUpdate('t', 'a1', 'chunk', { append: true, lastChunk: false });
     assert.equal(art.result.append, true);
     assert.equal(art.result.lastChunk, false);
@@ -69,7 +77,9 @@ describe('xiaoyi-protocol: artifactUpdate', () => {
   });
 
   it('partKind defaults to text, reasoningText uses { kind, reasoningText } shape', async () => {
-    const { artifactUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { artifactUpdate } = await import(
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
+    );
     const defaultArt = artifactUpdate('t', 'a1', 'hi', { append: false, lastChunk: true });
     assert.equal(defaultArt.result.artifact.parts[0].kind, 'text', 'default is text');
     assert.equal(defaultArt.result.artifact.parts[0].text, 'hi');
@@ -87,7 +97,7 @@ describe('xiaoyi-protocol: artifactUpdate', () => {
 
 describe('xiaoyi-protocol: statusUpdate', () => {
   it('working → final:false, no message field (D8)', async () => {
-    const { statusUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { statusUpdate } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const st = statusUpdate('task-1', 'working');
     assert.equal(st.result.final, false);
     assert.equal(st.result.status.state, 'working');
@@ -95,7 +105,7 @@ describe('xiaoyi-protocol: statusUpdate', () => {
   });
 
   it('completed → final:true (close frame)', async () => {
-    const { statusUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { statusUpdate } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const st = statusUpdate('task-1', 'completed');
     assert.equal(st.result.final, true);
     assert.equal(st.result.status.state, 'completed');
@@ -103,13 +113,13 @@ describe('xiaoyi-protocol: statusUpdate', () => {
   });
 
   it('failed → final:true', async () => {
-    const { statusUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { statusUpdate } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const st = statusUpdate('task-1', 'failed');
     assert.equal(st.result.final, true);
   });
 
   it('optional message param adds structured message to status', async () => {
-    const { statusUpdate } = await import('../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js');
+    const { statusUpdate } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js');
     const st = statusUpdate('task-1', 'working', 'processing…');
     assert.deepEqual(st.result.status.message, { parts: [{ kind: 'text', text: 'processing…' }] });
   });
@@ -118,7 +128,7 @@ describe('xiaoyi-protocol: statusUpdate', () => {
 describe('xiaoyi-protocol: message ID uniqueness', () => {
   it('consecutive calls produce unique IDs', async () => {
     const { artifactUpdate, statusUpdate } = await import(
-      '../dist/infrastructure/connectors/adapters/xiaoyi-protocol.js'
+      '../dist/infrastructure/connectors/im-connectors/xiaoyi/xiaoyi-protocol.js'
     );
     const ids = new Set();
     for (let i = 0; i < 10; i++) {

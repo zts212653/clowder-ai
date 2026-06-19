@@ -247,6 +247,33 @@ describe('ConnectorRouter', () => {
     assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
   });
 
+  it('resolves default cat getter for each message', async () => {
+    let currentDefault = 'opus';
+    const dynamicRouter = new ConnectorRouter({
+      bindingStore,
+      dedup,
+      messageStore,
+      threadStore,
+      invokeTrigger: trigger,
+      socketManager,
+      defaultUserId: 'owner-1',
+      defaultCatId: () => currentDefault,
+      log: noopLog(),
+    });
+    const thread = threadStore.create('owner-1', 'existing');
+    bindingStore.bind('feishu', 'chat-dynamic-default', thread.id, 'owner-1');
+    threadStore.participantActivity.set(thread.id, []);
+
+    await dynamicRouter.route('feishu', 'chat-dynamic-default', 'first', 'ext-dynamic-1');
+    currentDefault = 'codex';
+    await dynamicRouter.route('feishu', 'chat-dynamic-default', 'second', 'ext-dynamic-2');
+
+    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.equal(trigger.calls[1].catId, 'codex');
+    assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
+    assert.deepEqual(messageStore.messages[1].mentions, ['codex']);
+  });
+
   it('skips duplicate messages', async () => {
     const r1 = await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
     const r2 = await router.route('feishu', 'chat-123', 'Hello', 'ext-1');

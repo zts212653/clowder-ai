@@ -130,9 +130,11 @@ export class PluginRegistry {
     const status = this.deriveStatus(manifest, capabilities, env);
     const allConfigured = manifest.config.filter((f) => f.required).every((f) => !!env[f.envName]);
 
+    const isSensitive = (f: (typeof manifest.config)[number]) => f.type === 'input' && f.sensitive;
     const configWithValues = manifest.config.map((f) => ({
       ...f,
-      currentValue: maskValue(env[f.envName], f.sensitive),
+      sensitive: isSensitive(f),
+      currentValue: maskValue(env[f.envName], isSensitive(f)),
     }));
 
     const resourceStatuses: PluginResourceStatus[] = manifest.resources.map((r) => {

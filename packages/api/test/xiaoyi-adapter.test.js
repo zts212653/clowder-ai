@@ -44,7 +44,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   }
 
   it('inbound → sendPlaceholder → sendReply → onDeliveryBatchDone lifecycle', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     const received = [];
@@ -97,7 +97,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('append accumulation: first sendReply append=false, rest append=true with separator', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     adapter.onMsg = async () => {};
@@ -131,7 +131,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('onDeliveryBatchDone(chainDone=false) is a no-op', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     adapter.onMsg = async () => {};
@@ -151,7 +151,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('P2-1 regression: partial success + later failure still closes task and dequeues', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     const dispatched = [];
@@ -181,7 +181,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('P3-P1: all cats fail (no artifact) → task closes with failed state', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     adapter.onMsg = async () => {};
@@ -204,7 +204,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('dedup prevents double processing of same task', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     adapter.ws.send = () => {};
     const received = [];
@@ -218,7 +218,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('ignores messages for wrong agentId', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     adapter.ws.send = () => {};
     const received = [];
@@ -239,7 +239,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('tasks/cancel purges session state', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     adapter.ws.send = () => {};
     adapter.onMsg = async () => {};
@@ -258,7 +258,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('serial dispatch: task B waits until task A dequeues', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     adapter.ws.send = () => {};
     const dispatched = [];
@@ -276,7 +276,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('multi-cat: append accumulation with separator', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     adapter.onMsg = async () => {};
@@ -314,7 +314,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('editMessage and deleteMessage are no-ops (non-streaming model)', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const adapter = new XiaoyiAdapter(mkLog(), mkOpts());
     const sent = captureSent(adapter);
     adapter.onMsg = async () => {};
@@ -333,7 +333,7 @@ describe('XiaoyiAdapter: non-streaming append accumulation', () => {
   });
 
   it('HAG JSON-RPC error is logged', async () => {
-    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/adapters/XiaoyiAdapter.js');
+    const { XiaoyiAdapter } = await import('../dist/infrastructure/connectors/im-connectors/xiaoyi/XiaoyiAdapter.js');
     const warnings = [];
     const log = { ...mkLog(), warn: (...args) => warnings.push(args) };
     const adapter = new XiaoyiAdapter(log, mkOpts());

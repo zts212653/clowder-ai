@@ -1,0 +1,47 @@
+id: weixin
+name: 微信
+nameEn: WeChat Personal
+version: 1.0.0
+icon:
+  type: png
+  src: /images/connectors/weixin.png
+themeColor: '#07C160'
+docsUrl: https://chatbot.weixin.qq.com/
+testable: true
+
+config:
+  # ── Value field (hidden, managed by QR operation) ──
+  - envName: WEIXIN_BOT_TOKEN
+    type: input
+    label: Bot Token (扫码自动获取)
+    sensitive: true
+    required: true
+    hidden: true
+
+  # ── Operation field: QR login state machine ──
+  - name: weixin_qr_login
+    type: operation
+    label: 微信扫码登录
+    required: true
+    target: [WEIXIN_BOT_TOKEN]
+    actions:
+      - id: qr-generate
+        label: 生成二维码
+        render: button
+        resultRender: img
+        next: qr-status
+      - id: qr-status
+        label: 等待扫码
+        render: polling
+        timeout: 60
+        rollback: qr-generate
+        next: disconnect
+      - id: disconnect
+        label: 断开连接
+        render: button
+        next: qr-generate
+
+steps:
+  - text: 点击「生成二维码」按钮
+  - text: 使用微信扫描二维码并确认授权
+  - text: 授权成功后自动连接，无需重启服务

@@ -1,0 +1,76 @@
+id: feishu
+name: 飞书
+nameEn: Feishu / Lark
+version: 1.0.0
+icon:
+  type: png
+  src: /images/connectors/feishu.png
+themeColor: '#3370FF'
+docsUrl: https://open.feishu.cn/document/home/introduction-to-custom-app-development/self-built-application-development-process
+testable: true
+
+config:
+  # ── Value fields ──
+  - envName: FEISHU_APP_ID
+    type: input
+    label: App ID
+    sensitive: false
+    required: true
+  - envName: FEISHU_APP_SECRET
+    type: input
+    label: App Secret
+    sensitive: true
+    required: true
+  - envName: FEISHU_CONNECTION_MODE
+    type: select
+    label: 连接模式
+    required: false
+    default: webhook
+    options:
+      - value: webhook
+        label: Webhook（需公网 URL）
+      - value: websocket
+        label: WebSocket（无需公网，推荐内网）
+  - envName: FEISHU_VERIFICATION_TOKEN
+    type: input
+    label: Verification Token
+    sensitive: true
+    required: false
+    requiredWhen:
+      envName: FEISHU_CONNECTION_MODE
+      value: webhook
+
+  # ── Operation field: QR bind state machine ──
+  - name: feishu_qr_login
+    type: operation
+    label: 飞书扫码授权
+    required: false
+    target: [FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_CONNECTION_MODE]
+    actions:
+      - id: qr-generate
+        label: 生成二维码
+        render: button
+        resultRender: img
+        next: qr-status
+      - id: qr-status
+        label: 等待扫码
+        render: polling
+        timeout: 600
+        rollback: qr-generate
+        next: disconnect
+      - id: disconnect
+        label: 断开连接
+        render: button
+        next: qr-generate
+
+permissions:
+  label: 飞书
+
+steps:
+  - text: 在飞书开放平台创建企业自建应用，获取 App ID 和 App Secret
+  - text: 选择连接模式：Webhook（需公网 URL）或 WebSocket（无需公网，推荐内网环境）
+  - text: 在「事件订阅」中配置请求地址并获取 Verification Token
+    mode: webhook
+  - text: 在「事件订阅」中选择「使用长连接接收事件」，无需 Verification Token
+    mode: websocket
+  - text: 填写以下配置并保存，重启 API 服务后生效

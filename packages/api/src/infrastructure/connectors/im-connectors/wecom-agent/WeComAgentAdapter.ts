@@ -10,8 +10,8 @@ import crypto from 'node:crypto';
 import { basename } from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import type { FastifyBaseLogger } from 'fastify';
-import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
-import type { IOutboundAdapter } from '../OutboundDeliveryHook.js';
+import type { MessageEnvelope } from '../../ConnectorMessageFormatter.js';
+import type { IOutboundAdapter } from '../../OutboundDeliveryHook.js';
 
 // ── Constants ──
 

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { getAllConnectorDefinitions, getConnectorDefinition } from '../dist/types/connector.js';
+import {
+  getAllConnectorDefinitions,
+  getConnectorDefinition,
+  registerConnectorDefinition,
+  unregisterConnectorDefinition,
+} from '../dist/types/connector.js';
 
 describe('F140 ConnectorDefinitions', () => {
   it('GitHub connectors use a unified slate-gray gradient', () => {
@@ -37,6 +42,46 @@ describe('F140 ConnectorDefinitions', () => {
       } else {
         assert.match(def.icon.src, /^\//, `${def.id} png must have absolute src`);
       }
+    }
+  });
+
+  it('replaces runtime connector definitions without overriding static definitions', () => {
+    const runtimeId = 'runtime-definition-update-probe';
+    const builtInBefore = getConnectorDefinition('weixin');
+    assert.ok(builtInBefore);
+
+    try {
+      registerConnectorDefinition({
+        id: runtimeId,
+        displayName: 'Runtime Probe v1',
+        icon: { type: 'png', src: '/test-v1.png' },
+        themeColor: '#336699',
+        description: 'runtime probe v1',
+      });
+      registerConnectorDefinition({
+        id: runtimeId,
+        displayName: 'Runtime Probe v2',
+        icon: { type: 'png', src: '/test-v2.png' },
+        themeColor: '#669933',
+        description: 'runtime probe v2',
+      });
+      registerConnectorDefinition({
+        ...builtInBefore,
+        displayName: 'Overridden Weixin',
+      });
+
+      assert.equal(
+        getConnectorDefinition(runtimeId)?.displayName,
+        'Runtime Probe v2',
+        'runtime connector metadata must refresh after plugin update',
+      );
+      assert.strictEqual(
+        getConnectorDefinition('weixin'),
+        builtInBefore,
+        'runtime registration must not replace static connector definitions',
+      );
+    } finally {
+      unregisterConnectorDefinition(runtimeId);
     }
   });
 });

@@ -512,22 +512,6 @@ describe('cat-config-loader', () => {
       assert.equal(isSessionChainEnabled('unknown-cat', config), true);
     });
 
-    it('opencode breed has sessionChain enabled in real cat-template.json (clowder#915)', () => {
-      // clowder#915 root cause 1: opencode breed had `features.sessionChain: false`,
-      // so the entire chain → seal → continuation → handoff infrastructure never spun
-      // up. Even though strategy fallback to GLOBAL_DEFAULT (handoff @ 0.75/0.85) was
-      // "correct", with sessionChain disabled the strategy could not execute and
-      // opencode hung when context filled.
-      // Guard the actual repo cat-template.json against re-introduction of this.
-      const repoTemplate = resolve(import.meta.dirname, '../../../cat-template.json');
-      const config = loadCatConfig(repoTemplate);
-      assert.equal(
-        isSessionChainEnabled('opencode', config),
-        true,
-        'opencode breed must have sessionChain enabled or context-fill handoff never fires (clowder#915)',
-      );
-    });
-
     it('prefers variant.sessionChain override over breed-level setting', () => {
       const cfg = validConfig();
       cfg.breeds[0].features = { sessionChain: true };
@@ -558,6 +542,12 @@ describe('cat-config-loader', () => {
       const config = loadCatConfig(templatePath);
       assert.equal(isSessionChainEnabled('antigravity', config), true);
       assert.equal(isSessionChainEnabled('antig-opus', config), true);
+    });
+
+    it('project config keeps OpenCode session chain enabled', () => {
+      const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+      const config = loadCatConfig(templatePath);
+      assert.equal(isSessionChainEnabled('opencode', config), true);
     });
 
     it('accepts features with empty object (all defaults)', () => {

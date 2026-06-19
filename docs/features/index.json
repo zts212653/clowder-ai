@@ -1417,6 +1417,12 @@
       "file": "F233-ball-custody-observability.md"
     },
     {
+      "id": "F240",
+      "name": "IM Connector Plugin Architecture — 统一 IMConnectorPlugin 接口 + 外部 npm 包动态加载",
+      "status": "spec | **Owner**: Ragdoll Opus-4.6 | **Priority**: P1",
+      "file": "F240-im-connector-plugin-architecture.md"
+    },
+    {
       "id": "F235",
       "name": "Feedback-to-Community Publisher — 一键发布反馈到社区",
       "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",

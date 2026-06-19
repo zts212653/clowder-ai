@@ -69,10 +69,10 @@ export interface ConnectorSource {
 // ── Connector Definition (registry entry) ──
 
 /** How a connector's avatar icon is rendered.
- *  - `svg`: maps to a React SVG component by `iconId` (see ConnectorIcon)
- *  - `png`: renders a PNG image from `src` path */
+ *  - `svg`: maps to a React SVG component by `iconId` or renders a bundled SVG file from `src`
+ *  - `png`: renders an image from `src` path */
 export type ConnectorIconSpec =
-  | { readonly type: 'svg'; readonly iconId: string }
+  | { readonly type: 'svg'; readonly iconId: string; readonly src?: string }
   | { readonly type: 'png'; readonly src: string };
 
 /** Static definition of a connector type for frontend rendering.
@@ -253,12 +253,46 @@ const CONNECTOR_DEFINITIONS: readonly ConnectorDefinition[] = [
 
 const connectorMap = new Map<string, ConnectorDefinition>(CONNECTOR_DEFINITIONS.map((d) => [d.id, d]));
 
+/** Static IDs from compile-time definitions — immune to runtime registration. */
+const staticConnectorIds = new Set(CONNECTOR_DEFINITIONS.map((d) => d.id));
+
+/**
+ * Check whether an ID belongs to a static (compile-time) connector definition.
+ * Unlike `getConnectorDefinition()`, this is NOT affected by runtime
+ * `registerConnectorDefinition()` calls — safe for hot-reload ID conflict checks.
+ */
+export function isStaticConnectorId(id: string): boolean {
+  return staticConnectorIds.has(id);
+}
+
+/**
+ * Register a connector definition at runtime (F240 dynamic plugins).
+ * External IM connector plugins call this to make their definition
+ * available to frontend rendering (icon, color, displayName).
+ * Built-in definitions cannot be overridden.
+ */
+export function registerConnectorDefinition(def: ConnectorDefinition): void {
+  if (staticConnectorIds.has(def.id)) return;
+  connectorMap.set(def.id, def);
+}
+
+/**
+ * Unregister a runtime-added connector definition (F240 plugin uninstall).
+ * Static (compile-time) definitions are immune — only dynamically registered
+ * entries can be removed.
+ */
+export function unregisterConnectorDefinition(id: string): void {
+  if (!staticConnectorIds.has(id)) {
+    connectorMap.delete(id);
+  }
+}
+
 /** Look up a connector definition by ID. */
 export function getConnectorDefinition(connectorId: string): ConnectorDefinition | undefined {
   return connectorMap.get(connectorId);
 }
 
-/** Get all registered connector definitions. */
+/** Get all registered connector definitions (built-in + dynamically registered). */
 export function getAllConnectorDefinitions(): readonly ConnectorDefinition[] {
-  return CONNECTOR_DEFINITIONS;
+  return Array.from(connectorMap.values());
 }

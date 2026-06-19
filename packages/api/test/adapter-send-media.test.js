@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 
 describe('P1-2: TelegramAdapter.sendMedia', () => {
   it('sendMedia sends image via bot API', async () => {
-    const { TelegramAdapter } = await import('../dist/infrastructure/connectors/adapters/TelegramAdapter.js');
+    const { TelegramAdapter } = await import(
+      '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js'
+    );
 
     const sent = [];
     const adapter = new TelegramAdapter('fake-token', {
@@ -41,7 +43,9 @@ describe('P1-2: TelegramAdapter.sendMedia', () => {
   });
 
   it('R2-P1-2: local file path uses InputFile instead of raw string', async () => {
-    const { TelegramAdapter } = await import('../dist/infrastructure/connectors/adapters/TelegramAdapter.js');
+    const { TelegramAdapter } = await import(
+      '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js'
+    );
     const { InputFile } = await import('grammy');
 
     const sent = [];
@@ -72,7 +76,9 @@ describe('P1-2: TelegramAdapter.sendMedia', () => {
   });
 
   it('R2-P1-2: public URL stays as string (not InputFile)', async () => {
-    const { TelegramAdapter } = await import('../dist/infrastructure/connectors/adapters/TelegramAdapter.js');
+    const { TelegramAdapter } = await import(
+      '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js'
+    );
 
     const sent = [];
     const adapter = new TelegramAdapter('fake-token', {
@@ -102,7 +108,9 @@ describe('P1-2: TelegramAdapter.sendMedia', () => {
   });
 
   it('R3-P1: absPath in payload takes priority over url for InputFile', async () => {
-    const { TelegramAdapter } = await import('../dist/infrastructure/connectors/adapters/TelegramAdapter.js');
+    const { TelegramAdapter } = await import(
+      '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js'
+    );
     const { InputFile } = await import('grammy');
 
     const sent = [];
@@ -137,7 +145,9 @@ describe('P1-2: TelegramAdapter.sendMedia', () => {
   });
 
   it('sendMedia sends voice via bot API', async () => {
-    const { TelegramAdapter } = await import('../dist/infrastructure/connectors/adapters/TelegramAdapter.js');
+    const { TelegramAdapter } = await import(
+      '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js'
+    );
 
     const sent = [];
     const adapter = new TelegramAdapter('fake-token', {
@@ -168,7 +178,7 @@ describe('P1-2: TelegramAdapter.sendMedia', () => {
 
 describe('P1-2: FeishuAdapter.sendMedia with URL fallback', () => {
   it('sendMedia with url (no platform key) sends link as text', async () => {
-    const { FeishuAdapter } = await import('../dist/infrastructure/connectors/adapters/FeishuAdapter.js');
+    const { FeishuAdapter } = await import('../dist/infrastructure/connectors/im-connectors/feishu/FeishuAdapter.js');
 
     const sent = [];
     const adapter = new FeishuAdapter('fake-app-id', 'fake-secret', {
@@ -191,7 +201,7 @@ describe('P1-2: FeishuAdapter.sendMedia with URL fallback', () => {
   });
 
   it('sendMedia with imageKey uses platform key (existing behavior)', async () => {
-    const { FeishuAdapter } = await import('../dist/infrastructure/connectors/adapters/FeishuAdapter.js');
+    const { FeishuAdapter } = await import('../dist/infrastructure/connectors/im-connectors/feishu/FeishuAdapter.js');
 
     const sent = [];
     const adapter = new FeishuAdapter('fake-app-id', 'fake-secret', {

@@ -1,0 +1,44 @@
+id: wecom-bot
+name: 企业微信
+nameEn: WeCom Bot
+version: 1.0.0
+icon:
+  type: png
+  src: /images/connectors/wecom-bot.png
+themeColor: '#4F46E5'
+docsUrl: https://work.weixin.qq.com/wework_admin/frame#/aiHelper/create
+testable: true
+
+config:
+  - envName: WECOM_BOT_ID
+    label: Bot ID
+    sensitive: false
+    required: true
+  - envName: WECOM_BOT_SECRET
+    label: Bot Secret
+    sensitive: true
+    required: true
+
+  # ── Operation: validate + connect via WebSocket ──
+  - name: wecom_validate
+    type: operation
+    label: 验证并连接
+    required: false
+    target: [WECOM_BOT_ID, WECOM_BOT_SECRET]
+    actions:
+      - id: validate
+        label: 测试并连接
+        render: button
+        next: disconnect
+      - id: disconnect
+        label: 断开连接
+        render: button
+        next: validate
+
+permissions:
+  label: 企业微信
+
+steps:
+  - text: 点击上方链接直接进入创建页 → 选「API 模式」→ 连接方式选「使用长连接」
+  - text: 填写名称和可见范围，保存后获取 Bot ID 和 Secret
+  - text: 粘贴到下方并点击「测试并连接」，验证成功后自动生效

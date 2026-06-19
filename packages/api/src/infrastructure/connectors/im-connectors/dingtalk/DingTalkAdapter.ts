@@ -13,8 +13,8 @@ import { basename } from 'node:path';
 import type { RichBlock } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
-import type { MessageEnvelope } from '../ConnectorMessageFormatter.js';
-import type { IStreamableOutboundAdapter } from '../OutboundDeliveryHook.js';
+import type { MessageEnvelope } from '../../ConnectorMessageFormatter.js';
+import type { IStreamableOutboundAdapter } from '../../OutboundDeliveryHook.js';
 
 // ── Types ──
 

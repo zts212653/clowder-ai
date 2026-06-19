@@ -9,7 +9,7 @@ import {
   downloadMediaFromCdn,
   encryptAesEcb,
   uploadMediaToCdn,
-} from '../dist/infrastructure/connectors/adapters/weixin-cdn.js';
+} from '../dist/infrastructure/connectors/im-connectors/weixin/weixin-cdn.js';
 
 describe('weixin-cdn AES-128-ECB', () => {
   it('encrypts and decrypts round-trip', () => {

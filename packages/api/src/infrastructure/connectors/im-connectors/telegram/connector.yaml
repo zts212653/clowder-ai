@@ -1,0 +1,21 @@
+id: telegram
+name: Telegram
+nameEn: Telegram
+version: 1.0.0
+icon:
+  type: png
+  src: /images/connectors/telegram.png
+themeColor: '#0088CC'
+docsUrl: https://core.telegram.org/bots/tutorial
+testable: true
+
+config:
+  - envName: TELEGRAM_BOT_TOKEN
+    label: Bot Token
+    sensitive: true
+    required: true
+
+steps:
+  - text: 在 Telegram 中找到 @BotFather，发送 /newbot 创建机器人
+  - text: 复制生成的 Bot Token
+  - text: 填写以下配置并保存，重启 API 服务后生效
