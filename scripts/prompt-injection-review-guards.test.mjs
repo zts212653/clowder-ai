@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import YAML from 'yaml';
 
@@ -12,6 +14,16 @@ describe('prompt-injection review guard scripts', () => {
       return catId !== 'owner' && rosterEntry && rosterEntry.available !== false;
     });
     assert.ok(entry, `${catalogPath} must contain at least one available non-owner cat`);
+    return entry[0];
+  };
+
+  const firstAvailableCatIdExcluding = (excludedCatId) => {
+    const catalogPath = existsSync('.cat-cafe/cat-catalog.json') ? '.cat-cafe/cat-catalog.json' : 'cat-template.json';
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const entry = Object.entries(catalog.roster ?? {}).find(([catId, rosterEntry]) => {
+      return catId !== 'owner' && catId !== excludedCatId && rosterEntry && rosterEntry.available !== false;
+    });
+    assert.ok(entry, `${catalogPath} must contain an available non-owner cat other than ${excludedCatId}`);
     return entry[0];
   };
 
@@ -130,6 +142,59 @@ describe('prompt-injection review guard scripts', () => {
       /^── \[[A-Z]\d+] .+ ──$/m,
       'compiled native L0 must not send source/template display labels to the model',
     );
+  });
+
+  it('F231 compiled native L0 preserves capsule and primer carrier contract', async () => {
+    const { compileL0 } = await import('./compile-system-prompt-l0.mjs');
+    const targetCatId = firstAvailableCatId();
+    const profileDir = mkdtempSync(join(tmpdir(), 'f231-l0-profile-'));
+    const emptyProfileDir = mkdtempSync(join(tmpdir(), 'f231-l0-empty-profile-'));
+
+    try {
+      mkdirSync(join(profileDir, 'relationship'), { recursive: true });
+      writeFileSync(
+        join(profileDir, 'landy-capsule.md'),
+        '蓝莓拿铁是默认饮料。\n遇到取舍题先给结论再给依据。\n',
+        'utf-8',
+      );
+      writeFileSync(
+        join(profileDir, 'relationship', `${targetCatId}-primer.md`),
+        'THIS TARGET PRIMER BODY MUST NOT BE INJECTED INTO L0',
+        'utf-8',
+      );
+
+      const targetCompiled = await compileL0({ catId: targetCatId, profileDir });
+      assert.match(targetCompiled, /## 主人画像/, 'capsule heading must be injected when landy-capsule.md exists');
+      assert.match(targetCompiled, /蓝莓拿铁是默认饮料。/, 'capsule body must be injected into native L0');
+      const targetPrimerPointer = `private/profile/relationship/${targetCatId}-primer.md`;
+      assert.ok(
+        targetCompiled.includes(targetPrimerPointer),
+        'native L0 should include only the per-cat primer pointer',
+      );
+      assert.doesNotMatch(
+        targetCompiled,
+        /THIS TARGET PRIMER BODY MUST NOT BE INJECTED INTO L0/,
+        'native L0 must not inject primer body content',
+      );
+
+      const emptyCompiled = await compileL0({ catId: targetCatId, profileDir: emptyProfileDir });
+      assert.doesNotMatch(emptyCompiled, /## 主人画像/, 'empty profile must not emit a capsule section');
+      assert.doesNotMatch(
+        emptyCompiled,
+        /\{\{USER_CAPSULE\}\}/,
+        'empty profile must not leak the USER_CAPSULE placeholder',
+      );
+
+      const otherCatId = firstAvailableCatIdExcluding(targetCatId);
+      const otherCompiled = await compileL0({ catId: otherCatId, profileDir });
+      assert.ok(
+        !otherCompiled.includes(targetPrimerPointer),
+        'cat-specific primer pointer must not leak to another cat',
+      );
+    } finally {
+      rmSync(profileDir, { recursive: true, force: true });
+      rmSync(emptyProfileDir, { recursive: true, force: true });
+    }
   });
 
   it('S6 overlay mutations invalidate the native L0 cache', () => {
