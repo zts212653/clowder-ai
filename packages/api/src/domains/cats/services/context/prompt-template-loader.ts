@@ -8,7 +8,7 @@
  * - Simple {{VAR}} placeholder substitution
  * - .local overlay files for user customization (Checkpoint C)
  *
- * Overlay priority: {id}.local.{ext} > {id}.{ext} (base)
+ * Overlay priority: .cat-cafe/prompt-overlays/{id}.local.{ext} > assets/prompt-templates/{id}.{ext}
  * Only segments with allowLocalOverride: true support overlays.
  */
 
@@ -20,9 +20,14 @@ import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 // ── Path resolution ──────────────────────────────────────────
 
 export const TEMPLATES_DIR = join(findMonorepoRoot(), 'assets', 'prompt-templates');
+export const TEMPLATE_OVERLAYS_DIR = join(findMonorepoRoot(), '.cat-cafe', 'prompt-overlays');
 
 function templatePath(filename: string): string {
   return join(TEMPLATES_DIR, filename);
+}
+
+function overlayPath(filename: string): string {
+  return join(TEMPLATE_OVERLAYS_DIR, filename);
 }
 
 /**
@@ -30,7 +35,7 @@ function templatePath(filename: string): string {
  * Returns { path, isOverride } so callers can badge "customized" vs "default".
  */
 function resolveWithOverlay(base: string, localSuffix: string): { path: string; isOverride: boolean } {
-  const localPath = templatePath(localSuffix);
+  const localPath = overlayPath(localSuffix);
   if (existsSync(localPath)) {
     return { path: localPath, isOverride: true };
   }
@@ -239,7 +244,7 @@ export function getOverrideStatus(segmentId: string): OverrideStatus | null {
   if (!entry.local) {
     return { segmentId, hasOverride: false, basePath, overridePath: null };
   }
-  const localPath = templatePath(entry.local);
+  const localPath = overlayPath(entry.local);
   return {
     segmentId,
     hasOverride: existsSync(localPath),
@@ -257,7 +262,7 @@ export function getTemplateRawContent(segmentId: string, useOverride: boolean): 
   if (!entry) return null;
 
   if (useOverride && entry.local) {
-    const localPath = templatePath(entry.local);
+    const localPath = overlayPath(entry.local);
     if (existsSync(localPath)) {
       return readFileSync(localPath, 'utf-8');
     }
@@ -271,6 +276,13 @@ export function getTemplateRawContent(segmentId: string, useOverride: boolean): 
 /** Get the base filename for a template-backed segment */
 export function getTemplateFileInfo(segmentId: string): { base: string; local: string } | null {
   return TEMPLATE_FILES[segmentId] ?? null;
+}
+
+/** Get the writable overlay path for a template-backed segment */
+export function getTemplateOverlayPath(segmentId: string): string | null {
+  const entry = TEMPLATE_FILES[segmentId];
+  if (!entry?.local) return null;
+  return overlayPath(entry.local);
 }
 
 // ── Generic segment rendering (F237 template unification) ───

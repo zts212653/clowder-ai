@@ -32,8 +32,8 @@
  *   node scripts/compile-system-prompt-l0.mjs --cat opus-47
  *
  * S6 workflow triggers are loaded from assets/prompt-templates/workflow-triggers.yaml
- * with the same workflow-triggers.local.yaml overlay path as the non-native
- * SystemPromptBuilder path.
+ * with the same .cat-cafe/prompt-overlays/workflow-triggers.local.yaml overlay
+ * path as the non-native SystemPromptBuilder path.
  */
 
 import { accessSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -47,6 +47,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0.md');
 const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
+const PROMPT_OVERLAYS_DIR = resolve(findWorkspaceRoot(process.cwd()), '.cat-cafe', 'prompt-overlays');
 const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+ ──$/;
 
 /** L1-L7 section template files — static content extracted from the monolithic L0 template. */
@@ -59,6 +60,15 @@ const L0_SECTION_TEMPLATES = {
   L6_CONTENT: 'l6-capability-wakeup.md',
   L7_CONTENT: 'l7-collaboration-philosophy.md',
 };
+
+function findWorkspaceRoot(start) {
+  let dir = resolve(start);
+  while (dir !== dirname(dir)) {
+    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
+    dir = dirname(dir);
+  }
+  return resolve(start);
+}
 
 /**
  * Load an L0 section template file, stripping compiler-only annotation lines.
@@ -150,8 +160,12 @@ export function filterAvailableTeammates(allConfigs, currentCatId, isAvailableFn
   return Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isAvailableFn(id));
 }
 
-function workflowTriggersPath(filename) {
+function workflowTriggersBasePath(filename) {
   return resolve(PROMPT_TEMPLATES_DIR, filename);
+}
+
+function workflowTriggersOverlayPath(filename) {
+  return resolve(PROMPT_OVERLAYS_DIR, filename);
 }
 
 function parseWorkflowTriggersFile(filePath) {
@@ -168,8 +182,8 @@ function parseWorkflowTriggersFile(filePath) {
 }
 
 function loadWorkflowTriggers() {
-  const basePath = workflowTriggersPath('workflow-triggers.yaml');
-  const localPath = workflowTriggersPath('workflow-triggers.local.yaml');
+  const basePath = workflowTriggersBasePath('workflow-triggers.yaml');
+  const localPath = workflowTriggersOverlayPath('workflow-triggers.local.yaml');
   const effectivePath = existsSync(localPath) ? localPath : basePath;
 
   if (!existsSync(effectivePath)) {

@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
-import { getTemplateFileInfo, TEMPLATES_DIR } from '../dist/domains/cats/services/context/prompt-template-loader.js';
+import {
+  getTemplateFileInfo,
+  getTemplateOverlayPath,
+  TEMPLATES_DIR,
+} from '../dist/domains/cats/services/context/prompt-template-loader.js';
 import { promptInjectionRoutes } from '../dist/routes/prompt-injection.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
@@ -53,21 +57,29 @@ describe('prompt-injection YAML validation', () => {
       if (existsSync(path)) unlinkSync(path);
       return;
     }
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, content, 'utf-8');
   }
 
   async function withPreservedOverlay(segmentId, fn) {
     const fileInfo = getTemplateFileInfo(segmentId);
     assert.ok(fileInfo?.local, `${segmentId} should have a local overlay path`);
-    const localPath = join(TEMPLATES_DIR, fileInfo.local);
+    const localPath = getTemplateOverlayPath(segmentId);
+    assert.ok(localPath, `${segmentId} should resolve a writable overlay path`);
     const bakPath = `${localPath}.bak`;
+    const assetLocalPath = join(TEMPLATES_DIR, fileInfo.local);
+    const assetBakPath = `${assetLocalPath}.bak`;
     const localSnapshot = snapshotFile(localPath);
     const bakSnapshot = snapshotFile(bakPath);
+    const assetLocalSnapshot = snapshotFile(assetLocalPath);
+    const assetBakSnapshot = snapshotFile(assetBakPath);
     try {
       await fn();
     } finally {
       restoreFile(localPath, localSnapshot);
       restoreFile(bakPath, bakSnapshot);
+      restoreFile(assetLocalPath, assetLocalSnapshot);
+      restoreFile(assetBakPath, assetBakSnapshot);
     }
   }
 
@@ -235,6 +247,39 @@ describe('prompt-injection YAML validation', () => {
       } finally {
         await app.close();
       }
+    });
+
+    it('writes valid overlays under .cat-cafe prompt-overlays instead of assets', async () => {
+      await withPreservedOverlay(YAML_SEGMENT, async () => {
+        const fileInfo = getTemplateFileInfo(YAML_SEGMENT);
+        const overlayPath = getTemplateOverlayPath(YAML_SEGMENT);
+        assert.ok(fileInfo?.local);
+        assert.ok(overlayPath);
+        const assetLocalPath = join(TEMPLATES_DIR, fileInfo.local);
+        restoreFile(overlayPath, null);
+        restoreFile(`${overlayPath}.bak`, null);
+        restoreFile(assetLocalPath, null);
+
+        const app = await buildSessionApp();
+        try {
+          const content = 'ragdoll: "valid overlay"';
+          const res = await app.inject({
+            method: 'PUT',
+            url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+            headers: LOCAL_WRITE_HEADERS,
+            payload: { content },
+          });
+          assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
+          assert.equal(readFileSync(overlayPath, 'utf-8'), content);
+          assert.equal(
+            existsSync(assetLocalPath),
+            false,
+            'overlay save must not create a .local file in packaged assets/prompt-templates',
+          );
+        } finally {
+          await app.close();
+        }
+      });
     });
   });
 

@@ -11,7 +11,7 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
 import {
@@ -22,10 +22,10 @@ import { clearL0Cache } from '../domains/cats/services/agents/providers/l0-compi
 import {
   getOverrideStatus,
   getTemplateFileInfo,
+  getTemplateOverlayPath,
   getTemplateRawContent,
   renderTemplate,
   stripComments,
-  TEMPLATES_DIR,
 } from '../domains/cats/services/context/prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from '../domains/cats/services/context/rich-block-rules.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -189,8 +189,8 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
     const status = getOverrideStatus(id);
     const content = getTemplateRawContent(id, true);
     const baseContent = status?.hasOverride ? getTemplateRawContent(id, false) : content;
-    const fileInfo = getTemplateFileInfo(id);
-    const hasBackup = fileInfo ? existsSync(join(TEMPLATES_DIR, `${fileInfo.local}.bak`)) : false;
+    const overlayPath = getTemplateOverlayPath(id);
+    const hasBackup = overlayPath ? existsSync(`${overlayPath}.bak`) : false;
 
     return {
       segmentId: id,
@@ -300,7 +300,11 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
         return { error: 'Template file info not found' };
       }
 
-      const localPath = join(TEMPLATES_DIR, fileInfo.local);
+      const localPath = getTemplateOverlayPath(id);
+      if (!localPath) {
+        reply.status(500);
+        return { error: 'Template overlay path not found' };
+      }
       mkdirSync(dirname(localPath), { recursive: true });
 
       // Backup existing .local to .local.bak
@@ -338,7 +342,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       return { segmentId: id, deleted: false, reason: 'No overlay path defined' };
     }
 
-    const localPath = join(TEMPLATES_DIR, fileInfo.local);
+    const localPath = getTemplateOverlayPath(id);
+    if (!localPath) {
+      return { segmentId: id, deleted: false, reason: 'No overlay path defined' };
+    }
     if (existsSync(localPath)) {
       unlinkSync(localPath);
       invalidateNativeL0CacheForSegment(id);
@@ -372,7 +379,12 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       reply.status(500);
       return { error: 'Template file info not found' };
     }
-    const bakPath = join(TEMPLATES_DIR, `${fileInfo.local}.bak`);
+    const localPath = getTemplateOverlayPath(id);
+    if (!localPath) {
+      reply.status(500);
+      return { error: 'Template overlay path not found' };
+    }
+    const bakPath = `${localPath}.bak`;
     if (!existsSync(bakPath)) {
       reply.status(404);
       return { error: 'No backup file exists' };
@@ -388,7 +400,6 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-    const localPath = join(TEMPLATES_DIR, fileInfo.local);
     atomicCopyFileSync(bakPath, localPath);
     invalidateNativeL0CacheForSegment(id);
     return { segmentId: id, restored: true };

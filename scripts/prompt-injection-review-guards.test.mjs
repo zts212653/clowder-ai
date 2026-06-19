@@ -112,6 +112,35 @@ describe('prompt-injection review guard scripts', () => {
     );
   });
 
+  it('prompt overlay writes use the writable project data tree, not packaged assets', () => {
+    const loaderSource = readFileSync(
+      'packages/api/src/domains/cats/services/context/prompt-template-loader.ts',
+      'utf-8',
+    );
+    const routeSource = readFileSync('packages/api/src/routes/prompt-injection.ts', 'utf-8');
+
+    assert.match(
+      loaderSource,
+      /TEMPLATE_OVERLAYS_DIR\s*=\s*join\(findMonorepoRoot\(\),\s*['"]\.cat-cafe['"],\s*['"]prompt-overlays['"]\)/,
+      'prompt overlays must live under the writable .cat-cafe project data tree',
+    );
+    assert.match(
+      loaderSource,
+      /function\s+overlayPath\s*\(\s*filename:\s*string\s*\)/,
+      'template loader should centralize overlay path resolution',
+    );
+    assert.match(
+      loaderSource,
+      /export\s+function\s+getTemplateOverlayPath\s*\(\s*segmentId:\s*string\s*\)/,
+      'routes should use a loader-owned overlay path helper instead of reconstructing asset paths',
+    );
+    assert.doesNotMatch(
+      routeSource,
+      /join\(TEMPLATES_DIR,\s*(?:`\$\{fileInfo\.local\}\.bak`|fileInfo\.local)/,
+      'overlay save/delete/restore paths must not target packaged assets/prompt-templates',
+    );
+  });
+
   it('B1 manifest points at the runtime SessionBootstrap source, not an unused template', () => {
     const manifest = YAML.parse(readFileSync('assets/prompt-injection-manifest.yaml', 'utf-8'));
     const b1 = manifest.segments.find((segment) => segment.id === 'B1');
