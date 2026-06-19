@@ -214,3 +214,6 @@ generated/capability-wakeup/
 packages/api/test/__b1_parent_a__/
 .claude/skills/organize-threads
 .claude/skills/thread-orchestration
+
+# Manual outputs (PPT / research / showcase artifacts not in source tree)
+outputs/manual-*

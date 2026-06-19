@@ -86,3 +86,4 @@ created: 2026-02-26
 | F235 | Feedback-to-Community Publisher — 一键发布反馈到社区（F222 confirmed issue / 猫猫整理的问题 → 预览脱敏 → GitHub issue，补 F168 outbound 方向） | spec | Ragdoll | internal (operator 2026-06-15) | [F235](features/F235-feedback-to-community-publisher.md) |
 | F236 | Anchor-First Context 入口 — 返回侧 token 减负（实时 MCP 协作工具 anchor 化：指针+预览，全文按需 drill；与 F148 消息侧成版图，companion ADR-203） | spec | Ragdoll (Ragdoll Opus-4.8) + Maine Coon (gpt-5.5) | internal (operator 2026-06-15) | [F236](features/F236-anchor-first-context-entry.md) |
 | F192-sop-wiring | `eval:sop` live publish path wired + re-enabled (PR #2186 merged 2026-06-10) | ✅ done | Ragdoll | internal | [F192 § 2026-06-10 timeline](features/F192-socio-technical-harness-eval.md) |
+| F230 | CatAgent Write/Exec — 轻量内置可工作 Agent（F159 只读基座扩展 write/exec） | spec | 布偶猫 | internal | [F230](features/F230-catagent-write-exec.md) |
