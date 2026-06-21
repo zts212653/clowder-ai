@@ -5,7 +5,7 @@
 > | | |
 > |---|---|
 > | **日期** | 2026-06-20 |
-> | **分工** | 架构梳理 + 内容 + 架构草图：宪宪（Opus 4.8）· **精美架构示意图：烁烁（Opus 4.8）**（见文末 §六 图需求清单） |
+> | **分工** | 架构梳理 + 内容 + Mermaid 蓝图：宪宪（Opus 4.8）· **精美架构示意图（图 A/B/C）：烁烁（Opus 4.8）✅ 已嵌入**（见 §一/§2.1/§3.1，交付说明见 §六） |
 > | **证据等级** | 阿里云：官方「长期记忆」文档（一手，较扎实）。火山：官方文档导航页 JS 渲染未全抓到，组件信息来自火山官方搜索摘要 + 开发者社区文章互证（**VikingDB / 豆包 / 字节图数据库**有多源印证）。"抑制幻觉/增强推理"是 vendor 宣称效果，打折扣；组件名/算法名为技术事实，可信。 |
 
 ---
@@ -28,7 +28,10 @@
 - **阿里云＝数据库视角**：记忆是数据库长出来的能力。mem0/ReMe 框架挂在 AnalyticDB/PolarDB 上，记忆服务**贴着存储层**。
 - **火山＝AI 云视角**：记忆是一个独立的托管服务产品。「记忆库 Mem0」是 Viking 产品矩阵的一员，站在**模型/AI 服务层**，背靠方舟 Ark + VikingDB。
 
-> 📌 **并排"云上站位"对比图** → 见 §六，请烁烁出精美版（突出"阿里云贴存储层 vs 火山独立 PaaS 层"）。
+<p align="center">
+  <img src="./assets/mem0-cloud-positioning.png" alt="mem0 两种云上站位对比：阿里云下沉贴存储 vs 火山独立上浮" width="100%">
+  <br><em><b>图 C｜并排"云上站位"对比（封面图）</b>——阿里云的 mem0 <b>下沉贴存储层</b>、数据不出库；火山的 mem0 <b>独立上浮到 AI 服务层</b>、编排多后端。同一个 mem0，站位相反。（<a href="./assets/mem0-cloud-positioning.svg">SVG 矢量源</a>）</em>
+</p>
 
 ---
 
@@ -37,6 +40,13 @@
 ### 2.1 公有云形态 & 微服务位置
 
 形态：**"AnalyticDB Memory Service" 记忆服务层**——对外提供统一标准化接口供 Agent 调用 + 嵌入式 SDK；横跨 **AnalyticDB for MySQL** 与 **PolarDB**（PolarDB Mem0）两条数据库产品线。记忆能力是数据库的增值层，**不是独立微服务**。
+
+<p align="center">
+  <img src="./assets/mem0-aliyun-arch.png" alt="阿里云 mem0 架构：记忆服务下沉进数据库，数据不出库" width="860">
+  <br><em><b>图 A｜阿里云架构</b>——记忆服务整体被 ADB/PolarDB 容器包裹，体现"下沉进数据库、数据不出库"。（<a href="./assets/mem0-aliyun-arch.svg">SVG 矢量源</a>）</em>
+</p>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -51,6 +61,8 @@ flowchart TB
     style SVC fill:#fff3e0,stroke:#e65100,stroke-width:2px
     style DB fill:#e8f5e9,stroke:#2e7d32
 ```
+
+</details>
 
 **微服务位置**：记忆服务**紧贴存储引擎**——它本质是数据库对外多开的一组"记忆 API"，数据不出库，检索/遗忘在存储层就近完成。
 
@@ -69,6 +81,13 @@ flowchart TB
 
 形态：**独立托管 PaaS 产品「记忆库 Mem0」**（已公测）——Python/Go/Java SDK + REST API + 控制台 + API Key，是火山 **Viking 产品矩阵**（VikingDB 向量库 / Viking 知识库 / Viking 记忆库）的一员，与方舟 Ark 生态集成（ArkClaw）。
 
+<p align="center">
+  <img src="./assets/mem0-volcano-arch.png" alt="火山引擎 mem0 架构：独立托管 PaaS，字节图数据库差异化" width="860">
+  <br><em><b>图 B｜火山引擎架构</b>——独立 PaaS 微服务自成一体，编排"模型+向量+图"三类后端；<b>★ 字节自研图数据库</b>为差异化王牌。（<a href="./assets/mem0-volcano-arch.svg">SVG 矢量源</a>）</em>
+</p>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+
 ```mermaid
 flowchart TB
     APP["AI Agent / 应用"]
@@ -84,6 +103,8 @@ flowchart TB
     style VDB fill:#e3f2fd,stroke:#1565c0
     style GDB fill:#e3f2fd,stroke:#1565c0
 ```
+
+</details>
 
 **微服务位置**：一个**独立的 AI PaaS 服务**，站在模型服务层（方舟 Ark 旁），上游被 Agent 直接调用、下游编排 VikingDB + 图数据库 + 豆包模型。
 
@@ -123,16 +144,19 @@ flowchart TB
 
 ---
 
-## 六、给烁烁的图需求清单 🎨
+## 六、架构图交付说明 🎨（烁烁 · 已完成）
 
-> 下面是请烁烁出**精美 raster 架构图**的清单（嵌入到 `assets/` 并替换/补充上面的 Mermaid 草图）。Mermaid 是我的**架构蓝本/草图**，逻辑已对齐证据；你来做视觉精美化。
+三张精美架构图已绘制并嵌入上文（§一 图 C / §2.1 图 A / §3.1 图 B），原 Mermaid 草图收进各处 `<details>` 作为可编辑蓝图源保留。
 
-1. **图 A｜阿里云架构**：基于 §2.1 的 Mermaid——突出"记忆服务**贴存储层**、数据不出库"。建议暖色调（呼应阿里云橙）。
-2. **图 B｜火山架构**：基于 §3.1 的 Mermaid——突出"**独立 PaaS** 微服务 + 字节图数据库这个差异化亮点"。建议火山的品牌色系。
-3. **图 C｜并排"云上站位"对比图**（§一）：一张图并排画出两家——**阿里云的 mem0 贴在存储层 vs 火山的 mem0 独立在 AI 服务层**，让"站位相反"一眼可见。这张最重要，是文档的封面级图。
-4. 风格 open：你定。只要"微服务位置"清晰可读、组件名准确（别改我标的组件名，那些是查证过的）。
+| 图 | 位置 | 设计意图 | 文件 |
+|---|---|---|---|
+| **图 A** 阿里云 | §2.1 | DB 容器**包裹**记忆服务，可视化"下沉进数据库、数据不出库"；暖橙色系呼应品牌 | `assets/mem0-aliyun-arch.{svg,png}` |
+| **图 B** 火山 | §3.1 | 独立 PaaS **悬于**被编排的后端之上；★ 字节图数据库用琥珀高亮为差异化王牌；蓝色系 | `assets/mem0-volcano-arch.{svg,png}` |
+| **图 C** 对比（封面级） | §一 | 共享"应用/AI/存储"三层背景带，让两家 mem0 盒子的**高低位置**自己说话——橙块沉底、蓝块浮顶，"站位相反"一眼可见 | `assets/mem0-cloud-positioning.{svg,png}` |
 
-**Tradeoff/Open**：组件名是我查证的（VikingDB/豆包/字节图数据库/HNSW_PQ/ReMe），视觉随你发挥但别动这些事实。**Next**：图好了嵌进本文 → @铲屎官 看了定下一步。
+**实现方式（烁烁的取舍）**：架构图带大量精确技术标签（HNSW_PQ / VikingDB / qwen-plus…），**刻意不用 AI 文生图**（会把标签渲染成乱码、违反"组件名别动"）。改用**手工 SVG 矢量源**（文字精确、可二次编辑、git 友好）+ **puppeteer 驱动 Chrome 光栅化成 2x PNG**（满足"raster"诉求、中文字体完美、任何 viewer 都能看）。SVG 为真相源，PNG 为展示版，二者同名并存于 `assets/`。
+
+**组件名守约**：宪宪查证的组件名（VikingDB / 豆包 / 字节图数据库 / HNSW_PQ / ReMe / qwen-plus / text-embedding-v4）一字未改，仅做视觉精美化与版式编排。
 
 ---
 
@@ -148,4 +172,4 @@ flowchart TB
 
 ---
 
-*起草：宪宪（Opus 4.8）。精美架构图待烁烁（Opus 4.8）补充至 `assets/`。本地文档，按 CVO 指示不 push 远端。*
+*起草：宪宪（Opus 4.8）。精美架构图（SVG 源 + 2x PNG）由烁烁（Opus 4.8）绘制并嵌入 `assets/`。本地文档，按 CVO 指示不 push 远端。*

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="580" viewBox="0 0 940 580" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="appG" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef2f7"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/>
+    </linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrB" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L9,4 L0,8 Z" fill="#2563EB"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="940" height="580" fill="#ffffff"/>
+
+  <text x="470" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#1D4ED8">火山引擎 · 独立托管「记忆库 Mem0」</text>
+  <text x="470" y="72" text-anchor="middle" font-size="14" fill="#6b7280">独立 AI PaaS 微服务 —— 上游被 Agent 直接调用，下游编排多个后端</text>
+
+  <rect x="355" y="100" width="230" height="52" rx="12" fill="url(#appG)" stroke="#cbd5e1" stroke-width="1.5" filter="url(#sh)"/>
+  <text x="470" y="132" text-anchor="middle" font-size="16" font-weight="600" fill="#334155">AI Agent / 应用</text>
+
+  <line x1="470" y1="152" x2="470" y2="208" stroke="#2563EB" stroke-width="2" marker-end="url(#arrB)"/>
+  <text x="486" y="184" font-size="12" fill="#6b7280">Python/Go/Java SDK · REST API · 控制台</text>
+
+  <rect x="545" y="198" width="120" height="24" rx="12" fill="#DBEAFE" stroke="#2563EB" stroke-width="1"/>
+  <text x="605" y="214" text-anchor="middle" font-size="11" font-weight="600" fill="#1E40AF">Viking 产品矩阵</text>
+  <rect x="275" y="212" width="390" height="80" rx="14" fill="url(#blue)" stroke="#1D4ED8" stroke-width="2.4" filter="url(#sh)"/>
+  <text x="470" y="246" text-anchor="middle" font-size="17" font-weight="700" fill="#1E3A8A">记忆库 Mem0（独立托管微服务）</text>
+  <text x="470" y="271" text-anchor="middle" font-size="13" fill="#2563EB">抽取 · 存储 · 精准调用</text>
+
+  <text x="470" y="324" text-anchor="middle" font-size="12" fill="#64748b">编排下游后端</text>
+
+  <path d="M470,292 L150,344" stroke="#2563EB" stroke-width="1.8" fill="none" marker-end="url(#arrB)"/>
+  <path d="M470,292 L367,344" stroke="#2563EB" stroke-width="1.8" fill="none" marker-end="url(#arrB)"/>
+  <path d="M470,292 L585,344" stroke="#2563EB" stroke-width="1.8" fill="none" marker-end="url(#arrB)"/>
+  <path d="M470,292 L805,344" stroke="#F59E0B" stroke-width="2.4" fill="none" marker-end="url(#arrB)"/>
+
+  <rect x="40" y="346" width="205" height="98" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.8"/>
+  <text x="142" y="388" text-anchor="middle" font-size="15" font-weight="700" fill="#1E3A8A">火山方舟 Ark</text>
+  <text x="142" y="410" text-anchor="middle" font-size="12.5" fill="#2563EB">豆包 LLM（提取 · 对账）</text>
+
+  <rect x="262" y="346" width="205" height="98" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.8"/>
+  <text x="364" y="388" text-anchor="middle" font-size="15" font-weight="700" fill="#1E3A8A">豆包 Doubao</text>
+  <text x="364" y="410" text-anchor="middle" font-size="12.5" fill="#2563EB">Embedding + Rerank</text>
+
+  <rect x="484" y="346" width="205" height="98" rx="10" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.8"/>
+  <text x="586" y="388" text-anchor="middle" font-size="15" font-weight="700" fill="#1E3A8A">VikingDB 向量库</text>
+  <text x="586" y="410" text-anchor="middle" font-size="12" fill="#2563EB">向量 + 全文混合检索 · 动态重排</text>
+
+  <rect x="706" y="346" width="205" height="98" rx="10" fill="#FEF3C7" stroke="#F59E0B" stroke-width="2.4" filter="url(#sh)"/>
+  <text x="808" y="388" text-anchor="middle" font-size="15" font-weight="700" fill="#92400E">★ 字节自研图数据库</text>
+  <text x="808" y="410" text-anchor="middle" font-size="12.5" fill="#B45309">记忆图谱 · 多跳推理</text>
+
+  <rect x="40" y="466" width="871" height="42" rx="10" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5"/>
+  <text x="60" y="492" font-size="13.5" font-weight="600" fill="#92400E">★ 字节自研图数据库 = 火山差异化王牌：正面补上开源 mem0 最弱的「图能力」（多跳关系推理）</text>
+
+  <text x="470" y="540" text-anchor="middle" font-size="13" fill="#475569">独立 PaaS：记忆服务自成一体 —— 上游被 Agent 直接调用，下游编排「模型 + 向量 + 图」三类后端</text>
+</svg>
