@@ -5,7 +5,6 @@
 > | | |
 > |---|---|
 > | **日期** | 2026-06-20 |
-> | **分工** | 架构梳理 + 内容 + Mermaid 蓝图：宪宪（Opus 4.8）· **精美架构示意图（图 A/B/C）：烁烁（Opus 4.8）✅ 已嵌入**（见 §一/§2.1/§3.1，交付说明见 §六） |
 > | **证据等级** | 阿里云：官方「长期记忆」文档（一手，较扎实）。火山：官方文档导航页 JS 渲染未全抓到，组件信息来自火山官方搜索摘要 + 开发者社区文章互证（**VikingDB / 豆包 / 字节图数据库**有多源印证）。"抑制幻觉/增强推理"是 vendor 宣称效果，打折扣；组件名/算法名为技术事实，可信。 |
 
 ---
@@ -46,7 +45,7 @@
   <br><em><b>图 A｜阿里云架构</b>——记忆服务整体被 ADB/PolarDB 容器包裹，体现"下沉进数据库、数据不出库"。（<a href="./assets/mem0-aliyun-arch.svg">SVG 矢量源</a>）</em>
 </p>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -86,7 +85,7 @@ flowchart TB
   <br><em><b>图 B｜火山引擎架构</b>——独立 PaaS 微服务自成一体，编排"模型+向量+图"三类后端；<b>★ 字节自研图数据库</b>为差异化王牌。（<a href="./assets/mem0-volcano-arch.svg">SVG 矢量源</a>）</em>
 </p>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -140,11 +139,11 @@ flowchart TB
 - 火山有**图数据库** → 补 mem0 的**图能力**（§5.6 "图库生产常被砍"）
 - 阿里云有**分布式分析库** → 补 mem0 的**混合检索 + 存储膨胀/遗忘**（§5.4 "ADD-only 膨胀"）
 
-所以答案是：**都远不止简单服务化，而是"拿自家基础设施补开源短板"的深度增值。** 大厂花真金白银增强的地方，恰恰是开源版最弱的地方——反向印证了我们对 mem0 命门的判断是准的。
+所以答案是：**都远不止简单服务化，而是"拿自家基础设施补开源短板"的深度增值。** 大厂花真金白银增强的地方，恰恰是开源版最弱的地方。
 
 ---
 
-## 六、架构图交付说明 🎨（烁烁 · 已完成）
+## 六、配图说明 🎨
 
 三张精美架构图已绘制并嵌入上文（§一 图 C / §2.1 图 A / §3.1 图 B），原 Mermaid 草图收进各处 `<details>` 作为可编辑蓝图源保留。
 
@@ -154,9 +153,9 @@ flowchart TB
 | **图 B** 火山 | §3.1 | 独立 PaaS **悬于**被编排的后端之上；★ 字节图数据库用琥珀高亮为差异化王牌；蓝色系 | `assets/mem0-volcano-arch.{svg,png}` |
 | **图 C** 对比（封面级） | §一 | 共享"应用/AI/存储"三层背景带，让两家 mem0 盒子的**高低位置**自己说话——橙块沉底、蓝块浮顶，"站位相反"一眼可见 | `assets/mem0-cloud-positioning.{svg,png}` |
 
-**实现方式（烁烁的取舍）**：架构图带大量精确技术标签（HNSW_PQ / VikingDB / qwen-plus…），**刻意不用 AI 文生图**（会把标签渲染成乱码、违反"组件名别动"）。改用**手工 SVG 矢量源**（文字精确、可二次编辑、git 友好）+ **puppeteer 驱动 Chrome 光栅化成 2x PNG**（满足"raster"诉求、中文字体完美、任何 viewer 都能看）。SVG 为真相源，PNG 为展示版，二者同名并存于 `assets/`。
+**实现方式**：架构图带大量精确技术标签（HNSW_PQ / VikingDB / qwen-plus…），**刻意不用 AI 文生图**（会把标签渲染成乱码、违反"组件名别动"）。改用**手工 SVG 矢量源**（文字精确、可二次编辑、git 友好）+ **puppeteer 驱动 Chrome 光栅化成 2x PNG**（满足"raster"诉求、中文字体完美、任何 viewer 都能看）。SVG 为真相源，PNG 为展示版，二者同名并存于 `assets/`。
 
-**组件名守约**：宪宪查证的组件名（VikingDB / 豆包 / 字节图数据库 / HNSW_PQ / ReMe / qwen-plus / text-embedding-v4）一字未改，仅做视觉精美化与版式编排。
+**组件名**：架构组件名（VikingDB / 豆包 / 字节图数据库 / HNSW_PQ / ReMe / qwen-plus / text-embedding-v4）均经查证核对。
 
 ---
 
@@ -172,4 +171,4 @@ flowchart TB
 
 ---
 
-*起草：宪宪（Opus 4.8）。精美架构图（SVG 源 + 2x PNG）由烁烁（Opus 4.8）绘制并嵌入 `assets/`。本地文档，按 CVO 指示不 push 远端。*
+*mem0 公有云实践学习笔记 · 2026-06。架构图为 SVG 矢量源 + PNG。*

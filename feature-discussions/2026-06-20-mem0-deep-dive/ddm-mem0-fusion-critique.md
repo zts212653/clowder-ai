@@ -5,8 +5,7 @@
 > | | |
 > |---|---|
 > | **日期** | 2026-06-20 |
-> | **分工** | 架构论证 + Mermaid 蓝图：宪宪（Opus 4.8）· **5 张精美讲解图：烁烁（Opus 4.8）✅ 已嵌入**（见 §0/§2/§3/§5/§6，图说明见文末） |
-> | **用途** | 帮 CVO 把"这个融合不对劲"的直觉，翻译成能上桌、能对线架构师的架构语言 |
+> | **用途** | 把"这个融合不对劲"的直觉，翻译成能上桌、能对线架构师的架构语言 |
 > | **关联** | 第 1 篇 [`README.md`](./README.md)（mem0 本体）· 第 2 篇 [`mem0-cloud-practices.md`](./mem0-cloud-practices.md)（大厂公有云实践）· 本篇（融合批判）→ 后续融合成册 |
 
 ---
@@ -18,7 +17,7 @@
 
 **把"感觉不对劲"翻译成架构语言：**
 
-| CVO 的直觉 | 架构术语 | 本质 |
+| 常见直觉 | 架构术语 | 本质 |
 |---|---|---|
 | "DDM 不再纯粹" | 违反**关注点分离 / 单一职责** | 确定性组件背了概率性职责 |
 | "维护更麻烦" | **故障域耦合 + 迭代节奏冲突 + 可观测性塌方** | 易变 AI 故障引进承重数据库 |
@@ -29,7 +28,7 @@
 </p>
 <sub><b>图 1｜契约对撞</b>——两个契约相反的组件强行合并，DDM 的"纯粹性"被污染；核心隐喻"在确定性的承重墙里，埋了一根会随机变形的钢筋"。</sub>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart LR
@@ -74,7 +73,7 @@ flowchart LR
 </p>
 <sub><b>图 2｜问题全景</b>——三维度 11 个问题，一页看全；③ 公有云维护问题最多（列最高），⚠️ 标出三个最危险。</sub>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -116,7 +115,7 @@ flowchart TB
 </p>
 <sub><b>图 3｜抽象层级错配</b>——正常应逐层向上依赖；融合让地基（数据层 DDM）去干屋顶（认知层 mem0）的活，反向跨 2 层。</sub>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -161,7 +160,7 @@ flowchart TB
 </p>
 <sub><b>图 4｜故障域 blast radius</b>——融合把"边缘易变"的 AI 故障引进"核心承重"的数据库（红色全线蔓延）；解耦则把故障挡在隔离边界外（DDM 毫发无伤）。</sub>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart LR
@@ -189,7 +188,7 @@ flowchart LR
 </p>
 <sub><b>图 5｜错误 vs 正确</b>——左边"缝进一个引擎"的混沌 vs 右边"统一控制面 + 各自纯粹"的清爽；创新应放在"统一控制面/接口"，而非缝合引擎。</sub>
 
-<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+<details><summary>📐 架构蓝图源码（Mermaid，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -229,7 +228,7 @@ flowchart TB
 
 ---
 
-## 图说明 🎨（烁烁 · 已完成）
+## 图说明 🎨
 
 5 张讲解简图已优化为精美 raster 并嵌入上文（§0/§2/§3/§5/§6），原 Mermaid 草图收进各处 `<details>` 作可编辑蓝图源保留。沿用 [第 2 篇](./mem0-cloud-practices.md) 的 SVG+PNG 双轨工艺，**架构术语一字未改**（SoC / scatter-gather / shard key / ACID / HNSW 等）。
 
@@ -245,4 +244,4 @@ flowchart TB
 
 ---
 
-*起草：宪宪（Opus 4.8）。5 张讲解图（SVG 源 + 2x PNG）由烁烁（Opus 4.8）精美化并嵌入 `assets/`。本地文档，按 CVO 指示不 push。本篇为 mem0 系列第 3 篇，后续与前两篇融合成册。*
+*DDM × mem0 融合架构批判 · 2026-06。讲解图为 SVG 矢量源 + PNG。本篇为 mem0 系列第 3 篇。*
