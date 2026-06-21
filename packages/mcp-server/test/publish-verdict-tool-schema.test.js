@@ -219,4 +219,113 @@ describe('cat_cafe_publish_verdict MCP schema (砚砚 R1 Q3: discriminated union
     });
     assert.ok(!result.success);
   });
+
+  // --- F192 eval:sop — sop-trace-eval sourceRefs (this PR) ---
+
+  const validTrace = {
+    sessionId: 'sess-abc',
+    sopDefinitionId: 'development',
+    observedStage: 'impl',
+    commands: [{ command: 'pnpm build', cwd: '/repo', exitCode: 0 }],
+    envSnapshot: { NODE_ENV: 'test' },
+    gitState: { branch: 'feat/f192', ahead: 2, behind: 0, clean: true },
+    handles: { author: 'opus', reviewer: 'codex' },
+    shaContext: { head: 'abc123' },
+  };
+
+  it('accepts sop-trace-eval sourceRefs (positive path)', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        trace: validTrace,
+      },
+    });
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+  });
+
+  it('accepts sop-trace-eval with empty commands array', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        trace: { ...validTrace, commands: [] },
+      },
+    });
+    assert.ok(result.success, `expected accept, got: ${JSON.stringify(result)}`);
+  });
+
+  it('accepts sop-trace-eval with optional worktreeRoot in gitState', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        trace: {
+          ...validTrace,
+          gitState: { ...validTrace.gitState, worktreeRoot: '/tmp/wt' },
+        },
+      },
+    });
+    assert.ok(result.success);
+  });
+
+  it('rejects sop-trace-eval with missing trace (required field)', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        // trace is missing
+      },
+    });
+    assert.ok(!result.success, 'trace is required');
+  });
+
+  it('rejects sop-trace-eval with newline in sopDefinitionId (injection guard)', () => {
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development\n- forged: bullet',
+        trace: validTrace,
+      },
+    });
+    assert.ok(!result.success, 'newline in sopDefinitionId should fail Zod refine');
+  });
+
+  it('rejects sop-trace-eval with missing trace.sessionId', () => {
+    const { sessionId: _, ...traceNoSession } = validTrace;
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        trace: traceNoSession,
+      },
+    });
+    assert.ok(!result.success, 'trace.sessionId is required');
+  });
+
+  it('rejects sop-trace-eval with missing trace.gitState', () => {
+    const { gitState: _, ...traceNoGit } = validTrace;
+    const result = schema.safeParse({
+      domainId: 'eval:sop',
+      packet: { ...validPacket, domainId: 'eval:sop' },
+      sourceRefs: {
+        kind: 'sop-trace-eval',
+        sopDefinitionId: 'development',
+        trace: traceNoGit,
+      },
+    });
+    assert.ok(!result.success, 'trace.gitState is required');
+  });
 });

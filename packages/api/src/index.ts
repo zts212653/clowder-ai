@@ -2796,7 +2796,32 @@ async function main(): Promise<void> {
     sessionSealer,
     runtimeSessionStore,
   });
-  await app.register(sessionTranscriptRoutes, { sessionChainStore, threadStore, transcriptReader });
+  // F192 eval:sop — compute eval cat IDs + domain IDs for elevated session read access
+  const evalCatIds: Set<string> = new Set();
+  const evalDomainIds: string[] = [];
+  try {
+    const { loadDomains } = await import('./infrastructure/harness-eval/hub/eval-hub-read-model.js');
+    const domains = loadDomains(resolve(repoRoot, 'docs', 'harness-feedback'));
+    for (const [domainId, domain] of domains.entries()) {
+      evalCatIds.add(domain.evalCat.catId);
+      evalDomainIds.push(domainId);
+    }
+  } catch {
+    // Non-fatal: if domain registry is missing/broken, eval cats just can't cross-read
+    app.log.warn(
+      '[api] F192: could not load eval domain registry for session ACL — eval cats will get 403 on cross-cat reads',
+    );
+  }
+  await app.register(sessionTranscriptRoutes, {
+    sessionChainStore,
+    threadStore,
+    transcriptReader,
+    evalCatIds,
+    evalDomainIds,
+    redis,
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
   await app.register(externalRuntimeSessionsRoutes, { sessionChainStore, runtimeSessionStore, threadStore });
   const hookToken = process.env.CAT_CAFE_HOOK_TOKEN || '';
   await app.register(sessionHooksRoutes, {

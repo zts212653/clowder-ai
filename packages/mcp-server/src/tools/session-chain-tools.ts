@@ -14,14 +14,14 @@ import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
-const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
+const API_URL = process.env.CAT_CAFE_API_URL ?? 'http://localhost:3004';
 
 function resolveToolUserId(): string {
-  return process.env['CAT_CAFE_USER_ID'] ?? 'default-user';
+  return process.env.CAT_CAFE_USER_ID ?? 'default-user';
 }
 
 function resolveToolCatId(): string | undefined {
-  return process.env['CAT_CAFE_CAT_ID'];
+  return process.env.CAT_CAFE_CAT_ID;
 }
 
 function buildAuthHeaders(): Record<string, string> {
@@ -30,6 +30,19 @@ function buildAuthHeaders(): Record<string, string> {
   };
   const catId = resolveToolCatId();
   if (catId) headers['x-cat-id'] = catId;
+  // Forward invocation credentials so the API can verify caller identity
+  // (required for eval cat cross-cat session read bypass — F192 eval:sop)
+  const invocationId = process.env.CAT_CAFE_INVOCATION_ID;
+  const callbackToken = process.env.CAT_CAFE_CALLBACK_TOKEN;
+  if (invocationId && callbackToken) {
+    headers['x-invocation-id'] = invocationId;
+    headers['x-callback-token'] = callbackToken;
+  }
+  // Forward agent-key secret for persistent MCP auth (F192 eval:sop ACL)
+  const agentKeySecret = process.env.CAT_CAFE_AGENT_KEY_SECRET;
+  if (agentKeySecret) {
+    headers['x-agent-key-secret'] = agentKeySecret;
+  }
   return headers;
 }
 
@@ -233,7 +246,7 @@ export async function handleReadInvocationDetail(input: {
     lines.push(`Invocation ${data.invocationId}: ${data.total} event(s)`);
     lines.push('');
     for (const evt of data.events) {
-      const evtType = (evt.event['type'] as string) ?? 'unknown';
+      const evtType = (evt.event.type as string) ?? 'unknown';
       lines.push(`[${evt.eventNo}] ${evtType}: ${JSON.stringify(evt.event).slice(0, 300)}`);
     }
     return successResult(lines.join('\n'));
