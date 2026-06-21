@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="800" viewBox="0 0 1240 800" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="appG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef2f7"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EDE7F6"/><stop offset="1" stop-color="#D6C8F0"/></linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FEF3C7"/><stop offset="1" stop-color="#FCE08A"/></linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FEE2E2"/><stop offset="1" stop-color="#FCC4C4"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#E8EDF3"/><stop offset="1" stop-color="#CFD8E3"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrB" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4 L0,8 Z" fill="#1D4ED8"/></marker>
+    <marker id="arrG" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4 L0,8 Z" fill="#16A34A"/></marker>
+    <marker id="arrN" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1240" height="800" fill="#ffffff"/>
+  <text x="620" y="44" text-anchor="middle" font-size="26" font-weight="800" fill="#0f172a">图 1·1 · mem0 的两条管道：写入 (add) 与 读取 (search)</text>
+  <text x="620" y="72" text-anchor="middle" font-size="14" fill="#64748b">写入是聪明的那一半（提取-对账），读取是普通的那一半（RAG）</text>
+
+  <!-- WRITE panel -->
+  <rect x="40" y="96" width="580" height="566" rx="16" fill="#EFF4FF" stroke="#93B4F0" stroke-width="1.5"/>
+  <text x="60" y="126" font-size="15" font-weight="700" fill="#1D4ED8">✍️ 写入路径 add —— 聪明的那一半，mem0 的真本事</text>
+
+  <rect x="230" y="150" width="200" height="46" rx="10" fill="url(#appG)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="330" y="178" text-anchor="middle" font-size="15" font-weight="600" fill="#334155">对话消息</text>
+  <line x1="330" y1="196" x2="330" y2="220" stroke="#1D4ED8" stroke-width="2.2" marker-end="url(#arrB)"/>
+
+  <rect x="200" y="222" width="260" height="54" rx="10" fill="url(#blue)" stroke="#1D4ED8" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="330" y="246" text-anchor="middle" font-size="15" font-weight="700" fill="#1E3A8A">LLM 抽取原子事实</text>
+  <text x="330" y="265" text-anchor="middle" font-size="11.5" fill="#2563EB">把对话蒸馏成事实</text>
+  <line x1="330" y1="276" x2="330" y2="298" stroke="#1D4ED8" stroke-width="2.2" marker-end="url(#arrB)"/>
+
+  <rect x="200" y="300" width="260" height="54" rx="10" fill="url(#blue)" stroke="#1D4ED8" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="330" y="324" text-anchor="middle" font-size="15" font-weight="700" fill="#1E3A8A">与已有记忆对账</text>
+  <text x="330" y="343" text-anchor="middle" font-size="11.5" fill="#2563EB">★ 这一步才是 mem0 的核心创新</text>
+  <line x1="330" y1="354" x2="330" y2="365" stroke="#1D4ED8" stroke-width="2.2" marker-end="url(#arrB)"/>
+
+  <polygon points="330,366 412,403 330,440 248,403" fill="url(#purple)" stroke="#6D28D9" stroke-width="2" filter="url(#sh)"/>
+  <text x="330" y="408" text-anchor="middle" font-size="15" font-weight="700" fill="#4C1D95">决策</text>
+
+  <path d="M286,424 L150,470" stroke="#94a3b8" stroke-width="1.8" fill="none" marker-end="url(#arrN)"/>
+  <path d="M312,432 L258,470" stroke="#94a3b8" stroke-width="1.8" fill="none" marker-end="url(#arrN)"/>
+  <path d="M348,432 L392,470" stroke="#94a3b8" stroke-width="1.8" fill="none" marker-end="url(#arrN)"/>
+  <path d="M374,424 L520,470" stroke="#94a3b8" stroke-width="1.8" fill="none" marker-end="url(#arrN)"/>
+
+  <text x="115" y="466" text-anchor="middle" font-size="10.5" fill="#64748b">新事实</text>
+  <text x="255" y="466" text-anchor="middle" font-size="10.5" fill="#64748b">信息变更</text>
+  <text x="395" y="466" text-anchor="middle" font-size="10.5" fill="#64748b">自相矛盾</text>
+  <text x="535" y="466" text-anchor="middle" font-size="10.5" fill="#64748b">没新东西</text>
+
+  <rect x="56" y="472" width="118" height="56" rx="9" fill="url(#green)" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="115" y="496" text-anchor="middle" font-size="15" font-weight="700" fill="#14532D">ADD</text>
+  <text x="115" y="515" text-anchor="middle" font-size="11.5" fill="#166534">新增</text>
+  <rect x="196" y="472" width="118" height="56" rx="9" fill="url(#amber)" stroke="#D97706" stroke-width="1.8"/>
+  <text x="255" y="496" text-anchor="middle" font-size="15" font-weight="700" fill="#92400E">UPDATE</text>
+  <text x="255" y="515" text-anchor="middle" font-size="11.5" fill="#B45309">变更</text>
+  <rect x="336" y="472" width="118" height="56" rx="9" fill="url(#red)" stroke="#DC2626" stroke-width="1.8"/>
+  <text x="395" y="496" text-anchor="middle" font-size="15" font-weight="700" fill="#B91C1C">DELETE</text>
+  <text x="395" y="515" text-anchor="middle" font-size="11.5" fill="#991B1B">删除</text>
+  <rect x="476" y="472" width="118" height="56" rx="9" fill="#F1F5F9" stroke="#94a3b8" stroke-width="1.8"/>
+  <text x="535" y="496" text-anchor="middle" font-size="15" font-weight="700" fill="#475569">NOOP</text>
+  <text x="535" y="515" text-anchor="middle" font-size="11.5" fill="#64748b">跳过</text>
+
+  <path d="M115,528 L518,690" stroke="#16A34A" stroke-width="2" fill="none" marker-end="url(#arrG)"/>
+  <path d="M255,528 L590,690" stroke="#16A34A" stroke-width="2" fill="none" marker-end="url(#arrG)"/>
+  <path d="M395,528 L640,690" stroke="#16A34A" stroke-width="2" fill="none" marker-end="url(#arrG)"/>
+  <text x="535" y="556" text-anchor="middle" font-size="11" fill="#94a3b8">✕ 不写入</text>
+
+  <!-- READ panel -->
+  <rect x="660" y="96" width="540" height="566" rx="16" fill="#ECFDF5" stroke="#86C99A" stroke-width="1.5"/>
+  <text x="680" y="126" font-size="15" font-weight="700" fill="#15803D">🔍 读取路径 search —— 普通的那一半，本质是 RAG</text>
+
+  <rect x="830" y="158" width="200" height="46" rx="10" fill="url(#appG)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="930" y="186" text-anchor="middle" font-size="15" font-weight="600" fill="#334155">查询</text>
+  <line x1="930" y1="204" x2="930" y2="234" stroke="#16A34A" stroke-width="2.2" marker-end="url(#arrG)"/>
+
+  <rect x="762" y="236" width="336" height="72" rx="10" fill="url(#green)" stroke="#16A34A" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="930" y="266" text-anchor="middle" font-size="15" font-weight="700" fill="#14532D">多信号检索</text>
+  <text x="930" y="289" text-anchor="middle" font-size="12.5" fill="#166534">向量 + BM25 + 实体匹配 + 时间排序</text>
+  <line x1="930" y1="308" x2="930" y2="346" stroke="#16A34A" stroke-width="2.2" marker-end="url(#arrG)"/>
+
+  <rect x="810" y="348" width="240" height="50" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="930" y="378" text-anchor="middle" font-size="15" font-weight="600" fill="#14532D">Top-K 相关记忆</text>
+  <line x1="930" y1="398" x2="930" y2="428" stroke="#16A34A" stroke-width="2.2" marker-end="url(#arrG)"/>
+
+  <rect x="800" y="430" width="260" height="50" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="930" y="460" text-anchor="middle" font-size="15" font-weight="600" fill="#14532D">拼进 prompt 给模型</text>
+
+  <!-- STORE cylinder -->
+  <path d="M420,707 A200,15 0 0 1 820,707 L820,753 A200,15 0 0 1 420,753 Z" fill="url(#slate)" stroke="#64748B" stroke-width="2"/>
+  <ellipse cx="620" cy="707" rx="200" ry="15" fill="#F1F5F9" stroke="#64748B" stroke-width="2"/>
+  <text x="620" y="742" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">向量库 + 可选图库 + 元数据</text>
+
+  <!-- read feedback -->
+  <path d="M822,720 C 720,660 690,420 760,300" stroke="#16A34A" stroke-width="2" stroke-dasharray="7 5" fill="none" marker-end="url(#arrG)"/>
+  <text x="690" y="540" text-anchor="middle" font-size="12" font-weight="600" fill="#15803D" paint-order="stroke" stroke="#ECFDF5" stroke-width="4">检索时读取</text>
+</svg>
