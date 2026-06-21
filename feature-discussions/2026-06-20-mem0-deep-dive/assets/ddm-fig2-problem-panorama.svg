@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="purple" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EDE7F6"/><stop offset="1" stop-color="#D6C8F0"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4E6"/><stop offset="1" stop-color="#FFD9A8"/></linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FCE7F0"/><stop offset="1" stop-color="#F8CFE0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrP" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4 L0,8 Z" fill="#6D28D9"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1200" height="700" fill="#ffffff"/>
+  <text x="600" y="46" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 2 · 问题全景：三维度 11 问，一页看全</text>
+
+  <rect x="480" y="100" width="240" height="56" rx="14" fill="url(#purple)" stroke="#6D28D9" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="600" y="134" text-anchor="middle" font-size="17" font-weight="700" fill="#4C1D95">DDM × mem0 深度融合</text>
+
+  <path d="M560,156 L240,210" stroke="#6D28D9" stroke-width="2" fill="none" marker-end="url(#arrP)"/>
+  <path d="M600,156 L600,210" stroke="#6D28D9" stroke-width="2" fill="none" marker-end="url(#arrP)"/>
+  <path d="M640,156 L960,210" stroke="#6D28D9" stroke-width="2" fill="none" marker-end="url(#arrP)"/>
+
+  <!-- col 1 -->
+  <rect x="60" y="200" width="340" height="276" rx="14" fill="#F0FBF3" stroke="#86C99A" stroke-width="1.5"/>
+  <rect x="80" y="214" width="300" height="58" rx="10" fill="url(#green)" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="230" y="240" text-anchor="middle" font-size="17" font-weight="700" fill="#14532D">① 架构本身</text>
+  <text x="230" y="261" text-anchor="middle" font-size="12" fill="#15803D">为什么「不纯粹」</text>
+  <g>
+    <rect x="80" y="290" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="80" y="290" width="6" height="46" rx="3" fill="#16A34A"/>
+    <text x="100" y="318" font-size="14.5" fill="#374151">SoC 破坏</text>
+    <rect x="80" y="348" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="80" y="348" width="6" height="46" rx="3" fill="#16A34A"/>
+    <text x="100" y="376" font-size="14.5" fill="#374151">抽象层级错配</text>
+    <rect x="80" y="406" width="300" height="46" rx="8" fill="#FFF5F5" stroke="#FBB4B4"/><rect x="80" y="406" width="6" height="46" rx="3" fill="#DC2626"/>
+    <text x="100" y="434" font-size="14.5" font-weight="600" fill="#B91C1C">⚠️ 确定性契约被污染</text>
+  </g>
+
+  <!-- col 2 -->
+  <rect x="430" y="200" width="340" height="276" rx="14" fill="#FFF7ED" stroke="#FBC088" stroke-width="1.5"/>
+  <rect x="450" y="214" width="300" height="58" rx="10" fill="url(#orange)" stroke="#EA580C" stroke-width="1.8"/>
+  <text x="600" y="240" text-anchor="middle" font-size="17" font-weight="700" fill="#9A3412">② 实现方案</text>
+  <text x="600" y="261" text-anchor="middle" font-size="12" fill="#C2410C">技术做不漂亮</text>
+  <g>
+    <rect x="450" y="290" width="300" height="46" rx="8" fill="#FFF5F5" stroke="#FBB4B4"/><rect x="450" y="290" width="6" height="46" rx="3" fill="#DC2626"/>
+    <text x="468" y="318" font-size="13" font-weight="600" fill="#B91C1C">⚠️ 向量 scatter-gather 踩分片死穴</text>
+    <rect x="450" y="348" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="450" y="348" width="6" height="46" rx="3" fill="#EA580C"/>
+    <text x="470" y="376" font-size="14.5" fill="#374151">事务语义冲突</text>
+    <rect x="450" y="406" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="450" y="406" width="6" height="46" rx="3" fill="#EA580C"/>
+    <text x="470" y="434" font-size="14.5" fill="#374151">数据模型冲突</text>
+  </g>
+
+  <!-- col 3 -->
+  <rect x="800" y="200" width="340" height="410" rx="14" fill="#FDECF3" stroke="#F0A6C4" stroke-width="1.5"/>
+  <rect x="820" y="214" width="300" height="58" rx="10" fill="url(#rose)" stroke="#C2185B" stroke-width="1.8"/>
+  <text x="970" y="240" text-anchor="middle" font-size="17" font-weight="700" fill="#9D174D">③ 公有云维护</text>
+  <text x="970" y="261" text-anchor="middle" font-size="12" fill="#BE185D">为什么「更麻烦」</text>
+  <g>
+    <rect x="820" y="290" width="300" height="46" rx="8" fill="#FFF5F5" stroke="#FBB4B4"/><rect x="820" y="290" width="6" height="46" rx="3" fill="#DC2626"/>
+    <text x="840" y="318" font-size="14.5" font-weight="600" fill="#B91C1C">⚠️ 故障域耦合</text>
+    <rect x="820" y="348" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="820" y="348" width="6" height="46" rx="3" fill="#C2185B"/>
+    <text x="840" y="376" font-size="14.5" fill="#374151">迭代节奏冲突</text>
+    <rect x="820" y="406" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="820" y="406" width="6" height="46" rx="3" fill="#C2185B"/>
+    <text x="840" y="434" font-size="14.5" fill="#374151">可观测性塌方</text>
+    <rect x="820" y="464" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="820" y="464" width="6" height="46" rx="3" fill="#C2185B"/>
+    <text x="840" y="492" font-size="14.5" fill="#374151">SLA / 计费矛盾</text>
+    <rect x="820" y="522" width="300" height="46" rx="8" fill="#fff" stroke="#D1D5DB"/><rect x="820" y="522" width="6" height="46" rx="3" fill="#C2185B"/>
+    <text x="840" y="550" font-size="14.5" fill="#374151">安全攻击面扩大</text>
+  </g>
+
+  <rect x="60" y="636" width="1080" height="44" rx="10" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.4"/>
+  <text x="600" y="663" text-anchor="middle" font-size="14" font-weight="600" fill="#B91C1C">⚠️ 三个最危险：确定性契约被污染（信任根基塌方）· 向量踩分片死穴（两头不讨好）· 故障域耦合（blast radius 放大）</text>
+</svg>

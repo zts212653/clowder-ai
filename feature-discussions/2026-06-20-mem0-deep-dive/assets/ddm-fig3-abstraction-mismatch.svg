@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="640" viewBox="0 0 900 640" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/></linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4E6"/><stop offset="1" stop-color="#FFD9A8"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrN" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8"/></marker>
+    <marker id="arrR" markerWidth="13" markerHeight="13" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L10,4.5 L0,9 Z" fill="#DC2626"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="640" fill="#ffffff"/>
+  <text x="450" y="46" text-anchor="middle" font-size="26" font-weight="800" fill="#0f172a">图 3 · 抽象层级错配：让地基去干屋顶的活</text>
+
+  <!-- layers -->
+  <rect x="300" y="250" width="420" height="92" rx="12" fill="url(#blue)" stroke="#1D4ED8" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="320" y="291" font-size="18" font-weight="700" fill="#1E3A8A">认知层 · mem0</text>
+  <text x="320" y="316" font-size="13" fill="#2563EB">事实 / 对账 / 召回</text>
+  <rect x="598" y="262" width="104" height="26" rx="13" fill="#DBEAFE" stroke="#1D4ED8" stroke-width="1"/>
+  <text x="650" y="280" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1E3A8A">🏠 屋顶</text>
+
+  <rect x="300" y="372" width="420" height="92" rx="12" fill="url(#orange)" stroke="#EA580C" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="320" y="413" font-size="18" font-weight="700" fill="#9A3412">语义层 · 向量库</text>
+  <text x="320" y="438" font-size="13" fill="#C2410C">embedding / 相似度</text>
+
+  <rect x="300" y="494" width="420" height="92" rx="12" fill="url(#green)" stroke="#16A34A" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="320" y="535" font-size="18" font-weight="700" fill="#14532D">数据层 · DDM</text>
+  <text x="320" y="560" font-size="13" fill="#166534">行 / 列 / SQL / 分片</text>
+  <rect x="598" y="506" width="104" height="26" rx="13" fill="#DCFCE7" stroke="#16A34A" stroke-width="1"/>
+  <text x="650" y="524" text-anchor="middle" font-size="12.5" font-weight="600" fill="#14532D">🧱 地基</text>
+
+  <!-- normal dependency arrows -->
+  <line x1="510" y1="342" x2="510" y2="370" stroke="#94a3b8" stroke-width="2.4" marker-end="url(#arrN)"/>
+  <line x1="510" y1="464" x2="510" y2="492" stroke="#94a3b8" stroke-width="2.4" marker-end="url(#arrN)"/>
+  <rect x="742" y="384" width="150" height="68" rx="10" fill="#F8FAFC" stroke="#cbd5e1" stroke-width="1.2"/>
+  <text x="817" y="410" text-anchor="middle" font-size="12.5" font-weight="700" fill="#475569">✓ 正常依赖</text>
+  <text x="817" y="431" text-anchor="middle" font-size="11.5" fill="#64748b">逐层向下</text>
+  <text x="817" y="447" text-anchor="middle" font-size="11.5" fill="#64748b">不跨层</text>
+
+  <!-- WRONG reverse arrow -->
+  <path d="M300,540 C 120,498 120,360 300,300" fill="none" stroke="#DC2626" stroke-width="4" stroke-dasharray="9 6" marker-end="url(#arrR)"/>
+  <rect x="20" y="378" width="184" height="92" rx="10" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.6"/>
+  <text x="112" y="406" text-anchor="middle" font-size="13.5" font-weight="700" fill="#B91C1C">❌ 融合的错误</text>
+  <text x="112" y="430" text-anchor="middle" font-size="12.5" fill="#991B1B">数据层反向承担</text>
+  <text x="112" y="450" text-anchor="middle" font-size="12.5" fill="#991B1B">认知层职责（跨 2 层）</text>
+
+  <rect x="120" y="600" width="660" height="30" rx="8" fill="#F8FAFC" stroke="#e2e8f0"/>
+  <text x="450" y="620" text-anchor="middle" font-size="13.5" font-weight="600" fill="#334155">架构铁律：底层组件不该承担高层语义 —— 地基掺进易变认知逻辑，整栋楼根基就松了</text>
+</svg>

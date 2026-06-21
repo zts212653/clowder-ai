@@ -5,7 +5,7 @@
 > | | |
 > |---|---|
 > | **日期** | 2026-06-20 |
-> | **分工** | 架构论证 + 讲解简图（Mermaid）：宪宪（Opus 4.8）· **简图精美化：烁烁（Opus 4.8）**（见文末清单） |
+> | **分工** | 架构论证 + Mermaid 蓝图：宪宪（Opus 4.8）· **5 张精美讲解图：烁烁（Opus 4.8）✅ 已嵌入**（见 §0/§2/§3/§5/§6，图说明见文末） |
 > | **用途** | 帮 CVO 把"这个融合不对劲"的直觉，翻译成能上桌、能对线架构师的架构语言 |
 > | **关联** | 第 1 篇 [`README.md`](./README.md)（mem0 本体）· 第 2 篇 [`mem0-cloud-practices.md`](./mem0-cloud-practices.md)（大厂公有云实践）· 本篇（融合批判）→ 后续融合成册 |
 
@@ -23,6 +23,13 @@
 | "DDM 不再纯粹" | 违反**关注点分离 / 单一职责** | 确定性组件背了概率性职责 |
 | "维护更麻烦" | **故障域耦合 + 迭代节奏冲突 + 可观测性塌方** | 易变 AI 故障引进承重数据库 |
 | "总觉得奇怪" | **抽象层级错配** | 数据层去干认知层的活 |
+
+<p align="center">
+  <img src="./assets/ddm-fig1-contract-collision.png" alt="契约对撞：确定性 vs 概率性 —— 承重墙里埋随机变形的钢筋" width="900">
+</p>
+<sub><b>图 1｜契约对撞</b>——两个契约相反的组件强行合并，DDM 的"纯粹性"被污染；核心隐喻"在确定性的承重墙里，埋了一根会随机变形的钢筋"。</sub>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
 
 ```mermaid
 flowchart LR
@@ -44,7 +51,8 @@ flowchart LR
     style MEM fill:#fce4ec,stroke:#c2185b
     style X fill:#ffebee,stroke:#c62828,stroke-width:3px
 ```
-<sub><b>图 1｜契约对撞</b>——两个契约相反的组件强行合并，DDM 的"纯粹性"被污染。</sub>
+
+</details>
 
 ---
 
@@ -60,6 +68,13 @@ flowchart LR
 ---
 
 ## 2 · 问题全景（presentation 纲）
+
+<p align="center">
+  <img src="./assets/ddm-fig2-problem-panorama.png" alt="问题全景：三维度 11 个问题一页看全" width="940">
+</p>
+<sub><b>图 2｜问题全景</b>——三维度 11 个问题，一页看全；③ 公有云维护问题最多（列最高），⚠️ 标出三个最危险。</sub>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -83,7 +98,8 @@ flowchart TB
     style B fill:#fff3e0,stroke:#e65100
     style C fill:#fce4ec,stroke:#c2185b
 ```
-<sub><b>图 2｜问题全景</b>——三维度 11 个问题，一页看全。</sub>
+
+</details>
 
 ---
 
@@ -94,6 +110,13 @@ flowchart TB
 | A1 | **SoC 破坏** | DDM 契约=确定性/强一致/不懂内容；mem0 契约=概率/最终一致/懂语义。缝一层＝两个相反契约同处，纯粹性被污染 |
 | A2 | **抽象层级错配** | 数据层(DDM)被迫干认知层(mem0)的活，跨 2 层（见图 3） |
 | A3 | **确定性契约被污染** ⚠️ | DDM 是被下游广泛信任的承重设施；掺进会幻觉/超时的 LLM，"永远正确路由"的承诺被打破，**信任根基塌方** |
+
+<p align="center">
+  <img src="./assets/ddm-fig3-abstraction-mismatch.png" alt="抽象层级错配：让地基去干屋顶的活" width="760">
+</p>
+<sub><b>图 3｜抽象层级错配</b>——正常应逐层向上依赖；融合让地基（数据层 DDM）去干屋顶（认知层 mem0）的活，反向跨 2 层。</sub>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -106,7 +129,8 @@ flowchart TB
     style SEM fill:#fff3e0,stroke:#e65100
     style DAT fill:#e8f5e9,stroke:#2e7d32
 ```
-<sub><b>图 3｜抽象层级错配</b>——正常应逐层向上依赖；融合让地基去干屋顶的活。</sub>
+
+</details>
 
 ---
 
@@ -132,6 +156,13 @@ flowchart TB
 | C4 | **SLA/计费矛盾** | DDM 承诺 99.99%+强一致；mem0 只能"尽力而为+概率"。对外用哪个 SLA？计费 QPS vs token 也无法统一 |
 | C5 | **安全攻击面扩大** | 给承重数据库凭空增加 LLM 外发、向量副本、跨租户记忆等新攻击面 |
 
+<p align="center">
+  <img src="./assets/ddm-fig4-blast-radius.png" alt="故障 blast radius：融合后全线蔓延 vs 解耦故障隔离" width="900">
+</p>
+<sub><b>图 4｜故障域 blast radius</b>——融合把"边缘易变"的 AI 故障引进"核心承重"的数据库（红色全线蔓延）；解耦则把故障挡在隔离边界外（DDM 毫发无伤）。</sub>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
+
 ```mermaid
 flowchart LR
     subgraph AFTER["❌ 融合后：故障蔓延"]
@@ -146,11 +177,19 @@ flowchart LR
     style AFTER fill:#ffebee,stroke:#c62828
     style DS2 fill:#ff5252,color:#fff,stroke:#b71c1c
 ```
-<sub><b>图 4｜故障域 blast radius</b>——融合把"边缘易变"的 AI 故障，引进了"核心承重"的数据库。</sub>
+
+</details>
 
 ---
 
 ## 6 · 正确姿势：解耦，不融合
+
+<p align="center">
+  <img src="./assets/ddm-fig5-wrong-vs-right.png" alt="错误 vs 正确：缝合一个引擎 vs 解耦+统一控制面" width="900">
+</p>
+<sub><b>图 5｜错误 vs 正确</b>——左边"缝进一个引擎"的混沌 vs 右边"统一控制面 + 各自纯粹"的清爽；创新应放在"统一控制面/接口"，而非缝合引擎。</sub>
+
+<details><summary>📐 架构蓝图源码（Mermaid · 宪宪绘制，可编辑）</summary>
 
 ```mermaid
 flowchart TB
@@ -167,7 +206,8 @@ flowchart TB
     style RIGHT fill:#e8f5e9,stroke:#2e7d32
     style API fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
 ```
-<sub><b>图 5｜错误 vs 正确</b>——创新应放在"统一控制面/接口"，而非缝合引擎。</sub>
+
+</details>
 
 **最强反证：大厂自己怎么做的**（见 [第 2 篇](./mem0-cloud-practices.md)）：
 
@@ -189,20 +229,20 @@ flowchart TB
 
 ---
 
-## 给烁烁的图优化清单 🎨
+## 图说明 🎨（烁烁 · 已完成）
 
-> 下面 5 张是我的 **Mermaid 讲解简图**（逻辑已成型），presentation 用建议你优化成精美 raster（沿用你在 [第 2 篇](./mem0-cloud-practices.md) 的 SVG+PNG 双轨工艺）。**术语别动**（SoC / scatter-gather / shard key / ACID / HNSW 等是查证过的架构术语）。
+5 张讲解简图已优化为精美 raster 并嵌入上文（§0/§2/§3/§5/§6），原 Mermaid 草图收进各处 `<details>` 作可编辑蓝图源保留。沿用 [第 2 篇](./mem0-cloud-practices.md) 的 SVG+PNG 双轨工艺，**架构术语一字未改**（SoC / scatter-gather / shard key / ACID / HNSW 等）。
 
-| 图 | 内容 | 优化建议 |
-|---|---|---|
-| 图 1 | 契约对撞（确定性 vs 概率性） | 核心隐喻"承重墙埋随机钢筋"可视化，最值得出彩 |
-| 图 2 | 问题全景（三维 11 问） | presentation 纲领页，做成清爽的分类卡 |
-| 图 3 | 抽象层级错配 | 阶梯 + 错误反向箭头，强调"地基干屋顶" |
-| 图 4 | 故障 blast radius | 融合后红色蔓延链 vs 解耦绿色隔离，对比要冲击力 |
-| 图 5 | 错误 vs 正确姿势 | 缝合的乱 vs 解耦的清爽，一眼分高下 |
+| 图 | 位置 | 视觉处理 | 文件 |
+|---|---|---|---|
+| **图 1** 契约对撞 | §0 | 两张对撞卡片 + 星爆冲突；下半部**砖墙里埋一根红色波浪钢筋**（核心隐喻 hero） | `assets/ddm-fig1-contract-collision.{svg,png}` |
+| **图 2** 问题全景 | §2 | 三色分类卡，③ 维护问题列自然最高；⚠️ 红标三个最危险 | `assets/ddm-fig2-problem-panorama.{svg,png}` |
+| **图 3** 抽象层级错配 | §3 | 认知/语义/数据三层 + 红色虚线大弧从"地基"越级反扑"屋顶" | `assets/ddm-fig3-abstraction-mismatch.{svg,png}` |
+| **图 4** 故障 blast radius | §5 | 上红下绿双泳道：蔓延链+爆炸环 vs 故障撞 🛡️ 隔离边界戛止 | `assets/ddm-fig4-blast-radius.{svg,png}` |
+| **图 5** 错误 vs 正确 | §6 | 左"缝一个引擎"的纠缠混沌 vs 右"统一控制面+各自纯粹"的清爽层级 | `assets/ddm-fig5-wrong-vs-right.{svg,png}` |
 
-**Next**：你优化后嵌入本文（原 Mermaid 收进 `<details>` 保留）→ @铲屎官 看 presentation 版。
+**视觉语言**：与第 2 篇统一的 SVG 设计套件（同字体/渐变/阴影/箭头）；本篇专用语义色板——DDM=绿（确定性/承重）· mem0=玫红（概率性/易变）· 冲突/故障=红 · 正确/解耦=绿 · 认知层/控制面=蓝 · 语义层=橙 · root=紫。SVG 为真相源、PNG 为展示版，同名并存于 `assets/`。
 
 ---
 
-*起草：宪宪（Opus 4.8）。讲解简图待烁烁（Opus 4.8）精美化。本地文档，按 CVO 指示不 push。本篇为 mem0 系列第 3 篇，后续与前两篇融合成册。*
+*起草：宪宪（Opus 4.8）。5 张讲解图（SVG 源 + 2x PNG）由烁烁（Opus 4.8）精美化并嵌入 `assets/`。本地文档，按 CVO 指示不 push。本篇为 mem0 系列第 3 篇，后续与前两篇融合成册。*

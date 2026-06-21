@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="800" viewBox="0 0 1120 800" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FCE7F0"/><stop offset="1" stop-color="#F8CFE0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <filter id="glowR" x="-40%" y="-60%" width="180%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ef4444" flood-opacity="0.55"/></filter>
+    <pattern id="brick" width="64" height="32" patternUnits="userSpaceOnUse">
+      <rect width="64" height="32" fill="#ECE6DA"/>
+      <g stroke="#CDBFA9" stroke-width="1.4" stroke-linecap="square">
+        <line x1="0" y1="0.7" x2="64" y2="0.7"/><line x1="0" y1="16" x2="64" y2="16"/>
+        <line x1="0" y1="0" x2="0" y2="16"/><line x1="32" y1="16" x2="32" y2="32"/>
+      </g>
+    </pattern>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="800" fill="#ffffff"/>
+  <text x="560" y="46" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 1 · 契约对撞：确定性 × 概率性</text>
+  <text x="560" y="74" text-anchor="middle" font-size="15" fill="#64748b">两个契约相反的组件强行融合 —— DDM 的「纯粹性」被概率性污染</text>
+
+  <!-- DDM card -->
+  <rect x="60" y="118" width="420" height="250" rx="14" fill="url(#green)" stroke="#16A34A" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="80" y="150" font-size="18" font-weight="700" fill="#14532D">DDM · 数据分片中间件</text>
+  <rect x="338" y="130" width="124" height="26" rx="13" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.1"/>
+  <text x="400" y="148" text-anchor="middle" font-size="11.5" font-weight="600" fill="#166534">确定性 · 承重</text>
+  <text x="88" y="192" font-size="14.5" fill="#166534">▸ 确定性：SQL 进 SQL 出</text>
+  <text x="88" y="226" font-size="14.5" fill="#166534">▸ 强一致 · ACID</text>
+  <text x="88" y="260" font-size="14.5" fill="#166534">▸ 不理解内容 · 按 shard key 路由</text>
+  <text x="88" y="294" font-size="14.5" fill="#166534">▸ 性能可预测</text>
+  <text x="88" y="338" font-size="13" font-weight="600" fill="#15803D">可形式化验证 · 被下游广泛信任</text>
+
+  <!-- mem0 card -->
+  <rect x="640" y="118" width="420" height="250" rx="14" fill="url(#rose)" stroke="#C2185B" stroke-width="2.2" filter="url(#sh)"/>
+  <text x="660" y="150" font-size="18" font-weight="700" fill="#9D174D">mem0 · 语义记忆中间件</text>
+  <rect x="918" y="130" width="124" height="26" rx="13" fill="#FCE7F0" stroke="#C2185B" stroke-width="1.1"/>
+  <text x="980" y="148" text-anchor="middle" font-size="11.5" font-weight="600" fill="#BE185D">概率性 · 易变</text>
+  <text x="668" y="192" font-size="14.5" fill="#BE185D">▸ 概率性：LLM 会抽错</text>
+  <text x="668" y="226" font-size="14.5" fill="#BE185D">▸ 最终一致</text>
+  <text x="668" y="260" font-size="14.5" fill="#BE185D">▸ 重度语义理解 · 必须读懂内容</text>
+  <text x="668" y="294" font-size="14.5" fill="#BE185D">▸ 成本 / 延迟不可预测</text>
+  <text x="668" y="338" font-size="13" font-weight="600" fill="#BE185D">会幻觉 · 会超时 · 会改版</text>
+
+  <!-- collision -->
+  <text x="560" y="150" text-anchor="middle" font-size="12.5" font-weight="600" fill="#64748b">强行融合</text>
+  <path d="M486,243 L516,243" stroke="#9ca3af" stroke-width="3.5"/>
+  <polygon points="516,237 528,243 516,249" fill="#9ca3af"/>
+  <path d="M634,243 L604,243" stroke="#9ca3af" stroke-width="3.5"/>
+  <polygon points="604,237 592,243 604,249" fill="#9ca3af"/>
+  <polygon points="560,170 573,212 615,206 586,238 612,272 569,260 552,300 540,258 498,266 528,232 506,200 548,212" fill="#FEE2E2" stroke="#DC2626" stroke-width="2"/>
+  <circle cx="560" cy="240" r="33" fill="#FECACA" stroke="#DC2626" stroke-width="1.5"/>
+  <text x="560" y="252" text-anchor="middle" font-size="32">⚡</text>
+  <text x="560" y="332" text-anchor="middle" font-size="15" font-weight="700" fill="#B91C1C">契约冲突</text>
+  <text x="560" y="352" text-anchor="middle" font-size="11.5" fill="#991B1B">确定性被概率性污染</text>
+
+  <!-- metaphor panel -->
+  <rect x="60" y="398" width="1000" height="346" rx="16" fill="#FBFAF7" stroke="#E5E0D5" stroke-width="1.5"/>
+  <text x="560" y="436" text-anchor="middle" font-size="16.5" font-weight="700" fill="#334155">核心隐喻：在确定性的「承重墙」里，埋了一根会随机变形的钢筋</text>
+
+  <rect x="110" y="462" width="900" height="218" rx="4" fill="url(#brick)" stroke="#8B7E68" stroke-width="3"/>
+
+  <line x1="160" y1="528" x2="890" y2="528" stroke="#6B7280" stroke-width="7" stroke-linecap="round"/>
+  <rect x="150" y="520" width="12" height="16" rx="2" fill="#4B5563"/><rect x="888" y="520" width="12" height="16" rx="2" fill="#4B5563"/>
+  <rect x="556" y="500" width="190" height="22" rx="11" fill="#F3F4F6" stroke="#9CA3AF" stroke-width="1"/>
+  <text x="651" y="516" text-anchor="middle" font-size="12" font-weight="600" fill="#4B5563">✓ 确定性钢筋（可预测）</text>
+
+  <path d="M160,618 Q220,566 280,618 T400,618 T520,618 T640,618 T760,618 T880,618" fill="none" stroke="#EF4444" stroke-width="7" stroke-linecap="round" filter="url(#glowR)"/>
+  <rect x="556" y="640" width="200" height="22" rx="11" fill="#FEE2E2" stroke="#DC2626" stroke-width="1"/>
+  <text x="656" y="656" text-anchor="middle" font-size="12" font-weight="600" fill="#B91C1C">✗ 概率性钢筋（随机变形）</text>
+
+  <text x="560" y="722" text-anchor="middle" font-size="15.5" font-weight="700" fill="#B91C1C">平时看不出 —— 塌的时候，塌的是整面墙</text>
+</svg>

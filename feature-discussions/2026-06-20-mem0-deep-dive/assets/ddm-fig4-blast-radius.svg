@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="600" viewBox="0 0 1100 600" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrR" markerWidth="13" markerHeight="13" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L10,4.5 L0,9 Z" fill="#DC2626"/></marker>
+    <marker id="arrG" markerWidth="12" markerHeight="12" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4 L0,8 Z" fill="#16A34A"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1100" height="600" fill="#ffffff"/>
+  <text x="550" y="44" text-anchor="middle" font-size="26" font-weight="800" fill="#0f172a">图 4 · 故障 blast radius：融合 vs 解耦</text>
+
+  <!-- TOP: fusion, spreading -->
+  <rect x="40" y="78" width="1020" height="210" rx="14" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.6"/>
+  <text x="62" y="108" font-size="16" font-weight="700" fill="#B91C1C">❌ 融合后：一处抖动，全线蔓延（blast radius 放大）</text>
+
+  <circle cx="907" cy="222" r="80" fill="#EF4444" opacity="0.12"/>
+  <circle cx="907" cy="222" r="58" fill="#EF4444" opacity="0.18"/>
+
+  <rect x="70" y="186" width="180" height="72" rx="10" fill="#FFF7ED" stroke="#EA580C" stroke-width="1.8"/>
+  <text x="160" y="228" text-anchor="middle" font-size="14.5" font-weight="600" fill="#9A3412">LLM 抖动 / 限流</text>
+  <rect x="312" y="186" width="150" height="72" rx="10" fill="#FCE7F0" stroke="#C2185B" stroke-width="1.8"/>
+  <text x="387" y="228" text-anchor="middle" font-size="14.5" font-weight="600" fill="#9D174D">mem0 故障</text>
+  <rect x="524" y="186" width="200" height="72" rx="10" fill="#FEE2E2" stroke="#DC2626" stroke-width="2"/>
+  <text x="624" y="228" text-anchor="middle" font-size="14.5" font-weight="700" fill="#B91C1C">拖垮 DDM（承重）</text>
+  <rect x="812" y="186" width="190" height="72" rx="10" fill="#EF4444" stroke="#B91C1C" stroke-width="2" filter="url(#sh)"/>
+  <text x="907" y="228" text-anchor="middle" font-size="15" font-weight="800" fill="#ffffff">下游业务全挂</text>
+
+  <line x1="250" y1="222" x2="306" y2="222" stroke="#DC2626" stroke-width="3" marker-end="url(#arrR)"/>
+  <line x1="462" y1="222" x2="518" y2="222" stroke="#DC2626" stroke-width="4" marker-end="url(#arrR)"/>
+  <line x1="724" y1="222" x2="806" y2="222" stroke="#DC2626" stroke-width="5.5" marker-end="url(#arrR)"/>
+
+  <!-- BOTTOM: decoupled, isolated -->
+  <rect x="40" y="320" width="1020" height="210" rx="14" fill="#F0FBF3" stroke="#16A34A" stroke-width="1.6"/>
+  <text x="62" y="350" font-size="16" font-weight="700" fill="#15803D">✅ 解耦：故障被隔离在边缘，DDM 毫发无伤</text>
+
+  <rect x="70" y="426" width="180" height="72" rx="10" fill="#FFF7ED" stroke="#EA580C" stroke-width="1.8"/>
+  <text x="160" y="468" text-anchor="middle" font-size="14.5" font-weight="600" fill="#9A3412">LLM 抖动 / 限流</text>
+  <rect x="300" y="426" width="170" height="72" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="385" y="461" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14532D">mem0 降级</text>
+  <text x="385" y="481" text-anchor="middle" font-size="11.5" fill="#15803D">优雅处理</text>
+
+  <line x1="250" y1="462" x2="296" y2="462" stroke="#16A34A" stroke-width="2.6" marker-end="url(#arrG)"/>
+
+  <!-- isolation barrier -->
+  <line x1="540" y1="396" x2="540" y2="520" stroke="#16A34A" stroke-width="3" stroke-dasharray="8 5"/>
+  <text x="540" y="388" text-anchor="middle" font-size="20">🛡️</text>
+  <line x1="470" y1="462" x2="518" y2="462" stroke="#DC2626" stroke-width="3"/>
+  <text x="529" y="468" text-anchor="middle" font-size="20" font-weight="800" fill="#DC2626">✕</text>
+  <text x="540" y="540" text-anchor="middle" font-size="12.5" font-weight="600" fill="#15803D">🛡️ 隔离边界 · 故障到此为止</text>
+
+  <rect x="600" y="426" width="180" height="72" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="2"/>
+  <text x="690" y="461" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14532D">DDM（承重）</text>
+  <text x="690" y="481" text-anchor="middle" font-size="11.5" font-weight="600" fill="#15803D">✓ 不受影响</text>
+  <rect x="840" y="426" width="170" height="72" rx="10" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.8"/>
+  <text x="925" y="468" text-anchor="middle" font-size="14.5" font-weight="600" fill="#14532D">下游业务照常</text>
+  <line x1="780" y1="462" x2="836" y2="462" stroke="#16A34A" stroke-width="2.6" marker-end="url(#arrG)"/>
+</svg>
