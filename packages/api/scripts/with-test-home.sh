@@ -30,6 +30,11 @@ unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
 
+# API_SERVER_HOST is a runtime binding choice. LAN/dev invocations commonly set
+# it to 0.0.0.0, but capability write tests expect localhost-only defaults unless
+# an individual test explicitly sets the host under test.
+unset API_SERVER_HOST
+
 # DEFAULT_CAT_ID is user/runtime preference, not test fixture state. Leaving it
 # inherited makes routing tests depend on which cat launched the test command.
 unset DEFAULT_CAT_ID

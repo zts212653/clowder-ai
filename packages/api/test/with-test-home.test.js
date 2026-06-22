@@ -34,3 +34,17 @@ test('with-test-home strips runtime default cat override from outer shell', () =
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), '');
 });
+
+test('with-test-home strips runtime API host binding from outer shell', () => {
+  const result = spawnSync('bash', [withTestHome, 'node', '-p', 'process.env.API_SERVER_HOST ?? ""'], {
+    cwd: resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      API_SERVER_HOST: '0.0.0.0',
+    },
+    encoding: 'utf8',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '');
+});
