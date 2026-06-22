@@ -213,12 +213,35 @@ runtime_quick_mode() {
   start_arg_present "--quick" || start_arg_present "-q"
 }
 
+runtime_install_can_retry_without_frozen_lockfile() {
+  local log_file="$1"
+  grep -Eiq \
+    'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|frozen[- ]lockfile|lockfile.*(outdated|not up to date)' \
+    "$log_file"
+}
+
 install_runtime_dependencies() {
+  local install_log
+
   info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
   # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
   # which causes pnpm to skip devDependencies and break builds.
+  install_log="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-runtime-install.XXXXXX")"
+  if env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+    pnpm -C "$RUNTIME_DIR" install --frozen-lockfile 2>&1 | tee "$install_log"; then
+    rm -f "$install_log"
+    return 0
+  fi
+
+  if ! runtime_install_can_retry_without_frozen_lockfile "$install_log"; then
+    rm -f "$install_log"
+    return 1
+  fi
+  rm -f "$install_log"
+
+  info "runtime frozen lockfile install failed; retrying pnpm install --no-frozen-lockfile"
   env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
-    pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
+    pnpm -C "$RUNTIME_DIR" install --no-frozen-lockfile
 }
 
 seed_runtime_config_from_project() {

@@ -92,6 +92,17 @@ printf 'ok'
   assert.equal(output, 'ok');
 });
 
+test('start-dev auto-install clears inherited production install env', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const scriptText = readFileSync(scriptPath, 'utf8');
+
+  assert.match(
+    scriptText,
+    /run_logged_step "pnpm install" 5\s+\\?\s*env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION\s+\\?\s*pnpm install --frozen-lockfile/,
+    'auto-install must clear production install env before invoking pnpm install',
+  );
+});
+
 test('probe_port_with_dev_tcp falls back when timeout is unavailable', async () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const tempRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-start-dev-no-timeout-'));

@@ -76,7 +76,11 @@ function listenOnLoopback() {
   });
 }
 
-function createPnpmStub(projectDir) {
+function createPnpmStub(projectDir, options = {}) {
+  const {
+    failFrozenInstall = false,
+    frozenInstallFailure = 'ERR_PNPM_OUTDATED_LOCKFILE simulated frozen lockfile failure',
+  } = options;
   const binDir = join(projectDir, 'bin');
   const logFile = join(projectDir, 'pnpm.log');
   mkdirSync(binDir, { recursive: true });
@@ -92,6 +96,20 @@ if [ "\${1:-}" = "-C" ]; then
   shift 2
 fi
 if [ "\${1:-}" = "install" ] && [ "\${2:-}" = "--frozen-lockfile" ]; then
+  if [ "${failFrozenInstall ? '1' : '0'}" = "1" ]; then
+    printf '%s\\n' "${frozenInstallFailure}" >&2
+    exit 1
+  fi
+  mkdir -p "$target_dir/node_modules/.pnpm"
+  mkdir -p "$target_dir/packages/web/node_modules/next"
+  : > "$target_dir/packages/web/node_modules/next/package.json"
+  mkdir -p "$target_dir/packages/api/node_modules/tsx"
+  : > "$target_dir/packages/api/node_modules/tsx/package.json"
+  mkdir -p "$target_dir/packages/mcp-server/node_modules/typescript"
+  : > "$target_dir/packages/mcp-server/node_modules/typescript/package.json"
+  exit 0
+fi
+if [ "\${1:-}" = "install" ] && [ "\${2:-}" = "--no-frozen-lockfile" ]; then
   mkdir -p "$target_dir/node_modules/.pnpm"
   mkdir -p "$target_dir/packages/web/node_modules/next"
   : > "$target_dir/packages/web/node_modules/next/package.json"
@@ -129,8 +147,8 @@ exit 0
   return { binDir, logFile };
 }
 
-function withStubbedPnpmEnv(projectDir) {
-  const { binDir, logFile } = createPnpmStub(projectDir);
+function withStubbedPnpmEnv(projectDir, options = {}) {
+  const { binDir, logFile } = createPnpmStub(projectDir, options);
   return {
     ...process.env,
     CAT_CAFE_RUNTIME_RESTART_OK: '1',
@@ -421,6 +439,52 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.match(result.stdout, /STARTED:/);
     const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8');
     assert.match(pnpmLog, /install --frozen-lockfile/);
+  });
+
+  it('falls back to no-frozen-lockfile when runtime frozen install cannot resolve platform deps', () => {
+    const projectDir = createTempProject('runtime-self-heal-install-fallback');
+    const env = withStubbedPnpmEnv(projectDir, { failFrozenInstall: true });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env,
+    });
+
+    assert.equal(result.status, 0, `exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.match(result.stdout, /detected missing runtime prerequisites/);
+    assert.match(result.stdout, /retrying pnpm install --no-frozen-lockfile/);
+    assert.match(result.stdout, /STARTED:/);
+    const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8').trim().split('\n');
+    // After the no-frozen-lockfile install succeeds, the ADR-039 build invariant
+    // rebuilds the missing dist artifacts (shared/api/mcp-server/web) before start.
+    assert.deepEqual(pnpmLog, [
+      '-C ' + projectDir + ' install --frozen-lockfile',
+      '-C ' + projectDir + ' install --no-frozen-lockfile',
+      '-C ' + projectDir + '/packages/shared run build',
+      '-C ' + projectDir + '/packages/api run build',
+      '-C ' + projectDir + '/packages/mcp-server run build',
+      '-C ' + projectDir + '/packages/web run build',
+    ]);
+  });
+
+  it('does not retry without frozen lockfile for generic runtime install failures', () => {
+    const projectDir = createTempProject('runtime-self-heal-install-generic-failure');
+    const env = withStubbedPnpmEnv(projectDir, {
+      failFrozenInstall: true,
+      frozenInstallFailure: 'simulated network failure',
+    });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env,
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(result.stdout, /retrying pnpm install --no-frozen-lockfile/);
+    const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8').trim().split('\n');
+    assert.deepEqual(pnpmLog, ['-C ' + projectDir + ' install --frozen-lockfile']);
   });
 
   it('fails with guidance when auto-install is disabled and prerequisites are missing', () => {
