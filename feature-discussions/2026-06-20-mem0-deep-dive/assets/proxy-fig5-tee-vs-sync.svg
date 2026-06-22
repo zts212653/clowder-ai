@@ -16,7 +16,7 @@
   <!-- ============ TOP ❌ sync filter ============ -->
   <rect x="50" y="100" width="1020" height="250" rx="16" fill="#FEF6F6" stroke="#FCA5A5" stroke-width="1.8"/>
   <rect x="74" y="89" width="420" height="26" rx="13" fill="#DC2626" filter="url(#sh)"/>
-  <text x="284" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">❌ 同步 filter 嵌入查询链（= §3.3 子命题 B2）</text>
+  <text x="284" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">❌ 同步 filter 嵌入查询链（= §3.2 子命题 B2）</text>
 
   <rect x="86" y="158" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
   <text x="141" y="191" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">客户端</text>
@@ -51,7 +51,7 @@
   <!-- ============ BOTTOM ✅ tee bypass ============ -->
   <rect x="50" y="372" width="1020" height="250" rx="16" fill="#F0FBF8" stroke="#5EEAD4" stroke-width="1.8"/>
   <rect x="74" y="361" width="400" height="26" rx="13" fill="#0D9488" filter="url(#sh)"/>
-  <text x="274" y="379" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">✅ tee filter 异步旁路（= §3.5 旁路异步）</text>
+  <text x="274" y="379" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">✅ tee filter 异步旁路（= §3.3 旁路异步）</text>
 
   <rect x="86" y="418" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
   <text x="141" y="451" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">客户端</text>

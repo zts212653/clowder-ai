@@ -237,7 +237,7 @@ flowchart TB
 先把 proxy、分片中间件（MyCat / DDM）、mem0 三者的定位摆清楚：
 
 <p align="center">
-  <img src="./assets/proxy-fig1-positioning.png" alt="proxy / DDM / mem0 三者定位：proxy 在数据访问层最低、mem0 在应用语义层最高，隔着整个栈" width="100%">
+  <img src="./assets/proxy-fig1-positioning.png" alt="proxy / 分片中间件 / mem0 三者定位：proxy 在数据访问层最低、mem0 在应用语义层最高，隔着整个栈" width="100%">
 </p>
 <sub><b>图 3·1｜三者定位</b>——proxy 是最"哑"的 SQL 流量路由器（只看读 / 写，解析深度 ●○○），分片中间件 MyCat / DDM 懂分片结构（●●○），mem0 必须读懂对话语义（●●●）；proxy 在数据访问层最低、mem0 在应用 / 语义层最高，中间隔着整个栈，没有架构接触点。</sub>
 
@@ -352,6 +352,11 @@ flowchart TB
 | **方案复杂度** | 中（协议模块工程） | 高（双链路改造仍绕回 B1） | 低（tee 旁路原生支持） |
 | **公有云商业** | ✅ 正道（注意 BSL 许可证） | ⚠️ 只剩运营捆绑 + 入口错配 | ✅ 增值清晰 |
 | **运维** | 可控 | ❌ 故障域 / SLA / 安全全面恶化 | ✅ 故障隔离 |
+
+<p align="center">
+  <img src="./assets/proxy-fig7-evolution-roadmap.png" alt="演进路线图：现状 MyCat 残体 → MaxScale 演进 → 扩协议 → 集成 mem0 分叉（嵌入不可行/旁路可行）" width="100%">
+</p>
+<sub><b>图 3·7｜演进路线图：每一步一个判断</b>——现状 proxy（MyCat 残体：阉割分片 / 仅 MySQL / 封闭）→ ① 演进 MaxScale 可插拔 ✅ → ② 扩多协议（MySQL / PG ✅，Oracle 单独评估，先过 BSL 许可证）✅ → ③ 到「集成 mem0」才分叉：嵌入对话 mem0 进 SQL 转发关键路径 ❌（通路错配 / 延迟灾难 / 运维恶化）vs 旁路 SQL 智能（tee）✅（但那是 DB-ops AI，不是 mem0）。横向把数据访问做宽是正道，纵向把对话记忆塞进通路是错配。</sub>
 
 **建议**：
 - ✅ **做**：proxy 沿 MaxScale 模式演进成**多协议数据访问平台**（先 MySQL + PG，Oracle 单独评估；"用代码 vs 借鉴自研"先过许可证）。

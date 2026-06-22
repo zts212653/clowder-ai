@@ -10,7 +10,7 @@
   </defs>
 
   <rect x="0" y="0" width="1120" height="710" fill="#ffffff"/>
-  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·1 · proxy / DDM / mem0 — 三者定位</text>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·1 · proxy / 分片中间件 / mem0 — 三者定位</text>
   <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">proxy 离 mem0 最远：一个在栈最低层只看读 / 写，一个在栈最高层读懂语义，中间隔着整个栈</text>
 
   <!-- layer zones (faint) -->
@@ -39,7 +39,7 @@
 
   <!-- DDM card (data-access, upper) -->
   <rect x="120" y="462" width="600" height="84" rx="14" fill="url(#green)" stroke="#16A34A" stroke-width="2.4" filter="url(#sh)"/>
-  <text x="146" y="494" font-size="17" font-weight="700" fill="#14532D">DDM · 分片中间件</text>
+  <text x="146" y="494" font-size="17" font-weight="700" fill="#14532D">MyCat / DDM · 分片中间件</text>
   <text x="146" y="522" font-size="13" fill="#166534">分库分表 + 跨分片归并　·　懂结构（要算 shard-key）　·　确定性</text>
   <text x="560" y="497" font-size="11.5" font-weight="700" fill="#15803D">解析深度</text>
   <circle cx="600" cy="520" r="9" fill="#16A34A"/><circle cx="626" cy="520" r="9" fill="#16A34A"/><circle cx="652" cy="520" r="9" fill="none" stroke="#16A34A" stroke-width="2"/>
