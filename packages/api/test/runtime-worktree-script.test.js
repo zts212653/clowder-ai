@@ -80,6 +80,7 @@ function createPnpmStub(projectDir, options = {}) {
   const {
     failFrozenInstall = false,
     frozenInstallFailure = 'ERR_PNPM_OUTDATED_LOCKFILE simulated frozen lockfile failure',
+    frozenInstallExitCode = 1,
   } = options;
   const binDir = join(projectDir, 'bin');
   const logFile = join(projectDir, 'pnpm.log');
@@ -98,7 +99,7 @@ fi
 if [ "\${1:-}" = "install" ] && [ "\${2:-}" = "--frozen-lockfile" ]; then
   if [ "${failFrozenInstall ? '1' : '0'}" = "1" ]; then
     printf '%s\\n' "${frozenInstallFailure}" >&2
-    exit 1
+    exit ${frozenInstallExitCode}
   fi
   mkdir -p "$target_dir/node_modules/.pnpm"
   mkdir -p "$target_dir/packages/web/node_modules/next"
@@ -485,6 +486,78 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     assert.doesNotMatch(result.stdout, /retrying pnpm install --no-frozen-lockfile/);
     const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8').trim().split('\n');
     assert.deepEqual(pnpmLog, ['-C ' + projectDir + ' install --frozen-lockfile']);
+  });
+
+  it('additional pnpm 9 lockfile-class failure phrases trigger no-frozen-lockfile retry', () => {
+    // Align with scripts/install.ps1::Test-LockfileMismatchFailure — Windows
+    // installer already treats these phrases as retryable; the bash runtime
+    // classifier must agree so cross-platform self-heal stays symmetric.
+    const additionalPatterns = [
+      {
+        slug: 'breaking-change',
+        failure: 'ERR_PNPM_LOCKFILE_BREAKING_CHANGE: lockfile is at an incompatible version',
+      },
+      {
+        slug: 'incompatible',
+        failure: 'pnpm error: lockfile is incompatible with this version of pnpm',
+      },
+      {
+        slug: 'cannot-install-frozen',
+        failure: 'Cannot install with "frozen-lockfile" because lockfile is out of sync',
+      },
+      {
+        slug: 'cannot-proceed-without-lockfile',
+        failure: 'Cannot proceed with audit without the lockfile present',
+      },
+    ];
+
+    for (const { slug, failure } of additionalPatterns) {
+      const projectDir = createTempProject(`runtime-self-heal-install-${slug}`);
+      const env = withStubbedPnpmEnv(projectDir, {
+        failFrozenInstall: true,
+        frozenInstallFailure: failure,
+      });
+
+      const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+        cwd: projectDir,
+        encoding: 'utf8',
+        env,
+      });
+
+      assert.equal(
+        result.status,
+        0,
+        `[${slug}] expected retry to succeed; exit=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+      );
+      assert.match(
+        result.stdout,
+        /retrying pnpm install --no-frozen-lockfile/,
+        `[${slug}] expected classified retry to fire on "${failure}"`,
+      );
+    }
+  });
+
+  it('preserves original frozen install exit code on non-retry-able generic failure', () => {
+    // The non-retry path captures pnpm's exit code via ${PIPESTATUS[0]} so
+    // interrupts / OOM-style exits stay distinguishable from a generic exit 1.
+    const projectDir = createTempProject('runtime-self-heal-install-preserves-exit-code');
+    const env = withStubbedPnpmEnv(projectDir, {
+      failFrozenInstall: true,
+      frozenInstallFailure: 'simulated network failure',
+      frozenInstallExitCode: 42,
+    });
+
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
+      cwd: projectDir,
+      encoding: 'utf8',
+      env,
+    });
+
+    assert.equal(
+      result.status,
+      42,
+      `expected stub pnpm exit 42 to reach the caller; got ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
   });
 
   it('fails with guidance when auto-install is disabled and prerequisites are missing', () => {
