@@ -8,7 +8,7 @@ created: 2026-04-13
 
 # F161: ACP Carrier Generalization — 通用 ACP 传输 + 模板环境变量映射
 
-> **Status**: review (PR #899) | **Owner**: Ragdoll Opus-4.6 | **Priority**: P1
+> **Status**: implemented (Phase A+B, intake from clowder-ai#899) | **Owner**: Ragdoll Opus-4.6 | **Priority**: P1
 
 ## Why
 
@@ -16,7 +16,7 @@ F149 交付了完整的 ACP runtime operations（进程池 / session lease / lif
 
 核心痛点：**每加一个 ACP client 就要改 `index.ts` 路由 + `invoke-single-cat.ts` env 注入链的 if/else**。env 注入已有 5 个 protocol 分支（anthropic/openai/google/kimi/dare），每个硬编码 env var 名。
 
-铲屎官原话（2026-06-08）：
+operator experience（2026-06-08）：
 
 > "我想按照想把 acp 作为独立的 provider 开放出来"
 > "clientId 还是 opencode；但是新增一个可选的协议 cli/acp"
@@ -134,26 +134,6 @@ const BUILTIN_ENV_MAPS = {
 | KD-11 | ACP context lifecycle/handoff 作为 followup | ACP event transformer 不解析 `usage`/`contextWindow` 事件，导致 `context_health` 不触发自动 seal——需要独立 feature 设计 ACP 场景的 context 感知与 handoff 机制 | 2026-06-16 |
 | KD-12 | Compaction loop 根因：system+tools > usable threshold | OpenCode compaction 阈值 = `input - reserved`，当 Cat Cafe MCP 90+ 工具 schema (~90k tokens) 超过 usable(85k) 时每次响应都触发 compaction → auto-continue 循环。根治：全局 context 200k（阈值 185k > 90k）。followup：减少 MCP tool 暴露量 | 2026-06-16 |
 | KD-13 | ACP scratchpad defense-in-depth | acp-event-transformer 添加 `## Goal` 模式检测 + AcpAgentService 添加 50-event circuit breaker，作为 compaction loop 的 L2/L3 防御层 | 2026-06-16 |
-
-## Timeline
-
-| 日期 | 事件 |
-|------|------|
-| 2026-04-13 | 从 F149 Phase D 拆出 F161 spec |
-| 2026-06-08 | 铲屎官提出 ACP 通用接入需求，讨论设计方案 |
-| 2026-06-10 | 扩展 scope（env 模板映射 + 通用 ACP client），开始实现 |
-| 2026-06-11 | Phase A 实现完成：6/6 AC green，53 tests pass |
-| 2026-06-15 | Phase B 实现完成：ACP+Gemini/Kimi 端到端验证通过 |
-| 2026-06-16 | ACP thinking buffer、dual transport selector、kimi warning 完成 |
-| 2026-06-16 | Review fixes: thinking buffer error flush, Gemini args, builtin account, ACP capability gate, MCP resolver guard, pool signature |
-| 2026-06-16 | P2 fix: mcpSupport gate 贯穿 invoke 层（KD-8）+ 回归测试 41/41 |
-| 2026-06-16 | ACP session reuse 修复（KD-9）：multi-turn 对话不再失忆 |
-| 2026-06-16 | HTTP stream 终止修复：NDJSON reader 在收到 final response 后主动 `controller.abort()` |
-| 2026-06-16 | Zod schema 修复：`acpConfigSchema` 添加 `transport` 字段，防止 Zod 静默 strip |
-| 2026-06-16 | httpstream 从 UI 移除（KD-10）：opencode/gemini/kimi 保持 CLI/ACP(stdio)，后端实现保留 |
-| 2026-06-16 | Compaction loop 调查完成（KD-12）：system+tools ~90k > threshold 85k；全局 context 改 200k 根治 |
-| 2026-06-16 | ACP scratchpad defense-in-depth（KD-13）：event-transformer 检测 + circuit breaker |
-| 2026-06-16 | P2 fix：hub-cat-editor.payload.ts preserveHiddenAcpFields 防止表单保存丢失 mcpWhitelist 等字段 |
 
 ## Followup
 

@@ -31,6 +31,7 @@ evalCat:
   model: claude-opus-4-7
 frequency: weekly
 sourceAdapter: capability-wakeup-eval
+sourceRefsKind: capability-wakeup-trial-window
 threadPolicy:
   role: working-home
   stateSot: registry
@@ -56,6 +57,7 @@ evalCat:
   model: gpt-5.5
 frequency: daily
 sourceAdapter: f167-runtime-eval
+sourceRefsKind: a2a-snapshot-attribution
 threadPolicy:
   role: working-home
   stateSot: registry
@@ -153,7 +155,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
     );
     assert.ok('error' in result);
     assert.equal(result.status, 400);
-    assert.equal(result.error, 'invalid_source_ref');
+    assert.equal(result.error, 'sourceRefs_kind_mismatch');
     assert.match(result.detail, /capability-wakeup-trial-window/);
     assert.match(result.detail, /trial-ids/);
   });

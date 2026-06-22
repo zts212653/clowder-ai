@@ -114,6 +114,16 @@ describe('Phase H publish-verdict newline-injection lock (砚砚 R18/R19 P2)', (
       match: /requestedAction.*newline/,
     },
     {
+      // cloud-R2 P2: eval-friction-renderer adds a `- Root cause: ${summary}` single-line bullet
+      // directly above `- Owner ask:`; a newline in summary injects a fake bullet. Lock it.
+      name: 'rootCauseHypothesis.summary',
+      mutate: (p) => ({
+        ...p,
+        rootCauseHypothesis: { ...p.rootCauseHypothesis, summary: p.rootCauseHypothesis.summary + NL },
+      }),
+      match: /summary.*newline/,
+    },
+    {
       name: 'acceptanceReevalPlan.closureCondition',
       mutate: (p) => ({
         ...p,

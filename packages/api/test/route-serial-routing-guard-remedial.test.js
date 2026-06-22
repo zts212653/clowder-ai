@@ -51,9 +51,13 @@ function createSequenceService(catId, texts, { needsGuard = true } = {}) {
   };
 }
 
-function createMockDeps(services, appendedMessages, { voiceMode = false, socketEvents = [] } = {}) {
+function createMockDeps(
+  services,
+  appendedMessages,
+  { voiceMode = false, socketEvents = [], ballCustodyRecords = undefined, metadataAugments = [] } = {},
+) {
   let counter = 0;
-  return {
+  const deps = {
     services,
     invocationDeps: {
       registry: {
@@ -100,6 +104,10 @@ function createMockDeps(services, appendedMessages, { voiceMode = false, socketE
       getByThread: () => [],
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],
+      augmentStreamMetadata: async (messageId, patch) => {
+        metadataAugments.push({ messageId, patch });
+        return true;
+      },
     },
     draftStore: {
       upsert: () => {},
@@ -114,6 +122,14 @@ function createMockDeps(services, appendedMessages, { voiceMode = false, socketE
       },
     },
   };
+  if (ballCustodyRecords) {
+    deps.ballCustody = {
+      async record(event) {
+        ballCustodyRecords.push(event);
+      },
+    };
+  }
+  return deps;
 }
 
 async function installFakeStreamingTtsRegistry() {
@@ -144,16 +160,17 @@ async function runRoute(service, threadId, extraServices = {}, mockOptions = {})
     const original = catRegistry.getAllConfigs();
     await loadRealRoster();
     const appended = [];
+    const metadataAugments = [];
     try {
       const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-      const deps = createMockDeps({ codex: service, ...extraServices }, appended, depsOptions);
+      const deps = createMockDeps({ codex: service, ...extraServices }, appended, { ...depsOptions, metadataAugments });
       const yielded = [];
       for await (const msg of routeSerial(deps, ['codex'], 'guard test', 'user1', threadId, {
         thinkingMode,
       })) {
         yielded.push(msg);
       }
-      return { appended, yielded, calls: service.calls };
+      return { appended, yielded, calls: service.calls, metadataAugments };
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(original)) {
@@ -463,6 +480,202 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       appended.find((m) => m.source?.connector === 'routing-guard-failure'),
       undefined,
       'confirmed cross-thread self handoff should not emit a routing guard failure notice',
+    );
+  });
+
+  test('callback routing consumer contract covers callback tool matrix', async () => {
+    const { classifyCallbackContentRoutingState } = await import(
+      '../dist/domains/cats/services/agents/routing/route-serial.js'
+    );
+    assert.equal(typeof classifyCallbackContentRoutingState, 'function');
+    const original = catRegistry.getAllConfigs();
+    await loadRealRoster();
+
+    const toolCases = [
+      {
+        kind: 'post',
+        toolName: 'cat_cafe_post_message',
+        resultToolName: 'mcp:cat-cafe/post_message',
+        scope: 'local',
+      },
+      {
+        kind: 'cross',
+        toolName: 'cat_cafe_cross_post_message',
+        resultToolName: 'mcp:cat-cafe/cross_post_message',
+        scope: 'target',
+      },
+    ];
+    const mentionCases = [
+      {
+        kind: 'cat',
+        content: '@opus\ncallback handoff',
+        guardMentions: ['opus'],
+        expectSourceWorklist: (scope) => scope === 'local',
+        expectSourceMentionsUser: () => false,
+      },
+      {
+        kind: 'cvo',
+        content: '@co-creator\ncallback escalation',
+        guardMentions: [],
+        expectSourceWorklist: () => false,
+        expectSourceMentionsUser: (scope) => scope === 'local',
+      },
+    ];
+
+    try {
+      for (const toolCase of toolCases) {
+        for (const hasToolUseId of [true, false]) {
+          for (const mentionCase of mentionCases) {
+            const label = `${toolCase.kind}/${toolCase.scope}/${hasToolUseId ? 'toolUseId' : 'no-id'}/${mentionCase.kind}`;
+            const localThreadId = `thread-routing-contract-${toolCase.kind}-${hasToolUseId ? 'id' : 'no-id'}-${mentionCase.kind}`;
+            const resultThreadId = toolCase.scope === 'target' ? `${localThreadId}-target` : localThreadId;
+            const messageId = `msg-routing-contract-${toolCase.kind}-${hasToolUseId ? 'id' : 'no-id'}-${mentionCase.kind}`;
+            const toolUseId = `${toolCase.kind}-${mentionCase.kind}-tool-use`;
+            const expectedSourceWorklist = mentionCase.expectSourceWorklist(toolCase.scope);
+            const expectedSourceMentionsUser = mentionCase.expectSourceMentionsUser(toolCase.scope);
+
+            const state = classifyCallbackContentRoutingState(toolCase.toolName, mentionCase.content, 'codex');
+            assert.deepEqual(
+              state,
+              {
+                scope: toolCase.scope,
+                guardLineStartMentions: mentionCase.guardMentions,
+                localLineStartMentions: toolCase.scope === 'local' ? mentionCase.guardMentions : [],
+                hasGuardCoCreatorLineStartMention: mentionCase.kind === 'cvo',
+                hasLocalCoCreatorLineStartMention: toolCase.scope === 'local' && mentionCase.kind === 'cvo',
+                hasTargetCoCreatorLineStartMention: toolCase.scope === 'target' && mentionCase.kind === 'cvo',
+              },
+              `${label}: callback routing state must be explicit`,
+            );
+
+            const recorded = [];
+            const service = createSequenceService('codex', [
+              [
+                {
+                  type: 'tool_use',
+                  toolName: toolCase.toolName,
+                  ...(hasToolUseId ? { toolUseId } : {}),
+                  toolInput: {
+                    ...(toolCase.scope === 'target' ? { threadId: resultThreadId } : {}),
+                    content: mentionCase.content,
+                  },
+                },
+                {
+                  type: 'tool_result',
+                  toolName: toolCase.resultToolName,
+                  ...(hasToolUseId ? { toolUseId } : {}),
+                  content: JSON.stringify({ status: 'ok', messageId, threadId: resultThreadId }),
+                },
+                {
+                  type: 'text',
+                  content: `${label}: local source follow-up without a line-start route`,
+                },
+              ],
+              '@co-creator',
+            ]);
+            const opusService = createSequenceService('opus', [`${label}: opus ack`], { needsGuard: false });
+
+            const { appended, calls, metadataAugments } = await runRoute(
+              service,
+              localThreadId,
+              { opus: opusService },
+              { ballCustodyRecords: recorded },
+            );
+
+            assert.equal(calls.length, 1, `${label}: confirmed callback exit must satisfy the routing guard`);
+            assert.equal(
+              appended.find((m) => m.source?.connector === 'routing-guard-failure'),
+              undefined,
+              `${label}: confirmed callback exit must not emit a routing guard failure notice`,
+            );
+            assert.equal(
+              opusService.calls.length,
+              expectedSourceWorklist ? 1 : 0,
+              `${label}: source worklist enqueue must follow local callback mention state`,
+            );
+
+            const sourceMentionsUser =
+              toolCase.scope === 'local'
+                ? metadataAugments.some((entry) => entry.messageId === messageId && entry.patch.mentionsUser === true)
+                : appended.some((m) => m.catId === 'codex' && m.origin === 'stream' && m.mentionsUser === true);
+            assert.equal(
+              sourceMentionsUser,
+              expectedSourceMentionsUser,
+              `${label}: source mentionsUser must follow local operator state`,
+            );
+
+            const expectedCvo =
+              mentionCase.kind === 'cvo' ? [[`route:${messageId}`, `ball:thread:${resultThreadId}`]] : [];
+            assert.deepEqual(
+              recorded
+                .filter((event) => event.kind === 'ball.handed_cvo')
+                .map((event) => [event.sourceEventId, event.subjectKey]),
+              expectedCvo,
+              `${label}: operator handoff must bind to the callback delivery scope`,
+            );
+          }
+        }
+      }
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(original)) {
+        catRegistry.register(id, config);
+      }
+    }
+  });
+
+  test('cross-post operator callback does not mark the source thread as mentioning the user', async () => {
+    const recorded = [];
+    const service = createSequenceService('codex', [
+      [
+        {
+          type: 'tool_use',
+          toolName: 'cat_cafe_cross_post_message',
+          toolInput: {
+            threadId: 'thread-routing-cross-cvo-target',
+            content: '@co-creator\ncross-thread escalation',
+          },
+        },
+        {
+          type: 'tool_result',
+          toolName: 'cat_cafe_cross_post_message',
+          content: JSON.stringify({
+            status: 'ok',
+            messageId: 'msg-routing-cross-cvo',
+            threadId: 'thread-routing-cross-cvo-target',
+          }),
+        },
+        {
+          type: 'text',
+          content: 'local thread follow-up after target-thread escalation',
+        },
+      ],
+      '@co-creator',
+    ]);
+
+    const { appended, calls } = await runRoute(
+      service,
+      'thread-routing-cross-cvo-source',
+      {},
+      { ballCustodyRecords: recorded },
+    );
+
+    assert.equal(calls.length, 1, 'confirmed cross-post operator callback must satisfy the routing guard');
+    assert.deepEqual(
+      recorded
+        .filter((event) => event.kind === 'ball.handed_cvo')
+        .map((event) => [event.sourceEventId, event.subjectKey]),
+      [['route:msg-routing-cross-cvo', 'ball:thread:thread-routing-cross-cvo-target']],
+      'cross-post operator handoff must bind to the target thread',
+    );
+
+    const sourceMessage = appended.find((m) => m.catId === 'codex' && m.origin === 'stream');
+    assert.ok(sourceMessage, 'local follow-up should persist in the source thread');
+    assert.equal(sourceMessage.content, 'local thread follow-up after target-thread escalation');
+    assert.equal(
+      sourceMessage.mentionsUser,
+      undefined,
+      'target-thread operator callback must not create a source-thread user mention notification',
     );
   });
 

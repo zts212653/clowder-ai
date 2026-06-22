@@ -230,10 +230,11 @@ function AnchorItem({ anchor }: { anchor: InvestigationAnchor }) {
         type="button"
         data-testid="anchor-link-thread"
         onClick={handleThreadClick}
-        className="flex items-start gap-1.5 w-full text-left text-xs group hover:bg-cafe-hover rounded px-1 py-0.5"
+        className="flex items-start gap-1.5 w-full min-w-0 text-left text-xs group hover:bg-cafe-hover rounded px-1 py-0.5"
       >
         <span className="font-mono text-conn-blue-text shrink-0">{anchor.handle}</span>
-        <span className="group-hover:underline text-conn-blue-text">{anchor.title}</span>
+        {/* BUG-UX-2 fix: min-w-0 + truncate prevents vertical text collapse in narrow panel */}
+        <span className="group-hover:underline text-conn-blue-text min-w-0 truncate">{anchor.title}</span>
         <span className="text-cafe-tertiary ml-auto shrink-0 hidden sm:inline">{anchor.relevance}</span>
       </button>
     );
@@ -246,10 +247,11 @@ function AnchorItem({ anchor }: { anchor: InvestigationAnchor }) {
         target="_blank"
         rel="noopener noreferrer"
         data-testid="anchor-link-github"
-        className="flex items-start gap-1.5 text-xs group hover:bg-cafe-hover rounded px-1 py-0.5"
+        className="flex items-start gap-1.5 min-w-0 text-xs group hover:bg-cafe-hover rounded px-1 py-0.5"
       >
         <span className="font-mono text-conn-blue-text shrink-0">{anchor.handle}</span>
-        <span className="group-hover:underline text-conn-blue-text">{anchor.title}</span>
+        {/* BUG-UX-2 fix: min-w-0 + truncate prevents vertical text collapse in narrow panel */}
+        <span className="group-hover:underline text-conn-blue-text min-w-0 truncate">{anchor.title}</span>
         <span className="text-cafe-tertiary ml-auto shrink-0 hidden sm:inline">{anchor.relevance}</span>
       </a>
     );
@@ -259,11 +261,14 @@ function AnchorItem({ anchor }: { anchor: InvestigationAnchor }) {
   return (
     <div
       data-testid={`anchor-link-${anchor.kind}`}
-      className="flex items-start gap-1.5 text-xs hover:bg-cafe-hover rounded px-1 py-0.5"
+      className="flex items-start gap-1.5 min-w-0 text-xs hover:bg-cafe-hover rounded px-1 py-0.5"
     >
       <span className="font-mono text-conn-blue-text shrink-0">{anchor.handle}</span>
-      <span className="text-cafe-primary">{anchor.title}</span>
-      {anchor.path && <span className="font-mono text-cafe-tertiary ml-1 truncate">{anchor.path}</span>}
+      {/* BUG-UX-2 fix: min-w-0 + truncate prevents vertical text collapse in narrow panel */}
+      <span className="text-cafe-primary min-w-0 truncate">{anchor.title}</span>
+      {anchor.path && (
+        <span className="font-mono text-cafe-tertiary ml-1 truncate shrink max-w-[30%]">{anchor.path}</span>
+      )}
       <span className="text-cafe-tertiary ml-auto shrink-0 hidden sm:inline">{anchor.relevance}</span>
     </div>
   );

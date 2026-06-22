@@ -120,6 +120,7 @@ const CAT_CAFE_SPLIT_SERVER_IDS = [
   'cat-cafe-memory',
   'cat-cafe-signals',
   'cat-cafe-limb',
+  'cat-cafe-audio',
   'cat-cafe-finance',
 ];
 // F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
@@ -291,6 +292,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         ['cat-cafe-memory', 'memory.js'],
         ['cat-cafe-signals', 'signals.js'],
         ['cat-cafe-limb', 'limb.js'],
+        ['cat-cafe-audio', 'audio.js'],
         ['cat-cafe-finance', 'finance.js'],
       ];
       for (const [serverId, entrypoint] of splitServers) {

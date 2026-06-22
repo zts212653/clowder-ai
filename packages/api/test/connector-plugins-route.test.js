@@ -153,6 +153,44 @@ describe('GET /api/connectors/plugins/:id/icon', () => {
 
     await app.close();
   });
+
+  it('rejects plugin icon sources that resolve to non-image files', async () => {
+    const root = useTempConfigRoot();
+    const pluginDir = join(root, '.cat-cafe', 'plugins', 'icon-non-image');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'index.js'), 'console.log("plugin secret");');
+    writeFileSync(
+      join(pluginDir, 'connector.yaml'),
+      [
+        'id: icon-non-image',
+        'name: Icon Non Image',
+        'nameEn: Icon Non Image',
+        'version: 1.0.0',
+        'icon:',
+        '  type: png',
+        '  src: index.js',
+        'themeColor: "#336699"',
+        'docsUrl: https://example.com/icon-non-image',
+        'config: []',
+        'steps:',
+        '  - text: Step',
+      ].join('\n'),
+    );
+
+    const app = Fastify();
+    await app.register(connectorPluginRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/connectors/plugins/icon-non-image/icon' });
+
+      assert.equal(res.statusCode, 415);
+      assert.notEqual(res.body, 'console.log("plugin secret");');
+      assert.notEqual(res.headers['content-type'], 'application/octet-stream');
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 describe('POST /api/connectors/plugins/install auth boundary', () => {
@@ -176,6 +214,7 @@ describe('POST /api/connectors/plugins/install auth boundary', () => {
 
   it('requires DEFAULT_OWNER_USER_ID before plugin install', async () => {
     clearOwnerUserId();
+    setFrontendUrl('http://localhost:3003');
     const app = await buildPluginRouteApp();
 
     try {
@@ -198,6 +237,7 @@ describe('POST /api/connectors/plugins/install auth boundary', () => {
 
   it('rejects non-owner sessions before plugin install', async () => {
     setOwnerUserId('owner-user');
+    setFrontendUrl('http://localhost:3003');
     const app = await buildPluginRouteApp();
 
     try {
@@ -270,6 +310,7 @@ describe('POST /api/connectors/plugins/install auth boundary', () => {
 describe('DELETE /api/connectors/plugins/:id auth boundary', () => {
   it('rejects non-owner sessions before plugin uninstall', async () => {
     setOwnerUserId('owner-user');
+    setFrontendUrl('http://localhost:3003');
     const app = await buildPluginRouteApp();
 
     try {

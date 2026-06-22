@@ -1,4 +1,5 @@
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
+import type { EvalDomainId } from '../domain/eval-domain-registry.js';
 import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
 import { ensureEvalDomainThreads } from '../hub/eval-hub-thread-ensure.js';
@@ -103,9 +104,7 @@ export async function handleTriggerNow(
     // cats don't waste a run producing a packet they can't publish (501 from
     // handler when generator wire skipped — e.g. cw + no Redis).
     {
-      wiredPublishDomains: deps.wiredPublishDomains as
-        | ReadonlySet<'eval:a2a' | 'eval:memory' | 'eval:sop' | 'eval:capability-wakeup' | 'eval:task-outcome'>
-        | undefined,
+      wiredPublishDomains: deps.wiredPublishDomains as ReadonlySet<EvalDomainId> | undefined,
     },
   );
 

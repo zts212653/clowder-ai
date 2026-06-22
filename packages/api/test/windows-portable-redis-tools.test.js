@@ -39,7 +39,7 @@ test('Windows installer warns when Git is missing instead of exiting before ZIP 
 
 test('Windows installer treats winget Node install failures as retryable instead of terminating native command errors', () => {
   const wingetInstallIndex = installScript.indexOf(
-    'winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>$null',
+    'winget install -e --id OpenJS.NodeJS.LTS --version 24.16.0 --accept-source-agreements --accept-package-agreements --silent 2>$null',
   );
   const tryIndex = installScript.lastIndexOf('try {', wingetInstallIndex);
   const catchIndex = installScript.indexOf('} catch {', wingetInstallIndex);
@@ -51,7 +51,7 @@ test('Windows installer treats winget Node install failures as retryable instead
     'Write-Warn "winget Node.js install failed - falling back to manual prerequisite check"',
   );
   const manualInstallIndex = installScript.indexOf(
-    'Write-Err "Node.js >= 20 required. Install from https://nodejs.org/"',
+    'Write-Err "Node.js >= 24 and < 26 required. Install from https://nodejs.org/"',
   );
 
   assert.notEqual(wingetInstallIndex, -1, 'expected winget-based Node install path');
@@ -60,6 +60,12 @@ test('Windows installer treats winget Node install failures as retryable instead
   assert.notEqual(cancelExitIndex, -1, 'expected winget path to abort on user cancellation');
   assert.notEqual(fallbackWarnIndex, -1, 'expected fallback warning after non-cancellation failure');
   assert.notEqual(manualInstallIndex, -1, 'expected manual install fallback after winget failure');
+  assert.doesNotMatch(
+    installScript,
+    /winget install OpenJS\.NodeJS\.LTS --accept-source-agreements/,
+    'expected Node.js LTS install to be pinned to an exact Node 24 version',
+  );
+  assert.doesNotMatch(installScript, /winget install OpenJS\.NodeJS\s/);
   assert.ok(tryIndex < wingetInstallIndex, 'expected try block before winget install');
   assert.ok(wingetInstallIndex < catchIndex, 'expected catch block after winget install');
   assert.ok(catchIndex < cancelExitIndex, 'expected cancellation handling inside winget catch path');
@@ -73,8 +79,12 @@ test('Windows installer revalidates Node major version after winget install', ()
     'expected Node.js version check to rerun after winget install',
   );
   assert.match(installScript, /\$nodeMajor = \[int\]\$Matches\[1\]/);
-  assert.match(installScript, /if \(\$nodeMajor -ge 20\) \{/);
-  assert.match(installScript, /Write-Warn "Node\.js \$nodeRaw still too old after winget install"/);
+  assert.match(installScript, /if \(\$nodeMajor -ge 24 -and \$nodeMajor -lt 26\) \{/);
+  assert.match(
+    installScript,
+    /Write-Warn "Node\.js \$nodeRaw unsupported after winget install \(need >= 24 and < 26\)"/,
+  );
+  assert.doesNotMatch(installScript, /if \(\$nodeMajor -ge 24\) \{/);
 });
 
 test('Windows installer retries plain pnpm install when frozen lockfile mode still fails after protected retries', () => {

@@ -5,6 +5,7 @@ description: >
   Use when: 任务涉及 2+ 个独立可交付子任务，需要不同猫参与、不同 thread 并行推进。
   Not for: 单一任务（直接做）、已有 thread 之间的被动协调（用 cross-thread-sync）、单 session 内 subagent 并行（CLI 内置能力）、发现跨 scope 问题但已有归属 thread（用 cross_post_message，不要新建 thread）。
   Output: 子 thread 创建 + 选猫 + 各 thread 交付 + 主 thread 汇聚报告。
+  GOTCHA: projectPath 是子 thread 的工作区/真相源归属，不是外部目标仓；社区 PR review 目标可以是 clowder-ai，但工作区仍可能应继承 cat-cafe。
 triggers:
   - "拆任务"
   - "分 thread"
@@ -56,7 +57,7 @@ triggers:
     title: "简洁描述任务目标",
     reason: "为什么这个子任务值得自己一个 thread（必填）",
     preferredCats: ["执行猫", "review猫"],
-    projectPath: "/abs/path/to/repo",  // 当前 thread 是 default/未分类/eval/lobby 且子任务要做 repo 实现时必填
+    projectPath: "/abs/path/to/repo",  // 子 thread 的工作区/真相源归属；不是外部目标仓
     reportingMode: "final-only"  // 可选回报契约: none/final-only(默认)/state-transitions/blocking-ack，见下表
   )
 ```
@@ -72,6 +73,10 @@ triggers:
 #### projectPath — 项目归属
 
 不传 `projectPath` = 继承当前/parent thread 的项目。若当前 thread 本身是 `default` / 未分类 / eval / lobby，而子 thread 要做 repo 或实现工作，必须显式传绝对路径；只有纯 eval/meta/无需项目归属的 thread 才可留空并进入未分类。
+
+先问：**子 thread 的工作区真相源在哪？** `projectPath` 决定新 thread 的 cwd / 归属 project，不等于它要处理的外部 GitHub 仓库、PR 或 issue。例：从 cat-cafe 守门 thread 分发 `clowder-ai#NNN` 的 review / triage / intake 任务时，GitHub target 是 `clowder-ai`，但子 thread 的 projectPath 通常应继承或显式使用 `cat-cafe`，因为家里的 SOP、skills、feature docs、Direction Card 真相源都在这里。
+
+只有当子 thread 明确要在公开仓 checkout 内执行目标仓操作（例如 conflict rebase、public-only hotfix、release target validation），才把 `projectPath` 设为 `clowder-ai`，并在 handoff 里写明原因。
 
 #### reportingMode — 回报契约分型（F128 Phase Y → Phase AA）
 
@@ -224,6 +229,7 @@ Worktree = 隔离（不冲突）
 | 需回报 mode 下完成直接 commit 不等确认 | team lead 失去控制权 | final-only/state-transitions 待 commit 通知主 thread 等确认；none 自主 commit |
 | 把 propose 返回的 proposalId 当成 threadId 用 | cross_post 到不存在的 thread | propose 不创建 thread，只有 user 批准后才有 threadId。等批准事件再发首条消息 |
 | 提议一个 proposal 后立刻假设 thread 存在 | 后续操作全失败 | 必须等用户在 proposal 卡片上点"批准"。批准前继续主 thread 工作 |
+| 把 `projectPath` 当成外部目标仓，给社区 PR review thread 填 `clowder-ai` | 子 thread 进入错误 workspace，家里 SOP/skills/feature docs 不在工作区，球路污染 | projectPath 填工作区真相源；`clowder-ai#NNN` 放在标题/正文/gh 命令里，只有明确目标仓 checkout 操作才填 clowder-ai |
 
 ## 和其他 Skill 的区别
 

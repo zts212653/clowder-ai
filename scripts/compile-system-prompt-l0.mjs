@@ -28,6 +28,7 @@ import { accessSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+import { getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -240,7 +241,16 @@ function buildRosterRow(id, cfg) {
   const mention = cfg.mentionPatterns?.[0] ?? `@${id}`;
   const model = resolveModel(id, cfg);
   const cell = model ? `${mention} · ${model}` : mention;
-  const strengths = cfg.teamStrengths ?? cfg.roleDescription;
+  // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
+  const dossierSummary = getDossierRosterSummary(id, REPO_ROOT);
+  // KD-9: warn only for tracked cats (have dossier entry) missing l0RosterSummary.
+  // Runtime/custom cats with no dossier entry silently use config fallback.
+  if (!dossierSummary && hasDossierEntry(id, REPO_ROOT)) {
+    console.warn(
+      `[F208 KD-9] cat "${id}" has dossier entry but missing l0RosterSummary — falling back to config.teamStrengths`,
+    );
+  }
+  const strengths = dossierSummary ?? cfg.teamStrengths ?? cfg.roleDescription;
   const hasRestrictions = cfg.restrictions && cfg.restrictions.length > 0;
   const restrictions = hasRestrictions ? `**硬限制**：${cfg.restrictions.join('、')}` : null;
   const caution = [cfg.caution ?? null, restrictions].filter(Boolean).join('；') || '—';

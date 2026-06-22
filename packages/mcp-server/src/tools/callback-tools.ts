@@ -499,6 +499,14 @@ export const crossPostMessageInputSchema = {
     .max(200)
     .optional()
     .describe('Optional idempotency key for at-least-once delivery de-duplication'),
+  effectClass: z
+    .enum(['fyi', 'coordinate', 'investigate', 'assign_work'])
+    .optional()
+    .describe(
+      'F246 Phase B: Effect-class of the cross-thread dispatch. ' +
+        'fyi/coordinate/investigate → auto-deliver (default). ' +
+        'assign_work → held as a DispatchProposal pending operator approval in the Approval Hub.',
+    ),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -510,6 +518,11 @@ export const listTasksInputSchema = {
     .enum(['work', 'pr_tracking'])
     .optional()
     .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
+  taskId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('F236 why-drill: pass a taskId to retrieve that task with its full (untruncated) why field'),
 };
 
 /**
@@ -549,6 +562,7 @@ async function _executePostMessage(input: {
   clientMessageId?: string | undefined;
   targetCats?: string[] | undefined;
   agentKeyCatId?: string | undefined;
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -565,6 +579,7 @@ async function _executePostMessage(input: {
           ...(input.replyTo ? { replyTo: input.replyTo } : {}),
           clientMessageId: input.clientMessageId ?? randomUUID(),
           ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
+          ...(input.effectClass ? { effectClass: input.effectClass } : {}),
         },
         { enableOutbox: true, agentKeyCatId: input.agentKeyCatId },
       ),
@@ -696,6 +711,7 @@ export async function handleGetThreadContext(input: {
 export async function handleGetMessage(input: {
   messageId: string;
   contextCount?: number | undefined;
+  mode?: 'preview' | 'full' | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
   return callbackGet(
@@ -703,6 +719,7 @@ export async function handleGetMessage(input: {
     {
       messageId: input.messageId,
       ...(input.contextCount ? { contextCount: String(input.contextCount) } : {}),
+      ...(input.mode ? { mode: input.mode } : {}),
     },
     { agentKeyCatId: input.agentKeyCatId },
   );
@@ -903,6 +920,7 @@ export async function handleCrossPostMessage(input: {
   replyTo?: string | undefined;
   clientMessageId?: string | undefined;
   agentKeyCatId?: string | undefined;
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work' | undefined;
 }): Promise<ToolResult> {
   // F193 AC-A4 closing砚砚 review P1: MCP layer fail-closed.
   // The API route layer (callbacks.ts) only triggers AC-A4 reject when
@@ -941,6 +959,7 @@ export async function handleCrossPostMessage(input: {
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
     ...(input.targetCats?.length ? { targetCats: input.targetCats } : {}),
+    ...(input.effectClass ? { effectClass: input.effectClass } : {}),
   });
 }
 
@@ -949,12 +968,14 @@ export async function handleListTasks(input: {
   catId?: string | undefined;
   status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
   kind?: 'work' | 'pr_tracking' | undefined;
+  taskId?: string | undefined;
 }): Promise<ToolResult> {
   return callbackGet('/api/callbacks/list-tasks', {
     ...(input.threadId ? { threadId: input.threadId } : {}),
     ...(input.catId ? { catId: input.catId } : {}),
     ...(input.status ? { status: input.status } : {}),
     ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.taskId ? { taskId: input.taskId } : {}),
   });
 }
 
@@ -1556,7 +1577,7 @@ export const proposeThreadInputSchema = {
     .max(500)
     .optional()
     .describe(
-      'Optional absolute project directory the child thread belongs to (e.g. "/home/user/clowder-ai"). This decides the working directory cats use when invoked in the new thread. Omit to inherit THIS thread\'s project; if THIS thread is default/未分类/eval/lobby and the child will do repo or implementation work, set projectPath explicitly. Invalid/non-existent paths are rejected (400), never silently defaulted. The user can also change it on the approval card.',
+      'Optional absolute project directory the child thread belongs to (e.g. "/home/user/projects/clowder-ai"). This decides the working directory cats use when invoked in the new thread. Omit to inherit THIS thread\'s project; if THIS thread is default/未分类/eval/lobby and the child will do repo or implementation work, set projectPath explicitly. Invalid/non-existent paths are rejected (400), never silently defaulted. The user can also change it on the approval card.',
     ),
   clientRequestId: z
     .string()
@@ -1856,7 +1877,8 @@ export const callbackTools = [
       'Look up a single message by its messageId. Use when you receive a message with replyTo — ' +
       'call this to read the original quoted message and its surrounding context. ' +
       'Returns the message content, sender, timestamp, and optionally N nearby messages for context. ' +
-      'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10).',
+      'PARAM GUIDE: messageId = required exact ID. contextCount = number of messages before/after to include (default 0, max 10). ' +
+      'mode = "preview" (default — bounded excerpt that saves context) or "full" (complete original content; use when you need the whole message — anchor drillDown pointers already request mode=full).',
     inputSchema: {
       messageId: z.string().min(1).describe('The exact message ID to look up'),
       contextCount: z
@@ -1866,6 +1888,10 @@ export const callbackTools = [
         .max(10)
         .optional()
         .describe('Number of messages before and after to include for context (0-10, default 0)'),
+      mode: z
+        .enum(['preview', 'full'])
+        .optional()
+        .describe('preview (default, bounded excerpt) or full (complete content). F236 anchor-first drill terminal.'),
       agentKeyCatId: agentKeyCatIdSchema,
     },
     handler: handleGetMessage,

@@ -45,3 +45,7 @@ resources:
     name: repo-comment-poll
     factoryId: github.repo-comment-poll
     optional: true
+  - type: schedule
+    name: community-reconciler
+    factoryId: github.community-reconciler
+    optional: true

@@ -21,6 +21,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDefaultCatId } from '../config/cat-config-loader.js';
 import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
+import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromAgentMessage,
@@ -149,6 +150,8 @@ export interface MessagesRoutesOptions {
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
   autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
+  /** F233 PR3: ball-custody event sink for zombie reconciliation side effects. */
+  ballCustody?: IBallCustodyIngest;
   /** F088 ISSUE-15: Outbound delivery hook for connector platforms (late-bound after gateway bootstrap) */
   outboundHook?: OutboundDeliveryHookLike;
   /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
@@ -247,6 +250,8 @@ function formatRoutingWarnings(warnings: CatRoutingError[]): string {
         .map((a) => a.mention)
         .join('、');
       parts.push(`@${w.catId} 已停用，已跳过${alts ? `（可用替代：${alts}）` : ''}。`);
+    } else if (w.kind === 'target_not_in_thread') {
+      parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
     } else {
       parts.push(`${w.mention} 不存在，已跳过。`);
     }
@@ -1956,6 +1961,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             void reconcileZombies(liveness.zombies, {
               invocationRecordStore: recordStore,
               taskProgressStore: opts.taskProgressStore,
+              ballCustody: opts.ballCustody,
               log: request.log,
             }).catch((err) => request.log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
           }

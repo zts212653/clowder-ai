@@ -970,7 +970,7 @@ export class WeixinAdapter implements IOutboundAdapter {
       const apiBase = (
         process.env.CAT_CAFE_API_URL ??
         process.env.NEXT_PUBLIC_API_URL ??
-        'http://localhost:3004'
+        `http://localhost:${process.env.API_SERVER_PORT ?? '3004'}`
       ).replace(/\/$/, '');
       return `${apiBase}${url}`;
     }

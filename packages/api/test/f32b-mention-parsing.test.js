@@ -295,6 +295,17 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
     assert.deepEqual(targetCats.map(String), ['codex', 'opus-45']);
   });
 
+  it('earlier inline mention keeps priority over later route-line duplicate (cloud P1 regression)', async () => {
+    const router = await createVariantRouter();
+    const { targetCats, hasMentions } = await router.resolveTargetsAndIntent(
+      'please @codex and @opus\n@codex',
+      'test-thread',
+    );
+
+    assert.equal(hasMentions, true);
+    assert.deepEqual(targetCats.map(String), ['codex', 'opus']);
+  });
+
   it('email-like inline @handles are inert user text, not routing targets', async () => {
     const router = await createVariantRouter();
     const { targetCats, hasMentions } = await router.resolveTargetsAndIntent(
@@ -419,6 +430,47 @@ describe('F32-b: parseMentions (longest-match-first)', () => {
 
     assert.equal(hasMentions, true);
     assert.deepEqual(targetCats.map(String), ['codex']);
+  });
+
+  it('zero-width characters inside line-start mention tokens still route (cloud P2 regression)', async () => {
+    const router = await createVariantRouter();
+
+    for (const content of ['@\u200bcodex 看一下', '- @\u200bcodex 看一下', '@c\u200bodex 看一下']) {
+      const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+        content,
+        'test-thread',
+      );
+
+      assert.equal(hasMentions, true, content);
+      assert.deepEqual(targetCats.map(String), ['codex'], content);
+      assert.deepEqual(routing_warnings, [], content);
+    }
+  });
+
+  it('markdown-wrapped line-start mentions ignore matching closing markers (cloud P2 regression)', async () => {
+    const router = await createVariantRouter();
+
+    for (const content of ['_@codex_', '__@codex__', '*@codex*', '**@codex**', '- _@codex_']) {
+      const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+        content,
+        'test-thread',
+      );
+
+      assert.equal(hasMentions, true, content);
+      assert.deepEqual(targetCats.map(String), ['codex'], content);
+      assert.deepEqual(routing_warnings, [], content);
+    }
+
+    for (const content of ['_@codex_extra_', '__@codex_extra__']) {
+      const { targetCats, hasMentions, routing_warnings } = await router.resolveTargetsAndIntent(
+        content,
+        'test-thread',
+      );
+
+      assert.equal(hasMentions, false, content);
+      assert.deepEqual(targetCats.map(String), ['opus'], content);
+      assert.deepEqual(routing_warnings, [], content);
+    }
   });
 
   it('all IntentParser route-control tags allow line-start mention routing', async () => {

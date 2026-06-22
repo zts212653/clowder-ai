@@ -1506,7 +1506,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.equal(
         body.skillHealth?.registrationConsistent,
         true,
-        'plugin-owned skills should not be treated as phantom Cat Cafe source-tree registrations',
+        'plugin-owned skills should not be treated as phantom Clowder AI source-tree registrations',
       );
       assert.deepEqual(body.skillHealth?.phantom, []);
     } finally {
@@ -1515,7 +1515,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('creates Cat Cafe source skill capability beside a same-id plugin-owned skill on GET', async () => {
+  it('creates Clowder AI source skill capability beside a same-id plugin-owned skill on GET', async () => {
     const previousCwd = process.cwd();
     const Fastify = (await import('fastify')).default;
 
@@ -1570,7 +1570,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       assert.ok(pluginCap, 'declared plugin-owned skill should survive');
       assert.deepEqual(pluginCap.mountPaths, ['claude']);
       const catCafeCap = config?.capabilities.find((item) => item.id === 'debugging' && !item.pluginId);
-      assert.ok(catCafeCap, 'source Cat Cafe skill should get its own non-plugin capability');
+      assert.ok(catCafeCap, 'source Clowder AI skill should get its own non-plugin capability');
       assert.equal(catCafeCap.source, 'cat-cafe');
       assert.equal(catCafeCap.enabled, true);
     } finally {
@@ -1581,7 +1581,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('preserves same-id external skill capability when adding Cat Cafe source skill on GET', async () => {
+  it('preserves same-id external skill capability when adding Clowder AI source skill on GET', async () => {
     const previousCwd = process.cwd();
     const Fastify = (await import('fastify')).default;
 
@@ -1626,7 +1626,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       const catCafeCap = config?.capabilities.find(
         (item) => item.id === 'debugging' && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
       );
-      assert.ok(catCafeCap, 'source Cat Cafe skill should get its own non-external capability');
+      assert.ok(catCafeCap, 'source Clowder AI skill should get its own non-external capability');
       assert.equal(catCafeCap.enabled, true);
     } finally {
       await app.close();
@@ -1636,7 +1636,7 @@ describe('GET /api/capabilities (Fastify)', () => {
     }
   });
 
-  it('seeds discovered Cat Cafe skills from global disabled policy on GET', async () => {
+  it('seeds discovered Clowder AI skills from global disabled policy on GET', async () => {
     const previousCwd = process.cwd();
     const previousHome = process.env.HOME;
     const Fastify = (await import('fastify')).default;
@@ -1672,7 +1672,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       const catCafeCap = config?.capabilities.find(
         (item) => item.id === skillId && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
       );
-      assert.ok(catCafeCap, 'source Cat Cafe skill should get a project capability row');
+      assert.ok(catCafeCap, 'source Clowder AI skill should get a project capability row');
       assert.equal(catCafeCap.enabled, false, 'global disabled state should seed external discovery');
       assert.deepEqual(catCafeCap.mountPaths, [], 'global empty mountPaths should seed external discovery');
     } finally {
@@ -1734,7 +1734,7 @@ describe('GET /api/capabilities (Fastify)', () => {
       const catCafeCap = config?.capabilities.find(
         (item) => item.id === skillId && item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId,
       );
-      assert.ok(catCafeCap, 'Cat Cafe skill should be seeded even with custom mount targets');
+      assert.ok(catCafeCap, 'Clowder AI skill should be seeded even with custom mount targets');
       assert.equal(catCafeCap.enabled, false, 'global disabled state must seed despite custom mount target');
       assert.deepEqual(catCafeCap.mountPaths, [], 'global empty mountPaths must seed despite custom mount target');
     } finally {
@@ -3225,7 +3225,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     }
   });
 
-  it('prefers same-id first-party Cat Cafe skill when toggling managed skills', async () => {
+  it('prefers same-id first-party Clowder AI skill when toggling managed skills', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const mainRoot = await makeTmpDir('patch-skill-first-party-toggle-lookup');
@@ -3347,7 +3347,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       );
       assert.equal(external?.enabled, false, 'external skill should be toggled');
       assert.deepEqual(external?.mountPaths, ['claude'], 'external mount policy should be preserved');
-      assert.equal(firstParty?.enabled, true, 'first-party Cat Cafe skill must stay enabled');
+      assert.equal(firstParty?.enabled, true, 'first-party Clowder AI skill must stay enabled');
       assert.deepEqual(firstParty?.mountPaths, ['claude'], 'first-party mount policy must be preserved');
     } finally {
       await app.close();

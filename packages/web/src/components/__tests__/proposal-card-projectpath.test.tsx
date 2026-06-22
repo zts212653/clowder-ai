@@ -90,7 +90,7 @@ describe('ProposalCard — projectPath ownership', () => {
     root = createRoot(container);
     chatStoreState.threads = [
       { id: 'thread_cat_cafe', projectPath: '/home/user/cat-cafe' },
-      { id: 'thread_clowder', projectPath: '/home/user/clowder-ai' },
+      { id: 'thread_clowder', projectPath: '/home/user/projects/clowder-ai' },
       { id: 'thread_default', projectPath: 'default' },
     ];
     chatStoreState.updateThreadPin.mockReset();
@@ -142,11 +142,11 @@ describe('ProposalCard — projectPath ownership', () => {
   }
 
   it('surfaces the project ownership in the card (AC-Z4 visibility)', async () => {
-    await render(makeBlock('/home/user/clowder-ai'));
+    await render(makeBlock('/home/user/projects/clowder-ai'));
     expect(container.textContent).toContain('回报模式');
     expect(container.textContent).toContain('final-only');
     expect(container.textContent).toContain('项目归属');
-    expect(container.textContent).toContain('/home/user/clowder-ai');
+    expect(container.textContent).toContain('/home/user/projects/clowder-ai');
   });
 
   it('shows the default-ownership notice when the child has no project', async () => {
@@ -165,7 +165,7 @@ describe('ProposalCard — projectPath ownership', () => {
     const ppInput = findInputByLabel('项目归属');
     expect(ppInput.value).toBe('');
     await act(async () => {
-      setInput(ppInput, '/home/user/clowder-ai');
+      setInput(ppInput, '/home/user/projects/clowder-ai');
     });
     apiFetchMock.mockImplementation(() =>
       Promise.resolve(jsonResponse(200, { proposalId: PROPOSAL_ID, threadId: 'thread_rehomed', status: 'approved' })),
@@ -177,7 +177,7 @@ describe('ProposalCard — projectPath ownership', () => {
       await Promise.resolve();
     });
     const sentBody = readApproveBody();
-    expect(sentBody.projectPath).toBe('/home/user/clowder-ai');
+    expect(sentBody.projectPath).toBe('/home/user/projects/clowder-ai');
   });
 
   it('edit + approve lets the user override reportingMode to autonomous', async () => {
@@ -224,7 +224,7 @@ describe('ProposalCard — projectPath ownership', () => {
     expect([...select.options].map((option) => option.value)).toEqual([
       '',
       '/home/user/cat-cafe',
-      '/home/user/clowder-ai',
+      '/home/user/projects/clowder-ai',
     ]);
 
     await act(async () => {
@@ -266,11 +266,11 @@ describe('ProposalCard — projectPath ownership', () => {
   });
 
   it('prefills a real project path into the editable input', async () => {
-    await render(makeBlock('/home/user/repo'));
+    await render(makeBlock('/home/user/projects/repo'));
     await act(async () => {
       findButton('编辑').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
-    expect(findInputByLabel('项目归属').value).toBe('/home/user/repo');
+    expect(findInputByLabel('项目归属').value).toBe('/home/user/projects/repo');
   });
 
   it('uses finalized reportingMode from proposal GET after reload (cloud P2)', async () => {

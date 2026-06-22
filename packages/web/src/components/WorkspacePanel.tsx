@@ -9,6 +9,7 @@ import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { ApprovalPanel } from './ApprovalPanel';
 import { ArtifactsPanel } from './ArtifactsPanel';
 import { CommunityPanel } from './CommunityPanel';
 import { EventTimeline } from './event-memory/EventTimeline';
@@ -24,9 +25,11 @@ import { LinkedRootRemoveButton, LinkedRootsManager } from './workspace/LinkedRo
 import { ResizeHandle } from './workspace/ResizeHandle';
 import { SchedulePanel } from './workspace/SchedulePanel';
 import { TerminalTab } from './workspace/TerminalTab';
+import { TrajectoryPanel } from './workspace/trajectory/TrajectoryPanel';
 import { WorkspaceFileViewer } from './workspace/WorkspaceFileViewer';
 import { WorkspaceFocusShell } from './workspace/WorkspaceFocusShell';
 import { WorkspacePreviewOnly } from './workspace/WorkspacePreviewOnly';
+import { WorkspaceTabBar } from './workspace/WorkspaceTabBar';
 import { WorkspaceTree } from './workspace/WorkspaceTree';
 
 /** Find a node in a tree by path (DFS) */
@@ -292,7 +295,16 @@ export function WorkspacePanel() {
       ?.then((res) => res.json())
       .then((thread: { preferredWorkspaceMode?: string }) => {
         if (cancelled) return;
-        const valid = new Set(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts']);
+        const valid = new Set([
+          'dev',
+          'recall',
+          'schedule',
+          'tasks',
+          'community',
+          'artifacts',
+          'approval',
+          'trajectory',
+        ]);
         if (thread.preferredWorkspaceMode && valid.has(thread.preferredWorkspaceMode)) {
           setWorkspaceMode(thread.preferredWorkspaceMode as typeof workspaceMode);
         } else if (['community', 'artifacts'].includes(useChatStore.getState().workspaceMode)) {
@@ -748,132 +760,10 @@ export function WorkspacePanel() {
             </form>
           )}
 
-          {/* Phase H: Workspace mode switcher */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-cafe-surface/50">
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('dev')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'dev'
-                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <span className="text-xs">&lt;/&gt;</span> 开发
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('recall')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'recall'
-                  ? 'bg-cafe-accent/10 text-cafe-accent border border-cafe-accent/30'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <svg
-                className="w-3 h-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
-                <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
-                <path d="M9 17l3 5v-5M15 17l-3 5" />
-              </svg>
-              记忆
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('schedule')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'schedule'
-                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 0a8 8 0 110 16A8 8 0 018 0zm0 2a6 6 0 100 12A6 6 0 008 2zm.5 2v4.25l2.85 2.85a.5.5 0 01-.7.7L7.8 8.95A.5.5 0 017.5 8.6V4a.5.5 0 011 0z" />
-              </svg>
-              调度
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('tasks')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'tasks'
-                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <svg
-                className="w-3 h-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <circle cx="12" cy="12" r="1" />
-              </svg>
-              任务
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('community')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'community'
-                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <svg
-                className="w-3 h-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M22 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-              </svg>
-              社区
-            </button>
-            {/* F232 AC-A8 修订：产物升为 workspaceMode 顶层入口 */}
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('artifacts')}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-micro font-semibold transition-all ${
-                workspaceMode === 'artifacts'
-                  ? 'bg-cafe-surface text-cafe-interactive border border-cafe-subtle/60'
-                  : 'text-cafe-interactive/40 hover:text-cafe-interactive/60'
-              }`}
-            >
-              <svg
-                className="w-3 h-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                <path d="M2 17l10 5 10-5" />
-                <path d="M2 12l10 5 10-5" />
-              </svg>
-              产物
-            </button>
-          </div>
+          {/* F246 Phase C: responsive workspace tab bar (replaces hardcoded buttons) */}
+          <WorkspaceTabBar />
 
-          {/* Knowledge / Schedule / Tasks / Artifacts / Dev mode routing */}
+          {/* Knowledge / Schedule / Tasks / Artifacts / Approval / Dev mode routing */}
           {workspaceMode === 'recall' ? (
             <div className="flex-1 min-h-0 flex flex-col">
               {/* F227: 记忆流 vs 拉闸记录 (Event Memory timeline) */}
@@ -911,6 +801,10 @@ export function WorkspacePanel() {
                 选择一个对话以查看产物
               </div>
             )
+          ) : workspaceMode === 'approval' ? (
+            <ApprovalPanel />
+          ) : workspaceMode === 'trajectory' ? (
+            <TrajectoryPanel />
           ) : (
             <>
               {/* Files / Changes toggle */}

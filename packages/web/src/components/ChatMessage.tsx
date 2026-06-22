@@ -52,7 +52,6 @@ function formatTime(ts: number): string {
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
-
 function formatDualTime(timestamp: number, deliveredAt?: number): string {
   if (!deliveredAt || deliveredAt - timestamp <= DELIVERED_AT_GAP_THRESHOLD) {
     return formatTime(timestamp);
@@ -197,7 +196,6 @@ export function ChatMessage({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
-
   if (isSummary && message.summary) {
     return (
       <div data-message-id={message.id}>

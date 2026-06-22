@@ -9,6 +9,7 @@ const memoryDomain = {
   evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
   frequency: 'daily',
   sourceAdapter: 'f200-f188-memory-eval',
+  sourceRefsKind: 'memory-recall-snapshot',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',

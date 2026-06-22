@@ -102,6 +102,11 @@ describe('F167 C2 — eval:a2a 2026-06-16 verdict-without-pass slot-scope tuning
   });
 
   test('R3 P1: signature without 🐾 emoji (GPT-5.5 style) still stripped', () => {
+    // Restored after PR #2442 R2 (砚砚): PR #2314 R6 P1's legacy un-pawed
+    // signature contract is preserved via the layered rule in
+    // cat-signature-strip.ts — single slash + no file-extension tail ⇒
+    // signature. `[砚砚/GPT-5.5]` qualifies (`.5` is not a known extension);
+    // `[packages/api/src/foo.ts]` does not (multi-slash + .ts tail).
     const text = '放行\n\n[砚砚/GPT-5.5]';
     assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), true);
   });
@@ -167,31 +172,15 @@ describe('F167 C2 — eval:a2a 2026-06-16 verdict-without-pass slot-scope tuning
     assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), false);
   });
 
-  test('R6 P1: slashed signature WITHOUT 🐾 [砚砚/GPT-5.5] still strips (slash alone qualifies)', () => {
-    // commit-signatures.md examples: `[宪宪/Opus-46🐾]` etc. with paw, but the
-    // table format `[昵称/变体🐾]` shows paw as the standard suffix. Slashed
-    // signatures historically have appeared without paw too — keep them
-    // covered since the slash itself is a strong signal.
+  test('R6 P1: slashed signature WITHOUT 🐾 [砚砚/GPT-5.5] still strips (slash alone qualifies after layered rule)', () => {
+    // PR #2314 R6 P1 restored after PR #2442 R2 — slash-only check refined
+    // into "single slash + no file-extension tail" so legacy un-pawed
+    // signatures stay supported while file paths are excluded.
     const text = '放行\n\n[砚砚/GPT-5.5]';
     assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), true);
   });
 
-  // Cloud Codex round-4 P2 (2026-06-16) — converges with 砚砚 R6 P1 on the same
-  // root cause (over-broad signature regex stripping body brackets). Adding
-  // cloud's specific examples to the regression set so future refactors
-  // can't silently regress either reviewer's worry.
-  test('Cloud P2: bracketed body verdict [LGTM] terminal — preserved → fires (slot=[LGTM])', () => {
-    const text = 'Looks correct.\n\n[LGTM]';
-    assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), true);
-  });
-
-  test('Cloud P2: bracketed body verdict [P1: SQL injection] terminal — preserved → fires', () => {
-    const text = 'See review.\n\n[P1: SQL injection]';
-    assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), true);
-  });
-
-  test('Cloud P2: bracketed body verdict [P2: nit] terminal — preserved → fires', () => {
-    const text = '修了下命名\n\n[P2: nit]';
-    assert.equal(shouldWarnVerdictWithoutPass({ ...baseInput, text }), true);
-  });
+  // PR #2442 round-evolution regression tests (cloud R1 file-path FPs through
+  // 砚砚 R7 P2 CJK semantic labels) live in `verdict-detect-slot-scope-pr2442.test.js`
+  // — split per cloud R6/R7/R8 P1 (file 350-line hard cap from AGENTS.md).
 });

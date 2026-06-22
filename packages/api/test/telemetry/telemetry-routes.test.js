@@ -313,6 +313,44 @@ test('GET /api/telemetry/health returns full health contract', async () => {
   app.close();
 });
 
+// ── F167 sibling-PR: /api/telemetry/process-info ──
+// Exposes processStartMs so eval cats can compute counter rate against the
+// real OTel SDK accumulation window (counters reset on restart, hydrated
+// trace window can be 24h → silent false positive without this).
+
+test('GET /api/telemetry/process-info returns 401 without session', async () => {
+  const app = await buildApp();
+  const res = await app.inject({ method: 'GET', url: '/api/telemetry/process-info' });
+  assert.equal(res.statusCode, 401);
+  app.close();
+});
+
+test('GET /api/telemetry/process-info returns processStartMs + uptimeSec', async () => {
+  const app = await buildApp();
+  const cookie = await getSessionCookie(app);
+  const before = Date.now();
+  const res = await app.inject({
+    method: 'GET',
+    url: '/api/telemetry/process-info',
+    headers: { cookie },
+  });
+  const after = Date.now();
+  assert.equal(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  assert.ok(typeof body.processStartMs === 'number');
+  assert.ok(typeof body.uptimeSec === 'number');
+  // processStartMs ≤ before (process booted before this request)
+  assert.ok(body.processStartMs <= before, `processStartMs ${body.processStartMs} should be <= ${before}`);
+  // Sanity: uptimeSec should be positive and consistent with processStartMs
+  assert.ok(body.uptimeSec >= 0);
+  // processStartMs + uptimeSec*1000 should be close to "now" (within request latency)
+  const reconstructed = body.processStartMs + body.uptimeSec * 1000;
+  assert.ok(
+    Math.abs(reconstructed - after) < 5000,
+    `reconstructed boot+uptime ${reconstructed} should be within 5s of after=${after}`,
+  );
+});
+
 test('GET /api/telemetry/health returns 503 when readiness is degraded', async () => {
   const checkReadiness = async () => ({
     status: 'degraded',

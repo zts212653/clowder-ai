@@ -113,4 +113,23 @@ describe('ThreadExecutionBar force-reset (F220 Phase 3)', () => {
     const entry = container.querySelector('[data-testid="force-reset-entry"]');
     expect(entry?.getAttribute('data-escalated')).toBe('false');
   });
+
+  it('does not render capability tips in the execution bar', async () => {
+    vi.useFakeTimers();
+    try {
+      setActive('opus', 'streaming');
+      act(() => {
+        root.render(React.createElement(ThreadExecutionBar, { threadId: 'thread-a' }));
+      });
+      expect(container.querySelector('[data-testid="capability-tip-strip"]')).toBeNull();
+
+      await act(async () => {
+        vi.advanceTimersByTime(6000);
+      });
+
+      expect(container.querySelector('[data-testid="capability-tip-strip"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

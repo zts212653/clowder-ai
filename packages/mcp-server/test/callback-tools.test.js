@@ -82,6 +82,42 @@ describe('MCP Callback Tools', () => {
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
   });
 
+  test('handleGetMessage forwards mode + stays pass-through (F236 AC-A5/B1)', async () => {
+    const { handleGetMessage } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    // route returns an already-anchored payload; the MCP handler must NOT re-transform it
+    const routePayload = { message: { id: 'm1', preview: 'excerpt', truncated: true, contentLength: 500 } };
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => routePayload };
+    };
+
+    const result = await handleGetMessage({ messageId: 'm1', mode: 'full' });
+
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('/api/callbacks/get-message'));
+    assert.ok(capturedUrl.includes('messageId=m1'));
+    assert.ok(capturedUrl.includes('mode=full'), 'mode forwarded to route (truncation lives in route layer, AC-A5)');
+    // pass-through: route payload returned verbatim, anchor fields intact
+    assert.deepEqual(JSON.parse(result.content[0].text), routePayload);
+  });
+
+  test('handleListTasks forwards taskId why-drill param (F236 AC-A4)', async () => {
+    const { handleListTasks } = await import('../dist/tools/callback-tools.js');
+
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => ({ tasks: [] }) };
+    };
+
+    await handleListTasks({ taskId: 'task-123' });
+
+    assert.ok(capturedUrl.includes('/api/callbacks/list-tasks'));
+    assert.ok(capturedUrl.includes('taskId=task-123'), 'taskId forwarded for full-why drill');
+  });
+
   test('handlePostMessage forwards threadId for agent-key callers (F178)', async () => {
     // F193 KD-1: principal detection follows buildAuthHeaders precedence —
     // if env has BOTH invocation_id AND callback_token, request is

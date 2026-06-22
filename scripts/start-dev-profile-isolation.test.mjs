@@ -292,6 +292,21 @@ describe('start-dev strict profile isolation', () => {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
   });
+
+  it('runs --prod-web API launches without the dev watcher even when no env wrapper injects it', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({
+        sandboxDir,
+        extraArgs: ['--prod-web'],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /pnpm run start/, result.stdout);
+      assert.doesNotMatch(result.stdout, /pnpm run dev/, result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('cross-platform pnpm-start profile propagation (#421)', () => {
@@ -430,6 +445,21 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       devDirectBlock,
       /directConnectorAutostartFailClosed/,
       'dev:direct must explicitly fail closed for preconfigured IM connector autostart',
+    );
+  });
+
+  it('start-entry.mjs marks Unix runtime-worktree starts as no-watch before dispatch', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
+    const unixDispatchStart = source.indexOf('// Unix: dispatch based on mode');
+    const runtimeStartBlock = source.slice(
+      source.indexOf("mode === 'start'", unixDispatchStart),
+      source.indexOf("} else if (mode === 'start:direct'", unixDispatchStart),
+    );
+
+    assert.match(
+      runtimeStartBlock,
+      /CAT_CAFE_DIRECT_NO_WATCH:\s*'1'/,
+      'pnpm start must mark runtime-worktree startup as no-watch before dispatching',
     );
   });
 

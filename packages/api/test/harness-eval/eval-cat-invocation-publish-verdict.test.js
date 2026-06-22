@@ -15,6 +15,7 @@ const TEST_DOMAIN_BASE = {
   systemThreadId: 'thread_test',
   evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
   frequency: /** @type {const} */ ('daily'),
+  sourceRefsKind: /** @type {const} */ ('a2a-snapshot-attribution'),
   threadPolicy: {
     role: /** @type {const} */ ('working-home'),
     stateSot: /** @type {const} */ ('registry'),
@@ -36,6 +37,14 @@ const SOURCE_ADAPTER_FOR = {
   'eval:sop': 'sop-trace-eval',
   'eval:capability-wakeup': 'capability-wakeup-eval',
   'eval:task-outcome': 'task-outcome-eval',
+};
+
+const SOURCE_REFS_KIND_FOR = {
+  'eval:a2a': 'a2a-snapshot-attribution',
+  'eval:memory': 'memory-recall-snapshot',
+  'eval:sop': 'sop-trace-eval',
+  'eval:capability-wakeup': 'capability-wakeup-trial-window',
+  'eval:task-outcome': 'task-outcome-snapshot',
 };
 
 describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool', () => {
@@ -117,7 +126,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
 
   it('task-outcome base instruction keeps packet verdict 4-class and routes episode verdicts through sourceRefs', () => {
     const packet = buildEvalCatInvocation({
-      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:task-outcome', sourceAdapter: 'task-outcome-eval' },
+      domain: {
+        ...TEST_DOMAIN_BASE,
+        domainId: 'eval:task-outcome',
+        sourceAdapter: 'task-outcome-eval',
+        sourceRefsKind: 'task-outcome-snapshot',
+      },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
@@ -138,7 +152,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
   it('only wired domains get publish-verdict directive (wired domains only)', () => {
     for (const wiredDomain of ['eval:a2a', 'eval:capability-wakeup', 'eval:memory', 'eval:task-outcome', 'eval:sop']) {
       const packet = buildEvalCatInvocation({
-        domain: { ...TEST_DOMAIN_BASE, domainId: wiredDomain, sourceAdapter: SOURCE_ADAPTER_FOR[wiredDomain] },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: wiredDomain,
+          sourceAdapter: SOURCE_ADAPTER_FOR[wiredDomain],
+          sourceRefsKind: SOURCE_REFS_KIND_FOR[wiredDomain],
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -162,7 +181,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.doesNotMatch(a2a.instructions, /memory-recall-snapshot/, 'a2a does NOT mention memory selector');
 
     const cw = buildEvalCatInvocation({
-      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:capability-wakeup', sourceAdapter: 'capability-wakeup-eval' },
+      domain: {
+        ...TEST_DOMAIN_BASE,
+        domainId: 'eval:capability-wakeup',
+        sourceAdapter: 'capability-wakeup-eval',
+        sourceRefsKind: 'capability-wakeup-trial-window',
+      },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
@@ -179,7 +203,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.doesNotMatch(cw.instructions, /memory-recall-snapshot/, 'cw does NOT mention memory selector');
 
     const mem = buildEvalCatInvocation({
-      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:memory', sourceAdapter: 'f200-f188-memory-eval' },
+      domain: {
+        ...TEST_DOMAIN_BASE,
+        domainId: 'eval:memory',
+        sourceAdapter: 'f200-f188-memory-eval',
+        sourceRefsKind: 'memory-recall-snapshot',
+      },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
@@ -192,7 +221,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.doesNotMatch(mem.instructions, /capability-wakeup-trial-window/, 'memory does NOT mention cw selector kind');
 
     const taskOutcome = buildEvalCatInvocation({
-      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:task-outcome', sourceAdapter: 'task-outcome-eval' },
+      domain: {
+        ...TEST_DOMAIN_BASE,
+        domainId: 'eval:task-outcome',
+        sourceAdapter: 'task-outcome-eval',
+        sourceRefsKind: 'task-outcome-snapshot',
+      },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
@@ -207,7 +241,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     );
 
     const sop = buildEvalCatInvocation({
-      domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:sop', sourceAdapter: 'sop-trace-eval' },
+      domain: {
+        ...TEST_DOMAIN_BASE,
+        domainId: 'eval:sop',
+        sourceAdapter: 'sop-trace-eval',
+        sourceRefsKind: 'sop-trace-eval',
+      },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
@@ -227,7 +266,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
   it('omits memory publish instructions when wiredPublishDomains excludes eval:memory', () => {
     const memUnwired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:memory', sourceAdapter: 'f200-f188-memory-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:memory',
+          sourceAdapter: 'f200-f188-memory-eval',
+          sourceRefsKind: 'memory-recall-snapshot',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -244,7 +288,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     // Sanity: when memory IS wired, publish instructions + selector docs appear.
     const memWired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:memory', sourceAdapter: 'f200-f188-memory-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:memory',
+          sourceAdapter: 'f200-f188-memory-eval',
+          sourceRefsKind: 'memory-recall-snapshot',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -264,7 +313,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     // cw is in known-wireable BY_DOMAIN map, BUT runtime didn't wire it (Redis missing).
     const cwUnwired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:capability-wakeup', sourceAdapter: 'capability-wakeup-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:capability-wakeup',
+          sourceAdapter: 'capability-wakeup-eval',
+          sourceRefsKind: 'capability-wakeup-trial-window',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -280,7 +334,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     // Sanity: when cw IS wired, publish instructions appear.
     const cwWired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:capability-wakeup', sourceAdapter: 'capability-wakeup-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:capability-wakeup',
+          sourceAdapter: 'capability-wakeup-eval',
+          sourceRefsKind: 'capability-wakeup-trial-window',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -291,7 +350,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
 
     const taskOutcomeUnwired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:task-outcome', sourceAdapter: 'task-outcome-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:task-outcome',
+          sourceAdapter: 'task-outcome-eval',
+          sourceRefsKind: 'task-outcome-snapshot',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },
@@ -302,7 +366,12 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
 
     const taskOutcomeWired = buildEvalCatInvocation(
       {
-        domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:task-outcome', sourceAdapter: 'task-outcome-eval' },
+        domain: {
+          ...TEST_DOMAIN_BASE,
+          domainId: 'eval:task-outcome',
+          sourceAdapter: 'task-outcome-eval',
+          sourceRefsKind: 'task-outcome-snapshot',
+        },
         trendRefs: [],
         verdictRefs: [],
         legacyCleanup: { status: 'not_checked' },

@@ -37,5 +37,6 @@ export {
   type ReviewFeedbackRouteResult,
   ReviewFeedbackRouter,
   type ReviewFeedbackRouterOptions,
+  type ReviewFeedbackRoutingAudit,
   type ReviewFeedbackSignal as ReviewFeedbackRouterSignal,
 } from './ReviewFeedbackRouter.js';

@@ -103,7 +103,7 @@ export async function updateSkillMountPaths(
 }
 
 /**
- * Remove source-tree Cat Cafe skill capabilities that no longer exist.
+ * Remove source-tree Clowder AI skill capabilities that no longer exist.
  * Plugin-owned skill capabilities are intentionally preserved.
  */
 export async function removeCatCafeSkillCapabilities(projectRoot: string, skillNames: string[]): Promise<void> {

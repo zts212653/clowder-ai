@@ -25,11 +25,45 @@ export type ProfileUpdateTargetLayer = 'primer';
 export type ProfileUpdateProposalStatus = 'pending' | 'approving' | 'approved' | 'rejected';
 
 /**
+ * AC-C3 / KD-9: Collection signal whitelist — CLOSED enum.
+ *
+ * Only deterministic, explainable event types are allowed as collection sources.
+ * Forbidden: classifier-inferred, regex-scan, llm-annotation, or any automated labeling.
+ *
+ * Allowed kinds (KD-9 contract):
+ *   cvo-instructed   — operator explicitly told the cat to record something
+ *   cat-declared     — cat proactively observed and declared a signal
+ *   magic-word       — operator used a magic word (shared-rules.md)
+ *   message-coordinate — signal anchored to a specific message coordinate
+ *   sign-off         — operator signed off / rejected something (explicit decision)
+ *   reaction         — operator reaction (emoji, quick feedback)
+ */
+export const COLLECTION_SIGNAL_KINDS = Object.freeze([
+  'cvo-instructed',
+  'cat-declared',
+  'magic-word',
+  'message-coordinate',
+  'sign-off',
+  'reaction',
+] as const);
+
+export type CollectionSignalKind = (typeof COLLECTION_SIGNAL_KINDS)[number];
+
+/**
+ * KD-9 type guard: returns true only for whitelisted collection signal kinds.
+ * Rejects undefined, null, empty string, and any non-whitelisted string.
+ */
+export function isAllowedCollectionSignal(kind: unknown): kind is CollectionSignalKind {
+  if (typeof kind !== 'string' || kind === '') return false;
+  return (COLLECTION_SIGNAL_KINDS as readonly string[]).includes(kind);
+}
+
+/**
  * KD-9 whitelist source — where the relationship signal came from.
- * AC-C1: manual entry only (`cat-declared` / `cvo-instructed`); NO classifier-inferred kinds.
+ * AC-C3: extended to full KD-9 whitelist. NO classifier-inferred kinds.
  */
 export interface ProfileUpdateSignalProvenance {
-  kind: 'cat-declared' | 'cvo-instructed';
+  kind: CollectionSignalKind;
   sourceThreadId: string;
   sourceMessageId?: string;
 }

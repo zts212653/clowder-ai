@@ -5,7 +5,7 @@
  * - classifyArtifactView (AC-A7): 产物按 type + 数据可用性分发到内容查看策略。
  *   决定「点击产物看什么」——这是 F232 灵魂（点击看内容，不只列清单）的判定核心。
  */
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { SOURCE_CODE_EXTENSIONS, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { formatRelativeTime } from '../ThreadSidebar/thread-utils';
 
 export interface ArtifactRowMeta {
@@ -34,33 +34,14 @@ const TEXT_EXTENSIONS = new Set([
   'txt',
   'log',
   'json',
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
-  'css',
-  'scss',
-  'html',
   'yml',
   'yaml',
-  'sh',
-  'bash',
-  'py',
-  'rb',
-  'go',
-  'rs',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'sql',
   'toml',
   'xml',
   'csv',
   'tsv',
   'env',
+  ...SOURCE_CODE_EXTENSIONS,
 ]);
 function extensionOf(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? name;

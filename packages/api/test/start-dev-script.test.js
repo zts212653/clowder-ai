@@ -1183,6 +1183,34 @@ printf '%s' "$(api_launch_command)"
   assert.equal(output, 'cd packages/api && exec env NODE_ENV=production pnpm run start');
 });
 
+test('api_launch_command defaults to no-watch in production web mode', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+unset CAT_CAFE_DIRECT_NO_WATCH
+PROD_WEB=true
+printf '%s' "$(api_launch_command)"
+`,
+  );
+
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=production pnpm run start');
+});
+
+test('api_launch_command keeps the dev watcher in non-production web mode', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const output = runSourceOnlySnippet(
+    scriptPath,
+    `
+unset CAT_CAFE_DIRECT_NO_WATCH
+PROD_WEB=false
+printf '%s' "$(api_launch_command)"
+`,
+  );
+
+  assert.equal(output, 'cd packages/api && exec env NODE_ENV=development pnpm run dev');
+});
+
 test('api_launch_command routes multiple env assignments through env before pnpm', () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
   const output = runSourceOnlySnippet(

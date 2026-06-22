@@ -28,9 +28,9 @@ export interface EvalCatInvocationPacket {
   };
 }
 
-const DOMAIN_INSTRUCTIONS: Record<EvalDomainRegistryEntry['domainId'], string> = {
+const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
   'eval:a2a':
-    'Enter the eval:a2a domain thread, load the longitudinal context, compare day-over-day trends, and produce a verdict handoff packet when evidence supports fix/build/keep/delete_sunset. Include legacy scheduled task status in the analysis to prevent duplicate triggers.',
+    'Enter the eval:a2a domain thread, load the longitudinal context, compare day-over-day trends, and produce a verdict handoff packet when evidence supports fix/build/keep/delete_sunset. Include legacy scheduled task status in the analysis to prevent duplicate triggers. COUNTER RATE DENOMINATOR (F167 sibling-PR): OTel SDK counters reset to 0 on every API process restart, while the trace store is hydrated from Redis with up to 24h of history. The counter-window block is written as `counter_window` (snake_case) in raw snapshot YAML (`snapshots/*.yaml`) and as `counterWindow` (camelCase) in bundle JSON (`bundles/*/snapshot.json`) — both refer to the same field; check whichever artifact you are reading. If the counter-window block is present, use `counter_window.duration_hours` / `counterWindow.durationHours` — NOT `window.duration_hours` / `window.durationHours` — as the denominator for any counter-based rate (e.g. `activationCounts.X / counterWindow.durationHours`). When the counter-window duration is < 2 hours, downgrade counter-derived rate confidence by one level (recent restart = short accumulation window, rate is noisy). If the counter-window block is absent (older server build), flag as telemetry gap and accept that counter rates may underreport. GROUNDING SUBDOMAIN (F167 Phase O): examine the grounding-phase-o component — check grounding.check_total (shadow checks run on stateful tools), grounding.verdict_total (verdicts produced), grounding.mismatch_sample_count (claim-source mismatches). If mismatch_sample_count > 0, review groundingSampleEvidence for recurring patterns. Grounding runs in shadow mode (never blocks) — report whether shadow data suggests high-confidence mismatch patterns that warrant escalation to fail-closed, or whether the distribution is healthy (mostly verified/insufficient with few mismatches). no-data confidence on grounding-phase-o means the hook is not wired or no stateful tool calls observed — flag as telemetry gap.',
   'eval:memory':
     'Enter the eval:memory domain thread, load recall quality and library health trends, compare day-over-day recall metrics (MRR, precision@K, abandonment) and library health indicators (orphan edges, stale anchors, verification debt), and produce a verdict handoff packet when evidence supports fix/build/keep/delete_sunset.',
   'eval:sop':
@@ -39,6 +39,8 @@ const DOMAIN_INSTRUCTIONS: Record<EvalDomainRegistryEntry['domainId'], string> =
     'Enter the eval:capability-wakeup domain thread, prioritize workspace-navigator first, compare weekly miss-rate trends across capability wakeup traces, separate cognitive / behavioral / attention-dilution misses, and produce a verdict handoff packet when evidence supports fix/build/keep/delete_sunset.',
   'eval:task-outcome':
     'Enter the eval:task-outcome domain thread. Analyze task outcome episodes: review permission cancel signals, proposal reject signals, magic word triggers, and A1 world truth events. Bind signals to episodes, compare weekly cancel rates and terminal-state distributions, identify patterns, and produce a verdict handoff packet. Packet verdict is fix/build/keep_observe/delete_sunset. Terminal-state and signal distributions are evidence, not the packet verdict. Assign 7-class episode verdicts only for terminal episodes you actually reviewed; publish them through sourceRefs.episodeVerdicts. Proxy signals navigate; they do not judge.',
+  'eval:friction':
+    'Enter the eval:friction domain thread. Review the periodic cross-channel friction rollup report (clusters aggregated from paw-feel markers, tool-call cancels, user feedback, and eval-domain metrics). For each Top-N cluster, weigh its sensor forms (provided in the report), channel diversity (cross-channel recurrence = stronger signal), count, severity, and member evidence refs. The report does NOT pre-assign root cause — YOU assign the 7-class root cause as your own verdict-layer attribution judgment (harness_misfit / tool_gap / environment_drift / vision_gap / translation_gap / execution_gap / taste_gap); do not fabricate attribution — if the evidence is thin, lower your confidence or say so. Produce a verdict handoff packet (fix/build/keep_observe/delete_sunset). Cluster counts + sensor forms are evidence, not the packet verdict. Do not over-fold the long tail — a low-count cluster on a high-severity channel can still warrant a fix verdict.',
 };
 
 /**
@@ -221,12 +223,38 @@ The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits 
 **DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
 `;
 
-const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<EvalDomainRegistryEntry['domainId'], string>> = {
+const PUBLISH_VERDICT_INSTRUCTIONS_FRICTION = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
+You must also supply \`sourceRefs\` (NOT part of packet, separate input field) as a replayable friction-rollup selector:
+\`\`\`json
+{
+  "kind": "friction-rollup-snapshot",
+  "windowStartMs": 1759276800000,
+  "windowEndMs": 1759363200000,
+  "topN": 10,
+  "tokenCap": 4000
+}
+\`\`\`
+
+Fields:
+- \`kind\` — REQUIRED literal \`"friction-rollup-snapshot"\`
+- \`windowStartMs\` / \`windowEndMs\` — REQUIRED finite ms epoch; \`windowEndMs\` must be > \`windowStartMs\` (the rollup window over which cross-channel friction signals are aggregated)
+- \`topN\` — OPTIONAL deep-dive quota override (positive integer; default 10 — Top-N clusters keep full member evidence, the long tail is folded into a summary)
+- \`tokenCap\` — OPTIONAL token hard-cap override (positive integer; default 4000)
+
+Tool resolves the selector by composing the 4 read-only friction channels (paw-feel markers / tool-call cancels / user feedback / eval-domain metrics) over the window, aggregating + clustering into a FrictionRollupReport, and bundling replay data under \`docs/harness-feedback/bundles/<verdictId>/raw/\`. Read-only (KD-4): no writeback to any source store. Tool will NOT fabricate evidence — an empty window yields a no-finding record, not invented clusters.
+
+The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits + opens PR. Returns commit SHA + PR URL.
+
+**DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
+`;
+
+const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = {
   'eval:a2a': PUBLISH_VERDICT_INSTRUCTIONS_A2A,
   'eval:capability-wakeup': PUBLISH_VERDICT_INSTRUCTIONS_CAPABILITY_WAKEUP,
   'eval:memory': PUBLISH_VERDICT_INSTRUCTIONS_MEMORY,
   'eval:sop': PUBLISH_VERDICT_INSTRUCTIONS_SOP,
   'eval:task-outcome': PUBLISH_VERDICT_INSTRUCTIONS_TASK_OUTCOME,
+  'eval:friction': PUBLISH_VERDICT_INSTRUCTIONS_FRICTION,
 };
 
 /**
@@ -244,6 +272,9 @@ function domainInstructions(
   wiredDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>,
 ): string {
   const base = DOMAIN_INSTRUCTIONS[domainId];
+  if (!base) {
+    throw new Error(`No eval-cat instructions registered for domain '${domainId}' (fail-closed)`);
+  }
   const publishSection = PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN[domainId];
   if (!publishSection) return base;
   // If wiredDomains explicitly provided, gate on actual runtime support.

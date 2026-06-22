@@ -279,6 +279,12 @@ path_policies:
     risk: P1
     reason: "Localized READMEs are generated from README.opensource sources."
 
+  - pattern: "docs/ops/opensource-intake-ledger.json"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "Intake ledger tracks clowder-ai PR absorption; naturally contains cross-repo brand references (repo name, PR titles). pass-through exempts from brand guard (pre-commit) and intake classification (not a managed sync root — never reaches clowder-ai). F238 follow-up from #943/#944/#899."
+
   - pattern: "docs/**"
     outbound: sanitize
     inbound: manual-port

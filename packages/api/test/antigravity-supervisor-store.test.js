@@ -35,7 +35,7 @@ class FakeRedis {
   }
 }
 
-function buildJournalSummary(target = '/home/user/id_rsa') {
+function buildJournalSummary(target = '/home/user/.ssh/id_rsa') {
   const journal = new AntigravitySideEffectJournal({
     threadId: 'thread-1',
     catId: 'antig-opus',
@@ -142,7 +142,7 @@ describe('F201 AntigravitySupervisorStore', () => {
     });
     const record = buildSupervisorRecord();
 
-    await store.appendAudit({ type: 'upsert', record, target: '/home/user/id_rsa' });
+    await store.appendAudit({ type: 'upsert', record, target: '/home/user/.ssh/id_rsa' });
 
     const auditPath = path.join(auditDir, 'supervisor-2026-05-17.jsonl');
     const line = fs.readFileSync(auditPath, 'utf8').trim();
@@ -161,7 +161,7 @@ describe('F201 AntigravitySupervisorStore', () => {
 
     await store.appendAudit({
       type: 'probe',
-      target: ['/home/user/id_rsa', '/home/user/id_ed25519'],
+      target: ['/home/user/.ssh/id_rsa', '/home/user/.ssh/id_ed25519'],
     });
 
     const auditPath = path.join(auditDir, 'supervisor-2026-05-17.jsonl');

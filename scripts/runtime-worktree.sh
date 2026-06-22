@@ -30,7 +30,6 @@ Clowder AI Runtime Worktree Manager
 
 Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
-  ./scripts/runtime-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
   ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
   ./scripts/runtime-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
 
@@ -38,6 +37,13 @@ Defaults:
   --dir    ../cat-cafe-runtime
   --branch runtime/main-sync
   --remote origin
+
+Runtime Contract (passive frozen):
+  Runtime restarts ONLY on explicit `pnpm start` invocation.
+  start runs sync (git pull) + build invariant (rebuild stale dist) internally.
+  No standalone `sync` subcommand — fold into `pnpm start` as a single entry.
+  No tsx watch auto-restart — runtime doesn't track main src changes.
+  See docs/decisions/039-runtime-passive-freeze.md for design rationale.
 
 Safety:
   start refuses to kill an active API by default.
@@ -258,32 +264,43 @@ ensure_runtime_dependencies() {
   install_runtime_dependencies
 }
 
-ensure_quick_start_artifacts() {
-  runtime_quick_mode || return 0
-
-  # Gate rebuilds on source freshness (git HEAD of the runtime worktree),
-  # not artifact existence — otherwise a synced source change never reaches
-  # the running process no matter how many times we restart.
+ensure_runtime_dist_freshness() {
+  # ADR-039 Invariant 3: build invariant — rebuild stale dist before runtime
+  # spawns API/Web processes.
+  #
+  # Previously gated on `runtime_quick_mode`; F228 stale-dist crash exposed
+  # that default (full) mode also needs dists once CAT_CAFE_DIRECT_NO_WATCH=1
+  # makes runtime API run from `node dist/index.js` (not tsx watch src).
+  # Freshness gate (git HEAD) means steady-state cost is ~0.1s; only when
+  # main source moved do we actually rebuild.
   local head_commit
   head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
 
+  # Order matters: shared first (api/mcp depend on it), then api, then mcp, then web.
   if needs_rebuild "$RUNTIME_DIR/packages/shared/dist/index.js" \
       "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"; then
-    info "quick start: shared dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
+    info "runtime dist: shared stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
     pnpm -C "$RUNTIME_DIR/packages/shared" run build
     record_build_stamp "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"
   fi
 
+  if needs_rebuild "$RUNTIME_DIR/packages/api/dist/index.js" \
+      "$RUNTIME_DIR/packages/api/dist/.build-commit" "$head_commit"; then
+    info "runtime dist: api stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/api\" run build"
+    pnpm -C "$RUNTIME_DIR/packages/api" run build
+    record_build_stamp "$RUNTIME_DIR/packages/api/dist/.build-commit" "$head_commit"
+  fi
+
   if needs_rebuild "$RUNTIME_DIR/packages/mcp-server/dist/index.js" \
       "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"; then
-    info "quick start: MCP server dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
+    info "runtime dist: MCP server stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
     pnpm -C "$RUNTIME_DIR/packages/mcp-server" run build
     record_build_stamp "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"
   fi
 
   if needs_rebuild "$RUNTIME_DIR/packages/web/.next/BUILD_ID" \
       "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"; then
-    info "quick start: web production build stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
+    info "runtime dist: web production build stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
     pnpm -C "$RUNTIME_DIR/packages/web" run build
     record_build_stamp "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"
   fi
@@ -291,7 +308,7 @@ ensure_quick_start_artifacts() {
 
 ensure_runtime_start_prereqs() {
   ensure_runtime_dependencies
-  ensure_quick_start_artifacts
+  ensure_runtime_dist_freshness
 }
 
 ensure_restart_authorized() {
@@ -538,6 +555,10 @@ start_runtime_worktree() {
     export CAT_CAFE_RUNTIME_ROOT="$PROJECT_DIR"
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
+    # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
+    # Restart only happens on explicit `pnpm start` (which runs build invariant first).
+    # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
+    export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
@@ -554,7 +575,7 @@ start_runtime_worktree() {
   if [ "$SYNC_BEFORE_START" = "true" ]; then
     if is_api_running && [ "$FORCE" != "true" ]; then
       info "API port is active; skip pre-start sync to avoid in-place hot swap."
-      info "Run 'pnpm runtime:sync' after stop if you need latest origin/main."
+      info "Stop API first (pnpm stop), then re-run 'pnpm start' to sync + restart."
       seed_runtime_config_from_project
     else
       sync_runtime_worktree
@@ -574,9 +595,14 @@ start_runtime_worktree() {
   export CAT_CAFE_RUNTIME_ROOT="$RUNTIME_DIR"
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
   export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
+  # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
+  # Restart only happens on explicit `pnpm start` (which runs build invariant first).
+  # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
+  export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"
+  info "exporting CAT_CAFE_DIRECT_NO_WATCH=$CAT_CAFE_DIRECT_NO_WATCH (runtime passive-freeze)"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
   exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
@@ -645,9 +671,6 @@ done
 case "$COMMAND" in
   init)
     init_runtime_worktree
-    ;;
-  sync)
-    sync_runtime_worktree
     ;;
   start)
     start_runtime_worktree

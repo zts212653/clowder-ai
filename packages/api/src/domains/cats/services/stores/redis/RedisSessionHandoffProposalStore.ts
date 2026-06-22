@@ -29,6 +29,8 @@ const HandoffKeys = {
   session: (sessionId: string) => `handoff-proposals:session:${sessionId}`,
   catThread: (userId: string, catId: string, threadId: string) =>
     `handoff-proposals:catthread:${userId}:${catId}:${threadId}`,
+  /** F246 Approval Hub: per-user index for listPendingByUser (score=createdAt). */
+  user: (userId: string) => `handoff-proposals:user:${userId}`,
   dedup: (userId: string, clientRequestId: string) => `handoff-proposal-dedup:${userId}:${clientRequestId}`,
 };
 
@@ -113,6 +115,7 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       String(now),
       proposalId,
     );
+    pipeline.zadd(HandoffKeys.user(proposal.userId), String(now), proposalId);
     await pipeline.exec();
     return proposal;
   }
@@ -145,17 +148,26 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
 
   async finalizeApproval(proposalId: string): Promise<SessionHandoffProposal | null> {
     const ok = await this.cas(proposalId, 'approving', ['status', 'approved', 'updatedAt', String(Date.now())]);
-    return ok ? this.get(proposalId) : null;
+    if (!ok) return null;
+    const result = await this.get(proposalId);
+    if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
+    return result;
   }
 
   async markRejected(proposalId: string): Promise<SessionHandoffProposal | null> {
     const ok = await this.cas(proposalId, 'pending', ['status', 'rejected', 'updatedAt', String(Date.now())]);
-    return ok ? this.get(proposalId) : null;
+    if (!ok) return null;
+    const result = await this.get(proposalId);
+    if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
+    return result;
   }
 
   async markExpired(proposalId: string): Promise<SessionHandoffProposal | null> {
     const ok = await this.cas(proposalId, 'pending,approving', ['status', 'expired', 'updatedAt', String(Date.now())]);
-    return ok ? this.get(proposalId) : null;
+    if (!ok) return null;
+    const result = await this.get(proposalId);
+    if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
+    return result;
   }
 
   async listActiveBySession(sourceSessionId: string): Promise<SessionHandoffProposal[]> {
@@ -171,6 +183,26 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       const d = data as Record<string, string>;
       if (!d.proposalId || !ACTIVE_STATUSES.has(d.status)) continue;
       out.push(hydrate(d));
+    }
+    return out;
+  }
+
+  async listPendingByUser(userId: string, limit = 100): Promise<SessionHandoffProposal[]> {
+    // Read from user ZSet (score=createdAt), reverse order (newest first), filter pending in JS.
+    // Consistent with listActiveBySession pattern: index tracks all statuses, filter at read time.
+    const ids = await this.redis.zrevrange(HandoffKeys.user(userId), 0, -1);
+    if (ids.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(HandoffKeys.detail(id));
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const out: SessionHandoffProposal[] = [];
+    for (const [err, data] of results) {
+      if (err || !data || typeof data !== 'object') continue;
+      const d = data as Record<string, string>;
+      if (!d.proposalId || d.status !== 'pending') continue;
+      out.push(hydrate(d));
+      if (out.length >= limit) break;
     }
     return out;
   }
@@ -203,6 +235,7 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
     if (existing) {
       pipeline.zrem(HandoffKeys.session(existing.sourceSessionId), proposalId);
       pipeline.zrem(HandoffKeys.catThread(existing.userId, existing.sourceCatId, existing.sourceThreadId), proposalId);
+      pipeline.zrem(HandoffKeys.user(existing.userId), proposalId);
     }
     await pipeline.exec();
   }

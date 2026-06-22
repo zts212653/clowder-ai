@@ -264,7 +264,7 @@ describe('F161: env-map — extractUserEnvTemplates', () => {
     });
   });
 
-  it('does not classify unsupported placeholders as Cat Cafe templates', () => {
+  it('does not classify unsupported placeholders as Clowder AI templates', () => {
     const result = extractUserEnvTemplates({
       HTTPS_PROXY: 'http://${PROXY_HOST}:8080',
       MIXED_TEMPLATE: '${api_key}:${PROXY_HOST}',

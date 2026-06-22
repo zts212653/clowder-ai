@@ -36,6 +36,7 @@ evalCat:
   model: claude-opus-4-7
 frequency: weekly
 sourceAdapter: capability-wakeup-eval
+sourceRefsKind: capability-wakeup-trial-window
 threadPolicy:
   role: working-home
   stateSot: registry
@@ -63,6 +64,7 @@ evalCat:
   model: gpt-5.5
 frequency: daily
 sourceAdapter: f167-runtime-eval
+sourceRefsKind: a2a-snapshot-attribution
 threadPolicy:
   role: working-home
   stateSot: registry
@@ -157,6 +159,7 @@ evalCat:
   model: claude-opus-4-7
 frequency: weekly
 sourceAdapter: capability-wakeup-eval
+sourceRefsKind: capability-wakeup-trial-window
 threadPolicy:
   role: working-home
   stateSot: registry

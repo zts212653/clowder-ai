@@ -34,6 +34,7 @@ const domain = {
   evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
   frequency: 'weekly',
   sourceAdapter: 'capability-wakeup-eval',
+  sourceRefsKind: 'capability-wakeup-trial-window',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',
@@ -175,6 +176,7 @@ evalCat:
   model: claude-opus-4-7
 frequency: weekly
 sourceAdapter: capability-wakeup-eval
+sourceRefsKind: capability-wakeup-trial-window
 threadPolicy:
   role: working-home
   stateSot: registry

@@ -54,7 +54,12 @@ describe('connector.yaml operation field parsing', () => {
     const operationFields = manifest.config.filter((f) => f.type === 'operation');
     assert.equal(operationFields.length, 1);
     assert.equal(operationFields[0].name, 'feishu_qr_login');
-    assert.deepEqual(operationFields[0].target, ['FEISHU_APP_ID', 'FEISHU_APP_SECRET', 'FEISHU_CONNECTION_MODE']);
+    assert.deepEqual(operationFields[0].target, [
+      'FEISHU_APP_ID',
+      'FEISHU_APP_SECRET',
+      'FEISHU_CONNECTION_MODE',
+      'FEISHU_VERIFICATION_TOKEN',
+    ]);
 
     const qrStatus = operationFields[0].actions.find((a) => a.id === 'qr-status');
     assert.equal(qrStatus.timeout, 600, 'feishu QR polling should honor the provider 10 minute expiry window');

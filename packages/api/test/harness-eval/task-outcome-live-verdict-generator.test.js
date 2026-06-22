@@ -18,6 +18,7 @@ const domain = {
   evalCat: { catId: 'opus-47', handle: '@opus-47', model: 'claude-opus-4-7' },
   frequency: 'daily',
   sourceAdapter: 'task-outcome-eval',
+  sourceRefsKind: 'task-outcome-snapshot',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',
@@ -42,6 +43,7 @@ evalCat:
   model: claude-opus-4-7
 frequency: daily
 sourceAdapter: task-outcome-eval
+sourceRefsKind: task-outcome-snapshot
 threadPolicy:
   role: working-home
   stateSot: registry

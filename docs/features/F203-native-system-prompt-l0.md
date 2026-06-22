@@ -4,11 +4,21 @@ related_features: [F086, F167, F198, F210, F211, F061]
 topics: [system-prompt, governance, prompt-engineering, compression-immunity, l0-injection]
 doc_kind: spec
 created: 2026-05-15
+updated: 2026-06-19
 ---
 
 # F203: Native System Prompt L0 — 压缩免疫核心规则注入
 
-> **Status**: in-progress | **Owner**: Ragdoll Opus 4.7 | **Priority**: P1
+> **Status**: done（operator 签字降级 2026-06-19，AC-I8 deferred）| **Owner**: Ragdoll Opus 4.7 | **Priority**: P1
+
+## Current State Snapshot（2026-06-19）
+
+- **Codex**: done. `CodexAgentService` 走 per-invocation `-c developer_instructions=<compiled L0>`；`~/.codex/AGENTS.md` user-layer 双注入已按 KD-14 退役，Codex CLI 版本 drift 归 Phase E audit SOP。
+- **AGY CLI**: native L0 channel **not reachable** via public interface（2026-06-19 复核 agy 1.0.9 公开面：`--add-dir` / `-c` / `--continue` / `--conversation` / `--dangerously-skip-permissions` / `-i` / `--log-file` / `--model` / `-p/--print` / `--prompt` / `--prompt-interactive` / `--sandbox` + subcommands `changelog/help/install/models/plugin/update`——无 `--agent` / `--system` / root agent override，retraction conditions 未触发）。S6 已合入（PR #2036）：主 agent 只能走 prompt-level fallback。F236 拆形态细化：Siamese = AGY CLI / `agy --print`（`@gemini-25`）；hook 能力 F236 Phase C 单独实测。
+- **Antigravity Desktop / IDE**: native L0 channel **not reachable** via current bridge. S7 已合入（PR #2036）：`StartCascade` / `SendUserCascadeMessage` payload 无 system/preamble 字段，身份仍是 `AntigravityAgentService` first-prompt prepend + Rules fallback。F236 拆形态细化：Bengal = Antigravity IDE/LS（`@antig-opus`），F061 实测 view_file 自闭环不走 bridge = observe-only。
+- **OpenCode 金渐层**: implementation done, runtime validation **deferred — operator signed 2026-06-19**. Phase I 已合入（PR #2069）：`opencode.json` `instructions` 注入 compiled L0 + `OPENCODE.md`，全链守护测试 139/139。AC-I8 alpha runtime 体感验收 deferred 原因：**家里 runtime 没接入 OpenCode invocation flow（无 API/subscription）**——本地 opencode v1.2.27 已装但不在产线 carrier。retraction condition：OpenCode API/subscription 接入产线 carrier flow 时重开。
+
+F203 整体 **close（带 deferred AC-I8）**。BACKLOG 状态从 `runtime-validation` → `done`；OpenCode runtime 验收等 API/subscription 接入再开新 mini-spec（不留 stub 尾巴，retraction condition 写明）。
 
 ## Why
 
@@ -60,7 +70,7 @@ created: 2026-05-15
 按 ADR-030 §10.2 14 项 L0 清单切换到 native system role 通道：
 - **Claude 猫**：`ClaudeAgentService(-p)` 与 `ClaudeBgCarrierService(--bg)` 都走 `--system-prompt-file <compiled L0>`；carrier 选择只控制执行模式，不控制 F203 是否生效
 - **Codex 猫**：`codex exec -c 'developer_instructions="<compiled L0>"'`（S4 实测 per-call 注入 ✅）
-- **Gemini / Antigravity 猫**：2026-05-31 重新评估后拆线处理（KD-20/KD-21）：`gemini --acp` / Gemini CLI 不再作为 F203 主线；只保留 enterprise/API-key fallback。后续 native L0 重点转为两个 Antigravity spike：AGY CLI（headless Google carrier）与 Antigravity Desktop/IDE（Bengal）。
+- **Gemini / Antigravity 猫**：2026-05-31 重新评估后拆线处理（KD-20/KD-21）：`gemini --acp` / Gemini CLI 不再作为 F203 主线；只保留 enterprise/API-key fallback。AGY CLI（headless Google carrier）与 Antigravity Desktop/IDE（Bengal）两个 native L0 spike 已在 2026-06-01 收敛：当前公开接口均不可达，统一转 prompt-level fallback（KD-22）。
 - **OpenCode 金渐层**：`opencode.json` `instructions` 字段注入 compiled L0 文件路径；runtime config 通过 `writeOpenCodeRuntimeConfig` 传入 instructions（KD-23，S8 源码验证 compression-immune）
 
 ### Phase A: Baseline + 扩展 spike（无风险前置）
@@ -215,7 +225,7 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 - [x] AC-H0: Gemini home-file + repo-root `GEMINI.md` 身份污染收口（native L0 spike 前置卫生）✅ 2026-06-01 — `renderForGemini` 退役为空（照 KD-14 `renderForCodex`：`~/.gemini/GEMINI.md` 由 `--apply` 清空 + `checkDrift` 守护），删随之 dead 的 renderer helper 链（interfaces / dynamic-roster / collab-rules 渲染）；repo-root `GEMINI.md` 化石身份（2026-02-28 Siamese / 4 猫 / stale model 标注 `gpt-5.3-codex`·`gpt-5.2`）改为 provider-neutral 指针并纳入 `root-md-slim.test.js` ≤65 行 + 无化石身份守护。**根因**：home `~/.gemini/GEMINI.md` 被 Antigravity IDE Global Rules + AGY CLI global context + Gemini carrier 读，repo-root `GEMINI.md` 被 Gemini CLI + AGY CLI workspace context 读（**非** IDE Global Rules——官方 IDE 只有 Workspace Rules 读 `.agents/rules`）；两处旧内容都把任意模型（含 opus）灌成"Siamese"。Siamese身份本由 runtime prompt-prepend 提供（`GeminiAgentService` 416/697），home-file 是冗余双注入（同 Codex KD-14）。**边界**：repo-root `AGENTS.md`（Codex harness 入口）对 AGY 也是 workspace 污染，但有 harness 依赖，AGY-safe 拆分留 AC-H1/H2 spike 设计，本轮不动。
 - [x] AC-H1: AGY CLI native-L0 feasibility spike ✅ 2026-06-01 — 结论 **not reachable via public interface**（详见 Spike Log S6 + KD-22）：agy 1.0.4 公开面无 default/root agent override（CLI 无 `--agent`/`--system`、`settings.json` 无 agent field、Plugins/Hooks 只暴露 subagent 层 `define_subagent` + `agents/`）；binary 有 `agent_script`/`GetMainAgent`/`CustomAgentSpec` proto 但无公开提供入口。subagent `system_prompt` 是 reachable candidate 但**非 main-cat L0 carrier**（主 agent 仍裸 + 路由靠自觉 invoke）。**AGY 转 prompt-level fallback 做扎实**（profile 隔离 + context 污染收口 AC-H0 + 每轮 prepend + drift/版本守护）。POC 不做（边际价值 < 成本）。retraction：官方未来出 custom root agent / default-agent override / `--agent` flag 才重开。
 - [x] AC-H2: Antigravity Desktop/IDE native-L0 feasibility spike ✅ 2026-06-01 — 结论 **not reachable via bridge**（重核当前 AntigravityBridge 代码，非沿用 F211 旧结论）：bridge 无 system/preamble channel——所有具名 `rpcSafe` 调用（`StartCascade` 只 `source`、`SendUserCascadeMessage` 只 `items.text`/`media`/`cascadeConfig`(planner+model)、`GetCascade*` 查询 + `Resolve`/`Acknowledge`/`Handle`/`Cancel` 控制）均无 system 字段；`callRpc` 公开泛型入口仅被 `RunCommandExecutor` 用于 shell pre-exec（非 prompt/config 注入，Maine Coon复核漏网点）；全文 grep `systemPrompt`/`preamble` 零匹配。身份注入路径 = `AntigravityAgentService` 把 `options.systemPrompt` prepend 进 `effectivePrompt`（first-prompt prepend）= prompt-level；IDE Global Rules(home `~/.gemini/GEMINI.md`)/Workspace Rules(`.agents/`) 也是 prompt-level（S6 Maine Coon确认非 native system role）。**Antigravity Desktop 转 prompt-level fallback**（同 AGY）。retraction：Antigravity bridge 协议未来新增 system/preamble cascade config 才重开。
-- [ ] AC-H3: Gemini CLI/ACP fallback policy — `gemini-cli` / `gemini --acp` 仅为 enterprise / Google Cloud / paid API-key 用户保留；consumer/free/Pro/Ultra/Code Assist individuals 不再作为 F203 投入主线。
+- [x] AC-H3: Gemini CLI/ACP fallback policy ✅ — KD-20/KD-21 已落档：`gemini-cli` / `gemini --acp` 仅为 enterprise / Google Cloud / paid API-key 用户保留；consumer/free/Pro/Ultra/Code Assist individuals 不再作为 F203 投入主线。AGY CLI / Antigravity Desktop native L0 spike 已按 AC-H1/H2 收敛为 prompt-level fallback。
 
 ### Phase I（OpenCode 金渐层 native L0 注入）
 
@@ -226,7 +236,7 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 - [x] AC-I5: `golden-chinchilla` workflow triggers ✅（developer flow + OMOC boundary + question deny）
 - [x] AC-I6: `OPENCODE.md` 保留 + `permission.question=deny` / OMOC / compaction 不破坏 ✅（18 守护测试）
 - [x] AC-I7: 全链守护测试 ✅（f203 18/18 + opencode-service 25/25 + invoke-single-cat 96/96 = 0 regressions）
-- [ ] AC-I8: runtime 验收——金渐层 invocation 后确认 identity/roster/governance/workflow 在 system role，compaction 后不丢失
+- [~] AC-I8: runtime 验收 **deferred** ✋ — operator 签字降级 2026-06-19。原因：家里 runtime 没接入 OpenCode invocation flow（无 API/subscription），跑不了 alpha 体感测试。Retraction condition：OpenCode API/subscription 接入产线 carrier flow 时重开（开新 mini-spec 或 reopen issue，不留 stub 尾巴）
 
 ## Dependencies
 
@@ -277,6 +287,8 @@ operator 2026-05-21 指令：先做 #747，再做 #749；#748 先讨论、暂不
 | KD-21 | Antigravity native L0 后续必须拆成两个 spike：AGY CLI 与 Antigravity Desktop/IDE | 两者不是同一个 carrier：AGY CLI 是 F210 headless Google successor，目标是替代 consumer Gemini CLI/ACP；Antigravity Desktop/IDE 是 F061/F211 Bengal bridge，目标是让Bengal获得 F203 native L0。当前 `agy 1.0.3` help 无 `--acp` / `--model` / `--system`；Desktop `SendUserCascadeMessage` payload 只有 text/media/model/cascadeConfig，无 system/preamble 字段。Rules / first-prompt prepend 只能算 prompt-level fallback。 | 2026-05-31 |
 | KD-22 | AGY CLI native L0 不可达 → 转 prompt-level fallback | S6 spike（47 binary 深挖 + Maine Coon公开文档侦察协作）：agy 1.0.4 公开面无 default/root agent override（CLI 无 `--agent`/`--system`、`settings.json` 无 agent field、Plugins/Hooks 只暴露 subagent 层 `define_subagent` + `agents/`）；binary 有 `agent_script`/`GetMainAgent`/`CustomAgentSpec` proto 但无公开提供入口。subagent `system_prompt` 是 reachable candidate 但非 main-cat L0 carrier（主 agent 仍裸 + 路由靠自觉 invoke）。POC 边际价值 < 成本（不改"root agent 无 override"主结论）故不做。AGY 身份注入维持 prompt-level（profile 隔离 + 污染收口 AC-H0 + 每轮 prepend + drift/版本守护）。retraction：官方未来出 custom root agent / default-agent override / `--agent` flag 重开。 | 2026-06-01 |
 | KD-23 | OpenCode `instructions` 是 native L0 可达通道——压缩免疫 by design | S8 源码验证（Ragdoll 46，pin `sst/opencode@v1.15.13` commit `385cb69`）：OpenCode 的 `opencode.json` `instructions` 数组指向的文件**每轮 fresh 读取**（`instruction.ts` `system()`）→ 注入为 `role: "system"` messages（`request.ts` `prepare()`，非 OpenAI-OAuth provider）→ **不进对话历史**（`compaction.ts` 只压缩 user/assistant turns）→ **功能等价 Claude `--system-prompt-file`**。Cat Café 的 `OpenCodeAgentService` 当前不调用 `compileL0`、不声明 `injectsL0Natively()`，route 层对金渐层走 full `buildStaticIdentity` prepend = 可被 compaction 吃。修复路径：runtime config `instructions` 注入 compiled L0 temp file + `injectsL0Natively() → true`。golden-chinchilla 需独立 workflow triggers（评估复用 ragdoll 或独立定义，因 model 是 opus-4-6 但 family 不同）。 | 2026-06-03 |
+| KD-24 | AGY 1.0.9 复核 retraction 条件 = 仍不触发 | 47 2026-06-19 复核 `agy --help` 公开面（从 1.0.4 跳到 1.0.9，5 个 minor 版本）：flags 仍只有 `--add-dir` / `-c` / `--continue` / `--conversation` / `--dangerously-skip-permissions` / `-i/--prompt-interactive` / `--log-file` / `--model` / `-p/--print` / `--prompt` / `--sandbox`；subcommands 只有 `changelog/help/install/models/plugin/update`。**没有 `--agent` flag / `--system` / root agent override / system channel**。KD-22 "AGY CLI native L0 不可达"主结论维持 valid；prompt-level fallback 维持。retraction trigger 重申：官方 CLI 出现 `--agent` / `--system-prompt` / root-agent override / system prompt config field 之一时重开 spike。 | 2026-06-19 |
+| KD-25 | OpenCode AC-I8 runtime 验收 deferred — operator 签字降级 | operator 2026-06-19 directive："opencode 这个我们没有 api 哈哈哈 那我们标记一下？"。家里 runtime carrier flow 不接入 OpenCode invocation（无 API/subscription），AC-I8 alpha 体感测试无 production 路径可跑。Phase I 已合入的 implementation（PR #2069）+ S8 源码验证（KD-23）证明 OpenCode `instructions` 通道 by-design compression-immune；运行时验收只是体感确认（identity/governance compaction 后不丢）。**Retraction condition**：OpenCode API/subscription 接入产线 carrier flow（OpenCodeAgentService 实际承载 invocation）时，开 mini-spec 或 reopen issue 重跑 AC-I8 alpha smoke。**不留 stub 尾巴**：F203 整体 close，未来重开走新单据，不挂虚 follow-up。 | 2026-06-19 |
 
 ## Spike Log
 

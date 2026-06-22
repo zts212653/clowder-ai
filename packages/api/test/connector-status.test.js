@@ -432,6 +432,51 @@ describe('buildConnectorStatus', () => {
     );
   });
 
+  it('treats an unloaded external manifest as unconfigured even when stored config is resolved', () => {
+    const pluginId = 'unloaded-external-with-store';
+    const result = buildConnectorStatus(
+      {},
+      [
+        {
+          id: pluginId,
+          name: 'Unloaded External With Store',
+          nameEn: 'Unloaded External With Store',
+          version: '1.0.0',
+          icon: { type: 'png', src: '/test.png' },
+          themeColor: '#336699',
+          docsUrl: 'https://example.com',
+          source: 'external',
+          config: [
+            {
+              type: 'input',
+              envName: 'UNLOADED_EXTERNAL_WITH_STORE_TOKEN',
+              label: 'Token',
+              sensitive: true,
+              required: true,
+            },
+          ],
+          steps: [{ text: 'test' }],
+        },
+      ],
+      new Map([
+        [
+          pluginId,
+          {
+            UNLOADED_EXTERNAL_WITH_STORE_TOKEN: 'stored-token',
+          },
+        ],
+      ]),
+    );
+
+    const external = result.find((p) => p.id === pluginId);
+    assert.ok(external, 'external manifest connector must appear in status');
+    assert.equal(
+      external.configured,
+      false,
+      'stored config must not make an external connector look configured when its plugin failed to load',
+    );
+  });
+
   it('evaluates external manifest requiredWhen values without mode-specific coercion', () => {
     const pluginId = 'oauth-required-when-external';
     const result = buildConnectorStatus(

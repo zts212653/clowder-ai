@@ -40,12 +40,14 @@ interface HubCatEditorProps {
   draft?: HubCatEditorDraft | null;
   /** All cats — used for alias uniqueness validation. */
   existingCats?: CatData[];
+  /** F208 OQ-9: true when this cat has a structured dossier profile. */
+  hasDossier?: boolean;
   open: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }
 
-export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved }: HubCatEditorProps) {
+export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClose, onSaved }: HubCatEditorProps) {
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
@@ -614,6 +616,7 @@ export function HubCatEditor({ cat, draft, existingCats, open, onClose, onSaved 
             form={form}
             hasError={fieldErrors.identity}
             avatarUploading={uploadingAvatar}
+            hasDossier={hasDossier}
             onChange={patchForm}
             onAvatarUpload={handleAvatarUpload}
             onRefAudioUpload={handleRefAudioUpload}

@@ -1,3 +1,4 @@
+import { apiFetch } from '../utils/api-client';
 import {
   clearPersistedDebugFlag,
   clearStorageKey,
@@ -15,6 +16,8 @@ import type {
   DebugDumpOptions,
   DebugDumpResult,
   DebugEventInput,
+  DebugExportOptions,
+  DebugExportResult,
   DebugStatus,
   DebugWindowApi,
   StoredDebugEvent,
@@ -210,6 +213,27 @@ function makeDumpResult(events: StoredDebugEvent[], rawThreadId: boolean): Debug
   };
 }
 
+async function exportDebugEventsToRuntime(options: DebugExportOptions = {}): Promise<DebugExportResult> {
+  const kind = options.kind ?? 'events';
+  const dump = kind === 'bubbleTimeline' ? dumpBubbleTimeline(options) : dumpDebugEvents(options);
+  const response = await apiFetch('/api/debug/invocation-events/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind,
+      ...(options.label ? { label: options.label } : {}),
+      dump,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`debug export failed (${response.status}): ${text}`);
+  }
+
+  return (await response.json()) as DebugExportResult;
+}
+
 export function configureDebug(input: DebugConfigureInput): DebugStatus {
   if (input.enabled === false) {
     resetToDisabled();
@@ -298,6 +322,7 @@ export function ensureWindowDebugApi() {
     },
     dump: (options?: DebugDumpOptions) => JSON.stringify(dumpDebugEvents(options), null, 2),
     dumpBubbleTimeline: (options?: DebugDumpOptions) => JSON.stringify(dumpBubbleTimeline(options), null, 2),
+    exportToRuntime: (options?: DebugExportOptions) => exportDebugEventsToRuntime(options),
     clear: () => {
       clearDebugEvents();
     },
@@ -380,6 +405,8 @@ export type {
   DebugDumpOptions,
   DebugDumpResult,
   DebugEventInput,
+  DebugExportOptions,
+  DebugExportResult,
   DebugStatus,
   StoredDebugEvent,
 } from './invocationEventDebug.types';

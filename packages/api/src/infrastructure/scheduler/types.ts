@@ -1,4 +1,5 @@
 import type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
+import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 
 export type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
 
@@ -134,6 +135,8 @@ export interface ExecuteContext {
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
   invokeTrigger?: ScheduleInvokeTrigger;
+  /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
+  ballCustody?: IBallCustodyIngest;
 }
 
 /**

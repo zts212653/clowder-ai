@@ -176,7 +176,7 @@ describe('GET thread-context with workflowSop', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.workflowSop, undefined, 'invalid stored SOP data should not break thread-context');
-    assert.equal(body.messages[0].content, 'Hello');
+    assert.equal(body.messages[0].preview, 'Hello'); // F236: anchor preview replaces full content
   });
 
   test('does not return workflowSop when thread has no backlogItemId', async () => {

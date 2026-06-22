@@ -14,6 +14,8 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
+import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
+import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { AppendMessageInput } from '../../stores/ports/MessageStore.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
@@ -63,6 +65,8 @@ export interface StartupReconcilerDeps {
   messageStore?: MessageAppender;
   /** Phase A+: Optional — push real-time WebSocket notification to frontend. */
   socketManager?: ConnectorMessageBroadcaster;
+  /** Optional observability ledger for restart-killed running invocations. */
+  ballCustody?: IBallCustodyIngest;
 }
 
 type ScanStore = IInvocationRecordStore & { scanByStatus(status: string): Promise<string[]> };
@@ -136,6 +140,7 @@ export class StartupReconciler {
         const record = await store.get(id);
         if (!record) continue;
         if (cutoff && record.createdAt >= cutoff) continue;
+        const lastScanAt = record.updatedAt;
         const updated = await store.update(id, {
           status: 'failed',
           expectedStatus: 'running',
@@ -143,6 +148,7 @@ export class StartupReconciler {
         });
         if (updated) {
           running++;
+          this.recordInvocationDied(record, lastScanAt);
           this.trackAffectedThread(affectedThreads, record);
           taskProgressCleared += await this.clearTaskProgress(record.threadId, record.targetCats);
           // Safe: markDelivered is a no-op for non-queued messages (undefined/delivered/canceled),
@@ -155,6 +161,24 @@ export class StartupReconciler {
       }
     }
     return { running, taskProgressCleared, messagesRecovered };
+  }
+
+  private recordInvocationDied(record: InvocationRecord, lastScanAt: number): void {
+    const catId = record.targetCats.length === 1 ? record.targetCats[0] : undefined;
+    this.deps.ballCustody
+      ?.record(
+        buildInvocationDiedEvent({
+          invocationId: record.id,
+          threadId: record.threadId,
+          ...(catId ? { catId } : {}),
+          reason: 'process_restart',
+          lastScanAt,
+          at: Date.now(),
+        }),
+      )
+      .catch((err) =>
+        this.deps.log.warn(`[startup-reconciler] Failed to record invocation.died for ${record.id}: ${String(err)}`),
+      );
   }
 
   private async sweepStaleQueued(

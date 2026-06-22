@@ -13,60 +13,12 @@
  * shared-rules §10 已落地，本模块是不依赖猫配合的兜底信号。
  */
 
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
 import { finalRoutingSlot } from './final-routing-slot.js';
 
-/**
- * Cat signature line pattern: must have a slash OR a paw 🐾.
- *
- * Per L0 identity rule (`assets/system-prompts/system-prompt-l0.md`) and
- * `cat-cafe-skills/refs/commit-signatures.md`, valid cat signatures are:
- *   - Slashed:   `[昵称/变体]` or `[昵称/变体🐾]`  — e.g. `[宪宪/Opus-46🐾]`,
- *                                                       `[砚砚/GPT-5.5]`
- *   - Slashless: `[昵称🐾]`                        — e.g. `[Spark🐾]`,
- *                                                       `[烁烁🐾]`
- *                (paw REQUIRED — used by cats whose nickname is the full identifier)
- *
- * NOT a signature (per source-of-truth `commit-signatures.md` lines 12-13):
- *   - Slashless without paw — `[Spark]`, `[note]`, `[Phase B]` — these are
- *     just bracketed body tokens. R6 P1 (砚砚): the previous broader regex
- *     stripped these too, reintroducing the narrative-body false-positive
- *     class this PR is fixing (e.g. `"approved earlier.\n\n[Phase B]"`
- *     would strip `[Phase B]`, slot falls back to the prior paragraph, and
- *     `approved` fires.)
- *
- * Match: `[non-bracket-non-newline]` containing EITHER an internal `/`
- *   (matches both `[name/model]` and `[name/model🐾]`) OR a `🐾` (matches
- *   `[Spark🐾]` and `[烁烁🐾]`). A bare `[Phase B]` matches neither alternative.
- *
- * Stripping these before slot detection prevents `finalRoutingSlot('LGTM\n\n[宪宪/Opus-46🐾]')`
- * from returning just the signature (which would make `shouldWarnVerdictWithoutPass`
- * return false for a real signed verdict-without-pass).
- */
-const CAT_SIGNATURE_LINE_RE = /^\s*\[(?:[^[\]\n]+\/[^[\]\n]+|[^[\]\n]+🐾)\]\s*$/u;
-
-/**
- * Strip trailing cat-signature paragraphs (and blank lines) so the slot picker
- * lands on the last *content* paragraph. Body brackets that happen to match the
- * signature shape are preserved — only TRAILING signature lines are stripped.
- *
- * Iterates from the last line backwards: blank lines and signature lines are
- * dropped; the first non-empty, non-signature line stops the walk.
- */
-function stripTrailingCatSignatures(text: string): string {
-  if (!text) return text;
-  const lines = text.split(/\r?\n/);
-  let lastContentIdx = lines.length - 1;
-  while (lastContentIdx >= 0) {
-    const line = lines[lastContentIdx] ?? '';
-    if (line.trim() === '' || CAT_SIGNATURE_LINE_RE.test(line)) {
-      lastContentIdx--;
-      continue;
-    }
-    break;
-  }
-  if (lastContentIdx < 0) return '';
-  return lines.slice(0, lastContentIdx + 1).join('\n');
-}
+// 2026-06-20 verdict eval:a2a C2 void-hold English fix: signature stripping
+// extracted to `cat-signature-strip.ts` so void-hold-detect.ts can share the
+// same source of truth. See that module for the regex + helper.
 
 /**
  * Review verdict 关键词。保守集，避免常见日常用语误报：

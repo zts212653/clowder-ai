@@ -294,6 +294,74 @@ describe('SessionSealer', () => {
     });
   });
 
+  describe('postSealHook guard (F231 AC-C3 / KD-10)', () => {
+    test('hooks fire after successful finalize terminal write', async () => {
+      const { store, sealer } = await createFixtures();
+      const record = store.create(BASE_INPUT);
+
+      let hookCalled = false;
+      sealer.registerPostSealHook(async () => {
+        hookCalled = true;
+      });
+
+      await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
+      await sealer.finalize({ sessionId: record.id });
+
+      assert.equal(hookCalled, true, 'hook must fire after successful seal');
+    });
+
+    test('hooks do NOT fire when terminal seal write fails', async () => {
+      const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+      const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
+      const store = new SessionChainStore();
+      const sealer = new SessionSealer(store);
+
+      const record = store.create(BASE_INPUT);
+
+      let hookCalled = false;
+      sealer.registerPostSealHook(async () => {
+        hookCalled = true;
+      });
+
+      // Seal first (this needs the real store.update)
+      await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
+      assert.equal(store.get(record.id)?.status, 'sealing');
+
+      // Now patch store.update to throw on terminal write (status='sealed')
+      const originalUpdate = store.update.bind(store);
+      store.update = (id, patch) => {
+        if (patch.status === 'sealed') {
+          throw new Error('simulated terminal write failure');
+        }
+        return originalUpdate(id, patch);
+      };
+
+      // finalize should not throw (best-effort), but hooks must NOT fire
+      await sealer.finalize({ sessionId: record.id });
+
+      assert.equal(hookCalled, false, 'hook must NOT fire when terminal seal write fails');
+    });
+
+    test('hook event carries correct session metadata', async () => {
+      const { store, sealer } = await createFixtures();
+      const record = store.create(BASE_INPUT);
+
+      let capturedEvent = null;
+      sealer.registerPostSealHook(async (event) => {
+        capturedEvent = event;
+      });
+
+      await sealer.requestSeal({ sessionId: record.id, reason: 'manual' });
+      await sealer.finalize({ sessionId: record.id });
+
+      assert.ok(capturedEvent, 'hook must receive event');
+      assert.equal(capturedEvent.sessionId, record.id);
+      assert.equal(capturedEvent.catId, 'opus');
+      assert.equal(capturedEvent.threadId, 'thread-1');
+      assert.equal(capturedEvent.sealReason, 'manual');
+    });
+  });
+
   describe('full lifecycle: active → sealing → sealed', () => {
     test('complete seal + finalize + new session creation', async () => {
       const { store, sealer } = await createFixtures();

@@ -1,6 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import {
+  areWorktreeIdsEquivalent,
+  getNavigateWorktreeRoomIds,
+  resolveNavigateTargetWorktreeId,
+  scopeWorktreeAliases,
+  type WorktreeAliasMap,
+} from '@/utils/worktree-id-alias';
 
 export function shouldAcceptNavigate(sessionThreadId: string | null, eventThreadId: string | undefined): boolean {
   if (!eventThreadId) return true;
@@ -19,6 +26,17 @@ export interface NavigateEvent {
 
 const OPEN_REVEAL_GRACE_MS = 2000;
 
+function shouldProcessNavigateEvent(
+  data: NavigateEvent,
+  sessionThreadId: string | null,
+  lastEventIdRef: { current: string | null },
+): boolean {
+  if (!shouldAcceptNavigate(sessionThreadId, data.threadId)) return false;
+  if (data.eventId && data.eventId === lastEventIdRef.current) return false;
+  if (data.eventId) lastEventIdRef.current = data.eventId;
+  return true;
+}
+
 export function handleNavigateEvent(
   data: NavigateEvent,
   currentWorktreeId: string | null,
@@ -30,6 +48,7 @@ export function handleNavigateEvent(
   },
   recentOpen?: { path: string; worktreeId?: string; ts: number } | null,
   presentationLocked?: boolean,
+  worktreeAliases?: WorktreeAliasMap,
 ): boolean {
   // Phase H: Switch workspace to knowledge feed mode (allowed even when locked)
   if (data.action === 'knowledge-feed') {
@@ -43,20 +62,24 @@ export function handleNavigateEvent(
   // File-oriented actions: auto-switch back to dev mode so the file is visible
   if (data.action === 'open') {
     actions.setWorkspaceMode?.('dev');
-    actions.setWorkspaceOpenFile(data.path, data.line ?? null, data.worktreeId ?? null);
+    actions.setWorkspaceOpenFile(
+      data.path,
+      data.line ?? null,
+      resolveNavigateTargetWorktreeId(currentWorktreeId, data.worktreeId ?? null, worktreeAliases),
+    );
     return true;
   }
 
   if (
     recentOpen &&
     recentOpen.path === data.path &&
-    recentOpen.worktreeId === (data.worktreeId ?? undefined) &&
+    areWorktreeIdsEquivalent(recentOpen.worktreeId ?? null, data.worktreeId ?? null, worktreeAliases) &&
     Date.now() - recentOpen.ts < OPEN_REVEAL_GRACE_MS
   ) {
     return false;
   }
 
-  if (data.worktreeId && data.worktreeId !== currentWorktreeId) {
+  if (data.worktreeId && !areWorktreeIdsEquivalent(data.worktreeId, currentWorktreeId, worktreeAliases)) {
     actions.setWorkspaceWorktreeId(data.worktreeId);
   }
   actions.setWorkspaceMode?.('dev');
@@ -69,6 +92,10 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
   const setWorkspaceRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
+  const worktreeAliases = useChatStore((s) => s.workspaceWorktreeAliases);
+  const worktreeAliasesProjectPath = useChatStore((s) => s.workspaceWorktreeAliasesProjectPath);
+  const currentProjectPath = useChatStore((s) => s.currentProjectPath);
+  const scopedWorktreeAliases = scopeWorktreeAliases(worktreeAliases, worktreeAliasesProjectPath, currentProjectPath);
   const lastEventIdRef = useRef<string | null>(null);
   const recentOpenRef = useRef<{ path: string; worktreeId?: string; ts: number } | null>(null);
 
@@ -82,14 +109,12 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
       const socket = io(`${apiUrl.protocol}//${apiUrl.host}`, { transports: ['websocket'] });
 
       socket.emit('join_room', 'workspace:global');
-      if (worktreeId) {
-        socket.emit('join_room', `worktree:${worktreeId}`);
+      for (const roomWorktreeId of getNavigateWorktreeRoomIds(worktreeId, scopedWorktreeAliases)) {
+        socket.emit('join_room', `worktree:${roomWorktreeId}`);
       }
 
       const handler = (data: NavigateEvent) => {
-        if (!shouldAcceptNavigate(threadId, data.threadId)) return;
-        if (data.eventId && data.eventId === lastEventIdRef.current) return;
-        if (data.eventId) lastEventIdRef.current = data.eventId;
+        if (!shouldProcessNavigateEvent(data, threadId, lastEventIdRef)) return;
         const locked = useChatStore.getState().presentationLock != null;
         const processed = handleNavigateEvent(
           data,
@@ -102,6 +127,7 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
           },
           recentOpenRef.current,
           locked,
+          scopedWorktreeAliases,
         );
         if (processed && data.action === 'open') {
           recentOpenRef.current = { path: data.path, worktreeId: data.worktreeId, ts: Date.now() };
@@ -120,5 +146,13 @@ export function useWorkspaceNavigate(worktreeId: string | null, threadId: string
       cancelled = true;
       cleanup?.();
     };
-  }, [worktreeId, threadId, setWorkspaceWorktreeId, setWorkspaceRevealPath, setWorkspaceOpenFile, setWorkspaceMode]);
+  }, [
+    worktreeId,
+    threadId,
+    scopedWorktreeAliases,
+    setWorkspaceWorktreeId,
+    setWorkspaceRevealPath,
+    setWorkspaceOpenFile,
+    setWorkspaceMode,
+  ]);
 }

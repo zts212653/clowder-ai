@@ -1,6 +1,6 @@
 ---
 feature_ids: [F192]
-related_features: [F167, F153, F086, F188, F200]
+related_features: [F167, F153, F086, F188, F200, F245]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
@@ -658,6 +658,7 @@ Based on the first micro fit digest (2026-05-11):
 - **Related**: F200（Memory Recall Eval——memory-domain 专项 eval 竖井，Phase E 首批迁移对象）
 - **Related**: ADR-031（Harness Engineering 方法论）
 - **Related**: ADR-032（Local-First Trace Producer Enabler）
+- **Consumed by**: [F236](F236-anchor-first-context-entry.md) Phase A/B-Eval — anchor-first context 的 sunset 监控（telemetry 聚合 → verdict → 回退触发）接本 harness eval 的 pipeline + verdict engine；**eval 设计真相源在 F236「Phase A/B-Eval」节，此处不展开**（避免 F192 膨胀）
 
 ## Risk
 

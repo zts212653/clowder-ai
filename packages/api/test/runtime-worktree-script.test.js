@@ -107,6 +107,10 @@ if [ "\${1:-}" = "run" ] && [ "\${2:-}" = "build" ]; then
       mkdir -p "$target_dir/dist"
       : > "$target_dir/dist/index.js"
       ;;
+    */packages/api)
+      mkdir -p "$target_dir/dist"
+      : > "$target_dir/dist/index.js"
+      ;;
     */packages/mcp-server)
       mkdir -p "$target_dir/dist"
       : > "$target_dir/dist/index.js"
@@ -143,6 +147,17 @@ function seedRuntimeDependencyMarkers(projectDir) {
   writeFileSync(join(projectDir, 'packages', 'api', 'node_modules', 'tsx', 'package.json'), '{}');
   mkdirSync(join(projectDir, 'packages', 'mcp-server', 'node_modules', 'typescript'), { recursive: true });
   writeFileSync(join(projectDir, 'packages', 'mcp-server', 'node_modules', 'typescript', 'package.json'), '{}');
+}
+
+function seedRuntimeBuildArtifacts(projectDir) {
+  mkdirSync(join(projectDir, 'packages', 'shared', 'dist'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'shared', 'dist', 'index.js'), '');
+  mkdirSync(join(projectDir, 'packages', 'api', 'dist'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'api', 'dist', 'index.js'), '');
+  mkdirSync(join(projectDir, 'packages', 'mcp-server', 'dist'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'mcp-server', 'dist', 'index.js'), '');
+  mkdirSync(join(projectDir, 'packages', 'web', '.next'), { recursive: true });
+  writeFileSync(join(projectDir, 'packages', 'web', '.next', 'BUILD_ID'), 'stub-build-id\n');
 }
 
 async function waitForLocalPort(port, attempts = 20) {
@@ -282,6 +297,7 @@ printf 'ok'`,
   it('starts in-place when project is not a git repository', () => {
     const projectDir = createTempProject('runtime-non-git');
     seedRuntimeDependencyMarkers(projectDir);
+    seedRuntimeBuildArtifacts(projectDir);
 
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
       cwd: projectDir,
@@ -297,6 +313,7 @@ printf 'ok'`,
   it('ignores sibling runtime .env when starting in-place outside git', async () => {
     const projectDir = createTempProject('runtime-non-git-sibling-runtime');
     seedRuntimeDependencyMarkers(projectDir);
+    seedRuntimeBuildArtifacts(projectDir);
 
     const siblingRuntimeDir = join(projectDir, '..', 'cat-cafe-runtime');
     mkdirSync(siblingRuntimeDir, { recursive: true });
@@ -442,13 +459,15 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     );
 
     assert.equal(result.status, 0);
-    assert.match(result.stdout, /quick start: shared dist stale\/missing/);
-    assert.match(result.stdout, /quick start: MCP server dist stale\/missing/);
-    assert.match(result.stdout, /quick start: web production build stale\/missing/);
+    assert.match(result.stdout, /runtime dist: shared stale\/missing/);
+    assert.match(result.stdout, /runtime dist: api stale\/missing/);
+    assert.match(result.stdout, /runtime dist: MCP server stale\/missing/);
+    assert.match(result.stdout, /runtime dist: web production build stale\/missing/);
     assert.match(result.stdout, /STARTED:/);
 
     const pnpmLog = readFileSync(env.RUNTIME_TEST_PNPM_LOG, 'utf8');
     assert.match(pnpmLog, /-C .*packages\/shared run build/);
+    assert.match(pnpmLog, /-C .*packages\/api run build/);
     assert.match(pnpmLog, /-C .*packages\/mcp-server run build/);
     assert.match(pnpmLog, /-C .*packages\/web run build/);
   });
@@ -456,6 +475,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
   it('starts in-place when .git is a dangling pointer file', () => {
     const projectDir = createTempProject('runtime-dangling-git');
     seedRuntimeDependencyMarkers(projectDir);
+    seedRuntimeBuildArtifacts(projectDir);
     writeFileSync(join(projectDir, '.git'), 'gitdir: /tmp/does-not-exist-anymore\n', 'utf8');
 
     const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-sync'], {
@@ -671,7 +691,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     execFileSync('git', ['commit', '-m', 'add fable avatar'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 
-    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'sync', '--no-install'], {
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-install'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: {
@@ -718,7 +738,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     execFileSync('git', ['commit', '-m', 'replace directory with file'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 
-    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'sync', '--no-install'], {
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-install'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: {
@@ -767,7 +787,7 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     execFileSync('git', ['commit', '-m', 'remote advance'], { cwd: projectDir, stdio: 'ignore' });
     execFileSync('git', ['push', 'origin', 'main'], { cwd: projectDir, stdio: 'ignore' });
 
-    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'sync', '--no-install'], {
+    const result = spawnSync('bash', [join(projectDir, 'scripts', 'runtime-worktree.sh'), 'start', '--no-install'], {
       cwd: projectDir,
       encoding: 'utf8',
       env: {

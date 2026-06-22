@@ -36,6 +36,7 @@ const BUILTIN_CAT_CAFE_SERVERS: ReadonlyMap<string, string> = new Map([
   ['cat-cafe-memory', 'memory.js'],
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
+  ['cat-cafe-audio', 'audio.js'],
   ['cat-cafe-finance', 'finance.js'],
 ]);
 

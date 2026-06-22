@@ -195,6 +195,53 @@ describe('StartupReconciler', () => {
     assert.equal(unchanged.status, 'succeeded');
   });
 
+  test('F233 PR3: running startup sweep records invocation.died after failed transition', async () => {
+    const updatedAt = Date.now() - 45_000;
+    const r1 = makeRecord({
+      id: 'startup-died-1',
+      threadId: 'thread-startup-died',
+      status: 'running',
+      targetCats: ['opus'],
+      updatedAt,
+    });
+    const queued = makeRecord({
+      id: 'startup-queued-1',
+      threadId: 'thread-startup-queued',
+      status: 'queued',
+      targetCats: ['codex'],
+      createdAt: Date.now() - 10 * 60_000,
+    });
+    store.seed(r1);
+    store.seed(queued);
+
+    const recorded = [];
+    const reconciler = new StartupReconciler({
+      invocationRecordStore: store,
+      taskProgressStore,
+      log,
+      ballCustody: {
+        async record(event) {
+          recorded.push(event);
+        },
+      },
+    });
+
+    const result = await reconciler.reconcileOrphans();
+
+    assert.equal(result.running, 1);
+    assert.equal(result.queued, 1);
+    assert.equal(recorded.length, 1, 'only running invocations should produce invocation.died');
+    assert.equal(recorded[0].kind, 'invocation.died');
+    assert.equal(recorded[0].sourceEventId, 'inv:startup-died-1:died');
+    assert.equal(recorded[0].subjectKey, 'ball:thread:thread-startup-died');
+    assert.deepEqual(recorded[0].payload, {
+      invocationId: 'startup-died-1',
+      catId: 'opus',
+      reason: 'process_restart',
+      lastScanAt: updatedAt,
+    });
+  });
+
   test('clears task progress for swept records', async () => {
     const r1 = makeRecord({ id: 'r1', threadId: 't1', targetCats: ['opus', 'codex'] });
     store.seed(r1);

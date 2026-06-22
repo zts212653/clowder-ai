@@ -57,6 +57,12 @@ export interface ISessionHandoffProposalStore {
    */
   listActiveBySession(sourceSessionId: string): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
   /**
+   * F246 Approval Hub: list pending proposals for a given user, newest first.
+   * Used by the Hub aggregation route to collect all pending handoff proposals
+   * across threads for the operator's unified approval view.
+   */
+  listPendingByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
+  /**
    * A4 cooldown: most recent proposal (ANY status, incl. rejected/expired) for this cat+thread.
    * Enforces a per-(user,thread,cat) cooldown so a reject/expire can't be immediately re-spammed
    * (砚砚 P2 — ≤1 pending alone doesn't stop rapid re-cards after reject).
@@ -202,6 +208,17 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       }
     }
     return result;
+  }
+
+  listPendingByUser(userId: string, limit = 100): SessionHandoffProposal[] {
+    const result: SessionHandoffProposal[] = [];
+    for (const p of this.proposals.values()) {
+      if (p.userId === userId && p.status === 'pending') {
+        result.push(clone(p));
+      }
+    }
+    result.sort((a, b) => b.createdAt - a.createdAt);
+    return result.slice(0, Math.max(0, limit));
   }
 
   getMostRecentByCatThread(userId: string, sourceCatId: CatId, sourceThreadId: string): SessionHandoffProposal | null {

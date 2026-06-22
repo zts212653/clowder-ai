@@ -248,6 +248,17 @@ const EXPECTED_SIGNAL_TOOLS = [
 const EXPECTED_LIMB_TOOLS = ['limb_list_available', 'limb_invoke', 'limb_pair_list', 'limb_pair_approve'];
 
 // F207 Phase B0: finance fact tools get their own read-only data-plane server.
+const EXPECTED_AUDIO_TOOLS = [
+  'cat_cafe_audio_list_sources',
+  'cat_cafe_audio_capture_start',
+  'cat_cafe_audio_capture_stop',
+  'cat_cafe_audio_capture_status',
+  'cat_cafe_audio_read_transcript',
+  'cat_cafe_audio_enroll_speakers',
+  'cat_cafe_audio_set_advisory_mode',
+  'cat_cafe_audio_set_talking_points',
+];
+
 const EXPECTED_FINANCE_TOOLS = ['cat_cafe_finance_query'];
 
 function assertUnique(values, label) {
@@ -261,6 +272,7 @@ describe('MCP Server Tool Registration', () => {
     assertUnique(EXPECTED_MEMORY_TOOLS, 'EXPECTED_MEMORY_TOOLS');
     assertUnique(EXPECTED_SIGNAL_TOOLS, 'EXPECTED_SIGNAL_TOOLS');
     assertUnique(EXPECTED_LIMB_TOOLS, 'EXPECTED_LIMB_TOOLS');
+    assertUnique(EXPECTED_AUDIO_TOOLS, 'EXPECTED_AUDIO_TOOLS');
     assertUnique(EXPECTED_FINANCE_TOOLS, 'EXPECTED_FINANCE_TOOLS');
   });
 
@@ -419,6 +431,14 @@ describe('MCP Server Tool Registration', () => {
     const registered = Object.keys(server._registeredTools);
 
     assert.deepEqual([...registered].sort(), [...EXPECTED_LIMB_TOOLS].sort());
+  });
+
+  test('F195: createAudioServer registers only audio tool surface', async () => {
+    const { createAudioServer } = await import('../dist/audio.js');
+    const server = createAudioServer();
+    const registered = Object.keys(server._registeredTools);
+
+    assert.deepEqual([...registered].sort(), [...EXPECTED_AUDIO_TOOLS].sort());
   });
 
   test('F207 AC-B5: createFinanceServer registers only finance fact tool surface', async () => {

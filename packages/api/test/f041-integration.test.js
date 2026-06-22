@@ -423,8 +423,8 @@ describe('F041 Discovery Consistency', () => {
       geminiConfig: join(dir, 'nonexistent.json'),
     });
 
-    // F193/F207: 5 splits (collab/memory/signals/limb/finance) + pencil + jetbrains. No legacy 'cat-cafe'.
-    assert.equal(config.capabilities.length, 7);
+    // F193/F195/F207: 6 splits (collab/memory/signals/limb/audio/finance) + pencil + jetbrains. No legacy 'cat-cafe'.
+    assert.equal(config.capabilities.length, 8);
 
     const catCafeLegacy = config.capabilities.find((c) => c.id === 'cat-cafe');
     assert.equal(catCafeLegacy, undefined, 'legacy cat-cafe must not be bootstrapped (Phase C)');

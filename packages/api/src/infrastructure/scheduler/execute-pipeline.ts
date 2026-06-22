@@ -1,3 +1,4 @@
+import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 import type { EmissionStore } from './EmissionStore.js';
 import type { GlobalControlStore } from './GlobalControlStore.js';
 import type { RunLedger } from './RunLedger.js';
@@ -35,6 +36,8 @@ export interface PipelineContext {
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
   invokeTrigger?: ScheduleInvokeTrigger;
+  /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
+  ballCustody?: IBallCustodyIngest;
   /** #415: per-workItem outcome callback (used for failure notifications) */
   onItemOutcome?: (taskId: string, subjectKey: string, outcome: RunOutcome, errorSummary: string | null) => void;
 }
@@ -72,6 +75,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
     deliver,
     fetchContent,
     invokeTrigger,
+    ballCustody,
     onItemOutcome,
   } = ctx;
   const startMs = Date.now();
@@ -190,6 +194,7 @@ export async function executeTaskPipeline(ctx: PipelineContext): Promise<void> {
         deliver,
         fetchContent,
         invokeTrigger,
+        ballCustody,
       });
       pendingExecutes.push(rawExecute.catch(() => {}));
       let errorSummary: string | null = null;

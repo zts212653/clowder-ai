@@ -86,4 +86,23 @@ describe('F235: CommunityIssueDraft types', () => {
       assert.throws(() => createCommunityIssueDraft({ ...validInput, targetRepo: '' }), /targetRepo.*required/i);
     });
   });
+
+  describe('Phase B: cat_initiated sourceType', () => {
+    it('accepts cat_initiated as sourceType', async () => {
+      const { createCommunityIssueDraft } = await import('../dist/types/community-issue-draft.js');
+      const draft = createCommunityIssueDraft({
+        sourceType: 'cat_initiated',
+        sourceId: 'conv_test_123',
+        title: 'Test issue from cat',
+        bodyMarkdown: 'Cat drafted this issue',
+        targetRepo: 'clowder-ai/cat-cafe',
+        labels: ['user-reported'],
+        threadId: 'thread_test',
+        userId: 'user_test',
+      });
+      assert.equal(draft.sourceType, 'cat_initiated');
+      assert.equal(draft.status, 'draft');
+      assert.ok(draft.draftId.startsWith('cid_'));
+    });
+  });
 });

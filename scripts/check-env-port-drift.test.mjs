@@ -226,7 +226,10 @@ function buildExportedRootScripts(sourceScripts) {
     // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
     'check:reverse-sanitizer',
     'check:boundary-roundtrip',
+    // Privacy gate test — references F207 internal incident context; home-only.
+    'check:export-privacy-gate',
     'clean:root-debris',
+    'guards:check',
   ];
   for (const scriptName of internalScripts) {
     delete scripts[scriptName];
@@ -1330,7 +1333,7 @@ excluded:
     it('F180 Claude settings hook template guard rejects maintainer absolute-path variants', () => {
       const absolutePathTemplates = [
         '{"hooks":{"SessionStart":[{"hooks":[{"command":"/home/alice/.claude/hooks/session-start-recall.sh"}]}]}}',
-        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:/home/user/session-start-recall.sh"}]}]}}',
+        '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:/home/user/.claude/hooks/session-start-recall.sh"}]}]}}',
         '{"hooks":{"SessionStart":[{"hooks":[{"command":"C:\\\\Users\\\\Alice\\\\.claude\\\\hooks\\\\session-start-recall.sh"}]}]}}',
         '{"hooks":{"SessionStart":[{"hooks":[{"command":"bash \\"/home/alice/.claude/hooks/session-start-recall.sh\\""}]}]}}',
       ];

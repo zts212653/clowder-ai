@@ -180,8 +180,11 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/threads/T1/artifacts', headers: AUTH });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    assert.equal(body.artifacts.length, 3); // plan + feature-doc + file all collected
-    assert.ok(body.artifacts.every((a) => a.type === 'file')); // doc types map to panel file type
-    assert.deepEqual(body.artifacts.map((a) => a.ref).sort(), ['docs/features/F1.md', 'docs/plans/x.md', 'src/y.ts']);
+    assert.equal(body.artifacts.length, 3); // plan + feature-doc + source file all collected
+    assert.deepEqual(Object.fromEntries(body.artifacts.map((a) => [a.ref, a.type])), {
+      'docs/plans/x.md': 'file',
+      'docs/features/F1.md': 'file',
+      'src/y.ts': 'code',
+    });
   });
 });

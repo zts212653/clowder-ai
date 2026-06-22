@@ -62,7 +62,12 @@ created: 2026-04-26
 - 复用 F174 Route B 降级 framework：agent-key 失败时按 reason code 降级提示
 - `CAT_CAFE_READONLY=true` 总闸保留不动——F178 只开放 callback writeback allowlist，不解锁 file/shell mutators
 
-### Phase D: Hub UI（agent-key inventory / audit）+ 复用 F174 telemetry
+### Phase D: ~~Hub UI（agent-key inventory / audit）~~ ❌ cancelled
+
+> **Cancelled 2026-06-19** — operator 判定设计假设不成立：operator不需要管理 UI（"我的认知带宽是来帮你们看这些的吗"），运维/安全类监控应该是猫自治 + eval 闭环，不是给人看的 dashboard。原 Phase D 中仍有价值的需求（key orphaning guard、audit log、可观测性）迁移到 Phase E 以 eval 自治模式落地。
+
+<details>
+<summary>原 Phase D 内容（存档）</summary>
 
 - Hub 设置面板加 "Agent Keys" 页（KD-5：管理面板，不是审批入口）：
   - 列出 per-cat 的 agent-key（catId / userId / issuedAt / expiresAt / lastUsedAt / status）
@@ -75,6 +80,16 @@ created: 2026-04-26
 - audit log：所有 agent-key 写操作记录到 evidence/observability 通道
 - 复用 F174 24h ring buffer + plug indicator：agent-key 失败率挂同一个 indicator（颜色/状态语义扩展）
 - 现场可感知性：thread 内 agent-key 写操作标识 "by agent-key (out-of-invocation)"
+</details>
+
+### Phase E: Agent-Key 自治监控（eval 闭环）📋 backlog
+
+> 从 Phase D 迁移的有价值需求，以猫自治 + eval 闭环模式落地，不建 Hub 面板。
+
+- **Key orphaning guard**（原 AC-D5）：sidecar reconcile 重启时按 `catId × userId × scope` upsert/replace，连续 restart 不产生 orphan active keys。自动检测 + 自动修复，不需要人盯
+- **Audit log**（原 AC-D2）：agent-key 写操作记录到 evidence/observability 通道，走 F192 eval 闭环消费，不走 Hub UI
+- **可观测性**（原 AC-D3）：agent-key 失败率走 eval telemetry 自动告警，猫发现异常自行处理；复用 F174 ring buffer
+- **Thread 内标识**（原 AC-D4）：agent-key 写入标识 "by agent-key"，猫可感知出处，operator不需要关注
 
 ## Acceptance Criteria
 
@@ -97,12 +112,18 @@ created: 2026-04-26
 - [x] AC-C5: `CAT_CAFE_READONLY=true` 总闸保留，F178 不解锁 file/shell mutators
 - [x] AC-C6: 现有 invocation token 主路径无 regression（F174 测试套件全绿）
 
-### Phase D（UI + 审计 + telemetry）
-- [ ] AC-D1: Hub 设置面板 "Agent Keys" 页：inventory / rotate / revoke / audit（管理面板，不是审批入口）
-- [ ] AC-D2: audit log 落地（agent-key 每次写操作可追溯）
-- [ ] AC-D3: F174 plug indicator 扩展：agent-key 失败率与 callback 401 同 indicator 共显
-- [ ] AC-D4: 现场可感知性：agent-key 写入在 thread UI 标识 "by agent-key (out-of-invocation)"
-- [ ] AC-D5: Redis backend 上线前完成 key orphaning guard：sidecar reconcile 重启时按 `catId × userId × scope` upsert/replace，或 issue 前 revoke existing active key，并有连续 restart/reconcile 测试
+### Phase D（~~UI + 审计 + telemetry~~）❌ cancelled 2026-06-19
+- [~] ~~AC-D1: Hub 设置面板 "Agent Keys" 页~~ → cancelled（设计假设不成立：operator不需要管理 UI）
+- [~] ~~AC-D2: audit log~~ → 迁移到 Phase E（AC-E2）
+- [~] ~~AC-D3: plug indicator 扩展~~ → 迁移到 Phase E（AC-E3）
+- [~] ~~AC-D4: 现场可感知性~~ → 迁移到 Phase E（AC-E4）
+- [~] ~~AC-D5: key orphaning guard~~ → 迁移到 Phase E（AC-E1）
+
+### Phase E（Agent-Key 自治监控 — eval 闭环）📋 backlog
+- [ ] AC-E1: Key orphaning guard：sidecar reconcile 重启时按 `catId × userId × scope` upsert/replace，连续 restart/reconcile 测试覆盖（猫自治，不需人盯）
+- [ ] AC-E2: Audit log 走 evidence/observability 通道 + F192 eval 闭环消费（不走 Hub UI）
+- [ ] AC-E3: Agent-key 失败率走 eval telemetry 自动告警，复用 F174 ring buffer（猫发现异常自行处理）
+- [ ] AC-E4: Thread 内 agent-key 写入标识 "by agent-key"（猫可感知出处）
 
 ## Dependencies
 

@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
-import { parse as parseYaml } from 'yaml';
 import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js';
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import { buildA2aVerdictHandoff } from './eval-a2a-adapter.js';
+// R3 cloud P1 fix on PR #2466: YAML artifact parsers extracted to a separate
+// module to keep this file under the 350-line hard limit (AGENTS.md redline).
+// Behavior unchanged; pure structural split.
+import { parseAttribution, parseSnapshot } from './eval-a2a-artifact-parsers.js';
 import { resolveA2aEvidenceBundle } from './eval-a2a-artifact-resolver.js';
 import { formatLiveVerdictMarkdown } from './eval-a2a-verdict-renderer.js';
 
@@ -36,12 +39,8 @@ export interface A2aLiveVerdictArtifact {
   sentCrossThreadMessage: false;
 }
 
-interface ParsedMarkdownYaml {
-  frontmatter: Record<string, unknown>;
-  body: Record<string, unknown>;
-}
-
-type RawRecord = Record<string, unknown>;
+// ParsedMarkdownYaml + RawRecord + YAML parser helpers extracted to
+// eval-a2a-artifact-parsers.ts (R3 cloud P1 fix: 350-line cap).
 
 export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aLiveVerdictArtifact {
   assertSafeVerdictId(input.verdictId);
@@ -74,6 +73,10 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
     featureId: rawSnapshot.featureId,
     generatedAt: rawSnapshot.generatedAt,
     window: rawSnapshot.window,
+    // F167 sibling-PR (P1 gpt52 review fix): forward counterWindow when the
+    // raw snapshot YAML carried one. Skipping this field is what made the
+    // silent false positive fix invisible to eval cats reading the bundle.
+    ...(rawSnapshot.counterWindow ? { counterWindow: rawSnapshot.counterWindow } : {}),
     components: rawSnapshot.components.filter((component) => citedComponentIds.has(component.id)),
   };
   const attributionBundle = {
@@ -150,108 +153,15 @@ export function generateA2aLiveVerdict(input: GenerateA2aLiveVerdictInput): A2aL
   };
 }
 
-function parseSnapshot(path: string) {
-  const parsed = parseMarkdownYaml(path);
-  const featureId = stringValue(parsed.frontmatter.feature_id, 'snapshot feature_id');
-  const generatedAt = stringValue(parsed.frontmatter.generated_at, 'snapshot generated_at');
-  const components = arrayOfRecords(parsed.body.components).map((component) => ({
-    id: stringValue(component.id, 'snapshot component id'),
-    name: stringValue(component.name, 'snapshot component name'),
-    confidence: stringValue(component.confidence ?? 'medium', 'snapshot component confidence'),
-    activationCounts: countRecord(component.activation_counts),
-    frictionCounts: countRecord(component.friction_counts),
-  }));
-  return {
-    featureId,
-    evalSnapshotId:
-      optionalStringValue(parsed.frontmatter.eval_snapshot_id, 'snapshot eval_snapshot_id') ??
-      evalSnapshotIdFromGeneratedAt(featureId, generatedAt),
-    generatedAt,
-    window: {
-      startMs: optionalNumber(recordValue(parsed.body.window).start_ms),
-      endMs: optionalNumber(recordValue(parsed.body.window).end_ms),
-      durationHours: numberValue(recordValue(parsed.body.window).duration_hours, 'snapshot window duration_hours'),
-    },
-    components,
-  };
-}
-
 function assertSafeVerdictId(verdictId: string): void {
   if (!SAFE_VERDICT_ID_PATTERN.test(verdictId)) {
     throw new Error('verdictId must be a safe slug');
   }
 }
 
-function evalSnapshotIdFromGeneratedAt(featureId: string, generatedAt: string): string {
-  const date = generatedAt.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
-  if (!date) throw new Error('snapshot generated_at must start with YYYY-MM-DD');
-  return `eval-${featureId}-${date}`;
-}
-
-function parseAttribution(path: string) {
-  const parsed = parseMarkdownYaml(path);
-  const findings = arrayOfRecords(parsed.body.findings).map((finding) => {
-    const relatedFeature = optionalStringValue(finding.related_feature, 'attribution related_feature');
-    const attribution = recordValue(finding.attribution);
-    const pipelineOrHuman = optionalStringValue(attribution.pipeline_or_human, 'attribution pipeline_or_human');
-    return {
-      id: stringValue(finding.id, 'attribution finding id'),
-      ...(relatedFeature ? { relatedFeature } : {}),
-      frictionSignal: {
-        type: stringValue(recordValue(finding.friction_signal).type, 'attribution friction signal type'),
-        severity: severityValue(recordValue(finding.friction_signal).severity),
-        confidence: numberValue(recordValue(finding.friction_signal).confidence, 'attribution confidence'),
-      },
-      attribution: {
-        primaryLayer: stringValue(attribution.primary_layer, 'attribution primary_layer'),
-        ...(pipelineOrHuman ? { pipelineOrHuman } : {}),
-        evidence: arrayOfRecords(attribution.evidence).map((evidence) => ({
-          type: stringValue(evidence.type, 'attribution evidence type'),
-          anchor: stringValue(evidence.anchor, 'attribution evidence anchor'),
-          excerpt: stringValue(evidence.excerpt, 'attribution evidence excerpt'),
-        })),
-      },
-      proposedAction: arrayOfRecords(finding.proposed_action).map((action) => ({
-        action: stringValue(action.action, 'attribution proposed_action action'),
-        target: stringValue(action.target, 'attribution proposed_action target'),
-        rationale: stringValue(action.rationale, 'attribution proposed_action rationale'),
-      })),
-      status: stringValue(finding.status ?? 'open', 'attribution status'),
-    };
-  });
-  const noFinding = parsed.body.no_finding_record ? recordValue(parsed.body.no_finding_record) : undefined;
-  return {
-    featureId: stringValue(parsed.frontmatter.feature_id, 'attribution feature_id'),
-    evalSnapshotId: stringValue(parsed.frontmatter.eval_snapshot_id, 'attribution eval_snapshot_id'),
-    generatedAt: stringValue(parsed.frontmatter.generated_at, 'attribution generated_at'),
-    findings,
-    ...(noFinding
-      ? {
-          noFindingRecord: {
-            reason: stringValue(noFinding.reason, 'attribution no_finding_record reason'),
-            evidence: stringValue(noFinding.evidence, 'attribution no_finding_record evidence'),
-          },
-        }
-      : {}),
-  };
-}
-
-function parseMarkdownYaml(path: string): ParsedMarkdownYaml {
-  const raw = readFileSync(path, 'utf8');
-  const frontmatterMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!frontmatterMatch) throw new Error(`missing YAML frontmatter: ${path}`);
-  const body = raw.slice(frontmatterMatch[0].length);
-  const bodyYaml = body
-    .split(/\r?\n/)
-    .filter((line) => !line.trimStart().startsWith('#'))
-    .join('\n');
-  return {
-    frontmatter: asRecord(parseYaml(frontmatterMatch[1] ?? '')),
-    body: asRecord(parseYaml(bodyYaml) ?? {}),
-  };
-}
-
-// formatLiveVerdictMarkdown extracted to eval-a2a-verdict-renderer.ts (350-line limit)
+// parseAttribution + parseMarkdownYaml + evalSnapshotIdFromGeneratedAt extracted to
+// eval-a2a-artifact-parsers.ts (R3 cloud P1 fix: 350-line cap).
+// formatLiveVerdictMarkdown extracted to eval-a2a-verdict-renderer.ts (earlier split).
 
 function strongestFinding(findings: ReturnType<typeof parseAttribution>['findings'][number][]) {
   if (findings.length === 0) return undefined;
@@ -299,52 +209,6 @@ function toPosixPath(path: string): string {
   return path.replaceAll('\\', '/');
 }
 
-function countRecord(value: unknown): Record<string, number | null> {
-  const record = recordValue(value, false);
-  if (!record) return {};
-  return Object.fromEntries(
-    Object.entries(record).map(([key, count]) => [key, count == null ? null : numberValue(count, key)]),
-  );
-}
-
-function severityValue(value: unknown): 'low' | 'medium' | 'high' {
-  const severity = stringValue(value, 'attribution severity');
-  if (severity === 'low' || severity === 'medium' || severity === 'high') return severity;
-  throw new Error(`invalid attribution severity: ${severity}`);
-}
-
-function numberValue(value: unknown, name: string): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  throw new Error(`${name} must be a finite number`);
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  if (value == null) return undefined;
-  return numberValue(value, 'optional number');
-}
-
-function stringValue(value: unknown, name: string): string {
-  if (typeof value === 'string' && value.length > 0) return value;
-  throw new Error(`${name} must be a non-empty string`);
-}
-
-function optionalStringValue(value: unknown, name: string): string | undefined {
-  if (value == null) return undefined;
-  return stringValue(value, name);
-}
-
-function arrayOfRecords(value: unknown): RawRecord[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => asRecord(item));
-}
-
-function recordValue(value: unknown, required = true): RawRecord {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as RawRecord;
-  if (!required) return {};
-  throw new Error('expected YAML object');
-}
-
-function asRecord(value: unknown): RawRecord {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return value as RawRecord;
-  return {};
-}
+// YAML scalar/object helpers (countRecord, severityValue, numberValue, optionalNumber,
+// stringValue, optionalStringValue, arrayOfRecords, recordValue, asRecord) extracted
+// to eval-a2a-artifact-parsers.ts as private helpers (R3 cloud P1 fix: 350-line cap).

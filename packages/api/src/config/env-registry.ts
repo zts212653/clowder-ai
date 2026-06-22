@@ -209,6 +209,38 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'F233_BALL_CUSTODY_PROBE_INTERVAL_MS',
+    defaultValue: '60000',
+    description: 'F233 ball-custody ProbeScheduler 轮询间隔（毫秒，启动时读取）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'F233_FEAT_TRAJECTORY_COLLECTOR_INTERVAL_MS',
+    defaultValue: '900000',
+    description: 'F233 Phase C feat trajectory collector cron 轮询间隔（毫秒，默认 15 分钟；启动时读取）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_REPO_ROOT',
+    defaultValue: '(进程 CWD)',
+    description: 'F233 Phase C feat trajectory collector 所读 cat-cafe 仓根目录（含 .git）。未设置时用 process.cwd()',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_REPO_FULL_NAME',
+    defaultValue: 'zts212653/cat-cafe',
+    description: 'F233 Phase C feat trajectory collector 调 gh CLI 用的 owner/repo（GitHub PR 元数据查询）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_AGENT_KEY_SECRET',
     defaultValue: '(空)',
     description: 'F178 Persistent MCP Agent-Key Auth — 共享密钥（直接环境变量提供）',
@@ -913,8 +945,8 @@ export const ENV_VARS: EnvDefinition[] = [
 
   // --- connector infrastructure ---
   // F240: Per-connector config (TELEGRAM_*, FEISHU_*, DINGTALK_*, XIAOYI_*,
-  // WEIXIN_*, WECOM_*, GITHUB_*) moved to YAML manifests (connector.yaml /
-  // plugin.yaml). Only infrastructure-level vars remain here.
+  // WEIXIN_*, WECOM_*) moved to YAML manifests (connector.yaml/plugin.yaml).
+  // Only infrastructure-level and diagnostic vars remain here.
   {
     name: 'CONNECTOR_GATEWAY_AUTOSTART',
     defaultValue: 'runtime-production-only',
@@ -951,6 +983,64 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
     runtimeEditable: true,
     allowedValues: ['0', '1'],
+  },
+
+  // --- GitHub Repo Inbox / Review ---
+  {
+    name: 'GITHUB_WEBHOOK_SECRET',
+    defaultValue: '(未设置 → Repo Inbox webhook 不启用)',
+    description: 'GitHub Repo Inbox webhook secret（需与 GitHub 仓库 webhook 配置一致）',
+    category: 'github_review',
+    sensitive: true,
+    runtimeEditable: true,
+    exampleRecommended: true,
+  },
+  {
+    name: 'GITHUB_REPO_ALLOWLIST',
+    defaultValue: '(未设置)',
+    description: 'GitHub Repo Inbox 允许接收事件的仓库列表（owner/repo，多个用逗号分隔）',
+    category: 'github_review',
+    sensitive: false,
+    exampleRecommended: true,
+  },
+  {
+    name: 'GITHUB_REPO_INBOX_CAT_ID',
+    defaultValue: '(未设置)',
+    description: 'GitHub Repo Inbox 默认收件猫 catId',
+    category: 'github_review',
+    sensitive: false,
+    exampleRecommended: true,
+  },
+  {
+    name: 'GITHUB_AUTHORITATIVE_REVIEW_LOGINS',
+    defaultValue: 'chatgpt-codex-connector[bot]',
+    description:
+      '[DEPRECATED] F140 Phase E.2 cutover (2026-04-24): Rule B authoritative-source skip removed; this var now only serves as backward-compat fallback for GITHUB_SETUP_NOISE_BOT_LOGINS. Will be removed in a follow-up release.',
+    category: 'github_review',
+    sensitive: false,
+  },
+  {
+    name: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
+    defaultValue: 'chatgpt-codex-connector[bot]',
+    description:
+      'Comma-separated GitHub bot logins whose conversation comments may contain Codex setup-only guidance. F140 polling-side setup-noise filter skips those (bot + conversation + setup-only body, no codex review content). Falls back to GITHUB_AUTHORITATIVE_REVIEW_LOGINS for backward compat.',
+    category: 'github_review',
+    sensitive: false,
+  },
+  {
+    name: 'GITHUB_SELF_LOGIN',
+    defaultValue: '(未设置 → 自动使用 gh api /user 识别)',
+    description: 'GitHub review feedback 自身账号 fallback；当 gh api /user 无法识别时用于防止处理自己发出的评论',
+    category: 'github_review',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'GITHUB_TOKEN',
+    defaultValue: '(未设置)',
+    description: 'GitHub Personal Access Token（Scheduler 仓库活跃度模板 HTTP 请求鉴权）',
+    category: 'github_review',
+    sensitive: true,
   },
 
   // --- codex ---
@@ -1246,39 +1336,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'github_review',
     sensitive: true,
     runtimeEditable: true,
-  },
-  {
-    name: 'GITHUB_SELF_LOGIN',
-    defaultValue: '(未设置 → 自动使用 gh api /user 识别)',
-    description: 'GitHub review feedback 自身账号 fallback；当 gh api /user 无法识别时用于防止处理自己发出的评论',
-    category: 'github_review',
-    sensitive: false,
-    runtimeEditable: true,
-  },
-  {
-    name: 'GITHUB_WEBHOOK_SECRET',
-    defaultValue: '(未设置 → Repo Inbox webhook 不启用)',
-    description: 'GitHub Repo Inbox webhook secret（需与 GitHub 仓库 webhook 配置一致）',
-    category: 'github_review',
-    sensitive: true,
-    runtimeEditable: true,
-    exampleRecommended: true,
-  },
-  {
-    name: 'GITHUB_REPO_ALLOWLIST',
-    defaultValue: '(未设置)',
-    description: 'GitHub Repo Inbox 允许接收事件的仓库列表（owner/repo，多个用逗号分隔）',
-    category: 'github_review',
-    sensitive: false,
-    exampleRecommended: true,
-  },
-  {
-    name: 'GITHUB_REPO_INBOX_CAT_ID',
-    defaultValue: '(未设置)',
-    description: 'GitHub Repo Inbox 默认收件猫 catId',
-    category: 'github_review',
-    sensitive: false,
-    exampleRecommended: true,
   },
   {
     name: 'GITHUB_REVIEW_IMAP_PROXY',

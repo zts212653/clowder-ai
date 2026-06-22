@@ -259,6 +259,48 @@ describe('GET /api/callbacks/get-message visibility', () => {
     assert.equal(body.message.content, 'hello opus');
   });
 
+  test('get-message defaults to preview (bounded); mode=full returns complete content (F236 AC-B1/B2)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const longContent = 'X'.repeat(500);
+    const msg = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: ['opus'],
+      timestamp: 1000,
+      threadId: 'thread-1',
+    });
+
+    // default = preview: bounded excerpt + honest flags
+    const previewRes = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${msg.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(previewRes.statusCode, 200);
+    const previewBody = JSON.parse(previewRes.body);
+    assert.equal(previewBody.message.truncated, true);
+    assert.equal(previewBody.message.content.length, 280);
+    assert.equal(previewBody.message.contentLength, 500);
+    // F236 R1 / 云端 Codex P2: preview truncation carries a one-hop drill pointer to full content
+    assert.deepEqual(previewBody.message.drillDown, {
+      tool: 'cat_cafe_get_message',
+      args: { messageId: msg.id, mode: 'full' },
+    });
+
+    // mode=full = complete original content (drill terminal)
+    const fullRes = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${msg.id}&mode=full`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(fullRes.statusCode, 200);
+    const fullBody = JSON.parse(fullRes.body);
+    assert.equal(fullBody.message.content, longContent);
+    assert.equal(fullBody.message.truncated, false);
+  });
+
   test('returns whisper when caller is in whisperTo', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');

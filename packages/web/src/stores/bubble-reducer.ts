@@ -66,15 +66,16 @@ export function getStableInvocationKey(msg: ChatMessage): string | undefined {
  */
 export function buildStreamExtraFromEvent(
   event: BubbleEvent,
-): { stream: { invocationId: string; turnInvocationId?: string } } | undefined {
+): { stream: NonNullable<NonNullable<ChatMessage['extra']>['stream']> } | undefined {
   const turn = event.canonicalInvocationId;
   const parent = event.chainInvocationId;
+  const textMode = event.payload?.textMode === 'replace' ? 'replace' : undefined;
   if (parent && turn && parent !== turn) {
-    return { stream: { invocationId: parent, turnInvocationId: turn } };
+    return { stream: { invocationId: parent, turnInvocationId: turn, ...(textMode ? { textMode } : {}) } };
   }
   const id = parent ?? turn;
   if (!id) return undefined;
-  return { stream: { invocationId: id } };
+  return { stream: { invocationId: id, ...(textMode ? { textMode } : {}) } };
 }
 
 export interface BubbleReducerInput {
@@ -303,7 +304,14 @@ function reduceStreamChunk(messages: ChatMessage[], event: BubbleEvent): ChatMes
   if (existing) {
     const next = [...messages];
     const nextContent = isReplace ? chunkContent : existing.message.content + chunkContent;
-    next[existing.index] = { ...existing.message, content: nextContent };
+    next[existing.index] = {
+      ...existing.message,
+      content: nextContent,
+      extra: {
+        ...existing.message.extra,
+        ...(buildStreamExtraFromEvent(event) ?? {}),
+      },
+    };
     return next;
   }
   const upgrade = findUpgradableLocalPlaceholder(messages, event);

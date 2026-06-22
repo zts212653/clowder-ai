@@ -368,4 +368,9 @@ done
 printf "║    %-14s %3ds\n" "TOTAL" "$GATE_TOTAL"
 echo "╚══════════════════════════════════════════════════════╝"
 echo ""
+# LL-082 hard layer: list dirty worktrees so each uncommitted diff has known provenance
+# before merge (H4 dogfood: an orphaned half-fix in a sibling worktree crossed the gate).
+echo "── LL-082 dirty-worktree ledger（merge 前确认所有 worktree 的 dirty diff 都有 PR/task/comment 归属）──"
+node "$(dirname "$0")/check-worktree-dirty-ledger.mjs" || true
+echo ""
 echo "可以安全执行 merge-gate 的后续步骤了。"

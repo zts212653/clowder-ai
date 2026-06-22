@@ -98,6 +98,18 @@ export const DEVELOPMENT_SOP_DEFINITION = {
             futureCandidate: 'trace_pattern_post_compact_recall',
           },
         },
+        {
+          id: 'impl-convention-graph-before-convention-edit',
+          kind: 'pitfall',
+          text: '改 MCP tool / skill manifest / route / callback 等约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
+          severity: 'warn',
+          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          predicate: {
+            type: 'manual_only',
+            reason: 'Convention graph CLI usage is not yet emitted as structured telemetry.',
+            futureCandidate: 'convention_graph_usage_event',
+          },
+        },
       ],
     },
     {

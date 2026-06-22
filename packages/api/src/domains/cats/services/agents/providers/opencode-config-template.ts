@@ -116,7 +116,7 @@ export interface OpenCodeRuntimeConfigOptions {
   /**
    * #935: Directories outside the OpenCode working directory that should be
    * granted `permission.external_directory` access. Typically includes the
-   * Cat Cafe host project root when the thread's working directory is external.
+   * Clowder AI host project root when the thread's working directory is external.
    */
   externalDirectories?: readonly string[];
 }
@@ -236,7 +236,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     config.instructions = [...instructions];
   }
 
-  // #935: Grant external_directory permission for Clowder-approved workspace roots.
+  // #935: Grant external_directory permission for Clowder AI-approved workspace roots.
   // Without this, OpenCode on Windows rejects tool calls that touch paths outside
   // the working directory, forcing users to edit global config manually.
   const externalDirectoryPermissions = buildExternalDirectoryPermissions(externalDirectories);

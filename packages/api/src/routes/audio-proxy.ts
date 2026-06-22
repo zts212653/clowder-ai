@@ -100,6 +100,15 @@ export const audioProxyRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  app.post('/api/audio/map-speaker', async (req, reply) => {
+    if (!requireIdentity(req, reply)) return;
+    try {
+      return await proxyJson(reply, 'POST', '/map-speaker', req.body);
+    } catch {
+      return reply.status(502).send({ error: 'Audio service unavailable' });
+    }
+  });
+
   app.post('/api/audio/advisory-mode', async (req, reply) => {
     if (!requireIdentity(req, reply)) return;
     try {

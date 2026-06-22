@@ -633,6 +633,135 @@ describe('CiCdRouter', () => {
       assert.strictEqual(messageMock.messages.length, 0);
     });
   });
+
+  // ── F208 AC-E2: distillation checkpoint on merge path ────────────
+
+  describe('F208 AC-E2: distillation checkpoint on merge path', () => {
+    it('calls onFeatPhaseClose when merged PR has feature-bearing trackingInstructions', async () => {
+      const calls = [];
+      const mockCheckpoint = {
+        onFeatPhaseClose: async (ctx) => {
+          calls.push(ctx);
+          return { fired: true, sourceId: `feat-phase-close:${ctx.featureId}:${ctx.phaseLabel}` };
+        },
+      };
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 2467,
+        catId: 'opus',
+        threadId: 'thread-f208',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, {
+        trackingInstructions: 'F208 AC-E2 cloud re-review. Phase E checkpoint wiring.',
+      });
+
+      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 2467, prState: 'merged' }));
+
+      assert.strictEqual(calls.length, 1, 'onFeatPhaseClose must be called on merge');
+      assert.strictEqual(calls[0].featureId, 'F208');
+      assert.strictEqual(calls[0].phaseLabel, 'E');
+      assert.strictEqual(calls[0].prNumber, 2467);
+      assert.strictEqual(calls[0].repoFullName, 'zts212653/cat-cafe');
+      assert.strictEqual(calls[0].authorCatId, 'opus');
+      assert.strictEqual(calls[0].threadId, 'thread-f208');
+    });
+
+    it('does NOT call onFeatPhaseClose for closed PR (only merge)', async () => {
+      const calls = [];
+      const mockCheckpoint = {
+        onFeatPhaseClose: async (ctx) => {
+          calls.push(ctx);
+          return { fired: true, sourceId: 'test' };
+        },
+      };
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 99,
+        catId: 'opus',
+        threadId: 'thread-x',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, {
+        trackingInstructions: 'F167 Phase O fix.',
+      });
+
+      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 99, prState: 'closed' }));
+
+      assert.strictEqual(calls.length, 0, 'closed PR must not fire distillation checkpoint');
+    });
+
+    it('does NOT call onFeatPhaseClose when no feature ID in trackingInstructions', async () => {
+      const calls = [];
+      const mockCheckpoint = {
+        onFeatPhaseClose: async (ctx) => {
+          calls.push(ctx);
+          return { fired: true, sourceId: 'test' };
+        },
+      };
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 50,
+        catId: 'opus',
+        threadId: 'thread-y',
+        userId: 'user-1',
+      });
+      // No trackingInstructions with feature ID, title doesn't match either
+
+      await router.route(makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 50, prState: 'merged' }));
+
+      assert.strictEqual(calls.length, 0, 'no feature ID → no checkpoint');
+    });
+
+    it('continues routing when onFeatPhaseClose throws (best-effort)', async () => {
+      const mockCheckpoint = {
+        onFeatPhaseClose: async () => {
+          throw new Error('store unavailable');
+        },
+      };
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: messageMock.store, socketManager: socketMock.manager },
+        log: noopLog(),
+        distillationCheckpoint: /** @type {any} */ (mockCheckpoint),
+      });
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 77,
+        catId: 'opus',
+        threadId: 'thread-z',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, {
+        trackingInstructions: 'F100 Phase A test.',
+      });
+
+      // Must not throw — checkpoint failure is best-effort
+      const result = await router.route(
+        makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 77, prState: 'merged' }),
+      );
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('merged'));
+    });
+  });
 });
 
 // ─── buildCiMessageContent unit tests ──────────────────────────────

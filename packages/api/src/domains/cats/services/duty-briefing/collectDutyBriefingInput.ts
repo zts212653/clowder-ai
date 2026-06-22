@@ -10,6 +10,7 @@
 
 import type { RuntimeEvalSnapshot } from '../../../../infrastructure/harness-eval/f167-eval.js';
 import type { DynamicTaskStore } from '../../../../infrastructure/scheduler/DynamicTaskStore.js';
+import type { IBallCustodyProjectionStore } from '../../../ball-custody/BallCustodyProjectionStore.js';
 import type { IDraftStore } from '../stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
@@ -35,7 +36,7 @@ const HOLD_BALL_ID_PREFIX = 'hold-ball-';
 const HOLD_BALL_CREATED_BY_PREFIX = 'hold-ball:';
 
 export interface CollectDutyBriefingDeps {
-  taskStore: Pick<ITaskStore, 'listByKind'>;
+  taskStore: Pick<ITaskStore, 'listByKind'> & Partial<Pick<ITaskStore, 'get'>>;
   // 完整接口（非 Pick）：scanAll 是 optional（仅 Redis 提供），Pick 会成 weak type
   // 致 in-memory store（无 scanAll）无法赋值；collectZombies 内部已 runtime check scanAll 缺失。
   invocationRecordStore: IInvocationRecordStore;
@@ -45,6 +46,8 @@ export interface CollectDutyBriefingDeps {
   messageStore: Pick<IMessageStore, 'getByThread' | 'getByThreadAfter'>;
   /** 可降级：拿不到 snapshot → voidPasses 空 + degradedSources 标记（Task 0 决议） */
   f167SnapshotProvider?: () => RuntimeEvalSnapshot | null | Promise<RuntimeEvalSnapshot | null>;
+  /** PR4: canonical event-sourced read model. Empty index falls back to legacy cold-start collectors. */
+  ballCustodyProjectionStore?: Pick<IBallCustodyProjectionStore, 'listSubjectKeys' | 'get'>;
   userId: string;
   now: number;
   bindingStatus: 'bound' | 'degraded';
@@ -237,10 +240,156 @@ function oldestHeartbeat(tasks: AggregatorTask[], now: number): number {
   return now - oldest;
 }
 
+async function collectThreadTitles(
+  threadStore: Pick<IThreadStore, 'list'>,
+  userId: string,
+): Promise<{ titles: Record<string, string>; allowedThreadIds: Set<string> }> {
+  const threadTitles: Record<string, string> = {};
+  const threads = await threadStore.list(userId);
+  for (const t of threads) {
+    if (t.title) threadTitles[t.id] = t.title;
+  }
+  return { titles: threadTitles, allowedThreadIds: new Set(threads.map((thread) => thread.id)) };
+}
+
+function isVisibleTaskForUser(task: Awaited<ReturnType<ITaskStore['get']>>, userId: string): boolean {
+  if (!task) return false;
+  return task.userId === userId || (task.userId == null && userId === 'default-user');
+}
+
+function taskIdFromSubjectKey(subjectKey: string): string | null {
+  const prefix = 'ball:task:';
+  if (!subjectKey.startsWith(prefix)) return null;
+  const taskId = subjectKey.slice(prefix.length);
+  return taskId.length > 0 ? taskId : null;
+}
+
+function threadIdFromSubjectKey(subjectKey: string): string | null {
+  const prefix = 'ball:thread:';
+  if (!subjectKey.startsWith(prefix)) return null;
+  const threadId = subjectKey.slice(prefix.length);
+  return threadId.length > 0 ? threadId : null;
+}
+
+async function collectFromBallCustodyProjection(
+  deps: CollectDutyBriefingDeps,
+  degradedSources: string[],
+): Promise<DutyBriefingInput | null> {
+  if (!deps.ballCustodyProjectionStore) return null;
+
+  const subjectKeys = await deps.ballCustodyProjectionStore.listSubjectKeys();
+  if (subjectKeys.length === 0) return null;
+
+  const tasks: AggregatorTask[] = [];
+  const zombies: AggregatorZombie[] = [];
+  const voidPasses: AggregatorVoidPass[] = [];
+  const mentionCandidates: AggregatorMentionCandidate[] = [];
+  let activeCount = 0;
+  let oldestHeartbeatMs = 0;
+  let visibleProjectionCount = 0;
+  let threadTitles: Record<string, string> = {};
+  let allowedThreadIds = new Set<string>();
+  try {
+    const threadInfo = await collectThreadTitles(deps.threadStore, deps.userId);
+    threadTitles = threadInfo.titles;
+    allowedThreadIds = threadInfo.allowedThreadIds;
+  } catch {
+    degradedSources.push('thread_titles');
+  }
+
+  for (const subjectKey of subjectKeys) {
+    const projection = await deps.ballCustodyProjectionStore.get(subjectKey);
+    if (!projection) continue;
+
+    const taskId = taskIdFromSubjectKey(subjectKey);
+    const threadId = threadIdFromSubjectKey(subjectKey);
+    if (!taskId && !threadId) continue;
+    const task = taskId && deps.taskStore.get ? await deps.taskStore.get(taskId) : null;
+    if (taskId && !isVisibleTaskForUser(task, deps.userId)) continue;
+    if (threadId && !allowedThreadIds.has(threadId)) continue;
+    visibleProjectionCount += 1;
+    const effectiveThreadId = task?.threadId ?? threadId;
+    const eventAt = projection.lastScanAt ?? projection.lastStateChangeAt ?? projection.lastEventAt;
+
+    if (projection.state === 'active') {
+      activeCount += 1;
+      oldestHeartbeatMs = Math.max(oldestHeartbeatMs, deps.now - projection.lastEventAt);
+      continue;
+    }
+
+    if (projection.state === 'blocked' && task) {
+      tasks.push({
+        id: task.id,
+        title: task.title,
+        ownerCatId: task.ownerCatId,
+        status: 'blocked',
+        why: task.why,
+        updatedAt: projection.blockedSinceAt ?? projection.lastStateChangeAt,
+        threadId: task.threadId,
+      });
+      continue;
+    }
+
+    if ((projection.state === 'dead' || projection.state === 'zombie') && effectiveThreadId) {
+      zombies.push({
+        invocationId: taskId ?? subjectKey,
+        threadId: effectiveThreadId,
+        catId: (task?.ownerCatId ?? projection.holder) as string | null,
+        recordUpdatedAt: eventAt,
+        detail: projection.state === 'zombie' ? 'task_idle_long' : 'ball_state_dead',
+      });
+      continue;
+    }
+
+    if (projection.state === 'void') {
+      voidPasses.push({
+        trigger: 'ball.void_pass',
+        firedAtMs: projection.lastStateChangeAt,
+        catId: projection.holder,
+      });
+      continue;
+    }
+
+    if (projection.state === 'parked' && effectiveThreadId) {
+      mentionCandidates.push({
+        threadId: effectiveThreadId,
+        messageId: subjectKey,
+        catId: projection.holder === 'cvo' ? null : projection.holder,
+        title: threadTitles[effectiveThreadId] ?? effectiveThreadId,
+        timestamp: projection.lastStateChangeAt,
+      });
+    }
+  }
+
+  if (visibleProjectionCount === 0) return null;
+
+  return {
+    tasks,
+    zombies,
+    expiredHolds: [],
+    voidPasses,
+    mentionCandidates,
+    threadTitles,
+    activeCount,
+    oldestHeartbeatMs,
+    bindingStatus: deps.bindingStatus,
+    degradedSources,
+    now: deps.now,
+  };
+}
+
 /** 整合：5 源只读投影 → DutyBriefingInput。每源独立降级，整卡照发。 */
 export async function collectDutyBriefingInput(deps: CollectDutyBriefingDeps): Promise<DutyBriefingInput> {
   const { now, userId } = deps;
   const degradedSources: string[] = [];
+
+  const projectionInput = await safeCollect(
+    'ball_custody_projection',
+    () => collectFromBallCustodyProjection(deps, degradedSources),
+    null,
+    degradedSources,
+  );
+  if (projectionInput) return projectionInput;
 
   const tasks = await safeCollect('tasks', () => collectTasks(deps.taskStore, userId), [], degradedSources);
   const holds = await safeCollect(
@@ -278,10 +427,8 @@ export async function collectDutyBriefingInput(deps: CollectDutyBriefingDeps): P
   // 构建 threadId→title 映射：zombie/hold 条目需要 thread 名做标题（而非纯 catId）
   const threadTitles: Record<string, string> = {};
   try {
-    const threads = await deps.threadStore.list(userId);
-    for (const t of threads) {
-      if (t.title) threadTitles[t.id] = t.title;
-    }
+    const threadInfo = await collectThreadTitles(deps.threadStore, userId);
+    Object.assign(threadTitles, threadInfo.titles);
   } catch {
     // thread list 失败不阻塞简报——zombie/hold 标题退化到旧逻辑（catId 标题）
   }

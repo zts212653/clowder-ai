@@ -298,11 +298,11 @@ try {
     $nodeRaw = & node --version 2>$null
     if ($nodeRaw -match 'v(\d+)\.(\d+)') {
         $nodeMajor = [int]$Matches[1]
-        if ($nodeMajor -ge 20) {
+        if ($nodeMajor -ge 24 -and $nodeMajor -lt 26) {
             Write-Ok "Node.js $nodeRaw"
             $nodeOk = $true
         } else {
-            Write-Warn "Node.js $nodeRaw too old (need >= 20), upgrading..."
+            Write-Warn "Node.js $nodeRaw unsupported (need >= 24 and < 26), upgrading..."
         }
     }
 } catch {}
@@ -310,17 +310,17 @@ try {
 if (-not $nodeOk) {
     if ($hasWinget) {
         try {
-            Write-Host "  Installing Node.js LTS via winget..."
-            winget install OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements --silent 2>$null
+            Write-Host "  Installing Node.js 24.16.0 via winget..."
+            winget install -e --id OpenJS.NodeJS.LTS --version 24.16.0 --accept-source-agreements --accept-package-agreements --silent 2>$null
             Refresh-Path
             $nodeRaw = & node --version 2>$null
             if ($nodeRaw -match 'v(\d+)\.(\d+)') {
                 $nodeMajor = [int]$Matches[1]
-                if ($nodeMajor -ge 20) {
+                if ($nodeMajor -ge 24 -and $nodeMajor -lt 26) {
                     Write-Ok "Node.js $nodeRaw installed"
                     $nodeOk = $true
                 } else {
-                    Write-Warn "Node.js $nodeRaw still too old after winget install"
+                    Write-Warn "Node.js $nodeRaw unsupported after winget install (need >= 24 and < 26)"
                 }
             } else {
                 Write-Warn "Could not verify Node.js version after winget install"
@@ -333,7 +333,7 @@ if (-not $nodeOk) {
         }
     }
     if (-not $nodeOk) {
-        Write-Err "Node.js >= 20 required. Install from https://nodejs.org/"
+        Write-Err "Node.js >= 24 and < 26 required. Install from https://nodejs.org/"
         exit 1
     }
 }

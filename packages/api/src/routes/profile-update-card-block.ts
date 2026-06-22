@@ -9,8 +9,12 @@
 import type { ProfileUpdateProposal, RichCardBlock } from '@cat-cafe/shared';
 
 const SIGNAL_KIND_LABEL: Record<ProfileUpdateProposal['signalProvenance']['kind'], string> = {
-  'cat-declared': 'cat-declared（猫主动声明）',
   'cvo-instructed': 'cvo-instructed（co-creator指示）',
+  'cat-declared': 'cat-declared（猫主动声明）',
+  'magic-word': 'magic-word（Magic Word 触发）',
+  'message-coordinate': 'message-coordinate（消息坐标锚定）',
+  'sign-off': 'sign-off（co-creator签字/驳回）',
+  reaction: 'reaction（co-creator反馈/表情）',
 };
 
 export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): RichCardBlock {

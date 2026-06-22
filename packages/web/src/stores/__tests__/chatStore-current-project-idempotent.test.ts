@@ -3,7 +3,11 @@ import { useChatStore } from '../chatStore';
 
 describe('chatStore setCurrentProject idempotent guard', () => {
   beforeEach(() => {
-    useChatStore.setState({ currentProjectPath: 'default' });
+    useChatStore.setState({
+      currentProjectPath: 'default',
+      workspaceWorktreeAliases: {},
+      workspaceWorktreeAliasesProjectPath: null,
+    });
   });
 
   afterEach(() => {
@@ -33,5 +37,20 @@ describe('chatStore setCurrentProject idempotent guard', () => {
     const after = useChatStore.getState();
     expect(after.currentProjectPath).toBe('/tmp/foreign-repo');
     expect(after).not.toBe(before);
+  });
+
+  it('clears workspace worktree aliases when projectPath changes', () => {
+    useChatStore.setState({
+      currentProjectPath: '/tmp/old-repo',
+      workspaceWorktreeAliases: { '230809_cat-cafe': 'cat-cafe' },
+      workspaceWorktreeAliasesProjectPath: '/tmp/old-repo',
+    });
+
+    useChatStore.getState().setCurrentProject('/tmp/new-repo');
+
+    const after = useChatStore.getState();
+    expect(after.currentProjectPath).toBe('/tmp/new-repo');
+    expect(after.workspaceWorktreeAliases).toEqual({});
+    expect(after.workspaceWorktreeAliasesProjectPath).toBe('/tmp/new-repo');
   });
 });

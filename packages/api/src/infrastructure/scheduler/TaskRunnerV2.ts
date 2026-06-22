@@ -1,3 +1,5 @@
+import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
+import { buildHoldExpiredEvent } from '../../domains/ball-custody/ball-custody-events.js';
 import { computeNextCronSlot } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
 import { executeTaskPipeline } from './execute-pipeline.js';
@@ -33,6 +35,8 @@ export interface TaskRunnerV2Options {
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
   invokeTrigger?: ScheduleInvokeTrigger;
+  /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
+  ballCustody?: IBallCustodyIngest;
   /** Ephemeral lifecycle notifications (toast-only, not persisted in thread history) */
   notifyLifecycle?: ScheduleLifecycleNotifier;
   /** #415: dynamic task store — needed for once-trigger auto-retirement */
@@ -90,6 +94,15 @@ function formatThreadPreview(id: string): string {
   return id ? `Thread ${id.slice(0, 8)}…` : 'Thread';
 }
 
+function isHoldBallReminderDef(def: DynamicTaskDef): boolean {
+  return def.id.startsWith('hold-ball-') && def.templateId === 'reminder' && def.createdBy.startsWith('hold-ball:');
+}
+
+function readHoldBallCatId(def: DynamicTaskDef): string | null {
+  const catId = def.createdBy.slice('hold-ball:'.length);
+  return catId.length > 0 ? catId : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTaskSpec = TaskSpec_P1<any>;
 
@@ -119,6 +132,7 @@ export class TaskRunnerV2 {
   private deliver: TaskRunnerV2Options['deliver'];
   private fetchContent: TaskRunnerV2Options['fetchContent'];
   private invokeTrigger: TaskRunnerV2Options['invokeTrigger'];
+  private ballCustody: TaskRunnerV2Options['ballCustody'];
   private notifyLifecycle: TaskRunnerV2Options['notifyLifecycle'];
   private dynamicTaskStore: TaskRunnerV2Options['dynamicTaskStore'];
   /** F167 Phase M: busy checker for pre-fire defer (queueProcessor.isThreadBusy() || invocationTracker.has()) */
@@ -135,6 +149,7 @@ export class TaskRunnerV2 {
     this.deliver = opts.deliver;
     this.fetchContent = opts.fetchContent;
     this.invokeTrigger = opts.invokeTrigger;
+    this.ballCustody = opts.ballCustody;
     this.notifyLifecycle = opts.notifyLifecycle;
     this.dynamicTaskStore = opts.dynamicTaskStore;
     this.isThreadBusy = opts.isThreadBusy;
@@ -428,6 +443,15 @@ export class TaskRunnerV2 {
       error_summary: null,
     });
 
+    if (def.deliveryThreadId && isHoldBallReminderDef(def)) {
+      const catId = readHoldBallCatId(def);
+      if (catId) {
+        this.ballCustody
+          ?.record(buildHoldExpiredEvent({ threadId: def.deliveryThreadId, catId, fireAt, at: Date.now() }))
+          .catch((err) => this.logger.error(`[scheduler] ${def.id}: failed to record missed hold expiry`, err));
+      }
+    }
+
     // Notify user ephemerally so admin receipts don't pollute thread history.
     if (def.deliveryThreadId && this.notifyLifecycle) {
       const label = def.display?.label ?? def.templateId;
@@ -526,6 +550,7 @@ export class TaskRunnerV2 {
       deliver: this.deliver,
       fetchContent: this.fetchContent,
       invokeTrigger: this.invokeTrigger,
+      ballCustody: this.ballCustody,
       onItemOutcome: (_taskId, _subjectKey, outcome, errorSummary) => {
         if (outcome === 'RUN_DELIVERED') hasDelivered = true;
         if (outcome === 'RUN_FAILED') lastError = errorSummary;

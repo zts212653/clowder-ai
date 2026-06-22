@@ -327,13 +327,13 @@ describe('F192 Attribution', () => {
           makeComponent({
             componentId: 'C1',
             activationCounts: { hold_ball_calls: 10 },
-            frictionCounts: { 'c1.zombie_hold_count': 6 },
+            frictionCounts: { 'c1.hold_zombie_count': 6 },
           }),
         ],
       },
     });
-    const zombie = report.findings.find((f) => f.frictionSignal.type === 'c1.zombie_hold_count');
-    assert.ok(zombie, 'zombie_hold must surface');
+    const zombie = report.findings.find((f) => f.frictionSignal.type === 'c1.hold_zombie_count');
+    assert.ok(zombie, 'hold_zombie must surface');
     // 6/10 = 60% real ratio → high / human-required, computed against the real denominator.
     assert.equal(zombie.frictionSignal.severity, 'high');
     assert.equal(zombie.attribution.pipelineOrHuman, 'human-required');
@@ -704,8 +704,8 @@ describe('F192 D — C1 zombie-hold sampleCoverage (eval:a2a 2026-06-12 build ve
           {
             componentId: 'C1',
             activationCounts: { hold_ball_calls: 7 },
-            frictionCounts: { 'c1.zombie_hold_count': 5 },
-            frictionSamples: { 'c1.zombie_hold_count': samples },
+            frictionCounts: { 'c1.hold_zombie_count': 5 },
+            frictionSamples: { 'c1.hold_zombie_count': samples },
             telemetryGaps: [],
             confidence: 'medium',
             falsePositiveCandidates: [],
@@ -714,12 +714,12 @@ describe('F192 D — C1 zombie-hold sampleCoverage (eval:a2a 2026-06-12 build ve
         ],
       },
     });
-    const finding = report.findings.find((f) => f.frictionSignal.type === 'c1.zombie_hold_count');
-    assert.ok(finding, 'C1 zombie-hold friction must surface');
+    const finding = report.findings.find((f) => f.frictionSignal.type === 'c1.hold_zombie_count');
+    assert.ok(finding, 'C1 hold_zombie friction must surface');
     assert.deepEqual(finding.sampleCoverage, { sampleCount: 3, metricCount: 5, complete: false });
   });
 
-  it('C1 zombie-hold finding sampleCoverage still emits when frictionSamples empty (honest gap report)', () => {
+  it('C1 hold_zombie finding sampleCoverage still emits when frictionSamples empty (honest gap report)', () => {
     const report = generateAttributionReport({
       featureId: 'F167',
       snapshot: {
@@ -727,7 +727,7 @@ describe('F192 D — C1 zombie-hold sampleCoverage (eval:a2a 2026-06-12 build ve
           {
             componentId: 'C1',
             activationCounts: { hold_ball_calls: 7 },
-            frictionCounts: { 'c1.zombie_hold_count': 5 },
+            frictionCounts: { 'c1.hold_zombie_count': 5 },
             frictionSamples: {},
             telemetryGaps: [],
             confidence: 'medium',
@@ -737,8 +737,8 @@ describe('F192 D — C1 zombie-hold sampleCoverage (eval:a2a 2026-06-12 build ve
         ],
       },
     });
-    const finding = report.findings.find((f) => f.frictionSignal.type === 'c1.zombie_hold_count');
-    assert.ok(finding, 'C1 zombie-hold friction must surface');
+    const finding = report.findings.find((f) => f.frictionSignal.type === 'c1.hold_zombie_count');
+    assert.ok(finding, 'C1 hold_zombie friction must surface');
     assert.deepEqual(finding.sampleCoverage, { sampleCount: 0, metricCount: 5, complete: false });
   });
 });

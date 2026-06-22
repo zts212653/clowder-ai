@@ -46,7 +46,7 @@ describe('SettingsNav search filtering', () => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(13);
+    expect(buttons).toHaveLength(14);
     expect(container.textContent).toContain('规则与 SOP');
   });
 
@@ -56,7 +56,7 @@ describe('SettingsNav search filtering', () => {
     });
 
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(13);
+    expect(buttons).toHaveLength(14);
     for (const button of buttons) {
       expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
     }
@@ -95,7 +95,7 @@ describe('SettingsNav search filtering', () => {
     expect(buttons[0].textContent).toContain('规则与 SOP');
   });
 
-  it('filters concierge keywords to the 前台猫 section', () => {
+  it('filters concierge keywords to the 猫猫球 section', () => {
     act(() => {
       root.render(
         React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: '悬浮球' }),
@@ -103,7 +103,7 @@ describe('SettingsNav search filtering', () => {
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toContain('前台猫');
+    expect(buttons[0].textContent).toContain('猫猫球');
   });
 
   it('shows empty message when no match', () => {

@@ -1250,7 +1250,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // ── F161: Data-driven env var injection via resolveEnvMap ──────────────
     // Standard provider credential env vars (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
-    // are resolved from BUILTIN_ENV_MAPS templates. Cat Cafe internal routing vars
+    // are resolved from BUILTIN_ENV_MAPS templates. Clowder AI internal routing vars
     // (CAT_CAFE_*_PROFILE_MODE, CODEX_AUTH_MODE, proxy) remain explicit below.
     const userEnvTemplates = resolvedAccount?.envVars ? extractUserEnvTemplates(resolvedAccount.envVars) : undefined;
 
@@ -1274,7 +1274,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
-    // ── Cat Cafe internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
+    // ── Clowder AI internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
     if (effectiveProtocol === 'anthropic') {
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
@@ -1469,7 +1469,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const openCodeExternalDirs: string[] = [];
     if (provider === 'opencode') {
       if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
-        // External project — grant access to Cat Cafe host root (configs, MCP, etc.)
+        // External project — grant access to Clowder AI host root (configs, MCP, etc.)
         openCodeExternalDirs.push(hostProjectRoot);
       }
       if (workingProjectRoot && workingProjectRoot !== workingDirectory) {

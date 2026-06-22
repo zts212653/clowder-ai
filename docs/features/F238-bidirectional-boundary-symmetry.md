@@ -178,4 +178,3 @@ Add representative round-trip fixtures and a recurring verdict: public export ha
 ### Vision Guardian Non-Blocking Concerns Disposition
 
 1. **Biome check fail on main**: 在执行 `pnpm check` 过程中发现 `packages/api/test/scheduler/review-feedback-thread-rotation.test.js` 有 Biome 格式化报错。此报错为 `F235/F192` merge (#2335) 的历史遗留残留，不属于 F238 改动范围。本 Feature 范围内的 5 个 brand/boundary 相关 check (`check:brand-dictionary`, `check:brand-guard`, `check:reverse-sanitizer`, `check:boundary-roundtrip`, `check:sync-export`) 均已全部测试通过。
-
