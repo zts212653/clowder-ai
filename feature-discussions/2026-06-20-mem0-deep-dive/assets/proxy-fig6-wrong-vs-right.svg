@@ -9,7 +9,7 @@
   </defs>
 
   <rect x="0" y="0" width="1120" height="620" fill="#ffffff"/>
-  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·5 · 平台化的正确姿势</text>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·6 · 平台化的正确姿势</text>
   <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">左：往承重路径缝 mem0 = 杂货铺　|　右：多协议平台 + 旁路智能，两条线解耦</text>
 
   <!-- ===== LEFT ❌ ===== -->

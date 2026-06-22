@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="672" viewBox="0 0 1120 672" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F8FAFC"/><stop offset="1" stop-color="#E7ECF3"/></linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ECFDFA"/><stop offset="1" stop-color="#CCF3EC"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrK" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#475569"/></marker>
+    <marker id="arrR" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#DC2626"/></marker>
+    <marker id="arrT" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#0D9488"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="672" fill="#ffffff"/>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·5 · MaxScale filter 链机制：嵌入 ❌ vs 旁路 ✅</text>
+  <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">同一套可插拔机制 —— 同步 filter 嵌入查询链是错的，tee filter 异步旁路是对的</text>
+
+  <!-- ============ TOP ❌ sync filter ============ -->
+  <rect x="50" y="100" width="1020" height="250" rx="16" fill="#FEF6F6" stroke="#FCA5A5" stroke-width="1.8"/>
+  <rect x="74" y="89" width="420" height="26" rx="13" fill="#DC2626" filter="url(#sh)"/>
+  <text x="284" y="107" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">❌ 同步 filter 嵌入查询链（= §3.3 子命题 B2）</text>
+
+  <rect x="86" y="158" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="141" y="191" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">客户端</text>
+
+  <rect x="246" y="140" width="500" height="92" rx="12" fill="#ffffff" stroke="#DC2626" stroke-width="2.2"/>
+  <text x="266" y="160" font-size="12" font-weight="700" fill="#B91C1C">MaxScale · filter 链（请求穿过每个 filter）</text>
+  <rect x="262" y="176" width="80" height="42" rx="8" fill="url(#blue)" stroke="#1D4ED8" stroke-width="1.6"/>
+  <text x="302" y="202" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1E3A8A">协议</text>
+  <rect x="366" y="170" width="194" height="54" rx="9" fill="#FEE2E2" stroke="#DC2626" stroke-width="2.2"/>
+  <text x="463" y="191" text-anchor="middle" font-size="13" font-weight="700" fill="#B91C1C">🤖 AI filter（LLM）</text>
+  <text x="463" y="211" text-anchor="middle" font-size="11.5" font-weight="600" fill="#991B1B">⏱ 同步 · 阻塞主路</text>
+  <rect x="584" y="176" width="92" height="42" rx="8" fill="url(#slate)" stroke="#64748B" stroke-width="1.6"/>
+  <text x="630" y="202" text-anchor="middle" font-size="12.5" font-weight="600" fill="#334155">router</text>
+  <line x1="342" y1="197" x2="364" y2="197" stroke="#475569" stroke-width="2" marker-end="url(#arrK)"/>
+  <line x1="560" y1="197" x2="582" y2="197" stroke="#DC2626" stroke-width="2" marker-end="url(#arrR)"/>
+
+  <rect x="800" y="158" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="855" y="191" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">主 / 从库</text>
+  <line x1="196" y1="186" x2="244" y2="186" stroke="#475569" stroke-width="2.2" marker-end="url(#arrK)"/>
+  <line x1="746" y1="186" x2="798" y2="186" stroke="#475569" stroke-width="2.2" marker-end="url(#arrK)"/>
+
+  <!-- latency bar ❌ -->
+  <text x="86" y="272" font-size="12.5" font-weight="700" fill="#475569">本条 SQL 延迟</text>
+  <rect x="230" y="258" width="120" height="22" rx="4" fill="#C7D2FE" stroke="#6366F1" stroke-width="1.2"/>
+  <text x="290" y="273" text-anchor="middle" font-size="11.5" font-weight="600" fill="#3730A3">SQL</text>
+  <rect x="350" y="258" width="300" height="22" rx="4" fill="#FCA5A5" stroke="#DC2626" stroke-width="1.2"/>
+  <text x="500" y="273" text-anchor="middle" font-size="11.5" font-weight="700" fill="#7F1D1D">+ 阻塞等 LLM（会幻觉 / 会超时）</text>
+  <text x="668" y="273" font-size="12.5" font-weight="700" fill="#B91C1C">= SQL + LLM，每条都等</text>
+
+  <text x="560" y="324" text-anchor="middle" font-size="13.5" font-weight="700" fill="#991B1B">AI filter 在查询链内 → 每条 SQL 必须穿过它、阻塞等一次 LLM —— 延迟灾难</text>
+
+  <!-- ============ BOTTOM ✅ tee bypass ============ -->
+  <rect x="50" y="372" width="1020" height="250" rx="16" fill="#F0FBF8" stroke="#5EEAD4" stroke-width="1.8"/>
+  <rect x="74" y="361" width="400" height="26" rx="13" fill="#0D9488" filter="url(#sh)"/>
+  <text x="274" y="379" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">✅ tee filter 异步旁路（= §3.5 旁路异步）</text>
+
+  <rect x="86" y="418" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="141" y="451" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">客户端</text>
+
+  <rect x="246" y="400" width="500" height="92" rx="12" fill="#ffffff" stroke="#0D9488" stroke-width="2.2"/>
+  <text x="266" y="420" font-size="12" font-weight="700" fill="#0F766E">MaxScale · 主链纯粹（router 直转，AI 不在主路）</text>
+  <rect x="262" y="436" width="80" height="42" rx="8" fill="url(#blue)" stroke="#1D4ED8" stroke-width="1.6"/>
+  <text x="302" y="462" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1E3A8A">协议</text>
+  <rect x="366" y="436" width="128" height="42" rx="8" fill="#CCFBF1" stroke="#0D9488" stroke-width="2.2"/>
+  <text x="430" y="457" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0F766E">tee filter</text>
+  <text x="430" y="472" text-anchor="middle" font-size="10" fill="#115E59">复制·不阻塞</text>
+  <rect x="518" y="436" width="92" height="42" rx="8" fill="url(#slate)" stroke="#64748B" stroke-width="1.6"/>
+  <text x="564" y="462" text-anchor="middle" font-size="12.5" font-weight="600" fill="#334155">router</text>
+  <line x1="342" y1="457" x2="364" y2="457" stroke="#0D9488" stroke-width="2" marker-end="url(#arrT)"/>
+  <line x1="494" y1="457" x2="516" y2="457" stroke="#0D9488" stroke-width="2" marker-end="url(#arrT)"/>
+
+  <rect x="800" y="418" width="110" height="56" rx="12" fill="url(#slate)" stroke="#94a3b8" stroke-width="1.6" filter="url(#sh)"/>
+  <text x="855" y="451" text-anchor="middle" font-size="14" font-weight="600" fill="#334155">主 / 从库</text>
+  <line x1="196" y1="446" x2="244" y2="446" stroke="#0D9488" stroke-width="2.2" marker-end="url(#arrT)"/>
+  <line x1="610" y1="457" x2="798" y2="450" stroke="#0D9488" stroke-width="2.2" marker-end="url(#arrT)"/>
+
+  <!-- tee async branch -->
+  <path d="M430,478 L430,532" fill="none" stroke="#0D9488" stroke-width="2.2" stroke-dasharray="7 5" marker-end="url(#arrT)"/>
+  <text x="446" y="512" font-size="11" font-weight="600" fill="#0F766E">异步复制</text>
+  <rect x="300" y="534" width="300" height="62" rx="12" fill="url(#teal)" stroke="#0D9488" stroke-width="2" filter="url(#sh)"/>
+  <text x="450" y="560" text-anchor="middle" font-size="13.5" font-weight="700" fill="#134E4A">独立 AI 模块（旁路 service）</text>
+  <text x="450" y="580" text-anchor="middle" font-size="11.5" fill="#115E59">沉淀 SQL 操作记忆（运维）· 不是 mem0</text>
+
+  <!-- latency bar ✅ + isolation -->
+  <text x="650" y="528" font-size="12.5" font-weight="700" fill="#475569">主响应延迟</text>
+  <rect x="650" y="536" width="120" height="22" rx="4" fill="#A7F3D0" stroke="#0D9488" stroke-width="1.2"/>
+  <text x="710" y="551" text-anchor="middle" font-size="11.5" font-weight="600" fill="#065F46">SQL</text>
+  <text x="784" y="551" font-size="12.5" font-weight="700" fill="#0F766E">= 不变（AI 不在主路）</text>
+  <rect x="650" y="566" width="380" height="30" rx="10" fill="#ECFDF5" stroke="#0D9488" stroke-width="1.4"/>
+  <text x="840" y="586" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0F766E">🔒 旁路 AI 挂掉 ↛ 影响主响应 · 故障隔离</text>
+
+  <text x="560" y="652" text-anchor="middle" font-size="14.5" font-weight="700" fill="#334155">同一套可插拔机制：AI 放进 filter 链（同步）= 延迟灾难；用 tee 异步旁路才对 —— 可插拔 ≠ 可乱挂</text>
+</svg>

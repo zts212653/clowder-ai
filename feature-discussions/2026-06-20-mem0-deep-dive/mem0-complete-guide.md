@@ -323,6 +323,11 @@ proxy 平台化的**合理方向**是在**数据访问层内部横向扩展**：
 
 > **可插拔 proxy 甚至原生给了这个旁路原语**：比如 MaxScale 的 **tee filter**，把请求**异步复制**到旁路 service（官方文档明说 branch target 是 asynchronous、不阻塞主响应）。`tee → 异步 → 独立 AI 模块` 正是上面这个姿势。反过来，把 AI 做成**同步 filter** 挂在查询链里（= §3.3 的 B2 嵌入关键路径），每条 SQL 都要阻塞等一次 LLM——延迟灾难。**同一套可插拔机制，旁路（tee）是对的、嵌入（同步 filter）是错的。**
 
+<p align="center">
+  <img src="./assets/proxy-fig5-tee-vs-sync.png" alt="MaxScale filter 链机制：同步 filter 嵌入查询链阻塞 vs tee filter 异步旁路不阻塞" width="100%">
+</p>
+<sub><b>图 3·5｜MaxScale filter 链机制：嵌入 ❌ vs 旁路 ✅</b>——上（❌ 同步 filter）：AI filter 挂在查询链内，每条 SQL 必须穿过它、阻塞等一次 LLM（= §3.3 子命题 B2），延迟 = SQL + LLM；下（✅ tee filter）：tee 把请求异步复制到旁路 service，主响应不阻塞、延迟不变，旁路 AI 模块挂掉也 ↛ 影响转发。同一套可插拔机制，旁路对、嵌入错。</sub>
+
 > 一句话：proxy 能"长出"的 AI，是**面向 SQL 运维的旁路智能**，不是 mem0 那种**面向对话的记忆**。把后者塞进来，既是入口错配，又是通路错配。
 
 ## 3.6 旁证：大厂都没把记忆塞进 proxy 层
@@ -339,9 +344,9 @@ proxy 平台化的**合理方向**是在**数据访问层内部横向扩展**：
 ## 3.7 结论与建议
 
 <p align="center">
-  <img src="./assets/proxy-fig5-wrong-vs-right.png" alt="平台化正确姿势：左杂货铺反面，右多协议平台+旁路智能解耦" width="100%">
+  <img src="./assets/proxy-fig6-wrong-vs-right.png" alt="平台化正确姿势：左杂货铺反面，右多协议平台+旁路智能解耦" width="100%">
 </p>
-<sub><b>图 3·5｜平台化的正确姿势</b>——左（❌）：往 proxy 承重转发路径上缝 mem0，做成"杂货铺"，确定性污染 / 性能塌方 / 故障域耦合；右（✅）：proxy 做多协议数据访问平台（纯粹转发）+ 记忆走 B1 并列模块 / 旁路智能，两条线彻底解耦。</sub>
+<sub><b>图 3·6｜平台化的正确姿势</b>——左（❌）：往 proxy 承重转发路径上缝 mem0，做成"杂货铺"，确定性污染 / 性能塌方 / 故障域耦合；右（✅）：proxy 做多协议数据访问平台（纯粹转发）+ 记忆走 B1 并列模块 / 旁路智能，两条线彻底解耦。</sub>
 
 - ✅ **推荐**：proxy 走**多协议数据访问平台**（子命题 A，数据访问层横向扩展）；记忆能力如要加，走 **B1 并列模块 + 旁路异步**，和转发引擎彻底解耦。
 - ❌ **不推荐**：把 mem0 / 记忆逻辑塞进 proxy 的 **SQL 转发关键路径**（子命题 B2）。
