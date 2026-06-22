@@ -286,7 +286,10 @@ export function checkCapabilityTipsForRepo(repoRoot = defaultRepoRoot, options =
   const { tips, errors } = loadInventory(repoRoot, inventoryPath);
   const allErrors = [...errors];
   const allWarnings = [];
-  if (!changedFileResult.ok) allErrors.push(changedFileResult.error);
+  // Changed-file discovery failure (e.g. shallow clone without origin/main)
+  // is a soft issue: tip format/schema validation still runs; only the
+  // "new feature doc without matching tip" coverage check is skipped.
+  if (!changedFileResult.ok) allWarnings.push(changedFileResult.error);
   const changedFiles = changedFileResult.ok ? changedFileResult.files : [];
   const seenIds = new Set();
 

@@ -105,13 +105,16 @@ describe('F244 capability tips hard check', () => {
     }
   });
 
-  it('fails closed when changed-file discovery fails', () => {
+  it('warns (not errors) when changed-file discovery fails (e.g. shallow clone)', () => {
     const root = makeRepo();
     try {
       writeInventory(root, [validTip]);
       const result = checkCapabilityTipsForRepo(root);
-      assert.equal(result.ok, false);
-      assert.match(result.errors.join('\n'), /changed-file discovery failed/);
+      // Changed-file discovery failure is soft: tip validation still runs,
+      // only the "new doc needs a tip" coverage check is skipped.
+      assert.equal(result.ok, true, 'changed-file failure should not block the gate');
+      assert.ok(result.warnings?.length > 0, 'should produce a warning');
+      assert.match(result.warnings.join('\n'), /changed-file discovery failed/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
