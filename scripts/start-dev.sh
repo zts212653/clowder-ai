@@ -1298,7 +1298,9 @@ main() {
     if [ ! -x "$PROJECT_DIR/node_modules/.bin/tsc" ]; then
         echo ""
         echo -e "${YELLOW}检测到依赖不完整，自动安装...${NC}"
-        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        run_logged_step "pnpm install" 5 \
+            env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+            pnpm install --frozen-lockfile
         echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
     fi
     ensure_api_native_addons

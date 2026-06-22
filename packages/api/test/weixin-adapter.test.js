@@ -18,6 +18,13 @@ function noopLog() {
   };
 }
 
+function captureWarnLog() {
+  const warnings = [];
+  const log = noopLog();
+  log.warn = (...args) => warnings.push(args);
+  return { log, warnings };
+}
+
 async function waitForCondition(predicate, timeoutMs = 500) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -436,6 +443,129 @@ describe('WeixinAdapter', () => {
       const result = adapter.parseUpdates(raw);
       assert.equal(result.messages.length, 1);
       assert.ok(result.messages[0].messageId.startsWith('weixin-'));
+    });
+
+    it('generates stable fallback messageId for re-delivered messages without message_id', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            create_time_ms: 1700000000123,
+            item_list: [{ type: 1, text_item: { text: 'same logical message' } }],
+          },
+        ],
+      };
+
+      const first = adapter.parseUpdates(raw);
+      const second = adapter.parseUpdates(raw);
+
+      assert.equal(first.messages.length, 1);
+      assert.equal(second.messages.length, 1);
+      assert.equal(second.messages[0].messageId, first.messages[0].messageId);
+    });
+
+    it('keeps distinct fallback messageIds for same-content messages without message_id or timestamp in one update', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        get_updates_buf: 'cursor-same-batch',
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'OK' } }],
+          },
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'OK' } }],
+          },
+        ],
+      };
+
+      const result = adapter.parseUpdates(raw);
+
+      assert.equal(result.messages.length, 2);
+      assert.notEqual(result.messages[1].messageId, result.messages[0].messageId);
+    });
+
+    it('uses the response cursor to distinguish timestamp-less fallback messageIds across updates', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const first = adapter.parseUpdates({
+        ret: 0,
+        get_updates_buf: 'cursor-first',
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'OK' } }],
+          },
+        ],
+      });
+      const second = adapter.parseUpdates({
+        ret: 0,
+        get_updates_buf: 'cursor-second',
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'OK' } }],
+          },
+        ],
+      });
+
+      assert.equal(first.messages.length, 1);
+      assert.equal(second.messages.length, 1);
+      assert.notEqual(second.messages[0].messageId, first.messages[0].messageId);
+    });
+
+    it('keeps timestamp-less fallback messageIds stable for the same cursor and message position', () => {
+      const adapter = new WeixinAdapter('test-token', noopLog());
+      const raw = {
+        ret: 0,
+        get_updates_buf: 'cursor-replayed',
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'same replayed body' } }],
+          },
+        ],
+      };
+
+      const first = adapter.parseUpdates(raw);
+      const second = adapter.parseUpdates(raw);
+
+      assert.equal(first.messages.length, 1);
+      assert.equal(second.messages.length, 1);
+      assert.equal(second.messages[0].messageId, first.messages[0].messageId);
+    });
+
+    it('warns when fallback messageId has no stable protocol anchor', () => {
+      const { log, warnings } = captureWarnLog();
+      const adapter = new WeixinAdapter('test-token', log);
+      const raw = {
+        ret: 0,
+        msgs: [
+          {
+            from_user_id: 'user1',
+            context_token: 'ctx-1',
+            item_list: [{ type: 1, text_item: { text: 'same body without stable anchor' } }],
+          },
+        ],
+      };
+
+      const first = adapter.parseUpdates(raw);
+      const second = adapter.parseUpdates(raw);
+
+      assert.equal(first.messages.length, 1);
+      assert.equal(second.messages.length, 1);
+      assert.notEqual(second.messages[0].messageId, first.messages[0].messageId);
+      assert.equal(warnings.length, 2);
+      assert.match(warnings[0][1], /non-deterministic fallback message id/);
     });
 
     it('handles response with both ret and errcode (errcode wins for session expired)', () => {
