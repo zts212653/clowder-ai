@@ -96,6 +96,34 @@ describe('prompt-injection review guard scripts', () => {
     assert.match(source, /YAML\.parse/, 'native L0 compiler must load S6 workflow trigger YAML');
   });
 
+  it('Maine Coon S6 template preserves native L0 long-task guardrails', () => {
+    const workflowTriggers = YAML.parse(readFileSync('assets/prompt-templates/workflow-triggers.yaml', 'utf-8'));
+    const maineCoon = workflowTriggers['maine-coon'];
+
+    assert.equal(typeof maineCoon, 'string', 'maine-coon workflow trigger template must be a string block');
+    assert.match(
+      maineCoon,
+      /### 缅因猫家族治理（fallback 层数检测 F177 Phase D）/,
+      'Maine Coon S6 should preserve its fallback-layer governance block from the native overlay',
+    );
+    assert.match(maineCoon, /### 长任务纪律/, 'Maine Coon S6 should preserve long-task discipline');
+    assert.match(
+      maineCoon,
+      /exec_command session_id 存活 → 续 write_stdin。/,
+      'long-task discipline must keep session_id reuse guidance',
+    );
+    assert.match(
+      maineCoon,
+      /bash&\/nohup\/disown\/setsid = 伪后台；真后台用 detached spawn \+ unref。/,
+      'long-task discipline must keep pseudo-backgrounding guidance',
+    );
+    assert.match(
+      maineCoon,
+      /Fire-and-forget → pid\/log\/exit 探针轮询。/,
+      'long-task discipline must keep external probe guidance',
+    );
+  });
+
   it('desktop package manifests ship prompt template assets used at runtime', () => {
     const desktopPackage = JSON.parse(readFileSync('desktop/package.json', 'utf-8'));
     const innoInstaller = readFileSync('desktop/installer/cat-cafe.iss', 'utf-8');
