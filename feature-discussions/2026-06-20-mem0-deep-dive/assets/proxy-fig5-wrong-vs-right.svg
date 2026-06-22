@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FCE7F0"/><stop offset="1" stop-color="#F8CFE0"/></linearGradient>
+    <linearGradient id="teal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ECFDFA"/><stop offset="1" stop-color="#CCF3EC"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrG" markerWidth="11" markerHeight="11" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#16A34A"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="620" fill="#ffffff"/>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·5 · 平台化的正确姿势</text>
+  <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">左：往承重路径缝 mem0 = 杂货铺　|　右：多协议平台 + 旁路智能，两条线解耦</text>
+
+  <!-- ===== LEFT ❌ ===== -->
+  <rect x="48" y="100" width="510" height="452" rx="16" fill="#FEF6F6" stroke="#FCA5A5" stroke-width="1.8"/>
+  <rect x="72" y="120" width="330" height="32" rx="16" fill="#DC2626" filter="url(#sh)"/>
+  <text x="237" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">❌ 杂货铺：往承重路径缝 mem0</text>
+
+  <!-- overstuffed proxy -->
+  <rect x="84" y="180" width="438" height="232" rx="14" fill="#ffffff" stroke="#DC2626" stroke-width="2.4"/>
+  <text x="303" y="208" text-anchor="middle" font-size="15" font-weight="700" fill="#B91C1C">proxy · SQL 转发关键路径（承重）</text>
+  <text x="303" y="230" text-anchor="middle" font-size="12" fill="#991B1B">什么都往这条承重路径上缝 ↓</text>
+  <rect x="108" y="250" width="180" height="42" rx="9" fill="url(#blue)" stroke="#1D4ED8" stroke-width="1.6"/>
+  <text x="198" y="276" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1E3A8A">读写分离（本职）</text>
+  <rect x="300" y="250" width="200" height="42" rx="9" fill="#FCE7F0" stroke="#C2185B" stroke-width="1.6"/>
+  <text x="400" y="276" text-anchor="middle" font-size="12.5" font-weight="600" fill="#9D174D">+ LLM 抽取记忆</text>
+  <rect x="138" y="300" width="180" height="42" rx="9" fill="#FCE7F0" stroke="#C2185B" stroke-width="1.6"/>
+  <text x="228" y="326" text-anchor="middle" font-size="12.5" font-weight="600" fill="#9D174D">+ 向量检索</text>
+  <rect x="330" y="300" width="150" height="42" rx="9" fill="#FCE7F0" stroke="#C2185B" stroke-width="1.6"/>
+  <text x="405" y="326" text-anchor="middle" font-size="12.5" font-weight="600" fill="#9D174D">+ 记忆处理</text>
+  <text x="303" y="378" text-anchor="middle" font-size="28">⚡</text>
+  <text x="303" y="400" text-anchor="middle" font-size="12" font-weight="600" fill="#991B1B">每条 SQL 都被拖去过一道概率性 LLM</text>
+
+  <rect x="84" y="432" width="138" height="40" rx="10" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.4"/>
+  <text x="153" y="457" text-anchor="middle" font-size="12.5" font-weight="700" fill="#B91C1C">⚡ 确定性污染</text>
+  <rect x="234" y="432" width="138" height="40" rx="10" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.4"/>
+  <text x="303" y="457" text-anchor="middle" font-size="12.5" font-weight="700" fill="#B91C1C">⚡ 性能塌方</text>
+  <rect x="384" y="432" width="138" height="40" rx="10" fill="#FEE2E2" stroke="#DC2626" stroke-width="1.4"/>
+  <text x="453" y="457" text-anchor="middle" font-size="12.5" font-weight="700" fill="#B91C1C">⚡ 故障域耦合</text>
+
+  <text x="303" y="508" text-anchor="middle" font-size="13.5" font-weight="700" fill="#B91C1C">"什么都能做"的 proxy，丢了最该有的纯粹与可信</text>
+
+  <!-- ===== RIGHT ✅ ===== -->
+  <rect x="590" y="100" width="482" height="452" rx="16" fill="#F4FBF6" stroke="#9BD3AC" stroke-width="1.8"/>
+  <rect x="614" y="120" width="360" height="32" rx="16" fill="#16A34A" filter="url(#sh)"/>
+  <text x="794" y="142" text-anchor="middle" font-size="14" font-weight="700" fill="#ffffff">✅ 解耦：多协议平台 + 旁路智能</text>
+
+  <!-- lane 1: 数据访问平台 -->
+  <rect x="614" y="178" width="434" height="146" rx="14" fill="#ffffff" stroke="#16A34A" stroke-width="2.2"/>
+  <text x="634" y="206" font-size="14" font-weight="700" fill="#14532D">① 数据访问平台（纯粹转发）</text>
+  <rect x="634" y="222" width="180" height="42" rx="10" fill="url(#blue)" stroke="#1D4ED8" stroke-width="1.8"/>
+  <text x="724" y="248" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1E3A8A">proxy 内核</text>
+  <line x1="814" y1="243" x2="858" y2="243" stroke="#16A34A" stroke-width="2" marker-end="url(#arrG)"/>
+  <rect x="864" y="222" width="160" height="42" rx="10" fill="url(#green)" stroke="#16A34A" stroke-width="1.6"/>
+  <text x="944" y="248" text-anchor="middle" font-size="12.5" font-weight="600" fill="#15803D">MySQL/PG/Redis</text>
+  <text x="634" y="298" font-size="12.5" fill="#166534">确定性 · 低延迟 · 可信 —— proxy 的核心资产不被稀释</text>
+
+  <!-- 解耦 divider -->
+  <text x="831" y="350" text-anchor="middle" font-size="12.5" font-weight="700" fill="#64748b">— 两条线彻底解耦（独立部署 / 故障隔离）—</text>
+
+  <!-- lane 2: 记忆能力 -->
+  <rect x="614" y="364" width="434" height="146" rx="14" fill="url(#teal)" stroke="#0D9488" stroke-width="2.2"/>
+  <text x="634" y="392" font-size="14" font-weight="700" fill="#134E4A">② 记忆能力（解耦旁挂）</text>
+  <rect x="634" y="408" width="190" height="46" rx="10" fill="#ffffff" stroke="#0D9488" stroke-width="1.6"/>
+  <text x="729" y="430" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0F766E">B1 并列模块</text>
+  <text x="729" y="447" text-anchor="middle" font-size="11" fill="#115E59">独立部署 / 计费</text>
+  <rect x="838" y="408" width="190" height="46" rx="10" fill="#ffffff" stroke="#0D9488" stroke-width="1.6"/>
+  <text x="933" y="430" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0F766E">旁路智能</text>
+  <text x="933" y="447" text-anchor="middle" font-size="11" fill="#115E59">镜像 SQL · 异步</text>
+  <text x="634" y="486" font-size="12.5" fill="#115E59">挂了也不影响 proxy 转发 —— 智能放旁路，不进承重路径</text>
+
+  <text x="560" y="592" text-anchor="middle" font-size="14.5" font-weight="700" fill="#334155">proxy 做数据访问的多协议平台，智能放旁路；别做什么都往承重路径上缝的杂货铺</text>
+</svg>

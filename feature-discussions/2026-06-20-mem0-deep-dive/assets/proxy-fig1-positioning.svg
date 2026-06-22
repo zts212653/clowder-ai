@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="710" viewBox="0 0 1120 710" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAF1FF"/><stop offset="1" stop-color="#C3D8FF"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="rose" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FCE7F0"/><stop offset="1" stop-color="#F8CFE0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+    <marker id="arrUp" markerWidth="13" markerHeight="13" refX="5" refY="2" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,8 L5,0 L10,8 Z" fill="#94a3b8"/></marker>
+    <marker id="d2s" markerWidth="12" markerHeight="12" refX="5" refY="2" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,8 L5,0 L10,8 Z" fill="#DC2626"/></marker>
+    <marker id="d2e" markerWidth="12" markerHeight="12" refX="5" refY="8" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,2 L5,10 L10,2 Z" fill="#DC2626"/></marker>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="710" fill="#ffffff"/>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·1 · proxy / DDM / mem0 — 三者定位</text>
+  <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">proxy 离 mem0 最远：一个在栈最低层只看读 / 写，一个在栈最高层读懂语义，中间隔着整个栈</text>
+
+  <!-- layer zones (faint) -->
+  <rect x="70" y="108" width="960" height="170" rx="10" fill="#FCFBFE" stroke="#EDE9F4" stroke-width="1.2"/>
+  <rect x="70" y="430" width="960" height="232" rx="10" fill="#FAFCFB" stroke="#E6F0EA" stroke-width="1.2"/>
+  <text x="92" y="130" font-size="12.5" font-weight="700" fill="#9D174D">应用 / 语义层（栈最高）</text>
+  <text x="92" y="452" font-size="12.5" font-weight="700" fill="#15803D">数据访问层（栈最低）</text>
+  <text x="92" y="360" font-size="12.5" font-weight="600" fill="#94a3b8">⋯ 编排 / 业务逻辑 ⋯</text>
+
+  <!-- vertical stack axis -->
+  <line x1="58" y1="668" x2="58" y2="100" stroke="#94a3b8" stroke-width="2.2" marker-end="url(#arrUp)"/>
+  <text x="48" y="200" text-anchor="middle" font-size="12" fill="#94a3b8" transform="rotate(-90 48 380)">栈位置越高 = 越懂语义</text>
+
+  <!-- mem0 card (top) -->
+  <rect x="120" y="140" width="600" height="116" rx="14" fill="url(#rose)" stroke="#C2185B" stroke-width="2.4" filter="url(#sh)"/>
+  <text x="146" y="174" font-size="18" font-weight="700" fill="#9D174D">mem0 · 语义记忆中间件</text>
+  <text x="146" y="204" font-size="13.5" fill="#BE185D">干的活：提取对话事实 + 语义检索　·　必须<tspan font-weight="700">读懂对话语义</tspan></text>
+  <text x="146" y="230" font-size="13.5" fill="#BE185D">概率性（LLM 会抽错）　·　承载<tspan font-weight="700">对话语义</tspan></text>
+  <!-- 解析深度 -->
+  <text x="560" y="186" font-size="11.5" font-weight="700" fill="#9D174D">解析深度</text>
+  <circle cx="600" cy="210" r="9" fill="#C2185B"/><circle cx="626" cy="210" r="9" fill="#C2185B"/><circle cx="652" cy="210" r="9" fill="#C2185B"/>
+  <text x="672" y="214" font-size="12" font-weight="600" fill="#9D174D">读懂语义</text>
+
+  <!-- gap annotation -->
+  <text x="600" y="360" text-anchor="middle" font-size="13.5" font-weight="700" fill="#64748b">↕ proxy 与 mem0 之间 ≈ 整个技术栈</text>
+
+  <!-- DDM card (data-access, upper) -->
+  <rect x="120" y="462" width="600" height="84" rx="14" fill="url(#green)" stroke="#16A34A" stroke-width="2.4" filter="url(#sh)"/>
+  <text x="146" y="494" font-size="17" font-weight="700" fill="#14532D">DDM · 分片中间件</text>
+  <text x="146" y="522" font-size="13" fill="#166534">分库分表 + 跨分片归并　·　懂结构（要算 shard-key）　·　确定性</text>
+  <text x="560" y="497" font-size="11.5" font-weight="700" fill="#15803D">解析深度</text>
+  <circle cx="600" cy="520" r="9" fill="#16A34A"/><circle cx="626" cy="520" r="9" fill="#16A34A"/><circle cx="652" cy="520" r="9" fill="none" stroke="#16A34A" stroke-width="2"/>
+  <text x="672" y="524" font-size="12" font-weight="600" fill="#15803D">解析结构</text>
+
+  <!-- proxy card (data-access, lowest) -->
+  <rect x="120" y="556" width="600" height="92" rx="14" fill="url(#blue)" stroke="#1D4ED8" stroke-width="2.6" filter="url(#sh)"/>
+  <rect x="554" y="566" width="150" height="24" rx="12" fill="#1D4ED8"/>
+  <text x="629" y="583" text-anchor="middle" font-size="11.5" font-weight="700" fill="#ffffff">最"哑"· 栈最低层</text>
+  <text x="146" y="592" font-size="17" font-weight="700" fill="#1E3A8A">proxy · 读写分离代理</text>
+  <text x="146" y="620" font-size="13" fill="#2563EB">按读 / 写类型路由 SQL　·　<tspan font-weight="700">完全不懂数据</tspan>（只看字节）　·　确定性</text>
+  <text x="560" y="610" font-size="11.5" font-weight="700" fill="#1E3A8A">解析深度</text>
+  <circle cx="600" cy="632" r="9" fill="#1D4ED8"/><circle cx="626" cy="632" r="9" fill="none" stroke="#1D4ED8" stroke-width="2"/><circle cx="652" cy="632" r="9" fill="none" stroke="#1D4ED8" stroke-width="2"/>
+  <text x="672" y="636" font-size="12" font-weight="600" fill="#1E3A8A">不解析</text>
+
+  <!-- distance double-arrow (far right) -->
+  <line x1="800" y1="200" x2="800" y2="600" stroke="#DC2626" stroke-width="2.4" stroke-dasharray="2 0" marker-start="url(#d2s)" marker-end="url(#d2e)"/>
+  <rect x="824" y="356" width="268" height="92" rx="12" fill="#FEF2F2" stroke="#FCA5A5" stroke-width="1.6"/>
+  <text x="958" y="388" text-anchor="middle" font-size="15" font-weight="700" fill="#B91C1C">隔着整个栈</text>
+  <text x="958" y="414" text-anchor="middle" font-size="12.5" fill="#991B1B">proxy 在最低、mem0 在最高</text>
+  <text x="958" y="434" text-anchor="middle" font-size="12.5" font-weight="700" fill="#991B1B">没有架构接触点</text>
+
+  <text x="560" y="694" text-anchor="middle" font-size="14.5" font-weight="700" fill="#334155">越往下越"哑"：proxy 连数据都不解析 —— 它和读懂语义的 mem0，分处技术栈两端</text>
+</svg>

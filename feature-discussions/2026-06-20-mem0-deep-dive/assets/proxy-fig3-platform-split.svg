@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="690" viewBox="0 0 1120 690" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAFBEF"/><stop offset="1" stop-color="#CFF0D6"/></linearGradient>
+    <linearGradient id="slate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F8FAFC"/><stop offset="1" stop-color="#E7ECF3"/></linearGradient>
+    <linearGradient id="redg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FEF2F2"/><stop offset="1" stop-color="#FDE0E0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="3.5" flood-color="#0f172a" flood-opacity="0.16"/></filter>
+  </defs>
+
+  <rect x="0" y="0" width="1120" height="690" fill="#ffffff"/>
+  <text x="560" y="44" text-anchor="middle" font-size="27" font-weight="800" fill="#0f172a">图 3·3 ·「平台化」拆成两个子命题</text>
+  <text x="560" y="73" text-anchor="middle" font-size="14.5" fill="#64748b">"带记忆的数据访问平台"必须拆开看 —— 否则会把两件本质不同的事混为一谈</text>
+
+  <!-- root -->
+  <rect x="360" y="92" width="400" height="66" rx="14" fill="url(#slate)" stroke="#64748B" stroke-width="2" filter="url(#sh)"/>
+  <text x="560" y="121" text-anchor="middle" font-size="16" font-weight="700" fill="#334155">愿景 · 带 AI 记忆的「数据访问平台」</text>
+  <text x="560" y="144" text-anchor="middle" font-size="12.5" fill="#64748b">必须拆成两个子命题看 ↓</text>
+
+  <!-- fork lines -->
+  <path d="M560,158 L305,230" fill="none" stroke="#94a3b8" stroke-width="2"/>
+  <path d="M560,158 L815,230" fill="none" stroke="#94a3b8" stroke-width="2"/>
+
+  <!-- ===== A column ===== -->
+  <rect x="70" y="232" width="470" height="412" rx="16" fill="#F2FBF5" stroke="#9BD3AC" stroke-width="1.6"/>
+  <rect x="90" y="248" width="190" height="28" rx="14" fill="#16A34A"/>
+  <text x="185" y="267" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">子命题 A · ✅ 推荐</text>
+  <text x="90" y="310" font-size="17" font-weight="700" fill="#14532D">走多协议数据访问平台</text>
+  <text x="90" y="338" font-size="13" fill="#166534">数据访问层内部横向扩展，统一接入 + 统一治理</text>
+  <text x="90" y="362" font-size="13" fill="#166534">把 proxy 最擅长的「稳 · 快 · 确定性访问」做宽</text>
+
+  <rect x="100" y="390" width="410" height="44" rx="10" fill="url(#green)" stroke="#16A34A" stroke-width="2"/>
+  <text x="305" y="417" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14532D">统一数据访问平台（proxy 内核）</text>
+  <path d="M170,434 L150,478" fill="none" stroke="#16A34A" stroke-width="1.8"/>
+  <path d="M305,434 L305,478" fill="none" stroke="#16A34A" stroke-width="1.8"/>
+  <path d="M440,434 L455,478" fill="none" stroke="#16A34A" stroke-width="1.8"/>
+  <rect x="104" y="480" width="126" height="46" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="1.6"/>
+  <text x="167" y="509" text-anchor="middle" font-size="13.5" font-weight="600" fill="#15803D">MySQL</text>
+  <rect x="244" y="480" width="130" height="46" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="1.6"/>
+  <text x="309" y="509" text-anchor="middle" font-size="13.5" font-weight="600" fill="#15803D">PostgreSQL</text>
+  <rect x="388" y="480" width="122" height="46" rx="10" fill="#ffffff" stroke="#16A34A" stroke-width="1.6"/>
+  <text x="449" y="509" text-anchor="middle" font-size="13.5" font-weight="600" fill="#15803D">Redis …</text>
+
+  <rect x="90" y="586" width="420" height="40" rx="12" fill="#DCFCE7" stroke="#16A34A" stroke-width="1.4"/>
+  <text x="300" y="611" text-anchor="middle" font-size="13.5" font-weight="700" fill="#15803D">✅ 与 AI 无关 · 站得住的平台化方向</text>
+
+  <!-- ===== B column ===== -->
+  <rect x="580" y="232" width="470" height="58" rx="14" fill="url(#slate)" stroke="#64748B" stroke-width="1.8"/>
+  <text x="815" y="258" text-anchor="middle" font-size="15.5" font-weight="700" fill="#334155">子命题 B · 在平台上集成 mem0</text>
+  <text x="815" y="279" text-anchor="middle" font-size="12.5" fill="#64748b">—— 看是哪一种形态</text>
+
+  <!-- B1 -->
+  <rect x="580" y="304" width="470" height="150" rx="14" fill="#F2FBF5" stroke="#16A34A" stroke-width="2.4" filter="url(#sh)"/>
+  <rect x="600" y="320" width="230" height="28" rx="14" fill="#16A34A"/>
+  <text x="715" y="339" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">B1 并列模块 · ✅ 可行</text>
+  <text x="600" y="378" font-size="14.5" font-weight="700" fill="#14532D">记忆作为独立模块，与 proxy 转发引擎解耦</text>
+  <text x="600" y="405" font-size="13" fill="#166534">各自独立部署 / 计费 / 故障隔离</text>
+  <text x="600" y="434" font-size="12.5" font-weight="600" fill="#15803D">本质：平台上多挂一个产品（不碰转发路径）</text>
+
+  <!-- B2 -->
+  <rect x="580" y="470" width="470" height="174" rx="14" fill="url(#redg)" stroke="#DC2626" stroke-width="2.4" filter="url(#sh)"/>
+  <rect x="600" y="486" width="290" height="28" rx="14" fill="#DC2626"/>
+  <text x="745" y="505" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">B2 嵌入转发关键路径 · ❌ 不可行</text>
+  <text x="600" y="544" font-size="14.5" font-weight="700" fill="#B91C1C">把 mem0 塞进 proxy 的 SQL 转发关键路径</text>
+  <text x="600" y="571" font-size="13" fill="#991B1B">每条 SQL 都过一道 LLM / 记忆处理</text>
+  <text x="600" y="597" font-size="13" fill="#991B1B">承重路径凭空挂会幻觉 / 会超时 / 概率性的 LLM</text>
+  <text x="600" y="625" font-size="12.5" font-weight="600" fill="#B91C1C">根本没有「塞进去」的语义接口（见图 3·2）</text>
+
+  <text x="560" y="676" text-anchor="middle" font-size="14" font-weight="700" fill="#334155">A 是数据访问层的横向扩展（与 AI 无关）；B 才是「集成 mem0」—— 而 B 只有并列解耦可行，嵌入承重路径不可行</text>
+</svg>
