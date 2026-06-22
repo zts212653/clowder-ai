@@ -50,4 +50,42 @@ describe('handleFeishuAction', () => {
       FEISHU_CONNECTION_MODE: 'websocket',
     });
   });
+
+  it('persists pending verification token when QR auth confirms webhook mode', async () => {
+    const result = await handleFeishuAction('qr-status', {
+      env: {
+        FEISHU_CONNECTION_MODE: 'webhook',
+        FEISHU_VERIFICATION_TOKEN: 'vt_pending',
+      },
+      log: silentLog,
+      operationState: {
+        lastResult: {
+          render: 'img',
+          data: { qrPayload: 'qr-payload-webhook' },
+        },
+      },
+      _testOverrides: {
+        feishuQrBindClient: {
+          async create() {
+            throw new Error('not used');
+          },
+          async poll() {
+            return {
+              status: 'confirmed',
+              appId: 'cli_feishu_webhook',
+              appSecret: 'sec_feishu_webhook',
+            };
+          },
+        },
+      },
+    });
+
+    assert.equal(result.render, 'status');
+    assert.deepEqual(result.targetValues, {
+      FEISHU_APP_ID: 'cli_feishu_webhook',
+      FEISHU_APP_SECRET: 'sec_feishu_webhook',
+      FEISHU_CONNECTION_MODE: 'webhook',
+      FEISHU_VERIFICATION_TOKEN: 'vt_pending',
+    });
+  });
 });

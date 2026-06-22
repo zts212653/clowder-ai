@@ -156,6 +156,26 @@ describe('community-state-machine', () => {
       assert.strictEqual(result.next, 'declined');
     });
 
+    // P1-R4: route rejection must transition back to triaged so the decision queue
+    // can pick the issue up again (DIRECTION_SUPPRESSING_PROJECTION_STATES has 'routed')
+    it('case.route_rejected from routed → triaged', () => {
+      const result = transition('routed', makeEvent('case.route_rejected'), makeSnapshot());
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.next, 'triaged');
+    });
+
+    it('case.route_rejected from non-routed → invalid_transition', () => {
+      const result = transition('new', makeEvent('case.route_rejected'), makeSnapshot());
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.reason, 'invalid_transition');
+    });
+
+    it('case.route_validated from routed → routed (stays)', () => {
+      const result = transition('routed', makeEvent('case.route_validated'), makeSnapshot());
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.next, 'routed');
+    });
+
     it('pr.merged → fixed', () => {
       const result = transition('in_progress', makeEvent('pr.merged'), makeSnapshot());
       assert.strictEqual(result.ok, true);

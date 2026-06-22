@@ -165,7 +165,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('calls onSelect with existing project path when selected and confirmed', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();
@@ -222,7 +222,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('auto-selects first existing project when cwdPath unavailable', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/projects/cwd') return jsonFail();
       if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -235,7 +235,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('auto-selects cwdPath over existingProjects when both available', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();

@@ -69,6 +69,20 @@
       "reason": "F235 RedisCommunityIssueDraftStore 加入后 redis/ 达 25 files；与 ports/(26) 同源——每个 store port 一个 Redis impl。需在 F23 follow-up 中按 proposal/community/session 子域拆分。",
       "expiresAt": "2026-06-30",
       "ticket": "F23-followup"
+    },
+    {
+      "path": "packages/api/src/domains/community",
+      "owner": "opus",
+      "reason": "F168 Phase D D-PR1 新增 3 files（RedisNarratorDedupStore / community-closure-checklist / community-route-recommendation）后达 25 files。D-PR2 reconciler 可能再加 2-3 个；Phase D 结束后按 closure/reconciler/narrator 子域拆分。",
+      "expiresAt": "2026-07-15",
+      "ticket": "F168"
+    },
+    {
+      "path": "packages/api/src/domains/cats/services/stores/redis-keys",
+      "owner": "opus",
+      "reason": "redis-keys 27 files; each store has a dedicated key-builder module. Parallels stores/ports and stores/redis growth. Pending F23 follow-up sub-split by domain (proposal/community/session).",
+      "expiresAt": "2026-07-15",
+      "ticket": "F23-followup"
     }
   ]
 }

@@ -8,22 +8,19 @@
  * and the resolve call records a RouteDecisionEvalEvent (INV-13).
  */
 
-import { useCallback, useState } from 'react';
+import { parseRouteRecommendation, type RouteRecommendation } from '@cat-cafe/shared';
+import { useCallback, useMemo, useState } from 'react';
 
 import { ArrowIcon, ChatIcon, CheckIcon, DocIcon, NarratorIcon, PlusIcon, XIcon } from './DirectionCardIcons';
 
 // ---------------------------------------------------------------------------
-// Types
+// Types — local interfaces for DirectionCard rendering; RouteRecommendation
+// uses the shared canonical type validated via parseRouteRecommendation (D0.5).
 // ---------------------------------------------------------------------------
 
 interface QuestionResult {
   id: string;
   result: 'PASS' | 'WARN' | 'FAIL' | 'UNKNOWN';
-}
-
-interface RouteRecommendation {
-  kind: 'existing-thread' | 'new-thread' | 'decline';
-  threadId?: string;
 }
 
 interface TriageEntry {
@@ -33,7 +30,7 @@ interface TriageEntry {
   authoredByRole?: string;
   narrative?: string;
   evidenceRefs?: string[];
-  routeRecommendation?: RouteRecommendation;
+  routeRecommendation?: unknown; // validated at use-site via parseRouteRecommendation
   recommendedOwnerRole?: string;
 }
 
@@ -127,7 +124,12 @@ export function DirectionCard({ issueId, directionCard, onResolve }: DirectionCa
   // Find the narrator entry (authoredByRole === 'narrator')
   const narratorEntry = directionCard.entries.find((e) => e.authoredByRole === 'narrator');
 
-  const routeRec = narratorEntry?.routeRecommendation;
+  // D0.5: validate routeRecommendation via shared parser — never trust raw unknown shape
+  const routeRec: RouteRecommendation | undefined = useMemo(() => {
+    if (!narratorEntry?.routeRecommendation) return undefined;
+    const parsed = parseRouteRecommendation(narratorEntry.routeRecommendation);
+    return parsed.ok ? parsed.value : undefined;
+  }, [narratorEntry?.routeRecommendation]);
 
   // useCallback must be called before any early return (React hooks rules)
   const handleResolve = useCallback(

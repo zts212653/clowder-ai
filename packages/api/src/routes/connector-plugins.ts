@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { unregisterConnectorDefinition } from '@cat-cafe/shared';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
@@ -39,6 +39,11 @@ import { invalidateManifestCache } from './connector-hub.js';
 
 const PLUGIN_ARCHIVE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
 
+const PLUGIN_ICON_MIME_BY_EXT = new Map<string, string>([
+  ['.svg', 'image/svg+xml'],
+  ['.png', 'image/png'],
+]);
+
 export async function writeUploadedPluginArchive(tmpPath: string, buffer: Buffer): Promise<void> {
   await writeFile(tmpPath, buffer, { mode: 0o600 });
 }
@@ -56,6 +61,12 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
 
 function trustedPluginWriteOrigins(): (string | RegExp)[] {
   return resolveFrontendCorsOrigins(process.env).filter((origin) => origin !== PRIVATE_NETWORK_ORIGIN);
+}
+
+function resolvePluginIconMime(filePath: string): string | null {
+  const mime = PLUGIN_ICON_MIME_BY_EXT.get(extname(filePath).toLowerCase());
+  if (mime === undefined) return null;
+  return mime;
 }
 
 function requirePluginWriteAccess(request: FastifyRequest): CapabilityWriteRouteError | null {
@@ -185,8 +196,10 @@ export const connectorPluginRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ error: 'Icon file not found' });
       }
 
-      const ext = iconPath.split('.').pop()?.toLowerCase();
-      const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : 'application/octet-stream';
+      const mime = resolvePluginIconMime(realIconPath);
+      if (!mime) {
+        return reply.status(415).send({ error: 'Unsupported icon file type' });
+      }
 
       return reply.type(mime).header('Cache-Control', 'public, max-age=3600').send(readFileSync(iconPath));
     },

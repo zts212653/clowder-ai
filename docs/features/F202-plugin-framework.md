@@ -1,6 +1,6 @@
 ---
 feature_ids: [F202]
-related_features: [F041, F126, F129, F133, F139, F140, F141, F146, F190]
+related_features: [F041, F126, F129, F133, F139, F140, F141, F146, F190, F241]
 topics: [plugin-framework, capability-registry, settings, resource-activation, schedule-resource, github, community-pr]
 doc_kind: spec
 created: 2026-05-15

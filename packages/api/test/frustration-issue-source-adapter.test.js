@@ -118,7 +118,7 @@ describe('F235: FrustrationIssueSourceAdapter', () => {
         recentMessages: [
           {
             role: 'user',
-            content: 'Error in thread_abc123 for session_xyz789 at /home/user/foo',
+            content: 'Error in thread_abc123 for session_xyz789 at /home/user/projects/foo',
             timestamp: 1000,
           },
         ],

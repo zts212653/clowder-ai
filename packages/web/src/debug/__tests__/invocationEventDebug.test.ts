@@ -1,4 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { apiFetchMock } = vi.hoisted(() => ({
+  apiFetchMock: vi.fn(),
+}));
+
+vi.mock('../../utils/api-client', () => ({
+  API_URL: 'http://localhost:3004',
+  apiFetch: apiFetchMock,
+}));
+
 import {
   bootstrapDebugFromStorage,
   clearDebugEvents,
@@ -13,6 +23,7 @@ import {
 describe('invocationEventDebug', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    apiFetchMock.mockReset();
     clearDebugEvents();
     configureDebug({ enabled: false });
     delete (window as typeof window & { __catCafeDebug?: unknown }).__catCafeDebug;
@@ -127,6 +138,53 @@ describe('invocationEventDebug', () => {
         level: 'warn',
       }),
     ]);
+  });
+
+  it('exports current debug dump to runtime via API', async () => {
+    configureDebug({ enabled: true });
+    ensureWindowDebugApi();
+
+    recordDebugEvent({
+      event: 'queue_updated',
+      threadId: 'thread-a',
+      action: 'processing',
+      timestamp: 1,
+    });
+
+    apiFetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, path: 'docs/runtime/test.json', count: 1 })),
+    );
+
+    const debugApi = (
+      window as typeof window & {
+        __catCafeDebug?: {
+          exportToRuntime?: (options?: { rawThreadId?: boolean; label?: string }) => Promise<unknown>;
+        };
+      }
+    ).__catCafeDebug;
+
+    const result = await debugApi?.exportToRuntime?.({ rawThreadId: true, label: 'repro-thread-a' });
+    expect(result).toEqual({ ok: true, path: 'docs/runtime/test.json', count: 1 });
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/debug/invocation-events/export',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const firstCall = apiFetchMock.mock.calls[0] as unknown[] | undefined;
+    const requestInit = firstCall && firstCall.length > 1 ? (firstCall[1] as RequestInit) : undefined;
+    expect(requestInit).toBeDefined();
+    expect(JSON.parse((requestInit?.body ?? '') as string)).toEqual(
+      expect.objectContaining({
+        kind: 'events',
+        label: 'repro-thread-a',
+        dump: expect.objectContaining({
+          meta: expect.objectContaining({ rawThreadId: true, count: 1 }),
+          events: [expect.objectContaining({ threadId: 'thread-a', action: 'processing' })],
+        }),
+      }),
+    );
   });
 
   it('records history_replace events with action and reason payload', () => {

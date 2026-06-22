@@ -93,6 +93,18 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 | ④ | 门禁 → PR → remote review → merge → 清理 | `merge-gate` | **③ 放行后才进入**，模板见 `refs/pr-template.md` |
 | ⑤ | 愿景守护 + feat close（feature 最后一个 Phase 时） | `feat-lifecycle` completion | 守护猫 ≠ 作者 ≠ reviewer，动态选（查 roster） |
 
+## 约定面改动预检（F242）
+
+改 MCP tool、skill manifest、route、workflow callback 等约定面前，先用 convention graph 查影响面，避免只靠 grep 漏掉注册链或动态消费方。
+
+```bash
+pnpm convention-graph:index -- --repo .
+MCP_TOOL_NAME=replace_with_tool_name
+pnpm convention-graph:code-consumers -- --repo . --domain mcp-tool --kind mcp_tool --name "$MCP_TOOL_NAME"
+```
+
+查询结果里的 `freshness.stale=true` 表示图不能当 fresh 证据；先重跑 `pnpm convention-graph:index -- --repo .`，再做影响面判断。
+
 ## 例外路径
 
 ### 跳过remote review（Step ④ 中的 PR 环节）

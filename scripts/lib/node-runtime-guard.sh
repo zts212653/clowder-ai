@@ -5,10 +5,10 @@
 # fresh Node major on day one. Keep startup on a supported major instead of
 # letting Homebrew's `node` alias silently move the runtime.
 
-CAT_CAFE_NODE_MIN_MAJOR="${CAT_CAFE_NODE_MIN_MAJOR:-20}"
+CAT_CAFE_NODE_MIN_MAJOR="${CAT_CAFE_NODE_MIN_MAJOR:-24}"
 CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE="${CAT_CAFE_NODE_MAX_MAJOR_EXCLUSIVE:-26}"
 CAT_CAFE_NODE_PINNED_MAJOR="${CAT_CAFE_NODE_PINNED_MAJOR:-24}"
-CAT_CAFE_NODE_PREFERRED_MAJORS="${CAT_CAFE_NODE_PREFERRED_MAJORS:-24 25 22 20}"
+CAT_CAFE_NODE_PREFERRED_MAJORS="${CAT_CAFE_NODE_PREFERRED_MAJORS:-24 25}"
 
 node_runtime_version() {
   local node_bin="$1"

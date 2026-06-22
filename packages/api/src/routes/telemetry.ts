@@ -9,7 +9,9 @@
  */
 
 import type { FastifyPluginAsync } from 'fastify';
-import { hmacId } from '../infrastructure/telemetry/hmac.js';
+import type { IGroundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
+import type { ClaimGroundingEvent } from '../infrastructure/grounding/types.js';
+import { hmacId, validateSalt } from '../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore } from '../infrastructure/telemetry/local-trace-store.js';
 import type { MetricsSnapshotStore } from '../infrastructure/telemetry/metrics-snapshot-store.js';
 import { parsePrometheusText } from '../infrastructure/telemetry/metrics-snapshot-store.js';
@@ -29,6 +31,8 @@ export interface TelemetryRoutesOptions {
   metricsSnapshotStore?: MetricsSnapshotStore | null;
   /** Readiness probe — same checks as /ready. */
   checkReadiness?: () => Promise<ReadinessResult>;
+  /** F167 Phase O PR-O2b: bounded grounding sample store. */
+  groundingSampleStore?: IGroundingSampleStore | null;
 }
 
 /**
@@ -211,7 +215,98 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
       timestamp: Date.now(),
     };
   });
+
+  /**
+   * GET /api/telemetry/process-info — process boot diagnostics.
+   *
+   * F167 sibling-PR (telemetry counter baseline persistence): exposes
+   * `processStartMs` so eval consumers can compute counter rate against the
+   * real OTel SDK accumulation window. OTel counters are in-memory and reset
+   * to 0 on every process restart, while the trace store can be hydrated from
+   * Redis with 24h of history — without this endpoint eval cats would divide
+   * a fresh counter by a hydrated 24h window and silently underreport rates
+   * (false-negative "low activity" verdicts after restart).
+   *
+   * Uses `process.uptime()` (Node.js monotonic seconds since process boot)
+   * rather than a captured boot timestamp, so it stays correct across
+   * NTP adjustments. Reconstructed boot = `Date.now() - uptime * 1000`.
+   */
+  app.get('/api/telemetry/process-info', async (request, reply) => {
+    if (!requireSession(request, reply)) return;
+    const uptimeSec = process.uptime();
+    return {
+      processStartMs: Date.now() - Math.floor(uptimeSec * 1000),
+      uptimeSec,
+    };
+  });
+
+  // ── F167 Phase O PR-O2b: grounding sample evidence ──────────
+  app.get('/api/telemetry/grounding-samples', async (request, reply) => {
+    if (!requireSession(request, reply)) return;
+
+    if (!opts.groundingSampleStore) {
+      return reply.status(503).send({ error: 'Grounding sample store not available' });
+    }
+
+    // Cloud review P2: groundingSampleStore is wired independently of
+    // initTelemetry(), so HMAC salt may be unavailable even when the store
+    // is non-null. Return 503 (F192 adapter graceful degradation) instead
+    // of letting hmacId() throw → 500.
+    try {
+      validateSalt();
+    } catch {
+      return reply.status(503).send({ error: 'Telemetry HMAC salt not available — redaction cannot run' });
+    }
+
+    const rawSamples = await Promise.resolve(opts.groundingSampleStore.getSamples());
+    const samples = rawSamples.map(redactGroundingSample);
+    const stats = await Promise.resolve(opts.groundingSampleStore.getStats());
+    return { samples, stats };
+  });
 };
+
+/**
+ * PR-O2b-fix: Redact system identifiers from grounding sample events
+ * before returning them via the telemetry API.
+ *
+ * Spec L828 whitelist: "只存 sourceRef + hash/status"
+ * - invocationId / threadId / sourceThreadId → hmacId() (match traces endpoint)
+ * - claimSummary → removed (free-text hold reason, outside spec whitelist)
+ * - All other fields preserved (sourceRef, verdict, resolver, etc.)
+ */
+export function redactGroundingSample(event: ClaimGroundingEvent): Omit<ClaimGroundingEvent, 'claimSummary'> & {
+  invocationId: string;
+  threadId: string;
+  sourceThreadId?: string;
+} {
+  const { claimSummary: _removed, ...rest } = event;
+
+  // Redact all string fields in waitSourceRef outside spec L828 whitelist.
+  // Only enum (kind) and numeric (slaUntilMs) are structural — everything
+  // else is a free string that can carry PII depending on kind:
+  //   value: reporter handle / message ID / task ID for non-github kinds
+  //   anchorRef: raw messageId
+  //   expectedSignal: cat-supplied free text
+  let redactedWaitSourceRef = rest.waitSourceRef;
+  if (redactedWaitSourceRef) {
+    redactedWaitSourceRef = {
+      kind: redactedWaitSourceRef.kind,
+      value: hmacId(redactedWaitSourceRef.value),
+      expectedSignal: hmacId(redactedWaitSourceRef.expectedSignal),
+      slaUntilMs: redactedWaitSourceRef.slaUntilMs,
+      ...(redactedWaitSourceRef.anchorRef ? { anchorRef: hmacId(redactedWaitSourceRef.anchorRef) } : {}),
+    };
+  }
+
+  return {
+    ...rest,
+    invocationId: hmacId(event.invocationId),
+    threadId: hmacId(event.threadId),
+    sourceThreadId: event.sourceThreadId ? hmacId(event.sourceThreadId) : undefined,
+    ...(redactedWaitSourceRef ? { waitSourceRef: redactedWaitSourceRef } : {}),
+    ...(rest.freshnessKey ? { freshnessKey: hmacId(rest.freshnessKey) } : {}),
+  };
+}
 
 async function computeRecentErrorRate(getMetricsText?: () => Promise<string>): Promise<number | null> {
   if (!getMetricsText) return null;

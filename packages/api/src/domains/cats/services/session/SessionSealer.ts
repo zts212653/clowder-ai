@@ -76,7 +76,22 @@ export interface ISessionSealer {
  * F065 Phase B: Optionally updates ThreadMemory on seal.
  * F065 Phase C: Optionally generates handoff digest via Haiku.
  */
+/**
+ * Post-seal hook signature.
+ * Called after finalize() completes successfully (status = sealed).
+ * Hooks MUST be best-effort (catch their own errors) — a failing hook
+ * must not block the seal terminal transition.
+ */
+export type PostSealHook = (event: {
+  sessionId: string;
+  catId: string;
+  threadId: string;
+  sealReason: string;
+}) => Promise<void>;
+
 export class SessionSealer implements ISessionSealer {
+  private readonly postSealHooks: PostSealHook[] = [];
+
   constructor(
     private readonly store: ISessionChainStore,
     private readonly transcriptWriter?: TranscriptWriter,
@@ -86,6 +101,14 @@ export class SessionSealer implements ISessionSealer {
     private readonly handoffConfig?: HandoffConfig,
     private readonly summaryStore?: ISummaryStore,
   ) {}
+
+  /**
+   * F231 AC-C3 / KD-10: Register a hook to fire after session seal finalize.
+   * Hooks are called in registration order, best-effort (errors are caught and logged).
+   */
+  registerPostSealHook(hook: PostSealHook): void {
+    this.postSealHooks.push(hook);
+  }
 
   async requestSeal(args: { sessionId: string; reason: SealReason }): Promise<SealResult> {
     const record = await this.store.get(args.sessionId);
@@ -167,12 +190,14 @@ export class SessionSealer implements ISessionSealer {
 
     // Always attempt terminal transition — even if doFinalize failed/timed out.
     // A sealed session with missing transcript is recoverable; a stuck sealing session is not.
+    let sealWriteSucceeded = false;
     try {
       await this.store.update(args.sessionId, {
         status: 'sealed',
         sealedAt: now,
         updatedAt: now,
       });
+      sealWriteSucceeded = true;
       log.info(
         {
           sessionId: args.sessionId,
@@ -213,6 +238,31 @@ export class SessionSealer implements ISessionSealer {
           },
         })
         .catch(() => {});
+    }
+
+    // F231 AC-C3 / KD-10: Fire post-seal hooks (distillation trigger, etc.)
+    // Only fire when the terminal write succeeded — if it failed the session is
+    // still 'sealing' and a retry/reaper will seal it later. Reaper paths
+    // (reconcileStuck/reconcileAllStuck) intentionally skip hooks to avoid
+    // compounding failures in recovery code. Firing here on failure would also
+    // risk double-invocation if the reaper later succeeds.
+    if (sealWriteSucceeded && this.postSealHooks.length > 0) {
+      const hookEvent = {
+        sessionId: args.sessionId,
+        catId: record.catId,
+        threadId: record.threadId,
+        sealReason: record.sealReason ?? 'unknown',
+      };
+      for (const hook of this.postSealHooks) {
+        try {
+          await hook(hookEvent);
+        } catch (err) {
+          log.warn(
+            { sessionId: args.sessionId, error: err instanceof Error ? err.message : String(err) },
+            'post-seal hook failed (best-effort, non-blocking)',
+          );
+        }
+      }
     }
   }
 

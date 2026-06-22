@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { FALLBACK_SPRITE_PATH, resolvePetSprite } from '../usePetSkin';
+import { type AtlasSpriteResult, FALLBACK_SPRITE_PATH, resolvePetSprite } from '../usePetSkin';
 
 describe('resolvePetSprite — ragdoll-v1 (projection)', () => {
   it('idle ballState → idle sprite', () => {
@@ -89,5 +89,83 @@ describe('resolvePetSprite — yarn-ball (legacy compat)', () => {
 describe('FALLBACK_SPRITE_PATH', () => {
   it('points to idle.png in ragdoll-v1', () => {
     expect(FALLBACK_SPRITE_PATH).toBe('/concierge/skins/ragdoll-v1/idle.png');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// yanyan-codex atlas skin (E1: 9-state animated spritesheet)
+// ---------------------------------------------------------------------------
+describe('resolvePetSprite — yanyan-codex (atlas)', () => {
+  it('returns atlas result for yanyan-codex skin', () => {
+    const result = resolvePetSprite('idle', 'yanyan-codex');
+    expect(result).toMatchObject({
+      kind: 'atlas',
+      src: '/concierge/skins/yanyan-codex/spritesheet.webp',
+      petState: 'idle',
+    });
+  });
+
+  it('atlas result includes row index for idle (row 0)', () => {
+    const result = resolvePetSprite('idle', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.row).toBe(0);
+  });
+
+  it('thinking → running (V1 atlas projection)', () => {
+    const result = resolvePetSprite('thinking', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('running');
+  });
+
+  it('needs-confirmation → waiting (V1 atlas projection)', () => {
+    const result = resolvePetSprite('needs-confirmation', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('waiting');
+  });
+
+  it('handoff → running-right (V1 atlas projection)', () => {
+    const result = resolvePetSprite('handoff', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('running-right');
+  });
+
+  it('error → failed (atlas)', () => {
+    const result = resolvePetSprite('error', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('failed');
+  });
+
+  it('unknown state → idle (atlas fallback)', () => {
+    const result = resolvePetSprite('garbage', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('idle');
+  });
+
+  it('atlas result includes frame timing config', () => {
+    const result = resolvePetSprite('idle', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.frameCount).toBeGreaterThan(0);
+    expect(result.frameDurations).toBeInstanceOf(Array);
+    expect(result.frameDurations.length).toBe(result.frameCount);
+    expect(result.cellWidth).toBe(192);
+    expect(result.cellHeight).toBe(208);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backward compat: ragdoll-v1 still returns string with expanded CodexPetState
+// ---------------------------------------------------------------------------
+describe('resolvePetSprite — ragdoll-v1 backward compat with 9-state', () => {
+  it('returns string type for ragdoll-v1 (not atlas object)', () => {
+    const result = resolvePetSprite('idle', 'ragdoll-v1');
+    expect(typeof result).toBe('string');
+  });
+
+  it('new states gracefully degrade to existing sprites', () => {
+    // These states didn't exist in V0's CodexPetState but now do.
+    // ragdoll-v1 should map them to existing sprites via V0 projection.
+    // V0: idle → idle, sleeping → idle, listening → idle, etc.
+    const idlePath = '/concierge/skins/ragdoll-v1/idle.png';
+    expect(resolvePetSprite('idle', 'ragdoll-v1')).toBe(idlePath);
+    expect(resolvePetSprite('sleeping', 'ragdoll-v1')).toBe(idlePath);
   });
 });

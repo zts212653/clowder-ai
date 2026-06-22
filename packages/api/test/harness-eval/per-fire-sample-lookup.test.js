@@ -416,12 +416,12 @@ test('lookupByEvalSampleRef: default eventName remains verdict_without_pass_fire
   assert.equal(result.messageId, rawMsgId);
 });
 
-test('lookupByEvalSampleRef: C1 variant — eventName=c1.zombie_hold_fired finds event + builds sample', async () => {
+test('lookupByEvalSampleRef: C1 variant — eventName=c1.hold_zombie_fired finds event + builds sample', async () => {
   const rawPriorTaskId = 'hold-ball-1700000000000-abc123';
   const span = {
     traceId: 't-c1',
     spanId: 's-c1',
-    name: 'cat_cafe.a2a.c1.zombie_hold_sample',
+    name: 'cat_cafe.a2a.c1.hold_zombie_sample',
     startTimeMs: 0,
     endTimeMs: 0,
     durationMs: 0,
@@ -429,7 +429,7 @@ test('lookupByEvalSampleRef: C1 variant — eventName=c1.zombie_hold_fired finds
     attributes: {},
     events: [
       {
-        name: 'c1.zombie_hold_fired',
+        name: 'c1.hold_zombie_fired',
         timeMs: 1750000000000,
         attributes: {
           messageId: toyHmac(rawPriorTaskId),
@@ -451,7 +451,7 @@ test('lookupByEvalSampleRef: C1 variant — eventName=c1.zombie_hold_fired finds
       messageLookup: { listCandidateMessageIds: () => [rawPriorTaskId] },
       invocationLookup: { listCandidateInvocationIds: () => ['inv-c1-1'] },
       hmac: toyHmac,
-      eventName: 'c1.zombie_hold_fired',
+      eventName: 'c1.hold_zombie_fired',
     },
   );
   assert.equal(result.status.message, 'hit');
@@ -488,7 +488,7 @@ test('lookupByEvalSampleRef: eventName mismatch (asking for C1 on a C2 span) →
     {
       traceLookup: { getSpan: () => span },
       hmac: toyHmac,
-      eventName: 'c1.zombie_hold_fired',
+      eventName: 'c1.hold_zombie_fired',
     },
   );
   assert.equal(result.status.message, 'event_not_found_in_span');

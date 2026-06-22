@@ -73,6 +73,11 @@ function hydrate(fields: Record<string, string>): FrustrationIssue | null {
   };
 }
 
+/** F245 Phase B — confirmed 窗口结果跨分片合并后按 confirmedAt 升序（issueId tie-break 保确定性）。 */
+function byConfirmedAtAsc(a: FrustrationIssue, b: FrustrationIssue): number {
+  return (a.confirmedAt ?? 0) - (b.confirmedAt ?? 0) || a.issueId.localeCompare(b.issueId);
+}
+
 // ── Store ──────────────────────────────────────────────────────
 
 export class RedisFrustrationIssueStore implements IFrustrationIssueStore {
@@ -176,6 +181,49 @@ export class RedisFrustrationIssueStore implements IFrustrationIssueStore {
   async listAll(userId: string): Promise<FrustrationIssue[]> {
     const ids = await this.redis.zrevrange(FrustrationIssueKeys.userList(userId), 0, DEFAULT_LIST_LIMIT - 1);
     return this.bulkGet(ids);
+  }
+
+  /**
+   * F245 Phase B — 只读全局时间窗扫描 confirmed issue（守 KD-4）。
+   * confirmed 索引按 user 分片（frustration-issues:confirmed:{userId}，score=confirmedAt），无全局索引。
+   * scanStream 收集所有分片 key → 每 key ZRANGEBYSCORE 取 [sinceMs, untilMs) 窗内 issueId
+   * （半开：sinceMs 含、untilMs 不含，`(` 排除上界）→ hydrate → 按 confirmedAt 升序合并。
+   * 后台周期任务（非热路径），单次 scan 可接受；纯读不碰 confirm 写路径（KD-4 read-model 边界）。
+   */
+  async listConfirmedInWindow(sinceMs: number, untilMs: number): Promise<FrustrationIssue[]> {
+    const keys = await this.scanKeys('frustration-issues:confirmed:*');
+    // ids 跨分片收集：当前写路径每 issue 仅属一个 user 分片（confirm 只 zadd issue.userId），故天然无重，
+    // 不做 Set 去重（避免为不可能场景加防御代码）。若将来引入全局/二级 confirmed 索引（一 issue 进多分片），
+    // 此处需补 `[...new Set(ids)]`——gpt52 Phase B review 非阻塞备注的触发条件。
+    const ids: string[] = [];
+    for (const key of keys) {
+      const batch = await this.redis.zrangebyscore(key, sinceMs, `(${untilMs}`);
+      ids.push(...batch);
+    }
+    const issues = await this.bulkGet(ids);
+    return issues.sort(byConfirmedAtAsc);
+  }
+
+  /**
+   * Scan for keys matching pattern. ⚠️ ioredis keyPrefix 不自动作用于 scanStream MATCH——
+   * 手动拼前缀做 match，返回 key 再剥前缀，让后续 auto-prefix 命令（zrangebyscore/hgetall）正确
+   * （对齐 RedisSessionChainStore.scanKeys 先例）。
+   */
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+    const prefixedPattern = `${prefix}${pattern}`;
+    return new Promise((resolve, reject) => {
+      const keys: string[] = [];
+      const stream = this.redis.scanStream({ match: prefixedPattern, count: 100 });
+      stream.on('data', (batch: string[]) => {
+        for (const k of batch) {
+          const stripped = prefix && k.startsWith(prefix) ? k.slice(prefix.length) : k;
+          keys.push(stripped);
+        }
+      });
+      stream.on('end', () => resolve(keys));
+      stream.on('error', reject);
+    });
   }
 
   private async bulkGet(ids: string[]): Promise<FrustrationIssue[]> {

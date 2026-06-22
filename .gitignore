@@ -4,6 +4,13 @@ node_modules/
 # Build outputs
 dist/
 docs/.doc-index.json
+
+# Runtime-written sentinel queue (MarkerQueue auto-writes ephemeral yaml here).
+# Source: packages/api/src/domains/memory/MarkerQueue.ts. Content is callback
+# id / sentinel — not meant for git history. Reported by hook as "未提交" but
+#猫不该 commit. (47 sweep 2026-06-17)
+docs/markers/
+
 # Feature index — derived from docs/features/*.md, NO live consumer (runtime builds
 # its index from the docs directly; opensource sync regenerates it fresh). ADR-011
 # lists it as optional/never-completed. Decommitted to kill merge-order staleness
@@ -26,8 +33,11 @@ packages/web/public/vendor/
 .env.local
 .env.*.local
 
-# Local overlay files (#603 .local convention)
+# Local overlay files (#603 .local convention, F225 prompt templates)
 *.local.md
+*.local.md.bak
+*.local.yaml
+*.local.yaml.bak
 *.local-override.md
 
 # IDE & AI tools

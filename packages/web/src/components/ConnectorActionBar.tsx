@@ -12,6 +12,8 @@ interface Props {
   saveResult: { type: 'success' | 'error'; message: string } | null;
   saving: boolean;
   onSave: () => void;
+  /** Save only applies to visible value fields; operation-only connectors should not show a dead save button. */
+  showSave?: boolean;
   /** Show test button only when connector has a test handler (YAML action or built-in). */
   showTest?: boolean;
   testing: boolean;
@@ -23,6 +25,7 @@ export function ConnectorActionBar({
   saveResult,
   saving,
   onSave,
+  showSave = true,
   showTest = true,
   testing,
   onTest,
@@ -53,15 +56,17 @@ export function ConnectorActionBar({
             {testing ? '测试中...' : '测试连接'}
           </button>
         )}
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          className="console-button-primary text-sm disabled:opacity-50"
-          data-testid={`save-${platformId}`}
-        >
-          {saving ? '保存中...' : '保存配置'}
-        </button>
+        {showSave && (
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="console-button-primary text-sm disabled:opacity-50"
+            data-testid={`save-${platformId}`}
+          >
+            {saving ? '保存中...' : '保存配置'}
+          </button>
+        )}
       </div>
     </>
   );

@@ -71,7 +71,7 @@ export function ImportProjectModal({ onClose, onImported }: ImportProjectModalPr
               type="text"
               value={sourcePath}
               onChange={(e) => setSourcePath(e.target.value)}
-              placeholder="/home/user/studio-flow"
+              placeholder="/home/user/projects/studio-flow"
               className="mt-1 w-full rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] px-3 py-2 text-sm text-cafe focus:outline-none focus:ring-1 focus:ring-cafe-accent"
             />
           </label>

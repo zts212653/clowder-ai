@@ -101,7 +101,7 @@ describe('AcpProcessPool', () => {
       );
       pool = new AcpProcessPool(defaultPoolConfig, defaultVariantConfig, createMockClient, 'spawn:v1');
       assert.equal(pool.spawnSignature, 'spawn:v1');
-      assert.equal(Object.prototype.hasOwnProperty.call(pool, '_spawnSignature'), false);
+      assert.equal(Object.hasOwn(pool, '_spawnSignature'), false);
     });
   });
 

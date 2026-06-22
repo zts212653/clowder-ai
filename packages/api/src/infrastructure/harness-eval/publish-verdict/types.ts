@@ -1,3 +1,4 @@
+import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
@@ -118,6 +119,7 @@ export interface SopTraceSourceSelector {
  * - task-outcome branch: `TaskOutcomeSnapshotSourceRefs` (kind required, PR1 schema-only)
  * - memory branch: `MemoryRecallSourceSelector` (kind required, memory wire-up)
  * - sop branch: `SopTraceSourceSelector` (kind required, sop-wiring)
+ * - friction branch: `FrictionRollupSourceSelector` (kind required, F245 PR1b live sink)
  *
  * 砚砚 R1 P1 #2: generator MUST receive explicit `sources` (sanitized
  * evidence refs / replayable selector); tool NEVER fabricates evidence.
@@ -127,7 +129,8 @@ export type VerdictSourceRefs =
   | CapabilityWakeupSourceSelector
   | TaskOutcomeSnapshotSourceRefs
   | MemoryRecallSourceSelector
-  | SopTraceSourceSelector;
+  | SopTraceSourceSelector
+  | FrictionRollupSourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

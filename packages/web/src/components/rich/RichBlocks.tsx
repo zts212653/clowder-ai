@@ -6,6 +6,7 @@ import { AudioBlock } from './AudioBlock';
 import { CallbackAuthFailureBlock } from './CallbackAuthFailureBlock';
 import { CardBlock, type CardConfirmationEntry } from './CardBlock';
 import { ChecklistBlock } from './ChecklistBlock';
+import { CommunityIssueDraftCard, isCommunityIssueDraftBlock } from './CommunityIssueDraftCard';
 import { CommunityIssuePreviewCard, isCommunityIssuePreviewBlock } from './CommunityIssuePreviewCard';
 import { DiffBlock } from './DiffBlock';
 import { FileBlock } from './FileBlock';
@@ -44,9 +45,14 @@ function RichBlockRenderer({
       if (isFrustrationIssueCardBlock(block, messageSource)) {
         return <FrustrationIssueCard block={block} messageId={messageId} />;
       }
-      // F235: community issue preview cards (edit + publish flow)
+      // F235 Phase A: community issue preview cards from connector (edit + publish flow)
       if (isCommunityIssuePreviewBlock(block, messageSource)) {
         return <CommunityIssuePreviewCard block={block} messageId={messageId} />;
+      }
+      // F235 Phase B: cat-initiated draft cards (R3 P2: provenance gate — only render
+      // for non-connector messages, preventing spoofed cards from connector paths)
+      if (isCommunityIssueDraftBlock(block, messageSource)) {
+        return <CommunityIssueDraftCard block={block} messageId={messageId} />;
       }
       // F174 D2b-1: cards tagged with meta.kind = 'callback_auth_failure' get the
       // dedicated in-context observability renderer ("明厨亮灶" — entity carries its

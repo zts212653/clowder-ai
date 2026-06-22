@@ -192,7 +192,12 @@ export interface AgentMessage {
   messageId?: string;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {
-    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    crossPost?: {
+      sourceThreadId: string;
+      sourceInvocationId?: string;
+      /** F246 Phase B: effect-class label for receiving-side behavior constraints */
+      effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+    };
     targetCats?: string[];
     /** #814: True when message originated from an explicit post_message callback (not stream duplicate) */
     isExplicitPost?: boolean;

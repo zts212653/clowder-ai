@@ -34,14 +34,15 @@ const RECENT_CHROME_HELPER =
 // Node/Claude process: ppid=1, prompt text contains BOTH "Chrome" AND "--user-data-dir=...agent-browser-chrome"
 // This is the exact false positive scenario from review R2
 const NODE_BOTH_KEYWORDS =
-  '    1 70293 /home/user/claude -p Google Chrome Helper --user-data-dir=/tmp/agent-browser-chrome in prompt text';
+  '    1 70293 /home/user/.local/bin/claude -p Google Chrome Helper --user-data-dir=/tmp/agent-browser-chrome in prompt text';
 
 // Node process: ppid=1, has marker but no Chrome keyword
-const NODE_MARKER_ONLY = '    1 70294 /home/user/claude -p ... agent-browser-chrome marker in prompt text ...';
+const NODE_MARKER_ONLY =
+  '    1 70294 /home/user/.local/bin/claude -p ... agent-browser-chrome marker in prompt text ...';
 
 // Normal user Chrome: ppid=1, Chrome binary, but NO agent-browser user-data-dir
 const NORMAL_CHROME =
-  '    1 63814 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer --user-data-dir=/home/user/Application Support/Google/Chrome';
+  '    1 63814 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer --user-data-dir=/home/user/Library/Application Support/Google/Chrome';
 
 // Linux Chrome orphan (google-chrome-stable)
 const LINUX_CHROME_ORPHAN =
@@ -54,7 +55,7 @@ const LINUX_OPT_CHROME_ORPHAN =
 // go-rod orphan (e.g. xiaohongshu-mcp / any github.com/go-rod/rod consumer)
 // LL-056 extension — same ownership pattern (user-data-dir), different upstream owner
 const ROD_CHROME_ORPHAN =
-  '    1 50001 /home/user/Chromium --type=renderer --user-data-dir=/var/folders/41/n9jlv4ps78b90cb9vkgwtdv00000gn/T/rod/user-data/93beb2e1cde1b932 --remote-debugging-port=0';
+  '    1 50001 /home/user/.cache/rod/browser/chromium-1321438/Chromium.app/Contents/MacOS/Chromium --type=renderer --user-data-dir=/var/folders/41/n9jlv4ps78b90cb9vkgwtdv00000gn/T/rod/user-data/93beb2e1cde1b932 --remote-debugging-port=0';
 
 // Playwright orphan (puppeteer-like Chromium)
 const PLAYWRIGHT_CHROME_ORPHAN =
@@ -86,18 +87,18 @@ const LINUX_PLAYWRIGHT_HEADLESS_SHELL_ORPHAN =
 
 // macOS Puppeteer headless-shell orphan — same shape but mac suffix
 const MACOS_PUPPETEER_HEADLESS_SHELL_ORPHAN =
-  '    1 50008 /home/user/chrome-headless-shell --type=renderer --user-data-dir=/tmp/puppeteer_dev_chrome_profile-hs-mac --remote-debugging-port=0';
+  '    1 50008 /home/user/.cache/puppeteer/chrome-headless-shell/mac-120.0.6099.71/chrome-headless-shell-mac-arm64/chrome-headless-shell --type=renderer --user-data-dir=/tmp/puppeteer_dev_chrome_profile-hs-mac --remote-debugging-port=0';
 
 // Cached macOS Chromium helper (Renderer/GPU/Network) — path contains spaces
 // (云端 codex P1: helpers live in Contents/Frameworks/.../Helpers/..., not Contents/MacOS/Chromium)
 const CACHED_MACOS_CHROMIUM_HELPER_ORPHAN =
-  '    1 50009 /home/user/Chromium Framework.framework/Versions/128.0.6568.0/Helpers/Chromium Helper (Renderer).app/Contents/MacOS/Chromium Helper (Renderer) --type=renderer --user-data-dir=/var/folders/41/T/rod/user-data/abc123 --remote-debugging-port=0';
+  '    1 50009 /home/user/.cache/rod/browser/chromium-1321438/Chromium.app/Contents/Frameworks/Chromium Framework.framework/Versions/128.0.6568.0/Helpers/Chromium Helper (Renderer).app/Contents/MacOS/Chromium Helper (Renderer) --type=renderer --user-data-dir=/var/folders/41/T/rod/user-data/abc123 --remote-debugging-port=0';
 
 // Negative: Node/claude prompt text that happens to contain Chromium.app/Frameworks substring
 // + tracked user-data-dir. binary path is /home/user/claude, not Chromium. Must NOT match.
 // (砚砚 P1 二审: prevent regression of R2 class — substring scan over full args is unsafe.)
 const NODE_PROMPT_WITH_CHROMIUM_FRAMEWORK =
-  '    1 70295 /home/user/claude -p Path looks like /Chromium.app/Contents/Frameworks/Renderer in prompt --user-data-dir=/var/folders/41/T/rod/user-data/xxx test';
+  '    1 70295 /home/user/.local/bin/claude -p Path looks like /Chromium.app/Contents/Frameworks/Renderer in prompt --user-data-dir=/var/folders/41/T/rod/user-data/xxx test';
 
 const FIXTURE = [CHROME_ORPHAN, ACTIVE_CHROME, NODE_BOTH_KEYWORDS, NODE_MARKER_ONLY, NORMAL_CHROME, ''].join('\n');
 

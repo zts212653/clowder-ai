@@ -92,6 +92,24 @@ function makeGitHubDeps(overrides = {}) {
     fetchRepoComments: async () => [],
     readRepoCommentCursor: async () => undefined,
     writeRepoCommentCursor: async () => {},
+    // F168 D3: community-reconciler deps (redis-gated)
+    objectStore: {
+      get: async () => null,
+      listSubjectKeys: async () => [],
+    },
+    projector: { apply: async () => {} },
+    findingStore: {
+      upsert: async () => {},
+      resolveAbsent: async () => {},
+      listAll: async () => [],
+      listOpen: async () => [],
+      listBySubject: async () => [],
+      get: async () => null,
+    },
+    fetchGitHubIssueState: async () => ({ state: 'open', closedAt: null, mergedAt: null }),
+    fetchGitHubPrState: async () => ({ state: 'open', closedAt: null, mergedAt: null }),
+    isReconcilerBaselineEstablished: async () => true,
+    markReconcilerBaselineEstablished: async () => {},
     ...overrides,
   };
 }
@@ -219,7 +237,7 @@ describe('schedule name validation (P2-2)', () => {
 // --- Task 2: plugin.yaml manifest parsing ---
 
 describe('plugins/github/plugin.yaml (AC-B1)', () => {
-  test('parses as valid PluginManifest with 3 config + 6 schedule resources', () => {
+  test('parses as valid PluginManifest with 3 config + 7 schedule resources', () => {
     const yamlPath = join(__dirname, '../../../plugins/github/plugin.yaml');
     assert.ok(existsSync(yamlPath), `plugin.yaml must exist at ${yamlPath}`);
 
@@ -243,8 +261,9 @@ describe('plugins/github/plugin.yaml (AC-B1)', () => {
     const noiseField = manifest.config.find((c) => c.envName === 'GITHUB_SETUP_NOISE_BOT_LOGINS');
     assert.strictEqual(noiseField?.required, false);
 
-    // Schedule resources (4 original + issue-tracking F202-2D + repo-comment-poll F168-C0.3)
-    assert.strictEqual(manifest.resources.length, 6);
+    // Schedule resources (4 original + issue-tracking F202-2D + repo-comment-poll F168-C0.3
+    // + community-reconciler F168-D3)
+    assert.strictEqual(manifest.resources.length, 7);
     for (const r of manifest.resources) {
       assert.strictEqual(r.type, 'schedule');
       assert.ok(r.factoryId?.startsWith('github.'), `factoryId must start with "github.": ${r.factoryId}`);
@@ -254,6 +273,7 @@ describe('plugins/github/plugin.yaml (AC-B1)', () => {
     const resourceNames = manifest.resources.map((r) => r.name).sort();
     assert.deepStrictEqual(resourceNames, [
       'cicd-check',
+      'community-reconciler',
       'conflict-check',
       'issue-tracking',
       'repo-comment-poll',
@@ -266,7 +286,7 @@ describe('plugins/github/plugin.yaml (AC-B1)', () => {
 // --- Task 3: Factory registration + task creation ---
 
 describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
-  test('registerGitHubScheduleFactories registers all 6 factories', () => {
+  test('registerGitHubScheduleFactories registers all 7 factories', () => {
     const registry = new ScheduleFactoryRegistry();
     registerGitHubScheduleFactories(registry);
     assert.ok(registry.has('github.cicd-check'));
@@ -275,6 +295,7 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
     assert.ok(registry.has('github.repo-scan'));
     assert.ok(registry.has('github.issue-tracking'));
     assert.ok(registry.has('github.repo-comment-poll'));
+    assert.ok(registry.has('github.community-reconciler'));
   });
 
   test('github.cicd-check factory creates TaskSpec with correct instanceId', () => {
@@ -591,7 +612,7 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
     return JSON.parse(readFileSync(p, 'utf-8'));
   }
 
-  test('enable → 6 schedule tasks registered; disable → 6 unregistered', async () => {
+  test('enable → 7 schedule tasks registered; disable → 7 unregistered', async () => {
     const tmpDir = createTempDir();
     try {
       // Setup
@@ -616,18 +637,19 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
       const manifest = parsePluginManifest(join(__dirname, '../../../plugins/github/plugin.yaml'));
       const result = await activator.enablePlugin(manifest);
 
-      // All 6 schedule resources should succeed
+      // All 7 schedule resources should succeed
       assert.strictEqual(result.status, 'success', `enable should succeed: ${JSON.stringify(result)}`);
-      assert.strictEqual(result.resources.length, 6);
+      assert.strictEqual(result.resources.length, 7);
       for (const r of result.resources) {
         assert.ok(r.ok, `resource ${r.name} should be ok: ${r.error}`);
       }
 
-      // TaskRunner should have 6 registered tasks
-      assert.strictEqual(taskRunner.registered.length, 6);
+      // TaskRunner should have 7 registered tasks
+      assert.strictEqual(taskRunner.registered.length, 7);
       const ids = taskRunner.registered.map((t) => t.id).sort();
       assert.deepStrictEqual(ids, [
         'schedule:github:cicd-check',
+        'schedule:github:community-reconciler',
         'schedule:github:conflict-check',
         'schedule:github:issue-tracking',
         'schedule:github:repo-comment-poll',
@@ -635,9 +657,9 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
         'schedule:github:review-feedback',
       ]);
 
-      // Disable → all 6 unregistered
+      // Disable → all 7 unregistered
       await activator.disablePlugin(manifest);
-      assert.strictEqual(taskRunner.unregistered.length, 6);
+      assert.strictEqual(taskRunner.unregistered.length, 7);
       const unregIds = [...taskRunner.unregistered].sort();
       assert.deepStrictEqual(unregIds, ids);
     } finally {
@@ -679,9 +701,9 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
         'first startup should trigger migration',
       );
 
-      // Enable → 6 registered
+      // Enable → 7 registered
       await activator.enablePlugin(manifest);
-      assert.strictEqual(taskRunner.registered.length, 6);
+      assert.strictEqual(taskRunner.registered.length, 7);
 
       // Write marker (simulating what index.ts migration does after writing entries)
       markGitHubScheduleMigrationDone(tmpDir);
@@ -735,9 +757,19 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
       writeCapabilities(tmpDir, { capabilities: [] });
 
       const { PluginResourceActivator } = await import('../dist/domains/plugin/PluginResourceActivator.js');
-      // Remove repo deps to simulate no redis — both repo-scan AND repo-comment-poll
-      // are redis-gated optionals that require repoAllowlist.
-      const deps = makeGitHubDeps({ repoAllowlist: undefined, reconciliationDedup: undefined });
+      // Remove repo deps to simulate no redis — repo-scan, repo-comment-poll, and
+      // community-reconciler are all redis-gated optionals.
+      const deps = makeGitHubDeps({
+        repoAllowlist: undefined,
+        reconciliationDedup: undefined,
+        objectStore: undefined,
+        projector: undefined,
+        findingStore: undefined,
+        fetchGitHubIssueState: undefined,
+        fetchGitHubPrState: undefined,
+        isReconcilerBaselineEstablished: undefined,
+        markReconcilerBaselineEstablished: undefined,
+      });
       const activator = new PluginResourceActivator({
         resolveProjectRoot: () => tmpDir,
         pluginsDir: join(tmpDir, 'plugins'),
@@ -753,19 +785,23 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
       const manifest = parsePluginManifest(join(__dirname, '../../../plugins/github/plugin.yaml'));
       const result = await activator.enablePlugin(manifest);
 
-      // 4 succeed, 2 fail (repo-scan + repo-comment-poll — both optional), overall status = success
+      // 4 succeed, 3 fail (repo-scan + repo-comment-poll + community-reconciler — all optional), overall status = success
       assert.strictEqual(result.status, 'success');
       const succeeded = result.resources.filter((r) => r.ok);
       const failed = result.resources.filter((r) => !r.ok);
       assert.strictEqual(succeeded.length, 4);
-      assert.strictEqual(failed.length, 2);
+      assert.strictEqual(failed.length, 3);
       const failedNames = failed.map((r) => r.name).sort();
-      assert.deepStrictEqual(failedNames, ['repo-comment-poll', 'repo-scan']);
-      for (const r of failed) {
+      assert.deepStrictEqual(failedNames, ['community-reconciler', 'repo-comment-poll', 'repo-scan']);
+      // repo-scan + repo-comment-poll fail on repoAllowlist; community-reconciler on missing Redis deps
+      const repoFailed = failed.filter((r) => r.name !== 'community-reconciler');
+      for (const r of repoFailed) {
         assert.ok(r.error?.includes('repoAllowlist'), `${r.name} should fail on repoAllowlist: ${r.error}`);
       }
+      const reconcilerFailed = failed.find((r) => r.name === 'community-reconciler');
+      assert.ok(reconcilerFailed?.error?.includes('objectStore'), 'community-reconciler should fail on missing deps');
 
-      // Only 4 tasks registered (all except the 2 redis-gated optionals)
+      // Only 4 tasks registered (all except the 3 redis-gated optionals)
       assert.strictEqual(taskRunner.registered.length, 4);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -1303,6 +1339,39 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
     assert.strictEqual(rcp.migrationPendingReason, 'deps-unavailable');
   });
 
+  test('backfill adds community-reconciler as redis-gated TARGET for existing installs (cloud R2 P2-1)', async () => {
+    const { backfillMissingGitHubScheduleEntries } = await import(
+      '../dist/domains/plugin/github-schedule-factories.js'
+    );
+    // Existing install: has cicd-check (legacy migration ran), NO community-reconciler.
+    // After upgrade, backfill must add community-reconciler as redis-gated (pending).
+    const config = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'plugin:github:cicd-check',
+          type: 'schedule',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId: 'github',
+          scheduleTaskId: 'schedule:github:cicd-check',
+        },
+      ],
+    };
+    const manifest = {
+      resources: [
+        { type: 'schedule', name: 'cicd-check' },
+        { type: 'schedule', name: 'community-reconciler' },
+      ],
+    };
+    // No redis deps available → community-reconciler should be backfilled as pending
+    const result = backfillMissingGitHubScheduleEntries(config, manifest, {}, { repoScanDepsAvailable: false });
+    assert.strictEqual(result.changed, true);
+    const cr = result.config.capabilities.find((e) => e.id === 'plugin:github:community-reconciler');
+    assert.ok(cr, 'community-reconciler must be backfilled into existing install');
+    assert.strictEqual(cr.enabled, false, 'redis-gated resource without deps should be pending (disabled)');
+  });
+
   test('backfill gated on plugin-active — does NOT resurrect when GitHub plugin was disabled (cloud R3 P1)', async () => {
     const { backfillMissingGitHubScheduleEntries } = await import(
       '../dist/domains/plugin/github-schedule-factories.js'
@@ -1344,10 +1413,10 @@ describe('buildGitHubMigrationEntries (P2-B)', () => {
   });
 });
 
-// --- #949 Wiring regression: threadStore must reach ReviewFeedbackTaskSpec ---
+// --- F140/#949 regression: PR review feedback must stay on the registering thread ---
 
-describe('#949 wiring regression: threadStore reaches review-feedback factory', () => {
-  test('reviewFeedbackFactory passes threadStore to createReviewFeedbackTaskSpec', async () => {
+describe('F140 review-feedback factory preserves the registered thread', () => {
+  test('reviewFeedbackFactory uses threadStore only for read-only repair and never rotates PR tracking delivery', async () => {
     const { githubScheduleFactories } = await import('../dist/domains/plugin/github-schedule-factories.js');
     const reviewFeedbackFactory = githubScheduleFactories.find((f) => f.factoryId === 'github.review-feedback');
     assert.ok(reviewFeedbackFactory, 'review-feedback factory must exist in exported array');
@@ -1373,10 +1442,9 @@ describe('#949 wiring regression: threadStore reaches review-feedback factory', 
       },
     };
     const deps = makeGitHubDeps({ threadStore: mockThreadStore });
-    const spec = reviewFeedbackFactory.createTaskSpec('schedule:github:review-feedback', deps);
 
-    // The spec should be created with threadStore wired in.
-    // Verify by creating a task at the rotation threshold and checking rotation fires.
+    // Legacy automationState may still contain the removed counter. It must not
+    // affect the thread that originally registered PR tracking.
     const task = {
       id: 'task-1',
       kind: 'pr_tracking',
@@ -1391,7 +1459,7 @@ describe('#949 wiring regression: threadStore reaches review-feedback factory', 
       updatedAt: Date.now(),
       userId: 'u-1',
       automationState: {
-        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 3 },
+        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 99 },
       },
     };
 
@@ -1428,18 +1496,133 @@ describe('#949 wiring regression: threadStore reaches review-feedback factory', 
     assert.equal(gateResult.run, true, 'gate should fire');
     await spec2.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
 
-    // KEY ASSERTION: threadStore.create should have been called (rotation happened)
-    assert.equal(threadCreateCalls.length, 1, 'threadStore.create must be called — wiring is live');
-    // Task should be updated with new threadId
-    assert.ok(
-      updateCalls.some((c) => c.input.threadId === 'thread_rotated_1'),
-      'task threadId should be updated',
+    assert.equal(threadCreateCalls.length, 0, 'review-feedback must not create auto-rotated threads');
+    assert.equal(
+      updateCalls.some((c) => Object.hasOwn(c.input, 'threadId')),
+      false,
+      'review-feedback must not rewrite the PR tracking task threadId',
     );
-    // completedReviewCount should reset to 1
-    assert.ok(
-      patchCalls.some((c) => c.patch.review?.completedReviewCount === 1),
-      'completedReviewCount should reset to 1 after rotation',
+    assert.equal(
+      patchCalls.some((c) => Object.hasOwn(c.patch.review ?? {}, 'completedReviewCount')),
+      false,
+      'review-feedback must not maintain per-thread review counters',
     );
+  });
+
+  test('reviewFeedbackFactory repairs legacy auto-rotated task.threadId before delivery', async () => {
+    const { githubScheduleFactories } = await import('../dist/domains/plugin/github-schedule-factories.js');
+    const reviewFeedbackFactory = githubScheduleFactories.find((f) => f.factoryId === 'github.review-feedback');
+    assert.ok(reviewFeedbackFactory, 'review-feedback factory must exist in exported array');
+    const threadCreateCalls = [];
+    const mockThreadStore = {
+      create: (userId, title, projectPath) => {
+        threadCreateCalls.push({ userId, title, projectPath });
+        return {
+          id: 'thread_rotated_2',
+          title,
+          createdBy: userId,
+          createdAt: Date.now(),
+          participants: [],
+          projectPath: projectPath ?? 'default',
+          lastActiveAt: Date.now(),
+        };
+      },
+      get: (threadId) => {
+        if (threadId === 'thread_rotated_1') {
+          return {
+            id: 'thread_rotated_1',
+            title: 'MR review (auto-rotated from th-registered)',
+            createdBy: 'u-1',
+            createdAt: Date.now() + 1000,
+            participants: [],
+            projectPath: '/projects/cat-cafe',
+          };
+        }
+        if (threadId === 'th-registered') {
+          return {
+            id: 'th-registered',
+            projectPath: '/projects/cat-cafe',
+            title: 'Registered source thread',
+            createdBy: 'u-1',
+            createdAt: Date.now() - 1000,
+            participants: ['opus'],
+          };
+        }
+        return null;
+      },
+    };
+    const deps = makeGitHubDeps({ threadStore: mockThreadStore });
+    const task = {
+      id: 'task-legacy',
+      kind: 'pr_tracking',
+      threadId: 'thread_rotated_1',
+      subjectKey: 'pr:owner/repo#45',
+      title: 'PR owner/repo#45',
+      ownerCatId: 'opus',
+      status: 'todo',
+      why: '',
+      createdBy: 'opus',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      userId: 'u-1',
+      automationState: {
+        review: { lastCommentCursor: 0, lastDecisionCursor: 0, completedReviewCount: 1 },
+      },
+    };
+    const updateCalls = [];
+    const routeCalls = [];
+    deps.taskStore = {
+      get: async (taskId) => (taskId === task.id ? { ...task } : null),
+      listByKind: async () => [task],
+      update: async (taskId, input) => {
+        updateCalls.push({ taskId, input });
+        return { ...task, ...input };
+      },
+      updateIfThreadId: async (taskId, expectedThreadId, input) => {
+        if (taskId !== task.id || task.threadId !== expectedThreadId) return null;
+        updateCalls.push({ taskId, input, expectedThreadId });
+        Object.assign(task, input);
+        return { ...task };
+      },
+      patchAutomationState: async () => task,
+    };
+    deps.fetchComments = async () => [
+      { id: 100, author: 'alice', body: 'fix it', createdAt: '2026-01-01', commentType: 'conversation' },
+    ];
+    deps.reviewFeedbackRouter = {
+      route: async (signal, tracking) => {
+        routeCalls.push({ signal, tracking });
+        return {
+          kind: 'notified',
+          threadId: tracking.threadId,
+          catId: tracking.catId,
+          messageId: 'msg-1',
+          content: 'feedback',
+        };
+      },
+    };
+
+    const spec = reviewFeedbackFactory.createTaskSpec('schedule:github:review-feedback', deps);
+    const gateResult = await spec.admission.gate({ taskId: spec.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(gateResult.run, true, 'gate should fire');
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#45', {});
+
+    assert.equal(
+      routeCalls[0].tracking.threadId,
+      'th-registered',
+      'factory path must deliver legacy tasks to source thread',
+    );
+    assert.deepEqual(routeCalls[0].signal.routingAudit, {
+      kind: 'legacy-auto-rotated-repaired',
+      previousThreadId: 'thread_rotated_1',
+      repairedThreadId: 'th-registered',
+    });
+    assert.deepEqual(
+      updateCalls.filter((c) => Object.hasOwn(c.input, 'threadId')).map((c) => c.input.threadId),
+      ['th-registered'],
+      'factory path must persist task.threadId repair',
+    );
+    assert.equal(threadCreateCalls.length, 0, 'repair must not create another auto-rotated thread');
   });
 
   test('makeGitHubDeps without threadStore still creates spec (graceful degradation)', async () => {

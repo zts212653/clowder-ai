@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
+import { catDossierCoversStrengths, useDossierProfiles } from '@/hooks/useDossierProfiles';
 import { apiFetch } from '@/utils/api-client';
 import { ConnectorPluginInstallButton } from '../ConnectorPluginInstallButton';
 import { CatOverviewTab, type ConfigData } from '../config-viewer-tabs';
@@ -13,6 +14,7 @@ import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
+import { CatDossierContent } from './CatDossierContent';
 import { ConciergeSettingsContent } from './ConciergeSettingsContent';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
@@ -42,6 +44,13 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
   const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
   const [imRefreshKey, setImRefreshKey] = useState(0);
   const confirm = useConfirm();
+
+  // F208 OQ-9: per-field check — badge only when dossier l0RosterSummary covers teamStrengths (KD-14)
+  const { data: dossierData } = useDossierProfiles();
+  const editingCatHasDossier = useMemo(
+    () => (editingCat ? catDossierCoversStrengths(editingCat.id, dossierData) : false),
+    [editingCat, dossierData],
+  );
 
   const fetchData = useCallback(async () => {
     setFetchError(null);
@@ -136,6 +145,7 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
 
   if (section === 'marketplace') return <MarketplaceContent />;
   if (section === 'skills') return <SkillsContent />;
+  if (section === 'profiles') return <CatDossierContent />;
 
   const meta = SETTINGS_SECTIONS.find((item) => item.id === section) ?? SETTINGS_SECTIONS[0];
 
@@ -223,6 +233,7 @@ export function SettingsContent({ section, initialEditCatId }: SettingsContentPr
           open
           cat={editingCat}
           draft={createDraft}
+          hasDossier={editingCatHasDossier}
           onClose={() => {
             setEditorOpen(false);
             setEditingCat(null);

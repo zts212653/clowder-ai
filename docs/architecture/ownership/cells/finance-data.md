@@ -1,8 +1,8 @@
 ---
 cell_id: finance-data
 title: Finance Data
-summary: 个人投资学习的数据事实层、provider adapter、缓存、snapshot、来源审计与只读查询工具。
-canonical_features: [F207]
+summary: 金融数据事实层、provider adapter、缓存、snapshot、来源审计与只读查询工具。
+canonical_features: []
 code_anchors:
   - packages/finance/src/index.ts
   - packages/finance/src/fact.ts
@@ -10,18 +10,16 @@ code_anchors:
   - packages/finance/src/providers/fred.ts
   - packages/mcp-server/src/tools/finance-tools.ts
 doc_anchors:
-  - docs/features/F207-personal-finance-infra.md
   - project-research/2026-05-18-finance-provider-stack/synthesis.md
 static_scan_hints: [cat-cafe-finance, FinanceFact, snapshot_id, ttfund, FRED, sourceTier, presentationHint, queriesInLast7Days]
-cited_by:
-  - {feature: F207, date: 2026-06-03, delta: new cell}
+cited_by: []
 ---
 
 # Finance Data
 
 ## Canonical Owner
 
-F207 owns the AI Family Office data layer: cats query financial facts through a local wrapper that normalizes source metadata, freshness, cache, snapshot replay, and AUDHD presentation hints before any analysis layer consumes the data.
+This cell owns the read-only finance data layer: cats query financial facts through a local wrapper that normalizes source metadata, freshness, cache, snapshot replay, and presentation hints before any analysis layer consumes the data.
 
 ## Use This When
 

@@ -199,6 +199,13 @@ async function persistAndBroadcastCard(
       extra: stored.extra,
     },
   });
+  // F246: emit user-scoped proposal_created so Approval Hub badge refreshes in real-time.
+  // F128 already emits this in callback-propose-thread-routes.ts:293; F225 was missing it.
+  socketManager.emitToUser(record.userId, 'proposal_created', {
+    proposalId: proposal.proposalId,
+    status: proposal.status,
+    sourceFeatureId: 'F225',
+  });
   return { messageId: stored.id, warnings };
 }
 

@@ -4,12 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
 
-interface TranscriptLine {
+export interface TranscriptLine {
   ts: number;
   elapsed_s: number;
   chunk_num: number;
   asr_latency: number;
   text: string;
+  speaker_label?: string;
+  speaker_confidence?: number;
+  speaker_id?: string | null;
 }
 
 interface AudioSources {
@@ -37,6 +40,9 @@ interface SseEvent {
   chunk_num?: number;
   asr_latency?: number;
   text?: string;
+  speaker_label?: string;
+  speaker_confidence?: number;
+  speaker_id?: string | null;
   transcript_path?: string;
   recording_path?: string;
 }
@@ -49,6 +55,19 @@ function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** Pure component for a single transcript line — exported for regression testing. */
+export function TranscriptLineRow({ line }: { line: TranscriptLine }) {
+  return (
+    <div className="mb-1 flex gap-2">
+      <span className="shrink-0 text-cafe-text-muted">[{formatTime(line.ts)}]</span>
+      {line.speaker_label && (
+        <span className="shrink-0 font-medium text-cafe-accent-primary">{line.speaker_label}:</span>
+      )}
+      <span className="text-cafe-text-primary">{line.text}</span>
+    </div>
+  );
 }
 
 export function TranscriptPanel() {
@@ -123,6 +142,9 @@ export function TranscriptPanel() {
               chunk_num: data.chunk_num ?? 0,
               asr_latency: data.asr_latency ?? 0,
               text: data.text!,
+              speaker_label: data.speaker_label,
+              speaker_confidence: data.speaker_confidence,
+              speaker_id: data.speaker_id,
             },
           ]);
         } else if (data.type === 'status') {
@@ -330,10 +352,7 @@ export function TranscriptPanel() {
           </p>
         )}
         {lines.map((l, i) => (
-          <div key={l.chunk_num ?? i} className="mb-1 flex gap-2">
-            <span className="shrink-0 text-cafe-text-muted">[{formatTime(l.ts)}]</span>
-            <span className="text-cafe-text-primary">{l.text}</span>
-          </div>
+          <TranscriptLineRow key={l.chunk_num ?? i} line={l} />
         ))}
       </div>
 

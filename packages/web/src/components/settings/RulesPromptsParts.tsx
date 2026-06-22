@@ -1,6 +1,6 @@
 'use client';
 
-import { SettingsBadge, SettingsCard, SettingsSection, SettingsText } from './primitives';
+import { SettingsBadge, SettingsCard, SettingsText } from './primitives';
 
 export type PromptConsumptionKind = 'actual-prompt' | 'harness-injected' | 'reference' | 'skill-on-demand';
 
@@ -129,9 +129,12 @@ export function RuleFileCard({
 }) {
   const displayLabel = label ?? FILE_LABELS[file.path] ?? file.path;
 
+  // When nested inside SettingsSection (层4), cards use 层3 for depth hierarchy
+  const nestedStyle = { backgroundColor: 'var(--console-elevated-bg)' };
+
   if (errorMessage !== undefined) {
     return (
-      <SettingsCard>
+      <SettingsCard style={nestedStyle}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SettingsText as="p" variant="sm" tone="default" className="font-medium">
             {displayLabel}
@@ -151,7 +154,7 @@ export function RuleFileCard({
 
   if (!file.exists) {
     return (
-      <SettingsCard>
+      <SettingsCard style={nestedStyle}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SettingsText as="p" variant="sm" tone="default" className="font-medium">
             {displayLabel}
@@ -172,41 +175,25 @@ export function RuleFileCard({
   const lineCount = file.content.split('\n').length;
 
   return (
-    <SettingsCard onClick={onClick}>
+    <SettingsCard onClick={onClick} style={nestedStyle}>
       <div className="flex w-full items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <SettingsText as="p" variant="sm" tone="default" className="font-medium">
-              {displayLabel}
-            </SettingsText>
-            <SettingsBadge tone={CONSUMPTION_TONE[file.consumption.kind]}>{file.consumption.label}</SettingsBadge>
-            <SettingsBadge tone="blue">可预览</SettingsBadge>
-          </div>
+          <SettingsText as="p" variant="sm" tone="default" className="font-medium">
+            {displayLabel}
+          </SettingsText>
           <SettingsText as="p" tone="muted" className="mt-1">
             {file.path} · {lineCount} 行
           </SettingsText>
-          <ConsumptionMeta consumption={file.consumption} />
         </div>
-        <span
-          className="console-pill flex h-10 w-10 shrink-0 items-center justify-center"
-          style={{ borderRadius: '9999px', color: 'var(--cafe-text-secondary)' }}
-        >
-          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-            <path
-              fillRule="evenodd"
-              d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
+        <span className="shrink-0 text-xs opacity-50">查看</span>
       </div>
     </SettingsCard>
   );
 }
 
 /**
- * F203 Phase F — L0 system prompt section (read-only viewer).
- * Renders the L0 template card + per-cat compiled cards + customization paths.
+ * F203 Phase F / F237 — L0 system prompt template viewer.
+ * Styled as a segment row to be consistent with StageDetailPanels SegmentRow.
  */
 export function L0PromptsSection({
   l0Prompts,
@@ -215,59 +202,42 @@ export function L0PromptsSection({
   l0Prompts: L0PromptsBlock;
   onPreview: (file: RuleFile, label: string) => void;
 }) {
+  const lineCount = l0Prompts.template.content.split('\n').length;
+
   return (
-    <SettingsSection
-      title="L0 系统提示词"
-      description="shared-rules.md 编译成 governance L0 后，与 L0 template 一起进入 native system role / fallback prompt；这里展示 template 和 per-cat 实际编译产物。"
-      badge={<SettingsBadge tone="slate">1 template + {l0Prompts.compiledByCat.length} cats</SettingsBadge>}
+    <div
+      className="space-y-2 rounded-xl p-3"
+      style={{ backgroundColor: 'var(--console-card-bg)', boxShadow: '0 8px 22px rgba(43,33,26,0.04)' }}
     >
-      <div className="space-y-3">
-        <RuleFileCard
-          file={l0Prompts.template}
-          label="L0 Template（含占位）"
-          onClick={() => onPreview(l0Prompts.template, 'L0 Template — system-prompt-l0.md')}
-        />
-        {l0Prompts.compiledByCat.map((c) => {
-          const compiledFile: RuleFile = {
-            path: `compiled://${c.catId}`,
-            content: c.compiled,
-            exists: c.error === null,
-            consumption: c.consumption,
-          };
-          return (
-            <RuleFileCard
-              key={c.catId}
-              file={compiledFile}
-              label={c.displayName}
-              onClick={() => onPreview(compiledFile, `${c.displayName} — compiled L0`)}
-              errorMessage={c.error ?? undefined}
-            />
-          );
-        })}
-        <div
-          className="leading-5"
-          style={{
-            borderRadius: '0.75rem',
-            backgroundColor: 'var(--console-panel-bg)',
-            padding: '0.75rem',
-            fontSize: 'var(--console-font-xs)',
-            color: 'var(--cafe-text-muted)',
-          }}
-        >
-          <SettingsText as="p" tone="secondary" className="font-medium">
-            如何修改 L0（read-only viewer，编辑入口在文件系统）
+      <SettingsText as="h4" variant="sm" tone="default" className="font-semibold">
+        L0 系统提示词模板
+      </SettingsText>
+      <SettingsText as="p" variant="xs" tone="muted">
+        下方注入段的真相源模板。编译器按猫替换占位变量（身份、队友名册、工作流触发点）后生成最终系统提示词。
+      </SettingsText>
+      {/* Template row — 层3 抬升, shadow emphasis since 层3/层4 visually close */}
+      <button
+        type="button"
+        className="flex w-full cursor-pointer items-start gap-3 rounded-lg px-3 py-2 text-left hover:opacity-80"
+        style={{
+          backgroundColor: 'var(--console-elevated-bg)',
+          boxShadow: '0 1px 4px rgba(43,33,26,0.08)',
+        }}
+        onClick={() => onPreview(l0Prompts.template, 'L0 Template — system-prompt-l0.md')}
+      >
+        <SettingsText as="span" variant="xs" tone="muted" className="mt-0.5 w-8 shrink-0 font-mono">
+          L0
+        </SettingsText>
+        <div className="min-w-0 flex-1">
+          <SettingsText as="span" variant="sm" tone="default" className="font-medium">
+            L0 Template（含占位变量）
           </SettingsText>
-          <SettingsText as="p" tone="muted" className="mt-1">
-            Template 真相源: <code>{l0Prompts.customization.templatePath}</code>
-          </SettingsText>
-          <SettingsText as="p" tone="muted">
-            Per-cat 渲染逻辑: <code>{l0Prompts.customization.compileScript}</code>
-          </SettingsText>
-          <SettingsText as="p" tone="muted">
-            改完验证: {l0Prompts.customization.verifyCommand}
+          <SettingsText as="p" variant="xs" tone="secondary" className="mt-0.5">
+            {l0Prompts.customization.templatePath} · {lineCount} 行
           </SettingsText>
         </div>
-      </div>
-    </SettingsSection>
+        <span className="mt-0.5 shrink-0 text-xs opacity-50">查看</span>
+      </button>
+    </div>
   );
 }

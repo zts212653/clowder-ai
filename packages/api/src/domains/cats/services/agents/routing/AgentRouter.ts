@@ -111,6 +111,13 @@ interface MentionPattern {
   catId: CatId;
 }
 
+type MarkdownMentionMarker = '*' | '_';
+
+interface MarkdownMentionMarkerRun {
+  marker: MarkdownMentionMarker;
+  count: number;
+}
+
 /**
  * #969: Zero-width Unicode characters that LLMs may insert before mentions.
  * These are invisible in consoles but break line-start `@` detection.
@@ -279,6 +286,40 @@ function isMentionEndBoundary(message: string, end: number): boolean {
   return !HANDLE_CONTINUATION_RE.test(next);
 }
 
+function getOpeningRouteMarkdownMarkers(message: string, pos: number): MarkdownMentionMarkerRun | null {
+  let cursor = pos - 1;
+  while (cursor >= 0 && isZeroWidthChar(message.charCodeAt(cursor))) cursor--;
+
+  const marker = message[cursor];
+  if (marker !== '*' && marker !== '_') return null;
+
+  let count = 0;
+  while (cursor >= 0 && message[cursor] === marker) {
+    count++;
+    cursor--;
+  }
+  return { marker, count };
+}
+
+function skipClosingRouteMarkdownMarkers(
+  message: string,
+  end: number,
+  openingMarkers: MarkdownMentionMarkerRun | null,
+): number {
+  if (!openingMarkers) return end;
+
+  let cursor = end;
+  let remaining = openingMarkers.count;
+  while (remaining > 0) {
+    while (cursor < message.length && isZeroWidthChar(message.charCodeAt(cursor))) cursor++;
+    if (message[cursor] !== openingMarkers.marker) return end;
+    cursor++;
+    remaining--;
+  }
+  while (cursor < message.length && isZeroWidthChar(message.charCodeAt(cursor))) cursor++;
+  return cursor;
+}
+
 function isUrlishMentionToken(message: string, pos: number): boolean {
   const tokenStart =
     Math.max(message.lastIndexOf(' ', pos), message.lastIndexOf('\n', pos), message.lastIndexOf('\t', pos)) + 1;
@@ -310,19 +351,33 @@ function findMentionPatternAt(
   message: string,
   pos: number,
   patterns: readonly MentionPattern[],
+  normalizePatternEnd?: (end: number) => number,
 ): MentionPattern | null {
   for (const entry of patterns) {
-    if (!message.startsWith(entry.pattern, pos)) continue;
-    if (!isMentionEndBoundary(message, pos + entry.pattern.length)) continue;
+    const patternEnd = matchMentionPatternEnd(message, pos, entry.pattern);
+    if (patternEnd === null) continue;
+    const boundaryEnd = normalizePatternEnd ? normalizePatternEnd(patternEnd) : patternEnd;
+    if (!isMentionEndBoundary(message, boundaryEnd)) continue;
     return entry;
   }
   return null;
 }
 
+function matchMentionPatternEnd(message: string, pos: number, pattern: string): number | null {
+  let cursor = pos;
+  for (let i = 0; i < pattern.length; i++) {
+    while (cursor < message.length && isZeroWidthChar(message.charCodeAt(cursor))) cursor++;
+    if (message[cursor] !== pattern[i]) return null;
+    cursor++;
+  }
+  while (cursor < message.length && isZeroWidthChar(message.charCodeAt(cursor))) cursor++;
+  return cursor;
+}
+
 function hasDomainSuffixedMentionPatternAt(message: string, pos: number, patterns: readonly MentionPattern[]): boolean {
   return patterns.some((entry) => {
-    if (!message.startsWith(entry.pattern, pos)) return false;
-    const suffixStart = pos + entry.pattern.length;
+    const suffixStart = matchMentionPatternEnd(message, pos, entry.pattern);
+    if (suffixStart === null) return false;
     const suffixNext = message[suffixStart + 1];
     return message[suffixStart] === '.' && suffixNext !== undefined && DOMAIN_SUFFIX_START_RE.test(suffixNext);
   });
@@ -339,7 +394,10 @@ function recordRouteLineMentions(
   forEachRouteLineMentionCandidate(message, (_line, lineOffset, candidate) => {
     const position = lineOffset + candidate;
     if (isInsideSpan(position, excluded)) return;
-    const matched = findMentionPatternAt(message, position, patterns);
+    const openingMarkers = getOpeningRouteMarkdownMarkers(message, position);
+    const matched = findMentionPatternAt(message, position, patterns, (end) =>
+      skipClosingRouteMarkdownMarkers(message, end, openingMarkers),
+    );
     if (matched) recordResolvedMention(matched.catId, position, seenCats, mentions, routingWarnings);
   });
 }
@@ -364,6 +422,12 @@ function recordResolvedMention(
   if (!seenCats.has(key)) {
     seenCats.add(key);
     mentions.push({ catId, position });
+    return;
+  }
+
+  const existing = mentions.find((mention) => String(mention.catId) === key);
+  if (existing && position < existing.position) {
+    existing.position = position;
   }
 }
 
@@ -917,6 +981,9 @@ export class AgentRouter {
     const mentions: ParsedMention[] = [];
     const seenCats = new Set<string>();
     const routing_warnings: CatRoutingError[] = [];
+
+    // Route-line grammar handles markdown/list wrappers before the broader inline scan.
+    recordRouteLineMentions(lowerMessage, allPatterns, seenCats, mentions, routing_warnings);
 
     // Explicit @mentions are user-authored route tokens and may appear anywhere in prose.
     forEachUserMentionCandidate(lowerMessage, (pos) => {

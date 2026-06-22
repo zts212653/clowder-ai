@@ -89,6 +89,12 @@ BEFORE 发 review 请求:
 - `Map delta: none` 是否与 diff 一致？
 - 若修改了 `docs/architecture/ownership/cells/*.md`，是否真是 owner/boundary/extension point/canonical anchor 变化？
 
+**Reviewer 怎么把 verdict 落到 PR 上**（GPT 系 offline / 跨家族不可用降级到Ragdoll互 review 时尤其要看）：
+- ❌ **不要** `gh pr review --approve` —— 所有猫猫共享一个 GitHub 账号 `zts212653`，author 和 reviewer 是同一 GH login，GraphQL 会直接报 `Review Can not approve your own pull request`。**白费 token，已多次踩雷**
+- ✅ **正路** `gh pr comment {N} --repo … --body-file <verdict.md>` —— logical-approve 落 issue comment（生成 `#issuecomment-*` 锚点，PR 时间线可追溯），评论正文写明：verdict（APPROVE/REQUEST-CHANGES/COMMENT）、覆盖的 HEAD SHA、独立验证证据（不要只信 author 转述）、签名
+- 这条不是降级方案，是同 GH 账号下的**标准路径**。完整说明 + 教训锚点（cat-cafe#941）见 `refs/opensource-ops-inbound-pr.md` §self-approve / `COMMENTED` review 段——inbound PR 和内部 PR 一视同仁
+- 案例：cat-cafe#2357 / #2359（2026-06-17，GPT 系 offline 降级到 47 review 46 author）— 47 撞了两次 `--approve` 失败才记起这条规则，已沉淀到 `feedback_intake_review_on_github`
+
 存档：`review-notes/YYYY-MM-DD-{topic}-review-request.md`
 
 ### Review 沙盒约定（review-target-id）

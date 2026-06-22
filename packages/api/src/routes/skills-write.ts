@@ -184,7 +184,7 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
 
     if (!new Set(await listSourceSkillNames(skillsSrc)).has(body.skillName)) {
       reply.status(404);
-      return { error: `Skill '${body.skillName}' not found in Cat Cafe skills source` };
+      return { error: `Skill '${body.skillName}' not found in Clowder AI skills source` };
     }
 
     return withCapabilityLock(projectRoot, async () => {

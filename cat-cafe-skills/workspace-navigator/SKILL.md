@@ -81,7 +81,7 @@ Step 3: 调 typed MCP — 让 Hub 前端导航
 ### 路径格式要求
 
 - **必须是相对路径**（相对于 worktree 根目录），不要传绝对路径
-- 例：`packages/api/data/logs/api/2026-03-21.log`，不是 `/home/user/2026-03-21.log`
+- 例：`packages/api/data/logs/api/2026-03-21.log`，不是 `/home/user/.../2026-03-21.log`
 - 目录路径末尾带不带 `/` 都行
 
 ## Step 3 详解：调用 `cat_cafe_workspace_navigate`

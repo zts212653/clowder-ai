@@ -15,6 +15,13 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '成员名册、默认协作对象与编排顺序。',
   },
   {
+    id: 'profiles',
+    label: '猫猫画像',
+    icon: 'file-text',
+    color: 'var(--color-opus-primary)',
+    description: '按模型分组的能力画像、路由信号与来源追溯。',
+  },
+  {
     id: 'accounts',
     label: '账户与密钥',
     icon: 'key',
@@ -58,7 +65,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: 'concierge',
-    label: '前台猫',
+    label: '猫猫球',
     icon: 'cat',
     color: 'var(--cafe-accent)',
     description: '猫猫球的形象、人设、值班猫和主动性策略。',
@@ -79,10 +86,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: 'rules',
-    label: '规则与 SOP',
+    label: '协作与规则',
     icon: 'file-text',
     color: 'var(--color-gemini-primary)',
-    description: '家规、协作 SOP 和模型提示词入口。',
+    description: '会话生命周期、注入体系、协作规则与模型指南。',
   },
   {
     id: 'notify',

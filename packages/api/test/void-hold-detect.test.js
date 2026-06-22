@@ -226,4 +226,102 @@ describe('F167 Phase I + F192 D: evaluateVoidHold (trigger capture)', () => {
     const negative = { ...base, text: '我接球继续做' };
     assert.equal(shouldWarnVoidHold(negative), evaluateVoidHold(negative).shouldEmit);
   });
+
+  // ── 2026-06-20 verdict eval:a2a c2 void-hold English false-positive fix ──
+  // 06-20 eval showed C2 at 10/122 = 8.2% above 5% floor; 7 sampled fires
+  // dominated by `en_hold_ball_underscore` / `en_holdball_space` matching
+  // English tool/status prose in narrative body. Same surgery as C2
+  // verdict-without-pass: slot-scope detection so narrative mentions of
+  // `hold_ball` / `holdball` don't fire unless the actual final routing
+  // slot asserts a hold claim. Preserves true positives + per-fire trigger.
+
+  test('06-20 verdict: en_hold_ball_underscore in narrative body + summary slot → no fire', () => {
+    const text =
+      'I invoked the hold_ball tool earlier this turn to wait for the eval to finish.\n\n' +
+      'Eval still running; will check again in 5 minutes.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'tool-citation narrative + summary slot must not fire');
+    assert.equal(r.matchedPattern, null, 'slot has no hold phrase — null trigger');
+  });
+
+  test('06-20 verdict: en_holdball_space in narrative body + summary slot → no fire', () => {
+    const text =
+      'The holdball flow scheduled a wake-up at 3pm; I had to fall through to the cancel path because the timer expired.\n\n' +
+      'Cleanup complete, moving on.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'holdball narrative mention + cleanup slot must not fire');
+    assert.equal(r.matchedPattern, null);
+  });
+
+  test('06-20 verdict: true positive — terminal English `hold_ball` claim in slot → still fires', () => {
+    const text = 'Ack on the spec.\n\nI am going to hold_ball while we wait for the cloud review.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, true, 'real hold claim in final slot must still fire');
+    assert.equal(r.matchedPattern, 'en_hold_ball_underscore');
+  });
+
+  test('06-20 verdict: true positive — terminal `holdball` (space-style) in slot → still fires', () => {
+    const text = 'Plan looks solid.\n\nGoing to hold ball until I get the eval result.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, true, 'space-style hold ball claim in final slot must still fire');
+    assert.equal(r.matchedPattern, 'en_holdball_space');
+  });
+
+  test('06-20 verdict: signature stripping + narrative `hold_ball` mention → no fire', () => {
+    // Signed message ending with `[宪宪/Opus-47🐾]` — signature stripped,
+    // then slot picker lands on the actual final paragraph (cleanup summary),
+    // not the narrative `hold_ball` mention above.
+    const text =
+      'I invoked hold_ball in the prior turn but the wake fired already.\n\n' +
+      'Status: ready to continue.\n\n' +
+      '[宪宪/Opus-47🐾]';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'sig-stripped slot is status, not hold claim');
+    assert.equal(r.matchedPattern, null);
+  });
+
+  test('06-20 verdict: signature stripping + terminal hold claim in last content paragraph → fires', () => {
+    const text = 'Ack.\n\nGoing to hold_ball until alpha is ready.\n\n[宪宪/Opus-47🐾]';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, true);
+    assert.equal(r.matchedPattern, 'en_hold_ball_underscore');
+  });
+
+  test('06-20 verdict: en_hold_ball_underscore in fenced code at end → slot strips, no fire', () => {
+    // Trailing fenced code block — `finalRoutingSlot` strips it, the slot
+    // falls back to the prior content paragraph (status).
+    const text =
+      'See the example call below; this is documentation:\n\n```\nawait cat_cafe_hold_ball({...})\nhold_ball returns a task id\n```';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'hold phrase only in trailing fenced code → not a new claim');
+  });
+
+  test('06-20 verdict: hold phrase in blockquote of cited prior message → no fire', () => {
+    // Cited prior cat's message in blockquote. Slot picker should not see it.
+    const text =
+      '> Spark said: I am going to hold_ball until the report is done.\n\n' +
+      'I think we should send a verdict ping instead.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'blockquote-cited hold claim is not the current cat asserting hold');
+    assert.equal(r.matchedPattern, null);
+  });
+
+  test('06-20 verdict: single-paragraph terminal claim with all exits absent → fires (true positive control)', () => {
+    const text = 'Going to hold_ball now while we wait.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, true);
+    assert.equal(r.matchedPattern, 'en_hold_ball_underscore');
+  });
+
+  test('06-20 verdict: verdict-detect cross-bleed — review verdict in slot does NOT trigger void-hold', () => {
+    // Sanity that the slot-scoping doesn't cross-fire on verdict words.
+    const text = 'PR looks clean.\n\nLGTM, merging now.';
+    const r = evaluateVoidHold({ ...base, text });
+    assert.equal(r.shouldEmit, false, 'no hold phrase in slot → matchedPattern null');
+    assert.equal(r.matchedPattern, null);
+  });
+
+  // PR #2442 round-evolution regression tests (cloud R1 file-path FPs through
+  // 砚砚 R7 P2 CJK semantic labels) live in `void-hold-detect-pr2442.test.js`
+  // — split per cloud R6/R7/R8 P1 (file 350-line hard cap from AGENTS.md).
 });

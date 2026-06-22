@@ -475,13 +475,13 @@ describe('generateOpenCodeRuntimeConfig', () => {
       models: ['anthropic/claude-opus-4-6'],
       defaultModel: 'anthropic/claude-opus-4-6',
       apiType: 'anthropic',
-      externalDirectories: ['/Users/lysander/projects/cat-cafe/', 'C:\\Users\\lysander\\monorepo'],
+      externalDirectories: ['/home/user/cat-cafe/', 'C:\\Dev\\monorepo'],
     });
 
     assert.deepStrictEqual(config.permission, {
       external_directory: {
-        '/Users/lysander/projects/cat-cafe/**': 'allow',
-        'C:/Users/lysander/monorepo/**': 'allow',
+        '/home/user/cat-cafe/**': 'allow',
+        'C:/Dev/monorepo/**': 'allow',
       },
     });
   });

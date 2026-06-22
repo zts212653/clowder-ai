@@ -56,6 +56,13 @@ stages:
           type: manual_only
           reason: Current runtime has no stable post-compact recall-failure telemetry.
           future_candidate: trace_pattern_post_compact_recall
+      - id: impl-convention-graph-before-convention-edit
+        text: 改 MCP tool / skill manifest / route / callback 等约定面前，先用 convention graph 查影响面；stale=true 先 reindex
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: Convention graph CLI usage is not yet emitted as structured telemetry.
+          future_candidate: convention_graph_usage_event
 
   - id: quality_gate
     label: 自检

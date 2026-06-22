@@ -83,6 +83,12 @@ export const searchEvidenceInputSchema = {
     .boolean()
     .optional()
     .describe('When true, include rankingFactors (bm25Score, consumptionPrior, mmrPenalty) on each result'),
+  intent: z
+    .enum(['topk', 'coverage'])
+    .optional()
+    .describe(
+      'Search intent: topk (default, ranked list) or coverage (exhaustive multi-scope search with coverage matrix output). Use coverage for "哪些/所有/历史上" style source-map queries.',
+    ),
 };
 
 export async function handleSearchEvidence(input: {
@@ -98,6 +104,7 @@ export async function handleSearchEvidence(input: {
   dimension?: string | undefined;
   collections?: string | undefined;
   explain?: boolean | undefined;
+  intent?: 'topk' | 'coverage' | undefined;
 }): Promise<ToolResult> {
   const { dimension = 'project' } = input;
   const params = new URLSearchParams({ q: input.query });
@@ -114,6 +121,7 @@ export async function handleSearchEvidence(input: {
   params.set('dimension', dimension);
   if (input.collections) params.set('collections', input.collections);
   if (input.explain) params.set('explain', 'true');
+  if (input.intent) params.set('intent', input.intent);
 
   const url = `${API_URL}/api/evidence/search?${params.toString()}`;
   const queryLabel = JSON.stringify(input.query);
@@ -127,6 +135,57 @@ export async function handleSearchEvidence(input: {
         `[cat-cafe-search-evidence] HTTP error ${response.status} for ${url}\n  query=${queryLabel}\n  body=${text.slice(0, 500)}`,
       );
       return errorResult(`Evidence search failed for ${queryLabel} (${response.status}): ${text}`);
+    }
+
+    // F200 HW-1: intent=coverage returns CoverageSearchResult (different shape from topk)
+    if (input.intent === 'coverage') {
+      const coverageData = (await response.json()) as {
+        query: string;
+        totalHits: number;
+        bySource: Record<string, { count: number; cap: number }>;
+        matrix: Array<{
+          anchor: string;
+          title: string;
+          kind: string;
+          matchType: string;
+          confidence: number;
+          source: string;
+          sourcePath?: string;
+          expansionProvenance?: { source: string; via: string; confidence: string };
+        }>;
+        gaps: string[];
+        degraded?: Array<{ source: string; reason: string }>;
+      };
+
+      const lines: string[] = [];
+      lines.push(`📊 Coverage Search: ${coverageData.totalHits} hit(s) for ${queryLabel}`);
+      lines.push('');
+
+      for (const [src, info] of Object.entries(coverageData.bySource)) {
+        lines.push(`  ${src}: ${info.count}/${info.cap}`);
+      }
+      lines.push('');
+
+      for (const item of coverageData.matrix) {
+        const prov = item.expansionProvenance
+          ? ` [${item.expansionProvenance.source} via ${item.expansionProvenance.via}]`
+          : '';
+        lines.push(`[${item.matchType}] ${item.title}`);
+        lines.push(`  anchor: ${item.anchor}`);
+        lines.push(`  source: ${item.source} | confidence: ${item.confidence}${prov}`);
+        if (item.sourcePath) lines.push(`  sourcePath: ${item.sourcePath}`);
+        lines.push('');
+      }
+
+      if (coverageData.degraded && coverageData.degraded.length > 0) {
+        lines.push('⚠️ Degraded sources:');
+        for (const d of coverageData.degraded) {
+          lines.push(`  ${d.source}: ${d.reason}`);
+        }
+        lines.push('');
+      }
+
+      return successResult(lines.join('\n'));
     }
 
     const data = (await response.json()) as {

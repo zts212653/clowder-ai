@@ -13,7 +13,8 @@
  */
 
 // ---------------------------------------------------------------------------
-// Event kinds（全 13 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
+// Event kinds（全 16 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
+// Phase B 13 种 + Phase C 3 安乐死 kinds（KD-C2 三独立 kind 非单 kind+severity）
 // ---------------------------------------------------------------------------
 
 export type BallEventKind =
@@ -29,7 +30,11 @@ export type BallEventKind =
   | 'task.unblocked' // 阻塞解除（owner ack 或外部满足）
   | 'task.idle_long' // blocked 长期无活动（→ zombie）
   | 'task.done' // task 完成（→ resolved，唯一正常终结；probe completes 也走这条）
-  | 'ball.wake_sent'; // informational：bounces_back 唤醒已发，更新 lastWakeAt，不改 state（仅 blocked 接受）
+  | 'ball.wake_sent' // informational：bounces_back 唤醒已发，更新 lastWakeAt，不改 state（仅 blocked 接受）
+  // ---------- Phase C 安乐死（KD-C1/C2，operator 6-18 拍板） ----------
+  | 'ball.frozen' // 冷冻：暂停推进可解冻（payload: { why, by, kind:'frozen' }）→ resolved
+  | 'ball.degraded' // 降级：明确降优先级（payload: { why, by, kind:'degraded' }）→ resolved
+  | 'ball.abandoned'; // 放弃：终态"不做了"（payload: { why, by, kind:'abandoned' }）→ resolved
 
 export type BallEventClassification = 'state-changing' | 'informational';
 
@@ -45,6 +50,11 @@ export interface BallCustodyEvent {
    * - invocation：`inv:{invocationId}:started|hb:{draftUpdatedAt}|died`
    * - task：`task:{taskId}:blocked:{blockedSinceAt}` / `:unblocked:{at}` / `:idle:{at}` / `:done`
    * - ball.wake_sent：`wake:{taskId}:{blockedSinceAt}:{at}`
+   * - 安乐死类（Phase C，ball.frozen/degraded/abandoned）：`euthanasia:{subjectKey}:{kind}:{at}`
+   *   含 kind（KD-C2 三独立 kind 语义独立）。同一 ball 同一 kind 同一 ms 视为同事件（Lua append
+   *   幂等去重）；跨 ms 或跨 kind 视为独立事件（事件流时间轴诚实 + 同 ms 三 kind 可并存进事件流）。
+   *   state-machine 自己 reject already-resolved 重写——projection 投影层只有第一次落点，但事件流
+   *   保留"曾试图杀"的诚实痕迹（observability + Phase C trajectory §C 数据源）。
    */
   sourceEventId: string;
   /** 派生标识（KD-1，不新建 ID）：`ball:thread:{threadId}` | `ball:task:{taskId}` */
@@ -75,6 +85,13 @@ export type BallIntent = 'handoff' | 'fyi' | 'done_notify';
 
 /** blocked task 的 on-resolve 二态（KD-5）。 */
 export type BallResolveMode = 'completes' | 'bounces_back';
+
+/**
+ * Phase C 安乐死 kind（ball.frozen / ball.degraded / ball.abandoned 的 payload.kind）。
+ * 三种语义独立但共享转移行为（任何非 resolved → resolved，已 resolved → reject 'invalid_transition'）。
+ * KD-C2：三独立 kind 非单 kind+severity 字段——projector pattern match 直接 + 简报 collapsing 策略 per-kind 可调。
+ */
+export type BallEuthanasiaKind = 'frozen' | 'degraded' | 'abandoned';
 
 // ---------------------------------------------------------------------------
 // Projection（rebuildable read model，照 CommunityObjectProjection）

@@ -151,7 +151,7 @@ function truncateMiddle(s: string, max = 32): string {
 
 /**
  * 云端 codex P2-5 (2026-05-27): backend `resolveCliCommand()` may resolve to an
- * absolute path (e.g. `/home/user/codex` from `which` fallback), and
+ * absolute path (e.g. `/home/user/.npm/bin/codex` from `which` fallback), and
  * the api-side sanitizer redacts HOME/USERPROFILE only inside stderr — not the
  * structured `debugRef.command`. Mirror the same redaction on the frontend before
  * rendering so the debug strip can't leak host install paths.

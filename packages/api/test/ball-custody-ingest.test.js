@@ -12,7 +12,20 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { BallCustodyIngest } from '../dist/domains/ball-custody/BallCustodyIngest.js';
 import { BallCustodyProjector } from '../dist/domains/ball-custody/BallCustodyProjector.js';
-import { buildHandedEvent, buildVoidPassEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
+import {
+  buildHandedCvoEvent,
+  buildHandedEvent,
+  buildHeldEvent,
+  buildHoldExpiredEvent,
+  buildInvocationDiedEvent,
+  buildInvocationHeartbeatEvent,
+  buildInvocationStartedEvent,
+  buildTaskBlockedEvent,
+  buildTaskDoneEvent,
+  buildTaskIdleLongEvent,
+  buildTaskUnblockedEvent,
+  buildVoidPassEvent,
+} from '../dist/domains/ball-custody/ball-custody-events.js';
 
 // dedup memLog（同 sourceEventId → appended:false），用于验证 ingest 的 appended:true guard。
 // 注意：B1 projector.test 的 memLog 不 dedup（它测 projector 不测 ingest），这里必须 dedup。
@@ -89,6 +102,87 @@ describe('ball-custody-events — buildVoidPassEvent', () => {
     const e = buildVoidPassEvent({ threadId: 'thr1', messageId: 'msg1', at: 2000 });
     assert.strictEqual(e.kind, 'ball.void_pass');
     assert.strictEqual(e.sourceEventId, 'route:msg1:void');
+  });
+});
+
+describe('ball-custody-events — PR3 source builders', () => {
+  it('构造 hold held/expired events（§F hold sourceEventId + thread subject）', () => {
+    const held = buildHeldEvent({ threadId: 'thr1', catId: 'codex', fireAt: 9000, at: 1000 });
+    assert.strictEqual(held.kind, 'ball.held');
+    assert.strictEqual(held.sourceEventId, 'hold:thr1:codex:9000');
+    assert.strictEqual(held.subjectKey, 'ball:thread:thr1');
+    assert.deepStrictEqual(held.payload, { catId: 'codex', fireAt: 9000 });
+
+    const expired = buildHoldExpiredEvent({ threadId: 'thr1', catId: 'codex', fireAt: 9000, at: 9001 });
+    assert.strictEqual(expired.kind, 'ball.hold_expired');
+    assert.strictEqual(expired.sourceEventId, 'holdexp:thr1:codex:9000');
+    assert.strictEqual(expired.subjectKey, 'ball:thread:thr1');
+  });
+
+  it('构造 task status events（task subject + per-transition idempotency key）', () => {
+    const blocked = buildTaskBlockedEvent({
+      taskId: 'task1',
+      threadId: 'thr1',
+      ownerCatId: 'opus',
+      blockedSinceAt: 1000,
+    });
+    assert.strictEqual(blocked.kind, 'task.blocked');
+    assert.strictEqual(blocked.sourceEventId, 'task:task1:blocked:1000');
+    assert.strictEqual(blocked.subjectKey, 'ball:task:task1');
+    assert.deepStrictEqual(blocked.payload, { taskId: 'task1', threadId: 'thr1', ownerCatId: 'opus' });
+
+    assert.strictEqual(
+      buildTaskUnblockedEvent({ taskId: 'task1', at: 2000 }).sourceEventId,
+      'task:task1:unblocked:2000',
+    );
+    assert.strictEqual(buildTaskIdleLongEvent({ taskId: 'task1', at: 3000 }).sourceEventId, 'task:task1:idle:3000');
+    assert.strictEqual(buildTaskDoneEvent({ taskId: 'task1', at: 4000 }).sourceEventId, 'task:task1:done');
+  });
+
+  it('构造 invocation lifecycle events（lastScanAt 保留在 died payload）', () => {
+    const started = buildInvocationStartedEvent({ invocationId: 'inv1', threadId: 'thr1', catId: 'codex', at: 1000 });
+    assert.strictEqual(started.sourceEventId, 'inv:inv1:started');
+    assert.strictEqual(started.subjectKey, 'ball:thread:thr1');
+
+    const heartbeat = buildInvocationHeartbeatEvent({
+      invocationId: 'inv1',
+      threadId: 'thr1',
+      catId: 'codex',
+      draftUpdatedAt: 1500,
+    });
+    assert.strictEqual(heartbeat.sourceEventId, 'inv:inv1:hb:1500');
+    assert.strictEqual(heartbeat.at, 1500);
+
+    const died = buildInvocationDiedEvent({
+      invocationId: 'inv1',
+      threadId: 'thr1',
+      catId: 'codex',
+      reason: 'no_tracker_no_fresh_draft_age_exceeded',
+      lastScanAt: 1600,
+      at: 2000,
+    });
+    assert.strictEqual(died.kind, 'invocation.died');
+    assert.strictEqual(died.sourceEventId, 'inv:inv1:died');
+    assert.deepStrictEqual(died.payload, {
+      invocationId: 'inv1',
+      catId: 'codex',
+      reason: 'no_tracker_no_fresh_draft_age_exceeded',
+      lastScanAt: 1600,
+    });
+  });
+
+  it('构造 handed_cvo only from explicit structured intent（不做 NL 分类）', () => {
+    const e = buildHandedCvoEvent({
+      fromCatId: 'codex',
+      threadId: 'thr1',
+      messageId: 'msg1',
+      intent: 'handoff',
+      at: 1000,
+    });
+    assert.strictEqual(e.kind, 'ball.handed_cvo');
+    assert.strictEqual(e.sourceEventId, 'route:msg1');
+    assert.strictEqual(e.subjectKey, 'ball:thread:thr1');
+    assert.deepStrictEqual(e.payload, { fromCatId: 'codex', intent: 'handoff' });
   });
 });
 

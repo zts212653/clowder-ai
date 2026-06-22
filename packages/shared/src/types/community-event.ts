@@ -31,6 +31,9 @@ export type CommunityEventKind =
   | 'case.waived'
   | 'case.declined'
   | 'case.awaiting_external' // owner declares waiting for external actor (payload: { reason, declaredBy })
+  // Route validation events (F168 Phase F: target cat accepts/rejects routed issue)
+  | 'case.route_validated'
+  | 'case.route_rejected'
   // Eval events (INV-13: narrator recommendation vs owner decision)
   | 'case.route_decision_eval'
   // Migration synthetic event

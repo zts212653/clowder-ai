@@ -412,6 +412,7 @@ const MCP_DESCRIPTIONS: Record<string, string> = {
   'cat-cafe-collab': '三猫协作工具 — 消息、上下文、任务、权限等（协作核心）',
   'cat-cafe-memory': '三猫记忆工具 — 证据检索、反思、会话链回放',
   'cat-cafe-signals': '信号猎手工具 — inbox 检索、搜索、摘要',
+  'cat-cafe-audio': '音频工具 — 音频捕获、转录、说话人识别、会议 Copilot',
   'cat-cafe-finance': '金融事实工具 — 只读查询基金与宏观数据，返回 source/asOf/confidence/snapshot_id',
 };
 const MAX_CONCURRENT_MCP_PROBES = 4;
@@ -691,6 +692,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       'cat-cafe-memory',
       'cat-cafe-signals',
       'cat-cafe-limb',
+      'cat-cafe-audio',
       'cat-cafe-finance',
     ]);
     for (const server of discoveredServers) {

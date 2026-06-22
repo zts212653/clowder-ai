@@ -1554,3 +1554,175 @@ created: 2026-02-26
 - 来源锚点：PR #2326（#2329 false-positive close）| [thread-id] | opus-47 复盘（2026-06-17 01:24 UTC）
 - 原理：worktree full suite 的 fail ≠ standalone regression——full suite 有 in-suite CWD / env / resource 污染，单文件 fail 在 full suite 里出现是 **pollution 信号**，不是 **regression 证据**。两者的药方相反：pollution → 隔离测试 / restore env；regression → 修 test 或修代码。混淆后开 issue = 把 pollution 当 regression 投递给不可能修的 owner。
 - 关联：feedback_verify_before_guessing（先验证再行动）| feedback_inmemory_store_tests_miss_redis_behavior（in-suite 环境假绿）| LL-075（同 PR，gate 执行失误）
+
+### LL-077: F210-H1 dispatcher dual-handler 不变量——新 telemetry type 必须同时在 foreground + background chain 加 handler
+- 状态：validated
+- 更新时间：2026-06-17
+- 坑：社区 PR enihcam/clowder-ai#943 (`fix(web): consume provider_capability telemetry silently`) 给 `useAgentMessages.ts` foreground 链 (`handleAgentMessage` ~line 5111) 加了 `provider_capability` handler，但漏了 background 链 (`consumeBackgroundSystemInfo` ~line 731) 的 mirror handler。社区作者本人 + Maine Coon first-pass review + 我自己（opus-47）initial absorb 都没 catch。opus-46 cross-thread review on cat-cafe#2352 才发现。effect：kimi 在 background thread 跑时（常见 case：A2A 链 / 完成-未查看 thread / multi-cat background stream），原 #939 bug 依然存在——raw-JSON `"thinking → unavailable"` 系统 bubble 继续 surface 给用户。
+- 根因：F210-H1 dispatcher pattern 同一 telemetry type 走两条 chain（foreground React hook + background async callback），每条 chain 各有自己的 dispatcher list。**没有 single source of truth**——pattern 实现成了"visible-but-loose contract"：可发现（grep type name 能定位）但容易漏（review 默认 mental model 是"找到一处分支就够了"）。社区 PR review 习惯优先 verify 用户最常见 interactive 路径（foreground），background callback 路径 review 时容易省略。
+- 触发条件：① 增加新 `system_info` type 处理 / ② system_info dispatcher chain 改动 / ③ 任何 mirror dispatcher pattern (fg/bg, sync/async, primary/fallback)。
+- 修复：cat-cafe absorb fix in `d3b1214e3`（mirror handler 插入 background chain line 1062）+ 3 background regression tests in new file `useAgentMessages-provider-capability-background.test.ts`（real `useChatStore`，与 mock 化的 sister foreground test file 分离）+ nit `??` → `||` 在 fg+bg 两处都改（empty-string defense）。Upstream issue filed at clowder-ai#966。
+- 防护：
+  - **dispatcher 系列 PR review 强制 cross-chain audit**：对每个新 `system_info` type，在 PR review 时显式 grep `'<type>'` 在所有 dispatch chain 文件（`useAgentMessages.ts` 至少 fg+bg）确认 handler count ≥ 2；count = 1 = 漏一条。
+  - **intake-from-opensource.sh 加 dispatcher symmetry check**：PR diff 改动了 `handleAgentMessage` 的 dispatch chain 但没改 `consumeBackgroundSystemInfo` (或反之) → warning。F238 follow-up 候选。
+  - **lessons-learned reflex (与 LL-076 互补)**：intake 闭环完，发现"我们补的 fix 也应该在 upstream 修" → 立刻 file upstream issue，**不留"下次一定"**。本 LL 触发的 #966 是范例。
+- 来源锚点：cat-cafe#2352 (intake of clowder-ai#943) | [thread-id] | opus-46 cross-thread review on `cdeaa9150` (2026-06-17 14:08 UTC, PR comment #4731199498) | upstream issue clowder-ai#966
+- 原理：dispatcher pattern 的强 contract 应该是 single source of truth（如 handler registry map / decorator），让两条 chain 在编译期或加载期共享 handler list。当前实现是"两条 chain 各 if-else 平行写"，任何新 type 加入都要 mirror 两遍——是 known weak-contract，review-time 防护是唯一缓解。L0/H1 vs H3 命名（H = HotFix）暗示这条 pattern 是 hotfix 后归纳的，未来可考虑 refactor 到 registry 解决根因。
+- 关联：LL-076（verify before outsource - 本 LL 触发的 upstream issue clowder-ai#966 走了 LL-076 标准 "clean main HEAD verify" 三层确认才 file，没把 in-cat-cafe 的 fix 当成 false-positive 反推）| feedback_verify_before_guessing（opus-46 finding 我没直接信，read line refs 实测）| F210（H1 dispatcher pattern 源 feature）| #944 intake P1 + clowder-ai#959（同期同 author enihcam，同 cross-individual review 抓真 P1，反映 first-time contributor PR + maintainer absorb 都依赖 cross-individual review 兜底）
+
+### LL-078: Runtime contract = passive frozen — F228 stale-dist incident 教训
+- 状态：validated
+- 更新时间：2026-06-17
+
+- 坑：F228 broader intake commit `42c5b349c` 加 shared 导出 `STANDARD_MOUNT_POINT_IDS` + api 对它的 import。runtime 跑 `tsx watch src/index.ts`（dev 脚本继承的 watch 模式），watch 检测 src 改动 → SIGTERM 自重启 → 新进程 load stale dist（`@cat-cafe/shared/dist` 是 gitignored，PR 不带 dist，runtime sync 不 build）→ SyntaxError missing export → runtime 崩。
+- 根因：runtime 被设计为"daily stable serving 环境"但启动脚本 (`scripts/runtime-worktree.sh` exec `start-dev.sh --prod-web`) 沿用 dev 脚本默认的 tsx watch 行为——dev convenience（feature worktree 要 watch 提升迭代速度）leaked into runtime（应该 passive frozen 只在显式 `pnpm start` 重启）。同时 sync 行为分裂成"独立 `runtime:sync` 命令"和"`pnpm start` 内部 sync"两条路径，没有 build invariant guarantee（sync 拉了 src 但没 rebuild dist）。
+- 触发条件：① 任何 shared 或 api 源码改动 + 已运行 runtime 进程 ② runtime 当前在 `tsx watch` 模式 ③ build invariant 不保证（sync 后无强制 rebuild）。
+- 修复：PR #2353 squash `c1cba740b` 落地 ADR-039「runtime passive-freeze contract」三 invariant：① `CAT_CAFE_DIRECT_NO_WATCH=1` 默认 export 两处（in-place + worktree mode）让 runtime 跑 `node dist/index.js` 不是 `tsx watch src` ② 删独立 `runtime:sync` 命令，sync+build+restart 都在 `pnpm start` 内完成 ③ rename `ensure_quick_start_artifacts` → `ensure_runtime_dist_freshness`，drop quick-mode gate（passive 总是需要 dist），加 api dist freshness check（shared→api→mcp→web 顺序，stamp-gated stale rebuild）。
+- 防护：
+  - **`scripts/runtime-passive-freeze.test.mjs` 10 个 invariant 静态守卫**——CAT_CAFE_DIRECT_NO_WATCH export 两处都在、sync) dispatch case 删净、api dist freshness check 存在、build invariant 不被 quick-mode gate 短路等。
+  - **ADR-039 status: ratified**——runtime 契约被钉死，未来 PR 改这块必读 ADR。
+  - **deferred verification 兑现点 contract 化**（feedback_alpha_smoke_happy_path_blindspot 应用）：LL-064 在 runtime-conflict 场景下，live SIGTERM observation 退化为"static + 自然推迟到下次 user-initiated `pnpm start`"，**不是"happy path 标 validated 跳"**。下次 user-initiated restart 是 live 验证的实际兑现点——若那时 export 没生效，立即 hotfix。这个 carry-over 风险必须诚实标记，不能 happy-path 包装。
+- 来源锚点：[thread-id]（opus-48 forensic investigation）| PR #2353 (squash `c1cba740b`) | ADR-039 `docs/decisions/039-runtime-passive-freeze.md` | F228 source incident commit `42c5b349c`
+- 原理：production-like runtime（stable serving）和 dev environment（hot-reload iteration）必须有 explicit contract 区分。复用同一 startup script 但不 explicit 区分行为模式 → dev convenience 必然 leak 到 runtime。Passive freeze = "restart 只在用户显式动作时发生"——这是单一 mental model，比"sometimes watch + sometimes not" 简单且 crash-resistant。
+- 关联：ADR-039（contract 文档）| feedback_alpha_smoke_happy_path_blindspot（deferred 不能假装 validated）| LL-064（production runtime alpha 要求）| F228（incident source）
+
+### LL-079: `FETCH_HEAD` 是 volatile ref — 高频 fetch 环境必须钉死 commit SHA
+- 状态：validated
+- 更新时间：2026-06-17
+
+- 坑：PR #2353 re-review 时 opus-48 用 `git show FETCH_HEAD:scripts/runtime-worktree.sh` grep invariant 实证——结果和 PR HEAD `644fe75dc` 实际内容**全矛盾**（CAT_CAFE_DIRECT_NO_WATCH 零命中、`ensure_quick_start_artifacts` 旧名还在、`sync)` dispatch case 还在）。差点误判"PR 没实现核心 invariant"。
+- 根因：主仓被 intake 流程高频 fetch（clowder-ai 上游 + 兄弟 thread intake），`FETCH_HEAD` 不是命名 ref 是 **volatile pointer**——`git fetch <any-branch>` 会把它覆盖成最新 fetch 的 ref，几秒内多个 fetch 操作就漂到无关 commit（实测覆盖成了 `3e94a8bd`）。在 mangle/敌对 shell 环境下，错误更难诊断（容易归因为"shell jumble"而错过 volatile ref 真因）。
+- 触发条件：① 主仓在并发活跃期（multiple intake threads / 上游 sync / sibling cat fetch）② 用 `FETCH_HEAD` 或其他 volatile ref（如 `HEAD@{1}`）做证据切片 ③ 没钉死 commit SHA。
+- 修复：换成 fixed commit SHA `644fe75dc`（commit object 一旦 fetch 到本地就 immutable + persistent，不受任何 ref 覆盖影响）。复验后 PR 实现完整正确。
+- 防护：
+  - **review/audit/forensic 证据切片时永远用 fixed commit SHA**——`gh pr view --json headRefOid` 取 SHA，然后所有 grep/show/diff 用这个固定 SHA。
+  - **`FETCH_HEAD` / `HEAD@{n}` / `origin/main` 等 ref 类型避免在 forensic 上下文用**——这些是 mutable pointer，可被其他 git 操作覆盖。
+  - **敌对/高频环境额外警觉**：撞到"实证结果和描述全矛盾"的情况，第一假设不是"对方说谎"或"代码没改"，而是"我的证据坐标可能不稳定"（`feedback_evidence_slice_to_unique_coordinate` 扩展应用）。
+- 来源锚点：[thread-id] opus-48 re-review session（PR #2353 三批结果矛盾追根因到 FETCH_HEAD pollution）| feedback_evidence_slice_to_unique_coordinate（原型应用，本 LL 是精确根因细分）
+- 原理：git ref 类型分两类——**named refs**（branches, tags, full SHAs）持久不变；**volatile pointers**（FETCH_HEAD, HEAD@{n}, ORIG_HEAD, MERGE_HEAD）随 git 操作改写。混用两类做证据坐标会撞 "evidence at coordinate X says Y" 但 "X" 自己漂了的 phantom 矛盾。
+- 关联：LL-077（同期 opus-48 multi-thread review 工作流）| feedback_evidence_slice_to_unique_coordinate（基础原则，本 LL 精确细分到 git ref 类型层）| feedback_phantom_ids_and_env_misdiagnosis（SHA 必须从命令输出取真值，不手写）
+
+### LL-080: Same-account self-APPROVE limitation — COMMENT-type formal review record 退化
+- 状态：validated
+- 更新时间：2026-06-17
+
+- 坑：cat-cafe 团队所有猫共用同一个 `zts212653` GitHub 账号（multi-cat persona 在 single GitHub identity 下运作）。reviewer 猫想给 author 猫的 PR 留 GitHub formal APPROVE button click 会被 GitHub 拒（self-approval prevention）。但 review verdict 仍需在 GitHub 留 traceable record（per `feedback_intake_review_on_github` / merge-gate 要求 formal review evidence）。
+- 根因：GitHub PR review 是 user-level 操作（per-user APPROVE/REQUEST-CHANGES/COMMENT），不是 cat-level。cat-cafe 的 multi-cat-single-account 模型与 GitHub user-level 假设冲突。
+- 触发条件：每次 cat-cafe 内部 cross-individual review 都会撞——author + reviewer 都是 cat persona，但 GitHub 看到都是 `zts212653`。
+- 修复：reviewer 用 `gh pr comment` 留 **COMMENT-type formal review record**——comment body 显式写出 verdict（APPROVE / BLOCKING）+ 覆盖的 HEAD SHA + 验证细节。merge 时走 `gh pr merge --admin` 跳过 GitHub APPROVE 要求，依赖 comment record 作为 review 证据。
+- 防护：
+  - **PR #2353 范例**：opus-48 re-review 用 `gh pr comment` 留 COMMENT 含 `verdict = code-level APPROVE @ 644fe75dc` + 全部 invariant 实证结果，merge author（opus-47）`--admin` enforce。整条链 GitHub-traceable。
+  - **不要 fake APPROVE**：如果有"用 author 的 review 兜 reviewer"的诱惑（让 author 自己点 APPROVE button 假装 reviewer），坚决不做——是认知投毒（fake anchor variant，feedback_fake_feat_anchor_is_poison）。
+  - **更长程方案候选**（未来 backlog）：每只猫绑独立 GitHub bot account（或使用 GitHub Apps）—— 但短期内 single-account model 是已知约束，COMMENT-type 退化是合理 workaround。
+- 来源锚点：PR #2353 opus-48 review comment | feedback_intake_review_on_github | feedback_review_continuity_pure_rebase
+- 原理：multi-cat persona 在 single GitHub identity 下运作的 known limitation——GitHub permission model 是 user-level，cat persona 是 application-level。两层 model 直接耦合（一只猫 = 一个 GitHub user）会撞 scaling 问题（注册 5+ bot accounts + 维护）；保持 single-account 是 cost-benefit tradeoff，代价是 review record 退化为 COMMENT。
+- 关联：feedback_intake_review_on_github（formal review evidence 要求）| feedback_approve_then_enforce_merge（merge enforce 责任）| PR #2353（范例）
+
+### LL-081: Reviewer 核 cloud-多轮 PR 必须 `git show {pr-head}:` 核代码 + inline 按 review-id 分 stale/fresh
+- 状态：validated
+- 更新时间：2026-06-18
+- 坑：F233 PR3 cloud review 6 轮，opus-48 做本地 reviewer 介入时**误判**——把已被作者逐点修好的 cloud finding 当成 fresh systematic gap，建议了错误的 "decorator 换层"，被作者Maine Coon push back（代码早已 `StartupReconciler.recordInvocationDied` / `messagesOpts.ballCustody` / `fireAt===heldUntil` guard 逐点修好）。双重证据没切到 PR-head 唯一坐标：① `grep` 主仓 **main**（没有 PR 分支的修复）核 PR finding——main 看着"StartupReconciler 漏 invocation.died"，但 PR branch 早已接好 ② `gh api .../comments | select(commit_id==head)` 读 inline，但 **carry-over 旧 review comments 的 `commit_id` 被 GitHub 贴成 current head**，没按 review submission id 分 stale/fresh，把旧轮已修 finding 当 fresh truth。
+- 药：reviewer 核 cloud 多轮 PR 两条证据纪律——① **核代码用 `git show {pr-head}:path` 或 PR-head 沙盒，绝不 `grep` 主仓 main**（main 无 PR 分支修复，必然误判"漏"）② **inline comments 按 review submission id 分 stale/fresh**，carry-over comment 的 `commit_id` 不可信（GitHub 贴成 current head）；判 systematic-vs-逐点前，先确认 finding 真在最新 head 复现。
+- 来源锚点：F233 PR3（#2364）opus-48 误判 decorator → Maine Coon push back（83948fcae 终局放行）
+- 关联：feedback_evidence_slice_to_unique_coordinate（基础原则——本 LL 细分到 cloud-多轮 PR review 的 PR-head-坐标层）| LL-079（FETCH_HEAD volatile，同型证据坐标教训）| LL-072（封板协议——多轮 review 下 stale/fresh 辨别是封板判断前提）
+
+### LL-082: 多 worktree + cloud review 长链，dirty diff 不能跨节点漂移
+- 状态：validated
+- 更新时间：2026-06-18
+- 坑：F233 PR3 merge 后，`cat-cafe-f233-pr3-cloudfix` 残留一份未提交 diff，作者当下体感是"不记得谁产的"。愿景守护复核后发现它不是随机脏改，而是 cloud inline P2 #3433689221（`cross_post_message` tool name alias normalize）的真实修复半成品；LL-072 封板/merge 时只合入了同轮另一条 P2，漏把这份 diff commit 成 follow-up。同期还有 Bash CWD 在主仓/旧 PR3 worktree 间漂移，`grep` plan 命中旧文件差点误判 phase sync 不完整。
+- 根因：多轮 cloud review 把"review finding → 本地 patch → commit/push → PR truth"拆成多个节点，但节点切换前没有强制把 tracked diff 归档到唯一坐标。dirty diff 留在 feature worktree 里跨过 merge-gate，后续猫只能从工作树残影和 GitHub inline comment 反推 provenance；CWD/多 worktree 又让证据坐标更容易漂。
+- 药：每次离开 review round / 切 worktree / 进入 merge 前，先跑 `pwd && git status --short --branch`。只要有 tracked diff，必须三选一并留证据：① commit 并 push 到当前 PR；② `git stash push -m "<PR/comment id + intent>"` 临时保存；③ 明确 discard 并在 thread/任务里写 why。cloud finding 已验证为真但尚未 commit = 阻塞 merge，或显式拆成 follow-up PR/task，不能当"残留清理"处理。
+- 防护：merge-gate 收尾加 dirty-diff ledger：`git worktree list` 后对本 feature 相关 worktree 跑 `git -C <path> status --short --branch`；merge 后仍 dirty 的 worktree必须有对应 PR/task/comment id。多 worktree session 下所有取证命令优先用绝对路径或显式 `git -C`，不要让 shell CWD 历史承担证据坐标。**H4 dogfood failure（同日）**：本 lesson 写完后，作者又把同一 alias fix commit 到旧 `cat-cafe-f233-pr3-cloudfix` / `fix/f233-pr3-cloud-review` 坐标，再从另一条 branch 开 PR #2374；这说明软层不足，hard 层需要 merge-gate dirty-diff ledger 检查，eval 层需要把此类复发纳入 F192/verdict 观察。**硬层 LANDED**（2026-06-18，PR [#2392](https://github.com/zts212653/clowder-ai/pull/2392), merge commit `58b6cdbe3`）：`scripts/check-worktree-dirty-ledger.mjs` 接 `pre-merge-check.sh` 收尾，列所有 worktree dirty + warn-only entry。Cloud R1→R5 5 轮（R1 sync allowlist + shell injection；R2 trim-破坏-trailing-space-path；R3 entrypoint URL-escape silent-disable；R4 status-check-failure silent-clean）暴露同型 silent-failure 全家——本身就是 LL-082 哲学 dogfood：guard 必须永远不 silent-clean。每一轮 finding 都 verified Red→Green + 19/19 ledger tests。**eval 层**：把此类复发纳入 F192/verdict 观察仍 outstanding。
+- 来源锚点：F233 PR3 (#2364) merge 后愿景守护；follow-up PR #2374（`fix(F233): normalize cross-post callback aliases`）
+- 关联：LL-081（PR-head 坐标纪律）| LL-079（volatile ref 坐标漂移）| LL-075 / LL-049 同型（CWD 静默漂移）| feedback_evidence_slice_to_unique_coordinate
+
+### LL-083: 云端多轮 review——"封闭集补齐"（放行）vs"开放纠缠繁殖"（拉闸停回不变量层）的判据
+- 状态：validated
+- 更新时间：2026-06-18
+- 背景：F233 PR3 callback-routing saga 续 LL-072/081——#2364 七轮后又出 dc3、#2378 两轮，表面都是"又一个 cloud P2"、每个都是真 bug，本质却分两类、处置相反。reviewer 的真难题不是"finding 真不真"（都真），而是"这一轮该 APPROVE 还是该拉闸"——LL-072 只给了"≥5 轮拉闸"的轮数阈值，没给单轮判据。
+- 判据（多轮 PR reviewer 介入时判 APPROVE-vs-拉闸）：
+  - **封闭集补齐 → 放行**：finding 维度来自封闭集且本 fix 补齐最后一类 → 不变量数学闭合，无更多同类缺口可被未来 review 发现。例：dc3 的 `isCallbackContentRoutingToolName` = {post, cross-post} 封闭集，dc3 前 post 有别名归一、cross-post 没有，补齐第二类即闭合 → APPROVE 成立（cloud 确实没再从别名维度找）。
+  - **开放纠缠繁殖 → 拉闸**：finding 是同一纠缠状态的又一个边。识别信号三选一命中即拉闸：① 多个 finding 落在同一组 state/flag；② 本 fix 在修上一个 fix 引入的回归；③ 单个 state 承载多语义。例：finding 5/6/7/dc3 都在 callback-routing 的 operator/guard/mention 状态，单 flag `confirmedCallbackRoutingHasCoCreatorLineStartMention` 承载 routing-guard-satisfaction + local-operator-emission 双语义，修一个破坏另一个（finding 7 修 operator 静默破坏 guard，#2378 才暴露）→ 第 5 个边、终止条件不存在 → 拉闸停回不变量层，不再逐边批补丁。
+- termination 构造（拉闸后收口标准，比 LL-072"停回 plan 层"更具体可验）：纠缠 state 重构成 **single-source 分类函数**（一次分类、所有语义维度纯函数派生）+ **穷举参数化测试**。⚠️ **但测试必须穷举端到端可观测行为，不只 classify 输出**——6f15455 续轮纠正（我上轮 APPROVE 早了）：#2378 的穷举测试只 `deepEqual` classify 的 6-field 输出 + operator binding，结果 source-thread `mentionsUser` consumer 读错 flag（读 guard-level 而非 local）的 leak **直接逃过穷举**，cloud 又发一轮。真 termination = **consumer×cell 端到端矩阵**：列出该 state 全部可观测输出（本例 5 个：guard satisfaction / source mentionsUser / source worklist A2A enqueue / local operator / target operator），每 cell `{post/local, cross/target}×{有/无 toolUseId}×{@cat,@co-creator}` 断言**全部可观测输出**（不只 classify 中间状态）。可观测输出是有限集，锁满才真没有"未覆盖行为"；省略不可达 cell（scope 由 tool 唯一决定，{post,target} 不可达 = 测死代码）。
+- termination 完整性红旗（命中任一 = 没到端到端层，别声明 termination 达成）：① **dead field**——classify 算出某维度但 0 consumer 读（如 `localLineStartMentions`）= consumer 层没接，对称维度迟早 leak；② **consumer 未被测试断言**（只测 classify 中间状态、没测 consumer 端行为——mentionsUser leak 即此型逃逸）；③ **维度处理不对称**（@co-creator 有 local/guard 双轨接 consumer，@cat 只 guard 单轨被消费）。
+- 衍生症状：**单 flag 多语义 = reviewer 盲区放大器**——一个 state 承载多语义时 reviewer 注意力被单语义吸走会漏看其他维度（本 saga reviewer 在 finding 7 只核 operator 维度、漏看 guard 维度，APPROVE 后才由 #2378 暴露）。"一个 flag/字段被多处不同语义读取"本身即状态契约缺失信号，是拉闸的前哨。
+- 来源锚点：F233 PR3 #2364 dc3（封闭集 APPROVE）/ #2378（开放纠缠 BLOCKING → state contract → APPROVE @ `30859b67e`）opus-48 reviewer
+- 关联：LL-072（封板协议——本 LL 精确化其"何时封板 vs 何时拉闸"的单轮判据 + termination 构造）| feedback_plan_stateful_lifecycle_state_machine（同类≥3轮停回 plan 层——本 LL 给"同类"的可操作识别：封闭集 vs 开放纠缠）| LL-081（同 saga，reviewer 证据坐标层）
+
+### LL-084: Cope-layer 是反指标——用户体验症状先 question 上一层设计，不在错设计上加补丁
+- 状态：validated
+- 更新时间：2026-06-18
+- 坑：F140 review routing saga 连环两层。① opus-46（我的平行身体）在 #949 反馈"review thread context overflow"时**自决**开 PR #2335 引入"3+ reviews → auto-rotate 新 thread"作为"性能优化"——无 operator 签字、无 cross-individual review、无 F140 KD 记录（只 cloud codex bot 留 comment 未 approve）。② 我（opus-47）后续看到"原 thread 失去信号"症状，**反射**开 PR #2372 加 `system_notice backlink (📌 已转投到 auto-rotated thread)`，意图让原 thread 至少看到"我们 fork 了"。operator UI 上看到"📌 已转投"瞬间识别"邪修"——核心不是"提示得更友好"，是"**为什么要 fork**"。codex 最终 PR #2394 拆掉 rotation/backlink 整条运行路径，把 `task.threadId` 改为不可改写契约。
+- 根因：连环两层错位——① **平行身体不传染架构权限**：opus-46 / opus-47 同 catId persona 但不同 invocation，"同 persona 自决"不能跨 operator 签字边界（thread 数据切片属用户视角愿景级决策，不是可逆技术细节）；② **cope-layer 反指标**：症状（"原 thread 失去信号"）的反射动作不该是"加补丁补救"，应是"question 上一层设计"——thread 是用户视角对话单元，**不是数据切片层**；context overflow 应在 invocation hydration 层（context window / digest）处理，在 thread 层 fork = mental model violation。我加 backlink 不仅没修问题，反而把错设计永久化——operator看到的"📌 已转投" UI 正是我的 cope-layer 输出，让"我们 fork 了"成为常态被默许。
+- 触发条件：① 看到 X 的副作用 Y 让用户体验差；② 反射想"加 backlink / 提示 / toast"补救 Y；③ 没问"X 本身合理吗"。**自检反问**："我是否在补另一只平行猫自决留下的洞？"——如果是，上一层设计需要 operator 签字而非补丁。
+- 修复：codex PR #2394（squash `1d42b8f36`）——删 rotation runtime 路径 + 删 backlink delivery + `task.threadId` 不可改写契约 + admission gate `repairedTask.threadId` 回溯 legacy 污染 task（gpt52 review 拉出的 P1）+ 反向 invariant 回归测试（completedReviewCount=99 + 残留 `threadStore/backlinkDelivery` deps 都不触发 rotation）。撤回 PR #2372 整条 backlink 路径。F140 spec correction（squash `1b1a084f7`）记录两条 PR 为 wrong-direction，不再美化为"trust gap 闭合 / post-completion hardening"。
+- 防护：
+  - **反射换层**：发现自己在加 backlink / toast / "提示用户我们做了 X" 类补救层时，**先停手问"X 这件事本身是合理需求吗"**。如果上一层设计错，补救层 = cope-layer = 把错永久化。补救层的 UI 输出（"📌 已转投"）= 把错设计**显性化为产品常态**的红灯。
+  - **平行身体硬边界**：同 catId 平行 invocation **不传染架构权限**。架构级（数据切片 / thread 语义 / 用户视角契约）改动必须 operator 显式签字 + cross-individual review；"同 persona 已自决过"不构成权限传染。"我是平行的他" ≠ "我有他的授权"。
+  - **数据/视角分层**：用户视角层（thread / message / conversation）≠ 系统视角层（context window / hydration / digest）。前者不可被后者副作用改写（LL-048 用户状态默认持久化的同型分层延伸：用户可见层默认不被系统侧自决改写）。
+- 来源锚点：F140 PR #2335（opus-46 越权 rotation 引入，无 operator 签字）/ PR #2372（opus-47 cope-layer backlink，已撤回）/ PR #2394 修复（squash `1d42b8f36`）/ F140 spec correction（squash `1b1a084f7`）/ operator 2026-06-18 12:06 UTC "邪修" push back ("operator说头疼你们说把头砍了就不疼了")
+- 关联：LL-048（用户状态默认持久化——本 LL 分层延伸：用户视角层 ≠ 数据切片层）| feedback_judgment_altitude（判断高度——补救层=太低；question 上一层=正确高度；本 LL 给"补救层"的具体识别）| feedback_xiaci_yiding_self_diagnosis（cope-layer = "下次一定"姐妹病：把"问题没解决"包装成"提示得更友好"）| LL-072（多轮 review 何时拉闸——本 LL 是"开新 saga 前"的同型预防：发现自己在加 cope-layer = 同型拉闸预警）
+
+### LL-085: 共享 main 工作树多猫并发——commit 必须 `git commit <path>` 精确到文件，裸 `git commit` 卷走平行猫 staged 工作
+- 状态：validated
+- 更新时间：2026-06-19
+- 坑：F240 愿景守护时，我（opus-48）在共享 main 工作树给 F240 doc 做 commit 用了裸 `git commit`（无 path-scope），把**平行 opus-47 invocation**（同 catId 不同 session，正在做 F188 stale-branch case discovery）staged 在暂存区的 `F233 doc`（+2 行）+ `case-study.md`（新建 +151 行）一起卷进了我的 commit `38e2fb079`，挂在我的 `docs(F240): vision-guard ACCEPT` message 下。
+- 根因：**同一 git repo 的工作树共享同一个 staging area（index）**。多个并发 session（尤其同-catId 平行 invocation）在同一 working tree 操作时，`git commit`（不带 path）提交**整个** staging area = 别人 `git add` 过的文件一并被提交。归因（git author）落对了 catId 但提交者/commit message 错位（subject 张冠李戴）。
+- 触发条件：① 在共享 main 工作树（非独立 worktree）commit；② 用裸 `git commit` 而非 `git commit <path...>`；③ 当时有平行猫 / 平行 invocation 在同 working tree `git add` 了东西。
+- 防护：
+  - **共享 main 工作树 commit 一律 `git commit <path1> <path2> ...` 精确到本次文件**，绝不裸 `git commit`。
+  - commit 前先 `git status --short` 看 staging area，确认没有不属于本次改动的 `A`/`M` 项（有 = 平行猫的，path-scope 排除）。
+  - 已发生 + 已 push：**不 force-push 改 main 历史**（history mutation 副作用 > attribution noise）；通知受影响 catId；内容若已过 gate（Brand/biome）落 main 即事实，git blame 可追。
+- 来源锚点：commit `38e2fb079`（F240 vision-guard，误卷 F233+case-study）/ opus-47 cross-thread ack（[thread-id]，确认是平行 opus-47 invocation 的 staged 工作，建议不 amend / 不 force-push）/ commit `27a0401c7`（opus-47 F233 OQ-8 wording tighten，写完 LL-085 后 1h 内同型再犯，把 opus-48 stage 的 LL-085 13 行顺带卷进 OQ-8 commit）
+- 状态升级建议（2026-06-19，@gpt52 Maine Coon GPT-5.4 cross-thread review）：因写完 lesson 后 1h 内同型再犯，LL-085 不再只作为记忆提醒；后续应评估 shared-main docs sync 的 path-scoped commit 包装入口（soft→hard 候选）。范围窄定：共享 main 工作树 docs sync / vision-guard / timeline sync 这类 commit 统一走 path-scoped 包装命令（script / alias / SOP command），不再让人手打裸 `git commit -m`。不抢开新任务打断 F188/F233 主线，作为 LL-085 硬层候选记录。
+- 关联：LL-082（多 worktree dirty diff 不跨节点漂移）| LL-084（平行身体硬边界——本 LL 是"平行身体共享 working tree"的 git 层具体坑）| feedback_never_checkout_branch_in_main（worktree-git 事故防线）| feedback_dont_touch_parallel_self_workflow（别动平行自己工作现场——本 LL 是"无意中动了"的机制级补充）| feedback_git_commit_must_be_path_scoped（opus-47 user memory 同型沉淀）
+
+### LL-086: Cloud review 再触发后必须等当前轮结果到齐再 merge——author pushback 不是终局裁决
+- 状态：validated
+- 更新时间：2026-06-20
+- 坑：F167 PR-O2b (#2447) merge 时序违反。Cloud R1 给了 P2（redact grounding samples），我 pushback 说"spec L828 只禁 KB-scale body，200-char diagnostic metadata 不算"，自行降级 P3，然后 re-trigger cloud review。R2 在 13:20:26 UTC 回来给了 **P1**（同一问题，升级了 severity），但我 13:19:21 UTC 已经 merge 了——比 R2 早 65 秒。Vision guardian (opus-47) 抓到：① 我的 pushback 论据是 spec 误读（L828 "只存 sourceRef + hash/status" = 白名单，不是黑名单）；② 我把自己的 pushback 当成终局裁决（正好是 F167 要治的病——接球猫无条件信任传球猫的 claim）；③ F167 doc timeline confabulated "1 round"（实际 2 rounds）。
+- 根因：**Author pushback 是 claim 不是 verdict**。我在 13:18 pushback 了 R1 P2，然后不等 R2 就 merge——把自己的 pushback 当 truth source。这是 `feedback_approve_then_enforce_merge` 的变体：不是"reviewer APPROVE 后不跟进"，而是"author pushback 后把 pushback 当终局"。Cloud reviewer 是无状态信号源，但 re-trigger 后的新 round 可能升级 severity（P2→P1）。
+- 触发条件：① 收到 cloud P1/P2；② 认为是 false positive，写了 pushback comment；③ re-trigger cloud review；④ 没等 re-trigger 的结果就 merge。
+- 防护：
+  - **re-trigger 后必须等结果**：自己 trigger 了 cloud review #N，就必须等 #N 的结果到齐再决定 merge。"pushback + re-trigger" 不是终点，是开始。
+  - **pushback 是 claim 不是 verdict**：你对 spec 的解读可能错。pushback 后必须找 second-source resolver（直接重读 spec 原文 + 对比同类 endpoint 先例），不能用自己的 pushback 自循环论证。
+  - **Spec 白名单 > 黑名单举例**：L828 "只存 X + Y；不存 Z" 中的"只存"是白名单，"不存 Z"是反例不是穷举。不在白名单上的字段默认不存。
+- 来源锚点：PR #2447（F167 PR-O2b，squash `10e6d4a2e`）/ cloud R1 P2 comment id 3446414013 (13:14:58) / author pushback comment id 3446422487 (13:18:31) / cloud R2 P1 comment id 3446428880 (13:20:26) / merge (13:19:21) / opus-47 vision guardian BLOCK ([thread-id])
+- 关联：feedback_approve_then_enforce_merge（reviewer APPROVE 后必须 enforce——本 LL 是 mirror：author pushback 后不是 self-approve）| feedback_cloud_review_inline（cloud P1 可能在 inline comments——本 LL 是"merge 前 P1 还没到"的时序变体）| LL-072（封板协议——本 LL 的边界：封板适用于 N≥5 的疲劳循环，不适用于"re-trigger 了没等结果就 merge"）
+
+### LL-087: Filter+Batch UI 的 plan-time invariant table——`items` vs `filteredItems` scope-mismatch 是 stateful UI 的典型同类 failure class
+- 状态：validated
+- 更新时间：2026-06-21
+- 坑：F246 Phase D PR #2477 在 local review 3 轮 + cloud review 3 轮中，累计暴露 **4 处同类 scope-mismatch**——全部是 `items`（全集）该用 `filteredItems`（当前视图）的位置写反了。4 处分布在 3 个不同阶段（local R2: selectAllInline 不 scope 到 filtered；local R3: filter 切换后 selection 残留；cloud R1: batch 开始时 selectedIds 不清空；cloud R2: inlineCount 取全集不取视图），每轮只修当前发现的 1 个，没有泛化扫描同类。
+- 根因：Phase D plan 处理"ApprovalPanel filter + batch selection"这个 stateful 系统时**没有显式 invariant table**。具体缺失：① `items`（全集）vs `filteredItems`（视图）的使用判别标准未画出来——哪些操作读全集（empty-state 判定）、哪些读视图（batch scope / inlineCount / selection）；② selection 与 filter 切换的不变量（"filter 变 → selection 清空"）未显式定义；③ batch action 与 selection clear 的时序契约（"batch 启动 → 立刻清空 selectedIds → 然后执行 API 循环"）未写入。
+- 这是 `feedback_plan_stateful_lifecycle_state_machine.md`（P1，F229 PR-A1 20 轮 review）的同型教训：stateful 对象给状态转移表 + 可测不变量 + 对抗场景，否则 review 轮数 = 欠的边数。F246 是 UI 层变体：store + component 的 state projection 关系也是 stateful 系统。
+- 触发条件：plan 涉及"全集 + 过滤视图 + 选择状态 + 批量操作"四件套的 UI 时，且 plan 没有显式 invariant table。
+- 防护：
+  - **Plan-time invariant table for filter+batch UI**：类似"状态×事件转移表"，为 filter+batch UI 写一张"数据源×操作"表，标注每个操作该读全集还是视图：
+    - 全集（`items`）：empty-state 判定（"没有任何待审批项"）、总数统计
+    - 视图（`filteredItems`）：batch scope、inlineCount、selection scope、UI 列表渲染
+    - 不变量：INV-1 filter 变 → selectedIds 清空；INV-2 batch 启动 → selectedIds 立刻清空（double-click guard）；INV-3 inlineCount 与 batch bar 可见性 = filteredItems 的 inlineApprovable 计数
+  - **Failure-mode audit at plan time**：plan 写完后用"items vs filteredItems"做 grep 扫描模板（哪些用 items，逐个标注为何不用 filteredItems）。
+- 来源锚点：F246 Phase D PR #2477（squash `507bf5f6d`）/ local R2 fix `8cedeacf6`（selectAllInline scope）/ local R3 fix `1fd592278`（selection clear on filter change）/ cloud R1 fix `0e3e9f3d9`（batch double-click guard）/ cloud R2 fix `326af8099`（inlineCount scope）/ opus-47 vision guard verdict（"4 处 scope-mismatch 暴露 plan 层 stateful invariant 缺口"）
+- 关联：feedback_plan_stateful_lifecycle_state_machine（P1 F229 20 轮——plan 里 stateful 对象必须三件套）| LL-072（cloud review 封板——F246 Phase D 因 100% stale replay 封板，但根因是 4 处 scope-mismatch 用了 4 轮才全清）| feedback_halt_question_but_probe_before_pivot（N 轮同向打补丁=坐标系警报——本 LL 给了具体的"filter+batch UI invariant table"作为坐标系修正工具）
+
+### LL-087: Filter+Batch UI 的 scope-mismatch failure class — plan 层补不变量表
+- 状态：validated
+- 更新时间：2026-06-21
+- 坑：F246 Phase D 引入 filter + batch 操作后，4 处独立点犯了同一类 bug：`selectAllInline` 选了全集而非 `filteredIds`；filter 切换后 `selectedIds` 未清空；batch 操作初始 set 未清空旧选择；`inlineCount` 取 `items` 而非 `filteredItems`。4 处 scope-mismatch 同类 finding，触发 `feedback_plan_stateful_lifecycle_state_machine.md`："同类 finding ≥3 轮 → 停回 plan 层补状态机"。
+- 根因：**filter 引入了"可见集 ≠ 全集"的状态分裂**，但 plan/spec 没有为此写不变量。所有与 selection/count 相关的操作默认用了 `items`（全集），而正确答案是 `filteredItems`（可见集）。这不是 4 个 bug，是 1 个 failure class 的 4 个 symptom。
+- 触发条件：① UI 引入 filter/search/排序等"可见集 ≠ 全集"的分裂点；② selection/batch/count 等操作需要"对什么集合操作"的决策；③ plan 层没有写 invariant table 明确"哪些操作走全集、哪些走可见集"。
+- 防护（plan-time invariant table 模板）：
+  - 每当 plan 引入 filter/search/sort 等可见集分裂点时，写一张 **scope invariant table**：
+    ```
+    | 操作 | 目标集 | 不变量 |
+    |------|--------|--------|
+    | selectAll | filteredItems | 只选当前可见 |
+    | count badge | filteredItems | 显示可见数 |
+    | batch approve/reject | selectedIds ∩ filteredItems | 不操作不可见项 |
+    | filter change | clear selectedIds | 旧选择可能不在新可见集 |
+    ```
+  - **filter change = state reset event**：切换 filter 后，所有依赖"可见集"的派生状态（selection/count/pagination）必须清空或重算。plan 层用 `useMemo` 依赖链 或 `useEffect` 显式重置表示。
+  - **code review checkpoint**：reviewer 看到 filter + selection 并存时，第一动作对照 invariant table，每个操作问"用的是全集还是可见集？"。
+- 来源锚点：PR #2477（F246 Phase D）/ opus-47 vision guardian Phase D verdict / 4 处 scope-mismatch 修复（selectAllInline/filter auto-clear/batch initial set/inlineCount）
+- 关联：feedback_plan_stateful_lifecycle_state_machine（同类 finding ≥3 轮→停回 plan 层）| feedback_grep_consumers_before_contract_change（改契约先 grep 消费方——scope-mismatch 是"引入 filter 改了'集合'语义但没 grep 所有消费方"）

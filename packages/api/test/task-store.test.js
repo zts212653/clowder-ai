@@ -47,6 +47,19 @@ describe('TaskStore', () => {
       const task = store.create(makeInput({ ownerCatId: 'codex' }));
       assert.equal(task.ownerCatId, 'codex');
     });
+
+    it('preserves F233 probe + resolveMode metadata', () => {
+      const task = store.create(
+        makeInput({
+          resolveMode: 'completes',
+          probe: { kind: 'redis_exists', key: 'cat-cafe:probe:ready' },
+        }),
+      );
+
+      assert.equal(task.resolveMode, 'completes');
+      assert.deepEqual(task.probe, { kind: 'redis_exists', key: 'cat-cafe:probe:ready' });
+      assert.deepEqual(store.get(task.id).probe, task.probe);
+    });
   });
 
   describe('update', () => {
@@ -87,6 +100,21 @@ describe('TaskStore', () => {
       const updated = store.update(task.id, { status: 'doing' });
       assert.equal(updated.ownerCatId, 'opus');
       assert.equal(updated.title, '重构 AgentRouter');
+    });
+
+    it('updates F233 probe + resolveMode metadata', () => {
+      const task = store.create(makeInput());
+      const updated = store.update(task.id, {
+        resolveMode: 'bounces_back',
+        probe: { kind: 'http_get', url: 'http://127.0.0.1:3102/ready', expectStatus: 200 },
+      });
+
+      assert.equal(updated.resolveMode, 'bounces_back');
+      assert.deepEqual(updated.probe, {
+        kind: 'http_get',
+        url: 'http://127.0.0.1:3102/ready',
+        expectStatus: 200,
+      });
     });
   });
 

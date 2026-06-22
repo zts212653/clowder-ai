@@ -484,6 +484,45 @@ describe('F134 follow-up — HubConnectorConfigTab', () => {
     expect(container.querySelector('[data-testid="single-step-plugin-action-connect"]')).toBeTruthy();
   });
 
+  it('does not render a save button for operation-only connectors with no visible fields', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      jsonResponse({
+        platforms: [
+          {
+            id: 'operation-only',
+            name: 'Operation Only',
+            nameEn: 'Operation Only',
+            configured: false,
+            docsUrl: '',
+            steps: [{ text: 'Use the connect operation' }],
+            fields: [],
+            operations: [
+              {
+                name: 'connect',
+                label: 'Connect',
+                currentAction: 'connect',
+                actions: [{ id: 'connect', label: 'Connect plugin', render: 'button' }],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      root.render(React.createElement(HubConnectorConfigTab));
+    });
+    await flushEffects();
+
+    await act(async () => {
+      platformToggle(container, 'operation-only')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(container.querySelector('[data-testid="operation-only-action-connect"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="save-operation-only"]')).toBeNull();
+  });
+
   it('keeps pending save state scoped to the connector being saved', async () => {
     let resolveSave: (response: Response) => void = () => {};
     const savePromise = new Promise<Response>((resolve) => {

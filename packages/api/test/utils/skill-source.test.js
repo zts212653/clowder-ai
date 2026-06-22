@@ -9,7 +9,7 @@ import { resolveCatCafeSkillsSource } from '../../dist/utils/skill-source.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
 
-describe('Cat Cafe skills source resolver', () => {
+describe('Clowder AI skills source resolver', () => {
   test('uses the current worktree root instead of the primary worktree', async () => {
     assert.equal(await resolveCatCafeSkillsSource(), join(repoRoot, 'cat-cafe-skills'));
   });

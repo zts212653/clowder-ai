@@ -9,6 +9,7 @@ export interface LibraryHealthMetrics {
   verificationDebt: { needsReviewCount: number; escalatedCount: number; trustedLegacyCount: number };
   searchQuality: {
     totalSearches: number;
+    observedSearches: number;
     zeroHitCount: number;
     lowHitCount: number;
     recentMisses: Array<{ query: string; resultCount: number; searchedAt: string }>;
@@ -94,26 +95,30 @@ function computeSearchQuality(db: Database.Database) {
       .all() as Array<{ payload: string; created_at: string }>;
     let zeroHitCount = 0;
     let lowHitCount = 0;
+    let observedSearches = 0;
     const recentMisses: Array<{ query: string; resultCount: number; searchedAt: string }> = [];
     for (const row of rows) {
       try {
         const p = JSON.parse(row.payload) as { query?: string; resultCount?: number };
-        const rc = p.resultCount ?? 0;
+        // HW-7 三態校准: resultCount=null/undefined means "telemetry pipeline didn't write"
+        // (not-written), NOT "true zero results". Only count explicit 0 as zero-hit.
+        const rc = p.resultCount;
+        if (rc != null) observedSearches++;
         if (rc === 0) {
           zeroHitCount++;
           if (recentMisses.length < 10) {
             recentMisses.push({ query: p.query ?? '', resultCount: rc, searchedAt: row.created_at });
           }
-        } else if (rc <= 2) {
+        } else if (rc != null && rc <= 2) {
           lowHitCount++;
         }
       } catch {
         /* skip unparseable */
       }
     }
-    return { totalSearches: rows.length, zeroHitCount, lowHitCount, recentMisses };
+    return { totalSearches: rows.length, observedSearches, zeroHitCount, lowHitCount, recentMisses };
   } catch {
-    return { totalSearches: 0, zeroHitCount: 0, lowHitCount: 0, recentMisses: [] };
+    return { totalSearches: 0, observedSearches: 0, zeroHitCount: 0, lowHitCount: 0, recentMisses: [] };
   }
 }
 

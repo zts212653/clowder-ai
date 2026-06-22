@@ -60,7 +60,7 @@ describe('F146 validation scenario: browser 3-backend integration', () => {
   test('install pinchtab via write path', async () => {
     const preview = buildInstallPreview({
       id: 'pinchtab',
-      command: '/home/user/pinchtab-darwin-arm64',
+      command: '/home/user/.pinchtab/bin/pinchtab-darwin-arm64',
       args: ['mcp'],
     });
     assert.equal(preview.entry.id, 'pinchtab');
@@ -84,7 +84,7 @@ describe('F146 validation scenario: browser 3-backend integration', () => {
     assert.ok(config);
     const cap = config.capabilities.find((c) => c.id === 'pinchtab');
     assert.ok(cap);
-    assert.equal(cap.mcpServer?.command, '/home/user/pinchtab-darwin-arm64');
+    assert.equal(cap.mcpServer?.command, '/home/user/.pinchtab/bin/pinchtab-darwin-arm64');
   });
 
   test('install claude-in-chrome via resolver', async () => {
@@ -117,7 +117,7 @@ describe('F146 validation scenario: browser 3-backend integration', () => {
   test('full scenario: install 3 → delete 1 → verify audit', async () => {
     const backends = [
       { id: 'agent-browser', command: 'npx', args: ['agent-browser-mcp'] },
-      { id: 'pinchtab', command: '/home/user/pinchtab-darwin-arm64', args: ['mcp'] },
+      { id: 'pinchtab', command: '/home/user/.pinchtab/bin/pinchtab-darwin-arm64', args: ['mcp'] },
       { id: 'claude-in-chrome', resolver: 'chrome-extension' },
     ];
 

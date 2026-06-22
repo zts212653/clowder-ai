@@ -663,6 +663,7 @@ export interface IncrementalContextOptions {
   threadTitle?: string;
 }
 
+/* @segment N2 — 对话历史增量 */
 export async function assembleIncrementalContext(
   deps: RouteStrategyDeps,
   userId: string,

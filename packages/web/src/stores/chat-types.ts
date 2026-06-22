@@ -276,6 +276,7 @@ export interface ChatMessage {
     stream?: {
       invocationId?: string;
       turnInvocationId?: string;
+      textMode?: 'append' | 'replace';
       cliStdout?: string;
       speechContent?: string;
     };

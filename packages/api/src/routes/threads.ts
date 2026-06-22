@@ -248,7 +248,7 @@ const updateThreadSchema = z
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
     preferredWorkspaceMode: z
-      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts'])
+      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts', 'approval', 'trajectory'])
       .nullable()
       .optional(),
     /** F187: Thread label IDs. */

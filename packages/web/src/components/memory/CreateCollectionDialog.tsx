@@ -142,7 +142,7 @@ export function CreateCollectionDialog({ onClose, onCreated }: { onClose: () => 
               setRoot(e.target.value);
               setDryRun(null);
             }}
-            placeholder="/home/user/finance"
+            placeholder="/home/user/docs/finance"
             className="mt-1 block w-full appearance-none rounded-lg bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary outline-none transition focus:ring-1 focus:ring-[var(--console-input-stroke)]"
           />
         </label>

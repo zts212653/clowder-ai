@@ -254,7 +254,18 @@ describe('cat-catalog-store', () => {
     // with at least one usable member (empty registry crashes before wizard).
     assert.equal(runtimeCatalog.breeds.length, 1, 'should seed exactly one breed');
     assert.equal(runtimeCatalog.breeds[0].id, 'ragdoll', 'seed breed should be the first template breed');
-    assert.ok(runtimeCatalog.roster?.owner, 'owner roster entry must be present');
+    assert.deepEqual(runtimeCatalog.roster?.owner, {
+      family: 'owner',
+      roles: ['owner'],
+      lead: false,
+      available: true,
+      evaluation: 'co-creator / 大当家',
+    });
+    assert.deepEqual(
+      Object.keys(runtimeCatalog.roster ?? {}).sort(),
+      ['opus', 'owner', 'sonnet'],
+      'seeded catalog roster should only expose registered runtime cats plus owner',
+    );
     // Non-breed config (reviewPolicy, coCreator) is preserved from template.
     assert.deepEqual(runtimeCatalog.reviewPolicy, template.reviewPolicy);
     assert.deepEqual(runtimeCatalog.coCreator, template.coCreator);
@@ -623,7 +634,6 @@ describe('cat-catalog-store', () => {
     // Trigger eager migration (F136 Phase 4d backfills accountRef on first read)
     readRuntimeCatCatalog(projectRoot);
     const catalogPath = resolveCatCatalogPath(projectRoot);
-    const beforeRaw = readFileSync(catalogPath, 'utf-8');
 
     // Empty defaultModel is now allowed (OAuth/subscription CLIs use built-in defaults;
     // api_key accounts are validated at the route level in validateAccountBindingOrThrow).

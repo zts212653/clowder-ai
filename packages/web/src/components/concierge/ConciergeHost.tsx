@@ -38,7 +38,8 @@ import { ConciergeToolbar } from './ConciergeToolbar';
 const BALL_SIZE = 72;
 /** Default margin from viewport edge — matches original Tailwind `bottom-6 right-6` (1.5rem = 24px) */
 const EDGE_MARGIN = 24;
-/** Minimum drag distance (px) to distinguish drag from click (INV-P1) */
+/** Minimum drag distance (px) to distinguish drag from click (INV-P1)
+ *  BUG-UX-5: root fix is removing pointerEvents:'none' (below); threshold stays at 5. */
 const DRAG_THRESHOLD = 5;
 
 export function ConciergeHost() {
@@ -188,7 +189,10 @@ export function ConciergeHost() {
         bounds="window"
         onDragStart={handleDragStart}
         onDragStop={handleDragStop}
-        style={{ position: 'fixed', zIndex: 30, pointerEvents: 'none' }}
+        style={{ position: 'fixed', zIndex: 30 }}
+        // BUG-UX-5 fix: removed pointerEvents:'none' — it blocked react-rnd's
+        // drag detection from receiving mousedown directly on the wrapper.
+        // The ball button already fills the full 72×72 area.
       >
         {/* Layer 1: Cat body */}
         <ConciergeBall ballState={effectiveBallState} />

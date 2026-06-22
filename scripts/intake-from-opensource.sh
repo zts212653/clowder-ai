@@ -102,7 +102,7 @@ is_public_only() {
 # Helper: scripts/brand-dictionary-helper.mjs provides CLI + module interface.
 #
 # Classify a path via the dictionary helper.  Returns the inbound classification
-# from path_policies (manual-port / brand-sensitive / public-only / safe-cherry-pick).
+# from path_policies (manual-port / brand-sensitive / public-only / pass-through / safe-cherry-pick).
 classify_path() {
   local path="$1"
   local result
@@ -117,6 +117,18 @@ is_manual_port() {
   local cls
   cls=$(classify_path "$path")
   [ "$cls" = "manual-port" ]
+}
+
+# pass-through: file is exempt from both brand guard and intake classification.
+# Typical use: internal tracking files (e.g. intake ledger) that naturally contain
+# cross-repo brand references but are not sync-managed roots — never reach the
+# public repo, so intake classification is moot. Must be handled explicitly to
+# avoid falling through to safe-cherry-pick (PR #2482 review finding).
+is_pass_through() {
+  local path="$1"
+  local cls
+  cls=$(classify_path "$path")
+  [ "$cls" = "pass-through" ]
 }
 
 # Everything else = safe to cherry-pick (only cosmetic sanitization applied)
@@ -201,6 +213,10 @@ BRAND_EXPECTATIONS=(
   # connector command deep links — home runtime fallback must stay on 3001; public sync transforms it to 3003.
   "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_not_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
   "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
+  # adapter media URLs — must not hardcode opensource ports (3003/3004); use API_SERVER_PORT env fallback.
+  # Outbound sync transforms 3002→3004; intake must catch un-reversed port references.
+  "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3004|Weixin media fallback should use runtime API_SERVER_PORT not hardcoded opensource port"
+  "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3003|Weixin media fallback should not reference opensource frontend port"
   # favicon.svg file
   "packages/web/public/icons/favicon.svg|file_exists||favicon SVG must exist"
 )
@@ -229,11 +245,59 @@ _brand_file_contains() {
   fi
 }
 
+_brand_scope_contains() {
+  local scope_files="$1"
+  local file="$2"
+  if [ -z "$scope_files" ]; then return 0; fi
+  printf '%s\n' "$scope_files" | grep -Fxq "$file"
+}
+
+_brand_scope_count() {
+  local scope_files="$1"
+  if [ -z "$scope_files" ]; then
+    echo 0
+    return
+  fi
+  printf '%s\n' "$scope_files" | sed '/^[[:space:]]*$/d' | sort -u | wc -l | tr -d ' '
+}
+
+resolve_absorb_pr_brand_scope() {
+  if [ -z "$ABSORB_PR" ]; then return 1; fi
+  gh pr diff "$ABSORB_PR" --repo "$SOURCE_REPO" --name-only 2>/dev/null \
+    | sed 's/\r$//; /^[[:space:]]*$/d' \
+    | sort -u
+}
+
+resolve_local_brand_scope() {
+  if ! git -C "$SOURCE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [ "$FROM_INDEX" = true ]; then
+    git -C "$SOURCE_DIR" diff --cached --name-only -- 2>/dev/null \
+      | sed 's/\r$//; /^[[:space:]]*$/d' \
+      | sort -u
+    return 0
+  fi
+
+  {
+    git -C "$SOURCE_DIR" diff --name-only HEAD -- 2>/dev/null || true
+    git -C "$SOURCE_DIR" ls-files --others --exclude-standard 2>/dev/null || true
+  } | sed 's/\r$//; /^[[:space:]]*$/d' | sort -u
+}
+
 run_brand_validation() {
+  local scope_files="${1:-}"
+  local scope_label="${2:-absorb PR}"
+  if [ -n "$scope_files" ]; then
+    scope_files=$(printf '%s\n' "$scope_files" | sed '/^[[:space:]]*$/d' | sort -u)
+    echo "  Brand Guard scope: $(_brand_scope_count "$scope_files") $scope_label file(s)"
+  fi
   _BRAND_VIOLATION_COUNT=0
   # ── Phase 1: Legacy BRAND_EXPECTATIONS (specific must_contain/must_not_contain rules) ──
   for expectation in "${BRAND_EXPECTATIONS[@]}"; do
     IFS='|' read -r file check_type pattern desc <<< "$expectation"
+    if ! _brand_scope_contains "$scope_files" "$file"; then continue; fi
     case "$check_type" in
       must_not_contain)
         if _brand_file_exists "$file" && _brand_file_contains "$file" "$pattern"; then
@@ -336,27 +400,36 @@ run_brand_validation() {
       if [ -n "$bs_patterns" ]; then
         # Build a list of existing files matching brand-sensitive patterns
         local bs_files=""
-        while IFS= read -r glob_pat; do
-          [ -z "$glob_pat" ] && continue
-          if [ "$FROM_INDEX" = true ]; then
-            # Match staged files against glob using the dictionary helper's classify
-            local staged_files
-            staged_files=$(git diff --cached --name-only 2>/dev/null || true)
-            while IFS= read -r sf; do
-              [ -z "$sf" ] && continue
-              local sf_cls
-              sf_cls=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "$sf" 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.classification)" 2>/dev/null || true)
-              if [ "$sf_cls" = "brand-sensitive" ] || [ "$sf_cls" = "manual-port" ]; then
-                bs_files="${bs_files}${sf}\n"
-              fi
-            done <<< "$staged_files"
-          else
+        if [ -n "$scope_files" ]; then
+          while IFS= read -r sf; do
+            [ -z "$sf" ] && continue
+            local sf_cls
+            sf_cls=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "$sf" 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.classification)" 2>/dev/null || true)
+            if [ "$sf_cls" = "brand-sensitive" ] || [ "$sf_cls" = "manual-port" ]; then
+              bs_files="${bs_files}${sf}\n"
+            fi
+          done <<< "$scope_files"
+        elif [ "$FROM_INDEX" = true ]; then
+          # Match staged files against glob using the dictionary helper's classify
+          local staged_files
+          staged_files=$(git diff --cached --name-only 2>/dev/null || true)
+          while IFS= read -r sf; do
+            [ -z "$sf" ] && continue
+            local sf_cls
+            sf_cls=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "$sf" 2>/dev/null | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.classification)" 2>/dev/null || true)
+            if [ "$sf_cls" = "brand-sensitive" ] || [ "$sf_cls" = "manual-port" ]; then
+              bs_files="${bs_files}${sf}\n"
+            fi
+          done <<< "$staged_files"
+        else
+          while IFS= read -r glob_pat; do
+            [ -z "$glob_pat" ] && continue
             # Working tree: find files matching patterns
             local found
             found=$(find . -path "./$glob_pat" -type f 2>/dev/null | sed 's|^\./||' || true)
             bs_files="${bs_files}${found}\n"
-          fi
-        done <<< "$bs_patterns"
+          done <<< "$bs_patterns"
+        fi
 
         # Deduplicate and check each file
         local checked_files=""
@@ -544,7 +617,7 @@ run_absorbed_record_guard() {
   fi
 
   local issue_table_ok
-  issue_table_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const hasHeader=/##\\s*逐文件决策表/.test(body); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|\\s*(absorb|skip)\\b/i.test(body); console.log(hasHeader && hasRow ? 'yes' : 'no')")
+  issue_table_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##\\s*(?:逐文件决策表|(?:Per-File|Cluster-Level)\\s+Decision\\s+Table)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|\\s*(absorb|skip)\\b[^|\\n]*/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
   if [ "$issue_table_ok" != "yes" ]; then
     echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is missing a valid per-file decision table${NC}"
     return 1
@@ -610,7 +683,21 @@ run_absorbed_record_guard() {
 if [ "$VALIDATE_INBOUND" = true ]; then
   echo -e "${GREEN}=== 🛡 Inbound Brand Guard ===${NC}"
   echo ""
-  run_brand_validation
+  VALIDATION_SCOPE_FILES=""
+  VALIDATION_SCOPE_LABEL="local changed"
+  if [ "$FROM_INDEX" = true ]; then
+    VALIDATION_SCOPE_LABEL="staged"
+  fi
+  if VALIDATION_SCOPE_FILES=$(resolve_local_brand_scope); then
+    if [ -z "$VALIDATION_SCOPE_FILES" ]; then
+      echo "  Brand Guard scope: 0 $VALIDATION_SCOPE_LABEL file(s)"
+      echo -e "${GREEN}✓ No brand violations detected. Safe to commit.${NC}"
+      exit 0
+    fi
+    run_brand_validation "$VALIDATION_SCOPE_FILES" "$VALIDATION_SCOPE_LABEL"
+  else
+    run_brand_validation
+  fi
   if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
     echo ""
     echo -e "${RED}✗ Found $_BRAND_VIOLATION_COUNT brand violation(s)!${NC}"
@@ -636,7 +723,17 @@ if [ "$RECORD_DECISION" = true ]; then
   # P2 fix: mandatory Brand Guard before recording absorbed intake
   if [ "$DECISION" = "absorbed" ]; then
     echo -e "${BLUE}── Mandatory Brand Guard (pre-record) ──${NC}"
-    run_brand_validation
+    BRAND_SCOPE_FILES=""
+    if [ -n "$ABSORB_PR" ]; then
+      BRAND_SCOPE_FILES=$(resolve_absorb_pr_brand_scope || true)
+      if [ -z "$BRAND_SCOPE_FILES" ]; then
+        echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard${NC}"
+        echo "  Refusing to fall back to whole-repo scan during absorbed record; whole-repo scan has known pre-existing false positives."
+        echo "  Check: gh pr diff $ABSORB_PR --repo $SOURCE_REPO --name-only"
+        exit 1
+      fi
+    fi
+    run_brand_validation "$BRAND_SCOPE_FILES" "absorb PR"
     if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
       echo ""
       echo -e "${RED}✗ $_BRAND_VIOLATION_COUNT brand violation(s) detected. Fix before recording absorbed intake.${NC}"
@@ -747,12 +844,24 @@ if [ "$ADVANCE_LEDGER" = true ]; then
   UNREVIEWED_COUNT=0
   if [ -n "$OLD_HEAD" ]; then
     # Build set of recorded merge commits from entries[]
-    RECORDED_SHAS=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); l.entries.filter(e=>e.target_merge_commit).forEach(e=>console.log(e.target_merge_commit))" 2>/dev/null || true)
+    RECORDED_SHAS=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); l.entries.filter(e=>e.target_merge_commit).forEach(e=>console.log(String(e.target_merge_commit||'').trim().toLowerCase()))" 2>/dev/null || true)
     for c in $(git -C "$TARGET_DIR" rev-list --first-parent "$OLD_HEAD".."$CURRENT_HEAD" 2>/dev/null); do
       MSG=$(git -C "$TARGET_DIR" log --format=%s -1 "$c" 2>/dev/null || true)
       if echo "$MSG" | grep -qE "^sync:.*(cat-cafe|clowder-ai|v[0-9]+\.[0-9]+|outbound)"; then continue; fi
       # Check if this landed mainline commit is covered by an entries[] record
-      if echo "$RECORDED_SHAS" | grep -q "^${c}$"; then continue; fi
+      recorded_match=false
+      while IFS= read -r recorded; do
+        [ -z "$recorded" ] && continue
+        case "$recorded" in
+          [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*)
+            if [[ "$c" == "$recorded"* ]]; then
+              recorded_match=true
+              break
+            fi
+            ;;
+        esac
+      done <<< "$RECORDED_SHAS"
+      if [ "$recorded_match" = true ]; then continue; fi
       UNREVIEWED_COUNT=$((UNREVIEWED_COUNT + 1))
       SHORT=$(git -C "$TARGET_DIR" log --format="%h %s" -1 "$c" 2>/dev/null)
       UNREVIEWED="${UNREVIEWED}    → ${SHORT}\n"
@@ -994,12 +1103,17 @@ BRAND_FILES=""
 BRAND_COUNT=0
 HIGH_RISK_FILES=""
 HIGH_RISK_COUNT=0
+PASSTHROUGH_FILES=""
+PASSTHROUGH_COUNT=0
 
 while IFS= read -r file; do
   [ -z "$file" ] && continue
   if is_public_only "$file"; then
     PUBLIC_FILES="${PUBLIC_FILES}  ${file}\n"
     PUBLIC_COUNT=$((PUBLIC_COUNT + 1))
+  elif is_pass_through "$file"; then
+    PASSTHROUGH_FILES="${PASSTHROUGH_FILES}  ${file}\n"
+    PASSTHROUGH_COUNT=$((PASSTHROUGH_COUNT + 1))
   elif is_brand_sensitive "$file"; then
     BRAND_FILES="${BRAND_FILES}  ${file}\n"
     BRAND_COUNT=$((BRAND_COUNT + 1))
@@ -1050,9 +1164,14 @@ if [ "$PUBLIC_COUNT" -gt 0 ]; then
   echo -e "$PUBLIC_FILES"
 fi
 
+if [ "$PASSTHROUGH_COUNT" -gt 0 ]; then
+  echo -e "${BLUE}○ pass-through ($PASSTHROUGH_COUNT files)${NC} — exempt from intake (not a managed sync root)"
+  echo -e "$PASSTHROUGH_FILES"
+fi
+
 echo ""
 echo -e "${BLUE}── Summary ──${NC}"
-echo "  Total files: $((SAFE_COUNT + BRAND_COUNT + HIGH_RISK_COUNT + MANUAL_COUNT + PUBLIC_COUNT))"
+echo "  Total files: $((SAFE_COUNT + BRAND_COUNT + HIGH_RISK_COUNT + MANUAL_COUNT + PUBLIC_COUNT + PASSTHROUGH_COUNT))"
 echo -e "  ${GREEN}Safe:${NC}   $SAFE_COUNT  (auto-absorbable)"
 if [ "$BRAND_COUNT" -gt 0 ]; then
   echo -e "  ${RED}Brand:${NC} $BRAND_COUNT  (🛡 manual diff-merge only!)"
@@ -1062,6 +1181,9 @@ if [ "$HIGH_RISK_COUNT" -gt 0 ]; then
 fi
 echo -e "  ${YELLOW}Manual:${NC} $MANUAL_COUNT  (needs human review)"
 echo -e "  ${BLUE}Skip:${NC}   $PUBLIC_COUNT  (public-only)"
+if [ "$PASSTHROUGH_COUNT" -gt 0 ]; then
+  echo -e "  ${BLUE}Pass:${NC}   $PASSTHROUGH_COUNT  (exempt)"
+fi
 
 if [ "$MODE" = "plan" ]; then
   echo ""

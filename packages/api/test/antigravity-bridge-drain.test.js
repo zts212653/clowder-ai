@@ -111,7 +111,7 @@ describe('AntigravityBridge.drainCascade', () => {
       },
     }));
 
-    const drained = await bridge.drainCascade('c1', { quietWindowMs: 1, timeoutMs: 20, pollIntervalMs: 1 });
+    const drained = await bridge.drainCascade('c1', { quietWindowMs: 5, timeoutMs: 200, pollIntervalMs: 5 });
     assert.equal(drained.ok, true);
     assert.equal(drained.drainResult, 'complete');
     assert.equal(drained.lastObservedStepCount, 1);

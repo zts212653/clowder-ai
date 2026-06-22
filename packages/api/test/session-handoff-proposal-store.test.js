@@ -81,6 +81,38 @@ describe('SessionHandoffProposalStore (in-memory)', () => {
     assert.equal(store.markExpired(p2.proposalId), null, 'cannot expire rejected');
   });
 
+  // ── F246: listPendingByUser (Approval Hub aggregation query) ──
+
+  it('listPendingByUser: returns only pending proposals for the given user', () => {
+    store.create(baseInput({ userId: 'user_1' }));
+    store.create(baseInput({ userId: 'user_1', sourceSessionId: 'sess_2', sourceCatId: 'sonnet' }));
+    store.create(baseInput({ userId: 'user_2', sourceSessionId: 'sess_3' }));
+    const result = store.listPendingByUser('user_1');
+    assert.equal(result.length, 2);
+    assert.ok(result.every((p) => p.userId === 'user_1'));
+    assert.ok(result.every((p) => p.status === 'pending'));
+  });
+
+  it('listPendingByUser: excludes rejected/expired/approved proposals', () => {
+    const p1 = store.create(baseInput({ userId: 'user_1' }));
+    store.create(baseInput({ userId: 'user_1', sourceSessionId: 'sess_2' }));
+    store.markRejected(p1.proposalId);
+    const result = store.listPendingByUser('user_1');
+    assert.equal(result.length, 1);
+    assert.notEqual(result[0].proposalId, p1.proposalId);
+  });
+
+  it('listPendingByUser: returns empty array when no pending proposals exist', () => {
+    assert.deepEqual(store.listPendingByUser('no-such-user'), []);
+  });
+
+  it('listPendingByUser: sorts newest first', () => {
+    store.create(baseInput({ userId: 'user_1' }));
+    store.create(baseInput({ userId: 'user_1', sourceSessionId: 'sess_2' }));
+    const result = store.listPendingByUser('user_1');
+    assert.ok(result[0].createdAt >= result[1].createdAt);
+  });
+
   it('listActiveBySession: only pending|approving for that session (A4 ≤1 guard)', () => {
     const p1 = store.create(baseInput());
     store.create(baseInput({ sourceSessionId: 'sess_2' }));

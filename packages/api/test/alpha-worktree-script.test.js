@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const alphaScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'alpha-worktree.sh');
 const nodeRuntimeGuardSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'node-runtime-guard.sh');
+const quickstartFreshnessSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'quickstart-freshness.sh');
 const tempDirs = [];
 
 process.env.CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = '1';
@@ -31,6 +32,13 @@ function createTempProject(name) {
   writeFileSync(
     join(projectDir, 'scripts', 'lib', 'node-runtime-guard.sh'),
     readFileSync(nodeRuntimeGuardSource, 'utf8'),
+    {
+      mode: 0o644,
+    },
+  );
+  writeFileSync(
+    join(projectDir, 'scripts', 'lib', 'quickstart-freshness.sh'),
+    readFileSync(quickstartFreshnessSource, 'utf8'),
     {
       mode: 0o644,
     },

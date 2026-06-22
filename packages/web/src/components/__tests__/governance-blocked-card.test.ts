@@ -40,7 +40,7 @@ describe('GovernanceBlockedCard', () => {
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
-          projectPath: '/home/user/my-project',
+          projectPath: '/home/user/workspace/my-project',
           reasonKind: 'needs_bootstrap',
           invocationId: 'inv-123',
         }),
@@ -60,7 +60,7 @@ describe('GovernanceBlockedCard', () => {
     act(() => {
       root.render(
         React.createElement(GovernanceBlockedCard, {
-          projectPath: '/home/user/proj',
+          projectPath: '/home/user/workspace/proj',
           reasonKind: 'needs_confirmation',
         }),
       );

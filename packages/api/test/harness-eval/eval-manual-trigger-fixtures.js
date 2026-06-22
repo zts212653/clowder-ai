@@ -30,6 +30,7 @@ export function setupHarnessFeedback() {
     model,
     frequency,
     sourceAdapter,
+    sourceRefsKind,
     featureId,
   }) => `domainId: ${domainId}
 displayName: ${displayName}
@@ -40,6 +41,7 @@ evalCat:
   model: ${model}
 frequency: ${frequency}
 sourceAdapter: ${sourceAdapter}
+sourceRefsKind: ${sourceRefsKind}
 threadPolicy:
   role: working-home
   stateSot: registry
@@ -68,6 +70,7 @@ fixtures: []
       model: 'gpt-5.5',
       frequency: 'daily',
       sourceAdapter: 'f167-runtime-eval',
+      sourceRefsKind: 'a2a-snapshot-attribution',
       featureId: 'F167',
     }),
   );
@@ -81,6 +84,7 @@ fixtures: []
       model: 'claude-opus-4-7',
       frequency: 'daily',
       sourceAdapter: 'f200-f188-memory-eval',
+      sourceRefsKind: 'memory-recall-snapshot',
       featureId: 'F200',
     }),
   );
@@ -94,6 +98,7 @@ fixtures: []
       model: 'gpt-5.5',
       frequency: 'weekly',
       sourceAdapter: 'sop-trace-eval',
+      sourceRefsKind: 'sop-trace-eval',
       featureId: 'F203',
     }),
   );
@@ -107,6 +112,7 @@ fixtures: []
       model: 'claude-opus-4-7',
       frequency: 'weekly',
       sourceAdapter: 'capability-wakeup-eval',
+      sourceRefsKind: 'capability-wakeup-trial-window',
       featureId: 'F203',
     }),
   );
@@ -120,6 +126,7 @@ fixtures: []
       model: 'claude-opus-4-7',
       frequency: 'daily',
       sourceAdapter: 'task-outcome-eval',
+      sourceRefsKind: 'task-outcome-snapshot',
       featureId: 'F192',
     }),
   );

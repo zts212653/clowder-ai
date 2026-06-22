@@ -13,6 +13,7 @@ import type {
   ConnectorDeliveryResult,
 } from '../../email/deliver-connector-message.js';
 import type { IConnectorThreadBindingStore } from '../ConnectorThreadBindingStore.js';
+import { type InboxThreadStore, resolveInboxThread } from './inbox-thread-resolver.js';
 import type { ReconciliationDedup } from './ReconciliationDedup.js';
 import type { RedisDeliveryDedup, RedisLike } from './RedisDeliveryDedup.js';
 import type { GitHubRepoInboxConfig, RepoInboxSignal } from './types.js';
@@ -50,9 +51,10 @@ const LOG_ONLY_EVENTS = new Set([
 
 export interface GitHubRepoHandlerDeps {
   readonly bindingStore: Pick<IConnectorThreadBindingStore, 'getByExternal' | 'bind'>;
-  readonly threadStore: {
-    create(userId: string, title?: string): Promise<{ id: string }> | { id: string };
-  };
+  /** F167 R3 P2: reuse the typed InboxThreadStore shape from inbox-thread-resolver
+   *  instead of duplicating untyped `any` here. Locks the marker lifecycle to the
+   *  ThreadKind union per AGENTS.md 禁 any redline. */
+  readonly threadStore: InboxThreadStore;
   readonly deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   readonly invokeTrigger: {
     trigger(
@@ -480,42 +482,18 @@ export class GitHubRepoWebhookHandler {
   }
 
   private async ensureInboxThread(repoFullName: string): Promise<string> {
-    const existing = await this.deps.bindingStore.getByExternal(CONNECTOR_ID, repoFullName);
-    if (existing) return existing.threadId;
-
-    // KD-20: Per-repo NX lock prevents concurrent orphan thread creation
-    const lockKey = `f141:inbox-lock:${repoFullName}`;
-    if (this.deps.redis) {
-      const locked = await this.deps.redis.set(lockKey, '1', 'EX', 30, 'NX');
-      if (!locked) {
-        // Another request holds the lock — poll for the binding
-        for (let i = 0; i < 10; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          const retry = await this.deps.bindingStore.getByExternal(CONNECTOR_ID, repoFullName);
-          if (retry) return retry.threadId;
-        }
-        throw new Error(`Timeout waiting for inbox thread creation: ${repoFullName}`);
-      }
-
-      try {
-        // Double-check after acquiring lock
-        const recheck = await this.deps.bindingStore.getByExternal(CONNECTOR_ID, repoFullName);
-        if (recheck) return recheck.threadId;
-
-        const thread = await this.deps.threadStore.create(
-          this.config.defaultUserId,
-          `Repo Inbox \u00B7 ${repoFullName}`,
-        );
-        await this.deps.bindingStore.bind(CONNECTOR_ID, repoFullName, thread.id, this.config.defaultUserId);
-        return thread.id;
-      } finally {
-        await this.deps.redis.del(lockKey);
-      }
-    }
-
-    // Fallback without Redis lock (shouldn't hit in prod — dedup requires Redis)
-    const thread = await this.deps.threadStore.create(this.config.defaultUserId, `Repo Inbox \u00B7 ${repoFullName}`);
-    const binding = await this.deps.bindingStore.bind(CONNECTOR_ID, repoFullName, thread.id, this.config.defaultUserId);
-    return binding.threadId;
+    // F167 R2: delegate to shared resolver so webhook path + reconciliation path
+    // share identical bind+stamp+self-heal logic (single root cause for R1 P1#2).
+    const result = await resolveInboxThread(
+      {
+        bindingStore: this.deps.bindingStore,
+        threadStore: this.deps.threadStore,
+        connectorId: CONNECTOR_ID,
+        defaultUserId: this.config.defaultUserId,
+        redis: this.deps.redis,
+      },
+      repoFullName,
+    );
+    return result.threadId;
   }
 }

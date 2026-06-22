@@ -20,6 +20,7 @@ import {
   approveProfileUpdate as defaultApproveProfileUpdate,
 } from '../domains/cats/services/profile/approveProfileUpdate.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
+import { profileUpdateApproved, profileUpdateRejected } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 
@@ -100,6 +101,8 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, profileDir });
     clearCommittedPrimerCache(result);
     if (result.ok) {
+      // F231 AC-C3 eval counter (KD-10)
+      profileUpdateApproved.add(1, { 'agent.id': result.proposal.sourceCatId });
       socketManager.emitToUser(userId, 'proposal_updated', result.proposal);
       return {
         proposalId: result.proposal.proposalId,
@@ -168,6 +171,8 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
       reply.status(409);
       return { error: 'Proposal status changed concurrently — retry reject', status: proposal.status };
     }
+    // F231 AC-C3 eval counter (KD-10)
+    profileUpdateRejected.add(1, { 'agent.id': marked.sourceCatId });
     socketManager.emitToUser(userId, 'proposal_updated', marked);
     return { proposalId: marked.proposalId, status: marked.status };
   });

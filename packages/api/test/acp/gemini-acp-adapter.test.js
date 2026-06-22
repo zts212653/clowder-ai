@@ -241,7 +241,7 @@ describe('GeminiAcpAdapter', () => {
     for await (const _ of adapter.invoke('resume turn', {
       sessionId: 'sess-existing',
       callbackEnv: {
-        CAT_CAFE_API_URL: 'http://127.0.0.1:3002',
+        CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
         CAT_CAFE_INVOCATION_ID: 'new-invocation',
         CAT_CAFE_CALLBACK_TOKEN: 'new-token',
         CAT_CAFE_THREAD_ID: 'thread-new',
@@ -262,7 +262,7 @@ describe('GeminiAcpAdapter', () => {
     assert.deepEqual(Object.fromEntries(env.map((entry) => [entry.name, entry.value])), {
       CAT_CAFE_INVOCATION_ID: 'new-invocation',
       CAT_CAFE_CALLBACK_TOKEN: 'new-token',
-      CAT_CAFE_API_URL: 'http://127.0.0.1:3002',
+      CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
       CAT_CAFE_THREAD_ID: 'thread-new',
     });
   });

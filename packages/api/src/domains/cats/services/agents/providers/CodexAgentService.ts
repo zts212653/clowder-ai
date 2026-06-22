@@ -221,6 +221,7 @@ const CAT_CAFE_MCP_SERVER_ENTRIES = [
   ['cat-cafe-memory', 'memory.js'],
   ['cat-cafe-signals', 'signals.js'],
   ['cat-cafe-limb', 'limb.js'],
+  ['cat-cafe-audio', 'audio.js'],
   ['cat-cafe-finance', 'finance.js'],
 ] as const;
 const CAT_CAFE_MCP_CALLBACK_ENV_KEYS = [

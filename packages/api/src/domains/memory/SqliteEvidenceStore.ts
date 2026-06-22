@@ -8,6 +8,7 @@ import { EvidenceWriteQueue } from './evidence-write-queue.js';
 import { ContradictionDetector } from './f163-contradiction-detector.js';
 import { type F163Authority, freezeFlags, pathToAuthority } from './f163-types.js';
 import { freezeF200Flags } from './f200-types.js';
+import { buildProgressiveFtsQueries } from './fts-query-builder.js';
 import type {
   Edge,
   EntityMatch,
@@ -232,13 +233,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
 
     // ── FTS5 full-text search ────────────────────────────────────────
-    const ftsQuery = trimmed
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' ');
+    // HW-6: Progressive relaxation — try AND-all first, then relax to OR
+    const ftsQueries = buildProgressiveFtsQueries(trimmed);
 
-    if (ftsQuery) {
+    for (const ftsQuery of ftsQueries) {
       try {
         let sql = `
 				SELECT d.*, bm25(evidence_fts, 5.0, 1.0) AS rank
@@ -310,9 +308,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
             seenAnchors.add(row.anchor);
           }
         }
-      } catch {
-        // FTS5 syntax error (malformed query) — degrade to anchor-only results
-      }
+        // HW-6: if this relaxation level found results, stop trying looser levels
+        if (rows.length > 0) break;
+      } catch {}
     }
 
     // ── Lexical contains backfill: recover substring hits that unicode61 FTS misses ──
@@ -1637,91 +1635,91 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const ftsQuery = trimmed
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((w) => `"${w.replace(/"/g, '""')}"`)
-      .join(' ');
+    // HW-6: Progressive relaxation for passage search (same fix as doc search)
+    const passageFtsQueries = buildProgressiveFtsQueries(trimmed);
+    if (passageFtsQueries.length === 0) return [];
 
-    if (!ftsQuery) return [];
+    for (const ftsQuery of passageFtsQueries) {
+      try {
+        let sql = `SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at,
+                    bm25(passage_fts) AS rank
+             FROM passage_fts f
+             JOIN evidence_passages p ON p.rowid = f.rowid
+             WHERE passage_fts MATCH ?`;
+        const params: unknown[] = [ftsQuery];
 
-    try {
-      let sql = `SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at,
-                  bm25(passage_fts) AS rank
-           FROM passage_fts f
-           JOIN evidence_passages p ON p.rowid = f.rowid
-           WHERE passage_fts MATCH ?`;
-      const params: unknown[] = [ftsQuery];
-
-      if (timeFilter?.dateFrom) {
-        sql += ' AND p.created_at >= ?';
-        params.push(timeFilter.dateFrom);
-      }
-      if (timeFilter?.dateTo) {
-        // Add 'T23:59:59' to make dateTo inclusive for the full day
-        sql += ' AND p.created_at <= ?';
-        params.push(timeFilter.dateTo.length === 10 ? `${timeFilter.dateTo}T23:59:59` : timeFilter.dateTo);
-      }
-
-      sql += ' ORDER BY rank LIMIT ?';
-      params.push(limit);
-
-      const rows = this.db?.prepare(sql).all(...params) as Array<{
-        doc_anchor: string;
-        passage_id: string;
-        content: string;
-        speaker: string | null;
-        position: number | null;
-        created_at: string | null;
-        rank: number;
-      }>;
-
-      const results: PassageResult[] = (rows ?? []).map((r) => ({
-        docAnchor: r.doc_anchor,
-        passageId: r.passage_id,
-        content: r.content,
-        speaker: r.speaker ?? undefined,
-        position: r.position ?? undefined,
-        rank: r.rank,
-        createdAt: r.created_at ?? undefined,
-      }));
-
-      // AC-I8: fetch surrounding passages within the context window
-      const cw = options?.contextWindow;
-      if (cw && cw > 0 && this.db) {
-        const ctxStmt = this.db.prepare(
-          `SELECT doc_anchor, passage_id, content, speaker, position, created_at
-           FROM evidence_passages
-           WHERE doc_anchor = ? AND position BETWEEN ? AND ? AND passage_id != ?
-           ORDER BY position`,
-        );
-        for (const r of results) {
-          if (r.position != null) {
-            const ctxRows = ctxStmt.all(r.docAnchor, r.position - cw, r.position + cw, r.passageId) as Array<{
-              doc_anchor: string;
-              passage_id: string;
-              content: string;
-              speaker: string | null;
-              position: number | null;
-              created_at: string | null;
-            }>;
-            r.context = ctxRows.map((c) => ({
-              docAnchor: c.doc_anchor,
-              passageId: c.passage_id,
-              content: c.content,
-              speaker: c.speaker ?? undefined,
-              position: c.position ?? undefined,
-              createdAt: c.created_at ?? undefined,
-            }));
-          }
+        if (timeFilter?.dateFrom) {
+          sql += ' AND p.created_at >= ?';
+          params.push(timeFilter.dateFrom);
         }
-      }
+        if (timeFilter?.dateTo) {
+          sql += ' AND p.created_at <= ?';
+          params.push(timeFilter.dateTo.length === 10 ? `${timeFilter.dateTo}T23:59:59` : timeFilter.dateTo);
+        }
 
-      return results;
-    } catch {
-      // FTS5 syntax error — degrade gracefully
-      return [];
+        sql += ' ORDER BY rank LIMIT ?';
+        params.push(limit);
+
+        const rows = this.db?.prepare(sql).all(...params) as Array<{
+          doc_anchor: string;
+          passage_id: string;
+          content: string;
+          speaker: string | null;
+          position: number | null;
+          created_at: string | null;
+          rank: number;
+        }>;
+
+        // HW-6: if this relaxation level found results, process and return
+        if ((rows ?? []).length > 0) {
+          const results: PassageResult[] = (rows ?? []).map((r) => ({
+            docAnchor: r.doc_anchor,
+            passageId: r.passage_id,
+            content: r.content,
+            speaker: r.speaker ?? undefined,
+            position: r.position ?? undefined,
+            rank: r.rank,
+            createdAt: r.created_at ?? undefined,
+          }));
+
+          // AC-I8: fetch surrounding passages within the context window
+          const cw = options?.contextWindow;
+          if (cw && cw > 0 && this.db) {
+            const ctxStmt = this.db.prepare(
+              `SELECT doc_anchor, passage_id, content, speaker, position, created_at
+               FROM evidence_passages
+               WHERE doc_anchor = ? AND position BETWEEN ? AND ? AND passage_id != ?
+               ORDER BY position`,
+            );
+            for (const r of results) {
+              if (r.position != null) {
+                const ctxRows = ctxStmt.all(r.docAnchor, r.position - cw, r.position + cw, r.passageId) as Array<{
+                  doc_anchor: string;
+                  passage_id: string;
+                  content: string;
+                  speaker: string | null;
+                  position: number | null;
+                  created_at: string | null;
+                }>;
+                r.context = ctxRows.map((c) => ({
+                  docAnchor: c.doc_anchor,
+                  passageId: c.passage_id,
+                  content: c.content,
+                  speaker: c.speaker ?? undefined,
+                  position: c.position ?? undefined,
+                  createdAt: c.created_at ?? undefined,
+                }));
+              }
+            }
+          }
+
+          return results;
+        }
+        // 0 rows → try next relaxation level
+      } catch {}
     }
+    // All relaxation levels exhausted — return empty
+    return [];
   }
 
   close(): void {
@@ -1974,6 +1972,16 @@ export function applyConsumptionRerank(
     return;
   }
 
+  // HW-7: Snapshot pre-rerank BM25 order for shadow comparison.
+  // Previously shadow was stored from `final` (post-rerank), making shadow ≡ live
+  // by construction in 'on' mode — shadowConsumedMRR / liveOnShadowSubsetMRR ≈ 1 always.
+  // Cloud-P2: Must use original `results` array (before partition), not
+  // [protectedResults, rerankPool] which bakes in lexical protection bias.
+  const preRerankOrder: Array<{ anchor: string; shadowRank: number }> = results.map((item, i) => ({
+    anchor: item.anchor,
+    shadowRank: i,
+  }));
+
   const anchorMetrics = loadAnchorMetrics(
     db,
     rerankPool.map((r) => r.anchor),
@@ -2033,14 +2041,18 @@ export function applyConsumptionRerank(
   }
 
   const final = protectedResults.length > 0 ? [...protectedResults, ...reranked] : reranked;
-  const shadowOrder: Array<{ anchor: string; shadowRank: number }> = final.map((item, i) => ({
-    anchor: item.anchor,
-    shadowRank: i,
-  }));
   if (f200Flags.consumptionRerank === 'on') {
     for (let i = 0; i < final.length; i++) results[i] = final[i];
     results.length = final.length;
   }
+  // HW-7 + Cloud-P1-3: Shadow semantics differ by mode.
+  // 'on' mode:     live = reranked,  shadow = original BM25 → compare rerank vs BM25.
+  // 'shadow' mode:  live = BM25,      shadow = would-be reranked → compare BM25 vs rerank.
+  // Using the same order for both would make shadow ≡ live → zero signal.
+  const shadowOrder =
+    f200Flags.consumptionRerank === 'shadow'
+      ? final.map((item, i) => ({ anchor: item.anchor, shadowRank: i }))
+      : preRerankOrder;
   const keyAnchors =
     targetLimit != null && results.length > targetLimit
       ? results.slice(0, targetLimit).map((r) => r.anchor)

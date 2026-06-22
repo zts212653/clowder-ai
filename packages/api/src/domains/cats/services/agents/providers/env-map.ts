@@ -130,7 +130,7 @@ export function hasSupportedEnvTemplate(value: string): boolean {
 
 /**
  * Extract template entries from user-defined envVars.
- * Returns only entries that contain supported Cat Cafe credential templates.
+ * Returns only entries that contain supported Clowder AI credential templates.
  * Non-template entries are pass-through (handled separately by accountEnv).
  */
 export function extractUserEnvTemplates(

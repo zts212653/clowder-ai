@@ -195,6 +195,30 @@ describe('TriageOrchestrator', () => {
     assert.equal(patch.relatedFeature, 'F042');
   });
 
+  // ── P1-R2-2: routeAccepted must set routeAcceptance='accepted', routeSource='manual' ──
+
+  test('routeAccepted with relatedFeature sets routeAcceptance=accepted, routeSource=manual', async () => {
+    await orchestrator.routeAccepted('ci_1', 'F056', 'user_1', 'thread_f056');
+    const patch = issueStore.update.mock.calls[0].arguments[1];
+    assert.equal(patch.routeAcceptance, 'accepted');
+    assert.equal(patch.routeSource, 'manual');
+  });
+
+  test('routeAccepted with threadId only sets routeAcceptance=accepted, routeSource=manual', async () => {
+    await orchestrator.routeAccepted('ci_1', null, 'user_1', 'thread_existing');
+    // Path 2 variant: threadId provided, no relatedFeature → goes to threadId-only path
+    const patch = issueStore.update.mock.calls[0].arguments[1];
+    assert.equal(patch.routeAcceptance, 'accepted');
+    assert.equal(patch.routeSource, 'manual');
+  });
+
+  test('routeAccepted creating new thread sets routeAcceptance=accepted, routeSource=manual', async () => {
+    await orchestrator.routeAccepted('ci_1', null, 'user_1');
+    const patch = issueStore.update.mock.calls[0].arguments[1];
+    assert.equal(patch.routeAcceptance, 'accepted');
+    assert.equal(patch.routeSource, 'manual');
+  });
+
   // F168 Phase C C0.1 (INV-7): threadStore 接线缺失（生产 bug 场景）时 routeAccepted
   // Path 2（无 relatedFeature → 新建 thread）必须 fail-loud，不能静默 return 让 issue
   // 永远不被路由。narrator 推荐新建 thread 强依赖此路径。

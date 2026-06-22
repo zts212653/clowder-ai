@@ -187,7 +187,7 @@ export interface CatFamily {
 
 /** Skill mount health summary */
 export interface SkillHealthSummary {
-  /** All Cat Cafe skills correctly symlinked to all mount points */
+  /** All Clowder AI skills correctly symlinked to all mount points */
   allMounted: boolean;
   /** Source dir and capabilities.json skill sets are consistent */
   registrationConsistent: boolean;

@@ -868,7 +868,7 @@ describe('A3a: three-layer surfaceState interaction', () => {
 // ---------------------------------------------------------------------------
 
 describe('Block 7: P0 Liveness', () => {
-  it('shows "值班猫正在处理" when queue reports active invocation', async () => {
+  it('shows "猫猫球处理中" when queue reports active invocation', async () => {
     useConciergeStore.setState({
       configLoaded: true,
       surfaceState: 'bubble',
@@ -911,7 +911,7 @@ describe('Block 7: P0 Liveness', () => {
 
     const statusEl = container.querySelector('[role="status"]');
     expect(statusEl).not.toBeNull();
-    expect(statusEl?.textContent).toContain('值班猫正在处理');
+    expect(statusEl?.textContent).toContain('猫猫球处理中');
   });
 
   it('shows "发送中" during pending state', async () => {
@@ -1540,6 +1540,51 @@ describe('Block 8: Runtime fixes', () => {
     expect(postCalls.length).toBe(0);
   });
 
+  // FIX-5 (operator feedback): message bubble overflow-hidden prevents long text from breaking panel layout
+  it('FIX-5: assistant message bubble has overflow-hidden class', async () => {
+    useConciergeStore.setState({
+      configLoaded: true,
+      surfaceState: 'bubble',
+      threadId: 'thread-fix5',
+      threadIdLoaded: true,
+      invocationStatus: 'idle',
+    });
+
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/messages?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            messages: [
+              {
+                id: 'a1',
+                type: 'assistant',
+                content: 'R1 F168: Community Operations Board — 社区事务编排引擎 一段很长很长的文字',
+                catId: 'gemini25',
+                timestamp: 1000,
+              },
+            ],
+          }),
+        } as unknown as Response);
+      }
+      return configOk();
+    });
+
+    await render(<ConciergePanel />);
+    await flushEffects();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    await flushEffects();
+
+    // Message bubble must have overflow-hidden to prevent long text from breaking layout
+    const messageDivs = container.querySelectorAll('.max-w-\\[85\\%\\]');
+    expect(messageDivs.length).toBeGreaterThanOrEqual(1);
+    const bubble = messageDivs[0] as HTMLElement;
+    expect(bubble.className).toContain('overflow-hidden');
+  });
+
   // FIX-4 (P2 KD-16): Panel header must show duty cat identity
   it('FIX-4 KD-16: panel header shows duty cat name alongside displayName', async () => {
     useConciergeStore.setState({
@@ -1567,5 +1612,171 @@ describe('Block 8: Runtime fixes', () => {
     const headerSpan = container.querySelector('[role="dialog"] .text-sm.font-semibold');
     expect(headerSpan).not.toBeNull();
     expect(headerSpan?.textContent).toContain('值班');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Block 9: Cancel button (operator feedback 2026-06-18)
+// ---------------------------------------------------------------------------
+
+describe('Block 9: Cancel button during processing', () => {
+  it('cancel button appears during in_progress state', async () => {
+    useConciergeStore.setState({
+      configLoaded: true,
+      surfaceState: 'bubble',
+      threadId: 'thread-cancel-1',
+      threadIdLoaded: true,
+      invocationStatus: 'in_progress',
+    });
+
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/messages?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ messages: [] }),
+        } as unknown as Response);
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            queue: [],
+            paused: false,
+            activeInvocations: [{ catId: 'gemini25', startedAt: Date.now() }],
+          }),
+        } as unknown as Response);
+      }
+      return configOk();
+    });
+
+    await render(<ConciergePanel />);
+    await flushEffects();
+
+    const cancelBtn = container.querySelector('button[aria-label="停止回复"]');
+    expect(cancelBtn).not.toBeNull();
+    expect(cancelBtn?.textContent).toBe('停止');
+  });
+
+  it('cancel button NOT present when idle', async () => {
+    useConciergeStore.setState({
+      configLoaded: true,
+      surfaceState: 'bubble',
+      threadId: 'thread-cancel-2',
+      threadIdLoaded: true,
+      invocationStatus: 'idle',
+    });
+
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/messages?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ messages: [] }),
+        } as unknown as Response);
+      }
+      return configOk();
+    });
+
+    await render(<ConciergePanel />);
+    await flushEffects();
+
+    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
+  });
+
+  it('cancel button calls per-cat cancel API (not force-reset) and transitions to idle', async () => {
+    useConciergeStore.setState({
+      configLoaded: true,
+      surfaceState: 'bubble',
+      threadId: 'thread-cancel-3',
+      threadIdLoaded: true,
+      invocationStatus: 'in_progress',
+    });
+
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url.includes('/cancel/gemini25')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, cancelled: true }),
+        } as unknown as Response);
+      }
+      if (url.includes('/api/messages?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ messages: [] }),
+        } as unknown as Response);
+      }
+      if (url.includes('/queue')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            queue: [],
+            paused: false,
+            activeInvocations: [{ catId: 'gemini25', startedAt: Date.now() }],
+          }),
+        } as unknown as Response);
+      }
+      return configOk();
+    });
+
+    await render(<ConciergePanel />);
+    await flushEffects();
+
+    const cancelBtn = container.querySelector('button[aria-label="停止回复"]') as HTMLButtonElement;
+    expect(cancelBtn).not.toBeNull();
+
+    // Click cancel
+    await act(async () => {
+      cancelBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await flushEffects();
+
+    // Verify per-cat cancel was called (NOT force-reset)
+    const cancelCalls = mockApiFetch.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('/cancel/gemini25'),
+    );
+    expect(cancelCalls.length).toBe(1);
+    expect(cancelCalls[0][0]).toBe('/api/threads/thread-cancel-3/cancel/gemini25');
+
+    // Must NOT have called force-reset
+    const resetCalls = mockApiFetch.mock.calls.filter(
+      (args) => typeof args[0] === 'string' && args[0].includes('/force-reset'),
+    );
+    expect(resetCalls.length).toBe(0);
+
+    // Status should transition to idle
+    expect(useConciergeStore.getState().invocationStatus).toBe('idle');
+  });
+
+  it('cancel button NOT present during pending state (only in_progress)', async () => {
+    useConciergeStore.setState({
+      configLoaded: true,
+      surfaceState: 'bubble',
+      threadId: 'thread-cancel-4',
+      threadIdLoaded: true,
+      invocationStatus: 'pending',
+    });
+
+    mockApiFetch.mockImplementation((url: string) => {
+      if (url.includes('/api/messages?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ messages: [] }),
+        } as unknown as Response);
+      }
+      return configOk();
+    });
+
+    await render(<ConciergePanel />);
+    await flushEffects();
+
+    // Pending shows "发送中" but no cancel button (message hasn't been accepted yet)
+    expect(container.querySelector('button[aria-label="停止回复"]')).toBeNull();
   });
 });

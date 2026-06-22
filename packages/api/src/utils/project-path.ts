@@ -8,8 +8,9 @@
  * See: https://github.com/zts212653/clowder-ai/issues/228
  */
 
+import { realpathSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,18 @@ function legacyDefaultRoots(platformName = platform()): string[] {
   roots.add('/private/tmp');
   roots.add('/workspace');
   if (platformName === 'darwin') roots.add('/Volumes');
+
+  // On macOS, os.tmpdir() returns /var/folders/…/T/ (NOT /tmp).
+  // Tests using mkdtemp() create dirs there — they must be allowed when
+  // PROJECT_ALLOWED_ROOTS_APPEND=true activates allowlist mode (e.g. sync
+  // public gate).  Resolve symlinks so the root matches realpath'd paths.
+  try {
+    const sysTmp = realpathSync(tmpdir());
+    roots.add(sysTmp);
+  } catch {
+    // tmpdir resolution failed — fall through; /tmp still covers Linux/CI
+  }
+
   return [...roots];
 }
 

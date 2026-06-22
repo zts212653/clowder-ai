@@ -16,6 +16,7 @@ import type {
 } from '../../email/deliver-connector-message.js';
 import type { ExecuteContext, GateCtx, TaskSpec_P1, WorkItem } from '../../scheduler/types.js';
 import type { IConnectorThreadBindingStore } from '../ConnectorThreadBindingStore.js';
+import { type InboxThreadStore, selfHealInboxThreadKind } from './inbox-thread-resolver.js';
 import type { ReconciliationDedup } from './ReconciliationDedup.js';
 import type { RepoInboxSignal } from './types.js';
 
@@ -55,6 +56,13 @@ export interface RepoScanTaskSpecOptions {
     'isNotified' | 'markNotified' | 'isBaselineEstablished' | 'markBaselineEstablished'
   >;
   bindingStore: Pick<IConnectorThreadBindingStore, 'getByExternal'>;
+  /**
+   * F167 R2 P1#2: read+stamp threadKind on pre-existing inbox bindings so the
+   * reconciliation delivery path can't bypass the gate-keeping marker. Optional
+   * for backward compat with minimal test mocks; when absent, reconciliation
+   * delivers as before but emits a warn so missing wiring is visible.
+   */
+  threadStore?: Pick<InboxThreadStore, 'get' | 'updateThreadKind'>;
   deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   deliveryDeps: ConnectorDeliveryDeps;
   invokeTrigger: {
@@ -125,6 +133,36 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
 
         for (const repo of opts.repoAllowlist) {
           try {
+            // F167 R2 P2: self-heal gate-keeping marker for every allowlisted
+            // repo's inbox binding at admission.gate, INDEPENDENT of whether
+            // run.execute fires. Without this, a quiet repo (no unnotified
+            // items → run:false) leaves pre-rollout `threadKind=undefined`
+            // forever, and cats continuing in that inbox thread can still call
+            // register_pr_tracking/hold_ball before any webhook/reconciliation
+            // signal touches the binding (cloud P2 on 9d997e559).
+            //
+            // F167 R4 P2 (cloud finding on fc2c3895d): the lookup + self-heal
+            // BOTH must sit inside this best-effort try. The outer per-repo
+            // catch (line ~225) is reserved for genuine scan failures
+            // (fetchOpenPRs/Issues/dedup); if `bindingStore.getByExternal`
+            // throws here on a transient Redis read, the outer catch would
+            // skip fetchOpenPRs/Issues for this poll → reconciliation delayed
+            // or missed. Wrap both calls together → marker repair cannot
+            // abort scanning (mirrors INV-G7 fail-open).
+            //
+            // Idempotent — selfHealInboxThreadKind no-ops when marker already
+            // 'gate-keeping' and itself fails open internally.
+            if (opts.threadStore) {
+              try {
+                const repoBinding = await opts.bindingStore.getByExternal(CONNECTOR_ID, repo);
+                if (repoBinding) {
+                  await selfHealInboxThreadKind(opts.threadStore, repoBinding.threadId);
+                }
+              } catch {
+                // Swallowed: marker repair must never abort the per-repo scan.
+              }
+            }
+
             const repoWorkItems: WorkItem<RepoInboxSignal>[] = [];
             const baselineEstablished =
               !skipHistoricalOnFirstRun || (await opts.reconciliationDedup.isBaselineEstablished(repo));
@@ -215,6 +253,20 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
         if (!binding) {
           opts.log.warn(`[repo-scan] No inbox thread for ${signal.repoFullName}, skipping`);
           return;
+        }
+
+        // F167 R2 P1#2: self-heal gate-keeping marker BEFORE delivery. Without
+        // this, pre-rollout inbox threads whose only activity is reconciliation
+        // (e.g. quiet repos that never receive a live webhook) would silently
+        // bypass the trigger-time guard, since they'd never go through
+        // ensureInboxThread's stamping path. Best-effort; failure does not block
+        // delivery (same fail-open discipline as gate-keeping-guard.ts INV-G7).
+        if (opts.threadStore) {
+          await selfHealInboxThreadKind(opts.threadStore, binding.threadId);
+        } else {
+          opts.log.warn(
+            `[repo-scan] threadStore not wired — gate-keeping marker self-heal skipped for ${signal.repoFullName} thread=${binding.threadId}`,
+          );
         }
 
         const content = formatReconciliationMessage(signal);

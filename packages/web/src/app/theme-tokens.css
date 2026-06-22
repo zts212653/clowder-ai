@@ -24,6 +24,7 @@
   --accent-hue: 50; /* warm gold — 品牌主色旋钮（aligned with INIT_LIGHT） */
   --accent-chroma: 0.14;
   --surface-hue: 80; /* warm beige — 页面底色旋钮，独立于 accent（KD-34） */
+  --surface-chroma: 0.01; /* surface 四档共享色度 — Tuner 调一个全变 */
   --brand-cat-cafe-pink: oklch(0.62 var(--accent-chroma) var(--accent-hue)); /* 派生 — logo / splash */
 }
 
@@ -102,15 +103,15 @@
   --avatar-fallback-8: oklch(0.65 0.12 345);
 
   /* --- Surface 四档（light: 基于 develop_base 实测 hex 反推 OKLCH） ---
-   * 铲屎官指定梯度（按"浅则更白"原则，L 越浅 chroma 越低）：
-   *   sunken   #EEE5DB ActivityBar / code / field
-   *   surface  #F6EFE7 ThreadSidebar / RightPanel
-   *   elevated #FCFAF8 Chat 主区
-   *   canvas   #FFFDFB Card 浮起 */
-  --cafe-surface-sunken: oklch(0.92 0.015 var(--surface-hue));
-  --cafe-surface: oklch(0.95 0.012 var(--surface-hue));
-  --cafe-surface-elevated: oklch(0.99 0.005 var(--surface-hue));
-  --cafe-surface-canvas: oklch(0.995 0.003 var(--surface-hue));
+   * 四档共享 --surface-hue，chroma = --surface-chroma × 层级系数：
+   *   sunken   L=0.92  ×1.5  ActivityBar / code / field
+   *   surface  L=0.95  ×1.2  ThreadSidebar / RightPanel
+   *   elevated L=0.99  ×0.5  Chat 主区（高 L 需低 C 趋白）
+   *   canvas   L=0.995 ×0.3  Card 浮起（最浅最白） */
+  --cafe-surface-sunken: oklch(0.92 calc(var(--surface-chroma) * 1.5) var(--surface-hue));
+  --cafe-surface: oklch(0.95 calc(var(--surface-chroma) * 1.2) var(--surface-hue));
+  --cafe-surface-elevated: oklch(0.99 calc(var(--surface-chroma) * 0.5) var(--surface-hue));
+  --cafe-surface-canvas: oklch(0.995 calc(var(--surface-chroma) * 0.3) var(--surface-hue));
 
   /* --- Cafe semantic shortcuts（映射到 Neutral / App Accent / Semantic） --- */
   --cafe-text: var(--neutral-900);

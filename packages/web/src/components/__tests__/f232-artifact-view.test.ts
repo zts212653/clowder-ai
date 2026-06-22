@@ -56,6 +56,26 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
     expect(classifyArtifactView({ type: 'code', name: 'a.ts', ref: 'src/a.ts' })).toBe('text');
   });
 
+  it('code 脚本扩展名(.ps1/.bat/.pl) → text (ledger-only source preview)', () => {
+    expect(classifyArtifactView({ type: 'code', name: 'install.ps1', ref: 'scripts/install.ps1' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'start.bat', ref: 'scripts/start.bat' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: '_sanitize-rules.pl', ref: 'scripts/_sanitize-rules.pl' })).toBe(
+      'text',
+    );
+  });
+
+  it('code 源文件扩展名与 API 分类名单保持同步 → text', () => {
+    expect(classifyArtifactView({ type: 'code', name: 'index.html', ref: 'packages/web/index.html' })).toBe('text');
+    expect(
+      classifyArtifactView({ type: 'code', name: 'CaptureAppAudio.swift', ref: 'Sources/CaptureAppAudio.swift' }),
+    ).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'MainActivity.kt', ref: 'app/MainActivity.kt' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Plugin.scala', ref: 'project/Plugin.scala' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Widget.vue', ref: 'src/Widget.vue' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Panel.svelte', ref: 'src/Panel.svelte' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'theme.less', ref: 'styles/theme.less' })).toBe('text');
+  });
+
   it('file 二进制扩展名(.pdf) + url → download', () => {
     expect(classifyArtifactView({ type: 'file', name: '报告.pdf', url: '/uploads/r.pdf' })).toBe('download');
   });

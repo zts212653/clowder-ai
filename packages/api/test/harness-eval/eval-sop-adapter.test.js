@@ -13,6 +13,7 @@ const sopDomain = {
   evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
   frequency: 'weekly',
   sourceAdapter: 'sop-trace-eval',
+  sourceRefsKind: 'sop-trace-eval',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',

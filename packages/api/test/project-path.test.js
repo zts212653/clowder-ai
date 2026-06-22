@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
@@ -201,5 +201,22 @@ describe('PROJECT_ALLOWED_ROOTS legacy mode', () => {
     process.env.PROJECT_ALLOWED_ROOTS = '';
     assert.strictEqual(isDenylistMode(), true);
     assert.strictEqual(isUnderAllowedRoot(join(homedir(), 'projects')), true);
+  });
+
+  it('append mode includes os.tmpdir() (macOS /var/folders fix — sync public gate)', () => {
+    // On macOS, os.tmpdir() returns /var/folders/…/T/ which resolves to
+    // /private/var/folders/…/T/ — NOT under /tmp or /private/tmp.
+    // Tests that mkdtemp() into tmpdir() must be allowed when
+    // PROJECT_ALLOWED_ROOTS_APPEND=true (the sync public gate mode).
+    process.env.PROJECT_ALLOWED_ROOTS = '/some/custom/root';
+    process.env.PROJECT_ALLOWED_ROOTS_APPEND = 'true';
+
+    const resolvedTmpdir = realpathSync(tmpdir());
+    const testPath = join(resolvedTmpdir, 'some-test-project');
+    assert.strictEqual(
+      isUnderAllowedRoot(testPath),
+      true,
+      `path under resolved tmpdir (${resolvedTmpdir}) must be allowed in append mode`,
+    );
   });
 });

@@ -72,17 +72,6 @@ export class KimiAgentService implements AgentService {
     const effectivePrompt = buildKimiPrompt(prompt, options?.systemPrompt, imagePaths);
     const workingDirectory = options?.workingDirectory ?? process.cwd();
     const apiKeyEnv = buildApiKeyEnv(effectiveModel, options?.callbackEnv);
-    const tempMcpConfig = this.mcpServerPath
-      ? writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
-      : null;
-    const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
-    const supportsThinking =
-      modelConfig.capabilities.includes('thinking') ||
-      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
-    const supportsImageInput =
-      modelConfig.capabilities.includes('image_in') ||
-      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
-
     const kimiCommand = resolveCliCommand('kimi-cli') ?? resolveCliCommand('kimi');
     if (!kimiCommand) {
       yield {
@@ -95,6 +84,20 @@ export class KimiAgentService implements AgentService {
       yield { type: 'done' as const, catId: this.catId, metadata, timestamp: Date.now() };
       return;
     }
+    // Lazy create tempMcpConfig only AFTER we know kimi binary exists. If we created it
+    // before the not-found early-return (kimi/kimi-cli both absent + mcpServerPath set),
+    // the temp dir would leak — finally cleanup (line ~440) is gated by the try block below
+    // and the early-return jumps over it. Source clowder-ai#944 has the same regression.
+    const tempMcpConfig = this.mcpServerPath
+      ? writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
+      : null;
+    const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
+    const supportsThinking =
+      modelConfig.capabilities.includes('thinking') ||
+      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('thinking') === true;
+    const supportsImageInput =
+      modelConfig.capabilities.includes('image_in') ||
+      apiKeyEnv?.KIMI_MODEL_CAPABILITIES?.includes('image_in') === true;
 
     const isLegacy = resolveCliCommand('kimi-cli') !== null;
     const cliSupportsThinking = isLegacy && (supportsThinking || modelConfig.defaultThinking);

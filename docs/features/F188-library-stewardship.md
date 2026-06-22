@@ -8,7 +8,7 @@ created: 2026-05-06
 
 # F188: Library Stewardship — 图书馆管护与成长
 
-> **Status**: reopened | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Owner**: Ragdoll | **Priority**: P1
 
 ## Why
 
@@ -275,13 +275,13 @@ evaluator 在 status endpoint handler 里聚合**四类**输入 → 计算 warni
 - [x] AC-J9: Dogfood acceptance report：在 runtime DB 副本或 dry-run 环境验证当前 `201 orphanEdges` 和 `724 unverified` 的拆解；报告包含抽样证据、修复前后 count、不可自动修复列表、以及是否需要 operator 介入的具体项数
 
 ### Phase K（Memory Center Config Health Surface — reopened 2026-06-09）
-- [ ] AC-K1: `/api/evidence/status` 返回 schema 扩展 `{ healthy, functionalStatus, configWarnings[] }`；`healthy` 字段语义不变（API/DB liveness），外部 healthcheck client 不破坏（snapshot test 锁住）
-- [ ] AC-K2: 5 个 warning detector 实现：`docs_root_suspicious` / `embedding_disabled` / `vectors_empty` / `graph_empty` / `vec_table_missing`；每条产出 `{ code, message, suggestedAction }`（v1 不分 severity——KISS，未来需要 `info`/`error` 等级 v2 再扩展，避免 v1 公式歧义）；trigger 条件 + input source 按 Phase K "Warning codes" 表，**evaluator 输入显式分层**为 evidence.sqlite counts / evidence_meta / embedding service / LibraryCatalog 四类，不允许 implicit 猜测
-- [ ] AC-K3: `functionalStatus = configWarnings.length > 0 ? 'degraded' : 'ok'`（v1 无 severity 字段，length-based 公式无歧义；未来 v2 加 severity 时改 `some(w => w.severity === 'warn')`）；evaluator 在同一个 `/api/evidence/status` 请求内同步算（复用既有 db reads + 新增 catalog read，不引入新 background job）
-- [ ] AC-K4: Memory Center `IndexStatus` 组件（`/memory/status` route）顶部显示 degraded 黄色 banner（`functionalStatus === 'degraded'` 时），区分 "API running" 和 "Memory capabilities degraded"；每条 warning 显示 `message` + clickable `suggestedAction`；`healthy=false` 时仍显示红色 fatal banner（向后兼容）。F163/F188 `HealthReport` debt panel **不混入** Phase K warnings（Phase J system debt 治理 vs Phase K config health 是两个 surface），可在 HealthReport 加入口链接跳转 `/memory/status`
-- [ ] AC-K5: regression fixture：reporter #880 截图状态（`healthy=true` + `vectors_count=0` + `edges_count=0` + `embedding_model=null` — 字段名按 evidence.ts:369-377 实际返回）必须 trigger ≥3 warnings（`vectors_empty` + `graph_empty` + `embedding_disabled`），且 `functionalStatus='degraded'`
-- [ ] AC-K6: external healthcheck 兼容测试：`healthy` 字段在 Phase K 前后**返回值 + 语义完全一致**（snapshot test 跑 healthy/unhealthy 两条 path，无新字段污染 `healthy` 计算）
-- [ ] AC-K7: dogfood report：本地 runtime DB 跑 `/api/evidence/status`，文档化实际产出的 warnings 数 + 截图 + 用户 actionable next steps；至少有一个 warning 状态被验证（不是全绿）
+- [x] AC-K1: `/api/evidence/status` 返回 schema 扩展 `{ healthy, functionalStatus, configWarnings[] }`；`healthy` 字段语义不变（API/DB liveness），外部 healthcheck client 不破坏（snapshot test 锁住）
+- [x] AC-K2: 5 个 warning detector 实现：`docs_root_suspicious` / `embedding_disabled` / `vectors_empty` / `graph_empty` / `vec_table_missing`；每条产出 `{ code, message, suggestedAction }`（v1 不分 severity——KISS，未来需要 `info`/`error` 等级 v2 再扩展，避免 v1 公式歧义）；trigger 条件 + input source 按 Phase K "Warning codes" 表，**evaluator 输入显式分层**为 evidence.sqlite counts / evidence_meta / embedding service / LibraryCatalog 四类，不允许 implicit 猜测
+- [x] AC-K3: `functionalStatus = configWarnings.length > 0 ? 'degraded' : 'ok'`（v1 无 severity 字段，length-based 公式无歧义；未来 v2 加 severity 时改 `some(w => w.severity === 'warn')`）；evaluator 在同一个 `/api/evidence/status` 请求内同步算（复用既有 db reads + 新增 catalog read，不引入新 background job）
+- [x] AC-K4: Memory Center `IndexStatus` 组件（`/memory/status` route）顶部显示 degraded 黄色 banner（`functionalStatus === 'degraded'` 时），区分 "API running" 和 "Memory capabilities degraded"；每条 warning 显示 `message` + clickable `suggestedAction`（**R6 Maine Coon P1-1**: `<button type="button">` + `onClick → handleWarningClick(code)` → scroll target section + 1.5s amber focus ring，drift 回 `<span>` 即 vitest RED）；`healthy=false` 时仍显示红色 fatal banner（向后兼容）。F163/F188 `HealthReport` debt panel **不混入** Phase K warnings（Phase J system debt 治理 vs Phase K config health 是两个 surface），可在 HealthReport 加入口链接跳转 `/memory/status`
+- [x] AC-K5: regression fixture：reporter #880 截图状态（`healthy=true` + `vectors_count=0` + `edges_count=0` + `embedding_model=null` — 字段名按 evidence.ts:369-377 实际返回）必须 trigger ≥3 warnings（`vectors_empty` + `graph_empty` + `embedding_disabled`），且 `functionalStatus='degraded'`
+- [x] AC-K6: external healthcheck 兼容测试：`healthy` 字段在 Phase K 前后**返回值 + 语义完全一致**（snapshot test 跑 healthy/unhealthy 两条 path，无新字段污染 `healthy` 计算）
+- [x] AC-K7: dogfood report：本地 runtime DB 跑 `/api/evidence/status`，文档化实际产出的 warnings 数 + 截图 + 用户 actionable next steps；至少有一个 warning 状态被验证（不是全绿）。**R6 Maine Coon P1-2 fix**：pre-merge UI screenshot 入档于 `docs/harness-feedback/2026-06-09-f188-phase-k-screenshots/reporter-880-degraded-banner.png`（4 warnings + clickable action buttons，amber tokens 与 connector-tokens.css 一致）；browser blocker（Next dev sync-vendor-assets watch + first-compile >5min）记录在 dogfood report，走Maine Coon明确允许的"等价组件证物"fallback；dev preview page `/dev/memory-status-preview` ship 在 PR 内（production 返回 404）给后续真 React render 归档
 
 ### Phase C（Graph Fidelity）✅
 - [x] AC-C0a: edges 表 schema 迁移（补 from_collection_id / to_collection_id / edge_sensitivity / provenance / created_at 列）

@@ -124,6 +124,7 @@ const FRICTION_DENOMINATOR_BY_METRIC: Record<string, string> = {
 const FRICTION_DENOMINATOR_BY_PREFIX: Record<string, string> = {
   c1: 'hold_ball_calls',
   inline_action: 'inline_action.checked',
+  grounding: 'grounding.check_total',
 };
 
 interface FrictionGrade {
@@ -236,12 +237,9 @@ function buildFrictionFinding(
   };
 
   // sampleCoverage: only when samples are expected (metric is supported by sampling).
-  // F192 Phase D — eval:a2a sampled-metrics roster (extended across multiple verdicts):
-  //   - `c2.verdict_without_pass_count`     (2026-06-08 build verdict, PR #2144)
-  //   - `c2.void_hold_hint_emitted`         (2026-06-10 build verdict, PR #2222)
-  //   - `c1.zombie_hold_count`              (2026-06-12 build verdict, PR #2250)
-  // See `SAMPLED_METRICS` below for the canonical set. Other metrics get no
-  // sampleCoverage field — silent absence ≠ incomplete coverage, just "not sampled here".
+  // F192 Phase D — eval:a2a sampled-metrics roster (see SAMPLED_METRICS below).
+  // Other metrics get no sampleCoverage field — silent absence ≠ incomplete
+  // coverage, just "not sampled here".
   if (SAMPLED_METRICS.has(metric)) {
     record.sampleCoverage = {
       sampleCount: samples.length,
@@ -263,10 +261,10 @@ function buildFrictionFinding(
 const SAMPLED_METRICS: ReadonlySet<string> = new Set([
   'c2.verdict_without_pass_count',
   'c2.void_hold_hint_emitted',
-  // F192 Phase D — eval:a2a 2026-06-12 build verdict: C1 zombie-hold joins the sampled
-  // metrics so findings carry per-fire drilldown refs + sampleCoverage. Trigger is
-  // the wake-delay bucket (prior_overdue / prior_imminent / prior_short / prior_long).
-  'c1.zombie_hold_count',
+  // F192 verdict 2026-06-18-eval-a2a-c1-zombie-hold-semantics-fix: only the
+  // actionable bucket (prior_overdue|prior_imminent) needs friction-finding
+  // drilldown. Benign single-slot replacement churn moved to activationCounts.
+  'c1.hold_zombie_count',
 ]);
 
 function detectFrictionFromCounts(component: AttributionInput['snapshot']['components'][0]): AttributionRecord[] {

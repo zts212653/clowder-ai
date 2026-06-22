@@ -19,8 +19,8 @@ export type CommunityIssueDraftStatus = 'draft' | 'published' | 'cancelled';
 
 // ── Source Type ────────────────────────────────────────────────
 
-/** Extensible source discriminator. Phase A: frustration_issue only. */
-export type CommunityIssueDraftSourceType = 'frustration_issue';
+/** Extensible source discriminator. Phase A: frustration_issue; Phase B: cat_initiated. */
+export type CommunityIssueDraftSourceType = 'frustration_issue' | 'cat_initiated';
 
 // ── Draft ─────────────────────────────────────────────────────
 

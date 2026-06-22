@@ -9,6 +9,7 @@ const domain = {
   evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
   frequency: 'daily',
   sourceAdapter: 'f167-runtime-eval',
+  sourceRefsKind: 'a2a-snapshot-attribution',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',

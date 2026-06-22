@@ -1,6 +1,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handleNavigateEvent, shouldAcceptNavigate } from '@/hooks/useWorkspaceNavigate';
 import { useChatStore } from '@/stores/chatStore';
+import {
+  areWorktreeIdsEquivalent,
+  buildWorktreeAliasMap,
+  getNavigateWorktreeRoomIds,
+  hasEquivalentWorktreeId,
+  resolveListedWorktreeId,
+  resolveNavigateTargetWorktreeId,
+  scopeWorktreeAliases,
+} from '@/utils/worktree-id-alias';
+
+const repoRootAliases = {
+  '230809_cat-cafe': 'cat-cafe',
+  '230809_cat-cafe-runtime': 'cat-cafe-runtime',
+};
 
 describe('workspace navigate store (F131)', () => {
   afterEach(() => {
@@ -9,9 +23,12 @@ describe('workspace navigate store (F131)', () => {
       workspaceOpenFilePath: null,
       workspaceOpenFileLine: null,
       workspaceWorktreeId: null,
+      workspaceWorktreeAliases: {},
+      workspaceWorktreeAliasesProjectPath: null,
       workspaceOpenTabs: [],
       _workspaceFileSetAt: { ts: 0, threadId: null },
       rightPanelMode: 'status',
+      currentProjectPath: 'default',
     });
   });
 
@@ -57,6 +74,71 @@ describe('workspace navigate store (F131)', () => {
     expect(state.workspaceOpenTabs).toEqual([]);
   });
 
+  it('setWorkspaceOpenFile preserves prefixed worktree alias when navigate emits canonical id', () => {
+    useChatStore.setState({
+      currentProjectPath: '/tmp/current-project',
+      workspaceWorktreeId: '230809_cat-cafe',
+      workspaceWorktreeAliases: repoRootAliases,
+      workspaceWorktreeAliasesProjectPath: '/tmp/current-project',
+    });
+
+    useChatStore.getState().setWorkspaceOpenFile('docs/study.md', 7, 'cat-cafe');
+
+    const state = useChatStore.getState();
+    expect(state.workspaceWorktreeId).toBe('230809_cat-cafe');
+    expect(state.workspaceOpenFilePath).toBe('docs/study.md');
+    expect(state.workspaceOpenFileLine).toBe(7);
+    expect(state.workspaceOpenTabs).toEqual(['docs/study.md']);
+  });
+
+  it('setWorkspaceOpenFile does not preserve shaped worktree ids without alias metadata', () => {
+    useChatStore.setState({ workspaceWorktreeId: 'abcdef_feature' });
+
+    useChatStore.getState().setWorkspaceOpenFile('docs/study.md', 7, 'feature');
+
+    const state = useChatStore.getState();
+    expect(state.workspaceWorktreeId).toBe('feature');
+    expect(state.workspaceOpenFilePath).toBe('docs/study.md');
+    expect(state.workspaceOpenTabs).toEqual(['docs/study.md']);
+  });
+
+  it('setWorkspaceOpenFile ignores stale aliases from a different project', () => {
+    useChatStore.setState({
+      currentProjectPath: '/tmp/current-project',
+      workspaceWorktreeId: '230809_cat-cafe',
+      workspaceWorktreeAliases: repoRootAliases,
+      workspaceWorktreeAliasesProjectPath: '/tmp/previous-project',
+    });
+
+    useChatStore.getState().setWorkspaceOpenFile('docs/study.md', 7, 'cat-cafe');
+
+    const state = useChatStore.getState();
+    expect(state.workspaceWorktreeId).toBe('cat-cafe');
+    expect(state.workspaceOpenFilePath).toBe('docs/study.md');
+    expect(state.workspaceOpenTabs).toEqual(['docs/study.md']);
+  });
+
+  it('normalizeWorkspaceWorktreeId preserves the open file and clears edit tokens while remapping equivalent ids', () => {
+    useChatStore.setState({
+      workspaceWorktreeId: 'cat-cafe',
+      workspaceOpenFilePath: 'docs/study.md',
+      workspaceOpenFileLine: 7,
+      workspaceOpenTabs: ['docs/study.md'],
+      workspaceEditToken: 'edit-token',
+      workspaceEditTokenExpiry: 12345,
+    });
+
+    useChatStore.getState().normalizeWorkspaceWorktreeId('230809_cat-cafe');
+
+    const state = useChatStore.getState();
+    expect(state.workspaceWorktreeId).toBe('230809_cat-cafe');
+    expect(state.workspaceOpenFilePath).toBe('docs/study.md');
+    expect(state.workspaceOpenFileLine).toBe(7);
+    expect(state.workspaceOpenTabs).toEqual(['docs/study.md']);
+    expect(state.workspaceEditToken).toBeNull();
+    expect(state.workspaceEditTokenExpiry).toBeNull();
+  });
+
   it('setWorkspaceOpenFile stamps _workspaceFileSetAt with threadId', () => {
     useChatStore.setState({ currentThreadId: 'thread-x' });
     const before = Date.now();
@@ -89,6 +171,71 @@ describe('workspace navigate store (F131)', () => {
     useChatStore.getState().setWorkspaceRevealPath('docs/', 'thread-origin');
     const { _workspaceFileSetAt: stamp } = useChatStore.getState();
     expect(stamp.threadId).toBe('thread-origin');
+  });
+});
+
+describe('worktree id aliases', () => {
+  it('builds aliases only from explicit worktree metadata', () => {
+    expect(
+      buildWorktreeAliasMap([
+        { id: '230809_cat-cafe', canonicalId: 'cat-cafe' },
+        { id: 'abcdef_feature' },
+        { id: 'cat-cafe-runtime', canonicalId: 'cat-cafe-runtime' },
+      ]),
+    ).toEqual({ '230809_cat-cafe': 'cat-cafe' });
+  });
+
+  it('treats repoRoot-prefixed worktree ids as aliases of their canonical id', () => {
+    expect(areWorktreeIdsEquivalent('230809_cat-cafe', 'cat-cafe', repoRootAliases)).toBe(true);
+    expect(areWorktreeIdsEquivalent('230809_cat-cafe-runtime', 'cat-cafe-runtime', repoRootAliases)).toBe(true);
+    expect(areWorktreeIdsEquivalent('230809_cat-cafe', 'cat-cafe-runtime', repoRootAliases)).toBe(false);
+  });
+
+  it('uses the current alias when a navigate event targets the canonical id', () => {
+    expect(resolveNavigateTargetWorktreeId('230809_cat-cafe', 'cat-cafe', repoRootAliases)).toBe('230809_cat-cafe');
+    expect(resolveNavigateTargetWorktreeId('cat-cafe-runtime', 'cat-cafe', repoRootAliases)).toBe('cat-cafe');
+  });
+
+  it('joins both prefixed and canonical worktree rooms for repoRoot-scoped ids', () => {
+    expect(getNavigateWorktreeRoomIds('230809_cat-cafe', repoRootAliases)).toEqual(['230809_cat-cafe', 'cat-cafe']);
+    expect(getNavigateWorktreeRoomIds('cat-cafe', repoRootAliases)).toEqual(['cat-cafe']);
+    expect(getNavigateWorktreeRoomIds(null, repoRootAliases)).toEqual([]);
+  });
+
+  it('does not infer repoRoot aliases from id shape without explicit metadata', () => {
+    expect(areWorktreeIdsEquivalent('abcdef_feature', 'feature')).toBe(false);
+    expect(resolveNavigateTargetWorktreeId('abcdef_feature', 'feature')).toBe('feature');
+    expect(getNavigateWorktreeRoomIds('abcdef_feature')).toEqual(['abcdef_feature']);
+  });
+
+  it('treats a canonical selection as present when the list carries an explicit prefixed alias', () => {
+    const worktrees = [
+      { id: '230809_cat-cafe', canonicalId: 'cat-cafe' },
+      { id: '230809_cat-cafe-runtime', canonicalId: 'cat-cafe-runtime' },
+    ];
+    const aliases = buildWorktreeAliasMap(worktrees);
+
+    expect(hasEquivalentWorktreeId(worktrees, 'cat-cafe', aliases)).toBe(true);
+    expect(hasEquivalentWorktreeId(worktrees, '230809_cat-cafe', aliases)).toBe(true);
+    expect(hasEquivalentWorktreeId(worktrees, 'missing', aliases)).toBe(false);
+  });
+
+  it('resolves a canonical selection to the listed prefixed alias', () => {
+    const worktrees = [
+      { id: '230809_cat-cafe', canonicalId: 'cat-cafe' },
+      { id: '230809_cat-cafe-runtime', canonicalId: 'cat-cafe-runtime' },
+    ];
+    const aliases = buildWorktreeAliasMap(worktrees);
+
+    expect(resolveListedWorktreeId(worktrees, 'cat-cafe', aliases)).toBe('230809_cat-cafe');
+    expect(resolveListedWorktreeId(worktrees, '230809_cat-cafe', aliases)).toBe('230809_cat-cafe');
+    expect(resolveListedWorktreeId(worktrees, 'missing', aliases)).toBeNull();
+  });
+
+  it('scopes worktree aliases to the active project path', () => {
+    expect(scopeWorktreeAliases(repoRootAliases, '/tmp/project-a', '/tmp/project-a')).toBe(repoRootAliases);
+    expect(scopeWorktreeAliases(repoRootAliases, '/tmp/project-a', '/tmp/project-b')).toEqual({});
+    expect(scopeWorktreeAliases(repoRootAliases, null, '/tmp/project-a')).toEqual({});
   });
 });
 
@@ -143,6 +290,27 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
     expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
   });
 
+  it('does not switch worktree for reveal when target is the canonical alias of current', () => {
+    const actions = {
+      setWorkspaceWorktreeId: vi.fn(),
+      setWorkspaceRevealPath: vi.fn(),
+      setWorkspaceOpenFile: vi.fn(),
+    };
+
+    const result = handleNavigateEvent(
+      { path: 'docs/README.md', worktreeId: 'cat-cafe' },
+      '230809_cat-cafe',
+      actions,
+      undefined,
+      undefined,
+      repoRootAliases,
+    );
+
+    expect(result).toBe(true);
+    expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
+    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+  });
+
   it('delegates to setWorkspaceOpenFile for action=open', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
@@ -160,6 +328,27 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
     expect(actions.setWorkspaceOpenFile).toHaveBeenCalledWith('src/index.ts', 42, 'wt-1');
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
     expect(actions.setWorkspaceRevealPath).not.toHaveBeenCalled();
+  });
+
+  it('delegates open events with current worktree alias when event carries canonical id', () => {
+    const actions = {
+      setWorkspaceWorktreeId: vi.fn(),
+      setWorkspaceRevealPath: vi.fn(),
+      setWorkspaceOpenFile: vi.fn(),
+    };
+
+    const result = handleNavigateEvent(
+      { path: 'docs/study.md', worktreeId: 'cat-cafe', action: 'open', line: 7 },
+      '230809_cat-cafe',
+      actions,
+      undefined,
+      undefined,
+      repoRootAliases,
+    );
+
+    expect(result).toBe(true);
+    expect(actions.setWorkspaceOpenFile).toHaveBeenCalledWith('docs/study.md', 7, '230809_cat-cafe');
+    expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
   });
 
   it('handles reveal without worktreeId (no switch needed)', () => {
@@ -219,6 +408,28 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
     expect(result).toBe(true);
     expect(actions.setWorkspaceWorktreeId).toHaveBeenCalledWith('wt-B');
     expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+  });
+
+  it('suppresses reveal for equivalent worktree aliases within grace window', () => {
+    const actions = {
+      setWorkspaceWorktreeId: vi.fn(),
+      setWorkspaceRevealPath: vi.fn(),
+      setWorkspaceOpenFile: vi.fn(),
+    };
+
+    const recentOpen = { path: 'docs/study.md', worktreeId: '230809_cat-cafe', ts: Date.now() - 500 };
+    const result = handleNavigateEvent(
+      { path: 'docs/study.md', worktreeId: 'cat-cafe' },
+      '230809_cat-cafe',
+      actions,
+      recentOpen,
+      undefined,
+      repoRootAliases,
+    );
+
+    expect(result).toBe(false);
+    expect(actions.setWorkspaceRevealPath).not.toHaveBeenCalled();
+    expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
   });
 
   it('allows reveal for same path after grace window expires', () => {

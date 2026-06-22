@@ -144,7 +144,7 @@ test('assistant tool_use → tool_use', () => {
     type: 'assistant',
     message: {
       id: 'msg-2',
-      content: [{ type: 'tool_use', name: 'bash', input: { command: 'ls' } }],
+      content: [{ type: 'tool_use', id: 'toolu_123', name: 'bash', input: { command: 'ls' } }],
     },
   };
   const result = transformClaudeEvent(event, CAT, state);
@@ -153,6 +153,7 @@ test('assistant tool_use → tool_use', () => {
   assert.equal(result.length, 1);
   assert.equal(result[0].type, 'tool_use');
   assert.equal(result[0].toolName, 'bash');
+  assert.equal(result[0].toolUseId, 'toolu_123');
 });
 
 test('result/error → error', () => {

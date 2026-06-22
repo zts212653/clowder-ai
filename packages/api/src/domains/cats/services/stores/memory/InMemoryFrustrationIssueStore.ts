@@ -85,6 +85,19 @@ export class InMemoryFrustrationIssueStore implements IFrustrationIssueStore {
       .map(clone);
   }
 
+  async listConfirmedInWindow(sinceMs: number, untilMs: number): Promise<FrustrationIssue[]> {
+    return Array.from(this.issues.values())
+      .filter(
+        (i) =>
+          i.status === 'confirmed' &&
+          typeof i.confirmedAt === 'number' &&
+          i.confirmedAt >= sinceMs &&
+          i.confirmedAt < untilMs,
+      )
+      .sort((a, b) => (a.confirmedAt ?? 0) - (b.confirmedAt ?? 0))
+      .map(clone);
+  }
+
   async listDraft(userId: string): Promise<FrustrationIssue[]> {
     return Array.from(this.issues.values())
       .filter((i) => i.userId === userId && i.status === 'draft')
