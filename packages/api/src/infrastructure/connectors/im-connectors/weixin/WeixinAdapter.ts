@@ -264,6 +264,7 @@ export class WeixinAdapter implements IOutboundAdapter {
   private readonly typingTickets = new Map<string, string>();
   private readonly typingTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly typingEpoch = new Map<string, number>();
+  private fallbackMessageSequence = 0;
 
   constructor(botToken: string, log: FastifyBaseLogger, sessionStateStore?: WeixinSessionStateStore) {
     this.botToken = botToken;
@@ -372,8 +373,8 @@ export class WeixinAdapter implements IOutboundAdapter {
     const messages: WeixinInboundMessage[] = [];
 
     if (raw.msgs) {
-      for (const msg of raw.msgs) {
-        const parsed = this.parseMessage(msg);
+      for (const [index, msg] of raw.msgs.entries()) {
+        const parsed = this.parseMessage(msg, raw.get_updates_buf, index);
         if (parsed) messages.push(parsed);
       }
     }
@@ -396,15 +397,14 @@ export class WeixinAdapter implements IOutboundAdapter {
     return '';
   }
 
-  private parseMessage(msg: ILinkWeixinMessage): WeixinInboundMessage | null {
+  private parseMessage(
+    msg: ILinkWeixinMessage,
+    responseCursor: string | undefined,
+    messageIndex: number,
+  ): WeixinInboundMessage | null {
     const senderId = msg.from_user_id;
     const contextToken = msg.context_token;
     if (!senderId || !contextToken) return null;
-
-    const msgId =
-      msg.message_id != null
-        ? String(msg.message_id)
-        : `weixin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const firstItem = msg.item_list?.[0];
     if (!firstItem) {
@@ -413,6 +413,10 @@ export class WeixinAdapter implements IOutboundAdapter {
     }
 
     const itemType = firstItem.type ?? MessageItemType.TEXT;
+    const msgId =
+      msg.message_id != null
+        ? String(msg.message_id)
+        : this.buildFallbackMessageId(msg, senderId, contextToken, firstItem, responseCursor, messageIndex);
 
     if (itemType === MessageItemType.TEXT) {
       const text = firstItem.text_item?.text;
@@ -476,6 +480,51 @@ export class WeixinAdapter implements IOutboundAdapter {
 
     this.log.debug({ itemType, messageId: msg.message_id }, '[WeixinAdapter] Unsupported item type, skipping');
     return null;
+  }
+
+  private buildFallbackMessageId(
+    msg: ILinkWeixinMessage,
+    senderId: string,
+    contextToken: string,
+    firstItem: ILinkMessageItem,
+    responseCursor: string | undefined,
+    messageIndex: number,
+  ): string {
+    const itemType = firstItem.type ?? MessageItemType.TEXT;
+    const media =
+      firstItem.image_item?.media ??
+      firstItem.voice_item?.media ??
+      firstItem.file_item?.media ??
+      firstItem.video_item?.media;
+    const text = firstItem.text_item?.text ?? firstItem.voice_item?.text ?? '';
+    const fileName = firstItem.file_item?.file_name ?? '';
+    const mediaKey = this.buildMediaKey(media);
+    let deliveryScope: string;
+    if (msg.create_time_ms != null) {
+      deliveryScope = `time:${msg.create_time_ms}`;
+    } else if (responseCursor) {
+      // iLink redeliveries replay the same cursor; the index keeps same-content messages distinct within that batch.
+      deliveryScope = `cursor:${responseCursor}:index:${messageIndex}`;
+    } else {
+      const sequence = this.nextFallbackMessageSequence();
+      this.log.warn(
+        { itemType, messageIndex, senderId },
+        '[WeixinAdapter] Building non-deterministic fallback message id without message_id, timestamp, or cursor',
+      );
+      // Last resort: avoids over-deduping legitimate same-content messages, but cannot guarantee redelivery dedup.
+      deliveryScope = `sequence:${sequence}`;
+    }
+    const fingerprint = crypto
+      .createHash('sha256')
+      .update(`${senderId}\0${contextToken}\0${deliveryScope}\0${itemType}\0${text}\0${mediaKey}\0${fileName}`)
+      .digest('hex')
+      .slice(0, 16);
+    return `weixin-${fingerprint}`;
+  }
+
+  private nextFallbackMessageSequence(): number {
+    this.fallbackMessageSequence = (this.fallbackMessageSequence % Number.MAX_SAFE_INTEGER) + 1;
+    return this.fallbackMessageSequence;
   }
 
   /**
