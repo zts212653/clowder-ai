@@ -167,7 +167,7 @@ describe('prompt-injection review guard scripts', () => {
 
     assert.doesNotMatch(
       compiled,
-      /^── \[[A-Z]\d+] .+ ──$/m,
+      /^── \[[A-Z]\d+] .+──$/m,
       'compiled native L0 must not send source/template display labels to the model',
     );
   });

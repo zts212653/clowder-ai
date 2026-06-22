@@ -48,7 +48,7 @@ const REPO_ROOT = resolve(__dirname, '..');
 const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0.md');
 const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
 const PROMPT_OVERLAYS_DIR = resolve(findWorkspaceRoot(process.cwd()), '.cat-cafe', 'prompt-overlays');
-const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+ ──$/;
+const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+──$/;
 
 /** L1-L7 section template files — static content extracted from the monolithic L0 template. */
 const L0_SECTION_TEMPLATES = {
