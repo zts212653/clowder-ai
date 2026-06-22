@@ -14,7 +14,6 @@ import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { compileL0ViaSubprocess } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import { getDefaultRootsForPlatform, isPathUnderRoots, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -87,10 +86,10 @@ async function readRuleFile(
 
 /**
  * F203 Phase F — L0 system prompt visibility (read-only viewer in Console
- * 「规则与 SOP」). Returns the L0 template + per-cat compiled L0 + paths users
- * follow to customize. Read-only by Design Gate (co-creator 2026-05-16 confirm
- * "先做可见"; AC-F5 编辑器 DEFER). compileL0 + availableCats injectable for
- * unit tests; route handler passes the real subprocess + cat-catalog.
+ * 「规则与 SOP」). Returns the L0 template + paths users follow to customize.
+ * Read-only by Design Gate (co-creator 2026-05-16 confirm "先做可见";
+ * AC-F5 编辑器 DEFER). Per-cat compiled previews moved to the F237 prompt
+ * injection preview path; /api/rules must not spawn compilers for unused UI.
  */
 export interface L0CompiledForCat {
   catId: string;
@@ -107,15 +106,16 @@ export interface L0PromptsBlock {
 }
 
 export interface ReadL0PromptsOptions {
-  availableCats: Array<{ catId: string; displayName: string }>;
-  compileL0: (opts: { catId: string; cwd: string }) => Promise<string>;
+  availableCats?: Array<{ catId: string; displayName: string }>;
+  compileL0?: (opts: { catId: string; cwd: string }) => Promise<string>;
+  includeCompiledByCat?: boolean;
 }
 
 const L0_TEMPLATE_RELPATH = 'assets/system-prompts/system-prompt-l0.md';
 const L0_COMPILE_SCRIPT_RELPATH = 'scripts/compile-system-prompt-l0.mjs';
 const L0_VERIFY_COMMAND = 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)';
 
-export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions): Promise<L0PromptsBlock> {
+export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions = {}): Promise<L0PromptsBlock> {
   const template = await readRuleFile(
     root,
     L0_TEMPLATE_RELPATH,
@@ -125,27 +125,32 @@ export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions): P
       'CodexAgentService',
     ]),
   );
-  const compiledConsumption = CONSUMPTION.actualPrompt('Per-cat compiled L0 actually passed to the model.', [
-    'compile-system-prompt-l0.mjs',
-    'ClaudeBgCarrierService',
-    'CodexAgentService',
-  ]);
-  const compiledByCat: L0CompiledForCat[] = await Promise.all(
-    opts.availableCats.map(async ({ catId, displayName }) => {
-      try {
-        const compiled = await opts.compileL0({ catId, cwd: root });
-        return { catId, displayName, compiled, error: null, consumption: compiledConsumption };
-      } catch (e) {
-        return {
-          catId,
-          displayName,
-          compiled: '',
-          error: e instanceof Error ? e.message : String(e),
-          consumption: compiledConsumption,
-        };
-      }
-    }),
-  );
+  let compiledByCat: L0CompiledForCat[] = [];
+  if (opts.includeCompiledByCat) {
+    const compileL0 = opts.compileL0;
+    if (!compileL0) throw new Error('compileL0 is required when includeCompiledByCat=true');
+    const compiledConsumption = CONSUMPTION.actualPrompt('Per-cat compiled L0 actually passed to the model.', [
+      'compile-system-prompt-l0.mjs',
+      'ClaudeBgCarrierService',
+      'CodexAgentService',
+    ]);
+    compiledByCat = await Promise.all(
+      (opts.availableCats ?? []).map(async ({ catId, displayName }) => {
+        try {
+          const compiled = await compileL0({ catId, cwd: root });
+          return { catId, displayName, compiled, error: null, consumption: compiledConsumption };
+        } catch (e) {
+          return {
+            catId,
+            displayName,
+            compiled: '',
+            error: e instanceof Error ? e.message : String(e),
+            consumption: compiledConsumption,
+          };
+        }
+      }),
+    );
+  }
   return {
     template,
     compiledByCat,
@@ -185,7 +190,7 @@ export interface RulesPayload {
   l0Prompts: L0PromptsBlock;
 }
 
-export async function readRulesPayload(root: string, opts: ReadL0PromptsOptions): Promise<RulesPayload> {
+export async function readRulesPayload(root: string, opts: ReadL0PromptsOptions = {}): Promise<RulesPayload> {
   const [sharedRules, providerGuides, l0Prompts] = await Promise.all([
     Promise.all(SHARED_RULE_FILES.map((f) => readRuleFile(root, f.path, f.consumption))),
     Promise.all(
@@ -273,8 +278,7 @@ export const rulesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Authentication required' };
     }
     const root = findProjectRoot();
-    const availableCats = loadAvailableCatsForL0();
-    return readRulesPayload(root, { availableCats, compileL0: compileL0ViaSubprocess });
+    return readRulesPayload(root);
   });
 
   app.get<{ Params: { name: string }; Querystring: { projectPath?: string } }>(
