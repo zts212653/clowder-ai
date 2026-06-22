@@ -431,6 +431,31 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f237-prompt-injection-visibility",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F237-prompt-injection-visibility.md",
+      "anchor": "Prompt Injection Visibility"
+    },
+    "structureSource": {
+      "path": "docs/features/F237-prompt-injection-visibility.md",
+      "anchor": "Three-Segment Overlay Editor"
+    },
+    "bodySource": { "path": "docs/features/F237-prompt-injection-visibility.md", "anchor": "Trust Model" },
+    "contexts": ["thinking", "feature_dev", "review"],
+    "audience": ["developer", "maintainer"],
+    "body": "想知道猫猫这轮到底被注入了什么？去设置里的协作与规则看 Prompt Injection，可查看分段、预览编译结果，也能编辑安全开放的覆盖层。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 spec",
+      "sourceRef": {
+        "path": "docs/features/F237-prompt-injection-visibility.md",
+        "anchor": "Prompt Injection Visibility"
+      }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f188-memory-status-config-health",
     "kind": "feature",
     "sourceRef": {
