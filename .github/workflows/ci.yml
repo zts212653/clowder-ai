@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -61,6 +63,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
+      - name: Configure git identity for test sandbox
+        run: |
+          git config --global user.email "ci@clowder-ai.dev"
+          git config --global user.name "CI Runner"
       - run: pnpm --filter @cat-cafe/api run test:public
 
   dir-size:
