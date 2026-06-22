@@ -336,6 +336,10 @@ export const promptInjectionRoutes: FastifyPluginAsync = async (app) => {
       reply.status(404);
       return { error: `Segment ${id} is not template-backed` };
     }
+    if (!meta.allowLocalOverride) {
+      reply.status(403);
+      return { error: `Segment ${id} is readonly` };
+    }
 
     const fileInfo = getTemplateFileInfo(id);
     if (!fileInfo?.local) {

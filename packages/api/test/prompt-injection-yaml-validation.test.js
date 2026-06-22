@@ -283,6 +283,24 @@ describe('prompt-injection YAML validation', () => {
     });
   });
 
+  describe('DELETE /api/prompt-injection/segment/:id/override', () => {
+    it('rejects readonly template-backed segments with 403', async () => {
+      const app = await buildSessionApp();
+      try {
+        const res = await app.inject({
+          method: 'DELETE',
+          url: '/api/prompt-injection/segment/S1/override',
+          headers: LOCAL_WRITE_HEADERS,
+        });
+        assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}: ${res.body}`);
+        const body = JSON.parse(res.body);
+        assert.match(body.error, /readonly/i);
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
   describe('overlay write durability', () => {
     it('uses tmp+rename for overlay saves, backups, and restore-backup', () => {
       const source = readFileSync(new URL('../src/routes/prompt-injection.ts', import.meta.url), 'utf-8');
