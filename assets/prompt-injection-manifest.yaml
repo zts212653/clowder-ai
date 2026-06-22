@@ -1,0 +1,997 @@
+# F237: Prompt Injection Manifest
+# Machine-readable registry of all segments injected into the effective prompt.
+# Source of truth for Console visibility, drift checking, and Phase 2 lifecycle migration.
+#
+# Schema version: 1.0.0
+# Total active segments: 52 (L1-L7, S1-S13, D1-D21, R1-R2, M1-M2, B1, C1, N1-N2, H1-H3)
+# Excluded (dead code): 0 (X1 fully removed in F237 Phase 1 including source function)
+#
+# Three-axis classification (orthogonal):
+#   safetyTier        — Can a human edit this?        (readonly | limited-edit | editable)
+#   transparencyTier  — Can the user see this?        (visible-by-default | opt-in-view | debug-only)
+#   governanceTier    — Can auto harness change this? (auto-evolve | human-gated | immutable)
+#
+# Console badge mapping (tag-based):
+#   只读               ← safetyTier: readonly
+#   可编辑             ← safetyTier: editable/limited-edit + governanceTier: immutable
+#   可编辑 + 人工审批   ← safetyTier: editable/limited-edit + governanceTier: human-gated
+#   可编辑 + 自动迭代   ← safetyTier: editable/limited-edit + governanceTier: auto-evolve
+
+schemaVersion: "1.0.0"
+
+segments:
+  # ═══════════════════════════════════════════════════════════════
+  # Native L0 — compile-time, baked into system prompt by compiler
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: L1
+    name: 平行世界自我意识
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l1-parallel-world.md
+    sourceType: template
+    trigger: always
+    purpose: "Parallel-world self-awareness: same catId may run in multiple threads concurrently"
+    userExplanation: "告诉猫同一个身份可能在多个对话中同时存在，它们之间不共享上下文"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: null
+
+  - id: L2
+    name: 客观性 carry-over 段
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l2-carry-over.md
+    sourceType: template
+    trigger: always
+    purpose: "Baseline carry-over from CC/Codex version detection + F218 reflexes"
+    userExplanation: "确保猫的基础能力（工具调用、安全反射等）不因自定义 prompt 而退化"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: opt-in-view
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: F203
+
+  - id: L3
+    name: 传球三选一 + @ 路由规则
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l3-routing-rules.md
+    sourceType: template
+    trigger: always
+    purpose: "A2A handoff decision tree and @-mention routing rules at L0 level"
+    userExplanation: "规定猫每轮对话结束时必须决定球传给谁（另一只猫 / 等外部条件 / 铲屎官）"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: F167
+
+  - id: L4
+    name: 五条铁律
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l4-iron-laws.md
+    sourceType: template
+    trigger: always
+    purpose: "Five iron laws: data safety, cross-review, identity, release acceptance, persistence"
+    userExplanation: "猫的五条不可违反的安全铁律（数据安全、交叉 review、身份不可伪造等）"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: null
+
+  - id: L5
+    name: MCP 工具 quick index
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l5-mcp-tools-index.md
+    sourceType: template
+    trigger: always
+    purpose: "Quick reference index for cat-cafe MCP tool families"
+    userExplanation: "给猫一份 MCP 工具的快速索引（记忆、协作、任务、Rich Block 等分类）"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: opt-in-view
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: null
+
+  - id: L6
+    name: 能力唤醒指南
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l6-capability-wakeup.md
+    sourceType: template
+    trigger: always
+    purpose: "Capability wakeup index: maps bad-instinct scenarios to correct skill/tool"
+    userExplanation: "场景到 skill 的映射表——帮助猫在遇到特定情况时选择正确的工具而非默认行为"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: F192
+
+  - id: L7
+    name: 协作哲学
+    category: l0-native
+    lifecycleStage: compile-time
+    source: assets/prompt-templates/l7-collaboration-philosophy.md
+    sourceType: template
+    trigger: always
+    purpose: "Collaboration philosophy: cats are teammates, not isolated tools"
+    userExplanation: "协作精神宣言——猫是有队友、有家、有共同愿景的伙伴，不是孤立的执行单元"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: L0-system-prompt
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # Static Identity — session-level, buildStaticIdentity()
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: S1
+    name: 身份声明
+    category: identity
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s1-identity.md
+    sourceType: template
+    trigger: always
+    purpose: "Cat identity: name, nickname, role, personality from cat-catalog config"
+    userExplanation: "声明猫的身份（名字、昵称、角色、性格），数据来自猫的配置文件"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: S2
+    name: 硬限制
+    category: identity
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s2-restrictions.md
+    sourceType: template
+    trigger: "config.restrictions exists and length > 0"
+    purpose: "Self-awareness of hard restrictions so cat can push back on invalid @-mentions"
+    userExplanation: "告诉猫自己的硬限制（如暹罗猫禁止写代码），被 @ 做这类任务时会拒绝"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: S3
+    name: Pack Masks
+    category: identity
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s3-pack-masks.md
+    sourceType: template
+    trigger: "packBlocks?.masksBlock exists"
+    purpose: "F129 pack role overlay — adds project-specific role flavor without changing core identity"
+    userExplanation: "项目级角色叠加——让猫在特定项目中扮演额外角色（不改变核心身份）"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F129
+
+  - id: S4
+    name: 协作格式
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s4-collaboration.md
+    sourceType: template
+    trigger: "callableMentions.length > 0"
+    purpose: "A2A collaboration format: @-mention syntax, line-start rule, anti-spoofing"
+    userExplanation: "教猫正确的 @提及 格式（必须在行首，句中无效），防止球权丢失"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: S5
+    name: 队友名册
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s5-teammate-roster.md
+    sourceType: template
+    trigger: "roster has other cats"
+    purpose: "Teammate roster table: who to @ and their strengths/cautions"
+    userExplanation: "列出所有队友的名字、擅长领域和注意事项，帮猫决定找谁协作"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: S6
+    name: 工作流触发点
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/workflow-triggers.yaml
+    sourceType: template
+    trigger: "WORKFLOW_TRIGGERS[breedId] exists"
+    purpose: "Per-breed workflow triggers: when to proactively @-mention other cats"
+    userExplanation: "告诉每只猫在什么情况下应该 @提及 哪位队友（如完成开发后 @缅因猫 review）"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: true
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: S7
+    name: Pack Workflows
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s7-pack-workflows.md
+    sourceType: template
+    trigger: "packBlocks?.workflowsBlock exists"
+    purpose: "F129 pack workflow blocks — project-specific workflow additions"
+    userExplanation: "项目级工作流补充——在通用工作流基础上添加项目特有的协作流程"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F129
+
+  - id: S8
+    name: 铲屎官引用
+    category: identity
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s8-cvo-reference.md
+    sourceType: template
+    trigger: always
+    purpose: "Co-creator reference: name, mention handles, decision authority"
+    userExplanation: "告诉猫铲屎官（CVO）是谁、怎么 @ 铲屎官、重要决策由铲屎官拍板"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F067
+
+  - id: S9
+    name: 治理摘要
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s9-governance-digest.md
+    sourceType: template
+    trigger: always
+    purpose: "Governance L0 digest compiled from shared-rules.md (supports .local overlay)"
+    userExplanation: "从 shared-rules.md 编译的治理规则摘要——猫的协作纪律、质量标准、Magic Words 等"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: S10
+    name: Pack Guardrails
+    category: identity
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s10-pack-guardrails.md
+    sourceType: template
+    trigger: "packBlocks?.guardrailBlock exists"
+    purpose: "F129 pack guardrails — hard constraint track (only adds strictness)"
+    userExplanation: "项目级硬约束——为特定项目增加额外限制（不能放松核心规则）"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F129
+
+  - id: S11
+    name: Pack Defaults
+    category: feature-injection
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s11-pack-defaults.md
+    sourceType: template
+    trigger: "packBlocks?.defaultsBlock exists"
+    purpose: "F129 pack defaults — user-overridable behavior track"
+    userExplanation: "项目级默认行为——用户可覆盖的项目偏好设置"
+    priority: low
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F129
+
+  - id: S12
+    name: World Driver
+    category: feature-injection
+    lifecycleStage: session-init
+    source: assets/prompt-templates/s12-world-driver.md
+    sourceType: template
+    trigger: "packBlocks?.worldDriverSummary exists"
+    purpose: "F129 world driver summary — read-only informational world-building context"
+    userExplanation: "项目的世界观驱动摘要——为世界构建模式提供背景信息"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F129
+
+  - id: S13
+    name: MCP 工具文档
+    category: collaboration
+    lifecycleStage: session-init
+    source: assets/prompt-templates/mcp-tools.md
+    sourceType: template
+    trigger: "options?.mcpAvailable === true (Claude cats only)"
+    purpose: "MCP tools documentation section for native-MCP cats (Claude). Non-Claude cats use per-message HTTP callback injection instead."
+    userExplanation: "MCP 工具使用文档——告诉猫有哪些协作工具可用及其用法（仅 Claude 猫注入）"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: true
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # Dynamic Invocation Context — per-turn, buildInvocationContext()
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: D1
+    name: Identity 锚点
+    category: identity
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d1-identity-anchor.md
+    sourceType: template
+    trigger: always
+    purpose: "Identity constant pinned per invocation to survive compression"
+    userExplanation: "每轮重复注入猫的身份标识（名字 + @句柄 + 模型），防止上下文压缩后身份丢失"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F042
+
+  - id: D2
+    name: 直接消息来源
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d2-direct-message.md
+    sourceType: template
+    trigger: "directMessageFrom exists and differs from catId"
+    purpose: "A2A direct-message reply target + anti-spoofing model markers"
+    userExplanation: "告诉猫这条消息是哪只猫发来的，以及应该回复给谁"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F042
+
+  - id: D3
+    name: 同族分身提醒
+    category: identity
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d3-same-breed-warning.md
+    sourceType: template
+    trigger: "directMessageFrom has same displayName as current cat (variant collision)"
+    purpose: "Prevents identity collapse when same-breed variants hand off (e.g. opus-4.5 → opus-4.6)"
+    userExplanation: "当同族但不同版本的猫互相传球时，提醒它们是独立个体，不是彼此的旧版或新版"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: D4
+    name: 跨 thread 回复
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d4-cross-thread-reply.md
+    sourceType: template
+    trigger: "crossThreadReplyHint exists (F193 cross-post invocation)"
+    purpose: "Cross-thread reply hint with correct threadId + senderCatId for cross_post_message"
+    userExplanation: "当猫收到跨线程消息时，告诉它来源线程和发件猫，以及如何正确回复"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F193
+
+  - id: D5
+    name: 乒乓球警告
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d5-ping-pong-warning.md
+    sourceType: template
+    trigger: "pingPongWarning exists (F167 streak >= 2)"
+    purpose: "Warns cat about consecutive back-and-forth with same partner, suggests breaking pattern"
+    userExplanation: "当两只猫连续互相 @ 超过 2 轮时发出警告，建议引入第三方或收尾"
+    priority: medium
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: D6
+    name: 本次队友
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d6-teammates.md
+    sourceType: template
+    trigger: "teammates.length > 0 (multi-cat invocation)"
+    purpose: "Lists cats in current invocation with names and roles"
+    userExplanation: "列出本次被同时召唤的队友及其角色"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: D7
+    name: 模式声明
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d7-mode-serial.md  # variant: serial/parallel/solo selected at runtime
+    sourceType: template
+    trigger: always
+    purpose: "Declares current mode (serial/parallel/independent) with behavioral instructions"
+    userExplanation: "告诉猫当前运行模式：串行（注意前面猫的回复）/ 并行（独立思考）/ 独立"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: D8
+    name: A2A 球权检查
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/a2a-ball-check.md
+    sourceType: template
+    trigger: "mode !== 'parallel' && a2aEnabled"
+    purpose: "Ball ownership rules: @ = transfer, push back on contradictions, no deadlocks"
+    userExplanation: "球权规则——@ 是球权转移指令，收到矛盾信号要 push back，禁止球权死锁"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  - id: D9
+    name: 路由反馈
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d9-routing-feedback.md
+    sourceType: template
+    trigger: "mentionRoutingFeedback.items?.length > 0 (F064 mention miss)"
+    purpose: "One-shot feedback when previous @mention was not routed (not at line start)"
+    userExplanation: "提醒猫上次 @ 提及没有成功路由（可能写在了句中而非行首）"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F064
+
+  - id: D10
+    name: 思维标签
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d10-critique-tag.md
+    sourceType: template
+    trigger: "promptTags includes 'critique' (IntentParser)"
+    purpose: "Critique mode: challenges assumptions, finds flaws, proposes counterexamples"
+    userExplanation: "当检测到批判性分析意图时，引导猫用批判性思维方式回答"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: null
+
+  - id: D11
+    name: Skill 触发
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d11-skill-trigger.md
+    sourceType: template
+    trigger: "promptTags has 'skill:*' tag (F140 connector)"
+    purpose: "Signal-triggered skill suggestion hint (from F140 connector)"
+    userExplanation: "当 Signal 系统检测到相关内容时，提示猫加载对应的 skill"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F140
+
+  - id: D12
+    name: 活跃参与者
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d12-active-participant.md
+    sourceType: template
+    trigger: "activeParticipants exists and has recent activity (F042 tracking)"
+    purpose: "Shows most recently active cat in thread (excluding self)"
+    userExplanation: "显示当前线程中最近活跃的队友，帮猫决定传球给谁"
+    priority: low
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F042
+
+  - id: D13
+    name: 路由策略
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d13-routing-policy.md
+    sourceType: template
+    trigger: "routingPolicy?.v === 1 with active non-expired scopes (F042)"
+    purpose: "Thread-level routing hints: prefer/avoid specific cats for review/architecture"
+    userExplanation: "线程级路由策略——在特定场景中优先或避免某些猫（如 review 偏好）"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F042
+
+  - id: D14
+    name: SOP 阶段提示
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d14-sop-stage.md
+    sourceType: template
+    trigger: "sopStageHint exists (F073 workflow-sop)"
+    purpose: "SOP bulletin board: current stage + suggested skill to load"
+    userExplanation: "SOP 告示牌——显示当前功能处于哪个开发阶段，建议加载哪个 skill"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F073
+
+  - id: D15
+    name: Voice 模式
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d15-voice-off.md  # variant: on/off selected by Voice mode
+    sourceType: template
+    trigger: always (content varies by voiceMode state)
+    purpose: "Voice companion mode toggle: audio-first when ON, text-default when OFF"
+    userExplanation: "语音陪伴模式开关——开启时猫优先用语音回复，关闭时默认用文字"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F092
+
+  - id: D16
+    name: Bootcamp 模式
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d16-bootcamp.md
+    sourceType: template
+    trigger: "bootcampState exists (F087)"
+    purpose: "Bootcamp phase context: guides cat to onboard new CVO"
+    userExplanation: "新手训练营模式——引导猫按当前阶段帮助新用户入门"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F087
+
+  - id: D17
+    name: Guide 候选
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d17-guide-candidate.md
+    sourceType: template
+    trigger: "guideCandidate exists (F155 guide routing)"
+    purpose: "Guide candidate inline protocol for interactive guidance flows"
+    userExplanation: "引导流候选——当系统检测到适合引导的场景时，注入引导协议"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F155
+
+  - id: D18
+    name: 世界上下文
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d18-world-context.md
+    sourceType: template
+    trigger: "worldContext exists (F093 world mode)"
+    purpose: "World-building context: world state, scene, characters, canon, recent events"
+    userExplanation: "世界构建上下文——注入当前世界的状态、场景、角色、已确立设定和近期事件"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F093
+
+  - id: D19
+    name: Constitutional 知识
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d19-constitutional-knowledge.md
+    sourceType: template
+    trigger: "alwaysOnDocs exists and length > 0 (F163 always_on)"
+    purpose: "Always-on constitutional knowledge: physically injected docs (not retrieval)"
+    userExplanation: "常驻知识注入——标记为 always_on 的文档会每轮物理注入（不依赖检索）"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F163
+
+  - id: D20
+    name: Signal 文章
+    category: feature-injection
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/d20-signal-articles.md
+    sourceType: template
+    trigger: "activeSignals exists and length > 0 (F091 linked articles)"
+    purpose: "Signal articles linked to this thread with content snippets + related discussions"
+    userExplanation: "关联到当前线程的 Signal 文章——提供相关知识上下文和过往讨论"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: invocation-context
+    relatedFeature: F091
+
+  - id: D21
+    name: 传球决策树
+    category: collaboration
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/handoff-decision-tree.md
+    sourceType: template
+    trigger: "mode !== 'parallel' && a2aEnabled"
+    purpose: "Trailing handoff decision tree — maximum recency bias placement for non-Claude models"
+    userExplanation: "传球决策树（放在最末尾）——强制猫每轮结束时选择下一步：传给谁 / 等什么 / 找铲屎官"
+    priority: critical
+    safetyTier: readonly
+    transparencyTier: visible-by-default
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F167
+
+  # ═══════════════════════════════════════════════════════════════
+  # Route 拼接层 — route-serial.ts / route-parallel.ts
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: R1
+    name: Mode System Prompt
+    category: route
+    lifecycleStage: per-turn
+    source: packages/api/src/domains/cats/services/agents/routing/route-serial.ts
+    sourceType: config-driven
+    trigger: "always (per-cat fallback to default modeSystemPrompt)"
+    purpose: "Mode-specific system prompt prepended during route assembly"
+    userExplanation: "路由层注入的模式级系统提示——每种运行模式（串行/并行）有对应的系统 prompt"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: route-context
+    relatedFeature: null
+
+  - id: R2
+    name: Mode System Prompt (per-cat)
+    category: route
+    lifecycleStage: per-turn
+    source: packages/api/src/domains/cats/services/agents/routing/route-serial.ts
+    sourceType: config-driven
+    trigger: "modeSystemPromptByCat[catId] exists"
+    purpose: "Per-cat override of mode system prompt when cat needs special routing behavior"
+    userExplanation: "针对特定猫的模式 prompt 覆盖——当某只猫需要不同于默认的路由行为时使用"
+    priority: low
+    safetyTier: editable
+    transparencyTier: opt-in-view
+    governanceTier: auto-evolve
+    allowLocalOverride: false
+    disableable: true
+    consumer: route-context
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # Invocation Mutators — invoke-single-cat.ts
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: M1
+    name: Dispatch Mission Context
+    category: invocation
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/m1-dispatch-mission.md
+    sourceType: template
+    trigger: "External project dispatch (non-host project, F070)"
+    purpose: "Mission context for dispatch invocations from external projects"
+    userExplanation: "外部项目派遣时注入的任务上下文——告诉猫这次调用来自哪个项目、任务是什么"
+    priority: medium
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: F070
+
+  - id: M2
+    name: Transcript Path Hints
+    category: invocation
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/m2-transcript-hints.md
+    sourceType: template
+    trigger: "Active meeting transcript (meta.json active=true)"
+    purpose: "Injects transcript directory path hints for active audio sessions"
+    userExplanation: "活跃会议转录提示——当有进行中的语音会议时，告诉猫转录文件的位置"
+    priority: low
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: invocation-context
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # Session Continuity — SessionBootstrap.ts
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: B1
+    name: Session Bootstrap
+    category: session
+    lifecycleStage: session-init
+    source: packages/api/src/domains/cats/services/session/SessionBootstrap.ts
+    sourceType: typescript
+    trigger: "Session #2+ (first session returns null)"
+    purpose: "Session continuity bootstrap: identity, thread memory, project knowledge, previous digest"
+    userExplanation: "会话连续性引导——从第二次会话起注入身份、线程记忆、项目知识和上次摘要"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: opt-in-view
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: session-context
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # MCP Fallback — McpPromptInjector.ts
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: C1
+    name: MCP Callback Instructions
+    category: mcp-fallback
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/c1-mcp-callback.md
+    sourceType: template
+    trigger: "Native MCP unavailable AND not Antigravity provider"
+    purpose: "HTTP callback fallback for non-MCP cats: credentials, tool list, skill refs"
+    userExplanation: "MCP 回调降级方案——当猫不支持原生 MCP 时，通过 HTTP 回调提供工具能力"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: opt-in-view
+    governanceTier: human-gated
+    allowLocalOverride: true
+    disableable: false
+    consumer: mcp-fallback
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # Navigation / External — not through SystemPromptBuilder
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: N1
+    name: 导航块
+    category: navigation
+    lifecycleStage: per-turn
+    source: assets/prompt-templates/n1-navigation.md
+    sourceType: template
+    trigger: always
+    purpose: "Navigation header: baton passing context, active tasks, source ranking"
+    userExplanation: "导航块——显示球从谁传来、原始消息、真相源定位等上下文信息"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: route-context
+    relatedFeature: null
+
+  - id: N2
+    name: 对话历史增量
+    category: navigation
+    lifecycleStage: per-turn
+    source: packages/api/src/domains/cats/services/agents/routing/route-helpers.ts
+    sourceType: rule-generated
+    trigger: always
+    purpose: "Incremental conversation history assembly for context window"
+    userExplanation: "对话历史增量——组装未发送过的对话消息作为上下文"
+    priority: high
+    safetyTier: readonly
+    transparencyTier: debug-only
+    governanceTier: immutable
+    allowLocalOverride: false
+    disableable: false
+    consumer: route-context
+    relatedFeature: null
+
+  # ═══════════════════════════════════════════════════════════════
+  # External Hooks — shell scripts, not through Builder
+  # ═══════════════════════════════════════════════════════════════
+
+  - id: H1
+    name: Startup Hook 输出
+    category: hook
+    lifecycleStage: external
+    source: .claude/hooks/user-level/session-start-recall.sh
+    sourceType: hook
+    trigger: "Session start (Claude Code SessionStart event)"
+    purpose: "Session startup diagnostics: uncommitted docs, unpushed commits, untracked files, root clutter"
+    userExplanation: "开工自检——检查未提交的文档、未 push 的 commit、根目录杂物等，生成诊断通知"
+    priority: medium
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: true
+    consumer: external-hook
+    relatedFeature: null
+
+  - id: H2
+    name: PostCompact 注入
+    category: hook
+    lifecycleStage: external
+    source: .claude/hooks/user-level/
+    sourceType: hook
+    trigger: "PostCompact event (context compression)"
+    purpose: "Re-injects session digest + SOP bookmark after context window compression"
+    userExplanation: "上下文压缩后重新注入会话摘要和 SOP 书签，防止压缩导致关键信息丢失"
+    priority: high
+    safetyTier: limited-edit
+    transparencyTier: opt-in-view
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: false
+    consumer: external-hook
+    relatedFeature: null
+
+  - id: H3
+    name: Stop Hook 输出
+    category: hook
+    lifecycleStage: external
+    source: .claude/hooks/user-level/session-stop-check.sh
+    sourceType: hook
+    trigger: "Session stop (Claude Code SessionStop event)"
+    purpose: "Session closure diagnostics: validates commits and documentation status"
+    userExplanation: "退出自检——验证 commit 和文档状态。不进 model prompt，仅用于退出治理通知"
+    priority: low
+    safetyTier: editable
+    transparencyTier: visible-by-default
+    governanceTier: human-gated
+    allowLocalOverride: false
+    disableable: true
+    consumer: governance-hook
+    relatedFeature: null
+
+  # X1 (Reviewer Section) — physically removed in F237 Phase 1.
+  # buildReviewerSection() was dead code: exported but never called by any production route.
+  # Source function deletion tracked separately (SystemPromptBuilder.ts cleanup).

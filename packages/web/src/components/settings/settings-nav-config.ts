@@ -86,10 +86,10 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   },
   {
     id: 'rules',
-    label: '规则与 SOP',
+    label: '协作与规则',
     icon: 'file-text',
     color: 'var(--color-gemini-primary)',
-    description: '家规、协作 SOP 和模型提示词入口。',
+    description: '会话生命周期、注入体系、协作规则与模型指南。',
   },
   {
     id: 'notify',

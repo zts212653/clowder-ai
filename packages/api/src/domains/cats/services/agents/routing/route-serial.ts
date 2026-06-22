@@ -920,6 +920,8 @@ export async function* routeSerial(
           }
         }
 
+        /* @segment R1 — Mode System Prompt */
+        /* @segment R2 — Mode System Prompt (per-cat) */
         const catModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, catModePrompt, bootstrapContext, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);

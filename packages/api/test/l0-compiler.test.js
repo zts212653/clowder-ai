@@ -240,11 +240,12 @@ test('F231: profileDir falls back to script-path-based when cwd has no private/p
 
 // --- L0 template content guard ---
 
-test('L0 template includes limb tool quick index', () => {
-  const templatePath = resolve(import.meta.dirname, '../../../assets/system-prompts/system-prompt-l0.md');
-  const content = readFileSync(templatePath, 'utf8');
-  assert.match(content, /limb_list_available/, 'L0 template must mention limb_list_available');
-  assert.match(content, /limb_invoke/, 'L0 template must mention limb_invoke');
+test('L0 template includes limb tool quick index (via L5 segment)', () => {
+  // F237: L0 template now uses {{L5_CONTENT}} placeholder; actual content lives in l5-mcp-tools-index.md
+  const l5Path = resolve(import.meta.dirname, '../../../assets/prompt-templates/l5-mcp-tools-index.md');
+  const content = readFileSync(l5Path, 'utf8');
+  assert.match(content, /limb_list_available/, 'L5 MCP tools template must mention limb_list_available');
+  assert.match(content, /limb_invoke/, 'L5 MCP tools template must mention limb_invoke');
 });
 
 // --- AC-G10 (Phase G native L0 closure / KD-44): in-flight Promise dedup ---

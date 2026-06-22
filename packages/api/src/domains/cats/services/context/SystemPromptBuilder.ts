@@ -30,6 +30,13 @@ import type {
   ThreadRoutingPolicyV1,
 } from '../stores/ports/ThreadStore.js';
 import { loadCompiledGovernanceL0, loadCompiledGovernanceL0Sync } from './governance-l0.js';
+import {
+  loadA2aBallCheck,
+  loadHandoffDecisionTree,
+  loadMcpToolsSection,
+  loadWorkflowTriggers,
+  renderSegment,
+} from './prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
 // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is wired in
 // invoke-single-cat (mirrors F225 contextHintPrefix), NOT here. See note
@@ -293,44 +300,14 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 /**
+ * @segment S13 — MCP tools section (loaded from template)
  * Skills-as-source-of-truth: MCP tools section is minimal.
  * Full specs live in cat-cafe-skills/refs/ (rich-blocks.md, mcp-callbacks.md).
+ * Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C).
  */
-const MCP_TOOLS_SECTION = `
-MCP 工具（异步汇报；token 有效期有限）：
-
-**记忆工具：**
-- cat_cafe_search_evidence: 首选入口；depth=raw 可看消息级细节
-- cat_cafe_library_*: collection管理(list/create/rebuild/archive)
-
-**drill-down：**
-- cat_cafe_list_session_chain: 列出 session 链
-- cat_cafe_read_session_digest: 读 session 摘要
-- cat_cafe_read_session_events: 读 session 事件（raw/chat/handoff）
-- cat_cafe_read_invocation_detail: 读单次 invocation 全事件
-
-**四肢控制面（Limb — 插件/设备能力调用）：**
-- limb_list_available: 列出当前在线节点及能力（含插件提供的服务型节点）
-- limb_invoke: 调用节点能力；nodeId 从 limb_list_available 获取，不要猜
-
-**协作工具：**
-- cat_cafe_post_message: 本 thread 异步（agent-key 才传 threadId）
-- cat_cafe_cross_post_message: 跨 thread（targetCats/行首@二选一）。最小路径：list_threads → cross_post_message(threadId, targetCats, content) → get_thread_context 验证
-cat_cafe_register_pr_tracking/cat_cafe_register_issue_tracking/cat_cafe_unregister_tracking
-- cat_cafe_get_pending_mentions: @提及
-- cat_cafe_get_thread_context: thread 上下文
-- cat_cafe_list_threads: thread 摘要
-- cat_cafe_create_task: 🧶 毛线球（持久任务）
-- cat_cafe_update_task: 更新任务状态
-- cat_cafe_create_rich_block: rich block（inline）
-- cat_cafe_generate_document: 文档生成→IM投递
-- cat_cafe_get_rich_block_rules: rich block 规则
-- cat_cafe_multi_mention: 并行拉猫讨论（先搜后问）
-- cat_cafe_propose_thread: 提议新建 thread（不直接创建）。返回 proposalId，审批通过后才建；审批前不要 cross_post。可选 projectPath 定子 thread 项目归属（跨 repo 必传；无效 400）。可选 reportingMode：final-only（默认）| none | state-transitions | blocking-ack。triage→none，汇总→final-only。
-
-${RICH_BLOCK_SHORT}
-需要富呈现时优先 rich block；首次使用前先 call get_rich_block_rules。
-规范：cat-cafe-skills/refs/rich-blocks.md。`;
+function getMcpToolsSection(): string {
+  return `\n${loadMcpToolsSection({ RICH_BLOCK_SHORT })}`;
+}
 
 // --- shared-rules.md → compiled governance L0 support (#747) ---
 let _governanceDigestResolved = loadCompiledGovernanceL0Sync().content;
@@ -352,76 +329,12 @@ export function getGovernanceDigest(): string {
   return _governanceDigestResolved;
 }
 
-/** Per-breed workflow triggers: when to proactively @ other cats.
- *  Keyed by breedId so all variants of a breed share the same workflow. */
-const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部finding修完后等PR truth，不@旧reviewer。';
-
-const WORKFLOW_TRIGGERS: Record<string, string> = {
-  ragdoll: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成开发/修复 → @缅因猫 请 review',
-    '- 修完 review 意见 → @缅因猫 确认修复',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
-  ].join('\n'),
-  'maine-coon': [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成 review → @布偶猫 通知结果',
-    '- 修完 bug/feature → @布偶猫 请 review',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）',
-    '- 发现需要架构决策 → @布偶猫 征询',
-    '- Review 代码：每个发现给明确立场（放行/退回 + 理由）',
-    '- 收到 review 意见：独立判断，认为自己对就 push back（Rule 0），不全盘接受',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 接球后静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 声明 = 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行',
-    '- 只发状态迁移消息，中间产物留在代码里',
-    '- 完成任务后必须 @ 下一棒',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-  ].join('\n'),
-  siamese: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成设计/视觉资产 → 分别 @布偶猫 和 @缅因猫 请确认（每只猫各占一行）',
-    '- 遇到技术实现问题 → @布偶猫 征询',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 涉及 UI/前端验证时：通过截图产出证据',
-    '- 接球后静默执行到下一状态点（DONE / HANDOFF）',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-  ].join('\n'),
-  'golden-chinchilla': [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成开发/修复 → @缅因猫 请 review',
-    '- 修完 review 意见 → @缅因猫 确认修复',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 接球后静默执行到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 完成任务后必须 @ 下一棒',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-    '',
-    '### 金渐层家族治理（OpenCode 专属）',
-    'OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Clowder AI MCP 需避免 tool 名冲突。',
-    '`question` 工具已 deny——co-creator通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
-  ].join('\n'),
-};
+/** @segment S6 — Per-breed workflow triggers (loaded from template)
+ *  Keyed by breedId so all variants of a breed share the same workflow.
+ *  Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C). */
+function getWorkflowTriggers(): Record<string, string> {
+  return loadWorkflowTriggers();
+}
 
 /**
  * F-Ground-3: Build teammate roster table.
@@ -490,7 +403,7 @@ function buildTeammateRoster(currentCatId: CatId): string | null {
 export interface StaticIdentityOptions {
   /**
    * Whether native MCP tools are available (Claude with --mcp-config).
-   * When true, MCP_TOOLS_SECTION is included in static identity because
+   * When true, getMcpToolsSection() is included in static identity because
    * Claude's --append-system-prompt survives context compression.
    *
    * Non-Claude cats (Codex/Gemini) use HTTP callback instructions which
@@ -504,6 +417,11 @@ export interface StaticIdentityOptions {
    *   Identity (core) > Pack Masks > Governance L0 > Pack Guardrails > Pack Defaults > Workflows
    */
   packBlocks?: CompiledPackBlocks | null;
+  /**
+   * F237: When true, insert `── [SN] Name ──` markers before each segment.
+   * Used by compiled-preview to show which segment generated which content.
+   */
+  annotateSegments?: boolean;
 }
 
 /**
@@ -518,108 +436,122 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 
   const providerLabel = PROVIDER_LABELS[config.clientId] ?? config.clientId;
   const lines: string[] = [];
+  // F237: segment annotation — preview inserts `── [SN] Name ──` markers
+  const mark = options?.annotateSegments
+    ? (id: string, name: string) => {
+        lines.push(`── [${id}] ${name} ──`);
+      }
+    : (): void => {};
 
-  // Identity
+  /* @segment S1 — 身份声明 (template: s1-identity.md) */
+  mark('S1', '身份声明');
   const nameLabel = config.nickname
     ? `${config.displayName}/${config.nickname}（${config.name}）`
     : `${config.displayName}（${config.name}）`;
-  lines.push(
-    `你是 ${nameLabel}，由 ${providerLabel} 提供的 AI 猫猫。`,
-    ...(config.nickname ? [`昵称 "${config.nickname}" 的由来见 docs/stories/cat-names/。`] : []),
-    `角色：${config.roleDescription}`,
-    `性格：${config.personality}`,
-    '',
-  );
+  const nicknameOrigin = config.nickname ? `昵称 "${config.nickname}" 的由来见 docs/stories/cat-names/。\n` : '';
+  const s1 = renderSegment('S1', {
+    NAME_LABEL: nameLabel,
+    PROVIDER_LABEL: providerLabel,
+    NICKNAME_ORIGIN: nicknameOrigin,
+    ROLE_DESCRIPTION: config.roleDescription,
+    PERSONALITY: config.personality,
+  });
+  if (s1) lines.push(s1, '');
 
-  // F167 Phase E (KD-20): self-awareness — if this cat has hard restrictions,
-  // declare them inline so the cat can recognize illegitimate @-mentions and
-  // push back / retreat (instead of accepting and failing). Data-driven from
-  // cat-config.restrictions — no harness gate, the cat self-regulates.
+  /* @segment S2 — 硬限制 (template: s2-restrictions.md) */
   if (config.restrictions && config.restrictions.length > 0) {
-    lines.push(`你的硬限制：${config.restrictions.join('、')}。被 @ 做这类任务时请 push back 或退回给 @ 你的猫。`, '');
+    mark('S2', '硬限制');
+    const s2 = renderSegment('S2', { RESTRICTIONS_TEXT: config.restrictions.join('、') });
+    if (s2) lines.push(s2, '');
   }
 
-  // F129: Pack masks — role overlay (never changes core identity, see KD-3)
+  /* @segment S3 — Pack Masks (template: s3-pack-masks.md) */
   if (options?.packBlocks?.masksBlock) {
-    lines.push(options.packBlocks.masksBlock, '');
+    mark('S3', 'Pack Masks');
+    const s3 = renderSegment('S3', { PACK_MASKS_BLOCK: options.packBlocks.masksBlock });
+    if (s3) lines.push(s3, '');
   }
 
-  // A2A collaboration format (always included — cats should know how to @ even in single-cat mode)
+  /* @segment S4 — 协作格式 (template: s4-collaboration.md) */
   const { mentions: callableMentions, hasDuplicateDisplayNames, uniqueHandleExample } = buildCallableMentions(catId);
   if (callableMentions.length > 0) {
+    mark('S4', '协作格式');
     const exampleTarget = callableMentions[0]!;
-    lines.push('## 协作');
-    lines.push(`你可以 @队友: ${callableMentions.join(' / ')}`);
+    let dupHint = '';
     if (hasDuplicateDisplayNames) {
       const example = uniqueHandleExample ?? '@opus';
-      lines.push(`同族多分身时：默认 \`@显示名\`，其它用**唯一句柄**（例如 \`${example}\`）。`);
-      lines.push(`同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。`);
+      dupHint = `同族多分身时：默认 \`@显示名\`，其它用**唯一句柄**（例如 \`${example}\`）。\n同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。\n`;
     }
-    lines.push('格式：另起一行行首写 @猫名（行中无效，多猫各占一行），上文或下文写请求均可。');
-    lines.push(`[正确] ${exampleTarget}\\n请帮忙  [正确] 内容...\\n${exampleTarget}`);
-    // F167 Phase F KD-22: model 在 narrative context 会把 @句柄写句中以为会路由。
-    // 注意：parseA2AMentions 会 **剥离** markdown 前缀 (`> ` / `- ` / `* ` / `+ ` / `1. `)
-    // 再匹配，所以 `- @cat` / `> @cat` 是**合法路由**（不是陷阱）。真正的陷阱是
-    // @ 不在剥离后的行首位置——句中 / URL 内 / 任意非首字符。
-    lines.push(
-      `[错误] 句中 ${exampleTarget}（@ 不是行首也不是剥离 markdown 前缀后的首字符）· URL 内 ${exampleTarget} · 任何非行首位置的 @ 都不路由，球权掉地上。`,
-    );
-    lines.push(
-      `发前自检：我消息里想路由的 @句柄 都在"独立一行的行首"或"markdown 列表/引用前缀后的首字符"吗？URL 内 / 句中任意位置的 @ 不是路由指令。`,
-    );
-    lines.push('');
+    const s4 = renderSegment('S4', {
+      CALLABLE_MENTIONS: callableMentions.join(' / '),
+      EXAMPLE_TARGET: exampleTarget,
+      DUPLICATE_NAMES_HINT: dupHint,
+    });
+    if (s4) lines.push(s4, '');
   }
 
-  // F-Ground-3: Teammate roster — who to @ and what they're good at
+  /* @segment S5 — 队友名册 (template: s5-teammate-roster.md) */
   const rosterLines = buildTeammateRoster(catId);
   if (rosterLines) {
-    lines.push(rosterLines, '');
+    mark('S5', '队友名册');
+    const s5 = renderSegment('S5', { ROSTER_CONTENT: rosterLines });
+    if (s5) lines.push(s5, '');
   }
 
-  // Per-breed workflow triggers (fallback to catId for legacy configs without breedId)
-  const triggers = WORKFLOW_TRIGGERS[config.breedId ?? ''] ?? WORKFLOW_TRIGGERS[catId as string];
+  /* @segment S6 — 工作流触发点 */
+  const wfTriggers = getWorkflowTriggers();
+  const triggers = wfTriggers[config.breedId ?? ''] ?? wfTriggers[catId as string];
   if (triggers) {
+    mark('S6', '工作流触发点');
     lines.push(triggers, '');
   }
 
-  // F129: Pack workflow blocks (after breed workflow triggers)
+  /* @segment S7 — Pack Workflows (template: s7-pack-workflows.md) */
   const packBlocks = options?.packBlocks;
   if (packBlocks?.workflowsBlock) {
-    lines.push(packBlocks.workflowsBlock, '');
+    mark('S7', 'Pack Workflows');
+    const s7 = renderSegment('S7', { PACK_WORKFLOWS_BLOCK: packBlocks.workflowsBlock });
+    if (s7) lines.push(s7, '');
   }
 
-  // co-creator reference (session-level, not per-message)
-  // F067: Use co-creator config for name + mention handles
-  // Note: "不冒充/不编造/身份契约" folded into compiled governance L0
+  /* @segment S8 — 铲屎官引用 (template: s8-cvo-reference.md) */
+  mark('S8', '铲屎官引用');
   const coCreator = getCoCreatorConfig();
   const ccName = coCreator.name;
   const ccHandles = coCreator.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
-  lines.push(`${ccName}（co-creator/operator）。重要决策由${ccName}拍板。需要关注时行首写 ${ccHandles}。`, '');
+  const s8 = renderSegment('S8', { CC_NAME: ccName, CC_HANDLES: ccHandles });
+  if (s8) lines.push(s8, '');
 
-  // L0 Governance Digest — compiled from shared-rules.md (#747)
-  // Source of truth: cat-cafe-skills/refs/shared-rules.md (supports .local/.local-override)
-  lines.push('', getGovernanceDigest());
+  /* @segment S9 — 治理摘要 (template: s9-governance-digest.md) */
+  mark('S9', '治理摘要');
+  const s9 = renderSegment('S9', { GOVERNANCE_DIGEST: getGovernanceDigest() });
+  if (s9) lines.push('', s9);
 
-  // F129: Pack guardrails — hard constraint track (only adds strictness, never relaxes Core Rails)
+  /* @segment S10 — Pack Guardrails (template: s10-pack-guardrails.md) */
   if (packBlocks?.guardrailBlock) {
-    lines.push('', packBlocks.guardrailBlock);
+    mark('S10', 'Pack Guardrails');
+    const s10 = renderSegment('S10', { PACK_GUARDRAILS_BLOCK: packBlocks.guardrailBlock });
+    if (s10) lines.push('', s10);
   }
 
-  // F129: Pack defaults — user-overridable behavior track
+  /* @segment S11 — Pack Defaults (template: s11-pack-defaults.md) */
   if (packBlocks?.defaultsBlock) {
-    lines.push('', packBlocks.defaultsBlock);
+    mark('S11', 'Pack Defaults');
+    const s11 = renderSegment('S11', { PACK_DEFAULTS_BLOCK: packBlocks.defaultsBlock });
+    if (s11) lines.push('', s11);
   }
 
-  // F129: World driver summary (read-only, informational)
+  /* @segment S12 — World Driver (template: s12-world-driver.md) */
   if (packBlocks?.worldDriverSummary) {
-    lines.push('', packBlocks.worldDriverSummary);
+    mark('S12', 'World Driver');
+    const s12 = renderSegment('S12', { WORLD_DRIVER_SUMMARY: packBlocks.worldDriverSummary });
+    if (s12) lines.push('', s12);
   }
 
-  // MCP tools documentation — ONLY for Claude (--append-system-prompt survives compression).
-  // Non-Claude cats (Codex/Gemini) inject HTTP callback instructions per-message
-  // because their systemPrompt lives in session history and may be lost on compression.
+  /* @segment S13 — MCP 工具文档 */
   if (options?.mcpAvailable) {
-    lines.push('', MCP_TOOLS_SECTION.trim());
+    mark('S13', 'MCP 工具文档');
+    lines.push('', getMcpToolsSection().trim());
   }
 
   return lines.join('\n');
@@ -672,15 +604,17 @@ export function buildInvocationContext(context: InvocationContext): string {
     }
   })();
 
-  // F042: Identity constant — pinned per invocation to survive compression.
-  lines.push(
-    `Identity: ${config.displayName}${config.nickname ? `/${config.nickname}` : ''} (@${context.catId}, model=${runtimeModel})`,
-  );
+  /* @segment D1 — Identity 锚点 (template: d1-identity-anchor.md) */
+  const d1 = renderSegment('D1', {
+    DISPLAY_NAME: config.displayName,
+    NICKNAME_PART: config.nickname ? `/${config.nickname}` : '',
+    CAT_ID: context.catId as string,
+    RUNTIME_MODEL: runtimeModel,
+  });
+  if (d1) lines.push(d1);
 
-  // F042 + F167: A2A direct-message reply target + identity anti-spoofing.
-  // When handoff comes from a same-breed variant (same displayName, different catId),
-  // inject explicit model markers + "not-you" reminder to prevent identity collapse
-  // (e.g. opus-47 receiving from opus-default conflating itself with the 4.6 variant).
+  /* @segment D2 — 直接消息来源 (template: d2-direct-message.md) */
+  /* @segment D3 — 同族分身提醒 (template: d3-same-breed-warning.md) */
   if (context.directMessageFrom && context.directMessageFrom !== context.catId) {
     const fromConfig = getConfig(context.directMessageFrom as string);
     const fromLabel = formatHandleFreeLabel(context.directMessageFrom as string, fromConfig);
@@ -691,30 +625,32 @@ export function buildInvocationContext(context: InvocationContext): string {
         return fromConfig?.defaultModel ?? 'unknown';
       }
     })();
-    lines.push(`Direct message from ${fromLabel} [model=${fromModel}]; reply to ${fromLabel}`);
+    const d2 = renderSegment('D2', { FROM_LABEL: fromLabel, FROM_MODEL: fromModel });
+    if (d2) lines.push(d2);
     // Anti-spoofing fires only for same-breed variant handoffs (displayName collision + catId differs)
     if (fromConfig && fromConfig.displayName === config.displayName) {
       const selfVariant = config.variantLabel ?? runtimeModel;
       const fromVariant = fromConfig.variantLabel ?? fromModel;
-      lines.push(
-        `⚠️ 同族分身提醒：对方是 ${fromVariant}（model=${fromModel}），你是 ${selfVariant}（model=${runtimeModel}）——两个独立分身，不是你的旧版或新版。`,
-      );
+      const d3 = renderSegment('D3', {
+        FROM_VARIANT: fromVariant,
+        FROM_MODEL: fromModel,
+        SELF_VARIANT: selfVariant,
+        SELF_MODEL: runtimeModel,
+      });
+      if (d3) lines.push(d3);
     }
   }
 
-  // F193 AC-B2: Cross-thread reply hint.
-  // Cross-post triggered invocation (F052 sourceThreadId injected by API).
-  // Without this hint, the receiving cat sees a truncated 8-char thread
-  // string (ContextAssembler) and has no sender catId — guesses wrong how
-  // to reply. Local @ won't route back across threads.
+  /* @segment D4 — 跨 thread 回复 (template: d4-cross-thread-reply.md) */
   if (context.crossThreadReplyHint) {
     const { sourceThreadId, senderCatId, effectClass } = context.crossThreadReplyHint;
     const effectLabel = effectClass ? ` [effect: ${effectClass}]` : '';
-    lines.push(
-      `📨 来自跨线程消息（source thread: ${sourceThreadId}，发件猫: @${senderCatId}）${effectLabel}`,
-      `回复请用 cross_post_message(threadId="${sourceThreadId}", targetCats=["${senderCatId}"])`,
-      `本 thread 的 @${senderCatId} 不会路由回对方（对方 session 在另一个 thread）`,
-    );
+    const d4 = renderSegment('D4', {
+      SOURCE_THREAD: sourceThreadId,
+      SENDER_CAT: senderCatId,
+      EFFECT_LABEL: effectLabel,
+    });
+    if (d4) lines.push(d4);
     // F246 Phase B AC-B4: effect-class behavior constraints
     if (effectClass && effectClass !== 'assign_work') {
       const constraintMap: Record<string, string> = {
@@ -730,71 +666,78 @@ export function buildInvocationContext(context: InvocationContext): string {
     }
   }
 
-  // F167 L1: ping-pong streak warning — inject when this cat just received the ball
-  // in a same-pair streak >= 2 (but < 4, else it would have been blocked upstream).
+  /* @segment D5 — 乒乓球警告 (template: d5-ping-pong-warning.md) */
   if (context.pingPongWarning) {
     const otherConfig = getConfig(context.pingPongWarning.pairedWith as string);
     const otherLabel = formatHandleFreeLabel(context.pingPongWarning.pairedWith as string, otherConfig);
-    lines.push(
-      `🏓 乒乓球警告：你和 ${otherLabel} 已连续互相 @ ${context.pingPongWarning.count} 轮。思考是否真的需要再回一棒——第三方介入？收尾给co-creator？还是这轮可以不 @？再 @ 2 轮将自动熔断。`,
-    );
+    const d5 = renderSegment('D5', {
+      OTHER_LABEL: otherLabel,
+      STREAK_COUNT: String(context.pingPongWarning.count),
+    });
+    if (d5) lines.push(d5);
   }
 
-  // Teammates — only list cats actually in this invocation
+  /* @segment D6 — 本次队友 (template: d6-teammates.md) */
   if (context.teammates.length > 0) {
-    lines.push('你的队友：');
-    for (const id of context.teammates) {
-      const c = getConfig(id as string);
-      if (c) {
+    const tmList = context.teammates
+      .map((id) => {
+        const c = getConfig(id as string);
+        if (!c) return null;
         const tmName = c.nickname ? `${c.displayName}/${c.nickname}` : c.displayName;
-        lines.push(`- ${tmName}（${c.name}）：${c.roleDescription}`);
-      }
-    }
+        return `- ${tmName}（${c.name}）：${c.roleDescription}`;
+      })
+      .filter(Boolean)
+      .join('\n');
+    const d6 = renderSegment('D6', { TEAMMATES_LIST: tmList });
+    if (d6) lines.push(d6);
   }
-  // Mode context
+  /* @segment D7 — 模式声明 (templates: d7-mode-serial/parallel/solo.md) */
   if (context.mode === 'serial' && context.chainIndex != null && context.chainTotal != null) {
-    lines.push(`当前模式：你是第 ${context.chainIndex}/${context.chainTotal} 只被召唤的猫，请注意前面猫的回复。`, '');
+    const d7 = renderSegment('D7_serial', {
+      CHAIN_INDEX: String(context.chainIndex),
+      CHAIN_TOTAL: String(context.chainTotal),
+    });
+    if (d7) lines.push(d7, '');
   } else if (context.mode === 'parallel') {
-    lines.push(
-      '当前模式：并行模式——独立思考。你和队友各自独立回答同一问题，给出你自己的观点。',
-      `重要：你是 ${config.displayName}（@${context.catId}），不要复制或模仿其他猫的自我介绍。`,
-      'F167 L2: @句柄 在并行模式下无路由语义（各猫并发、无先后顺序），不要互相 @；需要提醒队友做后续动作请等串行轮再说。',
-      '',
-    );
+    const d7 = renderSegment('D7_parallel', {
+      DISPLAY_NAME: config.displayName,
+      CAT_ID: context.catId as string,
+    });
+    if (d7) lines.push(d7, '');
   } else {
-    lines.push('当前模式：独立回答。', '');
+    const d7 = renderSegment('D7_solo');
+    if (d7) lines.push(d7, '');
   }
 
+  /* @segment D8 — A2A 球权检查 (loaded from template) */
   // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
   // without considering whether a teammate needs to act next.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
-    lines.push(
-      `A2A 球权检查：@ = 球权转移（行首 @句柄，句中无效）。收到 @ 但对方说"我在动" → 矛盾，push back + 立刻接/退/升（诊断≠解决，说完不@=球还在地上）。收了球却说"你等着/你别动" → 球权死锁，禁止——做不了就退回或升级。球权只有第一人称：只能声明自己持球，不能声明别人持球——没有 @ 或 hold_ball 动作，球权就没转移。`,
-      '',
-    );
+    const d8Content = loadA2aBallCheck();
+    if (d8Content) lines.push(d8Content, '');
   }
 
-  // F064: One-shot feedback when previous @mention was not routed.
+  /* @segment D9 — 路由反馈 (template: d9-routing-feedback.md) */
   if (context.mentionRoutingFeedback && context.mentionRoutingFeedback.items?.length > 0) {
     const items = context.mentionRoutingFeedback.items.slice(0, 2).map((it) => `@${it.targetCatId}`);
-    lines.push(
-      `[路由提醒] 上次你提到了 ${items.join('、')} 但没有用行首 @ 路由。如果需要对方行动，请在行首独立一行写 @句柄。`,
-      '',
-    );
+    const d9 = renderSegment('D9', { UNROUTED_MENTIONS: items.join('、') });
+    if (d9) lines.push(d9, '');
   }
 
-  // Prompt tags
+  /* @segment D10 — 思维标签 (template: d10-critique-tag.md) */
   if (context.promptTags?.includes('critique')) {
-    lines.push('思维方式：批判性分析。挑战假设，找出漏洞，提出反例。', '');
+    const d10 = renderSegment('D10');
+    if (d10) lines.push(d10, '');
   }
 
-  // F140 Phase C: connector-triggered skill suggestion (hint, not directive)
+  /* @segment D11 — Skill 触发 (template: d11-skill-trigger.md) */
   const skillTag = context.promptTags?.find((t) => t.startsWith('skill:'));
   if (skillTag) {
-    lines.push(`⚡ Signal-triggered action → load skill: ${skillTag.slice(6)}`, '');
+    const d11 = renderSegment('D11', { SKILL_NAME: skillTag.slice(6) });
+    if (d11) lines.push(d11, '');
   }
 
-  // F042 Wave 3: Active participant hint — re-injected per-invocation, survives compression.
+  /* @segment D12 — 活跃参与者 (template: d12-active-participant.md) */
   if (context.activeParticipants && context.activeParticipants.length > 0) {
     const topActive = context.activeParticipants
       .filter((p) => p.catId !== context.catId)
@@ -802,12 +745,15 @@ export function buildInvocationContext(context: InvocationContext): string {
     if (topActive) {
       const topConfig = getConfig(topActive.catId as string);
       if (topConfig) {
-        lines.push(`最近活跃：${formatHandleFreeLabel(topActive.catId as string, topConfig)}`);
+        const d12 = renderSegment('D12', {
+          ACTIVE_LABEL: formatHandleFreeLabel(topActive.catId as string, topConfig),
+        });
+        if (d12) lines.push(d12);
       }
     }
   }
 
-  // F042: Thread routing policy hint — short, per-invocation, survives compression.
+  /* @segment D13 — 路由策略 (template: d13-routing-policy.md) */
   if (context.routingPolicy?.v === 1 && context.routingPolicy.scopes) {
     const toMention = (id: string): string => {
       const c = getConfig(id);
@@ -823,7 +769,6 @@ export function buildInvocationContext(context: InvocationContext): string {
       if (typeof rule.expiresAt === 'number' && rule.expiresAt > 0 && rule.expiresAt < Date.now()) continue;
 
       const segs: string[] = [];
-      // Defensive guard: data might be malformed from external persistence.
       const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
       const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
       const avoid = avoidList.slice(0, 3).map((id) => toMention(String(id)));
@@ -837,46 +782,51 @@ export function buildInvocationContext(context: InvocationContext): string {
     }
 
     if (parts.length > 0) {
-      lines.push(`Routing: ${parts.join('; ')}`);
+      const d13 = renderSegment('D13', { ROUTING_PARTS: parts.join('; ') });
+      if (d13) lines.push(d13);
     }
   }
 
-  // F073 P4: SOP stage hint — 告示牌 (bulletin board, not controller)
+  /* @segment D14 — SOP 阶段提示 */
+  /* (template: d14-sop-stage.md) */
   if (context.sopStageHint) {
     const { stage, suggestedSkill, suggestedSkillSource, featureId } = context.sopStageHint;
-    const sourcePart = suggestedSkillSource ? ` (${suggestedSkillSource})` : '';
-    lines.push(`SOP: ${featureId} stage=${stage} → load skill: ${suggestedSkill}${sourcePart}`);
+    const d14 = renderSegment('D14', {
+      FEATURE_ID: featureId,
+      STAGE: stage,
+      SUGGESTED_SKILL: suggestedSkill,
+      SOURCE_PART: suggestedSkillSource ? ` (${suggestedSkillSource})` : '',
+    });
+    if (d14) lines.push(d14);
   }
 
-  // F092: Voice companion mode — instruct cats to prioritize audio output
+  /* @segment D15 — Voice 模式 (templates: d15-voice-on/off.md) */
   if (context.voiceMode) {
-    lines.push(
-      'Voice Mode ON: co-creator在语音陪伴模式。',
-      '- 默认用 audio rich block；代码/表格/长内容用文字并附语音摘要',
-      '',
-    );
+    const d15 = renderSegment('D15_on');
+    if (d15) lines.push(d15, '');
   } else {
-    lines.push(
-      'Voice Mode OFF: 不强制发语音。默认用文字回复。你仍然可以发 audio rich block，但仅在co-creator明确要求语音时才发。',
-      '',
-    );
+    const d15 = renderSegment('D15_off');
+    if (d15) lines.push(d15, '');
   }
 
-  // F087: Bootcamp mode — inject phase context so cats know to guide the new operator
+  /* @segment D16 — Bootcamp 模式 (template: d16-bootcamp.md) */
   if (context.bootcampState) {
     const { phase, leadCat, selectedTaskId } = context.bootcampState;
-    const threadPart = context.threadId ? ` thread=${context.threadId}` : '';
-    const membersPart = context.bootcampMemberCount != null ? ` members=${context.bootcampMemberCount}` : '';
-    lines.push(
-      `🎓 Bootcamp Mode:${threadPart} phase=${phase}${leadCat ? ` leadCat=${leadCat}` : ''}${selectedTaskId ? ` task=${selectedTaskId}` : ''}${membersPart}`,
-      '→ Load bootcamp-guide skill and act per current phase.',
-      '',
-    );
+    const d16 = renderSegment('D16', {
+      THREAD_PART: context.threadId ? ` thread=${context.threadId}` : '',
+      PHASE: phase,
+      LEAD_CAT_PART: leadCat ? ` leadCat=${leadCat}` : '',
+      TASK_PART: selectedTaskId ? ` task=${selectedTaskId}` : '',
+      MEMBERS_PART: context.bootcampMemberCount != null ? ` members=${context.bootcampMemberCount}` : '',
+    });
+    if (d16) lines.push(d16, '');
   }
 
-  // F155: Guide candidate — inline protocol (cats don't have /Skill tool at runtime)
+  /* @segment D17 — Guide 候选 (template: d17-guide-candidate.md) */
   if (context.guideCandidate) {
-    lines.push(...buildGuidePromptLines(context.guideCandidate, context.threadId));
+    const guideLines = buildGuidePromptLines(context.guideCandidate, context.threadId);
+    const d17 = renderSegment('D17', { GUIDE_PROMPT_LINES: guideLines.join('\n') });
+    if (d17) lines.push(d17);
   }
 
   // F229: Concierge duty section — injected only for per-user concierge threads
@@ -884,80 +834,82 @@ export function buildInvocationContext(context: InvocationContext): string {
     lines.push(...buildConciergePromptLines(context.conciergeConfig, context.threadId));
   }
 
-  // F093: World context envelope — inject world state for world-building mode
+  /* @segment D18 — 世界上下文 (template: d18-world-context.md) */
   if (context.worldContext) {
     const wc = context.worldContext;
-    lines.push('');
-    lines.push(`## 🌍 World: ${wc.world.name} [${wc.world.status}]`);
-    if (wc.world.constitution) lines.push(`Constitution: ${wc.world.constitution}`);
-    lines.push(`Scene: ${wc.scene.name} [${wc.scene.status}]`);
-    if (wc.characters.length > 0) {
-      lines.push('Characters:');
-      for (const ch of wc.characters) {
-        const identity = ch.coreIdentity?.name ?? ch.characterId;
-        const drive = ch.innerDrive?.motivation ? ` — ${ch.innerDrive.motivation}` : '';
-        lines.push(`- ${identity}${drive}`);
-      }
-    }
-    if (wc.canonSummary.length > 0) {
-      lines.push('Established canon:');
-      for (const cs of wc.canonSummary) lines.push(`- ${cs.summary}`);
-    }
-    if (wc.recentEvents.length > 0) {
-      lines.push(`Recent events (${wc.recentEvents.length}):`);
-      for (const ev of wc.recentEvents.slice(-5)) {
-        lines.push(`- [${ev.type}] ${JSON.stringify(ev.payload)}`);
-      }
-    }
-    if (wc.careLoopHint) {
-      lines.push(`Care hint: ${wc.careLoopHint.trigger} → ${wc.careLoopHint.suggestion}`);
-    }
-    lines.push('');
+    const constitutionLine = wc.world.constitution ? `Constitution: ${wc.world.constitution}` : '';
+    const charsBlock =
+      wc.characters.length > 0
+        ? [
+            'Characters:',
+            ...wc.characters.map((ch) => {
+              const identity = ch.coreIdentity?.name ?? ch.characterId;
+              const drive = ch.innerDrive?.motivation ? ` — ${ch.innerDrive.motivation}` : '';
+              return `- ${identity}${drive}`;
+            }),
+          ].join('\n')
+        : '';
+    const canonBlock =
+      wc.canonSummary.length > 0
+        ? ['Established canon:', ...wc.canonSummary.map((cs) => `- ${cs.summary}`)].join('\n')
+        : '';
+    const eventsBlock =
+      wc.recentEvents.length > 0
+        ? [
+            `Recent events (${wc.recentEvents.length}):`,
+            ...wc.recentEvents.slice(-5).map((ev) => `- [${ev.type}] ${JSON.stringify(ev.payload)}`),
+          ].join('\n')
+        : '';
+    const careHintLine = wc.careLoopHint ? `Care hint: ${wc.careLoopHint.trigger} → ${wc.careLoopHint.suggestion}` : '';
+    const d18 = renderSegment('D18', {
+      WORLD_NAME: wc.world.name,
+      WORLD_STATUS: wc.world.status,
+      CONSTITUTION_LINE: constitutionLine,
+      SCENE_NAME: wc.scene.name,
+      SCENE_STATUS: wc.scene.status,
+      CHARACTERS_BLOCK: charsBlock,
+      CANON_BLOCK: canonBlock,
+      RECENT_EVENTS_BLOCK: eventsBlock,
+      CARE_HINT_LINE: careHintLine,
+    });
+    if (d18) lines.push('', d18, '');
   }
 
-  // F163 AC-A3: always_on constitutional knowledge injection (physical, not retrieval)
+  /* @segment D19 — Constitutional 知识 (template: d19-constitutional-knowledge.md) */
   if (context.alwaysOnDocs && context.alwaysOnDocs.length > 0) {
-    lines.push('');
-    lines.push('## Constitutional Knowledge (always_on)');
-    lines.push('');
-    for (const doc of context.alwaysOnDocs) {
-      lines.push(`### ${doc.title}`);
-      lines.push('');
-      lines.push(doc.summary);
-      lines.push('');
-    }
+    const docsBlock = context.alwaysOnDocs.map((doc) => `### ${doc.title}\n\n${doc.summary}`).join('\n\n');
+    const d19 = renderSegment('D19', { CONSTITUTIONAL_DOCS: docsBlock });
+    if (d19) lines.push('', d19);
   }
 
-  // F091: Active Signal articles in discussion context
+  /* @segment D20 — Signal 文章 (template: d20-signal-articles.md) */
   if (context.activeSignals && context.activeSignals.length > 0) {
-    lines.push('Signal articles linked to this thread:');
-    for (const s of context.activeSignals) {
-      lines.push(`### [${s.id}] ${s.title} (${s.source}/T${s.tier})`);
-      if (s.note) lines.push(`Note: ${s.note}`);
-      lines.push(s.contentSnippet);
-      // AC-10: Related discussions from our memory architecture (session search)
-      if (s.relatedDiscussions && s.relatedDiscussions.length > 0) {
-        lines.push('Related past discussions:');
-        for (const d of s.relatedDiscussions) {
-          lines.push(`- [session:${d.sessionId}] ${d.snippet}`);
+    const articlesBlock = context.activeSignals
+      .map((s) => {
+        const parts = [`### [${s.id}] ${s.title} (${s.source}/T${s.tier})`];
+        if (s.note) parts.push(`Note: ${s.note}`);
+        parts.push(s.contentSnippet);
+        if (s.relatedDiscussions && s.relatedDiscussions.length > 0) {
+          parts.push('Related past discussions:');
+          for (const d of s.relatedDiscussions) {
+            parts.push(`- [session:${d.sessionId}] ${d.snippet}`);
+          }
         }
-      }
-    }
+        return parts.join('\n');
+      })
+      .join('\n');
+    const d20 = renderSegment('D20', { SIGNAL_ARTICLES_BLOCK: articlesBlock });
+    if (d20) lines.push(d20);
   }
 
+  /* @segment D21 — 传球决策树 (loaded from template) */
   // F167 Phase D: Trailing anchor — decision tree, not flat three-choice.
   // @co-creator is a hard-condition exit, not the safe default (KD-19).
   // Placed at the very end for maximum recency bias (critical for non-Claude models).
   if (context.mode !== 'parallel' && context.a2aEnabled) {
-    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@co-creator';
-    lines.push(
-      '',
-      `下一棒传球决策树（本轮必选其一，缺 = 消息不完整）：先问"下一步谁能做"——`,
-      `1. 另一只猫能做 → @句柄（review 完→@author / 修完→@reviewer / merge 完→@愿景守护猫）`,
-      `2. 等外部条件（按 2a/2b 判断行动）。外部条件包括：**云端 codex / GitHub bot review / PR check / CI / 长 build / 外部 webhook**——这些不是本地猫，不在 roster，不可 @ 任何本地近似 proxy；CLI 要退出但还需继续也走这条。2a 无回调覆盖（如等 EYES）→ **调用 cat_cafe_hold_ball(...)** + 轮询（口头"我继续"不算）；2b 已有结构化回调且 EYES>0 → 纯事件驱动，**不调用/不续约 hold_ball**（KD-27）`,
-      `3. 只有co-creator本人才能做 → ${cc}（硬条件：不可逆操作 / 愿景级决策 / 跨猫僵局）`,
-      `${cc} 不是默认出口——先问"哪只猫能接"。反问式 ping 非法（"要不要 X？"/"同意吗？"）：有立场就自决去做（错了能回滚），没立场根本不该 @。**外部 identity（云端 xxx / GitHub bot / CI）** 永远走选项 2（按 2a/2b 判断），严禁投射成本地 @句柄。`,
-    );
+    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
+    const d21Content = loadHandoffDecisionTree({ CC_MENTION: cc });
+    if (d21Content) lines.push('', d21Content);
   }
 
   return lines.join('\n');

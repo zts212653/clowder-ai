@@ -4,7 +4,7 @@ interface SettingsSectionProps {
   title: string;
   description?: string;
   badge?: ReactNode;
-  children: ReactNode;
+  children?: ReactNode;
 }
 
 export function SettingsSection({ title, description, badge, children }: SettingsSectionProps) {
@@ -17,7 +17,7 @@ export function SettingsSection({ title, description, badge, children }: Setting
         </div>
         {badge}
       </div>
-      <div className="mt-3">{children}</div>
+      {children && <div className="mt-3">{children}</div>}
     </section>
   );
 }

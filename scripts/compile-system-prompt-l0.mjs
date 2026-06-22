@@ -2,12 +2,24 @@
 /**
  * F203 Phase B: Compile per-cat L0 string from system-prompt-l0.md template.
  *
- * Template variables (injected per invocation, not statically baked):
- *   {{IDENTITY_BLOCK}}      — catId / displayName / nickname / role / personality / restrictions
+ * 13 template variables (per-cat, per-invocation):
+ *
+ *   Static content (L-segments — from individual template files):
+ *   {{L1_CONTENT}}          — [L1] 平行世界自我意识
+ *   {{L2_CONTENT}}          — [L2] 客观性 carry-over
+ *   {{L3_CONTENT}}          — [L3] 路由规则（传球三选一 + @ 路由）
+ *   {{L4_CONTENT}}          — [L4] 五条铁律
+ *   {{L5_CONTENT}}          — [L5] MCP 工具索引
+ *   {{L6_CONTENT}}          — [L6] 能力唤醒指南
+ *   {{L7_CONTENT}}          — [L7] 协作哲学
+ *
+ *   Dynamic per-cat (≈ S-segment equivalents in non-L0 path):
+ *   {{IDENTITY_BLOCK}}      — [S1] 身份声明（name/role/personality/model）
  *   {{USER_CAPSULE}}        — per-user profile capsule (F231): owner portrait + optional primer pointer
- *   {{TEAMMATE_ROSTER}}     — table of other available cats with @mention · model · strengths · caution
- *   {{GOVERNANCE_L0}}       — compact governance block compiled from shared-rules.md
- *   {{WORKFLOW_TRIGGERS}}   — per-breed workflow triggers (ragdoll / maine-coon / siamese)
+ *   {{TEAMMATE_ROSTER}}     — [S5] 队友名册（available cats with @mention/model/strengths）
+ *   {{GOVERNANCE_L0}}       — [S9] 治理摘要（from shared-rules.md deterministic extraction）
+ *   {{WORKFLOW_TRIGGERS}}   — [S6] 工作流触发点（per-breed workflow triggers）
+ *   {{CVO_REF}}             — [S8] 铲屎官引用（co-creator name + mention handles）
  *
  * Output: string ready for `claude --system-prompt <out>` or
  * `codex exec -c 'developer_instructions=<out>'`.
@@ -19,20 +31,63 @@
  * CLI:
  *   node scripts/compile-system-prompt-l0.mjs --cat opus-47
  *
- * TODO(F203/Phase-C): WORKFLOW_TRIGGERS_INLINE is duplicated from
- * SystemPromptBuilder.ts:366. Phase C should export it from the builder
- * and delete the duplicate (P4 single source of truth).
+ * S6 workflow triggers are loaded from assets/prompt-templates/workflow-triggers.yaml
+ * with the same .cat-cafe/prompt-overlays/workflow-triggers.local.yaml overlay
+ * path as the non-native SystemPromptBuilder path.
  */
 
-import { accessSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { accessSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { getDossierRosterSummary, hasDossierEntry } from '@cat-cafe/shared/dossier';
+import YAML from 'yaml';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0.md');
+const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
+const PROMPT_OVERLAYS_DIR = resolve(findWorkspaceRoot(process.cwd()), '.cat-cafe', 'prompt-overlays');
+const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+──$/;
+
+/** L1-L7 section template files — static content extracted from the monolithic L0 template. */
+const L0_SECTION_TEMPLATES = {
+  L1_CONTENT: 'l1-parallel-world.md',
+  L2_CONTENT: 'l2-carry-over.md',
+  L3_CONTENT: 'l3-routing-rules.md',
+  L4_CONTENT: 'l4-iron-laws.md',
+  L5_CONTENT: 'l5-mcp-tools-index.md',
+  L6_CONTENT: 'l6-capability-wakeup.md',
+  L7_CONTENT: 'l7-collaboration-philosophy.md',
+};
+
+function findWorkspaceRoot(start) {
+  let dir = resolve(start);
+  while (dir !== dirname(dir)) {
+    if (existsSync(resolve(dir, 'pnpm-workspace.yaml'))) return dir;
+    dir = dirname(dir);
+  }
+  return resolve(start);
+}
+
+/**
+ * Load an L0 section template file, stripping compiler-only annotation lines.
+ * Returns the content with leading/trailing whitespace trimmed.
+ */
+function loadL0SectionTemplate(filename) {
+  const filePath = resolve(PROMPT_TEMPLATES_DIR, filename);
+  const raw = readFileSync(filePath, 'utf8');
+  return raw
+    .split('\n')
+    .filter((line) => !isCompilerAnnotationLine(line))
+    .join('\n')
+    .trim();
+}
+
+function isCompilerAnnotationLine(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith('<!--') || DISPLAY_SEGMENT_LABEL_RE.test(trimmed);
+}
 
 let _bootstrapped = false;
 // 云端 review round-2 P1: bootstrap 必须用 no-arg loadCatConfig()——
@@ -105,92 +160,51 @@ export function filterAvailableTeammates(allConfigs, currentCatId, isAvailableFn
   return Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isAvailableFn(id));
 }
 
-// TODO(F203/Phase-C): replace with `import { WORKFLOW_TRIGGERS } from
-// '@cat-cafe/api/.../SystemPromptBuilder'` once exported.
-const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部finding修完后等PR truth，不@旧reviewer。';
+function workflowTriggersBasePath(filename) {
+  return resolve(PROMPT_TEMPLATES_DIR, filename);
+}
 
-const WORKFLOW_TRIGGERS_INLINE = {
-  ragdoll: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成开发/修复 → @缅因猫 请 review',
-    '- 修完 review 意见 → @缅因猫 确认修复',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
-    '',
-    '### 布偶猫家族治理（46 hotfix 止血 F177 Phase E）',
-    'commit/PR title 含 `fix:`/`hotfix:`/`quick fix`/`minimal fix`/`band-aid`/`temp`/`workaround` → 归类 hotfix。单文件 ≤50 行 + 关键词 → 自动加 `hotfix` label。hotfix PR 必须跨猫 review（禁止 self-merge）；quality-gate 禁止作者 self-validate。2 周升级 review cron：升级正式修复 / 接受永久方案 / 已不再相关 三选一。',
-  ].join('\n'),
-  'maine-coon': [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成 review → @布偶猫 通知结果',
-    '- 修完 bug/feature → @布偶猫 请 review',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- serial/handoff 场景且需要对方行动 → @ 对应猫（parallel 模式各自独立，不互 @）',
-    '- 发现需要架构决策 → @布偶猫 征询',
-    '- Review 代码：每个发现给明确立场（放行/退回 + 理由）',
-    '- 收到 review 意见：独立判断，认为自己对就 push back（Rule 0），不全盘接受',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 接球后静默执行：收到"放行"后沉默做到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 声明 = 执行：说"我进 merge gate"必须同 turn 加载 skill 并执行',
-    '- 只发状态迁移消息，中间产物留在代码里',
-    '- 完成任务后必须 @ 下一棒',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-    '',
-    '### 缅因猫家族治理（fallback 层数检测 F177 Phase D）',
-    '同文件新增 ≥3 层 fallback (`try/catch`/`??`/`||`/`else-if`) → 坐标系自检：① 修对还是补错？② 变换消除？③ 每层为何不能去？',
-    '',
-    '### 长任务纪律',
-    '- exec_command session_id 存活 → 续 write_stdin。',
-    '- bash&/nohup/disown/setsid = 伪后台；真后台用 detached spawn + unref。',
-    '- Fire-and-forget → pid/log/exit 探针轮询。',
-  ].join('\n'),
-  siamese: [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成设计/视觉资产 → 分别 @布偶猫 和 @缅因猫 请确认（每只猫各占一行）',
-    '- 遇到技术实现问题 → @布偶猫 征询',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 涉及 UI/前端验证时：通过截图产出证据',
-    '- 接球后静默执行到下一状态点（DONE / HANDOFF）',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-    '',
-    '### 暹罗猫家族治理（创意-实现解耦 F177 Phase C）',
-    '发现问题 ≠ 动手改代码 → 记录 + handoff 执行猫（查 roster）。Edit 白名单：`designs/`/`docs/`/`assets/`/根目录 `.md`。碰 `packages/`/`src/` 必须 handoff。Dry Run Gate：暹罗猫签名 commit 改了白名单外文件 → hook 自动跑 build + test。',
-  ].join('\n'),
-  // F203 Phase I: golden-chinchilla (OpenCode) workflow — developer cat 共享
-  // ragdoll 基础流 + OpenCode 专属 OMOC 编排边界 + provider-agnostic 注意事项。
-  'golden-chinchilla': [
-    '## 工作流（主动 @ 触发点）',
-    '- 完成开发/修复 → @缅因猫 请 review',
-    '- 修完 review 意见 → @缅因猫 确认修复',
-    MERGE_GATE_SOURCE_PROVENANCE_TRIGGER,
-    '- 遇到视觉/体验问题 → @暹罗猫 征询',
-    '- Review 别人代码：每个发现给明确立场（放行/退回 + 理由）',
-    '',
-    '### 执行纪律',
-    '- 加载 Skill 后直接执行第一步（产出 > 复述）',
-    '- 接球后静默执行到下一状态迁移点（BLOCKED / REVIEW READY / DONE）',
-    '- 完成任务后必须 @ 下一棒',
-    '- 若识别到角色不匹配或方向有问题，先通知对方再执行（Rule 0）',
-    '',
-    '### 出口一问（发消息前必问）',
-    '我这条消息结尾有没有 @ 下一棒？没有 → 是真的不需要，还是我忘了？',
-    '',
-    '### 金渐层家族治理（OpenCode 专属）',
-    'OMOC Sisyphus 只编排自己的 sub-agent，不编排其他猫。opencode 原生 MCP 和 Clowder AI MCP 需避免 tool 名冲突。',
-    '`question` 工具已 deny——co-creator通过 Hub 交互，不走 OpenCode TUI 弹窗。提问用回复文本或 `cat_cafe_create_rich_block(kind=interactive)`。',
-  ].join('\n'),
-};
+function workflowTriggersOverlayPath(filename) {
+  return resolve(PROMPT_OVERLAYS_DIR, filename);
+}
+
+function parseWorkflowTriggersFile(filePath) {
+  const parsed = YAML.parse(readFileSync(filePath, 'utf-8'));
+  if (parsed == null || typeof parsed !== 'object') return {};
+
+  const result = {};
+  for (const [breed, content] of Object.entries(parsed)) {
+    if (typeof content === 'string') {
+      result[breed] = content.trimEnd();
+    }
+  }
+  return result;
+}
+
+function loadWorkflowTriggers() {
+  const basePath = workflowTriggersBasePath('workflow-triggers.yaml');
+  const localPath = workflowTriggersOverlayPath('workflow-triggers.local.yaml');
+  const effectivePath = existsSync(localPath) ? localPath : basePath;
+
+  if (!existsSync(effectivePath)) {
+    console.warn('[compile-l0] workflow-triggers.yaml not found, using empty map');
+    return {};
+  }
+
+  try {
+    return parseWorkflowTriggersFile(effectivePath);
+  } catch (err) {
+    console.warn(`[compile-l0] malformed YAML in ${effectivePath}: ${err}`);
+    if (effectivePath === localPath && existsSync(basePath)) {
+      try {
+        return parseWorkflowTriggersFile(basePath);
+      } catch {
+        console.warn('[compile-l0] base workflow-triggers.yaml also malformed, using empty map');
+      }
+    }
+    return {};
+  }
+}
 
 function buildIdentityBlock(config, runtimeModel) {
   const lines = [];
@@ -285,11 +299,12 @@ const DISPLAY_NAME_TO_BREED = {
 };
 
 function buildWorkflowTriggers(breedId, catId, displayName) {
-  const direct = WORKFLOW_TRIGGERS_INLINE[breedId] ?? WORKFLOW_TRIGGERS_INLINE[catId];
+  const workflowTriggers = loadWorkflowTriggers();
+  const direct = workflowTriggers[breedId] ?? workflowTriggers[catId];
   if (direct) return direct;
   const familyBreed = DISPLAY_NAME_TO_BREED[displayName];
-  if (familyBreed && WORKFLOW_TRIGGERS_INLINE[familyBreed]) {
-    return WORKFLOW_TRIGGERS_INLINE[familyBreed];
+  if (familyBreed && workflowTriggers[familyBreed]) {
+    return workflowTriggers[familyBreed];
   }
   return '## 工作流\n（无 per-breed 触发点配置）';
 }
@@ -433,7 +448,13 @@ export async function compileL0(options) {
     throw new Error(`compileL0: unknown catId "${catId}". Registered: ${catRegistry.getAllIds().join(', ')}`);
   }
   const config = { ...entry.config, catId };
-  const template = readFileSync(TEMPLATE_PATH, 'utf8');
+  // Strip compiler-only annotation lines from the main template (same as
+  // loadL0SectionTemplate does for L-section files). Allows rich source labels
+  // without changing the compiled output sent to the model.
+  const template = readFileSync(TEMPLATE_PATH, 'utf8')
+    .split('\n')
+    .filter((line) => !isCompilerAnnotationLine(line))
+    .join('\n');
   const governanceL0 = await _loadCompiledGovernanceL0(REPO_ROOT);
 
   // F231: resolve user capsule (profileDir > env > default 'private/profile')
@@ -443,7 +464,14 @@ export async function compileL0(options) {
   const resolvedProfileDir = profileDir ?? process.env.CAT_CAFE_PROFILE_DIR ?? resolve(REPO_ROOT, 'private/profile');
   const capsuleSection = resolveUserCapsule(resolvedProfileDir, catId);
 
-  return template
+  // Load L1-L7 section templates (static content extracted to individual files)
+  let result = template;
+  for (const [placeholder, filename] of Object.entries(L0_SECTION_TEMPLATES)) {
+    result = result.replace(`{{${placeholder}}}`, loadL0SectionTemplate(filename));
+  }
+
+  // Dynamic per-cat substitutions
+  return result
     .replace('{{IDENTITY_BLOCK}}', buildIdentityBlock(config, runtimeModel))
     .replace('{{USER_CAPSULE}}', capsuleSection)
     .replace('{{TEAMMATE_ROSTER}}', buildTeammateRoster(catId))

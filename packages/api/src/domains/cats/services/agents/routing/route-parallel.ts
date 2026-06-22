@@ -408,6 +408,8 @@ export async function* routeParallel(
           }
         }
 
+        /* @segment R1 — Mode System Prompt */
+        /* @segment R2 — Mode System Prompt (per-cat) */
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);
