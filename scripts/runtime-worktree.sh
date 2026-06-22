@@ -215,27 +215,43 @@ runtime_quick_mode() {
 
 runtime_install_can_retry_without_frozen_lockfile() {
   local log_file="$1"
+  # Kept in sync with scripts/install.ps1::Test-LockfileMismatchFailure — the
+  # Windows installer is the single source of truth for which pnpm 9 lockfile-
+  # class failures justify a `pnpm install --no-frozen-lockfile` retry. Any
+  # phrase added here MUST also be reflected in install.ps1 (and vice versa)
+  # so Linux/macOS bash and Windows PowerShell self-heal stay symmetric.
   grep -Eiq \
-    'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|frozen[- ]lockfile|lockfile.*(outdated|not up to date)' \
+    'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_BREAKING_CHANGE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|Cannot install with .frozen-lockfile|Cannot proceed .*without the lockfile|frozen[- ]lockfile|lockfile.*(outdated|not up to date|incompatible)' \
     "$log_file"
 }
 
 install_runtime_dependencies() {
   local install_log
+  local install_status
 
   info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
   # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
   # which causes pnpm to skip devDependencies and break builds.
   install_log="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-runtime-install.XXXXXX")"
+  # Wrap the pnpm pipeline in `if` so set -e + pipefail don't kill us on a
+  # non-zero exit, then capture pnpm's original exit code via ${PIPESTATUS[0]}.
+  # This preserves the caller-visible exit semantics on the non-retry path;
+  # interrupts / OOM-style failures stay distinguishable from a generic exit 1.
   if env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
     pnpm -C "$RUNTIME_DIR" install --frozen-lockfile 2>&1 | tee "$install_log"; then
+    install_status=0
+  else
+    install_status="${PIPESTATUS[0]}"
+  fi
+
+  if [ "$install_status" -eq 0 ]; then
     rm -f "$install_log"
     return 0
   fi
 
   if ! runtime_install_can_retry_without_frozen_lockfile "$install_log"; then
     rm -f "$install_log"
-    return 1
+    return "$install_status"
   fi
   rm -f "$install_log"
 
