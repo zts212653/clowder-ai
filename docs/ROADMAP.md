@@ -62,6 +62,7 @@ created: 2026-02-26
 | F202 | Plugin Framework — local discovery, config, resource activation, and schedule resources | in-progress | community @mindfn + maintainers | community [#686](https://github.com/zts212653/clowder-ai/pull/686) + [#844/#846](https://github.com/zts212653/clowder-ai/pull/846) | [F202](features/F202-plugin-framework.md) |
 | F204 | Weixin MP Publisher Plugin — 微信公众号文章发布插件 | review | community @mindfn + maintainers | community [#688](https://github.com/zts212653/clowder-ai/pull/688) | [F204](features/F204-weixin-mp-publisher-plugin.md) |
 | F205 | MediaHub Video Provider Plugins — 视频生成/分析插件 | spec | community @mindfn + maintainers | community [#689](https://github.com/zts212653/clowder-ai/pull/689) | [F205](features/F205-video-provider-plugins.md) |
+| F208 | Capability Profile Routing — 能力画像档案 + 认知路由 | spec | Ragdoll | internal | [F208](features/F208-capability-profile-routing.md) |
 | F193 | Cross-Thread Communication Unification (Phase E: 发现即投递) | in-progress | Ragdoll (Opus 4.6) | internal | [F193](features/F193-cross-thread-comm-unification.md) |
 | F210 | Gemini CLI to Antigravity CLI Migration | in-progress | Maine Coon/Maine Coon | internal | [F210](features/F210-antigravity-cli-migration.md) |
 | F219 | 核心引擎技术债盘点 + 架构演进（routeSerial 等核心调用链）| spec | Ragdoll Opus 4.8 | internal | [F219](features/F219-tech-debt-architecture-evolution.md) |
