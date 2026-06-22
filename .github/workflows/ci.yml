@@ -61,11 +61,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @cat-cafe/shared build
-      - name: Configure git identity for test sandbox
-        run: |
-          git config --global user.email "ci@clowder-ai.dev"
-          git config --global user.name "CI Runner"
       - run: pnpm --filter @cat-cafe/api run test:public
+        env:
+          GIT_AUTHOR_NAME: CI Runner
+          GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
+          GIT_COMMITTER_NAME: CI Runner
+          GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
 
   dir-size:
     name: Directory Size Guard
