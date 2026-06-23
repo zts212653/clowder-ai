@@ -87,7 +87,8 @@
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
     "check:brand-dictionary": "node --test scripts/brand-dictionary-helper.test.mjs",
-    "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs"
+    "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs",
+    "check:biome-version": "node -e \"const pkg=require('./package.json');const v=pkg.devDependencies?.['@biomejs/biome']??'?';console.log('biome lockfile version:',v)\""
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",

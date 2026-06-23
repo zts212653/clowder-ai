@@ -216,6 +216,77 @@ describe('AcpProcessPool', () => {
       resumeLease.release();
     });
 
+    test('stale lease on session-owned entry is force-released on re-acquire (#992)', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexedVariantConfig, createMockClient);
+
+      // Simulate: first acquire + rememberSession, but lease never released (zombie)
+      const lease1 = await pool.acquire(key1);
+      const ownerClient = lease1.client;
+      pool.rememberSession(key1, 'stale-sess', lease1);
+      // Do NOT release lease1 — simulates Windows console disconnect where finally never runs
+
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 1);
+
+      // Second acquire with same sessionId should recover, not throw
+      const lease2 = await pool.acquire(key1, { sessionId: 'stale-sess' });
+      assert.strictEqual(lease2.client, ownerClient, 'should reuse the same process');
+      assert.ok(lease2.client.isAlive);
+
+      // The stale lease was force-released, and a new lease was granted
+      // activeLeaseCount should be 1 (the new lease), not 2
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 1);
+
+      lease2.release();
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 0);
+    });
+
+    test('late release of stale lease does not corrupt new lease (#992 P1)', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(
+        { ...defaultPoolConfig, idleTtlMs: 20, healthCheckIntervalMs: 999_999 },
+        nonMultiplexedVariantConfig,
+        createMockClient,
+      );
+
+      // Step 1: acquire lease1, remember session, don't release (zombie)
+      const lease1 = await pool.acquire(key1);
+      const ownerClient = lease1.client;
+      pool.rememberSession(key1, 'late-sess', lease1);
+
+      // Step 2: re-acquire same session → force-release recovery
+      const lease2 = await pool.acquire(key1, { sessionId: 'late-sess' });
+      assert.strictEqual(lease2.client, ownerClient);
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 1);
+
+      // Step 3: old lease1.release() arrives late (async generator finally fires)
+      lease1.release();
+
+      // Invariants that must hold after late release:
+      // - new lease2 is still active (not corrupted)
+      assert.ok(lease2.client.isAlive, 'new lease client must still be alive');
+      // - activeLeaseCount must not go negative
+      assert.ok(pool.getMetrics().activeLeaseCount >= 0, 'activeLeaseCount must not go negative');
+      // - activeLeaseCount should still be 1 (lease2 is active, lease1's release was stale)
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 1, 'late stale release must be no-op');
+      // - idleProcessCount must not go negative
+      assert.ok(pool.getMetrics().idleProcessCount >= 0, 'idleProcessCount must not go negative');
+
+      // Step 4: wait past idle TTL — process must NOT be evicted while lease2 is active
+      await new Promise((r) => setTimeout(r, 50));
+      assert.ok(lease2.client.isAlive, 'lease2 client must survive idle TTL');
+      assert.strictEqual(pool.getMetrics().liveProcessCount, 1);
+
+      // Step 5: normal release of lease2 should work correctly
+      lease2.release();
+      assert.strictEqual(pool.getMetrics().activeLeaseCount, 0);
+      assert.strictEqual(pool.getMetrics().idleProcessCount, 1);
+    });
+
     test('double release is safe (no-op)', async () => {
       const { AcpProcessPool } = await import(
         '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'

@@ -21,6 +21,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import {
   type CapabilityWriteRouteError,
   requireCapabilityWriteOwner,
+  requireLocalCapabilityWriteRequest,
 } from '../config/capabilities/capability-write-guards.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { isOriginAllowed, PRIVATE_NETWORK_ORIGIN, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
@@ -70,6 +71,11 @@ function resolvePluginIconMime(filePath: string): string | null {
 }
 
 function requirePluginWriteAccess(request: FastifyRequest): CapabilityWriteRouteError | null {
+  // Layer 1: Loopback guard — reject non-localhost and proxy-forwarded requests (#794 pattern).
+  const localError = requireLocalCapabilityWriteRequest(request);
+  if (localError) return localError;
+
+  // Layer 2: Session authentication.
   const userId = resolveSessionUserId(request);
   if (!userId) {
     return { status: 401, error: 'Plugin writes require session authentication' };
@@ -80,13 +86,16 @@ function requirePluginWriteAccess(request: FastifyRequest): CapabilityWriteRoute
     return { status: 403, error: 'Connector plugin writes require same-origin Hub access' };
   }
 
-  return requireCapabilityWriteOwner(userId, {
-    requireConfiguredOwner: true,
-    missingOwnerError: 'Connector plugin writes require DEFAULT_OWNER_USER_ID to be configured',
-  });
+  // Layer 3: Owner gate — fall through in single-user mode (#794 pattern, #995 fix).
+  return requireCapabilityWriteOwner(userId, { allowMissingOwner: true });
 }
 
 function requirePluginListAccess(request: FastifyRequest): CapabilityWriteRouteError | null {
+  // Layer 1: Loopback guard — plugin metadata is reconnaissance-sensitive (#794 pattern).
+  const localError = requireLocalCapabilityWriteRequest(request);
+  if (localError) return localError;
+
+  // Layer 2: Session authentication.
   const userId = resolveSessionUserId(request);
   if (!userId) {
     return { status: 401, error: 'Plugin listing requires session authentication' };
@@ -97,10 +106,8 @@ function requirePluginListAccess(request: FastifyRequest): CapabilityWriteRouteE
     return { status: 403, error: 'Connector plugin listing requires same-origin Hub access' };
   }
 
-  return requireCapabilityWriteOwner(userId, {
-    requireConfiguredOwner: true,
-    missingOwnerError: 'Connector plugin listing requires DEFAULT_OWNER_USER_ID to be configured',
-  });
+  // Layer 3: Owner gate — fall through in single-user mode (#794 pattern, #995 fix).
+  return requireCapabilityWriteOwner(userId, { allowMissingOwner: true });
 }
 
 function toPublicPluginMeta(plugins: ReturnType<typeof listInstalledPlugins>) {

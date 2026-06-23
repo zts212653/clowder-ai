@@ -245,7 +245,7 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
     assert.equal(threadStore._createCalls.length, 0, 'legacy repair must not create another thread');
   });
 
-  it('delivers routing audit when legacy repair feedback is otherwise filtered', async () => {
+  it('delivers routing audit alongside OWNER feedback (#1002: no longer filtered)', async () => {
     const { createReviewFeedbackTaskSpec } = await import('../../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
     const task = mockTask(
       { repoFullName: 'owner/repo', prNumber: 48, catId: 'opus', threadId: 'thread_rotated_1', userId: 'u-1' },
@@ -303,10 +303,12 @@ describe('#949 / F140: review feedback returns to the registered thread', () => 
       previousThreadId: 'thread_rotated_1',
       repairedThreadId: 'th-original',
     });
-    assert.deepEqual(calls[0].signal.newComments, [], 'filtered feedback should not be reintroduced');
+    // #1002: OWNER comments are now delivered (decideDelivery removed)
+    assert.equal(calls[0].signal.newComments.length, 1, 'OWNER comment must be delivered (#1002)');
+    assert.equal(calls[0].signal.newComments[0].id, 34);
     assert.equal(calls[0].tracking.threadId, 'th-original');
     const cursorPatch = store._patchCalls.find((call) => call.patch.review?.lastCommentCursor !== undefined);
-    assert.ok(cursorPatch, 'audit delivery should still commit the filtered feedback cursor');
+    assert.ok(cursorPatch, 'cursor must advance past delivered comment');
     assert.equal(cursorPatch.patch.review.lastCommentCursor, 34);
   });
 
