@@ -58,6 +58,20 @@ describe('account-resolver (4b unified runtime resolution)', () => {
     return writeFile(join(projectRoot, '.cat-cafe', 'credentials.json'), JSON.stringify(creds, null, 2), 'utf-8');
   }
 
+  it('providerRequiresThreadWorkspace: only OpenCode requires a thread workspace (provider-level capability, not hardcoded in invocation layer)', async () => {
+    const { providerRequiresThreadWorkspace } = await import(`../dist/config/account-resolver.js?t=${Date.now()}-rtw`);
+    // OpenCode resolves project files relative to cwd and has no silent fallback like
+    // Claude/Codex — without a validated workspace it would inherit the runtime cwd.
+    assert.equal(providerRequiresThreadWorkspace('opencode'), true);
+    // Providers with their own cwd sources / silent fallback must NOT be forced.
+    assert.equal(providerRequiresThreadWorkspace('anthropic'), false);
+    assert.equal(providerRequiresThreadWorkspace('openai'), false);
+    assert.equal(providerRequiresThreadWorkspace('google'), false);
+    assert.equal(providerRequiresThreadWorkspace('kimi'), false);
+    // Unknown / undefined provider must default to false (no surprise hard-fail).
+    assert.equal(providerRequiresThreadWorkspace(undefined), false);
+  });
+
   it('resolveByAccountRef returns RuntimeProviderProfile from accounts + credentials', async () => {
     const { resolveByAccountRef } = await import(`../dist/config/account-resolver.js?t=${Date.now()}`);
     await writeCatalog({

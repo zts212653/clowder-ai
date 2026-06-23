@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test';
 
 const {
   validateProjectPath,
+  validateProjectPathDetailed,
   isUnderAllowedRoot,
   getAllowedRoots,
   getDefaultDeniedRoots,
@@ -125,6 +126,25 @@ describe('validateProjectPath', () => {
   it('returns null for nonexistent path', async () => {
     const result = await validateProjectPath('/nonexistent/path/xxx');
     assert.strictEqual(result, null);
+  });
+
+  it('classifies transient filesystem errors separately from invalid paths', async () => {
+    const result = await validateProjectPathDetailed('/tmp/project', {
+      realpath: async () => {
+        const err = new Error('disk not ready');
+        err.code = 'EIO';
+        throw err;
+      },
+      stat: async () => {
+        throw new Error('stat should not be reached');
+      },
+    });
+
+    assert.deepStrictEqual(result, {
+      ok: false,
+      reason: 'io_error',
+      message: 'disk not ready',
+    });
   });
 
   it('returns null for denied system path', async () => {
