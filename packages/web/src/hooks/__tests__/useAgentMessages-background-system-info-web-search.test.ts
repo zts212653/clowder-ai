@@ -566,6 +566,126 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
   });
 });
 
+// #966: provider_capability background handler — mirror of foreground handler.
+// Without this handler, kimi invocations in background threads surface raw-JSON bubbles.
+describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
+  it('consumes provider_capability silently (no raw JSON bubble)', () => {
+    const options = createMockOptions();
+    const msg = {
+      type: 'system_info',
+      catId: 'kimi',
+      threadId: 'thread-bg',
+      content: JSON.stringify({
+        type: 'provider_capability',
+        capability: 'thinking',
+        status: 'unavailable',
+        provider: 'kimi',
+        reason: 'kimi-cli 本次流式输出未提供可解析的 think/reasoning 内容',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
+    expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith('thread-bg', 'kimi', {
+      providerCapabilities: {
+        thinking: expect.objectContaining({
+          status: 'unavailable',
+          provider: 'kimi',
+          reason: expect.any(String),
+        }),
+      },
+    });
+  });
+
+  it('merges multiple capabilities without clobbering (read-merge-write)', () => {
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [],
+        catStatuses: {},
+        catInvocations: {
+          kimi: {
+            providerCapabilities: {
+              thinking: { status: 'unavailable', provider: 'kimi', reason: 'n/a', receivedAt: 1000 },
+            },
+          },
+        },
+      })),
+    });
+    const msg = {
+      type: 'system_info',
+      catId: 'kimi',
+      threadId: 'thread-bg',
+      content: JSON.stringify({
+        type: 'provider_capability',
+        capability: 'image_input',
+        status: 'limited',
+        provider: 'kimi',
+        reason: 'max 4 images',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    const call = vi.mocked(options.store.setThreadCatInvocation).mock.calls[0];
+    expect(call?.[2]?.providerCapabilities).toMatchObject({
+      thinking: { status: 'unavailable' },
+      image_input: { status: 'limited', provider: 'kimi' },
+    });
+  });
+
+  it('coerces unknown status to unavailable', () => {
+    const options = createMockOptions();
+    const msg = {
+      type: 'system_info',
+      catId: 'kimi',
+      threadId: 'thread-bg',
+      content: JSON.stringify({
+        type: 'provider_capability',
+        capability: 'thinking',
+        status: 'bogus',
+        provider: 'kimi',
+        reason: '',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    const call = vi.mocked(options.store.setThreadCatInvocation).mock.calls[0];
+    expect(call?.[2]?.providerCapabilities?.thinking?.status).toBe('unavailable');
+  });
+
+  it('uses msg.catId fallback when parsed.catId is empty string', () => {
+    const options = createMockOptions();
+    const msg = {
+      type: 'system_info',
+      catId: 'kimi',
+      threadId: 'thread-bg',
+      content: JSON.stringify({
+        type: 'provider_capability',
+        catId: '',
+        capability: 'thinking',
+        status: 'unavailable',
+        provider: 'kimi',
+        reason: '',
+      }),
+      timestamp: Date.now(),
+    };
+
+    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(result.consumed).toBe(true);
+    // Should use msg.catId='kimi' because parsed.catId='' is falsy with ||
+    expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith('thread-bg', 'kimi', expect.any(Object));
+  });
+});
+
 describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
   it('converts warning JSON to readable text (not raw JSON bubble)', () => {
     const options = createMockOptions();

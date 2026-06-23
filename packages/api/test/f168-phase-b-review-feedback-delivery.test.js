@@ -1,15 +1,13 @@
 /**
- * F168 Phase B — R2-P1-A: ReviewFeedbackTaskSpec delivery policy tests
+ * F168 Phase B — ReviewFeedbackTaskSpec delivery policy tests
  *
- * Verifies that decideDelivery() is called in ReviewFeedbackTaskSpec for both
- * PR review decisions and inline/conversation comments — OWNER/MEMBER activity
- * must be silent-logged (not routed to owner thread).
+ * #1002 fix: decideDelivery() removed from ReviewFeedbackTaskSpec. PR review
+ * tracking is opt-in (cat explicitly registered), so ALL reviewer feedback
+ * should be delivered regardless of authorAssociation. The existing
+ * isEchoComment + isNoiseComment + isEchoReview filters are sufficient.
  *
- * R2 finding: ReviewFeedbackTaskSpec routes ALL reviews/comments to workItems
- * unconditionally; OWNER/MEMBER maintainer activity still wakes the owner,
- * violating F168 Phase B's awaiting_external suppression spec.
- *
- * RED tests written first; GREEN after implementation.
+ * Previously (R2-P1-A), OWNER/MEMBER reviews were silent-logged — this was
+ * wrong because it caused maintainer reviews to be silently dropped (#1002).
  */
 
 import assert from 'node:assert/strict';
@@ -98,15 +96,15 @@ async function runGate(spec) {
 // Tests: delivery policy in ReviewFeedbackTaskSpec
 // ---------------------------------------------------------------------------
 
-describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
-  it('OWNER review decision is filtered (silent-logged) and NOT routed', async () => {
+describe('ReviewFeedbackTaskSpec: delivery policy — #1002 fix', () => {
+  it('OWNER review decision IS delivered (#1002: decideDelivery removed)', async () => {
     assert.ok(createReviewFeedbackTaskSpec, 'module must be importable');
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
     const router = makeReviewFeedbackRouter();
 
     const decisions = [
-      // External reviewer — should be delivered
+      // External reviewer — delivered
       {
         id: 101,
         author: 'external-reviewer',
@@ -115,7 +113,7 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
         submittedAt: '2026-01-01T00:00:00Z',
         authorAssociation: 'CONTRIBUTOR',
       },
-      // Repo owner reviewing own PR — should be silent-logged
+      // Repo owner reviewing — now also delivered (#1002)
       {
         id: 102,
         author: 'repo-owner',
@@ -137,20 +135,20 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
 
     const gate = await runGate(spec);
 
-    assert.strictEqual(gate.run, true, 'gate should run — CONTRIBUTOR review is deliverable');
+    assert.strictEqual(gate.run, true, 'gate should run — both reviews are deliverable');
     const decisionIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
     assert.ok(decisionIds.includes(101), 'CONTRIBUTOR review (id=101) must be in work items');
-    assert.ok(!decisionIds.includes(102), 'OWNER review (id=102) must be silent-logged, not delivered');
+    assert.ok(decisionIds.includes(102), 'OWNER review (id=102) must be delivered (#1002 fix)');
   });
 
-  it('MEMBER inline comment is filtered (silent-logged) and NOT routed', async () => {
+  it('MEMBER inline comment IS delivered (#1002: decideDelivery removed)', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
     const router = makeReviewFeedbackRouter();
 
     const comments = [
-      // External user inline comment — should be delivered
+      // External user inline comment — delivered
       {
         id: 201,
         author: 'external-user',
@@ -159,7 +157,7 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
         commentType: 'inline',
         authorAssociation: 'NONE',
       },
-      // Org member inline comment — should be silent-logged
+      // Org member inline comment — now also delivered (#1002)
       {
         id: 202,
         author: 'org-member',
@@ -183,7 +181,7 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
 
     const commentIds = gate.workItems.flatMap((wi) => wi.signal.newComments.map((c) => c.id));
     assert.ok(commentIds.includes(201), 'external comment (id=201) must be delivered');
-    assert.ok(!commentIds.includes(202), 'MEMBER comment (id=202) must be silent-logged');
+    assert.ok(commentIds.includes(202), 'MEMBER comment (id=202) must be delivered (#1002 fix)');
   });
 
   it('undefined authorAssociation defaults to wake-owner (conservative)', async () => {
@@ -211,7 +209,7 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
     assert.ok(decisionIds.includes(301), 'review with no authorAssociation must default to wake-owner');
   });
 
-  it('mixed scenario: only external activity reaches router', async () => {
+  it('mixed scenario: ALL reviewer activity reaches router (#1002)', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makePrTask());
@@ -269,8 +267,8 @@ describe('ReviewFeedbackTaskSpec: delivery policy — R2-P1-A', () => {
     const decisionIds = gate.workItems.flatMap((wi) => wi.signal.newDecisions.map((d) => d.id));
 
     assert.ok(commentIds.includes(401), 'external comment must be delivered');
-    assert.ok(!commentIds.includes(402), 'OWNER comment must be silent-logged');
+    assert.ok(commentIds.includes(402), 'OWNER comment must be delivered (#1002 fix)');
     assert.ok(decisionIds.includes(501), 'COLLABORATOR review must be delivered');
-    assert.ok(!decisionIds.includes(502), 'MEMBER review must be silent-logged');
+    assert.ok(decisionIds.includes(502), 'MEMBER review must be delivered (#1002 fix)');
   });
 });

@@ -408,6 +408,7 @@ async function syncProjectUnlocked(
       mountRules,
       pruneMountPaths: opts.pruneMountPaths,
       preserveGlobalCascade: opts.preserveGlobalCascade,
+      existingProjectSkills: new Set(previousNames),
       newlyEnabledMountPointIds: opts.pruneMountPaths ? newlyEnabledMountPointIds : undefined,
     });
 

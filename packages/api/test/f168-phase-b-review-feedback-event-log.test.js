@@ -273,7 +273,7 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
     );
   });
 
-  it('OWNER review is still appended to event log (silent-log = still captured)', async () => {
+  it('OWNER review is appended to event log AND delivered (#1002)', async () => {
     assert.ok(createReviewFeedbackTaskSpec);
     const taskStore = makeTaskStore(makePrTask());
     const eventLog = makeEventLog({ appended: true });
@@ -303,13 +303,13 @@ describe('ReviewFeedbackTaskSpec: event log append — polling fallback (R3-P1)'
 
     const gate = await runGate(spec);
 
-    // OWNER is silent-logged: NOT in workItems (delivery filter)
+    // #1002 fix: OWNER review IS now delivered (decideDelivery removed)
     const deliveredIds = (gate.run ? (gate.workItems ?? []) : []).flatMap((wi) =>
       wi.signal.newDecisions.map((d) => d.id),
     );
-    assert.ok(!deliveredIds.includes(501), 'OWNER review must not be delivered');
+    assert.ok(deliveredIds.includes(501), 'OWNER review must be delivered (#1002 fix)');
 
-    // But IS appended to event log (state machine must see it)
+    // AND appended to event log (state machine must see it)
     const ownerAppend = eventLog.appendCalls.find((e) => e.payload?.reviewId === 501);
     assert.ok(ownerAppend, 'OWNER review must still be appended to event log');
     assert.strictEqual(ownerAppend.payload.authorAssociation, 'OWNER');

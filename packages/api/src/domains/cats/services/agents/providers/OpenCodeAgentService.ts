@@ -144,6 +144,10 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     if (options?.accountEnv) {
       for (const [k, v] of Object.entries(options.accountEnv)) childEnv[k] = v;
     }
+    // The Cat Cafe MCP workspace is authoritative in OPENCODE_CONFIG
+    // mcp.cat-cafe.environment. Do not leak stale account-level workspace env into
+    // the parent OpenCode process and let it race the invocation-scoped config.
+    delete childEnv.ALLOWED_WORKSPACE_DIRS;
     const envSummary = summarizeOpenCodeEnvForDebug(childEnv);
     const metadata: MessageMetadata = { provider: 'opencode', model: effectiveModel };
     let sessionInitEmitted = false;

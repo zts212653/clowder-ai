@@ -17,7 +17,6 @@ import {
   type Thread,
 } from '../../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../../domains/community/CommunityEventLog.js';
-import { decideDelivery } from '../../domains/community/community-delivery-policy.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -505,33 +504,18 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             const reviewFilter = opts.isEchoReview;
             // R5-P2: use safeDeliveryXxx (items up to first failure) so items after a break are
             // not notified this round — they will be retried next poll without double-notification.
+            // #1002: decideDelivery removed — it silenced OWNER/MEMBER reviews,
+            // but PR tracking is opt-in (cat explicitly registered), so ALL reviewer
+            // feedback should be delivered. isEchoComment + isNoiseComment are sufficient.
             const newComments = safeDeliveryComments.filter((c) => {
               if (commentFilter?.(c)) return false;
               if (noiseFilter?.(c)) return false;
-              // F168 Phase B: apply delivery policy — OWNER/MEMBER activity is silent-log
-              const decision = decideDelivery({
-                state: 'in_progress', // stateless function — state field not used
-                eventKind: 'pr.review_submitted',
-                authorAssociation: c.authorAssociation as
-                  | import('@cat-cafe/shared').GitHubAuthorAssociation
-                  | undefined,
-              });
-              if (decision === 'silent-log') return false;
               return true;
             });
-            const newDecisions = (
-              reviewFilter ? safeDeliveryReviews.filter((r) => !reviewFilter(r)) : safeDeliveryReviews
-            ).filter((r) => {
-              // F168 Phase B: apply delivery policy — OWNER/MEMBER review decisions are silent-log
-              const decision = decideDelivery({
-                state: 'in_progress', // stateless function — state field not used
-                eventKind: 'pr.review_submitted',
-                authorAssociation: r.authorAssociation as
-                  | import('@cat-cafe/shared').GitHubAuthorAssociation
-                  | undefined,
-              });
-              return decision !== 'silent-log';
-            });
+            // #1002: same — isEchoReview is the only filter needed for review decisions.
+            const newDecisions = reviewFilter
+              ? safeDeliveryReviews.filter((r) => !reviewFilter(r))
+              : safeDeliveryReviews;
 
             // R4-P1-B: when eventLog is configured, cap cursor advancement at the last
             // successfully projected item (maxSafeXxxCursor). Items beyond a projection

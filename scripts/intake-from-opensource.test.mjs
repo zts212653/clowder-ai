@@ -591,15 +591,17 @@ if (flag === '--classify-path') {
     assert.match(err.stdout, /fail-closed|broken.*brand-sensitive|anchor.*pet/i);
   });
 
-  it('catches public frontend port contamination in connector-gateway-bootstrap.ts', () => {
+  it('allows port 3003 in connector-gateway-bootstrap.ts (clowder-ai public port)', () => {
+    // PR #993: BRAND_EXPECTATIONS entry for connector-gateway-bootstrap.ts was
+    // disabled — 3003 is the correct public frontend port for the clowder-ai
+    // repo (not contamination). Brand guard must NOT flag it.
     const f = makeBrandFixture({
       'packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts':
         "frontendBaseUrl: deps.frontendBaseUrl ?? 'http://localhost:3003',",
     });
     fixtures.push(f.sandboxRoot);
-    const err = captureValidateFailure(f.repoRoot);
-    assert.match(err.stdout, /brand violation/i);
-    assert.match(err.stdout, /connector-gateway-bootstrap/);
+    const output = runValidate(f.repoRoot);
+    assert.match(output, /No brand violations detected/);
   });
 
   it('scopes standalone validation to local changed files in a git worktree', () => {
