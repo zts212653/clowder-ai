@@ -88,10 +88,11 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
   });
 
   it('create() returns SessionRecord with correct initial state', async () => {
-    const record = await store.create(BASE_INPUT);
+    const record = await store.create({ ...BASE_INPUT, workingDirectory: '/tmp/worktree-a' });
 
     assert.ok(record.id.length > 0);
     assert.equal(record.cliSessionId, 'cli-sess-1');
+    assert.equal(record.workingDirectory, '/tmp/worktree-a');
     assert.equal(record.threadId, 'thread-1');
     assert.equal(record.catId, 'opus');
     assert.equal(record.userId, 'user-1');
@@ -216,6 +217,19 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     const updated = await store.update(record.id, { contextHealth: health });
     assert.ok(updated);
     assert.deepEqual(updated.contextHealth, health);
+  });
+
+  it('update() stores workingDirectory', async () => {
+    const record = await store.create(BASE_INPUT);
+
+    const updated = await store.update(record.id, { workingDirectory: '/tmp/worktree-b' });
+
+    assert.ok(updated);
+    assert.equal(updated.workingDirectory, '/tmp/worktree-b');
+    const byId = await store.get(record.id);
+    assert.equal(byId.workingDirectory, '/tmp/worktree-b');
+    const byCli = await store.getByCliSessionId('cli-sess-1');
+    assert.equal(byCli.workingDirectory, '/tmp/worktree-b');
   });
 
   it('update() persists continuityCapsule across hydrated lookup paths', async () => {

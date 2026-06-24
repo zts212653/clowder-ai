@@ -17,6 +17,8 @@ export interface SessionRecord {
   readonly id: string;
   /** CLI-reported session ID (from session_init event) */
   cliSessionId: string;
+  /** Filesystem workspace that the CLI session was created for, when known. */
+  workingDirectory?: string;
   readonly threadId: string;
   readonly catId: CatId;
   readonly userId: string;

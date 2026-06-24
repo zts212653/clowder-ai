@@ -32,7 +32,8 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * KEYS[4] = cli key, KEYS[5] = chainKey index key (F198; dummy when no chainKey)
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
  * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag,
- * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
+ * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched),
+ * ARGV[9] = workingDirectory value ('' = unknown)
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
@@ -51,6 +52,9 @@ redis.call('HSET', KEYS[3],
 if ARGV[8] ~= '' then
   redis.call('HSET', KEYS[3], 'chainKey', ARGV[8])
   ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[5], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[5], ARGV[1])`}
+end
+if ARGV[9] ~= '' then
+  redis.call('HSET', KEYS[3], 'workingDirectory', ARGV[9])
 end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
@@ -112,6 +116,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
         now,
         input.reuseExistingCliSession ? '1' : '0',
         input.chainKey ?? '',
+        input.workingDirectory ?? '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -126,6 +131,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
       return {
         id: recordId,
         cliSessionId: input.cliSessionId,
+        ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
         threadId: input.threadId,
         catId: input.catId as CatId,
         userId: input.userId,
@@ -228,6 +234,9 @@ export class RedisSessionChainStore implements ISessionChainStore {
         await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id);
       }
       pairs.push('cliSessionId', patch.cliSessionId);
+    }
+    if (patch.workingDirectory !== undefined) {
+      pairs.push('workingDirectory', patch.workingDirectory);
     }
 
     if (patch.status !== undefined) {
@@ -354,6 +363,7 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return {
       id: data.id!,
       cliSessionId: data.cliSessionId!,
+      ...(data.workingDirectory ? { workingDirectory: data.workingDirectory } : {}),
       threadId: data.threadId!,
       catId: data.catId as CatId,
       userId: data.userId!,
