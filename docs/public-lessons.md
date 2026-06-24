@@ -1736,10 +1736,10 @@ created: 2026-02-26
 - 坑：宪宪给 co-creator clone `HKUDS/Vibe-Trading` 时 SSH (`git@github.com:`) 报 `Connection closed by 198.18.0.96 port 22`，co-creator 一脸懵——同机器上 gh 能用，git SSH 怎么不行。
 - 根因：本地装的代理软件（Clash / Surge / Mihomo / V2Ray 等）开了 TUN / fakeip 模式：把 github.com 解析成虚拟 IP `198.18.0.96`（属于 RFC 6815 / RFC 2544 保留的 `198.18.0.0/15` 测试网段），但代理规则只配了 443（gh / 浏览器 HTTPS），没配 22（SSH），所以 SSH 流量打到虚拟 IP 后无人接听，连接被代理软件直接断。
 - 触发条件：任何机器装了 Clash / Surge / Mihomo / V2Ray 等代理软件且开了 TUN / fakeip；尝试 `git clone git@github.com:...` 或其他基于 SSH 的远程协议（rsync over SSH、scp 等）。
-- 修复：换走 HTTPS（`gh repo clone {owner}/{repo}` 或 `git clone https://github.com/{owner}/{repo}.git`），自动复用 gh 已经配好的认证 + 代理规则。
+- 修复：换走显式 HTTPS URL—— `git clone https://github.com/{owner}/{repo}.git` 或 `gh repo clone https://github.com/{owner}/{repo}.git`。**注意**：裸 `gh repo clone {owner}/{repo}`（无 scheme）会遵循 `git_protocol` 配置，如果用户跑过 `gh auth login --git-protocol ssh` 或 `gh config set git_protocol ssh`，gh 仍会走 SSH，**还是会撞 fakeip**——必须带 scheme 或先 `gh config set git_protocol https`。
 - 防护：
   - 看到错误信息含 `Connection closed by 198.18.x.x` / `198.19.x.x` → **立即怀疑代理 fakeip**，不要从 SSH key 方向排查（错误信息形态 ≠ 真正的 SSH 鉴权失败，后者会报 `Permission denied`）
-  - `cat-cafe-skills/open-source-teardown/refs/teardown-method.md` "单次拆解流程"章节默认走 `gh repo clone`（HTTPS），把这个坑前置规避
+  - `cat-cafe-skills/open-source-teardown/refs/teardown-method.md` "单次拆解流程"章节统一用**显式 HTTPS URL**（`https://github.com/...`），不依赖 gh 的 `git_protocol` 默认值
   - 复杂场景必须 SSH 时，在代理软件 22 端口配转发规则——但这是 SOP 例外，不是默认
 - 来源锚点：thread_mqolpabeo344e8tl（co-creator 2026-06-24 gitnexus 试用对话）| cat-cafe-skills/open-source-teardown/refs/teardown-method.md（GitNexus 加速章节）
 - 原理：`198.18.0.0/15` 是 RFC 6815 / RFC 2544 保留的网络性能测试段——任何代理软件用它做 fakeip 都是有意的虚拟 IP 标记，不是真实可达的网络资源。看到这个 IP = 流量已进入代理虚拟层 = **代理规则是真相源**，不是网络/认证/防火墙。

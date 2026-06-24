@@ -72,8 +72,12 @@ gitnexus doctor
 # 1. 准备目录（不污染主仓库）
 mkdir -p ~/workspace/teardown && cd ~/workspace/teardown
 
-# 2. clone：默认走 gh（HTTPS，绕过代理 SSH fakeip 问题；见 LL-088）
-gh repo clone {owner}/{repo}
+# 2. clone：用显式 HTTPS URL，绕过代理 SSH fakeip 问题（见 LL-088）
+# ⚠️ 不要写 `gh repo clone {owner}/{repo}` —— 当用户配过 `gh config set git_protocol ssh` 或
+#   `gh auth login --git-protocol ssh` 时，gh 会回退到 SSH，还是撞 fakeip
+gh repo clone https://github.com/{owner}/{repo}.git
+# 或纯 git：
+# git clone https://github.com/{owner}/{repo}.git
 cd {repo}
 
 # 3. 索引（中等项目 1.5k 文件实测 13 秒）
