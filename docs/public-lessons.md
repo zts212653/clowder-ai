@@ -1726,3 +1726,64 @@ created: 2026-02-26
   - **code review checkpoint**：reviewer 看到 filter + selection 并存时，第一动作对照 invariant table，每个操作问"用的是全集还是可见集？"。
 - 来源锚点：PR #2477（F246 Phase D）/ opus-47 vision guardian Phase D verdict / 4 处 scope-mismatch 修复（selectAllInline/filter auto-clear/batch initial set/inlineCount）
 - 关联：feedback_plan_stateful_lifecycle_state_machine（同类 finding ≥3 轮→停回 plan 层）| feedback_grep_consumers_before_contract_change（改契约先 grep 消费方——scope-mismatch 是"引入 filter 改了'集合'语义但没 grep 所有消费方"）
+
+---
+
+### LL-088: 代理 TUN 模式下 git SSH 失败诊断（198.18.0.0/15 fakeip 段）
+- 状态：draft
+- 更新时间：2026-06-24
+
+- 坑：宪宪给 co-creator clone `HKUDS/Vibe-Trading` 时 SSH (`git@github.com:`) 报 `Connection closed by 198.18.0.96 port 22`，co-creator 一脸懵——同机器上 gh 能用，git SSH 怎么不行。
+- 根因：本地装的代理软件（Clash / Surge / Mihomo / V2Ray 等）开了 TUN / fakeip 模式：把 github.com 解析成虚拟 IP `198.18.0.96`（属于 RFC 6815 / RFC 2544 保留的 `198.18.0.0/15` 测试网段），但代理规则只配了 443（gh / 浏览器 HTTPS），没配 22（SSH），所以 SSH 流量打到虚拟 IP 后无人接听，连接被代理软件直接断。
+- 触发条件：任何机器装了 Clash / Surge / Mihomo / V2Ray 等代理软件且开了 TUN / fakeip；尝试 `git clone git@github.com:...` 或其他基于 SSH 的远程协议（rsync over SSH、scp 等）。
+- 修复：换走 HTTPS（`gh repo clone {owner}/{repo}` 或 `git clone https://github.com/{owner}/{repo}.git`），自动复用 gh 已经配好的认证 + 代理规则。
+- 防护：
+  - 看到错误信息含 `Connection closed by 198.18.x.x` / `198.19.x.x` → **立即怀疑代理 fakeip**，不要从 SSH key 方向排查（错误信息形态 ≠ 真正的 SSH 鉴权失败，后者会报 `Permission denied`）
+  - `cat-cafe-skills/open-source-teardown/refs/teardown-method.md` "单次拆解流程"章节默认走 `gh repo clone`（HTTPS），把这个坑前置规避
+  - 复杂场景必须 SSH 时，在代理软件 22 端口配转发规则——但这是 SOP 例外，不是默认
+- 来源锚点：thread_mqolpabeo344e8tl（co-creator 2026-06-24 gitnexus 试用对话）| cat-cafe-skills/open-source-teardown/refs/teardown-method.md（GitNexus 加速章节）
+- 原理：`198.18.0.0/15` 是 RFC 6815 / RFC 2544 保留的网络性能测试段——任何代理软件用它做 fakeip 都是有意的虚拟 IP 标记，不是真实可达的网络资源。看到这个 IP = 流量已进入代理虚拟层 = **代理规则是真相源**，不是网络/认证/防火墙。
+
+- 关联：LL-089（同次试用收获）/ open-source-teardown skill
+
+---
+
+### LL-089: 知识图谱可视化的"全节点渲染"反模式
+- 状态：draft
+- 更新时间：2026-06-24
+
+- 坑：co-creator 用 GitNexus Web UI 看 Vibe-Trading 的图谱（18,062 节点 / 36,198 边全部一次性渲染）的反馈是"看起来好累"——节点像紫橙粉蓝混合的星云一团乱麻，眼睛根本不知道往哪看，认知负担巨大。
+- 根因：知识图谱 / 调用图工具默认是"展示数据量"而非"传达信息"——把所有节点和边全屏渲染，等于把"图谱"误当成"用户产品"。但用户的真正诉求是"理解项目"，不是"看一堆点"。理解需要的是消化好的结论，不是原始数据。
+- 触发条件：知识图谱 / 调用图 / 依赖图 / 任何超过 100+ 节点的可视化产品；用户期待"快速理解"而非"探索数据"。
+- 修复：让 agent（猫）调用图谱的 query API，把图谱消化成"中文 / 结构化报告"再呈现给用户。这次试用宪宪用 `gitnexus context / query` 拿到的事实，写成 7 维拆解报告给 co-creator，0 认知负担。
+- 防护：
+  - 设计 / 选型涉及"图谱可视化"工具时，先问"用户是 explore 还是 understand"——后者强烈倾向走"agent 消化"路径，**工具是 agent 的眼睛，不是用户的眼睛**
+  - 把"工具默认全节点渲染"当作信号：那是给开发者 debug 用的，不是给业务用户用的
+  - `open-source-teardown` skill 的 GitNexus 章节把它定位为"猫调用的 CLI 工具"而非"用户看的 Web UI"
+- 来源锚点：thread_mqolpabeo344e8tl（co-creator 2026-06-24 试用 GitNexus 截图 / "看起来好累"反馈）
+- 原理：可视化是个 channel，不是 product。同样的数据可以走"原图"（高带宽低信息密度）或"消化后摘要"（低带宽高信息密度）两条路。**当下游是人脑，几乎总是后者赢**——人脑的瓶颈是注意力，不是带宽。
+
+- 关联：LL-088（同次试用）/ LL-090（同次试用）/ open-source-teardown skill
+
+---
+
+### LL-090: skill 设计前必先查家里同类，避免重复造轮子
+- 状态：draft
+- 更新时间：2026-06-24
+
+- 坑：宪宪和 co-creator 讨论"把 gitnexus 试用经验沉淀成 skill"时，自信地设计了一个 `github-project-dissection` skill 的大纲（步骤 / 模板 / 能力面），**没有先 `search_evidence` 查家里是否已有同类 skill**。co-creator 一句"我们好像有一个分析 github 的工具"才触发宪宪去查，发现 `cat-cafe-skills/open-source-teardown/` 早就存在——而且是个比新设计更深的版本（防营销话术 / 8 审计镜头 / 算法剥皮表）。差点造一个同义异质的重复 skill。
+- 根因：新 skill 的设计灵感来自一次成功的实践（拆 Vibe-Trading）→ 思维直接跳到"沉淀方法论"→ 跳过了"先查家里"。这是 capability-wakeup miss case：skill 是用来"放大复用"的，但前提是"知道已经存在什么"，否则会造同名异质的 skill 让 wakeup 决策更难。
+- 触发条件：任何"我刚学到一个流程，想沉淀成 skill"的瞬间；尤其当流程的关键词（如"github 拆解"、"项目分析"、"开源审计"）听起来很泛、很可能撞名时。
+- 修复：co-creator 提示 + `find cat-cafe-skills -name "*teardown*"` → 找到 `open-source-teardown` → 改方案为"把 gitnexus 用法补进现有 `refs/teardown-method.md`"而非新建 skill。
+- 防护：
+  - **skill 设计三问**（提案前必过）：
+    1. `cat_cafe_search_evidence("{skill-topic} skill", scope="docs")` 命中 0 个？
+    2. `ls cat-cafe-skills/` 没有同义名（拆解 = teardown / 分析 = analyze / 审计 = audit / 探索 = explore）？
+    3. `grep -r "{核心关键词}" cat-cafe-skills/*/SKILL.md` 没在别的 skill description 里出现？
+    三个都通过才能新建；任意一个命中 → **改造现有 skill** 默认优先
+  - 触发"沉淀成 skill"念头时，**先列同类 skill** 再给方案；不要直接画大纲
+  - "改造 > 新建" 默认偏好——除非新方法论和旧 skill 真的不同维度（不只是流程细节差异）
+- 来源锚点：thread_mqolpabeo344e8tl（"如果要沉淀 skill 可以沉淀什么"对话 2026-06-24）| cat-cafe-skills/open-source-teardown/SKILL.md（被遗漏的现有 skill）
+- 原理：skill 系统的复利来自"已存在的可信调用面"被反复使用。新建一个同义 skill = 稀释一半可信度 + 让其他猫的 capability-wakeup 决策更难。每多一个 skill，wakeup miss-rate 边际上升——这是 F192 capability-wakeup eval 已经量化的成本。**对应到第一性原理：把"放大复用"误当成"沉淀经验"——前者要求收敛到已有承载面，后者只在记忆里 dump**。
+
+- 关联：F192 capability-wakeup eval / writing-skills skill / LL-088 / LL-089
