@@ -47,7 +47,7 @@ export function AdvancedRuntimeSection({
   onCodexChange: (patch: Partial<CodexRuntimeSettings>) => void;
 }) {
   const effectiveCodexSettings = codexSettings ?? {
-    sandboxMode: 'workspace-write' as const,
+    sandboxMode: 'danger-full-access' as const,
     approvalPolicy: 'on-request' as const,
     authMode: 'oauth' as const,
   };

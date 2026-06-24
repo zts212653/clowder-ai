@@ -17,7 +17,7 @@ test('formatCliNotFoundError returns install hint for known CLI', () => {
 });
 
 test('formatCliNotFoundError returns native installer hint for agy', () => {
-  const msg = formatCliNotFoundError('agy');
+  const msg = formatCliNotFoundError('agy', 'linux');
   assert.match(msg, /agy CLI 未找到/);
   assert.match(msg, /https:\/\/antigravity\.google\/cli\/install\.sh/);
 });
@@ -124,9 +124,11 @@ test(
 
     const originalAppData = process.env.APPDATA;
     const originalLocalAppData = process.env.LOCALAPPDATA;
+    const originalPath = process.env.PATH;
     try {
       process.env.APPDATA = join(tempRoot, 'roaming');
       process.env.LOCALAPPDATA = join(tempRoot, 'local');
+      process.env.PATH = '';
       invalidateCliCommand('agy');
       const result = resolveCliCommand('agy');
       assert.equal(result, fakeAgy, 'should find official Windows AGY native binary path');
@@ -136,6 +138,43 @@ test(
       else process.env.APPDATA = originalAppData;
       if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
       else process.env.LOCALAPPDATA = originalLocalAppData;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'resolveCliCommand prefers CODEX_CLI_PATH for codex on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (Codex desktop runtime fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-codex-path-'));
+    const desktopDir = join(tempRoot, 'OpenAI', 'Codex', 'bin', 'runtime-id');
+    mkdirSync(desktopDir, { recursive: true });
+    const desktopCodex = join(desktopDir, 'codex.exe');
+    writeFileSync(desktopCodex, 'MZ', 'utf8');
+
+    const npmDir = join(tempRoot, 'npm');
+    mkdirSync(npmDir, { recursive: true });
+    const npmCodex = join(npmDir, 'codex.cmd');
+    writeFileSync(npmCodex, '@echo off\n', 'utf8');
+
+    const originalCodeCliPath = process.env.CODEX_CLI_PATH;
+    const originalAppData = process.env.APPDATA;
+    try {
+      invalidateCliCommand('codex');
+      process.env.CODEX_CLI_PATH = desktopCodex;
+      process.env.APPDATA = tempRoot;
+
+      const result = resolveCliCommand('codex');
+      assert.equal(result, desktopCodex, 'Codex cats should use the desktop runtime before npm shims');
+    } finally {
+      invalidateCliCommand('codex');
+      if (originalCodeCliPath === undefined) delete process.env.CODEX_CLI_PATH;
+      else process.env.CODEX_CLI_PATH = originalCodeCliPath;
+      if (originalAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = originalAppData;
       rmSync(tempRoot, { recursive: true, force: true });
     }
   },

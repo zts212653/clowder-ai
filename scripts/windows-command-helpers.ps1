@@ -58,15 +58,19 @@ function Get-NpmConfigPrefixCandidates {
 
 function Get-ToolCommandCandidates {
     param([string]$Name)
-    $candidates = @()
+    $preferredCandidates = @()
+    $fallbackCandidates = @()
     if ($env:APPDATA) {
-        $candidates += @((Join-Path $env:APPDATA "npm\$Name.cmd"), (Join-Path $env:APPDATA "npm\$Name.ps1"), (Join-Path $env:APPDATA "npm\$Name"))
+        $npmDir = Join-Path $env:APPDATA "npm"
+        $preferredCandidates += @((Join-Path $npmDir "$Name.cmd"), (Join-Path $npmDir $Name))
+        $fallbackCandidates += @((Join-Path $npmDir "$Name.ps1"))
     }
     if ($Name -eq "agy" -and $env:LOCALAPPDATA) {
-        $candidates += @((Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe"))
+        $preferredCandidates += @((Join-Path $env:LOCALAPPDATA "agy\bin\agy.exe"))
     }
     foreach ($npmPrefix in (Get-NpmConfigPrefixCandidates)) {
-        $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
+        $preferredCandidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix $Name))
+        $fallbackCandidates += @((Join-Path $npmPrefix "$Name.ps1"))
     }
     $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
     if ($npmCommand) {
@@ -74,7 +78,8 @@ function Get-ToolCommandCandidates {
         try {
             $npmPrefix = @(& $npmPath prefix -g 2>$null) | Select-Object -Last 1
             if ($npmPrefix -and (Test-Path $npmPrefix -ErrorAction SilentlyContinue)) {
-                $candidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix "$Name.ps1"), (Join-Path $npmPrefix $Name))
+                $preferredCandidates += @((Join-Path $npmPrefix "$Name.cmd"), (Join-Path $npmPrefix $Name))
+                $fallbackCandidates += @((Join-Path $npmPrefix "$Name.ps1"))
             }
         } catch {}
     }
@@ -83,10 +88,32 @@ function Get-ToolCommandCandidates {
         $nodePath = if ($nodeCommand.Path) { $nodeCommand.Path } else { $nodeCommand.Source }
         if ($nodePath) {
             $nodeDir = Split-Path -Parent $nodePath
-            $candidates += @((Join-Path $nodeDir "$Name.cmd"), (Join-Path $nodeDir "$Name.ps1"), (Join-Path $nodeDir $Name))
+            $preferredCandidates += @((Join-Path $nodeDir "$Name.cmd"), (Join-Path $nodeDir $Name))
+            $fallbackCandidates += @((Join-Path $nodeDir "$Name.ps1"))
         }
     }
-    return @($candidates | Where-Object { $_ } | Select-Object -Unique)
+    return @(($preferredCandidates + $fallbackCandidates) | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Resolve-WindowsCommandShim {
+    param([string]$CommandPath)
+
+    if (-not $CommandPath) { return $CommandPath }
+
+    $extension = [System.IO.Path]::GetExtension($CommandPath)
+    if ($extension -ine ".ps1") { return $CommandPath }
+
+    $directory = Split-Path -Parent $CommandPath
+    $nameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($CommandPath)
+    if (-not $directory -or -not $nameWithoutExtension) { return $CommandPath }
+
+    foreach ($shim in @((Join-Path $directory "$nameWithoutExtension.cmd"), (Join-Path $directory $nameWithoutExtension))) {
+        if (Test-Path $shim -ErrorAction SilentlyContinue) {
+            return $shim
+        }
+    }
+
+    return $CommandPath
 }
 
 function Test-ToolCommandCandidate {
@@ -112,8 +139,8 @@ function Resolve-ToolCommand {
         }
     }
     $toolCommand = Get-Command $Name -ErrorAction SilentlyContinue
-    if ($toolCommand -and $toolCommand.Path) { return $toolCommand.Path }
-    if ($toolCommand -and $toolCommand.Source) { return $toolCommand.Source }
+    if ($toolCommand -and $toolCommand.Path) { return (Resolve-WindowsCommandShim -CommandPath $toolCommand.Path) }
+    if ($toolCommand -and $toolCommand.Source) { return (Resolve-WindowsCommandShim -CommandPath $toolCommand.Source) }
     return $null
 }
 

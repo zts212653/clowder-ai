@@ -467,7 +467,7 @@ export function toCodexRuntimeSettings(config?: {
   };
 }): CodexRuntimeSettings {
   return {
-    sandboxMode: config?.cli?.codexSandboxMode ?? 'workspace-write',
+    sandboxMode: config?.cli?.codexSandboxMode ?? 'danger-full-access',
     approvalPolicy: config?.cli?.codexApprovalPolicy ?? 'on-request',
     authMode: config?.codexExecution?.authMode ?? 'oauth',
   };

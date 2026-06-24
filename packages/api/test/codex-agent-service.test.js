@@ -244,6 +244,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
     assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
     assert.ok(args.includes('--config'), 'resume args must include approval policy override');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve sandbox via config');
     assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy should be on-request');
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
   });
@@ -559,6 +560,39 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('uses env-configured sandbox as config override for resume', async () => {
+    const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+    const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
+    process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
+    process.env.CAT_CODEX_APPROVAL_POLICY = 'never';
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('configurable resume', { sessionId: 'thread-config-resume' }));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config-resume' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+      assert.ok(args.includes('sandbox_mode="read-only"'), 'resume sandbox should follow CAT_CODEX_SANDBOX_MODE');
+      assert.ok(args.includes('approval_policy="never"'), 'resume approval policy should follow env');
+    } finally {
+      if (oldSandbox === undefined) {
+        delete process.env.CAT_CODEX_SANDBOX_MODE;
+      } else {
+        process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+      }
+      if (oldApproval === undefined) {
+        delete process.env.CAT_CODEX_APPROVAL_POLICY;
+      } else {
+        process.env.CAT_CODEX_APPROVAL_POLICY = oldApproval;
+      }
+    }
+  });
+
   test('falls back to defaults for invalid sandbox/approval env values', async () => {
     const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
     const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
@@ -607,7 +641,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(args.includes('--sandbox'), 'new session must still include --sandbox');
   });
 
-  test('resume session does NOT include --add-dir (sandbox locked at creation)', async () => {
+  test('resume session does NOT include --add-dir or --sandbox flags', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
@@ -619,6 +653,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(!args.includes('--add-dir'), 'resume args must not include --add-dir');
     assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve sandbox via config');
   });
 
   test('custom provider: model passed via --config as-is', async () => {
