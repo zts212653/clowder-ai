@@ -8,7 +8,6 @@
  * PATCH /api/threads/:threadId/sessions/:catId/bind - Manual bind CLI session ID (#72)
  */
 
-import { resolve } from 'node:path';
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
@@ -23,6 +22,7 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
+import { validateProjectPathDetailed } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 const bindSessionSchema = z.object({
@@ -83,14 +83,17 @@ function buildWorkspaceFingerprint(workingDirectory: string): string {
   return process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory;
 }
 
-function buildThreadSessionWorkspaceBinding(thread: { projectPath?: string | null }, catId: CatId) {
+async function buildThreadSessionWorkspaceBinding(thread: { projectPath?: string | null }, catId: CatId) {
   const provider = catRegistry.tryGet(catId as string)?.config.clientId;
   if (!providerRequiresThreadWorkspace(provider)) return {};
 
   const projectPath = thread.projectPath;
   if (!projectPath || projectPath === 'default' || projectPath.startsWith('games/')) return {};
 
-  const workingDirectory = resolve(projectPath);
+  const validatedProjectPath = await validateProjectPathDetailed(projectPath);
+  if (!validatedProjectPath.ok) return {};
+
+  const workingDirectory = validatedProjectPath.path;
   return {
     workingDirectory,
     workspaceFingerprint: buildWorkspaceFingerprint(workingDirectory),
@@ -272,7 +275,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       }
     }
 
-    const workspaceBinding = buildThreadSessionWorkspaceBinding(thread, session.catId);
+    const workspaceBinding = await buildThreadSessionWorkspaceBinding(thread, session.catId);
     const reopened = await sessionChainStore.create({
       cliSessionId: session.cliSessionId,
       ...workspaceBinding,
@@ -352,7 +355,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return { error: 'Access denied' };
     }
 
-    const workspaceBinding = buildThreadSessionWorkspaceBinding(thread, catId as CatId);
+    const workspaceBinding = await buildThreadSessionWorkspaceBinding(thread, catId as CatId);
     let session;
     let mode: 'updated' | 'created';
 

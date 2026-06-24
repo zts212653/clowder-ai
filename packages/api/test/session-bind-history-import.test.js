@@ -1,8 +1,8 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
@@ -19,8 +19,8 @@ describe('Session bind history import', () => {
     return dir;
   }
 
-  function expectedWorkspaceBinding(projectPath) {
-    const workingDirectory = resolve(projectPath);
+  async function expectedWorkspaceBinding(projectPath) {
+    const workingDirectory = await realpath(projectPath);
     return {
       workingDirectory,
       workspaceFingerprint: process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory,
@@ -196,7 +196,7 @@ describe('Session bind history import', () => {
     try {
       const projectPath = await makeWorkspaceDir();
       const thread = await threadStore.create('user-1', 'Test', projectPath);
-      const expected = expectedWorkspaceBinding(projectPath);
+      const expected = await expectedWorkspaceBinding(projectPath);
 
       const res = await app.inject({
         method: 'PATCH',
@@ -219,12 +219,44 @@ describe('Session bind history import', () => {
     }
   });
 
+  test(
+    'manual bind canonicalizes a symlinked thread projectPath before fingerprinting',
+    { skip: process.platform === 'win32' },
+    async () => {
+      const { app, threadStore } = await buildApp();
+      try {
+        const targetPath = await makeWorkspaceDir();
+        const linkParent = await mkdtemp(join(tmpdir(), 'session-bind-link-parent-'));
+        tempDirs.push(linkParent);
+        const linkedProjectPath = join(linkParent, 'workspace-link');
+        await symlink(targetPath, linkedProjectPath, 'dir');
+        const expected = await expectedWorkspaceBinding(targetPath);
+        const thread = await threadStore.create('user-1', 'Test', linkedProjectPath);
+
+        const res = await app.inject({
+          method: 'PATCH',
+          url: `/api/threads/${thread.id}/sessions/opencode/bind`,
+          headers: { 'x-cat-cafe-user': 'user-1' },
+          payload: { cliSessionId: 'cli-manual-bind-symlink' },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const body = JSON.parse(res.payload);
+        assert.notEqual(body.session.workingDirectory, linkedProjectPath);
+        assert.equal(body.session.workingDirectory, expected.workingDirectory);
+        assert.equal(body.session.workspaceFingerprint, expected.workspaceFingerprint);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
   test('manual bind updates an existing active session with workspace metadata from the thread projectPath', async () => {
     const { app, threadStore, sessionChainStore } = await buildApp();
     try {
       const projectPath = await makeWorkspaceDir();
       const thread = await threadStore.create('user-1', 'Test', projectPath);
-      const expected = expectedWorkspaceBinding(projectPath);
+      const expected = await expectedWorkspaceBinding(projectPath);
       const active = await sessionChainStore.create({
         cliSessionId: 'cli-before-manual-bind',
         threadId: thread.id,
@@ -256,7 +288,7 @@ describe('Session bind history import', () => {
     try {
       const projectPath = await makeWorkspaceDir();
       const thread = await threadStore.create('user-1', 'Test', projectPath);
-      const expected = expectedWorkspaceBinding(projectPath);
+      const expected = await expectedWorkspaceBinding(projectPath);
       const sealed = await sessionChainStore.create({
         cliSessionId: 'cli-sealed-manual-bind',
         threadId: thread.id,
