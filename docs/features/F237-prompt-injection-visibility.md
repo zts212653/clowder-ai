@@ -269,6 +269,7 @@ Each hook is defined by a YAML manifest (registration metadata) + optional code 
 id: D5
 name: 乒乓球警告
 stage: per-turn
+order: 500                                 # execution order within stage (see below)
 version: 1
 enabled: true
 
@@ -292,6 +293,7 @@ userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 **Key properties:**
 - `id` — stable segment identifier (S1, D5, etc.), matches Phase 1 manifest
 - `stage` — which clock signal triggers this hook
+- `order` — integer, determines execution order within a stage. Lower = earlier in the compiled prompt. Built-in hooks use 100-step spacing (S1=100, S2=200, ..., D1=100, D2=200, ...) to leave room for future insertions without reordering existing hooks. The order directly maps to the current `if/push` sequence in `SystemPromptBuilder.ts` — same output order, same model behavior. Order is per-stage (session-init and per-turn each start from their own sequence). Not overridable at runtime — order is a structural property of the prompt, not a user-tunable knob
 - `version` — integer, enables v1→v2 migration without deleting v1
 - `enabled` — boolean, the Build-to-Delete toggle
 - `template` — path to content template (reuses Phase 1 extracted templates)
@@ -309,7 +311,7 @@ interface HookRegistry {
   /** Scan hook directory, parse manifests, validate, register */
   scan(): HookManifest[];
   
-  /** Get hooks for a specific stage, ordered by priority */
+  /** Get hooks for a specific stage, ascending by `order` field */
   getStageHooks(stage: HookStage): RegisteredHook[];
   
   /** Get single hook by ID */
@@ -524,7 +526,7 @@ interface TraceEventObserved extends TraceEventBase {
 **Pipeline execution per stage (Tier 1 — S/D hooks only):**
 
 ```
-for each registered hook in stage (ordered by manifest priority):
+for each registered hook in stage (ascending by `order` field):
   1. Check effective enabled (override ?? manifest) → false?
      → emit TraceEvent { status: 'disabled', disabledBy: source }
   2. If hook has resolver → call resolver.resolve(input)
