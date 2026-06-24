@@ -144,9 +144,9 @@ This pattern has served well for 52 segments, but makes several operations hard:
 
 | Operation | Current Cost | With Hook Pipeline |
 |-----------|-------------|-------------------|
-| Disable a segment | Find code, comment out, deploy | `enabled: false` in manifest |
-| Try a new version | Branch + code change + PR | Add v2 template, switch in manifest |
-| Roll back | Revert commit + deploy | Switch version pointer |
+| Disable a segment | Find code, comment out, deploy | `enabled: false` in hook.yaml, deploy |
+| Try a new version | Branch + code change + PR | Add v2 template, switch version in hook.yaml |
+| Roll back | Revert commit + deploy | Revert version in hook.yaml |
 | Know what fired | Read source + infer from logs | InjectionTrace record per turn |
 | Add a new segment | Write code + template + manifest + tests | Template + manifest entry |
 | Remove a segment | Find and delete code + template | `enabled: false`, then delete at leisure |
@@ -172,16 +172,13 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
                            │ AssemblerInput
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       HookPipeline                              │
+│              Runtime Content Pipeline (S/D only)                │
 │                                                                 │
-│  Stage 1: compile-time   L1-L7 (observe only, content via L0)  │
-│  Stage 2: session-init   S1-S13 (buildStaticIdentity hooks)    │
-│  Stage 3: per-turn       D1-D21, B1 (buildInvocationContext)   │
-│  Stage 4: client-invoke  C1, N1, R1-R2 (route assembly hooks)  │
-│  Stage 5: event-hook     H1-H3 (shell hooks — observe only)    │
+│  session-init    S1-S13  (buildStaticIdentity hooks)            │
+│  per-turn        D1-D21  (buildInvocationContext hooks)         │
 │                                                                 │
-│  Each stage: iterate registered hooks → condition → resolve     │
-│            → emit PromptPatch + TraceEvent                      │
+│  Each hook: condition → resolve → render                        │
+│           → emit PromptPatch + TraceEvent                       │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ PromptPatch[] + TraceEvent[]
                            ▼
@@ -195,28 +192,55 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
 │  missionPrefix (F070, external project dispatch)                │
 │  M2 transcriptPathHints (always appended)                       │
 └─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│              Surface Trace Adapters (observe only)               │
+│                                                                 │
+│  L1-L7    compile-time (content via L0 compiler)                │
+│  B1       session bootstrap (SessionBootstrap.ts)               │
+│  C1       MCP callback (McpPromptInjector.ts)                   │
+│  R1-R2    route assembly (route-serial/parallel.ts)             │
+│  N1       navigation (route-helpers.ts)                         │
+│  H1-H3   shell hooks (external scripts)                        │
+│                                                                 │
+│  No resolvers, no enable/disable, no versioning.                │
+│  Only emit TraceEvents for full-coverage observability.         │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### The 5 Stages Are Clock Signals, Not Extension APIs
+### Two Tiers: Runtime Content Pipeline + Surface Trace Adapters
 
-A critical design decision: stages are **clock signals** (when things happen), not **rigid extension surfaces** (what can happen). Each stage is a point in the session/turn lifecycle where registered hooks execute. The stage contract is:
+Phase 2 splits the 52 segments into two tiers with different treatment:
 
+**Tier 1 — Runtime Content Pipeline (S1-S13, D1-D21 = 34 segments)**
+
+These segments live in `SystemPromptBuilder.ts` and follow the identical `if/push` pattern. They're the ones where hook-ification delivers real value: condition → resolve → render → trace. The pipeline has two stages:
+
+| Stage | Source Function | When | Segments |
+|-------|----------------|------|----------|
+| `session-init` | `buildStaticIdentity()` | New session / re-injection / registry change | S1-S13 |
+| `per-turn` | `buildInvocationContext()` | Every invocation, before model call | D1-D21 |
+
+These are the minimal observation boundary around existing code execution points. `buildStaticIdentity()` already IS session-init; `buildInvocationContext()` already IS per-turn. The pipeline makes the implicit explicit without inventing new boundaries.
+
+Hook contract:
 - **Input**: `AssemblerInput` — typed context data gathered by ContextAssembler
-- **Output**: `PromptPatch[]` + `TraceEvent[]` — content contributions and observability records
+- **Output**: `PromptPatch` (rendered content) + `TraceEvent` (observability record)
 
-Stages don't define what hooks can do — hooks define what they do. Adding a new hook to an existing stage doesn't require a new interface. Adding a new stage (if ever needed) doesn't break existing hooks.
+**Tier 2 — Surface Trace Adapters (L1-L7, B1, C1, R1-R2, N1, H1-H3 = 18 segments)**
 
-This addresses the maintainer's concern about "pre-freezing an N-stage pipeline locks the extension surface." The stages are:
+These segments have fundamentally different execution models (compile-time, separate services, route-layer, shell scripts). They don't fit the resolver/template pattern and shouldn't be forced into it. Phase 2 provides **observe-only adapters** that emit `TraceEvent` records without managing content:
 
-| Stage | Clock Signal | When | Current Segments |
-|-------|-------------|------|-----------------|
-| `compile-time` | L0 compilation | Build / first load | L1-L7 (observe only) |
-| `session-init` | New session / re-injection | Session start or force | S1-S13 |
-| `per-turn` | Every invocation | Before model call | D1-D21, B1 |
-| `client-invoke` | Route assembly | Per-route finalization | C1, N1, R1-R2 |
-| `event-hook` | Shell hook fire | SessionStart/Stop/PostCompact | H1-H3 (observe only) |
+| Surface | Source | Adapter Role |
+|---------|--------|-------------|
+| L1-L7 | `compile-system-prompt-l0.mjs` | Record content hash + token estimate of compiled L0 sections |
+| B1 | `SessionBootstrap.ts` | Record whether bootstrap context was injected |
+| C1 | `McpPromptInjector.ts` | Record MCP callback injection (respects existing `.local` overlay) |
+| R1-R2 | `route-serial.ts` / `route-parallel.ts` | Record route-level assembly |
+| N1 | `route-helpers.ts` | Record navigation context injection |
+| H1-H3 | Shell hooks | Record hook fire/skip via existing hook health infrastructure (F180) |
 
-These 5 stages map to the existing code execution points — they're not invented abstractions. `buildStaticIdentity()` already IS `session-init`. `buildInvocationContext()` already IS `per-turn`. The pipeline makes the implicit explicit.
+Trace adapters have no resolvers, no enable/disable toggle, no versioning. They only produce `TraceEvent` — ensuring the trace record covers all 52 segments for full observability without over-abstracting non-uniform surfaces.
 
 ### HookManifest — Self-Contained Segment Definition
 
@@ -276,19 +300,28 @@ interface HookRegistry {
   /** All registered hooks */
   getAllHooks(): RegisteredHook[];
   
-  /** Runtime enable/disable (persists to manifest) */
-  setEnabled(hookId: string, enabled: boolean): void;
+  /** Effective enabled state: manifest default merged with runtime override */
+  isEnabled(hookId: string): boolean;
   
-  /** Switch active version */
-  setVersion(hookId: string, version: number): void;
+  /** Effective active version: manifest default merged with runtime override */
+  getActiveVersion(hookId: string): number;
 }
 
 interface RegisteredHook {
-  manifest: HookManifest;
-  resolver: HookResolver | null;     // null = unconditional, always fires
-  template: string;                   // raw template content
+  manifest: HookManifest;              // read-only, from repo YAML
+  resolver: HookResolver | null;       // null = unconditional, always fires
+  template: string;                    // raw template content
 }
 ```
+
+**Two-layer state model:**
+
+| Layer | Source | Mutability | Scope |
+|-------|--------|-----------|-------|
+| **Manifest** (repo) | `hook.yaml` per segment | Read-only at runtime | Default enabled/version/stage |
+| **Runtime override** (store) | Owner-gated persistent store | Write via Console (Phase 2 deferred) | Override enabled/version per hook |
+
+The repo manifest is the source of truth for defaults — it's never written at runtime. Runtime overrides (enable/disable, version switch) are stored separately in an owner-gated persistent store, following the same trust boundary as Phase 1's `.local` overlay pattern. **Phase 2 first version defers Console write UI for runtime overrides** — overrides are managed via `hook.yaml` file edits + deploy, matching the maintainer's preference for "file + git + restart" as the rollback channel. Console toggle for S/D hooks may be added in a follow-up after trust model validation.
 
 **Directory structure:**
 
@@ -364,8 +397,12 @@ interface HookResolver {
   /** 
    * Evaluate whether this hook should fire and prepare template variables.
    * Returns null if the hook should be skipped this turn.
+   * When skipping, set this.skipReason to explain why.
    */
   resolve(input: AssemblerInput): HookResolveResult | null;
+  
+  /** Human-readable reason when resolve() returns null */
+  skipReason: string;
 }
 
 interface HookResolveResult {
@@ -383,45 +420,78 @@ interface PromptPatch {
   position: 'append';        // Phase 2: append only. Future: prepend, replace
 }
 
-interface TraceEvent {
+/** Discriminated union — status determines which fields are present */
+type TraceEvent =
+  | TraceEventFired
+  | TraceEventSkipped
+  | TraceEventDisabled
+  | TraceEventObserved;
+
+interface TraceEventBase {
   hookId: string;
   stage: HookStage;
-  fired: boolean;             // did the resolver return non-null?
-  reason: string;             // why fired or skipped (e.g., "pingPongWarning present")
-  contentHash: string;        // SHA-256 of rendered content (not full text)
-  tokenEstimate: number;      // approx token count of rendered content
+  durationMs: number;        // resolver execution time (0 for disabled/observed)
+}
+
+interface TraceEventFired extends TraceEventBase {
+  status: 'fired';
   version: number;            // which version of the hook fired
-  durationMs: number;         // resolver execution time
+  contentHash: string;        // SHA-256 of rendered content
+  tokenEstimate: number;      // approx token count
+}
+
+interface TraceEventSkipped extends TraceEventBase {
+  status: 'skipped';
+  reasonCode: string;         // e.g., "no_ping_pong_warning", "condition_false"
+  reason: string;             // human-readable: "pingPongWarning not present"
+}
+
+interface TraceEventDisabled extends TraceEventBase {
+  status: 'disabled';
+  disabledBy: 'manifest' | 'runtime-override';
+}
+
+/** For Tier 2 surface trace adapters (L/B/C/R/N/H) */
+interface TraceEventObserved extends TraceEventBase {
+  status: 'observed';
+  contentHash: string | null; // hash of observed content, null if not available
+  tokenEstimate: number;
 }
 ```
 
-**Pipeline execution per stage:**
+**Pipeline execution per stage (Tier 1 — S/D hooks only):**
 
 ```
 for each registered hook in stage (ordered by manifest priority):
-  1. Check hook.enabled → skip if false (TraceEvent: fired=false, reason="disabled")
+  1. Check isEnabled(hookId) → false?
+     → emit TraceEvent { status: 'disabled', disabledBy }
   2. If hook has resolver → call resolver.resolve(input)
-     - Returns null → skip (TraceEvent: fired=false, reason=resolver.skipReason)
+     - Returns null → emit TraceEvent { status: 'skipped',
+         reasonCode, reason: resolver.skipReason }
      - Returns result → continue
   3. If hook has no resolver → unconditional (always fire)
-  4. Render template with vars → PromptPatch
-  5. Emit TraceEvent (fired=true, contentHash, tokenEstimate)
+  4. Render template with result.vars → PromptPatch
+  5. Emit TraceEvent { status: 'fired', contentHash, tokenEstimate, version }
 ```
 
-### InjectionTrace — Lightweight Per-Turn Persistence
+### InjectionTrace — Dual-Layer Persistence
 
-After each turn, persist a lightweight `InjectionTraceRecord` — not the full `AssemblerInput` or rendered content:
+After each turn, persist injection trace data in two layers with different retention strategies:
+
+**Layer 1: InjectionTraceSummary (persistent)**
+
+Lightweight structural record — which hooks fired/skipped, aggregate stats. This is the data substrate for Phase 3 eval and long-term trend analysis. Default TTL=0 (persistent), consistent with the iron law that user-visible, traceable state defaults to persistent (LL-048).
 
 ```typescript
-interface InjectionTraceRecord {
+interface InjectionTraceSummary {
   turnId: string;
   sessionId: string;
   threadId: string;
   catId: string;
   timestamp: number;
   
-  /** Per-hook trace, one entry per registered hook (fired or skipped) */
-  hooks: TraceEvent[];
+  /** Per-hook summary, one entry per hook (fired/skipped/disabled/observed) */
+  hooks: TraceEventSummary[];
   
   /** Aggregate stats */
   totalTokens: number;
@@ -429,15 +499,40 @@ interface InjectionTraceRecord {
   totalHooksSkipped: number;
   totalDurationMs: number;
 }
+
+/** Compact per-hook entry — no content, just identity + outcome */
+interface TraceEventSummary {
+  hookId: string;
+  status: 'fired' | 'skipped' | 'disabled' | 'observed';
+  version?: number;           // only for fired
+  tokenEstimate?: number;     // only for fired/observed
+  reasonCode?: string;        // only for skipped
+}
 ```
 
-**Persistence strategy:**
-- Store to Redis with TTL (configurable, default 7 days) keyed by `injection-trace:{threadId}:{turnId}`
-- SessionContext holds only `currentTurnId` + `previousTurnId` references, not full trace data
-- Console can query trace history per thread for debugging: "which hooks fired on turn N?"
-- Future eval loop reads trace data to correlate segment combinations with outcomes
+Keyed by `injection-trace-summary:{threadId}:{turnId}`. Queryable for trend analysis: "how often does D5 fire across the last 100 turns?"
 
-**Why lightweight:** Full `AssemblerInput` contains runtime objects, config snapshots, and transient state that's expensive to serialize and rarely needed for analysis. The trace record captures what matters for iteration: *which hooks fired, why, with what content fingerprint, at what cost*.
+**Layer 2: InjectionTraceDetail (debug, short TTL)**
+
+Full `TraceEvent` records including content hashes, durations, human-readable reasons. For debugging "what exactly happened on turn N?" Default TTL = 7 days (configurable), consistent with F153's pattern for debug-level span data.
+
+```typescript
+interface InjectionTraceDetail {
+  turnId: string;
+  threadId: string;
+  catId: string;
+  timestamp: number;
+  
+  /** Full TraceEvent array (discriminated union, all fields) */
+  hooks: TraceEvent[];
+}
+```
+
+Keyed by `injection-trace-detail:{threadId}:{turnId}`.
+
+**Why dual-layer:** Full `TraceEvent` records with content hashes and durations are valuable for debugging but expensive to store indefinitely and rarely needed after the immediate debugging window. The summary layer captures the structural signal (which hooks, what outcome) needed for eval correlation and trend analysis without storing transient debug detail. This mirrors F153's approach: structured pointers persist, debug captures expire.
+
+SessionContext holds only `currentTurnId` + `previousTurnId` references, not trace data itself.
 
 ### Transport Assembly Boundary
 
@@ -458,14 +553,18 @@ The hook pipeline produces the **systemPrompt** (from session-init hooks) and **
 - Transport assembly can change (e.g., new prepend layers) without touching hooks
 - The `injectSystemPrompt` decision (resume vs force-reinjection) stays clean — it's a delivery decision, not a content decision
 
-### L1-L7 Observation Strategy
+### Surface Trace Adapters (Tier 2)
 
-L1-L7 segments are compiled at build time by `compile-system-prompt-l0.mjs`, not at runtime. They're frozen into `system-prompt-l0.md` and injected as a monolithic block. The hook pipeline **observes** them but doesn't **produce** them:
+The 18 non-S/D segments have diverse execution models that don't fit the resolver/template pattern. Instead of forcing them into the pipeline, Phase 2 provides lightweight trace adapters at each surface's existing execution point:
 
-- L1-L7 hooks are registered in the `compile-time` stage with `observeOnly: true`
-- They don't have resolvers or templates — their content comes from the L0 compiler
-- TraceEvents for L1-L7 record: present/absent, content hash of compiled L0 section, token estimate
-- This enables the trace record to cover ALL 52 segments, even though only ~40 are produced at runtime
+- **L1-L7 (compile-time)**: Adapter reads the compiled `system-prompt-l0.md` and emits `TraceEventObserved` with content hash per L-section. No runtime execution — runs once at startup or on L0 recompilation.
+- **B1 (session bootstrap)**: Adapter wraps `SessionBootstrap.buildBootstrapContext()`, emits `TraceEventObserved` with token estimate of bootstrap content.
+- **C1 (MCP callback)**: Adapter wraps `McpPromptInjector`, emits `TraceEventObserved`. Existing `.local` overlay mechanism is untouched.
+- **R1-R2 (route assembly)**: Adapter at route finalization point, records whether route-level injections were applied.
+- **N1 (navigation)**: Adapter at `route-helpers.ts` navigation injection point.
+- **H1-H3 (shell hooks)**: Adapters leverage existing F180 hook health infrastructure to record fire/skip.
+
+Trace adapters produce `TraceEventObserved` only — no `PromptPatch`, no enable/disable, no versioning. This ensures the trace record covers all 52 segments for complete observability without over-abstracting non-uniform surfaces.
 
 ### Versioning Model
 
@@ -500,27 +599,28 @@ Phase 2 implementation in 4 sub-phases, each independently shippable:
 
 | Sub-phase | Deliverable | Tests |
 |-----------|------------|-------|
-| **P2-A: HookManifest + Registry** | Hook YAML schema, directory scan, manifest parsing. No runtime wiring — just the registry that can list all hooks | Schema validation tests, scan tests (following PluginRegistry test pattern) |
-| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic from `SystemPromptBuilder.ts` `if/push` patterns into standalone resolver classes. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output | Snapshot tests: old output === new output for every segment |
-| **P2-C: Pipeline Execution** | Wire HookPipeline into `buildStaticIdentity()` and `buildInvocationContext()` as the primary code path. Remove old `if/push` patterns | Integration tests: compiled output identical. Regression: all existing tests pass |
-| **P2-D: InjectionTrace** | TraceEvent emission, InjectionTraceRecord persistence, Console trace viewer | Trace record completeness tests. Console: can view which hooks fired per turn |
+| **P2-A: HookManifest + Registry** | Hook YAML schema for S/D segments, directory scan, manifest parsing. No runtime wiring — just the registry that can list S1-S13 + D1-D21 hooks | Schema validation tests, scan tests (following PluginRegistry test pattern) |
+| **P2-B: ContextAssembler + Resolvers** | Extract S/D resolver logic from `SystemPromptBuilder.ts` `if/push` patterns into standalone resolver classes. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output | Snapshot tests: old output === new output for every S/D segment |
+| **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into `buildStaticIdentity()` and `buildInvocationContext()` as the primary code path. Remove old `if/push` patterns. Add Tier 2 trace adapters for L/B/C/R/N/H | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter coverage tests |
+| **P2-D: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer | Trace record completeness tests. Console: can view which hooks fired per turn |
 
 ## Acceptance Criteria — Phase 2
 
-- [ ] AC-P2-1: HookManifest YAML schema defined, validated by `check-hook-manifest.mjs`
-- [ ] AC-P2-2: HookRegistry scans `assets/prompt-hooks/`, parses all 52 hook manifests
-- [ ] AC-P2-3: ContextAssembler produces typed `AssemblerInput` from route-layer queries
-- [ ] AC-P2-4: All 52 resolvers extracted from `SystemPromptBuilder.ts` into standalone classes
-- [ ] AC-P2-5: Dual-path validation: old `if/push` output === new pipeline output for all segments (snapshot tests)
+- [ ] AC-P2-1: HookManifest YAML schema defined for S/D segments, validated by `check-hook-manifest.mjs`
+- [ ] AC-P2-2: HookRegistry scans `assets/prompt-hooks/`, parses S1-S13 + D1-D21 hook manifests (34 hooks)
+- [ ] AC-P2-3: ContextAssembler produces typed `AssemblerInput` from route-layer queries for session-init and per-turn stages
+- [ ] AC-P2-4: S/D content hooks have standalone resolvers or static renderers; non-S/D surfaces (L/B/C/R/N/H) have observe-only trace adapters
+- [ ] AC-P2-5: Dual-path validation: old `if/push` output === new pipeline output for all S/D segments (snapshot tests)
 - [ ] AC-P2-6: `buildStaticIdentity()` and `buildInvocationContext()` delegate to HookPipeline
-- [ ] AC-P2-7: Each hook execution produces TraceEvent (fired/skipped, reason, contentHash, tokenEstimate)
-- [ ] AC-P2-8: InjectionTraceRecord persisted per turn (Redis, TTL configurable)
+- [ ] AC-P2-7: Each S/D hook execution produces TraceEvent (discriminated union: fired/skipped/disabled)
+- [ ] AC-P2-8: InjectionTraceSummary persisted per turn (persistent, TTL=0); InjectionTraceDetail persisted with configurable TTL (default 7 days)
 - [ ] AC-P2-9: Console trace viewer: query which hooks fired per turn per thread
-- [ ] AC-P2-10: Hook versioning: v1→v2 switch via manifest, TraceEvent records version
-- [ ] AC-P2-11: Hook enable/disable: `enabled: false` stops hook from firing, TraceEvent records skip reason
+- [ ] AC-P2-10: Hook versioning: v1→v2 switch via manifest file edit, TraceEvent records version
+- [ ] AC-P2-11: Hook enable/disable via manifest `enabled` field, TraceEvent records disabled status
 - [ ] AC-P2-12: Transport assembly (staging/contextHint/missionPrefix/M2) unchanged, not in pipeline
-- [ ] AC-P2-13: L1-L7 observe-only hooks emit TraceEvents without producing content
+- [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for L/B/C/R/N/H surfaces
 - [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration
+- [ ] AC-P2-15: Repo manifest is read-only at runtime; runtime override store is owner-gated (Phase 2 defers Console write UI)
 
 ## Upstream Pitch Strategy (Issue #839)
 
@@ -532,11 +632,11 @@ Phase 2 design requires alignment with the upstream maintainer, who previously d
 
 ### Concern 2: "Pre-freezing N-stage pipeline locks the extension surface"
 
-**Our response:** 5 stages (not 8) are clock signals mapped to existing code execution points (`buildStaticIdentity` = session-init, `buildInvocationContext` = per-turn). They don't define what hooks can do. Adding a hook doesn't require a new stage. This is less "pre-freezing" than the current code, where adding a segment requires modifying specific functions and understanding their call patterns.
+**Our response:** Phase 2 defines only 2 runtime pipeline stages (session-init, per-turn), not the 8-10 stage lifecycle from the original proposal. These two stages are the minimal observation boundary around existing functions (`buildStaticIdentity` = session-init, `buildInvocationContext` = per-turn) — they formalize what's already there, not invent new boundaries. The remaining surfaces (L0 compiler, session bootstrap, route assembly, shell hooks) get observe-only trace adapters, not pipeline integration. Adding a hook to a stage doesn't require a new interface; the stages are registration categories, not extension APIs.
 
 ### Concern 3: "Build-to-Delete — metadata turns deletion into deprecation"
 
-**Our response:** The opposite. Currently, deleting a segment requires: find all code paths → remove condition + vars + render + push → verify no side effects → remove template → update manifest display entry → test. With hooks: set `enabled: false`, segment stops firing immediately. The code can be deleted at leisure. Build-to-Delete becomes a one-line config change followed by optional cleanup.
+**Our response:** The opposite. Currently, deleting a segment requires: find all code paths → remove condition + vars + render + push → verify no side effects → remove template → update manifest display entry → test. With hooks: set `enabled: false` in the hook's YAML manifest, commit, deploy — segment stops firing immediately. The resolver code and template can be deleted at leisure in a cleanup pass. The manifest file itself is just a YAML file in git — deleting the hook directory removes it completely. Build-to-Delete becomes: disable → observe trace confirms no regressions → delete directory. No "deprecation" metadata survives deletion.
 
 ### Concern 4: "Injections grow from trajectories, not pre-numbered interfaces"
 
