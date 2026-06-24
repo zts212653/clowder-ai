@@ -20,6 +20,7 @@ const LEGACY_EXCLUSIONS = [
   'workflow-sop-store',
   'dare-agent-service',
   'dare-l1-acceptance',
+  'dare-smoke\\.test',
   'codex-agent-service',
   'kimi-agent-service',
   'claude-settings-hooks\\.test',

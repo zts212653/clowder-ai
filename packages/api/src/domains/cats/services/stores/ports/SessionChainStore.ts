@@ -11,6 +11,8 @@ import type { CatId, SessionRecord } from '@cat-cafe/shared';
 
 export interface CreateSessionInput {
   cliSessionId: string;
+  workingDirectory?: string;
+  workspaceFingerprint?: string;
   threadId: string;
   catId: CatId;
   userId: string;
@@ -28,6 +30,8 @@ export type SessionRecordPatch = Partial<
   Pick<
     SessionRecord,
     | 'cliSessionId'
+    | 'workingDirectory'
+    | 'workspaceFingerprint'
     | 'status'
     | 'contextHealth'
     | 'lastUsage'
@@ -114,6 +118,8 @@ export class SessionChainStore implements ISessionChainStore {
     const record: SessionRecord = {
       id,
       cliSessionId: input.cliSessionId,
+      ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
+      ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
       threadId: input.threadId,
       catId: input.catId,
       userId: input.userId,
@@ -191,6 +197,8 @@ export class SessionChainStore implements ISessionChainStore {
       record.cliSessionId = patch.cliSessionId;
       this.cliIndex.set(patch.cliSessionId, id);
     }
+    if (patch.workingDirectory !== undefined) record.workingDirectory = patch.workingDirectory;
+    if (patch.workspaceFingerprint !== undefined) record.workspaceFingerprint = patch.workspaceFingerprint;
     if (patch.status !== undefined) {
       record.status = patch.status;
       const key = this.catThreadKey(record.catId, record.threadId);
