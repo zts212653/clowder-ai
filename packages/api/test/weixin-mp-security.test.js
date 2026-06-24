@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { describe, it } from 'node:test';
-import { markdownToWxHtml } from '../dist/domains/limb/limb-plugins/weixin-mp/markdown-to-wx-html.js';
+import { markdownToWxHtml } from '../dist/plugins/weixin-mp/markdown-to-wx-html.js';
 import {
   createPinnedRequestOptions,
   fetchExternalUrlPinned,

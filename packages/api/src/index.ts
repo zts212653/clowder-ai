@@ -2208,7 +2208,7 @@ async function main(): Promise<void> {
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
     const { PluginLimbAdapter } = await import('./domains/limb/PluginLimbAdapter.js');
     const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
-    const { weixinMpHandlers } = await import('./domains/limb/limb-plugins/weixin-mp/index.js');
+    const { weixinMpHandlers } = await import('./plugins/weixin-mp/index.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
