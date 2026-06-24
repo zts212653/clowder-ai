@@ -4,7 +4,7 @@
  *
  * CLI 调用方式:
  *   codex exec --json --sandbox danger-full-access --add-dir .git --config approval_policy="on-request" "prompt"
- *   codex exec resume SESSION_ID --json --config approval_policy="on-request" "prompt"
+ *   codex exec resume SESSION_ID --json --config sandbox_mode="danger-full-access" --config approval_policy="on-request" "prompt"
  *
  * NDJSON 事件格式:
  *   thread.started  → session_init (含 thread_id)
@@ -437,6 +437,7 @@ export class CodexAgentService implements AgentService {
     const approvalPolicy = getCodexApprovalPolicy();
     const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
+    const sandboxConfigArgs = ['--config', `sandbox_mode=${toTomlString(sandboxMode)}`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const ctxConfig = getCatContextWindowConfig(this.catId as string);
     const contextWindowArgs: string[] = ctxConfig
@@ -530,10 +531,12 @@ export class CodexAgentService implements AgentService {
     }
     const developerInstructionsArgs = l0Result.args;
 
-    // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
+    // resume 子命令不接受 --sandbox / --add-dir, but it does accept
+    // sandbox_mode through --config. Replay the configured sandbox there so
+    // resumed Codex turns cannot drift back to a CLI default sandbox on Windows.
     // --add-dir .git: 允许写入 .git/ 目录（index.lock、objects、refs），解锁 git commit
-    // 注意：旧 session resume 时沿用创建时的沙箱参数，不会带 --add-dir。
-    // 这是预期行为——新建会话即可获得 .git 写入权限。
+    // 注意：旧 session resume 时仍不会带 --add-dir。这是预期行为——新建会话
+    // 才能获得额外目录授权。
     // Incident 2026-05-29 (cross-thread-context-contamination): prompt 正文经 stdin
     // 传入（见下方 cliOpts.stdinInput），绝不进 argv —— 否则 `ps -o command=` /
     // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
@@ -568,6 +571,7 @@ export class CodexAgentService implements AgentService {
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
+          ...dedup(sandboxConfigArgs),
           ...dedup(approvalArgs),
           ...dedup(developerInstructionsArgs),
           ...dedup(customProviderArgs),
