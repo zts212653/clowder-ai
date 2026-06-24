@@ -318,6 +318,45 @@ describe('Session bind history import', () => {
     }
   });
 
+  test('unseal reopen preserves the sealed session workspace metadata after thread rehome', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const originalProjectPath = await makeWorkspaceDir();
+      const currentProjectPath = await makeWorkspaceDir();
+      const thread = await threadStore.create('user-1', 'Test', originalProjectPath);
+      const originalBinding = await expectedWorkspaceBinding(originalProjectPath);
+      const currentBinding = await expectedWorkspaceBinding(currentProjectPath);
+      const sealed = await sessionChainStore.create({
+        cliSessionId: 'cli-sealed-original-workspace',
+        ...originalBinding,
+        threadId: thread.id,
+        catId: 'opencode',
+        userId: 'user-1',
+      });
+      await sessionChainStore.update(sealed.id, {
+        status: 'sealed',
+        sealedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      await threadStore.updateProjectPath(thread.id, currentProjectPath);
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sealed.id}/unseal`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.mode, 'reopened');
+      assert.notEqual(body.session.workingDirectory, currentBinding.workingDirectory);
+      assert.equal(body.session.workingDirectory, originalBinding.workingDirectory);
+      assert.equal(body.session.workspaceFingerprint, originalBinding.workspaceFingerprint);
+    } finally {
+      await app.close();
+    }
+  });
+
   test('repeated bind does not duplicate imported history', async () => {
     const { app, threadStore, sessionChainStore, transcriptWriter, messageStore } = await buildApp();
     try {

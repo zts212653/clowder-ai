@@ -83,6 +83,17 @@ function buildWorkspaceFingerprint(workingDirectory: string): string {
   return process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory;
 }
 
+function buildStoredSessionWorkspaceBinding(session: { workingDirectory?: string; workspaceFingerprint?: string }) {
+  const workspaceFingerprint =
+    session.workspaceFingerprint ??
+    (session.workingDirectory ? buildWorkspaceFingerprint(session.workingDirectory) : undefined);
+
+  return {
+    ...(session.workingDirectory ? { workingDirectory: session.workingDirectory } : {}),
+    ...(workspaceFingerprint ? { workspaceFingerprint } : {}),
+  };
+}
+
 async function buildThreadSessionWorkspaceBinding(thread: { projectPath?: string | null }, catId: CatId) {
   const provider = catRegistry.tryGet(catId as string)?.config.clientId;
   if (!providerRequiresThreadWorkspace(provider)) return {};
@@ -275,7 +286,11 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       }
     }
 
-    const workspaceBinding = await buildThreadSessionWorkspaceBinding(thread, session.catId);
+    const storedWorkspaceBinding = buildStoredSessionWorkspaceBinding(session);
+    const workspaceBinding =
+      Object.keys(storedWorkspaceBinding).length > 0
+        ? storedWorkspaceBinding
+        : await buildThreadSessionWorkspaceBinding(thread, session.catId);
     const reopened = await sessionChainStore.create({
       cliSessionId: session.cliSessionId,
       ...workspaceBinding,
