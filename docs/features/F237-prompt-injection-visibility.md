@@ -557,22 +557,32 @@ The hook pipeline produces the **systemPrompt** (from session-init hooks) and **
 
 Session-init hooks (S1-S13) fire inside `buildStaticIdentity()`, which runs on every invocation. But the produced content is only delivered to the model when `injectSystemPrompt` is true (new session, force-reinjection, or registry change). On resumed turns with `canSkipOnResume`, the S-segment content is produced but **not sent**. If the trace only records "S1 fired", it creates false observability — the operator sees "S1 was active this turn" when the model never received it.
 
-To fix this, the `InjectionTraceSummary` includes a per-stage **delivery decision** record:
+To fix this, the `InjectionTraceSummary` includes a per-stage **delivery decision** record that is channel-aware:
 
 ```typescript
 interface StageDeliveryDecision {
   stage: 'session-init' | 'per-turn';
   delivered: boolean;
+  channel: DeliveryChannel;
   reason: string;       // e.g., "injectSystemPrompt=false (resume, canSkipOnResume)"
 }
+
+type DeliveryChannel =
+  | 'message-prepend'    // non-native: S-content prepended to prompt string
+  | 'native-l0'          // native providers (Claude/Codex/OpenCode): L0 via --system-prompt-file / developer_instructions
+  | 'pack-only'          // native L0 with hasNativeL0=true: only pack blocks via buildStaticIdentityPackOnly()
+  | 'always-delivered';  // per-turn D-segments, transport-layer M1/M2
 ```
 
-- **session-init**: `delivered = injectSystemPrompt` (mirrors the decision at `invoke-single-cat.ts:1639`)
-- **per-turn**: `delivered = true` (D-segments are always part of the prompt)
+Delivery semantics per stage and provider:
 
-This means `TraceEventSummary` records what the pipeline *produced*, and `StageDeliveryDecision` records what transport *delivered*. Together they answer both "what did we prepare?" and "what did the model actually see?" — the distinction needed for accurate eval correlation in Phase 3.
+- **session-init (non-native providers)**: `delivered = injectSystemPrompt`, `channel = 'message-prepend'`
+- **session-init (native L0 providers — Claude/Codex/OpenCode)**: S-content is delivered via native L0 channel (compiled `system-prompt-l0.md`), NOT via `injectSystemPrompt`. Route code uses `buildStaticIdentityPackOnly()` when `hasNativeL0=true` — only pack blocks go through `buildStaticIdentity()`. So `injectSystemPrompt` is not the delivery truth for native providers; the native L0 channel is.
+- **per-turn**: `delivered = true`, `channel = 'always-delivered'` (D-segments are always part of the prompt regardless of provider)
 
-For Tier 2 transport-layer adapters (M1/M2), delivery is inherent — they fire at the transport point and are always delivered. L1-L7 delivery depends on whether the L0 block was included via `injectSystemPrompt` or native L0 channel.
+This means `TraceEventSummary` records what the pipeline *produced*, and `StageDeliveryDecision` records what transport *delivered and through which channel*. Together they answer "what did we prepare?", "what did the model actually see?", and "how was it delivered?" — the distinction needed for accurate eval correlation in Phase 3.
+
+For Tier 2 transport-layer adapters (M1/M2), delivery is inherent (`channel = 'always-delivered'`). L1-L7 delivery depends on whether the provider uses native L0 (`channel = 'native-l0'`) or message-prepend (`channel = 'message-prepend'`, gated by `injectSystemPrompt`).
 
 ### Surface Trace Adapters (Tier 2 — 18 segments)
 
