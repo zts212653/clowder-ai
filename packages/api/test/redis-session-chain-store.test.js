@@ -101,6 +101,26 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.ok(record.createdAt > 0);
   });
 
+  it('create() and update() preserve workspace binding metadata', async () => {
+    const record = await store.create({
+      ...BASE_INPUT,
+      workingDirectory: '/repo-a',
+      workspaceFingerprint: '/repo-a',
+    });
+
+    assert.equal(record.workingDirectory, '/repo-a');
+    assert.equal(record.workspaceFingerprint, '/repo-a');
+
+    await store.update(record.id, {
+      workingDirectory: '/repo-b',
+      workspaceFingerprint: '/repo-b',
+    });
+
+    const updated = await store.get(record.id);
+    assert.equal(updated.workingDirectory, '/repo-b');
+    assert.equal(updated.workspaceFingerprint, '/repo-b');
+  });
+
   it('create() auto-increments seq for same cat+thread', async () => {
     const r0 = await store.create(BASE_INPUT);
     await store.update(r0.id, { status: 'sealed' });

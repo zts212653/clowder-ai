@@ -29,6 +29,7 @@ export NODE_ENV="test"
 unset CAT_CAFE_RUNTIME_ROOT
 unset CAT_CAFE_MCP_SERVER_PATH
 unset CAT_CAFE_WORKSPACE_ROOT
+unset ALLOWED_WORKSPACE_DIRS
 
 # API_SERVER_HOST is a runtime binding choice. LAN/dev invocations commonly set
 # it to 0.0.0.0, but capability write tests expect localhost-only defaults unless
@@ -38,5 +39,10 @@ unset API_SERVER_HOST
 # DEFAULT_CAT_ID is user/runtime preference, not test fixture state. Leaving it
 # inherited makes routing tests depend on which cat launched the test command.
 unset DEFAULT_CAT_ID
+
+# DEFAULT_OWNER_USER_ID is also runtime/operator configuration. Public tests
+# exercise both configured-owner and single-user modes explicitly; inheriting the
+# launcher value makes owner-gate expectations depend on the local runtime.
+unset DEFAULT_OWNER_USER_ID
 
 exec "$@"

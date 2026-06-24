@@ -54,6 +54,26 @@ async function rmWithRetry(path, attempts = 5) {
   }
 }
 
+async function makeSameProjectWorkspace(prefix) {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+  const projectRoot = await realpath(join(__dirname, '..', '..', '..'));
+  let fakeGitDir = join(projectRoot, '.git', 'worktrees', `${prefix}gitdir`);
+  try {
+    const dotGit = await readFile(join(projectRoot, '.git'), 'utf-8');
+    const match = dotGit.trim().match(/^gitdir:\s*(.+)$/);
+    if (match?.[1]) {
+      const hostGitDir = match[1].startsWith('/') ? match[1] : join(projectRoot, match[1]);
+      const commonGitDir = join(hostGitDir, '..', '..');
+      fakeGitDir = join(commonGitDir, 'worktrees', `${prefix}gitdir`);
+    }
+  } catch {
+    // Main worktree has .git as a directory; the default fakeGitDir above points
+    // back to the same common git dir through resolveGitCommonDir().
+  }
+  await writeFile(join(dir, '.git'), `gitdir: ${fakeGitDir}\n`, 'utf-8');
+  return dir;
+}
+
 /**
  * F171: bootstrapCatCatalog() now creates empty catalogs (first-run quest).
  * Tests that call bootstrapCatCatalog() and then read catalog breeds must call
@@ -6833,6 +6853,311 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     );
     assert.equal(optionsSeen.length, 1, `service should be invoked once, got messages: ${JSON.stringify(msgs)}`);
     assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
+  });
+
+  it('drops OpenCode resume when the stored session workspace differs from the current thread workspace', async () => {
+    const repoA = await makeSameProjectWorkspace('opencode-repo-a-');
+    const repoB = await makeSameProjectWorkspace('opencode-repo-b-');
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-repo-a',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'ses_repo_a',
+      catId: 'opencode',
+      threadId: 'thread-opencode-stale-workspace',
+      userId: 'user1',
+      messageCount: 0,
+      workspaceFingerprint: repoA,
+      workingDirectory: repoA,
+    };
+    const chainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      get: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async (_id, patch) => Object.assign(activeRecord, patch),
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: chainStore,
+            threadStore: {
+              get: async () => ({ projectPath: repoB, createdBy: 'user1' }),
+              updateParticipantActivity: async () => {},
+            },
+          },
+          {
+            catId: 'opencode',
+            service,
+            prompt: 'test stale workspace resume',
+            userId: 'user1',
+            threadId: 'thread-opencode-stale-workspace',
+            isLastCat: true,
+          },
+        ),
+      );
+    } finally {
+      await rmWithRetry(repoA);
+      await rmWithRetry(repoB);
+    }
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.workingDirectory, repoB);
+    assert.equal(optionsSeen[0]?.sessionId, undefined, 'OpenCode must start fresh on workspace mismatch');
+    assert.equal(optionsSeen[0]?.cliSessionId, undefined, 'stale session id must not be used for diagnostics either');
+  });
+
+  it('keeps OpenCode resume when the stored session workspace matches the current thread workspace', async () => {
+    const repo = await makeSameProjectWorkspace('opencode-repo-match-');
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-repo-match',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'ses_repo_match',
+      catId: 'opencode',
+      threadId: 'thread-opencode-matching-workspace',
+      userId: 'user1',
+      messageCount: 0,
+      workspaceFingerprint: repo,
+      workingDirectory: repo,
+    };
+    const chainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      get: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async (_id, patch) => Object.assign(activeRecord, patch),
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: chainStore,
+            threadStore: {
+              get: async () => ({ projectPath: repo, createdBy: 'user1' }),
+              updateParticipantActivity: async () => {},
+            },
+          },
+          {
+            catId: 'opencode',
+            service,
+            prompt: 'test matching workspace resume',
+            userId: 'user1',
+            threadId: 'thread-opencode-matching-workspace',
+            isLastCat: true,
+          },
+        ),
+      );
+    } finally {
+      await rmWithRetry(repo);
+    }
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.workingDirectory, repo);
+    assert.equal(optionsSeen[0]?.sessionId, 'ses_repo_match');
+    assert.equal(optionsSeen[0]?.cliSessionId, 'ses_repo_match');
+  });
+
+  it('drops OpenCode resume when the stored session workspace is unknown', async () => {
+    const repo = await makeSameProjectWorkspace('opencode-repo-unknown-');
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-unknown',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'ses_unknown_workspace',
+      catId: 'opencode',
+      threadId: 'thread-opencode-unknown-workspace',
+      userId: 'user1',
+      messageCount: 0,
+    };
+    const chainStore = {
+      getChain: async () => [activeRecord],
+      getActive: async () => activeRecord,
+      get: async () => activeRecord,
+      create: async () => activeRecord,
+      update: async (_id, patch) => Object.assign(activeRecord, patch),
+    };
+
+    try {
+      await collect(
+        invokeSingleCat(
+          {
+            ...makeDeps(),
+            sessionChainStore: chainStore,
+            threadStore: {
+              get: async () => ({ projectPath: repo, createdBy: 'user1' }),
+              updateParticipantActivity: async () => {},
+            },
+          },
+          {
+            catId: 'opencode',
+            service,
+            prompt: 'test unknown workspace resume',
+            userId: 'user1',
+            threadId: 'thread-opencode-unknown-workspace',
+            isLastCat: true,
+          },
+        ),
+      );
+    } finally {
+      await rmWithRetry(repo);
+    }
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.workingDirectory, repo);
+    assert.equal(optionsSeen[0]?.sessionId, undefined, 'OpenCode must start fresh when stored workspace is unknown');
+    assert.equal(optionsSeen[0]?.cliSessionId, undefined, 'unknown-workspace resume id must not reach diagnostics');
+  });
+
+  it('re-reads OpenCode active session after waiting on the resume mutex', async () => {
+    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+    const repo = await makeSameProjectWorkspace('opencode-repo-reread-');
+    const threadId = 'thread-opencode-reread-after-mutex';
+    const userId = 'user1';
+    const store = new SessionChainStore();
+    store.create({
+      cliSessionId: 'ses_legacy_unknown_workspace',
+      threadId,
+      catId: 'opencode',
+      userId,
+    });
+
+    let getChainCalls = 0;
+    let secondInvocationStarted = false;
+    let didResolveSecondPreMutexRead = false;
+    let resolveSecondPreMutexRead;
+    const secondPreMutexRead = new Promise((resolve) => {
+      resolveSecondPreMutexRead = resolve;
+    });
+    const chainStore = {
+      create: (...args) => store.create(...args),
+      get: (...args) => store.get(...args),
+      getActive: (...args) => store.getActive(...args),
+      getChain: (...args) => {
+        const chain = store.getChain(...args);
+        getChainCalls += 1;
+        if (secondInvocationStarted && !didResolveSecondPreMutexRead) {
+          didResolveSecondPreMutexRead = true;
+          resolveSecondPreMutexRead();
+        }
+        return chain;
+      },
+      update: (...args) => store.update(...args),
+      getByCliSessionId: (...args) => store.getByCliSessionId(...args),
+      getByChainKey: (...args) => store.getByChainKey(...args),
+      incrementCompressionCount: (...args) => store.incrementCompressionCount(...args),
+      listSealingSessions: (...args) => store.listSealingSessions(...args),
+      getChainByThread: (...args) => store.getChainByThread(...args),
+    };
+
+    let callCount = 0;
+    let releaseFirstSessionInit;
+    let resolveFirstServiceStarted;
+    const firstServiceStarted = new Promise((resolve) => {
+      resolveFirstServiceStarted = resolve;
+    });
+    const firstMayCreateFreshSession = new Promise((resolve) => {
+      releaseFirstSessionInit = resolve;
+    });
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        callCount += 1;
+        const callNumber = callCount;
+        optionsSeen.push(options ?? {});
+        if (callNumber === 1) {
+          resolveFirstServiceStarted();
+          await firstMayCreateFreshSession;
+          yield { type: 'session_init', catId: 'opencode', sessionId: 'ses_fresh_workspace', timestamp: Date.now() };
+        }
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+
+    const deps = {
+      ...makeDeps(),
+      sessionChainStore: chainStore,
+      threadStore: {
+        get: async () => ({ projectPath: repo, createdBy: userId }),
+        updateParticipantActivity: async () => {},
+      },
+    };
+    const waitFor = (promise, label) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 1000)),
+      ]);
+
+    try {
+      const firstRun = collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'first turn creates fresh session',
+          userId,
+          threadId,
+          isLastCat: true,
+        }),
+      );
+      await waitFor(firstServiceStarted, 'first service invocation');
+
+      secondInvocationStarted = true;
+      const secondRun = collect(
+        invokeSingleCat(deps, {
+          catId: 'opencode',
+          service,
+          prompt: 'second turn should reuse fresh session',
+          userId,
+          threadId,
+          isLastCat: true,
+        }),
+      );
+      await waitFor(secondPreMutexRead, 'second pre-mutex session read');
+      releaseFirstSessionInit();
+      await Promise.all([firstRun, secondRun]);
+    } finally {
+      await rmWithRetry(repo);
+    }
+
+    assert.equal(optionsSeen.length, 2);
+    assert.equal(optionsSeen[0]?.sessionId, undefined, 'first turn starts fresh for unknown legacy workspace');
+    assert.equal(optionsSeen[1]?.workingDirectory, repo);
+    assert.equal(
+      optionsSeen[1]?.sessionId,
+      'ses_fresh_workspace',
+      'second turn must use the fresh active session created while it waited on the old resume mutex',
+    );
+    assert.equal(optionsSeen[1]?.cliSessionId, 'ses_fresh_workspace');
   });
 
   it('fails loud for OpenCode when thread projectPath is default', async () => {
