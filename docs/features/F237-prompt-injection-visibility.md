@@ -125,6 +125,8 @@ Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat
 
 ## What — Phase 2: Hook Pipeline + Injection Trace
 
+> **Upstream status**: PROPOSAL — not yet accepted by maintainer. Upstream accepted scope is PR #859 (Phase 1) + #983 (hook demotion). This Phase 2 design requires a new pitch on issue #839 to get lifecycle abstraction accepted. The ACs and landing order below describe the proposed implementation, contingent on upstream alignment. See [Upstream Pitch Strategy](#upstream-pitch-strategy-issue-839) for how we plan to address the maintainer's prior concerns.
+
 ### Motivation
 
 Phase 1 delivered visibility — operators can see what's injected. Phase 2 makes the 34 S/D content segments (in `SystemPromptBuilder.ts`) **self-contained, dynamically manageable, observable, and versionable** via a hook pipeline. The remaining 18 segments (L/B/C/R/N/M/H — across compile-time, session bootstrap, route assembly, transport, and shell hooks) get observe-only trace adapters for full observability coverage. Together, all 52 segments become traceable — the data foundation for automated iteration.
@@ -442,7 +444,7 @@ interface TraceEventSkipped extends TraceEventBase {
 
 interface TraceEventDisabled extends TraceEventBase {
   status: 'disabled';
-  disabledBy: 'manifest' | 'runtime-override';
+  disabledBy: 'manifest';   // Phase 2: manifest only (no runtime override store)
 }
 
 /** For Tier 2 surface trace adapters (L/B/C/R/N/H) */
@@ -488,7 +490,10 @@ interface InjectionTraceSummary {
   /** Per-hook summary, one entry per hook (fired/skipped/disabled/observed) */
   hooks: TraceEventSummary[];
   
-  /** Aggregate stats */
+  /** Per-stage delivery decision — did produced content reach the model? */
+  delivery: StageDeliveryDecision[];
+  
+  /** Aggregate stats (of produced content, not delivered) */
   totalTokens: number;
   totalHooksFired: number;
   totalHooksSkipped: number;
@@ -547,6 +552,27 @@ The hook pipeline produces the **systemPrompt** (from session-init hooks) and **
 - The pipeline can evolve content independently of delivery mechanics
 - Transport assembly can change (e.g., new prepend layers) without touching hooks
 - The `injectSystemPrompt` decision (resume vs force-reinjection) stays clean — it's a delivery decision, not a content decision
+
+**Produced vs Delivered — critical trace distinction:**
+
+Session-init hooks (S1-S13) fire inside `buildStaticIdentity()`, which runs on every invocation. But the produced content is only delivered to the model when `injectSystemPrompt` is true (new session, force-reinjection, or registry change). On resumed turns with `canSkipOnResume`, the S-segment content is produced but **not sent**. If the trace only records "S1 fired", it creates false observability — the operator sees "S1 was active this turn" when the model never received it.
+
+To fix this, the `InjectionTraceSummary` includes a per-stage **delivery decision** record:
+
+```typescript
+interface StageDeliveryDecision {
+  stage: 'session-init' | 'per-turn';
+  delivered: boolean;
+  reason: string;       // e.g., "injectSystemPrompt=false (resume, canSkipOnResume)"
+}
+```
+
+- **session-init**: `delivered = injectSystemPrompt` (mirrors the decision at `invoke-single-cat.ts:1639`)
+- **per-turn**: `delivered = true` (D-segments are always part of the prompt)
+
+This means `TraceEventSummary` records what the pipeline *produced*, and `StageDeliveryDecision` records what transport *delivered*. Together they answer both "what did we prepare?" and "what did the model actually see?" — the distinction needed for accurate eval correlation in Phase 3.
+
+For Tier 2 transport-layer adapters (M1/M2), delivery is inherent — they fire at the transport point and are always delivered. L1-L7 delivery depends on whether the L0 block was included via `injectSystemPrompt` or native L0 channel.
 
 ### Surface Trace Adapters (Tier 2 — 18 segments)
 
@@ -610,6 +636,7 @@ Phase 2 implementation in 4 sub-phases, each independently shippable:
 - [ ] AC-P2-6: `buildStaticIdentity()` and `buildInvocationContext()` delegate to HookPipeline
 - [ ] AC-P2-7: Each S/D hook execution produces TraceEvent (discriminated union: fired/skipped/disabled)
 - [ ] AC-P2-8: InjectionTraceSummary persisted per turn (persistent, TTL=0); InjectionTraceDetail persisted with configurable TTL (default 7 days)
+- [ ] AC-P2-8a: InjectionTraceSummary includes per-stage `StageDeliveryDecision` distinguishing produced vs delivered (session-init delivery = `injectSystemPrompt` decision)
 - [ ] AC-P2-9: Console trace viewer: query which hooks fired per turn per thread
 - [ ] AC-P2-10: Hook versioning: v1→v2 switch via manifest file edit, TraceEvent records version
 - [ ] AC-P2-11: Hook enable/disable via manifest `enabled` field, TraceEvent records disabled status
