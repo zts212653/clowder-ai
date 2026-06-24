@@ -35,7 +35,7 @@ export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
     const content = await readFile(skillMdPath, 'utf-8');
     const match = content.match(/^---\n([\s\S]*?)\n---/);
     if (!match) return {};
-    const fm = parseYaml(match[1]!) as { description?: unknown; triggers?: unknown; requires_mcp?: unknown } | null;
+    const fm = parseYaml(match[1]!) as { description?: unknown; triggers?: unknown } | null;
     const desc = typeof fm?.description === 'string' ? fm.description.trim() : '';
     if (!desc) return {};
 
@@ -44,12 +44,6 @@ export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
       ? fm?.triggers
           .filter((v): v is string => typeof v === 'string')
           .map((s) => s.trim())
-          .filter(Boolean)
-      : [];
-    const requiresMcp = Array.isArray(fm?.requires_mcp)
-      ? fm.requires_mcp
-          .filter((value): value is string => typeof value === 'string')
-          .map((value) => value.trim())
           .filter(Boolean)
       : [];
 
@@ -95,7 +89,6 @@ export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
 
     const result: SkillMeta = { description: cleanDesc };
     if (triggers.length > 0) result.triggers = triggers;
-    if (requiresMcp.length > 0) result.requiresMcp = requiresMcp;
     return result;
   } catch {
     return {};

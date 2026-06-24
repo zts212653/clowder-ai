@@ -12,8 +12,6 @@ triggers:
   - "weixin"
   - "wechat"
   - "publish article"
-requires_mcp:
-  - "cat-cafe-limb"
 ---
 
 # 微信公众号发文
