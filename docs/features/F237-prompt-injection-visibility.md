@@ -129,9 +129,18 @@ Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat
 
 ### Motivation
 
-Phase 1 delivered visibility — operators can see what's injected. Phase 2 makes **44 content segments** self-contained, dynamically manageable, observable, and versionable via a hook pipeline. The remaining 8 segments (L1-L7 compile-time, M1-M2 transport-layer) get observe-only trace adapters. Together, all 52 segments become traceable — the data foundation for automated iteration.
+Phase 1 delivered visibility — operators can see what's injected. Phase 2 makes **46 content segments** self-contained, dynamically manageable, observable, and versionable via a hook pipeline. The remaining 6 segments (N2 conversation history delta, M1-M2 transport-layer, H1-H3 Claude Code hooks) get observe-only trace adapters. Together, all 52 segments become traceable — the data foundation for automated iteration.
 
-**Why 44 not 34:** The original design only pipelined S/D segments (in `SystemPromptBuilder.ts`), treating B/C/R/N/H segments as "fundamentally different execution models." Internal review found this was over-conservative — B1, C1, R1-R2, N1-N2, and H1-H3 all follow the same condition → content → inject pattern as S/D, just executed at different code points. The hook pipeline's resolver abstraction can wrap these execution points. Only L1-L7 (compile-time, not runtime) and M1-M2 (transport-layer, deliberately outside the content pipeline to preserve the produced-vs-delivered boundary) are genuinely different.
+**Why 46:** All segments that follow the condition → content → inject pattern become full hooks. This includes:
+- **S/D segments** (34): the original `if/push` patterns in `SystemPromptBuilder.ts`
+- **L1-L7** (7): dynamically compiled from template files by `compile-system-prompt-l0.mjs` at runtime — NOT build-time static. Same template → render → inject pattern as S-segments, just delivered via native L0 channel for native providers
+- **B1, C1** (2): session bootstrap and MCP callback — standard condition → content pattern
+- **R1-R2, N1** (3): route-layer assembly and navigation context
+
+**Why 6 stay observe-only:**
+- **N2** (conversation history delta): immutable data assembly (`trigger: always`, `disableable: false`, `governanceTier: immutable`). Just "previous unread messages" — no customization value in hook-ifying it
+- **M1-M2** (transport-layer): deliberately outside content pipeline to preserve the produced-vs-delivered boundary
+- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). H3 explicitly "不进 model prompt" (governance notification only). These are managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline
 
 ### Why Hook Pipeline
 
@@ -176,11 +185,10 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
                            │ AssemblerInput
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              Runtime Content Pipeline (44 hooks)                │
+│              Runtime Content Pipeline (46 hooks)                │
 │                                                                 │
-│  session-init    S1-S13, B1, C1      (identity + bootstrap)     │
-│  per-turn        D1-D21, R1-R2, N1-N2 (context + routing)      │
-│  shell-hook      H1-H3               (external hook scripts)   │
+│  session-init    S1-S13, B1, C1, L1-L7 (identity + rules)      │
+│  per-turn        D1-D21, R1-R2, N1     (context + routing)     │
 │                                                                 │
 │  Each hook: condition → resolve → render                        │
 │           → emit PromptPatch + TraceEvent                       │
@@ -199,13 +207,14 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│              Surface Trace Adapters (observe only — 8 segments) │
+│              Surface Trace Adapters (observe only — 6 segments) │
 │                                                                 │
-│  L1-L7    compile-time (content via L0 compiler)                │
-│  M1-M2    transport-layer (missionPrefix, transcriptPathHints)  │
+│  N2      conversation history delta (immutable data assembly)   │
+│  M1-M2   transport-layer (missionPrefix, transcriptPathHints)   │
+│  H1-H3   Claude Code hooks (external lifecycle events)          │
 │                                                                 │
 │  No resolvers, no enable/disable, no versioning.                │
-│  Only emit TraceEvents for full-coverage observability.         │
+│  Only emit TraceEvents for observability.                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -213,40 +222,41 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
 
 Phase 2 splits the 52 segments into two tiers with different treatment:
 
-**Tier 1 — Runtime Content Pipeline (44 segments)**
+**Tier 1 — Runtime Content Pipeline (46 segments)**
 
-These segments follow the condition → content → inject pattern and benefit from full hook-ification: manifest, resolver, override store, versioning, trace. The pipeline has three stages:
+These segments follow the condition → content → inject pattern and benefit from full hook-ification: manifest, resolver, override store, versioning, trace. The pipeline has two stages:
 
 | Stage | When | Segments | Source |
 |-------|------|----------|--------|
-| `session-init` | New session / re-injection / registry change | S1-S13, B1, C1 (15 hooks) | `buildStaticIdentity()`, `SessionBootstrap`, `McpPromptInjector` |
-| `per-turn` | Every invocation, before model call | D1-D21, R1-R2, N1-N2 (25 hooks) | `buildInvocationContext()`, route layer, `route-helpers.ts` |
-| `shell-hook` | External hook trigger points | H1-H3 (3 hooks) | Shell hook scripts via F180 |
+| `session-init` | New session / re-injection / registry change | S1-S13, B1, C1, L1-L7 (22 hooks) | `buildStaticIdentity()`, `SessionBootstrap`, `McpPromptInjector`, `compile-system-prompt-l0.mjs` |
+| `per-turn` | Every invocation, before model call | D1-D21, R1-R2, N1 (24 hooks) | `buildInvocationContext()`, route layer, `route-helpers.ts` |
 
-Why 44 not 34:
-- **B1** (session bootstrap): condition (new session?) → content → same pattern as S-hooks. Joins `session-init` stage.
-- **C1** (MCP callback): condition (MCP available?) → content → already has `.local` overlay which migrates naturally to the override store. Joins `session-init`.
-- **R1-R2** (route assembly): condition → content → inject at route layer. Resolver wraps existing route-level logic. Joins `per-turn`.
-- **N1-N2** (navigation + history): N1 is condition → content. N2 (conversation history delta) uses a raw-content resolver instead of template rendering, but the hook contract (condition → output → trace) is the same. Join `per-turn`.
-- **H1-H3** (shell hooks): resolver wraps subprocess execution via F180 hook health infrastructure. Own `shell-hook` stage because execution timing differs from session-init/per-turn.
+Why these segments unify:
+- **S1-S13, D1-D21** (34): original `if/push` patterns in `SystemPromptBuilder.ts` — the core use case
+- **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. The L0 compiler is refactored to consume pipeline output rather than independently loading templates
+- **B1** (1): session bootstrap — condition (new session?) → content. Joins `session-init`
+- **C1** (1): MCP callback — condition (MCP available?) → content. Existing `.local` overlay migrates to override store. Joins `session-init`
+- **R1-R2** (2): route assembly — condition → content at route layer. Joins `per-turn`
+- **N1** (1): navigation context — condition → content. Joins `per-turn`
 
 Hook contract:
 - **Input**: `AssemblerInput` — typed context data gathered by ContextAssembler
 - **Output**: `PromptPatch` (rendered content) + `TraceEvent` (observability record)
 
-**Tier 2 — Surface Trace Adapters (8 segments: L1-L7, M1-M2)**
+**Tier 2 — Surface Trace Adapters (6 segments: N2, M1-M2, H1-H3)**
 
 These segments are genuinely different from the hook pipeline pattern:
 
 | Surface | Source | Why observe-only |
 |---------|--------|-----------------|
-| L1-L7 (7) | `compile-system-prompt-l0.mjs` | **Compile-time**, not runtime. Content is baked into `system-prompt-l0.md` at build/startup. Runtime enable/disable is meaningless — requires recompilation. Adapter records content hash + token estimate per L-section |
+| N2 (1) | `route-helpers.ts` | **Immutable data assembly**. Conversation history delta = "previous unread messages." `trigger: always`, `disableable: false`, `governanceTier: immutable`. No customization value — not something you'd version, disable, or template-ify |
 | M1 (1) | `invoke-single-cat.ts` | **Transport-layer** (missionPrefix, F070). Deliberately outside content pipeline to preserve produced-vs-delivered boundary |
 | M2 (1) | `invoke-single-cat.ts` | **Transport-layer** (transcriptPathHints). Always appended, always delivered. Same reason as M1 |
+| H1-H3 (3) | `.claude/hooks/user-level/` | **Claude Code hooks** — completely different injection system. Shell scripts triggered by Claude Code lifecycle events (SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt" (governance notification only). Managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline |
 
-Total: 7 + 2 = **8 segments**. Combined with Tier 1's 44 hooks = all 52 segments covered.
+Total: 1 + 2 + 3 = **6 segments**. Combined with Tier 1's 46 hooks = all 52 segments covered.
 
-Trace adapters have no resolvers, no enable/disable toggle, no versioning. They only produce `TraceEventObserved` — compile-time and transport-layer concerns don't fit the runtime content pipeline, and forcing them in would blur the produced-vs-delivered boundary that trace accuracy depends on.
+Trace adapters have no resolvers, no enable/disable toggle, no versioning. They only produce `TraceEventObserved`.
 
 ### HookManifest — Self-Contained Segment Definition
 
@@ -286,7 +296,7 @@ userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 - `resolver` — optional TypeScript class that evaluates condition and prepares template variables. Hooks without a resolver are unconditional (always fire when stage fires)
 - `inputs` — declares which `AssemblerInput` fields the resolver reads. Enables dependency analysis and makes each hook's data requirements explicit
 
-**Migration from Phase 1:** Each of the 44 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For B1/C1/R1-R2/N1-N2/H1-H3, resolvers wrap existing execution logic at their current code points. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 8 observe-only segments (L1-L7, M1-M2) are not migrated into the hook directory.
+**Migration from Phase 1:** Each of the 46 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For L1-L7, the existing template files (`l1-parallel-world.md` etc.) become hook templates and the L0 compiler is refactored to consume pipeline output. For B1/C1/R1-R2/N1, resolvers wrap existing execution logic. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 6 observe-only segments (N2, M1-M2, H1-H3) are not migrated into the hook directory.
 
 ### HookRegistry — Scan, Register, Resolve
 
@@ -638,14 +648,15 @@ This means `TraceEventSummary` records what the pipeline *produced*, and `StageD
 
 For Tier 2 transport-layer adapters (M1/M2), delivery is inherent (`channel = 'always-delivered'`). L1-L7 delivery depends on whether the provider uses native L0 (`channel = 'native-l0'`) or message-prepend (`channel = 'message-prepend'`, gated by `injectSystemPrompt`).
 
-### Surface Trace Adapters (Tier 2 — 8 segments)
+### Surface Trace Adapters (Tier 2 — 6 segments)
 
-The 8 segments that genuinely don't fit the runtime content pipeline get lightweight observe-only adapters:
+The 6 segments that genuinely don't fit the runtime content pipeline get lightweight observe-only adapters:
 
-- **L1-L7 (compile-time)**: Adapter reads the compiled `system-prompt-l0.md` and emits `TraceEventObserved` with content hash per L-section. Runs once at startup or on L0 recompilation — not per-turn.
+- **N2 (conversation history delta)**: Adapter at `route-helpers.ts` records conversation history assembly. Immutable, always-on, no customization value.
 - **M1-M2 (transport-layer)**: M1 adapter records dispatch mission context (missionPrefix, F070). M2 adapter records transcript path hints. Both at `invoke-single-cat.ts` transport assembly point — they remain outside the content pipeline to preserve the produced-vs-delivered boundary.
+- **H1-H3 (Claude Code hooks)**: Adapters leverage F180 hook health infrastructure to record fire/skip of external shell scripts. These are managed by Claude Code's hook system (`.claude/hooks/`), not Cat Cafe's content pipeline. H3 is governance-only and doesn't enter the model prompt.
 
-Trace adapters produce `TraceEventObserved` only — no `PromptPatch`, no enable/disable, no versioning. This ensures the trace record covers all 52 segments (44 Tier 1 + 8 Tier 2) for complete observability.
+Trace adapters produce `TraceEventObserved` only — no `PromptPatch`, no enable/disable, no versioning. This ensures the trace record covers all 52 segments (46 Tier 1 + 6 Tier 2) for complete observability.
 
 ### Versioning Model
 
@@ -679,18 +690,18 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 
 | Sub-phase | Deliverable | Tests |
 |-----------|------------|-------|
-| **P2-A: HookManifest + Registry** | Hook YAML schema for all 44 pipelined segments, directory scan, manifest parsing. Registry lists S1-S13, B1, C1, D1-D21, R1-R2, N1-N2, H1-H3 | Schema validation tests, scan tests (following PluginRegistry test pattern) |
-| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, B1/C1/R/N/H wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output | Snapshot tests: old output === new output for all 44 hooks |
-| **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into session-init, per-turn, and shell-hook stages. Remove old patterns. Add Tier 2 trace adapters for L1-L7 + M1-M2 (8 observe-only) | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter coverage tests |
+| **P2-A: HookManifest + Registry** | Hook YAML schema for all 46 pipelined segments, directory scan, manifest parsing. Registry lists S1-S13, B1, C1, L1-L7, D1-D21, R1-R2, N1 | Schema validation tests, scan tests (following PluginRegistry test pattern) |
+| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output. L0 compiler refactored to consume pipeline output | Snapshot tests: old output === new output for all 46 hooks |
+| **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into session-init and per-turn stages. Remove old patterns. Add Tier 2 trace adapters for N2 + M1-M2 + H1-H3 (6 observe-only) | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter coverage tests |
 | **P2-D: Runtime Override Store** | Redis-backed override layer (`HookOverrideStore`). Console UI: enable/disable hooks, switch versions, edit templates (safetyTier-gated). Overrides persist across restart (TTL=0). Same write API for operator and future auto-eval | Override resolution tests (override ?? baseline). Safety tier gate tests. Persistence tests |
 | **P2-E: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer. Trace records override source (`disabledBy: 'operator'` etc.) | Trace record completeness tests. Console: can view which hooks fired per turn, who overrode what |
 
 ## Acceptance Criteria — Phase 2
 
 - [ ] AC-P2-1: HookManifest YAML schema defined for S/D segments, validated by `check-hook-manifest.mjs`
-- [ ] AC-P2-2: HookRegistry scans `assets/prompt-hooks/`, parses all 44 hook manifests (S1-S13, B1, C1, D1-D21, R1-R2, N1-N2, H1-H3)
+- [ ] AC-P2-2: HookRegistry scans `assets/prompt-hooks/`, parses all 46 hook manifests (S1-S13, B1, C1, L1-L7, D1-D21, R1-R2, N1)
 - [ ] AC-P2-3: ContextAssembler produces typed `AssemblerInput` from route-layer queries for session-init and per-turn stages
-- [ ] AC-P2-4: 44 content hooks have standalone resolvers (S/D extracted from `if/push`, B1/C1/R/N/H wrapping existing execution points); L1-L7 + M1-M2 have observe-only trace adapters
+- [ ] AC-P2-4: 46 content hooks have standalone resolvers (S/D from `if/push`, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points); N2 + M1-M2 + H1-H3 have observe-only trace adapters
 - [ ] AC-P2-5: Dual-path validation: old `if/push` output === new pipeline output for all S/D segments (snapshot tests)
 - [ ] AC-P2-6: `buildStaticIdentity()` and `buildInvocationContext()` delegate to HookPipeline
 - [ ] AC-P2-7: Each S/D hook execution produces TraceEvent (discriminated union: fired/skipped/disabled)
@@ -700,7 +711,7 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 - [ ] AC-P2-10: Hook versioning: v1→v2 switch via runtime override or manifest baseline, TraceEvent records version
 - [ ] AC-P2-11: Hook enable/disable via runtime override (any hook) or manifest baseline, TraceEvent records disabled status + source
 - [ ] AC-P2-12: Transport assembly (staging/contextHint/missionPrefix/M2) unchanged, not in pipeline
-- [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for L1-L7 + M1-M2 (8 observe-only segments)
+- [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for N2 + M1-M2 + H1-H3 (6 observe-only segments)
 - [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration (with no overrides active)
 - [ ] AC-P2-15: Runtime override store (Redis, TTL=0) with two-layer resolution: override ?? manifest baseline
 - [ ] AC-P2-16: Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
@@ -716,7 +727,7 @@ Phase 2 design requires alignment with the upstream maintainer, who previously d
 
 ### Concern 2: "Pre-freezing N-stage pipeline locks the extension surface"
 
-**Our response:** Phase 2 defines 3 runtime pipeline stages (session-init, per-turn, shell-hook), not the 8-10 stage lifecycle from the original proposal. These stages are the minimal observation boundary around existing execution points — they formalize what's already there, not invent new boundaries. Only L1-L7 (compile-time) and M1-M2 (transport-layer) get observe-only trace adapters. Adding a hook to a stage doesn't require a new interface; the stages are registration categories, not extension APIs.
+**Our response:** Phase 2 defines 2 runtime pipeline stages (session-init, per-turn), not the 8-10 stage lifecycle from the original proposal. These stages are the minimal observation boundary around existing execution points — they formalize what's already there, not invent new boundaries. Only 6 segments (N2, M1-M2, H1-H3) get observe-only trace adapters — the rest all join the pipeline. Adding a hook to a stage doesn't require a new interface; the stages are registration categories, not extension APIs.
 
 ### Concern 3: "Build-to-Delete — metadata turns deletion into deprecation"
 
