@@ -359,6 +359,16 @@ describe('DirectoryPickerModal', () => {
 
     clickConfirm();
     expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: targetPath }));
+    expect(
+      mockApiFetch.mock.calls.filter(
+        ([path]) => path === `/api/projects/browse?path=${encodeURIComponent(projectsPath)}`,
+      ),
+    ).toHaveLength(1);
+    expect(
+      mockApiFetch.mock.calls.filter(
+        ([path]) => path === `/api/projects/browse?path=${encodeURIComponent(targetPath)}`,
+      ),
+    ).toHaveLength(1);
   });
 
   // ── F068: Path input ──────────────────────────────────────
