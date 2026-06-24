@@ -376,6 +376,17 @@ function isUserVisibleSessionOutput(msg: AgentMessage): boolean {
   return msg.type === 'text' || msg.type === 'tool_use' || msg.type === 'tool_result';
 }
 
+function normalizeSessionWorkspace(path: string | undefined): string | undefined {
+  const trimmed = path?.trim();
+  return trimmed ? resolve(trimmed) : undefined;
+}
+
+function sessionWorkspaceMatches(record: SessionRecord, workingDirectory: string | undefined): boolean {
+  const expected = normalizeSessionWorkspace(workingDirectory);
+  const actual = normalizeSessionWorkspace(record.workingDirectory);
+  return Boolean(expected && actual && expected === actual);
+}
+
 async function syncAntigravityRuntimeMetadata(input: {
   runtimeSessionStore: IRuntimeSessionStore;
   sessionChainStore: ISessionChainStore;
@@ -1070,6 +1081,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       throw workspaceResolutionError;
     }
     const workingProjectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : undefined;
+
+    if (provider === 'opencode' && sessionId && deps.sessionChainStore && sessionChainActive && !isBgCarrier) {
+      try {
+        const activeRec = await preflightRace(
+          Promise.resolve(deps.sessionChainStore.getActive(catId, threadId)),
+          'getActive:workspaceResumeGuard',
+          signal,
+        );
+        if (!activeRec || activeRec.cliSessionId !== sessionId || !sessionWorkspaceMatches(activeRec, workingDirectory)) {
+          log.debug(
+            {
+              catId,
+              threadId,
+              invocationId,
+              cliSessionId: sessionId,
+              recordWorkingDirectory: activeRec?.workingDirectory ?? null,
+              workingDirectory: workingDirectory ?? null,
+            },
+            'OpenCode resume session discarded because stored workspace does not match thread workspace',
+          );
+          sessionId = undefined;
+        }
+      } catch {
+        sessionId = undefined;
+      }
+    }
 
     // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
     // Three-layer defense model (shared-rules §14):
@@ -2171,6 +2208,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               if (bgRec.cliSessionId !== msg.sessionId) {
                 await deps.sessionChainStore.update(bgRec.id, {
                   cliSessionId: msg.sessionId,
+                  ...(workingDirectory ? { workingDirectory } : {}),
                   ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
                   updatedAt: Date.now(),
                 });
@@ -2182,6 +2220,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             } else {
               const newRec = await deps.sessionChainStore.create({
                 cliSessionId: msg.sessionId,
+                ...(workingDirectory ? { workingDirectory } : {}),
                 threadId,
                 catId,
                 userId,
@@ -2206,6 +2245,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // This is normal — NOT a "session replaced" event. Just update the tracked ID.
                   await deps.sessionChainStore.update(existing.id, {
                     cliSessionId: msg.sessionId,
+                    ...(workingDirectory ? { workingDirectory } : {}),
                     ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
                     updatedAt: Date.now(),
                   });
@@ -2280,6 +2320,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
                     const newRec = await deps.sessionChainStore.create({
                       cliSessionId: msg.sessionId,
+                      ...(workingDirectory ? { workingDirectory } : {}),
                       threadId,
                       catId,
                       userId,
@@ -2298,13 +2339,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                 }
               } else if (params.continuityCapsule) {
                 await deps.sessionChainStore.update(existing.id, {
+                  ...(workingDirectory ? { workingDirectory } : {}),
                   continuityCapsule: params.continuityCapsule,
                 });
+              } else if (workingDirectory && existing.workingDirectory !== workingDirectory) {
+                await deps.sessionChainStore.update(existing.id, { workingDirectory });
               }
             } else {
               // No active session (first invocation or previous was sealed)
               const newRec = await deps.sessionChainStore.create({
                 cliSessionId: msg.sessionId,
+                ...(workingDirectory ? { workingDirectory } : {}),
                 threadId,
                 catId,
                 userId,

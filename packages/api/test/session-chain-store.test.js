@@ -21,10 +21,11 @@ describe('SessionChainStore', () => {
 
   test('create() returns SessionRecord with correct initial state', async () => {
     const store = await createStore();
-    const record = store.create(BASE_INPUT);
+    const record = store.create({ ...BASE_INPUT, workingDirectory: '/tmp/worktree-a' });
 
     assert.ok(record.id.length > 0, 'should have an id');
     assert.equal(record.cliSessionId, 'cli-sess-1');
+    assert.equal(record.workingDirectory, '/tmp/worktree-a');
     assert.equal(record.threadId, 'thread-1');
     assert.equal(record.catId, 'opus');
     assert.equal(record.userId, 'user-1');
@@ -174,6 +175,16 @@ describe('SessionChainStore', () => {
 
     assert.equal(store.getByCliSessionId('cli-new').id, record.id);
     assert.equal(store.getByCliSessionId('cli-sess-1'), null, 'old CLI session ID should be unlinked');
+  });
+
+  test('update() stores workingDirectory', async () => {
+    const store = await createStore();
+    const record = store.create(BASE_INPUT);
+
+    const updated = store.update(record.id, { workingDirectory: '/tmp/worktree-b' });
+
+    assert.equal(updated.workingDirectory, '/tmp/worktree-b');
+    assert.equal(store.get(record.id).workingDirectory, '/tmp/worktree-b');
   });
 
   test('update() returns null for non-existent id', async () => {

@@ -6835,6 +6835,182 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
   });
 
+  it('does not resume OpenCode when active session has no stored workspace', async () => {
+    const projectRoot = await realpath(join(__dirname, '..', '..', '..'));
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-no-workspace',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'stale-opencode-session',
+      catId: 'opencode',
+      threadId: 'thread-opencode-no-workspace-resume',
+      userId: 'user1',
+      messageCount: 1,
+      createdAt: Date.now() - 1000,
+      updatedAt: Date.now() - 1000,
+    };
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: projectRoot, createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+      sessionManager: {
+        get: async () => 'stale-opencode-session',
+        store: async () => {},
+        delete: async () => {},
+      },
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        get: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test stale workspace resume',
+        userId: 'user1',
+        threadId: 'thread-opencode-no-workspace-resume',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.sessionId, undefined, 'OpenCode must not resume sessions without workspace metadata');
+    assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
+  });
+
+  it('does not resume OpenCode when active session workspace differs from thread workspace', async () => {
+    const projectRoot = await realpath(join(__dirname, '..', '..', '..'));
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-wrong-workspace',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'stale-opencode-session',
+      workingDirectory: '/tmp/other-workspace',
+      catId: 'opencode',
+      threadId: 'thread-opencode-wrong-workspace-resume',
+      userId: 'user1',
+      messageCount: 1,
+      createdAt: Date.now() - 1000,
+      updatedAt: Date.now() - 1000,
+    };
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: projectRoot, createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+      sessionManager: {
+        get: async () => 'stale-opencode-session',
+        store: async () => {},
+        delete: async () => {},
+      },
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        get: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test wrong workspace resume',
+        userId: 'user1',
+        threadId: 'thread-opencode-wrong-workspace-resume',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.sessionId, undefined, 'OpenCode must not resume sessions from a different workspace');
+    assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
+  });
+
+  it('resumes OpenCode when active session workspace matches thread workspace', async () => {
+    const projectRoot = await realpath(join(__dirname, '..', '..', '..'));
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+      },
+    };
+    const activeRecord = {
+      id: 'rec-opencode-matching-workspace',
+      seq: 0,
+      status: 'active',
+      cliSessionId: 'live-opencode-session',
+      workingDirectory: projectRoot,
+      catId: 'opencode',
+      threadId: 'thread-opencode-matching-workspace-resume',
+      userId: 'user1',
+      messageCount: 1,
+      createdAt: Date.now() - 1000,
+      updatedAt: Date.now() - 1000,
+    };
+    const deps = {
+      ...makeDeps(),
+      threadStore: {
+        get: async () => ({ projectPath: projectRoot, createdBy: 'user1' }),
+        updateParticipantActivity: async () => {},
+      },
+      sessionManager: {
+        get: async () => 'live-opencode-session',
+        store: async () => {},
+        delete: async () => {},
+      },
+      sessionChainStore: {
+        getChain: async () => [activeRecord],
+        getActive: async () => activeRecord,
+        get: async () => activeRecord,
+        create: async () => activeRecord,
+        update: async () => activeRecord,
+      },
+    };
+
+    await collect(
+      invokeSingleCat(deps, {
+        catId: 'opencode',
+        service,
+        prompt: 'test matching workspace resume',
+        userId: 'user1',
+        threadId: 'thread-opencode-matching-workspace-resume',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(optionsSeen.length, 1);
+    assert.equal(optionsSeen[0]?.sessionId, 'live-opencode-session');
+    assert.equal(optionsSeen[0]?.workingDirectory, projectRoot);
+  });
+
   it('fails loud for OpenCode when thread projectPath is default', async () => {
     let invokedService = false;
     const service = {
