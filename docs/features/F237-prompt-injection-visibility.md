@@ -127,7 +127,7 @@ Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat
 
 ### Motivation
 
-Phase 1 delivered visibility — operators can see what's injected. Phase 2 makes injections **self-contained, dynamically manageable, observable, and versionable**. The goal: each of the 52 segments becomes an independently addressable hook that can be added, modified, disabled, versioned, and traced without code changes — the data foundation for automated iteration.
+Phase 1 delivered visibility — operators can see what's injected. Phase 2 makes the 34 S/D content segments (in `SystemPromptBuilder.ts`) **self-contained, dynamically manageable, observable, and versionable** via a hook pipeline. The remaining 18 segments (L/B/C/R/N/M/H — across compile-time, session bootstrap, route assembly, transport, and shell hooks) get observe-only trace adapters for full observability coverage. Together, all 52 segments become traceable — the data foundation for automated iteration.
 
 ### Why Hook Pipeline
 
@@ -227,20 +227,23 @@ Hook contract:
 - **Input**: `AssemblerInput` — typed context data gathered by ContextAssembler
 - **Output**: `PromptPatch` (rendered content) + `TraceEvent` (observability record)
 
-**Tier 2 — Surface Trace Adapters (L1-L7, B1, C1, R1-R2, N1, H1-H3 = 18 segments)**
+**Tier 2 — Surface Trace Adapters (18 segments: L1-L7, B1, C1, R1-R2, N1-N2, M1-M2, H1-H3)**
 
-These segments have fundamentally different execution models (compile-time, separate services, route-layer, shell scripts). They don't fit the resolver/template pattern and shouldn't be forced into it. Phase 2 provides **observe-only adapters** that emit `TraceEvent` records without managing content:
+These segments have fundamentally different execution models (compile-time, separate services, route-layer, transport-layer, shell scripts). They don't fit the resolver/template pattern and shouldn't be forced into it. Phase 2 provides **observe-only adapters** that emit `TraceEvent` records without managing content:
 
 | Surface | Source | Adapter Role |
 |---------|--------|-------------|
-| L1-L7 | `compile-system-prompt-l0.mjs` | Record content hash + token estimate of compiled L0 sections |
-| B1 | `SessionBootstrap.ts` | Record whether bootstrap context was injected |
-| C1 | `McpPromptInjector.ts` | Record MCP callback injection (respects existing `.local` overlay) |
-| R1-R2 | `route-serial.ts` / `route-parallel.ts` | Record route-level assembly |
-| N1 | `route-helpers.ts` | Record navigation context injection |
-| H1-H3 | Shell hooks | Record hook fire/skip via existing hook health infrastructure (F180) |
+| L1-L7 (7) | `compile-system-prompt-l0.mjs` | Record content hash + token estimate of compiled L0 sections |
+| B1 (1) | `SessionBootstrap.ts` | Record whether bootstrap context was injected |
+| C1 (1) | `McpPromptInjector.ts` | Record MCP callback injection (respects existing `.local` overlay) |
+| R1-R2 (2) | `route-serial.ts` / `route-parallel.ts` | Record route-level assembly |
+| N1-N2 (2) | `route-helpers.ts` | Record navigation context + conversation history delta injection |
+| M1-M2 (2) | `invoke-single-cat.ts` | Record transport-layer injections: M1 dispatch mission context (missionPrefix), M2 transcript path hints |
+| H1-H3 (3) | Shell hooks | Record hook fire/skip via existing hook health infrastructure (F180) |
 
-Trace adapters have no resolvers, no enable/disable toggle, no versioning. They only produce `TraceEvent` — ensuring the trace record covers all 52 segments for full observability without over-abstracting non-uniform surfaces.
+Total: 7 + 1 + 1 + 2 + 2 + 2 + 3 = **18 segments**. Combined with Tier 1's 34 S/D hooks = all 52 segments traced.
+
+Trace adapters have no resolvers, no enable/disable toggle, no versioning. They only produce `TraceEventObserved` — ensuring the trace record covers all 52 segments for full observability without over-abstracting non-uniform surfaces.
 
 ### HookManifest — Self-Contained Segment Definition
 
@@ -280,7 +283,7 @@ userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 - `resolver` — optional TypeScript class that evaluates condition and prepares template variables. Hooks without a resolver are unconditional (always fire when stage fires)
 - `inputs` — declares which `AssemblerInput` fields the resolver reads. Enables dependency analysis and makes each hook's data requirements explicit
 
-**Migration from Phase 1:** Each of the 52 `@segment` annotations in `SystemPromptBuilder.ts` becomes a `hook.yaml` + its existing template file. The resolver code is extracted from the inline `if/push` pattern. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction.
+**Migration from Phase 1:** Each of the 34 S/D `@segment` annotations in `SystemPromptBuilder.ts` becomes a `hook.yaml` + its existing template file. The resolver code is extracted from the inline `if/push` pattern. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The remaining 18 non-S/D segments (L/B/C/R/N/M/H) are not migrated into the hook directory — they get lightweight trace adapters at their existing execution points.
 
 ### HookRegistry — Scan, Register, Resolve
 
@@ -300,10 +303,10 @@ interface HookRegistry {
   /** All registered hooks */
   getAllHooks(): RegisteredHook[];
   
-  /** Effective enabled state: manifest default merged with runtime override */
+  /** Read enabled state from manifest (read-only at runtime) */
   isEnabled(hookId: string): boolean;
   
-  /** Effective active version: manifest default merged with runtime override */
+  /** Read active version from manifest (read-only at runtime) */
   getActiveVersion(hookId: string): number;
 }
 
@@ -314,14 +317,11 @@ interface RegisteredHook {
 }
 ```
 
-**Two-layer state model:**
+**State model — read-only manifest, no runtime override store:**
 
-| Layer | Source | Mutability | Scope |
-|-------|--------|-----------|-------|
-| **Manifest** (repo) | `hook.yaml` per segment | Read-only at runtime | Default enabled/version/stage |
-| **Runtime override** (store) | Owner-gated persistent store | Write via Console (Phase 2 deferred) | Override enabled/version per hook |
+Phase 2 uses the repo manifest (`hook.yaml`) as the single source of truth. The manifest is **read-only at runtime** — enable/disable and version changes require editing `hook.yaml`, committing, and deploying. This matches the maintainer's stated preference for "file + git + `pnpm gate` + restart" as the rollback channel (KD-5 from F203).
 
-The repo manifest is the source of truth for defaults — it's never written at runtime. Runtime overrides (enable/disable, version switch) are stored separately in an owner-gated persistent store, following the same trust boundary as Phase 1's `.local` overlay pattern. **Phase 2 first version defers Console write UI for runtime overrides** — overrides are managed via `hook.yaml` file edits + deploy, matching the maintainer's preference for "file + git + restart" as the rollback channel. Console toggle for S/D hooks may be added in a follow-up after trust model validation.
+A runtime override store (allowing Console-driven enable/disable without deploy) is a potential follow-up. It requires trust model design: which hooks can be toggled at runtime, by whom, with what audit trail. Phase 2 deliberately avoids this complexity — the manifest is a git-tracked artifact with full commit history, which is sufficient for the versioning and observability goals.
 
 **Directory structure:**
 
@@ -396,21 +396,15 @@ Each hook produces `PromptPatch` (content) + `TraceEvent` (observability). No di
 interface HookResolver {
   /** 
    * Evaluate whether this hook should fire and prepare template variables.
-   * Returns null if the hook should be skipped this turn.
-   * When skipping, set this.skipReason to explain why.
+   * Returns a discriminated union — no mutable state on the resolver instance,
+   * safe for concurrent invocations sharing a registry singleton.
    */
-  resolve(input: AssemblerInput): HookResolveResult | null;
-  
-  /** Human-readable reason when resolve() returns null */
-  skipReason: string;
+  resolve(input: AssemblerInput): ResolveResult;
 }
 
-interface HookResolveResult {
-  /** Template variables for renderSegment() */
-  vars: Record<string, string>;
-  /** Optional: override which template version to use */
-  templateVersion?: number;
-}
+type ResolveResult =
+  | { status: 'fired'; vars: Record<string, string>; templateVersion?: number }
+  | { status: 'skipped'; reasonCode: string; reason: string };
 
 /** What a hook produces after resolution + template rendering */
 interface PromptPatch {
@@ -463,14 +457,15 @@ interface TraceEventObserved extends TraceEventBase {
 
 ```
 for each registered hook in stage (ordered by manifest priority):
-  1. Check isEnabled(hookId) → false?
-     → emit TraceEvent { status: 'disabled', disabledBy }
+  1. Check manifest enabled → false?
+     → emit TraceEvent { status: 'disabled', disabledBy: 'manifest' }
   2. If hook has resolver → call resolver.resolve(input)
-     - Returns null → emit TraceEvent { status: 'skipped',
-         reasonCode, reason: resolver.skipReason }
-     - Returns result → continue
-  3. If hook has no resolver → unconditional (always fire)
-  4. Render template with result.vars → PromptPatch
+     - Returns { status: 'skipped', reasonCode, reason }
+       → emit TraceEvent { status: 'skipped', reasonCode, reason }
+     - Returns { status: 'fired', vars, templateVersion? }
+       → continue to step 4
+  3. If hook has no resolver → unconditional (always fire with empty vars)
+  4. Render template with vars → PromptPatch
   5. Emit TraceEvent { status: 'fired', contentHash, tokenEstimate, version }
 ```
 
@@ -553,7 +548,7 @@ The hook pipeline produces the **systemPrompt** (from session-init hooks) and **
 - Transport assembly can change (e.g., new prepend layers) without touching hooks
 - The `injectSystemPrompt` decision (resume vs force-reinjection) stays clean — it's a delivery decision, not a content decision
 
-### Surface Trace Adapters (Tier 2)
+### Surface Trace Adapters (Tier 2 — 18 segments)
 
 The 18 non-S/D segments have diverse execution models that don't fit the resolver/template pattern. Instead of forcing them into the pipeline, Phase 2 provides lightweight trace adapters at each surface's existing execution point:
 
@@ -561,10 +556,11 @@ The 18 non-S/D segments have diverse execution models that don't fit the resolve
 - **B1 (session bootstrap)**: Adapter wraps `SessionBootstrap.buildBootstrapContext()`, emits `TraceEventObserved` with token estimate of bootstrap content.
 - **C1 (MCP callback)**: Adapter wraps `McpPromptInjector`, emits `TraceEventObserved`. Existing `.local` overlay mechanism is untouched.
 - **R1-R2 (route assembly)**: Adapter at route finalization point, records whether route-level injections were applied.
-- **N1 (navigation)**: Adapter at `route-helpers.ts` navigation injection point.
+- **N1-N2 (navigation + history)**: N1 adapter at `route-helpers.ts` navigation injection point. N2 adapter records conversation history delta assembly.
+- **M1-M2 (transport-layer)**: M1 adapter records dispatch mission context (missionPrefix, F070). M2 adapter records transcript path hints. Both at `invoke-single-cat.ts` transport assembly point — they remain outside the content pipeline but get trace coverage.
 - **H1-H3 (shell hooks)**: Adapters leverage existing F180 hook health infrastructure to record fire/skip.
 
-Trace adapters produce `TraceEventObserved` only — no `PromptPatch`, no enable/disable, no versioning. This ensures the trace record covers all 52 segments for complete observability without over-abstracting non-uniform surfaces.
+Trace adapters produce `TraceEventObserved` only — no `PromptPatch`, no enable/disable, no versioning. This ensures the trace record covers all 52 segments (34 Tier 1 + 18 Tier 2) for complete observability without over-abstracting non-uniform surfaces.
 
 ### Versioning Model
 
@@ -620,7 +616,7 @@ Phase 2 implementation in 4 sub-phases, each independently shippable:
 - [ ] AC-P2-12: Transport assembly (staging/contextHint/missionPrefix/M2) unchanged, not in pipeline
 - [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for L/B/C/R/N/H surfaces
 - [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration
-- [ ] AC-P2-15: Repo manifest is read-only at runtime; runtime override store is owner-gated (Phase 2 defers Console write UI)
+- [ ] AC-P2-15: Hook manifest is read-only at runtime; enable/disable and version changes require git commit + deploy (no runtime override store in Phase 2)
 
 ## Upstream Pitch Strategy (Issue #839)
 
