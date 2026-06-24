@@ -3,9 +3,9 @@
  * that cannot be expressed as pure REST calls in YAML.
  */
 import type { LimbInvokeResult } from '@cat-cafe/shared';
+import { fetchExternalUrlPinned } from '../../utils/url-safety.js';
 import type { InvokeContext, InvokeHandler } from '../limb/PluginLimbAdapter.js';
 import { markdownToWxHtml } from './markdown-to-wx-html.js';
-import { fetchExternalUrlPinned } from './url-safety.js';
 
 const TIMEOUT_MS = 30_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;

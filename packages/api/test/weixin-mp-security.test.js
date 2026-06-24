@@ -13,7 +13,7 @@ import {
   resolveExternalUrl,
   validateExternalUrl,
   validateExternalUrlResolved,
-} from '../dist/domains/weixin-mp/url-safety.js';
+} from '../dist/utils/url-safety.js';
 
 describe('validateExternalUrl', () => {
   it('allows https URLs', () => {
