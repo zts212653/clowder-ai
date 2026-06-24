@@ -305,25 +305,78 @@ interface HookRegistry {
   /** All registered hooks */
   getAllHooks(): RegisteredHook[];
   
-  /** Read enabled state from manifest (read-only at runtime) */
+  /** Effective enabled state: runtime override ?? manifest baseline */
   isEnabled(hookId: string): boolean;
   
-  /** Read active version from manifest (read-only at runtime) */
+  /** Effective active version: runtime override ?? manifest baseline */
   getActiveVersion(hookId: string): number;
+  
+  /** Get effective state for a hook (resolved override chain) */
+  getEffective(hookId: string): EffectiveHookState;
+}
+
+interface EffectiveHookState {
+  enabled: boolean;
+  version: number;
+  templateOverride: string | null;   // null = use baseline template
+  source: 'baseline' | 'operator' | 'auto-eval';  // who set the current override
 }
 
 interface RegisteredHook {
-  manifest: HookManifest;              // read-only, from repo YAML
+  manifest: HookManifest;              // baseline, from repo YAML
   resolver: HookResolver | null;       // null = unconditional, always fires
-  template: string;                    // raw template content
+  template: string;                    // baseline template content
 }
 ```
 
-**State model — read-only manifest, no runtime override store:**
+**State model — baseline + runtime override:**
 
-Phase 2 uses the repo manifest (`hook.yaml`) as the single source of truth. The manifest is **read-only at runtime** — enable/disable and version changes require editing `hook.yaml`, committing, and deploying. This matches the maintainer's stated preference for "file + git + `pnpm gate` + restart" as the rollback channel (KD-5 from F203).
+Hook state uses a two-layer resolution chain: **runtime override** (Redis-persisted) takes precedence over **manifest baseline** (git-tracked YAML). This separates product-level concerns from user-level concerns:
 
-A runtime override store (allowing Console-driven enable/disable without deploy) is a potential follow-up. It requires trust model design: which hooks can be toggled at runtime, by whom, with what audit trail. Phase 2 deliberately avoids this complexity — the manifest is a git-tracked artifact with full commit history, which is sufficient for the versioning and observability goals.
+```
+Effective state = runtime override ?? manifest baseline
+```
+
+| Layer | What it controls | Who changes it | How |
+|-------|-----------------|----------------|-----|
+| **Manifest baseline** | Which hooks exist, default templates, default enabled/version | Product team | git commit + deploy |
+| **Runtime override** | Enable/disable, version switch, template edits, auto-eval iterations | Operator / auto-eval | Console API / auto-eval API |
+
+**Why two layers:**
+- **Baseline** is the product's factory default — it defines which hooks ship and their default behavior. Adding or removing a built-in hook is a product-level change that goes through git. This is the "file + git + restart" channel.
+- **Runtime override** is the user's workspace — operators can disable hooks they don't want, edit templates to customize behavior, switch versions. Auto-eval (Phase 3) writes to the same override layer. Override and auto-eval use the same mechanism; there's no distinction between manual and automated customization.
+- **Package-install users** never touch git. Their entire interaction is through runtime overrides on top of the shipped baseline.
+
+**Safety boundary:** Phase 1's `safetyTier` constrains which hooks accept template overrides — `readonly` hooks (49/52) reject template writes, `limited-edit` and `editable` hooks (3/52) accept them. Enable/disable override is allowed for all hooks regardless of safety tier (disabling a hook doesn't alter its content, just silences it).
+
+**Runtime override store:**
+
+```typescript
+interface HookOverrideStore {
+  /** Get override for a hook (null = use baseline) */
+  getOverride(hookId: string): HookOverride | null;
+  
+  /** Set override (operator or auto-eval) */
+  setOverride(hookId: string, override: HookOverride): void;
+  
+  /** Clear override (revert to baseline) */
+  clearOverride(hookId: string): void;
+  
+  /** List all active overrides */
+  listOverrides(): Array<{ hookId: string; override: HookOverride }>;
+}
+
+interface HookOverride {
+  enabled?: boolean;              // override enabled state
+  version?: number;               // override active version
+  templateContent?: string;       // override template (safetyTier gated)
+  source: 'operator' | 'auto-eval';
+  updatedAt: number;
+  reason?: string;                // why this override was set
+}
+```
+
+Keyed by `hook-override:{hookId}`. TTL=0 (persistent) — user customizations must survive restart (LL-048). Audit trail: each override records `source` and `reason`, enabling "who changed this and why" queries.
 
 **Directory structure:**
 
@@ -444,7 +497,7 @@ interface TraceEventSkipped extends TraceEventBase {
 
 interface TraceEventDisabled extends TraceEventBase {
   status: 'disabled';
-  disabledBy: 'manifest';   // Phase 2: manifest only (no runtime override store)
+  disabledBy: 'manifest' | 'operator' | 'auto-eval';  // which layer disabled it
 }
 
 /** For Tier 2 surface trace adapters (L/B/C/R/N/H) */
@@ -459,8 +512,8 @@ interface TraceEventObserved extends TraceEventBase {
 
 ```
 for each registered hook in stage (ordered by manifest priority):
-  1. Check manifest enabled → false?
-     → emit TraceEvent { status: 'disabled', disabledBy: 'manifest' }
+  1. Check effective enabled (override ?? manifest) → false?
+     → emit TraceEvent { status: 'disabled', disabledBy: source }
   2. If hook has resolver → call resolver.resolve(input)
      - Returns { status: 'skipped', reasonCode, reason }
        → emit TraceEvent { status: 'skipped', reasonCode, reason }
@@ -619,22 +672,22 @@ The resolver receives the active version and renders the corresponding template.
 
 ### What Phase 2 Does NOT Include
 
-- **Eval feedback loop** — automated analysis of trace data to score/iterate segments. This is Phase 3, consuming Phase 2's trace infrastructure
+- **Eval feedback loop** — automated analysis of trace data to score/iterate segments. This is Phase 3, consuming Phase 2's trace + override infrastructure
 - **Context mutation** — hooks producing side effects beyond PromptPatch (e.g., modifying session state). Future capability tier
-- **Arbitrary segment editability** — the 3-segment `.local` overlay pattern from Phase 1 continues. Phase 2 doesn't expand the editable set
 - **Custom user hooks** — operators can't register their own hooks yet. This requires security model design beyond Phase 2's scope
 - **L0 compiler integration** — L1-L7 remain compiled by `compile-system-prompt-l0.mjs`. Hook pipeline observes but doesn't replace the compiler
 
 ### Landing Order
 
-Phase 2 implementation in 4 sub-phases, each independently shippable:
+Phase 2 implementation in 5 sub-phases, each independently shippable:
 
 | Sub-phase | Deliverable | Tests |
 |-----------|------------|-------|
 | **P2-A: HookManifest + Registry** | Hook YAML schema for S/D segments, directory scan, manifest parsing. No runtime wiring — just the registry that can list S1-S13 + D1-D21 hooks | Schema validation tests, scan tests (following PluginRegistry test pattern) |
 | **P2-B: ContextAssembler + Resolvers** | Extract S/D resolver logic from `SystemPromptBuilder.ts` `if/push` patterns into standalone resolver classes. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output | Snapshot tests: old output === new output for every S/D segment |
 | **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into `buildStaticIdentity()` and `buildInvocationContext()` as the primary code path. Remove old `if/push` patterns. Add Tier 2 trace adapters for L/B/C/R/N/H | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter coverage tests |
-| **P2-D: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer | Trace record completeness tests. Console: can view which hooks fired per turn |
+| **P2-D: Runtime Override Store** | Redis-backed override layer (`HookOverrideStore`). Console UI: enable/disable hooks, switch versions, edit templates (safetyTier-gated). Overrides persist across restart (TTL=0). Same write API for operator and future auto-eval | Override resolution tests (override ?? baseline). Safety tier gate tests. Persistence tests |
+| **P2-E: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer. Trace records override source (`disabledBy: 'operator'` etc.) | Trace record completeness tests. Console: can view which hooks fired per turn, who overrode what |
 
 ## Acceptance Criteria — Phase 2
 
@@ -648,12 +701,14 @@ Phase 2 implementation in 4 sub-phases, each independently shippable:
 - [ ] AC-P2-8: InjectionTraceSummary persisted per turn (persistent, TTL=0); InjectionTraceDetail persisted with configurable TTL (default 7 days)
 - [ ] AC-P2-8a: InjectionTraceSummary includes per-stage `StageDeliveryDecision` distinguishing produced vs delivered (session-init delivery = `injectSystemPrompt` decision)
 - [ ] AC-P2-9: Console trace viewer: query which hooks fired per turn per thread
-- [ ] AC-P2-10: Hook versioning: v1→v2 switch via manifest file edit, TraceEvent records version
-- [ ] AC-P2-11: Hook enable/disable via manifest `enabled` field, TraceEvent records disabled status
+- [ ] AC-P2-10: Hook versioning: v1→v2 switch via runtime override or manifest baseline, TraceEvent records version
+- [ ] AC-P2-11: Hook enable/disable via runtime override (any hook) or manifest baseline, TraceEvent records disabled status + source
 - [ ] AC-P2-12: Transport assembly (staging/contextHint/missionPrefix/M2) unchanged, not in pipeline
 - [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for L/B/C/R/N/H surfaces
-- [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration
-- [ ] AC-P2-15: Hook manifest is read-only at runtime; enable/disable and version changes require git commit + deploy (no runtime override store in Phase 2)
+- [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration (with no overrides active)
+- [ ] AC-P2-15: Runtime override store (Redis, TTL=0) with two-layer resolution: override ?? manifest baseline
+- [ ] AC-P2-16: Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
+- [ ] AC-P2-17: Override audit trail: each override records source (operator/auto-eval), timestamp, reason
 
 ## Upstream Pitch Strategy (Issue #839)
 
