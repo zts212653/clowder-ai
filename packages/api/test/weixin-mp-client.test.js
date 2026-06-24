@@ -1,30 +1,52 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 
-import { deriveImageUploadMetadata, WeixinMpClient } from '../dist/domains/weixin-mp/weixin-mp-client.js';
+import { PluginRestExecutor } from '../dist/domains/limb/PluginRestExecutor.js';
 
 const originalFetch = globalThis.fetch;
 
-describe('WeixinMpClient image upload metadata', () => {
+describe('PluginRestExecutor', () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  it('uses fetched JPEG content-type instead of URL suffix guesses', () => {
-    assert.deepEqual(deriveImageUploadMetadata('image/jpeg; charset=binary'), {
-      mimeType: 'image/jpeg',
-      fileName: 'image.jpg',
-    });
+  it('resolves body template with params', () => {
+    const tokenManager = { getAccessToken: async () => 'token', isTokenExpiredError: () => false };
+    const executor = new PluginRestExecutor('https://api.example.com', tokenManager, null, 'query', 'access_token');
+
+    const result = executor.resolveBodyTemplate(
+      { offset: '${params.offset}', count: '${params.count}', fixed: 1 },
+      { offset: 0, count: 10 },
+    );
+
+    assert.deepEqual(result, { offset: 0, count: 10, fixed: 1 });
   });
 
-  it('uses fetched GIF content-type for extensionless signed URLs', () => {
-    assert.deepEqual(deriveImageUploadMetadata('image/gif'), {
-      mimeType: 'image/gif',
-      fileName: 'image.gif',
-    });
+  it('resolves nested array body template', () => {
+    const tokenManager = { getAccessToken: async () => 'token', isTokenExpiredError: () => false };
+    const executor = new PluginRestExecutor('https://api.example.com', tokenManager, null, 'query', 'access_token');
+
+    const result = executor.resolveBodyTemplate(
+      { articles: [{ title: '${params.title}', show_cover_pic: 1 }] },
+      { title: 'Hello World' },
+    );
+
+    assert.deepEqual(result, { articles: [{ title: 'Hello World', show_cover_pic: 1 }] });
   });
 
-  it('invalidates a cached token and retries draft creation once on WeChat auth errors', async () => {
+  it('omits keys with undefined param values', () => {
+    const tokenManager = { getAccessToken: async () => 'token', isTokenExpiredError: () => false };
+    const executor = new PluginRestExecutor('https://api.example.com', tokenManager, null, 'query', 'access_token');
+
+    const result = executor.resolveBodyTemplate(
+      { title: '${params.title}', author: '${params.author}' },
+      { title: 'Test' },
+    );
+
+    assert.deepEqual(result, { title: 'Test' });
+  });
+
+  it('invalidates and retries on token expired error', async () => {
     const urls = [];
     globalThis.fetch = async (url) => {
       urls.push(String(url));
@@ -44,19 +66,30 @@ describe('WeixinMpClient image upload metadata', () => {
       invalidateAccessToken: async () => {
         invalidateCalls += 1;
       },
+      isTokenExpiredError: (code) => code === 40001,
     };
-    const client = new WeixinMpClient(tokenManager);
 
-    const mediaId = await client.createDraft([
+    const executor = new PluginRestExecutor(
+      'https://api.example.com',
+      tokenManager,
+      { codePath: 'errcode', messagePath: 'errmsg' },
+      'query',
+      'access_token',
+    );
+
+    const result = await executor.execute(
       {
-        title: 'Draft',
-        content: '<p>Draft</p>',
-        thumb_media_id: 'thumb-media-id',
-        show_cover_pic: 1,
+        type: 'rest',
+        description: 'test',
+        params: {},
+        endpoint: '/draft/add',
+        method: 'POST',
+        body: { articles: [] },
       },
-    ]);
+      {},
+    );
 
-    assert.equal(mediaId, 'draft-media-id');
+    assert.equal(result.success, true);
     assert.equal(invalidateCalls, 1);
     assert.equal(tokenCalls, 2);
     assert.match(urls[0], /access_token=cached-token/);

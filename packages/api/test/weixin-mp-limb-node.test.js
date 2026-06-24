@@ -7,34 +7,13 @@ import { LimbActionLog } from '../dist/domains/limb/LimbActionLog.js';
 import { LimbLeaseManager } from '../dist/domains/limb/LimbLeaseManager.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../dist/domains/limb/limb-yaml-loader.js';
-import { WeixinMpLimbNode } from '../dist/domains/limb/WeixinMpLimbNode.js';
+import { PluginLimbAdapter } from '../dist/domains/limb/PluginLimbAdapter.js';
 
 const WEIXIN_MP_LIMB_PATH = fileURLToPath(new URL('../../../plugins/weixin-mp/limbs/weixin-mp.yml', import.meta.url));
 
-function createNodeWithDraftClient() {
-  const node = new WeixinMpLimbNode({
-    capabilities: [],
-    pluginConfig: {
-      WEIXIN_MP_APP_ID: 'app-id',
-      WEIXIN_MP_APP_SECRET: 'app-secret',
-    },
-  });
-  const calls = { createDraft: 0, publishDraft: 0, draftArticles: [] };
-  node.client.createDraft = async (articles) => {
-    calls.createDraft += 1;
-    calls.draftArticles = articles;
-    return 'draft-media-id';
-  };
-  node.client.publishDraft = async () => {
-    calls.publishDraft += 1;
-    return 'publish-id';
-  };
-  return { node, calls };
-}
-
-describe('WeixinMpLimbNode', () => {
+describe('PluginLimbAdapter (weixin-mp)', () => {
   it('declares publish commands with an invokable auth level', async () => {
-    const decl = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+    const declaration = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
     const registry = new LimbRegistry();
     registry.setDeps({
       accessPolicy: new LimbAccessPolicy(),
@@ -43,84 +22,82 @@ describe('WeixinMpLimbNode', () => {
     });
     const calls = [];
     await registry.register({
-      nodeId: decl.nodeId,
-      displayName: decl.displayName,
-      platform: decl.platform,
-      capabilities: decl.capabilities,
+      nodeId: declaration.nodeId,
+      displayName: declaration.displayName,
+      platform: declaration.platform,
+      capabilities: declaration.capabilities,
       invoke: async (command) => {
         calls.push(command);
         return { success: true };
       },
     });
 
-    const publish = await registry.invoke(decl.nodeId, 'weixin_mp.publish_article', {}, { catId: 'codex' });
-    const upload = await registry.invoke(decl.nodeId, 'weixin_mp.upload_image', {}, { catId: 'codex' });
+    const draft = await registry.invoke(declaration.nodeId, 'weixin_mp.create_draft', {}, { catId: 'codex' });
+    const upload = await registry.invoke(declaration.nodeId, 'weixin_mp.upload_image', {}, { catId: 'codex' });
 
-    assert.equal(publish.success, true);
+    assert.equal(draft.success, true);
     assert.equal(upload.success, true);
-    assert.deepEqual(calls, ['weixin_mp.publish_article', 'weixin_mp.upload_image']);
-    const publishCap = decl.capabilities.find((cap) => cap.cap === 'content_publish');
+    assert.deepEqual(calls, ['weixin_mp.create_draft', 'weixin_mp.upload_image']);
+    const publishCap = declaration.capabilities.find((cap) => cap.cap === 'content_publish');
     assert.equal(publishCap?.authLevel, 'leased');
   });
 
-  it('does not publish when publish is the string "false"', async () => {
-    const { node, calls } = createNodeWithDraftClient();
-
-    const result = await node.invoke('weixin_mp.publish_article', {
-      title: 'Draft title',
-      markdown: '# Draft',
-      thumbMediaId: 'thumb-media-id',
-      publish: 'false',
+  it('returns error for unknown commands', async () => {
+    const declaration = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+    const adapter = new PluginLimbAdapter({
+      declaration,
+      pluginConfig: { WEIXIN_MP_APP_ID: 'id', WEIXIN_MP_APP_SECRET: 'secret' },
     });
 
-    assert.equal(result.success, true);
-    assert.equal(calls.createDraft, 1);
-    assert.equal(calls.publishDraft, 0);
-    assert.deepEqual(result.data, { draftMediaId: 'draft-media-id' });
-  });
-
-  it('publishes only when publish is the boolean true', async () => {
-    const { node, calls } = createNodeWithDraftClient();
-
-    const result = await node.invoke('weixin_mp.publish_article', {
-      title: 'Live title',
-      markdown: '# Live',
-      thumbMediaId: 'thumb-media-id',
-      publish: true,
-    });
-
-    assert.equal(result.success, true);
-    assert.equal(calls.createDraft, 1);
-    assert.equal(calls.publishDraft, 1);
-    assert.deepEqual(result.data, { draftMediaId: 'draft-media-id', publishId: 'publish-id' });
-  });
-
-  it('includes the required cover display flag in draft article payloads', async () => {
-    const { node, calls } = createNodeWithDraftClient();
-
-    const result = await node.invoke('weixin_mp.publish_article', {
-      title: 'Draft title',
-      markdown: '# Draft',
-      thumbMediaId: 'thumb-media-id',
-    });
-
-    assert.equal(result.success, true);
-    assert.equal(calls.createDraft, 1);
-    assert.equal(calls.draftArticles[0]?.show_cover_pic, 1);
-  });
-
-  it('rejects external inline image URLs before creating a draft', async () => {
-    const { node, calls } = createNodeWithDraftClient();
-
-    const result = await node.invoke('weixin_mp.publish_article', {
-      title: 'Draft title',
-      markdown: 'Inline image: ![remote](https://example.com/a.png)',
-      thumbMediaId: 'thumb-media-id',
-    });
-
+    const result = await adapter.invoke('weixin_mp.nonexistent', {});
     assert.equal(result.success, false);
-    assert.match(result.error, /upload_image/);
-    assert.match(result.error, /https:\/\/example\.com\/a\.png/);
-    assert.equal(calls.createDraft, 0);
+    assert.match(result.error, /Unknown command/);
+  });
+
+  it('validates required params before execution', async () => {
+    const declaration = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+    const adapter = new PluginLimbAdapter({
+      declaration,
+      pluginConfig: { WEIXIN_MP_APP_ID: 'id', WEIXIN_MP_APP_SECRET: 'secret' },
+    });
+
+    const result = await adapter.invoke('weixin_mp.convert_markdown', {});
+    assert.equal(result.success, false);
+    assert.match(result.error, /Missing required params.*markdown/);
+  });
+
+  it('routes invoke commands to registered handlers', async () => {
+    const declaration = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+    const handlers = {
+      'weixin-mp:convert_markdown': async (params) => ({
+        success: true,
+        data: { html: `<p>${params.markdown}</p>` },
+      }),
+    };
+    const adapter = new PluginLimbAdapter({
+      declaration,
+      pluginConfig: { WEIXIN_MP_APP_ID: 'id', WEIXIN_MP_APP_SECRET: 'secret' },
+      handlers,
+    });
+
+    const result = await adapter.invoke('weixin_mp.convert_markdown', { markdown: 'hello' });
+    assert.equal(result.success, true);
+    assert.equal(result.data.html, '<p>hello</p>');
+  });
+
+  it('loads YAML with auth, error, and command type fields', () => {
+    const decl = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+
+    assert.ok(decl.auth);
+    assert.equal(decl.auth.type, 'client_credentials');
+    assert.equal(decl.auth.tokenPlacement, 'query');
+    assert.deepEqual(decl.auth.tokenExpiredCodes, [40001, 40014, 42001]);
+
+    assert.ok(decl.error);
+    assert.equal(decl.error.codePath, 'errcode');
+
+    assert.equal(decl.commands['weixin_mp.check_status']?.type, 'invoke');
+    assert.equal(decl.commands['weixin_mp.list_drafts']?.type, 'rest');
+    assert.equal(decl.commands['weixin_mp.list_drafts']?.endpoint, '/draft/batchget');
   });
 });

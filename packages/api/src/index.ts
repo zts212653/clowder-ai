@@ -2206,8 +2206,9 @@ async function main(): Promise<void> {
       './domains/plugin/PluginResourceActivator.js'
     );
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
-    const { WeixinMpLimbNode } = await import('./domains/limb/WeixinMpLimbNode.js');
+    const { PluginLimbAdapter } = await import('./domains/limb/PluginLimbAdapter.js');
     const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
+    const { weixinMpHandlers } = await import('./domains/weixin-mp/weixin-mp-handlers.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
@@ -2242,8 +2243,8 @@ async function main(): Promise<void> {
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
 
     limbAdapterRegistry.set('weixin-mp', async (yamlPath, pluginConfig) => {
-      const decl = loadLimbDeclaration(yamlPath);
-      return new WeixinMpLimbNode({ capabilities: decl.capabilities, redis, pluginConfig });
+      const declaration = loadLimbDeclaration(yamlPath);
+      return new PluginLimbAdapter({ declaration, pluginConfig, redis, handlers: weixinMpHandlers });
     });
 
     const pluginActivator = new PluginResourceActivator({
