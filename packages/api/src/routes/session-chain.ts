@@ -8,9 +8,11 @@
  * PATCH /api/threads/:threadId/sessions/:catId/bind - Manual bind CLI session ID (#72)
  */
 
+import { resolve } from 'node:path';
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
+import { providerRequiresThreadWorkspace } from '../config/account-resolver.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { RuntimeSessionMetadata } from '../domains/cats/services/runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
@@ -74,6 +76,24 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
     ...(metadata.lifecycle.unexpectedRuntimeSessionSwitch
       ? { unexpectedRuntimeSessionSwitch: metadata.lifecycle.unexpectedRuntimeSessionSwitch }
       : {}),
+  };
+}
+
+function buildWorkspaceFingerprint(workingDirectory: string): string {
+  return process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory;
+}
+
+function buildThreadSessionWorkspaceBinding(thread: { projectPath?: string | null }, catId: CatId) {
+  const provider = catRegistry.tryGet(catId as string)?.config.clientId;
+  if (!providerRequiresThreadWorkspace(provider)) return {};
+
+  const projectPath = thread.projectPath;
+  if (!projectPath || projectPath === 'default' || projectPath.startsWith('games/')) return {};
+
+  const workingDirectory = resolve(projectPath);
+  return {
+    workingDirectory,
+    workspaceFingerprint: buildWorkspaceFingerprint(workingDirectory),
   };
 }
 
@@ -252,8 +272,10 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       }
     }
 
+    const workspaceBinding = buildThreadSessionWorkspaceBinding(thread, session.catId);
     const reopened = await sessionChainStore.create({
       cliSessionId: session.cliSessionId,
+      ...workspaceBinding,
       threadId: session.threadId,
       catId: session.catId,
       userId: session.userId,
@@ -330,6 +352,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return { error: 'Access denied' };
     }
 
+    const workspaceBinding = buildThreadSessionWorkspaceBinding(thread, catId as CatId);
     let session;
     let mode: 'updated' | 'created';
 
@@ -337,6 +360,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       // Update existing active session's cliSessionId
       const updated = await sessionChainStore.update(active.id, {
         cliSessionId,
+        ...workspaceBinding,
         updatedAt: Date.now(),
       });
       if (!updated) {
@@ -349,6 +373,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       // No active session → create new one
       session = await sessionChainStore.create({
         cliSessionId,
+        ...workspaceBinding,
         threadId,
         catId: catId as CatId,
         userId,

@@ -2,7 +2,7 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
@@ -13,6 +13,20 @@ afterEach(async () => {
 });
 
 describe('Session bind history import', () => {
+  async function makeWorkspaceDir() {
+    const dir = await mkdtemp(join(tmpdir(), 'session-bind-workspace-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  function expectedWorkspaceBinding(projectPath) {
+    const workingDirectory = resolve(projectPath);
+    return {
+      workingDirectory,
+      workspaceFingerprint: process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory,
+    };
+  }
+
   async function buildApp() {
     const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
@@ -172,6 +186,101 @@ describe('Session bind history import', () => {
         importedCount: 0,
         reason: 'no_transcript_found',
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('manual bind creates a session with workspace metadata from the thread projectPath', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const projectPath = await makeWorkspaceDir();
+      const thread = await threadStore.create('user-1', 'Test', projectPath);
+      const expected = expectedWorkspaceBinding(projectPath);
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/sessions/opencode/bind`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+        payload: { cliSessionId: 'cli-manual-bind-created' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.mode, 'created');
+      assert.equal(body.session.workingDirectory, expected.workingDirectory);
+      assert.equal(body.session.workspaceFingerprint, expected.workspaceFingerprint);
+
+      const stored = await sessionChainStore.get(body.session.id);
+      assert.equal(stored?.workingDirectory, expected.workingDirectory);
+      assert.equal(stored?.workspaceFingerprint, expected.workspaceFingerprint);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('manual bind updates an existing active session with workspace metadata from the thread projectPath', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const projectPath = await makeWorkspaceDir();
+      const thread = await threadStore.create('user-1', 'Test', projectPath);
+      const expected = expectedWorkspaceBinding(projectPath);
+      const active = await sessionChainStore.create({
+        cliSessionId: 'cli-before-manual-bind',
+        threadId: thread.id,
+        catId: 'opencode',
+        userId: 'user-1',
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${thread.id}/sessions/opencode/bind`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+        payload: { cliSessionId: 'cli-after-manual-bind' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.mode, 'updated');
+      assert.equal(body.session.id, active.id);
+      assert.equal(body.session.cliSessionId, 'cli-after-manual-bind');
+      assert.equal(body.session.workingDirectory, expected.workingDirectory);
+      assert.equal(body.session.workspaceFingerprint, expected.workspaceFingerprint);
+    } finally {
+      await app.close();
+    }
+  });
+
+  test('unseal reopen creates the replacement session with workspace metadata from the thread projectPath', async () => {
+    const { app, threadStore, sessionChainStore } = await buildApp();
+    try {
+      const projectPath = await makeWorkspaceDir();
+      const thread = await threadStore.create('user-1', 'Test', projectPath);
+      const expected = expectedWorkspaceBinding(projectPath);
+      const sealed = await sessionChainStore.create({
+        cliSessionId: 'cli-sealed-manual-bind',
+        threadId: thread.id,
+        catId: 'opencode',
+        userId: 'user-1',
+      });
+      await sessionChainStore.update(sealed.id, {
+        status: 'sealed',
+        sealedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${sealed.id}/unseal`,
+        headers: { 'x-cat-cafe-user': 'user-1' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = JSON.parse(res.payload);
+      assert.equal(body.mode, 'reopened');
+      assert.equal(body.session.cliSessionId, 'cli-sealed-manual-bind');
+      assert.equal(body.session.workingDirectory, expected.workingDirectory);
+      assert.equal(body.session.workspaceFingerprint, expected.workspaceFingerprint);
     } finally {
       await app.close();
     }
