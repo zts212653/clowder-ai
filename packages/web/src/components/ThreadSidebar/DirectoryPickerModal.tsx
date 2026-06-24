@@ -113,10 +113,9 @@ export function DirectoryPickerModal({
   }, [selectedPath, selectWithOptions]);
 
   // F113: Handle directory selection from the web-based browser
-  const handleBrowserSelect = useCallback(
+  const handleBrowserCurrentPathChange = useCallback(
     (path: string) => {
       handleSelectPath(path);
-      setShowBrowser(false);
     },
     [handleSelectPath],
   );
@@ -172,6 +171,7 @@ export function DirectoryPickerModal({
 
   const [catsExpanded, setCatsExpanded] = useState(false);
   const catSummary = selectedCats.length > 0 ? `已选 ${selectedCats.length} 只猫` : '';
+  const browserInitialPath = selectedPath && selectedPath !== 'lobby' ? selectedPath : (cwdPath ?? undefined);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
@@ -389,9 +389,9 @@ export function DirectoryPickerModal({
         {showBrowser && (
           <div className="border-t border-cafe-subtle flex-1 min-h-0 flex flex-col overflow-hidden">
             <DirectoryBrowser
-              initialPath={cwdPath ?? undefined}
+              initialPath={browserInitialPath}
               activeProjectPath={cwdPath ?? undefined}
-              onSelect={handleBrowserSelect}
+              onCurrentPathChange={handleBrowserCurrentPathChange}
               onCancel={() => setShowBrowser(false)}
             />
           </div>

@@ -26,8 +26,8 @@ interface DirectoryBrowserProps {
   initialPath?: string;
   /** Path of the currently active project (highlighted in listing) */
   activeProjectPath?: string;
-  /** Called when user confirms a directory selection */
-  onSelect: (path: string) => void;
+  /** Called whenever the browsed directory changes */
+  onCurrentPathChange?: (path: string) => void;
   /** Called when user cancels */
   onCancel: () => void;
 }
@@ -77,7 +77,12 @@ function pathToSegments(absPath: string, homePath: string): { label: string; pat
   return segments;
 }
 
-export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onCancel }: DirectoryBrowserProps) {
+export function DirectoryBrowser({
+  initialPath,
+  activeProjectPath,
+  onCurrentPathChange,
+  onCancel,
+}: DirectoryBrowserProps) {
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,36 +94,40 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
   const [mkdirError, setMkdirError] = useState<string | null>(null);
   const newDirInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchDirectory = useCallback(async (path?: string, fallbackOnForbidden = false) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const url = path ? `/api/projects/browse?path=${encodeURIComponent(path)}` : '/api/projects/browse';
-      const res = await apiFetch(url);
-      if (!res.ok) {
-        // On initial load only: if initialPath is forbidden (403), visibly fall
-        // back to homedir so the user gets a browsable directory. Non-403 errors
-        // (400 readdir failure, 500) always surface — no silent swallowing.
-        if (fallbackOnForbidden && path && res.status === 403) {
-          setInfo('配置路径不可用，已切换到主目录');
-          // await so outer finally doesn't clear isLoading before fallback finishes
-          await fetchDirectory(undefined, false);
+  const fetchDirectory = useCallback(
+    async (path?: string, fallbackOnForbidden = false) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const url = path ? `/api/projects/browse?path=${encodeURIComponent(path)}` : '/api/projects/browse';
+        const res = await apiFetch(url);
+        if (!res.ok) {
+          // On initial load only: if initialPath is forbidden (403), visibly fall
+          // back to homedir so the user gets a browsable directory. Non-403 errors
+          // (400 readdir failure, 500) always surface — no silent swallowing.
+          if (fallbackOnForbidden && path && res.status === 403) {
+            setInfo('配置路径不可用，已切换到主目录');
+            // await so outer finally doesn't clear isLoading before fallback finishes
+            await fetchDirectory(undefined, false);
+            return;
+          }
+          const data = await res.json();
+          setError(data.error || 'Failed to browse directory');
+          // Keep previous browseResult — don't destroy current listing on error.
           return;
         }
-        const data = await res.json();
-        setError(data.error || 'Failed to browse directory');
-        // Keep previous browseResult — don't destroy current listing on error.
-        return;
+        const data: BrowseResult = await res.json();
+        setBrowseResult(data);
+        setPathInput(data.current);
+        onCurrentPathChange?.(data.current);
+      } catch {
+        setError('Unable to connect to server');
+      } finally {
+        setIsLoading(false);
       }
-      const data: BrowseResult = await res.json();
-      setBrowseResult(data);
-      setPathInput(data.current);
-    } catch {
-      setError('Unable to connect to server');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+    },
+    [onCurrentPathChange],
+  );
 
   // Initial load — try initialPath, fallback to homedir on 403 (with visible info)
   useEffect(() => {
@@ -365,15 +374,7 @@ export function DirectoryBrowser({ initialPath, activeProjectPath, onSelect, onC
             onClick={onCancel}
             className="px-4 py-2 rounded-lg border border-[var(--console-border-soft)] text-cafe-secondary text-xs font-medium transition-colors hover:bg-cafe-surface-elevated"
           >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => browseResult && onSelect(browseResult.current)}
-            disabled={!browseResult}
-            className="px-5 py-2 rounded-lg bg-cafe-accent hover:bg-cafe-interactive text-[var(--cafe-surface)] text-sm font-medium transition-colors disabled:opacity-40"
-          >
-            选择此目录
+            收起浏览
           </button>
         </div>
       </div>
