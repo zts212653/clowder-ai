@@ -10,7 +10,12 @@ import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
-import { type CapabilityEntry, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import {
+  type CapabilitiesConfig,
+  type CapabilityEntry,
+  type MountRules,
+  STANDARD_MOUNT_POINT_IDS,
+} from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { buildSkillMountTargets, createSkillSymlink } from '../utils/skill-mount.js';
 import { parseManifestSkillMeta, readSkillMeta } from './skill-meta.js';
@@ -34,6 +39,10 @@ export interface AddSkillOptions {
   mountPaths?: readonly string[];
   /** Default: true. Set false to register the skill as disabled. */
   enabled?: boolean;
+  /** Source directory persisted for plugin-provided skills. */
+  skillsSource?: string;
+  /** Optional config store override for consumers that already own locking/injection. */
+  configStore?: SkillConfigStore;
 }
 
 export interface SkillOperationResult {
@@ -49,6 +58,13 @@ export interface RemoveSkillOptions {
   capabilityId?: string;
   /** Needed to identify managed symlinks for cleanup. */
   skillsSource?: string;
+  /** Optional config store override for consumers that already own locking/injection. */
+  configStore?: SkillConfigStore;
+}
+
+export interface SkillConfigStore {
+  readCapabilities: () => Promise<CapabilitiesConfig | null>;
+  writeCapabilities: (config: CapabilitiesConfig) => Promise<void>;
 }
 
 // ────────── Internals ──────────
@@ -88,6 +104,24 @@ function findSkillEntry(
       c.source === 'cat-cafe' &&
       (pluginId ? c.pluginId === pluginId : !c.pluginId),
   );
+}
+
+async function writeCapabilitiesWithRollback(
+  store: SkillConfigStore,
+  previous: CapabilitiesConfig | null,
+  next: CapabilitiesConfig,
+): Promise<void> {
+  try {
+    await store.writeCapabilities(next);
+  } catch (err) {
+    const rollback = previous ?? { version: 1, capabilities: [] };
+    try {
+      await store.writeCapabilities(structuredClone(rollback));
+    } catch {
+      /* best-effort: original write error is the one callers need */
+    }
+    throw err;
+  }
 }
 
 // ────────── Symlink helpers (shared by addSkill and PluginResourceActivator) ──────────
@@ -225,17 +259,25 @@ export async function addSkill(
 ): Promise<SkillOperationResult> {
   const { mountRules, enabled = true, pluginId } = opts;
   const capId = opts.capabilityId ?? skillName;
+  const store = opts.configStore ?? {
+    readCapabilities: () => readCapabilitiesConfig(projectRoot),
+    writeCapabilities: (config: CapabilitiesConfig) => writeCapabilitiesConfig(projectRoot, config),
+  };
 
   // 1. Config: upsert capability entry
-  const config = (await readCapabilitiesConfig(projectRoot)) ?? {
-    version: 2 as const,
-    capabilities: [] as CapabilityEntry[],
-  };
+  const previous = await store.readCapabilities();
+  const config = previous
+    ? structuredClone(previous)
+    : {
+        version: 2 as const,
+        capabilities: [] as CapabilityEntry[],
+      };
   const existing = findSkillEntry(config.capabilities, capId, pluginId);
   if (existing) {
     existing.enabled = enabled;
     existing.globalEnabled = enabled;
     if (opts.mountPaths) existing.mountPaths = [...opts.mountPaths];
+    if (opts.skillsSource) existing.skillsSource = opts.skillsSource;
   } else {
     config.capabilities.push({
       id: capId,
@@ -244,9 +286,10 @@ export async function addSkill(
       source: 'cat-cafe',
       ...(pluginId ? { pluginId } : {}),
       ...(opts.mountPaths ? { mountPaths: [...opts.mountPaths] } : {}),
+      ...(opts.skillsSource ? { skillsSource: opts.skillsSource } : {}),
     });
   }
-  await writeCapabilitiesConfig(projectRoot, config);
+  await writeCapabilitiesWithRollback(store, previous, config);
 
   // 2. Mount symlinks
   if (!enabled) return { mounted: [], unmounted: [], conflicts: [] };
@@ -266,16 +309,21 @@ export async function removeSkill(
 ): Promise<SkillOperationResult> {
   const { mountRules, pluginId } = opts;
   const capId = opts.capabilityId ?? skillName;
+  const store = opts.configStore ?? {
+    readCapabilities: () => readCapabilitiesConfig(projectRoot),
+    writeCapabilities: (config: CapabilitiesConfig) => writeCapabilitiesConfig(projectRoot, config),
+  };
 
   // 1. Config: disable capability entry
-  const config = await readCapabilitiesConfig(projectRoot);
+  const previous = await store.readCapabilities();
+  const config = previous ? structuredClone(previous) : null;
   if (config) {
     const existing = findSkillEntry(config.capabilities, capId, pluginId);
     if (existing) {
       existing.enabled = false;
       existing.globalEnabled = false;
       existing.mountPaths = [];
-      await writeCapabilitiesConfig(projectRoot, config);
+      await writeCapabilitiesWithRollback(store, previous, config);
     }
   }
 

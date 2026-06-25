@@ -1075,7 +1075,7 @@ describe('PluginResourceActivator skill safety', () => {
     assert.equal(persisted.capabilities[0].enabled, true);
   });
 
-  it('rejects plugin skill activation through provider skills root symlink', async () => {
+  it('registers plugin skill but does not mount through provider skills root symlink', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
     const pluginsDir = join(root, 'plugins');
     const projectRoot = join(root, 'project');
@@ -1095,22 +1095,26 @@ describe('PluginResourceActivator skill safety', () => {
       config: [],
       resources: [{ type: 'skill', path: 'skills/plugin-skill' }],
     };
+    let persisted = { version: 1, capabilities: [] };
     const activator = new PluginResourceActivator({
       resolveProjectRoot: () => projectRoot,
       pluginsDir,
       limbRegistry: {},
-      readCapabilities: async () => ({ version: 1, capabilities: [] }),
-      writeCapabilities: async () => {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
       withCapabilityLock: async (fn) => fn(),
     });
 
     const result = await activator.enablePlugin(manifest);
 
-    assert.equal(result.status, 'failed');
-    // F228: mountSkillForProject delegates to isManagedDirectoryLevelSkillsSymlink
-    // which uses "directory-level skills mount" in its error messages
-    assert.match(result.resources[0].error, /directory-level skills mount/);
+    assert.equal(result.status, 'success');
+    assert.equal(result.resources[0].ok, true);
     assert.equal(existsSync(join(sharedSkillsDir, 'plugin-skill')), false);
+    assert.equal(persisted.capabilities[0].id, 'plugin-skill');
+    assert.equal(persisted.capabilities[0].enabled, true);
+    assert.equal(persisted.capabilities[0].skillsSource, '../plugins/test-plugin/skills');
   });
 
   it('rejects plugin skill source symlinks that escape the plugin root', async () => {
@@ -1461,7 +1465,7 @@ describe('PluginResourceActivator skill safety', () => {
 });
 
 describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () => {
-  it('P1-2: enablePlugin fails when all mount points conflict (no silent success)', async () => {
+  it('P1-2: enablePlugin registers skill when all mount points conflict so drift can surface it', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p12-'));
     const pluginsDir = join(root, 'plugins');
     const projectRoot = join(root, 'project');
@@ -1498,13 +1502,22 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
 
     const result = await activator.enablePlugin(manifest);
 
-    // Must report failure — not silent success with zero mounts
-    assert.equal(result.status, 'failed', 'all-conflict activation must fail');
+    // Config-first activation succeeds; mount conflicts are surfaced by the
+    // standard skill drift/sync flow instead of blocking plugin enable.
+    assert.equal(result.status, 'success', 'all-conflict activation should still register the skill');
     const skillResult = result.resources?.find((r) => r.type === 'skill');
     assert.ok(skillResult, 'skill result should exist in resources');
-    assert.equal(skillResult.ok, false, 'skill activation should report ok=false');
-    assert.ok(skillResult.error, 'skill result should have an error message');
-    assert.ok(skillResult.error.includes('All mount points conflict'), 'error should mention all-conflict');
+    assert.equal(skillResult.ok, true, 'skill activation should report ok=true');
+    assert.equal(persisted.capabilities[0].id, 'my-skill');
+    assert.equal(persisted.capabilities[0].enabled, true);
+    assert.equal(persisted.capabilities[0].skillsSource, '../plugins/test-plugin/skills');
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      assert.equal(
+        existsSync(join(projectRoot, `.${provider}`, 'skills', 'my-skill', 'user-file.md')),
+        true,
+        `activation must not replace user-owned ${provider} conflict`,
+      );
+    }
   });
 
   it('P2-1: rollback cleans up custom mount alias symlinks (not just standard providers)', async () => {
@@ -1537,7 +1550,6 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
       }),
     );
 
-    let writeCallCount = 0;
     const activator = new PluginResourceActivator({
       resolveProjectRoot: () => projectRoot,
       pluginsDir,
@@ -1548,7 +1560,6 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
         return readCapabilitiesConfig(projectRoot);
       },
       writeCapabilities: async () => {
-        writeCallCount++;
         throw new Error('Simulated config write failure');
       },
       withCapabilityLock: async (fn) => fn(),

@@ -10,7 +10,7 @@ import {
 } from '@cat-cafe/shared';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
+import { addSkill, removeSkill } from '../../skills/skill-manage.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -285,14 +285,23 @@ export class PluginResourceActivator {
     const skillsSource = dirname(skillSourceDir);
     const relativeSkillsSource = relative(projectRoot, skillsSource);
 
-    // Config first — drift check can discover mount issues if mount fails
-    await this.upsertCapabilityEntry(manifest, resource, true, undefined, undefined, relativeSkillsSource);
-
-    // Best-effort mount — conflicts are surfaced via drift check, not hard errors
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
     const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
-    await mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, mountPaths ?? undefined);
+    const capId = resourceCapId(manifest.id, resource);
+    await this.deps.withCapabilityLock(() =>
+      addSkill(projectRoot, skillName, skillsSource, {
+        mountRules,
+        pluginId: manifest.id,
+        capabilityId: capId,
+        mountPaths: mountPaths ?? undefined,
+        skillsSource: relativeSkillsSource,
+        configStore: {
+          readCapabilities: this.deps.readCapabilities,
+          writeCapabilities: this.deps.writeCapabilities,
+        },
+      }),
+    );
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -312,8 +321,18 @@ export class PluginResourceActivator {
       ? join(projectRoot, cap.skillsSource)
       : dirname(resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path));
 
-    await unmountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules);
-    await this.upsertCapabilityEntry(manifest, resource, false);
+    await this.deps.withCapabilityLock(() =>
+      removeSkill(projectRoot, skillName, {
+        mountRules,
+        pluginId: manifest.id,
+        capabilityId: capId,
+        skillsSource,
+        configStore: {
+          readCapabilities: this.deps.readCapabilities,
+          writeCapabilities: this.deps.writeCapabilities,
+        },
+      }),
+    );
   }
 
   private async readExistingPluginSkillMountPaths(
