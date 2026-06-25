@@ -12,11 +12,13 @@
  */
 
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import type {
   AssemblerInput,
   HookResolver,
   HookStage,
   PromptPatch,
+  RegisteredHook,
   ResolveResult,
   TraceEvent,
   TraceEventDisabled,
@@ -76,6 +78,26 @@ export class HookPipeline {
   ) {}
 
   /**
+   * Fallback renderer: read co-located template from hook directory.
+   * Used when the primary renderer (renderSegment) returns null because
+   * the template isn't registered in TEMPLATE_FILES but exists on disk
+   * in the hook's directory (e.g. B1, R1, R2).
+   */
+  private renderFromTemplatePath(hook: RegisteredHook, vars: Record<string, string>): string | null {
+    if (!hook.templatePath || !existsSync(hook.templatePath)) return null;
+    const raw = readFileSync(hook.templatePath, 'utf-8');
+    // Strip HTML comments (same logic as prompt-template-loader.stripComments)
+    const stripped = raw
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('<!--'))
+      .join('\n')
+      .trim();
+    if (!stripped) return null;
+    // Render {{VAR}} placeholders (same logic as prompt-template-loader.renderTemplate)
+    return stripped.replace(/\{\{(\w+)\}\}/g, (match, key: string) => (key in vars ? vars[key] : match));
+  }
+
+  /**
    * Execute all hooks for a stage in manifest order.
    * Each hook: enabled check → resolve → render → patch + trace.
    */
@@ -127,10 +149,14 @@ export class HookPipeline {
       // 3. Resolve template variant (D7 → D7_serial, D15 → D15_on, etc.)
       const templateId = result.vars.TEMPLATE_VARIANT ?? hookId;
 
-      // 4. Render template
-      const content = this.renderer(templateId, result.vars);
+      // 4. Render template (primary: renderSegment → fallback: co-located file)
+      let content = this.renderer(templateId, result.vars);
       if (!content) {
-        // Template missing — skip silently (renderSegment returns null)
+        // Primary renderer returned null — try co-located template from hook dir
+        content = this.renderFromTemplatePath(hook, result.vars);
+      }
+      if (!content) {
+        // Template missing from both sources
         const skipped: TraceEventSkipped = {
           hookId,
           stage,

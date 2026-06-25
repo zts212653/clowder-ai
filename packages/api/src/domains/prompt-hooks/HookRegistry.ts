@@ -14,9 +14,17 @@ import { parseHookManifest } from './hook-manifest-parser.js';
 export class HookRegistry {
   private hooks = new Map<string, RegisteredHook>();
   private readonly hooksDir: string;
+  private readonly templatesDir: string | null;
 
-  constructor(hooksDir: string) {
+  /**
+   * @param hooksDir - Directory containing hook subdirectories (each with hook.yaml)
+   * @param templatesDir - Optional fallback directory for template files.
+   *   Templates are first checked in the hook subdirectory, then in this fallback.
+   *   Typically `assets/prompt-templates/` (centralized template location).
+   */
+  constructor(hooksDir: string, templatesDir?: string) {
     this.hooksDir = hooksDir;
+    this.templatesDir = templatesDir ?? null;
   }
 
   /** Scan hook directory, parse manifests, validate, register. */
@@ -75,8 +83,11 @@ export class HookRegistry {
       }
       stageOrders.set(manifest.order, manifest.id);
 
-      // Resolve template path
-      const templatePath = join(hookDir, manifest.template);
+      // Resolve template path: check hook dir first, then centralized templates dir
+      let templatePath = join(hookDir, manifest.template);
+      if (!existsSync(templatePath) && this.templatesDir) {
+        templatePath = join(this.templatesDir, manifest.template);
+      }
       if (!existsSync(templatePath)) {
         console.warn(`[HookRegistry] Skipping ${entry}: template '${manifest.template}' not found`);
         continue;
