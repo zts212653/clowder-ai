@@ -276,7 +276,14 @@ export async function addSkill(
   if (existing) {
     existing.enabled = enabled;
     existing.globalEnabled = enabled;
-    if (opts.mountPaths) existing.mountPaths = [...opts.mountPaths];
+    // Explicit mountPaths = restrict; undefined = reset to default (all mount points).
+    // removeSkill sets mountPaths: [] on deactivation — re-enabling with undefined
+    // must clear the stale [] so config stays consistent with the filesystem.
+    if (opts.mountPaths) {
+      existing.mountPaths = [...opts.mountPaths];
+    } else {
+      delete existing.mountPaths;
+    }
     if (opts.skillsSource) existing.skillsSource = opts.skillsSource;
   } else {
     config.capabilities.push({

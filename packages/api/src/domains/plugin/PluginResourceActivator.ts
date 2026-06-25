@@ -345,7 +345,9 @@ export class PluginResourceActivator {
     const existing = config.capabilities.find(
       (c) => normalizeCapId(c.id) === capId && c.pluginId === manifest.id && c.type === 'skill',
     );
-    return Array.isArray(existing?.mountPaths) ? [...existing.mountPaths] : undefined;
+    // Empty mountPaths (set by removeSkill on deactivation) would restrict
+    // re-activation to zero mount points. Only return non-empty preferences.
+    return Array.isArray(existing?.mountPaths) && existing.mountPaths.length > 0 ? [...existing.mountPaths] : undefined;
   }
 
   private async activateLimb(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {

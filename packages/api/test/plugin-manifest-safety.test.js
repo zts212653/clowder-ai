@@ -1117,6 +1117,65 @@ describe('PluginResourceActivator skill safety', () => {
     assert.equal(persisted.capabilities[0].skillsSource, '../plugins/test-plugin/skills');
   });
 
+  it('re-enables plugin skill to all mount points after disable→enable cycle', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-reenable-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'plugin-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/plugin-skill' }],
+    };
+
+    // 1. Enable: should mount to all default providers
+    const enable1 = await activator.enablePlugin(manifest);
+    assert.equal(enable1.status, 'success');
+    assert.ok(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')));
+    assert.ok(existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')));
+
+    // 2. Disable: removeSkill sets mountPaths: [] and removes symlinks
+    const disable = await activator.disablePlugin(manifest);
+    assert.equal(disable.status, 'success');
+    assert.equal(persisted.capabilities[0].enabled, false);
+    assert.equal(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')), false);
+
+    // 3. Re-enable: must mount to ALL mount points again, not zero
+    const enable2 = await activator.enablePlugin(manifest);
+    assert.equal(enable2.status, 'success');
+    assert.ok(
+      existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')),
+      're-enable must mount to claude (was blocked by stale mountPaths: [])',
+    );
+    assert.ok(
+      existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')),
+      're-enable must mount to codex (was blocked by stale mountPaths: [])',
+    );
+    // Config must not have stale empty mountPaths
+    assert.equal(persisted.capabilities[0].enabled, true);
+    assert.ok(
+      !Array.isArray(persisted.capabilities[0].mountPaths) || persisted.capabilities[0].mountPaths.length > 0,
+      'config must not retain stale mountPaths: [] after re-enable',
+    );
+  });
+
   it('rejects plugin skill source symlinks that escape the plugin root', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
     const pluginsDir = join(root, 'plugins');
