@@ -232,4 +232,42 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     assert.ok(sessionOutput.includes('布偶猫'), 'Session output includes identity');
     assert.ok(turnOutput.includes('布偶猫'), 'Turn output includes identity anchor');
   });
+
+  // -- Override integration (AC-P2-10/11) -----------------------------------
+
+  it('operator-disabled hook produces TraceEventDisabled with disabledBy=operator', () => {
+    const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);
+    const overrides = new Map([['D15', { enabled: false, version: 1, templateOverride: null, source: 'operator' }]]);
+    const result = pipeline.executeStage('per-turn', makeRichInput(), overrides);
+    const d15Event = result.events.find((e) => e.hookId === 'D15');
+    assert.ok(d15Event, 'D15 should have a trace event');
+    assert.equal(d15Event.status, 'disabled');
+    assert.equal(/** @type {any} */ (d15Event).disabledBy, 'operator');
+    assert.ok(!result.patches.some((p) => p.hookId === 'D15'), 'D15 should produce no patch');
+  });
+
+  it('template override replaces file-based template (AC-P2-10)', () => {
+    const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);
+    const customTemplate = '## Custom Voice\nThis is a custom voice mode segment for {{DISPLAY_NAME}}';
+    const overrides = new Map([
+      ['D15', { enabled: true, version: 2, templateOverride: customTemplate, source: 'operator' }],
+    ]);
+    const result = pipeline.executeStage('per-turn', makeRichInput(), overrides);
+    const d15Patch = result.patches.find((p) => p.hookId === 'D15');
+    assert.ok(d15Patch, 'D15 should produce a patch');
+    assert.ok(d15Patch.content.includes('Custom Voice'), 'Should use override template');
+    // Version should reflect override
+    const d15Event = result.events.find((e) => e.hookId === 'D15' && e.status === 'fired');
+    assert.ok(d15Event);
+    assert.equal(/** @type {any} */ (d15Event).version, 2, 'Version from override');
+  });
+
+  it('without overrides map, pipeline uses baseline (backward-compatible)', () => {
+    const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);
+    // Call without overrides — should work exactly as before
+    const result = pipeline.executeStage('session-init', makeRichInput());
+    assert.equal(result.events.length, 22, 'Same 22 session-init events');
+    const firedIds = result.events.filter((e) => e.status === 'fired').map((e) => e.hookId);
+    assert.ok(firedIds.includes('S1'), 'S1 fires from baseline');
+  });
 });
