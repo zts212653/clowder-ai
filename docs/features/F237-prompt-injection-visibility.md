@@ -289,7 +289,7 @@ disableable: true                          # false = override store rejects disa
 # Classification (Phase 1 3-axis, carried forward)
 safetyTier: limited-edit                   # readonly | limited-edit | editable — gates template override
 transparencyTier: visible-by-default
-governanceTier: human-gated                # immutable | human-gated | auto-eval-eligible — gates version override
+governanceTier: human-gated                # immutable | human-gated | auto-evolve — gates version override
 
 # CVO-facing
 userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
@@ -373,7 +373,7 @@ Effective state = runtime override ?? manifest baseline
 |---------------|----------|------|
 | **Template edit** | `safetyTier` | `readonly` (49/52) reject, `limited-edit` / `editable` (3/52) accept |
 | **Enable/disable** | `disableable` | `disableable: false` hooks (identity, safety, routing constraints) reject disable override; `disableable: true` hooks accept |
-| **Version switch** | `governanceTier` | `immutable` hooks reject version override; `human-gated` / `auto-eval-eligible` accept |
+| **Version switch** | `governanceTier` | `immutable` hooks reject version override; `human-gated` / `auto-evolve` accept |
 
 The override store validates all three constraints before accepting a write. Attempting to disable a `disableable: false` hook (e.g., S1 identity, D8 ball ownership, L1-L7 core rules) returns an error with the constraint violation.
 
