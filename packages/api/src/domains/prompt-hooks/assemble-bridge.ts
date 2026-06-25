@@ -21,6 +21,7 @@ import {
   getGovernanceDigest,
   getMcpToolsSection,
   getWorkflowTriggers,
+  pickVariantMentionForBridge,
 } from '../cats/services/context/SystemPromptBuilder.js';
 import { buildConciergePromptLines } from '../concierge/ConciergePromptSection.js';
 import { buildGuidePromptLines } from '../guides/GuidePromptSection.js';
@@ -62,8 +63,8 @@ export function formatRoutingPolicy(
     const segs: string[] = [];
     const avoidList = Array.isArray(rule.avoidCats) ? rule.avoidCats : [];
     const preferList = Array.isArray(rule.preferCats) ? rule.preferCats : [];
-    const avoid = avoidList.slice(0, 3).map((id) => `@${String(id)}`);
-    const prefer = preferList.slice(0, 3).map((id) => `@${String(id)}`);
+    const avoid = avoidList.slice(0, 3).map((id) => pickVariantMentionForBridge(String(id)));
+    const prefer = preferList.slice(0, 3).map((id) => pickVariantMentionForBridge(String(id)));
     if (avoid.length > 0) segs.push(`avoid ${avoid.join(', ')}`);
     if (prefer.length > 0) segs.push(`prefer ${prefer.join(', ')}`);
     const sanitizedReason = typeof rule.reason === 'string' ? rule.reason.replace(/[\r\n]+/g, ' ').trim() : '';

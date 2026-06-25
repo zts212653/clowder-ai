@@ -244,6 +244,12 @@ function pickVariantMention(id: string, config: CatConfig): string {
   return `@${id}`;
 }
 
+/** @internal F237 — exported for AssembleBridge routing policy parity (cloud P2-1 fix) */
+export function pickVariantMentionForBridge(id: string): string {
+  const config = getConfig(id);
+  return config ? pickVariantMention(id, config) : `@${id}`;
+}
+
 function pickDisplayNameMention(config: CatConfig): string | null {
   const expected = `@${config.displayName}`.toLowerCase();
   return config.mentionPatterns.find((p) => p.toLowerCase() === expected) ?? null;
