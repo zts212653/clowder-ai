@@ -9,50 +9,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-
-// ---------------------------------------------------------------------------
-// FakeRedis — minimal Map-backed Redis stub for get/set/del/sadd/srem/smembers
-// ---------------------------------------------------------------------------
-
-class FakeRedis {
-  /** @type {Map<string, string>} */
-  store = new Map();
-  /** @type {Map<string, Set<string>>} */
-  sets = new Map();
-
-  async get(key) {
-    return this.store.get(key) ?? null;
-  }
-  async set(key, value) {
-    this.store.set(key, value);
-    return 'OK';
-  }
-  async del(key) {
-    const had = this.store.has(key);
-    this.store.delete(key);
-    return had ? 1 : 0;
-  }
-  async sadd(key, member) {
-    if (!this.sets.has(key)) this.sets.set(key, new Set());
-    this.sets.get(key).add(member);
-    return 1;
-  }
-  async srem(key, member) {
-    const set = this.sets.get(key);
-    if (!set) return 0;
-    const had = set.has(member);
-    set.delete(member);
-    return had ? 1 : 0;
-  }
-  async smembers(key) {
-    const set = this.sets.get(key);
-    return set ? [...set] : [];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+import { FakeRedis } from './helpers/fake-redis.js';
 
 describe('HookOverrideStore (P2-D)', () => {
   /** @type {typeof import('../dist/domains/prompt-hooks/HookOverrideStore.js')} */

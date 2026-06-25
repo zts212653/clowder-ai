@@ -668,6 +668,7 @@ export type {
   HookOverride,
   HookResolver,
   HookStage,
+  InjectionTraceDetail,
   InjectionTraceSummary,
   OverrideConstraintError,
   PingPongInput,

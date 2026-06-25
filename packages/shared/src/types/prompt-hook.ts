@@ -183,6 +183,7 @@ export interface TraceEventSummary {
   status: TraceEvent['status'];
   version?: number;
   tokenEstimate?: number;
+  reasonCode?: string;
 }
 
 export interface InjectionTraceSummary {
@@ -190,10 +191,22 @@ export interface InjectionTraceSummary {
   sessionId: string;
   threadId: string;
   catId: string;
+  timestamp: number;
   hooks: TraceEventSummary[];
   delivery: StageDeliveryDecision[];
   totalTokens: number;
   totalHooksFired: number;
+  totalHooksSkipped: number;
+  totalDurationMs: number;
+}
+
+/** Full trace detail — debug layer with content hashes, durations (TTL=7d) */
+export interface InjectionTraceDetail {
+  turnId: string;
+  threadId: string;
+  catId: string;
+  timestamp: number;
+  hooks: TraceEvent[];
 }
 
 // ---------------------------------------------------------------------------
