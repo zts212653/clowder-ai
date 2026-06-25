@@ -40,7 +40,7 @@ const PLUGIN_ENTRY = 'index.js';
 const CONNECTOR_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}[a-z0-9]$/;
 
 function resolveTarCommand(tarBin?: string): string {
-  return tarBin?.trim() || process.env.CAT_CAFE_TAR_BIN?.trim() || 'tar';
+  return tarBin?.trim() || 'tar';
 }
 
 function isValidConnectorId(id: string): boolean {
