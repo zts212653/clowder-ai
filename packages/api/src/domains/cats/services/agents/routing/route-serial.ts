@@ -74,6 +74,7 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -687,6 +688,9 @@ export async function* routeSerial(
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      // F237: drain session trace synchronously — before any await between
+      // buildStaticIdentity and buildInvocationContext (race-safety for parallel reuse).
+      const sessionTraceCapture = deps.injectionTraceStore ? drainCapturedTraces() : null;
       // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is NOT prepended
       // to staticIdentity here. Cloud R2 P1 #2237 L1099: folding staging into
       // staticIdentity breaks ADR-038 "每轮注入生效" contract on resumed
@@ -791,6 +795,8 @@ export async function* routeSerial(
         ...(worldContext ? { worldContext } : {}),
         ...conciergeContextForCat(conciergeCtx, catId as string),
       });
+      // F237: drain turn trace synchronously — no yield between build and drain.
+      const turnTraceCapture = deps.injectionTraceStore ? drainCapturedTraces() : null;
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -806,50 +812,46 @@ export async function* routeSerial(
       });
 
       // F237 Phase 2 (AC-P2-8/8a): Fire-and-forget injection trace persistence.
-      // Captures pipeline trace events from the buildStaticIdentity / buildInvocationContext
-      // delegation and persists them for observability and debugging.
+      // Uses locally-drained traces (captured synchronously after each build call)
+      // to avoid module-global race in concurrent routing.
       // AC-P2-8a: StageDeliveryDecision records channel-aware delivery truth.
-      if (deps.injectionTraceStore) {
-        const { drainCapturedTraces } = await import('../../../../prompt-hooks/PipelinePromptBuilder.js');
+      if (deps.injectionTraceStore && (sessionTraceCapture?.session || turnTraceCapture?.turn)) {
         const { buildTraceSummary } = await import('../../../../prompt-hooks/InjectionTraceStore.js');
-        const captured = drainCapturedTraces();
-        if (captured.session || captured.turn) {
-          const allEvents = [...(captured.session?.events ?? []), ...(captured.turn?.events ?? [])];
-          const turnId = `${Date.now()}-${catId as string}`;
-          // AC-P2-8a: channel-aware delivery decisions per stage
-          const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
-          if (captured.session) {
-            delivery.push({
-              stage: 'session-init',
-              delivered: true,
-              channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
-              reason: hasNativeL0
-                ? 'session-init delivered via native L0 channel; pack blocks via buildStaticIdentityPackOnly'
-                : 'session-init delivered via message-prepend (injectSystemPrompt)',
-            });
-          }
-          if (captured.turn) {
-            delivery.push({
-              stage: 'per-turn',
-              delivered: true,
-              channel: 'message-prepend',
-              reason: 'per-turn context always delivered via message-prepend',
-            });
-          }
-          const summary = buildTraceSummary({
-            turnId,
-            sessionId: threadId, // session ID resolved after invocation; threadId as proxy during migration
-            threadId,
-            catId: catId as string,
-            events: allEvents,
-            delivery,
-            durationMs: 0, // synchronous pipeline; sub-ms not tracked at this layer
-          });
-          const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
-          deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
-            log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+        const allEvents = [...(sessionTraceCapture?.session?.events ?? []), ...(turnTraceCapture?.turn?.events ?? [])];
+        const turnId = `${Date.now()}-${catId as string}`;
+        // AC-P2-8a: channel-aware delivery decisions per stage
+        const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
+        if (sessionTraceCapture?.session) {
+          delivery.push({
+            stage: 'session-init',
+            delivered: true,
+            channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+            reason: hasNativeL0
+              ? 'session-init delivered via native L0 channel; pack blocks via buildStaticIdentityPackOnly'
+              : 'session-init delivered via message-prepend (injectSystemPrompt)',
           });
         }
+        if (turnTraceCapture?.turn) {
+          delivery.push({
+            stage: 'per-turn',
+            delivered: true,
+            channel: 'message-prepend',
+            reason: 'per-turn context always delivered via message-prepend',
+          });
+        }
+        const summary = buildTraceSummary({
+          turnId,
+          sessionId: threadId, // session ID resolved after invocation; threadId as proxy during migration
+          threadId,
+          catId: catId as string,
+          events: allEvents,
+          delivery,
+          durationMs: 0, // synchronous pipeline; sub-ms not tracked at this layer
+        });
+        const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
+        deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
+          log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+        });
       }
 
       // F24 Phase E: Bootstrap context for Session #2+

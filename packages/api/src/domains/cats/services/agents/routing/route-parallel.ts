@@ -28,6 +28,7 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -216,6 +217,9 @@ export async function* routeParallel(
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+      // F237: drain session trace IMMEDIATELY — before any await that could let
+      // another parallel cat overwrite the module-global capture buffer.
+      const sessionTraceCapture = deps.injectionTraceStore ? drainCapturedTraces() : null;
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -286,49 +290,49 @@ export async function* routeParallel(
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         ...conciergeContextForCat(conciergeCtx, catId as string),
       });
+      // F237: drain turn trace IMMEDIATELY — same race-safety as session drain above.
+      const turnTraceCapture = deps.injectionTraceStore ? drainCapturedTraces() : null;
 
       // F237 Phase 2 (AC-P2-8/8a): Fire-and-forget injection trace persistence (parallel path).
-      // Same pattern as route-serial.ts — drain pipeline traces and persist with channel-aware delivery.
-      if (deps.injectionTraceStore) {
-        const { drainCapturedTraces } = await import('../../../../prompt-hooks/PipelinePromptBuilder.js');
+      // Uses locally-captured traces (drained synchronously after each build call) to avoid
+      // the module-global race: in Promise.all, another cat's build could overwrite the
+      // global buffer during any await between build and drain.
+      if (deps.injectionTraceStore && (sessionTraceCapture?.session || turnTraceCapture?.turn)) {
         const { buildTraceSummary } = await import('../../../../prompt-hooks/InjectionTraceStore.js');
-        const captured = drainCapturedTraces();
-        if (captured.session || captured.turn) {
-          const allEvents = [...(captured.session?.events ?? []), ...(captured.turn?.events ?? [])];
-          const turnId = `${Date.now()}-${catId as string}`;
-          const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
-          if (captured.session) {
-            delivery.push({
-              stage: 'session-init',
-              delivered: true,
-              channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
-              reason: hasNativeL0
-                ? 'session-init delivered via native L0 channel (parallel)'
-                : 'session-init delivered via message-prepend (parallel)',
-            });
-          }
-          if (captured.turn) {
-            delivery.push({
-              stage: 'per-turn',
-              delivered: true,
-              channel: 'message-prepend',
-              reason: 'per-turn context always delivered via message-prepend (parallel)',
-            });
-          }
-          const summary = buildTraceSummary({
-            turnId,
-            sessionId: threadId,
-            threadId,
-            catId: catId as string,
-            events: allEvents,
-            delivery,
-            durationMs: 0,
-          });
-          const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
-          deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
-            log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+        const allEvents = [...(sessionTraceCapture?.session?.events ?? []), ...(turnTraceCapture?.turn?.events ?? [])];
+        const turnId = `${Date.now()}-${catId as string}`;
+        const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
+        if (sessionTraceCapture?.session) {
+          delivery.push({
+            stage: 'session-init',
+            delivered: true,
+            channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+            reason: hasNativeL0
+              ? 'session-init delivered via native L0 channel (parallel)'
+              : 'session-init delivered via message-prepend (parallel)',
           });
         }
+        if (turnTraceCapture?.turn) {
+          delivery.push({
+            stage: 'per-turn',
+            delivered: true,
+            channel: 'message-prepend',
+            reason: 'per-turn context always delivered via message-prepend (parallel)',
+          });
+        }
+        const summary = buildTraceSummary({
+          turnId,
+          sessionId: threadId,
+          threadId,
+          catId: catId as string,
+          events: allEvents,
+          delivery,
+          durationMs: 0,
+        });
+        const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
+        deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
+          log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+        });
       }
 
       const continuityCapsule = buildCapsuleFromRouteState({
