@@ -15,7 +15,6 @@
 
 import type {
   ActiveParticipantInput,
-  AssemblerInput,
   CatConfig,
   CatConfigSnapshot,
   CatId,

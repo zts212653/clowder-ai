@@ -211,8 +211,10 @@ function getAllConfigs(): Record<string, CatConfig> {
   return catRegistry.getAllConfigs();
 }
 
-/** Get a single cat config by ID */
-function getConfig(catId: string): CatConfig | undefined {
+/** Get a single cat config by ID
+ * @internal F237 — exported for ContextAssembler bridge; will be removed when SystemPromptBuilder is replaced.
+ */
+export function getConfig(catId: string): CatConfig | undefined {
   return catRegistry.tryGet(catId)?.config;
 }
 
@@ -248,7 +250,8 @@ function pickDisplayNameOrVariantMention(id: string, config: CatConfig): string 
   return pickDisplayNameMention(config) ?? pickVariantMention(id, config);
 }
 
-function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
+/** @internal F237 — exported for ContextAssembler bridge */
+export function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
   const entries: CallableCatEntry[] = Object.entries(getAllConfigs())
     .filter(([id]) => id !== currentCatId && isCatAvailable(id))
     .map(([id, config]) => ({ id, config }));
@@ -290,7 +293,8 @@ function buildCallableMentions(currentCatId: CatId): CallableMentionsResult {
   return { mentions, hasDuplicateDisplayNames, uniqueHandleExample };
 }
 
-function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): string {
+/** @internal F237 — exported for ContextAssembler bridge */
+export function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): string {
   if (!config) return catId;
   // F167 identity anti-spoofing: carry variantLabel when present to disambiguate same-breed variants
   // (e.g. "布偶猫 Opus 4.7(opus-47)" vs "布偶猫(opus)"), preventing A2A handoff identity confusion.
@@ -298,7 +302,8 @@ function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): st
   return `${config.displayName}${variantPart}(${catId})`;
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
+/** @internal F237 — exported for ContextAssembler bridge */
+export const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
   google: 'Google',
@@ -310,7 +315,8 @@ const PROVIDER_LABELS: Record<string, string> = {
  * Full specs live in cat-cafe-skills/refs/ (rich-blocks.md, mcp-callbacks.md).
  * Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C).
  */
-function getMcpToolsSection(): string {
+/** @internal F237 — exported for ContextAssembler bridge */
+export function getMcpToolsSection(): string {
   return `\n${loadMcpToolsSection({ RICH_BLOCK_SHORT })}`;
 }
 
@@ -337,7 +343,8 @@ export function getGovernanceDigest(): string {
 /** @segment S6 — Per-breed workflow triggers (loaded from template)
  *  Keyed by breedId so all variants of a breed share the same workflow.
  *  Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C). */
-function getWorkflowTriggers(): Record<string, string> {
+/** @internal F237 — exported for ContextAssembler bridge */
+export function getWorkflowTriggers(): Record<string, string> {
   const triggers = loadWorkflowTriggers();
   return Object.fromEntries(
     Object.entries(triggers).map(([breed, content]) => [breed, ensureMergeGateSourceProvenanceTrigger(content)]),
@@ -356,7 +363,8 @@ function ensureMergeGateSourceProvenanceTrigger(content: string): string {
  * Lists all other cats with @mention, strengths, and caution.
  * Excludes the current cat. Returns null if no teammates.
  */
-function buildTeammateRoster(currentCatId: CatId): string | null {
+/** @internal F237 — exported for ContextAssembler bridge */
+export function buildTeammateRoster(currentCatId: CatId): string | null {
   const allConfigs = getAllConfigs();
   const entries = Object.entries(allConfigs).filter(([id]) => id !== currentCatId && isCatAvailable(id));
   if (entries.length === 0) return null;
