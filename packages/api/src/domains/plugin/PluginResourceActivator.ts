@@ -287,14 +287,12 @@ export class PluginResourceActivator {
 
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
-    const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
     const capId = resourceCapId(manifest.id, resource);
     await this.deps.withCapabilityLock(() =>
       addSkill(projectRoot, skillName, skillsSource, {
         mountRules,
         pluginId: manifest.id,
         capabilityId: capId,
-        mountPaths: mountPaths ?? undefined,
         skillsSource: relativeSkillsSource,
         configStore: {
           readCapabilities: this.deps.readCapabilities,
@@ -311,43 +309,19 @@ export class PluginResourceActivator {
     const projectRoot = this.deps.resolveProjectRoot();
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
-
-    // Read stored skillsSource from config — this is the path symlinks were created
-    // with, which may differ from current pluginsDir if the source directory moved.
-    const config = await this.deps.readCapabilities();
     const capId = resourceCapId(manifest.id, resource);
-    const cap = config?.capabilities.find((c) => c.id === capId && c.pluginId === manifest.id);
-    const skillsSource = cap?.skillsSource
-      ? join(projectRoot, cap.skillsSource)
-      : dirname(resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path));
 
     await this.deps.withCapabilityLock(() =>
       removeSkill(projectRoot, skillName, {
         mountRules,
         pluginId: manifest.id,
         capabilityId: capId,
-        skillsSource,
         configStore: {
           readCapabilities: this.deps.readCapabilities,
           writeCapabilities: this.deps.writeCapabilities,
         },
       }),
     );
-  }
-
-  private async readExistingPluginSkillMountPaths(
-    manifest: PluginManifest,
-    resource: PluginResourceDef,
-  ): Promise<readonly string[] | undefined> {
-    const config = await this.deps.readCapabilities();
-    if (!config) return undefined;
-    const capId = resourceCapId(manifest.id, resource);
-    const existing = config.capabilities.find(
-      (c) => normalizeCapId(c.id) === capId && c.pluginId === manifest.id && c.type === 'skill',
-    );
-    // Empty mountPaths (set by removeSkill on deactivation) would restrict
-    // re-activation to zero mount points. Only return non-empty preferences.
-    return Array.isArray(existing?.mountPaths) && existing.mountPaths.length > 0 ? [...existing.mountPaths] : undefined;
   }
 
   private async activateLimb(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {

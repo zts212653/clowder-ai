@@ -324,9 +324,11 @@ export async function removeSkill(
   // 1. Config: disable capability entry
   const previous = await store.readCapabilities();
   const config = previous ? structuredClone(previous) : null;
+  let storedSkillsSource: string | undefined;
   if (config) {
     const existing = findSkillEntry(config.capabilities, capId, pluginId);
     if (existing) {
+      storedSkillsSource = existing.skillsSource;
       existing.enabled = false;
       existing.globalEnabled = false;
       existing.mountPaths = [];
@@ -335,8 +337,10 @@ export async function removeSkill(
   }
 
   // 2. Remove managed symlinks from ALL mount point dirs
-  if (!opts.skillsSource) return { mounted: [], unmounted: [], conflicts: [] };
-  return unmountSkillSymlinks(projectRoot, skillName, opts.skillsSource, mountRules);
+  // Resolve skillsSource: explicit opts > stored config path > give up
+  const resolvedSource = opts.skillsSource ?? (storedSkillsSource ? join(projectRoot, storedSkillsSource) : undefined);
+  if (!resolvedSource) return { mounted: [], unmounted: [], conflicts: [] };
+  return unmountSkillSymlinks(projectRoot, skillName, resolvedSource, mountRules);
 }
 
 // ────────── Query ──────────

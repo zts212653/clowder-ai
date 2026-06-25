@@ -1022,7 +1022,7 @@ describe('PluginResourceActivator skill safety', () => {
     );
   });
 
-  it('honors existing plugin skill mountPaths policy during activation', async () => {
+  it('plugin skill activation always mounts to all active mount points', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-root-'));
     const pluginsDir = join(root, 'plugins');
     const projectRoot = join(root, 'project');
@@ -1030,6 +1030,8 @@ describe('PluginResourceActivator skill safety', () => {
     mkdirSync(skillSourceDir, { recursive: true });
     writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
 
+    // Even with a pre-existing disabled entry that had restricted mountPaths,
+    // plugin activation always mounts to all active mount points.
     let persisted = {
       version: 1,
       capabilities: [
@@ -1065,14 +1067,11 @@ describe('PluginResourceActivator skill safety', () => {
     const enableResult = await activator.enablePlugin(manifest);
 
     assert.equal(enableResult.status, 'success');
-    assert.equal(realpathSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')), realpathSync(skillSourceDir));
-    assert.equal(
-      existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')),
-      false,
-      'activation must not mount outside existing plugin mountPaths',
-    );
-    assert.deepEqual(persisted.capabilities[0].mountPaths, ['claude']);
+    assert.ok(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')));
+    assert.ok(existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')));
     assert.equal(persisted.capabilities[0].enabled, true);
+    // mountPaths cleared — addSkill defaults to all mount points
+    assert.equal(persisted.capabilities[0].mountPaths, undefined);
   });
 
   it('registers plugin skill but does not mount through provider skills root symlink', async () => {
