@@ -22,7 +22,6 @@ export type EnvCategory =
   | 'proxy'
   | 'connector'
   | 'codex'
-  | 'dare'
   | 'gemini'
   | 'kimi'
   | 'tts'
@@ -68,7 +67,6 @@ export const ENV_CATEGORIES: Record<EnvCategory, string> = {
   proxy: 'Anthropic 代理网关',
   connector: '平台接入 (Telegram/飞书)',
   codex: '缅因猫 (Codex)',
-  dare: '狸花猫 (Dare)',
   gemini: '暹罗猫 (Gemini)',
   kimi: 'Kimi',
   tts: '语音合成 (TTS)',
@@ -262,6 +260,33 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'F178 Persistent MCP Agent-Key Auth — catId 到密钥文件路径的 JSON 映射（Antigravity variants）',
     category: 'server',
     sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_REMOTE_PORT',
+    defaultValue: '3098',
+    description:
+      'F247 B1a Cloud Cat — remote-spike.ts 监听端口（公网 Remote MCP gateway for cloud cat e.g. ChatGPT Pro 砚砚 Pro）',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_REMOTE_TOKEN',
+    defaultValue: '(空)',
+    description:
+      'F247 B1a Cloud Cat — remote-spike.ts ?token= disposable interim guard（B1a 单防线；B1b 升级 verified CF Access OAuth 替换）',
+    category: 'server',
+    sensitive: true,
+    runtimeEditable: false,
+  },
+  {
+    name: 'CAT_CAFE_DESKTOP_MODE',
+    defaultValue: 'fable-phase0',
+    description:
+      'F247 B1a Cloud Cat — remote-spike.ts 工具白名单 mode 选择（fable-phase0 / cloud-pro-phase0；收窄到 10 项 collab+memory 工具）',
+    category: 'server',
+    sensitive: false,
     runtimeEditable: false,
   },
   {
@@ -1072,10 +1097,6 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'codex',
     sensitive: true,
   },
-
-  // --- dare ---
-  { name: 'DARE_ADAPTER', defaultValue: 'openrouter', description: '狸花猫适配器', category: 'dare', sensitive: false },
-  { name: 'DARE_PATH', defaultValue: '(未设置)', description: 'Dare CLI 路径', category: 'dare', sensitive: false },
 
   // --- gemini ---
   {

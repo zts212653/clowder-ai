@@ -54,7 +54,7 @@ function createStubSocket() {
 }
 
 function makePlayers(count) {
-  const catIds = ['opus', 'codex', 'gemini', 'gpt52', 'sonnet', 'dare', 'opencode', 'spark', 'antigravity'];
+  const catIds = ['opus', 'codex', 'gemini', 'gpt52', 'sonnet', 'opencode', 'spark', 'antigravity'];
   return catIds.slice(0, count).map((id) => ({ actorType: 'cat', actorId: id }));
 }
 

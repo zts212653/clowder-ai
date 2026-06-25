@@ -27,7 +27,12 @@ const evalDomainRegistryEntrySchema = z.object({
     handle: z.string().min(1),
     model: z.string().min(1),
   }),
-  frequency: z.enum(['daily', 'weekly']),
+  frequency: z.union([
+    z.enum(['daily', 'weekly']),
+    z
+      .string()
+      .regex(/^every-[1-9]\d*d$/, 'N-day frequency must match every-{N}d with N >= 1 (e.g. every-3d, every-7d)'),
+  ]),
   sourceAdapter: sourceAdapterSchema,
   sourceRefsKind: sourceRefsKindSchema,
   threadPolicy: z.object({

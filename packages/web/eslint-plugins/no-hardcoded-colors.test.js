@@ -16,7 +16,7 @@ tester.run('no-hardcoded-colors', rule, {
   valid: [
     // Semantic cat tokens are allowed
     { code: '<div className="bg-opus-primary text-codex-dark" />' },
-    { code: '<div className="border-gemini-light bg-dare-bg" />' },
+    { code: '<div className="border-gemini-light bg-codex-bg" />' },
     // Cafe tokens are allowed
     { code: '<div className="bg-cafe-white text-cafe-black" />' },
     // Werewolf tokens are allowed

@@ -145,26 +145,6 @@ function makeF127BootstrapTemplate() {
         ],
       },
       {
-        id: 'dragon-li',
-        catId: 'dare',
-        name: '狸花猫',
-        displayName: '狸花猫',
-        avatar: '/avatars/dare.png',
-        color: { primary: '#6B7280', secondary: '#E5E7EB' },
-        mentionPatterns: ['@dare', '@狸花猫'],
-        roleDescription: 'Dare 框架猫',
-        defaultVariantId: 'dare-default',
-        variants: [
-          {
-            id: 'dare-default',
-            provider: 'dare',
-            defaultModel: 'glm-4.7',
-            mcpSupport: true,
-            cli: { command: 'dare', outputFormat: 'json' },
-          },
-        ],
-      },
-      {
         id: 'golden-chinchilla',
         catId: 'opencode',
         name: '金渐层',
@@ -191,7 +171,6 @@ function makeF127BootstrapTemplate() {
       codex: { family: 'maine-coon', roles: ['reviewer'], lead: true, available: true, evaluation: 'codex' },
       spark: { family: 'maine-coon', roles: ['coder'], lead: false, available: true, evaluation: 'spark' },
       gemini: { family: 'siamese', roles: ['designer'], lead: true, available: true, evaluation: 'gemini' },
-      dare: { family: 'dragon-li', roles: ['coding'], lead: true, available: true, evaluation: 'dare' },
       opencode: { family: 'golden-chinchilla', roles: ['coding'], lead: true, available: true, evaluation: 'opencode' },
     },
     reviewPolicy: {
@@ -692,10 +671,10 @@ describe('cat-catalog-store', () => {
       mentionPatterns: ['@temp-cat'],
       roleDescription: '临时成员',
       personality: '临时',
-      clientId: 'dare',
-      defaultModel: 'dare-1',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
       mcpSupport: false,
-      cli: { command: 'dare', outputFormat: 'json' },
+      cli: { command: 'codex', outputFormat: 'json' },
     });
 
     await deleteRuntimeCat(projectRoot, 'temp-cat');
@@ -753,10 +732,10 @@ describe('cat-catalog-store', () => {
         mentionPatterns: ['@temp-cat'],
         roleDescription: '临时成员',
         personality: '临时',
-        clientId: 'dare',
-        defaultModel: 'dare-1',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
         mcpSupport: false,
-        cli: { command: 'dare', outputFormat: 'json' },
+        cli: { command: 'codex', outputFormat: 'json' },
       });
     } finally {
       if (previousTemplatePath === undefined) delete process.env.CAT_TEMPLATE_PATH;
@@ -798,10 +777,10 @@ describe('cat-catalog-store', () => {
       color: { primary: '#334155', secondary: '#cbd5f5' },
       mentionPatterns: ['@shadow-seed'],
       roleDescription: '用于路径边界验证',
-      clientId: 'dare',
-      defaultModel: 'dare-1',
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
       mcpSupport: false,
-      cli: { command: 'dare', outputFormat: 'json' },
+      cli: { command: 'codex', outputFormat: 'json' },
     });
 
     const previousTemplatePath = process.env.CAT_TEMPLATE_PATH;

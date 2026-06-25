@@ -132,10 +132,10 @@ describe('F168 Phase C C1.3: engine-zero-catname guard (INV-6)', () => {
 
   // R2-1 (codex cloud review #3409253420): rule B's cat-id set must be DERIVED from the catalog,
   // not a hand-maintained list that drifts. Asserts the derived set covers catalog ids a stale
-  // manual list missed (fable-5/antig-opus/dare/opencode/kimi were all absent before).
+  // manual list missed (fable-5/antig-opus/opencode/kimi were all absent before).
   it('rule B cat-id set is derived from the catalog (no manual drift)', () => {
     assert.ok(KNOWN_CAT_IDS.length >= 10, `expected a populated derived cat-id set, got ${KNOWN_CAT_IDS.length}`);
-    for (const id of ['fable-5', 'antig-opus', 'dare', 'opencode', 'kimi', 'gemini25', 'sonnet']) {
+    for (const id of ['fable-5', 'antig-opus', 'opencode', 'kimi', 'gemini25', 'sonnet']) {
       assert.ok(
         KNOWN_CAT_IDS.includes(id),
         `derived cat-id set must include catalog id '${id}' (drift would silently un-guard it)`,

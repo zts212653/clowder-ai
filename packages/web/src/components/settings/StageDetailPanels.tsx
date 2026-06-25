@@ -113,7 +113,7 @@ export function CarrierInfoPanel({ carrier }: { carrier: CarrierInfo }) {
 }
 
 // ── Event-driven stage panel (hook-events) ────────────────
-// Hook toggle/dry-run removed from F237 scope (CVO: "当前 PR 多余").
+// Hook toggle/dry-run removed from F237 scope (operator: "当前 PR 多余").
 // Hook events stage now uses the same StageDetailPanel as all others.
 
 // ── Stage detail panel ────────────────────────────────────────

@@ -110,7 +110,7 @@ interface EvalDomainSpecConfig extends EvalDomainScheduleOpts {
  * count these skips. It also points at the actionable next step (sync the runtime that
  * hosts this cron, or pin the cron to a runtime that has the prereq).
  */
-function buildPublishPrereqSkippedMessage(domain: EvalDomainRegistryEntry): string {
+export function buildPublishPrereqSkippedMessage(domain: EvalDomainRegistryEntry): string {
   return [
     `## Eval Domain: ${domain.domainId} — SKIPPED (publish prereq missing)`,
     '',
@@ -128,7 +128,7 @@ function buildPublishPrereqSkippedMessage(domain: EvalDomainRegistryEntry): stri
   ].join('\n');
 }
 
-async function evaluatePublishPrereq(
+export async function evaluatePublishPrereq(
   probe: NonNullable<EvalDomainScheduleOpts['publishPrereqProbe']>,
   domainId: EvalDomainRegistryEntry['domainId'],
 ): Promise<boolean> {
@@ -308,3 +308,5 @@ function loadRegisteredDomains(harnessFeedbackRoot: string, frequency: 'daily' |
       .filter((d) => d.enabled !== false)
   );
 }
+
+// N-day cadence helpers and factory were split to eval-domain-nday.ts (cloud R4 P1: file-size limit).

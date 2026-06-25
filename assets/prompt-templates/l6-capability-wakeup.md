@@ -1,7 +1,3 @@
-<!-- @segment L6 — 能力唤醒指南 -->
-<!-- Variables: none (static content) -->
-<!-- Condition: always -->
-
 非 SOP 默认链。"坏直觉 → 该用的"。不熟用 `tool_search` 搜 skill 名：
 
 - 想发一堆文字 / 日志 / 步骤 → `rich-messaging`（卡片 / 列表 / diff / 语音 / 图）
@@ -18,7 +14,7 @@
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
 - 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
-- co-creator重复不满 → `code-as-harness`（搜证据确认重复→诊断→代码修；新任务做过 ≥2 次→Build mode 建 skill）
 - 发现co-creator偏好变化 / 做对了互动 / 关系信号 → `cat_cafe_propose_profile_update`（提议更新关系画像 primer，operator 在 Hub 审批）
+- co-creator重复不满 → `code-as-harness`（搜证据确认重复→诊断→代码修；新任务做过 ≥2 次→Build mode 建 skill）
 
 > Skills 在 manifest ≠ 在认知路径。完整集 + Tier 2 见 `cat-cafe-skills/refs/capability-wakeup-index.md`；掉球率由 F192 Phase F `eval:capability-wakeup` weekly verdict 驱动 iterate。

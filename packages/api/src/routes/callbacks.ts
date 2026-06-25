@@ -59,6 +59,7 @@ import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
 import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
@@ -1838,6 +1839,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     );
     // F236 Track-1: also emit as OTel metrics (queryable canonical source for eval).
     recordAnchorReturned({ tool: 'pending-mentions', returnedChars: pendingMentionsReturnedChars });
+    // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+    // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+    recordAnchorPreviewEvent({
+      tool: 'pending-mentions',
+      itemIds: mentions.map((m) => m.id),
+      returnedChars: payload.mentions.reduce((sum, m) => sum + m.message.length, 0),
+      originalChars: mentions.reduce((sum, m) => sum + m.content.length, 0),
+    });
     return payload;
   });
 
@@ -2190,6 +2199,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     );
     // F236 Track-1: also emit as OTel metrics (queryable canonical source for eval).
     recordAnchorReturned({ tool: 'thread-context', returnedChars: threadContextReturnedChars });
+    // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+    // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: filtered.map((m) => m.id),
+      returnedChars: payload.messages.reduce((sum, m) => sum + m.preview.length, 0),
+      originalChars: filtered.reduce((sum, m) => sum + m.content.length, 0),
+    });
     return payload;
   });
 
@@ -2343,6 +2360,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       );
       // F236 Track-1: also emit as OTel metrics (chars + request/response volume substrate).
       recordAnchorFullDrill({ tool: 'get-message', fullDrillChars });
+      // F236 Track-2: per-event drill record with correlation key for drill↔preview join.
+      recordAnchorDrillEvent({ tool: 'get-message', itemId: message.id, fullDrillChars });
     }
 
     return result;

@@ -7,10 +7,10 @@
  */
 
 /** 产物类型 — 决定前端图标 / 筛选分组 */
-export type ThreadArtifactType = 'image' | 'file' | 'code' | 'pr' | 'audio' | 'video';
+export type ThreadArtifactType = 'image' | 'file' | 'code' | 'pr' | 'audio' | 'video' | 'widget';
 
 export interface ThreadArtifactDTO {
-  /** 产物类型（图 / 文件 / 代码 / PR / 语音 / 视频） */
+  /** 产物类型（图 / 文件 / 代码 / PR / 语音 / 视频 / 小组件） */
   type: ThreadArtifactType;
   /** 显示名（fileName / caption / filePath / PR 标题） */
   name: string;

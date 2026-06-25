@@ -84,7 +84,6 @@ const BUILTIN_ACCOUNT_IDS = {
   openai: 'codex',
   google: 'gemini',
   kimi: 'kimi',
-  dare: 'dare',
   opencode: 'opencode',
 };
 
@@ -7036,128 +7035,6 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[0]?.workingDirectory, repo);
     assert.equal(optionsSeen[0]?.sessionId, undefined, 'OpenCode must start fresh when stored workspace is unknown');
     assert.equal(optionsSeen[0]?.cliSessionId, undefined, 'unknown-workspace resume id must not reach diagnostics');
-  });
-
-  it('re-reads OpenCode active session after waiting on the resume mutex', async () => {
-    const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
-    const repo = await makeSameProjectWorkspace('opencode-repo-reread-');
-    const threadId = 'thread-opencode-reread-after-mutex';
-    const userId = 'user1';
-    const store = new SessionChainStore();
-    store.create({
-      cliSessionId: 'ses_legacy_unknown_workspace',
-      threadId,
-      catId: 'opencode',
-      userId,
-    });
-
-    let getChainCalls = 0;
-    let secondInvocationStarted = false;
-    let didResolveSecondPreMutexRead = false;
-    let resolveSecondPreMutexRead;
-    const secondPreMutexRead = new Promise((resolve) => {
-      resolveSecondPreMutexRead = resolve;
-    });
-    const chainStore = {
-      create: (...args) => store.create(...args),
-      get: (...args) => store.get(...args),
-      getActive: (...args) => store.getActive(...args),
-      getChain: (...args) => {
-        const chain = store.getChain(...args);
-        getChainCalls += 1;
-        if (secondInvocationStarted && !didResolveSecondPreMutexRead) {
-          didResolveSecondPreMutexRead = true;
-          resolveSecondPreMutexRead();
-        }
-        return chain;
-      },
-      update: (...args) => store.update(...args),
-      getByCliSessionId: (...args) => store.getByCliSessionId(...args),
-      getByChainKey: (...args) => store.getByChainKey(...args),
-      incrementCompressionCount: (...args) => store.incrementCompressionCount(...args),
-      listSealingSessions: (...args) => store.listSealingSessions(...args),
-      getChainByThread: (...args) => store.getChainByThread(...args),
-    };
-
-    let callCount = 0;
-    let releaseFirstSessionInit;
-    let resolveFirstServiceStarted;
-    const firstServiceStarted = new Promise((resolve) => {
-      resolveFirstServiceStarted = resolve;
-    });
-    const firstMayCreateFreshSession = new Promise((resolve) => {
-      releaseFirstSessionInit = resolve;
-    });
-    const optionsSeen = [];
-    const service = {
-      l0CompilerFn: dummyL0CompilerFn,
-      async *invoke(_prompt, options) {
-        callCount += 1;
-        const callNumber = callCount;
-        optionsSeen.push(options ?? {});
-        if (callNumber === 1) {
-          resolveFirstServiceStarted();
-          await firstMayCreateFreshSession;
-          yield { type: 'session_init', catId: 'opencode', sessionId: 'ses_fresh_workspace', timestamp: Date.now() };
-        }
-        yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
-      },
-    };
-
-    const deps = {
-      ...makeDeps(),
-      sessionChainStore: chainStore,
-      threadStore: {
-        get: async () => ({ projectPath: repo, createdBy: userId }),
-        updateParticipantActivity: async () => {},
-      },
-    };
-    const waitFor = (promise, label) =>
-      Promise.race([
-        promise,
-        new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 1000)),
-      ]);
-
-    try {
-      const firstRun = collect(
-        invokeSingleCat(deps, {
-          catId: 'opencode',
-          service,
-          prompt: 'first turn creates fresh session',
-          userId,
-          threadId,
-          isLastCat: true,
-        }),
-      );
-      await waitFor(firstServiceStarted, 'first service invocation');
-
-      secondInvocationStarted = true;
-      const secondRun = collect(
-        invokeSingleCat(deps, {
-          catId: 'opencode',
-          service,
-          prompt: 'second turn should reuse fresh session',
-          userId,
-          threadId,
-          isLastCat: true,
-        }),
-      );
-      await waitFor(secondPreMutexRead, 'second pre-mutex session read');
-      releaseFirstSessionInit();
-      await Promise.all([firstRun, secondRun]);
-    } finally {
-      await rmWithRetry(repo);
-    }
-
-    assert.equal(optionsSeen.length, 2);
-    assert.equal(optionsSeen[0]?.sessionId, undefined, 'first turn starts fresh for unknown legacy workspace');
-    assert.equal(optionsSeen[1]?.workingDirectory, repo);
-    assert.equal(
-      optionsSeen[1]?.sessionId,
-      'ses_fresh_workspace',
-      'second turn must use the fresh active session created while it waited on the old resume mutex',
-    );
-    assert.equal(optionsSeen[1]?.cliSessionId, 'ses_fresh_workspace');
   });
 
   it('fails loud for OpenCode when thread projectPath is default', async () => {

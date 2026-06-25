@@ -4,6 +4,7 @@ related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
+tips_exempt: harness-internal observability — ball custody events/projections are backend plumbing, no user-facing tip needed
 ---
 
 # F233: Ball Custody Observability — 球权保管链可观测（值班简报 + 轨迹下钻）

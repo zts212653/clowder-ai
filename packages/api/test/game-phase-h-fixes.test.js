@@ -124,7 +124,7 @@ function makeSeats() {
     { seatId: 'P3', actorType: 'cat', actorId: 'gemini', role: 'seer', alive: true, properties: {} },
     { seatId: 'P4', actorType: 'cat', actorId: 'gpt52', role: 'guard', alive: true, properties: {} },
     { seatId: 'P5', actorType: 'cat', actorId: 'sonnet', role: 'villager', alive: true, properties: {} },
-    { seatId: 'P6', actorType: 'cat', actorId: 'dare', role: 'villager', alive: true, properties: {} },
+    { seatId: 'P6', actorType: 'cat', actorId: 'kimi', role: 'villager', alive: true, properties: {} },
     { seatId: 'P7', actorType: 'cat', actorId: 'spark', role: 'villager', alive: true, properties: {} },
   ];
 }
@@ -252,7 +252,7 @@ describe('Phase H P1 Fixes — definition-level regression guards', () => {
         playerCount: 7,
         humanRole: 'player',
         voiceMode: false,
-        catIds: ['opus', 'codex', 'gemini', 'gpt52', 'sonnet', 'dare'],
+        catIds: ['opus', 'codex', 'gemini', 'gpt52', 'sonnet', 'kimi'],
       },
     });
 
@@ -479,8 +479,8 @@ describe('Phase H P1 Fixes', () => {
       assert.ok(lw.payload.text.length > 0, 'last_words should have text content');
 
       // Verify messageStore got the speech
-      const speechMessages = msgStore.messages.filter((m) => m.catId === 'dare');
-      assert.ok(speechMessages.length > 0, 'messageStore should have speech message from exiled player (dare)');
+      const speechMessages = msgStore.messages.filter((m) => m.catId === 'kimi');
+      assert.ok(speechMessages.length > 0, 'messageStore should have speech message from exiled player (kimi)');
     });
   });
 

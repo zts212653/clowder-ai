@@ -1603,7 +1603,7 @@ describe('AgentRouter', () => {
     // 云端 Codex P1-cloud-1: only providers that explicitly expose
     // injectsL0Natively() inject L0 natively (--system-prompt-file / -c
     // developer_instructions). Providers without that marker (GeminiAgentService,
-    // Antigravity, CatAgentService, A2A, OpenCode, Dare, Kimi…) still rely on the
+    // Antigravity, CatAgentService, A2A, OpenCode, Kimi…) still rely on the
     // user-message `params.systemPrompt` prepend for identity/家规. The route
     // layer must consult `service.injectsL0Natively?.()` and keep FULL static
     // identity for non-native services — pack-only-everywhere would orphan
@@ -1640,8 +1640,16 @@ describe('AgentRouter', () => {
       'static provider/identity line MUST be in user-message prompt for non-native-L0 provider',
     );
     assert.ok(
-      opusReceivedPrompt.includes('## 协作'),
+      opusReceivedPrompt.includes('## 协作\n'),
       'static A2A collaboration section MUST be present for non-native-L0 provider',
+    );
+    assert.ok(
+      opusReceivedPrompt.includes('A2A 球权检查'),
+      'dynamic A2A long anchors MUST remain for non-native-L0 providers',
+    );
+    assert.ok(
+      opusReceivedPrompt.includes('下一棒传球决策树'),
+      'baton decision tree MUST remain for non-native-L0 providers',
     );
     assert.ok(opusReceivedPrompt.includes('Identity: 布偶猫'), 'dynamic invocation identity pin');
     assert.ok(opusReceivedPrompt.includes('hello'), 'original message');
@@ -1684,8 +1692,16 @@ describe('AgentRouter', () => {
       'static provider/identity line must NOT duplicate in user message when provider injects natively',
     );
     assert.ok(
-      !opusReceivedPrompt.includes('## 协作'),
+      !opusReceivedPrompt.includes('## 协作\n'),
       'static A2A section must NOT duplicate when provider injects natively',
+    );
+    assert.ok(
+      !opusReceivedPrompt.includes('A2A 球权检查'),
+      'dynamic A2A long anchors must NOT duplicate when provider injects natively',
+    );
+    assert.ok(
+      !opusReceivedPrompt.includes('下一棒传球决策树'),
+      'baton decision tree must NOT duplicate when provider injects natively',
     );
     // Dynamic pin + message still flow.
     assert.ok(opusReceivedPrompt.includes('Identity: 布偶猫'));

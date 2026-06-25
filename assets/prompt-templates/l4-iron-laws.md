@@ -1,7 +1,3 @@
-<!-- @segment L4 — 五条铁律 -->
-<!-- Variables: none (static content) -->
-<!-- Condition: always -->
-
 1. **Runtime data safety** — Use isolated development/test data stores; never point local experiments at production user data
 2. **Review 必须跨个体** — 跨 family 优先，可降级到同 family 不同个体（自己的代码由别人 review）
 3. **用自己的身份** — 身份是硬约束常量，用自己的签名 `[昵称/模型🐾]`

@@ -56,12 +56,17 @@ test('item.completed file_change → tool_use', () => {
   const msg = transformCodexEvent(
     {
       type: 'item.completed',
-      item: { type: 'file_change', status: 'completed', changes: ['a', 'b'] },
+      item: {
+        type: 'file_change',
+        status: 'completed',
+        changes: ['a', { path: 'b' }],
+      },
     },
     CAT,
   );
   assert.equal(msg?.type, 'tool_use');
   assert.equal(msg?.toolName, 'file_change');
+  assert.deepEqual(msg?.toolInput, { status: 'completed', changes: ['a', { path: 'b' }] });
 });
 
 test('Reconnecting error → system_info', () => {

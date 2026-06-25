@@ -168,7 +168,7 @@ export function transformCodexEvent(
       type: 'tool_use',
       catId,
       toolName: 'file_change',
-      toolInput: { status, changes: changes.length },
+      toolInput: { status, changes },
       timestamp: Date.now(),
     };
   }

@@ -54,6 +54,7 @@ export function classifyArtifactView(a: Pick<ThreadArtifactDTO, 'type' | 'name' 
   if (a.type === 'audio' && a.url) return 'audio';
   if (a.type === 'video' && a.url) return 'video';
   if (a.type === 'pr') return 'pr';
+  if (a.type === 'widget') return 'fallback'; // widget 内容在消息里，跳回原消息查看
   // file / code：先看有无内容源，再按扩展名分文本 vs 二进制。
   const hasSource = Boolean(a.url || a.ref);
   if (!hasSource) return 'fallback';
@@ -108,6 +109,11 @@ export function artifactContentSource(
   if (a.url) return { kind: 'url', url: a.url };
   if (a.ref && worktreeId) return { kind: 'workspace', path: a.ref };
   return { kind: 'none' };
+}
+
+/** F232 polish: 产物行按钮文案——音视频「播放」，其余「打开」。 */
+export function artifactActionLabel(type: ThreadArtifactDTO['type']): string {
+  return type === 'audio' || type === 'video' ? '播放' : '打开';
 }
 
 export { TEXT_EXTENSIONS };

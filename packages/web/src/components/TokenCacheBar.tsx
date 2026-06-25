@@ -6,7 +6,6 @@ const CAT_GRADIENTS: Record<string, string> = {
   opus: 'linear-gradient(90deg, var(--color-opus-light), var(--color-opus-primary))',
   codex: 'linear-gradient(90deg, var(--color-codex-light), var(--color-codex-primary))',
   gemini: 'linear-gradient(90deg, var(--color-gemini-light), var(--color-gemini-primary))',
-  dare: 'linear-gradient(90deg, var(--color-dare-light), var(--color-dare-primary))',
 };
 
 export interface TokenCacheBarProps {

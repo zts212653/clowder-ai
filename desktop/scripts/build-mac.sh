@@ -343,16 +343,24 @@ PYTHON
 }
 
 # Configures the mounted volume's Finder view via AppleScript so the install
-# DMG opens to a 540×380 window with the app icon on the left and the
+# DMG opens to a 540x380 window with the app icon on the left and the
 # Applications symlink on the right, both at icon size 96, with a green arrow
 # background pointing from the app to Applications. macOS persists this view in
 # /Volumes/Clowder AI/.DS_Store, which hdiutil bakes into the final image when
 # we re-convert it to UDZO.
+# Configure the Finder icon layout for the staging DMG.
+#
+# Takes a POSIX path to the mounted staging volume (NOT a volume name), so the
+# layout always targets the disk we just attached — even when an unrelated DMG
+# with the same volume name (e.g. another "Clowder AI" image left over from a
+# parallel build or a tester install) is already mounted on the build machine.
+# (clowder-ai#1004 hardening point 2.)
 configure_dmg_layout() {
-  local volume_name="$1"
+  local mount_path="$1"
   /usr/bin/osascript <<APPLESCRIPT || warn "Finder layout AppleScript failed (continuing without custom layout)"
 tell application "Finder"
-  tell disk "${volume_name}"
+  set theMount to POSIX file "${mount_path}" as alias
+  tell theMount
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
@@ -402,18 +410,42 @@ for arch in "${ARCHS[@]}"; do
   rm -rf "$dmg_staging"
 
   echo "  Configuring Finder layout for ${arch} ..."
-  mount_output="$(hdiutil attach -readwrite -noverify -noautoopen "$rw_dmg")"
-  mount_point="$(echo "$mount_output" | awk -F '\t' '/\/Volumes\// { for (i=1;i<=NF;i++) if ($i ~ /^\/Volumes\//) { print $i; exit } }')"
-  if [[ -z "$mount_point" ]]; then
-    hdiutil detach "$rw_dmg" >/dev/null 2>&1 || true
+  # Use an explicit unique -mountpoint so the attach target is deterministic
+  # and immune to (a) the brittle tab-text parsing of `hdiutil attach` stdout
+  # and (b) collision with an already-mounted volume of the same name.
+  # (clowder-ai#1004 hardening point 1.)
+  mount_point="$(mktemp -d -t cat-cafe-dmg.XXXXXX)"
+  if ! hdiutil attach -readwrite -noverify -noautoopen -mountpoint "$mount_point" "$rw_dmg" >/dev/null; then
+    rmdir "$mount_point" 2>/dev/null || true
     rm -f "$rw_dmg"
-    die "Could not determine mount point for staging DMG (${arch})"
+    die "hdiutil attach failed for ${arch} (mountpoint=${mount_point})"
   fi
-  configure_dmg_layout "Clowder AI"
+  configure_dmg_layout "$mount_point"
   # Give Finder a moment to flush .DS_Store, then sync + detach.
   sync
   sleep 1
-  hdiutil detach "$mount_point" -force >/dev/null || warn "detach ${mount_point} failed (continuing)"
+  # Detach MUST succeed before `hdiutil convert` runs below — converting a
+  # still-mounted image silently produces a stale/corrupt distribution DMG
+  # (the icon layout we just configured never gets flushed). Retry once with
+  # backoff, then fail hard. (clowder-ai#1004 hardening point 3 — explicit
+  # fail-hard.)
+  #
+  # ⚠️ NON-DESTRUCTIVE failure path (gpt52 守门 #2526 P1):
+  # If detach has failed twice, we MUST NOT recurse into "$mount_point" with
+  # `rm -rf` — macOS will happily start deleting the live staging volume's
+  # contents through the still-mounted mountpoint before erroring out with
+  # `Resource busy`, leaving a half-destroyed mounted DMG. We also MUST NOT
+  # unlink "$rw_dmg" — that's the backing file the still-mounted volume
+  # references; unlinking leaves the mount alive but pointing at no file.
+  # Leave both for the operator to detach manually, then re-run.
+  if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+    sleep 2
+    if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+      die "Could not detach staging DMG at ${mount_point} (${arch}). Leaving both the mounted volume and the backing image '${rw_dmg}' in place — do not 'rm -rf' the mountpoint while it is still mounted (macOS will delete live volume contents). Eject manually via 'diskutil eject ${mount_point}' (or Disk Utility), then re-run."
+    fi
+  fi
+  # Safe only after detach succeeded — rmdir refuses non-empty dirs.
+  rmdir "$mount_point" 2>/dev/null || true
 
   echo "  Converting to compressed DMG: ${dmg_name} ..."
   rm -f "$dmg_out"

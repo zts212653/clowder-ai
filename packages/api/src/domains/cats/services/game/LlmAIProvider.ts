@@ -64,7 +64,7 @@ export class LlmAIProvider implements AIProvider {
         case 'kimi':
           return await this.callKimi(prompt, controller.signal);
         default:
-          // Unsupported providers (dare, antigravity, etc.) — fall through to Anthropic
+          // Unsupported providers (antigravity, etc.) — fall through to Anthropic
           return await this.callAnthropic(prompt, controller.signal);
       }
     } finally {

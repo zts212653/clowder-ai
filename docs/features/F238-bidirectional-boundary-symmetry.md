@@ -4,6 +4,7 @@ related_features: [F237, F203, F116, F154, F168, F190]
 topics: [open-source, intake, sanitizer, brand-guard, harness, l0]
 doc_kind: spec
 created: 2026-06-16
+tips_exempt: harness-internal boundary/sanitizer infrastructure — no user-facing capability change
 ---
 
 # F238: Bidirectional Boundary Symmetry

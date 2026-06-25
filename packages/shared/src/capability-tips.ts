@@ -7,6 +7,7 @@ export const CAPABILITY_TIP_CONTEXTS = [
   'review',
   'feature_dev',
   'merge_gate',
+  'eval',
   'long_running',
   'concierge_idle',
   'concierge_open',
@@ -17,6 +18,99 @@ export const CAPABILITY_TIP_SURFACES = ['assistant_stream_bubble', 'pending_bubb
 
 const ACTION_REQUIRED_KINDS = new Set(['capability', 'workflow', 'feature']);
 const FAKE_PROGRESS_RE = /就快好了|快好了|马上完成|马上好|马上就好|即将完成/u;
+
+/** 7 days — new tips within this window get display priority. */
+const NEW_TIP_BOOST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+// ── Exposure State (Phase D #997) ────────────────────────────────────────────
+
+export interface TipExposureState {
+  /** Tip IDs that have been shown in this scope. */
+  exposed: ReadonlySet<string>;
+  /** tipId → firstSeenAt timestamp for inventory-diff new tips. */
+  firstSeen: ReadonlyMap<string, number>;
+  /** Hash of the tip ID list when this state was last saved. */
+  fingerprint: string;
+}
+
+/** Deterministic hash of a string → non-negative int32. */
+function simpleHash(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  }
+  return h < 0 ? -h : h;
+}
+
+/** Fisher-Yates shuffle driven by a 32-bit LCG seeded with `seed`. */
+function seededShuffle<T>(items: readonly T[], seed: number): T[] {
+  const result = [...items];
+  let s = seed & 0x7fffffff;
+  for (let i = result.length - 1; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) & 0x7fffffff;
+    const j = s % (i + 1);
+    const tmp = result[i]!;
+    result[i] = result[j]!;
+    result[j] = tmp;
+  }
+  return result;
+}
+
+/**
+ * Canonical scope key for exposure tracking.
+ * Contexts are sorted so order in the caller's array doesn't matter.
+ */
+export function computeExposureScope(
+  surface: string,
+  audience: string | undefined,
+  contexts: readonly string[],
+): string {
+  const sorted = [...contexts].sort().join(',');
+  return `${surface}:${audience ?? 'all'}:${sorted}`;
+}
+
+/**
+ * Order-independent fingerprint of tip IDs.
+ * Changes when tips are added or removed, stable when content changes.
+ */
+export function computeInventoryFingerprint(tipIds: readonly string[]): string {
+  const sorted = [...tipIds].sort();
+  return String(simpleHash(sorted.join('\0')));
+}
+
+/**
+ * Migrate an existing exposure state to match the current inventory.
+ * - Deleted tips are pruned from `exposed` and `firstSeen`.
+ * - Genuinely new tips (not in old exposed or firstSeen) get `firstSeen = now`.
+ * - Fingerprint is recomputed.
+ */
+export function migrateExposureState(
+  existing: TipExposureState,
+  currentTipIds: readonly string[],
+  now: number,
+): TipExposureState {
+  const currentSet = new Set(currentTipIds);
+  const knownBefore = new Set([...existing.exposed, ...existing.firstSeen.keys()]);
+
+  // Prune deleted from exposed
+  const exposed = new Set<string>();
+  for (const id of existing.exposed) {
+    if (currentSet.has(id)) exposed.add(id);
+  }
+
+  // Prune deleted + add new to firstSeen
+  const firstSeen = new Map<string, number>();
+  for (const [id, ts] of existing.firstSeen) {
+    if (currentSet.has(id)) firstSeen.set(id, ts);
+  }
+  for (const id of currentTipIds) {
+    if (!knownBefore.has(id) && !firstSeen.has(id)) {
+      firstSeen.set(id, now);
+    }
+  }
+
+  return { exposed, firstSeen, fingerprint: computeInventoryFingerprint(currentTipIds) };
+}
 
 export const CapabilityTipSourceRefSchema = z
   .object({
@@ -157,6 +251,14 @@ export function selectCapabilityTip(
     contexts: readonly CapabilityTipContext[];
     audience?: CapabilityTipAudience;
     rotationKey?: number;
+    /** When provided, enables #997 exposure-uniform selection. */
+    exposure?: TipExposureState;
+    /** YYYY-MM-DD date bucket for deterministic daily shuffle. */
+    dateSeed?: string;
+    /** Opaque scope key for seed diversification (spec: seed = date + scope + fingerprint). */
+    scopeKey?: string;
+    /** Current timestamp (ms) for new-tip boost window. Defaults to Date.now(). */
+    now?: number;
   },
 ): CapabilityTip | null {
   const requestedAudience = options.audience;
@@ -172,17 +274,73 @@ export function selectCapabilityTip(
       if (!Number.isFinite(contextScore)) return null;
       return { tip, contextScore };
     })
-    .filter((entry): entry is { tip: CapabilityTip; contextScore: number } => entry !== null)
-    .sort(
+    .filter((entry): entry is { tip: CapabilityTip; contextScore: number } => entry !== null);
+
+  if (eligible.length === 0) return null;
+  const rotationKey = Math.max(0, Math.floor(options.rotationKey ?? 0));
+
+  // ── Legacy path: no exposure state → deterministic sort + modulo ──────────
+  if (!options.exposure) {
+    const sorted = [...eligible].sort(
       (a, b) =>
         a.contextScore - b.contextScore ||
         a.tip.contexts.length - b.tip.contexts.length ||
         a.tip.id.localeCompare(b.tip.id),
     );
+    return sorted[rotationKey % sorted.length]?.tip ?? null;
+  }
 
-  if (eligible.length === 0) return null;
-  const rotationKey = Math.max(0, Math.floor(options.rotationKey ?? 0));
-  return eligible[rotationKey % eligible.length]?.tip ?? null;
+  // ── Phase D path: exposure-aware selection with seeded shuffle ─────────────
+  const { exposure, dateSeed = '', scopeKey = '', now } = options;
+  const currentNow = now ?? Date.now();
+  // Spec: seed = date-bucket + scope + inventory-fingerprint (7e4a8855f)
+  const seed = simpleHash(dateSeed + scopeKey + exposure.fingerprint);
+
+  // Spec: "同优先級內用 deterministic seeded shuffle 打散排序" — preserve
+  // contextScore tiers, shuffle only within each tier.
+  const scoreGroups = new Map<number, typeof eligible>();
+  for (const entry of eligible) {
+    let group = scoreGroups.get(entry.contextScore);
+    if (!group) {
+      group = [];
+      scoreGroups.set(entry.contextScore, group);
+    }
+    group.push(entry);
+  }
+  const shuffled = [...scoreGroups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .flatMap(([, group]) => seededShuffle(group, seed));
+
+  // Determine if this looks like a first-install state (all tips are new).
+  // If so, suppress boost to avoid "首次安装全量抢占" per spec.
+  const allNewFirstSeen =
+    eligible.length > 0 && eligible.every((e) => exposure.firstSeen.has(e.tip.id)) && exposure.exposed.size === 0;
+
+  // Partition into exposure tiers (maintaining context-tiered shuffle order)
+  const newBoosted: typeof eligible = [];
+  const unexposed: typeof eligible = [];
+  const exposed: typeof eligible = [];
+
+  for (const entry of shuffled) {
+    const isExposed = exposure.exposed.has(entry.tip.id);
+    if (isExposed) {
+      exposed.push(entry);
+      continue;
+    }
+    const firstSeenAt = exposure.firstSeen.get(entry.tip.id);
+    const isNew = !allNewFirstSeen && firstSeenAt !== undefined && currentNow - firstSeenAt < NEW_TIP_BOOST_WINDOW_MS;
+    if (isNew) {
+      newBoosted.push(entry);
+    } else {
+      unexposed.push(entry);
+    }
+  }
+
+  // Tier-based selection: exhaust higher-priority exposure tier before falling
+  // through. Flat concat + global modulo allowed rotationKey to index into
+  // exposed tips while unexposed remained (cloud P1 on 9bcb6728).
+  const tier = newBoosted.length > 0 ? newBoosted : unexposed.length > 0 ? unexposed : exposed;
+  return tier[rotationKey % tier.length]?.tip ?? null;
 }
 
 export function formatSourceRef(sourceRef: CapabilityTipSourceRef): string {

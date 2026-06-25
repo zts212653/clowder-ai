@@ -343,7 +343,6 @@ export function buildCallHint(
     opencode: { cli: 'opencode', pathSuffix: ocPath ?? '/v1/chat/completions' },
     openai: { cli: 'codex', pathSuffix: '/v1/responses' },
     google: { cli: 'gemini', pathSuffix: `/models/${model || '...'}:generateContent` },
-    dare: { cli: 'dare', pathSuffix: '/v1/chat/completions' },
   };
   const info = cliEndpoints[client];
   if (!info) return null;

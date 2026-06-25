@@ -99,9 +99,9 @@ describe('parseGameCommand', () => {
   });
 
   it('parses player count + cat IDs', () => {
-    const result = parseGameCommand('/game werewolf player 9 opus,sonnet,codex,gpt52,spark,gemini,gemini25,dare');
+    const result = parseGameCommand('/game werewolf player 9 opus,sonnet,codex,gpt52,spark,gemini,gemini25,kimi');
     assert.equal(result?.playerCount, 9);
-    assert.deepStrictEqual(result?.catIds, ['opus', 'sonnet', 'codex', 'gpt52', 'spark', 'gemini', 'gemini25', 'dare']);
+    assert.deepStrictEqual(result?.catIds, ['opus', 'sonnet', 'codex', 'gpt52', 'spark', 'gemini', 'gemini25', 'kimi']);
   });
 
   it('parses player count + cat IDs + voice', () => {
@@ -165,7 +165,7 @@ describe('sanitizeCatIds', () => {
 });
 
 describe('buildGameSeats', () => {
-  const catIds = ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'dare', 'spark'];
+  const catIds = ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'kimi', 'spark'];
 
   it('builds 7-player seats with human P1 for player mode', () => {
     const seats = buildGameSeats({

@@ -10,8 +10,8 @@
 export interface ConciergeConfig {
   /** 是否启用前台猫 (default true) */
   enabled: boolean;
-  /** 皮肤 — E0: ragdoll-v1 默认 | E1: yanyan-codex (9-state atlas) | yarn-ball legacy */
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex';
+  /** 皮肤 — E0: ragdoll-v1 默认 | E1: yanyan-codex / xianxian-codex (9-state atlas) | yarn-ball legacy */
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
   /** 前台猫显示名（KD-6: per-deployment 可配置，本家 Phase A 落地投票） */
   displayName: string;
   /** 一句话人设基调（注入岗位 prompt） */

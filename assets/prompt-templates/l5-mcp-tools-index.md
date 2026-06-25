@@ -1,7 +1,3 @@
-<!-- @segment L5 — MCP 工具 quick index -->
-<!-- Variables: none (static content) -->
-<!-- Condition: always -->
-
 **记忆**：`cat_cafe_search_evidence`（语义/模糊找）/ `cat_cafe_graph_resolve`（精确 anchor）/ `cat_cafe_list_recent`（零先验/扫最近）
 **协作**：`cat_cafe_post_message` / `cat_cafe_cross_post_message` / `cat_cafe_multi_mention` / `cat_cafe_hold_ball`
 **任务**：`cat_cafe_create_task` / `cat_cafe_update_task` / `cat_cafe_list_tasks`

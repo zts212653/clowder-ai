@@ -105,7 +105,6 @@ const BUILTIN_ACCOUNT_IDS = {
   openai: 'codex',
   google: 'gemini',
   kimi: 'kimi',
-  dare: 'dare',
   opencode: 'opencode',
 };
 
@@ -269,17 +268,11 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
 
   it('GET /api/cats bootstraps the runtime catalog before the first read', async () => {
     const codexTemplate = makeCatalog('codex', 'Codex');
-    const dareTemplate = makeCatalog('dare', 'Dare', 'dare', 'glm-4.7');
     const antigravityTemplate = makeCatalog('antigravity', 'Antigravity', 'antigravity', 'gemini-bridge');
     const opencodeTemplate = makeCatalog('opencode', 'OpenCode', 'opencode', 'claude-opus-4-6');
     const template = {
       version: 1,
-      breeds: [
-        ...codexTemplate.breeds,
-        ...dareTemplate.breeds,
-        ...antigravityTemplate.breeds,
-        ...opencodeTemplate.breeds,
-      ],
+      breeds: [...codexTemplate.breeds, ...antigravityTemplate.breeds, ...opencodeTemplate.breeds],
     };
     const projectRoot = createTemplateOnlyProject(template);
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -297,7 +290,7 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     // project-local runtime catalog — so the response may include cats beyond the
     // local template.  Assert that the four locally-bootstrapped cats ARE present.
     const catIds = body.cats.map((cat) => cat.id);
-    for (const expected of ['codex', 'dare', 'antigravity', 'opencode']) {
+    for (const expected of ['codex', 'antigravity', 'opencode']) {
       assert.ok(catIds.includes(expected), `first read should include bootstrapped cat "${expected}"`);
     }
 

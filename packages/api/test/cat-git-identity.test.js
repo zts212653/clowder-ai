@@ -43,7 +43,6 @@ describe('resolveCatGitAuthorName', () => {
       resolveCatGitAuthorName('opencode', 'golden-chinchilla', 'anthropic/claude-opus-4-6'),
       'GoldenChinchilla-Opus-4.6',
     );
-    assert.equal(resolveCatGitAuthorName('dare', 'dragon-li', 'z-ai/glm-4.7'), 'DragonLi-GLM-4.7');
   });
 
   it('overrides the opus-47 dirty family (catalog family === own catId) back to Ragdoll', () => {

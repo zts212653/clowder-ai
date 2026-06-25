@@ -10,6 +10,7 @@ import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-ta
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
+import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
 import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.js';
 import { anchorTaskWhy } from './callback-anchor-helpers.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
@@ -276,9 +277,19 @@ export function registerCallbackTaskRoutes(
       // so counting it would over-count drill volume (cloud Codex review P2).
       if (payload.tasks.length > 0) {
         recordAnchorFullDrill({ tool: 'list-tasks', fullDrillChars: listTasksChars });
+        // F236 Track-2: per-event drill record with correlation key for drill↔preview join.
+        recordAnchorDrillEvent({ tool: 'list-tasks', itemId: taskId!, fullDrillChars: listTasksChars });
       }
     } else {
       recordAnchorReturned({ tool: 'list-tasks', returnedChars: listTasksChars });
+      // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+      // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+      recordAnchorPreviewEvent({
+        tool: 'list-tasks',
+        itemIds: tasks.map((t) => t.id),
+        returnedChars: payload.tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
+        originalChars: tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
+      });
     }
     return payload;
   });

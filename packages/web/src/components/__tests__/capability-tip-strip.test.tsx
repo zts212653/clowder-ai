@@ -1,7 +1,9 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import rawTips from '@/lib/capability-tips.seed.json';
 import { recordCapabilityTipEvent } from '@/lib/capabilityTipEvents';
+import { computeExposureScope, computeInventoryFingerprint } from '@/lib/capabilityTipExposure';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { CapabilityTipStrip } from '../CapabilityTipStrip';
 
@@ -11,6 +13,13 @@ vi.mock('@/lib/capabilityTipEvents', async () => ({
 
 let container: HTMLDivElement;
 let root: Root;
+
+type SeedTip = {
+  id: string;
+  contexts: string[];
+  audience: string[];
+  action?: { type?: string };
+};
 
 async function render(jsx: React.ReactNode) {
   await act(async () => {
@@ -89,6 +98,25 @@ describe('F244 CapabilityTipStrip', () => {
   });
 
   it('does not default omitted audience to all-only tips', async () => {
+    const seedTips = rawTips as readonly SeedTip[];
+    const scope = computeExposureScope('assistant_stream_bubble', undefined, ['review']);
+    const allAudienceReviewTipIds = seedTips
+      .filter(
+        (tip) =>
+          tip.action?.type === 'open_concierge_draft' &&
+          tip.contexts.includes('review') &&
+          tip.audience.includes('all'),
+      )
+      .map((tip) => tip.id);
+    localStorage.setItem(
+      `cat-cafe:tip-exposure:${scope}`,
+      JSON.stringify({
+        exposed: allAudienceReviewTipIds,
+        firstSeen: {},
+        fingerprint: computeInventoryFingerprint(seedTips.map((tip) => tip.id)),
+      }),
+    );
+
     await render(
       <CapabilityTipStrip surface="assistant_stream_bubble" contexts={['review']} firstDelayMs={0} rotateMs={12000} />,
     );
@@ -97,9 +125,11 @@ describe('F244 CapabilityTipStrip', () => {
       await Promise.resolve();
     });
 
-    expect(container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id')).toBe(
-      'capability-eval-verdict',
-    );
+    const tipId = container.querySelector('[data-testid="capability-tip-strip"]')?.getAttribute('data-tip-id');
+    const selectedTip = seedTips.find((tip) => tip.id === tipId);
+    // All "all" review tips are pre-exposed above. Correct omitted-audience behavior
+    // still has non-all tips available; an all-only default would fall back to exposed all tips.
+    expect(selectedTip?.audience).not.toContain('all');
   });
 
   it('records the context that matched the selected tip', async () => {

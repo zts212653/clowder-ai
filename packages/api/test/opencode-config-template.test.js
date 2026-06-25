@@ -472,7 +472,7 @@ describe('generateOpenCodeRuntimeConfig', () => {
       assert.equal(
         resolveWorkspaceRoot(),
         '/tmp/project',
-        'OpenCode MCP child env must make Cat Cafe MCP resolve the invocation workspace',
+        'OpenCode MCP child env must make Clowder AI MCP resolve the invocation workspace',
       );
     } finally {
       if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;

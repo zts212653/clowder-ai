@@ -10,7 +10,7 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 ensureFakeCliOnPath('opencode');
 
-// ── Mock helpers (same pattern as dare-agent-service.test.js) ──
+// ── Mock helpers ──
 
 function createMockProcess(exitCode = 0) {
   const stdout = new PassThrough();
@@ -413,7 +413,7 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.example/v1');
   });
 
-  test('cwd is workingDirectory (unlike DARE which uses darePath)', async () => {
+  test('cwd is workingDirectory', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });

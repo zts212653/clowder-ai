@@ -1,7 +1,7 @@
 export type ProfileMode = 'subscription' | 'api_key';
 export type ProfileAuthType = 'oauth' | 'api_key';
 export type ProfileKind = 'builtin' | 'api_key';
-export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode' | 'acp';
+export type BuiltinAccountClient = 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode' | 'acp';
 
 export interface ProfileItem {
   id: string;

@@ -30,7 +30,7 @@ interface ConciergeSettingsState {
   dutyCatProfileId: string;
   proactivePolicy: 'ambient' | 'quiet-badge';
   muted: boolean;
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex';
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
   ballPosition: { x: number; y: number } | null;
 }
 
@@ -187,6 +187,15 @@ export function ConciergeSettingsContent() {
             label="🐱 砚砚 v1"
             hint="9 态动画精灵图，砚砚专属皮肤。（默认）"
             onChange={() => updateConfig({ skin: 'yanyan-codex' })}
+          />
+          <RadioOption
+            name="skin"
+            value="xianxian-codex"
+            checked={state.skin === 'xianxian-codex'}
+            disabled={saving}
+            label="🐱 宪宪 v1"
+            hint="9 态动画精灵图，宪宪专属皮肤（视频提取）。"
+            onChange={() => updateConfig({ skin: 'xianxian-codex' })}
           />
           <RadioOption
             name="skin"

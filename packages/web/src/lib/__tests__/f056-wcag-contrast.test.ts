@@ -43,7 +43,6 @@ const CAT_ANCHORS: ReadonlyArray<[string, number, number]> = [
   ['codex', 145, 0.1],
   ['gemini', 240, 0.11],
   ['kimi', 250, 0.03],
-  ['dare', 80, 0.11],
   ['cocreator', 40, 0.1],
 ];
 

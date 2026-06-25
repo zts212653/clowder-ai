@@ -32,11 +32,11 @@ describe('deriveActiveCats — slot-first truth source', () => {
       snapshotCats: [],
       hasActiveInvocation: true,
       activeInvocations: {
-        'inv-1': { catId: 'dare', mode: 'execute' },
+        'inv-1': { catId: 'opus', mode: 'execute' },
       },
     });
 
-    expect(active).toEqual(['dare']);
+    expect(active).toEqual(['opus']);
   });
 
   it('drops targetCats after invocation ends when no slots remain', () => {

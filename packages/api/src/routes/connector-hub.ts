@@ -912,12 +912,25 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
 
   // ── F240: Generic plugin routes (config write / action / operation) ──
   // Implementation in connector-plugin-routes.ts for file size discipline.
+  // IMPORTANT: pluginRegistry / adapterRegistry / activateConnector / deactivateConnector
+  // are late-wired onto `opts` (= connectorHubOpts) AFTER connector gateway startup.
+  // Using value-copy here would snapshot `undefined` at registration time.
+  // Getters proxy to the live parent `opts` so the handler sees the gateway-populated values.
+  // (Fix for clowder-ai#1015: generic action routes returned 503 "plugin not loaded".)
   connectorActionRoutes({
     getManifests: getConnectorManifests,
-    pluginRegistry: opts.pluginRegistry,
-    adapterRegistry: opts.adapterRegistry,
-    activateConnector: opts.activateConnector,
-    deactivateConnector: opts.deactivateConnector,
+    get pluginRegistry() {
+      return opts.pluginRegistry;
+    },
+    get adapterRegistry() {
+      return opts.adapterRegistry;
+    },
+    get activateConnector() {
+      return opts.activateConnector;
+    },
+    get deactivateConnector() {
+      return opts.deactivateConnector;
+    },
     redis: opts.redis,
   })(app);
 

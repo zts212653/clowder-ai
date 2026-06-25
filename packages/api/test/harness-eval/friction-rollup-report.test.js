@@ -160,4 +160,67 @@ describe('buildFrictionRollupReport (F245 Phase C P1-3)', () => {
     assert.deepEqual(byId['fb-c'], ['reason']);
     assert.deepEqual(byId['cross-c'], ['act', 'reason'], '跨通道 cluster 多 sensorForm，去重升序');
   });
+
+  it('Phase D: eval-domain-only clusters are reference-only, never actionable', () => {
+    const evalOnly = clusterWithSigs('eval-only', {
+      count: 3,
+      channels: ['eval-domain'],
+      severity: 'high',
+    });
+    const report = buildFrictionRollupReport(inputOf([evalOnly]), '2026-06-22T00:00:00.000Z');
+
+    assert.equal(report.actionableCandidates.length, 0);
+    assert.equal(report.referenceOnly.length, 1);
+    assert.equal(report.referenceOnly[0].clusterId, 'eval-only');
+    assert.equal(report.referenceOnly[0].actionability, 'reference_only');
+  });
+
+  it('Phase D: non-eval-domain clusters become actionable candidates with followup draft', () => {
+    const fb = clusterWithSigs('feedback-c', {
+      count: 2,
+      channels: ['user-feedback'],
+      severity: 'high',
+    });
+    const report = buildFrictionRollupReport(inputOf([fb]), '2026-06-22T00:00:00.000Z');
+
+    assert.equal(report.referenceOnly.length, 0);
+    assert.equal(report.actionableCandidates.length, 1);
+    assert.equal(report.actionableCandidates[0].clusterId, 'feedback-c');
+    assert.equal(report.actionableCandidates[0].actionability, 'actionable_candidate');
+    assert.equal(report.actionableCandidates[0].followupDraft.clusterId, 'feedback-c');
+    assert.ok(report.actionableCandidates[0].followupDraft.evidenceRefs.length > 0);
+  });
+
+  it('Phase D: mixed-channel cluster stays actionable but preserves eval-domain refs separately', () => {
+    const mixed = clusterWithSigs('mixed-c', {
+      count: 4,
+      channels: ['eval-domain', 'user-feedback'],
+      severity: 'high',
+    });
+    const report = buildFrictionRollupReport(inputOf([mixed]), '2026-06-22T00:00:00.000Z');
+
+    assert.equal(report.referenceOnly.length, 0);
+    assert.equal(report.actionableCandidates.length, 1);
+    assert.equal(report.actionableCandidates[0].clusterId, 'mixed-c');
+    assert.deepEqual(
+      report.actionableCandidates[0].referenceOnlyEvidenceRefs,
+      ['mixed-c:m0', 'mixed-c:m2'],
+      'eval-domain member refs are preserved as reference-only evidence',
+    );
+  });
+
+  it('Phase D: actionable candidate count is capped by maxProposals (default 3, configurable)', () => {
+    const a = clusterWithSigs('a', { channels: ['user-feedback'], severity: 'high', count: 3 });
+    const b = clusterWithSigs('b', { channels: ['cancel'], severity: 'high', count: 2 });
+    const c = clusterWithSigs('c', { channels: ['paw-feel'], severity: 'medium', count: 2 });
+    const d = clusterWithSigs('d', { channels: ['user-feedback'], severity: 'medium', count: 1 });
+
+    const reportDefault = buildFrictionRollupReport(inputOf([a, b, c, d]), '2026-06-22T00:00:00.000Z');
+    assert.equal(reportDefault.actionableCandidates.length, 3, 'default maxProposals=3');
+
+    const reportCustom = buildFrictionRollupReport(inputOf([a, b, c, d]), '2026-06-22T00:00:00.000Z', {
+      maxProposals: 2,
+    });
+    assert.equal(reportCustom.actionableCandidates.length, 2, 'custom maxProposals respected');
+  });
 });

@@ -40,7 +40,9 @@ const DOMAIN_INSTRUCTIONS: Partial<Record<string, string>> = {
   'eval:task-outcome':
     'Enter the eval:task-outcome domain thread. Analyze task outcome episodes: review permission cancel signals, proposal reject signals, magic word triggers, and A1 world truth events. Bind signals to episodes, compare weekly cancel rates and terminal-state distributions, identify patterns, and produce a verdict handoff packet. Packet verdict is fix/build/keep_observe/delete_sunset. Terminal-state and signal distributions are evidence, not the packet verdict. Assign 7-class episode verdicts only for terminal episodes you actually reviewed; publish them through sourceRefs.episodeVerdicts. Proxy signals navigate; they do not judge.',
   'eval:friction':
-    'Enter the eval:friction domain thread. Review the periodic cross-channel friction rollup report (clusters aggregated from paw-feel markers, tool-call cancels, user feedback, and eval-domain metrics). For each Top-N cluster, weigh its sensor forms (provided in the report), channel diversity (cross-channel recurrence = stronger signal), count, severity, and member evidence refs. The report does NOT pre-assign root cause — YOU assign the 7-class root cause as your own verdict-layer attribution judgment (harness_misfit / tool_gap / environment_drift / vision_gap / translation_gap / execution_gap / taste_gap); do not fabricate attribution — if the evidence is thin, lower your confidence or say so. Produce a verdict handoff packet (fix/build/keep_observe/delete_sunset). Cluster counts + sensor forms are evidence, not the packet verdict. Do not over-fold the long tail — a low-count cluster on a high-severity channel can still warrant a fix verdict.',
+    'Enter the eval:friction domain thread. Review the periodic cross-channel friction rollup report (clusters aggregated from paw-feel markers, tool-call cancels, user feedback, and eval-domain metrics). For each Top-N cluster, weigh its sensor forms (provided in the report), channel diversity (cross-channel recurrence = stronger signal), count, severity, and member evidence refs. The report does NOT pre-assign root cause — YOU assign the 7-class root cause as your own verdict-layer attribution judgment (harness_misfit / tool_gap / environment_drift / vision_gap / translation_gap / execution_gap / taste_gap); do not fabricate attribution — if the evidence is thin, lower your confidence or say so. Phase D contract: `actionableCandidates` are the only clusters eligible for a repair-thread exit, and each may carry a prefilled `followupDraft` you can reuse when you decide a propose_thread is warranted. `referenceOnly` clusters are link-only context (currently eval-domain friction): list / cite them, but do NOT open a second repair thread for them. Produce a verdict handoff packet (fix/build/keep_observe/delete_sunset). Cluster counts + sensor forms are evidence, not the packet verdict. Do not over-fold the long tail — a low-count cluster on a high-severity channel can still warrant a fix verdict.',
+  'eval:anchor-first':
+    'Enter the eval:anchor-first domain thread. Analyze the anchor-first preview↔drill open-rate telemetry rollup: per-tool preview response counts, previewed items, drilled unique items, open-rate (drilledUniqueItems / previewedItems), charsSaved (originalChars - returnedChars), drillChars, and double-sided netBenefit (charsSaved - drillChars). Each rollup covers the LATEST 24h in-memory snapshot (event buffer has 24h retention; the weekly firing frequency is how often the eval cat runs, NOT the data window). Compare per-tool stats across the 3 preview tools (pending-mentions, thread-context, list-tasks) and 2 drill tools (get-message, list-tasks). orphanDrills indicates drills whose itemId matched no preview in the window (stale drill pointers, drills outside window, items surfaced before the event log started, or drills that arrived before any preview of that item — temporal causality enforced). Track-1 aggregate snapshot is cross-referenced for volume sanity checks. SUNSET SIGNAL CRITERIA (AC-E3, 双信号 — both required for delete_sunset): The attribution bundle includes pre-computed sunsetSignals per tool and a sunsetAssessment summary. Signal 1 (anchor tax): sunsetSignals.anchorTax=true when openRateByItem > 80% AND netBenefit < 0 — cats drill almost everything, anchor saves nothing; frictionSignal.severity is escalated to high, proposedAction is fix (not sunset — generator cannot confirm Signal 2 blindness; only eval cat escalates to delete_sunset after cross-referencing task-outcome). Signal 2 (blindness — MORE dangerous, token account INVISIBLE): reference-read the latest eval:task-outcome verdict/trend — if task-outcome quality (corrected_success / needs_investigation rates) worsened after anchor deployment and correlates with anchor tool usage, this is the insidious signal that preview is causing judgment errors. F236 does NOT write to eval:task-outcome; cross-reference only. VERDICT MAPPING: Both signals (tax + blindness evidence) → delete_sunset with governance.cvoAcceptRequired=true; ownerAsk.requestedAction MUST specify WHICH tool(s) to sunset. Signal 1 only (tax, no blindness evidence) → fix (investigate whether preview quality can improve to reduce drill rate). Signal 2 only (blindness, no clear tax) → fix (urgent: preview may be causing judgment errors, investigate). Neither signal + healthy data → keep_observe (log as Phase C expansion data basis). Insufficient data (low confidence / few preview events) → keep_observe with note on sample size. For delete_sunset verdicts: specify per-tool sunset in ownerAsk (e.g. "sunset anchor on thread-context, keep anchor on pending-mentions").',
 };
 
 /**
@@ -248,6 +250,27 @@ The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits 
 **DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
 `;
 
+const PUBLISH_VERDICT_INSTRUCTIONS_ANCHOR_FIRST = `${PUBLISH_VERDICT_PACKET_INSTRUCTIONS}
+You must also supply \`sourceRefs\` (NOT part of packet, separate input field) as a replayable anchor-telemetry selector:
+\`\`\`json
+{
+  "kind": "anchor-telemetry-snapshot",
+  "windowStartMs": 1759276800000,
+  "windowEndMs": 1759363200000
+}
+\`\`\`
+
+Fields:
+- \`kind\` — REQUIRED literal \`"anchor-telemetry-snapshot"\`
+- \`windowStartMs\` / \`windowEndMs\` — REQUIRED finite ms epoch; \`windowEndMs\` must be > \`windowStartMs\` (the window over which preview↔drill events are aggregated into the open-rate rollup)
+
+Tool resolves the selector by computing the anchor telemetry rollup over the specified window (per-tool preview↔drill join, open-rate, double-sided netBenefit, orphanDrills) and bundling the rollup snapshot + Track-1 aggregate cross-reference. Tool will NOT fabricate evidence — if the window yields zero preview events, the rollup is empty (no perTool entries).
+
+The MCP tool creates branch \`verdict/auto/{domainSlug}/{verdictId}\` + commits + opens PR. Returns commit SHA + PR URL.
+
+**DO NOT** run \`git add\`, \`git commit\`, \`git push\`, or write verdict files directly. Use the MCP tool.
+`;
+
 const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = {
   'eval:a2a': PUBLISH_VERDICT_INSTRUCTIONS_A2A,
   'eval:capability-wakeup': PUBLISH_VERDICT_INSTRUCTIONS_CAPABILITY_WAKEUP,
@@ -255,6 +278,7 @@ const PUBLISH_VERDICT_INSTRUCTIONS_BY_DOMAIN: Partial<Record<string, string>> = 
   'eval:sop': PUBLISH_VERDICT_INSTRUCTIONS_SOP,
   'eval:task-outcome': PUBLISH_VERDICT_INSTRUCTIONS_TASK_OUTCOME,
   'eval:friction': PUBLISH_VERDICT_INSTRUCTIONS_FRICTION,
+  'eval:anchor-first': PUBLISH_VERDICT_INSTRUCTIONS_ANCHOR_FIRST,
 };
 
 /**

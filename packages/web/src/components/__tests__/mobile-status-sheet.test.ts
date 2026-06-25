@@ -153,9 +153,9 @@ describe('MobileStatusSheet', () => {
       ...baseProps,
       open: true,
       targetCats: ['codex'],
-      catStatuses: { codex: 'pending' as CatStatus, dare: 'streaming' as CatStatus },
+      catStatuses: { codex: 'pending' as CatStatus, opus: 'streaming' as CatStatus },
       activeInvocations: {
-        'inv-dare-1': { catId: 'dare', mode: 'execute' },
+        'inv-opus-1': { catId: 'opus', mode: 'execute' },
       },
       hasActiveInvocation: true,
     };
@@ -164,7 +164,7 @@ describe('MobileStatusSheet', () => {
       root.render(React.createElement(MobileStatusSheet, props));
     });
 
-    expect(container.textContent).toContain('dare');
+    expect(container.textContent).toContain('布偶猫');
     expect(container.textContent).not.toContain('缅因猫');
   });
 

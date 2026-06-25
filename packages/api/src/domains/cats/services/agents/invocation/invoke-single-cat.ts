@@ -993,72 +993,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const catConfig = catRegistry.tryGet(catId as string)?.config;
     const provider = catConfig?.clientId;
     const requiresThreadWorkspace = providerRequiresThreadWorkspace(provider);
-    if (provider === 'opencode' && mutexKey && deps.sessionChainStore && sessionChainActive && !isBgCarrier) {
-      try {
-        const chain = await preflightRace(
-          Promise.resolve(deps.sessionChainStore.getChain(catId, threadId)),
-          'getChainAfterMutex',
-          signal,
-        );
-        const refreshedActiveRec = chain.find((s) => s.status === 'active') ?? null;
-        if (!refreshedActiveRec) {
-          activeSessionRecordForResume = null;
-          sessionId = undefined;
-        } else if (refreshedActiveRec.cliSessionId) {
-          activeSessionRecordForResume = refreshedActiveRec;
-          if (refreshedActiveRec.cliSessionId !== sessionId) {
-            const previousSessionId = sessionId;
-            const previousMutexRelease = sessionMutexRelease;
-            if (refreshedActiveRec.cliSessionId !== mutexKey) {
-              try {
-                const refreshedMutexRelease = await sessionMutex.acquire(refreshedActiveRec.cliSessionId, signal);
-                sessionMutexRelease = () => {
-                  refreshedMutexRelease();
-                  previousMutexRelease?.();
-                };
-              } catch (err) {
-                if (signal?.aborted) {
-                  const sc = invocationSpan.spanContext();
-                  const parentSid = params.routeSpan?.spanContext().spanId;
-                  yield {
-                    type: 'done' as const,
-                    catId,
-                    isFinal: isLastCat,
-                    timestamp: Date.now(),
-                    tracing: {
-                      traceId: sc.traceId,
-                      spanId: sc.spanId,
-                      ...(parentSid ? { parentSpanId: parentSid } : {}),
-                    },
-                  };
-                  didComplete = true;
-                  return;
-                }
-                throw err;
-              }
-            }
-            sessionId = refreshedActiveRec.cliSessionId;
-            log.info(
-              {
-                catId,
-                threadId,
-                invocationId,
-                previousSessionId: previousSessionId ?? null,
-                refreshedSessionId: sessionId,
-              },
-              'OpenCode resume mutex refreshed active session',
-            );
-          }
-        }
-      } catch (err) {
-        log.warn(
-          { catId, threadId, invocationId, err },
-          'OpenCode active session re-read failed after resume mutex; starting fresh',
-        );
-        activeSessionRecordForResume = null;
-        sessionId = undefined;
-      }
-    }
 
     // Resolve workingDirectory from thread's projectPath
     let workingDirectory: string | undefined;
@@ -1399,7 +1333,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       openai: 'openai',
       google: 'google',
       kimi: 'kimi',
-      dare: 'openai',
       opencode: 'anthropic',
       openrouter: 'openai',
     };
@@ -1447,11 +1380,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         const protocolKey = effectiveProtocol === 'openai-responses' ? 'openai' : effectiveProtocol;
         const envFromMap = resolveEnvMap(protocolKey, undefined, credentialAccount, userEnvTemplates);
         Object.assign(callbackEnv, envFromMap);
-      }
-      // Dare has its own env vars regardless of effectiveProtocol (dare's protocol = 'openai')
-      if (provider === 'dare') {
-        const dareEnv = resolveEnvMap('dare', undefined, credentialAccount);
-        Object.assign(callbackEnv, dareEnv);
       }
     }
 
@@ -1512,7 +1440,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Fallback for unresolved accounts on anthropic/opencode providers
       callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
     }
-    // Note: google and dare protocol branches no longer need explicit credential injection
+    // Note: google protocol branch no longer needs explicit credential injection
     // — fully handled by resolveEnvMap above.
 
     // F171: User-defined env vars from account config.

@@ -1,8 +1,8 @@
 {
-  "exportedAt": "2026-06-22T03:39:29.725Z",
+  "exportedAt": "2026-06-25T07:49:40.719Z",
   "minTier": "yellow",
-  "exported": 245,
-  "skipped": 10,
+  "exported": 247,
+  "skipped": 12,
   "errors": 0,
   "skippedFiles": [
     "F061-verification-2026-04-21.md",
@@ -13,6 +13,8 @@
     "F229-petskin-contract.md",
     "F234-harness-sunset-cat-fishing.md",
     "F237-prompt-injection-visibility-intake.md",
-    "F240-im-connector-plugin-architecture.md"
+    "F240-im-connector-plugin-architecture.md",
+    "F244-capability-tips-dogfood-report.md",
+    "F248-eval-hub-human-readability.md"
   ]
 }

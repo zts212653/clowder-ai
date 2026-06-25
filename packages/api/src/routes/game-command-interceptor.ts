@@ -65,7 +65,7 @@ export interface ParsedGameCommand {
  * Examples:
  *   /game werewolf player
  *   /game werewolf player 9
- *   /game werewolf player 9 opus,sonnet,codex,gpt52,spark,gemini,gemini25,dare
+ *   /game werewolf player 9 opus,sonnet,codex,gpt52,spark,gemini,gemini25
  *   /game werewolf god-view 7 opus,sonnet,codex voice
  */
 export function parseGameCommand(content: string): ParsedGameCommand | null {

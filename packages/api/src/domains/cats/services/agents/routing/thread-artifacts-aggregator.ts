@@ -121,8 +121,12 @@ function blockToArtifacts(b: RichBlock, msg: AggregatorMessage): ThreadArtifactD
       return [
         { ...base, type: 'audio', name: b.title ?? (b.text ? b.text.slice(0, AUDIO_NAME_MAX) : 'voice'), url: b.url },
       ];
+    case 'html_widget':
+      return [{ ...base, type: 'widget', name: b.title ?? 'Widget' }];
+    case 'interactive':
+      return [{ ...base, type: 'widget', name: b.title ?? b.description ?? 'Interactive' }];
     default:
-      return []; // card / checklist / interactive / html_widget 不收录（F232 OQ-3）
+      return []; // card / checklist 不收录
   }
 }
 

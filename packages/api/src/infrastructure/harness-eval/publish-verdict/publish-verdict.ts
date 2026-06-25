@@ -23,11 +23,13 @@ import {
   assertNoNewlineInBulletFields,
   inferSourceRefsKind,
   isA2aSourceRefs,
+  isAnchorTelemetrySourceRefs,
   isFrictionSourceRefs,
   isKnownSourceRefsKind,
   isMemorySourceRefs,
   isSopSourceRefs,
   isTaskOutcomeSourceRefs,
+  validateAnchorTelemetrySelector,
   validateFrictionRollupSelector,
   validateMemoryRecallSelector,
   validateSopTraceSelector,
@@ -225,6 +227,10 @@ export async function handlePublishVerdict(
     // ⚠️ friction branch MUST precede the a2a branch: isA2aSourceRefs returns true
     // for undefined/missing-kind refs (backward-compat default).
     const selectorError = validateFrictionRollupSelector(input.sourceRefs);
+    if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
+  } else if (isAnchorTelemetrySourceRefs(input.sourceRefs)) {
+    // F236 Track-2: anchor-telemetry-snapshot selector (砚砚 R1 P1-1).
+    const selectorError = validateAnchorTelemetrySelector(input.sourceRefs);
     if (selectorError) return { status: 400, error: 'invalid_source_ref', detail: selectorError };
   } else if (isA2aSourceRefs(input.sourceRefs)) {
     const refsCheck = validateSourceRefsFormat(input.sourceRefs);

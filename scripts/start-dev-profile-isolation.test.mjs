@@ -210,6 +210,38 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
+  it('bridges .env EMBED_ENABLED=1 to CAT_CAFE_SERVICE_EMBED_ENABLED for API lifecycle', () => {
+    // When .env sets EMBED_ENABLED=1, the script must export
+    // CAT_CAFE_SERVICE_EMBED_ENABLED=1 so the API startup reconciler knows to
+    // launch the embedding sidecar.  A previous bug (d93b109d8) wrote the
+    // source tag as "env/.env override" instead of ".env override", causing
+    // preserve_explicit_service_flag_for_api() to skip the bridge.
+    const sandboxDir = createSandbox('EMBED_ENABLED=1\n');
+    try {
+      const command = [
+        'source scripts/start-dev.sh --source-only',
+        'printf "SERVICE_EMBED=%s\\n" "${CAT_CAFE_SERVICE_EMBED_ENABLED:-unset}"',
+      ].join('; ');
+      const result = spawnSync('bash', ['-lc', command], {
+        cwd: sandboxDir,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          TERM: process.env.TERM ?? 'xterm-256color',
+        },
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(
+        result.stdout,
+        /SERVICE_EMBED=1/,
+        'EMBED_ENABLED=1 in .env must bridge to CAT_CAFE_SERVICE_EMBED_ENABLED=1',
+      );
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it('respects explicit EMBED_ENABLED=0 override even when EMBED_MODE=on', () => {
     const sandboxDir = createSandbox('EMBED_MODE=on\nEMBED_ENABLED=0\n');
     try {
