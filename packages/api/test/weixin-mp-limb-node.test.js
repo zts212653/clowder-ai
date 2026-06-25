@@ -9,7 +9,7 @@ import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../dist/domains/limb/limb-yaml-loader.js';
 import { PluginLimbAdapter } from '../dist/domains/limb/PluginLimbAdapter.js';
 
-const WEIXIN_MP_LIMB_PATH = fileURLToPath(new URL('../../../plugins/weixin-mp/limbs/weixin-mp.yml', import.meta.url));
+const WEIXIN_MP_LIMB_PATH = fileURLToPath(new URL('../src/plugins/weixin-mp/limbs/weixin-mp.yml', import.meta.url));
 
 describe('PluginLimbAdapter (weixin-mp)', () => {
   it('declares publish commands with an invokable auth level', async () => {
