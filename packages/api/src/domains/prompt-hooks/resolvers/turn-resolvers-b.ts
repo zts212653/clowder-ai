@@ -190,7 +190,8 @@ export class D20Resolver implements HookResolver {
 
 // ---------------------------------------------------------------------------
 // D21 — 传球决策树 (Handoff Decision Tree)
-// Same condition as D8. Loads content from template file.
+// Same condition as D8. Template uses {{CC_MENTION}} for co-creator mention.
+// Pipeline renders via renderSegment('D21', { CC_MENTION }) — no pre-load needed.
 // ---------------------------------------------------------------------------
 
 export class D21Resolver implements HookResolver {
@@ -199,10 +200,10 @@ export class D21Resolver implements HookResolver {
     if (!shouldFire) {
       return skip('a2a_not_needed', 'Handoff tree not needed (parallel/no-a2a/native-l0)');
     }
-    if (!input.handoffDecisionTreeContent) {
-      return skip('handoff_content_missing', 'Handoff decision tree template not loaded');
-    }
-    return { status: 'fired', vars: { CONTENT: input.handoffDecisionTreeContent } };
+    return {
+      status: 'fired',
+      vars: { CC_MENTION: input.coCreatorFirstMention },
+    };
   }
 }
 

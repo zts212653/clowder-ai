@@ -355,6 +355,9 @@ export interface AssemblerInput {
   // --- Pre-loaded template content (for D8/D21 which use file loading) ---
   a2aBallCheckContent: string | null;
   handoffDecisionTreeContent: string | null;
+
+  // --- Co-creator mention (for D21 template {{CC_MENTION}}) ---
+  coCreatorFirstMention: string;
 }
 
 /** Flattened world context for D18 resolver. */

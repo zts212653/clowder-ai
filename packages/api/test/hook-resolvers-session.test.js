@@ -62,6 +62,7 @@ function makeInput(overrides = {}) {
     activeSignalsBlock: null,
     a2aBallCheckContent: null,
     handoffDecisionTreeContent: null,
+    coCreatorFirstMention: '@lang',
     ...overrides,
   };
 }

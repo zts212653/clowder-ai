@@ -61,6 +61,7 @@ function makeInput(overrides = {}) {
     activeSignalsBlock: null,
     a2aBallCheckContent: null,
     handoffDecisionTreeContent: null,
+    coCreatorFirstMention: '@lang',
     ...overrides,
   };
 }
@@ -335,14 +336,15 @@ describe('Turn resolvers D11-D21, R1-R2, N1', () => {
     assert.equal(new mod.D20Resolver().resolve(input).status, 'fired');
   });
 
-  it('D21 fires with handoff content when a2a needed', () => {
+  it('D21 fires when a2a needed and returns CC_MENTION', () => {
     const input = makeInput({
       mode: 'serial',
       a2aEnabled: true,
       nativeL0Injected: false,
-      handoffDecisionTreeContent: '## Decision Tree',
     });
-    assert.equal(new mod.D21Resolver().resolve(input).status, 'fired');
+    const result = new mod.D21Resolver().resolve(input);
+    assert.equal(result.status, 'fired');
+    assert.equal(result.vars.CC_MENTION, '@lang');
   });
 
   it('D21 skips when native L0', () => {
