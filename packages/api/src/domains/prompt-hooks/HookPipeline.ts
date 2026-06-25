@@ -110,7 +110,7 @@ export class HookPipeline {
   }
 
   /**
-   * Render content for a fired hook: override template → primary → co-located fallback.
+   * Render content for a fired hook: override → CONTENT passthrough → template → fallback.
    * Returns null if no template found (caller emits template_missing trace).
    */
   private renderContent(
@@ -126,6 +126,12 @@ export class HookPipeline {
       );
       if (rendered) return rendered;
     }
+    // Resolver-produced content passthrough: when the resolver provides a CONTENT
+    // var, it signals that the final rendered content is already assembled
+    // (e.g., S6 breed-specific workflow triggers, S13 pre-rendered MCP tools
+    // section). Skip template rendering — the template file may be a data source
+    // (YAML) or expect vars that only the legacy path provides.
+    if (vars.CONTENT) return vars.CONTENT;
     return this.renderer(templateId, vars) ?? this.renderFromTemplatePath(hook, vars);
   }
 

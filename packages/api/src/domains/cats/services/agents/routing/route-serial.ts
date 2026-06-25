@@ -805,6 +805,32 @@ export async function* routeSerial(
         maxA2ADepth: maxDepth,
       });
 
+      // F237 Phase 2 (AC-P2-8): Fire-and-forget injection trace persistence.
+      // Captures pipeline trace events from the buildStaticIdentity / buildInvocationContext
+      // delegation and persists them for observability and debugging.
+      if (deps.injectionTraceStore) {
+        const { drainCapturedTraces } = await import('../../../../prompt-hooks/PipelinePromptBuilder.js');
+        const { buildTraceSummary } = await import('../../../../prompt-hooks/InjectionTraceStore.js');
+        const captured = drainCapturedTraces();
+        if (captured.session || captured.turn) {
+          const allEvents = [...(captured.session?.events ?? []), ...(captured.turn?.events ?? [])];
+          const turnId = `${Date.now()}-${catId as string}`;
+          const summary = buildTraceSummary({
+            turnId,
+            sessionId: threadId, // session ID resolved after invocation; threadId as proxy during migration
+            threadId,
+            catId: catId as string,
+            events: allEvents,
+            delivery: [], // StageDeliveryDecision computed post-migration when full pipeline replaces legacy
+            durationMs: 0, // synchronous pipeline; sub-ms not tracked at this layer
+          });
+          const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
+          deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
+            log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+          });
+        }
+      }
+
       // F24 Phase E: Bootstrap context for Session #2+
       // #836: Reborn cats skip bootstrap — every invocation starts with zero prior context.
       // Uses store lookup (not thread field) — Redis memberSS:* fields aren't hydrated by get().

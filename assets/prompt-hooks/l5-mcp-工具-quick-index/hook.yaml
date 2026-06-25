@@ -6,7 +6,7 @@ version: 1
 enabled: true
 
 # Content resolution
-template: l5-mcp-index.md
+template: l5-mcp-tools-index.md
 
 # Dependencies
 inputs:

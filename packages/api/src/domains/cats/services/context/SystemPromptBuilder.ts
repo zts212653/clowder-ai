@@ -23,6 +23,11 @@ import { findMonorepoRoot } from '../../../../utils/monorepo-root.js';
 // otherwise env overrides cause exactly the handle/model drift Phase F is killing.
 import { buildConciergePromptLines } from '../../../concierge/ConciergePromptSection.js';
 import { buildGuidePromptLines } from '../../../guides/GuidePromptSection.js';
+// F237 Phase 2 (AC-P2-6): pipeline-backed builders for delegation
+import {
+  buildInvocationContextViaHookPipeline,
+  buildStaticIdentityViaHookPipeline,
+} from '../../../prompt-hooks/PipelinePromptBuilder.js';
 import type {
   BootcampStateV1,
   ThreadMentionRoutingFeedback,
@@ -454,6 +459,15 @@ export interface StaticIdentityOptions {
  * Suitable for --system-prompt / --append-system-prompt injection.
  */
 export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOptions): string {
+  // AC-P2-6: delegate to HookPipeline for production path.
+  // Console preview (annotateSegments) keeps legacy path — segment annotation
+  // markers are a Console UI concern, not part of the pipeline output contract.
+  // Will be replaced by InjectionTraceSummary viewer in AC-P2-9.
+  if (!options?.annotateSegments) {
+    return buildStaticIdentityViaHookPipeline(catId, options);
+  }
+
+  // --- Legacy path (Console preview only, until AC-P2-9 migration) ---
   const config = getConfig(catId as string);
   if (!config) return '';
 
@@ -615,6 +629,13 @@ export function buildStaticIdentityPackOnly(catId: CatId, options?: StaticIdenti
  * (MCP tools and co-creator reference moved to buildStaticIdentity for session-level injection.)
  */
 export function buildInvocationContext(context: InvocationContext): string {
+  // AC-P2-6: delegate to HookPipeline for production path.
+  // Trace events emitted during pipeline execution enable injection observability.
+  return buildInvocationContextViaHookPipeline(context);
+}
+
+/** @deprecated Legacy implementation — kept during migration, will be removed. */
+function _buildInvocationContextLegacy(context: InvocationContext): string {
   const config = getConfig(context.catId as string);
   if (!config) return '';
 

@@ -72,6 +72,8 @@ export interface RouteStrategyDeps {
   worldStore?: import('../../../../world/interfaces.js').IWorldStore;
   /** F233 Phase B (B2): Ball-custody ingest — fire-and-forget 旁路写球权事件（append + appended-guard apply）。optional, fail-open */
   ballCustody?: import('../../../../ball-custody/BallCustodyIngest.js').IBallCustodyIngest;
+  /** F237 Phase 2 (AC-P2-8): Injection trace store for pipeline observability. optional, fail-open */
+  injectionTraceStore?: import('../../../../prompt-hooks/InjectionTraceStore.js').InjectionTraceStore;
 }
 
 /** Mutable context for tracking persistence failures across the generator boundary.
