@@ -195,3 +195,177 @@ export interface InjectionTraceSummary {
   totalTokens: number;
   totalHooksFired: number;
 }
+
+// ---------------------------------------------------------------------------
+// HookResolver — P2-B: resolver interface
+// ---------------------------------------------------------------------------
+
+export interface HookResolver {
+  /**
+   * Evaluate whether this hook should fire and prepare template variables.
+   * Pure function — no mutable state, no store queries, no side effects.
+   * All data comes from AssemblerInput (gathered by ContextAssembler).
+   */
+  resolve(input: AssemblerInput): ResolveResult;
+}
+
+// ---------------------------------------------------------------------------
+// AssemblerInput — P2-B: centralized typed context bag
+// ---------------------------------------------------------------------------
+
+/** Routing mode for the current invocation. */
+export type RoutingMode = 'independent' | 'serial' | 'parallel';
+
+/** Snapshot of a cat's configuration (config lookups done once by assembler). */
+export interface CatConfigSnapshot {
+  displayName: string;
+  nickname?: string;
+  name: string;
+  roleDescription: string;
+  personality: string;
+  defaultModel?: string;
+  variantLabel?: string;
+  isDefaultVariant?: boolean;
+  mentionPatterns: readonly string[];
+  restrictions?: readonly string[];
+  caution?: string;
+  clientId?: string;
+  breedId?: string;
+  teamStrengths?: string;
+}
+
+/** Pre-computed callable mention analysis. */
+export interface CallableMentionsData {
+  mentions: readonly string[];
+  hasDuplicateDisplayNames: boolean;
+  uniqueHandleExample: string | null;
+}
+
+/** Pre-resolved teammate info for D6. */
+export interface TeammateSnapshot {
+  id: string;
+  displayName: string;
+  nickname?: string;
+  name: string;
+  roleDescription: string;
+}
+
+/** Pre-resolved direct message info for D2/D3. */
+export interface DirectMessageInfo {
+  fromCatId: string;
+  fromLabel: string;
+  fromModel: string;
+  fromDisplayName: string;
+  fromVariantLabel?: string;
+  isSameBreed: boolean;
+}
+
+/** Cross-thread reply hint for D4. */
+export interface CrossThreadHintInput {
+  sourceThreadId: string;
+  senderCatId: string;
+  effectClass?: string;
+}
+
+/** Ping-pong warning info for D5. */
+export interface PingPongInput {
+  otherLabel: string;
+  count: number;
+}
+
+/** Active participant info for D12. */
+export interface ActiveParticipantInput {
+  catId: string;
+  label: string;
+  lastMessageAt: number;
+}
+
+/** SOP stage hint info for D14. */
+export interface SopStageInput {
+  featureId: string;
+  stage: string;
+  suggestedSkill: string;
+  suggestedSkillSource?: string;
+}
+
+/** Bootcamp state info for D16. */
+export interface BootcampInput {
+  phase: string;
+  leadCat?: string;
+  selectedTaskId?: string;
+}
+
+/**
+ * AssemblerInput — everything hooks need, gathered once by ContextAssembler.
+ * Resolvers read from this bag — no store queries, no config lookups.
+ */
+export interface AssemblerInput {
+  // --- Core identity (from catRegistry + config + runtime resolution) ---
+  catId: string;
+  catConfig: CatConfigSnapshot;
+  runtimeModel: string;
+  providerLabel: string;
+
+  // --- Session-init computed (by ContextAssembler) ---
+  callableMentions: CallableMentionsData;
+  rosterContent: string | null;
+  workflowTriggerContent: string | null;
+  coCreatorName: string;
+  coCreatorHandles: string;
+  governanceDigest: string;
+  mcpToolsSection: string;
+
+  // --- Pack blocks ---
+  packMasksBlock: string | null;
+  packWorkflowsBlock: string | null;
+  packGuardrailBlock: string | null;
+  packDefaultsBlock: string | null;
+  packWorldDriverSummary: string | null;
+
+  // --- Routing context ---
+  mode: RoutingMode;
+  chainIndex: number | null;
+  chainTotal: number | null;
+  mcpAvailable: boolean;
+  nativeL0Injected: boolean;
+  a2aEnabled: boolean;
+
+  // --- Per-turn dynamic (pre-resolved by assembler) ---
+  directMessage: DirectMessageInfo | null;
+  crossThreadReplyHint: CrossThreadHintInput | null;
+  pingPongWarning: PingPongInput | null;
+  teammates: readonly TeammateSnapshot[];
+  mentionRoutingItems: readonly string[];
+  promptTags: readonly string[];
+  activeParticipants: readonly ActiveParticipantInput[];
+  routingPolicyParts: string | null;
+  sopStageHint: SopStageInput | null;
+  voiceMode: boolean;
+  bootcampState: BootcampInput | null;
+  threadId: string | null;
+  bootcampMemberCount: number | null;
+  guidePromptLines: string | null;
+  conciergeLines: readonly string[] | null;
+
+  // --- World / Knowledge / Signals ---
+  worldContext: WorldContextInput | null;
+  alwaysOnDocsBlock: string | null;
+  activeSignalsBlock: string | null;
+
+  // --- Pre-loaded template content (for D8/D21 which use file loading) ---
+  a2aBallCheckContent: string | null;
+  handoffDecisionTreeContent: string | null;
+}
+
+/** Flattened world context for D18 resolver. */
+export interface WorldContextInput {
+  worldName: string;
+  worldStatus: string;
+  constitutionLine: string;
+  sceneName: string;
+  sceneStatus: string;
+  charactersBlock: string;
+  canonBlock: string;
+  recentEventsBlock: string;
+  careHintLine: string;
+}
