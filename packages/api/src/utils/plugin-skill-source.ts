@@ -109,17 +109,6 @@ export function resolvePluginSkillSourcesFromDirs(
   return results;
 }
 
-/**
- * Resolve plugin skill source paths from a capabilities config.
- *
- * For each plugin skill capability entry, parses the corresponding plugin
- * manifest to find the actual filesystem path. Returns only entries whose
- * source directories exist on disk. Parses each manifest at most once.
- */
-export function resolvePluginSkillSources(config: CapabilitiesConfig | null, pluginsDir: string): PluginSkillInfo[] {
-  return resolvePluginSkillSourcesFromDirs(config, [pluginsDir]);
-}
-
 export function resolvePluginSkillSourcesForProject(
   config: CapabilitiesConfig | null,
   canonicalPluginsDir: string,

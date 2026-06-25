@@ -212,7 +212,7 @@ async function reconcilePluginMounts(
   mountRules: MountRules,
   previousRules?: MountRules,
 ): Promise<void> {
-  const pluginsDir = join(dirname(skillsSrc), 'plugins');
+  const pluginsDir = join(dirname(skillsSrc), 'packages', 'api', 'src', 'plugins');
   const config = await readCapabilitiesConfig(projectRoot);
   const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
   if (pluginSkills.length === 0) return;

@@ -16,7 +16,7 @@ import {
   SettingsText,
   SettingsToolbar,
 } from './primitives';
-import type { SettingsSkillItem, SkillMount, SkillProjectSyncSummary, SkillScope, SkillsData } from './skills-types';
+import type { SettingsSkillItem, SkillMount, SkillProjectSyncSummary, SkillScope, SkillsSummary } from './skills-types';
 import { MOUNT_POINT_KEYS, SCOPE_ALL, SCOPE_PROJECT } from './skills-types';
 
 export function SkillRow({
@@ -346,7 +346,7 @@ export function SkillsSummaryFooter({
   projectCount,
   syncedProjects,
 }: {
-  summary: SkillsData['summary'];
+  summary: SkillsSummary;
   scope: SkillScope;
   projectCount: number;
   syncedProjects: number;

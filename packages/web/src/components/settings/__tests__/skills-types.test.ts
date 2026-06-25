@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CapabilityBoardItem } from '../../capability-board-ui';
-import { composeSkillItems, matchesSkillSearch, type SettingsSkillItem, type SkillsData } from '../skills-types';
+import { composeSkillItems, matchesSkillSearch, type SettingsSkillItem } from '../skills-types';
 
 function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkillItem {
   return {
@@ -56,58 +56,34 @@ describe('matchesSkillSearch', () => {
   });
 });
 
+// composeSkillItems iterates CapabilityBoardItem[] as the sole data source.
 describe('composeSkillItems', () => {
-  it('passes description through from SkillEntry', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'quality-gate',
-          category: 'SOP',
-          trigger: '/quality-gate',
-          description: '开发完成后的自检门禁',
-          mounts: { claude: true, codex: true, gemini: true, kimi: true },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: true, registrationConsistent: true },
-      staleness: null,
-    };
-    const result = composeSkillItems(governance, []);
+  it('passes description through from capability item', () => {
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'quality-gate',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: {},
+        description: '开发完成后的自检门禁',
+        category: 'SOP',
+        triggers: ['/quality-gate'],
+      },
+    ];
+    const result = composeSkillItems(caps);
     expect(result[0].description).toBe('开发完成后的自检门禁');
   });
 
   it('preserves undefined description', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'no-desc-skill',
-          category: '工具',
-          trigger: '/nodesc',
-          mounts: { claude: true, codex: false, gemini: false, kimi: false },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: false, registrationConsistent: true },
-      staleness: null,
-    };
-    const result = composeSkillItems(governance, []);
+    const caps: CapabilityBoardItem[] = [
+      { id: 'no-desc-skill', type: 'skill', source: 'cat-cafe', enabled: true, cats: {} },
+    ];
+    const result = composeSkillItems(caps);
     expect(result[0].description).toBeUndefined();
   });
 
   it('maps pluginId from CapabilityBoardItem', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'weixin-mp',
-          category: '插件',
-          trigger: '/weixin',
-          mounts: { claude: true, codex: false, gemini: false, kimi: false },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: false, registrationConsistent: true },
-      staleness: null,
-    };
     const caps: CapabilityBoardItem[] = [
       {
         id: 'weixin-mp',
@@ -118,69 +94,25 @@ describe('composeSkillItems', () => {
         pluginId: 'weixin-mp',
       },
     ];
-    const result = composeSkillItems(governance, caps);
+    const result = composeSkillItems(caps);
     expect(result[0].pluginId).toBe('weixin-mp');
   });
 
   it('pluginId is undefined when capability item has no pluginId', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'tdd',
-          category: 'SOP',
-          trigger: '/tdd',
-          mounts: { claude: true, codex: true, gemini: true, kimi: true },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: true, registrationConsistent: true },
-      staleness: null,
-    };
     const caps: CapabilityBoardItem[] = [{ id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: true, cats: {} }];
-    const result = composeSkillItems(governance, caps);
+    const result = composeSkillItems(caps);
     expect(result[0].pluginId).toBeUndefined();
   });
 
   it('prefers globalEnabled for skill controls when present', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'tdd',
-          category: 'SOP',
-          trigger: '/tdd',
-          mounts: { claude: true, codex: true, gemini: true, kimi: true },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: true, registrationConsistent: true },
-      staleness: null,
-    };
     const caps: CapabilityBoardItem[] = [
       { id: 'tdd', type: 'skill', source: 'cat-cafe', enabled: false, globalEnabled: true, cats: {} },
     ];
-
-    const result = composeSkillItems(governance, caps);
-
+    const result = composeSkillItems(caps);
     expect(result[0].controls?.enabled).toBe(true);
   });
 
-  it('prefers non-plugin Clowder AI capabilities for same-id source skills', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'debugging',
-          category: 'SOP',
-          trigger: '/debugging',
-          source: 'cat-cafe',
-          globalEnabled: true,
-          mountPaths: ['claude'],
-          mounts: { claude: true, codex: false, gemini: false, kimi: false },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: false, registrationConsistent: true },
-      staleness: null,
-    };
+  it('non-plugin and plugin capabilities with same id are separate items', () => {
     const caps: CapabilityBoardItem[] = [
       {
         id: 'debugging',
@@ -201,36 +133,31 @@ describe('composeSkillItems', () => {
       },
     ];
 
-    const result = composeSkillItems(governance, caps);
+    const result = composeSkillItems(caps);
 
+    // Both appear as separate items — capabilities is the iteration source
+    expect(result).toHaveLength(2);
     expect(result[0].pluginId).toBeUndefined();
     expect(result[0].mountPaths).toEqual(['claude']);
     expect(result[0].controls?.enabled).toBe(true);
+    expect(result[1].pluginId).toBe('same-id-plugin');
+    expect(result[1].controls?.enabled).toBe(false);
   });
 
-  it('uses mount-point-aware mount health when disabled mount points are intentionally unmounted', () => {
-    const governance: SkillsData = {
-      skills: [
-        {
-          name: 'debugging',
-          category: '工具',
-          trigger: '/debug',
-          mounts: { claude: true, codex: true, gemini: true, kimi: false },
-          mountHealth: {
-            enabledMountPoints: ['claude', 'codex', 'gemini'],
-            mountedCount: 3,
-            requiredCount: 3,
-            allMounted: true,
-          },
-          requiresMcp: [],
-        },
-      ],
-      summary: { total: 1, allMounted: true, registrationConsistent: true },
-      staleness: null,
-    };
-    const result = composeSkillItems(governance, []);
+  it('reads mount data from CapabilityBoardItem mounts', () => {
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: {},
+        mounts: { claude: true, codex: true, gemini: true, kimi: false },
+      },
+    ];
+    const result = composeSkillItems(caps);
     expect(result[0].governance.mountedCount).toBe(3);
-    expect(result[0].governance.requiredMountCount).toBe(3);
-    expect(result[0].governance.allMounted).toBe(true);
+    expect(result[0].governance.mounts.claude).toBe(true);
+    expect(result[0].governance.mounts.kimi).toBe(false);
   });
 });

@@ -51,6 +51,7 @@ interface SkillEntry {
   mounts: SkillMount;
   mountHealth: SkillMountHealth;
   requiresMcp?: SkillMcpDependency[];
+  pluginId?: string;
 }
 
 interface MountIssue {
@@ -263,6 +264,41 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       if (!manifestOrdered.has(name)) ordered.push(name);
     }
     const skills = ordered.map((n) => mountLookup.get(n)!).filter(Boolean);
+
+    // Plugin-provided skills: discover from capabilities.json entries with pluginId + skillsSource
+    const pluginCaps = (skillsCapConfig?.capabilities ?? []).filter(
+      (c) => c.type === 'skill' && c.pluginId && c.skillsSource && !sourceSet.has(c.id),
+    );
+    await Promise.all(
+      pluginCaps.map(async (cap) => {
+        const src = join(repoRoot, cap.skillsSource!);
+        const [claude, codex, gemini, kimi] = await Promise.all([
+          isSkillMountedAtPoint(mountPointDirCandidates.claude, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.codex, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, cap.id, mainSkillsSrc),
+        ]);
+        const mounts: SkillMount = { claude, codex, gemini, kimi };
+        const mountedIds = enabledMountPoints.filter((id) => mounts[id]);
+        const allIds = [...enabledMountPoints, ...customMountTargets.map((t) => t.id)];
+        skills.push({
+          name: cap.id,
+          category: '插件',
+          trigger: '',
+          source: 'cat-cafe',
+          globalEnabled: cap.globalEnabled ?? cap.enabled,
+          mountPaths: cap.mountPaths ?? mountedIds,
+          pluginId: cap.pluginId,
+          mounts,
+          mountHealth: {
+            enabledMountPoints: allIds,
+            mountedCount: mountedIds.length,
+            requiredCount: cap.enabled !== false ? enabledMountPoints.length : 0,
+            allMounted: cap.enabled !== false ? mountedIds.length === enabledMountPoints.length : true,
+          },
+        });
+      }),
+    );
 
     // Registration consistency check
     const capConfig = await readCapabilitiesConfig(projectRoot);

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { ScopeIssues } from './AllProjectsSyncBanner';
 import type { SkillIssue } from './skill-issue-view';
-import type { SettingsSkillItem, SkillProjectSyncSummary, SkillScope, SkillsData } from './skills-types';
+import type { SettingsSkillItem, SkillProjectSyncSummary, SkillScope } from './skills-types';
 import { SCOPE_ALL } from './skills-types';
 import type { useSkillControls } from './useSkillControls';
 
@@ -17,10 +17,9 @@ const GLOBAL_SCOPE_KEY = 'global';
 
 interface UseSkillsSyncOptions {
   scope: SkillScope;
-  data: SkillsData | null;
   composedItems: SettingsSkillItem[];
   controls: ReturnType<typeof useSkillControls>;
-  fetchSkills: (forProject?: string) => Promise<void>;
+  fetchSkills: (forProject?: string | null) => Promise<void>;
   /** Increment to force re-fetch of scope reports (e.g. after skill toggle). */
   refreshToken?: number;
 }

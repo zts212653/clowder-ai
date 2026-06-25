@@ -2215,7 +2215,7 @@ async function main(): Promise<void> {
     );
     const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
     const monorepoRoot = findMonorepoRoot(process.cwd());
-    const pluginsDir = join(monorepoRoot, 'plugins');
+    const pluginsDir = join(monorepoRoot, 'packages', 'api', 'src', 'plugins');
     const { loadAllPluginConfigs, resolvePluginEnv } = await import('./domains/plugin/plugin-config-store.js');
     const pluginRegistry = new PluginRegistry(pluginsDir);
     pluginRegistry.scan();

@@ -337,7 +337,8 @@ export class PluginResourceActivator {
     }
 
     try {
-      await this.upsertCapabilityEntry(manifest, resource, true);
+      const relativeSkillsSource = relative(projectRoot, skillsSource);
+      await this.upsertCapabilityEntry(manifest, resource, true, undefined, undefined, relativeSkillsSource);
     } catch (err) {
       // P2-1: Rollback uses exact paths from mount result (covers standard + custom)
       const { rm: rmFile } = await import('node:fs/promises');
@@ -511,6 +512,7 @@ export class PluginResourceActivator {
     enabled: boolean,
     limbNodeId?: string,
     scheduleTaskId?: string,
+    skillsSource?: string,
   ): Promise<CapabilitiesConfig | null> {
     return this.deps.withCapabilityLock(async () => {
       const config = await this.deps.readCapabilities();
@@ -566,6 +568,7 @@ export class PluginResourceActivator {
             delete existing.limbNodeId;
           }
         }
+        if (skillsSource) existing.skillsSource = skillsSource;
         // staleLimbNodeId is deregistered after the write below
         staleLimbNodeIdToClean = staleLimbNodeId;
       } else {
@@ -577,6 +580,7 @@ export class PluginResourceActivator {
           pluginId: manifest.id,
           ...(limbNodeId ? { limbNodeId } : {}),
           ...(scheduleTaskId ? { scheduleTaskId } : {}),
+          ...(skillsSource ? { skillsSource } : {}),
         };
 
         if (resource.type === 'mcp') {

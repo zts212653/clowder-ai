@@ -84,6 +84,10 @@ export interface CapabilityEntry {
   limbNodeId?: string;
   /** F202 Phase 2: Runtime task ID assigned by TaskRunnerV2 (schedule resources only) */
   scheduleTaskId?: string;
+  /** F204: Skill source directory (parent of skill subdirs). Stored at registration
+   *  time so mount-health checks don't need to reverse-lookup from plugin manifests.
+   *  Relative to project root. Only for type: 'skill' with pluginId. */
+  skillsSource?: string;
 }
 
 /** Sanitized MCP server details included in the capability board payload. */

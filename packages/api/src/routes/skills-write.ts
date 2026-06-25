@@ -92,7 +92,7 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
       });
 
       // Plugin skills: separate source dirs, handled with classifyMountPath
-      const pluginsDir = join(skillsRepoRoot, 'plugins');
+      const pluginsDir = join(skillsRepoRoot, 'packages', 'api', 'src', 'plugins');
       const config = await readCapabilitiesConfig(projectRoot);
       const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
       const pluginMounted: string[] = [];

@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
-import type { CapabilityBoardItem, CapabilityBoardResponse, CatFamily } from '../capability-board-ui';
+import type {
+  CapabilityBoardItem,
+  CapabilityBoardResponse,
+  CatFamily,
+  SkillHealthSummary,
+} from '../capability-board-ui';
 import { getProjectPaths, projectDisplayName } from '../ThreadSidebar/thread-utils';
 
 export { projectDisplayName };
@@ -27,6 +32,7 @@ export function useSkillControls() {
   const [threadProjectPaths, setThreadProjectPaths] = useState<string[]>([]);
   const [toggling, setToggling] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [skillHealth, setSkillHealth] = useState<SkillHealthSummary | null>(null);
   const fetchGeneration = useRef(0);
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -97,6 +103,7 @@ export function useSkillControls() {
       if (!isCurrent()) return;
       setItems(data.items.filter((item): item is SkillCapabilityItem => item.type === 'skill'));
       setCatFamilies(data.catFamilies);
+      setSkillHealth(data.skillHealth ?? null);
       setApiProjectPaths(data.knownProjectPaths ?? []);
       // Only set resolvedProjectPath on initial load (no explicit project switch).
       // This preserves the "home" project in the ProjectSelector dropdown.
@@ -277,6 +284,7 @@ export function useSkillControls() {
   return {
     items,
     catFamilies,
+    skillHealth,
     loading,
     projectPath,
     resolvedProjectPath,

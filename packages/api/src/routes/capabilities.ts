@@ -146,7 +146,7 @@ function findCapabilityPatchTargetIndex(
 // ────────── Helpers ──────────
 
 const MODULE_REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
-const CANONICAL_PLUGINS_DIR = join(MODULE_REPO_ROOT, 'plugins');
+const CANONICAL_PLUGINS_DIR = join(MODULE_REPO_ROOT, 'packages', 'api', 'src', 'plugins');
 
 /**
  * Returns subdirectory names.
@@ -870,6 +870,29 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         );
         item.mounts = { claude, codex, gemini, kimi };
         customMountsBySkill.set(item.id, customMounts);
+      }),
+    );
+
+    // 6b. Mount health check for plugin-provided skills
+    // Plugin skill entries carry skillsSource (stored at activation time) so we
+    // can resolve the mount source directly — no manifest re-parsing needed.
+    const pluginSkillCaps = config.capabilities.filter(
+      (c): c is typeof c & { pluginId: string; skillsSource: string } =>
+        c.type === 'skill' && !!c.pluginId && !!c.skillsSource,
+    );
+    const pluginSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !!i.pluginId);
+    await Promise.all(
+      pluginSkillItems.map(async (item) => {
+        const cap = pluginSkillCaps.find((c) => c.id === item.id && c.pluginId === item.pluginId);
+        if (!cap) return;
+        const src = join(getProjectRoot(), cap.skillsSource);
+        const [claude, codex, gemini, kimi] = await Promise.all([
+          isSkillMountedAtPoint(mountPointDirCandidates.claude, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.codex, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, item.id, mainSkillsSrc),
+        ]);
+        item.mounts = { claude, codex, gemini, kimi };
       }),
     );
 

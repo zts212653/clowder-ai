@@ -1,9 +1,9 @@
 /**
- * Weixin-MP plugin — platform-specific invoke handlers.
+ * Weixin-MP plugin — self-contained plugin directory.
  *
- * Generic limb framework lives in `domains/limb/`.
- * Plugin declarations (YAML, skills) live in `plugins/weixin-mp/`.
- * This directory holds the TypeScript handler implementations.
+ * Contains both declarations (plugin.yaml, skills/, limbs/) and
+ * TypeScript handler implementations. Generic limb framework lives
+ * in `domains/limb/`.
  */
 export { weixinMpHandlers } from './handlers.js';
 export { markdownToWxHtml } from './markdown-to-wx-html.js';
