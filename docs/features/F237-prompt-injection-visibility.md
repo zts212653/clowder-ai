@@ -721,9 +721,25 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 - [ ] AC-P2-16: Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
 - [ ] AC-P2-17: Override audit trail: each override records source (operator/auto-eval), timestamp, reason
 
-## Upstream Pitch Strategy (Issue #839)
+## Upstream Strategy (Issue #839)
 
-Phase 2 design requires alignment with the upstream maintainer, who previously declined lifecycle abstraction (comment on #839). Our pitch addresses each concern:
+### Agreed Dual-Track Approach (2026-06-25)
+
+Maintainer accepted our path analysis. Agreed sequencing:
+
+**Fork (internal development):** Build full pipeline + trace as Path B — pipeline produces TraceEvents as natural output. No throwaway instrumentation. This becomes the working prototype.
+
+**Upstream (PR sequence to clowder-ai):**
+
+| PR | Content | Dependency |
+|----|---------|-----------|
+| **PR 1: InjectionTrace v0** | Trace schema + lightweight instrumentation on current `if/push` + persistence + Console viewer. Zero behavior change. | None |
+| **PR 2: Pipeline migration** | Hook manifests + resolvers + pipeline switchover. Informed by PR 1 trace data + fork prototype. Equivalence proof: ordering, conditions, native L0, transport boundaries. | PR 1 merged + trace data |
+| **PR 3: Override store** | Runtime override layer, auth model, auto-eval writeback. Separate design review. | PR 2 merged |
+
+**Rationale:** Maintainer wants upstream to stay low-risk — first PR should not commit the main repo to the hook abstraction before trace data and a reviewed migration argument exist. Fork development avoids throwaway work internally.
+
+### Maintainer Concerns (addressed in proposal comment)
 
 ### Concern 1: "Schema-driven catalog compresses dynamic injections into static YAML claims"
 
