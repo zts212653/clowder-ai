@@ -165,7 +165,7 @@ export interface AgentMessage {
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
-   *  Provider transformers MUST inject this from raw payload when available (Claude tool_use.id, DARE tool_call_id,
+   *  Provider transformers MUST inject this from raw payload when available (Claude tool_use.id,
    *  CatAgent tool_use_id, Codex item.id, etc). Providers without native id may omit; ToolSpanTracker treats
    *  missing id as fallback (no span open, no fake duration) per KD-41. */
   toolUseId?: string;

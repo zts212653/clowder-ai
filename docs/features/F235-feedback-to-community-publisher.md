@@ -4,6 +4,7 @@ related_features: [F222, F168, F141, F128]
 topics: [community, publishing, frustration, feedback, github-issue]
 doc_kind: spec
 created: 2026-06-15
+tips_exempt: internal cat-to-community publishing pipeline — no user-facing capability change
 ---
 
 # F235: Feedback-to-Community Publisher — 一键发布反馈到社区

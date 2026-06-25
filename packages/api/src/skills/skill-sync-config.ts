@@ -136,8 +136,9 @@ export interface ConfigSyncCtx {
   pruneMountPaths?: boolean;
   /** When true, inherited-only global mount paths are skipped to preserve cascade. */
   preserveGlobalCascade?: boolean;
-  /** Skill names that already exist in the project config (used with preserveGlobalCascade
-   *  to distinguish existing skills from newly discovered ones — fixes #991). */
+  /** Skill names that already exist in the project config. Used with preserveGlobalCascade
+   *  to distinguish existing skills from newly discovered ones during drift-resolve sync;
+   *  new skills still need a config entry without mountPaths to keep global cascade live. */
   existingProjectSkills?: ReadonlySet<string>;
   /** Mount point IDs that were just enabled (absent in previous rules, present now).
    *  When set, active skills (mountPaths.length > 0) get these IDs supplemented. */
@@ -145,9 +146,9 @@ export interface ConfigSyncCtx {
 }
 
 export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSyncCtx): Promise<void> {
-  // #991: New skills discovered during drift-resolve that inherit global mount paths.
+  // New skills discovered during drift-resolve that inherit only global mount paths.
   // They need a config entry (so drift-check stops reporting configNew) but must NOT
-  // have project-local mountPaths written (that would freeze the global cascade — #962).
+  // have project-local mountPaths written (that would freeze the global cascade).
   const cascadeNewSkills: string[] = [];
 
   if (ctx.enabledNames.length > 0) {
@@ -166,8 +167,8 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
         // policy changes should propagate without freezing. Explicit sync operations
         // (sync/sync-skill) write mount paths to establish local baseline.
         if (ctx.preserveGlobalCascade && !hasLocalPolicy && !ctx.mountPathsBySkill.has(name)) {
-          // #991: New skills still need a config entry so drift-check stops reporting
-          // configNew. Collect them for registration WITHOUT mountPaths below.
+          // New skills still need a config entry so drift-check stops reporting configNew.
+          // Collect them for registration WITHOUT mountPaths below.
           if (ctx.existingProjectSkills && !ctx.existingProjectSkills.has(name)) {
             cascadeNewSkills.push(name);
           }
@@ -196,10 +197,10 @@ export async function updateConfigAfterSync(projectRoot: string, ctx: ConfigSync
       await updateSkillMountPaths(projectRoot, noPolicySkills, ctx.activeTargetIds);
     }
   }
-  // #991: Register new inherited-only skills in config WITHOUT mountPaths.
+  // Register new inherited-only skills in config WITHOUT mountPaths.
   // This creates a managed capability entry (drift-check stops reporting configNew)
   // while preserving global mount path cascade (no project-local mountPaths written,
-  // so resolveEffectiveSkillMountPaths falls through to global — #962 intent kept).
+  // so resolveEffectiveSkillMountPaths falls through to global policy).
   if (cascadeNewSkills.length > 0) {
     const config = await readCapabilitiesConfig(projectRoot);
     if (config) {

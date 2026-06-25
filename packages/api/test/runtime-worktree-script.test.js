@@ -492,6 +492,9 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
     // Align with scripts/install.ps1::Test-LockfileMismatchFailure — Windows
     // installer already treats these phrases as retryable; the bash runtime
     // classifier must agree so cross-platform self-heal stays symmetric.
+    // codex review (R2 P2) flagged the BREAKING_CHANGE + "incompatible" gaps;
+    // AUDIT (§16e failure-mode sweep) extended the fix to the remaining two
+    // patterns that the PowerShell helper already classifies as lockfile drift.
     const additionalPatterns = [
       {
         slug: 'breaking-change',
@@ -538,8 +541,11 @@ server.listen(3010,'127.0.0.1',()=>setInterval(()=>{},1000));`,
   });
 
   it('preserves original frozen install exit code on non-retry-able generic failure', () => {
-    // The non-retry path captures pnpm's exit code via ${PIPESTATUS[0]} so
-    // interrupts / OOM-style exits stay distinguishable from a generic exit 1.
+    // Regression guard for @gpt52 R1 P1: `if pnpm | tee; then ... else return 1`
+    // collapsed every non-retry frozen-install failure to exit code 1, hiding the
+    // caller-visible status from `pnpm install --frozen-lockfile` (network/OOM/
+    // interrupt would all look identical to a plain failure). install_runtime_dependencies
+    // must surface the original pnpm exit code via ${PIPESTATUS[0]}.
     const projectDir = createTempProject('runtime-self-heal-install-preserves-exit-code');
     const env = withStubbedPnpmEnv(projectDir, {
       failFrozenInstall: true,

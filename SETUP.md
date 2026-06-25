@@ -8,7 +8,7 @@
 
 | Tool | Version | Install |
 |------|---------|---------|
-| **Node.js** | >= 20.0.0 | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | >= 24.0.0 | [nodejs.org](https://nodejs.org/) |
 | **pnpm** | >= 9.0.0 | `npm install -g pnpm` |
 | **Redis** | >= 7.0 | `brew install redis` (macOS) or [redis.io](https://redis.io/download/) — *optional: use `--memory` flag to skip* |
 | **Git** | any recent | Comes with most systems |

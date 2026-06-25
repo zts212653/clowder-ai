@@ -1653,7 +1653,7 @@ describe('F155 guide offer ownership', () => {
             guideId: 'add-member',
             status: 'offered',
             offeredAt: Date.now(),
-            offeredBy: 'dare',
+            offeredBy: 'gemini',
           },
         };
       },
@@ -1699,7 +1699,7 @@ describe('F155 guide offer ownership', () => {
             guideId: 'add-member',
             status: 'awaiting_choice',
             offeredAt: Date.now(),
-            offeredBy: 'dare',
+            offeredBy: 'gemini',
           },
         };
       },
@@ -1788,7 +1788,7 @@ describe('F155 guide offer ownership', () => {
             guideId: 'add-member',
             status: 'offered',
             offeredAt: Date.now(),
-            offeredBy: 'dare',
+            offeredBy: 'gemini',
           },
         };
       },
@@ -1831,7 +1831,7 @@ describe('F155 guide offer ownership', () => {
             guideId: 'add-member',
             status: 'awaiting_choice',
             offeredAt: Date.now(),
-            offeredBy: 'dare',
+            offeredBy: 'gemini',
           },
         };
       },
@@ -2057,7 +2057,7 @@ describe('F155 guide completion ack ownership', () => {
       status: 'completed',
       offeredAt: Date.now(),
       completedAt: Date.now(),
-      offeredBy: 'dare',
+      offeredBy: 'gemini',
     };
     const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const opusService = createCapturingService('opus', '我来接着处理');
@@ -2110,7 +2110,7 @@ describe('F155 guide completion ack ownership', () => {
       status: 'completed',
       offeredAt: Date.now(),
       completedAt: Date.now(),
-      offeredBy: 'dare',
+      offeredBy: 'gemini',
     };
     const { threadStore, sessionStore, bridge } = await createGuideAckFixture(completedGuide, 'default');
     const opusService = createCapturingService('opus', '我来接着处理');

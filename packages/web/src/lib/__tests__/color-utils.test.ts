@@ -90,13 +90,6 @@ describe('hexToOklch (F056 Phase E AC-E4 migration helper)', () => {
     expect(h).toBeLessThan(260);
   });
 
-  it('dare 棕黄 #D4A76A → H 落在黄橙色相 (60°-90°)', () => {
-    const { c, h } = hexToOklch('#D4A76A');
-    expect(c).toBeGreaterThan(0.05);
-    expect(h).toBeGreaterThan(60);
-    expect(h).toBeLessThan(90);
-  });
-
   it('cocreator 橙 #E29578 → H 落在暖橙色相 (30°-50°)', () => {
     const { c, h } = hexToOklch('#E29578');
     expect(c).toBeGreaterThan(0.05);

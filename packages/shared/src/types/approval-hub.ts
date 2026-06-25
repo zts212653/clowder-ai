@@ -7,8 +7,8 @@
  * discarded after response. (KD-3: v1 query aggregation)
  */
 
-/** Features whose proposals can appear in the Approval Hub. v1 allowlist. */
-export type ApprovalFeatureId = 'F128' | 'F225' | 'F193';
+/** Features whose proposals can appear in the Approval Hub. */
+export type ApprovalFeatureId = 'F128' | 'F225' | 'F193' | 'F231';
 
 /**
  * Hub display status — a projection, not a canonical store status.

@@ -107,7 +107,6 @@ const ASSISTANT_STYLE_BY_CAT: Record<string, string> = {
   codex: 'bg-codex-light text-codex-dark',
   gemini: 'bg-gemini-light text-gemini-dark',
   kimi: 'bg-kimi-light text-kimi-dark',
-  dare: 'bg-dare-light text-dare-dark',
   gpt52: 'bg-conn-emerald-bg text-conn-emerald-text',
   'opus-45': 'bg-conn-purple-bg text-[var(--color-opus-primary)]',
   sonnet: 'bg-conn-purple-bg text-[var(--color-opus-primary)]',

@@ -37,6 +37,7 @@ import { assertStorageReady } from './config/storage-guard.js';
 import { F128ApprovalAdapter } from './domains/approval-hub/adapters/F128ApprovalAdapter.js';
 import { F193ApprovalAdapter } from './domains/approval-hub/adapters/F193ApprovalAdapter.js';
 import { F225ApprovalAdapter } from './domains/approval-hub/adapters/F225ApprovalAdapter.js';
+import { F231ApprovalAdapter } from './domains/approval-hub/adapters/F231ApprovalAdapter.js';
 import { createDispatchProposalStore } from './domains/approval-hub/stores/factories/DispatchProposalStoreFactory.js';
 import type { CollaborationContinuityCapsuleV1 } from './domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
 import { createTaskProgressStore } from './domains/cats/services/agents/invocation/createTaskProgressStore.js';
@@ -74,7 +75,6 @@ import {
   createDraftStore,
   createInvocationRecordStore,
   createSessionChainStore,
-  DareAgentService,
   DeliveryCursorStore,
   GeminiAgentService,
   getEventAuditLog,
@@ -1269,9 +1269,6 @@ async function main(): Promise<void> {
           case 'kimi':
             service = new KimiAgentService({ catId });
             break;
-          case 'dare':
-            service = new DareAgentService({ catId });
-            break;
           case 'antigravity':
             service = new AntigravityAgentService({
               catId,
@@ -1908,6 +1905,19 @@ async function main(): Promise<void> {
     verdictGenerators['eval:friction'] = createFrictionGeneratorAdapter(frictionProvider);
   }
 
+  // F236 Track-2 — anchor-first eval domain. Pure ctor (no store deps), unconditional.
+  // Provider wraps in-memory getAnchorTelemetryRollup(); generator writes rollup bundle.
+  {
+    const { createAnchorTelemetryGeneratorAdapter } = await import(
+      './infrastructure/harness-eval/publish-verdict/anchor-telemetry-generator-adapter.js'
+    );
+    const { AnchorTelemetryProviderImpl } = await import(
+      './infrastructure/harness-eval/anchor-first/anchor-telemetry-provider-impl.js'
+    );
+    const anchorProvider = new AnchorTelemetryProviderImpl();
+    verdictGenerators['eval:anchor-first'] = createAnchorTelemetryGeneratorAdapter(anchorProvider);
+  }
+
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
@@ -2524,6 +2534,8 @@ async function main(): Promise<void> {
     messageStore,
     taskStore,
     memoryStore,
+    sessionChainStore,
+    transcriptWriter,
     deliveryCursorStore,
     invocationTracker,
     draftStore,
@@ -2600,12 +2612,13 @@ async function main(): Promise<void> {
     socketManager,
     onProposalReject: (input) => onProposalReject({ ...input, proposalType: 'session_handoff' }),
   });
-  // F246: Approval Hub — unified operator approval center (query aggregation over F128 + F225 + F193)
+  // F246: Approval Hub — unified operator approval center (query aggregation over F128 + F225 + F193 + F231)
   await app.register(approvalHubRoutes, {
     adapters: [
       new F128ApprovalAdapter(proposalStore),
       new F225ApprovalAdapter(handoffProposalStore),
       new F193ApprovalAdapter(dispatchProposalStore),
+      new F231ApprovalAdapter(profileUpdateProposalStore),
     ],
   });
   // F246 Phase B: dispatch proposal approve/reject endpoints
@@ -4095,6 +4108,8 @@ async function main(): Promise<void> {
   const { createEvalDomainDailySpec, createEvalDomainWeeklySpec } = await import(
     './infrastructure/harness-eval/domain/eval-domain-daily.js'
   );
+  // N-day factory is in its own module (split from eval-domain-daily for file-size limit)
+  const { createEvalDomainNDaySpec } = await import('./infrastructure/harness-eval/domain/eval-domain-nday.js');
   const { getOwnerUserId } = await import('./config/cat-config-loader.js');
   // cloud R6 P2 (PR-2) + memory wire-up: mirror the same wired set the
   // eval-hub.ts route computes (Object.keys(verdictGenerators)). Bootstrap-time
@@ -4115,6 +4130,9 @@ async function main(): Promise<void> {
   // optional). Mirror task-outcome — unconditional add (must match the verdictGenerators
   // map above, else split-brain: scheduled fire would 501).
   wiredPublishDomains.add('eval:friction');
+  // F236 Track-2: eval:anchor-first provider is unconditionally wired (pure ctor,
+  // no store deps — wraps in-memory getAnchorTelemetryRollup). Same rationale as friction.
+  wiredPublishDomains.add('eval:anchor-first');
   if (toolEventLog && skillLoadEventLog) {
     wiredPublishDomains.add('eval:capability-wakeup');
   }
@@ -4164,6 +4182,8 @@ async function main(): Promise<void> {
   };
   taskRunnerV2.register(createEvalDomainDailySpec(evalScheduleOpts));
   taskRunnerV2.register(createEvalDomainWeeklySpec(evalScheduleOpts));
+  // F245 PR2: N-day cadence — eval:friction runs every-3d (not weekly)
+  taskRunnerV2.register(createEvalDomainNDaySpec(evalScheduleOpts));
 
   // F233 PR4: realtime blocked-task probe. Side effects live here, not in projector/rebuild.
   if (ballCustodyIngest && ballCustodyProjectionStore) {

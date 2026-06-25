@@ -8,7 +8,7 @@
 
 | 工具 | 版本 | 安装方式 |
 |------|------|---------|
-| **Node.js** | >= 20.0.0 | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | >= 24.0.0 | [nodejs.org](https://nodejs.org/) |
 | **pnpm** | >= 9.0.0 | `npm install -g pnpm` |
 | **Redis** | >= 7.0 | `brew install redis`（macOS）或 [redis.io](https://redis.io/download/) — *可选：用 `--memory` 标志跳过* |
 | **Git** | 任意近期版本 | 大多数系统自带 |

@@ -1,7 +1,3 @@
-<!-- @segment L2 — 客观性 carry-over 段 -->
-<!-- Variables: none (static content) -->
-<!-- Condition: always -->
-
 > **状态**：active minimal triggers；F203 Phase A 实测 0 项功能性能力退化。
 > **触发扩展**：F203 Phase E diff 出新 CC 功能性指令，且家规未覆盖时再补。
 > **不重写**：Anthropic 默认"糊弄哲学"指令（minimal fix / no abstractions / 简短至上）与愿景驱动冲突，故意删除。

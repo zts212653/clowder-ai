@@ -72,6 +72,34 @@ describe('useIMEGuard', () => {
     cleanup();
   });
 
+  it('still blocks same-turn Enter even if requestAnimationFrame flushes immediately', () => {
+    const originalRaf = globalThis.requestAnimationFrame;
+    const originalCancel = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0);
+      return 1;
+    }) as typeof requestAnimationFrame;
+    globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+
+    try {
+      const { input, onSubmit, cleanup } = setup();
+      act(() => {
+        input.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+      });
+      act(() => {
+        input.dispatchEvent(new Event('compositionend', { bubbles: true }));
+      });
+      act(() => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      expect(onSubmit).not.toHaveBeenCalled();
+      cleanup();
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+      globalThis.cancelAnimationFrame = originalCancel;
+    }
+  });
+
   it('allows Enter after rAF flushes post-compositionend', async () => {
     const { input, onSubmit, cleanup } = setup();
     act(() => {
@@ -80,9 +108,10 @@ describe('useIMEGuard', () => {
     act(() => {
       input.dispatchEvent(new Event('compositionend', { bubbles: true }));
     });
-    // Wait for rAF to flush
+    // Wait for rAF + timer turn to flush
     await act(async () => {
       await new Promise((r) => requestAnimationFrame(r));
+      await new Promise((r) => setTimeout(r, 0));
     });
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));

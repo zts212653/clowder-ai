@@ -19,7 +19,7 @@
  *   {{TEAMMATE_ROSTER}}     — [S5] 队友名册（available cats with @mention/model/strengths）
  *   {{GOVERNANCE_L0}}       — [S9] 治理摘要（from shared-rules.md deterministic extraction）
  *   {{WORKFLOW_TRIGGERS}}   — [S6] 工作流触发点（per-breed workflow triggers）
- *   {{CVO_REF}}             — [S8] 铲屎官引用（co-creator name + mention handles）
+ *   {{CVO_REF}}             — [S8] co-creator引用（co-creator name + mention handles）
  *
  * Output: string ready for `claude --system-prompt <out>` or
  * `codex exec -c 'developer_instructions=<out>'`.
@@ -49,6 +49,7 @@ const TEMPLATE_PATH = resolve(REPO_ROOT, 'assets/system-prompts/system-prompt-l0
 const PROMPT_TEMPLATES_DIR = resolve(REPO_ROOT, 'assets/prompt-templates');
 const PROMPT_OVERLAYS_DIR = resolve(findWorkspaceRoot(process.cwd()), '.cat-cafe', 'prompt-overlays');
 const DISPLAY_SEGMENT_LABEL_RE = /^── \[[A-Z]\d+] .+──$/;
+const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部finding修完后等PR truth，不@旧reviewer。';
 
 /** L1-L7 section template files — static content extracted from the monolithic L0 template. */
 const L0_SECTION_TEMPLATES = {
@@ -175,10 +176,17 @@ function parseWorkflowTriggersFile(filePath) {
   const result = {};
   for (const [breed, content] of Object.entries(parsed)) {
     if (typeof content === 'string') {
-      result[breed] = content.trimEnd();
+      result[breed] = ensureMergeGateSourceProvenanceTrigger(content.trimEnd());
     }
   }
   return result;
+}
+
+function ensureMergeGateSourceProvenanceTrigger(content) {
+  if (content.includes('MG provenance override') && content.includes('外部finding修完后等PR truth')) {
+    return content;
+  }
+  return `${content.trimEnd()}\n${MERGE_GATE_SOURCE_PROVENANCE_TRIGGER}`;
 }
 
 function loadWorkflowTriggers() {

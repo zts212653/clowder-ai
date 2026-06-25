@@ -57,22 +57,48 @@ const LABEL_PREFIX: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Fail-closed guards
+// Verb auto-correction (BUG-UX-9 fix)
 // ---------------------------------------------------------------------------
 
+type ActionVerb = '跳过去' | '原地看';
+
 /**
- * Determine if an action should be skipped (fail-closed).
+ * Resolve the actual action type and display verb, auto-correcting when the
+ * duty cat picked the wrong verb for the anchor's capabilities.
  *
- * - peek without messageId → no-op button (CardBlock.tsx:189 returns early)
- * - teleport for non-thread anchors → frontend can't navigate (only real threadIds)
+ * BUG-UX-9 root cause: small duty cats (gemini-3.5-flash) default to [原地看 Rn]
+ * for everything. Without auto-correction, peek on a thread-without-messageId
+ * was silently dropped → user sees no button at all.
+ *
+ * Auto-correction rules:
+ * - peek requested but no messageId + thread type → convert to teleport
+ * - teleport requested but non-thread type + has messageId → convert to peek
+ * - neither correction possible → null (truly incompatible, fail-closed)
  */
-function shouldSkipAction(
-  actionType: 'concierge_teleport' | 'concierge_peek',
+function resolveAction(
+  requestedType: 'concierge_teleport' | 'concierge_peek',
   anchor: { messageId?: string; type: string },
-): boolean {
-  if (actionType === 'concierge_peek' && !anchor.messageId) return true;
-  if (actionType === 'concierge_teleport' && anchor.type !== 'thread') return true;
-  return false;
+): { actionType: 'concierge_teleport' | 'concierge_peek'; displayVerb: ActionVerb } | null {
+  // Happy path: requested action is compatible with anchor
+  if (requestedType === 'concierge_teleport' && anchor.type === 'thread') {
+    return { actionType: 'concierge_teleport', displayVerb: '跳过去' };
+  }
+  if (requestedType === 'concierge_peek' && anchor.messageId) {
+    return { actionType: 'concierge_peek', displayVerb: '原地看' };
+  }
+
+  // Auto-correct: peek on thread without messageId → teleport
+  if (requestedType === 'concierge_peek' && !anchor.messageId && anchor.type === 'thread') {
+    return { actionType: 'concierge_teleport', displayVerb: '跳过去' };
+  }
+
+  // Auto-correct: teleport on non-thread with messageId → peek
+  if (requestedType === 'concierge_teleport' && anchor.type !== 'thread' && anchor.messageId) {
+    return { actionType: 'concierge_peek', displayVerb: '原地看' };
+  }
+
+  // Truly incompatible (non-thread without messageId) → fail-closed
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,32 +126,31 @@ export async function extractConciergeActions(
 
   if (matches.length === 0) return [];
 
-  // 2. Deduplicate (verb + handle)
+  // 2. Look up each handle, resolve action, and deduplicate by resolved action+handle
+  // (BUG-UX-9: dedup AFTER resolution — [跳过去 R1] and [原地看 R1] on the same
+  // thread-only handle both resolve to teleport; dedup by verb would keep both)
   const seen = new Set<string>();
-  const unique: Array<{ verb: string; handle: string }> = [];
-  for (const match of matches) {
-    const key = `${match.verb}:${match.handle}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(match);
-    }
-  }
-
-  // 3. Look up each handle and build actions (fail-closed)
   const actions: ConciergeAction[] = [];
-  for (const { verb, handle } of unique) {
+  for (const { verb, handle } of matches) {
     const anchor = await store.getHandle(threadId, handle);
     if (!anchor) continue; // fail-closed: unknown handle → skip
 
-    const actionType = ACTION_MAP[verb];
-    if (!actionType) continue; // safety guard
-    if (shouldSkipAction(actionType, anchor)) continue;
+    const requestedType = ACTION_MAP[verb];
+    if (!requestedType) continue; // safety guard
+
+    const resolved = resolveAction(requestedType, anchor);
+    if (!resolved) continue; // truly incompatible → fail-closed
+
+    // Dedup by resolved action type + handle (not raw verb + handle)
+    const dedupeKey = `${resolved.actionType}:${handle}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     actions.push({
-      action: actionType,
-      label: `${LABEL_PREFIX[verb]}：${anchor.title}`,
+      action: resolved.actionType,
+      label: `${LABEL_PREFIX[resolved.displayVerb]}：${anchor.title}`,
       handle,
-      verb,
+      verb, // keep original text verb — frontend uses it as actionMap key for marker matching
       payload: {
         threadId: anchor.threadId,
         ...(anchor.messageId != null ? { messageId: anchor.messageId } : {}),

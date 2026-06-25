@@ -246,7 +246,13 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // F128 Phase AA (AC-AA1): default reportingMode is now `final-only`
     // (supersedes Phase Y AC-Y6 default `none`). Cats are told to report back.
     assert.ok(enqueued.includes('final-only'), 'AC-AA1: default must be final-only (supersedes Phase Y none)');
-    assert.ok(enqueued.includes('回到主 Thread'), 'AC-AA1: default final-only serial chain returns to main thread');
+    // F128 final-only hardening: chain order no longer includes "→ 回到主 Thread" for
+    // final-only mode (it misleads intermediate cats). The final report instruction lives
+    // in the chain steps section, not the order overview line.
+    assert.ok(
+      enqueued.includes('任务完成') || enqueued.includes('PR 合入') || enqueued.includes('任务关闭'),
+      'final-only must define completion as task closure, not last-step-done',
+    );
     // Original user content must still be present — header is additive, not destructive.
     assert.ok(enqueued.includes('开玩！我先起头：一帆风顺'), 'original user-typed content must be preserved verbatim');
 

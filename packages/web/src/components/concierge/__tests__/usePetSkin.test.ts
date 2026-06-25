@@ -152,6 +152,61 @@ describe('resolvePetSprite — yanyan-codex (atlas)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// xianxian-codex atlas skin (E1: 9-state animated spritesheet — 宪宪)
+// ---------------------------------------------------------------------------
+describe('resolvePetSprite — xianxian-codex (atlas)', () => {
+  it('returns atlas result for xianxian-codex skin', () => {
+    const result = resolvePetSprite('idle', 'xianxian-codex');
+    expect(result).toMatchObject({
+      kind: 'atlas',
+      src: '/concierge/skins/xianxian-codex/spritesheet.webp',
+      petState: 'idle',
+    });
+  });
+
+  it('atlas result includes correct row for idle (row 0)', () => {
+    const result = resolvePetSprite('idle', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.row).toBe(0);
+    expect(result.frameCount).toBe(6);
+  });
+
+  it('thinking → running (V1 projection, same as yanyan)', () => {
+    const result = resolvePetSprite('thinking', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('running');
+    expect(result.row).toBe(7);
+  });
+
+  it('handoff → running-right (V1 projection)', () => {
+    const result = resolvePetSprite('handoff', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('running-right');
+    expect(result.row).toBe(1);
+  });
+
+  it('error → failed (atlas)', () => {
+    const result = resolvePetSprite('error', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('failed');
+    expect(result.row).toBe(5);
+  });
+
+  it('unknown state → idle fallback', () => {
+    const result = resolvePetSprite('garbage', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('idle');
+  });
+
+  it('atlas cell dimensions match spec (192×208)', () => {
+    const result = resolvePetSprite('idle', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.cellWidth).toBe(192);
+    expect(result.cellHeight).toBe(208);
+  });
+
+  it('frameDurations array length matches frameCount', () => {
+    const result = resolvePetSprite('idle', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.frameDurations.length).toBe(result.frameCount);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Backward compat: ragdoll-v1 still returns string with expanded CodexPetState
 // ---------------------------------------------------------------------------
 describe('resolvePetSprite — ragdoll-v1 backward compat with 9-state', () => {

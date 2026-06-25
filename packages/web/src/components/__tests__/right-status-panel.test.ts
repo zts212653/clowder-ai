@@ -110,10 +110,10 @@ describe('RightStatusPanel', () => {
     const html = render({
       intentMode: 'execute',
       targetCats: ['codex'],
-      catStatuses: { codex: 'pending', dare: 'streaming' },
+      catStatuses: { codex: 'pending', opus: 'streaming' },
       catInvocations: {},
       activeInvocations: {
-        'inv-dare-1': { catId: 'dare', mode: 'execute' },
+        'inv-opus-1': { catId: 'opus', mode: 'execute' },
       },
       hasActiveInvocation: true,
       threadId: 'thread-slot-priority',
@@ -126,7 +126,7 @@ describe('RightStatusPanel', () => {
       },
     });
 
-    expect(html).toContain('dare');
+    expect(html).toContain('布偶猫');
     expect(html).not.toContain('缅因猫');
   });
 

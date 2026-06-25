@@ -150,6 +150,15 @@ pnpm desktop:pack
   ```bash
   xattr -cr "/Applications/Cat Cafe.app"
   ```
+- **支持的安装位置（macOS）**：packaged 版本仅支持从 `/Applications/Cat Cafe.app` 启动。
+  - 启动时 `desktop/main.js` 的 `ensureValidMacInstallLocation()` guard 会拒绝从 DMG 卷
+    （`/Volumes/...`）直接运行，并弹出"必须先安装"对话框。
+  - **范围外**：`~/Applications`（用户级 Applications）、外部卷（USB / 网络盘）、企业
+    MDM 管理路径目前不在支持范围内 —— `app.isInApplicationsFolder()` 仅认 `/Applications`。
+    如果你的运行场景需要这些路径，请先开 issue 讨论而不是直接绕过 guard。
+  - clowder-ai#1004 硬化点 4：把"仅 `/Applications`"作为显式支持策略落到文档，而不是
+    隐式约束。（如果将来要扩展支持 `~/Applications`，需要同步改 main.js 的 guard +
+    本文档 + 引导用户在哪个位置安装的 onboarding 文案。）
 
 #### 产物位置
 

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { after, before, describe, it } from 'node:test';
 
 /**
  * F239 Phase A — `sync-skills.sh` default project-level + `--user` opt-in
@@ -12,99 +12,145 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
  * ADR-025 第 3 条：用户级目录不默认承载官方 skills；`pnpm sync:skills --user` opt-in。
  *
  * Verification strategy:
- * - Override $HOME to an empty tmp dir per test (no pre-existing symlinks
+ * - Override $HOME to an empty tmp dir (no pre-existing symlinks
  *   that could short-circuit sync_link's "already correct → skip" branch).
  * - Run sync-skills.sh in --dry-run mode (no side effects on real ~).
- * - Default mode: dry-run stdout must NOT contain any "would create
- *   ${tmpHome}/.{provider}/skills/..." line — the HOME loop is gated off.
- * - --user mode: dry-run stdout must contain "would create" lines for
- *   all 4 providers (claude/codex/gemini/kimi) under ${tmpHome}.
+ * - A test-local git wrapper intercepts `git worktree list` to report only
+ *   the main repo worktree, avoiding the 65-worktree scan that took 30s+/run
+ *   (砚砚 FYI 2026-06-22: 228s total, gate SIGTERM). The production script
+ *   contains no test-specific code. Tests only verify HOME-level behavior
+ *   (Part 2), not worktree iteration — Part 1 coverage is via static analysis.
+ * - Default mode: dry-run stdout must NOT contain any HOME-level skill paths.
+ * - --user mode: dry-run stdout must contain HOME paths for all 4 providers.
  */
 
 const PROJECT_ROOT = join(import.meta.dirname, '..', '..', '..', '..');
 const SCRIPT = join(PROJECT_ROOT, 'scripts', 'sync-skills.sh');
 const PROVIDERS = ['.claude', '.codex', '.gemini', '.kimi'];
 
-function runScript(args, tmpHome) {
+// Resolve the real git binary path — the test git wrapper delegates
+// non-worktree-list commands to the real binary via this absolute path.
+const REAL_GIT = spawnSync('which', ['git'], { encoding: 'utf-8' }).stdout.trim();
+
+function runScript(args, tmpHome, gitWrapperDir) {
   return spawnSync('bash', [SCRIPT, ...args], {
     cwd: PROJECT_ROOT,
     encoding: 'utf-8',
-    env: { ...process.env, HOME: tmpHome, NO_COLOR: '1' },
-    // 4 providers × N worktrees × ~46 skills produces thousands of sync_link calls;
-    // each readlink/stat round-trip is small but adds up. Allow up to 120s in CI.
-    timeout: 120_000,
-    // dry-run output for all worktrees × 4 providers easily exceeds the default
-    // 1 MiB buffer (~1.2 MiB observed locally with 43 worktrees); use 50 MiB.
-    maxBuffer: 50 * 1024 * 1024,
+    env: {
+      ...process.env,
+      HOME: tmpHome,
+      NO_COLOR: '1',
+      // Prepend test git wrapper dir so `git worktree list` returns only the
+      // main repo worktree. This avoids the 65-worktree scan (30s+/run) while
+      // keeping the production script free of test-specific env vars (P1 fix
+      // per 砚砚 review of PR #2513). All other git subcommands (rev-parse,
+      // -C, etc.) pass through to the real binary.
+      PATH: `${gitWrapperDir}:${process.env.PATH}`,
+      _SYNC_SKILLS_TEST_REPO: PROJECT_ROOT,
+    },
+    timeout: 30_000, // 1 worktree ≈ 1-2s; 30s is generous
+    maxBuffer: 10 * 1024 * 1024,
   });
 }
 
 describe('sync-skills.sh --user opt-in (F239 Phase A, ADR-025)', () => {
   let tmpHome;
+  let gitWrapperDir;
+  /** @type {ReturnType<typeof runScript>} */ let defaultResult;
+  /** @type {ReturnType<typeof runScript>} */ let userResult;
+  /** @type {ReturnType<typeof runScript>} */ let userSwapResult;
 
-  beforeEach(() => {
+  before(() => {
     tmpHome = mkdtempSync(join(tmpdir(), 'f239-sync-skills-test-'));
+
+    // Git wrapper: intercepts `git worktree list` to report only the main repo,
+    // avoiding the 65-worktree scan (30s+/run). All other git subcommands pass
+    // through to the real binary unchanged. This keeps the production script
+    // free of test-specific env vars — the cap lives entirely in the test
+    // harness (P1 fix per 砚砚 review of PR #2513).
+    //
+    // The script's per-worktree logic (classify_provider_dir, parent-escape
+    // guard, main-sync skip, stale-entry skip) still runs for the main
+    // worktree; multi-worktree interaction testing is out of scope for this
+    // suite which focuses on HOME-level (Part 2) behavior.
+    gitWrapperDir = join(tmpHome, 'bin');
+    mkdirSync(gitWrapperDir);
+    writeFileSync(
+      join(gitWrapperDir, 'git'),
+      [
+        '#!/bin/bash',
+        '# F239 test wrapper: report only main repo worktree to skip 65-wt scan',
+        'if [[ "$1" == "worktree" && "$2" == "list" ]]; then',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: bash variable, not JS template
+        '  printf "worktree %s\\n\\n" "${_SYNC_SKILLS_TEST_REPO}"',
+        '  exit 0',
+        'fi',
+        `exec "${REAL_GIT}" "$@"`,
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+
+    // Run each unique invocation once; individual tests assert against cached results.
+    // 3 runs × ~1-2s (1 worktree via wrapper) instead of 6 runs × 30s+.
+    defaultResult = runScript(['--dry-run'], tmpHome, gitWrapperDir);
+    userResult = runScript(['--user', '--dry-run'], tmpHome, gitWrapperDir);
+    userSwapResult = runScript(['--dry-run', '--user'], tmpHome, gitWrapperDir);
   });
 
-  afterEach(() => {
-    if (tmpHome) {
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
+  after(() => {
+    if (tmpHome) rmSync(tmpHome, { recursive: true, force: true });
   });
 
   describe('default mode (no --user)', () => {
     it('runs successfully in dry-run mode', () => {
-      const r = runScript(['--dry-run'], tmpHome);
-      assert.equal(r.status, 0, `script failed: stderr=${r.stderr}`);
+      assert.equal(defaultResult.status, 0, `script failed: stderr=${defaultResult.stderr}`);
     });
 
     it('does not target HOME-level skill paths for any provider', () => {
-      const r = runScript(['--dry-run'], tmpHome);
-      assert.equal(r.status, 0, `script failed: stderr=${r.stderr}`);
+      assert.equal(defaultResult.status, 0, `script failed: stderr=${defaultResult.stderr}`);
       for (const provider of PROVIDERS) {
         const homePath = `${tmpHome}/${provider}/skills`;
         assert.ok(
-          !r.stdout.includes(homePath),
+          !defaultResult.stdout.includes(homePath),
           `default mode must NOT target HOME path ${homePath}; ` +
-            `found in dry-run output (excerpt: ${r.stdout.slice(0, 800)})`,
+            `found in dry-run output (excerpt: ${defaultResult.stdout.slice(0, 800)})`,
         );
       }
     });
 
     it('prints awareness hint mentioning --user opt-in path', () => {
-      const r = runScript(['--dry-run'], tmpHome);
       assert.ok(
-        /--user/i.test(r.stdout),
-        `default mode should mention --user opt-in for HOME-level mount; output: ${r.stdout.slice(0, 800)}`,
+        /--user/i.test(defaultResult.stdout),
+        `default mode should mention --user opt-in for HOME-level mount; output: ${defaultResult.stdout.slice(0, 800)}`,
       );
     });
   });
 
   describe('--user mode (opt-in HOME-level mount)', () => {
     it('runs successfully in dry-run mode', () => {
-      const r = runScript(['--user', '--dry-run'], tmpHome);
-      assert.equal(r.status, 0, `script failed: stderr=${r.stderr}`);
+      assert.equal(userResult.status, 0, `script failed: stderr=${userResult.stderr}`);
     });
 
     it('targets HOME-level skill paths for all 4 providers', () => {
-      const r = runScript(['--user', '--dry-run'], tmpHome);
-      assert.equal(r.status, 0, `script failed: stderr=${r.stderr}`);
+      assert.equal(userResult.status, 0, `script failed: stderr=${userResult.stderr}`);
       for (const provider of PROVIDERS) {
         const homePath = `${tmpHome}/${provider}/skills`;
         assert.ok(
-          r.stdout.includes(homePath),
+          userResult.stdout.includes(homePath),
           `--user mode must target HOME path ${homePath}; ` +
-            `not found in dry-run output (excerpt: ${r.stdout.slice(0, 800)})`,
+            `not found in dry-run output (excerpt: ${userResult.stdout.slice(0, 800)})`,
         );
       }
     });
 
     it('accepts --dry-run --user flag order swap', () => {
-      const r = runScript(['--dry-run', '--user'], tmpHome);
-      assert.equal(r.status, 0, `script failed: stderr=${r.stderr}`);
+      assert.equal(userSwapResult.status, 0, `script failed: stderr=${userSwapResult.stderr}`);
       for (const provider of PROVIDERS) {
         const homePath = `${tmpHome}/${provider}/skills`;
-        assert.ok(r.stdout.includes(homePath), `flag order --dry-run --user must still target HOME path ${homePath}`);
+        assert.ok(
+          userSwapResult.stdout.includes(homePath),
+          `flag order --dry-run --user must still target HOME path ${homePath}`,
+        );
       }
     });
   });

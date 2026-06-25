@@ -97,7 +97,6 @@ const SEMANTIC_PREFIXES = [
   'codex',
   'gemini',
   'kimi',
-  'dare',
   'cocreator',
   // Cafe + werewolf
   'cafe',

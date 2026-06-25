@@ -38,9 +38,12 @@ import {
   renderSegment,
 } from './prompt-template-loader.js';
 import { RICH_BLOCK_SHORT } from './rich-block-rules.js';
+
 // L0-budget-defense PR-B-impl (ADR-038 件套 ④): staging is wired in
 // invoke-single-cat (mirrors F225 contextHintPrefix), NOT here. See note
 // at the buildLiveStaticIdentity removal site below for the rationale.
+
+const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部finding修完后等PR truth，不@旧reviewer。';
 
 /**
  * Context for a single cat invocation
@@ -58,6 +61,8 @@ export interface InvocationContext {
   teammates: readonly CatId[];
   /** Whether MCP tools are available for this cat */
   mcpAvailable: boolean;
+  /** Whether this invocation already receives the compiled L0 through a native system/developer channel. */
+  nativeL0Injected?: boolean;
   /** Prompt-level tags like 'critique' (from IntentParser) */
   promptTags?: readonly string[];
   /** Whether A2A collaboration prompt should be injected (only in serial/execute mode) */
@@ -333,7 +338,17 @@ export function getGovernanceDigest(): string {
  *  Keyed by breedId so all variants of a breed share the same workflow.
  *  Lazy-evaluated to pick up .local overlay changes (F237 Checkpoint C). */
 function getWorkflowTriggers(): Record<string, string> {
-  return loadWorkflowTriggers();
+  const triggers = loadWorkflowTriggers();
+  return Object.fromEntries(
+    Object.entries(triggers).map(([breed, content]) => [breed, ensureMergeGateSourceProvenanceTrigger(content)]),
+  );
+}
+
+function ensureMergeGateSourceProvenanceTrigger(content: string): string {
+  if (content.includes('MG provenance override') && content.includes('外部finding修完后等PR truth')) {
+    return content;
+  }
+  return `${content.trimEnd()}\n${MERGE_GATE_SOURCE_PROVENANCE_TRIGGER}`;
 }
 
 /**
@@ -514,8 +529,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     if (s7) lines.push(s7, '');
   }
 
-  /* @segment S8 — 铲屎官引用 (template: s8-cvo-reference.md) */
-  mark('S8', '铲屎官引用');
+  /* @segment S8 — co-creator引用 (template: s8-cvo-reference.md) */
+  mark('S8', 'co-creator引用');
   const coCreator = getCoCreatorConfig();
   const ccName = coCreator.name;
   const ccHandles = coCreator.mentionPatterns.map((p) => `\`${p}\``).join(' / ');
@@ -710,9 +725,12 @@ export function buildInvocationContext(context: InvocationContext): string {
   }
 
   /* @segment D8 — A2A 球权检查 (loaded from template) */
-  // A2A: Exit check reminder — prevents "chain termination blind spot" where cats finish output
-  // without considering whether a teammate needs to act next.
-  if (context.mode !== 'parallel' && context.a2aEnabled) {
+  // A2A: per-turn fallback anchors for providers without native L0. Native L0
+  // already carries the same ball-ownership rules and baton decision tree via
+  // the compression-immune system/developer channel.
+  const shouldInjectA2ALongAnchors = context.mode !== 'parallel' && context.a2aEnabled && !context.nativeL0Injected;
+
+  if (shouldInjectA2ALongAnchors) {
     const d8Content = loadA2aBallCheck();
     if (d8Content) lines.push(d8Content, '');
   }
@@ -905,9 +923,9 @@ export function buildInvocationContext(context: InvocationContext): string {
   /* @segment D21 — 传球决策树 (loaded from template) */
   // F167 Phase D: Trailing anchor — decision tree, not flat three-choice.
   // @co-creator is a hard-condition exit, not the safe default (KD-19).
-  // Placed at the very end for maximum recency bias (critical for non-Claude models).
-  if (context.mode !== 'parallel' && context.a2aEnabled) {
-    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@铲屎官';
+  // Placed at the very end for maximum recency bias when native L0 is unavailable.
+  if (shouldInjectA2ALongAnchors) {
+    const cc = getCoCreatorConfig().mentionPatterns[0] ?? '@co-creator';
     const d21Content = loadHandoffDecisionTree({ CC_MENTION: cc });
     if (d21Content) lines.push('', d21Content);
   }

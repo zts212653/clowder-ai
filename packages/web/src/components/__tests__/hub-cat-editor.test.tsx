@@ -175,7 +175,7 @@ describe('HubCatEditor', () => {
   }
 
   it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
-    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'] as const) {
+    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'opencode'] as const) {
       await renderAdvancedRuntimeSection(clientId);
       expect(document.body.textContent, clientId).toContain('额外 CLI 参数');
     }
@@ -1747,7 +1747,6 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
-    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['claude-sponsor', 'codex-sponsor']);
     expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
       'claude-sponsor',
       'codex-sponsor',

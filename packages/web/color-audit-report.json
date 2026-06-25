@@ -5692,13 +5692,6 @@
           "context": "gemini: { label: '暹罗猫', color: '#5B9BD5' },"
         },
         {
-          "type": "hex",
-          "value": "#D4A76A",
-          "line": 29,
-          "confidence": "medium",
-          "context": "dare: { label: '狸花猫', color: '#D4A76A' },"
-        },
-        {
           "type": "neutral",
           "value": "bg-gray-200",
           "line": 174,

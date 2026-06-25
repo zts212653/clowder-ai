@@ -4,7 +4,13 @@
  * AC-A7: classifyArtifactView — 产物按 type/数据可用性分发到内容查看策略。
  */
 import { describe, expect, it } from 'vitest';
-import { artifactRowMeta, classifyArtifactView, prRefToUrl, resolveAssetUrl } from '../artifacts/artifact-view';
+import {
+  artifactActionLabel,
+  artifactRowMeta,
+  classifyArtifactView,
+  prRefToUrl,
+  resolveAssetUrl,
+} from '../artifacts/artifact-view';
 
 describe('F232 AC-A5 artifactRowMeta — catId 昵称映射 + 相对时间', () => {
   const resolveNickname = (id: string): string | undefined =>
@@ -113,6 +119,41 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
 
   it('video 无 url → fallback', () => {
     expect(classifyArtifactView({ type: 'video', name: 'missing.mp4' })).toBe('fallback');
+  });
+
+  // F232 polish: widget type support
+  it('widget → fallback (跳回原消息看内容)', () => {
+    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('fallback');
+  });
+});
+
+describe('F232 polish: artifactActionLabel — 类型化按钮文案', () => {
+  it('audio → 播放', () => {
+    expect(artifactActionLabel('audio')).toBe('播放');
+  });
+
+  it('video → 播放', () => {
+    expect(artifactActionLabel('video')).toBe('播放');
+  });
+
+  it('file → 打开', () => {
+    expect(artifactActionLabel('file')).toBe('打开');
+  });
+
+  it('image → 打开', () => {
+    expect(artifactActionLabel('image')).toBe('打开');
+  });
+
+  it('code → 打开', () => {
+    expect(artifactActionLabel('code')).toBe('打开');
+  });
+
+  it('pr → 打开', () => {
+    expect(artifactActionLabel('pr')).toBe('打开');
+  });
+
+  it('widget → 打开', () => {
+    expect(artifactActionLabel('widget')).toBe('打开');
   });
 });
 

@@ -134,3 +134,6 @@ export function resetAnchorTelemetryForTest(): void {
   drillByTool = {};
   drillCharsByTool = {};
 }
+
+// Track-2 (per-event model with correlation keys + open-rate rollup) has been
+// extracted to ./anchor-event-log.ts (cloud R3 P1: 350-line file cap).

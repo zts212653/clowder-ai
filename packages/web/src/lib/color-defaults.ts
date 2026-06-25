@@ -24,7 +24,6 @@ export const CAT_COLORS: Record<string, CatColorPair> = {
   codex: { primary: '#5B8C5A', secondary: '#D4E6D3' },
   gemini: { primary: '#5B9BD5', secondary: '#D6E9F8' },
   kimi: { primary: '#4B5563', secondary: '#E5E7EB' },
-  dare: { primary: '#D4A76A', secondary: '#FFF8F0' },
 };
 
 /** Fallback when catId is unknown or color data is missing entirely. */

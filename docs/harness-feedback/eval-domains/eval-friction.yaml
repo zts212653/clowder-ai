@@ -9,9 +9,9 @@ evalCat:
   catId: gpt52
   handle: "@gpt52"
   model: gpt-5.4
-# weekly = community default + landable on existing daily|weekly registry enum.
-# 本家 3-day override comes in PR2 once N-day cadence infra lands.
-frequency: weekly
+# F245 PR2: 本家 3-day cadence — N-day infra landed.
+# Community default remains `weekly` in community eval-domains/ copies.
+frequency: every-3d
 sourceAdapter: f245-friction-rollup
 sourceRefsKind: friction-rollup-snapshot
 threadPolicy:

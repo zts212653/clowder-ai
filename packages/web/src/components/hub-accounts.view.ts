@@ -2,13 +2,12 @@ import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 
 function inferBuiltinClient(profile: ProfileItem): BuiltinAccountClient | undefined {
   if (profile.clientId) return profile.clientId;
-  if (profile.oauthLikeClient === 'dare' || profile.oauthLikeClient === 'opencode') return profile.oauthLikeClient;
+  if (profile.oauthLikeClient === 'opencode') return profile.oauthLikeClient;
   const normalizedId = `${profile.id} ${profile.provider ?? ''} ${profile.displayName} ${profile.name}`.toLowerCase();
   if (normalizedId.includes('claude')) return 'anthropic';
   if (normalizedId.includes('codex')) return 'openai';
   if (normalizedId.includes('gemini')) return 'google';
   if (normalizedId.includes('kimi') || normalizedId.includes('moonshot')) return 'kimi';
-  if (normalizedId.includes('dare')) return 'dare';
   if (normalizedId.includes('opencode')) return 'opencode';
   if (normalizedId.includes('acp')) return 'acp';
   return undefined;
@@ -32,8 +31,6 @@ export function builtinClientLabel(client?: BuiltinAccountClient): string {
       return 'Gemini';
     case 'kimi':
       return 'Kimi';
-    case 'dare':
-      return 'Dare';
     case 'opencode':
       return 'OpenCode';
     case 'acp':

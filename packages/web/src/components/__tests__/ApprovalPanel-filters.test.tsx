@@ -63,6 +63,23 @@ const SAMPLE_ITEMS: ApprovalItem[] = [
     expiresAt: NOW + 600_000, // not expired
     createdAt: NOW - 900_000,
   },
+  {
+    proposalId: 'dp-f231-1',
+    sourceFeatureId: 'F231',
+    sourceThreadId: 'thread-profile',
+    requesterCatId: 'opus',
+    ownerUserId: 'user-1',
+    status: 'pending',
+    summary: 'Profile update: user prefers dark mode',
+    detail: {
+      rationale: 'user prefers dark mode',
+      targetLayer: 'preferences',
+      targetPath: 'theme',
+      signalKind: 'explicit',
+    },
+    inlineApprovable: false,
+    createdAt: NOW - 600_000,
+  },
 ];
 
 let mockItems: ApprovalItem[] = [];
@@ -125,20 +142,8 @@ describe('F246 AC-D4: ApprovalPanel filters', () => {
     container.remove();
   });
 
-  it('renders filter bar with feature chips', async () => {
-    await act(async () => {
-      root.render(React.createElement(ApprovalPanel));
-    });
-
-    const filterBar = container.querySelector('[data-testid="approval-filter-bar"]');
-    expect(filterBar).not.toBeNull();
-
-    // Feature filter chips
-    expect(container.querySelector('[data-testid="approval-filter-feature-all"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="approval-filter-feature-F128"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="approval-filter-feature-F193"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="approval-filter-feature-F225"]')).not.toBeNull();
-  });
+  // F231 filter chip + label + filter behavior tests extracted to
+  // ApprovalPanel-f231-filter.test.tsx (cloud review P1: file over 350-line limit)
 
   it('default: all items shown (no filter active)', async () => {
     await act(async () => {

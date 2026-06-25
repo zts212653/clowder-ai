@@ -413,15 +413,15 @@ describe('POST /api/callbacks/start-vote', () => {
       payload: {
         question: 'Overflow test?',
         options: ['A', 'B'],
-        voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'dare', 'antig-opus'],
+        voters: ['codex', 'gemini', 'sonnet', 'gpt52', 'spark', 'antig-opus'],
       },
     });
 
     assert.equal(res.statusCode, 200);
 
-    // F175: agent source bypasses MAX_QUEUE_DEPTH — all 7 voters should be enqueued
+    // F175: agent source bypasses MAX_QUEUE_DEPTH — all 6 voters should be enqueued
     const queueEntries = invocationQueue.listAutoExecute?.(thread.id) ?? [];
-    assert.equal(queueEntries.length, 7, 'all 7 voters should be enqueued (agent bypasses depth limit)');
+    assert.equal(queueEntries.length, 6, 'all 6 voters should be enqueued (agent bypasses depth limit)');
 
     // No fallback needed — all fit in queue
     assert.equal(fallbackTargets.length, 0, 'no fallback needed when agent source bypasses depth limit');

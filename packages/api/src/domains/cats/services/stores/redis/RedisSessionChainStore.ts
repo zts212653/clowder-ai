@@ -33,6 +33,7 @@ const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
  * ARGV[1] = id, ARGV[2] = cliSessionId, ARGV[3] = threadId, ARGV[4] = catId,
  * ARGV[5] = userId, ARGV[6] = now, ARGV[7] = reuseExistingCliSession flag,
  * ARGV[8] = chainKey value ('' = none, KEYS[5] left untouched)
+ * ARGV[9] = workingDirectory ('' = none), ARGV[10] = workspaceFingerprint ('' = none)
  *
  * Returns: {'existing', existingId} when cliSessionId is already claimed,
  *          {'created', id, seq} when a new record is created.
@@ -52,6 +53,8 @@ if ARGV[8] ~= '' then
   redis.call('HSET', KEYS[3], 'chainKey', ARGV[8])
   ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('SET', KEYS[5], ARGV[1], 'EX', ${DEFAULT_TTL_SECONDS})` : `redis.call('SET', KEYS[5], ARGV[1])`}
 end
+if ARGV[9] ~= '' then redis.call('HSET', KEYS[3], 'workingDirectory', ARGV[9]) end
+if ARGV[10] ~= '' then redis.call('HSET', KEYS[3], 'workspaceFingerprint', ARGV[10]) end
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[3], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
 redis.call('ZADD', KEYS[2], seq, ARGV[1])
 ${DEFAULT_TTL_SECONDS > 0 ? `redis.call('EXPIRE', KEYS[2], ${DEFAULT_TTL_SECONDS})` : '-- persistent mode: no EXPIRE'}
@@ -112,6 +115,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
         now,
         input.reuseExistingCliSession ? '1' : '0',
         input.chainKey ?? '',
+        input.workingDirectory ?? '',
+        input.workspaceFingerprint ?? '',
       )) as [string, string, string?];
 
       const [status, recordId, seqRaw] = result;
@@ -135,6 +140,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
         createdAt: parseInt(now, 10),
         updatedAt: parseInt(now, 10),
         ...(input.chainKey ? { chainKey: input.chainKey } : {}),
+        ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
+        ...(input.workspaceFingerprint ? { workspaceFingerprint: input.workspaceFingerprint } : {}),
       };
     }
 
@@ -228,6 +235,12 @@ export class RedisSessionChainStore implements ISessionChainStore {
         await this.redis.set(SessionChainKeys.byCli(patch.cliSessionId), id);
       }
       pairs.push('cliSessionId', patch.cliSessionId);
+    }
+    if (patch.workingDirectory !== undefined) {
+      pairs.push('workingDirectory', patch.workingDirectory);
+    }
+    if (patch.workspaceFingerprint !== undefined) {
+      pairs.push('workspaceFingerprint', patch.workspaceFingerprint);
     }
 
     if (patch.status !== undefined) {
@@ -357,6 +370,8 @@ export class RedisSessionChainStore implements ISessionChainStore {
       threadId: data.threadId!,
       catId: data.catId as CatId,
       userId: data.userId!,
+      ...(data.workingDirectory ? { workingDirectory: data.workingDirectory } : {}),
+      ...(data.workspaceFingerprint ? { workspaceFingerprint: data.workspaceFingerprint } : {}),
       seq: parseInt(data.seq!, 10),
       status: (data.status as SessionStatus) ?? 'active',
       ...(contextHealth ? { contextHealth } : {}),

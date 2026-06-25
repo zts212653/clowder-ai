@@ -62,25 +62,23 @@ describe('Eval cat invocation packet', () => {
     assert.match(invocation.instructions, /legacy scheduled task/);
   });
 
-  it('fails closed when a syntactically valid domain has no explicit instruction wiring', () => {
-    assert.throws(
-      () =>
-        buildEvalCatInvocation({
-          domain: {
-            ...domain,
-            domainId: 'eval:anchor-first',
-            displayName: 'Anchor-first Eval',
-            systemThreadId: 'thread_eval_anchor_first',
-            sourceAdapter: 'anchor-first-eval',
-            sourceRefsKind: 'memory-recall-snapshot',
-            handoffTargetResolver: { featureId: 'F236', ownerCatId: 'codex', threadLookup: 'feature-thread' },
-          },
-          trendRefs: [],
-          verdictRefs: [],
-          legacyCleanup: { status: 'disabled' },
-        }),
-      /instruction|wired|domain/i,
-    );
+  it('builds instructions for eval:anchor-first (F236 Track-2 wired)', () => {
+    const invocation = buildEvalCatInvocation({
+      domain: {
+        ...domain,
+        domainId: 'eval:anchor-first',
+        displayName: 'Anchor-first Eval',
+        systemThreadId: 'thread_eval_anchor_first',
+        sourceAdapter: 'anchor-first-eval',
+        sourceRefsKind: 'anchor-telemetry-snapshot',
+        handoffTargetResolver: { featureId: 'F236', ownerCatId: 'codex', threadLookup: 'feature-thread' },
+      },
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+    assert.equal(invocation.domainId, 'eval:anchor-first');
+    assert.match(invocation.instructions, /anchor|preview|drill|open.rate/i);
   });
 
   it('builds instructions for eval:capability-wakeup domains', () => {
@@ -138,6 +136,9 @@ describe('Eval cat invocation packet', () => {
     );
     assert.match(invocation.instructions, /windowStartMs/, 'must describe the rollup window selector fields');
     assert.match(invocation.instructions, /Publish your verdict/, 'must include the common MANDATORY publish section');
+    assert.match(invocation.instructions, /actionableCandidates/i);
+    assert.match(invocation.instructions, /referenceOnly/i);
+    assert.match(invocation.instructions, /followupDraft|propose_thread/i);
   });
 
   it('eval:a2a instructions include grounding subdomain observation tokens (F167 Phase O)', () => {

@@ -192,40 +192,27 @@ is_high_risk() {
 # Format: file|check_type|pattern|description
 # check_type: must_not_contain, must_contain, file_exists
 # Both --validate-inbound and pre-commit hook consume this list.
-#
-# TODO(brand-parameterization): These rules were mirrored from cat-cafe verbatim.
-# In the clowder-ai repo, "Clowder AI" IS the correct brand (per brand-dictionary.yaml).
-# Brand-sensitive must_not_contain/must_contain entries below are disabled until
-# per-repo parameterization is implemented. See PR #993 review discussion.
 BRAND_EXPECTATIONS=(
   # layout.tsx
-  # DISABLED: Clowder AI is clowder-ai's brand, not contamination
-  # "packages/web/src/app/layout.tsx|must_not_contain|Clowder AI|title should be Clowder AI"
-  # "packages/web/src/app/layout.tsx|must_not_contain|Your AI team collaboration space|description should be Chinese"
+  "packages/web/src/app/layout.tsx|must_not_contain|Clowder AI|title should be Clowder AI"
+  "packages/web/src/app/layout.tsx|must_not_contain|Your AI team collaboration space|description should be Chinese"
   "packages/web/src/app/layout.tsx|must_contain|favicon.svg|favicon declaration required"
   "packages/web/src/app/layout.tsx|must_contain|icon-192x192.png|PWA icon declaration required"
   # SplitPaneView.tsx
-  # DISABLED: same reason
-  # "packages/web/src/components/SplitPaneView.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
-  # manifest.json — keep a benign file_exists entry so Phase 2 dictionary scan
-  # exempts this file (Phase 2 skips files already in BRAND_EXPECTATIONS).
-  # Brand content rules disabled; parameterization needed.
-  "packages/web/public/manifest.json|file_exists|manifest.json|PWA manifest must exist"
-  # "packages/web/public/manifest.json|must_not_contain|Clowder|name should be Clowder AI"
+  "packages/web/src/components/SplitPaneView.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
+  # manifest.json
+  "packages/web/public/manifest.json|must_not_contain|Clowder|name should be Clowder AI"
   # ChatContainerHeader.tsx — surface text AND semantic fields
-  # DISABLED: same reason
-  # "packages/web/src/components/ChatContainerHeader.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
-  # "packages/web/src/components/ChatContainerHeader.tsx|must_contain|Cat Caf|must have Clowder AI brand"
+  "packages/web/src/components/ChatContainerHeader.tsx|must_not_contain|Clowder AI|brand should be Clowder AI"
+  "packages/web/src/components/ChatContainerHeader.tsx|must_contain|Cat Caf|must have Clowder AI brand"
   "packages/web/src/components/ChatContainerHeader.tsx|must_contain|'cat-cafe'|INTERNAL_BASENAMES must include cat-cafe"
   "packages/web/src/components/ChatContainerHeader.tsx|must_contain|'cat-cafe-runtime'|INTERNAL_BASENAMES must include cat-cafe-runtime"
   # api-client.ts — comment AND real brand identity (F156: header → session cookie)
-  # DISABLED: same reason
-  # "packages/web/src/utils/api-client.ts|must_not_contain|client for Clowder AI|comment should reference Clowder AI"
+  "packages/web/src/utils/api-client.ts|must_not_contain|client for Clowder AI|comment should reference Clowder AI"
   "packages/web/src/utils/api-client.ts|must_contain|HttpOnly session cookie|identity uses session cookie (F156 D-1)"
   # connector command deep links — home runtime fallback must stay on 3001; public sync transforms it to 3003.
-  # DISABLED: contradictory pair (must_not + must_contain same value); needs per-repo parameterization
-  # "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_not_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
-  # "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
+  "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_not_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
+  "packages/api/src/infrastructure/connectors/connector-gateway-bootstrap.ts|must_contain|http://localhost:3003|connector command fallback should use Clowder AI frontend port"
   # adapter media URLs — must not hardcode opensource ports (3003/3004); use API_SERVER_PORT env fallback.
   # Outbound sync transforms 3002→3004; intake must catch un-reversed port references.
   "packages/api/src/infrastructure/connectors/im-connectors/weixin/WeixinAdapter.ts|must_not_contain|localhost:3004|Weixin media fallback should use runtime API_SERVER_PORT not hardcoded opensource port"
@@ -450,7 +437,8 @@ run_brand_validation() {
           [ -z "$bsf" ] && continue
           # Skip files already checked by BRAND_EXPECTATIONS (avoid double-counting)
           # Fix: use printf + [@] so each entry gets its own line; the old echo + [*]
-          # joined everything on one line, making ^anchor match only the first entry.
+          # joined everything on one line, so ^${bsf}| anchor only matched the first entry,
+          # letting later BRAND_EXPECTATIONS files leak into Phase 2 dictionary scan.
           if printf '%s\n' "${BRAND_EXPECTATIONS[@]}" | grep -q "^${bsf}|"; then continue; fi
           # Skip brand-validation toolchain files — they reference brand terms as
           # detection constants, not as content that needs sanitization.
@@ -631,17 +619,35 @@ run_absorbed_record_guard() {
     return 1
   fi
 
+  # cat-cafe#2519: Strict Guard schema is loosened to accept the natural
+  # intake vocabulary used by SKILL.md (safe-cherry-pick / manual-port /
+  # HIGH-RISK / public-only) and Markdown-link source PR references — not
+  # just the canonical `## Per-File Decision Table` + literal `absorb`/`skip`
+  # keywords. The intent (file table present + source PR linked) is what we
+  # actually verify; the prior regex forced a parallel "canonical" body shape
+  # that no skill ref documented, causing repeated false-block retries.
   local issue_table_ok
-  issue_table_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##\\s*(?:逐文件决策表|(?:Per-File|Cluster-Level)\\s+Decision\\s+Table)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|\\s*(absorb|skip)\\b[^|\\n]*/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
+  issue_table_ok=$(echo "$intent_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##+\\s*[^\\n]*?(?:逐文件决策表|Per[- ]?file\\s+decision|Cluster[- ]?level\\s+decision\\s+table|Decision\\s+Table|决策|Classification|Plan\\s+v\\d|Lane)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|[^|\\n]*(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\\b/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
   if [ "$issue_table_ok" != "yes" ]; then
     echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE is missing a valid per-file decision table${NC}"
+    echo "  Expected: a markdown table with a heading containing 'Decision' / '决策' / 'Plan vN' / 'Classification' / 'Lane',"
+    echo "  and rows containing one of: absorbed, safe-cherry-pick, manual-port, high-risk, skip, public-only."
     return 1
   fi
 
+  # cat-cafe#2519: source ref guard KEPT strict on owner-qualified form
+  # (zts212653/clowder-ai/pull/N) to preserve provenance — markdown links
+  # like [#N](https://github.com/zts212653/clowder-ai/pull/N) already match
+  # via substring inclusion, so no loosening was needed. The earlier #2519
+  # friction was caused by the Plan v2 body omitting the source PR line
+  # entirely, not by the regex shape. (砚砚 review of cat-cafe#2520 caught
+  # an over-loosening that would have accepted `evil/clowder-ai/pull/N`.)
   local issue_source_ref_ok
   issue_source_ref_ok=$(echo "$intent_info" | SOURCE_PR="$PR_NUMBER" node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const n=process.env.SOURCE_PR; const ok=body.includes('clowder-ai#'+n) || body.includes('zts212653/clowder-ai/pull/'+n); console.log(ok ? 'yes' : 'no')")
   if [ "$issue_source_ref_ok" != "yes" ]; then
     echo -e "${RED}✗ Intake Intent Issue #$INTENT_ISSUE must reference source PR clowder-ai#$PR_NUMBER${NC}"
+    echo "  Expected one of: literal 'clowder-ai#$PR_NUMBER' substring,"
+    echo "  OR a Markdown/URL containing 'zts212653/clowder-ai/pull/$PR_NUMBER'."
     return 1
   fi
 
@@ -737,25 +743,47 @@ if [ "$RECORD_DECISION" = true ]; then
   fi
   # P2 fix: mandatory Brand Guard before recording absorbed intake
   if [ "$DECISION" = "absorbed" ]; then
-    echo -e "${BLUE}── Mandatory Brand Guard (pre-record) ──${NC}"
-    BRAND_SCOPE_FILES=""
-    if [ -n "$ABSORB_PR" ]; then
-      BRAND_SCOPE_FILES=$(resolve_absorb_pr_brand_scope || true)
-      if [ -z "$BRAND_SCOPE_FILES" ]; then
-        echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard${NC}"
-        echo "  Refusing to fall back to whole-repo scan during absorbed record; whole-repo scan has known pre-existing false positives."
-        echo "  Check: gh pr diff $ABSORB_PR --repo $SOURCE_REPO --name-only"
+    if [ "$SKIP_ABSORBED_GUARD" = true ] && [ -z "$ABSORB_PR" ]; then
+      # outbound-filed hotfix or historical backfill: NO absorb PR to scope against.
+      # Source code is already in cat-cafe main (verified during original intake or
+      # filed-then-merged hotfix). The record commit only touches
+      # docs/ops/opensource-intake-ledger.json. Previous logic fell through with
+      # empty scope and silently degraded to whole-repo scan, hitting pre-existing
+      # legitimate brand mentions in public docs / README.opensource.* files
+      # (recurring friction across PR #943 / #944 / #899 / #996 intake records).
+      # Skip mandatory Brand Guard on this lane — strict guard already skipped by
+      # the same flag for symmetry. Callers concerned about source-code drift can
+      # still run `--validate-inbound` explicitly.
+      #
+      # IMPORTANT: --skip-absorbed-guard WITH --absorb-pr still runs the scoped
+      # Brand Guard below — that mixed-mode caller has a concrete PR to scope
+      # against and the bypass would otherwise widen to a real source-code PR
+      # (gpt52 review on cat-cafe#2497 caught this widening regression).
+      echo -e "${YELLOW}⚠ --skip-absorbed-guard with no --absorb-pr: skipping mandatory Brand Guard${NC}"
+      echo "  Reason: outbound-filed hotfix / historical backfill has no absorb PR to scope Brand Guard against."
+      echo "  Source code is already in cat-cafe main; this record commit only touches docs/ops/opensource-intake-ledger.json."
+      echo "  For explicit brand check, run: bash scripts/intake-from-opensource.sh --validate-inbound"
+    else
+      echo -e "${BLUE}── Mandatory Brand Guard (pre-record) ──${NC}"
+      BRAND_SCOPE_FILES=""
+      if [ -n "$ABSORB_PR" ]; then
+        BRAND_SCOPE_FILES=$(resolve_absorb_pr_brand_scope || true)
+        if [ -z "$BRAND_SCOPE_FILES" ]; then
+          echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard${NC}"
+          echo "  Refusing to fall back to whole-repo scan during absorbed record; whole-repo scan has known pre-existing false positives."
+          echo "  Check: gh pr diff $ABSORB_PR --repo $SOURCE_REPO --name-only"
+          exit 1
+        fi
+      fi
+      run_brand_validation "$BRAND_SCOPE_FILES" "absorb PR"
+      if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
+        echo ""
+        echo -e "${RED}✗ $_BRAND_VIOLATION_COUNT brand violation(s) detected. Fix before recording absorbed intake.${NC}"
+        echo "  Run: bash scripts/intake-from-opensource.sh --validate-inbound  (for details)"
         exit 1
       fi
+      echo -e "${GREEN}✓ Brand Guard passed.${NC}"
     fi
-    run_brand_validation "$BRAND_SCOPE_FILES" "absorb PR"
-    if [ "$_BRAND_VIOLATION_COUNT" -gt 0 ]; then
-      echo ""
-      echo -e "${RED}✗ $_BRAND_VIOLATION_COUNT brand violation(s) detected. Fix before recording absorbed intake.${NC}"
-      echo "  Run: bash scripts/intake-from-opensource.sh --validate-inbound  (for details)"
-      exit 1
-    fi
-    echo -e "${GREEN}✓ Brand Guard passed.${NC}"
     echo ""
     echo -e "${BLUE}── Mandatory Intake Strict Guard (pre-record) ──${NC}"
     run_absorbed_record_guard || exit 1
@@ -1102,9 +1130,18 @@ fi
 FILES=$(gh api --paginate "repos/$TARGET_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename' 2>/dev/null || true)
 
 if [ -z "$FILES" ]; then
-  echo -e "${YELLOW}⚠ No files found in PR (may not be merged yet)${NC}"
-  echo "  Intake works best with merged PRs."
-  exit 0
+  # cat-cafe#2518: PR_STATE was verified MERGED above (line 1101). An empty
+  # FILES list here means the GitHub files API returned no rows — almost
+  # certainly a transient flake, NOT a legitimate empty PR. Silently exiting
+  # 0 with "No files found" would produce a fake plan, leading downstream
+  # `--record` to register an "absorbed" intake with zero file decisions —
+  # the real PR contents never get absorbed. Hard-fail instead.
+  echo -e "${RED}✗ Could not resolve PR #${PR_NUMBER} file list (files API returned empty).${NC}"
+  echo "  PR is MERGED but \`gh api repos/${TARGET_REPO}/pulls/${PR_NUMBER}/files\` returned no rows."
+  echo "  Likely cause: transient GitHub API flake. Retry the plan command."
+  echo "  Direct check: gh pr diff ${PR_NUMBER} --repo ${TARGET_REPO} --name-only"
+  echo "  Refusing to produce an empty plan — would create a fake intake (no files to absorb)."
+  exit 1
 fi
 
 # Classify files

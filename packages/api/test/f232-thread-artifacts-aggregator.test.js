@@ -169,12 +169,12 @@ test('empty input → empty array', () => {
   assert.deepEqual(aggregateThreadArtifacts({ messages: [], prTasks: [], fileLedger: [] }), []);
 });
 
-test('non-collected blocks (card / html_widget) are ignored', () => {
+test('non-collected blocks (card / checklist) are ignored', () => {
   const r = aggregateThreadArtifacts({
     messages: [
       msg('m', 1, [
         { kind: 'card', v: 1, id: 'b1', title: 'x' },
-        { kind: 'html_widget', v: 1, id: 'b2', html: '<div></div>' },
+        { kind: 'checklist', v: 1, id: 'b2', items: [] },
       ]),
     ],
     prTasks: [],
@@ -182,6 +182,8 @@ test('non-collected blocks (card / html_widget) are ignored', () => {
   });
   assert.equal(r.length, 0);
 });
+
+// Widget artifact tests extracted to f232-widget-artifacts.test.js (350-line limit)
 
 test('collectAllThreadMessages paginates a REAL store with no overlap (oldest→newest cursor)', async () => {
   // 砚砚 P1: mock 不能伪造分页顺序——必须用真实 MessageStore（返回 oldest→newest），

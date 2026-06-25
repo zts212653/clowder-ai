@@ -16,6 +16,7 @@ const CAPABILITY_TIP_CONTEXTS = new Set([
   'review',
   'feature_dev',
   'merge_gate',
+  'eval',
   'long_running',
   'concierge_idle',
   'concierge_open',

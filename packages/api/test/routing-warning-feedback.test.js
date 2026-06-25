@@ -104,25 +104,6 @@ describe('AgentRouter.resolveTargetsAndIntent: routing_warnings for not-found ca
     assert.equal(result.routing_warnings[0]?.kind, 'cat_not_found', 'warning kind must be cat_not_found');
   });
 
-  it('preserves warning for breed-handle without service when another group mention matches (#826 P2)', async () => {
-    const router = buildRouter();
-
-    // "dare" (breedId: dragon-li) is registered in catRegistry but NOT in agentRegistry,
-    // so @all-dragon-li has no service-backed pattern in parseGroupMentions.
-    // When a different group mention (@thread) matches first, parseMentionsRaw generates
-    // a cat_not_found warning for @all-dragon-li. That warning must NOT be suppressed —
-    // the user should know @all-dragon-li did not route anywhere.
-    const result = await router.resolveTargetsAndIntent('@thread\n@all-dragon-li hi', 'thread-1');
-
-    const dragonWarning = result.routing_warnings.find(
-      (w) => w.kind === 'cat_not_found' && w.mention.toLowerCase().includes('dragon'),
-    );
-    assert.ok(
-      dragonWarning,
-      `expected cat_not_found warning for unroutable @all-dragon-li breed handle, got warnings: ${JSON.stringify(result.routing_warnings)}`,
-    );
-  });
-
   it('preserves warning for breed with service but all cats unavailable (#826 maintainer re-review)', async () => {
     // "antigravity" (breedId: bengal) has available:false in cat-template.json.
     // Register a service for it so it's service-backed but unavailable.

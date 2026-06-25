@@ -22,7 +22,6 @@ const CAT_LABELS: Record<string, string> = {
   spark: '缅因猫 Spark',
   gemini: '暹罗猫 Gemini',
   gemini25: '暹罗猫 Gemini 2.5',
-  dare: '狸花猫',
   antigravity: '孟加拉猫',
   'antig-opus': '孟加拉猫 Opus',
   opencode: '金渐层',

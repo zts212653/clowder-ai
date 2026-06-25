@@ -208,7 +208,7 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
               disabled={peekLoading === handle}
             >
               {isPeek ? '👁 ' : '→ '}
-              {verb} {handle}
+              {action.action === 'concierge_teleport' ? '跳过去' : '原地看'} {handle}
             </button>,
           );
         } else {

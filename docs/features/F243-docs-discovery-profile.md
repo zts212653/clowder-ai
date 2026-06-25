@@ -4,6 +4,7 @@ related_features: [F236, F186, F038]
 topics: [docs, discovery, profile, frontmatter, index, okf]
 doc_kind: spec
 created: 2026-06-17
+tips_exempt: spec-only — docs index generation not yet implemented, no user-facing capability
 ---
 
 # F243: Docs Discovery Profile — OKF-inspired metadata + generated index

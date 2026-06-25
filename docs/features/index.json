@@ -1419,8 +1419,14 @@
     {
       "id": "F236",
       "name": "Anchor-First Context 入口 — 返回侧 token 减负",
-      "status": "in-progress (Phase A+B done · Phase A/B-Eval Track-1 merged [chars/volume substrate, PR #2411] · **Track-2 [open-rate 事件模型 + `eval:anchor-first` 注册] UNBLOCKED**——shared Y-lite infra 已落 [F245 PR #2476]，可执行交接见「🎯 Track-2 实施交接」块 · Phase C spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48，保留记忆做愿景守护；**Track-2 实现可交 opus-4.6**，operator 2026-06-21) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203",
+      "status": "in-progress (Phase A+B done · **Phase A/B-Eval DONE** [Track-1 chars/volume + Track-2 open-rate + AC-E3 sunset trigger] · Phase C = cat-controlled mode（2026-06-24 pivot）：MCP-tools cat-mode V1 + cc-native spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48 愿景守护；Track-2/AC-E3 实现 opus-4.6) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203",
       "file": "F236-anchor-first-context-entry.md"
+    },
+    {
+      "id": "F237",
+      "name": "Prompt Injection Visibility",
+      "status": "done — clowder-ai#859 absorbed via cat-cafe#2505 squash `b859eb38` (2026-06-22) | **Owner**: community @mindfn + cat-cafe maintainers",
+      "file": "F237-prompt-injection-visibility.md"
     },
     {
       "id": "F238",
@@ -1455,20 +1461,26 @@
     {
       "id": "F244",
       "name": "Capability Tips System — 等待态 Knowledge Feed 投影",
-      "status": "in-progress | **Owner**: Maine Coon/Maine Coon | **Priority**: P1",
+      "status": "done | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **Completed**: 2026-06-22",
       "file": "F244-capability-tips-system.md"
     },
     {
       "id": "F245",
       "name": "Friction Signal Eval — 摩擦信号统一聚合（eval:friction）",
-      "status": "in-progress（Phase C PR1a + PR1b merged；shared Y-lite migration 已合入；**PR2 N-day cadence review in progress（PR #2483）**；Phase D 出口闭环待 PR2 合入后推进）| **Owner**: Maine Coon/Maine Coon (gpt52) | **Priority**: P1",
+      "status": "done | **Completed**: 2026-06-22 | **Owner**: Maine Coon/Maine Coon (gpt52; close sync @codex) | **Priority**: P1",
       "file": "F245-friction-signal-eval.md"
     },
     {
       "id": "F246",
       "name": "Approval Hub — 统一审批中心底座",
-      "status": "in-progress（Phase E: v2 adapters）| **Owner**: Ragdoll/Ragdoll (opus-46) | **Priority**: P2",
+      "status": "done（2026-06-22）| **Owner**: Ragdoll/Ragdoll (opus-46) | **Priority**: P2",
       "file": "F246-approval-hub.md"
+    },
+    {
+      "id": "F247",
+      "name": "云端猫 Family + 多 provider 接入平台",
+      "status": "active | **Owner**: Ragdoll (Ragdoll opus-47) | **Reviewer**: Maine Coon (Maine Coon codex/gpt-5.5) | **Vision Guard**: Ragdoll (opus-48) | **Priority**: P1 | **Created**: 2026-06-21",
+      "file": "F247-cloud-cat-family.md"
     }
   ]
 }

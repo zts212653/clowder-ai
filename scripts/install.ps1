@@ -34,10 +34,6 @@ function Refresh-Path {
 
 function Resolve-PnpmCommand { Resolve-ToolCommand -Name "pnpm" }
 function Invoke-Pnpm { param([string[]]$CommandArgs) Invoke-ToolCommand -Name "pnpm" -CommandArgs $CommandArgs }
-function Get-CommandOutputText {
-    param([object[]]$OutputLines)
-    return (@($OutputLines) | ForEach-Object { "$_" }) -join "`n"
-}
 function Test-PuppeteerBrowserDownloadFailure {
     param([string]$OutputText)
     return $OutputText -match "puppeteer" -and
@@ -90,7 +86,7 @@ function Invoke-PnpmInstallWithCapturedOutput {
         [switch]$SkipPuppeteerDownload
     )
 
-    $capturedOutput = @()
+    $capturedOutput = [System.Collections.Generic.List[string]]::new()
     $hadPreviousSkip = Test-Path Env:PUPPETEER_SKIP_DOWNLOAD
     $previousSkipValue = if ($hadPreviousSkip) { $env:PUPPETEER_SKIP_DOWNLOAD } else { $null }
     $previousErrorActionPreference = $ErrorActionPreference
@@ -109,6 +105,23 @@ function Invoke-PnpmInstallWithCapturedOutput {
             OutputText = "pnpm command not found"
         }
     }
+
+    # Spinner state for live progress display.
+    # Use a hashtable so ForEach-Object scriptblock mutations are visible
+    # in the outer scope (PowerShell 5.1 closes over reference types but
+    # not value types — $script:scope would also work, but a hashtable
+    # is cleaner inside a function that may be dot-sourced).
+    $spin = @{
+        Chars    = @('-', '\', '|', '/')
+        Index    = 0
+        Last     = ""
+        Line     = ""
+        CanUse   = $false
+    }
+    try {
+        [void][Console]::CursorVisible
+        $spin.CanUse = $true
+    } catch {}
 
     try {
         if ($SkipPuppeteerDownload) {
@@ -134,16 +147,77 @@ function Invoke-PnpmInstallWithCapturedOutput {
             # Stop, PowerShell 5.1 can promote benign Node 24 stderr (DEP0169)
             # into a RemoteException before we can read pnpm's exit code.
             $ErrorActionPreference = "SilentlyContinue"
-            & $pnpmCommand @CommandArgs 2>&1 | Tee-Object -Variable capturedOutput
+
+            # Instead of Tee-Object, process each line through a custom handler
+            # that captures output AND shows a live spinner for progress lines.
+            # Non-progress lines (errors, warnings, etc.) are printed normally
+            # so they remain visible on screen.
+            & $pnpmCommand @CommandArgs 2>&1 | ForEach-Object {
+                $line = "$_"
+                $capturedOutput.Add($line)
+
+                # Classify the line: is it a progress line that the spinner
+                # should display, or a real output line to print normally?
+                $isProgressLine = $line -match '^\.\.\./' -or
+                    $line -match '^packages/' -or
+                    $line -match '(?:Progress|Already|Downloaded|Resolved|Reused):'
+
+                if ($spin.CanUse -and $isProgressLine) {
+                    # Update spinner with progress info
+                    if ($line -match '^\.\.\./(.+?)(?:\s+|\$)') {
+                        $spin.Last = $Matches[1]
+                    } elseif ($line -match '^packages/(.+?)(?:\s|$)') {
+                        $spin.Last = $Matches[1]
+                    } elseif ($line -match '(?:Progress|Already|Downloaded|Resolved|Reused):\s*(.+)') {
+                        $spin.Last = $Matches[1].Trim()
+                    }
+
+                    $ch = $spin.Chars[$spin.Index % $spin.Chars.Count]
+                    $spin.Index++
+                    $display = if ($spin.Last) { $spin.Last } else { "resolving..." }
+                    if ($display.Length -gt 50) { $display = $display.Substring(0, 47) + "..." }
+                    $spin.Line = "  $ch $display"
+                    try {
+                        [Console]::SetCursorPosition(0, [Console]::CursorTop)
+                        [Console]::Write("`r$($spin.Line)" + " " * ([Math]::Max(0, 60 - $spin.Line.Length)))
+                    } catch {}
+                } else {
+                    # Non-progress line: clear spinner, print on its own line
+                    if ($spin.CanUse -and $spin.Line) {
+                        try {
+                            [Console]::SetCursorPosition(0, [Console]::CursorTop)
+                            [Console]::Write((" " * 70) + "`r")
+                        } catch {}
+                        $spin.Line = ""
+                    }
+                    Write-Host "  $line"
+                }
+            }
+
+            # Clear the progress line after pnpm finishes
+            if ($spin.CanUse -and $spin.Line) {
+                try {
+                    [Console]::SetCursorPosition(0, [Console]::CursorTop)
+                    [Console]::Write((" " * 70) + "`r")
+                } catch {}
+            }
+
             return [pscustomobject]@{
                 Ok = $global:LASTEXITCODE -eq 0
                 ErrorRecord = $null
-                OutputText = Get-CommandOutputText -OutputLines $capturedOutput
+                OutputText = $capturedOutput -join "`n"
             }
         } catch {
+            # Clear progress line on error too
+            if ($spin.CanUse -and $spin.Line) {
+                try {
+                    [Console]::SetCursorPosition(0, [Console]::CursorTop)
+                    [Console]::Write((" " * 70) + "`r")
+                } catch {}
+            }
             # Two distinct scenarios reach this catch:
-            #   (a) pnpm actually ran, exited 0, and only the 2>&1 | Tee-Object
-            #       pipeline threw (e.g. Node 24 DEP0169 deprecation on stderr
+            #   (a) pnpm actually ran, exited 0, and only the 2>&1 pipeline
+            #       threw (e.g. Node 24 DEP0169 deprecation on stderr
             #       under $ErrorActionPreference=Stop). $global:LASTEXITCODE is
             #       now 0 and we should treat this as success.
             #   (b) pnpm itself failed before producing an exit code, or the
@@ -154,13 +228,13 @@ function Invoke-PnpmInstallWithCapturedOutput {
                 return [pscustomobject]@{
                     Ok = $true
                     ErrorRecord = $null
-                    OutputText = Get-CommandOutputText -OutputLines ($capturedOutput + @($_))
+                    OutputText = ($capturedOutput + @("$_")) -join "`n"
                 }
             }
             return [pscustomobject]@{
                 Ok = $false
                 ErrorRecord = $_
-                OutputText = Get-CommandOutputText -OutputLines ($capturedOutput + @($_))
+                OutputText = ($capturedOutput + @("$_")) -join "`n"
             }
         }
     } finally {
@@ -494,6 +568,16 @@ if (-not $frozenInstallResult.Ok) {
         }
         if (-not $plainInstallResult.Ok) {
             Exit-InstallerIfCancelled -ErrorRecord $plainInstallResult.ErrorRecord -Context "pnpm install"
+            # Re-emit captured pnpm output so the user can see the real error
+            if ($plainInstallResult.OutputText) {
+                Write-Host ""
+                Write-Host "  --- pnpm output ---" -ForegroundColor DarkGray
+                $plainInstallResult.OutputText -split "`n" | ForEach-Object {
+                    Write-Host "  $_" -ForegroundColor DarkGray
+                }
+                Write-Host "  --- end pnpm output ---" -ForegroundColor DarkGray
+                Write-Host ""
+            }
             Write-Err "pnpm install failed"
             exit 1
         }
@@ -504,8 +588,19 @@ if (-not $frozenInstallResult.Ok) {
         if (Test-WindowsEpermFailure -OutputText $frozenInstallResult.OutputText) {
             Write-WindowsEpermHint
         }
+        # The spinner suppresses pnpm output during the run. Re-emit it now
+        # so the user can see the actual error pnpm reported.
+        if ($frozenInstallResult.OutputText) {
+            Write-Host ""
+            Write-Host "  --- pnpm output ---" -ForegroundColor DarkGray
+            $frozenInstallResult.OutputText -split "`n" | ForEach-Object {
+                Write-Host "  $_" -ForegroundColor DarkGray
+            }
+            Write-Host "  --- end pnpm output ---" -ForegroundColor DarkGray
+            Write-Host ""
+        }
         Write-Err "pnpm install --frozen-lockfile failed"
-        Write-Err "The real error is above. This is NOT a lockfile drift issue."
+        Write-Err "See pnpm output above for the real error. This is NOT a lockfile drift issue."
         exit 1
     }
 }

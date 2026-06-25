@@ -107,7 +107,6 @@ test('F153 Phase B: parentSpan threading through call chain', async (t) => {
     'CodexAgentService.ts',
     'GeminiAgentService.ts',
     'OpenCodeAgentService.ts',
-    'DareAgentService.ts',
     'KimiAgentService.ts',
   ];
 

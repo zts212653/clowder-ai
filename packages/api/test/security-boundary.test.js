@@ -21,7 +21,6 @@ const BUILTIN_ACCOUNT_IDS = {
   openai: 'codex',
   google: 'gemini',
   kimi: 'kimi',
-  dare: 'dare',
   opencode: 'opencode',
 };
 

@@ -160,7 +160,7 @@ describe('eval:a2a live verdict generator', () => {
     // mkdirSync handled in createRawArtifacts; we patch the existing file.
     const original = readFileSync(baseSnapshotPath, 'utf8');
     const withCounterWindow = original.replace(
-      /(  duration_hours: 24\n)/,
+      /( {2}duration_hours: 24\n)/,
       '$1\ncounter_window:\n  start_ms: 1779512800000\n  end_ms: 1779516400000\n  duration_hours: 1\n',
     );
     writeFileSync(baseSnapshotPath, withCounterWindow);

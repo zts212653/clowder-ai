@@ -21,7 +21,14 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
    * Builds a Fastify app with threadStore.list() returning multiple threads,
    * each containing messages with rich blocks to produce varied artifacts.
    */
-  async function makeApp({ threads = [], threadMessages = {}, threadTasks = {}, threadMemory = {} } = {}) {
+  async function makeApp({
+    threads = [],
+    threadMessages = {},
+    threadTasks = {},
+    threadMemory = {},
+    sessionChainStore,
+    transcriptWriter,
+  } = {}) {
     const threadStore = {
       get: async (id) => threads.find((t) => t.id === id) ?? null,
       list: async () => threads,
@@ -37,6 +44,8 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
       taskStore: {
         listByThread: async (threadId) => threadTasks[threadId] ?? [],
       },
+      ...(sessionChainStore ? { sessionChainStore } : {}),
+      ...(transcriptWriter ? { transcriptWriter } : {}),
     });
     return a;
   }
@@ -236,5 +245,25 @@ describe('GET /api/artifacts — server-side query params (F232 Phase B)', () =>
     const body = JSON.parse(res.body);
     assert.equal(body.artifacts.length, 1, 'should find the null-catId artifact');
     assert.equal(body.artifacts[0].catId, null);
+  });
+
+  it('does not scan live session chains for the global artifacts endpoint', async () => {
+    let chainCalls = 0;
+    app = await makeApp({
+      threads: [T1, T2],
+      threadMessages: { T1: messagesT1, T2: messagesT2 },
+      sessionChainStore: {
+        getChainByThread: async () => {
+          chainCalls += 1;
+          return [];
+        },
+      },
+      transcriptWriter: {
+        getFilesTouched: () => [],
+      },
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/artifacts', headers: AUTH });
+    assert.equal(res.statusCode, 200);
+    assert.equal(chainCalls, 0, 'global artifacts endpoint should not scan live session chains per thread');
   });
 });

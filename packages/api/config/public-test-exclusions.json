@@ -17,7 +17,7 @@
       "reason": "Fault-drill stress coverage is too heavy for the public gate and stays in internal validation.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-23"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "task-progress-store",
@@ -53,7 +53,7 @@
       "reason": "Persistence fault drills are heavyweight stress scenarios reserved for internal validation.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-23"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "cursor-store-atomicity",
@@ -69,24 +69,6 @@
       "match": "workflow-sop-store",
       "category": "source_only",
       "reason": "Workflow SOP store tests rely on internal governance persistence surfaces excluded from the public gate.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
-    },
-    {
-      "id": "dare-agent-service",
-      "match": "dare-agent-service",
-      "category": "source_only",
-      "reason": "DARE agent service coverage is internal-only agent runtime behavior, not public gate surface.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
-    },
-    {
-      "id": "dare-l1-acceptance",
-      "match": "dare-l1-acceptance",
-      "category": "source_only",
-      "reason": "DARE L1 acceptance exercises internal harness scenarios not exported publicly.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-06-30"
@@ -260,7 +242,7 @@
       "reason": "Process liveness probe timing is too contention-sensitive for the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-23"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "expedition-bootstrap",
@@ -332,7 +314,7 @@
       "reason": "Managed MCP path realignment currently fails in public gate and must be tracked as a real product regression.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-23"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "antigravity-run-command-executor",
@@ -341,7 +323,7 @@
       "reason": "Antigravity run-command executor timing is unstable on CI and remains out of the public gate until hardened.",
       "owner": "@zts212653",
       "introducedBy": "0340783c6",
-      "expiresOn": "2026-06-23"
+      "expiresOn": "2026-06-30"
     },
     {
       "id": "f203-phase-i-opencode-l0",

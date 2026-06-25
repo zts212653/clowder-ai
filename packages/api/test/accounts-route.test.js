@@ -361,7 +361,7 @@ describe('accounts routes', () => {
     }
   });
 
-  it('GET /api/accounts returns correct client for non-standard builtins (dare/opencode)', async () => {
+  it('GET /api/accounts returns correct client for non-standard builtins (opencode)', async () => {
     const { writeCatalogAccount } = await import('../dist/config/catalog-accounts.js');
     const Fastify = (await import('fastify')).default;
     const { accountsRoutes } = await import('../dist/routes/accounts.js');
@@ -382,7 +382,6 @@ describe('accounts routes', () => {
 
       // Write builtin accounts — protocol derived at runtime, not stored
       writeCatalogAccount(projectDir, 'claude', { authType: 'oauth', models: ['m1'] });
-      writeCatalogAccount(projectDir, 'dare', { authType: 'oauth', models: ['glm'] });
       writeCatalogAccount(projectDir, 'opencode', { authType: 'oauth', models: ['m2'] });
 
       const res = await app.inject({
@@ -395,9 +394,6 @@ describe('accounts routes', () => {
 
       const claude = providers.find((p) => p.id === 'claude');
       assert.equal(claude.clientId, 'anthropic', 'claude builtin clientId should be protocol (anthropic)');
-
-      const dare = providers.find((p) => p.id === 'dare');
-      assert.equal(dare.clientId, 'dare', 'dare builtin clientId should be its own ID, not protocol');
 
       const opencode = providers.find((p) => p.id === 'opencode');
       assert.equal(opencode.clientId, 'opencode', 'opencode builtin clientId should be its own ID, not protocol');

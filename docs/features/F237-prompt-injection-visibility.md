@@ -4,12 +4,12 @@ related_features: [F203, F153, F180, F190, F199, F206]
 topics: [system-prompt, injection, visibility, console, settings, trust, governance]
 doc_kind: spec
 created: 2026-06-02
-updated: 2026-06-16
+updated: 2026-06-22
 ---
 
 # Prompt Injection Visibility
 
-> **Status**: in-progress (Phase 1 PR #859) | **Owner**: Ragdoll Opus 4.6
+> **Status**: done — clowder-ai#859 absorbed via cat-cafe#2505 squash `b859eb38` (2026-06-22) | **Owner**: community @mindfn + cat-cafe maintainers
 > **Issue**: [#839](https://github.com/zts212653/clowder-ai/issues/839)
 > **Feature ID**: F237 (assigned by maintainer; branch/PR retain original naming)
 
@@ -17,7 +17,7 @@ updated: 2026-06-16
 
 ### Motivating Example
 
-Thread `thread_mpuxhppp0vzl2y16`: opus47 was dragged off-task by a startup hook's hygiene warning, dropping a review ball. Root cause: no visibility into what's injected into agent prompts, no way to audit or prioritize competing injections.
+Thread `[thread-id]`: opus47 was dragged off-task by a startup hook's hygiene warning, dropping a review ball. Root cause: no visibility into what's injected into agent prompts, no way to audit or prioritize competing injections.
 
 ### Problem
 
@@ -136,15 +136,3 @@ Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat
 - **Related**: F153 (tracing — future observability integration)
 - **Related**: F180 (hook health/sync)
 - **Related**: F190/F199/F206 (Console settings infrastructure)
-
-## Timeline
-
-| Date | Event |
-|------|-------|
-| 2026-06-02 | Kickoff: motivating incident analysis + CVO direction |
-| 2026-06-02 | Issue #839 created, maintainer triage |
-| 2026-06-03 | CVO approved Phase 1, worktree created |
-| 2026-06-04-10 | Implementation: 6 rounds of codex local review |
-| 2026-06-11 | Gate passed (build + tsc + test + lint), PR #859 opened |
-| 2026-06-11-12 | Cloud review: 34 findings processed (1 fixed, 33 pushback) |
-| 2026-06-15 | Scope discussion with maintainer on #839 |

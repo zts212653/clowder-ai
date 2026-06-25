@@ -80,7 +80,7 @@
     {
       "path": "packages/api/src/domains/cats/services/stores/redis-keys",
       "owner": "opus",
-      "reason": "redis-keys 27 files; each store has a dedicated key-builder module. Parallels stores/ports and stores/redis growth. Pending F23 follow-up sub-split by domain (proposal/community/session).",
+      "reason": "redis-keys 27 files；每个 store 一个专属 key-builder 模块，与 stores/ports 和 stores/redis 同源增长。待 F23 follow-up 按 proposal/community/session 子域拆分。",
       "expiresAt": "2026-07-15",
       "ticket": "F23-followup"
     }

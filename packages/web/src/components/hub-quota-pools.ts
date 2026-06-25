@@ -25,7 +25,6 @@ const BUILTIN_CLIENT_LABELS: Record<BuiltinAccountClient, string> = {
   openai: 'Codex',
   google: 'Gemini',
   kimi: 'Kimi',
-  dare: 'Dare',
   opencode: 'OpenCode',
   acp: 'ACP',
 };
@@ -48,8 +47,6 @@ function fallbackAccountRef(cat: CatData): string | null {
       return 'gemini';
     case 'kimi':
       return 'kimi';
-    case 'dare':
-      return 'dare';
     case 'opencode':
       return 'opencode';
     default:
@@ -92,8 +89,6 @@ function builtinEmptyText(accountId: string): string {
       return '暂无数据（需 ClaudeBar 推送）';
     case 'kimi':
       return '默认通过 Kimi CLI /usage 获取；如需 API 降级，配置 KIMI_QUOTA_API_FALLBACK_ENABLED=1 与 KIMI_AUTH_TOKEN';
-    case 'dare':
-      return 'Dare 不单独上报官方额度，实际额度取决于绑定账号';
     case 'opencode':
       return 'OpenCode 不单独上报官方额度，实际额度取决于绑定账号';
     default:
@@ -144,7 +139,7 @@ export function buildAccountQuotaGroups(
     {
       id: 'builtin',
       title: 'OAuth 账号额度（按账号配置）',
-      description: 'OAuth 账号包括 Claude / Codex / Gemini / Kimi / Dare / OpenCode，每个账号下方反向显示绑定成员。',
+      description: 'OAuth 账号包括 Claude / Codex / Gemini / Kimi / OpenCode，每个账号下方反向显示绑定成员。',
       pools: builtinPools,
     },
     {
