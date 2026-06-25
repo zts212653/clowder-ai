@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
@@ -1573,6 +1573,71 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
         `activation must not replace user-owned ${provider} conflict`,
       );
     }
+  });
+
+  it('does not fail plugin skill activation when an existing managed mount already works', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-existing-mount-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'my-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+
+    const claudeLink = join(projectRoot, '.claude', 'skills', 'my-skill');
+    mkdirSync(dirname(claudeLink), { recursive: true });
+    symlinkSync(relative(dirname(claudeLink), skillSourceDir), claudeLink);
+    const codexConflict = join(projectRoot, '.codex', 'skills', 'my-skill');
+    mkdirSync(codexConflict, { recursive: true });
+    writeFileSync(join(codexConflict, 'user-file.md'), 'user content');
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, '.cat-cafe', 'capabilities.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          capabilities: [],
+          mountRules: [
+            { name: 'claude', path: '.claude/skills', enabled: true },
+            { name: 'codex', path: '.codex/skills', enabled: true },
+            { name: 'gemini', path: '.gemini/skills', enabled: false },
+            { name: 'kimi', path: '.kimi/skills', enabled: false },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/my-skill' }],
+    };
+
+    const result = await activator.enablePlugin(manifest);
+
+    assert.equal(result.status, 'success', 'existing managed mount means this is not an all-conflict failure');
+    assert.equal(result.resources?.find((r) => r.type === 'skill')?.ok, true);
+    assert.equal(persisted.capabilities[0].enabled, true);
+    assert.equal(
+      existsSync(join(codexConflict, 'user-file.md')),
+      true,
+      'activation must preserve conflicting user dir',
+    );
   });
 
   it('P2-1: rollback cleans up custom mount alias symlinks (not just standard providers)', async () => {

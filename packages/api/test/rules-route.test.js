@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Fastify from 'fastify';
 
-const { isLegacySkillProjectPath, readL0Prompts, loadAvailableCatsForL0, readRulesPayload } = await import(
+const { isLegacySkillProjectPath, readL0Prompts, loadAvailableCatsForL0, readRulesPayload, rulesRoutes } = await import(
   '../dist/routes/rules.js'
 );
 
@@ -58,6 +59,56 @@ describe('rules route data sources', () => {
     assert.equal(isLegacySkillProjectPath('/Volumes/project', roots), true);
     assert.equal(isLegacySkillProjectPath('/opt/private-project', roots), false);
     assert.equal(isLegacySkillProjectPath('/srv/private-project', roots), false);
+  });
+
+  it('previews project-local plugin skill source from selected projectPath', async () => {
+    const projectRoot = join(tmpdir(), `rules-plugin-preview-${process.pid}-${Date.now()}`);
+    const pluginId = 'preview-plugin';
+    const skillName = 'preview-skill';
+    const skillsSource = join(projectRoot, 'plugins', pluginId, 'skills');
+    const skillDir = join(skillsSource, skillName);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), '# Project Plugin Preview\n');
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    writeFileSync(
+      join(projectRoot, '.cat-cafe', 'capabilities.json'),
+      JSON.stringify(
+        {
+          version: 2,
+          capabilities: [
+            {
+              id: skillName,
+              type: 'skill',
+              enabled: true,
+              source: 'cat-cafe',
+              pluginId,
+              skillsSource: relative(projectRoot, skillsSource),
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+    const app = Fastify();
+    await app.register(rulesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/rules/skill/${skillName}?projectPath=${encodeURIComponent(projectRoot)}`,
+        headers: { 'x-cat-cafe-user': 'test-user' },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = res.json();
+      assert.match(body.content, /Project Plugin Preview/);
+      assert.equal(body.path, realpathSync(join(skillDir, 'SKILL.md')));
+    } finally {
+      await app.close();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 

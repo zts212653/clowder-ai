@@ -1,16 +1,21 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import {
   type CapabilitiesConfig,
   type CapabilityEntry,
   type ILimbNode,
+  type MountRules,
   type PluginManifest,
   type PluginResourceDef,
+  STANDARD_MOUNT_POINT_IDS,
 } from '@cat-cafe/shared';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import { addSkill, removeSkill } from '../../skills/skill-manage.js';
+import { classifyMountPath } from '../../skills/skill-sync-engine.js';
+import { buildSkillMountTargets } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -91,6 +96,29 @@ export async function assertPluginResourceInsideRoot(
   if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`${label} must resolve inside plugin root ${pluginRootReal}: ${resourceReal}`);
   }
+}
+
+async function countExistingManagedSkillMounts(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+): Promise<number> {
+  const mountDirs = [
+    ...STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled).map((id) =>
+      join(projectRoot, mountRules.mountPoints[id].path),
+    ),
+    ...buildSkillMountTargets(projectRoot, homedir(), mountRules)
+      .filter((target) => target.kind === 'custom')
+      .flatMap((target) => target.candidates),
+  ];
+
+  const managedStatuses = await Promise.all(
+    mountDirs.map(
+      async (mountDir) => (await classifyMountPath(join(mountDir, skillName), skillsSource, skillName)) === 'managed',
+    ),
+  );
+  return managedStatuses.filter(Boolean).length;
 }
 
 function fallbackScheduleTaskId(manifestId: string, resourceName?: string): string | undefined {
@@ -300,7 +328,11 @@ export class PluginResourceActivator {
           writeCapabilities: this.deps.writeCapabilities,
         },
       });
-      if (result.mounted.length === 0 && result.conflicts.length > 0) {
+      const existingManagedCount =
+        result.mounted.length === 0 && result.conflicts.length > 0
+          ? await countExistingManagedSkillMounts(projectRoot, skillName, skillsSource, mountRules)
+          : 0;
+      if (result.mounted.length === 0 && existingManagedCount === 0 && result.conflicts.length > 0) {
         await this.deps.writeCapabilities(structuredClone(previousConfig ?? { version: 1, capabilities: [] }));
         const conflictPaths = result.conflicts.map((conflict) => conflict.path).join(', ');
         throw new Error(`All skill mount points conflict for plugin skill '${capId}': ${conflictPaths}`);

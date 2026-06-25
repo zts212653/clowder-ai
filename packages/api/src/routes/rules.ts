@@ -271,11 +271,11 @@ async function findSkillPath(root: string, name: string, projectPath?: string): 
   }
   // Fallback: check plugin skill source directories from capabilities config
   try {
-    const config = await readCapabilitiesConfig(root);
+    const config = await readCapabilitiesConfig(projectRoot);
     if (config) {
       for (const cap of config.capabilities) {
         if (cap.type === 'skill' && cap.pluginId && cap.id === name && cap.skillsSource) {
-          const pluginCandidate = join(root, cap.skillsSource, name, 'SKILL.md');
+          const pluginCandidate = join(projectRoot, cap.skillsSource, name, 'SKILL.md');
           if (existsSync(pluginCandidate)) return pluginCandidate;
         }
       }
