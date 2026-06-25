@@ -142,7 +142,9 @@ Phase 1 delivered visibility — operators can see what's injected. Phase 2 make
 - **M1-M2** (transport-layer): deliberately outside content pipeline to preserve the produced-vs-delivered boundary
 
 **Out of Phase 2/3 scope:**
-- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline — will be tracked and iterated independently
+- **H1-H3** (Claude Code hooks): completely different injection system (`.claude/hooks/` shell scripts triggered by Claude Code lifecycle events — SessionStart, PostCompact, SessionStop). Injection via event stdout → tool_result, not content pipeline. H3 explicitly "不进 model prompt". These are managed by Claude Code's hook infrastructure, not Cat Cafe's content pipeline — tracked separately as **F237-H** (to be filed as issue; dependency: Phase 2 delivers trace infrastructure that H1-H3 observability can reuse)
+
+> **Scope note:** The original motivating incident (opus47 dragged off-task by startup hook) may involve H1 (SessionStart hook). Phase 2 addresses Cat Cafe content pipeline visibility (49/52 segments). If the incident trigger was an H1-H3 hook, full closure requires F237-H delivery. Phase 2's trace schema and persistence layer are designed to be reusable by F237-H
 
 ### Why Hook Pipeline
 
@@ -236,7 +238,7 @@ These segments follow the condition → content → inject pattern and benefit f
 
 Why these segments unify:
 - **S1-S13, D1-D21** (34): original `if/push` patterns in `SystemPromptBuilder.ts` — the core use case
-- **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. The L0 compiler is refactored to consume pipeline output rather than independently loading templates
+- **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. The L0 compiler's content source is refactored: instead of independently loading template files, it consumes pipeline-produced output for L1-L7. The delivery mechanism (`--system-prompt-file`, native L0 channel) is preserved unchanged
 - **B1** (1): session bootstrap — condition (new session?) → content. Joins `session-init`
 - **C1** (1): MCP callback — condition (MCP available?) → content. Existing `.local` overlay migrates to override store. Joins `session-init`
 - **R1-R2** (2): route assembly — condition → content at route layer. Joins `per-turn`
@@ -281,10 +283,13 @@ resolver: D5PingPongResolver               # code resolver class name (optional)
 inputs:
   - pingPongWarning                        # field name on AssemblerInput
 
+# Override constraints
+disableable: true                          # false = override store rejects disable (S1, D8, L1-L7 etc.)
+
 # Classification (Phase 1 3-axis, carried forward)
-safetyTier: limited-edit
+safetyTier: limited-edit                   # readonly | limited-edit | editable — gates template override
 transparencyTier: visible-by-default
-governanceTier: human-gated
+governanceTier: human-gated                # immutable | human-gated | auto-eval-eligible — gates version override
 
 # CVO-facing
 userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
@@ -300,7 +305,7 @@ userExplanation: "当两只猫连续互传 ≥2 轮时警告，避免死循环"
 - `resolver` — optional TypeScript class that evaluates condition and prepares template variables. Hooks without a resolver are unconditional (always fire when stage fires)
 - `inputs` — declares which `AssemblerInput` fields the resolver reads. Enables dependency analysis and makes each hook's data requirements explicit
 
-**Migration from Phase 1:** Each of the 46 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For L1-L7, the existing template files (`l1-parallel-world.md` etc.) become hook templates and the L0 compiler is refactored to consume pipeline output. For B1/C1/R1-R2/N1, resolvers wrap existing execution logic. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 3 observe-only segments (N2, M1-M2) are not migrated into the hook directory. (H1-H3 are out of Phase 2 scope.)
+**Migration from Phase 1:** Each of the 46 pipelined segments becomes a `hook.yaml` + its existing template file. For S/D segments, the resolver code is extracted from the inline `if/push` pattern. For L1-L7, the existing template files (`l1-parallel-world.md` etc.) become hook templates; the L0 compiler's content source switches from direct template loading to pipeline-produced output (delivery channel unchanged). For B1/C1/R1-R2/N1, resolvers wrap existing execution logic. Zero content change, zero behavior change — same transformation principle as Phase 1's template extraction. The 3 observe-only segments (N2, M1-M2) are not migrated into the hook directory. (H1-H3 are out of Phase 2 scope.)
 
 ### HookRegistry — Scan, Register, Resolve
 
@@ -362,7 +367,15 @@ Effective state = runtime override ?? manifest baseline
 - **Runtime override** is the user's workspace — operators can disable hooks they don't want, edit templates to customize behavior, switch versions. Auto-eval (Phase 3) writes to the same override layer. Override and auto-eval use the same mechanism; there's no distinction between manual and automated customization.
 - **Package-install users** never touch git. Their entire interaction is through runtime overrides on top of the shipped baseline.
 
-**Safety boundary:** Phase 1's `safetyTier` constrains which hooks accept template overrides — `readonly` hooks (49/52) reject template writes, `limited-edit` and `editable` hooks (3/52) accept them. Enable/disable override is allowed for all hooks regardless of safety tier (disabling a hook doesn't alter its content, just silences it).
+**Safety boundary — three override constraints:**
+
+| Override type | Gated by | Rule |
+|---------------|----------|------|
+| **Template edit** | `safetyTier` | `readonly` (49/52) reject, `limited-edit` / `editable` (3/52) accept |
+| **Enable/disable** | `disableable` | `disableable: false` hooks (identity, safety, routing constraints) reject disable override; `disableable: true` hooks accept |
+| **Version switch** | `governanceTier` | `immutable` hooks reject version override; `human-gated` / `auto-eval-eligible` accept |
+
+The override store validates all three constraints before accepting a write. Attempting to disable a `disableable: false` hook (e.g., S1 identity, D8 ball ownership, L1-L7 core rules) returns an error with the constraint violation.
 
 **Runtime override store:**
 
@@ -371,7 +384,11 @@ interface HookOverrideStore {
   /** Get override for a hook (null = use baseline) */
   getOverride(hookId: string): HookOverride | null;
   
-  /** Set override (operator or auto-eval) */
+  /** Set override (operator or auto-eval). Validates constraints:
+   *  - enabled=false rejected if manifest.disableable=false
+   *  - templateContent rejected if manifest.safetyTier='readonly'
+   *  - version rejected if manifest.governanceTier='immutable'
+   *  Throws OverrideConstraintError on violation. */
   setOverride(hookId: string, override: HookOverride): void;
   
   /** Clear override (revert to baseline) */
@@ -682,11 +699,11 @@ The resolver receives the active version and renders the corresponding template.
 
 ### What Phase 2 Does NOT Include
 
-- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Cat Cafe's content pipeline. Will be tracked and iterated independently of Phase 2/3
+- **H1-H3 Claude Code hooks** — completely different injection system (`.claude/hooks/` shell scripts, triggered by Claude Code lifecycle events, injected via event stdout → tool_result). Not part of Cat Cafe's content pipeline. Tracked as **F237-H** (separate issue to be filed). Dependency: F237-H can reuse Phase 2's trace schema and persistence layer
 - **Eval feedback loop** — automated analysis of trace data to score/iterate segments. This is Phase 3, consuming Phase 2's trace + override infrastructure
 - **Context mutation** — hooks producing side effects beyond PromptPatch (e.g., modifying session state). Future capability tier
 - **Custom user hooks** — operators can't register their own hooks yet. This requires security model design beyond Phase 2's scope
-- **L0 compiler integration** — L1-L7 remain compiled by `compile-system-prompt-l0.mjs`. Hook pipeline observes but doesn't replace the compiler
+- **L0 delivery channel modification** — the native L0 delivery mechanism (`--system-prompt-file`, provider-specific channel) is unchanged. The pipeline replaces the L0 compiler's *content source* (templates → pipeline-produced output) but preserves its *delivery path*. See L1-L7 architecture notes above
 
 ### Landing Order
 
@@ -695,7 +712,7 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 | Sub-phase | Deliverable | Tests |
 |-----------|------------|-------|
 | **P2-A: HookManifest + Registry** | Hook YAML schema for all 46 pipelined segments, directory scan, manifest parsing. Registry lists S1-S13, B1, C1, L1-L7, D1-D21, R1-R2, N1 | Schema validation tests, scan tests (following PluginRegistry test pattern) |
-| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output. L0 compiler refactored to consume pipeline output | Snapshot tests: old output === new output for all 46 hooks |
+| **P2-B: ContextAssembler + Resolvers** | Extract resolver logic: S/D from `if/push` patterns, L1-L7 from L0 compiler templates, B1/C1/R/N1 wrapping existing execution points. ContextAssembler gathers inputs. Dual-path: old code path + new pipeline produce identical output. L0 compiler content source switched from direct template loading to pipeline-produced output (delivery channel unchanged) | Snapshot tests: old output === new output for all 46 hooks. L0 compiled output equivalence test |
 | **P2-C: Pipeline Execution + Trace Adapters** | Wire HookPipeline into session-init and per-turn stages. Remove old patterns. Add Tier 2 trace adapters for N2 + M1-M2 (3 observe-only) | Integration tests: compiled output identical. Regression: all existing tests pass. Trace adapter coverage tests |
 | **P2-D: Runtime Override Store** | Redis-backed override layer (`HookOverrideStore`). Console UI: enable/disable hooks, switch versions, edit templates (safetyTier-gated). Overrides persist across restart (TTL=0). Same write API for operator and future auto-eval | Override resolution tests (override ?? baseline). Safety tier gate tests. Persistence tests |
 | **P2-E: InjectionTrace Persistence** | Dual-layer persistence (summary persistent + detail short TTL). Console trace viewer. Trace records override source (`disabledBy: 'operator'` etc.) | Trace record completeness tests. Console: can view which hooks fired per turn, who overrode what |
@@ -710,16 +727,18 @@ Phase 2 implementation in 5 sub-phases, each independently shippable:
 - [ ] AC-P2-6: `buildStaticIdentity()` and `buildInvocationContext()` delegate to HookPipeline
 - [ ] AC-P2-7: Each S/D hook execution produces TraceEvent (discriminated union: fired/skipped/disabled)
 - [ ] AC-P2-8: InjectionTraceSummary persisted per turn (persistent, TTL=0); InjectionTraceDetail persisted with configurable TTL (default 7 days)
-- [ ] AC-P2-8a: InjectionTraceSummary includes per-stage `StageDeliveryDecision` distinguishing produced vs delivered (session-init delivery = `injectSystemPrompt` decision)
+- [ ] AC-P2-8a: InjectionTraceSummary includes per-stage `StageDeliveryDecision` with channel-aware delivery truth: `message-prepend` gated by `injectSystemPrompt`, `native-l0` gated by provider native channel, `always-delivered` for per-turn/transport, `pack-only` for native L0 pack blocks
 - [ ] AC-P2-9: Console trace viewer: query which hooks fired per turn per thread
 - [ ] AC-P2-10: Hook versioning: v1→v2 switch via runtime override or manifest baseline, TraceEvent records version
-- [ ] AC-P2-11: Hook enable/disable via runtime override (any hook) or manifest baseline, TraceEvent records disabled status + source
+- [ ] AC-P2-11: Hook enable/disable via runtime override (gated by `disableable` field — `disableable: false` hooks reject disable override) or manifest baseline, TraceEvent records disabled status + source + constraint violation if attempted
 - [ ] AC-P2-12: Transport assembly (staging/contextHint/missionPrefix/M2) unchanged, not in pipeline
 - [ ] AC-P2-13: Tier 2 trace adapters emit `TraceEventObserved` for N2 + M1-M2 (3 observe-only segments)
 - [ ] AC-P2-14: Zero behavior change — compiled prompt output identical pre/post migration (with no overrides active)
+- [ ] AC-P2-14a: L0 compiled output equivalence — `compile-system-prompt-l0.mjs` output identical when consuming pipeline-produced L1-L7 content vs direct template loading
 - [ ] AC-P2-15: Runtime override store (Redis, TTL=0) with two-layer resolution: override ?? manifest baseline
 - [ ] AC-P2-16: Template override gated by safetyTier — readonly hooks reject template writes, limited-edit/editable hooks accept
 - [ ] AC-P2-17: Override audit trail: each override records source (operator/auto-eval), timestamp, reason
+- [ ] AC-P2-18: Override constraint enforcement — `setOverride` rejects: disable on `disableable: false` hooks, template edit on `safetyTier: readonly` hooks, version switch on `governanceTier: immutable` hooks. Returns `OverrideConstraintError` with violated constraint
 
 ## Upstream Strategy (Issue #839)
 
@@ -767,7 +786,7 @@ Separately accepted upstream. Not blocked by Phase 2 — can land independently 
 - Text deduplication across A2A routing sections
 - Preview accuracy improvements (native-L0 routing, pack blocks, C1 overlays)
 - Manifest documentation refinements (concrete source paths)
-- **H1-H3 Claude Code hooks** — separate tracking for observability/iteration of external hook injection system
+- **H1-H3 Claude Code hooks (F237-H)** — separate tracking for observability/iteration of external hook injection system. Reuses Phase 2 trace schema/persistence. Required to fully close original motivating incident if trigger was H1-related
 - **Phase 3: Eval Feedback Loop** — automated trace analysis, segment scoring, A/B version comparison
 - **Custom User Hooks** — operator-registered hooks with security sandboxing
 - **Context Mutation Hooks** — hooks that modify session state (requires safety model design)
