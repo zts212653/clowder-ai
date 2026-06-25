@@ -318,22 +318,31 @@ export class PluginResourceActivator {
     const capId = resourceCapId(manifest.id, resource);
     await this.deps.withCapabilityLock(async () => {
       const previousConfig = await this.deps.readCapabilities();
-      const result = await addSkill(projectRoot, skillName, skillsSource, {
-        mountRules,
-        pluginId: manifest.id,
-        capabilityId: capId,
-        skillsSource: relativeSkillsSource,
-        configStore: {
-          readCapabilities: this.deps.readCapabilities,
-          writeCapabilities: this.deps.writeCapabilities,
-        },
-      });
+      const rollbackConfig = () =>
+        this.deps.writeCapabilities(structuredClone(previousConfig ?? { version: 1, capabilities: [] }));
+      let result: Awaited<ReturnType<typeof addSkill>>;
+      try {
+        result = await addSkill(projectRoot, skillName, skillsSource, {
+          mountRules,
+          pluginId: manifest.id,
+          capabilityId: capId,
+          skillsSource: relativeSkillsSource,
+          configStore: {
+            readCapabilities: this.deps.readCapabilities,
+            writeCapabilities: this.deps.writeCapabilities,
+          },
+        });
+      } catch (err) {
+        // addSkill writes config before mounting — roll back on mount throw
+        await rollbackConfig();
+        throw err;
+      }
       const existingManagedCount =
         result.mounted.length === 0 && result.conflicts.length > 0
           ? await countExistingManagedSkillMounts(projectRoot, skillName, skillsSource, mountRules)
           : 0;
       if (result.mounted.length === 0 && existingManagedCount === 0 && result.conflicts.length > 0) {
-        await this.deps.writeCapabilities(structuredClone(previousConfig ?? { version: 1, capabilities: [] }));
+        await rollbackConfig();
         const conflictPaths = result.conflicts.map((conflict) => conflict.path).join(', ');
         throw new Error(`All skill mount points conflict for plugin skill '${capId}': ${conflictPaths}`);
       }

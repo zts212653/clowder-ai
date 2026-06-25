@@ -3,7 +3,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -1638,6 +1638,52 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
       true,
       'activation must preserve conflicting user dir',
     );
+  });
+
+  it('rolls back plugin skill config when mount operation throws (cloud review P2 round 5)', async () => {
+    // addSkill writes config BEFORE mounting (config-first). If mountSkillSymlinks throws
+    // (e.g. permission denied on mkdir), the activator must roll back config so the skill
+    // doesn't appear enabled in capabilities while having zero working mounts.
+    if (process.platform === 'win32') return; // chmod semantics differ on Windows
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-mount-throw-'));
+    const pluginsDir = join(root, 'plugins');
+    const projectRoot = join(root, 'project');
+    const skillSourceDir = join(pluginsDir, 'test-plugin', 'skills', 'my-skill');
+    mkdirSync(skillSourceDir, { recursive: true });
+    writeFileSync(join(skillSourceDir, 'SKILL.md'), '# Test Skill\n');
+    mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+    // Create provider dirs as read-only (r-x) so mkdir for skills/ subdir throws EACCES
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const providerDir = join(projectRoot, `.${provider}`);
+      mkdirSync(providerDir, { recursive: true });
+      chmodSync(providerDir, 0o555);
+    }
+    let persisted = { version: 1, capabilities: [] };
+    const activator = new PluginResourceActivator({
+      resolveProjectRoot: () => projectRoot,
+      pluginsDir,
+      limbRegistry: {},
+      readCapabilities: async () => structuredClone(persisted),
+      writeCapabilities: async (config) => {
+        persisted = structuredClone(config);
+      },
+      withCapabilityLock: async (fn) => fn(),
+    });
+    const manifest = {
+      id: 'test-plugin',
+      name: 'Test Plugin',
+      version: '1.0.0',
+      builtin: false,
+      config: [],
+      resources: [{ type: 'skill', path: 'skills/my-skill' }],
+    };
+    const result = await activator.enablePlugin(manifest);
+    assert.equal(result.status, 'failed', 'mount throw should cause activation failure');
+    assert.deepEqual(persisted.capabilities, [], 'config must be rolled back on mount throw');
+    // Cleanup: restore permissions before temp dir cleanup
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      chmodSync(join(projectRoot, `.${provider}`), 0o755);
+    }
   });
 
   it('P2-1: rollback cleans up custom mount alias symlinks (not just standard providers)', async () => {
