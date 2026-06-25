@@ -85,7 +85,7 @@ The desktop installer bundles the app runtime, portable Node.js, and Redis, so r
 
 ### Option B: Source Setup
 
-**Prerequisites:** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git
+**Prerequisites:** [Node.js 24+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(optional — use `--memory` to skip)* · Git
 
 ```bash
 # 1. Clone

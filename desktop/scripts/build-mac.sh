@@ -111,8 +111,8 @@ bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"
 # matches the bundled runtime. Same rationale as the Windows build.
 BUILD_NODE_VERSION="$(node --version 2>/dev/null || echo '')"
 if [[ -z "$BUILD_NODE_VERSION" ]]; then
-  warn "node not on PATH; defaulting to v22.12.0"
-  BUILD_NODE_VERSION="v22.12.0"
+  warn "node not on PATH; defaulting to v24.16.0"
+  BUILD_NODE_VERSION="v24.16.0"
 fi
 BUILD_NODE_MAJOR="${BUILD_NODE_VERSION#v}"
 BUILD_NODE_MAJOR="${BUILD_NODE_MAJOR%%.*}"

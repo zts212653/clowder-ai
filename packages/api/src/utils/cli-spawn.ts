@@ -959,7 +959,7 @@ function defaultSpawn(
   // managers (nvm/fnm/Volta). CLI shims use `#!/usr/bin/env node`, so the
   // child process must be able to find `node` in its PATH. Prepend the
   // directory containing the resolved CLI binary — it typically sits next
-  // to the `node` binary that installed it (e.g. ~/.nvm/versions/node/v20/bin/).
+  // to the `node` binary that installed it (e.g. ~/.nvm/versions/node/v24/bin/).
   const env = { ...options.env };
   if (isAbsolute(command)) {
     const binDir = dirname(command);
