@@ -8,6 +8,7 @@ import { LimbLeaseManager } from '../dist/domains/limb/LimbLeaseManager.js';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../dist/domains/limb/limb-yaml-loader.js';
 import { PluginLimbAdapter } from '../dist/domains/limb/PluginLimbAdapter.js';
+import { createWeixinMpHandlers } from '../dist/plugins/weixin-mp/index.js';
 
 const WEIXIN_MP_LIMB_PATH = fileURLToPath(new URL('../src/plugins/weixin-mp/limbs/weixin-mp.yml', import.meta.url));
 
@@ -99,5 +100,49 @@ describe('PluginLimbAdapter (weixin-mp)', () => {
     assert.equal(decl.commands['weixin_mp.check_status']?.type, 'invoke');
     assert.equal(decl.commands['weixin_mp.list_drafts']?.type, 'rest');
     assert.equal(decl.commands['weixin_mp.list_drafts']?.endpoint, '/draft/batchget');
+  });
+
+  it('refreshes upload tokens after WeChat token-expired errors', async () => {
+    const declaration = loadLimbDeclaration(WEIXIN_MP_LIMB_PATH);
+    const uploadUrls = [];
+    let tokenCalls = 0;
+    let invalidateCalls = 0;
+    const handlers = createWeixinMpHandlers({
+      fetchExternalUrlPinned: async () => ({
+        contentType: 'image/png',
+        body: Buffer.from('png'),
+      }),
+      uploadFormData: async (url) => {
+        uploadUrls.push(url);
+        if (uploadUrls.length === 1) {
+          return { errcode: 40001, errmsg: 'invalid credential' };
+        }
+        return { errcode: 0, url: 'https://mmbiz.qpic.cn/fresh.png' };
+      },
+    });
+    const adapter = new PluginLimbAdapter({
+      declaration,
+      pluginConfig: { WEIXIN_MP_APP_ID: 'id', WEIXIN_MP_APP_SECRET: 'secret' },
+      handlers,
+    });
+    adapter.tokenManager = {
+      getAccessToken: async () => {
+        tokenCalls += 1;
+        return tokenCalls === 1 ? 'stale-token' : 'fresh-token';
+      },
+      invalidateAccessToken: async () => {
+        invalidateCalls += 1;
+      },
+      isTokenExpiredError: (code) => code === 40001,
+    };
+
+    const result = await adapter.invoke('weixin_mp.upload_image', { imageUrl: 'https://example.com/image.png' });
+
+    assert.equal(result.success, true, result.error);
+    assert.deepEqual(result.data, { url: 'https://mmbiz.qpic.cn/fresh.png' });
+    assert.equal(invalidateCalls, 1);
+    assert.equal(tokenCalls, 2);
+    assert.match(uploadUrls[0], /access_token=stale-token/);
+    assert.match(uploadUrls[1], /access_token=fresh-token/);
   });
 });

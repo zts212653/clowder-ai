@@ -5,5 +5,5 @@
  * TypeScript handler implementations. Generic limb framework lives
  * in `domains/limb/`.
  */
-export { weixinMpHandlers } from './handlers.js';
+export { createWeixinMpHandlers, weixinMpHandlers } from './handlers.js';
 export { markdownToWxHtml } from './markdown-to-wx-html.js';

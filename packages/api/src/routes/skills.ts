@@ -271,7 +271,9 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     );
     await Promise.all(
       pluginCaps.map(async (cap) => {
-        const src = join(repoRoot, cap.skillsSource!);
+        const skillsSource = cap.skillsSource;
+        if (!skillsSource) return;
+        const src = resolve(projectRoot, skillsSource);
         const [claude, codex, gemini, kimi] = await Promise.all([
           isSkillMountedAtPoint(mountPointDirCandidates.claude, src, cap.id, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.codex, src, cap.id, mainSkillsSrc),

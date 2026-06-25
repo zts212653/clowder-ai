@@ -909,6 +909,67 @@ describe('Skills Route', () => {
     }
   });
 
+  it('GET /api/skills resolves project-local plugin skillsSource against selected project', async () => {
+    const rawProjectDir = join('/tmp', `skills-route-test-project-plugin-source-${Date.now()}`);
+    await mkdir(rawProjectDir, { recursive: true });
+    const projectDir = await realpath(rawProjectDir);
+    const pluginId = 'test-project-local-source-plugin';
+    const skillName = 'project-local-source-skill';
+    const skillsSource = join(projectDir, 'plugins', pluginId, 'skills');
+    const skillSourceDir = join(skillsSource, skillName);
+
+    await mkdir(skillSourceDir, { recursive: true });
+    await writeFile(join(skillSourceDir, 'SKILL.md'), '# Project Local Source Skill\n');
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const skillsDir = join(projectDir, `.${provider}`, 'skills');
+      const linkPath = join(skillsDir, skillName);
+      await mkdir(skillsDir, { recursive: true });
+      await symlink(relative(dirname(linkPath), skillSourceDir), linkPath);
+    }
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+          skillsSource: relative(projectDir, skillsSource),
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.body);
+      const target = body.skills.find((skill) => skill.name === skillName);
+      assert.ok(target, 'project-local plugin skill should be listed');
+      assert.equal(target.pluginId, pluginId);
+      assert.deepEqual(target.mounts, { claude: true, codex: true, gemini: true, kimi: true });
+      assert.deepEqual(target.mountHealth, {
+        enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
+        mountedCount: 4,
+        requiredCount: 4,
+        allMounted: true,
+      });
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/sync does not remount globally disabled cat-cafe skills', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';

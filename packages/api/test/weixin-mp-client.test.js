@@ -95,4 +95,35 @@ describe('PluginRestExecutor', () => {
     assert.match(urls[0], /access_token=cached-token/);
     assert.match(urls[1], /access_token=fresh-token/);
   });
+
+  it('sends access tokens in the configured header for header auth mode', async () => {
+    const requests = [];
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url: String(url), headers: init?.headers ?? {} });
+      return { json: async () => ({ ok: true }) };
+    };
+
+    const tokenManager = {
+      getAccessToken: async () => 'header-token',
+      isTokenExpiredError: () => false,
+    };
+    const executor = new PluginRestExecutor('https://api.example.com', tokenManager, null, 'header', 'X-Plugin-Token');
+
+    const result = await executor.execute(
+      {
+        type: 'rest',
+        description: 'test',
+        params: {},
+        endpoint: '/status',
+        method: 'GET',
+      },
+      {},
+    );
+
+    assert.equal(result.success, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, 'https://api.example.com/status');
+    assert.equal(requests[0].headers['X-Plugin-Token'], 'header-token');
+    assert.equal(requests[0].headers['Content-Type'], 'application/json');
+  });
 });

@@ -41,10 +41,11 @@ export class PluginRestExecutor {
   private async doRequest(url: string, method: string, body: unknown): Promise<LimbInvokeResult> {
     const token = await this.tokenManager.getAccessToken();
     const fullUrl = this.injectToken(url, token);
+    const headers = this.buildHeaders(token);
 
     const res = await fetch(fullUrl, {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
@@ -58,6 +59,12 @@ export class PluginRestExecutor {
     if (this.tokenPlacement === 'header') return url;
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}${this.tokenParamName}=${token}`;
+  }
+
+  private buildHeaders(token: string): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.tokenPlacement === 'header') headers[this.tokenParamName] = token;
+    return headers;
   }
 
   private checkResponseError(data: Record<string, unknown>): void {
