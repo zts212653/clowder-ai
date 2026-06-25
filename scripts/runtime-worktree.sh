@@ -220,6 +220,9 @@ runtime_install_can_retry_without_frozen_lockfile() {
   # class failures justify a `pnpm install --no-frozen-lockfile` retry. Any
   # phrase added here MUST also be reflected in install.ps1 (and vice versa)
   # so Linux/macOS bash and Windows PowerShell self-heal stay symmetric.
+  # codex review (PR #2495 R2) flagged the BREAKING_CHANGE / "incompatible"
+  # gaps; AUDIT (§16e failure-mode sweep) added the remaining patterns the
+  # PowerShell helper already classifies as lockfile drift.
   grep -Eiq \
     'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_BREAKING_CHANGE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|Cannot install with .frozen-lockfile|Cannot proceed .*without the lockfile|frozen[- ]lockfile|lockfile.*(outdated|not up to date|incompatible)' \
     "$log_file"
@@ -235,7 +238,8 @@ install_runtime_dependencies() {
   install_log="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-runtime-install.XXXXXX")"
   # Wrap the pnpm pipeline in `if` so set -e + pipefail don't kill us on a
   # non-zero exit, then capture pnpm's original exit code via ${PIPESTATUS[0]}.
-  # This preserves the caller-visible exit semantics on the non-retry path;
+  # This preserves the caller-visible exit semantics on the non-retry path
+  # (regression vs the pre-PR direct `pnpm install --frozen-lockfile` call);
   # interrupts / OOM-style failures stay distinguishable from a generic exit 1.
   if env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
     pnpm -C "$RUNTIME_DIR" install --frozen-lockfile 2>&1 | tee "$install_log"; then

@@ -21,7 +21,6 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'codex',
   'gemini',
   'kimi',
-  'dare',
   'opencode',
   'anthropic',
   'openai',
@@ -30,7 +29,6 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'builtin_openai',
   'builtin_google',
   'builtin_kimi',
-  'builtin_dare',
   'builtin_opencode',
 ]);
 const INSTALLER_ACCOUNT_REFS = new Set([
@@ -38,7 +36,6 @@ const INSTALLER_ACCOUNT_REFS = new Set([
   'installer-openai',
   'installer-google',
   'installer-kimi',
-  'installer-dare',
   'installer-opencode',
   'installer-managed',
 ]);

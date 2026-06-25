@@ -74,33 +74,6 @@
       "expiresOn": "2026-06-30"
     },
     {
-      "id": "dare-agent-service",
-      "match": "dare-agent-service",
-      "category": "source_only",
-      "reason": "DARE agent service coverage is internal-only agent runtime behavior, not public gate surface.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
-    },
-    {
-      "id": "dare-l1-acceptance",
-      "match": "dare-l1-acceptance",
-      "category": "source_only",
-      "reason": "DARE L1 acceptance exercises internal harness scenarios not exported publicly.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
-    },
-    {
-      "id": "dare-smoke",
-      "match": "dare-smoke\\.test",
-      "category": "source_only",
-      "reason": "DARE smoke coverage invokes a local DARE checkout and live OpenRouter model, so it stays outside the public PR gate.",
-      "owner": "@zts212653",
-      "introducedBy": "clowder-1006-outbound",
-      "expiresOn": "2026-06-30"
-    },
-    {
       "id": "codex-agent-service",
       "match": "codex-agent-service",
       "category": "source_only",

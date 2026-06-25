@@ -1,0 +1,49 @@
+---
+# F244 Phase D AC-D2 — Capability Tips eval domain registration.
+#
+# Data flow (design — not yet wired):
+#   1. Web client records CapabilityTipUsageEvent in localStorage (PR-D1)
+#   2. Future: web→API telemetry rollup sends daily usage batch
+#   3. Source adapter reads rollup, produces eval traces
+#   4. Eval cat (opus-47 in capability-wakeup domain) extends verdict
+#      to include tips effectiveness signals
+#
+# Current state (Phase D):
+#   - Usage events persist in localStorage (PR-D1 ✅)
+#   - Stale/sunset check script validates sourceRef integrity (PR-D2)
+#   - Dogfood report produced from operator's 5 manual rounds (PR-D2)
+#   - enabled: false — sourceAdapter trace producer not yet wired;
+#     re-enable when web→API telemetry pipeline is built
+#
+# Why a separate domain (not extending eval:capability-wakeup):
+#   - Different signal source: tips usage events vs session trace analysis
+#   - Different cadence: tips effectiveness needs multi-week window
+#   - Different handoff target: tips → F244 owner, wakeup → F203 owner
+#   - Can share evalCat (opus-47) — domain runner, not signal source
+domainId: eval:capability-tips
+displayName: Capability Tips Effectiveness
+systemThreadId: thread_eval_capability_tips
+evalCat:
+  catId: opus-47
+  handle: "@opus47"
+  model: claude-opus-4-7
+frequency: weekly
+sourceAdapter: capability-tips-usage
+sourceRefsKind: capability-tips-usage-window
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F244
+  ownerCatId: opus
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 72
+  reevalWithinHours: 336
+fixtures: []
+enabled: false

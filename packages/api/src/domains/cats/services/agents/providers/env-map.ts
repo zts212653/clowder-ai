@@ -61,10 +61,6 @@ export const BUILTIN_ENV_MAPS: Record<string, Record<string, string>> = {
   kimi: {
     MOONSHOT_API_KEY: '${api_key}',
   },
-  dare: {
-    DARE_API_KEY: '${api_key}',
-    DARE_ENDPOINT: '${base_url}',
-  },
 };
 
 export interface EnvMapAccount {

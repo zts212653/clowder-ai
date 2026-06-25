@@ -229,7 +229,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         }}
         onCreated={handleProfileCreated}
         editProfile={editProfile}
-        initialClientId={clientId as 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode'}
+        initialClientId={clientId as 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode'}
       />
     </div>
   );

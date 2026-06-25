@@ -7,7 +7,7 @@ created: 2026-02-26
 
 # Cat Cafe Feature Roadmap
 
-> 维护者：三猫 | 最后更新：2026-06-21（F208 done, removed）
+> 维护者：三猫 | 最后更新：2026-06-22（F245 done, removed; F248 blocker narrowed）
 >
 > **规则**：只放活跃 Feature（idea/spec/in-progress/review），done 后移除。
 > 详细信息见 `docs/features/Fxxx-*.md`。
@@ -69,7 +69,6 @@ created: 2026-02-26
 | F23-followup | F23 Phase 2 — dir-size 5 个目录真拆（utils/config/providers 快线 + invocation/routes 跟 F219 协调）| in-progress | Ragdoll/Opus-4.7 | internal | [F23 § Phase 2](features/F023-directory-corrosion-defense.md) |
 | F224 | A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）| spec | Ragdoll Opus-4.8 | community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834) | [F224](features/F224-a2a-session-message-reliability.md) |
 | F226 | Presentation Surface / Demo Mode（右侧 surface 浮窗 PiP + AppShell 级 host + tear-off 快照，演示时 PPT 浮窗常驻、右侧切证据不打断）| Phase A done | Ragdoll Opus-4.8 | internal | [F226](features/F226-presentation-surface-demo-mode.md) |
-| F237 | Prompt Injection Visibility — 52 段 prompt 注入可见化、可控、可编排 | in-progress | Ragdoll Opus 4.6 | community [#839](https://github.com/zts212653/clowder-ai/issues/839) | [F237](features/F237-prompt-injection-visibility.md) |
 | F227 | Event Memory — 事件级记忆索引（拉闸记录 / 认知状态转折一等公民 + magic word 时间线 + teleport message 级跳转 + 飞轮可观测性层）| in-progress | Ragdoll Opus-4.8 | internal | [F227](features/F227-event-memory.md) |
 | F228 | Multi-Project Skill Mount Management — 多项目 / per-provider Skills 挂载管理 | spec | community @mindfn + maintainers | community [clowder-ai#760](https://github.com/zts212653/clowder-ai/pull/760) | [F228](features/F228-multi-project-skill-mount-management.md) |
 | F229 | 猫猫球前台猫 — 常驻入口 + 复合猫路由 + 用户侧记忆检索（悬浮球/桌宠、功能发现、求助分诊、金鱼的记忆、语音 loop、小模型分层）| spec | Ragdoll Fable-5 | internal (operator 愿景) + community [clowder-ai#841](https://github.com/zts212653/clowder-ai/issues/841) | [F229](features/F229-cat-ball-concierge.md) |
@@ -81,6 +80,4 @@ created: 2026-02-26
 | F241 | Agent Provider Plugin / Hostable Provider Runtime — 外部 agent runtime 以 plugin 声明式接入（新增 agentProvider 资源类型，provider 实现移出 core；不再改 ClientId union + index.ts switch）；Phase A host transport registry（F143/F161 lineage）/ B F202 agentProvider manifest / C clowder-code reference；安全边界全 host-owned（token/MCP/sandbox），F129 继承；core 安全 + merge-gate maintainer 守 | spec | community 彭潇(bouillipx) + Ragdoll家族 maintainer | community [#941](https://github.com/zts212653/clowder-ai/issues/941) | [F241](features/F241-agent-provider-plugin.md) |
 | F242 | Code Graph Layer Spike — 内生「约定层关联图」（Phase A/B spike 已落 main：convention-graph package + discovery skill + deer-flow skeleton；operator 2026-06-18 撤回 full close：仍缺猫猫认知路径 / 可用入口 / 更新或重建索引行为；进入 Phase C productization gate） | in-progress (spike done) | Maine Coon (gpt-5.5) + opus-48 design | internal | [F242](features/F242-code-graph-layer-spike.md) |
 | F243 | Docs Discovery Profile — OKF-inspired metadata + generated index（让 docs/features 从平铺文件堆变成可渐进探索的知识入口；4 Phase: stratified spike + profile draft + eval rubric → contract + lint + generator → rollout + checked-in index.md + sync gate → eval report + decisions/research 扩展 go/no-go；operator 2026-06-17 signoff；Maine Coon (gpt-5.5) co-design + R1 reviewer；F236 姊妹哲学 anchor-and-drill 调用侧 vs 文档侧；schema self-contained 供未来 consumer（F186 等是潜在候选但不绑定）；防"小猫代偿决策"反模式：抽查不可代 gate） | spec | Ragdoll (Ragdoll Opus-4.7) | internal (operator 2026-06-17) | [F243](features/F243-docs-discovery-profile.md) |
-| F244 | Capability Tips System — 等待态 Knowledge Feed 投影（家里能力 / magic words / 工作流 tips + feature tips 贡献机制；真实状态、tips、猫格表达三层分离） | spec | Maine Coon/Maine Coon | internal (operator 2026-06-18 "直接立项吧") | [F244](features/F244-capability-tips-system.md) |
-| F245 | Friction Signal Eval — 摩擦信号统一聚合（eval:friction）：猫爪感差/用户cancel/F222反馈/eval域摩擦 4 通道散落无统一视图 → 周期 rollup 聚合+分类(harness/工具/环境)+F128/code-as-harness 出口；频率可配（社区weekly/本家3天）；A聚合不搬迁 task-outcome；实证 signal 体量大（数百 invocation/天） | spec | Ragdoll/Ragdoll (opus-48) | internal (operator 2026-06-18 "需要feat你可以创建") | [F245](features/F245-friction-signal-eval.md) |
-| F246 | Approval Hub — 统一审批中心底座：operator 审批散落各 thread（F128/F225/F193），operator不在对应 thread 就看不到 → CQRS read-side index 聚合多 feature 审批项 + Hub "待审批" panel（跨 thread 可见 + 计数徽标 + 就地/跳转审批 + 过期提醒）；接入三条件 actor=operator + binary outcome + 跨 thread；v1 接 F128/F225/F193 E3；F168 sibling 不迁；push channel 独立问题 | spec | Ragdoll/Ragdoll (opus-46) | internal (operator 2026-06-20 "好耶！我同意") | [F246](features/F246-approval-hub.md) |
+| F247 | Cloud Cat Family — 多 provider 云端猫接入平台（B1a interim done 2026-06-22：cloudflared named tunnel + spike server `?token=` 单防线 + MCP annotations 显式表 + cat-cafe API hot-add via POST /api/cats + Maine Coon云端 ChatGPT Pro 实证 read + write 工具通；B1b 升级 verified auth via CF Access OAuth 待排期；Phase C avatar/bubble UX 抛光；Phase D Console 多 provider UI；Phase E npm plugin spec） | in-progress (B1a done) | Ragdoll (Ragdoll Opus-4.7) | internal (operator 2026-06-21 立项) | [F247](features/F247-cloud-cat-family.md) |

@@ -161,7 +161,10 @@ export async function buildConciergeSearchContext(
   await handleMapStore.setHandles(threadId, handles);
 
   // Build formatted context string for prompt injection
-  const lines: string[] = ['', '**搜索结果（用标记引用，如 [跳过去 R1] 或 [原地看 R1]）：**'];
+  const lines: string[] = [
+    '',
+    '**搜索结果（用标记引用：[跳过去 Rn] = 导航到该 thread；[原地看 Rn] = 预览消息内容，需要有具体 messageId）：**',
+  ];
   for (const h of handles) {
     const snippet = capped[parseInt(h.label.slice(1)) - 1]?.summary ?? '';
     const snippetPart = snippet ? ` — ${snippet.slice(0, 80)}` : '';

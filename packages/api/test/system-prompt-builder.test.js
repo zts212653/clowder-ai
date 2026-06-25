@@ -813,6 +813,22 @@ describe('SystemPromptBuilder', () => {
     assert.ok(ctx.includes('句中无效'), 'Should teach inline @ is invalid for routing');
   });
 
+  test('buildInvocationContext omits repeated A2A long anchors when native L0 is injected', async () => {
+    const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
+    const ctx = buildInvocationContext({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: ['opus'],
+      mcpAvailable: false,
+      a2aEnabled: true,
+      nativeL0Injected: true,
+    });
+    assert.ok(!ctx.includes('A2A 球权检查'), 'native L0 already carries A2A ball-ownership rules');
+    assert.ok(!ctx.includes('下一棒传球决策树'), 'native L0 already carries the full baton decision tree');
+    assert.ok(ctx.includes('当前模式：独立回答'), 'dynamic invocation mode should still be injected');
+    assert.ok(ctx.includes('你的队友'), 'dynamic teammate context should still be injected');
+  });
+
   test('F167-F AC-F1: teammate roster surfaces resolved model per cat (handle/model 解绑)', async () => {
     // KD-21: handle = identity constant; model = runtime-resolved metadata.
     // Sender must see {@mention} + defaultModel aligned —防止"云端 codex (bot)"

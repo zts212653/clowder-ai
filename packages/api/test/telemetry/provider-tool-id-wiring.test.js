@@ -1,7 +1,7 @@
 /**
  * F153 Phase J Slice J-A AC-J2: provider transformer native id pass-through tests.
  *
- * Verifies that DARE, Codex, and CatAgent provider transformers inject the
+ * Verifies that Codex and CatAgent provider transformers inject the
  * correct native tool id into AgentMessage.toolUseId and map tool result outcome
  * to the structured AgentMessage.toolResultStatus field — so the call site in
  * invoke-single-cat.ts can route tool_use/tool_result events through
@@ -9,8 +9,6 @@
  * recordToolUseSpan fallback).
  *
  * Coverage:
- * - DARE: tool.invoke / tool.result / tool.error → toolUseId lifted from
- *   data.tool_call_id; status mapped to ok / error.
  * - Codex: item.started + item.completed of type mcp_tool_call → toolUseId
  *   from item.id; status mapped from item.status (completed=ok, failed/error=error).
  * - CatAgent: stream-parser tool_use block id propagated as toolUseId on the
@@ -27,58 +25,6 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// ── DARE behavioral: tool.invoke + tool.result + tool.error ──────────
-
-const { transformDareEvent } = await import(
-  '../../dist/domains/cats/services/agents/providers/dare-event-transform.js'
-);
-
-const dareEnv = (event, data, ts = 1.0) => ({
-  schema_version: 'client-headless-event-envelope.v1',
-  ts,
-  session_id: 's',
-  run_id: 'r',
-  seq: 1,
-  event,
-  data,
-});
-
-test('F153 Phase J AC-J2 DARE: tool.invoke lifts tool_call_id to toolUseId (not toolInput)', () => {
-  const msg = transformDareEvent(
-    dareEnv('tool.invoke', { tool_name: 'web_search', tool_call_id: 'call_abc123' }),
-    'opus',
-  );
-  assert.equal(msg.type, 'tool_use');
-  assert.equal(msg.toolName, 'web_search');
-  assert.equal(msg.toolUseId, 'call_abc123', 'tool_call_id lifted to top-level toolUseId');
-  assert.equal(msg.toolInput, undefined, 'tool_call_id no longer shoved into toolInput');
-});
-
-test('F153 Phase J AC-J2 DARE: tool.result carries toolUseId + toolResultStatus=ok', () => {
-  const msg = transformDareEvent(
-    dareEnv('tool.result', { tool_name: 'web_search', tool_call_id: 'call_abc123' }),
-    'opus',
-  );
-  assert.equal(msg.type, 'tool_result');
-  assert.equal(msg.toolUseId, 'call_abc123');
-  assert.equal(msg.toolResultStatus, 'ok');
-});
-
-test('F153 Phase J AC-J2 DARE: tool.error carries toolUseId + toolResultStatus=error', () => {
-  const msg = transformDareEvent(
-    dareEnv('tool.error', { tool_name: 'web_search', tool_call_id: 'call_abc123', error: 'timeout' }),
-    'opus',
-  );
-  assert.equal(msg.type, 'tool_result');
-  assert.equal(msg.toolUseId, 'call_abc123');
-  assert.equal(msg.toolResultStatus, 'error');
-});
-
-test('F153 Phase J AC-J2 DARE: tool.invoke without tool_call_id leaves toolUseId undefined (fallback)', () => {
-  const msg = transformDareEvent(dareEnv('tool.invoke', { tool_name: 'web_search' }), 'opus');
-  assert.equal(msg.toolUseId, undefined, 'no id → no toolUseId (ToolSpanTracker falls back per KD-41)');
-});
 
 // ── Codex behavioral: item.started + item.completed of mcp_tool_call ─
 

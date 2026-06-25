@@ -670,7 +670,7 @@ export async function* routeSerial(
       // travel via the compression-immune native system role
       // (--system-prompt-file / -c) ONLY for providers that inject L0 natively
       // (ClaudeAgentService -p, ClaudeBgCarrierService, CodexAgent). Other
-      // providers (Gemini, Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…)
+      // providers (Gemini, Antigravity, CatAgent, A2A, OpenCode, Kimi…)
       // have no native L0 channel, so they MUST still receive the full static
       // identity via the user-message systemPrompt prepend — otherwise they
       // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
@@ -773,6 +773,7 @@ export async function* routeSerial(
         chainTotal: worklist.length,
         teammates,
         mcpAvailable,
+        nativeL0Injected: hasNativeL0,
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         a2aEnabled,
         ...(directMessageFrom ? { directMessageFrom } : {}),

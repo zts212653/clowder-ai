@@ -34,7 +34,7 @@ export interface PromptCapture {
 
   /**
    * The message-system / pack prompt fed via the user-message channel.
-   * For non-F203 providers (Gemini, DARE, etc.) this is the full system prompt.
+   * For non-F203 providers (Gemini, etc.) this is the full system prompt.
    * For F203 native providers (Claude / Codex) this is the pack appendix
    * delivered via `--append-system-prompt` / message body — the real system
    * role content lives in `nativeSystemPrompt`.
@@ -72,7 +72,7 @@ export interface PromptCapture {
    * The compiled L0 system prompt delivered via the provider's native
    * system-role channel — Claude `--system-prompt-file <l0Path>` or Codex
    * `-c developer_instructions=<l0_toml>`. Absent for providers that do not
-   * inject L0 natively (Gemini, DARE, CatAgent etc.). Captured best-effort:
+   * inject L0 natively (Gemini, CatAgent etc.). Captured best-effort:
    * if the L0 compile lookup fails at capture time, this field stays
    * `undefined` and a `captureDiagnostics` entry records the reason — the
    * invocation hot path is never blocked.

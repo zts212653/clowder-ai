@@ -119,6 +119,9 @@ const RAGDOLL_V1_BASE = '/concierge/skins/ragdoll-v1';
 /** yanyan-codex atlas skin base path */
 const YANYAN_CODEX_BASE = '/concierge/skins/yanyan-codex';
 
+/** xianxian-codex atlas skin base path (宪宪 video-extracted 9-state atlas) */
+const XIANXIAN_CODEX_BASE = '/concierge/skins/xianxian-codex';
+
 /** Legacy yarn-ball sprite base (pre-E0 transition sprites, 8-state direct mapping) */
 const YARN_BALL_BASE = '/concierge/sprites/ragdoll';
 
@@ -174,22 +177,24 @@ const YARN_BALL_FILENAME_OVERRIDES: Record<string, string> = {
  * Pure function: ConciergeBallState + skin → sprite info.
  *
  * - 'ragdoll-v1' (default): V0 projection → individual PNG URL (string)
- * - 'yanyan-codex': V1 projection → atlas descriptor (AtlasSpriteResult)
+ * - 'yanyan-codex': V1 projection → atlas descriptor (AtlasSpriteResult) — 砚砚
+ * - 'xianxian-codex': V1 projection → atlas descriptor (AtlasSpriteResult) — 宪宪
  * - 'yarn-ball': legacy direct mapping → sprite URL (string)
  *
  * Unknown/unmapped states fall back to idle in all paths.
  */
 export function resolvePetSprite(
   ballState: string,
-  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' = 'ragdoll-v1',
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex' = 'ragdoll-v1',
 ): PetSpriteResult {
-  // -- yanyan-codex atlas path --
-  if (skin === 'yanyan-codex') {
+  // -- atlas skins (yanyan-codex / xianxian-codex: same 9-state layout) --
+  if (skin === 'yanyan-codex' || skin === 'xianxian-codex') {
+    const base = skin === 'xianxian-codex' ? XIANXIAN_CODEX_BASE : YANYAN_CODEX_BASE;
     const petState = projectToPetState(ballState, PET_STATE_PROJECTION_V1);
     const rowConfig = YANYAN_ATLAS_ROWS[petState] ?? YANYAN_ATLAS_ROWS.idle;
     return {
       kind: 'atlas',
-      src: `${YANYAN_CODEX_BASE}/spritesheet.webp`,
+      src: `${base}/spritesheet.webp`,
       petState,
       row: rowConfig.row,
       frameCount: rowConfig.frameCount,

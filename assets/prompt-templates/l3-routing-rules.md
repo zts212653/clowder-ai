@@ -1,7 +1,3 @@
-<!-- @segment L3 — 传球三选一 + @ 路由规则 -->
-<!-- Variables: none (static content; CVO_REF injected separately) -->
-<!-- Condition: always -->
-
 **接球先问：能自决吗？（先于三选一）**
 可逆（≤1 commit 回滚）+ 不影响外部用户/数据/契约 + 不碰硬排除（愿景/权限/生产数据/production data boundary/新外部依赖/契约/显著成本）+ 能翻代码查到 → 直接做，不预先 @co-creator/拉全员；高影响可逆事后通报；做完按 SOP 传下一棒。做不了才进传球三选一。
 绕路反射：反射 @co-creator / 开新 thread / 拉全员 = 回避自决（非穷举）。最简动作能做 → 做。

@@ -12,18 +12,22 @@
  */
 
 import type {
+  ActionableFrictionCandidate,
   ClassifiedFrictionCluster,
   FrictionChannel,
   FrictionCluster,
+  FrictionFollowupDraft,
   FrictionRollupInput,
   FrictionRollupReport,
   FrictionSensorForm,
   FrictionSeverity,
+  ReferenceOnlyFrictionCluster,
 } from '@cat-cafe/shared';
 
 const SEVERITY_RANK: Record<FrictionSeverity, number> = { low: 1, medium: 2, high: 3 };
 const DEFAULT_TOP_N = 10;
 const DEFAULT_TOKEN_CAP = 4000;
+const DEFAULT_MAX_PROPOSALS = 3;
 
 /**
  * Deterministic channel → sensor-form label (F192 §8.1). Data-labeling, NOT judgment
@@ -49,6 +53,8 @@ export interface FrictionRollupReportOpts {
   topN?: number;
   /** Hard token ceiling for the serialized report (default ~4000). */
   tokenCap?: number;
+  /** Phase D: max number of actionable candidate drafts (default 3). */
+  maxProposals?: number;
 }
 
 // Upper-bound digit width for `estimated` (7 digits ≫ any realistic token estimate).
@@ -67,6 +73,44 @@ function estimateTokens(report: FrictionRollupReport): number {
   return Math.ceil(JSON.stringify(measured).length / 4);
 }
 
+function buildEvidenceRefs(cluster: FrictionCluster, predicate?: (channel: FrictionChannel) => boolean): string[] {
+  return cluster.members
+    .filter((member) => (predicate ? predicate(member.channel) : true))
+    .map((member) => member.rawRef);
+}
+
+function isReferenceOnlyCluster(cluster: FrictionCluster): boolean {
+  return cluster.channels.length > 0 && cluster.channels.every((channel) => channel === 'eval-domain');
+}
+
+function toReferenceOnlyCluster(cluster: ClassifiedFrictionCluster): ReferenceOnlyFrictionCluster {
+  return {
+    ...cluster,
+    actionability: 'reference_only',
+    evidenceRefs: buildEvidenceRefs(cluster),
+  };
+}
+
+function toFollowupDraft(cluster: ClassifiedFrictionCluster): FrictionFollowupDraft {
+  const evidenceRefs = buildEvidenceRefs(cluster, (channel) => channel !== 'eval-domain');
+  return {
+    clusterId: cluster.clusterId,
+    title: `Investigate friction cluster: ${cluster.representative}`,
+    summary: cluster.representative,
+    evidenceRefs: evidenceRefs.length > 0 ? evidenceRefs : buildEvidenceRefs(cluster),
+    reportingMode: 'final-only',
+  };
+}
+
+function toActionableCandidate(cluster: ClassifiedFrictionCluster): ActionableFrictionCandidate {
+  return {
+    ...cluster,
+    actionability: 'actionable_candidate',
+    followupDraft: toFollowupDraft(cluster),
+    referenceOnlyEvidenceRefs: buildEvidenceRefs(cluster, (channel) => channel === 'eval-domain'),
+  };
+}
+
 export function buildFrictionRollupReport(
   input: FrictionRollupInput,
   generatedAt: string,
@@ -74,6 +118,7 @@ export function buildFrictionRollupReport(
 ): FrictionRollupReport {
   const topN = opts.topN ?? DEFAULT_TOP_N;
   const tokenCap = opts.tokenCap ?? DEFAULT_TOKEN_CAP;
+  const maxProposals = opts.maxProposals ?? DEFAULT_MAX_PROPOSALS;
 
   // severity lookup: signalId → severity (cluster members carry no severity; join signals)
   const severityById = new Map<string, FrictionSeverity>();
@@ -103,6 +148,14 @@ export function buildFrictionRollupReport(
 
   const assemble = (cut: number): FrictionRollupReport => {
     const tail = ranked.slice(cut);
+    const classifiedTop = ranked.slice(0, cut).map((c) => classify(c, clusterMaxSeverity(c)));
+    const referenceOnly = classifiedTop
+      .filter((cluster) => isReferenceOnlyCluster(cluster))
+      .map(toReferenceOnlyCluster);
+    const actionableCandidates = classifiedTop
+      .filter((cluster) => !isReferenceOnlyCluster(cluster))
+      .slice(0, maxProposals)
+      .map(toActionableCandidate);
     const byChannel: Partial<Record<FrictionChannel, number>> = {};
     let tailSignalCount = 0;
     for (const c of tail) {
@@ -114,7 +167,9 @@ export function buildFrictionRollupReport(
     const report: FrictionRollupReport = {
       window: input.window,
       generatedAt,
-      topClusters: ranked.slice(0, cut).map((c) => classify(c, clusterMaxSeverity(c))),
+      topClusters: classifiedTop,
+      actionableCandidates,
+      referenceOnly,
       tailSummary: { clusterCount: tail.length, signalCount: tailSignalCount, byChannel },
       degraded: input.degraded,
       droppedChannels: input.droppedChannels,

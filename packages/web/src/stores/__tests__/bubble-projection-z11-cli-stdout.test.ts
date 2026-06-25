@@ -139,4 +139,69 @@ describe('F194 Phase Z11 — projection keeps post_message speech separate from 
     expect(messages[1]!.origin).toBe('callback');
     expect(messages[1]!.content).toBe('final speech');
   });
+
+  it('rollback compatibility: stale cached R21 split fields do not override later stream content', () => {
+    const parent = 'inv-r21-cache';
+    const turn = 'turn-r21-cache';
+    const records: ChatMessage[] = [
+      {
+        id: 'cached-r21-stream',
+        type: 'assistant',
+        catId: 'codex',
+        content: '',
+        timestamp: 1000,
+        origin: 'stream',
+        extra: {
+          stream: {
+            invocationId: parent,
+            turnInvocationId: turn,
+            cliStdout: '',
+            speechContent: 'STALE_R21_SPEECH',
+          },
+        },
+      },
+      {
+        id: 'new-stream-catchup',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'NEW_STREAM_TEXT',
+        timestamp: 2000,
+        origin: 'stream',
+        extra: { stream: { invocationId: parent, turnInvocationId: turn } },
+      },
+    ];
+
+    const { messages } = projectCanonicalBubbles({ records });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toBe('NEW_STREAM_TEXT');
+    expect(messages[0]!.extra?.stream?.cliStdout).toBeUndefined();
+    expect(messages[0]!.extra?.stream?.speechContent).toBeUndefined();
+  });
+
+  it('rollback compatibility: stale cached R21 speech remains visible when it is the only content', () => {
+    const records: ChatMessage[] = [
+      {
+        id: 'cached-r21-stream-only',
+        type: 'assistant',
+        catId: 'codex',
+        content: '',
+        timestamp: 1000,
+        origin: 'stream',
+        extra: {
+          stream: {
+            invocationId: 'inv-r21-only',
+            turnInvocationId: 'turn-r21-only',
+            cliStdout: '',
+            speechContent: 'CACHED_R21_SPEECH',
+          },
+        },
+      },
+    ];
+
+    const { messages } = projectCanonicalBubbles({ records });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toBe('CACHED_R21_SPEECH');
+    expect(messages[0]!.extra?.stream?.cliStdout).toBeUndefined();
+    expect(messages[0]!.extra?.stream?.speechContent).toBeUndefined();
+  });
 });

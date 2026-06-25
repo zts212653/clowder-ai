@@ -187,6 +187,13 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
       },
     });
     socketManager.emitToUser(record.userId, 'profile_update_proposal_created', proposal);
+    // F246: emit user-scoped proposal_created so Approval Hub badge refreshes in real-time.
+    // F128/F225/F193 already emit this; F231 was missing it (cloud review P2).
+    socketManager.emitToUser(record.userId, 'proposal_created', {
+      proposalId: proposal.proposalId,
+      status: proposal.status,
+      sourceFeatureId: 'F231',
+    });
 
     // F231 AC-C3 eval counter (KD-10)
     profileUpdateProposed.add(1, { 'agent.id': record.catId, 'signal.kind': signalKind });

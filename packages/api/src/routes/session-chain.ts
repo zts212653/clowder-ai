@@ -11,7 +11,6 @@
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
-import { providerRequiresThreadWorkspace } from '../config/account-resolver.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { RuntimeSessionMetadata } from '../domains/cats/services/runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
@@ -22,7 +21,6 @@ import type { IMessageStore } from '../domains/cats/services/stores/ports/Messag
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { canAccessThread, isSharedDefaultThread } from '../domains/guides/guide-state-access.js';
-import { validateProjectPathDetailed } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 const bindSessionSchema = z.object({
@@ -76,38 +74,6 @@ function formatRuntimeSessionSummary(metadata: RuntimeSessionMetadata): RuntimeS
     ...(metadata.lifecycle.unexpectedRuntimeSessionSwitch
       ? { unexpectedRuntimeSessionSwitch: metadata.lifecycle.unexpectedRuntimeSessionSwitch }
       : {}),
-  };
-}
-
-function buildWorkspaceFingerprint(workingDirectory: string): string {
-  return process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory;
-}
-
-function buildStoredSessionWorkspaceBinding(session: { workingDirectory?: string; workspaceFingerprint?: string }) {
-  const workspaceFingerprint =
-    session.workspaceFingerprint ??
-    (session.workingDirectory ? buildWorkspaceFingerprint(session.workingDirectory) : undefined);
-
-  return {
-    ...(session.workingDirectory ? { workingDirectory: session.workingDirectory } : {}),
-    ...(workspaceFingerprint ? { workspaceFingerprint } : {}),
-  };
-}
-
-async function buildThreadSessionWorkspaceBinding(thread: { projectPath?: string | null }, catId: CatId) {
-  const provider = catRegistry.tryGet(catId as string)?.config.clientId;
-  if (!providerRequiresThreadWorkspace(provider)) return {};
-
-  const projectPath = thread.projectPath;
-  if (!projectPath || projectPath === 'default' || projectPath.startsWith('games/')) return {};
-
-  const validatedProjectPath = await validateProjectPathDetailed(projectPath);
-  if (!validatedProjectPath.ok) return {};
-
-  const workingDirectory = validatedProjectPath.path;
-  return {
-    workingDirectory,
-    workspaceFingerprint: buildWorkspaceFingerprint(workingDirectory),
   };
 }
 
@@ -286,14 +252,8 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       }
     }
 
-    const storedWorkspaceBinding = buildStoredSessionWorkspaceBinding(session);
-    const workspaceBinding =
-      Object.keys(storedWorkspaceBinding).length > 0
-        ? storedWorkspaceBinding
-        : await buildThreadSessionWorkspaceBinding(thread, session.catId);
     const reopened = await sessionChainStore.create({
       cliSessionId: session.cliSessionId,
-      ...workspaceBinding,
       threadId: session.threadId,
       catId: session.catId,
       userId: session.userId,
@@ -370,7 +330,6 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return { error: 'Access denied' };
     }
 
-    const workspaceBinding = await buildThreadSessionWorkspaceBinding(thread, catId as CatId);
     let session;
     let mode: 'updated' | 'created';
 
@@ -378,7 +337,6 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       // Update existing active session's cliSessionId
       const updated = await sessionChainStore.update(active.id, {
         cliSessionId,
-        ...workspaceBinding,
         updatedAt: Date.now(),
       });
       if (!updated) {
@@ -391,7 +349,6 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       // No active session → create new one
       session = await sessionChainStore.create({
         cliSessionId,
-        ...workspaceBinding,
         threadId,
         catId: catId as CatId,
         userId,

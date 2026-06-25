@@ -217,3 +217,92 @@ describe('callback propose-profile-update route', () => {
     assert.equal(store.get(existingProposalId).cardMessageId, cardMessage.id);
   });
 });
+
+// F246 v2: proposal_created socket event regression (cloud review P2).
+// Ensures F231 emits the generic proposal_created event that the Approval Hub
+// listens for (useApprovalHub → cat-cafe:proposal-created CustomEvent), alongside
+// the legacy profile_update_proposal_created event.
+describe('F246 v2: proposal_created socket event for F231', () => {
+  let profileDir;
+  let app;
+  let registry;
+  let store;
+  let messageStore;
+  let emitCalls;
+
+  const seedPrimer = (content, catId = 'opus') => {
+    writeFileSync(join(profileDir, 'relationship', `${catId}-primer.md`), content, 'utf8');
+  };
+
+  const propose = async ({ userId = 'alice', catId = 'opus', threadId = 'thread_1', body }) => {
+    const { invocationId, callbackToken } = await registry.create(userId, catId, threadId);
+    return app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-profile-update',
+      headers: {
+        'x-invocation-id': invocationId,
+        'x-callback-token': callbackToken,
+        'content-type': 'application/json',
+      },
+      payload: body,
+    });
+  };
+
+  beforeEach(async () => {
+    profileDir = mkdtempSync(join(tmpdir(), 'f231-socket-'));
+    mkdirSync(join(profileDir, 'relationship'), { recursive: true });
+    const routeMod = await import('../dist/routes/callback-propose-profile-update-routes.js');
+    const RegMod = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
+    const StoreMod = await import('../dist/domains/cats/services/stores/ports/ProfileUpdateProposalStore.js');
+    const MsgMod = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const authMod = await import('../dist/routes/callback-auth-prehandler.js');
+
+    registry = new RegMod.InvocationRegistry();
+    store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    messageStore = new MsgMod.MessageStore();
+    emitCalls = [];
+    const socketManager = {
+      emitToUser(userId, event, data) {
+        emitCalls.push({ userId, event, data });
+      },
+      broadcastToRoom() {},
+    };
+    app = Fastify();
+    authMod.registerCallbackAuthHook(app, registry);
+    routeMod.registerCallbackProposeProfileUpdateRoutes(app, {
+      registry,
+      proposalStore: store,
+      messageStore,
+      socketManager,
+      profileDir,
+    });
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    rmSync(profileDir, { recursive: true, force: true });
+  });
+
+  it('emits proposal_created alongside profile_update_proposal_created', async () => {
+    seedPrimer('OLD primer');
+    const res = await propose({
+      body: { afterContent: 'NEW', rationale: 'testing socket', signalKind: 'cat-declared' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+
+    // Legacy event must still be present
+    const legacy = emitCalls.find((c) => c.event === 'profile_update_proposal_created');
+    assert.ok(legacy, 'profile_update_proposal_created event emitted');
+    assert.equal(legacy.userId, 'alice');
+
+    // F246 hub-refresh event must also be emitted
+    const hubEvent = emitCalls.find((c) => c.event === 'proposal_created');
+    assert.ok(hubEvent, 'proposal_created event emitted for Approval Hub refresh');
+    assert.equal(hubEvent.userId, 'alice');
+    assert.equal(hubEvent.data.proposalId, body.proposalId);
+    assert.equal(hubEvent.data.status, 'pending');
+    assert.equal(hubEvent.data.sourceFeatureId, 'F231');
+  });
+});

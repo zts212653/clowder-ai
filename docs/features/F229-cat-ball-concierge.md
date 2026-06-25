@@ -154,14 +154,14 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 - [ ] AC-D3: 小模型不可用时自动降级全走值班大猫（测试）→ R7
 
 ### operator UX 遗留 Bug（operator 2026-06-18/06-21 多次反馈，跨 Phase 修）
-- [ ] BUG-UX-1: Maine Coon桌宠"狗皮膏药"——球按钮底色 `var(--cafe-surface-elevated)` 实心不透明方块，应为透明底浮在页面上。operator 2026-06-18 + 2026-06-21 两次报告
-- [ ] BUG-UX-2: 调查报告 anchor 列表可读性崩溃——InvestigationReportCard 内文字一个字一个字竖排，列宽塌缩到单字符宽度。operator 2026-06-21 截图
+- [x] BUG-UX-1: Maine Coon桌宠"狗皮膏药"——球按钮底色 `var(--cafe-surface-elevated)` 实心不透明方块，应为透明底浮在页面上。operator 2026-06-18 + 2026-06-21 两次报告。**已修复**：PR #2474 merged 2026-06-21，移除实心 `backgroundColor` + `boxShadow`，改为透明 `drop-shadow` filter
+- [x] BUG-UX-2: 调查报告 anchor 列表可读性崩溃——InvestigationReportCard 内文字一个字一个字竖排，列宽塌缩到单字符宽度。operator 2026-06-21 截图。**已修复**：PR #2474 merged 2026-06-21，flex 容器加 `min-w-0` + title span 加 `truncate`
 - [x] BUG-UX-3: 面板不可拉伸——宽度写死 `w-80`(320px)，无 CSS resize handle。operator 要求可拖拽调整面板大小 + 持久化记住尺寸。operator 2026-06-18 + 2026-06-21 两次要求——**width resize PR #2474 merged 2026-06-21 + height resize PR #2481 merged 2026-06-21**
-- [ ] BUG-UX-4: 猫猫球回复中可读性差——猫签名（`[Siamese/gemini-3.5-flash🐾]`）、`@co-creator`、内部协作格式对用户可见，应在 concierge 上下文中 strip 掉或简化
-- [ ] BUG-UX-5: Maine Coon拖动困难——operator 报告"好难拖动"，拖拽交互手感差（可能是拖拽区域 vs 点击区域冲突、touchAction 设置、或 drag threshold 过大）。operator 2026-06-21
+- [x] BUG-UX-4: 猫猫球回复中可读性差——猫签名（`[Siamese/gemini-3.5-flash🐾]`）、`@co-creator`、内部协作格式对用户可见，应在 concierge 上下文中 strip 掉或简化。**已修复**：PR #2474 merged 2026-06-21，ConciergeMessageContent 渲染层 strip `[name/model🐾]` 签名 + 内部路由 mention
+- [x] BUG-UX-5: Maine Coon拖动困难——operator 报告"好难拖动"，拖拽交互手感差（可能是拖拽区域 vs 点击区域冲突、touchAction 设置、或 drag threshold 过大）。operator 2026-06-21。**已修复**：PR #2474 merged 2026-06-21，drag threshold 5→8px + 移除阻塞拖拽的 `pointerEvents:'none'`
 - [x] BUG-UX-7: 猫猫球不渲染 Markdown——值班猫回复中 Markdown 语法显示为原始文本。**已修复**：PR #2488 merged 2026-06-22，统一使用 `MarkdownContent` 组件 + `buildMdComponents(tp?)` 工厂模式，textProcessor 覆盖所有文本容器（p/strong/em/del/h1-h6/li/a/th/td），code/pre 排除。gpt52 local review 2 轮 + cloud review 0 P1/P2
 - [x] BUG-UX-8: 原地看（peek）内容无收起机制。**已修复**：同 PR #2488——re-click toggle + ✕ dismiss button
-- [ ] BUG-UX-9: 跳转动作错误显示为"原地看"——某些 `concierge_teleport` 类型的 action 在 UI 上显示为"原地看"而非"跳过去"。operator 2026-06-21 截图：三个按钮全部显示"原地看"，但其中至少一个对应的是跳转（teleport）操作。可能根因：API 侧 `verb` 字段赋值逻辑（`concierge-reply-validator.ts`）或 HandleMap 查询返回的 action type 不匹配实际 intent
+- [x] BUG-UX-9: 跳转动作错误显示为"原地看" ✅ PR #2531 修复。根因：小模型（gemini-3.5-flash）默认写 `[原地看 Rn]`，旧 `shouldSkipAction` 静默丢弃不兼容组合。修复：`resolveAction` 自动纠正 verb↔anchor 不匹配（peek→teleport / teleport→peek），前端按钮文字改用 `action.action` 显示正确动词
 
 ### Phase E（桌宠化 + 形象生态）
 - [x] AC-E0-1: PetSkinContract v0 — `conciergeState → petState` pure projection (4 states: idle/running/review/failed), shared types + `projectToPetState()` function, 10 unit tests
@@ -173,6 +173,7 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 - [x] AC-E1-3: AtlasSprite renderer — aspect-ratio-aware scaling (192×208→59×64 height-fit), CSS background-image + background-position stepping, integer display-coordinate position computation (P2 fix: avoids float rounding drift on non-square cells)
 - [x] AC-E1-4: Backward compatibility — ragdoll-v1 fallback entries for new states (running-right→running.png, waiting→idle.png, etc.), `PetSpriteResult` discriminated union (`string | AtlasSpriteResult`), 29 web + 20 shared + 5 animation unit tests
 - [x] AC-E2-1: Skin picker unlock — Settings page `皮肤` section upgraded from locked chip to 3 `RadioOption`s (`yanyan-codex` / `ragdoll-v1` / `yarn-ball`), reusing existing optimistic `updateConfig()` partial PUT flow
+- [x] AC-E1-5: xianxian-codex 9-state animated atlas — parallel `xianxian-codex` skin using same `YANYAN_ATLAS_ROWS` config + dynamic base path selection in `usePetSkin.ts`, 733KB spritesheet (1536×1872, 8×9 grid, 192×208 cells), `pet.json` manifest (ragdoll, seal bicolor, video-extraction provenance), Settings 4th radio option, API zod validator + shared type + store type aligned (6/6 consumer sites). 37 web tests (8 new). BUG-UX-6 素材升级 pipeline 首个产出
 - [x] AC-E2-2: Default skin change for unconfigured users — `CONCIERGE_CONFIG_DEFAULTS.skin` changed to `yanyan-codex`; existing TTL=0 persisted configs intentionally remain untouched and must switch via the unlocked picker
 
 ## Dependencies

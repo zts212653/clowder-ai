@@ -57,17 +57,7 @@ const cliSchema = z.object({
   effort: cliEffortSchema.nullable().optional(),
 });
 
-const clientSchema = z.enum([
-  'anthropic',
-  'openai',
-  'google',
-  'kimi',
-  'dare',
-  'antigravity',
-  'opencode',
-  'catagent',
-  'acp',
-]);
+const clientSchema = z.enum(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'catagent', 'acp']);
 
 /** F161: ACP transport config schema — matches AcpVariantConfig from cat-config-loader. */
 const acpConfigSchema = z
@@ -269,8 +259,6 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
       return { command: 'gemini', outputFormat: 'stream-json' };
     case 'kimi':
       return { command: 'kimi', outputFormat: 'stream-json' };
-    case 'dare':
-      return { command: 'dare', outputFormat: 'json' };
     case 'opencode':
       return { command: 'opencode', outputFormat: 'json' };
     case 'antigravity':

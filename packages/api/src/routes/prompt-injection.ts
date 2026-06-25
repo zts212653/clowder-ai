@@ -135,7 +135,7 @@ interface SegmentMeta {
 /** Known runtime values for template variable preview rendering */
 const KNOWN_PREVIEW_VARS: Record<string, string> = {
   RICH_BLOCK_SHORT: RICH_BLOCK_SHORT,
-  CC_MENTION: '@铲屎官',
+  CC_MENTION: '@co-creator',
 };
 
 /** Derive segment meta dynamically from TEMPLATE_FILES registry (all 49 segments) */

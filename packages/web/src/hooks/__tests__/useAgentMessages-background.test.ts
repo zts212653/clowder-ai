@@ -2068,7 +2068,7 @@ describe('background thread socket handling', () => {
   });
 
   describe('regression: background completion clears stale targetCats', () => {
-    it('codex completion clears targetCats so subsequent dare start is clean', () => {
+    it('codex completion clears targetCats so subsequent opus start is clean', () => {
       const store = useChatStore.getState();
       // codex is running with a tracked invocation slot
       store.addThreadActiveInvocation('thread-bg', 'inv-codex-1', 'codex', 'execute');
@@ -2090,11 +2090,11 @@ describe('background thread socket handling', () => {
       expect(ts.targetCats).toEqual([]);
       expect(ts.catStatuses).toEqual({});
 
-      // Now dare starts via queue auto-dequeue (uses setThreadTargetCats merge)
-      store.setThreadTargetCats('thread-bg', ['dare']);
+      // Now opus starts via queue auto-dequeue (uses setThreadTargetCats merge)
+      store.setThreadTargetCats('thread-bg', ['opus']);
       const ts2 = useChatStore.getState().getThreadState('thread-bg');
-      // Must be ['dare'] only, not ['codex', 'dare']
-      expect(ts2.targetCats).toEqual(['dare']);
+      // Must be ['opus'] only, not ['codex', 'opus']
+      expect(ts2.targetCats).toEqual(['opus']);
     });
 
     it('multi-cat: catA done does NOT clear targetCats while catB still active', () => {

@@ -5,6 +5,7 @@ topics: [agent, provider, plugin, transport, hostable-runtime, acp]
 doc_kind: spec
 created: 2026-06-17
 community_issue: "clowder-ai#941"
+tips_exempt: spec-only — plugin framework not yet implemented, no user-facing capability
 ---
 
 # F241: Agent Provider Plugin / Hostable Provider Runtime

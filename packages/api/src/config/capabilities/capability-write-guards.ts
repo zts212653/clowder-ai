@@ -35,7 +35,8 @@ export function resolveCapabilityWriteSessionUserId(request: FastifyRequest): st
  *   "not configured" means "hide sensitive data" not "block the request".
  *
  * ⚠️ Do NOT use requireConfiguredOwner for write routes — it blocks local single-user
- *   mode unnecessarily. This mistake has recurred multiple times (#995, #794 history).
+ *   mode unnecessarily. This mistake has recurred in connector plugin routes
+ *   (see #794 history).
  */
 export function requireCapabilityWriteOwner(
   userId: string,

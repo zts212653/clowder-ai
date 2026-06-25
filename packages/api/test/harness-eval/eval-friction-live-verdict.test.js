@@ -142,6 +142,12 @@ describe('generateFrictionLiveVerdict', () => {
     assert.ok(existsSync(join(result.bundleDir, 'provenance.json')));
     // raw rollup report under bundle/raw (task-outcome shape — Decision 2)
     assert.ok(existsSync(join(result.bundleDir, 'raw', 'rollup-report.json')), 'raw rollup report must be written');
+    const rawReport = JSON.parse(readFileSync(join(result.bundleDir, 'raw', 'rollup-report.json'), 'utf8'));
+    assert.ok(Array.isArray(rawReport.report.actionableCandidates), 'raw report must surface actionableCandidates');
+    assert.ok(Array.isArray(rawReport.report.referenceOnly), 'raw report must surface referenceOnly');
+    assert.equal(rawReport.report.actionableCandidates.length, 2, 'two paw-feel clusters → two actionable candidates');
+    assert.equal(rawReport.report.referenceOnly.length, 0, 'no eval-domain clusters in this fixture');
+    assert.ok(rawReport.report.actionableCandidates[0].followupDraft, 'actionable candidate must carry followupDraft');
 
     // snapshot conforms to a2a bundle schema
     const snapshot = JSON.parse(readFileSync(join(result.bundleDir, 'snapshot.json'), 'utf8'));
@@ -185,6 +191,9 @@ describe('generateFrictionLiveVerdict', () => {
     const attribution = JSON.parse(readFileSync(join(result.bundleDir, 'attribution.json'), 'utf8'));
     assert.equal(attribution.findings.length, 0, 'no clusters → zero findings');
     assert.ok(attribution.noFindingRecord, 'must carry noFindingRecord when no findings');
+    const rawReport = JSON.parse(readFileSync(join(result.bundleDir, 'raw', 'rollup-report.json'), 'utf8'));
+    assert.deepEqual(rawReport.report.actionableCandidates, [], 'empty rollup → no actionable candidates');
+    assert.deepEqual(rawReport.report.referenceOnly, [], 'empty rollup → no reference-only clusters');
   });
 
   it('emits an aggregate tail finding when all clusters fold into the tail, not no-finding (cloud-R3 P2)', async () => {

@@ -10,10 +10,11 @@ import {
 } from '../dist/domains/cats/services/context/prompt-template-loader.js';
 import { promptInjectionRoutes } from '../dist/routes/prompt-injection.js';
 
-const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
+const TEST_USER_ID = 'test-user';
+const AUTH_HEADERS = { 'x-cat-cafe-user': TEST_USER_ID };
 const LOCAL_WRITE_HEADERS = {
-  host: '127.0.0.1:3002',
-  origin: 'http://127.0.0.1:3001',
+  host: '127.0.0.1:3004',
+  origin: 'http://127.0.0.1:3003',
 };
 
 /**
@@ -37,12 +38,24 @@ describe('prompt-injection YAML validation', () => {
   async function buildSessionApp() {
     const app = Fastify({ logger: false });
     app.addHook('onRequest', (req, _reply, done) => {
-      req.sessionUserId = 'test-user';
+      req.sessionUserId = TEST_USER_ID;
       done();
     });
     await app.register(promptInjectionRoutes);
     await app.ready();
     return app;
+  }
+
+  async function withDefaultOwnerUserId(value, fn) {
+    const prev = process.env.DEFAULT_OWNER_USER_ID;
+    if (value === null) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = value;
+    try {
+      return await fn();
+    } finally {
+      if (prev === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = prev;
+    }
   }
 
   // S6 is the YAML segment (workflow-triggers)
@@ -172,9 +185,7 @@ describe('prompt-injection YAML validation', () => {
     });
 
     it('rejects non-owner session with 403 when DEFAULT_OWNER_USER_ID is set', async () => {
-      const prev = process.env.DEFAULT_OWNER_USER_ID;
-      process.env.DEFAULT_OWNER_USER_ID = 'real-owner';
-      try {
+      await withDefaultOwnerUserId('real-owner', async () => {
         // buildSessionApp sets sessionUserId = 'test-user' (not the owner)
         const app = await buildSessionApp();
         try {
@@ -190,10 +201,7 @@ describe('prompt-injection YAML validation', () => {
         } finally {
           await app.close();
         }
-      } finally {
-        if (prev === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
-        else process.env.DEFAULT_OWNER_USER_ID = prev;
-      }
+      });
     });
 
     it('rejects session writes that do not come from direct localhost Hub access', async () => {
@@ -215,89 +223,97 @@ describe('prompt-injection YAML validation', () => {
     });
 
     it('rejects null YAML with 400 (session auth)', async () => {
-      const app = await buildSessionApp();
-      try {
-        const res = await app.inject({
-          method: 'PUT',
-          url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
-          headers: LOCAL_WRITE_HEADERS,
-          payload: { content: 'null' },
-        });
-        assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
-        const body = JSON.parse(res.body);
-        assert.ok(body.error, 'response should have error field');
-        assert.match(body.error, /mapping|object/i, 'error should mention mapping/object');
-      } finally {
-        await app.close();
-      }
-    });
-
-    it('rejects scalar YAML with 400 (session auth)', async () => {
-      const app = await buildSessionApp();
-      try {
-        const res = await app.inject({
-          method: 'PUT',
-          url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
-          headers: LOCAL_WRITE_HEADERS,
-          payload: { content: 'just a string' },
-        });
-        assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
-        const body = JSON.parse(res.body);
-        assert.match(body.error, /mapping|object/i);
-      } finally {
-        await app.close();
-      }
-    });
-
-    it('writes valid overlays under .cat-cafe prompt-overlays instead of assets', async () => {
-      await withPreservedOverlay(YAML_SEGMENT, async () => {
-        const fileInfo = getTemplateFileInfo(YAML_SEGMENT);
-        const overlayPath = getTemplateOverlayPath(YAML_SEGMENT);
-        assert.ok(fileInfo?.local);
-        assert.ok(overlayPath);
-        const assetLocalPath = join(TEMPLATES_DIR, fileInfo.local);
-        restoreFile(overlayPath, null);
-        restoreFile(`${overlayPath}.bak`, null);
-        restoreFile(assetLocalPath, null);
-
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
         const app = await buildSessionApp();
         try {
-          const content = 'ragdoll: "valid overlay"';
           const res = await app.inject({
             method: 'PUT',
             url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
             headers: LOCAL_WRITE_HEADERS,
-            payload: { content },
+            payload: { content: 'null' },
           });
-          assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
-          assert.equal(readFileSync(overlayPath, 'utf-8'), content);
-          assert.equal(
-            existsSync(assetLocalPath),
-            false,
-            'overlay save must not create a .local file in packaged assets/prompt-templates',
-          );
+          assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
+          const body = JSON.parse(res.body);
+          assert.ok(body.error, 'response should have error field');
+          assert.match(body.error, /mapping|object/i, 'error should mention mapping/object');
         } finally {
           await app.close();
         }
+      });
+    });
+
+    it('rejects scalar YAML with 400 (session auth)', async () => {
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
+        const app = await buildSessionApp();
+        try {
+          const res = await app.inject({
+            method: 'PUT',
+            url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+            headers: LOCAL_WRITE_HEADERS,
+            payload: { content: 'just a string' },
+          });
+          assert.equal(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
+          const body = JSON.parse(res.body);
+          assert.match(body.error, /mapping|object/i);
+        } finally {
+          await app.close();
+        }
+      });
+    });
+
+    it('writes valid overlays under .cat-cafe prompt-overlays instead of assets', async () => {
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
+        await withPreservedOverlay(YAML_SEGMENT, async () => {
+          const fileInfo = getTemplateFileInfo(YAML_SEGMENT);
+          const overlayPath = getTemplateOverlayPath(YAML_SEGMENT);
+          assert.ok(fileInfo?.local);
+          assert.ok(overlayPath);
+          const assetLocalPath = join(TEMPLATES_DIR, fileInfo.local);
+          restoreFile(overlayPath, null);
+          restoreFile(`${overlayPath}.bak`, null);
+          restoreFile(assetLocalPath, null);
+
+          const app = await buildSessionApp();
+          try {
+            const content = 'ragdoll: "valid overlay"';
+            const res = await app.inject({
+              method: 'PUT',
+              url: `/api/prompt-injection/segment/${YAML_SEGMENT}/override`,
+              headers: LOCAL_WRITE_HEADERS,
+              payload: { content },
+            });
+            assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.body}`);
+            assert.equal(readFileSync(overlayPath, 'utf-8'), content);
+            assert.equal(
+              existsSync(assetLocalPath),
+              false,
+              'overlay save must not create a .local file in packaged assets/prompt-templates',
+            );
+          } finally {
+            await app.close();
+          }
+        });
       });
     });
   });
 
   describe('DELETE /api/prompt-injection/segment/:id/override', () => {
     it('rejects readonly template-backed segments with 403', async () => {
-      const app = await buildSessionApp();
-      try {
-        const res = await app.inject({
-          method: 'DELETE',
-          url: '/api/prompt-injection/segment/S1/override',
-          headers: LOCAL_WRITE_HEADERS,
-        });
-        assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}: ${res.body}`);
-        const body = JSON.parse(res.body);
-        assert.match(body.error, /readonly/i);
-      } finally {
-        await app.close();
-      }
+      await withDefaultOwnerUserId(TEST_USER_ID, async () => {
+        const app = await buildSessionApp();
+        try {
+          const res = await app.inject({
+            method: 'DELETE',
+            url: '/api/prompt-injection/segment/S1/override',
+            headers: LOCAL_WRITE_HEADERS,
+          });
+          assert.equal(res.statusCode, 403, `expected 403, got ${res.statusCode}: ${res.body}`);
+          const body = JSON.parse(res.body);
+          assert.match(body.error, /readonly/i);
+        } finally {
+          await app.close();
+        }
+      });
     });
   });
 

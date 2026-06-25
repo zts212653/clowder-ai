@@ -85,7 +85,6 @@ const BUILTIN_ACCOUNT_IDS = {
   openai: 'codex',
   google: 'gemini',
   kimi: 'kimi',
-  dare: 'dare',
   opencode: 'opencode',
 };
 
@@ -1363,12 +1362,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     const cases = [
       {
-        catId: 'runtime-dare-wrong-builtin',
-        clientId: 'dare',
-        accountRef: 'codex',
-        defaultModel: 'gpt-5.4',
-      },
-      {
         catId: 'runtime-opencode-wrong-builtin',
         clientId: 'opencode',
         accountRef: 'claude',
@@ -1812,7 +1805,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.match(patchBody.error, /@opus.*opus/i);
   });
 
-  it('POST /api/cats still requires a concrete provider binding for dare and opencode clients', async () => {
+  it('POST /api/cats still requires a concrete provider binding for opencode clients', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -1830,15 +1823,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         'x-cat-cafe-user': 'codex',
       },
       body: JSON.stringify({
-        catId: 'runtime-dare',
-        name: '运行时审计猫',
-        displayName: '运行时审计猫',
-        avatar: '/avatars/dare.png',
+        catId: 'runtime-opencode',
+        name: '运行时编码猫',
+        displayName: '运行时编码猫',
+        avatar: '/avatars/opencode.png',
         color: { primary: '#0f172a', secondary: '#cbd5e1' },
-        mentionPatterns: ['@runtime-dare'],
-        roleDescription: '审计',
-        clientId: 'dare',
-        defaultModel: 'dare-1',
+        mentionPatterns: ['@runtime-opencode'],
+        roleDescription: '编码',
+        clientId: 'opencode',
+        defaultModel: 'claude-opus-4-6',
       }),
     });
 

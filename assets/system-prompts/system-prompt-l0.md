@@ -36,10 +36,11 @@
 
 ## 4. 传球三选一 + @ 路由规则
 
+<!-- merge-gate source provenance 反射：外部 finding 修完后等 PR truth，不 @ 本地旧 reviewer -->
 ── [L3] 路由规则 ──
 {{L3_CONTENT}}
 
-── [S8] 铲屎官引用 ──
+── [S8] co-creator引用 ──
 {{CVO_REF}}
 
 ---

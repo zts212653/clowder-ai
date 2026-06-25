@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import { ApprovalItemCard } from './ApprovalItemCard';
 
-type FeatureFilter = 'all' | 'F128' | 'F225' | 'F193';
+type FeatureFilter = 'all' | 'F128' | 'F225' | 'F193' | 'F231';
 type StatusFilter = 'all' | 'pending' | 'stale';
 
 /** Feature display names for filter chips. */
@@ -24,6 +24,7 @@ const FEATURE_LABELS: Record<FeatureFilter, string> = {
   F128: '线程',
   F225: '会话',
   F193: '派发',
+  F231: '画像',
 };
 
 function applyFilters(

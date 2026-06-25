@@ -231,6 +231,19 @@ F128 遵循 ADR-035 Proposal-First Agent Actions：
 - 设计收敛：Maine Coon（Codex GPT-5.5）— 接受"上游 contract 完整化"方向，补充：保留 Phase Y triage 价值但 supersede 通用 default；routing credentials 是 report-back contract 的硬要求，不是 header 文案 polish。
 - operator correction：landy — 要求从第一性原理修 propose-time mode choice 和首条消息来源体验，避免下游补锅。
 
+#### Final-Only Prompt Hardening（PR #2489, 2026-06-22）
+
+> operator反馈：`final-only` 模式下猫仍不断 ACK 主 thread、浪费 token。
+
+**根因**：弱语言（"不必" vs "禁止"）+ routing credentials 诱导中间猫回报 + chain order line "→ 回到主 Thread" 误导所有猫 + L0 "传球三选一" 与 final-only 意图竞争。
+
+**改动（多表面 prompt hardening）**：
+- `proposal-enrich-header.ts`："禁止" 替换 "不必"；`final-only` 增加 `⚠️ 过程中禁止 cross_post_message 回报主 Thread`；chain tail（"→ 回到主 Thread"）从 `final-only` 链移除（仅 `state-transitions`/`blocking-ack` 保留）
+- `proposal-card-block.ts` + `ProposalCardFields.tsx`：卡片 label 统一为 "自治推进，任务闭环后回报一次"
+- `SystemPromptBuilder.ts`：MCP 工具描述缩短至 6700 char 预算内
+- `thread-orchestration/SKILL.md`：Step 5 按 mode 拆分（final-only 跳过确认流，自主 commit/review/merge）；Quick Reference 更新
+- 24 项 proposal 测试全绿；local review（GPT-5.4，3 轮）+ cloud review（2 轮，R1 P2 已修）
+
 ### Phase Z: projectPath 项目归属 — cwd 圣域回落根因修复（2026-06-05）
 
 > **Status**: merged（PR #2118, squash `b3541acf`, 2026-06-06）

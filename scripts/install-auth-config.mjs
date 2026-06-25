@@ -22,7 +22,6 @@ const BUILTIN_ACCOUNT_SPECS = [
   { id: 'codex', displayName: 'Codex', client: 'openai', models: ['gpt-5.3-codex', 'gpt-5.4', 'gpt-5.3-codex-spark'] },
   { id: 'gemini', displayName: 'Gemini', client: 'google', models: ['gemini-3.1-pro-preview', 'gemini-2.5-pro'] },
   { id: 'kimi', displayName: 'Kimi', client: 'kimi', models: ['kimi-code/kimi-for-coding'] },
-  { id: 'dare', displayName: 'Dare', client: 'dare', models: ['z-ai/glm-4.7'] },
   { id: 'opencode', displayName: 'OpenCode', client: 'opencode', models: ['claude-opus-4-6', 'claude-sonnet-4-5'] },
 ];
 
@@ -34,7 +33,6 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'codex',
   'gemini',
   'kimi',
-  'dare',
   'opencode',
   'anthropic',
   'openai',
@@ -43,7 +41,6 @@ const BUILTIN_ACCOUNT_REFS = new Set([
   'builtin_openai',
   'builtin_google',
   'builtin_kimi',
-  'builtin_dare',
   'builtin_opencode',
 ]);
 const INSTALLER_ACCOUNT_REFS = new Set([
@@ -51,7 +48,6 @@ const INSTALLER_ACCOUNT_REFS = new Set([
   'installer-openai',
   'installer-google',
   'installer-kimi',
-  'installer-dare',
   'installer-opencode',
   'installer-managed',
 ]);
@@ -225,7 +221,6 @@ function normalizeClient(rawClient) {
   if (trimmed === 'openai' || trimmed === 'codex') return 'openai';
   if (trimmed === 'google' || trimmed === 'gemini') return 'google';
   if (trimmed === 'kimi' || trimmed === 'moonshot') return 'kimi';
-  if (trimmed === 'dare') return 'dare';
   if (trimmed === 'opencode') return 'opencode';
   return null;
 }

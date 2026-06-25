@@ -408,6 +408,54 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
     });
   });
 
+  // BUG-UX-9: button displays corrected verb from action, not raw text verb
+  describe('BUG-UX-9: verb display matches action type', () => {
+    it('displays "跳过去" when action is teleport but text says "原地看" (auto-corrected)', () => {
+      // API auto-corrected peek→teleport, but kept verb field as "原地看" for map key matching
+      // Frontend should display based on action.action, not raw text verb
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去：Thread Level',
+          handle: 'R1',
+          verb: '原地看', // original text verb (before auto-correction was reflected in verb field)
+          payload: { threadId: 'thread_target' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '看看 [原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      // Button text should show the CORRECT verb for the action type
+      expect(button?.textContent).toContain('跳过去');
+      expect(button?.textContent).not.toContain('原地看');
+    });
+
+    it('displays teleport styling (color/icon) when action is auto-corrected teleport', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去：Target',
+          handle: 'R1',
+          verb: '原地看',
+          payload: { threadId: 'thread_target' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '[原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button')!;
+      // Should have teleport icon (→), not peek icon (👁)
+      expect(button.textContent).toContain('→');
+      expect(button.textContent).not.toContain('👁');
+    });
+  });
+
   // AC-6: card actions fallback (no handle/verb) → no inline buttons, text unchanged
   it('does not crash on actions without handle/verb (KD-19 fallback)', () => {
     const actions = [

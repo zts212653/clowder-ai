@@ -107,29 +107,57 @@ describe('extractConciergeActions', () => {
     assert.equal(actions.length, 1, 'duplicate should be deduplicated');
   });
 
-  // P1-3 fix: concierge_peek without messageId → no-op button on frontend (CardBlock.tsx:189 returns early)
-  // Fail-closed: skip peek action when anchor has no messageId
-  it('skips peek action when anchor has no messageId (fail-closed)', async () => {
+  // BUG-UX-9: [原地看 R1] on thread without messageId → auto-correct to teleport (not silently drop)
+  it('auto-corrects peek to teleport when anchor is thread without messageId (BUG-UX-9)', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('thread_c', [
       { label: 'R1', anchor: { threadId: 't_thread_only', title: 'Thread Level', type: 'thread' } },
     ]);
 
-    // [原地看 R1] on a handle without messageId → should produce 0 actions
     const actions = await extractConciergeActions('[原地看 R1]', 'thread_c', store);
-    assert.equal(actions.length, 0, 'peek without messageId must be skipped (fail-closed)');
+    assert.equal(actions.length, 1, 'auto-corrected to teleport, not dropped');
+    assert.equal(actions[0].action, 'concierge_teleport', 'action type auto-corrected');
+    assert.equal(actions[0].verb, '原地看', 'original text verb kept for frontend marker matching');
+    assert.equal(actions[0].handle, 'R1');
+    assert.equal(actions[0].payload.threadId, 't_thread_only');
   });
 
-  // P1-3: mixed markers — teleport works without messageId, peek does NOT
-  it('allows teleport but skips peek on same thread-only handle', async () => {
+  // BUG-UX-9: [跳过去 R1] on non-thread with messageId → auto-correct to peek
+  it('auto-corrects teleport to peek when anchor is non-thread with messageId (BUG-UX-9)', async () => {
+    const store = new MemoryConciergeHandleMapStore();
+    await store.setHandles('thread_c', [
+      { label: 'R1', anchor: { threadId: 'feature:F229', messageId: 'msg_99', title: 'F229', type: 'feature' } },
+    ]);
+
+    const actions = await extractConciergeActions('[跳过去 R1]', 'thread_c', store);
+    assert.equal(actions.length, 1, 'auto-corrected to peek, not dropped');
+    assert.equal(actions[0].action, 'concierge_peek', 'action type auto-corrected');
+    assert.equal(actions[0].verb, '跳过去', 'original text verb kept for frontend marker matching');
+  });
+
+  // BUG-UX-9: mixed markers on thread-only — both resolve to teleport, deduplicated
+  it('deduplicates when peek auto-corrects to same teleport on thread-only handle', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('thread_c', [
       { label: 'R1', anchor: { threadId: 't_thread_only', title: 'Thread Level', type: 'thread' } },
     ]);
 
     const actions = await extractConciergeActions('[跳过去 R1] 或者 [原地看 R1]', 'thread_c', store);
-    assert.equal(actions.length, 1, 'only teleport should survive');
+    // Both resolve to teleport — should deduplicate to 1
+    assert.equal(actions.length, 1, 'deduplicated after auto-correction');
     assert.equal(actions[0].action, 'concierge_teleport');
+  });
+
+  // Still fail-closed: non-thread without messageId → truly incompatible, skip
+  it('still skips when neither teleport nor peek is possible (fail-closed)', async () => {
+    const store = new MemoryConciergeHandleMapStore();
+    await store.setHandles('thread_c', [
+      { label: 'R1', anchor: { threadId: 'feature:F229', title: 'F229', type: 'feature' } },
+    ]);
+
+    // non-thread, no messageId → can't teleport, can't peek → skip
+    const actions = await extractConciergeActions('[原地看 R1]', 'thread_c', store);
+    assert.equal(actions.length, 0, 'truly incompatible → still skipped');
   });
 
   // Cloud P1: non-thread anchors (feature/doc) can't be teleported to —

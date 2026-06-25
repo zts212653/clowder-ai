@@ -18,7 +18,7 @@ function makeCat(overrides: Partial<CatData> & { id: string; clientId: string })
   };
 }
 
-const PROVIDER_TYPES = ['anthropic', 'openai', 'antigravity', 'google', 'dare', 'opencode'] as const;
+const PROVIDER_TYPES = ['anthropic', 'openai', 'antigravity', 'google', 'opencode'] as const;
 
 describe('#723 list-level member deletion coverage', () => {
   it.each(PROVIDER_TYPES)('renders delete button at list level for %s provider', (clientId) => {

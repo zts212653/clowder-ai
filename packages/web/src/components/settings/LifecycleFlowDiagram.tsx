@@ -191,7 +191,7 @@ function StageNode({
       <span className="whitespace-nowrap text-xs font-medium">{stage.label}</span>
       {count > 0 && (
         <span
-          className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none"
+          className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-micro font-bold leading-none"
           style={{
             backgroundColor: state === 'selected' ? 'rgba(255,255,255,0.2)' : 'var(--console-active-bg)',
             color: state === 'selected' ? '#fff' : 'var(--cafe-text-muted)',

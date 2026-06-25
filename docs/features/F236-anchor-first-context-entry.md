@@ -4,13 +4,14 @@ related_features: [F148, F209, F192]
 topics: [context-engineering, token-budget, mcp, harness]
 doc_kind: spec
 created: 2026-06-15
+tips_exempt: harness-internal anchor telemetry + eval domain — no user-visible capability change
 ---
 
 # F236: Anchor-First Context 入口 — 返回侧 token 减负
 
-> **Status**: in-progress (Phase A+B done · Phase A/B-Eval Track-1 merged [chars/volume substrate, PR #2411] · **Track-2 [open-rate 事件模型 + `eval:anchor-first` 注册] UNBLOCKED**——shared Y-lite infra 已落 [F245 PR #2476]，可执行交接见「🎯 Track-2 实施交接」块 · Phase C spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48，保留记忆做愿景守护；**Track-2 实现可交 opus-4.6**，operator 2026-06-21) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203
+> **Status**: in-progress (Phase A+B done · **Phase A/B-Eval DONE** [Track-1 chars/volume + Track-2 open-rate + AC-E3 sunset trigger] · Phase C = cat-controlled mode（2026-06-24 pivot）：MCP-tools cat-mode V1 + cc-native spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48 愿景守护；Track-2/AC-E3 实现 opus-4.6) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203
 >
-> **Timeline**: 2026-06-18 — Phase A + B merged (PR #2381, squash `9af8b2093`)：anchor-first 协作读工具（thread-context/pending-mentions/list-tasks 默认 preview + drillDown）+ get-message bounded drill（mode=preview|full + fullDrillChars telemetry）。本地 gpt52/codex 跨族 review + 云端 Codex 2 轮（封板）。**2026-06-18 — Phase A/B-Eval Track-1（anchor telemetry OTel chars/volume substrate）merged（PR #2411，squash `21ae2c83b`）：gpt52 跨族 review + 云端 Codex 3 轮（round-2 逼出 open-rate 信号模型岔路 → Maine Coon eval-owner 裁定收口 chars/volume，open-rate→Track-2）。**
+> **Timeline**: 2026-06-18 — Phase A + B merged (PR #2381, squash `9af8b2093`)：anchor-first 协作读工具（thread-context/pending-mentions/list-tasks 默认 preview + drillDown）+ get-message bounded drill（mode=preview|full + fullDrillChars telemetry）。本地 gpt52/codex 跨族 review + 云端 Codex 2 轮（封板）。**2026-06-18 — Phase A/B-Eval Track-1（anchor telemetry OTel chars/volume substrate）merged（PR #2411，squash `21ae2c83b`）：gpt52 跨族 review + 云端 Codex 3 轮（round-2 逼出 open-rate 信号模型岔路 → Maine Coon eval-owner 裁定收口 chars/volume，open-rate→Track-2）。** **2026-06-22 — Phase A/B-Eval Track-2（per-event open-rate model + `eval:anchor-first` domain）merged（PR #2490，squash `5251c2f75`）：Maine Coon本地 3 轮跨族 review + 云端 Codex 5 轮（封板 LL-072）。25 tests。** **2026-06-22 — AC-E3 sunset 触发（PR #2507，squash `d09024c90`）：per-tool sunset signal flags + eval 猫双信号判据 + verdict.md sunset section。gpt52 本地 3 轮跨族 review + 云端 Codex 1 轮（2 P1 pushback→P3 + 1 P2 fixed）。10 tests。**
 
 ## Why
 
@@ -66,16 +67,17 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 - [x] AC-B1: `get_message` 支持 `mode=preview|full`，默认 preview（截断 + drillDown 指针，agent-key caller 注入 agentKeyCatId 一跳）
 - [x] AC-B2: full drill 显式触发，记录 `fullDrillChars` telemetry（含 context neighbors + contentBlocks 全量）
 
-### Phase A/B-Eval: anchor-first sunset 监控闭环 🔜 NEXT（还 ADR-031 eval 层债，先于 Phase C）
+### Phase A/B-Eval: anchor-first sunset 监控闭环 ✅ DONE（Track-1 ✅ + Track-2 ✅ + AC-E3 ✅）
 
 > **eval 叫啥 / 为什么是 phase 不是独立 feat**：这是 F236 的 **Phase A/B-Eval**——Phase A/B 的**配套监控闭环**（紧耦合 F236 telemetry + sunset 回退决策），不是独立能力（不像 F245 那样单独立项）。实现**接 F192 harness eval system**（telemetry pipeline + verdict engine）；**本节是 eval 设计真相源，F192 md 只放一行 link 过来**（不让 F192 md 膨胀）。
 >
 > **为什么先于 Phase C（排期）**：Phase A/B 已 merged 上线，但**只 emit telemetry、没闭环**——"何时 sunset 回退 / anchor 是否真净益"现在只能靠operator提醒或挂 cron 盲看两天 = **假闭环**（ADR-031 eval 层欠债）。先还这个债，再扩大头 Phase C。**Phase C 不硬依赖本 phase**（它另有 AC-C5 blindness gate 自带 eval），但本 phase 的 verdict 为 Phase C 扩展提供数据依据。
 
 - [x] AC-E1（"省" telemetry substrate）✅ **Track-1 MERGED（PR #2411）**：`returnedChars`/`fullDrillChars` 落 OTel metrics（`cat_cafe.anchor.{returned,full_drill}.{count,chars}`，per-tool）= 可查询 chars/request-volume substrate。⚠️ **范围已按Maine Coon 2026-06-19 裁定收窄**：`anchorOpenRate` + 任务返工轮次**不在 AC-E1**——它们是跨请求相关性，移到 AC-E2 的可 join 事件模型（见下 + Track-2 交接块）。`*.count` 仅 volume，非 open-rate 分子/分母。
-- [ ] AC-E2（verdict 自动判定）: F192 verdict engine 跑**双边净收益**（省 − drill 成本）+ **sunset 双信号**（① anchor tax: `anchorOpenRate` 持续 >80% → 净亏；② 变瞎子: 任务正确性/返工率下降 → preview 偷判断）→ 产结构化 verdict（Maine Coon KD：不许单边报省）
-- [ ] AC-E3（sunset 触发 + Phase C 数据依据）: verdict **净亏 → 自动 alert** 标记该工具 anchor 该回退 inline（不靠operator提醒）；verdict **净益 + 无变瞎子 → 作为 Phase C 扩展的数据依据**（非硬 gate）
-- [ ] AC-E4（接入 F192 不膨胀）: 实现挂 F192 harness eval system；F192 md 仅加一行 link 指向本节，F236 此节为 eval 设计真相源
+- [x] AC-E2（verdict 自动判定）✅ **Track-2 MERGED（PR #2490，squash `5251c2f75`，2026-06-22）**：per-event preview↔drill correlation model（in-memory ring buffer, 24h retention）+ joinable event records（correlation key = itemId/sourceTool）+ timeline-interleaved rollup algorithm（per-tool openRateByItem, charsSaved, drillChars, netBenefit, orphanDrills）。4 emit sites wired（pending-mentions, thread-context, get-message, list-tasks）。25 unit tests GREEN（Maine Coon 3 轮本地 + 云端 5 轮封板，11 findings 全修 + 5 回歸測試）。
+- [x] AC-E3（sunset 触发 + Phase C 数据依据）✅ **DONE（PR #2507，squash `d09024c90`，2026-06-22）**：attribution 加 per-tool `sunsetSignals`（anchorTax/highOpenRate/netNegative）+ root-level `sunsetAssessment` 摘要；severity 升级到 `high` + proposedAction 标记为 `fix` 当 anchorTax 触发（Signal 1 only — blindness 不可由 generator 确认，eval cat 交叉验证后升级）；low-sample tools (previewedItems < 10) skip findings entirely（publish-policy correctness）；verdict.md 渲染 Sunset Signal Assessment 区段。eval 猫指令增强双信号准则（Signal ① anchor tax + Signal ② blindness cross-ref eval:task-outcome）+ verdict mapping（both→delete_sunset / single→fix / neither→keep_observe）。10 测试 GREEN（gpt52 本地 3 轮跨族 review + 云端 Codex 1 轮）。
+  - 🔍 **愿景守護 opus-48（2026-06-22）— APPROVE（merge 正确）+ 记 1 latent issue（non-blocking）**：核过 ① 低样本 gate 真修（`previewedItems<10` → `continue` 跳出 findings[] → `noFindingRecord{reason:low_sample}`，不再被 publish-policy 误当 actionable regular_pr，gpt52 R3 APPROVE 站得住）；② eval 猫 verdict mapping 双信号 spec-faithful（cost-only 不会误 delete_sunset）。**Latent issue（待 follow-up）**：generator 把 `anchorTax`（=highOpenRate&&netNegative，纯成本信号①）的 per-tool `proposedAction` 直接标 `'sunset'`（`eval-anchor-first-live-verdict.ts:229`），但 generator **测不到 blindness 信号②**，按 spec 该工具 single-signal 应是 `fix`——bundle 数据（proposedAction='sunset'）与 verdict mapping（single→fix）自相矛盾，可能误导 eval 猫。**修法**：把 anchorTax-without-blindness 的 proposedAction 对齐成 `'fix'` 或显式 `'sunset-candidate'`。**✅ RESOLVED by PR #2508**：proposedAction 对齐为 `'fix'`，primaryLayer 对齐为 `'anchor_tax'`，eval-cat 指令文案同步修正。**cloud P1#1 实为真 latent issue（非纯"设计解释差异"）；46 的 P3 降级 outcome 可接受（非最终判定 bug、不阻塞 merge）但 framing 过宽。** 另：46 降级时引用的"愿景守护已裁决"对此条不成立（opus-47 那轮 VG 是 F208 AC-E3 撞名；我此前只裁过 netNegative→fix / low-sample→keep_observe）。
+- [x] AC-E4（接入 F192 不膨胀）✅ **Track-2 DONE**：`eval:anchor-first` domain registered on Y-lite（YAML + sourceRefsKind `anchor-telemetry-snapshot` + VerdictSourceRefs 7th branch + zod schema + generator adapter + live-verdict writer + provider wired in index.ts）。F192 md 仅需加一行 link。
 
 #### Design Notes（2026-06-18 Ragdoll opus-48 session #4 调查 — 落库防 context 死亡）
 
@@ -150,7 +152,26 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
     - **实测（nonce probe）留 Phase C**：cc 已证 PostToolUse output replace 范式真实（核心打底）+ codex/agy hook/config 已查到；codex 实测烧贵配额（Maine Coon额度），spike 阶段 cost>边际价值，Phase C 实现期实测确认
     - 来源：codex `developers.openai.com/codex/hooks` / agy **官方 SDK README（PostToolCallHook read-only）+ 家里 F061 AC-2cR4 实测**（`antigravity.google/docs/hooks` 返空，Maine Coon改用 SDK README 核验）（checked 2026-06-17）
 - [ ] AC-C4: 双边 eval 对 cc 工具同样适用（Read drill 净收益 = 省 − drill 成本）
-- [ ] **AC-C5（变瞎子 gate，Maine Coon P1 — 实现前置硬约束）**: 原生 Read/Grep 默认 anchor **只在 blindness eval 通过后开启**——① debug/review/未知任务**默认保守给全文**；② 小文件/短 grep **full pass-through**（不 anchor）；③ 大文件 anchor **必须显式标省略 + 一跳 full drill**；④ Sunset② 判断质量 eval 未过 → 不开默认 anchor。**这是 gate 不是描述：AC-C1/C2 的默认 anchor 受本条约束。**
+- [ ] **AC-C5（控制机制 = cat-controlled mode — 2026-06-24 pivot，详见下方 pivot 块）**: 不再"系统猜何时 anchor"，而是**猫显式选 mode（anchor / full）**、系统零任务分类。anchor mode 内护栏：locator-not-synopsis（硬不变量）+ 全文一跳逃生（证完才默认开）。默认 fail-open。eval = 反馈/调默认、**非 gate**。**AC-C1/C2 的"默认 anchorized"改为"猫选 anchor mode 时 anchorized"。**
+
+#### 🔄 设计 pivot（2026-06-24）：cat-controlled mode（Maine Coon failure-mode 审计 + operator cold-start 纠偏）
+
+经三轮收敛，AC-C5 从"系统猜何时 anchor"翻转为"猫显式选 mode"。**完整推演链（防失忆 — session handoff 也不丢）**：
+1. **v1（弃）任务分类**：debug/review → 默认全文。→ operator否：判断任务类型 = task 意图分类器 = 补锅 if-else + 违 **KD-8「不用分类器替猫判断 intent」**。
+2. **v2（弃为主控、降 fallback）大小阈值**：按输出大小 + 猫是否 bound 决定 anchor。→ **Maine Coon failure-mode 审计 3 P1**：① preview 必须 **locator 不是 synopsis**（synopsis = 隐藏分类器、偷走重要性判断）；② 全文逃生通路（大文件全文一跳 / Grep 扩上下文 / interactive parity）**证完才许默认开**（否则 drill 拿不回 / anchor-on-anchor 死循环）；③ **eval 是刹车校准不是气囊**——变瞎子是事后信号，前置边界必须 fail-open。
+3. **v3（采纳）cat-controlled mode**：→ **operator cold-start 纠偏**：fail-open canary **没人用 → 没数据 → 永远放不开 → 死在摇篮**。正解 = 把"猫是任务 oracle"贯彻到底——**让猫显式选 mode、系统不猜**；猫嫌噪音自己开 anchor（adoption + 数据双解），review 时自留全量（**判断权归猫，KD-3**）。
+
+**采纳设计**：
+- **主控 = 猫显式选 anchor / full mode，系统零任务分类 / 零意图猜测。**
+- **我们自己的工具（MCP 协作工具：thread-context / pending-mentions / list-tasks / get-message）**：mode 作参数，**完整铺开（V1，现在做，不 timid）**。
+- **cc 原生 Read/Grep**：签名改不了 + PostToolUse 调用后才触发 → 猫设 **session 级 mode**、hook 读状态决定 anchor/放行。**spike-gated**（operator 2026-06-24 批：先证"猫能 signal mode 给 hook"）。
+- **anchor mode 内护栏（Maine Coon audit，still holds）**：preview = 机械 **locator 不是 synopsis**（路径+总行数+省略行数+命中行号/文件数+可复制 drill 指针；升为**可测硬不变量** = ADR-031 硬层）；**全文一跳逃生**；Grep drill = 扩文件上下文、不回更大 blob。
+- **默认（猫没选时）= fail-open 给全文**；多信号阈值（字节/行数 + grep fan-out + 压缩比，非单 magic number）仅作"猫没选时的智能默认"、**非 gate**。
+- **eval（Phase A/B-Eval）角色**：观察 mode 使用 + 给猫反馈 + 调默认，**非 enforce 闸门**（刹车≠气囊）。
+
+**Open（待 spike / 设计）**：① cc 原生"猫 signal mode → hook 读"可行性（**spike 进行中**）；② 默认 mode 值 + mode 表达 ergonomics（session / per-turn / per-call）；③ anchor mode 内是否需 size 下限护栏（防猫 anchor 小文件还变瞎）。
+
+**Supersedes**：AC-C5 v1"debug/review 默认全文"（task 分类）+ 下方「防瞎子设计」的"任务感知"条 — 均弃；fail-open / locator / 逃生 / 多信号阈值并入本设计。
 
 ## Eval / Tracking Contract（F192 / ADR-031）
 

@@ -355,7 +355,7 @@ describe('useAgentMessages loading lifecycle', () => {
             timestamp: number;
           }>,
           activeInvocations: {
-            'inv-bg': { catId: 'dare', mode: 'execute' },
+            'inv-bg': { catId: 'opus', mode: 'execute' },
           },
         };
       }
@@ -382,7 +382,7 @@ describe('useAgentMessages loading lifecycle', () => {
       captured?.handleStop(cancelInvocation, 'thread-2');
     });
 
-    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'dare');
+    expect(cancelInvocation).toHaveBeenCalledWith('thread-2', 'opus');
     expect(mockResetThreadInvocationState).toHaveBeenCalledWith('thread-2');
   });
 

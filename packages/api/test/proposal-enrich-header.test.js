@@ -31,8 +31,17 @@ describe('F128 Phase Y — enrichWithParentThreadHeader reportingMode', () => {
     const out = enrichWithParentThreadHeader('hi', SRC, TITLE, SOLO, 'hi');
     assert.ok(out.includes('## 主 Thread'), 'parent-thread header still injected');
     assert.ok(out.includes('final-only'), 'AC-AA1: default must be final-only, not none/autonomous');
-    assert.ok(out.includes('回到主 Thread'), 'default final-only serial chain tail returns to main thread');
     assert.ok(out.includes('cat_cafe_cross_post_message'), 'final-only reports via cross_post');
+    // final-only chain order line should NOT include "→ 回到主 Thread" as a chain step —
+    // it misleads intermediate cats into thinking reporting back is their job.
+    // The final report instruction lives in the chain steps, not the order line.
+    const orderMatch = out.match(/顺序:\s*([^\n]+)/);
+    if (orderMatch) {
+      assert.ok(
+        !orderMatch[1].includes('回到主 Thread'),
+        'final-only chain order line must NOT include "→ 回到主 Thread" (misleads intermediate cats)',
+      );
+    }
   });
 
   test("reportingMode='none' explicit → autonomous, no forced return", () => {
@@ -41,12 +50,26 @@ describe('F128 Phase Y — enrichWithParentThreadHeader reportingMode', () => {
     assert.ok(!out.includes('回到主 Thread'), 'C-Y5');
   });
 
-  test("reportingMode='final-only' serial → last cat reports summary once", () => {
+  test("reportingMode='final-only' serial → self-governing thread, report once after task closure", () => {
     const out = enrichWithParentThreadHeader('hi', SRC, TITLE, SOLO, 'hi', null, undefined, 'final-only');
     assert.ok(out.includes('final-only'), 'mode label present');
-    assert.ok(out.includes('最后一棒'), 'serial final-only points at last cat');
     assert.ok(out.includes('cat_cafe_cross_post_message'), 'final-only reports via cross_post');
-    assert.ok(out.includes('回到主 Thread'), 'serial chain tail returns to main thread when not none');
+    // New: final-only must explicitly PROHIBIT mid-process cross_post
+    assert.ok(out.includes('禁止'), 'final-only must use 禁止 (prohibit), not 不必 (not necessary)');
+    assert.ok(
+      !out.includes('中途不必'),
+      'old weak "中途不必逐步回报" language must be removed — too easily overridden by L0 rules',
+    );
+    // New: final-only must frame the thread as self-governing
+    assert.ok(
+      out.includes('本 Thread 自治') || out.includes('自治推进'),
+      'final-only must frame the sub-thread as self-governing (本 Thread 自治)',
+    );
+    // New: "final" means task closure (PR merged / task closed), not "last cat finished their step"
+    assert.ok(
+      out.includes('PR 合入') || out.includes('任务关闭') || out.includes('任务完成'),
+      'final-only must define completion as task closure (PR merged / task closed), not "last step done"',
+    );
   });
 
   test("reportingMode='final-only' parallel (#ideate) → reporter owner = first cat", () => {
@@ -70,6 +93,28 @@ describe('F128 Phase Y — enrichWithParentThreadHeader reportingMode', () => {
     assert.ok(out.includes('blocking-ack'));
     assert.ok(out.includes('[BLOCKING]'), 'blocking-ack tells downstream to send [BLOCKING] request');
     assert.ok(out.includes('cat_cafe_hold_ball'), 'C-Y3: downstream holds via hold_ball');
+  });
+
+  test('state-transitions and blocking-ack chain order STILL includes "→ 回到主 Thread"', () => {
+    for (const mode of /** @type {const} */ (['state-transitions', 'blocking-ack'])) {
+      const out = enrichWithParentThreadHeader('hi', SRC, TITLE, PAIR, 'hi', null, undefined, mode);
+      const orderMatch = out.match(/顺序:\s*([^\n]+)/);
+      assert.ok(orderMatch, `${mode}: chain order line must exist`);
+      assert.ok(
+        orderMatch[1].includes('回到主 Thread'),
+        `${mode}: chain order line SHOULD include "→ 回到主 Thread" (process reporting modes)`,
+      );
+    }
+  });
+
+  test('final-only serial chain includes explicit mid-process prohibition for intermediate cats', () => {
+    const out = enrichWithParentThreadHeader('hi', SRC, TITLE, PAIR, 'hi', null, undefined, 'final-only');
+    assert.ok(out.includes('接力链路'), 'chain protocol injected');
+    // Chain protocol must include an explicit prohibition for intermediate cats
+    assert.ok(
+      out.includes('禁止') && (out.includes('cross_post') || out.includes('cross-post')),
+      'chain protocol must explicitly prohibit mid-process cross_post to main thread',
+    );
   });
 
   test('C-Y6: #ideate + none → NO reporter owner injected (orthogonality)', () => {

@@ -163,7 +163,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`workspace-navigator`" },
     "contexts": ["thinking", "feature_dev", "review"],
     "audience": ["all"],
-    "body": "想看某个文件？猫猫可以直接把它打开到你的工作区面板里。",
+    "body": "想看某个文件但不想自己翻目录？跟猫猫说一声，它直接帮你打开到工作区。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -193,7 +193,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`guide-interaction`" },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
-    "body": "问「怎么用」或「怎么配置」时，猫猫可以把说明做成一步步交互引导。",
+    "body": "不确定怎么用或怎么配？问猫猫——它会做成一步步交互引导，跟着走就行。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -208,7 +208,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`expert-panel`" },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "重要决策拿不准？可以开 expert-panel 让多只猫各自独立判断，再一起收敛。",
+    "body": "重要决策拿不准？让多只猫各自独立判断再收敛——跟猫说「开个专家讨论」就行。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -253,7 +253,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "CLI 错误诊断" },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
-    "body": "CLI 只显示「退出了」？让猫猫读 cliDiagnostics/debugRef 帮你定位原因——别自己翻日志。",
+    "body": "CLI 只显示「退出了」？让猫猫读诊断信息帮你定位，不用自己翻日志。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -338,7 +338,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/memory-routing-partial.md", "anchor": "graph_resolve" },
     "contexts": ["thinking", "review"],
     "audience": ["all"],
-    "body": "当你发现猫猫好像忘了之前的约定，说「我们之前不是定了 X 吗」——它会搜长期记忆找到原始决策，而不是从零开始。",
+    "body": "猫猫忘了之前约定？说「我们不是定了 X 吗」——它会搜长期记忆找到原始决策。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -374,7 +374,7 @@
     "bodySource": { "path": "cat-cafe-skills/feat-lifecycle/SKILL.md", "anchor": "sourceRef" },
     "contexts": ["feature_dev"],
     "audience": ["developer", "maintainer"],
-    "body": "立新功能时，在 spec 写 Tips Contribution；纯内部重构才用 frontmatter 豁免。",
+    "body": "新功能要写 Tips Contribution；纯重构用 tips_exempt 豁免。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -386,7 +386,7 @@
     "bodySource": { "path": "cat-cafe-skills/quality-gate/SKILL.md", "anchor": "CI 只证明结构" },
     "contexts": ["feature_dev", "review", "merge_gate"],
     "audience": ["developer", "maintainer"],
-    "body": "提 review 前跑 pnpm check:capability-tips；废话 tip 仍由 reviewer 退回。",
+    "body": "提 review 前跑 pnpm check:capability-tips 验证。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -398,7 +398,7 @@
     "bodySource": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "ask/why/evidence/action" },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["developer", "maintainer"],
-    "body": "社区的 issue 和 PR 都会进入 Decision Queue——猫猫按优先级处理，你可以在看板追踪进展。",
+    "body": "社区 issue/PR 进 Decision Queue——猫猫按优先级处理，看板可追踪。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "codex"
   },
@@ -469,7 +469,7 @@
     "bodySource": { "path": "docs/features/F188-library-stewardship.md", "anchor": "Warning codes" },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["all"],
-    "body": "记忆系统有健康面板——如果搜不到东西，可以去 Memory Center 看看是不是配置问题。",
+    "body": "搜不到之前聊过的东西？去 Memory Center 看健康面板——可能是配置问题，面板会帮你诊断。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus-47"
   },
@@ -481,7 +481,7 @@
     "bodySource": { "path": "docs/features/F246-approval-hub.md", "anchor": "统一审批中心底座" },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
-    "body": "左侧 Activity Bar 的铃铛图标可以打开审批中心——Thread 提案和 Session 交接都汇聚在这里，不用逐个 Thread 翻找。",
+    "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -565,7 +565,7 @@
     "bodySource": { "path": "docs/features/F188-library-stewardship.md", "anchor": "Memory Center Config Health" },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
-    "body": "之前讨论的东西忘了？跟猫说「翻一下我们上次聊的 X」——它有长期记忆，会自动搜到之前的决策和踩坑记录。Memory Center 可以看记忆健康状态。",
+    "body": "之前聊的忘了？说「翻一下上次聊的 X」——猫有长期记忆，会搜到之前的决策。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -577,7 +577,7 @@
     "bodySource": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
-    "body": "要换话题了？点左侧「+」开新 Thread，每个 Thread 独立话题互不干扰。双击标题可以改名，方便之后找回来。",
+    "body": "换话题？点左侧「+」开新 Thread，独立互不干扰。双击标题改名。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -595,7 +595,7 @@
     },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
-    "body": "不确定找哪只猫？布偶猫擅长深度分析，缅因猫擅长找 bug，暹罗猫擅长审美——想找特定猫就 @ 它的名字。",
+    "body": "不确定找哪只？布偶猫擅长分析，缅因猫找 bug，暹罗猫审美——@ 名字就行。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -607,7 +607,22 @@
     "bodySource": { "path": "docs/features/F108-side-dispatch-concurrent-invocation.md", "anchor": "Side-Dispatch" },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
-    "body": "不 @ 任何猫猫？上次跟你聊的那只猫会继续接话。想找特定猫猫就 @ 它的名字。同时 @ 多只时它们各自独立回复你，那一轮里不会互相传球——想让它们接力协作，等回复后再点名下一只。",
+    "body": "不 @ 任何猫？上次聊的那只会继续接话。想找特定猫就 @ 它名字。",
+    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "owner": "opus"
+  },
+  {
+    "id": "basics-concurrent-at",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F108-side-dispatch-concurrent-invocation.md", "anchor": "Side-Dispatch" },
+    "structureSource": {
+      "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
+      "anchor": "Side-Dispatch"
+    },
+    "bodySource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
+    "contexts": ["thinking", "concierge_open"],
+    "audience": ["all"],
+    "body": "同时 @ 多只猫？它们各自独立回你、不互相传球。想接力就等回复后再点名。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -619,7 +634,7 @@
     "bodySource": { "path": "docs/features/F102-memory-adapter-refactor.md", "anchor": "记忆组件 Adapter" },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
-    "body": "觉得猫猫越来越懂你的项目了？因为对话中的有价值知识会自动沉淀——不用手动标记，之前做过的决策不会白做。",
+    "body": "猫越来越懂你的项目了？有价值知识会自动沉淀——不用标记，决策不会白做。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -649,7 +664,7 @@
     "bodySource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
-    "body": "猫卡住反复修不好？点「停止生成」停下来，跟它说「换个方法」——或者 @ 另一只猫从头诊断，有时换个视角就通了。",
+    "body": "猫卡住反复修不好？停下来说「换个方法」——或 @ 另一只猫从头诊断。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -661,7 +676,7 @@
     "bodySource": { "path": "docs/SOP.md", "anchor": "完整流程（5 步）" },
     "contexts": ["feature_dev", "thinking", "long_running"],
     "audience": ["cvo"],
-    "body": "想让猫做完整功能？跟它说「按 SOP 开发这个」——它会自己走立项、设计、写测试、找别的猫 review、合并，你只在关键决策点拍板。",
+    "body": "想做完整功能？说「按 SOP 开发」——猫会自走立项到合并，你只拍板关键点。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus-48"
   },
@@ -685,7 +700,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "W1. 猫猫是 Agent" },
     "contexts": ["feature_dev", "thinking", "long_running"],
     "audience": ["cvo"],
-    "body": "给一只猫清楚的目标，它做完会自己把活传给下一只接力，你只管在关键处拍板。注意：同时 @ 多只是各自独立回你、那一轮不互相传球。",
+    "body": "想让猫做什么？直接说目标就好。它们会自己传球接力——同时 @ 多只是各干各的哦。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus-48"
   },
@@ -697,7 +712,7 @@
     "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "P5. 可验证才算完成" },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo"],
-    "body": "猫写完代码会自己找另一只猫 review（优先跨家族，必要时同族不同猫），不用你提醒。看到它们互相挑错很正常——这是质量门，不是吵架。",
+    "body": "看到两只猫在互相挑毛病？别担心——写完代码必须另一只 review 才能合入，那是质量门。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus-48"
   },
@@ -721,8 +736,24 @@
     "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "判断力的行使" },
     "contexts": ["feature_dev", "thinking"],
     "audience": ["cvo"],
-    "body": "能回滚的小决定，猫会自己拍不打扰你；改愿景、删数据这种不可逆的才找你确认。想全程把关也行，告诉它就好。",
+    "body": "猫自己做了个决定没问你？那多半是可回滚的小事——不可逆的它一定会来确认。觉得管太松就跟它说。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus-48"
+  },
+  {
+    "id": "feature-f245-friction-eval-rollup",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" },
+    "structureSource": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Phase D" },
+    "bodySource": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Why" },
+    "contexts": ["thinking", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "觉得某个地方用着别扭？去 Eval Hub 看「摩擦信号」——爪感差、cancel、反馈都汇在一起了。标「建议修复」的猫会自动跟进。",
+    "action": {
+      "type": "open_source",
+      "label": "打开 spec",
+      "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" }
+    },
+    "owner": "gpt52"
   }
 ]

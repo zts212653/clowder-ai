@@ -1058,11 +1058,16 @@ excluded:
 
     it('sync-manifest exports F203 native L0 runtime closure', () => {
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
+      const managedRoots = readYamlTopLevelList('sync-manifest.yaml', 'managed_roots');
       const managedScripts = readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts');
 
       assert.ok(
         managedFiles.includes('assets/system-prompts/system-prompt-l0.md'),
         'sync-manifest should export the F203 L0 template required by native prompt compilation',
+      );
+      assert.ok(
+        managedRoots.includes('assets/prompt-templates'),
+        'sync-manifest should export the F237 segmented L0 templates loaded by the native prompt compiler',
       );
       assert.ok(
         managedScripts.includes('scripts/compile-system-prompt-l0.mjs'),
@@ -1133,6 +1138,10 @@ excluded:
         transformTargets.includes('assets/system-prompts/system-prompt-l0.md'),
         'system-prompt-l0.md carries governance rules and must be explicitly tracked as a sanitize transform',
       );
+      assert.ok(
+        transformTargets.includes('assets/prompt-templates/l4-iron-laws.md'),
+        'segmented L4 iron-laws template carries data-safety rules and must be explicitly tracked as a sanitize transform',
+      );
     });
 
     it('public F203 native L0 template sanitization removes home-only runtime rules', () => {
@@ -1142,8 +1151,19 @@ excluded:
       assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
       assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
       assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
-      assert.match(sanitized, /\*\*Runtime data safety\*\*/);
       assert.doesNotMatch(sanitized, /Clowder AI 的护城河是情感壁垒不是技术壁垒/);
+    });
+
+    it('public F237 segmented L4 template sanitization removes home-only runtime rules', () => {
+      const sourceL4 = readFileSync(resolve(ROOT, 'assets/prompt-templates/l4-iron-laws.md'), 'utf-8');
+      const sanitized = sanitizeFixture('assets/prompt-templates/l4-iron-laws.md', sourceL4);
+
+      assert.match(sanitized, /\*\*Runtime data safety\*\*/);
+      assert.match(sanitized, /\*\*Release acceptance channel\*\*/);
+      assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
+      assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
+      assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
+      assert.doesNotMatch(sanitized, /co-creator/);
     });
 
     it('public docs and skill refs sanitize internal role, thread, and ops-cost markers', () => {

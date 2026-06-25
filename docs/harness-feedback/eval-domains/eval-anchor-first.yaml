@@ -1,0 +1,34 @@
+---
+domainId: eval:anchor-first
+displayName: Anchor-First Context Entry Eval
+systemThreadId: thread_eval_anchor_first
+# evalCat: gpt52 (Maine Coon GPT-5.4) — cross-family separation (Ragdoll authored
+# F236 anchor-first → Maine Coon evaluates). Same cost rationale as eval:friction.
+evalCat:
+  catId: gpt52
+  handle: "@gpt52"
+  model: gpt-5.4
+# frequency: weekly means the eval cat fires weekly. Each fire reads
+# the latest 24h in-memory snapshot (EVICTION_TTL_MS in anchor-telemetry.ts).
+# The eval window covers the most recent 24h, not the full week (Maine Coon R1 P2).
+frequency: weekly
+sourceAdapter: f236-anchor-telemetry-rollup
+sourceRefsKind: anchor-telemetry-snapshot
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+# Findings route to F236 owner (opus-47 as the registered harness-eval cell owner).
+handoffTargetResolver:
+  featureId: F236
+  ownerCatId: opus-47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+# Generator + provider wired end-to-end (index.ts verdictGenerators + wiredPublishDomains).
+enabled: true

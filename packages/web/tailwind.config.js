@@ -99,12 +99,6 @@ module.exports = {
           dark: 'var(--color-kimi-dark)',
           bg: 'var(--color-kimi-bg)',
         },
-        dare: {
-          primary: 'var(--color-dare-primary)',
-          light: 'var(--color-dare-light)',
-          dark: 'var(--color-dare-dark)',
-          bg: 'var(--color-dare-bg)',
-        },
         cocreator: {
           primary: 'var(--color-cocreator-primary)',
           light: 'var(--color-cocreator-light)',

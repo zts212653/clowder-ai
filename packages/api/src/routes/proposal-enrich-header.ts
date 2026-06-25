@@ -68,13 +68,17 @@ function buildReportingProtocol(
     case 'final-only':
       if (isParallelMode && reporterHandle) {
         return [
-          `**回报模式：final-only（并行）report-back owner**：${reporterHandle}（提议顺序第一棒）负责综合所有并行回复，用 \`cat_cafe_cross_post_message\` 把**最终总结**回报到主 Thread（一次）。`,
+          `**回报模式：final-only（并行）** — 本 Thread 自治推进，全部任务完成（PR 合入 / 任务关闭）后由 report-back owner ${reporterHandle}（第一棒）综合所有并行回复，用 \`cat_cafe_cross_post_message\` 回报**一次最终总结**到主 Thread。`,
           '其它并行的猫独立思考 / 回复即可，**不要**各自 cross-post（由 report-back owner 统一汇总）。',
+          `**⚠️ 过程中禁止 cross_post_message 回报主 Thread**（含进度、ACK、中间结果）——所有协作在本 Thread 内用行首 \`@\` 闭环。`,
+          `**最终回报专用路由凭证**（仅任务全部完成后使用）：`,
           routingLine,
         ];
       }
       return [
-        '**回报模式：final-only** — 完成后由最后一棒猫用 `cat_cafe_cross_post_message` 把**最终总结**回报到主 Thread（一次；中途不必逐步回报）。',
+        '**回报模式：final-only** — 本 Thread 自治推进，全部任务完成（PR 合入 / 任务关闭）后由最后一棒猫用 `cat_cafe_cross_post_message` 回报**一次最终总结**到主 Thread。',
+        `**⚠️ 过程中禁止 cross_post_message 回报主 Thread**（含进度、ACK、中间结果）——所有协作（review / 修改 / 传球）在本 Thread 内用行首 \`@\` 闭环。`,
+        `**最终回报专用路由凭证**（仅任务全部完成后使用）：`,
         routingLine,
       ];
     case 'state-transitions':
@@ -139,22 +143,38 @@ function buildChainProtocol(
   const handles = preferredCats.map((catId) => resolveHandle(catId) ?? `@${catId}`);
   const chainOrder = handles.join(' → ');
   const isNone = reportingMode === 'none';
-  const chainTail = isNone ? '' : ' → 回到主 Thread';
+  const isFinalOnly = reportingMode === 'final-only';
+  // final-only: no "→ 回到主 Thread" in the order line — it misleads intermediate
+  // cats into thinking reporting back is a chain step they should all do.
+  // Only state-transitions / blocking-ack (process-reporting modes) show the tail.
+  const chainTail = isNone || isFinalOnly ? '' : ' → 回到主 Thread';
   // AC-AA6: serial chain final step includes routing credentials (P1-3: copyable, not placeholder)
   const sourceCatId = sourceCatHandle?.replace(/^@/, '') ?? null;
   const routingHint = sourceCatId
     ? `（\`targetCats: ["${sourceCatId}"]\` 或行首 \`${sourceCatHandle}\`）`
     : '（设置 `targetCats` 或行首 `@` 源猫 handle）';
-  const finalStep = isNone
-    ? '  - （本 Thread 为 autonomous 模式，无强制回报；接力完成即可）'
-    : `  - 最后一棒完成后, 用 \`cat_cafe_cross_post_message\` 把总结回报到主 Thread${routingHint}`;
-  return [
+  let finalStep: string;
+  if (isNone) {
+    finalStep = '  - （本 Thread 为 autonomous 模式，无强制回报；接力完成即可）';
+  } else if (isFinalOnly) {
+    finalStep = `  - 全部任务完成（PR 合入 / 任务关闭）后, 由最后一棒猫用 \`cat_cafe_cross_post_message\` 回报最终总结到主 Thread${routingHint}`;
+  } else {
+    finalStep = `  - 最后一棒完成后, 用 \`cat_cafe_cross_post_message\` 把总结回报到主 Thread${routingHint}`;
+  }
+  // final-only: explicit prohibition for intermediate cats
+  const midProcessProhibition = isFinalOnly
+    ? '  - ⚠️ 过程中禁止 cross_post 主 Thread——所有协作在本 Thread 内用行首 `@` 闭环'
+    : null;
+  const lines = [
     '',
     '## 接力链路（cat-driven @-chain）',
     `顺序: ${chainOrder}${chainTail}`,
     'Server 只 wake 了**第一棒**。你接到这条消息后:',
     '  - 完成你的回合',
     '  - 在自己回复的**行首独立一行** `@` 下一棒猫的 stable handle 把球传出去',
+  ];
+  if (midProcessProhibition) lines.push(midProcessProhibition);
+  lines.push(
     finalStep,
     '',
     // NOTE: do NOT write the literal "#ideate" string here — parseIntent
@@ -162,7 +182,8 @@ function buildChainProtocol(
     // user tag and force parallel mode. Refer to the tool description for
     // the actual opt-in syntax.
     '（如果要**并行模式**让大家独立思考不按顺序，下一次 propose 时按 `cat_cafe_propose_thread` 工具描述里的 ideate 选项 opt-in。）',
-  ];
+  );
+  return lines;
 }
 
 /**

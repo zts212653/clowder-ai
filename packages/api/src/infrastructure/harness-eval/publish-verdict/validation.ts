@@ -5,6 +5,7 @@ import { VERDICT_CLASSES } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 import type {
   A2aSnapshotAttributionRefs,
+  AnchorTelemetrySourceSelector,
   HandlerError,
   MemoryRecallSourceSelector,
   ResolvedSourceRefs,
@@ -54,8 +55,20 @@ export function isFrictionSourceRefs(refs: VerdictSourceRefs | undefined): refs 
   return refs.kind === 'friction-rollup-snapshot';
 }
 
+/**
+ * F236 Track-2 AC-E4 — discriminator helper for anchor telemetry selector.
+ */
+export function isAnchorTelemetrySourceRefs(
+  refs: VerdictSourceRefs | undefined,
+): refs is AnchorTelemetrySourceSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'anchor-telemetry-snapshot';
+}
+
 export const KNOWN_SOURCE_REFS_KINDS = [
   'a2a-snapshot-attribution',
+  'anchor-telemetry-snapshot',
   'capability-wakeup-trial-window',
   'memory-recall-snapshot',
   'sop-trace-eval',
@@ -103,9 +116,10 @@ export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string
   if (isSopSourceRefs(refs)) return 'sop-trace-eval';
   if (isMemorySourceRefs(refs)) return 'memory-recall-snapshot';
   if (isTaskOutcomeSourceRefs(refs)) return 'task-outcome-snapshot';
-  // ⚠️ friction guard MUST precede the a2a default: isA2aSourceRefs returns true
-  // for undefined/missing-kind refs (backward-compat default) and would swallow
-  // friction selectors otherwise.
+  // ⚠️ anchor-telemetry + friction guards MUST precede the a2a default:
+  // isA2aSourceRefs returns true for undefined/missing-kind refs (backward-compat
+  // default) and would swallow kind-discriminated selectors otherwise.
+  if (isAnchorTelemetrySourceRefs(refs)) return 'anchor-telemetry-snapshot';
   if (isFrictionSourceRefs(refs)) return 'friction-rollup-snapshot';
   if (isA2aSourceRefs(refs)) return 'a2a-snapshot-attribution';
   if (refs && typeof refs === 'object' && 'kind' in refs && typeof refs.kind === 'string') {
@@ -177,6 +191,26 @@ function validateOptionalPositiveInt(value: number | undefined, fieldName: strin
   if (value === undefined) return null;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     return `${fieldName} must be a positive integer when provided`;
+  }
+  return null;
+}
+
+/**
+ * F236 Track-2 AC-E4 — structural validator for anchor telemetry selector.
+ * Mirrors validateFrictionRollupSelector shape (window-only, no optional fields).
+ */
+export function validateAnchorTelemetrySelector(selector: AnchorTelemetrySourceSelector): string | null {
+  if (selector.kind !== 'anchor-telemetry-snapshot') {
+    return `expected kind='anchor-telemetry-snapshot', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return 'windowEndMs must be greater than windowStartMs';
   }
   return null;
 }

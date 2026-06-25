@@ -60,9 +60,14 @@ describe('F128 chain protocol injection', () => {
     const geminiIdx = orderLine.indexOf('gemini');
     const codexIdx = orderLine.indexOf('codex');
     assert.ok(kimiIdx >= 0 && geminiIdx > kimiIdx && codexIdx > geminiIdx, 'order must follow preferredCats');
-    // F128 Phase AA (AC-AA1): default reportingMode is now final-only. The serial
-    // chain order ends with "→ 回到主 Thread" (default final-only returns results).
-    assert.ok(orderLine.includes('回到主 Thread'), 'AC-AA1: default final-only chain order DOES return to 主 Thread');
+    // F128 final-only hardening: chain order line must NOT include "→ 回到主 Thread"
+    // for final-only mode — it misleads intermediate cats into thinking reporting back
+    // is a chain step they should do. The final report instruction lives in the
+    // dedicated final step, not the order overview.
+    assert.ok(
+      !orderLine.includes('回到主 Thread'),
+      'final-only chain order must NOT include "→ 回到主 Thread" (misleads intermediate cats)',
+    );
 
     assert.ok(enqueued.includes('行首独立一行'), 'must instruct cats to use line-start @-mention for handoff');
     assert.ok(

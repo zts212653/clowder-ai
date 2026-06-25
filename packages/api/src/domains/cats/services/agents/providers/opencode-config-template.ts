@@ -111,8 +111,7 @@ export interface OpenCodeRuntimeConfigOptions {
   allowedWorkspaceDirs?: string;
   /**
    * F203 Phase I: Instruction file paths injected into OpenCode's `instructions` config.
-   * These are loaded by OpenCode every turn into `role: "system"` messages — compression-immune.
-   * Typical contents: [compiledL0Path, "OPENCODE.md"].
+   * Loaded every turn into `role: "system"` messages — compression-immune.
    */
   instructions?: readonly string[];
   /** #935: Directories outside cwd granted `permission.external_directory` access. */

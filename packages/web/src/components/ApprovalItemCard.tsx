@@ -69,13 +69,21 @@ export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
   }, [rejectProposal, item.proposalId]);
 
   const featureBadge =
-    item.sourceFeatureId === 'F128' ? 'Thread' : item.sourceFeatureId === 'F193' ? 'Dispatch' : 'Handoff';
+    item.sourceFeatureId === 'F128'
+      ? 'Thread'
+      : item.sourceFeatureId === 'F193'
+        ? 'Dispatch'
+        : item.sourceFeatureId === 'F231'
+          ? 'Profile'
+          : 'Handoff';
   const featureColor =
     item.sourceFeatureId === 'F128'
       ? 'var(--semantic-info)'
       : item.sourceFeatureId === 'F193'
         ? 'var(--semantic-success, #22c55e)'
-        : 'var(--semantic-secondary, #8b5cf6)';
+        : item.sourceFeatureId === 'F231'
+          ? 'var(--semantic-warning, #f59e0b)'
+          : 'var(--semantic-secondary, #8b5cf6)';
 
   return (
     <div

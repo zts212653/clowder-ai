@@ -135,7 +135,7 @@ describe('parseA2AMentions', () => {
 
   it('routes when content comes before @mention (content-before-mention pattern)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
-    const text = '这是交接文档，DARE 源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus';
+    const text = '这是交接文档，源码目录执行 + 业务项目 workspace\n是否接受完全禁用 --api-key argv\n@opus';
     const result = parseA2AMentions(text, 'codex');
     assert.deepEqual(result, ['opus']);
   });

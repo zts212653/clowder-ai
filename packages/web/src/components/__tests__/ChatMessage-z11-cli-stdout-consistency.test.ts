@@ -126,4 +126,59 @@ describe('F194 Phase Z11 — ChatMessage CLI Output stdout consistency (AC-Z29)'
     expect(text).toContain('CLI Output');
     expect(text).toContain('PURE_STREAM_STDOUT');
   });
+
+  it('rollback compatibility: cached R21 stream speech stays visible when cliStdout is empty', () => {
+    const msg = {
+      id: 'msg-z11-cached-r21-speech',
+      type: 'assistant' as const,
+      catId: 'opus',
+      content: '',
+      origin: 'stream' as const,
+      toolEvents: [{ id: 't1', type: 'tool_use' as const, label: 'Read cached.ts', timestamp: 1000 }],
+      timestamp: Date.now(),
+      isStreaming: false,
+      extra: {
+        stream: {
+          invocationId: 'p',
+          turnInvocationId: 't',
+          cliStdout: '',
+          speechContent: 'CACHED_R21_SPEECH',
+        },
+      },
+    };
+    act(() => {
+      root.render(React.createElement(ChatMessage, { message: msg, getCatById }));
+    });
+    const text = container.textContent ?? '';
+    expect(text).toContain('CLI Output');
+    expect(text).toContain('CACHED_R21_SPEECH');
+  });
+
+  it('rollback compatibility: cached R21 speech does not override non-empty stream content', () => {
+    const msg = {
+      id: 'msg-z11-cached-r21-stale-speech',
+      type: 'assistant' as const,
+      catId: 'opus',
+      content: 'NEW_STREAM_TEXT',
+      origin: 'stream' as const,
+      toolEvents: [{ id: 't1', type: 'tool_use' as const, label: 'Read fresh.ts', timestamp: 1000 }],
+      timestamp: Date.now(),
+      isStreaming: false,
+      extra: {
+        stream: {
+          invocationId: 'p',
+          turnInvocationId: 't',
+          cliStdout: '',
+          speechContent: 'STALE_R21_SPEECH',
+        },
+      },
+    };
+    act(() => {
+      root.render(React.createElement(ChatMessage, { message: msg, getCatById }));
+    });
+    const text = container.textContent ?? '';
+    expect(text).toContain('CLI Output');
+    expect(text).toContain('NEW_STREAM_TEXT');
+    expect(text).not.toContain('STALE_R21_SPEECH');
+  });
 });

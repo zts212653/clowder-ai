@@ -115,6 +115,46 @@ export interface ClassifiedFrictionCluster extends FrictionCluster {
 }
 
 /**
+ * F245 Phase D — cluster 在出口层的语义分流。
+ * actionable_candidate = 可由 eval cat 提议修复；
+ * reference_only = 只展示引用，不进入 propose_thread 出口。
+ */
+export type FrictionClusterActionability = 'actionable_candidate' | 'reference_only';
+
+/**
+ * F245 Phase D — friction cluster 对应的 propose_thread 草稿。
+ * 这是 eval cat 的“一键起草”载荷，不代表自动执行。
+ */
+export interface FrictionFollowupDraft {
+  clusterId: string;
+  title: string;
+  summary: string;
+  evidenceRefs: string[];
+  suggestedOwnerCatId?: string;
+  reportingMode: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
+  projectPath?: string;
+}
+
+/**
+ * F245 Phase D — 可进入修复出口的 cluster。
+ * mixed-channel cluster 若含 eval-domain 成员，这些 evidence refs 只作 reference-only 附带证据，
+ * 不改变本 cluster 可提议修复的主语义。
+ */
+export interface ActionableFrictionCandidate extends ClassifiedFrictionCluster {
+  actionability: 'actionable_candidate';
+  followupDraft: FrictionFollowupDraft;
+  referenceOnlyEvidenceRefs: string[];
+}
+
+/**
+ * F245 Phase D — 只展示、不进入修复出口的 cluster（当前 = eval-domain-only）。
+ */
+export interface ReferenceOnlyFrictionCluster extends ClassifiedFrictionCluster {
+  actionability: 'reference_only';
+  evidenceRefs: string[];
+}
+
+/**
  * F245 Phase B — Friction rollup 的纯函数输入（Phase C rollup 消费）。
  * 给定窗口 → dedup 后全量 signals + cluster 列表 + degraded 标志。可独立测试（fixture → 断言）。
  */
@@ -156,6 +196,10 @@ export interface FrictionRollupReport {
   generatedAt: string;
   /** 深挖区：Top-N cluster（severity × count × channelDiversity 降序，默认 N=10；P1-4 起含 sensorForms） */
   topClusters: ClassifiedFrictionCluster[];
+  /** Phase D：可由 eval cat 提议修复的候选 cluster（默认最多 3 个，可调） */
+  actionableCandidates: ActionableFrictionCandidate[];
+  /** Phase D：reference-only cluster（当前 = eval-domain-only，不重复开修复 thread） */
+  referenceOnly: ReferenceOnlyFrictionCluster[];
   /** 长尾折叠摘要（Top-N 之外的 cluster） */
   tailSummary: FrictionTailSummary;
   /** 透传：rollup 不完整（embedding 降级 OR 通道抛错）。degraded 报告不应被当完整发布 */

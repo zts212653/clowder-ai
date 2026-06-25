@@ -7,7 +7,6 @@ test('isCliTimeoutError matches 响应超时 pattern', () => {
   assert.ok(isCliTimeoutError('缅因猫 CLI 响应超时 (300s)'));
   assert.ok(isCliTimeoutError('布偶猫 CLI 响应超时 (1800s)'));
   assert.ok(isCliTimeoutError('暹罗猫 CLI 响应超时 (300s, 未收到首帧)'));
-  assert.ok(isCliTimeoutError('DARE CLI 响应超时 (300s)'));
   assert.ok(isCliTimeoutError('opencode CLI 响应超时 (600s, 未收到首帧)'));
 });
 

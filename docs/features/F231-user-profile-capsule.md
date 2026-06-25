@@ -4,6 +4,7 @@ related_features: [F221, F203, F102, F200, F229]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
+tips_exempt: L0-internal per-user alignment injection — harness plumbing, no user-visible capability surface
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
