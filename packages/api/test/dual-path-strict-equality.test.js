@@ -1,13 +1,15 @@
 /**
- * F237 Phase 2 AC-P2-5: Strict equality — old builder output === pipeline output.
+ * F237 Phase 2 AC-P2-5: Strict equality — legacy builder output === pipeline output.
  *
- * Proves that buildStaticIdentity (legacy if/push) and buildStaticIdentityViaHookPipeline
- * produce whitespace-normalized identical output when given the same inputs.
+ * Proves that _buildStaticIdentityLegacy (manual segment assembly) and
+ * buildStaticIdentityViaHookPipeline produce whitespace-normalized identical output.
+ *
+ * Uses the exported _legacy functions directly so the comparison is truly
+ * legacy-vs-pipeline, not pipeline-vs-pipeline (which would happen if we called
+ * the delegating buildStaticIdentity/buildInvocationContext entrypoints).
  *
  * This test is the safety gate for AC-P2-6 delegation: once equivalence is proven,
  * the old functions can safely delegate to the pipeline.
- *
- * Test runs BEFORE delegation (both paths callable independently).
  */
 
 import assert from 'node:assert/strict';
@@ -66,8 +68,9 @@ describe('Strict equality: legacy builder vs pipeline (AC-P2-5/14)', () => {
     pipelineBuilder?.resetPipelineSingleton();
   });
 
-  it('buildStaticIdentity output matches pipeline output (whitespace-normalized)', () => {
-    const legacyOutput = legacyBuilder.buildStaticIdentity('opus', { mcpAvailable: true });
+  it('_buildStaticIdentityLegacy output matches pipeline output (whitespace-normalized)', () => {
+    // Use exported legacy function directly — NOT buildStaticIdentity which delegates to pipeline
+    const legacyOutput = legacyBuilder._buildStaticIdentityLegacy('opus', { mcpAvailable: true });
     const pipelineOutput = pipelineBuilder.buildStaticIdentityViaHookPipeline('opus', { mcpAvailable: true });
 
     assert.ok(legacyOutput.length > 500, `Legacy output should be substantial (got ${legacyOutput.length})`);
@@ -103,7 +106,7 @@ describe('Strict equality: legacy builder vs pipeline (AC-P2-5/14)', () => {
     }
   });
 
-  it('buildInvocationContext output matches pipeline output (whitespace-normalized)', () => {
+  it('_buildInvocationContextLegacy output matches pipeline output (whitespace-normalized)', () => {
     /** @type {import('../dist/domains/cats/services/context/SystemPromptBuilder.js').InvocationContext} */
     const context = {
       catId: /** @type {any} */ ('opus'),
@@ -116,7 +119,8 @@ describe('Strict equality: legacy builder vs pipeline (AC-P2-5/14)', () => {
       nativeL0Injected: false,
     };
 
-    const legacyOutput = legacyBuilder.buildInvocationContext(context);
+    // Use exported legacy function directly — NOT buildInvocationContext which delegates to pipeline
+    const legacyOutput = legacyBuilder._buildInvocationContextLegacy(context);
     const pipelineOutput = pipelineBuilder.buildInvocationContextViaHookPipeline(context);
 
     assert.ok(legacyOutput.length > 100, `Legacy output should be substantial (got ${legacyOutput.length})`);

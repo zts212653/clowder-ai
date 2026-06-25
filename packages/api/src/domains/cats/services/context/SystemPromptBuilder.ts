@@ -464,6 +464,9 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   // markers are a Console UI concern, not part of the pipeline output contract.
   // Will be replaced by InjectionTraceSummary viewer in AC-P2-9.
   if (!options?.annotateSegments) {
+    // Unknown cat guard: legacy returns '', pipeline would throw
+    const config = getConfig(catId as string);
+    if (!config) return '';
     return buildStaticIdentityViaHookPipeline(catId, options);
   }
 
@@ -594,6 +597,115 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   return lines.join('\n');
 }
 
+/** @deprecated @internal Legacy implementation — kept during migration for test use only, will be removed. */
+export function _buildStaticIdentityLegacy(catId: CatId, options?: StaticIdentityOptions): string {
+  const config = getConfig(catId as string);
+  if (!config) return '';
+
+  const providerLabel = PROVIDER_LABELS[config.clientId] ?? config.clientId;
+  const lines: string[] = [];
+
+  /* S1 — 身份声明 */
+  const nameLabel = config.nickname
+    ? `${config.displayName}/${config.nickname}（${config.name}）`
+    : `${config.displayName}（${config.name}）`;
+  const nicknameOrigin = config.nickname ? `昵称 "${config.nickname}" 的由来见 docs/stories/cat-names/。\n` : '';
+  const s1 = renderSegment('S1', {
+    NAME_LABEL: nameLabel,
+    PROVIDER_LABEL: providerLabel,
+    NICKNAME_ORIGIN: nicknameOrigin,
+    ROLE_DESCRIPTION: config.roleDescription,
+    PERSONALITY: config.personality,
+  });
+  if (s1) lines.push(s1, '');
+
+  /* S2 — 硬限制 */
+  if (config.restrictions && config.restrictions.length > 0) {
+    const s2 = renderSegment('S2', { RESTRICTIONS_TEXT: config.restrictions.join('、') });
+    if (s2) lines.push(s2, '');
+  }
+
+  /* S3 — Pack Masks */
+  if (options?.packBlocks?.masksBlock) {
+    const s3 = renderSegment('S3', { PACK_MASKS_BLOCK: options.packBlocks.masksBlock });
+    if (s3) lines.push(s3, '');
+  }
+
+  /* S4 — 协作格式 */
+  const { mentions: callableMentions, hasDuplicateDisplayNames, uniqueHandleExample } = buildCallableMentions(catId);
+  if (callableMentions.length > 0) {
+    const exampleTarget = callableMentions[0]!;
+    let dupHint = '';
+    if (hasDuplicateDisplayNames) {
+      const example = uniqueHandleExample ?? '@opus';
+      dupHint = `同族多分身时：默认 \`@显示名\`，其它用**唯一句柄**（例如 \`${example}\`）。\n同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。\n`;
+    }
+    const s4 = renderSegment('S4', {
+      CALLABLE_MENTIONS: callableMentions.join(' / '),
+      EXAMPLE_TARGET: exampleTarget,
+      DUPLICATE_NAMES_HINT: dupHint,
+    });
+    if (s4) lines.push(s4, '');
+  }
+
+  /* S5 — 队友名册 */
+  const rosterLines = buildTeammateRoster(catId);
+  if (rosterLines) {
+    const s5 = renderSegment('S5', { ROSTER_CONTENT: rosterLines });
+    if (s5) lines.push(s5, '');
+  }
+
+  /* S6 — 工作流触发点 */
+  const wfTriggers = getWorkflowTriggers();
+  const triggers = wfTriggers[config.breedId ?? ''] ?? wfTriggers[catId as string];
+  if (triggers) {
+    lines.push(triggers, '');
+  }
+
+  /* S7 — Pack Workflows */
+  const packBlocks = options?.packBlocks;
+  if (packBlocks?.workflowsBlock) {
+    const s7 = renderSegment('S7', { PACK_WORKFLOWS_BLOCK: packBlocks.workflowsBlock });
+    if (s7) lines.push(s7, '');
+  }
+
+  /* S8 — co-creator引用 */
+  const coCreator = getCoCreatorConfig();
+  const ccName = coCreator.name;
+  const ccHandles = coCreator.mentionPatterns.map((p: string) => `\`${p}\``).join(' / ');
+  const s8 = renderSegment('S8', { CC_NAME: ccName, CC_HANDLES: ccHandles });
+  if (s8) lines.push(s8, '');
+
+  /* S9 — 治理摘要 */
+  const s9 = renderSegment('S9', { GOVERNANCE_DIGEST: getGovernanceDigest() });
+  if (s9) lines.push('', s9);
+
+  /* S10 — Pack Guardrails */
+  if (packBlocks?.guardrailBlock) {
+    const s10 = renderSegment('S10', { PACK_GUARDRAILS_BLOCK: packBlocks.guardrailBlock });
+    if (s10) lines.push('', s10);
+  }
+
+  /* S11 — Pack Defaults */
+  if (packBlocks?.defaultsBlock) {
+    const s11 = renderSegment('S11', { PACK_DEFAULTS_BLOCK: packBlocks.defaultsBlock });
+    if (s11) lines.push('', s11);
+  }
+
+  /* S12 — World Driver */
+  if (packBlocks?.worldDriverSummary) {
+    const s12 = renderSegment('S12', { WORLD_DRIVER_SUMMARY: packBlocks.worldDriverSummary });
+    if (s12) lines.push('', s12);
+  }
+
+  /* S13 — MCP 工具文档 */
+  if (options?.mcpAvailable) {
+    lines.push('', getMcpToolsSection().trim());
+  }
+
+  return lines.join('\n');
+}
+
 /**
  * F203 Phase C (Task 2): the pack-only slice of the static identity.
  *
@@ -634,8 +746,8 @@ export function buildInvocationContext(context: InvocationContext): string {
   return buildInvocationContextViaHookPipeline(context);
 }
 
-/** @deprecated Legacy implementation — kept during migration, will be removed. */
-function _buildInvocationContextLegacy(context: InvocationContext): string {
+/** @deprecated @internal Legacy implementation — kept during migration for test use only, will be removed. */
+export function _buildInvocationContextLegacy(context: InvocationContext): string {
   const config = getConfig(context.catId as string);
   if (!config) return '';
 

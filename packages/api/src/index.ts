@@ -1512,6 +1512,10 @@ async function main(): Promise<void> {
     await import('./domains/concierge/ConciergeInvestigationJobStore.js');
   const conciergeInvestigationJobStore = redis ? new _RIJSEarly(redis) : new _MIJSEarly();
 
+  // F237 Phase 2: InjectionTraceStore — prompt injection trace persistence
+  const { InjectionTraceStore: _ITSEarly } = await import('./domains/prompt-hooks/InjectionTraceStore.js');
+  const injectionTraceStore = redis ? new _ITSEarly(redis) : undefined;
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -1549,6 +1553,7 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeHandleMapStore: conciergeHandleMapStoreShared,
     conciergeTriagePlanStore,
+    ...(injectionTraceStore ? { injectionTraceStore } : {}),
   });
 
   // F39: Message queue delivery

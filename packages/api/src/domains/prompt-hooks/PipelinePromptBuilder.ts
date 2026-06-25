@@ -18,6 +18,7 @@ import type { AssemblerInput, CatId, EffectiveHookState } from '@cat-cafe/shared
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { renderSegment } from '../cats/services/context/prompt-template-loader.js';
 import type { InvocationContext, StaticIdentityOptions } from '../cats/services/context/SystemPromptBuilder.js';
+import { buildConciergePromptLines } from '../concierge/ConciergePromptSection.js';
 import { assembleForSession, assembleForTurn } from './assemble-bridge.js';
 import { HookPipeline, type PipelineResult } from './HookPipeline.js';
 import { HookRegistry } from './HookRegistry.js';
@@ -154,6 +155,15 @@ export function buildInvocationContextViaHookPipeline(
 ): string {
   const { prompt, trace } = buildInvocationContextViaHookPipelineWithTrace(context, overrides);
   capturedTurnTrace = trace; // AC-P2-8: capture for invocation-layer persistence
+
+  // F229: Concierge duty section — not yet a pipeline hook. Append post-pipeline.
+  if (context.threadKind === 'concierge' && context.conciergeConfig) {
+    const conciergeLines = buildConciergePromptLines(context.conciergeConfig, context.threadId);
+    if (conciergeLines.length > 0) {
+      return [prompt, ...conciergeLines].filter(Boolean).join('\n');
+    }
+  }
+
   return prompt;
 }
 

@@ -22,6 +22,8 @@ import {
   getMcpToolsSection,
   getWorkflowTriggers,
 } from '../cats/services/context/SystemPromptBuilder.js';
+import { buildConciergePromptLines } from '../concierge/ConciergePromptSection.js';
+import { buildGuidePromptLines } from '../guides/GuidePromptSection.js';
 import {
   extractPackBlocks,
   flattenWorldContext,
@@ -208,8 +210,13 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
       : null,
     threadId: context.threadId ?? null,
     bootcampMemberCount: context.bootcampMemberCount ?? null,
-    guidePromptLines: null,
-    conciergeLines: null,
+    guidePromptLines: context.guideCandidate
+      ? buildGuidePromptLines(context.guideCandidate, context.threadId).join('\n')
+      : null,
+    conciergeLines:
+      context.threadKind === 'concierge' && context.conciergeConfig
+        ? buildConciergePromptLines(context.conciergeConfig, context.threadId)
+        : null,
     worldContext: context.worldContext ? flattenWorldContext(context.worldContext) : null,
     alwaysOnDocsBlock:
       context.alwaysOnDocs && context.alwaysOnDocs.length > 0 ? formatAlwaysOnDocs(context.alwaysOnDocs) : null,
