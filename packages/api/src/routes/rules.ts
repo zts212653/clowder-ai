@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
+import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { getDefaultRootsForPlatform, isPathUnderRoots, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -267,6 +268,20 @@ async function findSkillPath(root: string, name: string, projectPath?: string): 
   for (const dir of candidateDirs) {
     const candidate = join(dir, name, 'SKILL.md');
     if (existsSync(candidate)) return candidate;
+  }
+  // Fallback: check plugin skill source directories from capabilities config
+  try {
+    const config = await readCapabilitiesConfig(root);
+    if (config) {
+      for (const cap of config.capabilities) {
+        if (cap.type === 'skill' && cap.pluginId && cap.id === name && cap.skillsSource) {
+          const pluginCandidate = join(root, cap.skillsSource, name, 'SKILL.md');
+          if (existsSync(pluginCandidate)) return pluginCandidate;
+        }
+      }
+    }
+  } catch {
+    // capabilities read failure is non-critical for preview
   }
   return null;
 }

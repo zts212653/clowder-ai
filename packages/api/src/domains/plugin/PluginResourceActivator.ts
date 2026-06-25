@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { lstat, readlink, realpath, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import {
@@ -306,6 +306,31 @@ export class PluginResourceActivator {
         // an invalid root symlink must hard-fail to prevent writing outside project.
         const isTarget = !mountPaths || mountPaths.includes(mountPointId);
         if (isTarget) throw err as Error;
+      }
+    }
+
+    // Pre-clean: remove dangling/stale symlinks for this skill from a previous
+    // activation whose source directory may have moved.  Without this, classifyMountPath
+    // sees the old symlink as a "conflict" and mountSkillSymlinks refuses to overwrite.
+    const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
+    for (const target of targets) {
+      for (const dir of target.candidates) {
+        const linkPath = join(dir, skillName);
+        try {
+          const linkStat = await lstat(linkPath);
+          if (!linkStat.isSymbolicLink()) continue;
+          // Check if symlink is stale: target doesn't exist OR points to a different source
+          const linkTarget = await readlink(linkPath);
+          const absTarget = isAbsolute(linkTarget) ? linkTarget : join(dirname(linkPath), linkTarget);
+          const absExpected = join(skillsSource, skillName);
+          const realTarget = await realpath(absTarget).catch(() => null);
+          const realExpected = await realpath(absExpected).catch(() => absExpected);
+          if (realTarget === null || realTarget !== realExpected) {
+            await rm(linkPath);
+          }
+        } catch {
+          // ENOENT or permission error — nothing to clean up
+        }
       }
     }
 
