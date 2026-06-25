@@ -1,0 +1,25 @@
+id: S10
+name: 护栏
+stage: session-init
+order: 1700
+version: 1
+enabled: true
+
+# Content resolution
+template: s10-guardrails.md
+resolver: S10GuardrailsResolver
+
+# Dependencies
+inputs:
+  - guardrails
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "安全护栏和行为边界"

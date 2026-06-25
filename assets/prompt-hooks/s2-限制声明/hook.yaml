@@ -1,0 +1,25 @@
+id: S2
+name: 限制声明
+stage: session-init
+order: 900
+version: 1
+enabled: true
+
+# Content resolution
+template: s2-restrictions.md
+resolver: S2RestrictionsResolver
+
+# Dependencies
+inputs:
+  - restrictions
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "猫不能做什么（如暹罗猫禁止写代码）"

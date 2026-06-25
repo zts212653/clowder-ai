@@ -1,0 +1,25 @@
+id: S7
+name: Pack 工作流
+stage: session-init
+order: 1400
+version: 1
+enabled: true
+
+# Content resolution
+template: s7-pack-workflows.md
+resolver: S7PackWorkflowsResolver
+
+# Dependencies
+inputs:
+  - packWorkflows
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "Pack 特有的工作流步骤"

@@ -1,0 +1,25 @@
+id: S9
+name: 治理摘要
+stage: session-init
+order: 1600
+version: 1
+enabled: true
+
+# Content resolution
+template: s9-governance-digest.md
+resolver: S9GovernanceDigestResolver
+
+# Dependencies
+inputs:
+  - governanceDigest
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "当前的治理规则和决策记录摘要"

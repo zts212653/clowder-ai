@@ -1,0 +1,25 @@
+id: S13
+name: MCP 工具文档
+stage: session-init
+order: 2000
+version: 1
+enabled: true
+
+# Content resolution
+template: mcp-tools.md
+resolver: S13McpToolsResolver
+
+# Dependencies
+inputs:
+  - mcpDocs
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: editable
+transparencyTier: opt-in-view
+governanceTier: auto-evolve
+
+# CVO-facing
+userExplanation: "MCP 工具的使用文档和示例"

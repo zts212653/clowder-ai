@@ -1,0 +1,25 @@
+id: D1
+name: 身份锚定
+stage: per-turn
+order: 100
+version: 1
+enabled: true
+
+# Content resolution
+template: d1-identity-anchor.md
+resolver: D1IdentityAnchorResolver
+
+# Dependencies
+inputs:
+  - identity
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "每轮重申身份以防偏移"

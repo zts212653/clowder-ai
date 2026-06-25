@@ -1,0 +1,25 @@
+id: D7
+name: 模式声明
+stage: per-turn
+order: 700
+version: 1
+enabled: true
+
+# Content resolution
+template: d7-mode-declaration.md
+resolver: D7ModeResolver
+
+# Dependencies
+inputs:
+  - mode
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "当前的工作模式（如 voice mode、bootcamp 等）"

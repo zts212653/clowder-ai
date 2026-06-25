@@ -1,0 +1,24 @@
+id: L1
+name: 平行世界自我意识
+stage: session-init
+order: 100
+version: 1
+enabled: true
+
+# Content resolution
+template: l1-parallel-world.md
+
+# Dependencies
+inputs:
+  []
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "告诉猫同一个身份可能在多个对话中同时存在"

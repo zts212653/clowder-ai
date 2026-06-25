@@ -57,6 +57,7 @@
     "test": "pnpm -r --workspace-concurrency=1 --if-present run test",
     "test:api:redis": "pnpm --filter @cat-cafe/api run test:redis",
     "test:api:redis:repeat": "pnpm --filter @cat-cafe/api run test:redis:repeat",
+    "check:biome-version": "node -e \"const pkg=require('./package.json');const v=pkg.devDependencies?.['@biomejs/biome']??'?';console.log('biome lockfile version:',v)\"",
     "check:dir-size": "bash scripts/check-dir-size.sh",
     "check:deps": "depcruise packages/api/src packages/shared/src --config .dependency-cruiser.cjs",
     "check:lockfile": "pnpm install --frozen-lockfile",

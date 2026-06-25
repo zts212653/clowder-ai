@@ -1,0 +1,25 @@
+id: D21
+name: 决策树
+stage: per-turn
+order: 2100
+version: 1
+enabled: true
+
+# Content resolution
+template: handoff-decision-tree.md
+resolver: D21DecisionTreeResolver
+
+# Dependencies
+inputs:
+  - handoffDecisionTree
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "传球决策的完整判断树"

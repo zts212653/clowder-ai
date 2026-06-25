@@ -1,0 +1,24 @@
+id: L4
+name: 五条铁律
+stage: session-init
+order: 400
+version: 1
+enabled: true
+
+# Content resolution
+template: l4-iron-laws.md
+
+# Dependencies
+inputs:
+  []
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "不可违反的安全约束"

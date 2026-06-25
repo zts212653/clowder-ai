@@ -1,0 +1,26 @@
+id: C1
+name: MCP 回调
+stage: session-init
+order: 2200
+version: 1
+enabled: true
+
+# Content resolution
+template: c1-mcp-callback.md
+resolver: C1McpCallbackResolver
+
+# Dependencies
+inputs:
+  - mcpAvailable
+  - mcpCallbackContent
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: editable
+transparencyTier: opt-in-view
+governanceTier: auto-evolve
+
+# CVO-facing
+userExplanation: "MCP 服务可用时注入的回调提示"

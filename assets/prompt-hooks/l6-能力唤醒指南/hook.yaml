@@ -1,0 +1,24 @@
+id: L6
+name: 能力唤醒指南
+stage: session-init
+order: 600
+version: 1
+enabled: true
+
+# Content resolution
+template: l6-capability-wakeup.md
+
+# Dependencies
+inputs:
+  []
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "场景到 skill 的触发反射映射"

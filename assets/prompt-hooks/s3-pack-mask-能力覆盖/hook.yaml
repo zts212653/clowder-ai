@@ -1,0 +1,25 @@
+id: S3
+name: Pack Mask（能力覆盖）
+stage: session-init
+order: 1000
+version: 1
+enabled: true
+
+# Content resolution
+template: s3-pack-mask.md
+resolver: S3PackMaskResolver
+
+# Dependencies
+inputs:
+  - packMasks
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "Pack 级别的能力遮罩声明"

@@ -1,0 +1,25 @@
+id: S11
+name: 默认行为
+stage: session-init
+order: 1800
+version: 1
+enabled: true
+
+# Content resolution
+template: s11-defaults.md
+resolver: S11DefaultsResolver
+
+# Dependencies
+inputs:
+  - defaults
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "未明确指定时的默认行为设置"

@@ -1,0 +1,25 @@
+id: D19
+name: 宪法知识
+stage: per-turn
+order: 1900
+version: 1
+enabled: true
+
+# Content resolution
+template: d19-constitutional-knowledge.md
+resolver: D19ConstitutionalResolver
+
+# Dependencies
+inputs:
+  - constitutionalKnowledge
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "核心治理知识和决策框架"

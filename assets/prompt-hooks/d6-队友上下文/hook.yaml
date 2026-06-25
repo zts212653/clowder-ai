@@ -1,0 +1,25 @@
+id: D6
+name: 队友上下文
+stage: per-turn
+order: 600
+version: 1
+enabled: true
+
+# Content resolution
+template: d6-teammates-context.md
+resolver: D6TeammatesContextResolver
+
+# Dependencies
+inputs:
+  - teammatesContext
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "当前活跃队友的实时状态"

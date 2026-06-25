@@ -1,0 +1,25 @@
+id: S5
+name: 队友花名册
+stage: session-init
+order: 1200
+version: 1
+enabled: true
+
+# Content resolution
+template: s5-teammate-roster.md
+resolver: S5TeammateRosterResolver
+
+# Dependencies
+inputs:
+  - teamStrengths
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "所有队友的能力、昵称和注意事项"

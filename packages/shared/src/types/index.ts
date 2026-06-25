@@ -653,6 +653,28 @@ export {
   COLLECTION_SIGNAL_KINDS,
   isAllowedCollectionSignal,
 } from './profile-update.js';
+export type {
+  DeliveryChannel,
+  EffectiveHookState,
+  GovernanceTier,
+  HookManifest,
+  HookOverride,
+  HookStage,
+  InjectionTraceSummary,
+  OverrideConstraintError,
+  PromptPatch,
+  RegisteredHook,
+  ResolveResult,
+  SafetyTier,
+  StageDeliveryDecision,
+  TraceEvent,
+  TraceEventDisabled,
+  TraceEventFired,
+  TraceEventObserved,
+  TraceEventSkipped,
+  TraceEventSummary,
+  TransparencyTier,
+} from './prompt-hook.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
   ProposalApproveOverrides,

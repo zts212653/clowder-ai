@@ -1,0 +1,25 @@
+id: D5
+name: 乒乓球警告
+stage: per-turn
+order: 500
+version: 1
+enabled: true
+
+# Content resolution
+template: d5-ping-pong-warning.md
+resolver: D5PingPongResolver
+
+# Dependencies
+inputs:
+  - pingPongWarning
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: limited-edit
+transparencyTier: visible-by-default
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "当两只猫连续互传 ≥2 轮时警告"

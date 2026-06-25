@@ -1,0 +1,25 @@
+id: S6
+name: 工作流触发点
+stage: session-init
+order: 1300
+version: 1
+enabled: true
+
+# Content resolution
+template: workflow-triggers.yaml
+resolver: S6WorkflowTriggersResolver
+
+# Dependencies
+inputs:
+  - workflowTriggers
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: editable
+transparencyTier: visible-by-default
+governanceTier: auto-evolve
+
+# CVO-facing
+userExplanation: "完成某步后主动 @ 下一步猫的触发点列表"

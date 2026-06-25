@@ -1,0 +1,26 @@
+id: B1
+name: 会话引导
+stage: session-init
+order: 2100
+version: 1
+enabled: true
+
+# Content resolution
+template: b1-session-bootstrap.md
+resolver: B1BootstrapResolver
+
+# Dependencies
+inputs:
+  - isNewSession
+  - bootstrapData
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "新会话的初始化引导信息"

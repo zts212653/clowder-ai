@@ -1,0 +1,25 @@
+id: D4
+name: 跨 Thread 回复
+stage: per-turn
+order: 400
+version: 1
+enabled: true
+
+# Content resolution
+template: d4-cross-thread-reply.md
+resolver: D4CrossThreadResolver
+
+# Dependencies
+inputs:
+  - crossThreadReplyHint
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "收到跨 thread 投递时的上下文提示"

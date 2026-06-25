@@ -1,0 +1,25 @@
+id: R1
+name: 路由组装（串行）
+stage: per-turn
+order: 2200
+version: 1
+enabled: true
+
+# Content resolution
+template: r1-route-serial.md
+resolver: R1RouteSerialResolver
+
+# Dependencies
+inputs:
+  - routeSerialContext
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "串行路由的组装逻辑"

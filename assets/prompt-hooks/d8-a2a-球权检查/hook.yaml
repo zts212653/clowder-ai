@@ -1,0 +1,25 @@
+id: D8
+name: A2A 球权检查
+stage: per-turn
+order: 800
+version: 1
+enabled: true
+
+# Content resolution
+template: a2a-ball-check.md
+resolver: D8BallCheckResolver
+
+# Dependencies
+inputs:
+  - ballCustody
+
+# Override constraints
+disableable: false
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: immutable
+
+# CVO-facing
+userExplanation: "检查当前球权状态，防止无球操作"

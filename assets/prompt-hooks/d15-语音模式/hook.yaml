@@ -1,0 +1,25 @@
+id: D15
+name: 语音模式
+stage: per-turn
+order: 1500
+version: 1
+enabled: true
+
+# Content resolution
+template: d15-voice-on.md
+resolver: D15VoiceModeResolver
+
+# Dependencies
+inputs:
+  - voiceMode
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: visible-by-default
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "语音模式开关状态和行为指导"

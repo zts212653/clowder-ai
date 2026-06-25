@@ -1,0 +1,25 @@
+id: N1
+name: 导航上下文
+stage: per-turn
+order: 2400
+version: 1
+enabled: true
+
+# Content resolution
+template: n1-navigation.md
+resolver: N1NavigationResolver
+
+# Dependencies
+inputs:
+  - navigationContext
+
+# Override constraints
+disableable: true
+
+# Classification (Phase 1 3-axis)
+safetyTier: readonly
+transparencyTier: opt-in-view
+governanceTier: human-gated
+
+# CVO-facing
+userExplanation: "当前的导航和定位上下文"
