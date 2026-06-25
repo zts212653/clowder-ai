@@ -805,9 +805,10 @@ export async function* routeSerial(
         maxA2ADepth: maxDepth,
       });
 
-      // F237 Phase 2 (AC-P2-8): Fire-and-forget injection trace persistence.
+      // F237 Phase 2 (AC-P2-8/8a): Fire-and-forget injection trace persistence.
       // Captures pipeline trace events from the buildStaticIdentity / buildInvocationContext
       // delegation and persists them for observability and debugging.
+      // AC-P2-8a: StageDeliveryDecision records channel-aware delivery truth.
       if (deps.injectionTraceStore) {
         const { drainCapturedTraces } = await import('../../../../prompt-hooks/PipelinePromptBuilder.js');
         const { buildTraceSummary } = await import('../../../../prompt-hooks/InjectionTraceStore.js');
@@ -815,13 +816,33 @@ export async function* routeSerial(
         if (captured.session || captured.turn) {
           const allEvents = [...(captured.session?.events ?? []), ...(captured.turn?.events ?? [])];
           const turnId = `${Date.now()}-${catId as string}`;
+          // AC-P2-8a: channel-aware delivery decisions per stage
+          const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
+          if (captured.session) {
+            delivery.push({
+              stage: 'session-init',
+              delivered: true,
+              channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+              reason: hasNativeL0
+                ? 'session-init delivered via native L0 channel; pack blocks via buildStaticIdentityPackOnly'
+                : 'session-init delivered via message-prepend (injectSystemPrompt)',
+            });
+          }
+          if (captured.turn) {
+            delivery.push({
+              stage: 'per-turn',
+              delivered: true,
+              channel: 'message-prepend',
+              reason: 'per-turn context always delivered via message-prepend',
+            });
+          }
           const summary = buildTraceSummary({
             turnId,
             sessionId: threadId, // session ID resolved after invocation; threadId as proxy during migration
             threadId,
             catId: catId as string,
             events: allEvents,
-            delivery: [], // StageDeliveryDecision computed post-migration when full pipeline replaces legacy
+            delivery,
             durationMs: 0, // synchronous pipeline; sub-ms not tracked at this layer
           });
           const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };

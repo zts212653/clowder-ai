@@ -286,6 +286,51 @@ export async function* routeParallel(
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         ...conciergeContextForCat(conciergeCtx, catId as string),
       });
+
+      // F237 Phase 2 (AC-P2-8/8a): Fire-and-forget injection trace persistence (parallel path).
+      // Same pattern as route-serial.ts — drain pipeline traces and persist with channel-aware delivery.
+      if (deps.injectionTraceStore) {
+        const { drainCapturedTraces } = await import('../../../../prompt-hooks/PipelinePromptBuilder.js');
+        const { buildTraceSummary } = await import('../../../../prompt-hooks/InjectionTraceStore.js');
+        const captured = drainCapturedTraces();
+        if (captured.session || captured.turn) {
+          const allEvents = [...(captured.session?.events ?? []), ...(captured.turn?.events ?? [])];
+          const turnId = `${Date.now()}-${catId as string}`;
+          const delivery: import('@cat-cafe/shared').StageDeliveryDecision[] = [];
+          if (captured.session) {
+            delivery.push({
+              stage: 'session-init',
+              delivered: true,
+              channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+              reason: hasNativeL0
+                ? 'session-init delivered via native L0 channel (parallel)'
+                : 'session-init delivered via message-prepend (parallel)',
+            });
+          }
+          if (captured.turn) {
+            delivery.push({
+              stage: 'per-turn',
+              delivered: true,
+              channel: 'message-prepend',
+              reason: 'per-turn context always delivered via message-prepend (parallel)',
+            });
+          }
+          const summary = buildTraceSummary({
+            turnId,
+            sessionId: threadId,
+            threadId,
+            catId: catId as string,
+            events: allEvents,
+            delivery,
+            durationMs: 0,
+          });
+          const detail = { threadId, turnId, catId: catId as string, timestamp: Date.now(), hooks: allEvents };
+          deps.injectionTraceStore.persist(summary, detail).catch((traceErr: unknown) => {
+            log.warn({ threadId, catId, err: traceErr }, '[F237] injection trace persistence failed (fire-and-forget)');
+          });
+        }
+      }
+
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
