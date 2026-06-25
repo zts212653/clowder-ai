@@ -743,6 +743,9 @@ export function buildStaticIdentityPackOnly(catId: CatId, options?: StaticIdenti
 export function buildInvocationContext(context: InvocationContext): string {
   // AC-P2-6: delegate to HookPipeline for production path.
   // Trace events emitted during pipeline execution enable injection observability.
+  // Unknown cat guard: legacy returns '', pipeline would throw (same as buildStaticIdentity)
+  const config = getConfig(context.catId as string);
+  if (!config) return '';
   return buildInvocationContextViaHookPipeline(context);
 }
 
