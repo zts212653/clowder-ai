@@ -854,7 +854,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       mountSkillsSrc === catCafeSkillsDir ? (catCafeOwnSkills ?? []) : ((await listSkillSubdirs(mountSkillsSrc)) ?? []),
     );
     const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !i.pluginId);
-    const customMountsBySkill = new Map<string, boolean[]>();
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
         const [claude, codex, gemini, kimi] = await Promise.all([
@@ -868,8 +867,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
             isSkillMountedAtPoint(target.candidates, mountSkillsSrc, item.id, mainSkillsSrc),
           ),
         );
-        item.mounts = { claude, codex, gemini, kimi };
-        customMountsBySkill.set(item.id, customMounts);
+        const mounts: Record<string, boolean> = { claude, codex, gemini, kimi };
+        customMountTargets.forEach((target, index) => {
+          mounts[target.id] = customMounts[index] ?? false;
+        });
+        item.mounts = mounts;
       }),
     );
 
@@ -885,16 +887,39 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       pluginSkillItems.map(async (item) => {
         const cap = pluginSkillCaps.find((c) => c.id === item.id && c.pluginId === item.pluginId);
         if (!cap) return;
-        const src = join(getProjectRoot(), cap.skillsSource);
-        const [claude, codex, gemini, kimi] = await Promise.all([
+        const src = resolve(projectRoot, cap.skillsSource);
+        const [claude, codex, gemini, kimi, customMounts] = await Promise.all([
           isSkillMountedAtPoint(mountPointDirCandidates.claude, src, item.id, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.codex, src, item.id, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, item.id, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, item.id, mainSkillsSrc),
+          Promise.all(
+            customMountTargets.map((target) => isSkillMountedAtPoint(target.candidates, src, item.id, mainSkillsSrc)),
+          ),
         ]);
-        item.mounts = { claude, codex, gemini, kimi };
+        const mounts: Record<string, boolean> = { claude, codex, gemini, kimi };
+        customMountTargets.forEach((target, index) => {
+          mounts[target.id] = customMounts[index] ?? false;
+        });
+        item.mounts = mounts;
       }),
     );
+
+    const availableMountPointIds = [...enabledMountPoints, ...customMountTargets.map((target) => target.id)];
+    for (const item of [...catCafeSkillItems, ...pluginSkillItems]) {
+      if (!item.mounts) continue;
+      const declaredMountPaths = Array.isArray(item.mountPaths) ? new Set(item.mountPaths) : null;
+      const requiredMountPointIds = declaredMountPaths
+        ? availableMountPointIds.filter((mountPointId) => declaredMountPaths.has(mountPointId))
+        : availableMountPointIds;
+      const mountedCount = requiredMountPointIds.filter((mountPointId) => item.mounts?.[mountPointId]).length;
+      item.mountHealth = {
+        enabledMountPoints: availableMountPointIds,
+        mountedCount,
+        requiredCount: requiredMountPointIds.length,
+        allMounted: mountedCount === requiredMountPointIds.length,
+      };
+    }
 
     // Registration consistency: capabilities.json vs source dir
     // Source directory = truth for "which skills exist"
@@ -907,23 +932,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const mountRequiredCatCafeSkillItems = catCafeSkillItems.filter((item) =>
       Array.isArray(item.mountPaths) ? item.mountPaths.length > 0 : item.enabled,
     );
-    let allMounted = mountRequiredCatCafeSkillItems.every((item) => {
-      if (!item.mounts) return false;
-      const declaredMountPaths = Array.isArray(item.mountPaths) ? new Set(item.mountPaths) : null;
-      const requiredMountPoints = declaredMountPaths
-        ? STANDARD_MOUNT_POINT_IDS.filter(
-            (mountPointId) => declaredMountPaths.has(mountPointId) && mountRules.mountPoints[mountPointId].enabled,
-          )
-        : enabledMountPoints;
-      const requiredCustomTargetIds = declaredMountPaths
-        ? new Set(customMountTargets.filter((target) => declaredMountPaths.has(target.id)).map((target) => target.id))
-        : new Set(customMountTargets.map((target) => target.id));
-      const customMounts = customMountsBySkill.get(item.id) ?? [];
-      return (
-        requiredMountPoints.every((mountPointId) => item.mounts?.[mountPointId]) &&
-        customMountTargets.every((target, index) => !requiredCustomTargetIds.has(target.id) || customMounts[index])
-      );
-    });
+    let allMounted = mountRequiredCatCafeSkillItems.every((item) => item.mountHealth?.allMounted === true);
     // If we have expected cat-cafe skills (source dir non-empty) but discovered none,
     // treat as unhealthy (likely broken mounts).
     if (catCafeSkillItems.length === 0 && mountSourceNames.size > 0) allMounted = false;

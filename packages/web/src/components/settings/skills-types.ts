@@ -107,7 +107,10 @@ export function composeSkillItems(
       gemini: false,
       kimi: false,
     };
-    const mountedCount = getMountedCount(mounts);
+    const mountedCount = cap.mountHealth?.mountedCount ?? getMountedCount(mounts);
+    const requiredMountCount = cap.mountHealth?.requiredCount ?? MOUNT_POINT_KEYS.length;
+    const allMounted = cap.mountHealth?.allMounted ?? mountedCount === requiredMountCount;
+    const enabledMountPoints = cap.mountHealth?.enabledMountPoints ?? MOUNT_POINT_KEYS;
     const trigger = cap.triggers?.join('、') || '';
     const category = cap.category ?? '未分类';
     return {
@@ -122,9 +125,9 @@ export function composeSkillItems(
       governance: {
         mounts,
         mountedCount,
-        requiredMountCount: MOUNT_POINT_KEYS.length,
-        allMounted: mountedCount === MOUNT_POINT_KEYS.length,
-        enabledMountPoints: MOUNT_POINT_KEYS as string[],
+        requiredMountCount,
+        allMounted,
+        enabledMountPoints,
         requiresMcp: [],
         isStaleNew: staleNewNames.has(cap.id),
         isStaleRemoved: staleRemovedNames.has(cap.id),

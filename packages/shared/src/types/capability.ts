@@ -137,6 +137,13 @@ export interface CapabilitiesConfig {
   skillsSync?: SkillsSyncState;
 }
 
+export interface CapabilitySkillMountHealth {
+  enabledMountPoints: string[];
+  mountedCount: number;
+  requiredCount: number;
+  allMounted: boolean;
+}
+
 /** Capabilities board response — what the GET API returns */
 export interface CapabilityBoardItem {
   id: string;
@@ -155,6 +162,8 @@ export interface CapabilityBoardItem {
   category?: string;
   /** Skill mount status per mount point (symlink correctness check) */
   mounts?: Record<string, boolean>;
+  /** Per-skill mount health derived from mount rules + this skill's mountPaths policy. */
+  mountHealth?: CapabilitySkillMountHealth;
   /** Mount point aliases where this skill is intentionally mounted in the selected project. */
   mountPaths?: string[];
   /** MCP tools discovered via probe (only when ?probe=true) */

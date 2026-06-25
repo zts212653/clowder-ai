@@ -160,4 +160,28 @@ describe('composeSkillItems', () => {
     expect(result[0].governance.mounts.claude).toBe(true);
     expect(result[0].governance.mounts.kimi).toBe(false);
   });
+
+  it('preserves backend per-skill mount health requirements', () => {
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'debugging',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: {},
+        mounts: { claude: true, codex: true, gemini: true, kimi: false },
+        mountHealth: {
+          enabledMountPoints: ['claude', 'codex', 'gemini'],
+          mountedCount: 3,
+          requiredCount: 3,
+          allMounted: true,
+        },
+      },
+    ];
+    const result = composeSkillItems(caps);
+    expect(result[0].governance.mountedCount).toBe(3);
+    expect(result[0].governance.requiredMountCount).toBe(3);
+    expect(result[0].governance.allMounted).toBe(true);
+    expect(result[0].governance.enabledMountPoints).toEqual(['claude', 'codex', 'gemini']);
+  });
 });
