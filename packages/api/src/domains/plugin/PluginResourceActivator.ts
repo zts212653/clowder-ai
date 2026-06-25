@@ -288,8 +288,9 @@ export class PluginResourceActivator {
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
     const capId = resourceCapId(manifest.id, resource);
-    await this.deps.withCapabilityLock(() =>
-      addSkill(projectRoot, skillName, skillsSource, {
+    await this.deps.withCapabilityLock(async () => {
+      const previousConfig = await this.deps.readCapabilities();
+      const result = await addSkill(projectRoot, skillName, skillsSource, {
         mountRules,
         pluginId: manifest.id,
         capabilityId: capId,
@@ -298,8 +299,13 @@ export class PluginResourceActivator {
           readCapabilities: this.deps.readCapabilities,
           writeCapabilities: this.deps.writeCapabilities,
         },
-      }),
-    );
+      });
+      if (result.mounted.length === 0 && result.conflicts.length > 0) {
+        await this.deps.writeCapabilities(structuredClone(previousConfig ?? { version: 1, capabilities: [] }));
+        const conflictPaths = result.conflicts.map((conflict) => conflict.path).join(', ');
+        throw new Error(`All skill mount points conflict for plugin skill '${capId}': ${conflictPaths}`);
+      }
+    });
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {

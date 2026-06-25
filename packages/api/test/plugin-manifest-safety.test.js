@@ -1523,7 +1523,7 @@ describe('PluginResourceActivator skill safety', () => {
 });
 
 describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () => {
-  it('P1-2: enablePlugin registers skill when all mount points conflict so drift can surface it', async () => {
+  it('fails plugin skill activation when all mount points conflict', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-activator-p12-'));
     const pluginsDir = join(root, 'plugins');
     const projectRoot = join(root, 'project');
@@ -1560,15 +1560,12 @@ describe('PluginResourceActivator conflict & rollback (review P1-2, P2-1)', () =
 
     const result = await activator.enablePlugin(manifest);
 
-    // Config-first activation succeeds; mount conflicts are surfaced by the
-    // standard skill drift/sync flow instead of blocking plugin enable.
-    assert.equal(result.status, 'success', 'all-conflict activation should still register the skill');
+    assert.equal(result.status, 'failed', 'all-conflict activation should fail the required skill resource');
     const skillResult = result.resources?.find((r) => r.type === 'skill');
     assert.ok(skillResult, 'skill result should exist in resources');
-    assert.equal(skillResult.ok, true, 'skill activation should report ok=true');
-    assert.equal(persisted.capabilities[0].id, 'my-skill');
-    assert.equal(persisted.capabilities[0].enabled, true);
-    assert.equal(persisted.capabilities[0].skillsSource, '../plugins/test-plugin/skills');
+    assert.equal(skillResult.ok, false, 'skill activation should report ok=false');
+    assert.match(skillResult.error ?? '', /All skill mount points conflict/);
+    assert.deepEqual(persisted.capabilities, [], 'failed all-conflict activation should roll back capability config');
     for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
       assert.equal(
         existsSync(join(projectRoot, `.${provider}`, 'skills', 'my-skill', 'user-file.md')),

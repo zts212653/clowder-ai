@@ -141,7 +141,25 @@ describe('composeSkillItems', () => {
     expect(result[0].mountPaths).toEqual(['claude']);
     expect(result[0].controls?.enabled).toBe(true);
     expect(result[1].pluginId).toBe('same-id-plugin');
-    expect(result[1].controls?.enabled).toBe(false);
+    expect(result[1].controls).toBeNull();
+  });
+
+  it('does not expose normal skill controls for plugin-owned skills', () => {
+    const caps: CapabilityBoardItem[] = [
+      {
+        id: 'weixin-mp',
+        type: 'skill',
+        source: 'cat-cafe',
+        enabled: true,
+        cats: {},
+        pluginId: 'weixin-mp',
+      },
+    ];
+
+    const result = composeSkillItems(caps);
+
+    expect(result[0].pluginId).toBe('weixin-mp');
+    expect(result[0].controls).toBeNull();
   });
 
   it('reads mount data from CapabilityBoardItem mounts', () => {
