@@ -5,6 +5,7 @@ import { CHAT_THREAD_ROUTE_EVENT } from '../ThreadSidebar/thread-navigation';
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 const routerPushMock = vi.hoisted(() => vi.fn());
+const toastAddMock = vi.hoisted(() => vi.fn());
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: routerPushMock }),
@@ -13,6 +14,10 @@ vi.mock('next/navigation', () => ({
 vi.mock('../../stores/chatStore', () => ({
   useChatStore: (selector: (state: { threads: unknown[]; setThreads: ReturnType<typeof vi.fn> }) => unknown) =>
     selector({ threads: [], setThreads: vi.fn() }),
+}));
+
+vi.mock('../../stores/toastStore', () => ({
+  useToastStore: { getState: () => ({ addToast: toastAddMock }) },
 }));
 
 vi.mock('../../utils/api-client', () => ({
@@ -32,6 +37,7 @@ describe('BootcampListModal navigation', () => {
   beforeEach(() => {
     apiFetchMock.mockReset();
     routerPushMock.mockReset();
+    toastAddMock.mockReset();
     window.history.replaceState({}, '', '/');
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -78,5 +84,55 @@ describe('BootcampListModal navigation', () => {
     expect(dispatchSpy.mock.calls.some(([event]) => event.type === CHAT_THREAD_ROUTE_EVENT)).toBe(true);
     expect(routerPushMock).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('keeps the create button compact and surfaces bootcamp creation errors', async () => {
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === '/api/bootcamp/threads') {
+        return {
+          ok: true,
+          json: async () => ({ threads: [] }),
+        };
+      }
+      if (path === '/api/threads') {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: 'Bootcamp workspace root is not configured; refusing to use runtime cwd' }),
+        };
+      }
+      throw new Error(`Unexpected API call: ${path}`);
+    });
+    const onClose = vi.fn();
+
+    await act(async () => {
+      root.render(React.createElement(BootcampListModal, { open: true, onClose, currentThreadId: 'default' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const createButton = container.querySelector('[data-testid="bootcamp-list-create"]') as HTMLButtonElement | null;
+    expect(createButton).toBeTruthy();
+    expect(createButton!.className).toContain('whitespace-nowrap');
+    const iconClass = createButton!.querySelector('svg')?.getAttribute('class') ?? '';
+    expect(iconClass).toContain('w-5');
+    expect(iconClass).toContain('h-5');
+    expect(iconClass).toContain('shrink-0');
+    expect(iconClass).not.toContain('w-4.5');
+
+    await act(async () => {
+      createButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'error',
+        title: '创建训练营失败',
+        message: expect.stringContaining('CAT_CAFE_WORKSPACE_ROOT'),
+      }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

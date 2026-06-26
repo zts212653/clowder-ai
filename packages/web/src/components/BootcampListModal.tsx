@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
+import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -42,6 +43,33 @@ function phaseProgress(phase: string | undefined): number {
   const idx = PHASE_ORDER.indexOf(phase);
   if (idx < 0) return 0;
   return Math.round(((idx + 1) / PHASE_ORDER.length) * 100);
+}
+
+async function readApiError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = (await res.json()) as { error?: unknown; message?: unknown };
+    const message = typeof data.error === 'string' ? data.error : typeof data.message === 'string' ? data.message : '';
+    if (message.trim()) return message.trim();
+  } catch {
+    // fall through to fallback
+  }
+  return fallback;
+}
+
+function normalizeCreateError(message: string): string {
+  if (message.includes('Bootcamp workspace root')) {
+    return '训练营工作区未配置。请在启动环境中设置 CAT_CAFE_WORKSPACE_ROOT 后重启服务。';
+  }
+  return message;
+}
+
+function showCreateError(message: string) {
+  useToastStore.getState().addToast({
+    type: 'error',
+    title: '创建训练营失败',
+    message,
+    duration: 7000,
+  });
 }
 
 interface BootcampListModalProps {
@@ -104,11 +132,17 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
           bootcampState: { v: 1, phase: 'phase-1-intro', startedAt: Date.now() },
         }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const message = await readApiError(res, `请求失败 (${res.status})`);
+        showCreateError(normalizeCreateError(message));
+        return;
+      }
       const thread: Thread = await res.json();
       setThreads([thread, ...storeThreads]);
       pushThreadRouteWithHistory(thread.id, typeof window !== 'undefined' ? window : undefined);
       onClose();
+    } catch (err) {
+      showCreateError(err instanceof Error ? err.message : '网络请求失败，请稍后重试。');
     } finally {
       setIsCreating(false);
     }
@@ -221,10 +255,10 @@ export function BootcampListModal({ open, onClose, currentThreadId }: BootcampLi
             type="button"
             onClick={handleCreate}
             disabled={isCreating}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] font-semibold hover:opacity-90 disabled:opacity-40 transition-colors"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] font-semibold hover:opacity-90 disabled:opacity-40 transition-colors whitespace-nowrap"
             data-testid="bootcamp-list-create"
           >
-            <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             {isCreating ? '创建中...' : '开始新训练营'}
