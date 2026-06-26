@@ -157,6 +157,9 @@ function buildSkillIssues(scenarios: {
 export interface CheckGlobalOpts {
   /** Skills registered in global capabilities.json (cat-cafe managed). */
   globalConfigSkills: ReadonlySet<string>;
+  /** Skills with custom skillsSource (e.g. plugin-provided). These are NOT
+   *  in the default source dir and should NOT be flagged as phantom. */
+  customSourceSkills?: ReadonlySet<string>;
   disabledSkills: Iterable<string>;
   skillMountPaths: SkillMountPathInput;
   platformName?: NodeJS.Platform;
@@ -457,7 +460,9 @@ export async function checkGlobal(
 
   // 1.1 Registration: source ↔ global config
   const unregistered = sourceNames.filter((n) => !opts.globalConfigSkills.has(n));
-  const phantom = [...opts.globalConfigSkills].filter((n) => !sourceSet.has(n));
+  // Skills with custom skillsSource live outside the default source dir —
+  // they are expected to not appear in sourceSet and should not be phantom.
+  const phantom = [...opts.globalConfigSkills].filter((n) => !sourceSet.has(n) && !opts.customSourceSkills?.has(n));
 
   // 1.2 Mount: global config ↔ symlinks
   const expectedSet = buildExpectedSet(policy, disabledSet);

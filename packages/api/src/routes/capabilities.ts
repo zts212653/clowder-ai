@@ -616,7 +616,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     for (const skillName of allSkillNames) {
       const isCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName);
       const exists = config.capabilities.some(
-        (c) => c.type === 'skill' && c.id === skillName && (!isCatCafe || (c.source === 'cat-cafe' && !c.pluginId)),
+        (c) => c.type === 'skill' && c.id === skillName && (!isCatCafe || (c.source === 'cat-cafe' && !c.skillsSource)),
       );
       if (!exists) {
         config.capabilities.push(
@@ -638,7 +638,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Also fix source for existing skills that were incorrectly classified
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
-      if (cap.pluginId || cap.source === 'external') continue;
+      if (cap.skillsSource || cap.source === 'external') continue;
       const shouldBeCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id);
       // Upgrade is safe when we have evidence; downgrade is only safe when scans succeeded.
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
@@ -860,19 +860,27 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const mountSourceNames = new Set(
       mountSkillsSrc === catCafeSkillsDir ? (catCafeOwnSkills ?? []) : ((await listSkillSubdirs(mountSkillsSrc)) ?? []),
     );
-    const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !i.pluginId);
+    // Unified mount health: all cat-cafe skills (including those with custom
+    // skillsSource from plugins). Per-skill effective source: if the config
+    // entry has skillsSource, resolve it; otherwise use the default mountSkillsSrc.
+    const catCafeSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe');
+    const effectiveSourceBySkill = new Map<string, string>();
+    for (const cap of config.capabilities) {
+      if (cap.type === 'skill' && cap.source === 'cat-cafe' && cap.skillsSource) {
+        effectiveSourceBySkill.set(cap.id, resolve(projectRoot, cap.skillsSource));
+      }
+    }
     await Promise.all(
       catCafeSkillItems.map(async (item) => {
+        const src = effectiveSourceBySkill.get(item.id) ?? mountSkillsSrc;
         const [claude, codex, gemini, kimi] = await Promise.all([
-          isSkillMountedAtPoint(mountPointDirCandidates.claude, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.codex, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.gemini, mountSkillsSrc, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.kimi, mountSkillsSrc, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.claude, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.codex, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, item.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, item.id, mainSkillsSrc),
         ]);
         const customMounts = await Promise.all(
-          customMountTargets.map((target) =>
-            isSkillMountedAtPoint(target.candidates, mountSkillsSrc, item.id, mainSkillsSrc),
-          ),
+          customMountTargets.map((target) => isSkillMountedAtPoint(target.candidates, src, item.id, mainSkillsSrc)),
         );
         const mounts: Record<string, boolean> = { claude, codex, gemini, kimi };
         customMountTargets.forEach((target, index) => {
@@ -882,38 +890,8 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }),
     );
 
-    // 6b. Mount health check for plugin-provided skills
-    // Plugin skill entries carry skillsSource (stored at activation time) so we
-    // can resolve the mount source directly — no manifest re-parsing needed.
-    const pluginSkillCaps = config.capabilities.filter(
-      (c): c is typeof c & { pluginId: string; skillsSource: string } =>
-        c.type === 'skill' && !!c.pluginId && !!c.skillsSource,
-    );
-    const pluginSkillItems = items.filter((i) => i.type === 'skill' && i.source === 'cat-cafe' && !!i.pluginId);
-    await Promise.all(
-      pluginSkillItems.map(async (item) => {
-        const cap = pluginSkillCaps.find((c) => c.id === item.id && c.pluginId === item.pluginId);
-        if (!cap) return;
-        const src = resolve(projectRoot, cap.skillsSource);
-        const [claude, codex, gemini, kimi, customMounts] = await Promise.all([
-          isSkillMountedAtPoint(mountPointDirCandidates.claude, src, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.codex, src, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, item.id, mainSkillsSrc),
-          isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, item.id, mainSkillsSrc),
-          Promise.all(
-            customMountTargets.map((target) => isSkillMountedAtPoint(target.candidates, src, item.id, mainSkillsSrc)),
-          ),
-        ]);
-        const mounts: Record<string, boolean> = { claude, codex, gemini, kimi };
-        customMountTargets.forEach((target, index) => {
-          mounts[target.id] = customMounts[index] ?? false;
-        });
-        item.mounts = mounts;
-      }),
-    );
-
     const availableMountPointIds = [...enabledMountPoints, ...customMountTargets.map((target) => target.id)];
-    for (const item of [...catCafeSkillItems, ...pluginSkillItems]) {
+    for (const item of catCafeSkillItems) {
       if (!item.mounts) continue;
       const declaredMountPaths = Array.isArray(item.mountPaths) ? new Set(item.mountPaths) : null;
       const requiredMountPointIds = declaredMountPaths
@@ -932,10 +910,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Source directory = truth for "which skills exist"
     // capabilities.json = truth for "which skills are configured"
     const capSkillNames = new Set(
-      config.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id),
+      config.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe').map((c) => c.id),
     );
     const unregistered = [...mountSourceNames].filter((n) => !capSkillNames.has(n));
-    const phantom = [...capSkillNames].filter((n) => !mountSourceNames.has(n));
+    // Skills with custom skillsSource live outside the default source dir —
+    // they are expected to not appear in mountSourceNames and should not be phantom.
+    const phantom = [...capSkillNames].filter((n) => !mountSourceNames.has(n) && !effectiveSourceBySkill.has(n));
     const mountRequiredCatCafeSkillItems = catCafeSkillItems.filter((item) =>
       Array.isArray(item.mountPaths) ? item.mountPaths.length > 0 : item.enabled,
     );
@@ -1194,8 +1174,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         if (body.scope === 'global' && !pathsEqual(projectRoot, getProjectRoot())) {
           const globalConfig = await readCapabilitiesConfig(getProjectRoot());
           const globalManagedCaps =
-            globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId) ??
-            [];
+            globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe') ?? [];
           const disabled = new Set<string>();
           const mountMap = new Map<string, readonly string[]>();
           for (const gc of globalManagedCaps) {

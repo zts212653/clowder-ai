@@ -73,6 +73,9 @@ interface ProjectSkillMountPolicy {
   /** F228: Set of skill IDs that appear in this config (enabled or disabled).
    *  Used to distinguish "project has no opinion" from "project explicitly enabled." */
   configuredSkills: Set<string>;
+  /** Skills with custom skillsSource (e.g. plugin-provided). Excluded from
+   *  phantom detection in checkGlobal — they aren't in the default source dir. */
+  customSourceSkills: Set<string>;
 }
 
 interface SkillsDriftRouteOptions {
@@ -95,14 +98,20 @@ export function readCatCafeSkillMountPolicy(
   config: CapabilitiesConfig | null | undefined,
   opts?: { useGlobalEnabledForDisabled?: boolean },
 ): ProjectSkillMountPolicy {
-  if (!config) return { disabledSkills: [], skillMountPaths: {}, configuredSkills: new Set() };
+  if (!config)
+    return { disabledSkills: [], skillMountPaths: {}, configuredSkills: new Set(), customSourceSkills: new Set() };
 
   const useGlobalEnabled = opts?.useGlobalEnabledForDisabled ?? false;
   const disabledSkills: string[] = [];
   const skillMountPaths: Record<string, string[]> = {};
   const configuredSkills = new Set<string>();
+  const customSourceSkills = new Set<string>();
   for (const cap of config.capabilities) {
-    if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
+    if (cap.type !== 'skill' || cap.source !== 'cat-cafe') continue;
+    // Skills with custom skillsSource (e.g. plugin-provided) are tracked
+    // for phantom exclusion in checkGlobal — they aren't in the default
+    // source dir, so they shouldn't be flagged as phantom.
+    if (cap.skillsSource) customSourceSkills.add(cap.id);
     configuredSkills.add(cap.id);
     if (useGlobalEnabled) {
       // Global policy mode: use globalEnabled for cascade decisions.
@@ -129,7 +138,7 @@ export function readCatCafeSkillMountPolicy(
       }
     }
   }
-  return { disabledSkills, skillMountPaths, configuredSkills };
+  return { disabledSkills, skillMountPaths, configuredSkills, customSourceSkills };
 }
 
 /** @internal Exported for unit testing only.
@@ -164,10 +173,14 @@ export function mergeSkillMountPolicies(
     );
     if (effective) skillMountPaths[skillName] = effective;
   }
+  // Merge customSourceSkills from both — a skill with custom source in either
+  // policy should be excluded from phantom detection.
+  const customSourceSkills = new Set([...projectPolicy.customSourceSkills, ...globalPolicy.customSourceSkills]);
   return {
     disabledSkills,
     skillMountPaths,
     configuredSkills: projectPolicy.configuredSkills,
+    customSourceSkills,
   };
 }
 
@@ -183,7 +196,9 @@ async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string)
   // represents the local mount state, while globalEnabled represents the global
   // enable/disable policy. Without this, a project-scope enable on the main
   // project makes external projects incorrectly see the skill as globally enabled.
-  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig, { useGlobalEnabledForDisabled: true });
+  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig, {
+    useGlobalEnabledForDisabled: true,
+  });
   const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy);
   return { projectPolicy, globalPolicy, mergedPolicy };
 }
@@ -204,6 +219,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       fillDefaultMountPaths(globalPolicy, mountRules);
       const drift = await checkGlobal(globalProjectRoot, skillsSource, mountRules, {
         globalConfigSkills: globalPolicy.configuredSkills,
+        customSourceSkills: globalPolicy.customSourceSkills,
         disabledSkills: globalPolicy.disabledSkills,
         skillMountPaths: globalPolicy.skillMountPaths,
       });
@@ -231,6 +247,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
     // Config orphans: skills in project config but not global config.
     // Must be cleaned from project capabilities.json on drift-resolve sync.
     const configOrphans = [...projectPolicy.configuredSkills].filter((s) => !globalPolicy.configuredSkills.has(s));
+
     return {
       drift,
       effectiveRoot: projectRoot,

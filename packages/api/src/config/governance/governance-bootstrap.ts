@@ -77,7 +77,7 @@ function enabledSkillMountTargetIds(rules: MountRules): string[] {
 
 function findCatCafeSkillCapability(config: CapabilitiesConfig | null | undefined, skillName: string) {
   return config?.capabilities.find(
-    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.pluginId,
+    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.skillsSource,
   );
 }
 
@@ -100,7 +100,7 @@ async function readDisabledCatCafeSkillNames(projectRoot: string): Promise<Set<s
         (cap) =>
           cap.type === 'skill' &&
           cap.source === 'cat-cafe' &&
-          !cap.pluginId &&
+          !cap.skillsSource &&
           (cap.globalEnabled ?? cap.enabled) === false,
       )
       .map((cap) => cap.id) ?? [],
@@ -109,7 +109,7 @@ async function readDisabledCatCafeSkillNames(projectRoot: string): Promise<Set<s
 
 function ensureDisabledSkillPolicy(config: CapabilitiesConfig, skillName: string): boolean {
   const existing = config.capabilities.find(
-    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.pluginId,
+    (cap) => cap.type === 'skill' && cap.id === skillName && cap.source === 'cat-cafe' && !cap.skillsSource,
   );
   if (!existing) {
     config.capabilities.push({

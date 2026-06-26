@@ -57,19 +57,21 @@ export async function classifyMountPath(
 
 async function convertDirectoryLevelMount(
   skillsDir: string,
-  skillsSource: string,
+  defaultSource: string,
   enabledSkillNames: string[],
+  sourceMap: ReadonlyMap<string, string>,
 ): Promise<boolean> {
   try {
-    if (!(await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource))) return false;
+    if (!(await isManagedDirectoryLevelSkillsSymlink(skillsDir, defaultSource))) return false;
   } catch {
     return false;
   }
   await rm(skillsDir);
   await mkdir(skillsDir, { recursive: true });
   for (const skillName of enabledSkillNames) {
+    const effSource = sourceMap.get(skillName) ?? defaultSource;
     const linkPath = join(skillsDir, skillName);
-    await createSkillSymlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+    await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
   }
   return true;
 }
@@ -158,9 +160,28 @@ async function syncProjectUnlocked(
   }
   const config = existingConfig ?? { version: 2 as const, capabilities: [] as never[] };
   const managedCaps = config.capabilities.filter(
-    (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && isValidSkillName(cap.id),
+    (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && isValidSkillName(cap.id),
   );
   const previousNames = managedCaps.map((cap) => cap.id);
+
+  // Per-skill effective source: if a skill has skillsSource in config, use it;
+  // otherwise use the default skillsSource (cat-cafe-skills/).
+  const effectiveSourceMap = new Map<string, string>();
+  const customSourceSkillNames = new Set<string>();
+  for (const cap of managedCaps) {
+    if (cap.skillsSource) {
+      effectiveSourceMap.set(cap.id, resolve(projectRoot, cap.skillsSource));
+      customSourceSkillNames.add(cap.id);
+    } else {
+      effectiveSourceMap.set(cap.id, skillsSource);
+    }
+  }
+  for (const name of sourceNames) {
+    if (!effectiveSourceMap.has(name)) effectiveSourceMap.set(name, skillsSource);
+  }
+  // All skill names = default source dir ∪ custom-source skills from config.
+  const allSkillNames = [...new Set([...sourceNames, ...customSourceSkillNames])];
+
   // F228: project state is mountPaths-first. An explicit empty mountPaths means
   // locally disabled; non-empty mountPaths means locally enabled, even if legacy
   // enabled/globalEnabled is stale. Without mountPaths, fall back to global state.
@@ -190,8 +211,8 @@ async function syncProjectUnlocked(
   if (opts.mountPathsBySkill) {
     for (const [k, v] of opts.mountPathsBySkill) mountPathsBySkill.set(k, [...v]);
   }
-  const enabledNames = sourceNames.filter((n) => !disabledSet.has(n));
-  const disabledNames = sourceNames.filter((n) => disabledSet.has(n));
+  const enabledNames = allSkillNames.filter((n) => !disabledSet.has(n));
+  const disabledNames = allSkillNames.filter((n) => disabledSet.has(n));
 
   // F228 KD-6: When disabledSkills is authoritative (ANY cascading caller — global
   // toggle, mount-rule reconciliation, OR plain reconciliation), and a skill is enabled
@@ -210,9 +231,12 @@ async function syncProjectUnlocked(
       }
     }
   }
-  const sourceSet = new Set(sourceNames);
+  // All known skills = source dir + custom-source from config.
+  // A skill is "removed" only if it was previously configured but is no longer
+  // in any source (default dir OR custom skillsSource).
+  const allSkillSet = new Set(allSkillNames);
   const removedNames = [
-    ...previousNames.filter((n) => !sourceSet.has(n)),
+    ...previousNames.filter((n) => !allSkillSet.has(n)),
     ...[...(opts.additionalRemovedSkills ?? [])].filter(isValidSkillName),
   ];
 
@@ -264,7 +288,7 @@ async function syncProjectUnlocked(
   for (const target of activeTargets) {
     const targetEnabled = enabledNames.filter((n) => mountTargetIdsBySkill.get(n)?.has(target.id));
     for (const dir of target.dirs) {
-      const converted = await convertDirectoryLevelMount(dir, skillsSource, targetEnabled);
+      const converted = await convertDirectoryLevelMount(dir, skillsSource, targetEnabled, effectiveSourceMap);
       if (converted) {
         // Disabled skills + enabled skills filtered by mount policy are implicitly unmounted
         for (const n of disabledNames) result.unmounted.push({ skillName: n, mountPointId: target.id });
@@ -307,11 +331,12 @@ async function syncProjectUnlocked(
 
       for (const skillName of targetEnabled) {
         validateSkillName(skillName);
+        const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
         const linkPath = join(skillsDir, skillName);
-        const status = await classifyMountPath(linkPath, skillsSource, skillName);
+        const status = await classifyMountPath(linkPath, effSource, skillName);
         if (status === 'missing' || (status === 'conflict' && force)) {
           if (status === 'conflict') await rm(linkPath, { recursive: true, force: true });
-          await createSkillSymlink(symlinkTargetFor(linkPath, join(skillsSource, skillName)), linkPath);
+          await createSkillSymlink(symlinkTargetFor(linkPath, join(effSource, skillName)), linkPath);
           result.mounted.push({ skillName, mountPointId: target.id, path: linkPath });
         } else if (status === 'conflict') {
           result.conflicts.push({ skillName, mountPointId: target.id, path: linkPath });
@@ -319,8 +344,9 @@ async function syncProjectUnlocked(
       }
 
       for (const skillName of outOfPolicy) {
+        const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
         const linkPath = join(skillsDir, skillName);
-        if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
+        if ((await classifyMountPath(linkPath, effSource, skillName)) === 'managed') {
           await rm(linkPath);
           result.unmounted.push({ skillName, mountPointId: target.id, path: linkPath });
         }
@@ -350,12 +376,13 @@ async function syncProjectUnlocked(
     const entries = await readdir(skillsDir).catch(() => [] as string[]);
     const dirCleanup = new Set(cleanupNames);
     for (const entry of entries) {
-      if (!isDisabledMount && !dirCleanup.has(entry) && sourceSet.has(entry)) continue;
+      if (!isDisabledMount && !dirCleanup.has(entry) && allSkillSet.has(entry)) continue;
       dirCleanup.add(entry);
     }
     for (const skillName of dirCleanup) {
+      const effSource = effectiveSourceMap.get(skillName) ?? skillsSource;
       const linkPath = join(skillsDir, skillName);
-      if ((await classifyMountPath(linkPath, skillsSource, skillName)) === 'managed') {
+      if ((await classifyMountPath(linkPath, effSource, skillName)) === 'managed') {
         await rm(linkPath);
         result.unmounted.push({ skillName, mountPointId: 'cleanup', path: linkPath });
       }
@@ -383,8 +410,9 @@ async function syncProjectUnlocked(
         continue;
       }
       for (const entry of await readdir(oldDir).catch(() => [] as string[])) {
+        const effSource = effectiveSourceMap.get(entry) ?? skillsSource;
         const lp = join(oldDir, entry);
-        if ((await classifyMountPath(lp, skillsSource, entry)) === 'managed') {
+        if ((await classifyMountPath(lp, effSource, entry)) === 'managed') {
           await rm(lp);
           result.unmounted.push({ skillName: entry, mountPointId: 'old-mount', path: lp });
         }
@@ -427,7 +455,8 @@ async function syncProjectUnlocked(
     }
     for (const op of result.unmounted) {
       if (!op.path || op.skillName === '*') continue; // No path or directory-level rollback not feasible
-      const target = join(skillsSource, op.skillName);
+      const effSource = effectiveSourceMap.get(op.skillName) ?? skillsSource;
+      const target = join(effSource, op.skillName);
       await createSkillSymlink(symlinkTargetFor(op.path, target), op.path).catch(() => {});
     }
     throw configWriteErr;

@@ -692,11 +692,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       disabledSkills: [],
       skillMountPaths: {},
       configuredSkills: new Set(),
+      customSourceSkills: new Set(),
     };
     const globalPolicy = {
       disabledSkills: ['tdd'],
       skillMountPaths: {},
       configuredSkills: new Set(['tdd']),
+      customSourceSkills: new Set(),
     };
 
     const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
@@ -713,11 +715,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       disabledSkills: ['tdd'],
       skillMountPaths: {},
       configuredSkills: new Set(['tdd']),
+      customSourceSkills: new Set(),
     };
     const globalPolicy = {
       disabledSkills: [],
       skillMountPaths: { tdd: ['claude', 'codex'] },
       configuredSkills: new Set(['tdd']),
+      customSourceSkills: new Set(),
     };
 
     const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
@@ -738,11 +742,13 @@ describe('DriftResolver (F228 Phase 2B)', () => {
       disabledSkills: [],
       skillMountPaths: { tdd: ['claude', 'codex'] },
       configuredSkills: new Set(['tdd']),
+      customSourceSkills: new Set(),
     };
     const globalPolicy = {
       disabledSkills: ['tdd'],
       skillMountPaths: {},
       configuredSkills: new Set(['tdd']),
+      customSourceSkills: new Set(),
     };
 
     const merged = mergeSkillMountPolicies(projectPolicy, globalPolicy);
