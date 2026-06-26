@@ -627,6 +627,21 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       /CAT_CAFE_RUNTIME_ROOT\s*=\s*\$runtimeRootMarker/,
       'runtimeEnvOverrides must pass CAT_CAFE_RUNTIME_ROOT into the API job after dotenv reload',
     );
+    assert.match(
+      ps1,
+      /\$workspaceRootMarker\s*=\s*if\s*\(-not\s*\$Dev\)\s*\{\s*[\s\S]*\$ProjectRoot[\s\S]*\}\s*else\s*\{\s*\$env:CAT_CAFE_WORKSPACE_ROOT\s*\}/,
+      'Windows production starts must default CAT_CAFE_WORKSPACE_ROOT to $ProjectRoot while preserving explicit env overrides',
+    );
+    assert.match(
+      ps1,
+      /\$workspaceRootMarker\s*=\s*if\s*\(-not\s*\$Dev\)\s*\{\s*if\s*\(\$env:CAT_CAFE_WORKSPACE_ROOT\)\s*\{\s*\$env:CAT_CAFE_WORKSPACE_ROOT\s*\}\s*else\s*\{\s*\$ProjectRoot\s*\}\s*\}/,
+      'Windows production CAT_CAFE_WORKSPACE_ROOT must prefer explicit $env override before falling back to $ProjectRoot (guards against accidental override-stripping refactors)',
+    );
+    assert.match(
+      overridesBlock,
+      /CAT_CAFE_WORKSPACE_ROOT\s*=\s*\$workspaceRootMarker/,
+      'runtimeEnvOverrides must pass CAT_CAFE_WORKSPACE_ROOT into the API job after dotenv reload',
+    );
   });
 
   it('start-windows.ps1 assigns NODE_ENV inside the API Start-Job', () => {
