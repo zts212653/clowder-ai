@@ -914,10 +914,10 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
   // Implementation in connector-plugin-routes.ts for file size discipline.
   connectorActionRoutes({
     getManifests: getConnectorManifests,
-    pluginRegistry: opts.pluginRegistry,
-    adapterRegistry: opts.adapterRegistry,
-    activateConnector: opts.activateConnector,
-    deactivateConnector: opts.deactivateConnector,
+    getPluginRegistry: () => opts.pluginRegistry,
+    getAdapterRegistry: () => opts.adapterRegistry,
+    getActivateConnector: () => opts.activateConnector,
+    getDeactivateConnector: () => opts.deactivateConnector,
     redis: opts.redis,
   })(app);
 

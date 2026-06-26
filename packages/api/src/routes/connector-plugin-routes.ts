@@ -37,14 +37,18 @@ import {
 export interface ConnectorActionRoutesOptions {
   /** Manifest lookup by connector ID (built-in + installed plugins). */
   getManifests: () => Map<string, ConnectorManifest>;
-  /** F240 A-3: Plugin registry for generic action endpoint (includes unconfigured plugins) */
-  pluginRegistry?: ReadonlyMap<string, IMConnectorPlugin>;
-  /** F240 A-3: Adapter registry for generic action endpoint (only configured+started connectors) */
-  adapterRegistry?: ReadonlyMap<string, IOutboundAdapter>;
-  /** F240 A-3: Activate a connector after credentials acquired via action */
-  activateConnector?: (connectorId: string) => Promise<void>;
-  /** F240 A-3: Deactivate a connector on disconnect */
-  deactivateConnector?: (connectorId: string) => Promise<void>;
+  /**
+   * F240 A-3: Live plugin registry getter (resolves after gateway start).
+   * wireGatewayHooks mutates connectorHubOpts.pluginRegistry post-register;
+   * a register-time value would snapshot undefined. Getter reads latest at request time.
+   */
+  getPluginRegistry?: () => ReadonlyMap<string, IMConnectorPlugin> | undefined;
+  /** F240 A-3: Live adapter registry getter (same timing reason as getPluginRegistry) */
+  getAdapterRegistry?: () => ReadonlyMap<string, IOutboundAdapter> | undefined;
+  /** F240 A-3: Live activate hook getter */
+  getActivateConnector?: () => ((connectorId: string) => Promise<void>) | undefined;
+  /** F240 A-3: Live deactivate hook getter */
+  getDeactivateConnector?: () => ((connectorId: string) => Promise<void>) | undefined;
   /** Shared Redis dependency for external connector action handlers. */
   redis?: RedisClient | undefined;
 }
@@ -177,13 +181,13 @@ export const connectorActionRoutes: (opts: ConnectorActionRoutesOptions) => (app
         return { error: `Unknown connector: ${connectorId}` };
       }
 
-      const plugin = opts.pluginRegistry?.get(connectorId);
+      const plugin = opts.getPluginRegistry?.()?.get(connectorId);
       if (!plugin) {
         reply.status(503);
         return { error: `Connector '${connectorId}' plugin not loaded` };
       }
       // Adapter is optional — unconfigured connectors (e.g. pre-QR-login) have no adapter yet
-      const adapter = opts.adapterRegistry?.get(connectorId);
+      const adapter = opts.getAdapterRegistry?.()?.get(connectorId);
 
       const projectRoot = resolveActiveProjectRoot();
       // Resolve actual env (stored > env > default) so action handlers see real values
@@ -226,9 +230,11 @@ export const connectorActionRoutes: (opts: ConnectorActionRoutesOptions) => (app
 
       // Lifecycle: activate after credential backfill, deactivate on explicit disconnect.
       let activationStatus: 'activated' | 'deactivated' | 'failed' | undefined;
-      if (result.activate === false && opts.deactivateConnector) {
+      const deactivateConnector = opts.getDeactivateConnector?.();
+      const activateConnector = opts.getActivateConnector?.();
+      if (result.activate === false && deactivateConnector) {
         try {
-          await opts.deactivateConnector(connectorId);
+          await deactivateConnector(connectorId);
           activationStatus = 'deactivated';
           app.log.info({ connectorId }, '[ConnectorHub] Connector deactivated after disconnect');
         } catch (err) {
@@ -254,10 +260,10 @@ export const connectorActionRoutes: (opts: ConnectorActionRoutesOptions) => (app
         }
       } else if (
         (result.activate === true || (result.backfilledKeys && result.backfilledKeys.length > 0)) &&
-        opts.activateConnector
+        activateConnector
       ) {
         try {
-          await opts.activateConnector(connectorId);
+          await activateConnector(connectorId);
           activationStatus = 'activated';
           app.log.info(
             { connectorId, backfilledKeys: result.backfilledKeys },
