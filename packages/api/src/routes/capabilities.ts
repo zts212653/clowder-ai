@@ -795,10 +795,16 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         pluginId: cap.pluginId,
         mountPaths: cap.mountPaths,
       };
-      const meta =
+      let meta =
         cap.source === 'cat-cafe'
           ? (manifestMetaMap.get(cap.id) ?? skillMetaMap.get(cap.id))
           : skillMetaMap.get(cap.id);
+      // Fallback: plugin skills store their source path — read SKILL.md directly
+      // when mount-point scan didn't find it (e.g. skill registered but not yet mounted).
+      if (!meta?.description && cap.skillsSource) {
+        const pluginSkillDir = resolve(projectRoot, cap.skillsSource, cap.id);
+        meta = await readSkillMeta(pluginSkillDir);
+      }
       if (meta?.description) skillItem.description = meta.description;
       if (meta?.triggers) skillItem.triggers = meta.triggers;
       // Category from manifest.yaml (F228: moved from BOOTSTRAP.md)
