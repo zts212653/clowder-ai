@@ -10,6 +10,7 @@
  * A2A only triggers here in routeSerial; routeParallel never chains (MVP safety boundary).
  */
 
+import crypto from 'node:crypto';
 import {
   type CatConfig,
   type CatId,
@@ -74,6 +75,9 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+// F237: Injection trace (v0 — fire-and-forget observability)
+import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -792,6 +796,26 @@ export async function* routeSerial(
         ...(worldContext ? { worldContext } : {}),
         ...conciergeContextForCat(conciergeCtx, catId as string),
       });
+      // F237: fire-and-forget injection trace persist (v0 — observability only)
+      try {
+        const traceStore = getTraceStore();
+        if (traceStore) {
+          const traceTurnId = crypto.randomUUID();
+          const trace = collectTrace(catId as string, staticIdentity, invocationContext, hasNativeL0, {
+            mcpAvailable,
+            packBlocks,
+          });
+          const traceMeta = { turnId: traceTurnId, sessionId: '', threadId, catId: catId as string };
+          const summary = buildTraceSummary(trace, traceMeta);
+          const detail = buildTraceDetail(trace, traceMeta);
+          traceStore.persist(summary, detail).catch((err) => {
+            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
+          });
+        }
+      } catch {
+        /* F237: trace collection must never break invocation */
+      }
+
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,

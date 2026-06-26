@@ -495,6 +495,15 @@ export {
   generateSessionId,
   generateThreadId,
 } from './ids.js';
+// F237: Injection Trace types (v0 — observability layer)
+export type {
+  DeliveryChannel,
+  InjectionStage,
+  InjectionTraceDetail,
+  InjectionTraceSummary,
+  ObservedSegment,
+  StageDeliveryDecision,
+} from './injection-trace.js';
 // Intent Card + Need Audit types (F076 需求翻译官)
 export type {
   CreateIntentCardInput,
