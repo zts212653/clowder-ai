@@ -73,7 +73,7 @@ describe('InjectionTraceStore', () => {
       catId: 'ragdoll',
       timestamp: Date.now(),
       segments: [{ segmentId: 'S1', stage: 'session-init', status: 'observed', contentHash: 'abc123', charCount: 100 }],
-      delivery: [{ stage: 'session-init', delivered: true, channel: 'message-prepend', reason: 'test' }],
+      delivery: [{ stage: 'session-init', contentAssembled: true, channel: 'message-prepend', reason: 'test' }],
       totalCharCount: 100,
       totalSegmentsObserved: 1,
       totalSegmentsAbsent: 0,
@@ -346,6 +346,26 @@ describe('TraceCollector', () => {
     assert.equal(summary.durationMs, 3);
     assert.equal(summary.turnId, 't1');
     assert.equal(summary.catId, 'ragdoll');
+    assert.equal(summary.sessionId, 's1');
+  });
+
+  test('buildTraceSummary omits sessionId when not provided', async () => {
+    const { buildTraceSummary } = await import('../dist/domains/prompt-hooks/trace-collector.js');
+
+    const trace = {
+      segments: [],
+      delivery: [],
+      sessionContentHash: null,
+      turnContentHash: null,
+      sessionCharCount: 0,
+      turnCharCount: 0,
+      durationMs: 1,
+    };
+    const meta = { turnId: 't2', threadId: 'th2', catId: 'bengal' };
+
+    const summary = buildTraceSummary(trace, meta);
+    assert.equal(summary.sessionId, undefined);
+    assert.equal(summary.threadId, 'th2');
   });
 
   test('buildTraceDetail captures content hashes and char counts', async () => {

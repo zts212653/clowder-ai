@@ -323,7 +323,7 @@ export async function* routeParallel(
             mcpAvailable,
             packBlocks,
           });
-          const traceMeta = { turnId: traceTurnId, sessionId: '', threadId, catId: catId as string };
+          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
           const summary = buildTraceSummary(collected, traceMeta);
           const detail = buildTraceDetail(collected, traceMeta);
           traceStore.persist(summary, detail).catch((err) => {

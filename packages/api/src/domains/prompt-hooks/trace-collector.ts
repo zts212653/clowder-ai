@@ -124,19 +124,24 @@ export function collectTrace(
         ]
       : [];
 
-  // Delivery decisions
+  // Delivery decisions — route-level observation only.
+  // `contentAssembled` = content was prepared and passed to invocation layer.
+  // Actual delivery depends on session-chain resume state (invoke-single-cat
+  // may skip systemPrompt on resumes) and native L0 provider behavior.
   const delivery: StageDeliveryDecision[] = [
     {
       stage: 'session-init',
-      delivered: sessionContent.length > 0,
+      contentAssembled: sessionContent.length > 0,
       channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
-      reason: hasNativeL0 ? 'Native L0 provider injects via system prompt file' : 'Content prepended to user message',
+      reason: hasNativeL0
+        ? 'Route-level: pack-only content assembled for native L0 provider; actual delivery by provider'
+        : 'Route-level: content assembled for message-prepend; actual delivery depends on session-chain resume state',
     },
     {
       stage: 'per-turn',
-      delivered: turnContent.length > 0,
+      contentAssembled: turnContent.length > 0,
       channel: 'message-prepend',
-      reason: 'Per-turn context prepended to user message',
+      reason: 'Per-turn context assembled for message-prepend',
     },
   ];
 
@@ -157,14 +162,14 @@ export function collectTrace(
 /** Build InjectionTraceSummary from collected trace data. */
 export function buildTraceSummary(
   trace: CollectedTrace,
-  meta: { turnId: string; sessionId: string; threadId: string; catId: string },
+  meta: { turnId: string; sessionId?: string; threadId: string; catId: string },
 ): InjectionTraceSummary {
   const observed = trace.segments.filter((s) => s.status === 'observed');
   const absent = trace.segments.filter((s) => s.status === 'absent');
 
   return {
     turnId: meta.turnId,
-    sessionId: meta.sessionId,
+    ...(meta.sessionId ? { sessionId: meta.sessionId } : {}),
     threadId: meta.threadId,
     catId: meta.catId,
     timestamp: Date.now(),

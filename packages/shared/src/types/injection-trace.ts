@@ -21,10 +21,18 @@ export interface ObservedSegment {
   charCount: number;
 }
 
-/** Delivery decision for a stage. */
+/**
+ * Delivery decision for a stage.
+ *
+ * `contentAssembled` indicates whether the route assembled content for this
+ * stage — NOT whether it was actually delivered to the model. Actual delivery
+ * depends on downstream factors the route cannot observe (session-chain resume
+ * state, native L0 provider behavior). Consumers should treat this as
+ * "content was prepared and passed to the invocation layer".
+ */
 export interface StageDeliveryDecision {
   stage: InjectionStage;
-  delivered: boolean;
+  contentAssembled: boolean;
   channel: DeliveryChannel;
   reason: string;
 }
@@ -32,7 +40,8 @@ export interface StageDeliveryDecision {
 /** Compact per-turn summary — persistent (TTL=0). */
 export interface InjectionTraceSummary {
   turnId: string;
-  sessionId: string;
+  /** Optional — only populated when invocation-level session ID is available. */
+  sessionId?: string;
   threadId: string;
   catId: string;
   timestamp: number;
