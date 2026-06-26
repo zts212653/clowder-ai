@@ -52,7 +52,7 @@ export interface SettingsSkillItem {
     enabled: boolean;
     cats: Record<string, boolean>;
     canToggle: boolean;
-  } | null;
+  };
 }
 
 export interface SkillProjectSyncSummary {
@@ -132,14 +132,12 @@ export function composeSkillItems(
         isStaleNew: staleNewNames.has(cap.id),
         isStaleRemoved: staleRemovedNames.has(cap.id),
       },
-      controls: cap.pluginId
-        ? null
-        : {
-            source: cap.source,
-            enabled: cap.globalEnabled ?? cap.enabled,
-            cats: cap.cats ?? {},
-            canToggle: true,
-          },
+      controls: {
+        source: cap.source,
+        enabled: cap.globalEnabled ?? cap.enabled,
+        cats: cap.cats ?? {},
+        canToggle: true,
+      },
     };
   });
 }

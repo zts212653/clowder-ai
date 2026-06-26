@@ -56,6 +56,7 @@ import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
+import { mountSkillSymlinks } from '../skills/skill-manage.js';
 import { parseManifestSkillMeta, readSkillMeta, type SkillMeta } from '../skills/skill-meta.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
@@ -1072,7 +1073,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const catCafeRepoRoot = await resolveMainRepoPath();
       const config = healCatCafeMcpTopology(rawConfig, { catCafeRepoRoot }).config;
 
-      // Resolve all capabilities up front — fail fast on missing/plugin-owned
+      // Resolve all capabilities up front — fail fast on missing
       const targets: Array<{ cap: CapabilityEntry; index: number; skillId: string }> = [];
       for (const skillId of effectiveIds) {
         const lookupBody = { ...body, capabilityId: skillId };
@@ -1082,12 +1083,6 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           return { error: `Capability "${skillId}" (type=${body.capabilityType}) not found` };
         }
         const cap = config.capabilities[capIndex]!;
-        if (cap.pluginId) {
-          reply.status(409);
-          return {
-            error: `Capability "${skillId}" is managed by plugin "${cap.pluginId}". Use /api/plugins/${cap.pluginId}/enable or /disable instead.`,
-          };
-        }
         targets.push({ cap, index: capIndex, skillId });
       }
 
@@ -1254,6 +1249,23 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
           await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
           await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
           throw syncErr;
+        }
+
+        // Plugin skills: syncProject skips entries with pluginId — reconcile
+        // their mount points separately using each skill's stored skillsSource.
+        const pluginTargets = targets.filter(
+          ({ cap, skillId }) => cap.pluginId && managedSkillIds.has(skillId) && cap.skillsSource,
+        );
+        for (const { cap, skillId } of pluginTargets) {
+          const absSkillsSource = resolve(projectRoot, cap.skillsSource!);
+          const result = await mountSkillSymlinks(
+            projectRoot,
+            skillId,
+            absSkillsSource,
+            syncMountRules,
+            cap.mountPaths as string[] | undefined,
+          );
+          localSyncConflicts.push(...result.conflicts);
         }
       }
 

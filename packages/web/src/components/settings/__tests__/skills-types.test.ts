@@ -19,7 +19,7 @@ function makeSkillItem(overrides: Partial<SettingsSkillItem> = {}): SettingsSkil
       isStaleNew: false,
       isStaleRemoved: false,
     },
-    controls: null,
+    controls: { source: 'cat-cafe', enabled: true, cats: {}, canToggle: true },
     ...overrides,
   };
 }
@@ -141,10 +141,16 @@ describe('composeSkillItems', () => {
     expect(result[0].mountPaths).toEqual(['claude']);
     expect(result[0].controls?.enabled).toBe(true);
     expect(result[1].pluginId).toBe('same-id-plugin');
-    expect(result[1].controls).toBeNull();
+    // Plugin skills now have the same controls as built-in skills
+    expect(result[1].controls).toEqual({
+      source: 'cat-cafe',
+      enabled: false,
+      cats: { codex: false },
+      canToggle: true,
+    });
   });
 
-  it('does not expose normal skill controls for plugin-owned skills', () => {
+  it('exposes same skill controls for plugin-owned skills', () => {
     const caps: CapabilityBoardItem[] = [
       {
         id: 'weixin-mp',
@@ -159,7 +165,13 @@ describe('composeSkillItems', () => {
     const result = composeSkillItems(caps);
 
     expect(result[0].pluginId).toBe('weixin-mp');
-    expect(result[0].controls).toBeNull();
+    // Plugin skills get the same controls as built-in skills — no special handling
+    expect(result[0].controls).toEqual({
+      source: 'cat-cafe',
+      enabled: true,
+      cats: {},
+      canToggle: true,
+    });
   });
 
   it('reads mount data from CapabilityBoardItem mounts', () => {
