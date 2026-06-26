@@ -135,6 +135,11 @@ export interface SyncProjectOptions {
    *  policy changes should propagate without freezing. Default false (explicit
    *  sync writes mount paths to establish local baseline). */
   preserveGlobalCascade?: boolean;
+  /** Custom-source skills from global config. These skills have their own
+   *  skillsSource (e.g. plugin-provided) and may not be in the project config
+   *  yet. Without this, syncProject only knows about custom-source skills
+   *  already in the project config — new plugin skills would be invisible. */
+  globalCustomSourceSkills?: ReadonlyMap<string, { skillsSource: string; pluginId?: string }>;
 }
 
 export async function syncProject(
@@ -159,9 +164,13 @@ async function syncProjectUnlocked(
     await writeCapabilitiesConfig(projectRoot, { version: 2, capabilities: [] });
   }
   const config = existingConfig ?? { version: 2 as const, capabilities: [] as never[] };
-  const managedCaps = config.capabilities.filter(
+  const allCatCafeCaps = config.capabilities.filter(
     (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && isValidSkillName(cap.id),
   );
+  // Legacy plugin entries (pluginId without skillsSource) — their source path
+  // is unknown to syncProject. These are handled by reconcilePluginMounts
+  // separately until they're migrated to include skillsSource.
+  const managedCaps = allCatCafeCaps.filter((cap) => !cap.pluginId || cap.skillsSource);
   const previousNames = managedCaps.map((cap) => cap.id);
 
   // Per-skill effective source: if a skill has skillsSource in config, use it;
@@ -176,10 +185,20 @@ async function syncProjectUnlocked(
       effectiveSourceMap.set(cap.id, skillsSource);
     }
   }
+  // Also include custom-source skills from global config that aren't yet in project config.
+  // Without this, new plugin skills (in global but not project) are invisible to syncProject.
+  if (opts.globalCustomSourceSkills) {
+    for (const [name, meta] of opts.globalCustomSourceSkills) {
+      if (!effectiveSourceMap.has(name)) {
+        effectiveSourceMap.set(name, resolve(projectRoot, meta.skillsSource));
+        customSourceSkillNames.add(name);
+      }
+    }
+  }
   for (const name of sourceNames) {
     if (!effectiveSourceMap.has(name)) effectiveSourceMap.set(name, skillsSource);
   }
-  // All skill names = default source dir ∪ custom-source skills from config.
+  // All skill names = default source dir ∪ custom-source skills from config ∪ global custom-source.
   const allSkillNames = [...new Set([...sourceNames, ...customSourceSkillNames])];
 
   // F228: project state is mountPaths-first. An explicit empty mountPaths means
@@ -438,6 +457,7 @@ async function syncProjectUnlocked(
       preserveGlobalCascade: opts.preserveGlobalCascade,
       existingProjectSkills: new Set(previousNames),
       newlyEnabledMountPointIds: opts.pruneMountPaths ? newlyEnabledMountPointIds : undefined,
+      globalCustomSourceSkills: opts.globalCustomSourceSkills,
     });
 
     const newHash = await computeSourceManifestHash(skillsSource);

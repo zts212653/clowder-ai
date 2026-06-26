@@ -200,7 +200,19 @@ async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string)
     useGlobalEnabledForDisabled: true,
   });
   const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy);
-  return { projectPolicy, globalPolicy, mergedPolicy };
+  // Collect custom-source skills from global config for syncProject.
+  // These skills have skillsSource pointing to a non-default directory
+  // and may not be in the project config yet.
+  const globalCustomSourceSkills = new Map<string, { skillsSource: string; pluginId?: string }>();
+  for (const cap of globalConfig?.capabilities ?? []) {
+    if (cap.type === 'skill' && cap.source === 'cat-cafe' && cap.skillsSource) {
+      globalCustomSourceSkills.set(cap.id, {
+        skillsSource: cap.skillsSource,
+        ...(cap.pluginId ? { pluginId: cap.pluginId } : {}),
+      });
+    }
+  }
+  return { projectPolicy, globalPolicy, mergedPolicy, globalCustomSourceSkills };
 }
 
 export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = async (app, opts) => {
@@ -235,7 +247,10 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
       };
     }
 
-    const { projectPolicy, globalPolicy, mergedPolicy } = await loadDriftPolicies(projectRoot, globalProjectRoot);
+    const { projectPolicy, globalPolicy, mergedPolicy, globalCustomSourceSkills } = await loadDriftPolicies(
+      projectRoot,
+      globalProjectRoot,
+    );
     const mountRules = await readMountRules(projectRoot, globalProjectRoot);
     fillDefaultMountPaths(mergedPolicy, mountRules);
     const drift = await checkProject(projectRoot, skillsSource, mountRules, {
@@ -258,6 +273,7 @@ export const skillsDriftRoutes: FastifyPluginAsync<SkillsDriftRouteOptions> = as
         skillMountPaths: projectPolicy.skillMountPaths,
         globalSkillMountPaths: globalPolicy.skillMountPaths,
         configOrphans,
+        globalCustomSourceSkills: globalCustomSourceSkills.size > 0 ? globalCustomSourceSkills : undefined,
       },
     };
   }

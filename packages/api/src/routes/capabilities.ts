@@ -616,7 +616,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     for (const skillName of allSkillNames) {
       const isCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(skillName);
       const exists = config.capabilities.some(
-        (c) => c.type === 'skill' && c.id === skillName && (!isCatCafe || (c.source === 'cat-cafe' && !c.skillsSource)),
+        (c) => c.type === 'skill' && c.id === skillName && (!isCatCafe || (c.source === 'cat-cafe' && !c.pluginId)),
       );
       if (!exists) {
         config.capabilities.push(
@@ -638,7 +638,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // Also fix source for existing skills that were incorrectly classified
     for (const cap of config.capabilities) {
       if (cap.type !== 'skill') continue;
-      if (cap.skillsSource || cap.source === 'external') continue;
+      if (cap.skillsSource || cap.pluginId || cap.source === 'external') continue;
       const shouldBeCatCafe = catCafeOwnSkills !== null && catCafeOwnSkills.includes(cap.id);
       // Upgrade is safe when we have evidence; downgrade is only safe when scans succeeded.
       if (shouldBeCatCafe && cap.source !== 'cat-cafe') {
@@ -915,7 +915,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const unregistered = [...mountSourceNames].filter((n) => !capSkillNames.has(n));
     // Skills with custom skillsSource live outside the default source dir —
     // they are expected to not appear in mountSourceNames and should not be phantom.
-    const phantom = [...capSkillNames].filter((n) => !mountSourceNames.has(n) && !effectiveSourceBySkill.has(n));
+    // Legacy plugin entries (pluginId without skillsSource) are also excluded —
+    // their source is resolved via plugin manifests, not the default source dir.
+    const pluginOwnedNames = new Set(
+      config.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && c.pluginId).map((c) => c.id),
+    );
+    const phantom = [...capSkillNames].filter(
+      (n) => !mountSourceNames.has(n) && !effectiveSourceBySkill.has(n) && !pluginOwnedNames.has(n),
+    );
     const mountRequiredCatCafeSkillItems = catCafeSkillItems.filter((item) =>
       Array.isArray(item.mountPaths) ? item.mountPaths.length > 0 : item.enabled,
     );
