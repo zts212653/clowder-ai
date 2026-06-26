@@ -321,7 +321,10 @@ export async function removeSkill(
     writeCapabilities: (config: CapabilitiesConfig) => writeCapabilitiesConfig(projectRoot, config),
   };
 
-  // 1. Config: disable capability entry
+  // 1. Config: disable or remove capability entry
+  // Plugin skills are fully removed on deactivation (the plugin owns the
+  // lifecycle; re-enable recreates via addSkill). Built-in skills are kept
+  // as disabled entries to preserve metadata across toggles.
   const previous = await store.readCapabilities();
   const config = previous ? structuredClone(previous) : null;
   let storedSkillsSource: string | undefined;
@@ -329,9 +332,15 @@ export async function removeSkill(
     const existing = findSkillEntry(config.capabilities, capId, pluginId);
     if (existing) {
       storedSkillsSource = existing.skillsSource;
-      existing.enabled = false;
-      existing.globalEnabled = false;
-      existing.mountPaths = [];
+      if (pluginId) {
+        // Plugin skill: purge entry entirely
+        config.capabilities = config.capabilities.filter((c) => c !== existing);
+      } else {
+        // Built-in skill: disable but keep entry
+        existing.enabled = false;
+        existing.globalEnabled = false;
+        existing.mountPaths = [];
+      }
       await writeCapabilitiesWithRollback(store, previous, config);
     }
   }

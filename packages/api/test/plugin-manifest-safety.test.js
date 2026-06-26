@@ -961,8 +961,12 @@ describe('PluginResourceActivator skill safety', () => {
 
     assert.equal(disableResult.status, 'success');
     assert.equal(existsSync(codexLink), false);
-    assert.equal(persisted.capabilities[0].id, 'plugin-skill');
-    assert.equal(persisted.capabilities[0].enabled, false);
+    // Plugin skills are fully purged from capabilities on deactivation
+    assert.equal(
+      persisted.capabilities.find((c) => c.id === 'plugin-skill' && c.type === 'skill'),
+      undefined,
+      'plugin skill entry should be removed, not just disabled',
+    );
   });
 
   it('inherits main default mount rules when activating external project skills', async () => {
@@ -1150,10 +1154,14 @@ describe('PluginResourceActivator skill safety', () => {
     assert.ok(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')));
     assert.ok(existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')));
 
-    // 2. Disable: removeSkill sets mountPaths: [] and removes symlinks
+    // 2. Disable: removeSkill purges plugin skill entry and removes symlinks
     const disable = await activator.disablePlugin(manifest);
     assert.equal(disable.status, 'success');
-    assert.equal(persisted.capabilities[0].enabled, false);
+    assert.equal(
+      persisted.capabilities.find((c) => c.id === 'plugin-skill' && c.type === 'skill'),
+      undefined,
+      'plugin skill entry should be fully removed on disable',
+    );
     assert.equal(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')), false);
 
     // 3. Re-enable: must mount to ALL mount points again, not zero
