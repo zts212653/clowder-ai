@@ -681,6 +681,7 @@ describe('embedding sidecar startup guards', () => {
 describe('TTS sidecar startup guards', () => {
   it('preloads runtime voice assets during install and starts from cache', () => {
     const installScript = readFileSync(resolve(ROOT, 'scripts/services/tts-install.sh'), 'utf8');
+    const installPs1 = readFileSync(resolve(ROOT, 'scripts/services/tts-install.ps1'), 'utf8');
     const serverScript = readFileSync(resolve(ROOT, 'scripts/services/tts-server.sh'), 'utf8');
     const apiScript = readFileSync(resolve(ROOT, 'scripts/services/tts-api.py'), 'utf8');
 
@@ -691,6 +692,13 @@ describe('TTS sidecar startup guards', () => {
     assert.match(serverScript, /HF_HUB_OFFLINE/);
     assert.match(serverScript, /mlx-audio\|qwen3-clone/);
     assert.doesNotMatch(apiScript, /except Exception:\s*\n\s*pass\s+# Warmup may fail/);
+    assert.match(apiScript, /os\.environ\.get\(["']CAT_CAFE_HOME["']\)/);
+    assert.match(apiScript, /CAT_CAFE_HOME[\s\S]*piper-models/);
+    assert.doesNotMatch(apiScript, /Path\.home\(\)\s*\/\s*["']\.cat-cafe["']\s*\/\s*["']piper-models["']/);
+    assert.match(installScript, /HF_ENDPOINT/);
+    assert.match(installPs1, /HF_ENDPOINT/);
+    assert.doesNotMatch(installScript, /base="https:\/\/huggingface\.co\/rhasspy\/piper-voices/);
+    assert.doesNotMatch(installPs1, /\{ "https:\/\/huggingface\.co\/rhasspy\/piper-voices/);
   });
 });
 

@@ -49,6 +49,13 @@ log = logging.getLogger("tts-api")
 app = FastAPI(title="Cat Cafe TTS Server")
 
 
+def resolve_cat_cafe_home() -> Path:
+    raw = os.environ.get("CAT_CAFE_HOME")
+    if raw:
+        return Path(raw).expanduser()
+    return Path(__file__).resolve().parents[2] / ".cat-cafe"
+
+
 @app.on_event("startup")
 async def _emit_ready_marker():
     """Push-based ready signal — see embed-api.py + service-logs.ts."""
@@ -269,11 +276,11 @@ class PiperAdapter(TtsAdapter):
     """Piper neural TTS via piper-tts (offline, cross-platform).
 
     Models are downloaded by tts-install.sh / tts-install.ps1 into
-    ~/.cat-cafe/piper-models/<voice>.onnx + .onnx.json
+    ${CAT_CAFE_HOME}/piper-models/<voice>.onnx + .onnx.json
     """
 
     DEFAULT_MODEL = "zh_CN-huayan-medium"
-    MODELS_DIR = Path.home() / ".cat-cafe" / "piper-models"
+    MODELS_DIR = resolve_cat_cafe_home() / "piper-models"
 
     def __init__(self, model: str | None = None):
         self._model = model or self.DEFAULT_MODEL

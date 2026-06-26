@@ -79,12 +79,14 @@ tts_install_non_arm64_extras() {
       local piper_dir="${CAT_CAFE_HOME}/piper-models"
       mkdir -p "$piper_dir"
 
+      local hf_base="${HF_ENDPOINT:-${HF_HUB_ENDPOINT:-https://huggingface.co}}"
+      hf_base="${hf_base%/}"
       local base
       case "$voice" in
-        zh_CN-huayan-medium) base="https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium" ;;
-        en_US-amy-medium)    base="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium" ;;
-        en_US-lessac-medium) base="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium" ;;
-        en_GB-alan-medium)   base="https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium" ;;
+        zh_CN-huayan-medium) base="${hf_base}/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium" ;;
+        en_US-amy-medium)    base="${hf_base}/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium" ;;
+        en_US-lessac-medium) base="${hf_base}/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium" ;;
+        en_GB-alan-medium)   base="${hf_base}/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium" ;;
         *)
           echo "ERROR: Unknown piper voice: ${voice}. Supported: zh_CN-huayan-medium, en_US-amy-medium, en_US-lessac-medium, en_GB-alan-medium" >&2
           exit 1

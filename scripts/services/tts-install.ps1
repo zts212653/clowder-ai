@@ -66,13 +66,15 @@ if ($IsPiper) {
     $PiperDir = Join-Path $env:CAT_CAFE_HOME "piper-models"
     if (-not (Test-Path $PiperDir)) { New-Item -ItemType Directory -Path $PiperDir | Out-Null }
 
-    $voiceBase = switch ($Voice) {
-        "zh_CN-huayan-medium"  { "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium" }
-        "en_US-amy-medium"     { "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium" }
-        "en_US-lessac-medium"  { "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium" }
-        "en_GB-alan-medium"    { "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium" }
+    $hfBase = if ($env:HF_ENDPOINT) { $env:HF_ENDPOINT.TrimEnd('/') } elseif ($env:HF_HUB_ENDPOINT) { $env:HF_HUB_ENDPOINT.TrimEnd('/') } else { "https://huggingface.co" }
+    $voicePath = switch ($Voice) {
+        "zh_CN-huayan-medium"  { "rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium" }
+        "en_US-amy-medium"     { "rhasspy/piper-voices/resolve/main/en/en_US/amy/medium" }
+        "en_US-lessac-medium"  { "rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium" }
+        "en_GB-alan-medium"    { "rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium" }
         default                { throw "Unknown piper voice: $Voice. Supported: zh_CN-huayan-medium, en_US-amy-medium, en_US-lessac-medium, en_GB-alan-medium" }
     }
+    $voiceBase = "$hfBase/$voicePath"
 
     $onnxPath = Join-Path $PiperDir "$Voice.onnx"
     $jsonPath = Join-Path $PiperDir "$Voice.onnx.json"
