@@ -167,6 +167,7 @@ import {
   isMalformedToolCallError,
   isMissingClaudeSessionError,
   isPromptTokenLimitExceededError,
+  isSessionNotFoundDiagnostic,
   isTransientAcpPromptFailure,
   isTransientCliExitCode1,
   preflightRace,
@@ -2863,7 +2864,11 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
 
-        if (allowSessionRetry && msg.type === 'error' && isMissingClaudeSessionError(msg.error)) {
+        if (
+          allowSessionRetry &&
+          msg.type === 'error' &&
+          (isMissingClaudeSessionError(msg.error) || isSessionNotFoundDiagnostic(msg.metadata))
+        ) {
           suppressedMissingSessionError = msg;
           continue;
         }

@@ -8,6 +8,9 @@ const fixtures = [
   // Existing (must regress — predates F212, must keep behavior)
   ['Invalid `signature` in `thinking` block: foo', 'invalid_thinking_signature'],
   ['Error: no rollout found for cli session abc', 'missing_rollout'],
+  // clowder-ai#1038: opencode resumed a stale --session (session DB rebuilt/cleared) —
+  // stderr is the literal "Session not found"; must classify so it routes to self-heal.
+  ['Error: Session not found', 'session_not_found'],
   // New 7 (AC-A4)
   ['The supported API model names are deepseek-v4-pro or deepseek-v4-flash', 'model_not_found'],
   ['Unknown model: foo-bar-v9', 'model_not_found'],

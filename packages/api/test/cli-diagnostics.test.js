@@ -194,6 +194,7 @@ test('all 9 reasonCodes produce non-empty publicSummary + publicHint', () => {
   const cases = [
     ['Invalid `signature` in `thinking` block: foo', 'invalid_thinking_signature'],
     ['no rollout found', 'missing_rollout'],
+    ['Error: Session not found', 'session_not_found'],
     ['model not found', 'model_not_found'],
     ['401 Unauthorized', 'auth_failed'],
     ['429 Too Many Requests', 'quota_exceeded'],
