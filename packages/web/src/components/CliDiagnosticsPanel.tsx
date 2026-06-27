@@ -90,6 +90,10 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
+  // clowder-ai#1038: opencode resumed a stale --session (session DB rebuilt/cleared while
+  // Redis held the old cliSessionId). Same system tier as missing_rollout — session-side
+  // issue, auto-self-healed by the backend (Path A drops + retries fresh).
+  session_not_found: { ...PALETTE_SYSTEM, Icon: FileXIcon },
   // Tier 4 — cognitive / context limit
   context_window_exceeded: { ...PALETTE_COGNITIVE, Icon: TextQuoteIcon },
   invalid_thinking_signature: { ...PALETTE_COGNITIVE, Icon: BrainIcon },

@@ -45,6 +45,13 @@ const REASON_TEXT: Record<CliErrorReasonCode, { summary: string; hint: string }>
     summary: 'CLI session 找不到',
     hint: '对话上下文被外部清理了，发条新消息重建 session 即可。',
   },
+  // clowder-ai#1038: opencode --session 指向的会话已不存在（session DB 重建/清理后 Redis 仍
+  // 持有旧 cliSessionId）。API 已自动丢弃旧 session 并用新 session 重试本轮；下一条消息会
+  // 自动接上新会话。无需手动操作。
+  session_not_found: {
+    summary: 'CLI session 找不到',
+    hint: '对话会话已失效（CLI 数据库重建或会话被清理），已自动新建会话重试本轮；下一条消息会自动接上新会话，无需操作。',
+  },
   model_not_found: {
     summary: '模型名不被支持',
     hint: '检查 CLI 配置里的模型名拼写，或查 provider 官方支持列表（常见拼错：deepseek-v-4 应为 deepseek-v4-pro / deepseek-v4-flash）。',

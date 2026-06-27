@@ -76,6 +76,20 @@ export function isMissingClaudeSessionError(message: string | undefined): boolea
   return classifyResumeFailure(message) === 'missing_session';
 }
 
+/**
+ * clowder-ai#1038: opencode's "Session not found" surfaces in `msg.metadata.cliDiagnostics`
+ * (stderr excerpt), NOT in the formatted `msg.error` string (which is the generic
+ * `opencode CLI: CLI 异常退出 (code: 1, signal: none)`). So `isMissingClaudeSessionError(msg.error)`
+ * misses it and the error would fall into the transient-retry path (Path B), which re-runs the
+ * same stale `--session`. Detect via the classified `reasonCode` instead so it routes to the
+ * session self-heal path (Path A: drop sessionId + retry fresh), mirroring Claude/Codex/Gemini.
+ */
+export function isSessionNotFoundDiagnostic(
+  metadata: { cliDiagnostics?: { reasonCode?: string } } | undefined,
+): boolean {
+  return metadata?.cliDiagnostics?.reasonCode === 'session_not_found';
+}
+
 export function isTransientCliExitCode1(message: string | undefined): boolean {
   if (!message) return false;
   if (!/CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message)) return false;
