@@ -576,7 +576,7 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.deepEqual(managedNames, ['debugging', 'tdd']);
   });
 
-  test('syncDrift removes Cat Cafe capabilities for source-deleted stale skills', async () => {
+  test('syncDrift removes Clowder AI capabilities for source-deleted stale skills', async () => {
     await makeSkill('tdd');
     await makeSkill('old-skill');
     await syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {});

@@ -8,7 +8,7 @@
 #
 # 直接调用脚本:
 #   ./scripts/start-dev.sh            — 开发模式 (next dev + Redis 持久化)
-#   ./scripts/start-dev.sh --prod-web — 前端 production build + next start
+#   ./scripts/start-dev.sh --prod-web — API 非 watch + 前端 production build + next start
 #   ./scripts/start-dev.sh --quick    — 仅跳过重复构建；不改变 dev/prod 模式
 #   ./scripts/start-dev.sh --memory   — 使用内存存储 (重启丢数据)
 #   ./scripts/start-dev.sh --no-redis — 同 --memory
@@ -96,7 +96,7 @@ done
 #   对于其他键: .env.local > .env（无 CLI 恢复机制）
 #   例外：CAT_CAFE_PROVISION_GLOBAL_SIDECAR 是 machine-global sidecar
 #   owner marker，只能来自 wrapper/CLI 环境；dotenv 不得授予 ownership。
-#   安全注意: .env.local 全量 source，不再限于 DARE 白名单。
+#   安全注意: .env.local 全量 source。
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
@@ -387,7 +387,7 @@ derive_embed_enabled() {
     # start-dev no longer derives EMBED_ENABLED=1 from EMBED_MODE.
     local explicit="${EMBED_ENABLED-}"
     if [ -n "$explicit" ]; then
-        _SRC_EMBED_ENABLED="env/.env override"
+        _SRC_EMBED_ENABLED=".env override"
         return
     fi
     EMBED_ENABLED=0
@@ -793,12 +793,22 @@ api_node_env() {
     fi
 }
 
+api_uses_no_watch() {
+    if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
+        return 0
+    fi
+    if [ "$PROD_WEB" = true ]; then
+        return 0
+    fi
+    return 1
+}
+
 api_launch_command() {
     local env_prefix="NODE_ENV=$(api_node_env) "
     if [ "$DEBUG_MODE" = true ]; then
         env_prefix="${env_prefix}LOG_LEVEL=debug "
     fi
-    if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
+    if api_uses_no_watch; then
         printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run start"
     else
         printf '%s' "cd packages/api && exec env ${env_prefix}pnpm run dev"
@@ -1263,7 +1273,7 @@ ensure_api_native_addons() {
     run_logged_step "better-sqlite3 rebuild" 20 pnpm -C "$PROJECT_DIR/packages/api" rebuild better-sqlite3
 
     if ! (cd "$PROJECT_DIR/packages/api" && node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.close();" >/dev/null 2>&1); then
-        echo -e "${RED}  ✗ better-sqlite3 重建后仍无法加载。请确认当前 Node 在 >=20 <26 范围内。${NC}" >&2
+        echo -e "${RED}  ✗ better-sqlite3 重建后仍无法加载。请确认当前 Node 在 >=24 <26 范围内。${NC}" >&2
         return 1
     fi
 
@@ -1288,7 +1298,9 @@ main() {
     if [ ! -x "$PROJECT_DIR/node_modules/.bin/tsc" ]; then
         echo ""
         echo -e "${YELLOW}检测到依赖不完整，自动安装...${NC}"
-        run_logged_step "pnpm install" 5 pnpm install --frozen-lockfile
+        run_logged_step "pnpm install" 5 \
+            env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+            pnpm install --frozen-lockfile
         echo -e "${GREEN}  ✓ 依赖安装完成${NC}"
     fi
     ensure_api_native_addons
@@ -1342,8 +1354,8 @@ main() {
     # transferred to CAT_CAFE_SERVICE_*_ENABLED upstream of this point.
 
     API_LAUNCH_CMD="$(api_launch_command)"
-    if [ "${CAT_CAFE_DIRECT_NO_WATCH:-0}" = "1" ]; then
-        echo -e "${YELLOW}  ⚠ API 使用非 watch 模式 (CAT_CAFE_DIRECT_NO_WATCH=1)${NC}"
+    if api_uses_no_watch; then
+        echo -e "${YELLOW}  ⚠ API 使用非 watch 模式 (runtime production)${NC}"
     fi
 
     # API Server

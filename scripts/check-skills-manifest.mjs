@@ -160,6 +160,14 @@ const REFS_EXEMPT_FILES = new Set([
   'hyperfocus-brake-messages.md',
   'creator-context.md',
   'mcp-tool-description-standard.md',
+  // F247: gpt-pro Custom Instructions is the L0 prompt fed verbatim to cloud-side ChatGPT Pro
+  // (砚砚 Pro). The file's whole purpose is to address that cat by name — it can't use generic
+  // "主执行猫/QA 审查猫" role descriptions and still be the persona injection text.
+  'gpt-pro-custom-instructions.md',
+  // F247: ChatGPT Cloud onboarding SOP — entire document is the runbook for onboarding the
+  // specific cloud cat 砚砚 Pro. Switching to role descriptions would lose the named-cat
+  // routing semantics (mention patterns, identity verification, ChatGPT端 prompt 触发词).
+  'chatgpt-cloud-onboarding-guide.md',
 ]);
 
 const NICKNAME_EXEMPT_SKILLS = new Set(['hyperfocus-brake', 'bootcamp-guide', 'incident-response']);

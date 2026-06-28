@@ -230,73 +230,96 @@ function inlineCodeClassName(className = ''): string {
 }
 
 /* ── Markdown component overrides ──────────────────────────── */
-const mdComponents: Components = {
-  p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{withMentionsAndLinks(children)}</p>,
-  strong: ({ children }) => <strong className="font-semibold">{withMentions(children)}</strong>,
-  em: ({ children }) => <em>{withMentions(children)}</em>,
-  del: ({ children }) => <del className="opacity-60">{withMentions(children)}</del>,
 
-  h1: ({ children }) => <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{withMentions(children)}</h1>,
-  h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{withMentions(children)}</h2>,
-  h3: ({ children }) => <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{withMentions(children)}</h3>,
-  h4: ({ children }) => <h4 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{withMentions(children)}</h4>,
-  h5: ({ children }) => (
-    <h5 className="text-xs font-semibold mb-1 mt-1.5 first:mt-0 uppercase tracking-wide">{withMentions(children)}</h5>
-  ),
-  h6: ({ children }) => (
-    <h6 className="text-xs font-medium mb-1 mt-1.5 first:mt-0 text-cafe-muted">{withMentions(children)}</h6>
-  ),
+/**
+ * Build react-markdown component overrides. When `tp` (textProcessor) is provided,
+ * it runs BEFORE mention/link processing on every text-containing component
+ * (p, strong, em, del, h1-h6, li, a, th, td). Code/pre components are excluded —
+ * textProcessor never touches code block content.
+ *
+ * Using a factory avoids duplicating component definitions: styling is defined once,
+ * and textProcessor composition is injected into the mention-processing pipeline.
+ */
+function buildMdComponents(tp?: (children: ReactNode) => ReactNode): Components {
+  // Compose text processing: tp runs first (e.g. replace markers with buttons),
+  // then withMentions/withMentionsAndLinks processes remaining strings.
+  const m = tp ? (c: ReactNode) => withMentions(tp(c)) : withMentions;
+  const ml = tp ? (c: ReactNode) => withMentionsAndLinks(tp(c)) : withMentionsAndLinks;
 
-  ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
-  li: ({ children, className }) => (
-    <li className={className === 'task-list-item' ? 'list-none -ml-5 flex items-start gap-1.5' : undefined}>
-      {withMentions(children)}
-    </li>
-  ),
-  input: ({ type, checked }) =>
-    type === 'checkbox' ? (
-      <input
-        type="checkbox"
-        checked={checked}
-        readOnly
-        className="mt-1 h-3.5 w-3.5 rounded border-[var(--console-border-soft)] text-conn-blue-text pointer-events-none"
-      />
-    ) : (
-      <input type={type} />
+  return {
+    p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{ml(children)}</p>,
+    strong: ({ children }) => <strong className="font-semibold">{m(children)}</strong>,
+    em: ({ children }) => <em>{m(children)}</em>,
+    del: ({ children }) => <del className="opacity-60">{m(children)}</del>,
+
+    h1: ({ children }) => <h1 className="text-lg font-bold mb-2 mt-3 first:mt-0">{m(children)}</h1>,
+    h2: ({ children }) => <h2 className="text-base font-bold mb-2 mt-3 first:mt-0">{m(children)}</h2>,
+    h3: ({ children }) => <h3 className="text-sm font-bold mb-1 mt-2 first:mt-0">{m(children)}</h3>,
+    h4: ({ children }) => <h4 className="text-sm font-semibold mb-1 mt-2 first:mt-0">{m(children)}</h4>,
+    h5: ({ children }) => (
+      <h5 className="text-xs font-semibold mb-1 mt-1.5 first:mt-0 uppercase tracking-wide">{m(children)}</h5>
     ),
+    h6: ({ children }) => <h6 className="text-xs font-medium mb-1 mt-1.5 first:mt-0 text-cafe-muted">{m(children)}</h6>,
 
-  blockquote: ({ children }) => (
-    <blockquote className="border-l-[3px] border-cafe pl-3 my-2 italic opacity-80">{children}</blockquote>
-  ),
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-conn-blue-text hover:underline break-all">
-      {withMentions(children)}
-    </a>
-  ),
-  hr: () => <hr className="my-3 border-cafe" />,
-
-  /* Code blocks with copy button */
-  pre: ({ children }) => (isMermaidPre(children) ? children : <CodeBlock>{children}</CodeBlock>),
-  code: ({ className = '', children }) =>
-    hasMermaidLanguage(className) ? (
-      <MermaidDiagram source={codeChildrenToString(children)} />
-    ) : (
-      <code className={inlineCodeClassName(className)}>{children}</code>
+    ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-0.5">{children}</ul>,
+    ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-0.5">{children}</ol>,
+    li: ({ children, className }) => (
+      <li className={className === 'task-list-item' ? 'list-none -ml-5 flex items-start gap-1.5' : undefined}>
+        {m(children)}
+      </li>
     ),
+    input: ({ type, checked }) =>
+      type === 'checkbox' ? (
+        <input
+          type="checkbox"
+          checked={checked}
+          readOnly
+          className="mt-1 h-3.5 w-3.5 rounded border-[var(--console-border-soft)] text-conn-blue-text pointer-events-none"
+        />
+      ) : (
+        <input type={type} />
+      ),
 
-  /* Tables (GFM) */
-  table: ({ children }) => (
-    <div className="overflow-x-auto my-2">
-      <table className="min-w-full text-sm border-collapse">{children}</table>
-    </div>
-  ),
-  thead: ({ children }) => <thead className="bg-cafe-surface-elevated">{children}</thead>,
-  th: ({ children }) => (
-    <th className="border border-cafe px-2 py-1 text-left font-semibold text-xs">{withMentions(children)}</th>
-  ),
-  td: ({ children }) => <td className="border border-cafe px-2 py-1">{withMentions(children)}</td>,
-};
+    blockquote: ({ children }) => (
+      <blockquote className="border-l-[3px] border-cafe pl-3 my-2 italic opacity-80">{children}</blockquote>
+    ),
+    a: ({ href, children }) => (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-conn-blue-text hover:underline break-all"
+      >
+        {m(children)}
+      </a>
+    ),
+    hr: () => <hr className="my-3 border-cafe" />,
+
+    /* Code blocks with copy button — textProcessor intentionally excluded */
+    pre: ({ children }) => (isMermaidPre(children) ? children : <CodeBlock>{children}</CodeBlock>),
+    code: ({ className = '', children }) =>
+      hasMermaidLanguage(className) ? (
+        <MermaidDiagram source={codeChildrenToString(children)} />
+      ) : (
+        <code className={inlineCodeClassName(className)}>{children}</code>
+      ),
+
+    /* Tables (GFM) */
+    table: ({ children }) => (
+      <div className="overflow-x-auto my-2">
+        <table className="min-w-full text-sm border-collapse">{children}</table>
+      </div>
+    ),
+    thead: ({ children }) => <thead className="bg-cafe-surface-elevated">{children}</thead>,
+    th: ({ children }) => (
+      <th className="border border-cafe px-2 py-1 text-left font-semibold text-xs">{m(children)}</th>
+    ),
+    td: ({ children }) => <td className="border border-cafe px-2 py-1">{m(children)}</td>,
+  };
+}
+
+/** Default components — no textProcessor, built once at module load */
+const mdComponents = buildMdComponents();
 
 /* ── Exported component ────────────────────────────────────── */
 interface Props {
@@ -308,6 +331,11 @@ interface Props {
   basePath?: string;
   /** Worktree ID for resolving workspace-relative image paths */
   worktreeId?: string;
+  /** Pre-process text children in all text-containing components (p, strong, em,
+   *  del, h1-h6, li, a, th, td) BEFORE mention/link processing. Code/pre components
+   *  are excluded — textProcessor never touches code block content.
+   *  Useful for replacing text patterns (e.g. markers) with interactive elements. */
+  textProcessor?: (children: ReactNode) => ReactNode;
 }
 
 /** Check if href is a relative markdown link (not absolute, not external) */
@@ -330,13 +358,23 @@ export function resolveRelativePath(base: string, relative: string): string {
   return parts.join('/');
 }
 
-export function MarkdownContent({ content, className, disableCommandPrefix, basePath, worktreeId }: Props) {
+export function MarkdownContent({
+  content,
+  className,
+  disableCommandPrefix,
+  basePath,
+  worktreeId,
+  textProcessor,
+}: Props) {
   const cmdMatch = disableCommandPrefix ? null : /^(\/\w+)/.exec(content);
   const md = cmdMatch ? content.slice(cmdMatch[1].length) : content;
 
-  let components = mdComponents;
+  let components: Components = textProcessor ? buildMdComponents(textProcessor) : mdComponents;
+
   if (basePath != null) {
-    components = { ...components, a: createWorkspaceLinkComponent(basePath, withMentions, worktreeId) };
+    // When textProcessor is active, the workspace link component must also compose it
+    const mentionsFn = textProcessor ? (c: ReactNode) => withMentions(textProcessor(c)) : withMentions;
+    components = { ...components, a: createWorkspaceLinkComponent(basePath, mentionsFn, worktreeId) };
     if (worktreeId) {
       components = { ...components, img: createWorkspaceImageComponent(basePath, worktreeId) };
     }

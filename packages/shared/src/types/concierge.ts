@@ -10,8 +10,8 @@
 export interface ConciergeConfig {
   /** 是否启用前台猫 (default true) */
   enabled: boolean;
-  /** 皮肤 — Phase E0: ragdoll-v1 默认，yarn-ball 保留为 legacy fallback */
-  skin: 'yarn-ball' | 'ragdoll-v1';
+  /** 皮肤 — E0: ragdoll-v1 默认 | E1: yanyan-codex / xianxian-codex (9-state atlas) | yarn-ball legacy */
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
   /** 前台猫显示名（KD-6: per-deployment 可配置，本家 Phase A 落地投票） */
   displayName: string;
   /** 一句话人设基调（注入岗位 prompt） */
@@ -33,7 +33,7 @@ export interface ConciergeConfig {
 /** ConciergeConfig 默认值（dutyCatProfileId 由 API 层根据 roster 解析） */
 export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'> = {
   enabled: true,
-  skin: 'ragdoll-v1',
+  skin: 'yanyan-codex',
   displayName: '猫猫球',
   personaTone: '温暖、简短、不啰嗦',
   proactivePolicy: 'quiet-badge',
@@ -63,10 +63,16 @@ export type ConciergeBallState =
   | 'error';
 
 /**
- * threadKind: Thread 字段扩展（F229）
+ * threadKind: Thread 字段扩展（F229 / F167）
  * concierge = 专属前台猫对话载体（per-user，sidebar 默认隐藏）
+ * gate-keeping = 守门 thread（per-repo inbox / community ops 看板载体）。F167
+ *   trigger-time guard 在 register_pr_tracking / register_issue_tracking / hold_ball
+ *   端点 default-block 守门 thread 调用，避免「已 cross_post / propose 后还在守门
+ *   thread 替下游 hold/挂 tracking」的双 owner、球权死锁事故。
  */
 export type ConciergeThreadKind = 'concierge';
+export type GateKeepingThreadKind = 'gate-keeping';
+export type ThreadKind = ConciergeThreadKind | GateKeepingThreadKind;
 
 /**
  * CardBlock concierge actions（前端 action handler 注册点）

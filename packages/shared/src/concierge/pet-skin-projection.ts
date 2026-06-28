@@ -8,10 +8,20 @@
 import type { ConciergeBallState } from '../types/concierge.js';
 
 /**
- * Codex Pet animation state — v0 four-state subset.
- * Full set (E1+): idle | running-right | running-left | waving | jumping | failed | waiting | running | review
+ * Codex Pet animation state — E1 full nine-state set.
+ * Atlas-based skins use all 9; individual-sprite skins (ragdoll-v1) map
+ * new states to their existing sprite subset via the resolver.
  */
-export type CodexPetState = 'idle' | 'running' | 'review' | 'failed';
+export type CodexPetState =
+  | 'idle'
+  | 'running-right'
+  | 'running-left'
+  | 'waving'
+  | 'jumping'
+  | 'failed'
+  | 'waiting'
+  | 'running'
+  | 'review';
 
 /** Projection mapping — concierge ball state → codex pet state. */
 export interface PetStateProjection {
@@ -45,6 +55,40 @@ export const PET_STATE_PROJECTION_V0: PetStateProjection = {
     found: 'review',
     'needs-confirmation': 'idle',
     handoff: 'running',
+    error: 'failed',
+  },
+} as const;
+
+/**
+ * V1 projection — nine-state atlas mapping (E1: yanyan-codex + future atlas skins).
+ *
+ * Key differences from V0:
+ * - listening → waiting (V0: idle) — now has dedicated waiting animation
+ * - needs-confirmation → waiting (V0: idle) — pending user action
+ * - handoff → running-right (V0: running) — directional relay animation
+ *
+ * | ConciergeBallState    | CodexPetState  | Why                                    |
+ * |-----------------------|----------------|----------------------------------------|
+ * | idle                  | idle           | Quiet baseline                         |
+ * | sleeping              | idle           | Quiet state                            |
+ * | listening             | waiting        | Passive input → waiting animation      |
+ * | thinking              | running        | Duty cat is working                    |
+ * | found                 | review         | Result ready for inspection            |
+ * | needs-confirmation    | waiting        | Pending user action                    |
+ * | handoff               | running-right  | Relay in progress, directional         |
+ * | error                 | failed         | Blocked or stuck                       |
+ */
+export const PET_STATE_PROJECTION_V1: PetStateProjection = {
+  version: 1,
+  fallback: 'idle',
+  map: {
+    idle: 'idle',
+    sleeping: 'idle',
+    listening: 'waiting',
+    thinking: 'running',
+    found: 'review',
+    'needs-confirmation': 'waiting',
+    handoff: 'running-right',
     error: 'failed',
   },
 } as const;

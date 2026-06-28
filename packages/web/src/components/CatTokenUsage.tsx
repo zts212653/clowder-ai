@@ -17,7 +17,6 @@ const CAT_TEXT_COLORS: Record<string, string> = {
   opus: 'text-opus-dark',
   codex: 'text-codex-dark',
   gemini: 'text-gemini-dark',
-  dare: 'text-dare-dark',
 };
 
 function cachePercent(usage: TokenUsage): number {

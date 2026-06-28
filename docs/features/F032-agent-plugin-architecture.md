@@ -562,3 +562,20 @@ Phase B3 做一次性批量替换 + 守护测试。
 | routes/*.ts | z.enum 写死 | P1 |
 | services/index.ts | AgentService 构造写死 | P1 |
 | MENTION_ALIASES | 模块级常量 import 时求值 | P2 |
+
+## Post-Completion Boundary Adjustments
+
+### KD-13（F208 边界调整）— operator signoff 2026-06-19
+
+F208（Capability Profile Routing）引入 `cat-dossier.md` 能力画像档案后，cat-config 的
+能力描述字段（`teamStrengths` / `caution`）与 dossier 产生语义漂移。三猫讨论 + operator
+拍板后调整边界：
+
+- **cat-config 退回纯身份配置**：管 catId / model / 开关 / 排序 / 硬限制（如"禁止写代码"）
+- **能力描述权归 F208 dossier**：`cat-dossier.md` 结构化投影层（`l0RosterSummary`）
+  替代 `teamStrengths` 作为 compile-l0 / SystemPromptBuilder 的能力描述源
+- **`teamStrengths` / `caution` 标 legacy-fallback**：**永久保留当社区兜底，永不删字段**。
+  社区operator没有 dossier，用 `teamStrengths` 写"产品经理"式角色定位——这是他们唯一入口
+- **Fallback 链**：`dossier.l0RosterSummary ?? config.teamStrengths ?? config.roleDescription`
+
+> 详见 F208 spec KD-8 ~ KD-14；讨论记录：F208 feat doc Timeline 2026-06-19 条目。

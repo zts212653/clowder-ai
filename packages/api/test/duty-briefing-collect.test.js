@@ -236,6 +236,17 @@ test('collectMention: 非近期活跃 thread（超 72h）跳过', async () => {
   assert.equal(input.mentionCandidates.length, 0, '超 72h 不扫');
 });
 
+test('legacy mode: threadTitles stays a direct title map', async () => {
+  const input = await collectDutyBriefingInput(
+    mockDeps({
+      threadStore: { list: async () => [{ id: 'thr-title', title: 'Deploy Thread' }] },
+    }),
+  );
+
+  assert.equal(input.threadTitles['thr-title'], 'Deploy Thread');
+  assert.equal(input.threadTitles.titles, undefined);
+});
+
 test('collectVoidPasses（via 整合）: F167 C2 frictionSamples → voidPasses', async () => {
   const input = await collectDutyBriefingInput(
     mockDeps({
@@ -256,6 +267,321 @@ test('collectVoidPasses（via 整合）: F167 C2 frictionSamples → voidPasses'
   assert.equal(input.voidPasses.length, 1);
   assert.equal(input.voidPasses[0].trigger, 'verdict_reject');
   assert.equal(input.voidPasses[0].catId, 'opus');
+});
+
+test('PR4 projection mode: collectDutyBriefingInput reads ball-custody projection instead of legacy 5 sources', async () => {
+  const projections = new Map([
+    [
+      'ball:task:t-blocked',
+      {
+        subjectKey: 'ball:task:t-blocked',
+        state: 'blocked',
+        holder: null,
+        intent: null,
+        resolveMode: 'bounces_back',
+        heldUntil: null,
+        blockedSinceAt: NOW - 2 * HOUR,
+        lastWakeAt: null,
+        lastScanAt: null,
+        lastStateChangeAt: NOW - 2 * HOUR,
+        lastEventAt: NOW - 2 * HOUR,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        createdAt: NOW - 2 * HOUR,
+        updatedAt: NOW - 2 * HOUR,
+      },
+    ],
+    [
+      'ball:task:t-active',
+      {
+        subjectKey: 'ball:task:t-active',
+        state: 'active',
+        holder: 'codex',
+        intent: null,
+        resolveMode: null,
+        heldUntil: null,
+        blockedSinceAt: null,
+        lastWakeAt: null,
+        lastScanAt: null,
+        lastStateChangeAt: NOW - HOUR,
+        lastEventAt: NOW - HOUR,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        createdAt: NOW - HOUR,
+        updatedAt: NOW - HOUR,
+      },
+    ],
+    [
+      'ball:thread:thr-dead',
+      {
+        subjectKey: 'ball:thread:thr-dead',
+        state: 'dead',
+        holder: 'opus',
+        intent: null,
+        resolveMode: null,
+        heldUntil: null,
+        blockedSinceAt: null,
+        lastWakeAt: null,
+        lastScanAt: NOW - 30 * MIN,
+        lastStateChangeAt: NOW - 30 * MIN,
+        lastEventAt: NOW - 30 * MIN,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        createdAt: NOW - 30 * MIN,
+        updatedAt: NOW - 30 * MIN,
+      },
+    ],
+    [
+      'ball:thread:thr-void',
+      {
+        subjectKey: 'ball:thread:thr-void',
+        state: 'void',
+        holder: 'sonnet',
+        intent: null,
+        resolveMode: null,
+        heldUntil: null,
+        blockedSinceAt: null,
+        lastWakeAt: null,
+        lastScanAt: null,
+        lastStateChangeAt: NOW - 10 * MIN,
+        lastEventAt: NOW - 10 * MIN,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        createdAt: NOW - 10 * MIN,
+        updatedAt: NOW - 10 * MIN,
+      },
+    ],
+  ]);
+
+  const input = await collectDutyBriefingInput(
+    mockDeps({
+      taskStore: {
+        listByKind: async () => {
+          throw new Error('legacy task collector should not run in projection mode');
+        },
+        get: async (id) =>
+          id === 't-blocked'
+            ? {
+                id,
+                title: 'Wait for deploy',
+                ownerCatId: 'codex',
+                status: 'blocked',
+                why: 'probe not ready',
+                updatedAt: NOW - 2 * HOUR,
+                threadId: 'thr-task',
+              }
+            : {
+                id,
+                title: 'Active task',
+                ownerCatId: 'codex',
+                status: 'doing',
+                why: '',
+                updatedAt: NOW - HOUR,
+                threadId: 'thr-active',
+              },
+      },
+      invocationRecordStore: {
+        scanAll: async () => {
+          throw new Error('legacy invocation collector should not run in projection mode');
+        },
+      },
+      dynamicTaskStore: {
+        getAll: () => {
+          throw new Error('legacy hold collector should not run in projection mode');
+        },
+      },
+      messageStore: {
+        getByThread: async () => {
+          throw new Error('legacy mention collector should not run in projection mode');
+        },
+        getByThreadAfter: async () => {
+          throw new Error('legacy mention collector should not run in projection mode');
+        },
+      },
+      threadStore: {
+        list: async () => [
+          { id: 'thr-task', title: 'Task Thread' },
+          { id: 'thr-dead', title: 'Dead Thread' },
+          { id: 'thr-void', title: 'Void Thread' },
+        ],
+      },
+      ballCustodyProjectionStore: {
+        listSubjectKeys: async () => [...projections.keys()],
+        get: async (subjectKey) => projections.get(subjectKey) ?? null,
+      },
+    }),
+  );
+
+  assert.equal(input.tasks.length, 1);
+  assert.equal(input.tasks[0].id, 't-blocked');
+  assert.equal(input.activeCount, 1);
+  assert.equal(input.zombies.length, 1);
+  assert.equal(input.zombies[0].threadId, 'thr-dead');
+  assert.equal(input.voidPasses.length, 1);
+  assert.equal(input.voidPasses[0].catId, 'sonnet');
+  assert.deepEqual(input.degradedSources, []);
+});
+
+test('PR4 projection mode: filters projected task/thread entries to the briefing owner', async () => {
+  const projection = (subjectKey, state, overrides = {}) => ({
+    subjectKey,
+    state,
+    holder: null,
+    intent: null,
+    resolveMode: null,
+    heldUntil: null,
+    blockedSinceAt: state === 'blocked' ? NOW - 2 * HOUR : null,
+    lastWakeAt: null,
+    lastScanAt: null,
+    lastStateChangeAt: NOW - 2 * HOUR,
+    lastEventAt: NOW - 2 * HOUR,
+    appliedEventCount: 1,
+    lastRejectedEvent: null,
+    createdAt: NOW - 2 * HOUR,
+    updatedAt: NOW - 2 * HOUR,
+    ...overrides,
+  });
+  const projections = new Map([
+    ['ball:task:t-owner', projection('ball:task:t-owner', 'blocked')],
+    ['ball:task:t-foreign', projection('ball:task:t-foreign', 'blocked')],
+    ['ball:task:t-legacy', projection('ball:task:t-legacy', 'blocked')],
+    ['ball:thread:thr-owner-dead', projection('ball:thread:thr-owner-dead', 'dead', { holder: 'opus' })],
+    ['ball:thread:thr-foreign-dead', projection('ball:thread:thr-foreign-dead', 'dead', { holder: 'sonnet' })],
+    ['ball:thread:thr-foreign-void', projection('ball:thread:thr-foreign-void', 'void', { holder: 'codex' })],
+    ['ball:thread:thr-foreign-parked', projection('ball:thread:thr-foreign-parked', 'parked', { holder: 'cvo' })],
+  ]);
+  const tasks = new Map([
+    [
+      't-owner',
+      {
+        id: 't-owner',
+        title: 'Mine',
+        ownerCatId: 'codex',
+        status: 'blocked',
+        why: '',
+        updatedAt: NOW,
+        threadId: 'thr-owner-task',
+        userId: 'owner',
+      },
+    ],
+    [
+      't-foreign',
+      {
+        id: 't-foreign',
+        title: 'Foreign',
+        ownerCatId: 'opus',
+        status: 'blocked',
+        why: '',
+        updatedAt: NOW,
+        threadId: 'thr-foreign-task',
+        userId: 'other',
+      },
+    ],
+    [
+      't-legacy',
+      {
+        id: 't-legacy',
+        title: 'Legacy default-user only',
+        ownerCatId: 'sonnet',
+        status: 'blocked',
+        why: '',
+        updatedAt: NOW,
+        threadId: 'thr-legacy-task',
+      },
+    ],
+  ]);
+
+  const input = await collectDutyBriefingInput(
+    mockDeps({
+      userId: 'owner',
+      taskStore: {
+        listByKind: async () => {
+          throw new Error('legacy task collector should not run in projection mode');
+        },
+        get: async (id) => tasks.get(id) ?? null,
+      },
+      threadStore: {
+        list: async () => [
+          { id: 'thr-owner-task', title: 'Owner Task' },
+          { id: 'thr-owner-dead', title: 'Owner Dead' },
+        ],
+      },
+      ballCustodyProjectionStore: {
+        listSubjectKeys: async () => [...projections.keys()],
+        get: async (subjectKey) => projections.get(subjectKey) ?? null,
+      },
+    }),
+  );
+
+  assert.deepEqual(
+    input.tasks.map((task) => task.id),
+    ['t-owner'],
+    'projection task rows preserve legacy userId/default-user visibility',
+  );
+  assert.deepEqual(
+    input.zombies.map((zombie) => zombie.threadId),
+    ['thr-owner-dead'],
+    'thread projections are limited to current owner threads',
+  );
+  assert.deepEqual(input.voidPasses, [], 'foreign void thread is filtered');
+  assert.deepEqual(input.mentionCandidates, [], 'foreign parked thread is filtered');
+});
+
+test('PR4 projection mode: falls back to legacy collectors when projection has no visible rows for owner', async () => {
+  const projections = new Map([
+    [
+      'ball:thread:thr-foreign-dead',
+      {
+        subjectKey: 'ball:thread:thr-foreign-dead',
+        state: 'dead',
+        holder: 'sonnet',
+        intent: null,
+        resolveMode: null,
+        heldUntil: null,
+        blockedSinceAt: null,
+        lastWakeAt: null,
+        lastScanAt: NOW - HOUR,
+        lastStateChangeAt: NOW - HOUR,
+        lastEventAt: NOW - HOUR,
+        appliedEventCount: 1,
+        lastRejectedEvent: null,
+        createdAt: NOW - HOUR,
+        updatedAt: NOW - HOUR,
+      },
+    ],
+  ]);
+
+  const input = await collectDutyBriefingInput(
+    mockDeps({
+      userId: 'owner',
+      taskStore: {
+        listByKind: async () => [
+          {
+            id: 'legacy-blocked',
+            title: 'Legacy blocked task',
+            ownerCatId: 'codex',
+            status: 'blocked',
+            why: 'owner still has no projected rows',
+            updatedAt: NOW - HOUR,
+            threadId: 'thr-owner-task',
+            userId: 'owner',
+          },
+        ],
+        get: async () => null,
+      },
+      threadStore: { list: async () => [{ id: 'thr-owner-task', title: 'Owner Task' }] },
+      ballCustodyProjectionStore: {
+        listSubjectKeys: async () => [...projections.keys()],
+        get: async (subjectKey) => projections.get(subjectKey) ?? null,
+      },
+    }),
+  );
+
+  assert.deepEqual(
+    input.tasks.map((task) => task.id),
+    ['legacy-blocked'],
+    'foreign-only projection index must not false-zero the current owner briefing',
+  );
 });
 
 test('collectTasks: 只收 briefing owner 的 task；legacy 无 userId 仅 default-user 收', async () => {

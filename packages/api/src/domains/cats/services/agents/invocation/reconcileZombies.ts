@@ -18,6 +18,8 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
+import type { IBallCustodyIngest } from '../../../../ball-custody/BallCustodyIngest.js';
+import { buildInvocationDiedEvent } from '../../../../ball-custody/ball-custody-events.js';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { ZombieRecord } from './getThreadLiveInvocations.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
@@ -32,6 +34,7 @@ export interface ReconcileZombieDeps {
     info: (obj: unknown, msg?: string) => void;
     warn: (obj: unknown, msg?: string) => void;
   };
+  ballCustody?: IBallCustodyIngest;
 }
 
 export interface ReconcileZombieResult {
@@ -145,6 +148,20 @@ async function processZombie(
       },
       '[reconcile-zombies] marked failed',
     );
+    deps.ballCustody
+      ?.record(
+        buildInvocationDiedEvent({
+          invocationId: zombie.invocationId,
+          threadId: updated.threadId,
+          catId: zombie.catId ?? undefined,
+          reason: zombie.reason,
+          lastScanAt: zombie.recordUpdatedAt,
+          at: Date.now(),
+        }),
+      )
+      .catch((err) =>
+        log.warn({ invocationId: zombie.invocationId, err }, '[reconcile-zombies] failed to record invocation.died'),
+      );
     const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
     return { reconciled: true, alreadyTerminal: false, taskProgressCleared: tp.cleared, errors: tp.errors };
   } catch (err) {

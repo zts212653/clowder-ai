@@ -70,7 +70,7 @@ F138 需要同时支持两条视频生产路径，对应不同场景和复杂度
 
 ### 现状
 
-- **已有**：`/home/user/` — 2,182 行 Remotion 代码，15+ 轮迭代经验
+- **已有**：`/home/user/projects/remotion-studio/` — 2,182 行 Remotion 代码，15+ 轮迭代经验
 - **已有**：`docs/videos/cat-cafe-intro/` — 分镜脚本 + 素材索引 + 制作复盘
 - **已有**：猫猫 TTS 声线（Ragdoll/Maine Coon/Siamese，F066/F103）
 - **缺失**：没有 canonical video spec（事实散在聊天/代码/旁白/字幕里）

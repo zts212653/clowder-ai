@@ -164,7 +164,7 @@ describe('composeSkillItems', () => {
     expect(result[0].controls?.enabled).toBe(true);
   });
 
-  it('prefers non-plugin Cat Cafe capabilities for same-id source skills', () => {
+  it('prefers non-plugin Clowder AI capabilities for same-id source skills', () => {
     const governance: SkillsData = {
       skills: [
         {

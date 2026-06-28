@@ -6,6 +6,7 @@ import {
   buildCollabTools,
   buildLimbTools,
   buildMemoryTools,
+  DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS,
   DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS,
   parseToolsetEnv,
   READONLY_ALLOWED_TOOLS,
@@ -315,5 +316,130 @@ describe('buildCollabTools / buildMemoryTools — real toolset assertions (codex
     // Sanity: real toolset includes these baseline tools
     assert.equal(collabNames.has('cat_cafe_post_message'), true);
     assert.equal(memoryNames.has('cat_cafe_search_evidence'), true);
+  });
+});
+
+// =====================================================================
+// F238 Phase B1a — cloud-pro-phase0 mode regression coverage (砚砚 R7 P2)
+//
+// cloud-pro-phase0 是云端 ChatGPT Pro 砚砚 (gpt-pro catId) 的安全边界。
+// 砚砚 R7: "cloud-pro-phase0 lacks direct regression coverage" — 现有
+// desktop-mode tests 只锁 fable-phase0. 加平行 assertion lock cloud-pro-
+// phase0 行为, 防 future fork / unintended whitelist drift.
+// =====================================================================
+
+describe('F238 cloud-pro-phase0 mode — Phase B1a security boundary', () => {
+  it('DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS contains exactly 10 tools', () => {
+    assert.equal(
+      DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.size,
+      10,
+      'cloud-pro-phase0 locked at 10 tools (fable-phase0 同套)',
+    );
+  });
+
+  it('contains same 10 tools as fable-phase0 (shared-set reference is intentional)', () => {
+    // F238 KD-8: cloud-pro-phase0 复用 fable-phase0 同 10 项白名单 via
+    // direct const reference. 这个断言保证未来 reviewer 能立刻看出两个
+    // mode 共享 set 是有意为之 (not accidental coupling).
+    assert.equal(
+      DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS,
+      DESKTOP_FABLE_PHASE0_ALLOWED_TOOLS,
+      'cloud-pro-phase0 and fable-phase0 share the same Set reference (KD-8)',
+    );
+  });
+
+  it('applyReadonlyFilter(cloud-pro-phase0) → only 10 whitelist tools', () => {
+    const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
+    const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
+    const outNames = new Set(out.map((t) => t.name));
+    for (const name of ALL_FAKE_NAMES) {
+      const expected = DESKTOP_CLOUD_PRO_PHASE0_ALLOWED_TOOLS.has(name);
+      assert.equal(outNames.has(name), expected, `tool ${name}: expected ${expected}`);
+    }
+  });
+
+  it('cloud-pro-phase0 mode precedence — NOT union with READONLY/AGENT_KEY', () => {
+    // F238 KD-7 + 砚砚 R7 P1: cloud-pro-phase0 必须 mode-precedence-
+    // highest. shell_exec / publish_verdict 等 READONLY/AGENT_KEY 工具
+    // 不能因 env 配错滑进来.
+    const env: ToolsetEnv = {
+      desktopMode: 'cloud-pro-phase0',
+      readonly: true,
+      hasAgentKey: true,
+    };
+    const out = applyReadonlyFilter(ALL_FAKE_TOOLS, env);
+    const outNames = new Set(out.map((t) => t.name));
+    assert.equal(outNames.has('cat_cafe_shell_exec'), false, 'shell_exec must not leak via READONLY');
+    assert.equal(outNames.has('cat_cafe_read_file_slice'), false, 'read_file_slice must not leak via READONLY');
+    assert.equal(outNames.has('cat_cafe_publish_verdict'), false, 'publish_verdict must not leak via AGENT_KEY');
+    assert.equal(outNames.has('cat_cafe_backfill_events'), false, 'backfill must not leak via AGENT_KEY');
+    assert.equal(outNames.has('cat_cafe_workspace_navigate'), false, 'workspace_navigate must not leak via AGENT_KEY');
+    assert.equal(outNames.has('cat_cafe_teleport'), false, 'teleport must not leak via AGENT_KEY');
+    assert.equal(outNames.has('cat_cafe_create_rich_block'), false, 'create_rich_block must not leak via AGENT_KEY');
+    assert.equal(outNames.has('cat_cafe_read_session_events'), false, 'raw transcript excluded');
+    assert.equal(outNames.has('cat_cafe_read_invocation_detail'), false, 'raw invocation detail excluded');
+    // 10 项白名单仍在
+    assert.equal(outNames.has('cat_cafe_post_message'), true);
+    assert.equal(outNames.has('cat_cafe_search_evidence'), true);
+  });
+
+  it('cloud-pro-phase0 limb tools fully denied (defense-in-depth)', () => {
+    const out = buildLimbTools({ desktopMode: 'cloud-pro-phase0' });
+    assert.equal(out.length, 0, 'cloud-pro-phase0 must NOT expose limb tools (云端猫无控制本地浏览器需求)');
+  });
+
+  it('cloud-pro-phase0 limb tools denied even with readonly + agent-key (mode highest precedence)', () => {
+    const out = buildLimbTools({ desktopMode: 'cloud-pro-phase0', readonly: true, hasAgentKey: true });
+    assert.equal(out.length, 0, 'mode precedence holds even with agent-key — defense-in-depth');
+  });
+
+  it('typo "cloud-pro-phaseO" (capital O) → fail-fast throw', () => {
+    const env: ToolsetEnv = { desktopMode: 'cloud-pro-phaseO' };
+    assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE: "cloud-pro-phaseO"/);
+  });
+
+  it('typo "clound-pro-phase0" (typo cloud→clound) → fail-fast throw', () => {
+    const env: ToolsetEnv = { desktopMode: 'clound-pro-phase0' };
+    assert.throws(() => applyReadonlyFilter(ALL_FAKE_TOOLS, env), /Unknown CAT_CAFE_DESKTOP_MODE/);
+  });
+
+  it('cloud-pro-phase0 collab build: only 5 collab tools registered', () => {
+    const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
+    const out = buildCollabTools(env);
+    const outNames = new Set(out.map((t) => t.name));
+    const expectedCollab = [
+      'cat_cafe_post_message',
+      'cat_cafe_cross_post_message',
+      'cat_cafe_get_thread_context',
+      'cat_cafe_list_threads',
+      'cat_cafe_get_message',
+    ];
+    for (const name of expectedCollab) {
+      assert.equal(outNames.has(name), true, `${name} expected in cloud-pro-phase0 collab`);
+    }
+    assert.equal(outNames.has('cat_cafe_shell_exec'), false);
+    assert.equal(outNames.has('cat_cafe_publish_verdict'), false);
+    // Memory tools should NOT bleed into collab build
+    assert.equal(outNames.has('cat_cafe_search_evidence'), false);
+  });
+
+  it('cloud-pro-phase0 memory build: only 5 memory tools registered', () => {
+    const env: ToolsetEnv = { desktopMode: 'cloud-pro-phase0' };
+    const out = buildMemoryTools(env);
+    const outNames = new Set(out.map((t) => t.name));
+    const expectedMemory = [
+      'cat_cafe_search_evidence',
+      'cat_cafe_graph_resolve',
+      'cat_cafe_list_recent',
+      'cat_cafe_list_session_chain',
+      'cat_cafe_read_session_digest',
+    ];
+    for (const name of expectedMemory) {
+      assert.equal(outNames.has(name), true, `${name} expected in cloud-pro-phase0 memory`);
+    }
+    assert.equal(outNames.has('cat_cafe_read_file_slice'), false);
+    assert.equal(outNames.has('cat_cafe_read_session_events'), false);
+    assert.equal(outNames.has('cat_cafe_read_invocation_detail'), false);
+    assert.equal(outNames.has('cat_cafe_post_message'), false);
   });
 });

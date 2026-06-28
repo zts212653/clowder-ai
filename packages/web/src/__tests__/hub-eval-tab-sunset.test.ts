@@ -49,6 +49,22 @@ describe('deriveDomainScheduleLine (sunset / next-eval / none)', () => {
     const result = deriveDomainScheduleLine({ enabled: true });
     expect(result.kind).toBe('none');
   });
+
+  it('returns next-eval with "下次探测 (every-3d)" label for N-day domain (gpt52 R1 P2)', () => {
+    // N-day domains: cron fires daily but gate decides if eval runs.
+    // UI must show "下次探测" not "下次评估" to avoid false operator signal.
+    const result = deriveDomainScheduleLine({
+      enabled: true,
+      nextCronFireAt: '2026-06-07T03:00:00.000Z',
+      frequency: 'every-3d',
+    });
+    expect(result.kind).toBe('next-eval');
+    if (result.kind === 'next-eval') {
+      expect(result.text).toContain('下次探测');
+      expect(result.text).toContain('every-3d');
+      expect(result.text).not.toContain('下次评估');
+    }
+  });
 });
 
 describe('deriveDomainStatusBadge (Sunset > verdict label > 待首次评估)', () => {

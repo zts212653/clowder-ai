@@ -111,8 +111,8 @@ bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"
 # matches the bundled runtime. Same rationale as the Windows build.
 BUILD_NODE_VERSION="$(node --version 2>/dev/null || echo '')"
 if [[ -z "$BUILD_NODE_VERSION" ]]; then
-  warn "node not on PATH; defaulting to v22.12.0"
-  BUILD_NODE_VERSION="v22.12.0"
+  warn "node not on PATH; defaulting to v24.16.0"
+  BUILD_NODE_VERSION="v24.16.0"
 fi
 BUILD_NODE_MAJOR="${BUILD_NODE_VERSION#v}"
 BUILD_NODE_MAJOR="${BUILD_NODE_MAJOR%%.*}"
@@ -270,10 +270,116 @@ for arch in "${ARCHS[@]}"; do
 done
 
 # Create DMGs from .app bundles using hdiutil (handles large bundles reliably).
-# Each DMG contains the .app plus an /Applications symlink so users can
-# drag-to-install instead of accidentally running from the mounted volume.
+# Each DMG contains the .app plus an /Applications symlink, with Finder window
+# layout configured to visually guide users to drag the app icon onto the
+# Applications shortcut. Without this layout, users frequently double-click
+# the app inside the mounted DMG, which holds the volume open (Redis/API/Web
+# subprocesses anchor cwd + module loading to /Volumes/Clowder AI/...) and
+# prevents ejection. main.js has a runtime guard for this case, but a clear
+# install UI prevents the user from ever hitting that error path.
 mkdir -p "$DIST_DIR"
 VERSION="$(node -p "require('./package.json').version")"
+
+# Creates a simple green drag arrow background for the install DMG using only
+# Python's standard library, avoiding external image dependencies on build
+# machines. Finder accepts PNG files as icon-view background pictures.
+create_dmg_background() {
+  local background_path="$1"
+  /usr/bin/python3 - "$background_path" <<'PYTHON' || warn "DMG background generation failed (continuing without arrow)"
+import struct
+import sys
+import zlib
+
+out = sys.argv[1]
+width, height = 540, 380
+bg = (247, 252, 247)
+green = (22, 173, 64)
+shadow = (194, 232, 204)
+
+pixels = [[bg for _ in range(width)] for _ in range(height)]
+
+def rect(x0, y0, x1, y1, color):
+    for y in range(max(0, y0), min(height, y1)):
+        row = pixels[y]
+        for x in range(max(0, x0), min(width, x1)):
+            row[x] = color
+
+def triangle(points, color):
+    (x1, y1), (x2, y2), (x3, y3) = points
+    min_x = max(0, min(x1, x2, x3))
+    max_x = min(width - 1, max(x1, x2, x3))
+    min_y = max(0, min(y1, y2, y3))
+    max_y = min(height - 1, max(y1, y2, y3))
+    area = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)
+    for y in range(min_y, max_y + 1):
+        for x in range(min_x, max_x + 1):
+            w1 = (x2 - x) * (y3 - y) - (y2 - y) * (x3 - x)
+            w2 = (x3 - x) * (y1 - y) - (y3 - y) * (x1 - x)
+            w3 = (x1 - x) * (y2 - y) - (y1 - y) * (x2 - x)
+            if (area >= 0 and w1 >= 0 and w2 >= 0 and w3 >= 0) or (area < 0 and w1 <= 0 and w2 <= 0 and w3 <= 0):
+                pixels[y][x] = color
+
+# Soft offset shadow, then the green drag arrow pointing from the app icon to
+# the Applications shortcut.
+rect(204, 186, 330, 210, shadow)
+triangle(((330, 198), (286, 160), (286, 236)), shadow)
+rect(198, 180, 324, 204, green)
+triangle(((352, 192), (314, 154), (314, 230)), green)
+
+raw = b''.join(b'\x00' + bytes(channel for pixel in row for channel in pixel) for row in pixels)
+compressed = zlib.compress(raw, 9)
+
+def chunk(kind, data):
+    return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+
+png = b'\x89PNG\r\n\x1a\n'
+png += chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+png += chunk(b'IDAT', compressed)
+png += chunk(b'IEND', b'')
+
+with open(out, 'wb') as file:
+    file.write(png)
+PYTHON
+}
+
+# Configures the mounted volume's Finder view via AppleScript so the install
+# DMG opens to a 540x380 window with the app icon on the left and the
+# Applications symlink on the right, both at icon size 96, with a green arrow
+# background pointing from the app to Applications. macOS persists this view in
+# /Volumes/Clowder AI/.DS_Store, which hdiutil bakes into the final image when
+# we re-convert it to UDZO.
+# Configure the Finder icon layout for the staging DMG.
+#
+# Takes a POSIX path to the mounted staging volume (NOT a volume name), so the
+# layout always targets the disk we just attached — even when an unrelated DMG
+# with the same volume name (e.g. another "Clowder AI" image left over from a
+# parallel build or a tester install) is already mounted on the build machine.
+# (clowder-ai#1004 hardening point 2.)
+configure_dmg_layout() {
+  local mount_path="$1"
+  /usr/bin/osascript <<APPLESCRIPT || warn "Finder layout AppleScript failed (continuing without custom layout)"
+tell application "Finder"
+  set theMount to POSIX file "${mount_path}" as alias
+  tell theMount
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, 740, 500}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 96
+    set background picture of viewOptions to file ".background:install-arrow.png"
+    set position of item "Clowder AI.app" of container window to {140, 190}
+    set position of item "Applications" of container window to {400, 190}
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+APPLESCRIPT
+}
+
 for arch in "${ARCHS[@]}"; do
   case "$arch" in
     arm64) app_dir="${DESKTOP_DIR}/dist/mac-arm64" ;;
@@ -289,11 +395,63 @@ for arch in "${ARCHS[@]}"; do
   dmg_staging="$(mktemp -d)"
   cp -R "${app_dir}/Clowder AI.app" "$dmg_staging/"
   ln -s /Applications "$dmg_staging/Applications"
-  echo "  Creating ${dmg_name} via hdiutil ..."
-  rm -f "$dmg_out"
-  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_out" \
-    || die "hdiutil create failed for ${arch}"
+  mkdir -p "$dmg_staging/.background"
+  create_dmg_background "$dmg_staging/.background/install-arrow.png"
+
+  # Two-stage hdiutil flow:
+  #   1. Create a writable UDRW image so we can mount it and let Finder
+  #      persist the icon layout into .DS_Store.
+  #   2. Convert the writable image to compressed UDZO for distribution.
+  rw_dmg="$(mktemp -u).dmg"
+  echo "  Creating writable staging DMG for ${arch} ..."
+  hdiutil create -volname "Clowder AI" -srcfolder "$dmg_staging" -ov \
+    -fs HFS+ -format UDRW "$rw_dmg" \
+    || die "hdiutil create (writable) failed for ${arch}"
   rm -rf "$dmg_staging"
+
+  echo "  Configuring Finder layout for ${arch} ..."
+  # Use an explicit unique -mountpoint so the attach target is deterministic
+  # and immune to (a) the brittle tab-text parsing of `hdiutil attach` stdout
+  # and (b) collision with an already-mounted volume of the same name.
+  # (clowder-ai#1004 hardening point 1.)
+  mount_point="$(mktemp -d -t cat-cafe-dmg.XXXXXX)"
+  if ! hdiutil attach -readwrite -noverify -noautoopen -mountpoint "$mount_point" "$rw_dmg" >/dev/null; then
+    rmdir "$mount_point" 2>/dev/null || true
+    rm -f "$rw_dmg"
+    die "hdiutil attach failed for ${arch} (mountpoint=${mount_point})"
+  fi
+  configure_dmg_layout "$mount_point"
+  # Give Finder a moment to flush .DS_Store, then sync + detach.
+  sync
+  sleep 1
+  # Detach MUST succeed before `hdiutil convert` runs below — converting a
+  # still-mounted image silently produces a stale/corrupt distribution DMG
+  # (the icon layout we just configured never gets flushed). Retry once with
+  # backoff, then fail hard. (clowder-ai#1004 hardening point 3 — explicit
+  # fail-hard.)
+  #
+  # ⚠️ NON-DESTRUCTIVE failure path (gpt52 守门 #2526 P1):
+  # If detach has failed twice, we MUST NOT recurse into "$mount_point" with
+  # `rm -rf` — macOS will happily start deleting the live staging volume's
+  # contents through the still-mounted mountpoint before erroring out with
+  # `Resource busy`, leaving a half-destroyed mounted DMG. We also MUST NOT
+  # unlink "$rw_dmg" — that's the backing file the still-mounted volume
+  # references; unlinking leaves the mount alive but pointing at no file.
+  # Leave both for the operator to detach manually, then re-run.
+  if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+    sleep 2
+    if ! hdiutil detach "$mount_point" -force >/dev/null 2>&1; then
+      die "Could not detach staging DMG at ${mount_point} (${arch}). Leaving both the mounted volume and the backing image '${rw_dmg}' in place — do not 'rm -rf' the mountpoint while it is still mounted (macOS will delete live volume contents). Eject manually via 'diskutil eject ${mount_point}' (or Disk Utility), then re-run."
+    fi
+  fi
+  # Safe only after detach succeeded — rmdir refuses non-empty dirs.
+  rmdir "$mount_point" 2>/dev/null || true
+
+  echo "  Converting to compressed DMG: ${dmg_name} ..."
+  rm -f "$dmg_out"
+  hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg_out" \
+    || die "hdiutil convert failed for ${arch}"
+  rm -f "$rw_dmg"
   ok "Created ${dmg_name}"
 done
 

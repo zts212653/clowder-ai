@@ -65,14 +65,15 @@ MISSING=()
 if command -v node &>/dev/null; then
     NODE_VER=$(node -v)
     echo -e "  ${GREEN}✓${NC} Node.js $NODE_VER"
-    # Check minimum version (v20+)
+    # Check supported version range (v24/v25)
     MAJOR=$(echo "$NODE_VER" | sed 's/v//' | cut -d. -f1)
-    if [ "$MAJOR" -lt 20 ]; then
-        echo -e "  ${YELLOW}⚠ Node.js v20+ recommended (you have $NODE_VER)${NC}"
+    if [ "$MAJOR" -lt 24 ] || [ "$MAJOR" -ge 26 ]; then
+        echo -e "  ${RED}✗${NC} Node.js $NODE_VER unsupported (need >= 24 and < 26)"
+        MISSING+=("Node.js (>= 24 and < 26) — https://nodejs.org/")
     fi
 else
     echo -e "  ${RED}✗${NC} Node.js not found"
-    MISSING+=("Node.js (v20+) — https://nodejs.org/")
+    MISSING+=("Node.js (v24+) — https://nodejs.org/")
 fi
 
 if command -v pnpm &>/dev/null; then

@@ -46,7 +46,11 @@ export function safeParseExtra(raw: string | undefined):
       // Frontend `getBubbleInvocationId` uses turnInvocationId for bubble identity
       // (falls back to invocationId / parent only for legacy records).
       stream?: { invocationId: string; turnInvocationId?: string };
-      crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+      crossPost?: {
+        sourceThreadId: string;
+        sourceInvocationId?: string;
+        effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+      };
       scheduler?: {
         hiddenTrigger?: boolean;
         toast?: {
@@ -71,7 +75,11 @@ export function safeParseExtra(raw: string | undefined):
     const result: {
       rich?: RichMessageExtra;
       stream?: { invocationId: string; turnInvocationId?: string };
-      crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+      crossPost?: {
+        sourceThreadId: string;
+        sourceInvocationId?: string;
+        effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+      };
       scheduler?: {
         hiddenTrigger?: boolean;
         toast?: {
@@ -117,10 +125,15 @@ export function safeParseExtra(raw: string | undefined):
       typeof parsed.crossPost === 'object' &&
       typeof parsed.crossPost.sourceThreadId === 'string'
     ) {
+      const validEffectClasses = new Set(['fyi', 'coordinate', 'investigate', 'assign_work']);
       result.crossPost = {
         sourceThreadId: parsed.crossPost.sourceThreadId,
         ...(typeof parsed.crossPost.sourceInvocationId === 'string'
           ? { sourceInvocationId: parsed.crossPost.sourceInvocationId }
+          : {}),
+        // F246 Phase B: preserve effectClass through Redis round-trip
+        ...(typeof parsed.crossPost.effectClass === 'string' && validEffectClasses.has(parsed.crossPost.effectClass)
+          ? { effectClass: parsed.crossPost.effectClass as 'fyi' | 'coordinate' | 'investigate' | 'assign_work' }
           : {}),
       };
       hasField = true;

@@ -25,6 +25,10 @@
     "./registry": {
       "import": "./dist/registry/index.js",
       "types": "./dist/registry/index.d.ts"
+    },
+    "./dossier": {
+      "import": "./dist/dossier/index.js",
+      "types": "./dist/dossier/index.d.ts"
     }
   },
   "scripts": {

@@ -27,6 +27,7 @@ import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import { buildVoteNotification } from '../domains/cats/services/agents/routing/vote-intercept.js';
+import { getSenderName } from '../domains/cats/services/context/ContextAssembler.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { EventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IRuntimeSessionStore } from '../domains/cats/services/runtime-session/RuntimeSessionStore.js';
@@ -51,12 +52,18 @@ import {
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
+import { extractIssueTrackingClaims, extractPrTrackingClaims } from '../infrastructure/grounding/claim-extractors.js';
+import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
+import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { scoreKeywordRelevance, tokenizeKeyword } from '../utils/keyword-relevance.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
+import { recordAnchorDrillEvent, recordAnchorPreviewEvent } from './anchor-event-log.js';
+import { recordAnchorFullDrill, recordAnchorReturned } from './anchor-telemetry.js';
 import { getFeatureTagId } from './backlog-doc-import.js';
 import { enqueueA2ATargets, triggerA2AInvocation } from './callback-a2a-trigger.js';
+import { anchorPendingMention, anchorThreadMessage, truncateHead } from './callback-anchor-helpers.js';
 import {
   extractCallbackCredentials,
   registerCallbackAuthHook,
@@ -90,6 +97,8 @@ import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.
 import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { type FeatIndexEntry, readFeatIndexEntries } from './feat-index-doc-import.js';
+import { verifyKeeperOwnership } from './gate-keeping-cross-store.js';
+import { checkGateKeepingGuard } from './gate-keeping-guard.js';
 import { detectUserMention } from './user-mention.js';
 import { clearVoteTimer, closeVoteInternal, voteTimers } from './votes.js';
 
@@ -223,6 +232,8 @@ function buildPostMessageRoutingMessage(
         .map((a) => a.mention)
         .join('、');
       parts.push(`@${w.catId} 已停用，已跳过${alts ? `（可用替代：${alts}）` : ''}。`);
+    } else if (w.kind === 'target_not_in_thread') {
+      parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
     } else {
       parts.push(`${w.mention} 不存在，已跳过。`);
     }
@@ -530,6 +541,8 @@ export interface CallbackRoutesOptions {
   limbPairingStore?: import('../domains/limb/LimbPairingStore.js').LimbPairingStore;
   /** F187 Phase C: Label store for list-labels callback. */
   labelStore?: import('../domains/cats/services/stores/ports/ThreadStore.js').ILabelStore;
+  /** F246 Phase B: dispatch proposal store for assign_work approval flow. */
+  dispatchProposalStore?: import('../domains/approval-hub/stores/ports/IDispatchProposalStore.js').IDispatchProposalStore;
   /** F088: Outbound delivery hook for connector-bound threads (late-bound after gateway bootstrap). */
   outboundHook?: {
     deliver(
@@ -550,6 +563,8 @@ const postMessageSchema = z.object({
   replyTo: z.string().optional(),
   clientMessageId: z.string().min(1).max(200).optional(),
   targetCats: z.array(z.string().min(1)).optional(),
+  // F246 Phase B: effect-class for cross-thread dispatch (assign_work → Approval Hub)
+  effectClass: z.enum(['fyi', 'coordinate', 'investigate', 'assign_work']).optional(),
 });
 
 const threadContextQuerySchema = z.object({
@@ -832,6 +847,27 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         }
       }
       const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
+
+      // F177-H: Agent-key participant awareness — same check as invocation-auth
+      // path. Agent-key callers always specify threadId explicitly; if targetCats
+      // aren't participants, they may have the wrong threadId.
+      if (threadStore && mergedTargets.size > 0) {
+        const currentParticipants = await threadStore.getParticipants(effectiveThreadId);
+        for (const targetCat of mergedTargets) {
+          if (!currentParticipants.includes(targetCat)) {
+            routing_warnings.push({
+              kind: 'target_not_in_thread',
+              catId: targetCat,
+              threadId: effectiveThreadId,
+            });
+            app.log.info(
+              { targetCat, threadId: effectiveThreadId, currentParticipants, senderCatId },
+              '[F177-H/agent-key] target_not_in_thread: target is not a current participant',
+            );
+          }
+        }
+      }
+
       if (contentTargets.length === 1 && mergedTargets.size > 1) {
         const [primaryTarget] = contentTargets;
         if (primaryTarget) {
@@ -1115,7 +1151,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { content, threadId, replyTo, clientMessageId, targetCats: explicitTargetCats } = parsed.data;
+    const { content, threadId, replyTo, clientMessageId, targetCats: explicitTargetCats, effectClass } = parsed.data;
     const { invocationId } = actor;
     // #573: identity for cross-handler dedup. stream + callback for same logical
     // response must broadcast/persist with the same id; QueueProcessor + route-serial
@@ -1182,6 +1218,116 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
+    // F246 Phase B: assign_work on same-thread is invalid — assign_work only makes
+    // sense for cross-thread dispatch (per plan Task 3 test matrix).
+    if (!isCrossThread && effectClass === 'assign_work') {
+      reply.status(400);
+      return {
+        kind: 'assign_work_same_thread',
+        message: 'assign_work effectClass is only valid for cross-thread dispatches.',
+      };
+    }
+
+    // F246 Phase B: assign_work effect-class intercept — hold as DispatchProposal
+    // instead of auto-delivering. Only applies to cross-thread posts.
+    if (isCrossThread && effectClass === 'assign_work' && opts.dispatchProposalStore) {
+      // Idempotency: check if this clientMessageId already created a proposal
+      if (clientMessageId) {
+        const existing = await opts.dispatchProposalStore.findByClientMessageId(clientMessageId, actor.threadId);
+        if (existing) {
+          return {
+            status: 'proposal_exists',
+            proposalId: existing.proposalId,
+            clientMessageId,
+          };
+        }
+      }
+
+      const proposalId = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const ownerUserId = record.userId ?? 'default-user';
+
+      // R3 fix: The intercept exits before the normal flow's analyzeA2AMentions (line 1294),
+      // so content @mentions would be lost. Parse them here and merge with explicit targetCats,
+      // mirroring the normal flow's merge at line 1312. Without this, assign_work routed via
+      // line-start @cat (no explicit targetCats) stores [] → nobody wakes on approval.
+      const interceptContentAnalysis = analyzeA2AMentions(content, undefined); // cross-thread: no self-filter
+      const interceptContentTargets = interceptContentAnalysis.mentions;
+      // R3 P1 fix (reviewer-confirmed): Validate targets via resolveCatTarget before
+      // persisting, mirroring the normal flow (line 1312). The approval replay path trusts
+      // proposal.targetCats as pre-resolved CatId[] and feeds them straight into
+      // enqueueA2ATargets without re-running resolveCatTarget. A typo or disabled cat
+      // would get persisted, approved, and silently fail to wake the intended cat.
+      const rawMergedTargets = [
+        ...new Set<string>([...interceptContentTargets, ...(explicitTargetCats ?? [])].map((t) => t.replace(/^@/, ''))),
+      ];
+      const validInterceptTargets: string[] = [];
+      const interceptRoutingWarnings: CatRoutingError[] = [];
+      for (const id of rawMergedTargets) {
+        const resolved = resolveCatTarget(id);
+        if ('ok' in resolved) {
+          validInterceptTargets.push(resolved.ok);
+        } else {
+          interceptRoutingWarnings.push(resolved.error);
+          app.log.warn(
+            { droppedId: id, catId: actor.catId, reason: resolved.error.kind },
+            '[F246/dispatch-proposal] Dropped unavailable catId from assign_work targetCats',
+          );
+        }
+      }
+
+      // Fail-closed: if ALL targets are invalid, return routing failure — don't create
+      // a proposal that can never wake any cat (mirrors normal flow line 1672-1687).
+      if (rawMergedTargets.length > 0 && validInterceptTargets.length === 0) {
+        return {
+          isError: true,
+          routed: [],
+          routing_warnings: interceptRoutingWarnings,
+          message: `assign_work dispatch failed: all target cats are unavailable (${rawMergedTargets.join(', ')})`,
+          threadId: effectiveThreadId,
+          ...(clientMessageId ? { clientMessageId } : {}),
+        };
+      }
+
+      const mergedTargetCats = validInterceptTargets;
+
+      const proposal = await opts.dispatchProposalStore.create({
+        proposalId,
+        sourceThreadId: actor.threadId,
+        targetThreadId: effectiveThreadId,
+        senderCatId: actor.catId as string,
+        ownerUserId,
+        content,
+        targetCats: mergedTargetCats,
+        replyTo,
+        clientMessageId,
+        createdAt: Date.now(),
+      });
+
+      // Emit socket event so Hub badge refreshes in real-time
+      socketManager?.emitToUser?.(ownerUserId, 'proposal_created', {
+        proposalId: proposal.proposalId,
+        featureId: 'F193',
+      });
+
+      app.log.info(
+        {
+          proposalId,
+          sourceThreadId: actor.threadId,
+          targetThreadId: effectiveThreadId,
+          senderCatId: actor.catId,
+          effectClass,
+        },
+        '[F246/dispatch-proposal] assign_work intercepted — held for operator approval',
+      );
+
+      return {
+        status: 'proposal_created',
+        proposalId,
+        message: 'Work assignment held for operator approval in the Approval Hub.',
+        ...(clientMessageId ? { clientMessageId } : {}),
+      };
+    }
+
     // At-least-once de-duplication: retries with same clientMessageId are treated as duplicate.
     if (clientMessageId) {
       const isFirstSeen = await registry.claimClientMessageId(invocationId, clientMessageId);
@@ -1235,6 +1381,28 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const mergedTargets = new Set<CatId>([...contentTargets, ...validExplicitTargets]);
 
+    // F177-H: Cross-post participant awareness — warn when target cats are not
+    // current participants in the target thread (common misroute signal).
+    // Soft warning only: cross-posting to introduce a cat to a new thread is
+    // legitimate, but mis-targeting a thread (F195 dogfood ball-drop) surfaces
+    // immediately in the MCP response so the sender can self-correct.
+    if (isCrossThread && threadStore && mergedTargets.size > 0) {
+      const currentParticipants = await threadStore.getParticipants(effectiveThreadId);
+      for (const targetCat of mergedTargets) {
+        if (!currentParticipants.includes(targetCat)) {
+          routing_warnings.push({
+            kind: 'target_not_in_thread',
+            catId: targetCat,
+            threadId: effectiveThreadId,
+          });
+          app.log.info(
+            { targetCat, threadId: effectiveThreadId, currentParticipants, senderCatId },
+            '[F177-H] target_not_in_thread: cross-post target is not a current participant',
+          );
+        }
+      }
+    }
+
     if (contentTargets.length === 1 && mergedTargets.size > 1) {
       const [primaryTarget] = contentTargets;
       if (!primaryTarget) {
@@ -1276,7 +1444,15 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
     const mentionsUser = detectUserMention(storedContent);
     const crossPostExtra = isCrossThread
-      ? { crossPost: { sourceThreadId: actor.threadId, sourceInvocationId: invocationId } }
+      ? {
+          crossPost: {
+            sourceThreadId: actor.threadId,
+            sourceInvocationId: invocationId,
+            // F246 Phase B: carry effectClass so receiving-side SystemPromptBuilder can
+            // inject behavior constraints (AC-B4: non-assign never authorizes coding)
+            ...(effectClass ? { effectClass } : {}),
+          },
+        }
       : {};
     const richExtra = richBlocks.length > 0 ? { rich: { v: 1 as const, blocks: richBlocks } } : {};
     const targetCatsExtra = validExplicitTargets.length ? { targetCats: validExplicitTargets } : {};
@@ -1641,15 +1817,37 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F35: Filter out whispers not intended for this cat
     const mentionViewer = { type: 'cat' as const, catId };
     const mentions = rawMentions.filter((m) => canViewMessage(m, mentionViewer));
-    return {
-      mentions: mentions.map((item) => ({
-        id: item.id,
-        from: item.catId ?? item.userId,
-        message: item.content,
-        timestamp: item.timestamp,
-        ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
-      })),
+    const payload = {
+      // F236 AC-A3: anchor-first — head+tail excerpt + requiresDrill, full body one hop away.
+      mentions: mentions.map((item) =>
+        anchorPendingMention(item, {
+          from: getSenderName(item.catId),
+          ...(shouldIncludeAcked ? { acked: Boolean(lastAckId && item.id <= lastAckId) } : {}),
+        }),
+      ),
     };
+    // F236 AC-A1 (R1/砚砚 P1): emit returnedChars for eval-layer payload-shrink accounting.
+    const pendingMentionsReturnedChars = JSON.stringify(payload).length;
+    app.log.info(
+      {
+        tool: 'pending-mentions',
+        returnedChars: pendingMentionsReturnedChars,
+        count: payload.mentions.length,
+        catId: record.catId,
+      },
+      '[F236] anchor returned',
+    );
+    // F236 Track-1: also emit as OTel metrics (queryable canonical source for eval).
+    recordAnchorReturned({ tool: 'pending-mentions', returnedChars: pendingMentionsReturnedChars });
+    // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+    // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+    recordAnchorPreviewEvent({
+      tool: 'pending-mentions',
+      itemIds: mentions.map((m) => m.id),
+      returnedChars: payload.mentions.reduce((sum, m) => sum + m.message.length, 0),
+      originalChars: mentions.reduce((sum, m) => sum + m.content.length, 0),
+    });
+    return payload;
   });
 
   // #77: POST /api/callbacks/ack-mentions — explicit ack with 4-way validation
@@ -1969,33 +2167,55 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // so external runtimes (Antigravity/Bengal) can access image files.
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
 
-    return {
+    const payload = {
       // TD091: echo threadId so cats know which thread they're in
       threadId: effectiveThreadId,
+      // F236 AC-A1/A2: anchor-first — preview + speaker + injected threadId + drillDown,
+      // contentBlocks omitted (image hints kept), full body one hop away via get_message.
       messages: filtered.map((item) => {
         const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
         const imageUrls = extractImageUrls(item.contentBlocks);
-        return {
-          id: item.id,
-          userId: item.userId,
-          catId: item.catId,
-          content: item.content,
-          ...(item.contentBlocks ? { contentBlocks: item.contentBlocks } : {}),
-          ...(imagePaths.length > 0 ? { imagePaths } : {}),
-          ...(imageUrls.length > 0 ? { imageUrls } : {}),
-          timestamp: item.timestamp,
-          // F148 Phase B (AC-B2): include relevance score when keyword search is active
-          ...(keywordTerms.length > 0 ? { relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) } : {}),
-        };
+        const anchored = anchorThreadMessage(item, {
+          effectiveThreadId,
+          speaker: getSenderName(item.catId),
+          keywordTerms,
+          // F236 R1 云端 P2: agent-key caller needs agentKeyCatId in the drill pointer for one-hop verbatim
+          agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
+          imagePaths,
+          imageUrls,
+        });
+        // F148 Phase B (AC-B2): include relevance score (computed on full content) when keyword search is active
+        return keywordTerms.length > 0
+          ? { ...anchored, relevanceScore: scoreKeywordRelevance(item.content, keywordTerms) }
+          : anchored;
       }),
       ...(workflowSop ? { workflowSop } : {}),
     };
+    // F236 AC-A1 (R1/砚砚 P1): emit returnedChars so the eval layer can compute payload shrink (省).
+    const threadContextReturnedChars = JSON.stringify(payload).length;
+    app.log.info(
+      { tool: 'thread-context', returnedChars: threadContextReturnedChars, count: payload.messages.length },
+      '[F236] anchor returned',
+    );
+    // F236 Track-1: also emit as OTel metrics (queryable canonical source for eval).
+    recordAnchorReturned({ tool: 'thread-context', returnedChars: threadContextReturnedChars });
+    // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+    // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: filtered.map((m) => m.id),
+      returnedChars: payload.messages.reduce((sum, m) => sum + m.preview.length, 0),
+      originalChars: filtered.reduce((sum, m) => sum + m.content.length, 0),
+    });
+    return payload;
   });
 
   // #699: Look up a single message by ID with optional surrounding context
   const getMessageQuerySchema = z.object({
     messageId: z.string().min(1),
     contextCount: z.coerce.number().int().min(0).max(10).optional(),
+    // F236 AC-B1: drill terminal is bounded — default preview, mode=full returns complete content.
+    mode: z.enum(['preview', 'full']).optional(),
   });
 
   app.get('/api/callbacks/get-message', async (request, reply) => {
@@ -2049,15 +2269,37 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
+    // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
+    // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
+    // complete content + contentBlocks. Image hints stay in both modes.
+    const isFullDrill = (parsed.data.mode ?? 'preview') === 'full';
     const projectMsg = (m: typeof message) => {
       const imagePaths = extractImagePaths(m.contentBlocks, uploadDir);
       const imageUrls = extractImageUrls(m.contentBlocks);
+      const { preview, truncated } = isFullDrill ? { preview: m.content, truncated: false } : truncateHead(m.content);
       return {
         id: m.id,
         userId: m.userId,
         catId: m.catId,
-        content: m.content,
-        ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+        content: preview,
+        contentLength: m.content.length,
+        truncated,
+        // F236 R1 / 云端 Codex P2: preview-mode truncation carries a one-hop drill pointer to the
+        // full content (consistent with thread-context/pending anchors — caller never left guessing).
+        ...(truncated
+          ? {
+              drillDown: {
+                tool: 'cat_cafe_get_message',
+                args: {
+                  messageId: m.id,
+                  mode: 'full',
+                  // F236 R1 云端 P2: agent-key caller needs agentKeyCatId in drill pointer for one-hop verbatim
+                  ...(principal.kind === 'agent_key' ? { agentKeyCatId: principal.catId } : {}),
+                },
+              },
+            }
+          : {}),
+        ...(isFullDrill && m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
         ...(imagePaths.length > 0 ? { imagePaths } : {}),
         ...(imageUrls.length > 0 ? { imageUrls } : {}),
         ...(m.replyTo ? { replyTo: m.replyTo } : {}),
@@ -2101,6 +2343,25 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         })
         .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
       result.context = contextMsgs.map(projectMsg);
+    }
+
+    // F236 AC-B2 (R1/砚砚 P1): record full-drill cost AFTER the whole payload (message +
+    // context neighbors + contentBlocks) is assembled, so the cost account isn't undercounted.
+    if (isFullDrill) {
+      const fullDrillChars = JSON.stringify(result).length;
+      app.log.info(
+        {
+          messageId: message.id,
+          fullDrillChars,
+          contextCount: result.context?.length ?? 0,
+          catId: principal.catId,
+        },
+        '[F236] get_message full drill',
+      );
+      // F236 Track-1: also emit as OTel metrics (chars + request/response volume substrate).
+      recordAnchorFullDrill({ tool: 'get-message', fullDrillChars });
+      // F236 Track-2: per-event drill record with correlation key for drill↔preview join.
+      recordAnchorDrillEvent({ tool: 'get-message', itemId: message.id, fullDrillChars });
     }
 
     return result;
@@ -2264,6 +2525,44 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // Use authoritative catId from invocation record, not caller payload.
     const catId = record.catId;
 
+    // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
+    // Runs BEFORE gate-keeping guard so blocked calls are still observable in shadow mode.
+    void checkGrounding({
+      invocationId: record.invocationId ?? 'unknown',
+      catId: catId as string,
+      threadId: record.threadId,
+      tool: 'register_pr_tracking',
+      actionFamily: 'register_tracking',
+      actionRisk: 'register_tracking',
+      claims: extractPrTrackingClaims({ repoFullName, prNumber }),
+    })
+      .then(async (result) => {
+        for (const event of result.events) {
+          await groundingSampleStore.record(event, result.wouldBlock);
+        }
+        log.debug(
+          { threadId: record.threadId, catId, verdict: result.overallVerdict, wouldBlock: result.wouldBlock },
+          'F167 Phase O: shadow grounding check completed (register_pr_tracking)',
+        );
+      })
+      .catch((err: unknown) => {
+        log.warn({ err, catId }, 'F167 grounding shadow telemetry failed (register_pr_tracking, non-blocking)');
+      });
+
+    // F167: gate-keeping thread guard (hard-block 守门 thread 调用，避免 SKILL 文字层
+    // 100%/trigger-time 0 enforcement 的事故复发。无 override 通道——必须传球到下游 thread)
+    const guardResult = await checkGateKeepingGuard({
+      threadStore: opts.threadStore,
+      threadId: record.threadId,
+      tool: 'register_pr_tracking',
+      log,
+      context: { catId, repoFullName, prNumber },
+    });
+    if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      reply.status(400);
+      return guardResult.blockedResponse;
+    }
+
     // Phase D: validate repo exists and is accessible (AC-D1)
     if (validateRepo) {
       let repoOk: boolean;
@@ -2294,7 +2593,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    const subjectKey = `pr:${repoFullName}#${prNumber}`;
+    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
+    const subjectKey = `pr:${repoFullName.toLowerCase()}#${prNumber}`;
     try {
       // F140: resolve wake intent. Explicit wins; otherwise preserve an already-set intent (so an
       // incidental re-register doesn't silently downgrade a deliberate 'merge'); default 'review'.
@@ -2358,6 +2658,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
     issueNumber: z.number().int().positive(),
     instructions: z.string().max(2000).optional(),
+    // PR-O3 R2: issueOwnership removed from route schema.
+    // Grounding checker does NOT verify ownership (only checks issue existence),
+    // so caller-declared ownership is an unverified trust hole.
+    // PR-O4 will wire cross-store verification + re-add this field.
+    // Policy engine skeleton preserved for PR-O4 (tested in unit tests).
   });
 
   app.post('/api/callbacks/register-issue-tracking', async (request, reply) => {
@@ -2377,6 +2682,52 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const { repoFullName, issueNumber, instructions } = parsed.data;
     const catId = record.catId;
+
+    // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
+    // Runs BEFORE gate-keeping guard so blocked calls are still observable in shadow mode.
+    void checkGrounding({
+      invocationId: record.invocationId ?? 'unknown',
+      catId: catId as string,
+      threadId: record.threadId,
+      tool: 'register_issue_tracking',
+      actionFamily: 'register_tracking',
+      actionRisk: 'register_tracking',
+      claims: extractIssueTrackingClaims({ repoFullName, issueNumber }),
+    })
+      .then(async (result) => {
+        for (const event of result.events) {
+          await groundingSampleStore.record(event, result.wouldBlock);
+        }
+        log.debug(
+          { threadId: record.threadId, catId, verdict: result.overallVerdict, wouldBlock: result.wouldBlock },
+          'F167 Phase O: shadow grounding check completed (register_issue_tracking)',
+        );
+      })
+      .catch((err: unknown) => {
+        log.warn({ err, catId }, 'F167 grounding shadow telemetry failed (register_issue_tracking, non-blocking)');
+      });
+
+    // F167: gate-keeping thread guard (PR-O4: cross-store ownership verification).
+    // PR-O3 left issueOwnership as caller-declared (trust hole).
+    // PR-O4 wires cross-store verification: query TaskStore to check if this
+    // issue is already tracked in a different thread (= distributed, not keeper).
+    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
+    const issueSubjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}`;
+    const issueOwnership = taskStore
+      ? await verifyKeeperOwnership(taskStore, record.threadId, issueSubjectKey, log)
+      : undefined; // no taskStore → no verification → Phase N blanket block
+    const guardResult = await checkGateKeepingGuard({
+      threadStore: opts.threadStore,
+      threadId: record.threadId,
+      tool: 'register_issue_tracking',
+      log,
+      context: { catId, repoFullName, issueNumber },
+      policyContext: issueOwnership ? { issueOwnership } : undefined,
+    });
+    if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      reply.status(400);
+      return guardResult.blockedResponse;
+    }
 
     // F202 Phase 2D P2-fix: validate repo exists and is accessible (mirrors PR tracking at L1975)
     if (validateRepo) {
@@ -2408,7 +2759,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       }
     }
 
-    const subjectKey = `issue:${repoFullName}#${issueNumber}`;
+    // PR-O4 R5: normalize repo to lowercase (GitHub repos are case-insensitive)
+    const subjectKey = `issue:${repoFullName.toLowerCase()}#${issueNumber}`;
     const existingTask = await taskStore.getBySubject(subjectKey);
     const existingIssueCursor = existingTask?.automationState?.issue?.lastCommentCursor;
     const shouldSeedIssueCursor = existingIssueCursor === undefined || existingTask?.status === 'done';

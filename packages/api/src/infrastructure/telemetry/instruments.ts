@@ -131,9 +131,56 @@ export const l1StreakBreakCount = lazy(() =>
   }),
 );
 
-export const c1ZombieHoldCount = lazy(() =>
-  meter().createCounter('cat_cafe.a2a.c1.zombie_hold_count', {
-    description: 'Hold registered but previous hold for same (thread, cat) was unreleased',
+/**
+ * F192 eval:a2a verdict `2026-06-18-eval-a2a-c1-zombie-hold-semantics-fix`
+ * (砚砚): split the original `c1.zombie_hold_count` into two metrics by
+ * wake-delay-bucket semantics. Routed at fire time in
+ * `callback-hold-ball-c1-emit.ts` based on the `bucketWakeDelay()` result:
+ *
+ *   - `prior_overdue` + `prior_imminent` → `c1.hold_zombie_count`
+ *     (scheduler stuck or wake interrupted <60s — actionable signal,
+ *     consumed under `frictionCounts` in f167-eval's `buildC1`)
+ *   - `prior_short` + `prior_long` → `c1.hold_replacement_count`
+ *     (benign single-slot replacement churn per F167 Phase G KD-23 —
+ *     R1 P1 #1: consumed under `activationCounts` so the generic friction
+ *     grader never sees it; pre-split shape would re-create the 06-18
+ *     false positive under the renamed metric)
+ *
+ * No legacy alias; clean rename. Producer (callback-hold-ball-c1-emit),
+ * sample extractor (c1-hold-sample-evidence), and eval consumer
+ * (f167-eval / attribution) updated together — bundle PR avoids the
+ * historical risk of partial migrations.
+ */
+export const c1HoldZombieCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c1.hold_zombie_count', {
+    description: 'Prior hold cancelled with wake-delay bucket overdue/imminent (true zombie suppression)',
+  }),
+);
+
+export const c1HoldReplacementCount = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c1.hold_replacement_count', {
+    description: 'Prior hold cancelled with wake-delay bucket short/long (benign single-slot replacement churn)',
+  }),
+);
+
+/**
+ * F167 gate-keeping thread guard outcomes.
+ *
+ * Attributes:
+ *   tool ∈ { register_pr_tracking, register_issue_tracking, hold_ball }
+ *   outcome ∈ { blocked, override_used, guard_skipped }
+ *
+ * `blocked` = guard refused (守门 thread, no override) — desired enforcement; healthy ↑.
+ * `override_used` = caller asserted downstream-owner role — review for misuse if rate > 30%.
+ * `guard_skipped` = threadStore抖动 fail-open — should stay near zero in steady state.
+ *
+ * See gate-keeping-guard.ts + F167 Phase 6 in
+ * docs/plans/2026-06-17-f167-gate-keeping-thread-guard.md.
+ */
+export const gateKeepingHarnessAttemptCount = lazy(() =>
+  meter().createCounter('cat_cafe.harness.gate_keeping_attempt_count', {
+    description:
+      'F167 trigger-time gate-keeping thread guard outcomes (blocked / override_used / guard_skipped) per tool',
   }),
 );
 
@@ -261,6 +308,146 @@ export const callbackAuthFailures = lazy(() =>
   }),
 );
 
+// --- F236 Track-1: anchor-first telemetry (chars + request/response volume substrate) ---
+
+/**
+ * F236 Phase A made the anchor-first callback read-tools (pending-mentions /
+ * thread-context / list-tasks) return head/tail previews + drill pointers
+ * instead of full bodies, to shrink agent token load. The chars/省 signal was
+ * previously only `app.log.info` (ephemeral stdout). Track-1 funnels it through
+ * `anchor-telemetry.ts` so it ALSO lands as OTel metrics — a queryable
+ * chars + request/response VOLUME substrate.
+ *
+ * Scope (砚砚 eval-owner ruling iii): Track-1 ships chars (the 省/savings signal)
+ * and request/response volume ONLY. These are low-cardinality aggregate counters
+ * with NO join keys, so they are NOT an open-rate numerator/denominator and do
+ * NOT support a per-tool drill↔preview open-rate (that needs a cross-endpoint /
+ * per-item correlated event model — Track-2's scope, not computed here).
+ *
+ * Attributes (allowlist-filtered): `anchor.tool` only (bounded 4-value set).
+ */
+
+/**
+ * Counter: an anchor preview payload was returned, per tool.
+ * Request/response VOLUME — explicitly NOT an open-rate numerator/denominator.
+ */
+export const anchorReturnedCount = lazy(() =>
+  meter().createCounter('cat_cafe.anchor.returned.count', {
+    description:
+      'Anchor-first preview payload returned, by tool — request/response volume, NOT an open-rate numerator/denominator (F236 Track-1)',
+  }),
+);
+
+/** Histogram: chars returned in an anchor preview payload, per tool (the 省/savings signal). */
+export const anchorReturnedChars = lazy(() =>
+  meter().createHistogram('cat_cafe.anchor.returned.chars', {
+    description: 'Chars returned in an anchor-first preview payload, by tool — the 省/savings signal (F236 Track-1)',
+    unit: 'characters',
+  }),
+);
+
+/**
+ * Counter: a full drill (mode=full body served) was served, per tool.
+ * Request/response VOLUME — explicitly NOT an open-rate numerator/denominator.
+ */
+export const anchorFullDrillCount = lazy(() =>
+  meter().createCounter('cat_cafe.anchor.full_drill.count', {
+    description:
+      'Anchor full-drill (full body served) by tool — request/response volume, NOT an open-rate numerator/denominator (F236 Track-1)',
+  }),
+);
+
+/** Histogram: chars served in a full drill, per tool (the 省/savings signal). */
+export const anchorFullDrillChars = lazy(() =>
+  meter().createHistogram('cat_cafe.anchor.full_drill.chars', {
+    description:
+      'Chars served in an anchor full-drill (full body served) by tool — the 省/savings signal (F236 Track-1)',
+    unit: 'characters',
+  }),
+);
+
+// --- F231 AC-C3: Profile update eval counters (KD-10: zero-activation detection) ---
+
+/** Counter: profile update proposed (cat → operator card). */
+export const profileUpdateProposed = lazy(() =>
+  meter().createCounter('cat_cafe.profile_update.proposed', {
+    description: 'Profile update proposals created (F231 C3 eval)',
+  }),
+);
+
+/** Counter: profile update approved (operator → primer written). */
+export const profileUpdateApproved = lazy(() =>
+  meter().createCounter('cat_cafe.profile_update.approved', {
+    description: 'Profile update proposals approved and written (F231 C3 eval)',
+  }),
+);
+
+/** Counter: profile update rejected (operator → no write). */
+export const profileUpdateRejected = lazy(() =>
+  meter().createCounter('cat_cafe.profile_update.rejected', {
+    description: 'Profile update proposals rejected (F231 C3 eval)',
+  }),
+);
+
+/** Counter: distillation trigger fired on session seal (KD-10 eval). */
+export const profileDistillationTriggered = lazy(() =>
+  meter().createCounter('cat_cafe.profile_update.distillation_triggered', {
+    description: 'Profile distillation trigger fired on session-seal event (F231 C3/KD-10 eval)',
+  }),
+);
+
+// --- F167 Phase O PR-O2: Claim Grounding Shadow Telemetry ---
+
+/**
+ * Total grounding checks initiated per tool call.
+ * Attributes: callback.tool (hold_ball / register_pr_tracking / register_issue_tracking)
+ */
+export const groundingCheckTotal = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.grounding.check_total', {
+    description: 'F167 Phase O grounding check invocations per stateful tool call (shadow mode)',
+  }),
+);
+
+/**
+ * Claim-level verdict outcomes.
+ * Attributes: grounding.claim_type × grounding.verdict × callback.tool
+ */
+export const groundingVerdictTotal = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.grounding.verdict_total', {
+    description: 'F167 Phase O claim grounding verdict outcomes (verified/mismatch/insufficient)',
+  }),
+);
+
+/**
+ * Per-resolver invocation count.
+ * Attributes: grounding.source_tier × status (resolver id)
+ */
+export const groundingResolverTotal = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.grounding.resolver_total', {
+    description: 'F167 Phase O resolver invocations (per resolver × source tier)',
+  }),
+);
+
+/**
+ * Resolver cache hits.
+ * Attributes: status (resolver id)
+ */
+export const groundingCacheHitTotal = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.grounding.cache_hit_total', {
+    description: 'F167 Phase O resolver cache hits',
+  }),
+);
+
+/**
+ * Budget exhaustion events per grounding check.
+ * Attributes: callback.tool × grounding.action_family
+ */
+export const groundingBudgetExhaustedTotal = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.grounding.budget_exhausted_total', {
+    description: 'F167 Phase O resolver budget exhausted (verdict forced to insufficient)',
+  }),
+);
+
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 
@@ -314,11 +501,23 @@ export function unregisterLivenessProbe(invocationId: string): void {
 export function warmupCounters(): void {
   l1StreakWarnCount.add(0);
   l1StreakBreakCount.add(0);
-  c1ZombieHoldCount.add(0);
+  c1HoldZombieCount.add(0);
+  c1HoldReplacementCount.add(0);
   c1HoldCancelCount.add(0);
   c2VerdictHintEmitted.add(0);
   c2VoidHoldHintEmitted.add(0);
   c2VerdictWithoutPassCount.add(0);
   c2ExitChecked.add(0);
   c2VoidHoldChecked.add(0);
+  // F231 AC-C3: profile update pipeline counters
+  profileUpdateProposed.add(0);
+  profileUpdateApproved.add(0);
+  profileUpdateRejected.add(0);
+  profileDistillationTriggered.add(0);
+  // F167 Phase O PR-O2: claim grounding shadow telemetry
+  groundingCheckTotal.add(0);
+  groundingVerdictTotal.add(0);
+  groundingResolverTotal.add(0);
+  groundingCacheHitTotal.add(0);
+  groundingBudgetExhaustedTotal.add(0);
 }

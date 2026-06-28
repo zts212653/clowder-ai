@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * F229 PR-A3a: conciergeStore — 猫猫球前台猫前端状态
+ * F229 PR-A3a: conciergeStore — 猫猫球前端状态
  *
  * 核心设计（micro-spec §1）：
  *   ballState = 纯投影函数，永远不进 store（INV-2）
@@ -84,7 +84,7 @@ interface ConciergeStoreState extends ConciergeInputs {
   personaTone: string;
   dutyCatProfileId: string;
   proactivePolicy: 'ambient' | 'quiet-badge';
-  skin: 'yarn-ball' | 'ragdoll-v1';
+  skin: 'yarn-ball' | 'ragdoll-v1' | 'yanyan-codex' | 'xianxian-codex';
 
   // Thread
   threadId: string | null;

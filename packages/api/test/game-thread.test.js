@@ -17,7 +17,7 @@ describe('Independent Game Thread', () => {
     const seats = buildGameSeats({
       humanRole: 'god-view',
       userId: 'owner',
-      catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'dare', 'spark'],
+      catIds: ['opus', 'sonnet', 'codex', 'gpt52', 'gemini', 'spark', 'kimi'],
       playerCount: 7,
     });
     assert.equal(seats.length, 7);

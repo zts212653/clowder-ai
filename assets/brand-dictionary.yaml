@@ -253,6 +253,18 @@ path_policies:
     risk: P1
     reason: "Desktop app product identity, installer metadata, and support paths differ by repo."
 
+  - pattern: "cat-cafe-skills/refs/gpt-pro-custom-instructions.md"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "F247 B1a — verbatim L0 prompt fed to cloud-side ChatGPT Pro (砚砚 Pro). Internal persona injection text; never sync to opensource clowder-ai (no cloud-cat counterpart there). Pass-through exempts from brand guard."
+
+  - pattern: "cat-cafe-skills/refs/chatgpt-cloud-onboarding-guide.md"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "F247 B1a — internal SOP for onboarding cloud-side ChatGPT Pro (砚砚 Pro) to cat-cafe. House-rules document with named-cat routing semantics; never sync to opensource. Pass-through exempts from brand guard."
+
   - pattern: "cat-cafe-skills/**"
     outbound: sanitize
     inbound: manual-port
@@ -278,6 +290,12 @@ path_policies:
     inbound: manual-port
     risk: P1
     reason: "Localized READMEs are generated from README.opensource sources."
+
+  - pattern: "docs/ops/opensource-intake-ledger.json"
+    outbound: pass-through
+    inbound: pass-through
+    risk: P3
+    reason: "Intake ledger tracks clowder-ai PR absorption; naturally contains cross-repo brand references (repo name, PR titles). pass-through exempts from brand guard (pre-commit) and intake classification (not a managed sync root — never reaches clowder-ai). F238 follow-up from #943/#944/#899."
 
   - pattern: "docs/**"
     outbound: sanitize

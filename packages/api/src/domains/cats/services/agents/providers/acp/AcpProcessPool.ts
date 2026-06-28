@@ -69,6 +69,8 @@ interface AcpPoolVariantConfig {
 interface PoolEntry {
   client: AcpPoolClient;
   leaseCount: number;
+  /** Bumped on stale-lease force-release so old lease closures become no-ops (#992). */
+  leaseGeneration: number;
   lastUsedAt: number;
   state: 'initializing' | 'ready' | 'closing';
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -144,7 +146,22 @@ export class AcpProcessPool {
         if (this.supportsMultiplexing || owner.leaseCount === 0) {
           return this.leaseReadyEntry(owner, poolKey);
         }
-        throw new Error(`ACP session ${sessionId} is already active on its owning process`);
+        // #992: Stale lease recovery — the previous lease holder is a zombie (e.g. Windows
+        // console disconnect where the async generator finally block never ran). Since the
+        // caller is re-acquiring the SAME sessionId, the previous consumer is necessarily
+        // gone. Force-release the orphaned lease so the process can be reused.
+        log.warn(
+          { poolKey, sessionId, staleLeaseCount: owner.leaseCount },
+          'ACP stale lease detected — force-releasing zombie lease for session re-acquire',
+        );
+        this._metrics.activeLeaseCount -= owner.leaseCount;
+        owner.leaseCount = 0;
+        // Transition to idle so leaseReadyEntry's idleProcessCount-- is balanced.
+        this._metrics.idleProcessCount++;
+        // Bump generation so any late-arriving release() from the old lease becomes a
+        // no-op (the old closure captured the previous generation value).
+        owner.leaseGeneration++;
+        return this.leaseReadyEntry(owner, poolKey);
       }
       if (owner) this.sessionOwners.delete(sessionKey);
     }
@@ -268,12 +285,19 @@ export class AcpProcessPool {
 
   private createLease(entry: PoolEntry, poolKey: PoolKey): AcpLease {
     let released = false;
+    // Capture the generation at lease creation time. If a stale-lease force-release
+    // bumps the generation before this closure runs, the release becomes a no-op —
+    // preventing the late-arriving old finally from corrupting the new lease (#992).
+    const creationGeneration = entry.leaseGeneration;
     return {
       client: entry.client,
       poolKey,
       release: () => {
         if (released) return;
         released = true;
+        // Stale lease guard: generation mismatch means this lease was force-released
+        // and a new lease has been issued on the same entry. The old release is a no-op.
+        if (entry.leaseGeneration !== creationGeneration) return;
         entry.leaseCount--;
         this._metrics.activeLeaseCount--;
         if (entry.leaseCount <= 0) {
@@ -290,6 +314,7 @@ export class AcpProcessPool {
     const entry: PoolEntry = {
       client,
       leaseCount: 0, // caller manages lease count after spawn
+      leaseGeneration: 0,
       lastUsedAt: Date.now(),
       state: 'initializing',
       idleTimer: null,

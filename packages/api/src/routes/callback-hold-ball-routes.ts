@@ -11,25 +11,27 @@
  * reminder scheduler; that is intentionally deferred.
  */
 
-import { trace } from '@opentelemetry/api';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
+import { buildHeldEvent } from '../domains/ball-custody/ball-custody-events.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { C1_ZOMBIE_HOLD_EVENT_NAME } from '../infrastructure/harness-eval/c1-zombie-hold-sample-evidence.js';
+import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
+import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
+import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.js';
-import { AGENT_ID, THREAD_SYSTEM_KIND, TRIGGER } from '../infrastructure/telemetry/genai-semconv.js';
-import { hmacId } from '../infrastructure/telemetry/hmac.js';
-import { c1ZombieHoldCount } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
+import { emitC1HoldCancellation } from './callback-hold-ball-c1-emit.js';
 import { registerHoldBallCancelRoutes } from './callback-hold-ball-cancel-routes.js';
 import { deriveCallbackActor } from './callback-scope-helpers.js';
+import { type CrossStoreTaskStore, detectEventCallback } from './gate-keeping-cross-store.js';
+import { checkGateKeepingGuard } from './gate-keeping-guard.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
-import { bucketWakeDelay } from './wake-delay-bucket.js';
 
 const log = createModuleLogger('routes/callback-hold-ball');
 
@@ -71,10 +73,36 @@ export function incrementHoldCount(threadId: string, catId: string, now: number 
   return entry.count;
 }
 
+/**
+ * F167 Phase O PR-O2: WaitSourceRef schema for structured wait grounding.
+ * Per R3.1 OQ-5: slaUntilMs is REQUIRED (no SLA = no hold).
+ * 'reporter_handle' | 'pending_input' require anchorRef (narrative kinds too forgeable).
+ */
+const waitSourceRefSchema = z
+  .object({
+    kind: z.enum(['github_issue', 'github_comment', 'thread_message', 'task', 'reporter_handle', 'pending_input']),
+    value: z.string().min(1),
+    anchorRef: z.string().optional(),
+    expectedSignal: z.string().min(1),
+    slaUntilMs: z.number().int().positive(),
+  })
+  .refine(
+    (data) => {
+      // anchorRef REQUIRED for narrative kinds
+      if ((data.kind === 'reporter_handle' || data.kind === 'pending_input') && !data.anchorRef) {
+        return false;
+      }
+      return true;
+    },
+    { message: 'anchorRef is required for reporter_handle and pending_input kinds' },
+  );
+
 const holdBallSchema = z.object({
   reason: z.string().min(1).max(500),
   nextStep: z.string().min(1).max(500),
   wakeAfterMs: z.number().int().min(5_000).max(3_600_000),
+  /** F167 Phase O: structured wait source for grounding telemetry (optional in PR-O2 shadow). */
+  waitSourceRef: waitSourceRefSchema.optional(),
 });
 
 export interface HoldBallRouteDeps {
@@ -85,12 +113,19 @@ export interface HoldBallRouteDeps {
   messageStore: IMessageStore;
   socketManager: SocketManager;
   threadStore: {
-    get(
-      threadId: string,
-    ):
-      | { createdBy: string; systemKind?: 'connector_hub' | 'eval_domain' }
+    get(threadId: string):
+      | {
+          createdBy: string;
+          systemKind?: 'connector_hub' | 'eval_domain';
+          /** F167: gate-keeping thread marker used by checkGateKeepingGuard. */
+          threadKind?: 'concierge' | 'gate-keeping';
+        }
       | null
-      | Promise<{ createdBy: string; systemKind?: 'connector_hub' | 'eval_domain' } | null>;
+      | Promise<{
+          createdBy: string;
+          systemKind?: 'connector_hub' | 'eval_domain';
+          threadKind?: 'concierge' | 'gate-keeping';
+        } | null>;
   };
   onHoldBallCancelFeedback?: (input: {
     taskId: string;
@@ -98,6 +133,13 @@ export interface HoldBallRouteDeps {
     userId: string;
     catId: string;
   }) => void | Promise<void>;
+  ballCustody?: IBallCustodyIngest;
+  /**
+   * PR-O4: TaskStore for cross-store event callback detection.
+   * When provided, hold_ball in gate-keeping threads checks whether
+   * active PR/issue tracking exists → hasEventCallback policy context.
+   */
+  taskStore?: CrossStoreTaskStore;
 }
 
 export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldBallRouteDeps): void {
@@ -117,6 +159,52 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const { reason, nextStep, wakeAfterMs } = parsed.data;
     const { threadId, catId, userId } = actor;
     const catIdStr = catId as string;
+
+    // F167 Phase O PR-O2b: shadow grounding telemetry with real claim extraction.
+    // Fire-and-forget: don't await, don't let failures affect the hold_ball flow.
+    void checkGrounding({
+      invocationId: record.invocationId ?? 'unknown',
+      catId: catIdStr,
+      threadId,
+      tool: 'hold_ball',
+      actionFamily: 'wait',
+      actionRisk: 'hold_ball',
+      claims: extractHoldBallClaims({ reason, waitSourceRef: parsed.data.waitSourceRef }),
+    })
+      .then(async (result) => {
+        for (const event of result.events) {
+          await groundingSampleStore.record(event, result.wouldBlock);
+        }
+        log.debug(
+          { threadId, catId: catIdStr, verdict: result.overallVerdict, wouldBlock: result.wouldBlock },
+          'F167 Phase O: shadow grounding check completed (hold_ball)',
+        );
+      })
+      .catch((err: unknown) => {
+        log.warn({ err, threadId, catId: catIdStr }, 'F167 grounding shadow telemetry failed (non-blocking)');
+      });
+
+    // F167: gate-keeping thread guard (PR-O3 → PR-O4: cross-store callback detection)
+    // PR-O4: detect event callback by querying TaskStore for active tracking
+    // in the same thread. Pass waitSourceRef for subject-level matching:
+    // only tracking tasks covering the SAME subject count as "event-backed."
+    // Fail-open: if taskStore not injected or query fails,
+    // hasEventCallback defaults to false (allows hold — conservative).
+    const hasEventCallback = deps.taskStore
+      ? await detectEventCallback(deps.taskStore, threadId, log, parsed.data.waitSourceRef)
+      : false;
+    const guardResult = await checkGateKeepingGuard({
+      threadStore: deps.threadStore as Parameters<typeof checkGateKeepingGuard>[0]['threadStore'],
+      threadId,
+      tool: 'hold_ball',
+      log,
+      context: { catId: catIdStr, reason },
+      policyContext: { wakeAfterMs, hasEventCallback, hasWaitSourceRef: !!parsed.data.waitSourceRef },
+    });
+    if (guardResult.outcome === 'blocked' && guardResult.blockedResponse) {
+      reply.status(400);
+      return guardResult.blockedResponse;
+    }
 
     const currentCount = getHoldCount(threadId, catIdStr);
     if (currentCount >= MAX_HOLDS_PER_WINDOW) {
@@ -223,26 +311,17 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return { error: 'Failed to register hold wake with scheduler' };
     }
 
-    // New hold fully committed. Cancel prior pending holds (best-effort — a
-    // failure here leaves an extra stale wake, not zero wakes, which is the
-    // milder of the two failure modes).
-    //
-    // F192 Phase D — eval:a2a 2026-06-12 build verdict: emit a per-fire sample
-    // span event `c1.zombie_hold_fired` at each cancellation so attribution can
-    // classify replacements by wake-delay bucket (prior_overdue / prior_imminent
-    // / prior_short / prior_long). Same pattern as PR #2222 (C2 void-hold) and
-    // PR #2144 (C2 verdict-without-pass) — discipline single-sourced via the
-    // shared per-fire sample extractor.
-    //
-    // Counter `c1ZombieHoldCount.add` now carries `[TRIGGER]` for the same
-    // bucket so the aggregate count can split by replacement category without
-    // the per-fire sample dependency (already in metric-allowlist).
-    //
-    // F192 Phase D R1 P1-2 fix (砚砚): derive `thread.system_kind` from
-    // threadStore at cancel time so eval/connector_hub threads classify
-    // correctly (was hardcoded 'product' → misclassified eval-domain hold
-    // replacements as product friction). Same precedent as C2 route-serial
-    // (`routeThread?.systemKind ?? 'product'`).
+    deps.ballCustody
+      ?.record(buildHeldEvent({ threadId, catId: catIdStr, fireAt, at: Date.now() }))
+      .catch((err) => log.warn({ threadId, catId: catIdStr, taskId, err }, 'F233 PR3: failed to record ball.held'));
+
+    // Cancel prior pending holds (best-effort — failure here leaves an extra
+    // stale wake, not zero wakes, the milder failure mode). Telemetry: F192
+    // verdict 2026-06-18 routes the cancellation by `bucketWakeDelay()` to
+    // split zombie vs replacement metrics + span events (see
+    // `callback-hold-ball-c1-emit.ts`). thread.system_kind derived from
+    // threadStore (Phase D R1 P1-2 — hardcoded 'product' previously
+    // misclassified eval-domain replacements).
     let threadSystemKind = 'product';
     if (pendingHolds.length > 0) {
       try {
@@ -257,41 +336,21 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const cancelNow = Date.now();
     for (const prior of pendingHolds) {
       const priorFireAt = (prior.trigger as { fireAt?: number }).fireAt ?? cancelNow;
-      const wakeBucket = bucketWakeDelay(priorFireAt, cancelNow);
-      const c1FireAttr: Record<string, string> = {
-        [AGENT_ID]: catIdStr,
-        [THREAD_SYSTEM_KIND]: threadSystemKind,
-        [TRIGGER]: wakeBucket,
-      };
+      let wakeBucket: string | undefined;
       try {
         taskRunner.unregister(prior.id);
         dynamicTaskStore.remove(prior.id);
-        c1ZombieHoldCount.add(1, c1FireAttr);
-        // Per-fire sample span event. Marker span starts + immediately ends so
-        // RedactingSpanProcessor (onEnd hook) HMAC-pseudonymizes the Class C ids
-        // (messageId / invocationId / threadId) before LocalTraceStore stores them.
-        // priorTaskId / newTaskId are NOT in the Class C allowlist — pre-hash with
-        // explicit `Hash` suffix in the attr keys, mirroring PerFireSample
-        // schema's messageIdHash convention.
-        try {
-          const sampleSpan = trace.getTracer('cat-cafe-api', '0.1.0').startSpan('cat_cafe.a2a.c1.zombie_hold_sample');
-          sampleSpan.addEvent(C1_ZOMBIE_HOLD_EVENT_NAME, {
-            // Class C — redactor HMACs on event end:
-            messageId: prior.id, // semantically "what got cancelled" — duplicate of priorTaskIdHash post-redaction
-            invocationId: actor.invocationId,
-            threadId,
-            // Class D / labels:
-            [AGENT_ID]: catIdStr,
-            [THREAD_SYSTEM_KIND]: threadSystemKind,
-            [TRIGGER]: wakeBucket,
-            // Pre-hashed (key not in Class C allowlist — explicit `Hash` suffix marks redaction):
-            priorTaskIdHash: hmacId(prior.id),
-            newTaskIdHash: hmacId(taskId),
-          });
-          sampleSpan.end();
-        } catch {
-          /* best-effort sample emission */
-        }
+        const result = emitC1HoldCancellation({
+          priorTaskId: prior.id,
+          priorFireAtMs: priorFireAt,
+          cancelNowMs: cancelNow,
+          newTaskId: taskId,
+          catId: catIdStr,
+          threadId,
+          threadSystemKind,
+          invocationId: actor.invocationId,
+        });
+        wakeBucket = result.wakeBucket;
         log.info(
           { threadId, catId: catIdStr, priorTaskId: prior.id, newTaskId: taskId, wakeBucket, threadSystemKind },
           'F167 Phase G: cancelled prior pending hold wake (single-slot replace)',

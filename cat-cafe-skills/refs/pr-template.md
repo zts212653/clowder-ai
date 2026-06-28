@@ -32,6 +32,13 @@
 - ADR: `docs/decisions/NNN-xxx.md`（如有）
 - BACKLOG: F__ / #__
 
+## Tips Contribution（F244）
+
+- [ ] Added/updated 1-2 tips in `packages/web/src/lib/capability-tips.seed.json`
+- [ ] Existing tip sourceRef still covers this user-visible change
+- [ ] `tips_exempt:` {reason}（仅纯内部重构/无用户可感知变化）
+- Reviewer usefulness check: tip teaches a concrete action, timing, or traceable house rule; title-only tips must be rejected.
+
 ## Tradeoff
 
 {放弃了什么方案，为什么}

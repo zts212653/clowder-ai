@@ -416,6 +416,58 @@ describe('MCP Evidence Tools', () => {
     );
   });
 
+  test('intent=coverage formats CoverageSearchResult matrix instead of crashing (P1-2)', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        query: 'production data boundary',
+        totalHits: 2,
+        bySource: {
+          docs: { count: 1, cap: 25 },
+          threads: { count: 1, cap: 20 },
+          conventionGraph: { count: 0, cap: 10 },
+        },
+        matrix: [
+          {
+            anchor: 'docs/iron-rules.md',
+            title: 'Redis production Redis (sacred)',
+            kind: 'lesson',
+            matchType: 'direct',
+            confidence: 0.95,
+            source: 'docs',
+          },
+          {
+            anchor: 'thread:redis-debug',
+            title: 'Redis port 事故',
+            kind: 'discussion',
+            matchType: 'alias',
+            confidence: 0.7,
+            source: 'threads',
+            expansionProvenance: {
+              source: 'frontmatter-alias',
+              via: 'keyword:6399',
+              confidence: 'heuristic',
+            },
+          },
+        ],
+        gaps: [],
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'production data boundary', intent: 'coverage' });
+
+    assert.equal(result.isError, undefined, 'should not crash on coverage response shape');
+    const text = result.content[0].text;
+    assert.ok(text.includes('2'), 'should show total hits');
+    assert.ok(text.includes('Redis production Redis (sacred)'), 'should render matrix item titles');
+    assert.ok(text.includes('docs/iron-rules.md'), 'should render anchors');
+    assert.ok(text.includes('direct'), 'should show match types');
+    assert.ok(text.includes('alias'), 'should show indirect match types');
+    assert.ok(text.includes('frontmatter-alias'), 'should show expansion provenance');
+  });
+
   test('search_evidence description warns coverage tasks are not single-query exhaustive', async () => {
     const { evidenceTools } = await import('../dist/tools/evidence-tools.js');
     const description = evidenceTools[0].description;

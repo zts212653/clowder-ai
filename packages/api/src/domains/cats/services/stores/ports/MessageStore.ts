@@ -104,7 +104,12 @@ export interface StoredMessage {
      *      hydrate/merge stable key; required so same-parent multi-turn-same-cat bubbles do NOT merge)
      *  Frontend prefers `turnInvocationId` (fallback `invocationId` for legacy messages). */
     stream?: { invocationId: string; turnInvocationId?: string };
-    crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+    crossPost?: {
+      sourceThreadId: string;
+      sourceInvocationId?: string;
+      /** F246 Phase B: effect-class label carried for receiving-side constraints */
+      effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+    };
     targetCats?: string[];
     scheduler?: SchedulerMessageExtra['scheduler'];
     tracing?: { traceId: string; spanId: string; parentSpanId?: string };
@@ -825,7 +830,12 @@ export async function hydrateReplyPreview(store: IMessageStore, replyToId: strin
 export async function hydrateCrossThreadReplyHint(
   store: IMessageStore,
   triggerMessageId: string,
-): Promise<{ sourceThreadId: string; senderCatId: CatId } | null> {
+): Promise<{
+  sourceThreadId: string;
+  senderCatId: CatId;
+  /** F246 Phase B: effect-class from the cross-post trigger message */
+  effectClass?: 'fyi' | 'coordinate' | 'investigate' | 'assign_work';
+} | null> {
   const trigger = await store.getById(triggerMessageId);
   if (!trigger) return null;
   const sourceThreadId = trigger.extra?.crossPost?.sourceThreadId;
@@ -834,5 +844,6 @@ export async function hydrateCrossThreadReplyHint(
   return {
     sourceThreadId,
     senderCatId: trigger.catId,
+    ...(trigger.extra?.crossPost?.effectClass ? { effectClass: trigger.extra.crossPost.effectClass } : {}),
   };
 }

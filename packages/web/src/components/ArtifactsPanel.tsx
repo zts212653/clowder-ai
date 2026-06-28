@@ -15,7 +15,7 @@ import { ArtifactDetailView } from './artifacts/ArtifactDetailView';
 import { extractCatChips, filterByCat } from './artifacts/artifact-filters';
 import type { ArtifactGroup, GroupingMode } from './artifacts/artifact-grouping';
 import { groupArtifacts } from './artifacts/artifact-grouping';
-import { artifactRowMeta, resolveAssetUrl } from './artifacts/artifact-view';
+import { artifactActionLabel, artifactRowMeta, resolveAssetUrl } from './artifacts/artifact-view';
 
 const resolveUrl = (url?: string): string | undefined => resolveAssetUrl(url, API_URL);
 
@@ -88,6 +88,15 @@ const IconVideo = () => (
   </svg>
 );
 
+// F232 polish: widget icon (puzzle piece — represents html_widget / interactive blocks)
+const IconWidget = () => (
+  <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" {...S}>
+    <path d="M20 16V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2z" />
+    <path d="M9 10h6" />
+    <path d="M9 14h4" />
+  </svg>
+);
+
 // Collapsible group chevron (F232 Phase B grouping)
 const IconChevron = ({ open }: { open: boolean }) => (
   <svg className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} viewBox="0 0 24 24" {...S}>
@@ -102,6 +111,7 @@ const TYPE_ICON: Record<ThreadArtifactType, () => JSX.Element> = {
   pr: IconCode,
   audio: IconMic,
   video: IconVideo,
+  widget: IconWidget,
 };
 
 // Type-specific color system (F232 design language — intentionally NOT generic cafe tokens).
@@ -113,6 +123,7 @@ const TYPE_TINT: Record<ThreadArtifactType, { color: string; background: string 
   pr: { color: '#479a5a', background: '#edf5ef' },
   audio: { color: '#8866b0', background: '#f2edf8' },
   video: { color: '#b05a5a', background: '#f8eded' },
+  widget: { color: '#5a8fb0', background: '#edf2f8' },
 };
 
 /** F232 Phase B: extracted row component to reduce ArtifactsPanel cognitive complexity. */
@@ -193,14 +204,14 @@ function ArtifactRow({
           onClick={(e) => e.stopPropagation()}
           className="shrink-0 rounded-lg border border-cafe bg-cafe-surface-elevated px-2.5 py-1 text-micro text-cafe-muted transition-colors hover:text-cafe-secondary"
         >
-          打开
+          {artifactActionLabel(a.type)}
         </a>
       )}
     </div>
   );
 }
 
-type FilterKey = 'all' | 'image' | 'file' | 'codepr' | 'audio' | 'video';
+type FilterKey = 'all' | 'image' | 'file' | 'codepr' | 'audio' | 'video' | 'widget';
 const inFilter = (a: ThreadArtifactDTO, f: FilterKey): boolean =>
   f === 'all' ? true : f === 'codepr' ? a.type === 'code' || a.type === 'pr' : a.type === f;
 
@@ -299,12 +310,13 @@ export function ArtifactsPanel({
   );
 
   const counts = useMemo(() => {
-    const c = { all: catFiltered.length, image: 0, file: 0, codepr: 0, audio: 0, video: 0 };
+    const c = { all: catFiltered.length, image: 0, file: 0, codepr: 0, audio: 0, video: 0, widget: 0 };
     for (const a of catFiltered) {
       if (a.type === 'image') c.image++;
       else if (a.type === 'file') c.file++;
       else if (a.type === 'audio') c.audio++;
       else if (a.type === 'video') c.video++;
+      else if (a.type === 'widget') c.widget++;
       else c.codepr++; // code | pr
     }
     return c;
@@ -339,6 +351,7 @@ export function ArtifactsPanel({
     ['codepr', '代码·PR', counts.codepr],
     ['audio', '语音', counts.audio],
     ['video', '视频', counts.video],
+    ['widget', '小组件', counts.widget],
   ];
 
   return (
@@ -400,7 +413,7 @@ export function ArtifactsPanel({
                 ? '加载中…'
                 : error
                   ? '加载失败，点筛选可重试'
-                  : `共 ${counts.all} 项 · ${counts.image} 图 · ${counts.file} 文件 · ${counts.codepr} 代码/PR · ${counts.audio} 语音 · ${counts.video} 视频`}
+                  : `共 ${counts.all} 项 · ${counts.image} 图 · ${counts.file} 文件 · ${counts.codepr} 代码/PR · ${counts.audio} 语音 · ${counts.video} 视频 · ${counts.widget} 小组件`}
             </div>
             <label className="mt-2 flex items-center gap-2 rounded-lg border border-cafe-subtle bg-cafe-surface-sunken px-2.5 py-1.5 text-xs text-cafe-muted">
               <IconSearch />

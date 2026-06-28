@@ -12,6 +12,7 @@ describe('ensureEvalDomainThreads', () => {
       evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
       frequency: 'daily',
       sourceAdapter: 'test-adapter',
+      sourceRefsKind: 'test-source-refs',
       threadPolicy: { role: 'working-home', stateSot: 'registry', allowedContent: [] },
       legacyScheduledTaskIds: [],
       handoffTargetResolver: { featureId: 'F999', ownerCatId: 'opus47', threadLookup: 'feature-thread' },

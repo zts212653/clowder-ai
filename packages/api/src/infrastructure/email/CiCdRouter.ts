@@ -60,6 +60,13 @@ export interface CiCdRouterOptions {
   readonly eventLog?: ICommunityEventLog;
   /** Optional projector to apply the emitted event immediately after append. */
   readonly projector?: ICommunityProjectorMin;
+  /**
+   * F208 Phase E AC-E2: distillation checkpoint for feat-phase-close.
+   * CiCdRouter is the canonical first-detection point for PR merge — wire here
+   * so the checkpoint fires even when ReviewFeedbackTaskSpec gate filters done tasks.
+   * Idempotent (sourceId dedup) so double-fire from both paths is safe.
+   */
+  readonly distillationCheckpoint?: import('../../infrastructure/distillation/DistillationCheckpoint.js').DistillationCheckpoint;
 }
 
 export class CiCdRouter {
@@ -106,6 +113,34 @@ export class CiCdRouter {
           });
         } catch {
           // Best-effort: don't break CI/CD routing
+        }
+      }
+
+      // F208 AC-E2: distillation checkpoint on feat-phase-close (best-effort, merge only).
+      // CiCdRouter is the canonical first-detection point for merge — checkpoint MUST fire here
+      // because ReviewFeedbackTaskSpec gate filters done tasks and may miss.
+      // sourceId dedup makes double-fire from ReviewFeedbackTaskSpec safe.
+      if (poll.prState === 'merged' && this.opts.distillationCheckpoint) {
+        try {
+          // Extract featureId from trackingInstructions (prTitle not available here)
+          const featureSource = task.automationState?.trackingInstructions ?? task.title ?? '';
+          const featureMatch = featureSource.match(/\b[Ff](\d{2,4})\b/);
+          const featureId = featureMatch ? `F${featureMatch[1]}` : undefined;
+          if (featureId) {
+            const phaseMatch = featureSource.match(/[Pp]hase\s+([A-Z])/i);
+            await this.opts.distillationCheckpoint.onFeatPhaseClose({
+              prNumber: poll.prNumber,
+              repoFullName: poll.repoFullName,
+              authorCatId: (task.ownerCatId ?? 'unknown') as string,
+              threadId: task.threadId,
+              featureId,
+              phaseLabel: phaseMatch?.[1] ?? 'unknown',
+            });
+          }
+        } catch {
+          log.warn(
+            `[CiCdRouter] distillation checkpoint (feat-phase-close) failed for ${poll.repoFullName}#${poll.prNumber}`,
+          );
         }
       }
 

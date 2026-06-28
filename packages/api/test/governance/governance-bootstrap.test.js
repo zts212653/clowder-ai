@@ -219,12 +219,12 @@ describe('GovernanceBootstrapService', () => {
 
     const config = await readCapabilitiesConfig(targetProject);
     const worktree = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'worktree' && !cap.pluginId);
-    assert.ok(worktree, 'source Cat Cafe skill should be bootstrapped independently from same-id plugin policy');
+    assert.ok(worktree, 'source Clowder AI skill should be bootstrapped independently from same-id plugin policy');
     assert.equal(worktree.enabled, true);
     assert.deepStrictEqual(worktree.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
   });
 
-  it('preserves same-id external skill entries when seeding disabled Cat Cafe skills', async () => {
+  it('preserves same-id external skill entries when seeding disabled Clowder AI skills', async () => {
     await writeCapabilitiesConfig(catCafeRoot, {
       version: 2,
       capabilities: [{ id: 'worktree', type: 'skill', enabled: false, source: 'cat-cafe', mountPaths: [] }],
@@ -256,7 +256,7 @@ describe('GovernanceBootstrapService', () => {
     const catCafe = config.capabilities.find(
       (cap) => cap.type === 'skill' && cap.id === 'worktree' && cap.source === 'cat-cafe' && !cap.pluginId,
     );
-    assert.ok(catCafe, 'disabled first-party Cat Cafe policy should be created separately');
+    assert.ok(catCafe, 'disabled first-party Clowder AI policy should be created separately');
     assert.equal(catCafe.enabled, false);
     assert.deepStrictEqual(catCafe.mountPaths, []);
   });

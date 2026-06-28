@@ -175,7 +175,14 @@ async function syncProjectUnlocked(
     managedCaps.flatMap((cap) => (Array.isArray(cap.mountPaths) ? [[cap.id, [...cap.mountPaths]] as const] : [])),
   );
 
-  // F228: disabledSkills is authoritative when provided (global cascade — scenarios 6/7).
+  // F228 KD-6: disabledSkills is authoritative for ALL callers when provided —
+  // global toggle (scenarios 6/7), mount-rule reconciliation (scenarios 9/11),
+  // and plain reconciliation (POST /api/skills/sync, /api/skills/sync-skill,
+  // PUT /api/mount-rules). Path A simplification (operator/mindfn 2026-06-17 IM sync):
+  // unconditional cascade across caller types; project-local `mountPaths:[]` disable
+  // is NOT preserved across global ops. See docs/features/F228 KD-6 + AC-C5 +
+  // regression test 'POST /api/skills/sync clears project-local mountPaths:[]'
+  // in test/skills-route.test.js.
   // When omitted (project-scope toggle), fall back to config-derived disabled state.
   const disabledSet = new Set<string>(opts.disabledSkills ?? configDisabledSet);
   const mountPathsBySkill = new Map(configMountPaths);
@@ -186,10 +193,14 @@ async function syncProjectUnlocked(
   const enabledNames = sourceNames.filter((n) => !disabledSet.has(n));
   const disabledNames = sourceNames.filter((n) => disabledSet.has(n));
 
-  // F228 scenario 7: When disabledSkills is authoritative (global cascade) and a skill
-  // is enabled (not in disabledSet), clear config-derived empty mountPaths so the skill
-  // falls through to the "no policy" path and gets all active mount points.
-  // Without this, a previously cascade-disabled skill (mountPaths:[]) would stay disabled
+  // F228 KD-6: When disabledSkills is authoritative (ANY cascading caller — global
+  // toggle, mount-rule reconciliation, OR plain reconciliation), and a skill is enabled
+  // (not in disabledSet), clear config-derived empty mountPaths so the skill falls
+  // through to the "no policy" path and gets all active mount points.
+  // This is the **unconditional cascade** behavior chosen in Path A: project-local
+  // `mountPaths:[]` disable does not survive any global op, including plain
+  // POST /api/skills/sync (the over-preservation Path C trade-off Clowder AI explicitly
+  // rejected). Without this, a previously cascade-disabled skill would stay disabled
   // even after the global source re-enables it.
   if (opts.disabledSkills) {
     for (const name of enabledNames) {
@@ -397,6 +408,7 @@ async function syncProjectUnlocked(
       mountRules,
       pruneMountPaths: opts.pruneMountPaths,
       preserveGlobalCascade: opts.preserveGlobalCascade,
+      existingProjectSkills: new Set(previousNames),
       newlyEnabledMountPointIds: opts.pruneMountPaths ? newlyEnabledMountPointIds : undefined,
     });
 

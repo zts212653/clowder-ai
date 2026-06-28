@@ -1,5 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import {
+  type CatalogCollectionSnapshot,
+  type ConfigWarning,
+  computeFunctionalStatus,
+  evaluateConfigWarnings,
+  type FunctionalStatus,
+} from '../domains/memory/evidence-status-signals.js';
 import { F163ExperimentLogger } from '../domains/memory/f163-experiment-logger.js';
 import {
   applySalienceRerank,
@@ -18,6 +25,7 @@ import type {
   SearchExecutionMeta,
   SearchOptions,
 } from '../domains/memory/interfaces.js';
+import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
 import {
@@ -45,6 +53,8 @@ const searchSchema = z.object({
   truthSourceRef: z.string().optional(),
   recentArtifactRefs: z.string().optional(),
   currentThreadId: z.string().optional(),
+  /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
+  intent: z.enum(['topk', 'coverage']).optional(),
 });
 
 export type {
@@ -85,6 +95,12 @@ export interface EvidenceRoutesOptions {
   indexBuilder?: IIndexBuilder;
   knowledgeResolver?: IKnowledgeResolver;
   rebuildJobTracker?: RebuildJobTracker;
+  /**
+   * F188 Phase K (AC-K2): library catalog snapshot for `docs_root_suspicious`
+   * detection. Optional — when absent, the docs-root detector is skipped
+   * (worktree / no-catalog scenarios remain functional).
+   */
+  catalog?: Pick<LibraryCatalog, 'list' | 'getRoutable'>;
 }
 
 export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (app, opts) => {
@@ -112,7 +128,27 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       truthSourceRef,
       recentArtifactRefs: rawArtifactRefs,
       currentThreadId,
+      intent,
     } = parseResult.data;
+
+    // F200 HW-1: intent=coverage → CoverageSearchService bypass (separate pipeline)
+    // Wiring gaps (by design for HW-1 v1, documented in plan §Task 6):
+    //   - conventionGraph: no production ConventionGraphAdapter yet (F242 soft dep).
+    //     Service gracefully degrades with `degraded: [{source: 'convention-graph', ...}]`.
+    //   - onCoverageEvent: telemetry callback not wired; persistence deferred to HW-1 Phase 2.
+    //     catId/invocationId in CoverageSearchEvent are placeholder empty strings until then.
+    if (intent === 'coverage') {
+      try {
+        const { CoverageSearchService } = await import('../domains/memory/CoverageSearchService.js');
+        const coverageService = new CoverageSearchService(opts.evidenceStore);
+        const coverageResult = await coverageService.search(q);
+        return coverageResult;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        reply.status(500);
+        return { error: 'Coverage search failed', details: message };
+      }
+    }
 
     const effectiveLimit = limit ?? 5;
     // F163: freeze flags once per request, compute variant ID
@@ -316,12 +352,26 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
   });
 
   // F102 D-2/D-8: Memory status (AC-D8)
+  // F188 Phase K (AC-K1/K3): adds `functionalStatus` + `configWarnings[]` to
+  // surface configuration health without touching the existing `healthy` field
+  // semantic (KD-14 — external healthcheck backward compat).
   app.get('/api/evidence/status', async () => {
+    // Helper: shape unhealthy responses with the Phase K schema extension so
+    // the response type is stable across healthy / no_db / query_error paths
+    // (砚砚 R3 P2-2). Frontend keeps red fatal banner priority when healthy=false.
+    const fatalShape = (reason: 'no_db' | 'query_error') => ({
+      backend: 'sqlite' as const,
+      healthy: false as const,
+      reason,
+      functionalStatus: 'degraded' as FunctionalStatus,
+      configWarnings: [] as ConfigWarning[],
+    });
+
     try {
       const db = (opts.evidenceStore as { getDb?: () => unknown }).getDb?.() as
         | { prepare: (sql: string) => { get: () => Record<string, unknown> } }
         | undefined;
-      if (!db) return { backend: 'sqlite', healthy: false, reason: 'no_db' };
+      if (!db) return fatalShape('no_db');
 
       const docCount = (db.prepare('SELECT count(*) AS c FROM evidence_docs').get() as { c: number }).c;
       const threadCount = (
@@ -386,6 +436,32 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         /* vec0 virtual table missing — install dialog blocked this case */
       }
 
+      // F188 Phase K (AC-K2): build signals → evaluate config warnings →
+      // derive functionalStatus. Pure compute, no extra DB / fs cost beyond
+      // the docs-root inspection inside detectDocsRootSuspicious.
+      const catalogCollections: CatalogCollectionSnapshot[] = opts.catalog
+        ? opts.catalog.list().map((m) => ({
+            id: m.id,
+            root: m.root,
+            kind: m.kind,
+            status: m.status,
+          }))
+        : [];
+      const configWarnings = evaluateConfigWarnings({
+        dbCounts: {
+          docs_count: docCount,
+          edges_count: edgeCount,
+          vectors_count: vectorsCount,
+          passage_vectors_count: passageVectorCount,
+          threads_count: threadCount,
+          passages_count: passageCount,
+        },
+        embeddingMeta: { embedding_model: embeddingModel },
+        embeddingService: { passage_vectors_supported: passageVectorsSupported },
+        catalogSnapshot: { collections: catalogCollections },
+      });
+      const functionalStatus = computeFunctionalStatus(configWarnings);
+
       return {
         backend: 'sqlite',
         healthy: true,
@@ -398,9 +474,12 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         vectors_count: vectorsCount,
         last_rebuild_at: lastUpdated,
         embedding_model: embeddingModel,
+        // F188 Phase K (AC-K1/K3): config health surface.
+        functionalStatus,
+        configWarnings,
       };
     } catch {
-      return { backend: 'sqlite', healthy: false, reason: 'query_error' };
+      return fatalShape('query_error');
     }
   });
 

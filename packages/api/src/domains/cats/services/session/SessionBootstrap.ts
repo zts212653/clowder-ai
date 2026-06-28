@@ -103,6 +103,7 @@ export interface SessionBootstrapOptions {
  * Build bootstrap context for a cat's current session.
  * Returns null if cat is on Session #1 (no prior context to inject).
  */
+/* @segment B1 — Session Bootstrap */
 export async function buildSessionBootstrap(
   opts: SessionBootstrapOptions,
   catId: CatId,

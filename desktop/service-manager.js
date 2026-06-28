@@ -100,7 +100,7 @@ class ServiceManager {
     // ---- Pre-flight checks ----
     const nodeExe = resolveNode(this.root);
     if (!nodeExe) {
-      throw new Error('Node.js not found. Please install Node.js >= 20 from https://nodejs.org/');
+      throw new Error('Node.js not found. Please install Node.js >= 24 from https://nodejs.org/');
     }
     log(`Node.js found: ${nodeExe}`);
 

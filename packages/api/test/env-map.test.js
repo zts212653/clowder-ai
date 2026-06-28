@@ -148,17 +148,6 @@ describe('F161: env-map — resolveEnvMap', () => {
     });
   });
 
-  it('resolves dare built-in mapping', () => {
-    const result = resolveEnvMap('dare', undefined, {
-      apiKey: 'dare-xxx',
-      baseUrl: 'https://dare.example.com',
-    });
-    assert.deepEqual(result, {
-      DARE_API_KEY: 'dare-xxx',
-      DARE_ENDPOINT: 'https://dare.example.com',
-    });
-  });
-
   it('generic acp clientId uses user templates', () => {
     const result = resolveEnvMap(
       'acp',
@@ -264,7 +253,7 @@ describe('F161: env-map — extractUserEnvTemplates', () => {
     });
   });
 
-  it('does not classify unsupported placeholders as Cat Cafe templates', () => {
+  it('does not classify unsupported placeholders as Clowder AI templates', () => {
     const result = extractUserEnvTemplates({
       HTTPS_PROXY: 'http://${PROXY_HOST}:8080',
       MIXED_TEMPLATE: '${api_key}:${PROXY_HOST}',
@@ -291,7 +280,7 @@ describe('F161: env-map — extractUserEnvTemplates', () => {
 
 describe('F161: env-map — BUILTIN_ENV_MAPS coverage', () => {
   it('has mappings for all expected providers', () => {
-    const expected = ['anthropic', 'openai', 'google', 'openrouter', 'kimi', 'dare', 'opencode'];
+    const expected = ['anthropic', 'openai', 'google', 'openrouter', 'kimi', 'opencode'];
     for (const provider of expected) {
       assert.ok(BUILTIN_ENV_MAPS[provider], `Missing built-in map for ${provider}`);
       assert.ok(Object.keys(BUILTIN_ENV_MAPS[provider]).length > 0, `Empty built-in map for ${provider}`);

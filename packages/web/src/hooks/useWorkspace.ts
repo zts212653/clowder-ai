@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { buildWorktreeAliasMap, resolveListedWorktreeId } from '@/utils/worktree-id-alias';
 
 export interface WorktreeEntry {
   id: string;
+  canonicalId?: string | null;
   root: string;
   branch: string;
   head: string;
@@ -55,6 +57,8 @@ export function useWorkspace() {
   const worktreeId = useChatStore((s) => s.workspaceWorktreeId);
   const openFilePath = useChatStore((s) => s.workspaceOpenFilePath);
   const setWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
+  const normalizeWorktreeId = useChatStore((s) => s.normalizeWorkspaceWorktreeId);
+  const setWorktreeAliases = useChatStore((s) => s.setWorkspaceWorktreeAliases);
   const projectPath = useChatStore((s) => s.currentProjectPath);
 
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
@@ -78,16 +82,20 @@ export function useWorkspace() {
         const data = await res.json();
         const newList: typeof worktrees = data.worktrees ?? [];
         setWorktrees(newList);
+        const worktreeAliases = buildWorktreeAliasMap(newList);
+        setWorktreeAliases(worktreeAliases, projectPath);
         // Auto-select first worktree if none selected or current was removed
-        const currentStillExists = worktreeId && newList.some((w: { id: string }) => w.id === worktreeId);
-        if (!currentStillExists && newList.length > 0) {
+        const listedWorktreeId = resolveListedWorktreeId(newList, worktreeId, worktreeAliases);
+        if (listedWorktreeId && listedWorktreeId !== worktreeId) {
+          normalizeWorktreeId(listedWorktreeId);
+        } else if (!listedWorktreeId && newList.length > 0) {
           setWorktreeId(newList[0].id);
         }
       }
     } catch {
       /* ignore */
     }
-  }, [worktreeId, setWorktreeId, projectPath]);
+  }, [worktreeId, setWorktreeId, normalizeWorktreeId, setWorktreeAliases, projectPath]);
 
   useEffect(() => {
     fetchWorktrees();

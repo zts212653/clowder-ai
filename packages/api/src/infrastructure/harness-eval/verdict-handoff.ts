@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { evalDomainIdSchema } from './domain/eval-domain-registry.js';
 
 const stringRefArray = z.array(z.string().min(1));
 const nonEmptyStringArray = stringRefArray.min(1);
@@ -7,7 +8,7 @@ const isoDateTime = z.string().datetime({ offset: true });
 const verdictHandoffPacketSchema = z
   .object({
     id: z.string().min(1),
-    domainId: z.enum(['eval:a2a', 'eval:memory', 'eval:sop', 'eval:capability-wakeup', 'eval:task-outcome']),
+    domainId: evalDomainIdSchema,
     createdAt: isoDateTime,
     phenomenon: z.string().min(1),
     harnessUnderEval: z.object({

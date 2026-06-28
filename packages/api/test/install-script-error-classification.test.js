@@ -156,15 +156,26 @@ test('Step 5 fails fast on non-lockfile errors instead of swapping to plain pnpm
 
 test('Invoke-PnpmInstallWithCapturedOutput trusts $LASTEXITCODE over pipeline exceptions (DEP0169 tolerance)', () => {
   // Node 24 emits DEP0169 deprecation warnings to stderr. With $ErrorActionPreference=Stop,
-  // the 2>&1 | Tee-Object pipeline can throw even when pnpm itself exited 0.
+  // the 2>&1 pipeline can throw even when pnpm itself exited 0.
   // The catch path must check $LASTEXITCODE and treat exit 0 as success, not failure.
   const body = getInvokePnpmInstallFunctionBody();
-  // The catch block must reference $LASTEXITCODE so it can distinguish a real
-  // process failure from a benign pipeline throw on stderr.
-  const catchBlock = body.match(/} catch \{[\s\S]*?\}/);
-  assert.ok(catchBlock, 'must have catch block');
+  // Anchor to the actual pnpm pipeline catch block by locating the
+  // "Two distinct scenarios reach this catch:" comment, which uniquely
+  // identifies the DEP0169 tolerance catch (not the bare spinner catch {}).
+  const scenariosIdx = body.indexOf('Two distinct scenarios');
+  assert.ok(scenariosIdx >= 0, 'must have DEP0169 tolerance catch block with "Two distinct scenarios" comment');
+  // Walk backward from the comment to find its enclosing '} catch {'
+  const beforeComment = body.substring(0, scenariosIdx);
+  const catchIdx = beforeComment.lastIndexOf('} catch {');
+  assert.ok(catchIdx >= 0, 'must have catch block before "Two distinct scenarios" comment');
+  // Slice from catch start to the following '} finally {' to capture the
+  // full pnpm pipeline catch block (excluding later code outside it).
+  const fromCatch = body.substring(catchIdx);
+  const finallyIdx = fromCatch.indexOf('} finally {');
+  assert.ok(finallyIdx >= 0, 'catch block must be followed by } finally {');
+  const catchBlock = fromCatch.substring(0, finallyIdx);
   assert.match(
-    catchBlock[0],
+    catchBlock,
     /\$(?:global:)?LASTEXITCODE\s*-eq\s*0/,
     'catch block must check $LASTEXITCODE (optionally with $global: scope) -eq 0 to avoid DEP0169 false failures',
   );
@@ -204,22 +215,23 @@ test('Invoke-PnpmInstallWithCapturedOutput calls resolved pnpm directly inside t
   // (Invoke-Pnpm -> Invoke-ToolCommand -> & $toolCommand) hides the native exit
   // code from the captured pipeline. Fix: resolve pnpm up-front and invoke it
   // directly inside the captured pipeline (`& $pnpmCommand @CommandArgs 2>&1
-  // | Tee-Object ...`) so the native command is the only producer of
+  // | ForEach-Object ...`) so the native command is the only producer of
   // $LASTEXITCODE in scope.
   const body = getInvokePnpmInstallFunctionBody();
   assert.match(body, /Resolve-PnpmCommand/, 'must resolve pnpm command upfront (not via Invoke-Pnpm wrapper)');
   // The captured pipeline must invoke the resolved pnpm command directly with
   // `& $pnpmCommand`, NOT through the Invoke-Pnpm wrapper, so PowerShell can
-  // record the native exit code in $LASTEXITCODE reliably.
+  // record the native exit code in $LASTEXITCODE reliably. The pipeline may
+  // use either Tee-Object or ForEach-Object — both preserve $LASTEXITCODE.
   assert.match(
     body,
-    /&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*Tee-Object/,
-    'captured pipeline must call & $pnpmCommand @CommandArgs 2>&1 | Tee-Object directly',
+    /&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*(?:Tee-Object|ForEach-Object)/,
+    'captured pipeline must call & $pnpmCommand @CommandArgs 2>&1 | Tee-Object or ForEach-Object directly',
   );
   assert.doesNotMatch(
     body,
-    /Invoke-Pnpm\s+-CommandArgs\s+\$CommandArgs\s+2>&1\s*\|\s*Tee-Object/,
-    'must NOT pipe Invoke-Pnpm into Tee-Object (hides native exit code from caller scope)',
+    /Invoke-Pnpm\s+-CommandArgs\s+\$CommandArgs\s+2>&1\s*\|\s*(?:Tee-Object|ForEach-Object)/,
+    'must NOT pipe Invoke-Pnpm into Tee-Object/ForEach-Object (hides native exit code from caller scope)',
   );
 });
 
@@ -247,10 +259,19 @@ test('Invoke-PnpmInstallWithCapturedOutput reads $global:LASTEXITCODE explicitly
   assert.ok(successCheck, 'must have an Ok = $... -eq 0 check on the success path');
   assert.equal(successCheck[1], '$global:LASTEXITCODE', 'success path must read $global:LASTEXITCODE explicitly');
   // The catch path must also read $global:LASTEXITCODE for the same reason.
-  const catchBlock = body.match(/} catch \{[\s\S]*?\}\s*\}\s*finally/);
-  assert.ok(catchBlock, 'must have catch block');
+  // Anchor to the pnpm pipeline catch block using the "Two distinct scenarios"
+  // comment, then extract the block between the catch and its following finally.
+  const scenariosIdx = body.indexOf('Two distinct scenarios');
+  assert.ok(scenariosIdx >= 0, 'must have DEP0169 tolerance catch block with "Two distinct scenarios" comment');
+  const beforeComment = body.substring(0, scenariosIdx);
+  const catchIdx = beforeComment.lastIndexOf('} catch {');
+  assert.ok(catchIdx >= 0, 'must have catch block before "Two distinct scenarios" comment');
+  const fromCatch = body.substring(catchIdx);
+  const finallyIdx = fromCatch.indexOf('} finally {');
+  assert.ok(finallyIdx >= 0, 'catch block must be followed by } finally {');
+  const catchBlock = fromCatch.substring(0, finallyIdx);
   assert.match(
-    catchBlock[0],
+    catchBlock,
     /\$global:LASTEXITCODE\s*-eq\s*0/,
     'catch path must read $global:LASTEXITCODE explicitly to detect pnpm success-with-pipeline-throw',
   );
@@ -260,7 +281,7 @@ test('Invoke-PnpmInstallWithCapturedOutput temporarily downgrades ErrorActionPre
   const body = getInvokePnpmInstallFunctionBody();
   const snapshotIdx = body.indexOf('$previousErrorActionPreference = $ErrorActionPreference');
   const downgradeIdx = body.indexOf('$ErrorActionPreference = "SilentlyContinue"');
-  const invokeMatch = body.match(/&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*Tee-Object/);
+  const invokeMatch = body.match(/&\s*\$pnpmCommand\s+@CommandArgs\s+2>&1\s*\|\s*(?:Tee-Object|ForEach-Object)/);
   const invokeIdx = invokeMatch ? invokeMatch.index : -1;
   const finallyIdx = body.indexOf('} finally {');
   const restoreIdx = body.indexOf('$ErrorActionPreference = $previousErrorActionPreference');

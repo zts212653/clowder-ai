@@ -12,8 +12,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { type PlatformActionDef, type PlatformOperationStatus } from '../../HubConfigIcons';
+import { type PlatformOperationStatus } from '../../HubConfigIcons';
 import { ActionPanelBody, type ActionPhase, ConnectedBanner, type ResultState } from './ActionRendererParts';
+import {
+  type ActionApiResult,
+  classifyPollResult,
+  deriveActionState,
+  phaseForAction,
+  toResultState,
+} from './ActionRendererState';
 
 export interface ActionRendererProps {
   connectorId: string;
@@ -27,69 +34,6 @@ export interface ActionRendererProps {
   onStatusChange?: () => void;
   /** Platform theme color for the primary action button. */
   themeColor?: string;
-}
-
-interface ActionApiResult {
-  ok: boolean;
-  render?: string;
-  data?: unknown;
-  label?: string;
-}
-
-function toResultState(r: ActionApiResult): ResultState {
-  return { render: r.render ?? 'status', data: r.data, label: r.label };
-}
-
-/** Determine what phase to enter when we land on a given action. */
-function phaseForAction(
-  actionId: string | undefined,
-  actions: PlatformActionDef[],
-  disconnectId: string | undefined,
-): ActionPhase {
-  if (!actionId) return 'idle';
-  if (disconnectId && actionId === disconnectId) return 'connected';
-  const action = actions.find((a) => a.id === actionId);
-  if (action?.render === 'polling') return 'polling';
-  return 'idle';
-}
-
-function deriveActionState(
-  operation: PlatformOperationStatus,
-  actions: PlatformActionDef[],
-  configured: boolean | undefined,
-  disconnectId: string | undefined,
-  firstActionId: string | undefined,
-): { currentActionId: string | undefined; lastResult: ResultState | undefined; phase: ActionPhase } {
-  const persistedActionId = operation.currentAction;
-  if (persistedActionId && disconnectId && persistedActionId === disconnectId && configured !== true) {
-    return { currentActionId: firstActionId, lastResult: undefined, phase: 'idle' };
-  }
-
-  const currentActionId = persistedActionId ?? (configured ? disconnectId : undefined) ?? firstActionId;
-  if (!operation.currentAction && configured && disconnectId) {
-    return { currentActionId, lastResult: operation.lastResult, phase: 'connected' };
-  }
-  const initial = phaseForAction(operation.currentAction, actions, disconnectId);
-  return {
-    currentActionId,
-    lastResult: operation.lastResult,
-    phase: initial === 'idle' && operation.lastResult ? 'result' : initial,
-  };
-}
-
-/** Classify a poll response into retry / continue / done with parsed state. */
-type PollVerdict =
-  | { outcome: 'retry' }
-  | { outcome: 'error'; message: string }
-  | { outcome: 'continue'; state: ResultState }
-  | { outcome: 'done'; state: ResultState };
-
-function classifyPollResult(raw: ActionApiResult | null, actionRender?: string): PollVerdict {
-  if (!raw) return { outcome: 'retry' };
-  if (!raw.ok) return { outcome: 'error', message: raw.label ?? 'Action failed' };
-  const state = toResultState(raw);
-  if (raw.render === 'polling' || raw.render === actionRender) return { outcome: 'continue', state };
-  return { outcome: 'done', state };
 }
 
 // ── Main component ──
@@ -211,6 +155,21 @@ export function ActionRenderer({
         }
         if (verdict.outcome === 'error') {
           stopTimers();
+          setPhase('error');
+          setErrorMsg(verdict.message);
+          return;
+        }
+        if (verdict.outcome === 'terminal') {
+          stopTimers();
+          if (action?.rollback) {
+            void resetOperation(action.rollback).finally(() => {
+              onStatusChange?.();
+            });
+            setCurrentActionId(action.rollback);
+            setLastResult(undefined);
+          } else {
+            setLastResult(verdict.state);
+          }
           setPhase('error');
           setErrorMsg(verdict.message);
           return;

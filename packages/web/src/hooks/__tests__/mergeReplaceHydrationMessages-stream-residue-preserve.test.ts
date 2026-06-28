@@ -268,11 +268,79 @@ describe('mergeReplaceHydrationMessages — stream residue preserve cases', () =
     expect(result.stats.preservedLocalCount).toBe(1);
   });
 
+  it('preserves contentful residue when text coverage is only manufactured across persisted siblings', () => {
+    const firstTool = { detail: 'stdout: first persisted segment' };
+    const secondTool = { detail: 'stdout: second persisted segment' };
+    const history: ChatMessage[] = [
+      makeMsg({
+        id: '0001781850200000-000620-first-history',
+        content: 'A B',
+        toolEvents: [makeToolEvent('tool-server-first', firstTool)],
+        extra: {
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: HISTORY_TURN_ID,
+          },
+        },
+      }),
+      makeMsg({
+        id: '0001781850200001-000621-second-history',
+        content: 'C D',
+        toolEvents: [makeToolEvent('tool-server-second', secondTool)],
+        extra: {
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: HISTORY_TURN_ID,
+          },
+        },
+      }),
+    ];
+    const current: ChatMessage[] = [
+      makeLocalResidue({
+        content: 'B C',
+        toolEvents: [makeToolEvent('tool-client-first', firstTool), makeToolEvent('tool-client-second', secondTool)],
+      }),
+    ];
+
+    const result = mergeReplaceHydrationMessages(history, current, {});
+
+    expect(result.messages.map((msg) => msg.id).sort()).toEqual([
+      '0001781850200000-000620-first-history',
+      '0001781850200001-000621-second-history',
+      `msg-${RESIDUE_TURN_ID}-codex`,
+    ]);
+    expect(result.stats.preservedLocalCount).toBe(1);
+  });
+
   it('preserves empty msg-* stream residue while the live cat invocation still claims it', () => {
     const history: ChatMessage[] = [makeHistoryMessage()];
     const current: ChatMessage[] = [makeLocalResidue()];
     const currentCatInvocations: Record<string, CatInvocationInfo> = {
       codex: { invocationId: PARENT_INVOCATION_ID, turnInvocationId: RESIDUE_TURN_ID },
+    };
+
+    const result = mergeReplaceHydrationMessages(history, current, currentCatInvocations);
+
+    expect(result.messages.map((msg) => msg.id).sort()).toEqual([
+      '0001781577227533-000193-f22d6fb6',
+      `msg-${RESIDUE_TURN_ID}-codex`,
+    ]);
+    expect(result.stats.preservedLocalCount).toBe(1);
+  });
+
+  it('preserves empty msg-* stream residue while the claiming invocation snapshot is still running', () => {
+    const history: ChatMessage[] = [makeHistoryMessage()];
+    const current: ChatMessage[] = [makeLocalResidue()];
+    const currentCatInvocations: Record<string, CatInvocationInfo> = {
+      codex: {
+        invocationId: PARENT_INVOCATION_ID,
+        turnInvocationId: RESIDUE_TURN_ID,
+        taskProgress: {
+          tasks: [],
+          lastUpdate: 1781875600000,
+          snapshotStatus: 'running',
+        },
+      },
     };
 
     const result = mergeReplaceHydrationMessages(history, current, currentCatInvocations);

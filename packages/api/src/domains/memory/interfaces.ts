@@ -261,6 +261,8 @@ export interface SearchOptions {
   sceneId?: string;
   /** F200 v1.1 DF-3: include explainability fields in results */
   explain?: boolean;
+  /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
+  intent?: 'topk' | 'coverage';
 }
 
 export type SearchDegradeReason =

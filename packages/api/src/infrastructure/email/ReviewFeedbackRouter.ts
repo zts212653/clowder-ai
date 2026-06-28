@@ -39,9 +39,16 @@ export interface PrReviewDecision {
   readonly authorAssociation?: string;
 }
 
+export interface ReviewFeedbackRoutingAudit {
+  readonly kind: 'legacy-auto-rotated-repaired';
+  readonly previousThreadId: string;
+  readonly repairedThreadId: string;
+}
+
 export interface ReviewFeedbackSignal {
   readonly repoFullName: string;
   readonly prNumber: number;
+  readonly routingAudit?: ReviewFeedbackRoutingAudit;
   readonly newComments: readonly PrFeedbackComment[];
   readonly newDecisions: readonly PrReviewDecision[];
 }
@@ -68,7 +75,7 @@ export class ReviewFeedbackRouter {
     signal: ReviewFeedbackSignal,
     tracking: { threadId: string; catId: string; userId: string; trackingInstructions?: string },
   ): Promise<ReviewFeedbackRouteResult> {
-    if (signal.newComments.length === 0 && signal.newDecisions.length === 0) {
+    if (signal.newComments.length === 0 && signal.newDecisions.length === 0 && !signal.routingAudit) {
       return { kind: 'skipped', reason: 'no new feedback' };
     }
 
@@ -115,6 +122,10 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
   const maxSev = getMaxSeverity(signal.newComments, signal.newDecisions);
   if (maxSev) {
     lines.push(`**Review 检测到 ${maxSev}**`, '');
+  }
+
+  if (signal.routingAudit) {
+    lines.push(...formatRoutingAudit(signal.routingAudit), '');
   }
 
   lines.push(`📋 **Review Feedback** — PR #${signal.prNumber} (${signal.repoFullName})`);
@@ -175,6 +186,21 @@ export function buildReviewFeedbackContent(signal: ReviewFeedbackSignal, trackin
   }
 
   return lines.join('\n');
+}
+
+function formatRoutingAudit(audit: ReviewFeedbackRoutingAudit): string[] {
+  switch (audit.kind) {
+    case 'legacy-auto-rotated-repaired':
+      return [
+        '⚠️ **PR review feedback 路由异常已修复**',
+        `检测到 PR tracking task 指向 auto-rotated thread \`${audit.previousThreadId}\`，已修回注册 thread \`${audit.repairedThreadId}\`。`,
+        '后续 review feedback 会继续投回注册 thread。',
+      ];
+    default: {
+      const _exhaustive: never = audit.kind;
+      return _exhaustive;
+    }
+  }
 }
 
 function decisionEmoji(state: PrReviewDecision['state']): string {

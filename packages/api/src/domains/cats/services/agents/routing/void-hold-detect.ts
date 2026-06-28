@@ -10,10 +10,20 @@
  * the matched HOLD_PATTERN id as `trigger` so per-fire sample evidence can bucket
  * fires by surface phrase (parallel to verdict-detect returning matched verdict
  * keyword). `shouldWarnVoidHold` is preserved as a backward-compatible shim.
+ *
+ * 2026-06-20 verdict eval:a2a `2026-06-20-eval-a2a-c2-void-hold-english-fix`
+ * (砚砚): 06-20 eval shows C2 void-hold at 10/122 = 8.2% above the 5% floor;
+ * 7 sampled fires dominated by `en_hold_ball_underscore` / `en_holdball_space`
+ * matching English tool/status prose in narrative body. Same false-positive
+ * class verdict-detect hit on 2026-06-16. Same surgery: scope detection to
+ * the **final routing slot** via `finalRoutingSlot()` so narrative `hold_ball`
+ * / `holdball` mentions in body (status reports, tool-name citations) no
+ * longer fire — only a hold claim in the actual final routing position does.
+ * KD-24 mechanical, no semantic classifier.
  */
 
-const FENCED_CODE_RE = /```[\s\S]*?```/g;
-const URL_RE = /https?:\/\/[^\s)\]]+/g;
+import { stripTrailingCatSignatures } from './cat-signature-strip.js';
+import { finalRoutingSlot } from './final-routing-slot.js';
 
 /**
  * Hold pattern catalog. Order matters: more-specific patterns first so a
@@ -44,25 +54,34 @@ export const HOLD_PATTERNS: readonly HoldPatternEntry[] = [
 /** Stable id list for downstream test contracts and attribution allowlists. */
 export const HOLD_PATTERN_IDS: readonly string[] = HOLD_PATTERNS.map((p) => p.id);
 
-function stripStructural(text: string): string {
-  const noFence = text.replace(FENCED_CODE_RE, '');
-  const noQuote = noFence
-    .split(/\r?\n/)
-    .filter((line) => !/^\s*>/.test(line))
-    .join('\n');
-  return noQuote.replace(URL_RE, '');
-}
-
 /**
  * Returns the matched HOLD_PATTERN id (most-specific first) or null if no hold
- * surface phrase is found in the structurally-stripped text. Used by both
- * `hasHoldTextClaim` (boolean shim) and `evaluateVoidHold` (trigger capture).
+ * surface phrase is found in the **final routing slot**.
+ *
+ * 2026-06-20 verdict (eval:a2a `2026-06-20-eval-a2a-c2-void-hold-english-fix`):
+ * Previously this scanned the entire structurally-stripped text. 06-20 eval
+ * showed C2 void-hold at 10/122 = 8.2% above the 5% floor with English
+ * `hold_ball` / `holdball` triggers dominating — cats writing tool/status
+ * prose ("the `hold_ball` flow scheduled..." / "I invoked `hold_ball` and
+ * waited") tripped the regex even though the actual final routing slot was
+ * elsewhere.
+ *
+ * Fix: scope detection to the final routing slot via `finalRoutingSlot()`
+ * (same Phase H mechanism that scopes inline-@ and verdict-without-pass —
+ * KD-24 mechanical, no semantic classifier). Trailing cat signatures are
+ * stripped first so signed messages still surface the real final paragraph.
+ *
+ * Trade-off: structural exemptions (fenced code / blockquote / URL) at the end
+ * of the message strip the slot to the previous paragraph — see `finalRoutingSlot`
+ * for the strip discipline. A hold phrase ONLY inside trailing fenced code
+ * (e.g. pasted prior-cat output) is treated as quoted, not a new claim — desired.
  */
 export function matchHoldPattern(text: string): string | null {
   if (!text) return null;
-  const stripped = stripStructural(text);
+  const slot = finalRoutingSlot(stripTrailingCatSignatures(text));
+  if (!slot) return null;
   for (const entry of HOLD_PATTERNS) {
-    if (entry.re.test(stripped)) return entry.id;
+    if (entry.re.test(slot)) return entry.id;
   }
   return null;
 }

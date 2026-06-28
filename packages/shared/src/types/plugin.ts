@@ -2,15 +2,12 @@
  * Plugin Framework Types — F202 声明式插件注册与资源编排
  *
  * F240 KD-15: PluginConfigField replaced by shared ValueConfigField.
- * Alias kept for import compatibility during transition; will be removed.
+ * Alias kept for import compatibility during transition; plugins only use value fields.
  */
 
 import type { ValueConfigField } from './config-field.js';
 
-/**
- * @deprecated Use ValueConfigField from config-field.ts directly.
- * Alias kept temporarily for import compat — plugins only use value fields.
- */
+/** @deprecated Use ValueConfigField from config-field.ts directly. */
 export type PluginConfigField = ValueConfigField;
 
 /** Plugin health check declaration */

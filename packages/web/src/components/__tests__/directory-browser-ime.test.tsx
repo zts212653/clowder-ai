@@ -51,7 +51,7 @@ describe('DirectoryBrowser IME guard', () => {
 
   it('prevents Enter default and does not create folder while composing', async () => {
     await act(async () => {
-      root.render(<DirectoryBrowser onSelect={vi.fn()} onCancel={vi.fn()} />);
+      root.render(<DirectoryBrowser onCancel={vi.fn()} />);
     });
 
     await act(async () => {

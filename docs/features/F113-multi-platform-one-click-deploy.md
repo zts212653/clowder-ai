@@ -26,7 +26,7 @@ community_issue: https://github.com/zts212653/clowder-ai/issues/14
 `scripts/install.sh` — 自动检测 Debian/Ubuntu、CentOS/RHEL/Fedora，安装依赖、配置环境变量、构建并启动服务。
 
 - 系统依赖检测 + 自动安装（git、curl）
-- fnm/Node.js 20 + pnpm + Redis
+- fnm/Node.js 24 + pnpm + Redis
 - AI CLI 工具安装（Claude Code、Codex、Gemini CLI）
 - TTY 安全读取（非交互环境兼容）
 - npm registry fallback（中国镜像）
@@ -41,7 +41,7 @@ community_issue: https://github.com/zts212653/clowder-ai/issues/14
 核心能力：
 - **Homebrew 自动安装**：Apple Silicon（`/opt/homebrew`）+ Intel（`/usr/local`）双路径检测；非 login shell 下也能发现已有 brew（`shellenv` 注入）
 - **Xcode CLT**：缺失时自动 `xcode-select --install`，30min 非致命超时（不阻塞安装）
-- **Node.js**：优先 fnm，fallback `brew install node@20`；keg-only formula 的 bin 路径显式注入 PATH
+- **Node.js**：优先 fnm，fallback `brew install node@24`；keg-only formula 的 bin 路径显式注入 PATH
 - **pnpm**：corepack → npm fallback；安装后无条件 `persist_user_bin` + 当前 session PATH 注入
 - **Redis**：`brew install redis` + `brew services start redis`（启动失败非致命，install 是关键）
 - **AI CLI 工具**：

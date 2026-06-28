@@ -76,7 +76,10 @@ if (mode === 'status') {
   if (mode === 'start') {
     cmd = resolve(__dirname, 'runtime-worktree.sh');
     args = ['start', ...rest];
-    env = { ...process.env };
+    env = {
+      ...process.env,
+      CAT_CAFE_DIRECT_NO_WATCH: '1',
+    };
   } else if (mode === 'start:direct') {
     cmd = resolve(__dirname, 'start-dev.sh');
     args = ['--prod-web', ...rest];

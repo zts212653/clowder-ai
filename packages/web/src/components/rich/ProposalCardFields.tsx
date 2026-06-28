@@ -39,7 +39,7 @@ export function EditField({ label, value, onChange, multiline }: EditFieldProps)
 }
 
 const REPORTING_MODE_OPTIONS: Array<{ value: ReportingModeEditValue; label: string }> = [
-  { value: 'final-only', label: '做完回报一次（默认）' },
+  { value: 'final-only', label: '自治推进，闭环后回报一次（默认）' },
   { value: 'none', label: '下游自治，不强制回报' },
   { value: 'state-transitions', label: '阶段边界回报' },
   { value: 'blocking-ack', label: '阻塞点等源 thread ack' },
@@ -49,7 +49,7 @@ export function formatReportingMode(value: ReportingModeEditValue): string {
   if (value === 'none') return 'autonomous（下游自治，无强制回报）';
   if (value === 'state-transitions') return 'state-transitions（每阶段边界回报）';
   if (value === 'blocking-ack') return 'blocking-ack（遇阻塞点等 ack）';
-  return 'final-only（默认 · 完成时回报一次）';
+  return 'final-only（默认 · 自治推进，任务闭环后回报一次）';
 }
 
 export function ReportingModeEdit({

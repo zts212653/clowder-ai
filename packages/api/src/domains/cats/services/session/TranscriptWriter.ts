@@ -4,7 +4,8 @@
  *
  * File structure per session:
  *   <dataDir>/threads/<threadId>/<catId>/sessions/<sessionId>/
- *     events.jsonl           — NDJSON events with envelope
+ *     events.jsonl           — NDJSON events with envelope (canonical, written at seal)
+ *     events.live.jsonl      — incremental crash-recovery copy (active sessions only)
  *     index.json             — sparse byte-offset index for pagination
  *     digest.extractive.json — rule-based extractive digest
  *
@@ -12,7 +13,7 @@
  *   { v:1, t:number, threadId, catId, sessionId, cliSessionId, invocationId?, eventNo, event }
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CollaborationContinuityCapsuleV1,
@@ -116,6 +117,8 @@ export class TranscriptWriter {
   private readonly indexStride: number;
   /** sessionId → buffered events */
   private buffers = new Map<string, BufferedEvent[]>();
+  /** Serialized disk write chains per session for incremental crash-recovery append. */
+  private diskWriteQueue = new Map<string, Promise<void>>();
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
@@ -129,12 +132,18 @@ export class TranscriptWriter {
       buf = [];
       this.buffers.set(session.sessionId, buf);
     }
-    buf.push({
+    const entry: BufferedEvent = {
       eventNo: buf.length,
       timestamp: Date.now(),
       ...(invocationId !== undefined ? { invocationId } : {}),
       event,
-    });
+    };
+    buf.push(entry);
+
+    // Incremental disk append for crash recovery (F232 disk fallback).
+    // Fire-and-forget: buffer is the primary source during normal operation;
+    // disk copy only matters when the process restarts and buffer is lost.
+    this.enqueueDiskAppend(session, entry);
   }
 
   /** Get buffered events for a session (for testing). */
@@ -147,6 +156,98 @@ export class TranscriptWriter {
     return this.buffers.get(sessionId)?.length ?? 0;
   }
 
+  /** Enqueue a single event append to disk. Writes are serialized per session. */
+  private enqueueDiskAppend(session: TranscriptSessionInfo, entry: BufferedEvent): void {
+    const prev = this.diskWriteQueue.get(session.sessionId) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const dir = this.sessionDir(session);
+        await mkdir(dir, { recursive: true });
+        const envelope = {
+          v: 1,
+          t: entry.timestamp,
+          threadId: session.threadId,
+          catId: session.catId,
+          sessionId: session.sessionId,
+          cliSessionId: session.cliSessionId,
+          invocationId: entry.invocationId,
+          eventNo: entry.eventNo,
+          event: entry.event,
+        };
+        await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
+      })
+      .catch(() => {
+        // Best-effort: buffer is the primary source; disk append is crash-recovery insurance.
+      });
+    this.diskWriteQueue.set(session.sessionId, next);
+  }
+
+  /** Wait for all pending incremental disk writes to complete. Primarily for testing. */
+  async drainPendingWrites(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      await this.diskWriteQueue.get(sessionId);
+    } else {
+      await Promise.all([...this.diskWriteQueue.values()]);
+    }
+  }
+
+  /**
+   * Get the current session's touched files.
+   * Merges events from both disk (events.live.jsonl — has pre-restart events)
+   * and in-memory buffer (has current events including not-yet-flushed writes).
+   * The merge is idempotent on file paths via Map key deduplication.
+   */
+  async getFilesTouched(
+    sessionId: string,
+    sessionMeta?: { threadId: string; catId: string },
+  ): Promise<ExtractiveDigestV1['filesTouched']> {
+    const filePaths = new Map<string, Set<string>>();
+
+    // Merge from disk: has pre-restart events + already-flushed post-restart events
+    if (sessionMeta) {
+      const sessionDir = join(this.dataDir, 'threads', sessionMeta.threadId, sessionMeta.catId, 'sessions', sessionId);
+      const diskEvents = await this.readEventsFromLiveFile(sessionDir);
+      for (const entry of diskEvents) {
+        const evt = entry.event;
+        recordFilesTouched(filePaths, evt, (evt.toolName ?? evt.name) as string | undefined);
+      }
+    }
+
+    // Overlay in-memory buffer: has current events + not-yet-flushed writes
+    const buf = this.buffers.get(sessionId) ?? [];
+    for (const entry of buf) {
+      const evt = entry.event;
+      recordFilesTouched(filePaths, evt, (evt.toolName ?? evt.name) as string | undefined);
+    }
+
+    return materializeFilesTouched(filePaths);
+  }
+
+  /** Read raw events from the incremental live file. Returns [] if file doesn't exist. */
+  private async readEventsFromLiveFile(sessionDir: string): Promise<BufferedEvent[]> {
+    try {
+      const content = await readFile(join(sessionDir, 'events.live.jsonl'), 'utf-8');
+      const events: BufferedEvent[] = [];
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const envelope = JSON.parse(line);
+          events.push({
+            eventNo: events.length,
+            timestamp: envelope.t,
+            ...(envelope.invocationId !== undefined ? { invocationId: envelope.invocationId } : {}),
+            event: envelope.event,
+          });
+        } catch {
+          // Skip malformed lines
+        }
+      }
+      return events;
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * Flush buffered events to disk + generate index + extractive digest.
    * Clears the buffer after successful write.
@@ -155,12 +256,38 @@ export class TranscriptWriter {
     session: TranscriptSessionInfo,
     sealTimestamps?: { createdAt: number; sealedAt: number; sealReason?: string },
   ): Promise<void> {
-    const buf = this.buffers.get(session.sessionId);
-    if (!buf || buf.length === 0) {
+    let buf = this.buffers.get(session.sessionId) ?? [];
+
+    // Drain pending incremental writes before reading the live file.
+    await this.drainPendingWrites(session.sessionId);
+
+    const sessionDir = this.sessionDir(session);
+
+    // Recover pre-restart events from live file, merging with the in-memory
+    // buffer instead of replacing. The buffer is authoritative for post-restart
+    // events — it may include events whose disk append silently failed
+    // (enqueueDiskAppend is best-effort, catch swallows errors).
+    // This also covers the zero-post-restart seal case: buffer is empty but
+    // events.live.jsonl has all pre-restart events.
+    const liveEvents = await this.readEventsFromLiveFile(sessionDir);
+    if (liveEvents.length > 0) {
+      // Content-based dedup: fingerprint each buffer event so we can identify
+      // which live-file events are disk-only (pre-restart) vs duplicates of
+      // buffer events that also made it to disk.
+      const bufKeys = new Set(buf.map((e) => `${e.timestamp}:${JSON.stringify(e.event)}`));
+      const diskOnly = liveEvents.filter((e) => !bufKeys.has(`${e.timestamp}:${JSON.stringify(e.event)}`));
+      buf = [...diskOnly, ...buf];
+      // Re-number eventNo sequentially after merge.
+      for (let i = 0; i < buf.length; i++) {
+        buf[i] = { ...buf[i], eventNo: i };
+      }
+      this.buffers.set(session.sessionId, buf);
+    }
+
+    if (buf.length === 0) {
       return;
     }
 
-    const sessionDir = this.sessionDir(session);
     await mkdir(sessionDir, { recursive: true });
 
     // 1. Write events.jsonl
@@ -207,8 +334,13 @@ export class TranscriptWriter {
       await writeFile(join(sessionDir, 'digest.extractive.json'), JSON.stringify(digest, null, 2), 'utf-8');
     }
 
-    // Clear buffer
+    // Clear buffer + disk write queue
     this.buffers.delete(session.sessionId);
+    this.diskWriteQueue.delete(session.sessionId);
+
+    // Remove the incremental crash-recovery file — the canonical events.jsonl is now the source.
+    // Best-effort: file may not exist if no incremental writes happened.
+    await unlink(join(sessionDir, 'events.live.jsonl')).catch(() => {});
   }
 
   /**
@@ -241,18 +373,7 @@ export class TranscriptWriter {
       // Tool use events
       if (evtType === 'tool_use' && typeof evtName === 'string') {
         toolNames.add(evtName);
-
-        // Extract file paths from tool input (AgentMessage: toolInput, raw: input)
-        const input = (evt.toolInput ?? evt.input) as Record<string, unknown> | undefined;
-        if (input) {
-          const filePath = (input.file_path ?? input.path) as string | undefined;
-          if (filePath && typeof filePath === 'string') {
-            const ops = filePaths.get(filePath) ?? new Set();
-            const opName = this.toolNameToOp(evtName);
-            if (opName) ops.add(opName);
-            filePaths.set(filePath, ops);
-          }
-        }
+        recordFilesTouched(filePaths, evt, evtName);
       }
 
       // Error events — AgentMessage uses type='error'+error field;
@@ -334,10 +455,7 @@ export class TranscriptWriter {
           toolNames: [...toolNames],
         },
       ],
-      filesTouched: [...filePaths.entries()].map(([path, ops]) => ({
-        path,
-        ops: [...ops],
-      })),
+      filesTouched: materializeFilesTouched(filePaths),
       errors: digestErrors,
       ...(noiseSummaries.length > 0 ? { diagnostics: { noise: noiseSummaries } } : {}),
       recentMessages: recentMessages.slice(-5),
@@ -356,29 +474,70 @@ export class TranscriptWriter {
 
     await writeFile(join(sessionDir, 'digest.handoff.md'), `${frontmatter}\n\n${body}\n`, 'utf-8');
   }
-
-  /** Map tool name to file operation type. */
-  private toolNameToOp(name: string): string | null {
-    switch (name.toLowerCase()) {
-      case 'write':
-        return 'create';
-      case 'edit':
-        return 'edit';
-      case 'delete':
-        return 'delete';
-      case 'read':
-      case 'grep':
-      case 'glob':
-        return 'read';
-      default:
-        return null;
-    }
-  }
-
   /** Compute session directory path. */
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
   }
+}
+
+function recordFilesTouched(
+  filePaths: Map<string, Set<string>>,
+  evt: Record<string, unknown>,
+  evtName: string | undefined,
+): void {
+  if (evt.type !== 'tool_use' || typeof evtName !== 'string') return;
+
+  const input = (evt.toolInput ?? evt.input) as Record<string, unknown> | undefined;
+  if (!input) return;
+  const opName = toolNameToOp(evtName);
+  const filePathsTouched = extractToolPaths(input, evtName);
+  for (const filePath of filePathsTouched) {
+    const ops = filePaths.get(filePath) ?? new Set<string>();
+    if (opName) ops.add(opName);
+    filePaths.set(filePath, ops);
+  }
+}
+
+function materializeFilesTouched(filePaths: Map<string, Set<string>>): ExtractiveDigestV1['filesTouched'] {
+  return [...filePaths.entries()].map(([path, ops]) => ({
+    path,
+    ops: [...ops],
+  }));
+}
+
+function toolNameToOp(name: string): string | null {
+  switch (name.toLowerCase()) {
+    case 'write':
+      return 'create';
+    case 'edit':
+    case 'file_change':
+      return 'edit';
+    case 'delete':
+      return 'delete';
+    case 'read':
+    case 'grep':
+    case 'glob':
+      return 'read';
+    default:
+      return null;
+  }
+}
+
+function extractToolPaths(input: Record<string, unknown>, toolName: string): string[] {
+  const directPath = (input.file_path ?? input.path) as string | undefined;
+  if (directPath && typeof directPath === 'string') return [directPath];
+
+  if (toolName.toLowerCase() !== 'file_change' || !Array.isArray(input.changes)) return [];
+
+  return input.changes
+    .map((change) => {
+      if (typeof change === 'string') return change;
+      if (change && typeof change === 'object' && typeof (change as { path?: unknown }).path === 'string') {
+        return (change as { path: string }).path;
+      }
+      return null;
+    })
+    .filter((path): path is string => typeof path === 'string' && path.length > 0);
 }
 
 function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim?: boolean }): string | null {

@@ -95,14 +95,16 @@ describe('antigravity-image-publisher', () => {
         'Completed At: 2026-04-24T01:21:26Z',
         'Using prompt: bengal cat portrait...',
         '',
-        'Generated image is saved at /home/user/bengal_cat_portrait_1776993686675.png.',
+        'Generated image is saved at /home/user/.gemini/antigravity/brain/678b53ee-38c6-43b9-b3d6-298d801cfbde/bengal_cat_portrait_1776993686675.png.',
         '',
         ' Do not output the path of this image to show to the user since the user can already see it.',
       ].join('\n');
 
       const paths = extractAbsoluteImagePaths(text);
 
-      assert.deepEqual(paths, ['/home/user/bengal_cat_portrait_1776993686675.png']);
+      assert.deepEqual(paths, [
+        '/home/user/.gemini/antigravity/brain/678b53ee-38c6-43b9-b3d6-298d801cfbde/bengal_cat_portrait_1776993686675.png',
+      ]);
     });
 
     it('strips multiple trailing punctuation kinds (.,;:!?)', async () => {

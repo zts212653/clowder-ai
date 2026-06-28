@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 const HELPER_PATH = resolve(process.cwd(), 'scripts/brand-dictionary-helper.mjs');
@@ -150,6 +152,106 @@ describe('brand-dictionary-helper', () => {
   // ── CLI interface (for bash consumption) ──
 
   describe('CLI --classify-path', () => {
+    it('runs from a clean tree without node_modules', () => {
+      const sandbox = mkdtempSync(join(tmpdir(), 'cc-brand-helper-clean-'));
+      try {
+        mkdirSync(join(sandbox, 'scripts'), { recursive: true });
+        mkdirSync(join(sandbox, 'assets'), { recursive: true });
+        copyFileSync(HELPER_PATH, join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'));
+        copyFileSync(
+          resolve(process.cwd(), 'assets/brand-dictionary.yaml'),
+          join(sandbox, 'assets', 'brand-dictionary.yaml'),
+        );
+
+        const output = execFileSync(
+          'node',
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
+        );
+        const result = JSON.parse(output.trim());
+        assert.equal(result.classification, 'manual-port');
+        assert.equal(result.risk, 'P0');
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    });
+
+    it('ignores YAML inline comments in consumed clean-tree scalars', () => {
+      const sandbox = mkdtempSync(join(tmpdir(), 'cc-brand-helper-comments-'));
+      try {
+        mkdirSync(join(sandbox, 'scripts'), { recursive: true });
+        mkdirSync(join(sandbox, 'assets'), { recursive: true });
+        copyFileSync(HELPER_PATH, join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'));
+
+        const dictionary = readFileSync(resolve(process.cwd(), 'assets/brand-dictionary.yaml'), 'utf-8')
+          .replace('pattern: "assets/system-prompts/**"', 'pattern: "assets/system-prompts/**" # P0 anchor')
+          .replace('- "Clowder AI"', '- "Clowder AI" # accented product variant');
+        writeFileSync(join(sandbox, 'assets', 'brand-dictionary.yaml'), dictionary);
+
+        const classifyOutput = execFileSync(
+          'node',
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
+        );
+        const classifyResult = JSON.parse(classifyOutput.trim());
+        assert.equal(classifyResult.classification, 'manual-port');
+        assert.equal(classifyResult.risk, 'P0');
+
+        const termsOutput = execFileSync(
+          'node',
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--home-terms'],
+          {
+            encoding: 'utf-8',
+            cwd: sandbox,
+            env: { ...process.env, NODE_PATH: '' },
+          },
+        );
+        const terms = JSON.parse(termsOutput);
+        const primary = terms.find((term) => term.id === 'product.primary');
+        assert.ok(primary.homePatterns.includes('Clowder AI'));
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts YAML inline comments on consumed clean-tree section headers', () => {
+      const sandbox = mkdtempSync(join(tmpdir(), 'cc-brand-helper-sections-'));
+      try {
+        mkdirSync(join(sandbox, 'scripts'), { recursive: true });
+        mkdirSync(join(sandbox, 'assets'), { recursive: true });
+        copyFileSync(HELPER_PATH, join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'));
+
+        const dictionary = readFileSync(resolve(process.cwd(), 'assets/brand-dictionary.yaml'), 'utf-8')
+          .replace(/^terms:/m, 'terms: # brand terms')
+          .replace(/^path_policies:/m, 'path_policies: # inbound rules');
+        writeFileSync(join(sandbox, 'assets', 'brand-dictionary.yaml'), dictionary);
+
+        const classifyOutput = execFileSync(
+          'node',
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
+        );
+        const classifyResult = JSON.parse(classifyOutput.trim());
+        assert.equal(classifyResult.classification, 'manual-port');
+        assert.equal(classifyResult.risk, 'P0');
+
+        const termsOutput = execFileSync(
+          'node',
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--home-terms'],
+          {
+            encoding: 'utf-8',
+            cwd: sandbox,
+            env: { ...process.env, NODE_PATH: '' },
+          },
+        );
+        const terms = JSON.parse(termsOutput);
+        const primary = terms.find((term) => term.id === 'product.primary');
+        assert.ok(primary.homePatterns.includes('Clowder AI'));
+      } finally {
+        rmSync(sandbox, { recursive: true, force: true });
+      }
+    });
+
     it('outputs JSON classification for a manual-port path', () => {
       const output = execFileSync('node', [HELPER_PATH, '--classify-path', 'assets/system-prompts/foo.md'], {
         encoding: 'utf-8',

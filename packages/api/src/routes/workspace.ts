@@ -317,7 +317,11 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     // Prefix foreign repo worktree IDs with a short hash to prevent cross-repo collision
     if (repoRoot) {
       const prefix = createHash('sha256').update(repoRoot).digest('hex').slice(0, 6);
-      for (const e of entries) e.id = `${prefix}_${e.id}`;
+      for (const e of entries) {
+        const canonicalId = e.id;
+        e.id = `${prefix}_${canonicalId}`;
+        e.canonicalId = canonicalId;
+      }
     }
     const linked = await getLinkedRootsAsync();
     const all = [...entries, ...linked];

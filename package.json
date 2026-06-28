@@ -48,8 +48,7 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
-    "check:biome-version": "node -e \"const pkg=require('./package.json');const v=pkg.devDependencies?.['@biomejs/biome']??'?';console.log('biome lockfile version:',v)\"",
-    "check": "pnpm biome check . --diagnostic-level=error && pnpm check:features && pnpm check:sop-definitions && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:pre-merge-gate && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only",
+    "check": "pnpm biome check . --diagnostic-level=error && pnpm check:features && pnpm check:capability-tips && pnpm check:sop-definitions && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:pre-merge-gate && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only",
     "video:new": "node scripts/video-forge/new-project.mjs",
     "check:video-new": "node --test test/scripts/video-new-project.test.mjs",
     "check:scripts-ascii-only": "node scripts/check-scripts-ascii-only.mjs",
@@ -67,6 +66,8 @@
     "check:worktree-port-offset": "node --test scripts/derive-worktree-ports.test.mjs && node scripts/check-worktree-port-offset.mjs",
     "gen:env-reference": "node scripts/gen-env-reference.mjs",
     "check:features": "node scripts/check-feature-truth.mjs",
+    "check:capability-tips": "node --test scripts/check-capability-tips.test.mjs && node scripts/check-capability-tips.mjs",
+    "check:capability-tips:stale": "node --test scripts/check-capability-tips-stale.test.mjs && node scripts/check-capability-tips-stale.mjs",
     "gen:sop-definitions": "node scripts/sop-definitions.mjs",
     "check:sop-definitions": "node --test scripts/sop-definitions.test.mjs && node scripts/sop-definitions.mjs --check",
     "check:followup-tails": "node scripts/check-followup-tails.mjs",
@@ -76,6 +77,9 @@
     "check:skills:surfaces": "node --test scripts/check-skill-first-party-surfaces.test.mjs && node scripts/check-skill-first-party-surfaces.mjs",
     "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/test-bash-runtime.test.mjs",
     "mcp:doctor": "node scripts/mcp-doctor.mjs",
+    "convention-graph": "pnpm --filter @cat-cafe/convention-graph convention-graph",
+    "convention-graph:index": "pnpm --filter @cat-cafe/convention-graph graph:index",
+    "convention-graph:code-consumers": "pnpm --filter @cat-cafe/convention-graph graph:code-consumers",
     "sync:skills": "bash scripts/sync-skills.sh",
     "clean:stale-skill-links": "bash scripts/clean-stale-skill-links.sh",
     "rescue:claude:thinking": "node ./scripts/rescue-claude-thinking-signature.mjs",
@@ -94,7 +98,7 @@
     "yaml": "^2.8.1"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=24.0.0",
     "pnpm": ">=8.0.0"
   },
   "packageManager": "pnpm@9.15.4"

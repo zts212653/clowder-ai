@@ -21,8 +21,17 @@ vi.mock('@/stores/conciergeStore', () => ({
   useConciergeStore: { getState: () => ({ onNavigationAction: mockOnNavigationAction }) },
 }));
 
+// chatStore mock must be callable (MarkdownContent uses it as a hook: useChatStore(selector))
+// AND have .getState() (ConciergeMessageContent uses it for currentThreadId)
+const chatStoreState = {
+  currentThreadId: 'thread_current',
+  updateRichBlock: vi.fn(),
+  setWorkspaceOpenFile: vi.fn(),
+};
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: { getState: () => ({ currentThreadId: 'thread_current', updateRichBlock: vi.fn() }) },
+  useChatStore: Object.assign((selector: (s: typeof chatStoreState) => unknown) => selector(chatStoreState), {
+    getState: () => chatStoreState,
+  }),
 }));
 
 vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
@@ -221,6 +230,230 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
 
     expect(container.textContent).toBe('纯文本，没有标记');
     expect(container.querySelector('button')).toBeNull();
+  });
+
+  // BUG-UX-7: Markdown rendering — unified with thread chat MarkdownContent
+  describe('BUG-UX-7: Markdown rendering (unified with MarkdownContent)', () => {
+    it('renders **bold** text as <strong> elements', () => {
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '这是**加粗**的文字',
+            actions: [],
+          }),
+        );
+      });
+
+      const strong = container.querySelector('strong');
+      expect(strong).not.toBeNull();
+      expect(strong?.textContent).toBe('加粗');
+    });
+
+    it('renders `inline code` as <code> elements', () => {
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '运行 `pnpm test` 命令',
+            actions: [],
+          }),
+        );
+      });
+
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code?.textContent).toBe('pnpm test');
+    });
+
+    it('renders markdown lists as <ul>/<li>', () => {
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '找到了以下结果：\n\n- 第一项\n- 第二项',
+            actions: [],
+          }),
+        );
+      });
+
+      const list = container.querySelector('ul');
+      expect(list).not.toBeNull();
+      const items = container.querySelectorAll('li');
+      expect(items.length).toBe(2);
+    });
+
+    it('renders markdown between marker buttons correctly', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去',
+          handle: 'R1',
+          verb: '跳过去',
+          payload: { threadId: 'thread_t' },
+        },
+      ];
+
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '**发现了！** 详情请 [跳过去 R1] 查看',
+            actions,
+          }),
+        );
+      });
+
+      // Both markdown rendering and marker button should work
+      expect(container.querySelector('strong')).not.toBeNull();
+      expect(container.querySelector('button')).not.toBeNull();
+    });
+
+    it('uses MarkdownContent wrapper (unified .markdown-content class)', () => {
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '普通文本',
+            actions: [],
+          }),
+        );
+      });
+
+      // MarkdownContent wraps output in a div.markdown-content
+      expect(container.querySelector('.markdown-content')).not.toBeNull();
+    });
+
+    // P1 fix: markers inside inline code are NOT extracted as buttons
+    it('does not extract markers inside inline code blocks', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去',
+          handle: 'R1',
+          verb: '跳过去',
+          payload: { threadId: 'thread_t' },
+        },
+      ];
+
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '使用 `[跳过去 R1]` 格式的标记',
+            actions,
+          }),
+        );
+      });
+
+      // Marker inside code block → rendered as code text, NOT as a button
+      expect(container.querySelector('button')).toBeNull();
+      const code = container.querySelector('code');
+      expect(code).not.toBeNull();
+      expect(code?.textContent).toContain('[跳过去 R1]');
+    });
+
+    // P1 R2 fix: markers inside bold/formatted text are processed (not just p/li)
+    it('processes markers inside bold text (textProcessor covers all text components)', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去',
+          handle: 'R1',
+          verb: '跳过去',
+          payload: { threadId: 'thread_t' },
+        },
+      ];
+
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '重要！**[跳过去 R1]**',
+            actions,
+          }),
+        );
+      });
+
+      // Marker inside bold → should be a button, not raw bracket text
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      expect(button?.textContent).toContain('跳过去');
+      // Raw bracket text must not appear
+      expect(container.innerHTML).not.toContain('[跳过去 R1]');
+    });
+
+    // P2 fix: single MarkdownContent → inline flow preserved
+    it('preserves inline flow (single <p> for text with markers)', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去',
+          handle: 'R1',
+          verb: '跳过去',
+          payload: { threadId: 'thread_t' },
+        },
+      ];
+
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '前文 [跳过去 R1] 后文',
+            actions,
+          }),
+        );
+      });
+
+      // Single MarkdownContent → exactly one .markdown-content wrapper (not N per segment)
+      const mdWrappers = container.querySelectorAll('.markdown-content');
+      expect(mdWrappers.length).toBe(1);
+
+      // The button should be inside a <p> element (inline with surrounding text)
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      expect(button?.closest('p')).not.toBeNull();
+    });
+  });
+
+  // BUG-UX-9: button displays corrected verb from action, not raw text verb
+  describe('BUG-UX-9: verb display matches action type', () => {
+    it('displays "跳过去" when action is teleport but text says "原地看" (auto-corrected)', () => {
+      // API auto-corrected peek→teleport, but kept verb field as "原地看" for map key matching
+      // Frontend should display based on action.action, not raw text verb
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去：Thread Level',
+          handle: 'R1',
+          verb: '原地看', // original text verb (before auto-correction was reflected in verb field)
+          payload: { threadId: 'thread_target' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '看看 [原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button');
+      expect(button).not.toBeNull();
+      // Button text should show the CORRECT verb for the action type
+      expect(button?.textContent).toContain('跳过去');
+      expect(button?.textContent).not.toContain('原地看');
+    });
+
+    it('displays teleport styling (color/icon) when action is auto-corrected teleport', () => {
+      const actions = [
+        {
+          action: 'concierge_teleport' as const,
+          label: '跳过去：Target',
+          handle: 'R1',
+          verb: '原地看',
+          payload: { threadId: 'thread_target' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '[原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button')!;
+      // Should have teleport icon (→), not peek icon (👁)
+      expect(button.textContent).toContain('→');
+      expect(button.textContent).not.toContain('👁');
+    });
   });
 
   // AC-6: card actions fallback (no handle/verb) → no inline buttons, text unchanged

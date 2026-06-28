@@ -45,6 +45,7 @@ const emptyVoiceFields = {
 
 const emptyAcpFields = {
   acpEnabled: false,
+  acpTransport: 'stdio' as const,
   acpCommand: '',
   acpStartupArgs: '',
   acpMaxLiveProcesses: '',
@@ -174,7 +175,7 @@ describe('HubCatEditor', () => {
   }
 
   it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
-    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'dare', 'opencode'] as const) {
+    for (const clientId of ['anthropic', 'openai', 'google', 'kimi', 'opencode'] as const) {
       await renderAdvancedRuntimeSection(clientId);
       expect(document.body.textContent, clientId).toContain('额外 CLI 参数');
     }
@@ -404,6 +405,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'opencode',
       acpStartupArgs: '--acp --mode agent',
       acpMaxLiveProcesses: '4',
@@ -448,6 +450,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'opencode',
       acpStartupArgs: 'acp',
       acpMaxLiveProcesses: '',
@@ -538,6 +541,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'deepseek-cli',
       acpStartupArgs: '--acp',
       acpMaxLiveProcesses: '',
@@ -590,6 +594,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'opencode',
       acpStartupArgs: 'acp',
       acpMaxLiveProcesses: '',
@@ -649,6 +654,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'kimi',
       acpStartupArgs: 'acp',
       acpMaxLiveProcesses: '',
@@ -706,6 +712,7 @@ describe('HubCatEditor', () => {
       maxContentLengthPerMsg: '',
       ...emptyVoiceFields,
       acpEnabled: true,
+      acpTransport: 'stdio',
       acpCommand: 'some-acp-agent',
       acpStartupArgs: 'acp',
       acpMaxLiveProcesses: '',
@@ -1740,7 +1747,6 @@ describe('HubCatEditor', () => {
       'claude-sponsor',
       'codex-sponsor',
     ]);
-    expect(filterProfiles('dare', profiles).map((profile) => profile.id)).toEqual(['claude-sponsor', 'codex-sponsor']);
     expect(filterProfiles('opencode', profiles).map((profile) => profile.id)).toEqual([
       'claude-sponsor',
       'codex-sponsor',
@@ -3929,5 +3935,63 @@ describe('HubCatEditor', () => {
     expect(JSON.parse(String(strategyPatches[1]?.[1]?.body)).strategy).toBe('compress');
     expect(document.body.textContent).toContain('network dropped during cat save');
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('shows dossier notice badge only when hasDossier is true (OQ-9 per-field regression)', async () => {
+    const catWithDossier: CatData = {
+      id: 'opus',
+      name: 'opus',
+      displayName: '布偶猫',
+      clientId: 'claude-code',
+      defaultModel: 'claude-opus-4-6',
+      commandArgs: [],
+      color: { primary: '#7c3aed', secondary: '#ddd6fe' },
+      mentionPatterns: ['@opus'],
+      avatar: '/avatars/opus.png',
+      roleDescription: '主架构师',
+      personality: '温柔但有主见',
+    };
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      }
+      if (path === '/api/config/session-strategy') {
+        return Promise.resolve(jsonResponse({ cats: [] }));
+      }
+      if (path === '/api/cat-templates') {
+        return Promise.resolve(jsonResponse({ templates: [] }));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    // Render WITH hasDossier=true — badge should appear
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: catWithDossier,
+          hasDossier: true,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    expect(document.body.textContent).toContain('擅长领域由画像驱动');
+
+    // Re-render WITHOUT hasDossier — badge must NOT appear
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: catWithDossier,
+          hasDossier: false,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    expect(document.body.textContent).not.toContain('擅长领域由画像驱动');
   });
 });

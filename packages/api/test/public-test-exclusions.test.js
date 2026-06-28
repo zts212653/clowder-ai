@@ -18,8 +18,6 @@ const LEGACY_EXCLUSIONS = [
   'persistence-fault-drill',
   'cursor-store-atomicity',
   'workflow-sop-store',
-  'dare-agent-service',
-  'dare-l1-acceptance',
   'codex-agent-service',
   'kimi-agent-service',
   'claude-settings-hooks\\.test',

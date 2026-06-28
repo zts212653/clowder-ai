@@ -35,11 +35,30 @@ function createMockService(catId, innerInvocationId, text) {
   };
 }
 
+function createBurstTextService(catId, innerInvocationId) {
+  return {
+    async *invoke() {
+      yield {
+        type: 'system_info',
+        catId,
+        content: JSON.stringify({ type: 'invocation_created', invocationId: innerInvocationId }),
+        timestamp: Date.now(),
+      };
+      yield { type: 'text', catId, content: 'a', timestamp: Date.now() };
+      yield { type: 'text', catId, content: 'b'.repeat(2000), timestamp: Date.now() };
+      yield { type: 'text', catId, content: 'c'.repeat(2000), timestamp: Date.now() };
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 function createMockDeps(services) {
   let invocationSeq = 0;
   let messageSeq = 0;
   const storedById = new Map();
+  const draftOps = [];
   return {
+    draftOps,
     services,
     invocationDeps: {
       registry: {
@@ -68,8 +87,14 @@ function createMockDeps(services) {
     socketManager: { broadcastToRoom: () => {} },
     draftStore: {
       delete: () => Promise.resolve(),
-      touch: () => Promise.resolve(),
-      upsert: () => Promise.resolve(),
+      touch: (...args) => {
+        draftOps.push({ type: 'touch', args });
+        return Promise.resolve();
+      },
+      upsert: (draft) => {
+        draftOps.push({ type: 'upsert', draft });
+        return Promise.resolve();
+      },
     },
     voiceMode: false,
   };
@@ -120,5 +145,67 @@ describe('F194 Phase Z9 — routeSerial stamps ownInvocationId on yielded events
     assert.ok(doneMsg, 'done event yielded');
     assert.ok(doneMsg.invocationId, 'yielded done event MUST carry invocationId');
     assert.notEqual(doneMsg.invocationId, 'parent-z9-yield-test', 'done invocationId is own, not parent');
+  });
+
+  it('F233 PR3: records invocation.started + heartbeat with own turn invocationId', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'hello') });
+    const recorded = [];
+    deps.ballCustody = {
+      async record(event) {
+        recorded.push(event);
+      },
+    };
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      parentInvocationId: 'parent-z9-yield-test',
+    })) {
+      yielded.push(msg);
+    }
+
+    const textMsg = yielded.find((m) => m.type === 'text');
+    assert.ok(textMsg?.invocationId, 'precondition: routeSerial yielded own turn invocationId');
+
+    const started = recorded.find((event) => event.kind === 'invocation.started');
+    const heartbeat = recorded.find((event) => event.kind === 'invocation.heartbeat');
+    assert.ok(started, 'must record invocation.started');
+    assert.ok(heartbeat, 'must record invocation.heartbeat from draft update');
+    assert.equal(started.payload.invocationId, textMsg.invocationId);
+    assert.equal(heartbeat.payload.invocationId, textMsg.invocationId);
+    assert.notEqual(started.payload.invocationId, 'parent-z9-yield-test');
+  });
+
+  it('F233 PR3: throttles ball-custody heartbeat events across rapid draft flushes', async () => {
+    const originalNow = Date.now;
+    let now = 1_000;
+    Date.now = () => {
+      now += 1_000;
+      return now;
+    };
+
+    try {
+      const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+      const deps = createMockDeps({ opus: createBurstTextService('opus', 'cli-inner-id') });
+      const recorded = [];
+      deps.ballCustody = {
+        async record(event) {
+          recorded.push(event);
+        },
+      };
+
+      for await (const _msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+        parentInvocationId: 'parent-z9-heartbeat-throttle',
+      })) {
+        // consume stream
+      }
+
+      const draftUpserts = deps.draftOps.filter((op) => op.type === 'upsert');
+      const heartbeats = recorded.filter((event) => event.kind === 'invocation.heartbeat');
+      assert.ok(draftUpserts.length >= 3, 'precondition: rapid draft flushes occurred');
+      assert.equal(heartbeats.length, 1, 'rapid draft flushes should not each append heartbeat events');
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });

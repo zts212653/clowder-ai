@@ -1189,6 +1189,44 @@ describe('TaskRunnerV2 — once trigger (#415)', () => {
     runner.stop();
   });
 
+  it('hydrated missed hold-ball once task records ball.hold_expired before retiring', async () => {
+    const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
+    const events = [];
+    const runner = new TaskRunnerV2({
+      logger: silentLogger,
+      ledger,
+      dynamicTaskStore,
+      ballCustody: {
+        async record(event) {
+          events.push(event);
+        },
+      },
+    });
+
+    const pastFireAt = Date.now() - 120_000;
+    dynamicTaskStore.insert({
+      id: 'hold-ball-missed-1',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt: pastFireAt },
+      params: { message: 'wake me', targetCatId: 'codex', triggerUserId: 'user-42' },
+      display: { label: '持球唤醒 (codex)', category: 'system' },
+      deliveryThreadId: 'thread-hold-missed',
+      enabled: true,
+      createdBy: 'hold-ball:codex',
+      createdAt: new Date(pastFireAt - 60_000).toISOString(),
+    });
+
+    runner.hydrateDynamic(dynamicTaskStore, { get: () => null });
+
+    assert.equal(dynamicTaskStore.getById('hold-ball-missed-1'), null, 'missed hold-ball task should be retired');
+    assert.equal(events.length, 1, 'missed hold-ball task should emit one expiry event');
+    assert.equal(events[0].kind, 'ball.hold_expired');
+    assert.equal(events[0].sourceEventId, `holdexp:thread-hold-missed:codex:${pastFireAt}`);
+    assert.equal(events[0].subjectKey, 'ball:thread:thread-hold-missed');
+    assert.deepEqual(events[0].payload, { catId: 'codex', fireAt: pastFireAt });
+    runner.stop();
+  });
+
   it('once trigger does NOT fire before fireAt', async () => {
     const { TaskRunnerV2 } = await import('../../dist/infrastructure/scheduler/TaskRunnerV2.js');
     const runner = new TaskRunnerV2({ logger: silentLogger, ledger, dynamicTaskStore });

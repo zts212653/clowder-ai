@@ -118,15 +118,13 @@ test('client-auth remove --force drops the installer api key account', () => {
   }
 });
 
-test('client-auth set oauth creates builtin accounts for dare and opencode', () => {
+test('client-auth set oauth creates builtin accounts for opencode', () => {
   const projectRoot = mkdtempSync(join(tmpdir(), 'clowder-install-client-auth-oauth-'));
 
   try {
-    runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'dare', '--mode', 'oauth']);
     runHelper(['client-auth', 'set', '--project-dir', projectRoot, '--client', 'opencode', '--mode', 'oauth']);
 
     const { accounts } = readInstallerState(projectRoot);
-    assert.equal(accounts.dare?.authType, 'oauth');
     assert.equal(accounts.opencode?.authType, 'oauth');
   } finally {
     rmSync(projectRoot, { recursive: true, force: true });

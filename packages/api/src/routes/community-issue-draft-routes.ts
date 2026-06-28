@@ -48,6 +48,20 @@ const publishBodySchema = z
   .strict()
   .optional();
 
+// Phase B: generic draft creation (cat_initiated or future source types)
+const genericCreateBodySchema = z.object({
+  sourceType: z.enum(['cat_initiated']),
+  sourceId: z.string().min(1).max(200),
+  title: z.string().trim().min(1).max(500),
+  bodyMarkdown: z.string().trim().min(1).max(10000),
+  targetRepo: z.string().max(200).optional(),
+  labels: z.array(z.string().max(50)).max(10).optional(),
+  threadId: z.string().min(1).max(200),
+  // R2 P1 fix: messageId disambiguates same-user cross-thread collisions.
+  // Without it, two draft cards with same block.id in different messages collide.
+  messageId: z.string().min(1).max(200).optional(),
+});
+
 // ── In-process publish debounce (Phase A: single-process guard against double-click /
 // two-tab / retry race conditions. NOT a distributed lock — adequate for alpha single-
 // process deployment. If scaled to multi-process, replace with store-level claim.) ──
@@ -58,6 +72,105 @@ const publishingDrafts = new Set<string>();
 
 export const communityIssueDraftRoutes: FastifyPluginAsync<CommunityIssueDraftRoutesOptions> = async (app, opts) => {
   const { communityIssueDraftStore, frustrationIssueStore, publisher, config } = opts;
+
+  // ── GET /api/community-issue-drafts/config ──
+  // Phase B: repo picker configuration for frontend dropdown.
+  // Must be registered BEFORE /:draftId to avoid route param collision.
+
+  app.get('/api/community-issue-drafts/config', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Not authenticated' };
+    }
+    return {
+      defaultRepo: config.defaultRepo,
+      repos: config.repoAllowlist,
+    };
+  });
+
+  // ── POST /api/community-issue-drafts (generic create) ──
+  // Phase B: cat-initiated or future generic source types.
+
+  app.post('/api/community-issue-drafts', async (request, reply) => {
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Not authenticated' };
+    }
+
+    const bodyParse = genericCreateBodySchema.safeParse(request.body);
+    if (!bodyParse.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: bodyParse.error.issues };
+    }
+
+    const { sourceType, sourceId, title, bodyMarkdown, labels, threadId, messageId } = bodyParse.data;
+    const targetRepo = bodyParse.data.targetRepo ?? config.defaultRepo;
+
+    // INV-B2: repo must be in allowlist (server-side enforcement)
+    if (!config.repoAllowlist.includes(targetRepo)) {
+      reply.status(400);
+      return { error: `Repository not allowed: ${targetRepo}` };
+    }
+
+    // R1 P1-2 + R2 P1 fix: scope sourceId by (sourceType, userId, messageId) to
+    // prevent both cross-user and same-user cross-thread collisions.
+    // block.id is per-message sequential, not globally unique. messageId
+    // disambiguates cards with the same block.id in different messages.
+    const scopedSourceId = `${sourceType}:${userId}:${messageId ?? sourceId}:${sourceId}`;
+
+    // R1 P1-1 fix: idempotent create — if an active draft already exists for
+    // this scoped sourceId, return it instead of throwing INV-3. This makes
+    // retry-after-failed-publish safe (frontend does create→publish every submit).
+    const existing = await communityIssueDraftStore.getBySourceId(scopedSourceId);
+    if (existing && existing.status === 'draft') {
+      return { draft: existing };
+    }
+    // Cloud P2-1 fix: if the draft was already published, return 409 with
+    // the published draft info instead of falling through to create() which
+    // would hit INV-3 and surface a 500. This handles page-reload-after-publish.
+    if (existing && existing.status === 'published') {
+      reply.status(409);
+      return { error: 'Already published', draft: existing };
+    }
+
+    // Sanitize content on creation (KD-4: defense in depth)
+    const sanitized = sanitize(title, bodyMarkdown);
+    if (!sanitized.passed) {
+      reply.status(422);
+      return { error: 'Content contains forbidden patterns that could not be fully redacted' };
+    }
+
+    // Create draft via store (store calls shared factory + persists).
+    // Cloud P2-5 fix: wrap in try/catch for concurrent create race. In Redis,
+    // two tabs can both pass getBySourceId preflight, then one wins SET NX and
+    // the loser throws INV-3. Catch and re-read the winner's draft (same pattern
+    // as Phase A's from-frustration-issue route).
+    try {
+      const stored = await communityIssueDraftStore.create({
+        sourceType,
+        sourceId: scopedSourceId,
+        title: sanitized.title,
+        bodyMarkdown: sanitized.bodyMarkdown,
+        targetRepo,
+        labels: labels ?? [],
+        threadId,
+        userId,
+      });
+      return { draft: stored };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('already has')) {
+        // Concurrent race: another request claimed the source slot.
+        // Re-read the winner's draft for idempotent recovery.
+        const winner = await communityIssueDraftStore.getBySourceId(scopedSourceId);
+        if (winner) return { draft: winner };
+      }
+      reply.status(500);
+      return { error: msg };
+    }
+  });
 
   // ── POST /api/community-issue-drafts/from-frustration-issue/:issueId ──
 

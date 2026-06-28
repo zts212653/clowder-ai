@@ -213,13 +213,15 @@ export function transformClaudeEvent(
           timestamp: Date.now(),
         });
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {
-        messages.push({
+        const msg: AgentMessage = {
           type: 'tool_use',
           catId,
           toolName: b.name,
           toolInput: (b.input as Record<string, unknown>) ?? {},
           timestamp: Date.now(),
-        });
+        };
+        if (typeof b.id === 'string') msg.toolUseId = b.id;
+        messages.push(msg);
       }
     }
     if (messageId && skipFinalText) {

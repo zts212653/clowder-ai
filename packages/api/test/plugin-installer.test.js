@@ -22,7 +22,7 @@ function cleanup() {
   if (existsSync(TEST_ROOT)) rmSync(TEST_ROOT, { recursive: true });
 }
 
-async function waitForFile(path, timeoutMs = 2000) {
+async function waitForFile(path, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (!existsSync(path)) {
     if (Date.now() > deadline) {

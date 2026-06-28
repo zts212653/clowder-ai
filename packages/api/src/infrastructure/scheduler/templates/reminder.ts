@@ -1,4 +1,5 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
+import { buildHoldExpiredEvent } from '../../../domains/ball-custody/ball-custody-events.js';
 import type { TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
@@ -46,6 +47,12 @@ export const reminderTemplate: TaskTemplate = {
           const tid = subjectKey.startsWith('thread-') ? subjectKey.slice(7) : subjectKey;
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
           const content = `${SCHEDULER_TRIGGER_PREFIX} ${message}`;
+
+          if (instanceId.startsWith('hold-ball-') && p.trigger.type === 'once' && threadId) {
+            ctx.ballCustody
+              ?.record(buildHoldExpiredEvent({ threadId: tid, catId, fireAt: p.trigger.fireAt, at: Date.now() }))
+              .catch(() => {});
+          }
 
           // Store trigger message first → real messageId for InvocationRecord + retry
           const messageId = await ctx.deliver({

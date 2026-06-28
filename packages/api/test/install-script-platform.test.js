@@ -94,10 +94,10 @@ printf '%s' "$PLATFORM"
 
 // ── Behavioral tests for Darwin branch ────────────────────────
 
-test('darwin node@20 keg-only: adds keg bin to PATH after brew install', () => {
+test('darwin node@24 keg-only: adds keg bin to PATH after brew install', () => {
   // Verify the install script explicitly adds the keg bin to PATH
   // rather than relying on brew link (which keg-only formulas don't support)
-  assert.match(installScriptText, /brew --prefix node@20/, 'must resolve the keg prefix to find the bin directory');
+  assert.match(installScriptText, /brew --prefix node@24/, 'must resolve the keg prefix to find the bin directory');
   assert.match(
     installScriptText,
     /export PATH="\$_keg_bin:\$PATH"/,
@@ -113,13 +113,13 @@ test('darwin node@20 keg-only: adds keg bin to PATH after brew install', () => {
   );
 });
 
-test('darwin node@20 keg PATH addition works with stubbed brew', () => {
+test('darwin node@24 keg PATH addition works with stubbed brew', () => {
   // Create a fake keg layout and a stub `brew` that returns it,
   // then run the actual script code path (not a manual simulation).
   const output = runSourceOnlySnippet(`
 fake_keg="$(mktemp -d)"
 mkdir -p "$fake_keg/bin"
-printf '#!/bin/sh\\necho v20.0.0' > "$fake_keg/bin/node"
+printf '#!/bin/sh\\necho v24.0.0' > "$fake_keg/bin/node"
 chmod +x "$fake_keg/bin/node"
 
 # Stub brew: --prefix returns fake keg, install is a no-op
@@ -135,7 +135,7 @@ OLD_PATH="$PATH"
 PATH="$(printf '%s' "$PATH" | tr ':' '\\n' | grep -v node | tr '\\n' ':')"
 
 # Run the actual keg-bin injection logic from the script
-_keg_bin="$(brew --prefix node@20 2>/dev/null)/bin"
+_keg_bin="$(brew --prefix node@24 2>/dev/null)/bin"
 [[ -d "$_keg_bin" ]] && export PATH="$_keg_bin:$PATH"
 unset _keg_bin
 
@@ -145,10 +145,10 @@ command -v node >/dev/null && printf 'FOUND:%s' "$(node -v)"
 PATH="$OLD_PATH"
 rm -rf "$fake_keg"
 `);
-  assert.match(output, /^FOUND:v20/, 'node should be discoverable after keg bin PATH injection');
+  assert.match(output, /^FOUND:v24/, 'node should be discoverable after keg bin PATH injection');
 });
 
-test('darwin node@20 keg: prefix failure must NOT write /bin to profile (#174 P1 regression)', () => {
+test('darwin node@24 keg: prefix failure must NOT write /bin to profile (#174 P1 regression)', () => {
   // When brew --prefix fails, _keg_prefix is empty and _keg_bin must NOT
   // degrade to "/bin" (a real system directory).
   const output = runSourceOnlySnippet(`
@@ -160,7 +160,7 @@ brew() {
   esac
 }
 
-_keg_prefix="$(brew --prefix node@20 2>/dev/null || true)"
+_keg_prefix="$(brew --prefix node@24 2>/dev/null || true)"
 _keg_bin="\${_keg_prefix:+$_keg_prefix/bin}"
 # Evaluate the conditional expansion
 eval "_keg_bin=$_keg_bin"

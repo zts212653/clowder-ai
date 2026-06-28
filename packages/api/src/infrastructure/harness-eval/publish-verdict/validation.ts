@@ -1,9 +1,11 @@
 import { basename, isAbsolute, resolve } from 'node:path';
+import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import { resolveSafeRawPath } from '../safe-path.js';
 import { VERDICT_CLASSES } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
 import type {
   A2aSnapshotAttributionRefs,
+  AnchorTelemetrySourceSelector,
   HandlerError,
   MemoryRecallSourceSelector,
   ResolvedSourceRefs,
@@ -45,6 +47,40 @@ export function isSopSourceRefs(refs: VerdictSourceRefs | undefined): refs is So
 }
 
 /**
+ * F245 Phase C PR1b — discriminator helper for friction rollup selector.
+ */
+export function isFrictionSourceRefs(refs: VerdictSourceRefs | undefined): refs is FrictionRollupSourceSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'friction-rollup-snapshot';
+}
+
+/**
+ * F236 Track-2 AC-E4 — discriminator helper for anchor telemetry selector.
+ */
+export function isAnchorTelemetrySourceRefs(
+  refs: VerdictSourceRefs | undefined,
+): refs is AnchorTelemetrySourceSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'anchor-telemetry-snapshot';
+}
+
+export const KNOWN_SOURCE_REFS_KINDS = [
+  'a2a-snapshot-attribution',
+  'anchor-telemetry-snapshot',
+  'capability-wakeup-trial-window',
+  'memory-recall-snapshot',
+  'sop-trace-eval',
+  'task-outcome-snapshot',
+  'friction-rollup-snapshot',
+] as const;
+
+export function isKnownSourceRefsKind(kind: string): kind is (typeof KNOWN_SOURCE_REFS_KINDS)[number] {
+  return KNOWN_SOURCE_REFS_KINDS.includes(kind as (typeof KNOWN_SOURCE_REFS_KINDS)[number]);
+}
+
+/**
  * F192 sop-wiring — structural validator for SOP trace selector.
  * Returns user-facing error detail; handler maps to 400 invalid_source_ref.
  */
@@ -71,23 +107,25 @@ export function validateSopTraceSelector(selector: SopTraceSourceSelector): stri
 }
 
 /**
- * F192 publish_verdict eval:memory wire-up — infer concrete sourceRefs.kind for
- * cross-check vs EXPECTED_REFS_KIND_BY_DOMAIN. Extracted to keep handler's
- * cognitive complexity from creeping further past biome's 15 threshold.
+ * Infer the concrete sourceRefs.kind string used by publish-verdict.
+ * Known kinds stay as explicit literals; unknown string kinds pass through
+ * unchanged so the handler can fail closed with an honest unsupported-kind
+ * error instead of misclassifying them as an existing domain's selector.
  */
-export function inferSourceRefsKind(
-  refs: VerdictSourceRefs | undefined,
-):
-  | 'a2a-snapshot-attribution'
-  | 'capability-wakeup-trial-window'
-  | 'memory-recall-snapshot'
-  | 'sop-trace-eval'
-  | 'task-outcome-snapshot' {
+export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string {
   if (isSopSourceRefs(refs)) return 'sop-trace-eval';
   if (isMemorySourceRefs(refs)) return 'memory-recall-snapshot';
   if (isTaskOutcomeSourceRefs(refs)) return 'task-outcome-snapshot';
+  // ⚠️ anchor-telemetry + friction guards MUST precede the a2a default:
+  // isA2aSourceRefs returns true for undefined/missing-kind refs (backward-compat
+  // default) and would swallow kind-discriminated selectors otherwise.
+  if (isAnchorTelemetrySourceRefs(refs)) return 'anchor-telemetry-snapshot';
+  if (isFrictionSourceRefs(refs)) return 'friction-rollup-snapshot';
   if (isA2aSourceRefs(refs)) return 'a2a-snapshot-attribution';
-  return 'capability-wakeup-trial-window';
+  if (refs && typeof refs === 'object' && 'kind' in refs && typeof refs.kind === 'string') {
+    return refs.kind;
+  }
+  return 'a2a-snapshot-attribution';
 }
 
 /**
@@ -119,6 +157,60 @@ function validateOptionalIdField(value: string | undefined, fieldName: string): 
   }
   if (/[\r\n]/.test(value)) {
     return `${fieldName} must not contain newlines (markdown bullet injection guard)`;
+  }
+  return null;
+}
+
+/**
+ * F245 Phase C PR1b — structural validator for the friction rollup selector.
+ * Mirrors `validateMemoryRecallSelector` / `validateTaskOutcomeSourceRefs` shape
+ * (non-throw, returns user-facing error detail or null). Handler maps to 400
+ * invalid_source_ref. Generator-adapter also calls it (defense-in-depth).
+ */
+export function validateFrictionRollupSelector(selector: FrictionRollupSourceSelector): string | null {
+  if (selector.kind !== 'friction-rollup-snapshot') {
+    return `expected kind='friction-rollup-snapshot', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return 'windowEndMs must be greater than windowStartMs';
+  }
+  const topNError = validateOptionalPositiveInt(selector.topN, 'topN');
+  if (topNError) return topNError;
+  const tokenCapError = validateOptionalPositiveInt(selector.tokenCap, 'tokenCap');
+  if (tokenCapError) return tokenCapError;
+  return null;
+}
+
+function validateOptionalPositiveInt(value: number | undefined, fieldName: string): string | null {
+  if (value === undefined) return null;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    return `${fieldName} must be a positive integer when provided`;
+  }
+  return null;
+}
+
+/**
+ * F236 Track-2 AC-E4 — structural validator for anchor telemetry selector.
+ * Mirrors validateFrictionRollupSelector shape (window-only, no optional fields).
+ */
+export function validateAnchorTelemetrySelector(selector: AnchorTelemetrySourceSelector): string | null {
+  if (selector.kind !== 'anchor-telemetry-snapshot') {
+    return `expected kind='anchor-telemetry-snapshot', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return 'windowEndMs must be greater than windowStartMs';
   }
   return null;
 }
@@ -354,6 +446,10 @@ export function assertNoNewlineInBulletFields(packet: VerdictHandoffPacket): Han
     ['harnessUnderEval.componentId', packet.harnessUnderEval.componentId],
     ['harnessUnderEval.name', packet.harnessUnderEval.name],
     ['ownerAsk.requestedAction', packet.ownerAsk.requestedAction],
+    // cloud-R2 P2: rootCauseHypothesis.summary renders as a single-line `- Root cause:` bullet
+    // (eval-friction-renderer) directly above `- Owner ask:`; a newline injects a fake bullet that
+    // corrupts Eval Hub extractBullet read-model. Guard it like the other single-line bullet fields.
+    ['rootCauseHypothesis.summary', packet.rootCauseHypothesis.summary],
     ['acceptanceReevalPlan.closureCondition', packet.acceptanceReevalPlan.closureCondition],
     ['acceptanceReevalPlan.nextEvalAt', packet.acceptanceReevalPlan.nextEvalAt],
     ...packet.evidencePacket.metricRefs.map((r, i): [string, string] => [`evidencePacket.metricRefs[${i}]`, r]),

@@ -18,7 +18,7 @@ import type {
   ProfileUpdateProposalStatus,
   ProfileUpdateSignalProvenance,
 } from '@cat-cafe/shared';
-import { generateProposalId } from '@cat-cafe/shared';
+import { generateProposalId, isAllowedCollectionSignal } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   CreateProfileUpdateProposalInput,
@@ -314,7 +314,7 @@ function parseSignalProvenance(raw: string | undefined): ProfileUpdateSignalProv
   try {
     const parsed = JSON.parse(raw ?? '{}');
     return {
-      kind: parsed.kind === 'cvo-instructed' ? 'cvo-instructed' : 'cat-declared',
+      kind: isAllowedCollectionSignal(parsed.kind) ? parsed.kind : 'cat-declared',
       sourceThreadId: typeof parsed.sourceThreadId === 'string' ? parsed.sourceThreadId : '',
       ...(typeof parsed.sourceMessageId === 'string' ? { sourceMessageId: parsed.sourceMessageId } : {}),
     };

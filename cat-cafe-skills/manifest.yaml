@@ -494,12 +494,14 @@ skills:
     category: "引导与协作"
     description: >
       跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
-      Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
+      Use when: 平行 session 之间需要协同、收到跨线程消息、通知改动影响、共享文件争用。
       Not for: 跨猫工作交接（用 cross-cat-handoff）。
+      GOTCHA: 收到跨线程 ACTION 不等于接活；先做 thread/feat ownership gate，不属于当前 thread 就 cross-post 退回。
       Output: cross-post 通知 + 争用协调完成。
     triggers:
       - "通知另一个 session"
       - "跨 thread"
+      - "跨线程消息"
       - "平行世界"
       - "parallel session sync"
       - "另一只Ragdoll"
@@ -641,6 +643,32 @@ skills:
     merged_from: null
 
   # ── 知识工程（F152 Phase 0）──
+  convention-graph-discovery:
+    category: "调研与知识"
+    description: >
+      约定图发现方法论：进一个 repo 先识别 repo-specific conventions，再定义 domain/extractor 接
+      Convention Graph 引擎。Use when: 进入陌生 repo、要画约定图、要找“改 X 影响谁”的约定层关联、
+      F242/Convention Graph Layer 工作。Not for: 普通符号跳转/LSP、文档索引检索、记忆图谱、直接使用
+      codegraph/GitNexus。Output: domain 定义 + extractor 计划 + gap/freshness/provenance 报告。
+      GOTCHA: 沉淀的是“怎么画图”的方法，不是把 cat-cafe 的 extractor 硬搬到所有 repo。
+    triggers:
+      - "约定图"
+      - "convention graph"
+      - "进陌生 repo"
+      - "画规矩地图"
+      - "改 X 影响谁"
+      - "顺藤摸瓜"
+      - "F242"
+    not_for:
+      - "普通符号跳转"
+      - "文档索引检索"
+      - "记忆图谱"
+      - "直接使用 codegraph/GitNexus"
+    output: "Domain definition + extractor plan + gap/freshness/provenance report"
+    next: ["tdd", "quality-gate"]
+    sop_step: null
+    merged_from: null
+
   knowledge-engineering:
     category: "调研与知识"
     description: >
@@ -1189,6 +1217,42 @@ skills:
     next: []
     sop_step: null
     feature: "F207"
+
+  # ── F167 Phase O 接球真相核验 ──
+  receive-handoff-grounding:
+    category: "协作 / 防御"
+    description: >
+      接球前真相核验三问：claim → resolver → verdict (sourceTier T0/T1/T2 + actionFamily)，
+      防止把传球者当无审视真相源 (F167 Phase O 第一性原理)。
+      Use when: 即将调 hold_ball / register_pr_tracking / register_issue_tracking /
+      merge / takeover / 改 owner / 任何 irreversible action / 基于 "operator signoff" 或
+      "你是 owner" 类 claim 行动之前。
+      Not for: 纯阅读 cross_post (无 actionFamily 后续)、本 thread 日常 @mention 无副作用、
+      implementation continuation (自检通过的下一步)。
+      Output: Claim grounding verdict (verified/mismatch/insufficient) + 接球决策
+      (proceed / block / push back to source thread)。
+    triggers:
+      - "hold_ball"
+      - "register_pr_tracking"
+      - "register_issue_tracking"
+      - "merge approval"
+      - "operator signoff"
+      - "takeover"
+      - "irreversible"
+      - "owner reassignment"
+      - "这是你的"
+      - "应该是你接"
+      - "operator 同意"
+      - "等 X"
+      - "PR 在"
+    not_for:
+      - "纯阅读 cross_post"
+      - "本 thread 日常 @mention"
+      - "implementation continuation"
+    output: "Claim grounding verdict + 接球决策"
+    next: ["worktree", "tdd", "merge-gate"]
+    sop_step: null
+    feature: "F167"
 
 # ─── 降级为 refs/（不再是独立 skill） ─────────────────
 refs:

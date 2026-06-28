@@ -20,12 +20,12 @@ operator指出参考 Codex App 的组织方式：
 ```
 Codex App 侧栏:
 ├── cat-cafe (Project = 目录)
-│   ├── /home/user/relay-st...   (Thread)
+│   ├── /home/user/projects/relay-st...   (Thread)
 │   ├── Study identity injection discussion    (Thread)
 │   ├── 调研 Claude Code Agent Teams ...       (Thread)
 │   └── 你看看这是一个怎么样的工程！...        (Thread)
 └── relay-station (Project = 目录)
-    └── /home/user/antigravit...   (Thread)
+    └── /home/user/.gemini/antigravit...   (Thread)
 ```
 
 ## 决策

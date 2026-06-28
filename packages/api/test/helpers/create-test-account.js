@@ -20,7 +20,6 @@ const PROTOCOL_MAP = {
   anthropic: 'anthropic',
   openai: 'openai',
   google: 'google',
-  dare: 'openai',
   opencode: 'anthropic',
 };
 
@@ -113,7 +112,7 @@ let projectRootFallback = '';
  *
  * @param {string} projectRoot - project root path
  * @param {object} opts
- * @param {string} [opts.provider] - 'anthropic' | 'openai' | 'google' | 'dare' | 'opencode'
+ * @param {string} [opts.provider] - 'anthropic' | 'openai' | 'google' | 'opencode'
  * @param {string} opts.name - display name (used to derive ID)
  * @param {string} [opts.mode] - 'api_key' | 'oauth'
  * @param {string} [opts.baseUrl]

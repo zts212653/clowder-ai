@@ -879,7 +879,7 @@
     {
       "id": "F144",
       "name": "PPT Forge — AI 演示文稿生成引擎",
-      "status": "in-progress | **Owner**: 三猫 | **Priority**: P2",
+      "status": "done | **Owner**: 三猫 | **Priority**: P2",
       "file": "F144-ppt-forge.md"
     },
     {
@@ -927,7 +927,7 @@
     {
       "id": "F152",
       "name": "Expedition Memory — 外部项目记忆冷启动 + 经验回流",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 代码链已闭环，等待 AC-C5 operator全链路终验",
+      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-06-18 rerun complete — 代码链与 close 证物已补齐，仍等待 AC-C5 operator全链路终验",
       "file": "F152-expedition-memory.md"
     },
     {
@@ -992,8 +992,8 @@
     },
     {
       "id": "F161",
-      "name": "ACP Carrier Generalization — 多载体复用同一 Runtime Policy",
-      "status": "spec | **Owner**: TBD | **Priority**: P2",
+      "name": "ACP Carrier Generalization — 通用 ACP 传输 + 模板环境变量映射",
+      "status": "implemented (Phase A+B, intake from clowder-ai#899) | **Owner**: Ragdoll Opus-4.6 | **Priority**: P1",
       "file": "F161-acp-carrier-generalization.md"
     },
     {
@@ -1035,7 +1035,7 @@
     {
       "id": "F168",
       "name": "Community Operations Board — 社区事务编排引擎",
-      "status": "Phase A ✅ | **Phase B ✅ closed (2026-06-12)** | **Phase C ✅ closed (2026-06-16)**（C0 前置 ✅ / C1 Role Registry ✅ / C2 narrator spawn ✅ / C3.1 resolve routing ✅ / C3.2 DirectionCard + eval.1 ✅）| **First completed**: 2026-04-20 | **Owner**: Ragdoll (opus-4.8，2026-06-12 接手自 fable-5) | **Priority**: P1",
+      "status": "infra-complete / ops-gap 🚧 — 管道精密但没流水（2026-06-20 operator review 后重新定位）| **基础设施 A→E 全部 merged ✅** | **Phase F backend + backfill + board UX merged, opus-47 vision guards PASS ✅** | **运营闭环仍在推进 🚧**（端到端生产流未完成）| **Owner**: Ragdoll (opus-4.8) | **Priority**: P1",
       "file": "F168-community-ops-board.md"
     },
     {
@@ -1155,7 +1155,7 @@
     {
       "id": "F188",
       "name": "Library Stewardship — 图书馆管护与成长",
-      "status": "reopened | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Completed (A-J)**: 2026-05-26 | **Reopened**: 2026-06-09 (Phase K) | **Phase K Closed**: 2026-06-19 (PR #2414, merge `1ec99732`) | **Infra Fix**: 2026-06-19 (PR #2419 — alpha:start build-freshness gate, ADR-039 parity) | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F188-library-stewardship.md"
     },
     {
@@ -1203,7 +1203,7 @@
     {
       "id": "F198",
       "name": "Claude Code Subscription Carrier — 6/15 SDK Credit 拐点前救Ragdoll",
-      "status": "on-hold — **2026-06-15 Anthropic 宣布延期政策变更**（\"We're not making this change today\"），SDK credit 拐点未生效，OQ-13 自行消解。Phase A-C ✅ 已交付；Phase D PR-1 (AC-D1 carrier health) ✅ merged；Phase D 剩余 + Phase E 暂停，代码全量保留备用（operator 指示\"没准未来又抽风\"）。(Phase A ✅; Phase B Step 1-4 ✅; **Phase C ✅ 完全关闭 2026-05-15**; Phase D PR-1 AC-D1 ✅ merged 2026-06-12 PR #2257) | **Owner**: Ragdoll Opus 4.7 | **Priority**: ~~P0~~ → P3（保留，不拆）",
+      "status": "done (on-hold close) — Anthropic 2026-06-15 延期 SDK credit 政策变更，核心问题被取消。Phase A-C ✅ 全交付；Phase D PR-1 (AC-D1 carrier health) ✅ merged；Phase D 剩余 + Phase E 暂停，代码全量保留备用（KD-13）。unmet AC (D2-D4, E1-E2, E4) 因前提消失 delete；AC-D5 代码交付 operator signoff 接受。 | **Completed**: 2026-06-18 | **Owner**: Ragdoll Opus 4.7 | **Priority**: ~~P0~~ → P3",
       "file": "F198-claude-code-subscription-carrier.md"
     },
     {
@@ -1233,7 +1233,7 @@
     {
       "id": "F203",
       "name": "Native System Prompt L0 — 压缩免疫核心规则注入",
-      "status": "in-progress | **Owner**: Ragdoll Opus 4.7 | **Priority**: P1",
+      "status": "done（operator 签字降级 2026-06-19，AC-I8 deferred）| **Owner**: Ragdoll Opus 4.7 | **Priority**: P1",
       "file": "F203-native-system-prompt-l0.md"
     },
     {
@@ -1255,15 +1255,9 @@
       "file": "F206-settings-ui-convergence.md"
     },
     {
-      "id": "F207",
-      "name": "AI Family Office — 个人投资学习基建",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P2",
-      "file": "F207-personal-finance-infra.md"
-    },
-    {
       "id": "F208",
       "name": "Capability Profile Routing — 能力画像档案 + 认知路由",
-      "status": "spec | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1",
       "file": "F208-capability-profile-routing.md"
     },
     {
@@ -1383,7 +1377,7 @@
     {
       "id": "F228",
       "name": "Multi-Project Skill Mount Management — 多项目 Skills 挂载管理",
-      "status": "spec | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
+      "status": "Phase A + B done (2026-06-17) | Phase C planning | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
       "file": "F228-multi-project-skill-mount-management.md"
     },
     {
@@ -1407,32 +1401,32 @@
     {
       "id": "F232",
       "name": "Thread Artifacts Panel — Thread 产物视图",
-      "status": "in-progress（Phase A 全部 merged；**Phase B foundation merged PR #2285 + grouping merged PR #2288 + cat filter merged PR #2290**（AC-B1 ✅）；视觉待 alpha）| **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
+      "status": "in-progress（Phase A 全部 merged；**Phase B foundation merged PR #2285 + grouping merged PR #2288 + cat filter merged PR #2290**（AC-B1 ✅）；source-code artifact classification hardening merged PR #2362；视觉待 alpha）| **Owner**: Ragdoll Opus-4.8 | **Priority**: P1",
       "file": "F232-thread-artifacts-panel.md"
     },
     {
       "id": "F233",
       "name": "Ball Custody Observability — 球权保管链可观测（值班简报 + 轨迹下钻）",
-      "status": "in-progress | **Owner**: Ragdoll Opus-4.8（plan + 实现 + Phase 末守护；原 fable-5 角色因 model 暂不可用，operator 2026-06-15 指示 opus-48 接管 own）· reviewer: Maine Coon | **Priority**: P1",
+      "status": "in-progress（Phase A ✅ + Phase B ✅ 2026-06-18 收口 · Phase C **轨迹全链 ✅** 2026-06-21：C1a ✅ + C2a ✅ + **C2b/C2c/C3 ✅** merged · C1b C1c pending — 安乐死 MCP/UI surface 留待下个迭代）| **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1",
       "file": "F233-ball-custody-observability.md"
-    },
-    {
-      "id": "F240",
-      "name": "IM Connector Plugin Architecture — 统一 IMConnectorPlugin 接口 + 外部 npm 包动态加载",
-      "status": "spec | **Owner**: Ragdoll Opus-4.6 | **Priority**: P1",
-      "file": "F240-im-connector-plugin-architecture.md"
     },
     {
       "id": "F235",
       "name": "Feedback-to-Community Publisher — 一键发布反馈到社区",
-      "status": "in-progress | **Owner**: Ragdoll | **Priority**: P1",
+      "status": "done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-17",
       "file": "F235-feedback-to-community-publisher.md"
     },
     {
       "id": "F236",
       "name": "Anchor-First Context 入口 — 返回侧 token 减负",
-      "status": "spec | **Owner**: Ragdoll (Ragdoll opus-48) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203",
+      "status": "in-progress (Phase A+B done · **Phase A/B-Eval DONE** [Track-1 chars/volume + Track-2 open-rate + AC-E3 sunset trigger] · Phase C = cat-controlled mode（2026-06-24 pivot）：MCP-tools cat-mode V1 + cc-native spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48 愿景守护；Track-2/AC-E3 实现 opus-4.6) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203",
       "file": "F236-anchor-first-context-entry.md"
+    },
+    {
+      "id": "F237",
+      "name": "Prompt Injection Visibility",
+      "status": "done — clowder-ai#859 absorbed via cat-cafe#2505 squash `b859eb38` (2026-06-22) | **Owner**: community @mindfn + cat-cafe maintainers",
+      "file": "F237-prompt-injection-visibility.md"
     },
     {
       "id": "F238",
@@ -1445,6 +1439,48 @@
       "name": "Skill Mount HOME Hygiene — `sync:skills` 默认改 project-level + 老 symlinks 清理（ADR-025 Phase 5 收尾）",
       "status": "closed (Phase A + B both merged 2026-06-16) | **Owner**: Ragdoll/Ragdoll (Opus 4.7) | **Priority**: P2",
       "file": "F239-skill-mount-home-hygiene.md"
+    },
+    {
+      "id": "F241",
+      "name": "Agent Provider Plugin / Hostable Provider Runtime",
+      "status": "spec | **Owner**: Community (彭潇/bouillipx) + Ragdoll家族 maintainer | **Priority**: P1",
+      "file": "F241-agent-provider-plugin.md"
+    },
+    {
+      "id": "F242",
+      "name": "Code Graph Layer Spike — 内生「约定层关联图」",
+      "status": "in-progress | **Owner**: codex-gpt55（Maine Coon；implementation takeover 2026-06-17） | **Priority**: P1 | **Spike**: Phase A/B done 2026-06-18 | **Close**: retracted 2026-06-18",
+      "file": "F242-code-graph-layer-spike.md"
+    },
+    {
+      "id": "F243",
+      "name": "Docs Discovery Profile — OKF-inspired metadata + generated index",
+      "status": "spec | **Owner**: Ragdoll (Ragdoll Opus-4.7) | **Priority**: P1",
+      "file": "F243-docs-discovery-profile.md"
+    },
+    {
+      "id": "F244",
+      "name": "Capability Tips System — 等待态 Knowledge Feed 投影",
+      "status": "done | **Owner**: Maine Coon/Maine Coon | **Priority**: P1 | **Completed**: 2026-06-22",
+      "file": "F244-capability-tips-system.md"
+    },
+    {
+      "id": "F245",
+      "name": "Friction Signal Eval — 摩擦信号统一聚合（eval:friction）",
+      "status": "done | **Completed**: 2026-06-22 | **Owner**: Maine Coon/Maine Coon (gpt52; close sync @codex) | **Priority**: P1",
+      "file": "F245-friction-signal-eval.md"
+    },
+    {
+      "id": "F246",
+      "name": "Approval Hub — 统一审批中心底座",
+      "status": "done（2026-06-22）| **Owner**: Ragdoll/Ragdoll (opus-46) | **Priority**: P2",
+      "file": "F246-approval-hub.md"
+    },
+    {
+      "id": "F247",
+      "name": "云端猫 Family + 多 provider 接入平台",
+      "status": "active | **Owner**: Ragdoll (Ragdoll opus-47) | **Reviewer**: Maine Coon (Maine Coon codex/gpt-5.5) | **Vision Guard**: Ragdoll (opus-48) | **Priority**: P1 | **Created**: 2026-06-21",
+      "file": "F247-cloud-cat-family.md"
     }
   ]
 }

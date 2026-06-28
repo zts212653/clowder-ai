@@ -87,13 +87,11 @@ export function parsePluginManifest(yamlPath: string): PluginManifest {
     );
   }
 
-  // F240 KD-15: use shared parser, plugins only have value fields (no operations)
   const rawConfig = doc['config'];
   let config: ValueConfigField[];
   if (Array.isArray(rawConfig)) {
     const allFields = parseConfigFields(rawConfig, `${yamlPath}/config`);
     config = getValueFields(allFields);
-    // Warn if someone puts operation fields in a plugin.yaml (not supported)
     if (config.length < allFields.length) {
       console.warn(`[PluginManifest] ${yamlPath}: operation fields are not supported in plugin.yaml, skipped`);
     }

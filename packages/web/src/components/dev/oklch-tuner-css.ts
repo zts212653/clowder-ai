@@ -13,9 +13,10 @@ export function buildCSS(p: TunerState, hc: HcOverride): string {
     return `oklch(${msg.L} ${msg.C} ${p.neutralHue})`;
   };
 
-  // 1. Accent + surface hue — accent cascades to --accent-*, surface hue is independent (KD-34)
+  // 1. Accent + surface hue/chroma — accent cascades to --accent-*, surface hue+chroma independent (KD-34)
   const sH = p.surfaceHue ?? 80;
-  const accent = `:root{--accent-hue:${p.accentHue};--accent-chroma:${p.accentChroma};--surface-hue:${sH};}`;
+  const sC = +(0.01 * (p.surfaceChroma ?? 1)).toFixed(4);
+  const accent = `:root{--accent-hue:${p.accentHue};--accent-chroma:${p.accentChroma};--surface-hue:${sH};--surface-chroma:${sC};}`;
 
   // 1b. Cat tier gradients — per-slug tokens in cat-persona-tokens.css consume these
   const catGrads = (m: ModeP, dark: boolean) => {
@@ -39,18 +40,17 @@ export function buildCSS(p: TunerState, hc: HcOverride): string {
     );
   };
 
-  // 2. Surface elevation — hue + chroma independent of accent (KD-34)
-  const sCmul = p.surfaceChroma ?? 1;
+  // 2. Surface elevation — chroma = --surface-chroma × layer factor (1.5/1.2/0.5/0.3)
+  const SURF_FACTORS = [1.5, 1.2, 0.5, 0.3] as const;
   const surf = (e: SurfaceP, dark: boolean) => {
     const sel = dark ? '[data-theme="dark"]' : ':root';
-    const ch = [0.015, 0.012, 0.005, 0.003].map((c) => +(c * sCmul).toFixed(4));
-    const h = sH;
+    const ch = SURF_FACTORS.map((f) => +(sC * f).toFixed(4));
     return (
       `${sel}{` +
-      `--cafe-surface-sunken:oklch(${e.sunken} ${ch[0]} ${h});` +
-      `--cafe-surface:oklch(${e.base} ${ch[1]} ${h});` +
-      `--cafe-surface-elevated:oklch(${e.elevated} ${ch[2]} ${h});` +
-      `--cafe-surface-canvas:oklch(${e.canvas} ${ch[3]} ${h});}`
+      `--cafe-surface-sunken:oklch(${e.sunken} ${ch[0]} ${sH});` +
+      `--cafe-surface:oklch(${e.base} ${ch[1]} ${sH});` +
+      `--cafe-surface-elevated:oklch(${e.elevated} ${ch[2]} ${sH});` +
+      `--cafe-surface-canvas:oklch(${e.canvas} ${ch[3]} ${sH});}`
     );
   };
 

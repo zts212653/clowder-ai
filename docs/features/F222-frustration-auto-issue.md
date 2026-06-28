@@ -1,6 +1,6 @@
 ---
 feature_ids: [F222]
-related_features: [F192, F128]
+related_features: [F192, F128, F245]
 topics: [frustration, auto-issue, friction-detection, eval]
 doc_kind: spec
 created: 2026-06-03

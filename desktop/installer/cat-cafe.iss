@@ -99,8 +99,8 @@ Source: "..\..\docs\*";                          DestDir: "{app}\docs"; \
 Source: "..\..\scripts\*";                         DestDir: "{app}\scripts"; \
   Excludes: "*.sh,*.test.*,__pycache__"; \
   Flags: recursesubdirs createallsubdirs
-; L0 system prompt template — read by rules.ts for governance compilation.
-Source: "..\..\assets\system-prompts\*";           DestDir: "{app}\assets\system-prompts"; \
+; Runtime assets — prompt templates, manifest, system prompt, brand dictionary.
+Source: "..\..\assets\*";                          DestDir: "{app}\assets"; \
   Flags: recursesubdirs createallsubdirs
 ; Guide registry + flow definitions — loaded by guide-registry-loader.ts.
 ; Missing → bootcamp/guide features crash on first request.

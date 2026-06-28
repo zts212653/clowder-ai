@@ -158,6 +158,13 @@ If not, we can pick it up from our side.
 - 只有当守门 thread 明确保留 owner 时，才由守门 thread 自己 `hold_ball` 或转事件驱动。
 - 明确保留 owner 只适用于信息追问、作者意图等待、或operator明确授权的本 thread 修复；普通 bugfix 不因“当前猫看懂了”就留在守门 thread 实现。
 
+**propose-thread projectPath 规则**：`projectPath` 是子 thread 的工作区/真相源，不是 GitHub
+target。处理 `clowder-ai#NNN` 时，PR/issue 链接、GitHub CLI 命令和公开评论仍写
+`clowder-ai`；但普通 review / triage / intake / bugfix 子 thread 应继承或显式使用当前
+cat-cafe projectPath。只有 conflict rebase、public-only hotfix、release target validation
+这类明确需要在公开仓 checkout 操作的任务，才把 proposal projectPath 设为 `clowder-ai`，并在
+handoff 中写明原因。
+
 #### Direction Card（F168 台账联动）
 
 每个 verdict 确定后，**必须发 Direction Card** 到 Inbox thread（模板见 [direction-card-template.md](./direction-card-template.md)）：
@@ -219,6 +226,7 @@ cat_cafe_register_pr_tracking(repoFullName, prNumber)
 | 守门 thread 看到有效 bug 就直接开修 | Inbox 变成工程 thread，operator失去路由控制，容易和 feature/thread owner 撞车 | 先公开首反 + Direction Card；实现交给独立 bugfix thread / feature owner；无明显 owner 时给operator路由建议 |
 | WELCOME 后只给 verdict，不给 owner / route | 球权掉地上 | Direction Card 必填 route、owner、next action、report-back |
 | 分发给下游 thread 后继续在守门 thread hold | 双 owner、重复轮询、死锁 | 谁接球谁 hold；守门 thread 只保留路由记录 |
+| 把 `clowder-ai#NNN` 的下游 thread projectPath 填成 `clowder-ai` | 下游猫进入错误 workspace，家里 SOP/skills/feature docs 不在 cwd | projectPath 跟工作区真相源走；普通社区 review/triage/intake 用 cat-cafe，只有公开仓 checkout 操作例外 |
 | PR 还没 accepted issue 就深度 code review | 方向错也浪费 reviewer | 先 issue-first；无 accepted issue 不进代码 review |
 | 有更优雅方案就立刻 @co-creator | operator 变回人肉路由 | 猫猫先 maintainer reframing；只有硬决策才升级 |
 | 明显 spam 仍开 thread 讨论 | 浪费协作带宽 | `invalid` + `triaged` + close |

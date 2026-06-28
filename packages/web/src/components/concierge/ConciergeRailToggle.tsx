@@ -10,6 +10,7 @@
  */
 
 import { useConciergeStore } from '@/stores/conciergeStore';
+import { CafeIcon } from '../rich/CafeIcons';
 
 export function ConciergeRailToggle() {
   const configLoaded = useConciergeStore((s) => s.configLoaded);
@@ -34,13 +35,11 @@ export function ConciergeRailToggle() {
           ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
           : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
       }`}
-      title={isOpen ? '收起前台猫' : muted ? '唤起前台猫（已静音）' : '唤起前台猫'}
-      aria-label={isOpen ? '收起前台猫' : '唤起前台猫'}
+      title={isOpen ? '收起猫猫球' : muted ? '唤起猫猫球（已静音）' : '唤起猫猫球'}
+      aria-label={isOpen ? '收起猫猫球' : '唤起猫猫球'}
       data-testid="concierge-rail-toggle"
     >
-      <span className="text-base leading-none" aria-hidden="true">
-        🐱
-      </span>
+      <CafeIcon name="cat" className="w-5 h-5" />
     </button>
   );
 }

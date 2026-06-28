@@ -16,6 +16,7 @@ describe('eval:task-outcome domain registration (F192 Phase G)', () => {
       evalCat: { catId: 'opus-47', handle: '@opus47', model: 'claude-opus-4-7' },
       frequency: 'weekly',
       sourceAdapter: 'task-outcome-eval',
+      sourceRefsKind: 'task-outcome-snapshot',
       threadPolicy: {
         role: 'working-home',
         stateSot: 'registry',
@@ -96,6 +97,7 @@ describe('eval:task-outcome domain registration (F192 Phase G)', () => {
         evalCat: { catId: 'opus-47', handle: '@opus47', model: 'claude-opus-4-7' },
         frequency: 'weekly',
         sourceAdapter: 'task-outcome-eval',
+        sourceRefsKind: 'task-outcome-snapshot',
         threadPolicy: {
           role: 'working-home',
           stateSot: 'registry',
@@ -128,6 +130,7 @@ describe('eval:task-outcome domain registration (F192 Phase G)', () => {
       evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
       frequency: 'daily',
       sourceAdapter: 'f167-runtime-eval',
+      sourceRefsKind: 'a2a-snapshot-attribution',
       threadPolicy: {
         role: 'working-home',
         stateSot: 'registry',

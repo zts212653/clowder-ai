@@ -1,0 +1,43 @@
+---
+domainId: eval:friction
+displayName: Friction Signal Eval
+systemThreadId: thread_eval_friction
+# evalCat: F245 owner default — gpt52 (Maine Coon GPT-5.4) for cost (codex is ~2x) +
+# cross-family separation (Ragdoll authors/owns F245 → Maine Coon evaluates the friction
+# its own family reports). Adjustable config — flagged for review/operator.
+evalCat:
+  catId: gpt52
+  handle: "@gpt52"
+  model: gpt-5.4
+# F245 PR2: 本家 3-day cadence — N-day infra landed.
+# Community default remains `weekly` in community eval-domains/ copies.
+frequency: every-3d
+sourceAdapter: f245-friction-rollup
+sourceRefsKind: friction-rollup-snapshot
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+# Actionable friction findings route to the harness-eval owner (Phase D wires
+# per-finding propose_thread; until then the owner triages from here).
+# ownerCatId must be a REGISTERED catId in cat-config.json (cloud R2 P2): opus-48
+# (F245 author) is an invocation identity but NOT in the routing catalog, so it
+# would be an unwakeable handoff. Use opus-47 — registered + the harness-eval cell
+# owner (same target eval:a2a / eval:memory / eval:capability-wakeup hand off to).
+handoffTargetResolver:
+  featureId: F245
+  ownerCatId: opus-47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+# Gated OFF until the friction report producer (P1-3/4) + verdict generator (P1-6)
+# are wired — otherwise the weekly cron would invoke a friction eval cat that
+# can't publish (501 / silent-broken fire, same failure eval:sop hit 2026-06-06).
+# Flipped to true in PR1b (P1-7) after the end-to-end live sink is wired + verified
+# green (publish_verdict eval:friction → friction-rollup-snapshot → live verdict).
+enabled: true

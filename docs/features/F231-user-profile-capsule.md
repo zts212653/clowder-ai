@@ -4,6 +4,7 @@ related_features: [F221, F203, F102, F200, F229]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
+tips_exempt: L0-internal per-user alignment injection — harness plumbing, no user-visible capability surface
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
@@ -119,8 +120,8 @@ operator experience（2026-06-11）：
 
 ### Phase C（养熟循环）
 - [x] AC-C1: 关系信号→capsule/primer 更新提议路径落地（三段管道 KD-8，KD-12 分层写入制），至少 1 次真实更新走完全程（跑在白名单采集 + runtime-neutral trigger 真骨架上，非 L0 反射脚手架）（✅ PR #2296 merged 2026-06-15：profile-update proposal store/routes/tool/card + approve/reject write path + provenance audit + settled-card recovery；`pnpm gate` passed at `be6185ad`）
-- [ ] AC-C2: 正向轨迹沉淀有真实样本（≥1 条"做对的时刻"进 primer/capsule，对照"只记检讨书"基线）
-- [ ] AC-C3: 采集白名单（KD-9）写成机器可检查的数据契约（lint/test 守护禁 classifier 采集源）+ 蒸馏 trigger runtime-neutral（KD-10，不依赖 provider Stop hook，codex/gpt52 path 有 fallback 覆盖）
+- [x] AC-C2: 正向轨迹沉淀有真实样本（≥1 条"做对的时刻"进 primer/capsule，对照"只记检讨书"基线）（✅ 2026-06-17 proposal_mqg11vxc8ypclgv4：3 条正向轨迹 opus-primer.md + operator approve + provenance 归档；但 operator 指出 C1 merged 2 天零有机使用 → C3 必须做不可后置）
+- [x] AC-C3: 采集白名单（KD-9）写成机器可检查的数据契约（lint/test 守护禁 classifier 采集源）+ 蒸馏 trigger runtime-neutral（KD-10，不依赖 provider Stop hook，codex/gpt52 path 有 fallback 覆盖）（✅ 2026-06-17 `b6de921f0`：COLLECTION_SIGNAL_KINDS 6 种白名单 frozen enum + isAllowedCollectionSignal() type guard + 4 OTel eval counters (proposed/approved/rejected/distillation_triggered) + ProfileDistillationTrigger.onSessionSealed() + SessionSealer.registerPostSealHook() 机制；13 tests RED→GREEN）
 
 ## Dependencies
 
@@ -157,6 +158,8 @@ operator experience（2026-06-11）：
 | KD-13 | 纠正信号（operator 否认/修正画像）= 最高优先级采集源，但识别走**当事猫的自我认知**（参与对话、有完整语义上下文、主动声明"我被纠正了"），**禁系统用关键词/模式匹配扫对话识别纠正**——人类表达太多样（"诶不对"/"为什么你觉得"/"其实我"无限种），匹配抓不全且误判=A 类 classifier 换皮；区别于 magic-word（operator 主动按的有限约定暗号，仍可 deterministic 匹配） | operator："不要去模式匹配这样的信号比如关键词匹配，人的表达太多了"；当事猫语义理解 ≠ 旁观系统分类（KD-8 禁后者不禁前者，opus47 research B 类猫自省可做） | 2026-06-13 |
 | KD-14 | 画像使用形态 = 潜意识涌出（内化成猫的直觉、自然流露），非"查表报依据"；归因只在关键/无把握时轻确认，多数潜意识使用 | operator："pull 本质是潜意识涌出来之后我说诶这不太对"+"不能让猫猫班味"；KD-4（写事实不写指令）延伸到使用形态——条目化使用必背书 | 2026-06-13 |
 | KD-15 | 写入目标层分流：低代价偏好/印象猫自治写入**只进 per-cat 层**（primer / user-signal lane），**不直接进 shared capsule**；晋升 shared capsule（全猫共享真相源）需高门槛（operator 签字 or 多猫印证 + 用中校准稳定后晋升） | capsule 扩散面最大（KD-2 全猫共享 / KD-5 数据最小化），单猫自治直写 shared capsule 风险高；per-cat 层是猫视角/暂存自治合理（呼应失真悖论：capsule 客观 vs primer 猫视角）；codex rigor P1 要求写死写入目标层、不让实现猫猜 | 2026-06-13 |
+| KD-16 | `ProfileDistillationTrigger.onSessionSealed` Phase C 实现边界 = observability-only（trigger counter +1 + return 0），signal harvest 由猫主动调 `cat_cafe_propose_profile_update` MCP tool 完成；spec C3 "采集白名单 + 蒸馏管道"读起来像完整 auto-harvest 实际是"白名单 + 观察 trigger + 手动入口"两步实现 | KD-11 bounded pilot 设计内合理简化（"不开通用 dream lane"），不是 dead code；记录边界避免后续 reader 误判 auto-harvest 已就绪；opus-47 trace runtime data flow 时发现，Maine Coon独立 trace 同结论建议写入 spec | 2026-06-18 |
+| KD-17 | OQ-5 closed：画像注入第三级 = **静态 capsule + profile index + 动态 recall**。L0 常驻只保留 ≤300 字 capsule（身份锚）+ primer 指针；画像正文、per-cat primer、user-signal lane 进入可索引 profile corpus；每轮按当前任务/上下文动态召回相关片段注入。入库判断仍走 KD-8/KD-12/KD-15，注入判断只做相关性检索，不重新判断"什么算画像"；敏感/高代价事实可入索引但默认不自动召回，除非 operator 显式签字或当前任务强相关。 | operator 2026-06-18："很多的可以变成索引类似的？甚至可能需要动态 recall" + "我是 我觉得ok的"。这保留"醒来第一眼看到主人"的 capsule 体验，同时避免画像变厚后挤爆 L0；把 50k→5k→500 的第三级从静态堆 prompt 改成可验证 retrieval。实现细节（index schema / scorer / 注入位置 / eval 指标 / F102/F200 接法）猫猫自决。 | 2026-06-18 |
 
 ## Remaining Work Plan（2026-06-16 三猫收敛）
 
@@ -171,8 +174,8 @@ operator experience（2026-06-11）：
 | B1-B2 | ✅ 全部完成 | 2026-06-11 三棒 + operator 签字 |
 | C1 | ✅ merged | PR #2296 (`be6185ad`) |
 | B3 | ✅ 完成 | `compile-system-prompt-l0.test.mjs` 4 项 compile-level regression |
-| **C2** | ❌ 待做 | — |
-| **C3** | ❌ 待做 | — |
+| C2 | ✅ 完成 | `proposal_mqg11vxc8ypclgv4` operator approved，但 2 天零有机使用 → C3 必须 |
+| **C3** | ✅ merged | PR #2354 (`37f7dedc`) — KD-9 whitelist enum + KD-10 eval counters + distillation trigger |
 
 ### Wave 2（当前，不需额外 spec）
 
@@ -206,6 +209,7 @@ operator experience（2026-06-11）：
 - propose→approve 周期、写入质量、画像漂移检测
 - 依赖 C3 自动采集产生足够数据
 
-### operator 待决
+### operator 裁定（2026-06-17）
 
-- **F231 terminal state**：C1（manual propose 入口）+ C2（跑通一次循环）是否构成可接受的 Phase C 终态？或必须完成 C3（自动采集管道）？48 判断：C1 manual-only 可作 bounded pilot 终态（KD-11），C3 可开新 Phase 或并入后续 feat
+- **C3 必须做，不可后置**。证据：C1 merged 2 天（2026-06-15→17），除 C2 手动测试外零有机使用。wakeup entry 写了但没有猫自然触发。operator 原话："既然这么几天 c2 做完没人用只能说明你这个功能不在大猫猫们的认知路径上"。harness = 软 + 硬 + eval，缺 eval + 缺自动 trigger = dead code on shelf。
+- **eval 也必须做**——不测量激活率，下一个功能还是同样命运。eval 指标：propose 调用频次 / approve-reject ratio / primer 被 L0 引用次数

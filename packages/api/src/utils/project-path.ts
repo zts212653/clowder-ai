@@ -8,8 +8,9 @@
  * See: https://github.com/zts212653/clowder-ai/issues/228
  */
 
+import { realpathSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { delimiter, relative, resolve, win32 } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,18 @@ function legacyDefaultRoots(platformName = platform()): string[] {
   roots.add('/private/tmp');
   roots.add('/workspace');
   if (platformName === 'darwin') roots.add('/Volumes');
+
+  // On macOS, os.tmpdir() returns /var/folders/…/T/ (NOT /tmp).
+  // Tests using mkdtemp() create dirs there — they must be allowed when
+  // PROJECT_ALLOWED_ROOTS_APPEND=true activates allowlist mode (e.g. sync
+  // public gate).  Resolve symlinks so the root matches realpath'd paths.
+  try {
+    const sysTmp = realpathSync(tmpdir());
+    roots.add(sysTmp);
+  } catch {
+    // tmpdir resolution failed — fall through; /tmp still covers Linux/CI
+  }
+
   return [...roots];
 }
 
@@ -84,30 +97,69 @@ export function isDenylistMode(): boolean {
   return LEGACY_ALLOWED_ROOTS() === null;
 }
 
+export type ProjectPathValidationFailureReason = 'not_found' | 'not_directory' | 'denied_root' | 'io_error';
+
+export type ProjectPathValidationResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: ProjectPathValidationFailureReason; message?: string };
+
+interface ProjectPathValidationDeps {
+  realpath?: typeof realpath;
+  stat?: typeof stat;
+}
+
+function errorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code)
+    : undefined;
+}
+
+function errorMessage(err: unknown): string | undefined {
+  return err instanceof Error ? err.message : undefined;
+}
+
+function isMissingPathError(err: unknown): boolean {
+  return ['ENOENT', 'ENOTDIR'].includes(errorCode(err) ?? '');
+}
+
 /**
- * Check if a path is an allowed project directory.
+ * Check if a path is an allowed project directory and return diagnostic detail.
  *
  * 1. Resolves the path to absolute
  * 2. Uses realpath() to follow symlinks and canonicalize
  * 3. Checks the real path against denylist (or allowlist in legacy mode)
  * 4. Verifies the path is an existing directory
+ */
+export async function validateProjectPathDetailed(
+  rawPath: string,
+  deps: ProjectPathValidationDeps = {},
+): Promise<ProjectPathValidationResult> {
+  const realpathFn = deps.realpath ?? realpath;
+  const statFn = deps.stat ?? stat;
+  try {
+    const absPath = resolve(rawPath);
+    const realPath = await realpathFn(absPath);
+
+    if (!isUnderAllowedRoot(realPath)) return { ok: false, reason: 'denied_root' };
+
+    const info = await statFn(realPath);
+    if (!info.isDirectory()) return { ok: false, reason: 'not_directory' };
+
+    return { ok: true, path: realPath };
+  } catch (err) {
+    if (isMissingPathError(err)) return { ok: false, reason: 'not_found', message: errorMessage(err) };
+    return { ok: false, reason: 'io_error', message: errorMessage(err) };
+  }
+}
+
+/**
+ * Check if a path is an allowed project directory.
  *
  * @returns The canonicalized real path if valid, or null if rejected.
  */
 export async function validateProjectPath(rawPath: string): Promise<string | null> {
-  try {
-    const absPath = resolve(rawPath);
-    const realPath = await realpath(absPath);
-
-    if (!isUnderAllowedRoot(realPath)) return null;
-
-    const info = await stat(realPath);
-    if (!info.isDirectory()) return null;
-
-    return realPath;
-  } catch {
-    return null;
-  }
+  const result = await validateProjectPathDetailed(rawPath);
+  return result.ok ? result.path : null;
 }
 
 export function isPathUnderRoots(absPath: string, roots: string[], platformName = process.platform): boolean {

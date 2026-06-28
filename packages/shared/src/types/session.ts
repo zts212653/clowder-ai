@@ -17,6 +17,10 @@ export interface SessionRecord {
   readonly id: string;
   /** CLI-reported session ID (from session_init event) */
   cliSessionId: string;
+  /** Canonical workspace path associated with this CLI session, when provider-scoped. */
+  workingDirectory?: string;
+  /** Stable workspace identity used to decide whether a CLI session can be resumed. */
+  workspaceFingerprint?: string;
   readonly threadId: string;
   readonly catId: CatId;
   readonly userId: string;

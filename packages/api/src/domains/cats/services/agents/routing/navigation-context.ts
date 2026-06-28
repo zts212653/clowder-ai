@@ -1,5 +1,6 @@
 import { getCoCreatorConfig } from '../../../../../config/cat-config-loader.js';
 import { getSenderName } from '../../context/ContextAssembler.js';
+import { renderSegment } from '../../context/prompt-template-loader.js';
 import { formatPromptTime } from '../../format-time.js';
 
 export interface BatonContext {
@@ -106,8 +107,12 @@ export interface NavigationContext {
   bestNextSource?: string;
 }
 
-export function formatNavigationHeader(ctx: NavigationContext): string {
-  const lines: string[] = ['[导航]'];
+/**
+ * Build navigation inner content (conditional blocks).
+ * Template envelope ([导航]...[/导航]) is in n1-navigation.md.
+ */
+function buildNavigationInner(ctx: NavigationContext): string {
+  const lines: string[] = [];
   const coCreatorTimeZone = getCoCreatorConfig().timeZone;
 
   if (ctx.baton) {
@@ -148,6 +153,10 @@ export function formatNavigationHeader(ctx: NavigationContext): string {
     }
   }
 
-  lines.push('[/导航]');
   return lines.join('\n');
+}
+
+/* @segment N1 — 导航块 (template: n1-navigation.md) */
+export function formatNavigationHeader(ctx: NavigationContext): string {
+  return renderSegment('N1', { INNER_CONTENT: buildNavigationInner(ctx) }) ?? '[导航]\n[/导航]';
 }

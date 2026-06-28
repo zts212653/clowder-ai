@@ -83,6 +83,12 @@ describe('pre-merge gate guard', () => {
       });
       assert.notEqual(result.status, 0);
       assert.match(result.stderr, /fseventsd RSS/);
+      assert.match(result.stderr, /pnpm process:doctor/);
+      assert.match(result.stderr, /pnpm process:cleanup/);
+      assert.match(result.stderr, /stale\/no-listener Clowder AI dev\/watch process groups/);
+      assert.match(result.stderr, /will not necessarily reduce fseventsd RSS/);
+      assert.match(result.stderr, /Manual gate bypass is a operator override/);
+      assert.doesNotMatch(result.stderr, /kill -9|pkill|lsof -ti tcp:/);
       assert.equal(existsSync(lockDir), false);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

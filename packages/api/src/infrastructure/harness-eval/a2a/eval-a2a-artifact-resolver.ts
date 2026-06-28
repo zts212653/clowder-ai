@@ -53,6 +53,17 @@ const bundleSnapshotSchema = z.object({
     endMs: z.number().int().optional(),
     durationHours: z.number().min(0),
   }),
+  // F167 sibling-PR (P1 gpt52 review fix): allow counterWindow to round-trip
+  // through bundle JSON validation. Counter-domain window reflects process
+  // lifetime (boot → now) and is independent from `window` (trace window).
+  // Optional for backward compat with older bundles that pre-date this field.
+  counterWindow: z
+    .object({
+      startMs: z.number().int().optional(),
+      endMs: z.number().int().optional(),
+      durationHours: z.number().min(0),
+    })
+    .optional(),
   components: z.array(bundleComponentSchema).min(1),
 });
 

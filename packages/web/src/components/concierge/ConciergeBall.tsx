@@ -9,6 +9,7 @@
  * V4 (P1): idle 态呼吸动画（4s 慢呼吸，reduced-motion 降级）
  * V5 (P1): 八态 sprite 映射 + crossfade 过渡
  * V6 (Phase E0): PetSkinContract v0 — projection-driven sprite resolution
+ * V7 (Phase E1): Atlas-based animated sprites — 9-state spritesheet animation
  *
  * 交互：
  *   collapsed → toolbar（点猫，不直接开气泡）
@@ -20,7 +21,8 @@
 
 import type { ConciergeBallState } from '@cat-cafe/shared';
 import { useConciergeStore } from '@/stores/conciergeStore';
-import { resolvePetSprite } from './usePetSkin';
+import { type AtlasSpriteResult, resolvePetSprite } from './usePetSkin';
+import { useSpriteAnimation } from './useSpriteAnimation';
 
 interface ConciergeBallProps {
   ballState: ConciergeBallState;
@@ -50,6 +52,79 @@ const STATE_LABELS: Record<ConciergeBallState, string> = {
   error: '出错了',
 };
 
+// ---------------------------------------------------------------------------
+// Atlas sprite renderer (E1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders an animated sprite from an atlas spritesheet.
+ * Uses <img> inside a clipping container for reliable alpha transparency.
+ *
+ * Why <img> instead of CSS background-image:
+ *   CSS background-image + imageRendering: pixelated has known alpha compositing
+ *   issues in some browser/OS combos — transparent regions render as black.
+ *   An <img> element with position offset inside overflow:hidden is the most
+ *   reliable cross-browser approach for spritesheet alpha.
+ *
+ * Display size: aspect-ratio-aware scaling.
+ * Atlas cells are 192×208 (not square). To fit inside the 64×64 display area
+ * while preserving aspect ratio, we height-fit: 64px height → 59px width.
+ * (64 × 192/208 ≈ 59.08)
+ */
+function AtlasSprite({ atlas }: { atlas: AtlasSpriteResult }) {
+  const { frameIndex } = useSpriteAnimation({
+    frameCount: atlas.frameCount,
+    frameDurations: atlas.frameDurations,
+    row: atlas.row,
+    cellWidth: atlas.cellWidth,
+    cellHeight: atlas.cellHeight,
+  });
+
+  // Height-fit: display height = 64px, width scales proportionally
+  const displayHeight = 64;
+  const displayWidth = Math.round(displayHeight * (atlas.cellWidth / atlas.cellHeight));
+
+  // Full spritesheet dimensions at display scale
+  const imgWidth = displayWidth * 8;
+  const imgHeight = displayHeight * 9;
+
+  // Frame offset in display coordinates (integer math avoids rounding drift)
+  const offsetX = -(frameIndex * displayWidth);
+  const offsetY = -(atlas.row * displayHeight);
+
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: displayWidth,
+        height: displayHeight,
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {/* biome-ignore lint/performance/noImgElement: sprite atlas, not content — Next Image optimization not applicable */}
+      <img
+        src={atlas.src}
+        alt=""
+        draggable={false}
+        style={{
+          position: 'absolute',
+          left: offsetX,
+          top: offsetY,
+          width: imgWidth,
+          height: imgHeight,
+          maxWidth: 'none', // Override Tailwind preflight `img { max-width: 100% }`
+          imageRendering: 'pixelated',
+        }}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ConciergeBall component
+// ---------------------------------------------------------------------------
+
 export function ConciergeBall({ ballState }: ConciergeBallProps) {
   const setSurfaceState = useConciergeStore((s) => s.setSurfaceState);
   const surfaceState = useConciergeStore((s) => s.surfaceState);
@@ -74,7 +149,8 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
   };
 
   const skin = useConciergeStore((s) => s.skin);
-  const spriteSrc = resolvePetSprite(ballState, skin);
+  const spriteResult = resolvePetSprite(ballState, skin);
+  const isAtlas = typeof spriteResult !== 'string' && spriteResult.kind === 'atlas';
   const dotColor = STATE_DOT_COLORS[ballState] ?? 'var(--accent-300)';
   const stateLabel = STATE_LABELS[ballState] ?? ballState;
   const isExpanded = surfaceState !== 'collapsed';
@@ -88,8 +164,9 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
         aria-expanded={isExpanded}
         aria-haspopup="dialog"
         style={{
-          backgroundColor: 'var(--cafe-surface-elevated)',
-          boxShadow: 'var(--shadow-elevation-1)',
+          // BUG-UX-1 fix: transparent background — no "狗皮膏药" opaque base.
+          // Drop shadow on the button gives depth without a solid fill.
+          filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.18))',
         }}
         className={[
           'pointer-events-auto',
@@ -101,25 +178,33 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
           // The transition on `transform` caused a visible "teleport then slide"
           // artifact when react-rnd's position prop updated after drag stop.
           isDragging ? '' : 'transition-transform duration-200',
-          isIdle && !isDragging ? 'animate-[concierge-breathe_4s_ease-in-out_infinite]' : '',
+          // Breathing animation only for idle state with non-atlas skins
+          // (atlas skins have their own idle animation frames)
+          isIdle && !isDragging && !isAtlas ? 'animate-[concierge-breathe_4s_ease-in-out_infinite]' : '',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cafe-accent)] focus-visible:ring-offset-2',
           'select-none',
           isDragging ? 'cursor-grabbing' : 'cursor-pointer hover:scale-105',
         ].join(' ')}
         onClick={handleClick}
       >
-        {/* Cat sprite — 64×64 inside 72×72 base
-            V1: PNG sprite replaces emoji
-            V5: crossfade on state change via CSS transition */}
-        <img
-          src={spriteSrc}
-          alt=""
-          aria-hidden="true"
-          width={64}
-          height={64}
-          className="object-contain"
-          style={{ transition: 'opacity 300ms ease-in-out' }}
-        />
+        {/* Cat sprite — 64×64 (or aspect-ratio-aware) inside 72×72 base */}
+        {isAtlas ? (
+          <AtlasSprite atlas={spriteResult as AtlasSpriteResult} />
+        ) : (
+          // biome-ignore lint/performance/noImgElement: sprite image, not content — Next Image optimization not applicable
+          <img
+            src={spriteResult as string}
+            alt=""
+            aria-hidden="true"
+            width={64}
+            height={64}
+            className="object-contain"
+            style={{
+              transition: 'opacity 300ms ease-in-out',
+              imageRendering: 'pixelated',
+            }}
+          />
+        )}
 
         {/* Badge dot — shows only when unseenResultCount > 0 (quiet-badge policy §3)
             role="img" lets aria-label attach to an empty visual element */}
@@ -131,7 +216,8 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
             className={[
               'absolute -top-1 -right-1',
               'w-3 h-3 rounded-full',
-              'border-2 border-[color:var(--cafe-surface-elevated)]',
+              // BUG-UX-1: use page background instead of removed surface-elevated
+              'border-2 border-[color:var(--cafe-surface-canvas)]',
             ].join(' ')}
           />
         )}
@@ -142,7 +228,8 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
           className={[
             'absolute -bottom-1 -right-1',
             'w-3 h-3 rounded-full',
-            'border-2 border-[color:var(--cafe-surface-elevated)]',
+            // BUG-UX-1: use page background instead of removed surface-elevated
+            'border-2 border-[color:var(--cafe-surface-canvas)]',
           ].join(' ')}
           aria-hidden="true"
         />

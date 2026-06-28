@@ -21,13 +21,13 @@ check_requirements() {
 
     if ! command -v node &> /dev/null; then
         echo -e "${RED}错误: 未找到 Node.js${NC}"
-        echo "请安装 Node.js 20+ : https://nodejs.org/"
+        echo "请安装 Node.js 24+ (<26): https://nodejs.org/"
         exit 1
     fi
 
     NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-    if [ "$NODE_VERSION" -lt 20 ]; then
-        echo -e "${RED}错误: Node.js 版本过低 (需要 >= 20)${NC}"
+    if [ "$NODE_VERSION" -lt 24 ] || [ "$NODE_VERSION" -ge 26 ]; then
+        echo -e "${RED}错误: Node.js 版本不支持 (需要 >= 24 and < 26)${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ Node.js $(node -v)${NC}"

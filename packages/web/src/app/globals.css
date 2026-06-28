@@ -87,6 +87,27 @@ body {
   }
 }
 
+/* F244: Tip-as-thinking-bubble — breathing border glow while cat is thinking */
+@keyframes tip-thinking-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    border-color: var(--color-cafe-border, rgba(128, 128, 128, 0.2));
+  }
+  50% {
+    box-shadow: 0 0 10px 0 rgba(155, 126, 189, 0.12);
+    border-color: rgba(155, 126, 189, 0.35);
+  }
+}
+.tip-thinking {
+  animation: tip-thinking-glow 3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip-thinking {
+    animation: none;
+  }
+}
+
 @keyframes guide-success-flash {
   0% {
     transform: scale(1);

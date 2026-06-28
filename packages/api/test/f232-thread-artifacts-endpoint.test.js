@@ -1,17 +1,33 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 const { threadsRoutes } = await import('../dist/routes/threads.js');
+const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
+const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
 
 describe('GET /api/threads/:threadId/artifacts (F232)', () => {
   let app;
+  const tempDirs = [];
   afterEach(async () => {
     if (app) await app.close();
     app = null;
+    while (tempDirs.length > 0) {
+      rmSync(tempDirs.pop(), { recursive: true, force: true });
+    }
   });
 
-  async function makeApp({ thread = { id: 'T1', createdBy: 'alice' }, messages = [], tasks = [], memory = null } = {}) {
+  async function makeApp({
+    thread = { id: 'T1', createdBy: 'alice' },
+    messages = [],
+    tasks = [],
+    memory = null,
+    sessionChainStore,
+    transcriptWriter,
+  } = {}) {
     const threadStore = {
       get: async (id) => (thread && id === thread.id ? thread : null),
       getThreadMemory: async () => memory,
@@ -21,6 +37,8 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
       threadStore,
       messageStore: { getByThread: async () => messages, getByThreadBefore: async () => [] },
       taskStore: { listByThread: async () => tasks },
+      ...(sessionChainStore ? { sessionChainStore } : {}),
+      ...(transcriptWriter ? { transcriptWriter } : {}),
     });
     return a;
   }
@@ -180,8 +198,93 @@ describe('GET /api/threads/:threadId/artifacts (F232)', () => {
     const res = await app.inject({ method: 'GET', url: '/api/threads/T1/artifacts', headers: AUTH });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    assert.equal(body.artifacts.length, 3); // plan + feature-doc + file all collected
-    assert.ok(body.artifacts.every((a) => a.type === 'file')); // doc types map to panel file type
-    assert.deepEqual(body.artifacts.map((a) => a.ref).sort(), ['docs/features/F1.md', 'docs/plans/x.md', 'src/y.ts']);
+    assert.equal(body.artifacts.length, 3); // plan + feature-doc + source file all collected
+    assert.deepEqual(Object.fromEntries(body.artifacts.map((a) => [a.ref, a.type])), {
+      'docs/plans/x.md': 'file',
+      'docs/features/F1.md': 'file',
+      'src/y.ts': 'code',
+    });
+  });
+
+  it('P1 (cloud): active-session file artifacts appear before session seal', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'f232-thread-artifacts-live-'));
+    tempDirs.push(dataDir);
+    const sessionChainStore = new SessionChainStore();
+    const transcriptWriter = new TranscriptWriter({ dataDir });
+    const activeSession = sessionChainStore.create({
+      cliSessionId: 'cli-live-1',
+      threadId: 'T1',
+      catId: 'opus',
+      userId: 'alice',
+    });
+
+    const sessionInfo = {
+      sessionId: activeSession.id,
+      threadId: activeSession.threadId,
+      catId: activeSession.catId,
+      cliSessionId: activeSession.cliSessionId,
+      seq: activeSession.seq,
+    };
+    transcriptWriter.appendEvent(sessionInfo, {
+      type: 'tool_use',
+      toolName: 'Edit',
+      toolInput: { path: 'packages/api/src/routes/threads.ts' },
+    });
+    transcriptWriter.appendEvent(sessionInfo, {
+      type: 'tool_use',
+      toolName: 'Read',
+      toolInput: { path: 'README.md' },
+    });
+
+    app = await makeApp({
+      thread: { id: 'T1', createdBy: 'alice' },
+      sessionChainStore,
+      transcriptWriter,
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/threads/T1/artifacts', headers: AUTH });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const refs = body.artifacts.map((a) => a.ref);
+    assert.ok(refs.includes('packages/api/src/routes/threads.ts'), 'live edited file should appear before seal');
+    assert.ok(!refs.includes('README.md'), 'read-only live file must stay excluded');
+  });
+
+  it('P1 (cloud): shared thread live file ledger is user-scoped', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'f232-thread-artifacts-live-scope-'));
+    tempDirs.push(dataDir);
+    const sessionChainStore = new SessionChainStore();
+    const transcriptWriter = new TranscriptWriter({ dataDir });
+
+    const bobSession = sessionChainStore.create({
+      cliSessionId: 'cli-bob-1',
+      threadId: 'shared',
+      catId: 'opus',
+      userId: 'bob',
+    });
+    transcriptWriter.appendEvent(
+      {
+        sessionId: bobSession.id,
+        threadId: bobSession.threadId,
+        catId: bobSession.catId,
+        cliSessionId: bobSession.cliSessionId,
+        seq: bobSession.seq,
+      },
+      {
+        type: 'tool_use',
+        toolName: 'Edit',
+        toolInput: { path: 'src/bob-secret.ts' },
+      },
+    );
+
+    app = await makeApp({
+      thread: { id: 'shared', createdBy: 'system' },
+      sessionChainStore,
+      transcriptWriter,
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/threads/shared/artifacts', headers: AUTH });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    const refs = body.artifacts.map((a) => a.ref);
+    assert.ok(!refs.includes('src/bob-secret.ts'), 'Alice must not see Bob live files on shared thread');
   });
 });

@@ -65,7 +65,7 @@ const staleAgentHookHealth = {
       status: 'missing',
       drifted: true,
       reason: 'target file does not exist',
-      targetPath: '/home/user/session-start-recall.sh',
+      targetPath: '/home/user/.claude/hooks/session-start-recall.sh',
       diff: { kind: 'text', message: 'target file is missing' },
     },
   ],

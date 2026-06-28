@@ -25,7 +25,6 @@ function humanizeClientId(clientId: string) {
   if (clientId === 'openai') return 'OpenAI';
   if (clientId === 'anthropic') return 'Anthropic';
   if (clientId === 'google') return 'Gemini';
-  if (clientId === 'dare') return 'Dare';
   if (clientId === 'opencode') return 'OpenCode';
   if (clientId === 'antigravity') return 'Antigravity';
   return clientId;
@@ -38,7 +37,6 @@ function clientRuntimeLabel(cat: CatData, configCat?: CatConfig) {
   if (accountRef.includes('gemini')) return 'Gemini';
   if (accountRef.includes('kimi') || accountRef.includes('moonshot')) return 'Kimi';
   if (accountRef.includes('opencode')) return 'OpenCode';
-  if (accountRef.includes('dare')) return 'Dare';
   if (cat.clientId === 'antigravity') return 'Antigravity';
   if (cat.clientId === 'openai') return 'OpenAI-Compatible';
   return humanizeClientId(configCat?.clientId ?? cat.clientId);
@@ -52,7 +50,6 @@ function accountSummary(cat: CatData) {
     accountRef === 'codex' ||
     accountRef === 'gemini' ||
     accountRef === 'kimi' ||
-    accountRef === 'dare' ||
     accountRef === 'opencode'
   ) {
     return 'CLI（OAuth）账号';
@@ -206,7 +203,7 @@ function MemberMeta({ cat, configCat }: { cat: CatData; configCat?: CatConfig })
   return (
     <>
       <span>
-        <SettingsText tone="muted" className="mr-1.5 font-mono text-[10px]">
+        <SettingsText tone="muted" className="mr-1.5 font-mono text-micro">
           {cat.id}
         </SettingsText>
         {getMetaSummary(cat, configCat)}

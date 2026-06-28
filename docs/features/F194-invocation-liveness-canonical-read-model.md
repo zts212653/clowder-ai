@@ -4,6 +4,7 @@ related_features: [F048, F117, F173, F183]
 topics: [invocation, liveness, redis, runtime-state, observability, message-pipeline]
 doc_kind: spec
 created: 2026-05-07
+tips_exempt: post-close R20/R21 live CLI ghost bugfix timeline; no new user-facing capability tip
 ---
 
 # F194: Invocation Liveness Canonical Read Model — 后端 invocation 活性真相源收口

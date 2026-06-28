@@ -19,6 +19,7 @@ const CONNECTOR_CONFIG_SUBDIR = 'im-connector-config';
 const CONNECTOR_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}[a-z0-9]$/;
 
 type StoredValues = Record<string, string | null>;
+export type ConnectorStoredConfig = Record<string, string | null>;
 
 const configCache = new Map<string, StoredValues>();
 
@@ -104,6 +105,14 @@ export function readConnectorConfig(projectRoot: string, connectorId: string): R
 }
 
 /**
+ * Read stored config with tombstones preserved.
+ * Used by rollback paths that must distinguish absent keys from explicit clears.
+ */
+export function readConnectorStoredConfig(projectRoot: string, connectorId: string): ConnectorStoredConfig {
+  return { ...readRawConfig(projectRoot, connectorId) };
+}
+
+/**
  * Write config updates for a connector.
  * Returns the list of keys that actually changed.
  */
@@ -136,6 +145,49 @@ export function writeConnectorConfig(
   }
 
   // Merge value fields back with preserved _operations
+  const merged: Record<string, unknown> = { ...values };
+  if (full._operations !== undefined) merged._operations = full._operations;
+
+  const configPath = resolveConfigPath(projectRoot, connectorId);
+  writeFileAtomic(configPath, `${JSON.stringify(merged, null, 2)}\n`);
+
+  configCache.set(connectorId, { ...values });
+
+  return { changedKeys };
+}
+
+/**
+ * Restore stored connector values to a previous three-state snapshot.
+ *
+ * `undefined` means "the key was absent before" and deletes the stored entry,
+ * preserving env/default fallback. `null` preserves an explicit tombstone.
+ */
+export function restoreConnectorConfigValues(
+  projectRoot: string,
+  connectorId: string,
+  updates: { name: string; value: string | null | undefined }[],
+): { changedKeys: string[] } {
+  const dir = resolveConfigDir(projectRoot);
+  mkdirSync(dir, { recursive: true });
+
+  const full = readFullConfig(projectRoot, connectorId);
+  const values = extractValueFields(full);
+  const changedKeys: string[] = [];
+
+  for (const { name, value } of updates) {
+    const hadKey = Object.hasOwn(values, name);
+    const oldRaw = values[name]; // undefined | null | string
+    if (value === undefined) {
+      if (hadKey) changedKeys.push(name);
+      delete values[name];
+      continue;
+    }
+
+    const newRaw = value === '' ? null : value; // null | string
+    if (oldRaw !== newRaw) changedKeys.push(name);
+    values[name] = newRaw;
+  }
+
   const merged: Record<string, unknown> = { ...values };
   if (full._operations !== undefined) merged._operations = full._operations;
 

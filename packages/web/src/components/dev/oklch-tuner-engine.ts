@@ -53,7 +53,7 @@ export interface TunerState {
   accentHue: number;
   accentChroma: number;
   surfaceHue: number /* warm beige ~80 (light) / ~30 (dark), independent of accent (KD-34) */;
-  surfaceChroma: number /* multiplier on base chroma [0.015..0.003], default 1.0 */;
+  surfaceChroma: number /* multiplier on shared --surface-chroma base 0.01, default 1.0 */;
   light: ModeP;
   dark: ModeP;
   semanticLight: SemanticP;

@@ -698,3 +698,67 @@ test('non-legacy kimi fallback: only kimi exists, no kimi-cli, meta events for s
     invalidateCliCommand('kimi');
   }
 });
+
+test('both kimi-cli and kimi absent: error emitted without leaking tempMcpConfig dir (regression guard for #944 intake P1 found by opus-48)', async () => {
+  // Isolate PATH: no kimi or kimi-cli anywhere; temp HOME prevents fallback search.
+  const emptyBinDir = mkdtempSync(join(tmpdir(), 'kimi-empty-bin-'));
+  const tempHome = mkdtempSync(join(tmpdir(), 'kimi-empty-home-'));
+  const tempShareDir = mkdtempSync(join(tmpdir(), 'kimi-share-empty-'));
+
+  const savedPath = process.env.PATH;
+  const savedHome = process.env.HOME;
+  process.env.PATH = `${emptyBinDir}:/usr/bin:/bin`;
+  process.env.HOME = tempHome;
+
+  invalidateCliCommand('kimi-cli');
+  invalidateCliCommand('kimi');
+
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    // mcpServerPath non-empty + callbackEnv non-empty are the two preconditions for
+    // writeMcpConfigFile() to actually create a tmp-mcp-* dir (per kimi-config.ts:252).
+    // If the not-found early-return happened AFTER tempMcpConfig creation (the bug),
+    // the dir would be left behind because finally cleanup is gated by the try block.
+    const service = new KimiAgentService({
+      spawnFn,
+      mcpServerPath: '/dummy/cat-cafe-mcp-server.js',
+    });
+
+    // KIMI_SHARE_DIR routes writeMcpConfigFile()'s tmp-mcp-* prefix into our temp area,
+    // so we can assert no dir is created there.
+    const msgs = await collect(
+      service.invoke('Hello', {
+        callbackEnv: { KIMI_SHARE_DIR: tempShareDir },
+      }),
+    );
+
+    // Should emit error + done (not-found path)
+    const err = msgs.find((m) => m.type === 'error');
+    assert.ok(err, 'expected error event when both kimi-cli and kimi are absent');
+    const done = msgs.find((m) => m.type === 'done');
+    assert.ok(done, 'expected done event after error');
+
+    // spawn should NOT have been called (kimi binary absent)
+    assert.equal(spawnFn.mock.calls.length, 0, 'spawn should not be called when binary absent');
+
+    // CRITICAL: no tmp-mcp-* dir leaked in shareDir (the regression we are guarding).
+    // Before the fix (intake commit e939be0), tempMcpConfig was created BEFORE the
+    // not-found check, so the dir survived because the try/finally was never entered.
+    const { readdirSync } = await import('node:fs');
+    const entries = readdirSync(tempShareDir).filter((name) => name.startsWith('tmp-mcp-'));
+    assert.equal(
+      entries.length,
+      0,
+      `tempMcpConfig leak: expected 0 tmp-mcp-* dirs in shareDir, found ${entries.length} (${entries.join(', ')})`,
+    );
+  } finally {
+    process.env.PATH = savedPath;
+    process.env.HOME = savedHome;
+    rmSync(emptyBinDir, { recursive: true, force: true });
+    rmSync(tempHome, { recursive: true, force: true });
+    rmSync(tempShareDir, { recursive: true, force: true });
+    invalidateCliCommand('kimi-cli');
+    invalidateCliCommand('kimi');
+  }
+});

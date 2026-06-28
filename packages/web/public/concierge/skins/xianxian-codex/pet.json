@@ -1,0 +1,105 @@
+{
+  "id": "xianxian-codex",
+  "displayName": "宪宪 v1",
+  "description": "Ragdoll codex pet — 9-state animated video-extracted spritesheet.",
+  "version": 1,
+  "format": "atlas",
+  "atlas": {
+    "src": "spritesheet.webp",
+    "columns": 8,
+    "rows": 9,
+    "cellWidth": 192,
+    "cellHeight": 208,
+    "totalWidth": 1536,
+    "totalHeight": 1872
+  },
+  "states": {
+    "idle": {
+      "row": 0,
+      "frameCount": 6,
+      "frameDurations": [1200, 400, 400, 500, 500, 800]
+    },
+    "running-right": {
+      "row": 1,
+      "frameCount": 8,
+      "frameDurations": [120, 120, 120, 120, 120, 120, 120, 220]
+    },
+    "running-left": {
+      "row": 2,
+      "frameCount": 8,
+      "frameDurations": [120, 120, 120, 120, 120, 120, 120, 220]
+    },
+    "waving": {
+      "row": 3,
+      "frameCount": 4,
+      "frameDurations": [140, 140, 140, 280]
+    },
+    "jumping": {
+      "row": 4,
+      "frameCount": 5,
+      "frameDurations": [140, 140, 140, 140, 280]
+    },
+    "failed": {
+      "row": 5,
+      "frameCount": 8,
+      "frameDurations": [140, 140, 140, 140, 140, 140, 140, 240]
+    },
+    "waiting": {
+      "row": 6,
+      "frameCount": 6,
+      "frameDurations": [150, 150, 150, 150, 150, 260]
+    },
+    "running": {
+      "row": 7,
+      "frameCount": 6,
+      "frameDurations": [120, 120, 120, 120, 120, 220]
+    },
+    "review": {
+      "row": 8,
+      "frameCount": 6,
+      "frameDurations": [150, 150, 150, 150, 150, 280]
+    }
+  },
+  "projection": {
+    "version": 1,
+    "fallback": "idle",
+    "map": {
+      "idle": "idle",
+      "sleeping": "idle",
+      "listening": "waiting",
+      "thinking": "running",
+      "found": "review",
+      "needs-confirmation": "waiting",
+      "handoff": "running-right",
+      "error": "failed"
+    }
+  },
+  "identity": {
+    "species": "cat",
+    "breedOrForm": "ragdoll",
+    "palette": [],
+    "markings": ["seal bicolor", "blue eyes", "fluffy coat", "medium frame"],
+    "silhouetteNotes": "compact full-body ragdoll, readable at 64x64, scale-consistent across states",
+    "allowedProps": []
+  },
+  "provenance": {
+    "source": "video-extraction",
+    "pipeline": "mother-image → AI video (operator manual) → ffmpeg 4fps → center-crop → transparent → resize → atlas",
+    "pipelineDoc": "docs/features/assets/F229/desktop-pet-sprite/video-to-spritesheet-pipeline.md",
+    "generatedBy": "opus (claude-opus-4-6)",
+    "motherImage": "docs/features/assets/F229/desktop-pet-sprite/raw/xianxian-mother.png",
+    "videoSource": "operator-provided AI-generated videos (9 states)",
+    "tasteWatchItems": [
+      "Video-extracted frames have organic movement vs AI-generated pixel art",
+      "Background removal via magick -fuzz 15% — some edge artifacts possible at tiny scale"
+    ]
+  },
+  "qa": {
+    "readabilityCheck": "pass",
+    "identityDiffCheck": "pass",
+    "provenanceCheck": "pass",
+    "scaleConsistencyCheck": "pass (all states processed with identical crop/resize pipeline)",
+    "reviewer": "opus",
+    "reviewedAt": "2026-06-24"
+  }
+}

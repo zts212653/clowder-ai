@@ -1,11 +1,16 @@
 /**
  * F167 C1 — hold-ball callback route C1 per-fire sample span event
  *
- * Verdict 2026-06-12-eval-a2a-c1-zombie-hold-samples-build (PR #2244): the
- * single-slot replacement path emits a `c1.zombie_hold_fired` span event
- * carrying HMAC-pseudonymized ids + wake-delay bucket trigger so attribution
- * can classify replacements. Sibling to `callback-hold-ball-route-scheduling.test.js`
- * (split per PR #1290 cloud P2 file-size guidance).
+ * History: PR #2244 (verdict 2026-06-12-eval-a2a-c1-zombie-hold-samples-build)
+ * shipped a single `c1.zombie_hold_fired` event covering all single-slot
+ * replacements. F192 verdict 2026-06-18-eval-a2a-c1-zombie-hold-semantics-fix
+ * (砚砚) split the producer by wake-delay bucket — this test now asserts the
+ * actionable `c1.hold_zombie_fired` event variant fires on `prior_imminent`
+ * (the test scenario schedules a 5s wake then replaces it immediately). The
+ * benign `c1.hold_replacement_fired` variant (prior_short / prior_long) is
+ * covered by the bucket-routing unit test in the c1-hold-sample-evidence
+ * suite. Sibling to `callback-hold-ball-route-scheduling.test.js` (split per
+ * PR #1290 cloud P2 file-size guidance).
  *
  * Uses InMemorySpanExporter (test SDK pattern from
  * `test/telemetry/mention-dispatch-trace.test.js`) to capture the emitted span +
@@ -115,7 +120,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
     return app;
   }
 
-  test('emits c1.zombie_hold_fired span event with HMAC ids + wake-delay bucket trigger on replacement', async () => {
+  test('emits c1.hold_zombie_fired span event with HMAC ids + prior_imminent trigger on imminent-bucket replacement', async () => {
     const deps = makeStubDeps();
     const app = await createApp(deps);
     const thread = await threadStore.create('user-c1-sample', 'c1sample');
@@ -146,16 +151,16 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
     const secondTaskId = JSON.parse(r2.body).taskId;
 
     const spans = otelExporter.getFinishedSpans();
-    const sampleSpan = spans.find((s) => s.name === 'cat_cafe.a2a.c1.zombie_hold_sample');
+    const sampleSpan = spans.find((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');
     assert.ok(
       sampleSpan,
-      `must emit a cat_cafe.a2a.c1.zombie_hold_sample span; got names: ${JSON.stringify(spans.map((s) => s.name))}`,
+      `must emit a cat_cafe.a2a.c1.hold_zombie_sample span; got names: ${JSON.stringify(spans.map((s) => s.name))}`,
     );
 
     const events = sampleSpan.events ?? [];
     assert.equal(events.length, 1, 'one fire event per cancellation');
     const [event] = events;
-    assert.equal(event.name, 'c1.zombie_hold_fired');
+    assert.equal(event.name, 'c1.hold_zombie_fired');
 
     const attrs = event.attributes ?? {};
     // Class C — raw values here (redactor would HMAC on export, not in test exporter)
@@ -199,7 +204,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
     });
     assert.equal(r.statusCode, 200);
 
-    const sampleSpans = otelExporter.getFinishedSpans().filter((s) => s.name === 'cat_cafe.a2a.c1.zombie_hold_sample');
+    const sampleSpans = otelExporter.getFinishedSpans().filter((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');
     assert.equal(sampleSpans.length, 0, 'no sample span on first hold (no prior to cancel)');
   });
 
@@ -227,8 +232,14 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       payload: { reason: 'new-wait', nextStep: 'pivot', wakeAfterMs: 60_000 },
     });
 
-    const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.zombie_hold_sample');
-    assert.ok(sampleSpan, 'sample span must emit on replacement');
+    const sampleSpan = otelExporter
+      .getFinishedSpans()
+      .find((s) => s.name === 'cat_cafe.a2a.c1.hold_replacement_sample');
+    assert.ok(
+      sampleSpan,
+      'replacement sample span must emit on prior_long bucket replacement (post 06-18 split: long bucket → c1.hold_replacement_*, not c1.hold_zombie_*)',
+    );
+    assert.equal(sampleSpan.events[0].name, 'c1.hold_replacement_fired');
     assert.equal(sampleSpan.events[0].attributes.trigger, 'prior_long');
   });
 
@@ -255,7 +266,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000 },
     });
 
-    const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.zombie_hold_sample');
+    const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');
     assert.ok(sampleSpan, 'sample span must emit on replacement');
     assert.equal(
       sampleSpan.events[0].attributes['thread.system_kind'],
@@ -286,7 +297,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000 },
     });
 
-    const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.zombie_hold_sample');
+    const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');
     assert.ok(sampleSpan);
     assert.equal(sampleSpan.events[0].attributes['thread.system_kind'], 'connector_hub');
   });

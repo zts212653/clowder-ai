@@ -10,6 +10,8 @@ created: 2026-03-26
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Phase A-D Completed**: 2026-03-27 | **Reopened**: 2026-04-24（Phase E — 通知合流：severity 抽取 + 下线 email 路径） | **Completed**: 2026-04-25
 > **Post-completion hardening**: 2026-05-07 — Review Feedback backlog guard（merged/closed 自收敛 + stale commit 过滤 + 同 PR/target-cat queue coalesce）
+> **Post-completion correction**: 2026-06-18 — PR #2394 (squash 1d42b8f36) fixed PR review feedback routing to preserve the PR-tracking registration thread. #949 auto-rotation / PR #2372 backlink was the wrong layer: context overflow belongs to invocation hydration, not thread ownership. Review feedback no longer creates `MR review (auto-rotated...)` threads, and legacy already-rotated tracking tasks are repaired back to their source thread before delivery. If such a repair happens, the original thread receives an explicit routing-anomaly audit warning; this is fault exposure, not a redirect design.
+> **Post-completion correction audit**: 2026-06-18 — PR #2404 (squash bcabe177) keeps legacy routing repair visible even when feedback is filtered, persists the repair only after audit delivery succeeds, and makes the repair thread update conditional to avoid overwriting a fresh re-registration.
 > **Post-completion**: 2026-06-03 — PR-tracking wake intent（PR #2070）：`register_pr_tracking` 加 `intent: review|merge`，CI-pass 仅 intent=merge 唤醒；删 approval 推断 + dead poller
 
 ## 三层架构定位

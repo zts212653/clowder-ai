@@ -83,6 +83,56 @@ describe('mergeReplaceHydrationMessages — stream residue drop cases', () => {
     expect(result.stats.preservedLocalCount).toBe(0);
   });
 
+  it('drops contentful terminal residue when persisted same-parent sibling already covers text and tools', () => {
+    const history: ChatMessage[] = [
+      makeMsg({
+        id: '0001781850200000-000620-live-split-history',
+        content:
+          '我按 `opensource-ops` 重新过一遍这条：这个问题不是“有没有一个现成社区 PR 就该修到可 merge”，而是先判断这个 PR 现在是不是正确 implementation path。',
+        toolEvents: [
+          makeToolEvent('tool-server-use', {
+            detail: '/bin/zsh -lc "gh pr view 413 --repo zts212653/clowder-ai"',
+            timestamp: 1781850200000,
+          }),
+          makeToolEvent('tool-server-result', {
+            type: 'tool_result',
+            label: 'command_execution result',
+            detail: 'stdout: mergeable=CONFLICTING mergeStateStatus=DIRTY',
+            timestamp: 1781850200100,
+          }),
+        ],
+        extra: {
+          stream: {
+            invocationId: PARENT_INVOCATION_ID,
+            turnInvocationId: HISTORY_TURN_ID,
+          },
+        },
+      }),
+    ];
+    const current: ChatMessage[] = [
+      makeLocalResidue({
+        content: '问题不是“有没有一个现成社区 PR 就该修到可 merge”',
+        toolEvents: [
+          makeToolEvent('tool-client-use', {
+            detail: '/bin/zsh -lc "gh pr view 413 --repo zts212653/clowder-ai"',
+            timestamp: 1781850200200,
+          }),
+          makeToolEvent('tool-client-result', {
+            type: 'tool_result',
+            label: 'command_execution result',
+            detail: 'stdout: mergeable=CONFLICTING mergeStateStatus=DIRTY',
+            timestamp: 1781850200300,
+          }),
+        ],
+      }),
+    ];
+
+    const result = mergeReplaceHydrationMessages(history, current, {});
+
+    expect(result.messages.map((msg) => msg.id)).toEqual(['0001781850200000-000620-live-split-history']);
+    expect(result.stats.preservedLocalCount).toBe(0);
+  });
+
   it('drops terminal residue when only another cat claims the shared parent invocation', () => {
     const history: ChatMessage[] = [makeHistoryMessage()];
     const current: ChatMessage[] = [
@@ -175,6 +225,27 @@ describe('mergeReplaceHydrationMessages — stream residue drop cases', () => {
     const current: ChatMessage[] = [makeLocalResidue()];
     const currentCatInvocations: Record<string, CatInvocationInfo> = {
       codex: { invocationId: NEXT_PARENT_INVOCATION_ID, turnInvocationId: RESIDUE_TURN_ID },
+    };
+
+    const result = mergeReplaceHydrationMessages(history, current, currentCatInvocations);
+
+    expect(result.messages.map((msg) => msg.id)).toEqual(['0001781577227533-000193-f22d6fb6']);
+    expect(result.stats.preservedLocalCount).toBe(0);
+  });
+
+  it('drops covered terminal residue when the same invocation is only a completed task snapshot', () => {
+    const history: ChatMessage[] = [makeHistoryMessage()];
+    const current: ChatMessage[] = [makeLocalResidue()];
+    const currentCatInvocations: Record<string, CatInvocationInfo> = {
+      codex: {
+        invocationId: PARENT_INVOCATION_ID,
+        turnInvocationId: RESIDUE_TURN_ID,
+        taskProgress: {
+          tasks: [],
+          lastUpdate: 1781875600000,
+          snapshotStatus: 'completed',
+        },
+      },
     };
 
     const result = mergeReplaceHydrationMessages(history, current, currentCatInvocations);

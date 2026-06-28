@@ -63,7 +63,7 @@ describe('DirectoryBrowser', () => {
 
   function render(props: Partial<React.ComponentProps<typeof DirectoryBrowser>> = {}) {
     const defaults = {
-      onSelect: vi.fn(),
+      onCurrentPathChange: vi.fn(),
       onCancel: vi.fn(),
       ...props,
     };
@@ -211,28 +211,23 @@ describe('DirectoryBrowser', () => {
     expect(mockApiFetch).toHaveBeenCalledWith(`/api/projects/browse?path=${encodeURIComponent(`${HOME}/projects`)}`);
   });
 
-  // ── Select and cancel ─────────────────────────────────
+  // ── Current path and cancel ────────────────────────────
 
-  it('calls onSelect with current path when "选择此目录" is clicked', async () => {
+  it('calls onCurrentPathChange when the current path loads', async () => {
     mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(`${HOME}/projects`, [], HOME)));
     const fns = render({ initialPath: `${HOME}/projects` });
     await flush();
 
-    const selectBtn = findButtonByText('选择此目录');
-    expect(selectBtn).toBeTruthy();
-    act(() => {
-      selectBtn!.click();
-    });
-
-    expect(fns.onSelect).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(fns.onCurrentPathChange).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(findButtonByText('选择此目录')).toBeFalsy();
   });
 
-  it('calls onCancel when "取消" is clicked', async () => {
+  it('calls onCancel when "收起浏览" is clicked', async () => {
     mockApiFetch.mockReturnValueOnce(jsonOk(makeBrowseResult(HOME, [], null)));
     const fns = render();
     await flush();
 
-    const cancelBtn = findButtonByText('取消');
+    const cancelBtn = findButtonByText('收起浏览');
     expect(cancelBtn).toBeTruthy();
     act(() => {
       cancelBtn!.click();
@@ -342,7 +337,7 @@ describe('DirectoryBrowser', () => {
     const fns = render({ initialPath: `${HOME}/projects` });
     await flush();
 
-    expect(findButtonByText('选择此目录')).toBeTruthy();
+    expect(fns.onCurrentPathChange).toHaveBeenCalledWith(`${HOME}/projects`);
     expect(container.textContent).toContain('cat-cafe');
 
     // Navigate to a forbidden path
@@ -362,14 +357,8 @@ describe('DirectoryBrowser', () => {
     // Error banner shown AND listing still visible (non-destructive)
     expect(container.textContent).toContain('Access denied');
     expect(container.textContent).toContain('cat-cafe');
-    // "选择此目录" still works — selects the PREVIOUS valid directory
-    const selectBtn = findButtonByText('选择此目录');
-    expect(selectBtn).toBeTruthy();
-    expect(selectBtn!.disabled).toBe(false);
-    act(() => {
-      selectBtn!.click();
-    });
-    expect(fns.onSelect).toHaveBeenCalledWith(`${HOME}/projects`);
+    expect(findButtonByText('选择此目录')).toBeFalsy();
+    expect(fns.onCurrentPathChange).toHaveBeenCalledTimes(1);
   });
 
   // ── Non-home path breadcrumbs (cloud P2) ──────────────

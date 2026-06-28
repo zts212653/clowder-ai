@@ -55,10 +55,19 @@ describe('CommunityPanel dispatch (B5)', () => {
     document.body.appendChild(container);
     root = createRoot(container);
 
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => MOCK_BOARD,
-    } as Response);
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/api/community-repos')) {
+        return { ok: true, json: async () => ({ repos: ['test/repo'] }) } as Response;
+      }
+      if (requestUrl.includes('/api/community-decision-queue')) {
+        return { ok: true, json: async () => ({ items: [], warnings: [] }) } as Response;
+      }
+      if (requestUrl.includes('/api/community-findings')) {
+        return { ok: true, json: async () => ({ findings: [] }) } as Response;
+      }
+      return { ok: true, json: async () => MOCK_BOARD } as Response;
+    });
   });
 
   afterEach(() => {

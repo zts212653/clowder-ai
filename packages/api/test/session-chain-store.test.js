@@ -35,6 +35,27 @@ describe('SessionChainStore', () => {
     assert.equal(record.createdAt, record.updatedAt);
   });
 
+  test('create() and update() preserve workspace binding metadata', async () => {
+    const store = await createStore();
+    const record = store.create({
+      ...BASE_INPUT,
+      workingDirectory: '/repo-a',
+      workspaceFingerprint: '/repo-a',
+    });
+
+    assert.equal(record.workingDirectory, '/repo-a');
+    assert.equal(record.workspaceFingerprint, '/repo-a');
+
+    store.update(record.id, {
+      workingDirectory: '/repo-b',
+      workspaceFingerprint: '/repo-b',
+    });
+
+    const updated = store.get(record.id);
+    assert.equal(updated.workingDirectory, '/repo-b');
+    assert.equal(updated.workspaceFingerprint, '/repo-b');
+  });
+
   test('create() auto-increments seq for same cat+thread', async () => {
     const store = await createStore();
     const r0 = store.create(BASE_INPUT);

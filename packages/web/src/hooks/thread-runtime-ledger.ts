@@ -245,6 +245,40 @@ export function getActiveBubble(
 }
 
 /**
+ * F194 dual-path thread-switch fix (saga round 17): recover the turn id that the
+ * ACTIVE path bound this (thread, cat)'s bubble to, if any.
+ *
+ * The active bubble's `messageId` is the deterministic `deriveBubbleId` output
+ * `msg-{turnInvocationId}-{catId}` when (and only when) it is turn-bound
+ * (`seedSource === 'bound'`). The background path
+ * (`ensureBackgroundAssistantMessage`) uses this to recover the SAME turn the
+ * active path already bound, so a single codex reply whose events straddle a
+ * mid-reply `currentThreadId` switch (active path before, background path after)
+ * resolves ONE turn id → ONE bubble.
+ *
+ * Returns undefined unless the entry is genuinely turn-bound — a parent-only /
+ * fresh-parent seed must NOT masquerade as a turn (that would let a parent id be
+ * treated as a turn and could collapse distinct turns). This guard is what keeps
+ * the fix Z3-safe: only an already-bound turn is reused; genuinely different
+ * invocation_created turns each have their own bound bubble → stay separate.
+ */
+export function getActiveBoundTurnInvocationId(
+  ledger: ThreadRuntimeLedger,
+  threadId: ThreadId,
+  catId: CatId,
+): InvocationId | undefined {
+  const entry = ledger.getOrCreate(threadId);
+  const active = entry.active.get(catId);
+  if (!active || active.seedSource !== 'bound') return undefined;
+  const prefix = 'msg-';
+  const suffix = `-${catId}`;
+  const { messageId } = active;
+  if (!messageId.startsWith(prefix) || !messageId.endsWith(suffix)) return undefined;
+  const turn = messageId.slice(prefix.length, messageId.length - suffix.length);
+  return turn.length > 0 ? turn : undefined;
+}
+
+/**
  * Clear the active bubble for a (thread, cat). Used on terminal / replace.
  * No-op if nothing is set.
  */

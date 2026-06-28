@@ -93,6 +93,17 @@ export type DebugDumpOptions = {
   rawThreadId?: boolean;
 };
 
+export type DebugExportOptions = DebugDumpOptions & {
+  kind?: 'events' | 'bubbleTimeline';
+  label?: string;
+};
+
+export type DebugExportResult = {
+  ok: boolean;
+  path: string;
+  count: number;
+};
+
 export type DebugDumpResult = {
   meta: {
     generatedAt: number;
@@ -118,6 +129,7 @@ export type DebugWindowApi = {
   configure: (input: DebugConfigureInput) => DebugStatus;
   dump: (options?: DebugDumpOptions) => string;
   dumpBubbleTimeline: (options?: DebugDumpOptions) => string;
+  exportToRuntime: (options?: DebugExportOptions) => Promise<DebugExportResult>;
   clear: () => void;
   status: () => DebugStatus;
 };

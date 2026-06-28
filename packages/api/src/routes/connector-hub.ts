@@ -5,27 +5,19 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { applyConnectorSecretUpdates } from '../config/connector-secret-updater.js';
-import {
-  containsRedactedPlaceholder,
-  requireConnectorWriteNetworkGuard,
-  requireConnectorWriteOwner,
-  resolveConnectorSessionUserId,
-  validateConnectorSecretUpdates,
-} from '../config/connector-secret-write-guards.js';
+import { validateConnectorSecretUpdates } from '../config/connector-secret-write-guards.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import { DEFAULT_THREAD_ID, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { encodeDefault } from '../infrastructure/config-field-parser.js';
 import type { IConnectorPermissionStore } from '../infrastructure/connectors/ConnectorPermissionStore.js';
-import { executeConnectorAction } from '../infrastructure/connectors/connector-action-handler.js';
+
 import { getAllExternalConnectorMeta } from '../infrastructure/connectors/external-connector-registry.js';
 import { DefaultFeishuQrBindClient, type FeishuQrBindClient } from '../infrastructure/connectors/FeishuQrBindClient.js';
 import {
   loadAllConnectorConfigs,
   readAllOperationStates,
-  readConnectorConfig,
   resolveConnectorEnv,
   writeConnectorConfig,
-  writeOperationState,
 } from '../infrastructure/connectors/im-connector-config-store.js';
 import type { IMConnectorPlugin } from '../infrastructure/connectors/im-connector-plugin.js';
 import type { WeComBotAdapter } from '../infrastructure/connectors/im-connectors/wecom-bot/WeComBotAdapter.js';
@@ -40,6 +32,8 @@ import { resolvePluginsDir } from '../infrastructure/connectors/plugins/plugin-i
 import { normalizeTelegramBotToken } from '../infrastructure/connectors/telegram-token.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
+import { connectorActionRoutes } from './connector-plugin-routes.js';
+import { requireConnectorWriteIdentity, requireSessionHubIdentity } from './connector-route-helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,33 +80,6 @@ function requireTrustedHubIdentity(request: FastifyRequest, reply: FastifyReply)
   return userId;
 }
 
-function requireSessionHubIdentity(request: FastifyRequest, reply: FastifyReply): string | null {
-  const userId = resolveConnectorSessionUserId(request);
-  if (!userId) {
-    reply.status(401);
-    return null;
-  }
-  return userId;
-}
-
-type ConnectorWriteIdentityResult = { userId: string; error?: never } | { userId?: never; error: { error: string } };
-
-function requireConnectorWriteIdentity(request: FastifyRequest, reply: FastifyReply): ConnectorWriteIdentityResult {
-  const userId = requireSessionHubIdentity(request, reply);
-  if (!userId) return { error: { error: 'Identity required' } };
-  const networkError = requireConnectorWriteNetworkGuard(request);
-  if (networkError) {
-    reply.status(networkError.status);
-    return { error: { error: networkError.error } };
-  }
-  const ownerError = requireConnectorWriteOwner(userId);
-  if (ownerError) {
-    reply.status(ownerError.status);
-    return { error: { error: ownerError.error } };
-  }
-  return { userId };
-}
-
 interface ConnectorSecretRouteUpdate {
   name: string;
   value: string | null;
@@ -157,23 +124,6 @@ async function applyAuditedConnectorSecretUpdates(
   }
 
   return null;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function pickPendingActionValues(body: unknown, valueFields: ValueConfigField[]): Record<string, string> {
-  if (!isRecord(body) || !isRecord(body.values)) return {};
-
-  const allowedNames = new Set(valueFields.map((field) => field.envName));
-  const values: Record<string, string> = {};
-  for (const [name, value] of Object.entries(body.values)) {
-    if (allowedNames.has(name) && typeof value === 'string') {
-      values[name] = value;
-    }
-  }
-  return values;
 }
 
 // ── Connector platform config definitions ──
@@ -481,11 +431,7 @@ export function buildConnectorStatus(
     }
     if (platform.source === 'external') {
       const externalMeta = externalMetaById.get(platform.id);
-      if (externalMeta) {
-        configured = externalMeta.configured;
-      } else if (!connectorEnvById?.has(platform.id)) {
-        configured = false;
-      }
+      configured = externalMeta?.configured ?? false;
     }
 
     return {
@@ -964,283 +910,29 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
     return { ok: true };
   });
 
-  // ── F240: Write connector config via config store ──
-
-  app.put('/api/connectors/:connectorId/config', async (request, reply) => {
-    const auth = requireConnectorWriteIdentity(request, reply);
-    if (auth.error) return auth.error;
-    const { userId } = auth;
-
-    const { connectorId } = request.params as {
-      connectorId: string;
-    };
-    const manifest = getConnectorManifests().get(connectorId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: `Unknown connector: ${connectorId}` };
-    }
-
-    const body = request.body as {
-      fields?: { name: string; value: string | null }[];
-    };
-    if (!Array.isArray(body?.fields) || body.fields.length === 0) {
-      reply.status(400);
-      return { error: 'fields array required' };
-    }
-
-    // Validate field names against manifest — only value fields have envName (KD-17)
-    const allowed = new Set(manifest.config.filter(isValueField).map((f) => f.envName));
-    const invalid = body.fields.filter((f) => !allowed.has(f.name));
-    if (invalid.length > 0) {
-      reply.status(400);
-      return {
-        error: `Unknown fields: ${invalid.map((f) => f.name).join(', ')}`,
-      };
-    }
-    if (body.fields.some((field) => containsRedactedPlaceholder(field.value))) {
-      reply.status(400);
-      return { error: 'Refusing to write redacted connector placeholder values' };
-    }
-
-    const projectRoot = resolveActiveProjectRoot();
-    const { changedKeys } = writeConnectorConfig(projectRoot, connectorId, body.fields);
-
-    // No process.env sync — connector config lives in .cat-cafe store, not in the
-    // host process environment. Gateway bootstrap reads config store via
-    // getStoredConnectorValue() which overrides process.env/.env fallback (L493-505).
-    // Writing to process.env would pollute the host namespace.
-
-    // Fire config change event — triggers connector-reload-subscriber gateway restart
-    if (changedKeys.length > 0) {
-      configEventBus.emitChange({
-        source: 'config-store',
-        scope: manifest.source === 'external' ? 'file' : 'key',
-        changedKeys,
-        changeSetId: createChangeSetId(),
-        timestamp: Date.now(),
-      });
-    }
-
-    try {
-      await getEventAuditLog().append({
-        type: AuditEventTypes.CONFIG_UPDATED,
-        data: {
-          target: 'connector-config',
-          action: `connector-config-write:${connectorId}`,
-          keys: changedKeys,
-          operator: userId,
-        },
-      });
-    } catch (err) {
-      app.log.warn({ err, connectorId, keys: changedKeys }, 'connector config audit append failed');
-    }
-
-    return { ok: true, changedKeys };
-  });
-
-  // ── F240 A-3: Generic action endpoint (AC-A16) ──
-
-  app.post('/api/connectors/:connectorId/operations/:operationName/reset', async (request, reply) => {
-    const auth = requireConnectorWriteIdentity(request, reply);
-    if (auth.error) return auth.error;
-
-    const { connectorId, operationName } = request.params as {
-      connectorId: string;
-      operationName: string;
-    };
-    const body = request.body as { currentAction?: string };
-    const currentAction = body?.currentAction;
-    if (!currentAction) {
-      reply.status(400);
-      return { error: 'currentAction required' };
-    }
-
-    const manifest = getConnectorManifests().get(connectorId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: `Unknown connector: ${connectorId}` };
-    }
-    const operation = manifest.config.find((f) => isOperationField(f) && f.name === operationName);
-    if (!operation || !isOperationField(operation)) {
-      reply.status(404);
-      return { error: `Operation '${operationName}' not found in connector '${connectorId}'` };
-    }
-    if (!operation.actions.some((a) => a.id === currentAction)) {
-      reply.status(400);
-      return { error: `Action '${currentAction}' not found in operation '${operationName}'` };
-    }
-
-    const projectRoot = resolveActiveProjectRoot();
-    writeOperationState(projectRoot, connectorId, operationName, { currentAction });
-    return { ok: true, currentAction };
-  });
-
-  app.post('/api/connectors/:connectorId/actions/:operationName/:actionId', async (request, reply) => {
-    const auth = requireConnectorWriteIdentity(request, reply);
-    if (auth.error) return auth.error;
-
-    const { connectorId, operationName, actionId } = request.params as {
-      connectorId: string;
-      operationName: string;
-      actionId: string;
-    };
-
-    const manifest = getConnectorManifests().get(connectorId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: `Unknown connector: ${connectorId}` };
-    }
-
-    const plugin = opts.pluginRegistry?.get(connectorId);
-    if (!plugin) {
-      reply.status(503);
-      return { error: `Connector '${connectorId}' plugin not loaded` };
-    }
-    // Adapter is optional — unconfigured connectors (e.g. pre-QR-login) have no adapter yet
-    const adapter = opts.adapterRegistry?.get(connectorId);
-
-    const projectRoot = resolveActiveProjectRoot();
-    // Resolve actual env (stored > env > default) so action handlers see real values
-    const valueFields = manifest.config.filter(isValueField);
-    const resolvedEnv = resolveConnectorEnv(connectorId, valueFields);
-    const pendingActionValues = pickPendingActionValues(request.body, valueFields);
-    if (containsRedactedPlaceholder(pendingActionValues)) {
-      reply.status(400);
-      return { error: 'Refusing to use redacted connector placeholder values' };
-    }
-    const operationDef = manifest.config.find((f) => isOperationField(f) && f.name === operationName);
-    const operationTargetEnvNames =
-      operationDef && isOperationField(operationDef) && Array.isArray(operationDef.target) ? operationDef.target : [];
-    const previousTargetValues = new Map<string, string | null>();
-    if (operationTargetEnvNames.length > 0) {
-      const previousConfig = readConnectorConfig(projectRoot, connectorId);
-      for (const name of operationTargetEnvNames) {
-        previousTargetValues.set(name, previousConfig[name] ?? null);
-      }
-    }
-
-    const result = await executeConnectorAction({
-      projectRoot,
-      connectorId,
-      operationName,
-      actionId,
-      manifest,
-      plugin,
-      pluginCtx: { env: { ...resolvedEnv, ...pendingActionValues }, log: app.log, redis: opts.redis },
-      adapter,
-      operator: auth.userId,
-      auditLog: getEventAuditLog(),
-    });
-
-    if (!result.ok) {
-      reply.status(result.status ?? 500);
-      return { error: result.error };
-    }
-
-    // Lifecycle: activate after credential backfill, deactivate on explicit disconnect.
-    let activationStatus: 'activated' | 'deactivated' | 'failed' | undefined;
-    if (result.activate === false && opts.deactivateConnector) {
-      // Disconnect: stop inbound listener, remove adapter/webhook/media
-      try {
-        await opts.deactivateConnector(connectorId);
-        activationStatus = 'deactivated';
-        app.log.info({ connectorId }, '[ConnectorHub] Connector deactivated after disconnect');
-      } catch (err) {
-        activationStatus = 'failed';
-        if (operationTargetEnvNames.length > 0) {
-          const rollbackUpdates = operationTargetEnvNames.map((name) => ({
-            name,
-            value: previousTargetValues.get(name) ?? null,
-          }));
-          const { changedKeys } = writeConnectorConfig(projectRoot, connectorId, rollbackUpdates);
-          if (changedKeys.length > 0) {
-            configEventBus.emitChange({
-              source: 'config-store',
-              scope: manifest.source === 'external' ? 'file' : 'key',
-              changedKeys,
-              changeSetId: createChangeSetId(),
-              timestamp: Date.now(),
-            });
-          }
-        }
-        writeOperationState(projectRoot, connectorId, operationName, {
-          currentAction: actionId,
-          lastResult: {
-            render: 'status',
-            data: { status: 'deactivation_failed' },
-            label: 'Deactivation failed',
-          },
-        });
-        app.log.warn({ err, connectorId }, '[ConnectorHub] Connector deactivation failed');
-        reply.status(502);
-        return {
-          ok: false,
-          error: 'Connector deactivation failed after action succeeded',
-          activationStatus,
-        };
-      }
-    } else if (
-      (result.activate === true || (result.backfilledKeys && result.backfilledKeys.length > 0)) &&
-      opts.activateConnector
-    ) {
-      // Connect: create adapter + start inbound after credential backfill
-      try {
-        await opts.activateConnector(connectorId);
-        activationStatus = 'activated';
-        app.log.info(
-          { connectorId, backfilledKeys: result.backfilledKeys },
-          '[ConnectorHub] Connector activated after credential backfill',
-        );
-      } catch (err) {
-        activationStatus = 'failed';
-        writeOperationState(projectRoot, connectorId, operationName, {
-          currentAction: actionId,
-          lastResult: {
-            render: 'status',
-            data: { status: 'activation_failed' },
-            label: 'Activation failed',
-          },
-        });
-        app.log.warn(
-          { err, connectorId },
-          '[ConnectorHub] Connector activation failed after backfill — may need restart',
-        );
-        reply.status(502);
-        return {
-          ok: false,
-          error: 'Connector activation failed after action succeeded',
-          activationStatus,
-        };
-      }
-    }
-
-    return {
-      ok: true,
-      render: result.render,
-      data: result.data,
-      ...(result.label ? { label: result.label } : {}),
-      ...(result.backfilledKeys ? { backfilledKeys: result.backfilledKeys } : {}),
-      ...(activationStatus ? { activationStatus } : {}),
-    };
-  });
-
-  // ── F240 A-3: Operation state in status endpoint (AC-A20) ──
-
-  app.get('/api/connectors/:connectorId/operations', async (request, reply) => {
-    const userId = requireSessionHubIdentity(request, reply);
-    if (!userId) return { error: 'Identity required' };
-
-    const { connectorId } = request.params as { connectorId: string };
-    const manifest = getConnectorManifests().get(connectorId);
-    if (!manifest) {
-      reply.status(404);
-      return { error: `Unknown connector: ${connectorId}` };
-    }
-
-    const projectRoot = resolveActiveProjectRoot();
-    const states = readAllOperationStates(projectRoot, connectorId);
-    return { operations: states };
-  });
+  // ── F240: Generic plugin routes (config write / action / operation) ──
+  // Implementation in connector-plugin-routes.ts for file size discipline.
+  // IMPORTANT: pluginRegistry / adapterRegistry / activateConnector / deactivateConnector
+  // are late-wired onto `opts` (= connectorHubOpts) AFTER connector gateway startup.
+  // Using value-copy here would snapshot `undefined` at registration time.
+  // Getters proxy to the live parent `opts` so the handler sees the gateway-populated values.
+  // (Fix for clowder-ai#1015: generic action routes returned 503 "plugin not loaded".)
+  connectorActionRoutes({
+    getManifests: getConnectorManifests,
+    get pluginRegistry() {
+      return opts.pluginRegistry;
+    },
+    get adapterRegistry() {
+      return opts.adapterRegistry;
+    },
+    get activateConnector() {
+      return opts.activateConnector;
+    },
+    get deactivateConnector() {
+      return opts.deactivateConnector;
+    },
+    redis: opts.redis,
+  })(app);
 
   // ── F134 Phase D: Connector Permission API ──
 

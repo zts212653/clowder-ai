@@ -210,6 +210,38 @@ describe('start-dev strict profile isolation', () => {
     }
   });
 
+  it('bridges .env EMBED_ENABLED=1 to CAT_CAFE_SERVICE_EMBED_ENABLED for API lifecycle', () => {
+    // When .env sets EMBED_ENABLED=1, the script must export
+    // CAT_CAFE_SERVICE_EMBED_ENABLED=1 so the API startup reconciler knows to
+    // launch the embedding sidecar.  A previous bug (d93b109d8) wrote the
+    // source tag as "env/.env override" instead of ".env override", causing
+    // preserve_explicit_service_flag_for_api() to skip the bridge.
+    const sandboxDir = createSandbox('EMBED_ENABLED=1\n');
+    try {
+      const command = [
+        'source scripts/start-dev.sh --source-only',
+        'printf "SERVICE_EMBED=%s\\n" "${CAT_CAFE_SERVICE_EMBED_ENABLED:-unset}"',
+      ].join('; ');
+      const result = spawnSync('bash', ['-lc', command], {
+        cwd: sandboxDir,
+        env: {
+          PATH: process.env.PATH ?? '',
+          HOME: process.env.HOME ?? '',
+          TERM: process.env.TERM ?? 'xterm-256color',
+        },
+        encoding: 'utf8',
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(
+        result.stdout,
+        /SERVICE_EMBED=1/,
+        'EMBED_ENABLED=1 in .env must bridge to CAT_CAFE_SERVICE_EMBED_ENABLED=1',
+      );
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it('respects explicit EMBED_ENABLED=0 override even when EMBED_MODE=on', () => {
     const sandboxDir = createSandbox('EMBED_MODE=on\nEMBED_ENABLED=0\n');
     try {
@@ -288,6 +320,21 @@ describe('start-dev strict profile isolation', () => {
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /NODE_ENV=production/, result.stdout);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs --prod-web API launches without the dev watcher even when no env wrapper injects it', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runApiLaunchCommand({
+        sandboxDir,
+        extraArgs: ['--prod-web'],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /pnpm run start/, result.stdout);
+      assert.doesNotMatch(result.stdout, /pnpm run dev/, result.stdout);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
@@ -433,6 +480,21 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('start-entry.mjs marks Unix runtime-worktree starts as no-watch before dispatch', () => {
+    const source = readFileSync(resolve(ROOT, 'scripts/start-entry.mjs'), 'utf8');
+    const unixDispatchStart = source.indexOf('// Unix: dispatch based on mode');
+    const runtimeStartBlock = source.slice(
+      source.indexOf("mode === 'start'", unixDispatchStart),
+      source.indexOf("} else if (mode === 'start:direct'", unixDispatchStart),
+    );
+
+    assert.match(
+      runtimeStartBlock,
+      /CAT_CAFE_DIRECT_NO_WATCH:\s*'1'/,
+      'pnpm start must mark runtime-worktree startup as no-watch before dispatching',
+    );
+  });
+
   it('start-windows.ps1 clears inherited profile vars when strict mode is on', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
 
@@ -565,6 +627,21 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       /CAT_CAFE_RUNTIME_ROOT\s*=\s*\$runtimeRootMarker/,
       'runtimeEnvOverrides must pass CAT_CAFE_RUNTIME_ROOT into the API job after dotenv reload',
     );
+    assert.match(
+      ps1,
+      /\$workspaceRootMarker\s*=\s*if\s*\(-not\s*\$Dev\)\s*\{\s*[\s\S]*\$ProjectRoot[\s\S]*\}\s*else\s*\{\s*\$env:CAT_CAFE_WORKSPACE_ROOT\s*\}/,
+      'Windows production starts must default CAT_CAFE_WORKSPACE_ROOT to $ProjectRoot while preserving explicit env overrides',
+    );
+    assert.match(
+      ps1,
+      /\$workspaceRootMarker\s*=\s*if\s*\(-not\s*\$Dev\)\s*\{\s*if\s*\(\$env:CAT_CAFE_WORKSPACE_ROOT\)\s*\{\s*\$env:CAT_CAFE_WORKSPACE_ROOT\s*\}\s*else\s*\{\s*\$ProjectRoot\s*\}\s*\}/,
+      'Windows production CAT_CAFE_WORKSPACE_ROOT must prefer explicit $env override before falling back to $ProjectRoot (guards against accidental override-stripping refactors)',
+    );
+    assert.match(
+      overridesBlock,
+      /CAT_CAFE_WORKSPACE_ROOT\s*=\s*\$workspaceRootMarker/,
+      'runtimeEnvOverrides must pass CAT_CAFE_WORKSPACE_ROOT into the API job after dotenv reload',
+    );
   });
 
   it('start-windows.ps1 assigns NODE_ENV inside the API Start-Job', () => {
@@ -619,6 +696,7 @@ describe('embedding sidecar startup guards', () => {
 describe('TTS sidecar startup guards', () => {
   it('preloads runtime voice assets during install and starts from cache', () => {
     const installScript = readFileSync(resolve(ROOT, 'scripts/services/tts-install.sh'), 'utf8');
+    const installPs1 = readFileSync(resolve(ROOT, 'scripts/services/tts-install.ps1'), 'utf8');
     const serverScript = readFileSync(resolve(ROOT, 'scripts/services/tts-server.sh'), 'utf8');
     const apiScript = readFileSync(resolve(ROOT, 'scripts/services/tts-api.py'), 'utf8');
 
@@ -629,6 +707,13 @@ describe('TTS sidecar startup guards', () => {
     assert.match(serverScript, /HF_HUB_OFFLINE/);
     assert.match(serverScript, /mlx-audio\|qwen3-clone/);
     assert.doesNotMatch(apiScript, /except Exception:\s*\n\s*pass\s+# Warmup may fail/);
+    assert.match(apiScript, /os\.environ\.get\(["']CAT_CAFE_HOME["']\)/);
+    assert.match(apiScript, /CAT_CAFE_HOME[\s\S]*piper-models/);
+    assert.doesNotMatch(apiScript, /Path\.home\(\)\s*\/\s*["']\.cat-cafe["']\s*\/\s*["']piper-models["']/);
+    assert.match(installScript, /HF_ENDPOINT/);
+    assert.match(installPs1, /HF_ENDPOINT/);
+    assert.doesNotMatch(installScript, /base="https:\/\/huggingface\.co\/rhasspy\/piper-voices/);
+    assert.doesNotMatch(installPs1, /\{ "https:\/\/huggingface\.co\/rhasspy\/piper-voices/);
   });
 });
 

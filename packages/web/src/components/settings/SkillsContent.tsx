@@ -215,11 +215,6 @@ export function SkillsContent() {
             }}
           />
           <MountRulesPanel projectPath={selectedProjectPath} onSaved={handleMountRulesSaved} />
-          <SkillsDriftBanner
-            projectPath={selectedProjectPath}
-            refreshToken={driftRefreshToken}
-            onResolved={refreshSelectedSkills}
-          />
         </>
       )}
 
@@ -237,28 +232,35 @@ export function SkillsContent() {
         />
       )}
 
-      {scope === SCOPE_ALL && data && (
-        <AllProjectsSyncBanner
-          scopes={sync.scopeIssues}
-          scopesWithIssues={sync.scopesWithIssues}
-          syncing={sync.syncing}
-          error={sync.syncAllError}
-          onSyncAll={sync.handleSyncAllScopes}
-          onSyncScope={sync.handleSyncScope}
-        />
-      )}
-
-      {data && filteredSkills.some((s) => s.controls) && (
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-cafe-muted">
-            {batchEnabled ? '批量禁用当前筛选的 Skill' : '批量启用当前筛选的 Skill'}
-          </p>
-          <SettingsResourceToggleSwitch
-            enabled={batchEnabled}
-            busy={controls.toggling === '__batch__'}
-            onClick={() => handleBatchToggle(!batchEnabled)}
-            title={batchEnabled ? '批量禁用当前筛选的 Skill' : '批量启用当前筛选的 Skill'}
-          />
+      {data && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            {scope === SCOPE_ALL && (
+              <AllProjectsSyncBanner
+                scopes={sync.scopeIssues}
+                scopesWithIssues={sync.scopesWithIssues}
+                syncing={sync.syncing}
+                error={sync.syncAllError}
+                onSyncAll={sync.handleSyncAllScopes}
+                onSyncScope={sync.handleSyncScope}
+              />
+            )}
+            {scope === SCOPE_PROJECT && (
+              <SkillsDriftBanner
+                projectPath={selectedProjectPath}
+                refreshToken={driftRefreshToken}
+                onResolved={refreshSelectedSkills}
+              />
+            )}
+          </div>
+          {filteredSkills.some((s) => s.controls) && (
+            <SettingsResourceToggleSwitch
+              enabled={batchEnabled}
+              busy={controls.toggling === '__batch__'}
+              onClick={() => handleBatchToggle(!batchEnabled)}
+              title={batchEnabled ? '批量禁用当前筛选的 Skill' : '批量启用当前筛选的 Skill'}
+            />
+          )}
         </div>
       )}
 

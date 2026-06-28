@@ -5,7 +5,7 @@ import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
 import { buildMountPointDirCandidates, buildSkillMountTargets } from '../../dist/utils/skill-mount.js';
 
 const PROJECT = '/tmp/proj';
-const HOME = '/Users/test';
+const HOME = '/home/user';
 
 describe('buildSkillMountTargets (F228)', () => {
   test('returns 4 standard targets for DEFAULT rules', () => {
@@ -23,7 +23,7 @@ describe('buildSkillMountTargets (F228)', () => {
   test('each standard target has [projectDir, homeDir] candidates in canonical order', () => {
     const targets = buildSkillMountTargets(PROJECT, HOME);
     const claude = targets.find((t) => t.id === 'claude');
-    assert.deepEqual(claude.candidates, ['/tmp/proj/.claude/skills', '/Users/test/.claude/skills']);
+    assert.deepEqual(claude.candidates, ['/tmp/proj/.claude/skills', '/home/user/.claude/skills']);
   });
 
   test('standard HOME candidates stay canonical when project mount path is customized', () => {
@@ -35,11 +35,11 @@ describe('buildSkillMountTargets (F228)', () => {
       },
     };
     const candidates = buildMountPointDirCandidates(PROJECT, HOME, rules);
-    assert.deepEqual(candidates.claude, ['/tmp/proj/.project-claude/skills', '/Users/test/.claude/skills']);
+    assert.deepEqual(candidates.claude, ['/tmp/proj/.project-claude/skills', '/home/user/.claude/skills']);
 
     const targets = buildSkillMountTargets(PROJECT, HOME, rules);
     const claude = targets.find((t) => t.id === 'claude');
-    assert.deepEqual(claude.candidates, ['/tmp/proj/.project-claude/skills', '/Users/test/.claude/skills']);
+    assert.deepEqual(claude.candidates, ['/tmp/proj/.project-claude/skills', '/home/user/.claude/skills']);
   });
 
   test('omits disabled standard mount points', () => {
@@ -75,7 +75,7 @@ describe('buildSkillMountTargets (F228)', () => {
     };
     const targets = buildSkillMountTargets(PROJECT, HOME, rules);
     const custom = targets.find((t) => t.id === 'opencode');
-    assert.deepEqual(custom.candidates, ['/Users/test/.opencode/skills']);
+    assert.deepEqual(custom.candidates, ['/home/user/.opencode/skills']);
   });
 
   test('resolves project-relative custom path against project root', () => {
@@ -95,14 +95,14 @@ describe('buildSkillMountTargets (F228)', () => {
     };
     const targets = buildSkillMountTargets(PROJECT, HOME, rules);
     const custom = targets.find((t) => t.id === 'home-skills');
-    assert.deepEqual(custom.candidates, ['/Users/test']);
+    assert.deepEqual(custom.candidates, ['/home/user']);
   });
 
   test('dedupes candidates when projectRoot equals home', () => {
     const targets = buildSkillMountTargets(HOME, HOME);
     const claude = targets.find((t) => t.id === 'claude');
     assert.equal(claude.candidates.length, 1, 'project/home overlap should collapse to one candidate');
-    assert.equal(claude.candidates[0], '/Users/test/.claude/skills');
+    assert.equal(claude.candidates[0], '/home/user/.claude/skills');
   });
 
   test('returns empty array when all standard mount points disabled and no custom paths', () => {

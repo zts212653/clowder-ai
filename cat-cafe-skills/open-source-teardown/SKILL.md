@@ -58,7 +58,7 @@ triggers:
 
 1. 记录用户原始问题和最关心的 claims。
 2. `search_evidence` 查我们是否已有同项目/同类系统讨论、lesson、feature anchor；有矛盾就 flag。
-3. clone 或 update 到 `/home/user/{project}`。
+3. clone 或 update 到 `/home/user/projects/ref/{project}`。
 4. 记录 `git rev-parse HEAD`、最新 tag/release、`git status --short`。
 5. 把 README/PPT/官网中的明星特性拆成 claims ledger。
 

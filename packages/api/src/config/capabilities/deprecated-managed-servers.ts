@@ -74,7 +74,7 @@ export const DEPRECATED_MANAGED_SERVERS: readonly DeprecatedManagedServer[] = [
   {
     serverName: 'cat-cafe',
     reason:
-      'F193 Phase C / F207 Phase B0 split-only migration: replaced by split servers (cat-cafe-collab, cat-cafe-memory, cat-cafe-signals, cat-cafe-limb, cat-cafe-finance)',
+      'F193 Phase C / F207 Phase B0 / F195 split-only migration: replaced by split servers (cat-cafe-collab, cat-cafe-memory, cat-cafe-signals, cat-cafe-limb, cat-cafe-audio, cat-cafe-finance)',
     // F213 砚砚 review 2026-05-26 P1: `argsSuffix` marker removed for safety —
     // any user fork at `/users/alice/forks/cat-cafe/packages/mcp-server/dist/index.js`
     // would falsely match suffix → mistakenly removed → third-party preservation

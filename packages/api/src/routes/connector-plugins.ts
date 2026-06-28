@@ -14,13 +14,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { unregisterConnectorDefinition } from '@cat-cafe/shared';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import {
   type CapabilityWriteRouteError,
   requireCapabilityWriteOwner,
+  requireLocalCapabilityWriteRequest,
 } from '../config/capabilities/capability-write-guards.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { isOriginAllowed, PRIVATE_NETWORK_ORIGIN, resolveFrontendCorsOrigins } from '../config/frontend-origin.js';
@@ -38,6 +39,11 @@ import { resolveSessionUserId } from '../utils/request-identity.js';
 import { invalidateManifestCache } from './connector-hub.js';
 
 const PLUGIN_ARCHIVE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+
+const PLUGIN_ICON_MIME_BY_EXT = new Map<string, string>([
+  ['.svg', 'image/svg+xml'],
+  ['.png', 'image/png'],
+]);
 
 export async function writeUploadedPluginArchive(tmpPath: string, buffer: Buffer): Promise<void> {
   await writeFile(tmpPath, buffer, { mode: 0o600 });
@@ -58,7 +64,18 @@ function trustedPluginWriteOrigins(): (string | RegExp)[] {
   return resolveFrontendCorsOrigins(process.env).filter((origin) => origin !== PRIVATE_NETWORK_ORIGIN);
 }
 
+function resolvePluginIconMime(filePath: string): string | null {
+  const mime = PLUGIN_ICON_MIME_BY_EXT.get(extname(filePath).toLowerCase());
+  if (mime === undefined) return null;
+  return mime;
+}
+
 function requirePluginWriteAccess(request: FastifyRequest): CapabilityWriteRouteError | null {
+  // Layer 1: Loopback guard — reject non-localhost and proxy-forwarded requests (#794 pattern).
+  const localError = requireLocalCapabilityWriteRequest(request);
+  if (localError) return localError;
+
+  // Layer 2: Session authentication.
   const userId = resolveSessionUserId(request);
   if (!userId) {
     return { status: 401, error: 'Plugin writes require session authentication' };
@@ -69,13 +86,16 @@ function requirePluginWriteAccess(request: FastifyRequest): CapabilityWriteRoute
     return { status: 403, error: 'Connector plugin writes require same-origin Hub access' };
   }
 
-  return requireCapabilityWriteOwner(userId, {
-    requireConfiguredOwner: true,
-    missingOwnerError: 'Connector plugin writes require DEFAULT_OWNER_USER_ID to be configured',
-  });
+  // Layer 3: Owner gate — fall through in single-user mode (#794 pattern, #995 fix).
+  return requireCapabilityWriteOwner(userId, { allowMissingOwner: true });
 }
 
 function requirePluginListAccess(request: FastifyRequest): CapabilityWriteRouteError | null {
+  // Layer 1: Loopback guard — plugin metadata is reconnaissance-sensitive (#794 pattern).
+  const localError = requireLocalCapabilityWriteRequest(request);
+  if (localError) return localError;
+
+  // Layer 2: Session authentication.
   const userId = resolveSessionUserId(request);
   if (!userId) {
     return { status: 401, error: 'Plugin listing requires session authentication' };
@@ -86,10 +106,8 @@ function requirePluginListAccess(request: FastifyRequest): CapabilityWriteRouteE
     return { status: 403, error: 'Connector plugin listing requires same-origin Hub access' };
   }
 
-  return requireCapabilityWriteOwner(userId, {
-    requireConfiguredOwner: true,
-    missingOwnerError: 'Connector plugin listing requires DEFAULT_OWNER_USER_ID to be configured',
-  });
+  // Layer 3: Owner gate — fall through in single-user mode (#794 pattern, #995 fix).
+  return requireCapabilityWriteOwner(userId, { allowMissingOwner: true });
 }
 
 function toPublicPluginMeta(plugins: ReturnType<typeof listInstalledPlugins>) {
@@ -185,8 +203,10 @@ export const connectorPluginRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ error: 'Icon file not found' });
       }
 
-      const ext = iconPath.split('.').pop()?.toLowerCase();
-      const mime = ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : 'application/octet-stream';
+      const mime = resolvePluginIconMime(realIconPath);
+      if (!mime) {
+        return reply.status(415).send({ error: 'Unsupported icon file type' });
+      }
 
       return reply.type(mime).header('Cache-Control', 'public, max-age=3600').send(readFileSync(iconPath));
     },

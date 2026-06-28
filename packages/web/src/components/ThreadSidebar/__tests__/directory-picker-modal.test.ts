@@ -165,7 +165,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('calls onSelect with existing project path when selected and confirmed', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();
@@ -222,7 +222,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('auto-selects first existing project when cwdPath unavailable', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/projects/cwd') return jsonFail();
       if (path === '/api/backlog/items') return jsonOk({ items: [] });
@@ -235,7 +235,7 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('auto-selects cwdPath over existingProjects when both available', async () => {
-    const existingPath = '/home/user/other';
+    const existingPath = '/home/user/projects/other';
     setupCwdSuccess();
     const fns = render({ existingProjects: [existingPath] });
     await flush();
@@ -289,6 +289,86 @@ describe('DirectoryPickerModal', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(fns.onSelect).not.toHaveBeenCalled();
+  });
+
+  it('creates the thread with the currently browsed directory without requiring a separate directory confirm', async () => {
+    const projectsPath = `${CWD_PATH}/projects`;
+    const targetPath = `${projectsPath}/cat-cafe`;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
+      if (path === '/api/backlog/items') return jsonOk({ items: [] });
+      if (path === `/api/projects/browse?path=${encodeURIComponent(CWD_PATH)}`) {
+        return jsonOk({
+          current: CWD_PATH,
+          name: 'project',
+          parent: '/path/to',
+          homePath: CWD_PATH,
+          entries: [{ name: 'projects', path: projectsPath, isDirectory: true }],
+        });
+      }
+      if (path === `/api/projects/browse?path=${encodeURIComponent(projectsPath)}`) {
+        return jsonOk({
+          current: projectsPath,
+          name: 'projects',
+          parent: CWD_PATH,
+          homePath: CWD_PATH,
+          entries: [{ name: 'cat-cafe', path: targetPath, isDirectory: true }],
+        });
+      }
+      if (path === `/api/projects/browse?path=${encodeURIComponent(targetPath)}`) {
+        return jsonOk({
+          current: targetPath,
+          name: 'cat-cafe',
+          parent: projectsPath,
+          homePath: CWD_PATH,
+          entries: [],
+        });
+      }
+      return jsonFail();
+    });
+    const fns = render();
+    await flush();
+    const browseBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('浏览文件夹'),
+    );
+    if (!browseBtn) throw new Error('browse button not found');
+
+    await act(async () => {
+      browseBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(container.textContent).not.toContain('选择此目录');
+
+    const projectsBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('projects'),
+    );
+    if (!projectsBtn) throw new Error('projects directory button not found');
+    await act(async () => {
+      projectsBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const catCafeBtn = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('cat-cafe'),
+    );
+    if (!catCafeBtn) throw new Error('cat-cafe directory button not found');
+    await act(async () => {
+      catCafeBtn.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    clickConfirm();
+    expect(fns.onSelect).toHaveBeenCalledWith(expect.objectContaining({ projectPath: targetPath }));
+    expect(
+      mockApiFetch.mock.calls.filter(
+        ([path]) => path === `/api/projects/browse?path=${encodeURIComponent(projectsPath)}`,
+      ),
+    ).toHaveLength(1);
+    expect(
+      mockApiFetch.mock.calls.filter(
+        ([path]) => path === `/api/projects/browse?path=${encodeURIComponent(targetPath)}`,
+      ),
+    ).toHaveLength(1);
   });
 
   // ── F068: Path input ──────────────────────────────────────

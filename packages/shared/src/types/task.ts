@@ -7,6 +7,7 @@
  * kind=pr_tracking: automated PR monitoring tasks (merged from PrTrackingStore)
  */
 
+import type { BallResolveMode } from './ball-custody.js';
 import type { DispatchGateState } from './cross-thread-affordance.js';
 import type { CatId } from './ids.js';
 
@@ -57,8 +58,6 @@ export interface ReviewAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
-  /** #949: Number of MR reviews completed on the current thread. Used for thread rotation. */
-  readonly completedReviewCount?: number;
 }
 
 /**
@@ -99,6 +98,18 @@ export interface AutomationState {
   readonly trackingInstructions?: string;
 }
 
+export type TaskProbeSpec =
+  | {
+      readonly kind: 'http_get';
+      readonly url: string;
+      readonly expectStatus?: number;
+      readonly timeoutMs?: number;
+    }
+  | {
+      readonly kind: 'redis_exists';
+      readonly key: string;
+    };
+
 export interface TaskItem {
   readonly id: string;
   /** Task kind: 'work' (default) or 'pr_tracking' (#320) */
@@ -125,6 +136,10 @@ export interface TaskItem {
   readonly sourceMessageId?: string;
   /** Source summary ID for traceability (4-A feature) */
   readonly sourceSummaryId?: string;
+  /** F233 PR4: machine-checkable condition for blocked-task auto-resolution. */
+  readonly probe?: TaskProbeSpec | null;
+  /** F233 PR4: what to do once the probe is satisfied. */
+  readonly resolveMode?: BallResolveMode | null;
 
   // --- F193 Phase E (dispatch gate) ---
 
@@ -144,6 +159,8 @@ export type CreateTaskInput = Pick<TaskItem, 'threadId' | 'title' | 'why' | 'cre
   userId?: string;
   sourceMessageId?: string;
   sourceSummaryId?: string;
+  probe?: TaskProbeSpec | null;
+  resolveMode?: BallResolveMode | null;
   // F193 Phase E (dispatch gate)
   relatedFeatureId?: string;
   /** Cat's current feature context — used to determine if detected F-IDs are "external" */
@@ -160,7 +177,9 @@ export type UpdateTaskInput = {
   status?: TaskStatus;
   why?: string;
   automationState?: AutomationState;
-  /** #949: Thread rotation — allow reassigning a task to a new thread. */
+  probe?: TaskProbeSpec | null;
+  resolveMode?: BallResolveMode | null;
+  /** Generic task move support. Callers that change threadId own the UX contract. */
   threadId?: string;
   /** F193-E1 P1-4: allow patching dispatchGate on existing tasks */
   dispatchGate?: DispatchGateState;

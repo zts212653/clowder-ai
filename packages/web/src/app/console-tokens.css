@@ -19,6 +19,7 @@
   --console-shell-bg: var(--cafe-surface-elevated);
   --console-panel-bg: var(--cafe-surface);
   --console-card-bg: var(--cafe-surface-canvas);
+  --console-elevated-bg: var(--cafe-surface-elevated);
   /* Search/trash derive from base (层2) with fixed darker offset, NOT from sunken.
    * This decouples them from the sunken slider — they track the thread panel. */
   --console-card-soft-bg: color-mix(in oklch, var(--cafe-surface), black 5%);

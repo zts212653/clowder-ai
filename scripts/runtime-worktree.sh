@@ -30,7 +30,6 @@ Clowder AI Runtime Worktree Manager
 
 Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
-  ./scripts/runtime-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
   ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
   ./scripts/runtime-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
 
@@ -38,6 +37,13 @@ Defaults:
   --dir    ../cat-cafe-runtime
   --branch runtime/main-sync
   --remote origin
+
+Runtime Contract (passive frozen):
+  Runtime restarts ONLY on explicit `pnpm start` invocation.
+  start runs sync (git pull) + build invariant (rebuild stale dist) internally.
+  No standalone `sync` subcommand — fold into `pnpm start` as a single entry.
+  No tsx watch auto-restart — runtime doesn't track main src changes.
+  See docs/decisions/039-runtime-passive-freeze.md for design rationale.
 
 Safety:
   start refuses to kill an active API by default.
@@ -207,12 +213,55 @@ runtime_quick_mode() {
   start_arg_present "--quick" || start_arg_present "-q"
 }
 
+runtime_install_can_retry_without_frozen_lockfile() {
+  local log_file="$1"
+  # Kept in sync with scripts/install.ps1::Test-LockfileMismatchFailure — the
+  # Windows installer is the single source of truth for which pnpm 9 lockfile-
+  # class failures justify a `pnpm install --no-frozen-lockfile` retry. Any
+  # phrase added here MUST also be reflected in install.ps1 (and vice versa)
+  # so Linux/macOS bash and Windows PowerShell self-heal stay symmetric.
+  # codex review (PR #2495 R2) flagged the BREAKING_CHANGE / "incompatible"
+  # gaps; AUDIT (§16e failure-mode sweep) added the remaining patterns the
+  # PowerShell helper already classifies as lockfile drift.
+  grep -Eiq \
+    'ERR_PNPM_OUTDATED_LOCKFILE|ERR_PNPM_FROZEN_LOCKFILE_WITH_OUTDATED_LOCKFILE|ERR_PNPM_LOCKFILE_BREAKING_CHANGE|ERR_PNPM_LOCKFILE_CONFIG_MISMATCH|Cannot install with .frozen-lockfile|Cannot proceed .*without the lockfile|frozen[- ]lockfile|lockfile.*(outdated|not up to date|incompatible)' \
+    "$log_file"
+}
+
 install_runtime_dependencies() {
+  local install_log
+  local install_status
+
   info "runtime prerequisites missing; running pnpm install --frozen-lockfile"
   # Always clear production env flags — Claude Code shell often has NODE_ENV=production,
   # which causes pnpm to skip devDependencies and break builds.
+  install_log="$(mktemp "${TMPDIR:-/tmp}/cat-cafe-runtime-install.XXXXXX")"
+  # Wrap the pnpm pipeline in `if` so set -e + pipefail don't kill us on a
+  # non-zero exit, then capture pnpm's original exit code via ${PIPESTATUS[0]}.
+  # This preserves the caller-visible exit semantics on the non-retry path
+  # (regression vs the pre-PR direct `pnpm install --frozen-lockfile` call);
+  # interrupts / OOM-style failures stay distinguishable from a generic exit 1.
+  if env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
+    pnpm -C "$RUNTIME_DIR" install --frozen-lockfile 2>&1 | tee "$install_log"; then
+    install_status=0
+  else
+    install_status="${PIPESTATUS[0]}"
+  fi
+
+  if [ "$install_status" -eq 0 ]; then
+    rm -f "$install_log"
+    return 0
+  fi
+
+  if ! runtime_install_can_retry_without_frozen_lockfile "$install_log"; then
+    rm -f "$install_log"
+    return "$install_status"
+  fi
+  rm -f "$install_log"
+
+  info "runtime frozen lockfile install failed; retrying pnpm install --no-frozen-lockfile"
   env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
-    pnpm -C "$RUNTIME_DIR" install --frozen-lockfile
+    pnpm -C "$RUNTIME_DIR" install --no-frozen-lockfile
 }
 
 seed_runtime_config_from_project() {
@@ -258,32 +307,43 @@ ensure_runtime_dependencies() {
   install_runtime_dependencies
 }
 
-ensure_quick_start_artifacts() {
-  runtime_quick_mode || return 0
-
-  # Gate rebuilds on source freshness (git HEAD of the runtime worktree),
-  # not artifact existence — otherwise a synced source change never reaches
-  # the running process no matter how many times we restart.
+ensure_runtime_dist_freshness() {
+  # ADR-039 Invariant 3: build invariant — rebuild stale dist before runtime
+  # spawns API/Web processes.
+  #
+  # Previously gated on `runtime_quick_mode`; F228 stale-dist crash exposed
+  # that default (full) mode also needs dists once CAT_CAFE_DIRECT_NO_WATCH=1
+  # makes runtime API run from `node dist/index.js` (not tsx watch src).
+  # Freshness gate (git HEAD) means steady-state cost is ~0.1s; only when
+  # main source moved do we actually rebuild.
   local head_commit
   head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
 
+  # Order matters: shared first (api/mcp depend on it), then api, then mcp, then web.
   if needs_rebuild "$RUNTIME_DIR/packages/shared/dist/index.js" \
       "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"; then
-    info "quick start: shared dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
+    info "runtime dist: shared stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/shared\" run build"
     pnpm -C "$RUNTIME_DIR/packages/shared" run build
     record_build_stamp "$RUNTIME_DIR/packages/shared/dist/.build-commit" "$head_commit"
   fi
 
+  if needs_rebuild "$RUNTIME_DIR/packages/api/dist/index.js" \
+      "$RUNTIME_DIR/packages/api/dist/.build-commit" "$head_commit"; then
+    info "runtime dist: api stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/api\" run build"
+    pnpm -C "$RUNTIME_DIR/packages/api" run build
+    record_build_stamp "$RUNTIME_DIR/packages/api/dist/.build-commit" "$head_commit"
+  fi
+
   if needs_rebuild "$RUNTIME_DIR/packages/mcp-server/dist/index.js" \
       "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"; then
-    info "quick start: MCP server dist stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
+    info "runtime dist: MCP server stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/mcp-server\" run build"
     pnpm -C "$RUNTIME_DIR/packages/mcp-server" run build
     record_build_stamp "$RUNTIME_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"
   fi
 
   if needs_rebuild "$RUNTIME_DIR/packages/web/.next/BUILD_ID" \
       "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"; then
-    info "quick start: web production build stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
+    info "runtime dist: web production build stale/missing; running pnpm -C \"$RUNTIME_DIR/packages/web\" run build"
     pnpm -C "$RUNTIME_DIR/packages/web" run build
     record_build_stamp "$RUNTIME_DIR/packages/web/.next/.build-commit" "$head_commit"
   fi
@@ -291,7 +351,7 @@ ensure_quick_start_artifacts() {
 
 ensure_runtime_start_prereqs() {
   ensure_runtime_dependencies
-  ensure_quick_start_artifacts
+  ensure_runtime_dist_freshness
 }
 
 ensure_restart_authorized() {
@@ -538,6 +598,10 @@ start_runtime_worktree() {
     export CAT_CAFE_RUNTIME_ROOT="$PROJECT_DIR"
     export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
+    # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
+    # Restart only happens on explicit `pnpm start` (which runs build invariant first).
+    # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
+    export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
@@ -554,7 +618,7 @@ start_runtime_worktree() {
   if [ "$SYNC_BEFORE_START" = "true" ]; then
     if is_api_running && [ "$FORCE" != "true" ]; then
       info "API port is active; skip pre-start sync to avoid in-place hot swap."
-      info "Run 'pnpm runtime:sync' after stop if you need latest origin/main."
+      info "Stop API first (pnpm stop), then re-run 'pnpm start' to sync + restart."
       seed_runtime_config_from_project
     else
       sync_runtime_worktree
@@ -574,9 +638,14 @@ start_runtime_worktree() {
   export CAT_CAFE_RUNTIME_ROOT="$RUNTIME_DIR"
   export CAT_CAFE_WORKSPACE_ROOT="${CAT_CAFE_WORKSPACE_ROOT:-$PROJECT_DIR}"
   export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
+  # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
+  # Restart only happens on explicit `pnpm start` (which runs build invariant first).
+  # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
+  export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"
+  info "exporting CAT_CAFE_DIRECT_NO_WATCH=$CAT_CAFE_DIRECT_NO_WATCH (runtime passive-freeze)"
   # Runtime = production: auto-inject --prod-web for PWA + Tailscale support.
   # Bash 3.2 + set -u: empty-array expansion can throw "unbound variable".
   exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
@@ -645,9 +714,6 @@ done
 case "$COMMAND" in
   init)
     init_runtime_worktree
-    ;;
-  sync)
-    sync_runtime_worktree
     ;;
   start)
     start_runtime_worktree

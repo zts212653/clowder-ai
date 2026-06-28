@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { resolveWorkspaceRoot } from '../dist/config/capabilities/mcp-config-adapters.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../dist/domains/cats/services/agents/providers/opencode-acp-spawn-config.js';
 import {
   deriveOpenCodeApiType,
@@ -432,6 +433,55 @@ describe('generateOpenCodeRuntimeConfig', () => {
     });
   });
 
+  test('mcp.cat-cafe environment uses the invocation workspace', () => {
+    const config = generateOpenCodeRuntimeConfig({
+      providerName: 'anthropic',
+      models: ['anthropic/claude-opus-4-6'],
+      defaultModel: 'anthropic/claude-opus-4-6',
+      apiType: 'anthropic',
+      mcpServerPath: '/absolute/path/to/packages/mcp-server/dist/index.js',
+      allowedWorkspaceDirs: '/tmp/project',
+    });
+
+    assert.deepStrictEqual(config.mcp['cat-cafe'], {
+      type: 'local',
+      command: ['node', '/absolute/path/to/packages/mcp-server/dist/index.js'],
+      environment: {
+        ALLOWED_WORKSPACE_DIRS: '/tmp/project',
+      },
+    });
+  });
+
+  test('mcp.cat-cafe environment drives MCP workspace resolution', () => {
+    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
+    const originalWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    try {
+      process.env.ALLOWED_WORKSPACE_DIRS = '/stale/parent/workspace';
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: 'anthropic',
+        models: ['anthropic/claude-opus-4-6'],
+        defaultModel: 'anthropic/claude-opus-4-6',
+        apiType: 'anthropic',
+        mcpServerPath: '/absolute/path/to/packages/mcp-server/dist/index.js',
+        allowedWorkspaceDirs: '/tmp/project',
+      });
+
+      process.env.ALLOWED_WORKSPACE_DIRS = config.mcp['cat-cafe'].environment.ALLOWED_WORKSPACE_DIRS;
+
+      assert.equal(
+        resolveWorkspaceRoot(),
+        '/tmp/project',
+        'OpenCode MCP child env must make Clowder AI MCP resolve the invocation workspace',
+      );
+    } finally {
+      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
+      if (originalWorkspace === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspace;
+    }
+  });
+
   test('#871: non-api_key runtime config can omit provider auth placeholders', () => {
     const config = generateOpenCodeRuntimeConfig({
       providerName: 'anthropic',
@@ -475,13 +525,13 @@ describe('generateOpenCodeRuntimeConfig', () => {
       models: ['anthropic/claude-opus-4-6'],
       defaultModel: 'anthropic/claude-opus-4-6',
       apiType: 'anthropic',
-      externalDirectories: ['/Users/lysander/projects/cat-cafe/', 'C:\\Users\\lysander\\monorepo'],
+      externalDirectories: ['/home/user/cat-cafe/', 'C:\\Dev\\monorepo'],
     });
 
     assert.deepStrictEqual(config.permission, {
       external_directory: {
-        '/Users/lysander/projects/cat-cafe/**': 'allow',
-        'C:/Users/lysander/monorepo/**': 'allow',
+        '/home/user/cat-cafe/**': 'allow',
+        'C:/Dev/monorepo/**': 'allow',
       },
     });
   });

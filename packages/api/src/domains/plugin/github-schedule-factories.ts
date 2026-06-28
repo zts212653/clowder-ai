@@ -42,6 +42,11 @@ import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../community/CommunityEventLog.js';
+import type { ICommunityObjectStore } from '../community/CommunityObjectStore.js';
+import type { GitHubSnapshot } from '../community/CommunityReconciler.js';
+import { createCommunityReconcilerTaskSpec } from '../community/CommunityReconcilerTaskSpec.js';
+import type { CommunityReconciliationFindingStore } from '../community/CommunityReconciliationFindingStore.js';
+import type { SlaPolicy } from '../community/community-sla-policy.js';
 import type { ScheduleFactory, ScheduleFactoryDeps, ScheduleFactoryRegistry } from './ScheduleFactoryRegistry.js';
 
 /** Minimal projector interface for optional DI in factories — avoids importing concrete class. */
@@ -61,9 +66,12 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   fetchPrStatus?: (repoFullName: string, prNumber: number) => Promise<CiPollResult | null>;
   conflictRouter: ConflictRouter;
   reviewFeedbackRouter: ReviewFeedbackRouter;
+  /** F140/#949 correction + F167 R2: `get` lets ReviewFeedbackTaskSpec repair already-rotated
+   *  PR tracking tasks; `create`/`updateThreadKind` are for RepoScanTaskSpec reconciliation. */
+  threadStore?: Pick<IThreadStore, 'create' | 'get' | 'updateThreadKind'>;
   invokeTrigger: ConnectorInvokeTrigger;
-  /** #949: Thread store for MR review thread rotation (create fresh threads when context overflows) */
-  threadStore?: Pick<IThreadStore, 'create' | 'get'>;
+  // Repo-scan connector delivery deps. Review-feedback delivery stays encapsulated
+  // in ReviewFeedbackRouter; no rotation/backlink delivery path exists post-#2394.
   checkMergeable: (repo: string, pr: number) => Promise<{ mergeState: string; headSha: string }>;
   autoExecutor: ConflictAutoExecutor;
   fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
@@ -106,6 +114,23 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   fetchRepoComments?: (repo: string, sinceIso?: string) => Promise<RepoIssueComment[]>;
   readRepoCommentCursor?: (repo: string) => Promise<string | undefined>;
   writeRepoCommentCursor?: (repo: string, cursor: string) => Promise<void>;
+  /**
+   * F168 Phase D D3: community reconciler deps.
+   * Redis-gated (same as repo-scan): needs objectStore, findingStore, projector,
+   * and GitHub fetch functions for issue/PR state.
+   */
+  objectStore?: Pick<ICommunityObjectStore, 'get' | 'listSubjectKeys'>;
+  findingStore?: CommunityReconciliationFindingStore;
+  fetchGitHubIssueState?: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
+  fetchGitHubPrState?: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
+  reconcilerSlaPolicy?: SlaPolicy;
+  isReconcilerBaselineEstablished?: () => Promise<boolean>;
+  markReconcilerBaselineEstablished?: () => Promise<void>;
+  /**
+   * F208 Phase E AC-E2: distillation checkpoint for review-complete + feat-phase-close hooks.
+   * Optional — only available when wired in index.ts (always, since InMemoryOpportunityStore).
+   */
+  distillationCheckpoint?: import('../../infrastructure/distillation/DistillationCheckpoint.js').DistillationCheckpoint;
 }
 
 /** Cast ScheduleFactoryDeps to GitHubScheduleDeps with runtime validation */
@@ -160,6 +185,7 @@ const reviewFeedbackFactory: ScheduleFactory = {
       fetchComments: d.fetchComments,
       fetchReviews: d.fetchReviews,
       reviewFeedbackRouter: d.reviewFeedbackRouter,
+      threadStore: d.threadStore,
       invokeTrigger: d.invokeTrigger,
       log: d.log,
       isEchoComment: d.isEchoComment,
@@ -168,8 +194,8 @@ const reviewFeedbackFactory: ScheduleFactory = {
       // F168 Phase A P1-1: thread community event services to spec
       eventLog: d.eventLog,
       projector: d.projector,
-      // #949: thread rotation deps
-      threadStore: d.threadStore,
+      // F208 Phase E AC-E2: distillation checkpoint
+      distillationCheckpoint: d.distillationCheckpoint,
     }) as TaskSpec_P1;
   },
 };
@@ -201,6 +227,8 @@ const repoScanFactory: ScheduleFactory = {
       defaultUserId: d.defaultUserId,
       reconciliationDedup: d.reconciliationDedup,
       bindingStore: d.bindingStore,
+      // F167 R2 P1#2: wire threadStore so reconciliation can self-heal gate-keeping marker
+      threadStore: d.threadStore,
       deliverFn: d.deliverFn,
       deliveryDeps: d.deliveryDeps,
       invokeTrigger: d.invokeTrigger,
@@ -284,7 +312,47 @@ const repoCommentPollFactory: ScheduleFactory = {
   },
 };
 
-/** Register all 6 GitHub schedule factories in the registry. */
+/**
+ * F168 Phase D D3: community reconciler — drift detection + SLA enforcement.
+ * Redis-gated (same availability as repo-scan).
+ */
+const communityReconcilerFactory: ScheduleFactory = {
+  pluginId: 'github',
+  factoryId: 'github.community-reconciler',
+  createTaskSpec(instanceId, deps) {
+    const d = deps as GitHubScheduleDeps;
+    if (!d.objectStore || !d.eventLog || !d.projector || !d.findingStore) {
+      throw new Error(
+        '[F168-D3] github.community-reconciler requires objectStore, eventLog, projector, findingStore in deps',
+      );
+    }
+    if (!d.fetchGitHubIssueState || !d.fetchGitHubPrState) {
+      throw new Error(
+        '[F168-D3] github.community-reconciler requires fetchGitHubIssueState and fetchGitHubPrState in deps',
+      );
+    }
+    if (!d.isReconcilerBaselineEstablished || !d.markReconcilerBaselineEstablished) {
+      throw new Error(
+        '[F168-D3] github.community-reconciler requires isReconcilerBaselineEstablished and markReconcilerBaselineEstablished in deps',
+      );
+    }
+    return createCommunityReconcilerTaskSpec({
+      id: instanceId,
+      objectStore: d.objectStore,
+      eventLog: d.eventLog,
+      projector: d.projector,
+      findingStore: d.findingStore,
+      fetchIssueState: d.fetchGitHubIssueState,
+      fetchPrState: d.fetchGitHubPrState,
+      slaPolicy: d.reconcilerSlaPolicy,
+      isBaselineEstablished: d.isReconcilerBaselineEstablished,
+      markBaselineEstablished: d.markReconcilerBaselineEstablished,
+      log: d.log,
+    }) as TaskSpec_P1;
+  },
+};
+
+/** Register all 7 GitHub schedule factories in the registry. */
 export function registerGitHubScheduleFactories(registry: ScheduleFactoryRegistry): void {
   registry.register(cicdCheckFactory);
   registry.register(conflictCheckFactory);
@@ -292,6 +360,7 @@ export function registerGitHubScheduleFactories(registry: ScheduleFactoryRegistr
   registry.register(repoScanFactory);
   registry.register(issueTrackingFactory);
   registry.register(repoCommentPollFactory);
+  registry.register(communityReconcilerFactory);
 }
 
 /** Exported for testing — allows direct factory lookup without constructing a full registry. */
@@ -302,6 +371,7 @@ export const githubScheduleFactories = [
   repoScanFactory,
   issueTrackingFactory,
   repoCommentPollFactory,
+  communityReconcilerFactory,
 ] as const;
 
 // --- F202-2B Migration helpers (P2-1 fix) ---
@@ -363,7 +433,7 @@ const REPO_SCAN_PENDING_REASON = 'deps-unavailable' as const;
  * availability is identical. Gated as pending until deps exist to avoid a ghost
  * "enabled" capability with no running task (P2-1).
  */
-const REDIS_GATED_GITHUB_RESOURCES = new Set(['repo-scan', 'repo-comment-poll']);
+const REDIS_GATED_GITHUB_RESOURCES = new Set(['repo-scan', 'repo-comment-poll', 'community-reconciler']);
 /**
  * F168 C0.3 (cloud review R2 P1): schedule resources THIS version introduces and must
  * backfill into existing installs (the one-time migration already ran for them, so it
@@ -372,7 +442,7 @@ const REDIS_GATED_GITHUB_RESOURCES = new Set(['repo-scan', 'repo-comment-poll'])
  * the capability row via removeCapabilityEntry). When a future version adds another
  * schedule, add it here AND bump the backfill marker so it backfills exactly once.
  */
-const BACKFILL_TARGET_RESOURCES = new Set(['repo-comment-poll']);
+const BACKFILL_TARGET_RESOURCES = new Set(['repo-comment-poll', 'community-reconciler']);
 const LEGACY_GITHUB_SCHEDULE_TASK_IDS = new Map([
   ['cicd-check', 'cicd-check'],
   ['conflict-check', 'conflict-check'],

@@ -234,6 +234,27 @@ export class TaskOutcomeEpisodeStore {
   }
 
   /**
+   * F245 Phase B — 只读时间窗查询（cancel 通道源）。
+   * createdAt 是 ISO TEXT（字典序 == 时间序），半开窗 [sinceMs, untilMs)：含下界、不含上界。
+   * 可选 category 粗筛（真实列 a1/a2/proxy）；record.type 精筛留给 Adapter 层。
+   * 纯 SELECT，不碰写侧（KD-4 read-model 边界）。
+   */
+  listSignalsInWindow(sinceMs: number, untilMs: number, categories?: Array<'a1' | 'a2' | 'proxy'>): StoredSignal[] {
+    const sinceIso = new Date(sinceMs).toISOString();
+    const untilIso = new Date(untilMs).toISOString();
+    const params: unknown[] = [sinceIso, untilIso];
+    let sql = 'SELECT * FROM task_outcome_signals WHERE createdAt >= ? AND createdAt < ?';
+    if (categories && categories.length > 0) {
+      const placeholders = categories.map(() => '?').join(', ');
+      sql += ` AND category IN (${placeholders})`;
+      params.push(...categories);
+    }
+    sql += ' ORDER BY createdAt ASC, id ASC';
+    const rows = this.db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
+    return rows.map((r) => this.rowToSignal(r));
+  }
+
+  /**
    * Get the latest in_progress episode for a thread (for signal binding).
    */
   getActiveEpisode(threadId: string): StoredEpisode | null {

@@ -17,6 +17,18 @@ import { beforeEach, describe, it } from 'node:test';
 
 const NARRATOR_DRIVER_PATH = '../../dist/domains/community/NarratorDriver.js';
 
+/** D0.2: in-memory dedup store for test isolation (atomic claim). */
+function createTestDedupStore() {
+  const store = new Set();
+  return {
+    async claim(key) {
+      if (store.has(key)) return false;
+      store.add(key);
+      return true;
+    },
+  };
+}
+
 describe('F168 Phase C C2.2: NarratorDriver', () => {
   let NarratorDriver;
 
@@ -50,6 +62,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
         narratorThreadId: 'thread_narrator_ops',
         wakeCat: mockWakeCat,
         log: { info: () => {}, warn: () => {}, error: () => {} },
+        dedupStore: createTestDedupStore(),
       });
 
       const subjectKey = 'issue:clowder-ai#912';
@@ -90,6 +103,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
         narratorThreadId: 'thread_narrator_ops',
         wakeCat: mockWakeCat,
         log: { info: () => {}, warn: () => {}, error: () => {} },
+        dedupStore: createTestDedupStore(),
       });
 
       await driver.spawnNarrator({
@@ -128,6 +142,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
         narratorThreadId: 'thread_narrator_ops',
         wakeCat: mockWakeCat,
         log: { info: () => {}, warn: () => {}, error: () => {} },
+        dedupStore: createTestDedupStore(),
       });
 
       // Verifies constructor signature: no communityIssueStore parameter exists (INV-1)
@@ -170,6 +185,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
         narratorThreadId: 'thread_narrator_ops',
         wakeCat: mockWakeCat,
         log: { info: () => {}, warn: (msg) => warnings.push(msg), error: () => {} },
+        dedupStore: createTestDedupStore(),
       });
 
       await driver.spawnNarrator({ caseId: 'ci-x', subjectKey: 's', sourceEventId: 'e', briefingContext: 'ctx' });
@@ -196,6 +212,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
           warn: (ctx, msg) => warnings.push(msg || ctx),
           error: () => {},
         },
+        dedupStore: createTestDedupStore(),
       });
 
       await driver.spawnNarrator({ caseId: 'ci-x', subjectKey: 's', sourceEventId: 'e', briefingContext: 'ctx' });
@@ -229,6 +246,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
           warn: () => {},
           error: (ctx, msg) => errors.push(msg || ctx),
         },
+        dedupStore: createTestDedupStore(),
       });
 
       // Must not throw — fire-and-forget failure must be absorbed
@@ -259,6 +277,7 @@ describe('F168 Phase C C2.2: NarratorDriver', () => {
         narratorThreadId: 'thread_narrator_ops_abc',
         wakeCat: mockWakeCat,
         log: { info: () => {}, warn: () => {}, error: () => {} },
+        dedupStore: createTestDedupStore(),
       });
 
       await driver.spawnNarrator({

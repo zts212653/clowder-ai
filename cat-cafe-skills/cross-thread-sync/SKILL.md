@@ -2,13 +2,15 @@
 name: cross-thread-sync
 description: >
   跨 thread 协同：发现平行 session → 通知（3+2 件套）→ 争用协调 → 确认。
-  Use when: 平行 session 之间需要协同、通知改动影响、共享文件争用。
+  Use when: 平行 session 之间需要协同、收到跨线程消息、通知改动影响、共享文件争用。
   Not for: 跨猫工作交接（用 cross-cat-handoff）、需要新建 thread 时（用 propose_thread / thread-orchestration）。
+  GOTCHA: 收到跨线程 ACTION 不等于接活；先做 thread/feat ownership gate，不属于当前 thread 就 cross-post 退回。
   Boundary with F128: 发现跨 scope 问题 → 先 list_threads 查有没有已有 thread → 有 = 本 skill（cross_post）→ 没有 = propose_thread。
   Output: cross-post 通知 + 争用协调完成。
 triggers:
   - "通知另一个 session"
   - "跨 thread"
+  - "跨线程消息"
   - "平行世界"
   - "parallel session sync"
   - "另一只Ragdoll"
@@ -47,6 +49,28 @@ triggers:
 | 被其他 feature 依赖的接口/类型 | 必须 |
 | `packages/shared/**` | 必须 |
 | 纯内部改动（只影响自己 feature 的文件） | 不需要 |
+
+## 入站门禁：收到跨线程消息时先判归属
+
+跨线程消息是**路由候选**，不是自动授权。尤其是 source thread / sender cat 与当前 thread 不同、消息里要求“take over / implement / open PR”时，先停 30 秒做 ownership gate，再决定接/退/升。
+
+### 三问（缺一不接）
+
+| 问题 | 怎么查 | 通过条件 |
+|------|--------|----------|
+| 当前 thread 是什么？ | 看 thread 标题 / 导航 / task snapshot / 最近 feature doc | 当前 thread 的主题与来球 feature/issue 一致 |
+| 来球归属谁？ | 消息里的 source thread / issue / PR / feature id；必要时 `search_evidence` 或源 thread context | 来球 owner 指向当前 thread，或明确要求本 thread 接 |
+| 我现在能接吗？ | 当前 thread in-flight 工作、毛线球、负责 feat、是否会污染上下文 | 接了不会把外部 feature 的工程现场带进当前 thread |
+
+### 判定动作
+
+| 判定 | 动作 |
+|------|------|
+| 归属当前 thread | 正常接球，按对应 skill 做 |
+| 归属别的 thread / 不确定 | **不写码、不建 worktree、不注册 tracking**；cross-post 回 source thread：说明当前 thread 不接、给证据、建议正确 owner |
+| 只有 operator 能改路由 | 带 Decision Packet `@co-creator`，不要反问式 ping |
+
+**失败模式**：看到“跨线程消息 + action brief”就猛开 worktree，会把别的 feature 的上下文和 WIP 污染进当前 thread。正确做法是先判归属；cross-post 是通知层，不是接活授权。
 
 ## Step 2: 通知（3+2 升级制）
 
@@ -151,6 +175,7 @@ Action Needed 必须标注级别：
 | 在自己 thread 里说"另一个 session 注意" | 对方看不到！用 `cross_post_message` |
 | `post_message` 发到对方 thread | 用 `cross_post_message`（带 crossPost 元数据） |
 | 不写 `@句柄` 也不传 `targetCats` | 消息到达但**零触发**——必须至少用一种方式（推荐双保险：targetCats + content 末尾 @句柄） |
+| 收到跨线程 ACTION 就直接实现 | 先过“入站门禁”：thread/feat owner 不匹配就 cross-post 退回，不开 worktree |
 | 以为 list_threads 能看到别人的 thread | 只能看到同 userId 的 thread |
 | 不 pull 就在 main 改共享文件 | 先 `git pull origin main` 再改（§14） |
 | 不标同步级别 | Action Needed 必须写 `[FYI]` / `[ACTION]` / `[BLOCKING]` |

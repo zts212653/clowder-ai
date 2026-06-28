@@ -85,7 +85,7 @@ Clowder はモデル非依存です。各エージェント CLI / adapter は統
 
 ### オプション B：ソースセットアップ
 
-**前提条件：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(オプション — スキップする場合は `--memory`)* · Git
+**前提条件：** [Node.js 24+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *(オプション — スキップする場合は `--memory`)* · Git
 
 ```bash
 # 1. クローン

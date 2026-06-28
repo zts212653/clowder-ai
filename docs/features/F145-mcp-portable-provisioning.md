@@ -16,7 +16,7 @@ created: 2026-03-27
 > "我搞了一个新电脑，要把你们从 GitHub 下载回来，然后我这些 MCP 如果还要我自己一个个去挂就很奇怪了。"
 > "我们现在就有个 bug，pencil MCP 写死用 antigravity 的插件，但是 vscode 其实也有插件，是一个东西。"
 
-**根因**：F041 的 capability orchestrator 只做到"统一真相源 + 自动生成三份 CLI 配置"，但没有区分"期望态"和"本机解析态"。`capabilities.json` 混进了机器特定的绝对路径（如 pencil 的 `/home/user/mcp-server-darwin-arm64`），导致：
+**根因**：F041 的 capability orchestrator 只做到"统一真相源 + 自动生成三份 CLI 配置"，但没有区分"期望态"和"本机解析态"。`capabilities.json` 混进了机器特定的绝对路径（如 pencil 的 `/home/user/.antigravity/extensions/highagency.pencildev-0.6.32-universal/out/mcp-server-darwin-arm64`），导致：
 
 1. **新机器 clone 后 MCP 配置坏**：绝对路径在另一台机器上不存在
 2. **Pencil 只认 Antigravity**：VS Code 用户装了同样的 Pencil 扩展也用不了

@@ -136,6 +136,15 @@ function buildStreamSegmentsByBaseKey(
   return streamSegmentsByBaseKey;
 }
 
+function stripStreamSplitFields(
+  stream: NonNullable<NonNullable<ChatMessage['extra']>['stream']>,
+): NonNullable<NonNullable<ChatMessage['extra']>['stream']> {
+  const copy = { ...stream };
+  delete copy.cliStdout;
+  delete copy.speechContent;
+  return copy;
+}
+
 function projectGroup(records: ChatMessage[]): ChatMessage {
   const sorted = records.slice().sort(compareRecords);
   const first = sorted[0]!;
@@ -205,12 +214,29 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
   // evidence, contentBlocks, etc.) from canonical record. Base = callback record if
   // present else first record by ts asc; then override projection-specific fields.
   const base = callbackRecord ?? first;
+
+  // F194 R21 rollback compatibility: cached R21 records may contain split fields
+  // (`cliStdout` / `speechContent`) that projection no longer owns. If there is no
+  // real content in this group, keep stale speech visible by folding it back into
+  // stream content. Otherwise never let stale split fields override newer content.
+  const firstStream = sorted.find((r) => r.extra?.stream)?.extra?.stream;
+  const isMergeCase = streamContentParts.length > 0 && callbackContentParts.length > 0;
+  const staleR21SpeechContent =
+    !isMergeCase &&
+    streamContentParts.length === 0 &&
+    firstStream?.cliStdout === '' &&
+    typeof firstStream.speechContent === 'string' &&
+    firstStream.speechContent.trim().length > 0
+      ? firstStream.speechContent
+      : undefined;
+  const projectedContent = contentParts.length > 0 ? contentParts.join('\n\n') : (staleR21SpeechContent ?? '');
+
   const projected: ChatMessage = {
     ...base,
     id: canonicalId,
     type: 'assistant',
     catId: first.catId,
-    content: contentParts.join('\n\n'),
+    content: projectedContent,
     timestamp: first.timestamp ?? 0,
     isStreaming,
     origin,
@@ -229,19 +255,17 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
   // CLI Output behavior consistent (stream working log → CLI Output stdout;
   // callback terminal text → main body). Ordinary post_msg speech is projected
   // as a separate callback bubble by bubbleGroupKey above.
-  const isMergeCase = streamContentParts.length > 0 && callbackContentParts.length > 0;
   const cliStdout = isMergeCase ? streamContentParts.join('\n\n') : undefined;
   const speechContent = isMergeCase ? callbackContentParts.join('\n\n') : undefined;
 
   // Preserve stream identity on the projected bubble — downstream code uses
   // `getBubbleInvocationId` to dedupe further (e.g. live cleanup, suppression).
-  const firstStream = sorted.find((r) => r.extra?.stream)?.extra?.stream;
   const baseExtra = base.extra ?? {};
   if (firstStream || richBlocks.length > 0 || isMergeCase || Object.keys(baseExtra).length > 0) {
     const extra: NonNullable<ChatMessage['extra']> = { ...baseExtra };
     if (firstStream || isMergeCase) {
       extra.stream = {
-        ...firstStream,
+        ...(firstStream ? stripStreamSplitFields(firstStream) : {}),
         ...(cliStdout !== undefined ? { cliStdout } : {}),
         ...(speechContent !== undefined ? { speechContent } : {}),
       };

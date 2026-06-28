@@ -14,7 +14,7 @@
  * Invariants enforced here:
  *   INV-1: narrator has no direct access to communityIssueStore — no path to write case.state
  *   INV-2: narrator capabilities come from RoleResolver (fail-closed if 'code'/'merge' snuck in)
- *   INV-3: spawn is idempotent per (subjectKey, sourceEventId) — in-memory dedup set
+ *   INV-3: spawn is idempotent per sourceEventId — persistent dedup store (D0.2)
  *   INV-4/5/6: via RoleResolver.resolve('narrator') fail-closed contract
  */
 
@@ -22,6 +22,31 @@ import { createCatId, type RoleResolver } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 import type { WakeCatFn } from '../cats/services/game/GameNarratorDriver.js';
+
+// ---------------------------------------------------------------------------
+// D0.2: Persistent dedup store interface (replaces process-local Set)
+// ---------------------------------------------------------------------------
+
+/**
+ * Persistent dedup store for narrator spawn idempotency (INV-3).
+ *
+ * Replaces the former process-local `Set<string>` so that multiple
+ * NarratorDriver instances (across restarts or parallel workers)
+ * share dedup state and never double-spawn the same event.
+ *
+ * The `claim()` method MUST be atomic: in a concurrent race, exactly
+ * one caller returns `true` and all others return `false`. Redis
+ * implementations use SET NX; in-memory is single-threaded so a
+ * simple has+add suffices.
+ */
+export interface NarratorDedupStore {
+  /**
+   * Atomically claim this sourceEventId. Returns `true` if this call
+   * is the first to claim it (caller should proceed with spawn),
+   * `false` if already claimed (caller should no-op).
+   */
+  claim(sourceEventId: string): Promise<boolean>;
+}
 
 export interface NarratorDriverDeps {
   /** Injected role resolver — engine's ONLY dependency on the roster (INV-6). */
@@ -34,6 +59,8 @@ export interface NarratorDriverDeps {
   /** Proven production mechanism: GameNarratorDriver.WakeCatFn (SPIKE-1 candidate a). */
   readonly wakeCat: WakeCatFn;
   readonly log: Pick<FastifyBaseLogger, 'info' | 'warn' | 'error'>;
+  /** D0.2: Persistent dedup store for INV-3 idempotency. */
+  readonly dedupStore: NarratorDedupStore;
 }
 
 /** Parameters for a single narrator spawn invocation. */
@@ -58,48 +85,75 @@ const NARRATOR_TIMEOUT_MS = 5 * 60_000; // 5 min
  * NarratorDriver — thin spawn coordinator.
  *
  * Resolves the narrator role executor, builds a structured briefing, and fires
- * the WakeCatFn. Never owns case state. Idempotent by sourceEventId.
+ * the WakeCatFn. Never owns case state. Idempotent by sourceEventId via
+ * the injected NarratorDedupStore (D0.2: persistent, not process-local).
  */
 export class NarratorDriver {
   readonly #deps: NarratorDriverDeps;
-  /** INV-3: dedup set of eventIds spawned in this process lifetime. */
-  readonly #spawnedEventIds = new Set<string>();
 
   constructor(deps: NarratorDriverDeps) {
     this.#deps = deps;
   }
 
+  // ---------------------------------------------------------------------------
+  // D0.3: Static boot config check
+  // ---------------------------------------------------------------------------
+
   /**
-   * Spawn the narrator for a community case event. Fire-and-forget safe: a rejection
-   * from wakeCat is caught and logged (never propagates to the caller — dispatch must not
-   * be blocked by narrator infrastructure failures).
+   * Check at boot time whether narrator configuration is consistent.
+   * Warns if narrator role is configured in role bindings but the required
+   * COMMUNITY_NARRATOR_THREAD_ID environment variable is absent.
+   */
+  static checkNarratorBootConfig(opts: {
+    narratorRoleConfigured: boolean;
+    narratorThreadId: string | undefined;
+    log: Pick<FastifyBaseLogger, 'warn'>;
+  }): void {
+    if (opts.narratorRoleConfigured && !opts.narratorThreadId) {
+      opts.log.warn(
+        '[F168] Narrator role is configured in DEFAULT_COMMUNITY_ROLE_BINDINGS but ' +
+          'COMMUNITY_NARRATOR_THREAD_ID is absent — narrator will be silently disabled. ' +
+          'Set the env var or remove the narrator role binding.',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Core spawn logic
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Spawn the narrator for a community case event. Fire-and-forget safe: ANY rejection
+   * (dedup claim, role resolution, wakeCat) is caught and logged — never propagates to
+   * the caller. Dispatch must not be blocked by narrator infrastructure failures.
    */
   async spawnNarrator(params: NarratorSpawnParams): Promise<void> {
-    const { roleResolver, narratorThreadId, wakeCat, log } = this.#deps;
+    const { roleResolver, narratorThreadId, wakeCat, log, dedupStore } = this.#deps;
     const { caseId, subjectKey, sourceEventId, briefingContext } = params;
 
-    // INV-3: idempotent by sourceEventId
-    if (this.#spawnedEventIds.has(sourceEventId)) {
-      log.info({ subjectKey, sourceEventId }, '[F168] NarratorDriver: dedup no-op (INV-3)');
-      return;
-    }
-
-    // INV-4/5/6: resolve via RoleResolver, fail-closed on null
-    const executor = roleResolver.resolve('narrator');
-    if (!executor) {
-      log.warn(
-        { subjectKey, sourceEventId },
-        '[F168] NarratorDriver: narrator role unresolved — case stays triaged (INV-5 fail-closed)',
-      );
-      return;
-    }
-
-    // Mark spawned BEFORE async call — ensures no duplicate fire even if await is slow
-    this.#spawnedEventIds.add(sourceEventId);
-
-    const briefing = buildNarratorBriefing({ caseId, subjectKey, sourceEventId, briefingContext });
-
     try {
+      // INV-4/5/6: resolve via RoleResolver BEFORE claim (cloud R3 P2 fix).
+      // Why resolve-first: claim() is a one-shot key. If role is null (config
+      // not yet fixed), consuming the key would permanently block retries for
+      // this sourceEventId even after the role is configured.
+      const executor = roleResolver.resolve('narrator');
+      if (!executor) {
+        log.warn(
+          { subjectKey, sourceEventId },
+          '[F168] NarratorDriver: narrator role unresolved — case stays triaged (INV-5 fail-closed)',
+        );
+        return;
+      }
+
+      // INV-3: atomic claim — prevents race conditions across concurrent workers (D0.2)
+      const claimed = await dedupStore.claim(sourceEventId);
+      if (!claimed) {
+        log.info({ subjectKey, sourceEventId }, '[F168] NarratorDriver: dedup no-op (INV-3)');
+        return;
+      }
+
+      const briefing = buildNarratorBriefing({ caseId, subjectKey, sourceEventId, briefingContext });
+
       await wakeCat({
         threadId: narratorThreadId,
         catId: createCatId(executor.catId),
@@ -112,11 +166,11 @@ export class NarratorDriver {
         '[F168] NarratorDriver: narrator spawned ✓',
       );
     } catch (err) {
-      // Fire-and-forget: wakeCat failure is logged but NEVER rethrown.
-      // Case stays in triaged state — logged only; no dead-letter mechanism yet.
+      // Fire-and-forget: ANY failure (claim / wakeCat / unexpected) is logged but NEVER
+      // rethrown. Case stays in triaged state; no dead-letter mechanism yet.
       log.error(
-        { subjectKey, sourceEventId, catId: executor.catId, err },
-        '[F168] NarratorDriver: wakeCat failed — narrator not spawned (case stays triaged)',
+        { subjectKey, sourceEventId, err },
+        '[F168] NarratorDriver: spawnNarrator failed (claim or wakeCat) — case stays triaged',
       );
     }
   }

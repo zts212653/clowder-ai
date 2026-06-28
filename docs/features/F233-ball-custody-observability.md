@@ -4,11 +4,16 @@ related_features: [F167, F153, F117, F064, F081, F232, F192, F055, F052, F193, F
 topics: [observability, a2a, ball-custody, cvo-experience, harness-engineering]
 doc_kind: spec
 created: 2026-06-12
+tips_exempt: harness-internal observability — ball custody events/projections are backend plumbing, no user-facing tip needed
 ---
 
 # F233: Ball Custody Observability — 球权保管链可观测（值班简报 + 轨迹下钻）
 
-> **Status**: in-progress | **Owner**: Ragdoll Opus-4.8（plan + 实现 + Phase 末守护；原 fable-5 角色因 model 暂不可用，operator 2026-06-15 指示 opus-48 接管 own）· reviewer: Maine Coon | **Priority**: P1
+> **Status**: in-progress（Phase A ✅ + Phase B ✅ 2026-06-18 收口 · Phase C **轨迹全链 ✅** 2026-06-21：C1a ✅ + C2a ✅ + **C2b/C2c/C3 ✅** merged · C1b C1c pending — 安乐死 MCP/UI surface 留待下个迭代）| **Owner**: Ragdoll Opus-4.7（operator 2026-06-18 重指 acting plan owner——opus-48 tool-call malformed 退化触发交接 + fable-5 model 暂不可用；opus-47 承接 Phase B 整体收口愿景守护 + Phase C plan packet skeleton + acting implementation；opus-48 在线时可回归 plan owner，operator 拍板）· reviewer: Maine Coon（KD-C6 cross-family co-collaborator）| **Priority**: P1
+>
+> **Phase B 收口**（2026-06-18）：PR #2364（B1 骨架）+ #2374（cross-post alias）+ #2380（PR4 ProbeScheduler/WakeSender + 简报切源，AC-B1/B2/B3 端到端）+ #2378（callback-routing state contract，consumer×cell matrix 终止 LL-072 saga）全 merge。13/13 event wired + 状态机 INV-10 全覆盖。opus-47 整体收口愿景守护 PASS。**Follow-up status**（2026-06-18 同日）：LL-082 hard-layer dirty-diff ledger ✅ merged 经 cloud R1→R5 + 5 真 P 修复（PR [#2392](https://github.com/zts212653/clowder-ai/pull/2392), merge commit `58b6cdbe3`，opus-48 → opus-47 handoff，merge-gate dirty-diff ledger 硬层落地 + sentinel never-silent-clean）。B1 redis 测试并发 race ✅ merged（PR [#2390](https://github.com/zts212653/clowder-ai/pull/2390), merge commit `447cc20b5`，cloud-clean + `pnpm gate` on latest main）。
+Architecture cell: `ball-custody`
+Map delta: new cell required — Phase B 新增 append-only event log + projector + projection store；Phase A rich block surface 仍属既有 hub-action-surface。
 
 ## Why
 
@@ -105,14 +110,14 @@ operator experience（2026-06-12，球权流转图 thread）：
 - [x] AC-A5: 简报生成全程只读，零写副作用（代码 review 复核数据访问面）→ trace KD-4
 
 ### Phase B（结构化回执）
-- [ ] AC-B1: 复现"invocation 中途死亡"（测试环境模拟），死球在下一次简报被点名，含最后扫描点
-- [ ] AC-B2: blocked task 带 probe + resolve 字段，探针判定条件满足后：completes 型自动完结、bounces-back 型 owner 收到真实唤醒投递（fixture：Repo Inbox task 同型场景红→绿）
-- [ ] AC-B3: 球权状态转移表 + 不变量有测试覆盖（含 crash / 并发 / 重复探针对抗场景）
+- [x] AC-B1: 复现"invocation 中途死亡"（测试环境模拟），死球在下一次简报被点名，含最后扫描点
+- [x] AC-B2: blocked task 带 probe + resolve 字段，探针判定条件满足后：completes 型自动完结、bounces-back 型 owner 收到真实唤醒投递（fixture：Repo Inbox task 同型场景红→绿）
+- [x] AC-B3: 球权状态转移表 + 不变量有测试覆盖（含 crash / 并发 / 重复探针对抗场景）
 
 ### Phase C（安乐死 + 轨迹）
 - [ ] AC-C1: 球可显式冷冻/降级/放弃且留 why，操作记入事件流；简报僵尸球区随之消项
-- [ ] AC-C2: 任选一个 ≥3 Phase 的 feat（如 F192）生成轨迹视图，operator读后能回答"它怎么走到今天 + 现在啥情况"（验收人：operator）
-- [ ] AC-C3: Phase B 上线后产生的球权事件，简报与轨迹读同一事件流（代码 review 复核该时间段数据路径唯一、无双写）；历史回填条目带 stitched provenance 标注（抽查 ≥3 条可见标注）
+- [x] AC-C2: 任选一个 ≥3 Phase 的 feat（如 F192）生成轨迹视图，operator读后能回答"它怎么走到今天 + 现在啥情况"（验收人：operator）— Hub Workspace `trajectory` tab + feat picker + 13 kind 视觉 + F188 提包球 fixture 高亮渲染（PR #2470, 2026-06-21）
+- [x] AC-C3: Phase B 上线后产生的球权事件，简报与轨迹读同一事件流（代码 review 复核该时间段数据路径唯一、无双写）；历史回填条目带 stitched provenance 标注（抽查 ≥3 条可见标注）— 3 源 contract（event-stream + historical-stitched + git-ref-snapshot）落 collector + projector + cron scheduler；backfill script 标 stitched provenance（PR #2470, 2026-06-21）
 
 ## Eval / Tracking Contract
 

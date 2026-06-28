@@ -21,13 +21,27 @@ export function resolveCapabilityWriteSessionUserId(request: FastifyRequest): st
   return typeof sessionUserId === 'string' && sessionUserId.trim() ? sessionUserId.trim() : null;
 }
 
+/**
+ * Owner gate for capability/plugin write operations (#794 unified pattern).
+ *
+ * **For write routes** (install, delete, toggle, config save):
+ *   Use `{ allowMissingOwner: true }` — falls through in local single-user mode
+ *   (no DEFAULT_OWNER_USER_ID configured). Security is provided by session auth +
+ *   origin check + loopback guard; the owner gate only adds value when explicitly
+ *   configured for multi-user/shared deployments.
+ *
+ * **For data-visibility filters** (canReadSensitiveMcpConfig):
+ *   Use `{ requireConfiguredOwner: true }` — fail when unconfigured, because
+ *   "not configured" means "hide sensitive data" not "block the request".
+ *
+ * ⚠️ Do NOT use requireConfiguredOwner for write routes — it blocks local single-user
+ *   mode unnecessarily. This mistake has recurred in connector plugin routes
+ *   (see #794 history).
+ */
 export function requireCapabilityWriteOwner(
   userId: string,
   options: CapabilityWriteOwnerOptions = {},
 ): CapabilityWriteRouteError | null {
-  // Write callers (MCP install/delete, plugin enable/disable) pass allowMissingOwner: true
-  // → fall through in single-user mode. The data-filter caller (canReadSensitiveMcpConfig)
-  // passes requireConfiguredOwner: true → fail when unconfigured (sensitive data gate).
   const shouldFallThrough = !!options.allowMissingOwner && !options.requireConfiguredOwner;
   return resolveOwnerGate(userId, {
     requireConfiguredOwner: !shouldFallThrough,

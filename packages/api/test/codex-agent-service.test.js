@@ -120,6 +120,7 @@ const CAT_CAFE_SPLIT_SERVER_IDS = [
   'cat-cafe-memory',
   'cat-cafe-signals',
   'cat-cafe-limb',
+  'cat-cafe-audio',
   'cat-cafe-finance',
 ];
 // F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
@@ -236,12 +237,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     // Incident 2026-05-29: prompt 走 stdin，argv 末尾是 '-'（codex 从 stdin 读 PROMPT）
     assert.equal(args.at(-1), '-', 'prompt 走 stdin，argv 末尾是 -');
     assert.equal(proc.stdinData, 'Continue', 'prompt 经 stdin 传入');
-    // resume 子命令不接受 --sandbox（sandbox 在创建时已锁定）
+    // resume 子命令不接受 --sandbox；sandbox mode is replayed through --config.
     assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
     assert.ok(args.includes('--json'), 'resume args must include --json');
     const modelFlagIndex = args.indexOf('--model');
     assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
     assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve default sandbox mode');
     assert.ok(args.includes('--config'), 'resume args must include approval policy override');
     assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy should be on-request');
     assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
@@ -291,6 +293,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         ['cat-cafe-memory', 'memory.js'],
         ['cat-cafe-signals', 'signals.js'],
         ['cat-cafe-limb', 'limb.js'],
+        ['cat-cafe-audio', 'audio.js'],
         ['cat-cafe-finance', 'finance.js'],
       ];
       for (const [serverId, entrypoint] of splitServers) {
@@ -557,6 +560,32 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('uses env-configured sandbox for resume through config override', async () => {
+    const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
+    process.env.CAT_CODEX_SANDBOX_MODE = 'read-only';
+
+    try {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+
+      const promise = collect(service.invoke('resume configurable', { sessionId: 'thread-config-resume' }));
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'thread-config-resume' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      assert.equal(args[1], 'resume');
+      assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+      assert.ok(args.includes('sandbox_mode="read-only"'), 'resume sandbox should follow CAT_CODEX_SANDBOX_MODE');
+    } finally {
+      if (oldSandbox === undefined) {
+        delete process.env.CAT_CODEX_SANDBOX_MODE;
+      } else {
+        process.env.CAT_CODEX_SANDBOX_MODE = oldSandbox;
+      }
+    }
+  });
+
   test('falls back to defaults for invalid sandbox/approval env values', async () => {
     const oldSandbox = process.env.CAT_CODEX_SANDBOX_MODE;
     const oldApproval = process.env.CAT_CODEX_APPROVAL_POLICY;
@@ -605,7 +634,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(args.includes('--sandbox'), 'new session must still include --sandbox');
   });
 
-  test('resume session does NOT include --add-dir (sandbox locked at creation)', async () => {
+  test('resume session does NOT include --add-dir but preserves sandbox mode via config', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
@@ -617,6 +646,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(!args.includes('--add-dir'), 'resume args must not include --add-dir');
     assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+    assert.ok(args.includes('sandbox_mode="danger-full-access"'), 'resume args must preserve sandbox mode');
   });
 
   test('custom provider: model passed via --config as-is', async () => {

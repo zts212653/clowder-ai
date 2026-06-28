@@ -1,10 +1,10 @@
 # IM Connector 开发文档
 
-> Build a custom IM connector for Cat Cafe without modifying the main repository.
+> Build a custom IM connector for Cat Café without modifying the main repository.
 
 ## Overview
 
-Cat Cafe's IM connector plugin system (F240) lets you integrate any messaging platform by packaging a self-contained plugin archive. Upload via Hub UI, configure credentials — done.
+Cat Café's IM connector plugin system (F240) lets you integrate any messaging platform by packaging a self-contained plugin archive. Upload via Hub UI, configure credentials — done.
 
 ```
 # Package your connector as a tar.gz:
@@ -16,7 +16,7 @@ tar czf my-connector.tar.gz my-connector/
 ## Architecture
 
 ```
-Your IM Platform                     Cat Cafe
+Your IM Platform                     Cat Café
 ┌──────────┐    webhook/ws     ┌─────────────────────────┐
 │  Server   │ ───────────────► │ Your Plugin              │
 │           │                  │  handleWebhook()         │
@@ -26,7 +26,7 @@ Your IM Platform                     Cat Cafe
 └──────────┘                   └─────────────────────────┘
 ```
 
-Your plugin sits between the IM platform and Cat Cafe's message router. It translates platform-specific protocols into the unified `IMConnectorPlugin` interface.
+Your plugin sits between the IM platform and Cat Café's message router. It translates platform-specific protocols into the unified `IMConnectorPlugin` interface.
 
 ## Quick Start
 
@@ -274,7 +274,7 @@ const plugin = {
         }
         // 2. Parse payload
         const msg = parseEvent(body);
-        // 3. Route to Cat Cafe
+        // 3. Route to Cat Café
         await onMessage({ chatId: msg.chatId, text: msg.text, messageId: msg.id });
         return { kind: 'processed', messageId: msg.id };
       },
@@ -469,7 +469,7 @@ Every connector has a `source` attribute:
 
 | Source | Origin | Managed by |
 |--------|--------|------------|
-| `builtin` | Ships with Cat Cafe (feishu, telegram, wecom-bot, etc.) | Core repo |
+| `builtin` | Ships with Cat Café (feishu, telegram, wecom-bot, etc.) | Core repo |
 | `external` | Installed as plugin archives via Hub UI or API | Plugin system |
 
 Both render identically in the Hub UI connector card list. External connectors display a "外部" badge and a trash icon for uninstalling. The `source` field is force-written into `connector.yaml` at install time — plugin authors don't need to set it.
@@ -484,7 +484,7 @@ Both render identically in the Hub UI connector card list. External connectors d
 
 **Via API:**
 ```bash
-curl -X POST http://localhost:3002/api/connectors/plugins/install \
+curl -X POST http://localhost:3004/api/connectors/plugins/install \
   -F "file=@my-connector.tar.gz"
 ```
 
@@ -493,10 +493,10 @@ curl -X POST http://localhost:3002/api/connectors/plugins/install \
 **Uninstalling:**
 ```bash
 # Via API (config preserved by default)
-curl -X DELETE http://localhost:3002/api/connectors/plugins/my-connector
+curl -X DELETE http://localhost:3004/api/connectors/plugins/my-connector
 
 # Clear config too
-curl -X DELETE http://localhost:3002/api/connectors/plugins/my-connector?clearConfig=true
+curl -X DELETE http://localhost:3004/api/connectors/plugins/my-connector?clearConfig=true
 ```
 
 ## Development Workflow
@@ -545,7 +545,7 @@ cd .. && tar czf my-connector.tar.gz my-connector/
 
 # 5. Install via Hub UI → IM 对接 → 安装插件
 # Or via API:
-curl -X POST http://localhost:3002/api/connectors/plugins/install \
+curl -X POST http://localhost:3004/api/connectors/plugins/install \
   -F "file=@my-connector.tar.gz"
 
 # Look for: [IMConnectorLoader] Installed plugin loaded { id: 'my-connector' }
@@ -558,7 +558,7 @@ curl -X POST http://localhost:3002/api/connectors/plugins/install \
 
 ```bash
 # Send a test webhook to your connector's endpoint
-curl -X POST http://localhost:3002/api/connectors/myid/webhook \
+curl -X POST http://localhost:3004/api/connectors/myid/webhook \
   -H 'Content-Type: application/json' \
   -H 'x-webhook-secret: test-123' \
   -d '{"chat_id": "test", "text": "Hello!", "message_id": "1"}'

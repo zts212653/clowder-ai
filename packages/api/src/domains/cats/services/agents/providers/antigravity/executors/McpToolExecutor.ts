@@ -30,6 +30,7 @@ const SERVER_ENTRYPOINTS: Record<string, string> = {
   'cat-cafe-limb': 'limb.js',
   'cat-cafe-memory': 'memory.js',
   'cat-cafe-signals': 'signals.js',
+  'cat-cafe-audio': 'audio.js',
   'cat-cafe-finance': 'finance.js',
 };
 

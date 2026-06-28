@@ -198,7 +198,7 @@ export async function* routeParallel(
       // compression-immune native system role (--system-prompt-file / -c)
       // ONLY for providers with native L0 injection (ClaudeAgentService -p,
       // ClaudeBgCarrierService, CodexAgent). Non-native providers (Gemini,
-      // Antigravity, CatAgent, A2A, OpenCode, Dare, Kimi…) still need full
+      // Antigravity, CatAgent, A2A, OpenCode, Kimi…) still need full
       // identity via user-message systemPrompt prepend, else they
       // lose identity/家规 entirely (云端 Codex P1-cloud-1, 2026-05-16).
       // mcpAvailable still gates the per-message HTTP callback fallback.
@@ -274,6 +274,7 @@ export async function* routeParallel(
         mode: 'parallel',
         teammates,
         mcpAvailable,
+        nativeL0Injected: hasNativeL0,
         ...(promptTags && promptTags.length > 0 ? { promptTags } : {}),
         ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
         ...(routingPolicy ? { routingPolicy } : {}),
@@ -408,6 +409,8 @@ export async function* routeParallel(
           }
         }
 
+        /* @segment R1 — Mode System Prompt */
+        /* @segment R2 — Mode System Prompt (per-cat) */
         const parCatModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt;
         const parts = [invocationContext, parCatModePrompt, bootstrapCtx, mcpInstructions].filter(Boolean);
         if (inc.contextText) parts.push(inc.contextText);

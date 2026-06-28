@@ -107,17 +107,14 @@ export interface OpenCodeRuntimeConfigOptions {
   omitProviderAuth?: boolean;
   /** Absolute path to Clowder AI MCP server entry (packages/mcp-server/dist/index.js). */
   mcpServerPath?: string;
+  /** Workspace exposed to Clowder AI MCP servers for this invocation. */
+  allowedWorkspaceDirs?: string;
   /**
    * F203 Phase I: Instruction file paths injected into OpenCode's `instructions` config.
-   * These are loaded by OpenCode every turn into `role: "system"` messages — compression-immune.
-   * Typical contents: [compiledL0Path, "OPENCODE.md"].
+   * Loaded every turn into `role: "system"` messages — compression-immune.
    */
   instructions?: readonly string[];
-  /**
-   * #935: Directories outside the OpenCode working directory that should be
-   * granted `permission.external_directory` access. Typically includes the
-   * Cat Cafe host project root when the thread's working directory is external.
-   */
+  /** #935: Directories outside cwd granted `permission.external_directory` access. */
   externalDirectories?: readonly string[];
 }
 
@@ -187,6 +184,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     hasBaseUrl = false,
     omitProviderAuth = false,
     mcpServerPath,
+    allowedWorkspaceDirs,
     instructions,
     externalDirectories,
   } = options;
@@ -225,6 +223,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
       'cat-cafe': {
         type: 'local',
         command: ['node', mcpServerPath],
+        ...(allowedWorkspaceDirs ? { environment: { ALLOWED_WORKSPACE_DIRS: allowedWorkspaceDirs } } : {}),
       },
     };
   }
@@ -236,7 +235,7 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
     config.instructions = [...instructions];
   }
 
-  // #935: Grant external_directory permission for Clowder-approved workspace roots.
+  // #935: Grant external_directory permission for Clowder AI-approved workspace roots.
   // Without this, OpenCode on Windows rejects tool calls that touch paths outside
   // the working directory, forcing users to edit global config manually.
   const externalDirectoryPermissions = buildExternalDirectoryPermissions(externalDirectories);

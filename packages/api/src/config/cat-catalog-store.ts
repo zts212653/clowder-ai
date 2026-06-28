@@ -1,7 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import type { CatCafeConfig, ClientId, RosterEntry } from '@cat-cafe/shared';
-import { builtinAccountIdForClient, resolveBuiltinClientForProvider } from './account-resolver.js';
+import { resolveBuiltinClientForProvider } from './account-resolver.js';
+import {
+  pickSeedBreed,
+  pruneRosterToRuntimeBreeds,
+  type RuntimeBreedWithCatIds,
+} from './cat-catalog-bootstrap-roster.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CAT_CATALOG_FILENAME = 'cat-catalog.json';
@@ -32,7 +37,7 @@ function writeFileAtomic(filePath: string, content: string): void {
 }
 
 /** clowder-ai#340 P5: ClientId values — used to detect old `provider` field holding a clientId. */
-const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'dare', 'antigravity', 'opencode', 'a2a']);
+const CLIENT_ID_VALUES = new Set(['anthropic', 'openai', 'google', 'kimi', 'antigravity', 'opencode', 'a2a']);
 
 /**
  * clowder-ai#340: One-time catalog variant migration — rewrites file on disk then never runs again.
@@ -271,29 +276,6 @@ function readBootstrapSourceConfig(templatePath: string): { catalog: CatCafeConf
   };
 }
 
-/**
- * #948 R2: Pick the best seed breed from the catalog.
- * Prefers the breed matching DEFAULT_CAT_ID env (if set), otherwise falls back
- * to the first breed in the template. Returns undefined when no breeds exist
- * (dev environments with empty templates).
- */
-type BreedLike = { id: string; catId?: string; variants?: Array<{ catId?: string }> };
-
-function pickSeedBreed(catalog: CatCafeConfig): CatCafeConfig['breeds'][number] | undefined {
-  const breeds = Array.isArray(catalog.breeds) ? catalog.breeds : [];
-  if (breeds.length === 0) return undefined;
-
-  const defaultCatId = process.env.DEFAULT_CAT_ID?.trim();
-  if (defaultCatId) {
-    const match = (breeds as BreedLike[]).find(
-      (breed) => breed.catId === defaultCatId || breed.variants?.some((v) => v.catId === defaultCatId),
-    );
-    if (match) return match as unknown as CatCafeConfig['breeds'][number];
-  }
-  // Fallback: first breed in template (works even without DEFAULT_CAT_ID)
-  return breeds[0];
-}
-
 // NOTE: Repairing existing empty catalogs (e.g. Windows reinstall where user-data
 // dir survives) is intentionally NOT done here — we cannot distinguish "broken
 // install with empty breeds" from "user intentionally deleted all members".
@@ -323,14 +305,18 @@ export function bootstrapCatCatalog(projectRoot: string, templatePath: string): 
 
   let runtimeCatalog: CatCafeConfig;
   if (seedBreed) {
+    const seedBreeds = [seedBreed as CatCafeConfig['breeds'][number]];
     runtimeCatalog = {
       ...migratedCatalog,
-      breeds: [seedBreed as CatCafeConfig['breeds'][number]],
+      breeds: seedBreeds,
     };
-    // Preserve owner in roster
-    const ownerEntry = buildOwnerRosterEntry();
     if ('roster' in runtimeCatalog) {
-      (runtimeCatalog.roster as Record<string, RosterEntry>)[OWNER_ROSTER_KEY] = ownerEntry;
+      (runtimeCatalog as { roster: Record<string, RosterEntry> }).roster = pruneRosterToRuntimeBreeds(
+        runtimeCatalog.roster as Record<string, RosterEntry>,
+        seedBreeds as RuntimeBreedWithCatIds[],
+        OWNER_ROSTER_KEY,
+        buildOwnerRosterEntry(),
+      );
     }
   } else {
     // Template has no breeds — start empty (first-run wizard guides member addition).

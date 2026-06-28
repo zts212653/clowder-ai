@@ -491,6 +491,83 @@ describe('ActionRenderer', () => {
     expect(statusPollCalls()).toBe(1);
   });
 
+  it('stops polling and allows QR regeneration when the platform returns a terminal QR status', async () => {
+    let statusPollCalls = 0;
+    mockApiFetch.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.endsWith('/qr-generate')) {
+        return jsonResponse({
+          ok: true,
+          render: 'img',
+          data: { url: 'https://example.com/qr.png', qrPayload: 'payload-1' },
+          label: 'Scan QR',
+        });
+      }
+      if (path.endsWith('/qr-status')) {
+        statusPollCalls += 1;
+        return jsonResponse({
+          ok: true,
+          render: 'polling',
+          data: { status: 'expired', message: 'QR code expired', qrPayload: 'payload-1' },
+          label: 'QR code expired',
+        });
+      }
+      if (path.endsWith('/operations/connect/reset')) {
+        return jsonResponse({ ok: true, currentAction: 'qr-generate' });
+      }
+      return jsonResponse({ ok: false, label: 'unexpected action' }, 500);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(ActionRenderer, {
+          connectorId: 'weixin',
+          operation: {
+            name: 'connect',
+            label: 'Connect',
+            actions: [
+              {
+                id: 'qr-generate',
+                label: 'Generate QR Code',
+                render: 'button',
+                resultRender: 'img',
+                next: 'qr-status',
+              },
+              { id: 'qr-status', label: 'Waiting', render: 'polling', rollback: 'qr-generate', timeout: 60 },
+              { id: 'disconnect', label: 'Disconnect', render: 'button', next: 'qr-generate' },
+            ],
+          },
+        }),
+      );
+    });
+    await flushEffects();
+
+    await act(async () => {
+      queryButton(container, 'Generate QR Code').click();
+      await Promise.resolve();
+    });
+    await flushEffects();
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    await flushEffects();
+
+    expect(statusPollCalls).toBe(1);
+    expect(container.textContent).toContain('QR code expired');
+    expect(container.querySelector('[data-testid="weixin-qr-image"]')).toBeNull();
+    expect(container.querySelector('[data-testid="weixin-action-qr-generate"]')).not.toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+      await Promise.resolve();
+    });
+    await flushEffects();
+
+    expect(statusPollCalls).toBe(1);
+  });
+
   it('retries transient polling fetch failures without leaving the QR flow', async () => {
     let statusPollCalls = 0;
     mockApiFetch.mockImplementation(async (url) => {

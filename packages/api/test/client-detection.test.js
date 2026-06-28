@@ -23,8 +23,8 @@ test('detectAvailableClients probes every spec via injected existsOnPath', async
 
   const result = await detectAvailableClients({ existsOnPath });
 
-  assert.equal(result.length, 6, 'six CLIs detected');
-  assert.deepEqual(probedClis.sort(), ['claude', 'codex', 'dare', 'gemini', 'kimi', 'opencode']);
+  assert.equal(result.length, 5, 'five CLIs detected');
+  assert.deepEqual(probedClis.sort(), ['claude', 'codex', 'gemini', 'kimi', 'opencode']);
   // Two installed (claude + codex), four not.
   const installed = result.filter((c) => c.installed).map((c) => c.client);
   assert.deepEqual(installed.sort(), ['claude', 'codex']);
@@ -49,7 +49,7 @@ test('detectAvailableClients tolerates probe rejection on individual CLIs', asyn
   // The wrapping checkCli should swallow the throw and treat as not-installed,
   // so the call resolves rather than rejecting.
   const result = await detectAvailableClients({ existsOnPath });
-  assert.equal(result.length, 6);
+  assert.equal(result.length, 5);
   const opencode = result.find((c) => c.client === 'opencode');
   // Either installed=false (swallowed) or the call rejected (current shape:
   // existsOnPath throws → checkCli's awaited probe throws → Promise.all rejects).
@@ -59,7 +59,7 @@ test('detectAvailableClients tolerates probe rejection on individual CLIs', asyn
 
 test('NO spec carries a version-fetching command field — LL-055 src-extension regression guard', () => {
   const specs = getCliSpecsForTest();
-  assert.equal(specs.length, 6);
+  assert.equal(specs.length, 5);
   for (const spec of specs) {
     // Hard-fail if anyone reintroduces `versionCmd`, `versionArgs`, or any
     // field name that hints at spawning the CLI to interrogate it.
@@ -88,8 +88,6 @@ test('hasApiKey reflects env var presence', async () => {
     assert.equal(claude?.hasApiKey, true, 'ANTHROPIC_API_KEY set → claude.hasApiKey=true');
     const opencode = result.find((c) => c.client === 'opencode');
     assert.equal(opencode?.hasApiKey, true, 'opencode shares ANTHROPIC_API_KEY');
-    const dare = result.find((c) => c.client === 'dare');
-    assert.equal(dare?.hasApiKey, false, 'dare has empty envKey → hasApiKey=false');
   } finally {
     if (original === undefined) {
       delete process.env.ANTHROPIC_API_KEY;

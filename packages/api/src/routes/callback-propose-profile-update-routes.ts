@@ -17,7 +17,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateProposalId, type ProfileUpdateProposal } from '@cat-cafe/shared';
+import { COLLECTION_SIGNAL_KINDS, generateProposalId, type ProfileUpdateProposal } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
@@ -28,6 +28,7 @@ import {
 } from '../domains/cats/services/profile/writeProfileUpdate.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
+import { profileUpdateProposed } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { buildProfileUpdateCardBlock } from './profile-update-card-block.js';
@@ -40,7 +41,7 @@ const SELF_HEAL_SCAN_LIMIT = 10000;
 const proposeSchema = z.object({
   afterContent: z.string().min(1).max(20000),
   rationale: z.string().trim().min(1).max(1000),
-  signalKind: z.enum(['cat-declared', 'cvo-instructed']),
+  signalKind: z.enum(COLLECTION_SIGNAL_KINDS),
   sourceMessageId: z.string().min(1).optional(),
   // INV-6: AC-C1 writes the per-cat primer only. `capsule` is not in the union → 400.
   targetLayer: z.literal('primer').optional(),
@@ -186,6 +187,16 @@ export function registerCallbackProposeProfileUpdateRoutes(app: FastifyInstance,
       },
     });
     socketManager.emitToUser(record.userId, 'profile_update_proposal_created', proposal);
+    // F246: emit user-scoped proposal_created so Approval Hub badge refreshes in real-time.
+    // F128/F225/F193 already emit this; F231 was missing it (cloud review P2).
+    socketManager.emitToUser(record.userId, 'proposal_created', {
+      proposalId: proposal.proposalId,
+      status: proposal.status,
+      sourceFeatureId: 'F231',
+    });
+
+    // F231 AC-C3 eval counter (KD-10)
+    profileUpdateProposed.add(1, { 'agent.id': record.catId, 'signal.kind': signalKind });
 
     return {
       proposalId: proposal.proposalId,

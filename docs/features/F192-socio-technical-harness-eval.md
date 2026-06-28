@@ -1,9 +1,10 @@
 ---
 feature_ids: [F192]
-related_features: [F167, F153, F086, F188, F200]
+related_features: [F167, F153, F086, F188, F200, F245]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
+tips_exempt: harness-internal eval infra — no user-visible capability change
 ---
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系
@@ -81,6 +82,7 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
 | `eval:capability-wakeup` | weekly live | wired (PR #2117, squash `1caa98c84`) | First live verdict exists (`2026-06-06-cap-wakeup-c1-baseline-probe`). Phase F coverage expansion now covers all 13 L0 §8 Tier 1 capabilities and supports omitted-`sessionIds` runtime-session window scan; re-eval closure remains open. |
 | `eval:task-outcome` | daily live | wired (PR #2162, squash `c9aa0e16d`) | Publish path is live. Phase G v0.5 signal chain e2e is green; 7-class episode verdict writeback is wired through explicit `sourceRefs.episodeVerdicts`. Manual runtime Eval Hub acceptance remains open. |
 | `eval:sop` | active (weekly) | wired (PR #2186) | Schema / predicate evaluator + SopTrace producer + file-writer + PUBLISH_VERDICT_INSTRUCTIONS all wired. Re-enabled 2026-06-10. |
+| `eval:anchor-first` | weekly | wired (F236 Track-2) | Preview↔drill open-rate rollup via in-memory event log. Generator adapter + live-verdict writer + provider wired. Eval design truth in F236. |
 
 ## Why
 
@@ -658,6 +660,7 @@ Based on the first micro fit digest (2026-05-11):
 - **Related**: F200（Memory Recall Eval——memory-domain 专项 eval 竖井，Phase E 首批迁移对象）
 - **Related**: ADR-031（Harness Engineering 方法论）
 - **Related**: ADR-032（Local-First Trace Producer Enabler）
+- **Consumed by**: [F236](F236-anchor-first-context-entry.md) Phase A/B-Eval — anchor-first context 的 sunset 监控（telemetry 聚合 → verdict → 回退触发）接本 harness eval 的 pipeline + verdict engine；**eval 设计真相源在 F236「Phase A/B-Eval」节，此处不展开**（避免 F192 膨胀）
 
 ## Risk
 

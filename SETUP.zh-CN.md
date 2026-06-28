@@ -8,7 +8,7 @@
 
 | 工具 | 版本 | 安装方式 |
 |------|------|---------|
-| **Node.js** | >= 20.0.0 | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | >= 24.0.0 | [nodejs.org](https://nodejs.org/) |
 | **pnpm** | >= 9.0.0 | `npm install -g pnpm` |
 | **Redis** | >= 7.0 | `brew install redis`（macOS）或 [redis.io](https://redis.io/download/) — *可选：用 `--memory` 标志跳过* |
 | **Git** | 任意近期版本 | 大多数系统自带 |
@@ -81,8 +81,9 @@ your-projects/
 | `pnpm stop` | 停止后台 daemon |
 | `pnpm start:status` | 查看 daemon 是否在运行 |
 | `pnpm runtime:init` | 只创建运行时 worktree（不启动） |
-| `pnpm runtime:sync` | 只同步 worktree 到 origin/main（不启动） |
 | `pnpm runtime:status` | 显示 worktree 路径、分支、HEAD、ahead/behind |
+
+> 运行时契约（ADR-039 被动冻结）：`pnpm start` 是单一入口，sync+build+restart 一次完成。已移除独立 sync 命令以防止 stale-dist 崩溃（详见 ADR-039）。
 
 首次运行自动创建 `../cat-cafe-runtime`。后续运行做 fast-forward 同步后启动。
 
@@ -498,10 +499,9 @@ pnpm stop               # 停止后台 daemon
 pnpm start:status       # 查看 daemon 是否在运行
                         # 查看日志: tail -f cat-cafe-daemon.log
 
-# === 运行时 Worktree ===
+# === 运行时 Worktree (ADR-039 被动冻结) ===
 pnpm runtime:init       # 创建运行时 worktree（仅首次）
-pnpm runtime:sync       # 同步 worktree 到 origin/main
-pnpm runtime:start      # 同步 + 从 worktree 启动
+pnpm runtime:start      # 单一入口：sync + build + start（无独立 sync）
 pnpm runtime:status     # 查看 worktree 状态
 
 # === 构建和测试 ===

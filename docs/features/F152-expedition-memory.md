@@ -8,7 +8,7 @@ created: 2026-04-08
 
 # F152: Expedition Memory — 外部项目记忆冷启动 + 经验回流
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 代码链已闭环，等待 AC-C5 operator全链路终验
+> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1 | **Close Gate**: 2026-06-18 rerun complete — 代码链与 close 证物已补齐，仍等待 AC-C5 operator全链路终验
 
 ## Why
 
@@ -212,7 +212,7 @@ interface ScannedEvidence {
 - [x] 每个 AC 都有验证方式
 - [x] 前端需求已准备需求→证据映射表（若适用）
 
-## 当前进度（2026-04-15 愿景守护）
+## 当前进度（2026-06-18 close-gate rerun）
 
 ### 已确认闭环
 

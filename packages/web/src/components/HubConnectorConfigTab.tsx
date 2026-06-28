@@ -208,6 +208,9 @@ export function HubConnectorConfigTab({ refreshKey }: { refreshKey?: number }) {
           : undefined;
         const filteredSteps = platform.steps.filter((s) => !s.mode || s.mode === selectedMode);
         const guideSteps = filteredSteps.slice(0, -1);
+        const hasVisibleConfigFields = platform.fields.length > 0;
+        const hasActionBar =
+          hasVisibleConfigFields || platform.testable === true || saveResultsById[platform.id] !== undefined;
 
         return (
           <div
@@ -326,7 +329,7 @@ export function HubConnectorConfigTab({ refreshKey }: { refreshKey?: number }) {
                     )}
 
                     {/* Config fields (ConfigFieldRenderer) — from YAML manifest */}
-                    {platform.fields.length > 0 && (
+                    {hasVisibleConfigFields && (
                       <div className="space-y-2">
                         <div className="flex items-center gap-1.5">
                           <StepBadge num={guideSteps.length + 1} />
@@ -353,15 +356,18 @@ export function HubConnectorConfigTab({ refreshKey }: { refreshKey?: number }) {
                   </Suspense>
                 )}
 
-                <ConnectorActionBar
-                  platformId={platform.id}
-                  saveResult={saveResultsById[platform.id] ?? null}
-                  saving={savingById[platform.id] === true}
-                  onSave={() => handleSave(platform)}
-                  showTest={platform.testable === true}
-                  testing={testingById[platform.id] === true}
-                  onTest={() => handleTest(platform)}
-                />
+                {hasActionBar && (
+                  <ConnectorActionBar
+                    platformId={platform.id}
+                    saveResult={saveResultsById[platform.id] ?? null}
+                    saving={savingById[platform.id] === true}
+                    onSave={() => handleSave(platform)}
+                    showSave={hasVisibleConfigFields}
+                    showTest={platform.testable === true}
+                    testing={testingById[platform.id] === true}
+                    onTest={() => handleTest(platform)}
+                  />
+                )}
               </div>
             )}
           </div>

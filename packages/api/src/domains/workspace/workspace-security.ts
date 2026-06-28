@@ -108,6 +108,7 @@ export function isDenylisted(relPath: string): boolean {
 
 export interface WorktreeEntry {
   id: string;
+  canonicalId?: string;
   root: string;
   branch: string;
   head: string;

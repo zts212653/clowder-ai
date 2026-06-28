@@ -5,7 +5,7 @@
  * - classifyArtifactView (AC-A7): 产物按 type + 数据可用性分发到内容查看策略。
  *   决定「点击产物看什么」——这是 F232 灵魂（点击看内容，不只列清单）的判定核心。
  */
-import type { ThreadArtifactDTO } from '@cat-cafe/shared';
+import { SOURCE_CODE_EXTENSIONS, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import { formatRelativeTime } from '../ThreadSidebar/thread-utils';
 
 export interface ArtifactRowMeta {
@@ -34,33 +34,14 @@ const TEXT_EXTENSIONS = new Set([
   'txt',
   'log',
   'json',
-  'ts',
-  'tsx',
-  'js',
-  'jsx',
-  'mjs',
-  'cjs',
-  'css',
-  'scss',
-  'html',
   'yml',
   'yaml',
-  'sh',
-  'bash',
-  'py',
-  'rb',
-  'go',
-  'rs',
-  'java',
-  'c',
-  'cpp',
-  'h',
-  'sql',
   'toml',
   'xml',
   'csv',
   'tsv',
   'env',
+  ...SOURCE_CODE_EXTENSIONS,
 ]);
 function extensionOf(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? name;
@@ -73,6 +54,7 @@ export function classifyArtifactView(a: Pick<ThreadArtifactDTO, 'type' | 'name' 
   if (a.type === 'audio' && a.url) return 'audio';
   if (a.type === 'video' && a.url) return 'video';
   if (a.type === 'pr') return 'pr';
+  if (a.type === 'widget') return 'fallback'; // widget 内容在消息里，跳回原消息查看
   // file / code：先看有无内容源，再按扩展名分文本 vs 二进制。
   const hasSource = Boolean(a.url || a.ref);
   if (!hasSource) return 'fallback';
@@ -127,6 +109,11 @@ export function artifactContentSource(
   if (a.url) return { kind: 'url', url: a.url };
   if (a.ref && worktreeId) return { kind: 'workspace', path: a.ref };
   return { kind: 'none' };
+}
+
+/** F232 polish: 产物行按钮文案——音视频「播放」，其余「打开」。 */
+export function artifactActionLabel(type: ThreadArtifactDTO['type']): string {
+  return type === 'audio' || type === 'video' ? '播放' : '打开';
 }
 
 export { TEXT_EXTENSIONS };

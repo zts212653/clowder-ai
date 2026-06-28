@@ -17,7 +17,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import jsYaml from 'js-yaml';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DICTIONARY_PATH = resolve(__dirname, '..', 'assets', 'brand-dictionary.yaml');
@@ -27,8 +26,170 @@ let _cached = null;
 function loadDictionary() {
   if (_cached) return _cached;
   const raw = readFileSync(DICTIONARY_PATH, 'utf-8');
-  _cached = jsYaml.load(raw);
+  _cached = parseDictionary(raw);
   return _cached;
+}
+
+function stripYamlInlineComment(value) {
+  let quote = null;
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+    if (quote) {
+      if (char === quote && value[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '#' && (i === 0 || /\s/.test(value[i - 1] ?? ''))) return value.slice(0, i);
+  }
+  return value;
+}
+
+function parseScalar(value) {
+  const trimmed = stripYamlInlineComment(value).trim();
+  if (trimmed === '') return '';
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function splitKeyValue(text) {
+  const idx = text.indexOf(':');
+  if (idx === -1) return null;
+  return [text.slice(0, idx).trim(), parseScalar(text.slice(idx + 1))];
+}
+
+function sectionHeaderName(line) {
+  if (!/^\S/.test(line) || line.trim().startsWith('#')) return null;
+  const trimmed = stripYamlInlineComment(line).trim();
+  if (!trimmed.endsWith(':')) return null;
+  return trimmed.slice(0, -1).trim();
+}
+
+function sectionLines(lines, sectionName) {
+  const start = lines.findIndex((line) => sectionHeaderName(line) === sectionName);
+  if (start === -1) return [];
+  const out = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (sectionHeaderName(line)) break;
+    out.push(line);
+  }
+  return out;
+}
+
+function lineBodyAfterDash(trimmedLine) {
+  return trimmedLine.slice(2).trim();
+}
+
+function assignPair(target, text) {
+  const pair = splitKeyValue(text);
+  if (!pair) return false;
+  target[pair[0]] = pair[1];
+  return true;
+}
+
+function startTerm(trimmedLine) {
+  const term = {};
+  assignPair(term, lineBodyAfterDash(trimmedLine));
+  return term;
+}
+
+function applyTermField(term, trimmedLine) {
+  const pair = splitKeyValue(trimmedLine);
+  if (!pair) return null;
+  const [key, value] = pair;
+  if (key === 'home' || key === 'public') {
+    term[key] = {};
+    return term[key];
+  }
+  term[key] = value;
+  return null;
+}
+
+function applyNestedField(nested, trimmedLine) {
+  const pair = splitKeyValue(trimmedLine);
+  if (!pair || !nested) return null;
+  const [key, value] = pair;
+  if (value !== '') {
+    nested[key] = value;
+    return null;
+  }
+  nested[key] = [];
+  return nested[key];
+}
+
+function isTermFieldLine(line) {
+  return line.startsWith('    ') && !line.startsWith('      ');
+}
+
+function isNestedFieldLine(line) {
+  return line.startsWith('      ') && !line.startsWith('        ');
+}
+
+function readTermLine(terms, state, line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('#')) return state;
+
+  if (line.startsWith('  - ')) {
+    const current = startTerm(trimmed);
+    terms.push(current);
+    return { current, nested: null, listTarget: null };
+  }
+  if (!state.current) return state;
+
+  if (isTermFieldLine(line)) {
+    return { current: state.current, nested: applyTermField(state.current, trimmed), listTarget: null };
+  }
+
+  if (isNestedFieldLine(line)) {
+    return { ...state, listTarget: applyNestedField(state.nested, trimmed) };
+  }
+
+  if (line.startsWith('        - ') && state.listTarget) {
+    state.listTarget.push(parseScalar(lineBodyAfterDash(trimmed)));
+  }
+  return state;
+}
+
+function parseTerms(lines) {
+  const terms = [];
+  let state = { current: null, nested: null, listTarget: null };
+  for (const line of lines) state = readTermLine(terms, state, line);
+
+  return terms;
+}
+
+function parsePathPolicies(lines) {
+  const pathPolicies = [];
+  let current = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    if (line.startsWith('  - ')) {
+      current = {};
+      pathPolicies.push(current);
+      assignPair(current, lineBodyAfterDash(trimmed));
+      continue;
+    }
+    if (!current || !line.startsWith('    ') || line.startsWith('      ')) continue;
+    assignPair(current, trimmed);
+  }
+
+  return pathPolicies;
+}
+
+function parseDictionary(raw) {
+  const lines = raw.split(/\r?\n/);
+  return {
+    terms: parseTerms(sectionLines(lines, 'terms')),
+    path_policies: parsePathPolicies(sectionLines(lines, 'path_policies')),
+  };
 }
 
 /**

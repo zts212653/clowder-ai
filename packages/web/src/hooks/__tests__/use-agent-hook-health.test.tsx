@@ -16,7 +16,7 @@ const configuredResponse = {
       status: 'configured',
       drifted: false,
       reason: 'configured',
-      targetPath: '/home/user/session-start-recall.sh',
+      targetPath: '/home/user/.claude/hooks/session-start-recall.sh',
     },
   ],
 };

@@ -557,11 +557,11 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 18 total rules in development.yaml
-    assert.equal(results.length, 18, `expected 18 rules, got ${results.length}`);
+    // 19 total rules in development.yaml
+    assert.equal(results.length, 19, `expected 19 rules, got ${results.length}`);
 
-    // 7 manual_only rules → skipped
-    assert.equal(skipped.length, 7, `expected 7 skipped (manual_only), got ${skipped.length}`);
+    // 8 manual_only rules -> skipped
+    assert.equal(skipped.length, 8, `expected 8 skipped (manual_only), got ${skipped.length}`);
 
     // Nominal trace should produce 0 violations
     assert.equal(
@@ -576,6 +576,7 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     assert.ok(ruleIds.includes('impl-redis-6398-only'));
     assert.ok(ruleIds.includes('review-no-self-review'));
     assert.ok(ruleIds.includes('impl-main-sync-before-worktree'));
+    assert.ok(ruleIds.includes('impl-convention-graph-before-convention-edit'));
 
     // Verify specific rules pass
     const squashRule = results.find((r) => r.ruleId === 'merge-github-squash-only');

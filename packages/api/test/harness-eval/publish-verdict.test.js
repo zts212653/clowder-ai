@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
@@ -128,6 +129,51 @@ describe('handlePublishVerdict', () => {
       assert.ok('error' in result);
       assert.equal(result.status, 501);
       assert.equal(result.error, 'unsupported_generator');
+    });
+
+    it('returns 501 unsupported_source_refs_kind when registry declares a new kind without publish wiring', async () => {
+      writeFileSync(
+        join(root, 'eval-domains', 'eval-anchor-first.yaml'),
+        `domainId: eval:anchor-first
+displayName: Anchor-first Eval
+systemThreadId: thread_eval_anchor_first
+evalCat:
+  catId: codex
+  handle: '@codex'
+  model: gpt-5.5
+frequency: daily
+sourceAdapter: anchor-first-eval
+sourceRefsKind: anchor-first-snapshot
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F236
+  ownerCatId: codex
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 24
+  reevalWithinHours: 72
+fixtures: []
+`,
+      );
+
+      const result = await handlePublishVerdict(
+        { harnessFeedbackRoot: root },
+        {
+          packet: buildPacket({ domainId: 'eval:anchor-first' }),
+          domain: 'eval:anchor-first',
+          catId: 'codex',
+          sourceRefs: { kind: 'anchor-first-snapshot', anchorId: 'abc-123' },
+        },
+      );
+      assert.ok('error' in result);
+      assert.equal(result.status, 501);
+      assert.equal(result.error, 'unsupported_source_refs_kind');
+      assert.match(result.detail, /anchor-first-snapshot/);
     });
 
     it('returns 400 invalid_source_ref when task-outcome databasePath is absolute or escapes repo root', async () => {

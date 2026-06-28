@@ -96,7 +96,7 @@ describe('F201 AntigravitySideEffectJournal', () => {
     const step = {
       type: 'CORTEX_STEP_TYPE_CODE_ACTION',
       status: 'CORTEX_STEP_STATUS_DONE',
-      metadata: { operation: 'write', path: '/home/user/id_rsa' },
+      metadata: { operation: 'write', path: '/home/user/.ssh/id_rsa' },
     };
 
     journal.observeStep({ step, stepIndex: 2, effect: classifyAntigravityStepEffect(step) });
@@ -120,12 +120,12 @@ describe('F201 AntigravitySideEffectJournal', () => {
     const sshStep = {
       type: 'CORTEX_STEP_TYPE_CODE_ACTION',
       status: 'CORTEX_STEP_STATUS_DONE',
-      metadata: { operation: 'write', path: '/home/user/id_rsa' },
+      metadata: { operation: 'write', path: '/home/user/.ssh/id_rsa' },
     };
     const awsStep = {
       type: 'CORTEX_STEP_TYPE_CODE_ACTION',
       status: 'CORTEX_STEP_STATUS_DONE',
-      metadata: { operation: 'write', path: '/home/user/credentials' },
+      metadata: { operation: 'write', path: '/home/user/.aws/credentials' },
     };
 
     const sshEntry = journal.observeStep({

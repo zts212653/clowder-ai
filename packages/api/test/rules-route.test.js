@@ -68,7 +68,7 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
     assert.ok(existsSync(join(root, 'assets', 'system-prompts', 'system-prompt-l0.md')));
   });
 
-  it('returns template + per-cat compiled + customization shape', async () => {
+  it('returns template + customization shape without compiling per-cat L0 by default', async () => {
     const fakeCats = [
       { catId: 'opus-47', displayName: '布偶猫 Opus 4.7' },
       { catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)' },
@@ -84,6 +84,30 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
     assert.equal(result.template.path, 'assets/system-prompts/system-prompt-l0.md');
     assert.equal(result.template.exists, true);
 
+    assert.deepEqual(result.compiledByCat, []);
+    assert.deepEqual(compileCalls, [], 'default /api/rules payload must not compile unused per-cat L0 previews');
+
+    assert.equal(result.customization.templatePath, 'assets/system-prompts/system-prompt-l0.md');
+    assert.equal(result.customization.compileScript, 'scripts/compile-system-prompt-l0.mjs');
+    assert.match(result.customization.verifyCommand, /pnpm gate.*restart/);
+  });
+
+  it('can explicitly compile per-cat L0 previews for callers that render them', async () => {
+    const fakeCats = [
+      { catId: 'opus-47', displayName: '布偶猫 Opus 4.7' },
+      { catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)' },
+    ];
+    const compileCalls = [];
+    const fakeCompile = async ({ catId }) => {
+      compileCalls.push(catId);
+      return `COMPILED-L0-FOR-${catId}`;
+    };
+    const result = await readL0Prompts(root, {
+      availableCats: fakeCats,
+      compileL0: fakeCompile,
+      includeCompiledByCat: true,
+    });
+
     assert.equal(result.compiledByCat.length, 2);
     assert.equal(result.compiledByCat[0].catId, 'opus-47');
     assert.equal(result.compiledByCat[0].displayName, '布偶猫 Opus 4.7');
@@ -93,10 +117,6 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
     assert.equal(result.compiledByCat[1].compiled, 'COMPILED-L0-FOR-codex');
 
     assert.deepEqual(compileCalls.sort(), ['codex', 'opus-47'], 'compile called once per cat');
-
-    assert.equal(result.customization.templatePath, 'assets/system-prompts/system-prompt-l0.md');
-    assert.equal(result.customization.compileScript, 'scripts/compile-system-prompt-l0.mjs');
-    assert.match(result.customization.verifyCommand, /pnpm gate.*restart/);
   });
 
   it('loadAvailableCatsForL0 propagates loadCatConfig errors instead of silent [] (cloud P2 R2)', () => {
@@ -152,7 +172,11 @@ describe('readL0Prompts helper (F203 Phase F)', () => {
       if (catId === 'bad-cat') throw new Error('simulated compile failure');
       return `COMPILED-${catId}`;
     };
-    const result = await readL0Prompts(root, { availableCats: fakeCats, compileL0: fakeCompile });
+    const result = await readL0Prompts(root, {
+      availableCats: fakeCats,
+      compileL0: fakeCompile,
+      includeCompiledByCat: true,
+    });
 
     assert.equal(result.compiledByCat[0].compiled, 'COMPILED-good-cat');
     assert.equal(result.compiledByCat[0].error, null);
@@ -165,9 +189,13 @@ describe('rules consumption metadata (#749)', () => {
   const root = findProjectRoot();
 
   it('labels actual prompt vs reference documents in /api/rules payload', async () => {
+    const compileCalls = [];
     const result = await readRulesPayload(root, {
       availableCats: [{ catId: 'codex', displayName: '缅因猫 GPT-5.5(codex)' }],
-      compileL0: async () => 'COMPILED-L0-FOR-codex',
+      compileL0: async ({ catId }) => {
+        compileCalls.push(catId);
+        return 'COMPILED-L0-FOR-codex';
+      },
     });
 
     const sharedRules = result.sharedRules.find((f) => f.path === 'cat-cafe-skills/refs/shared-rules.md');
@@ -184,9 +212,8 @@ describe('rules consumption metadata (#749)', () => {
     assert.equal(l0Template.consumption.kind, 'actual-prompt');
     assert.match(l0Template.consumption.detail, /native system role/);
 
-    const compiledCodex = result.l0Prompts.compiledByCat[0];
-    assert.equal(compiledCodex.consumption.kind, 'actual-prompt');
-    assert.equal(compiledCodex.compiled, 'COMPILED-L0-FOR-codex');
+    assert.deepEqual(result.l0Prompts.compiledByCat, []);
+    assert.deepEqual(compileCalls, [], '/api/rules payload should not compile unused per-cat L0 previews');
 
     const codexGuide = result.providerGuides.find((g) => g.provider === 'codex');
     assert.equal(codexGuide?.consumption.kind, 'harness-injected');

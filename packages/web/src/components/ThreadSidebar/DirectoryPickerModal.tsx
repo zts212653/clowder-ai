@@ -46,6 +46,7 @@ export function DirectoryPickerModal({
   const [pathError, setPathError] = useState<string | null>(null);
   const { getCatById } = useCatData();
   const modalRef = useRef<HTMLDivElement>(null);
+  const browserInitialPathRef = useRef<string | undefined>(undefined);
   const ime = useIMEGuard();
 
   // F068-R7: Two-step flow — select project first, then confirm
@@ -113,10 +114,9 @@ export function DirectoryPickerModal({
   }, [selectedPath, selectWithOptions]);
 
   // F113: Handle directory selection from the web-based browser
-  const handleBrowserSelect = useCallback(
+  const handleBrowserCurrentPathChange = useCallback(
     (path: string) => {
       handleSelectPath(path);
-      setShowBrowser(false);
     },
     [handleSelectPath],
   );
@@ -172,6 +172,22 @@ export function DirectoryPickerModal({
 
   const [catsExpanded, setCatsExpanded] = useState(false);
   const catSummary = selectedCats.length > 0 ? `已选 ${selectedCats.length} 只猫` : '';
+  const getBrowserInitialPath = useCallback(
+    () => (selectedPath && selectedPath !== 'lobby' ? selectedPath : (cwdPath ?? undefined)),
+    [cwdPath, selectedPath],
+  );
+
+  const setBrowserOpen = useCallback(
+    (open: boolean) => {
+      if (open) {
+        browserInitialPathRef.current = getBrowserInitialPath();
+      } else {
+        browserInitialPathRef.current = undefined;
+      }
+      setShowBrowser(open);
+    },
+    [getBrowserInitialPath],
+  );
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-close
@@ -389,10 +405,10 @@ export function DirectoryPickerModal({
         {showBrowser && (
           <div className="border-t border-cafe-subtle flex-1 min-h-0 flex flex-col overflow-hidden">
             <DirectoryBrowser
-              initialPath={cwdPath ?? undefined}
+              initialPath={browserInitialPathRef.current}
               activeProjectPath={cwdPath ?? undefined}
-              onSelect={handleBrowserSelect}
-              onCancel={() => setShowBrowser(false)}
+              onCurrentPathChange={handleBrowserCurrentPathChange}
+              onCancel={() => setBrowserOpen(false)}
             />
           </div>
         )}
@@ -402,7 +418,7 @@ export function DirectoryPickerModal({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setShowBrowser((v) => !v)}
+              onClick={() => setBrowserOpen(!showBrowser)}
               className={`flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
                 showBrowser
                   ? 'bg-cafe-accent text-[var(--cafe-surface)]'

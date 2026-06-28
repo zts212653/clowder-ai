@@ -8,7 +8,7 @@
 
 | Tool | Version | Install |
 |------|---------|---------|
-| **Node.js** | >= 20.0.0 | [nodejs.org](https://nodejs.org/) |
+| **Node.js** | >= 24.0.0 | [nodejs.org](https://nodejs.org/) |
 | **pnpm** | >= 9.0.0 | `npm install -g pnpm` |
 | **Redis** | >= 7.0 | `brew install redis` (macOS) or [redis.io](https://redis.io/download/) — *optional: use `--memory` flag to skip* |
 | **Git** | any recent | Comes with most systems |
@@ -81,8 +81,9 @@ your-projects/
 | `pnpm stop` | Stop background daemon |
 | `pnpm start:status` | Check if daemon is running |
 | `pnpm runtime:init` | Only create the runtime worktree (no start) |
-| `pnpm runtime:sync` | Only sync worktree to origin/main (no start) |
 | `pnpm runtime:status` | Show worktree path, branch, HEAD, ahead/behind |
+
+> Runtime contract (ADR-039 passive frozen): `pnpm start` is the single entry; sync+build+restart are folded into one command. There is no standalone sync — that was removed to prevent stale-dist crashes (see ADR-039).
 
 First run creates `../cat-cafe-runtime` automatically. Subsequent runs do a fast-forward sync then start.
 
@@ -498,10 +499,9 @@ pnpm stop               # Stop background daemon
 pnpm start:status       # Check if daemon is running
                         # View logs: tail -f cat-cafe-daemon.log
 
-# === Runtime Worktree ===
+# === Runtime Worktree (ADR-039 passive frozen) ===
 pnpm runtime:init       # Create runtime worktree (first time only)
-pnpm runtime:sync       # Sync worktree to origin/main
-pnpm runtime:start      # Sync + start from worktree
+pnpm runtime:start      # Single entry: sync + build + start (no standalone sync)
 pnpm runtime:status     # Show worktree status
 
 # === Build & Test ===

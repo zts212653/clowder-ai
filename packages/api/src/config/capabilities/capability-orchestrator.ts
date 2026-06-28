@@ -685,11 +685,13 @@ const CAT_CAFE_SPLIT_SERVER_IDS = [
   'cat-cafe-memory',
   'cat-cafe-signals',
   'cat-cafe-limb',
+  'cat-cafe-audio',
   'cat-cafe-finance',
 ] as const;
 
 const CAT_CAFE_SUPPLEMENTAL_SPLIT_SERVERS = [
   { id: 'cat-cafe-limb', entrypoint: 'limb.js' },
+  { id: 'cat-cafe-audio', entrypoint: 'audio.js' },
   { id: 'cat-cafe-finance', entrypoint: 'finance.js' },
 ] as const;
 
@@ -747,6 +749,14 @@ function buildCatCafeSplitMcpDescriptors(binaryRoot: string): McpServerDescripto
       name: 'cat-cafe-limb',
       command: 'node',
       args: [resolve(binaryRoot, 'packages/mcp-server/dist/limb.js')],
+      enabled: true,
+      source: 'cat-cafe',
+    },
+    {
+      // F195: audio capture/transcription tools get their own split server.
+      name: 'cat-cafe-audio',
+      command: 'node',
+      args: [resolve(binaryRoot, 'packages/mcp-server/dist/audio.js')],
       enabled: true,
       source: 'cat-cafe',
     },

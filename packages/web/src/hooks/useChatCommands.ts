@@ -147,7 +147,7 @@ export function useChatCommands() {
     const regex =
       allPatterns.length > 0
         ? new RegExp(`@(${allPatterns.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
-        : /@(opus|codex|gemini|dare|dare-agent)/gi; // fallback
+        : /@(opus|codex|gemini)/gi; // fallback
     return { regex, resolve: (name: string) => patternToCatId.get(name.toLowerCase()) };
   }, [cats]);
 

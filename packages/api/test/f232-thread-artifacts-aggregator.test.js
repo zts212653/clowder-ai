@@ -101,16 +101,54 @@ test('PR task without subjectKey is skipped', () => {
   assert.equal(r.length, 0);
 });
 
-test('file ledger entry → file artifact', () => {
+test('file ledger entry for source code → code artifact', () => {
   const r = aggregateThreadArtifacts({
     messages: [],
     prTasks: [],
-    fileLedger: [{ ref: 'src/foo.ts', label: 'foo.ts', updatedAt: 90, updatedBy: 'opus-48' }],
+    fileLedger: [
+      { ref: 'src/foo.ts', label: 'foo.ts', updatedAt: 91, updatedBy: 'opus-48' },
+      { ref: 'packages/web/index.html', label: 'index.html', updatedAt: 90, updatedBy: 'opus-48' },
+    ],
   });
-  assert.equal(r[0].type, 'file');
+  assert.equal(r[0].type, 'code');
   assert.equal(r[0].name, 'foo.ts');
   assert.equal(r[0].ref, 'src/foo.ts');
   assert.equal(r[0].catId, 'opus-48');
+  assert.equal(r[1].type, 'code');
+  assert.equal(r[1].name, 'index.html');
+  assert.equal(r[1].ref, 'packages/web/index.html');
+  assert.equal(r[1].catId, 'opus-48');
+});
+
+test('file ledger entry for tracked script extensions → code artifact', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [],
+    fileLedger: [
+      { ref: 'scripts/install.ps1', label: 'install.ps1', updatedAt: 96, updatedBy: 'opus-48' },
+      { ref: 'scripts/start.bat', label: 'start.bat', updatedAt: 95, updatedBy: 'opus-48' },
+      { ref: 'scripts/_sanitize-rules.pl', label: '_sanitize-rules.pl', updatedAt: 94, updatedBy: 'opus-48' },
+    ],
+  });
+  assert.deepEqual(
+    r.map((a) => [a.ref, a.type]),
+    [
+      ['scripts/install.ps1', 'code'],
+      ['scripts/start.bat', 'code'],
+      ['scripts/_sanitize-rules.pl', 'code'],
+    ],
+  );
+});
+
+test('file ledger entry for markdown stays file artifact', () => {
+  const r = aggregateThreadArtifacts({
+    messages: [],
+    prTasks: [],
+    fileLedger: [{ ref: 'docs/features/F232.md', label: 'F232.md', updatedAt: 95, updatedBy: 'opus-48' }],
+  });
+  assert.equal(r[0].type, 'file');
+  assert.equal(r[0].name, 'F232.md');
+  assert.equal(r[0].ref, 'docs/features/F232.md');
 });
 
 test('dedup by ref keeps latest createdAt; result is time-desc', () => {
@@ -131,12 +169,12 @@ test('empty input → empty array', () => {
   assert.deepEqual(aggregateThreadArtifacts({ messages: [], prTasks: [], fileLedger: [] }), []);
 });
 
-test('non-collected blocks (card / html_widget) are ignored', () => {
+test('non-collected blocks (card / checklist) are ignored', () => {
   const r = aggregateThreadArtifacts({
     messages: [
       msg('m', 1, [
         { kind: 'card', v: 1, id: 'b1', title: 'x' },
-        { kind: 'html_widget', v: 1, id: 'b2', html: '<div></div>' },
+        { kind: 'checklist', v: 1, id: 'b2', items: [] },
       ]),
     ],
     prTasks: [],
@@ -144,6 +182,8 @@ test('non-collected blocks (card / html_widget) are ignored', () => {
   });
   assert.equal(r.length, 0);
 });
+
+// Widget artifact tests extracted to f232-widget-artifacts.test.js (350-line limit)
 
 test('collectAllThreadMessages paginates a REAL store with no overlap (oldest→newest cursor)', async () => {
   // 砚砚 P1: mock 不能伪造分页顺序——必须用真实 MessageStore（返回 oldest→newest），

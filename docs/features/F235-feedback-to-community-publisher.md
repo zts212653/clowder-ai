@@ -4,11 +4,12 @@ related_features: [F222, F168, F141, F128]
 topics: [community, publishing, frustration, feedback, github-issue]
 doc_kind: spec
 created: 2026-06-15
+tips_exempt: internal cat-to-community publishing pipeline — no user-facing capability change
 ---
 
 # F235: Feedback-to-Community Publisher — 一键发布反馈到社区
 
-> **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
+> **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-06-17
 
 ## Architecture Ownership
 
@@ -103,10 +104,10 @@ CommunityIssueStore / F168 projection  ← 幂等回写，防重复 triage
 - [x] AC-A5: 创建成功后卡片更新为"已发布"状态并附 issue URL 链接（截图可验证）
 - [x] AC-A6: GitHub API 失败时友好提示，不丢失 draft 数据（手动测试）
 
-### Phase B（通用发布卡片）
-- [ ] AC-B1: 猫猫可主动生成 `community_issue_draft` rich block 卡片（运行时验证）
-- [ ] AC-B2: 卡片支持选择目标仓库（至少 cat-cafe + cat-cafe-tutorials）
-- [ ] AC-B3: submit 流程复用 Phase A 的脱敏→发布→回链管线
+### Phase B（通用发布卡片）✅
+- [x] AC-B1: 猫猫可主动生成 `community_issue_draft` rich block 卡片（运行时验证）
+- [x] AC-B2: 卡片支持选择目标仓库（至少 cat-cafe + cat-cafe-tutorials，含 dropdown + 手动输入 fallback）
+- [x] AC-B3: submit 流程复用 Phase A 的脱敏→发布→回链管线
 
 ## Dependencies
 

@@ -726,8 +726,22 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2);
-    assert.equal(body.messages[0].content, 'Message 1');
-    assert.equal(body.messages[1].content, 'Reply 1');
+    // F236 AC-A1/A2: anchor-first shape — preview replaces the full content body.
+    assert.equal(body.messages[0].preview, 'Message 1');
+    assert.equal(body.messages[1].preview, 'Reply 1');
+    assert.equal(body.messages[0].speaker, 'co-creator'); // F236 R1: human → co-creator, never raw userId
+    assert.ok(
+      body.messages[1].speaker && body.messages[1].speaker !== 'user-1',
+      'cat speaker resolved via sender-display, no internal id leak',
+    );
+    assert.equal(body.messages[0].threadId, body.threadId); // injected effectiveThreadId
+    assert.equal(body.messages[0].contentLength, 'Message 1'.length);
+    assert.equal(body.messages[0].truncated, false);
+    assert.deepEqual(body.messages[0].drillDown, {
+      tool: 'cat_cafe_get_message',
+      args: { messageId: body.messages[0].id, mode: 'full' },
+    });
+    assert.equal('content' in body.messages[0], false); // full body not inlined
   });
 
   test('GET thread-context exposes HTTP image urls so external runtimes can fetch them (F211-REG3)', async () => {
@@ -814,9 +828,240 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.deepEqual(
-      body.messages.map((m) => m.content),
+      body.messages.map((m) => m.preview),
       ['Window message 1', 'Window message 2', 'Window message 3', 'Window message 4'],
     );
+  });
+
+  test('thread-context keyword anchor surfaces the match even when it is in the tail (F236 R1/砚砚 P1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const longBody = `${'filler '.repeat(60)}REDISLOCKBUG at the very end`;
+    messageStore.append({ userId: 'user-1', catId: null, content: longBody, mentions: [], timestamp: 1 });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?keyword=REDISLOCKBUG',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const hit = body.messages.find((m) => m.contentLength === longBody.length);
+    assert.ok(hit, 'the long matching message is returned');
+    assert.equal(hit.truncated, true);
+    assert.ok(
+      hit.preview.includes('REDISLOCKBUG'),
+      `keyword-ranked preview must surface the match (anti-变瞎子), got: ${hit.preview}`,
+    );
+  });
+
+  test('thread-context emits returnedChars telemetry (F236 R1/砚砚 P1 eval contract)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({ userId: 'user-1', catId: null, content: 'X'.repeat(500), mentions: [], timestamp: 1 });
+
+    const logs = [];
+    app.log.info = (obj) => logs.push(obj);
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    const anchorLog = logs.find((l) => l && l.tool === 'thread-context' && typeof l.returnedChars === 'number');
+    assert.ok(anchorLog, 'thread-context must emit returnedChars for eval-layer 省 accounting');
+    assert.ok(anchorLog.returnedChars > 0);
+  });
+
+  test('get-message full drill fullDrillChars includes context neighbors (F236 R1/砚砚 P1 AC-B2)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'AAAA',
+      mentions: [],
+      timestamp: 1,
+      threadId: 'thread-1',
+    });
+    const target = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'TARGET',
+      mentions: [],
+      timestamp: 2,
+      threadId: 'thread-1',
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'CCCC',
+      mentions: [],
+      timestamp: 3,
+      threadId: 'thread-1',
+    });
+
+    const logs = [];
+    app.log.info = (obj) => logs.push(obj);
+
+    await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${target.id}&mode=full&contextCount=5`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    const drillLog = logs.find((l) => l && typeof l.fullDrillChars === 'number');
+    assert.ok(drillLog, 'full drill must emit fullDrillChars');
+    assert.ok(
+      drillLog.contextCount >= 1,
+      'fullDrillChars accounting must include context neighbors (not undercounted)',
+    );
+  });
+
+  test('thread-context anchor cuts content payload ≥60% vs full bodies (F236 AC-A1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const bigBody = 'Z'.repeat(2000);
+    let fullContentChars = 0;
+    for (let i = 0; i < 10; i++) {
+      messageStore.append({ userId: 'user-1', catId: null, content: bigBody, mentions: [], timestamp: i + 1 });
+      fullContentChars += bigBody.length;
+    }
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.messages.length, 10);
+    // Content-reduction proxy for AC-A1's token target (exact token cut is a runtime telemetry check).
+    const previewChars = body.messages.reduce((sum, m) => sum + m.preview.length, 0);
+    const reduction = 1 - previewChars / fullContentChars;
+    assert.ok(reduction >= 0.6, `expected ≥60% content reduction, got ${(reduction * 100).toFixed(1)}%`);
+    assert.ok(
+      body.messages.every((m) => m.truncated),
+      'long messages must be honestly flagged truncated',
+    );
+  });
+
+  test('GET pending-mentions anchors long mention with head+tail + requiresDrill (F236 AC-A3)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const longContent = `@opus ${'detail '.repeat(80)}FINAL INSTRUCTION: ship it now`;
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: ['opus'],
+      timestamp: Date.now(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.mentions.length, 1);
+    const m = body.mentions[0];
+    assert.equal(m.requiresDrill, true);
+    assert.ok(m.message.startsWith('@opus'), 'head preserved');
+    assert.ok(m.message.endsWith('ship it now'), 'tail handoff instruction preserved (not lost)');
+    assert.equal(m.contentLength, longContent.length);
+    assert.deepEqual(m.drillDown, { tool: 'cat_cafe_get_message', args: { messageId: m.id, mode: 'full' } });
+  });
+
+  test('GET list-tasks anchors long why; taskId drill returns full why (F236 AC-A4)', async () => {
+    const app = await createApp();
+    const threadA = await threadStore.create('user-1', 'thread-a');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
+    const longWhy = 'W'.repeat(600);
+    const task = await taskStore.create({
+      threadId: threadA.id,
+      title: 'big task',
+      why: longWhy,
+      createdBy: 'user',
+      ownerCatId: 'opus',
+    });
+
+    // F236 Track-1 (gpt52 review P1 route-level guard): list-tasks telemetry must
+    // categorize preview-return volume vs taskId-drill volume at the ROUTE, not only
+    // in the recorder unit test. (Volume categorization; open-rate is Track-2.)
+    const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
+      '../dist/routes/anchor-telemetry.js'
+    );
+    resetAnchorTelemetryForTest();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-tasks',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 200);
+    const anchored = JSON.parse(res.body).tasks.find((x) => x.id === task.id);
+    assert.equal(anchored.whyTruncated, true);
+    assert.equal(anchored.why.length, 280);
+    assert.equal(anchored.whyLength, 600);
+    assert.equal(anchored.title, 'big task'); // non-why fields preserved
+    assert.deepEqual(anchored.drillDown, { tool: 'cat_cafe_list_tasks', args: { taskId: task.id } });
+    // telemetry: the no-taskId list is a preview RETURN, not a drill
+    {
+      const snap = getAnchorTelemetrySnapshot();
+      assert.equal(snap.returnedByTool['list-tasks'], 1);
+      assert.equal(snap.drillByTool['list-tasks'] ?? 0, 0, 'preview must not count as a drill');
+    }
+
+    // one-hop drill: taskId returns the full untruncated why
+    const drillRes = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/list-tasks?taskId=${task.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(drillRes.statusCode, 200);
+    const drillTasks = JSON.parse(drillRes.body).tasks;
+    assert.equal(drillTasks.length, 1);
+    assert.equal(drillTasks[0].why, longWhy);
+    assert.equal(drillTasks[0].whyTruncated, false);
+    // telemetry P1 guard: the taskId path records a DRILL, NOT a second preview return.
+    {
+      const snap = getAnchorTelemetrySnapshot();
+      assert.equal(snap.drillByTool['list-tasks'], 1, 'taskId drill must record as a drill');
+      assert.equal(snap.returnedByTool['list-tasks'], 1, 'taskId drill must NOT be counted as a preview return');
+    }
+  });
+
+  test('list-tasks taskId matching no task records NO drill volume (cloud P2: empty drill not counted)', async () => {
+    const app = await createApp();
+    const threadA = await threadStore.create('user-1', 'thread-a');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
+    // a real task exists, but the taskId below won't match it → empty {tasks:[]}, no why served
+    await taskStore.create({
+      threadId: threadA.id,
+      title: 'real task',
+      why: 'present',
+      createdBy: 'user',
+      ownerCatId: 'opus',
+    });
+
+    const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
+      '../dist/routes/anchor-telemetry.js'
+    );
+    resetAnchorTelemetryForTest();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-tasks?taskId=does-not-exist',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).tasks.length, 0);
+
+    const snap = getAnchorTelemetrySnapshot();
+    assert.equal(snap.drillByTool['list-tasks'] ?? 0, 0, 'empty drill (no task served) must NOT count as a drill');
+    assert.equal(snap.returnedByTool['list-tasks'] ?? 0, 0, 'a taskId query is not a preview return either');
   });
 
   test('GET thread-context rejects messageId from another thread', async () => {
@@ -875,7 +1120,7 @@ describe('Callback Routes', () => {
     assert.equal(catResponse.statusCode, 200);
     const catBody = JSON.parse(catResponse.body);
     assert.equal(catBody.messages.length, 1);
-    assert.equal(catBody.messages[0].content, 'codex reply');
+    assert.equal(catBody.messages[0].preview, 'codex reply');
 
     const userResponse = await app.inject({
       method: 'GET',
@@ -885,7 +1130,7 @@ describe('Callback Routes', () => {
     assert.equal(userResponse.statusCode, 200);
     const userBody = JSON.parse(userResponse.body);
     assert.equal(userBody.messages.length, 1);
-    assert.equal(userBody.messages[0].content, 'human message');
+    assert.equal(userBody.messages[0].preview, 'human message');
   });
 
   test('GET thread-context supports keyword filter (case-insensitive)', async () => {
@@ -925,8 +1170,8 @@ describe('Callback Routes', () => {
     assert.equal(body.messages.length, 2);
     // F148 Phase B: with relevance sort, both match "redis" equally (1.0).
     // Tiebreaker is newest-first (b.timestamp - a.timestamp).
-    assert.equal(body.messages[0].content, 'redis retry and timeout');
-    assert.equal(body.messages[1].content, 'Discuss Redis lock strategy');
+    assert.equal(body.messages[0].preview, 'redis retry and timeout');
+    assert.equal(body.messages[1].preview, 'Discuss Redis lock strategy');
   });
 
   test('GET thread-context combines catId + keyword filters', async () => {
@@ -963,7 +1208,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].content, 'redis findings');
+    assert.equal(body.messages[0].preview, 'redis findings');
   });
 
   test('GET thread-context rejects unknown catId filter', async () => {
@@ -1013,10 +1258,10 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].content, 'User 1 msg');
+    assert.equal(body.messages[0].preview, 'User 1 msg');
   });
 
-  test('GET thread-context includes contentBlocks (image attachments)', async () => {
+  test('GET thread-context anchor omits contentBlocks but keeps image hints (F236 AC-A2)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
 
@@ -1048,11 +1293,8 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2);
-    // Message with image should include contentBlocks
-    assert.ok(body.messages[0].contentBlocks, 'contentBlocks should be present');
-    assert.equal(body.messages[0].contentBlocks.length, 2);
-    assert.equal(body.messages[0].contentBlocks[1].type, 'image');
-    assert.equal(body.messages[0].contentBlocks[1].url, '/uploads/1234567890-abc.png');
+    // F236 AC-A2 / 决策2: anchor OMITS contentBlocks (may carry large base64) — image hints kept instead.
+    assert.equal(body.messages[0].contentBlocks, undefined, 'contentBlocks must be omitted from the anchor');
     // F211 BUG1 fix: imagePaths should contain resolved absolute filesystem paths
     assert.ok(body.messages[0].imagePaths, 'imagePaths should be present for image messages');
     assert.equal(body.messages[0].imagePaths.length, 1);
@@ -1113,8 +1355,8 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2);
-    assert.equal(body.messages[0].content, 'thread-B msg 1');
-    assert.equal(body.messages[1].content, 'thread-B msg 2');
+    assert.equal(body.messages[0].preview, 'thread-B msg 1');
+    assert.equal(body.messages[1].preview, 'thread-B msg 2');
   });
 
   test('GET thread-context without threadId reads own thread (default)', async () => {
@@ -1147,7 +1389,7 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 1);
-    assert.equal(body.messages[0].content, 'thread-A msg');
+    assert.equal(body.messages[0].preview, 'thread-A msg');
   });
 
   test('GET thread-context cross-thread respects limit', async () => {
@@ -1176,8 +1418,8 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2);
     // Should return the 2 most recent
-    assert.equal(body.messages[0].content, 'thread-B msg 3');
-    assert.equal(body.messages[1].content, 'thread-B msg 4');
+    assert.equal(body.messages[0].preview, 'thread-B msg 3');
+    assert.equal(body.messages[1].preview, 'thread-B msg 4');
   });
 
   // ---- GET /api/callbacks/list-threads ----
@@ -2664,14 +2906,14 @@ describe('Callback Routes', () => {
     // All returned messages should be visible (no codex stream)
     for (const msg of body.messages) {
       assert.ok(
-        !msg.content.startsWith('codex stream'),
-        `should not contain codex stream messages, got: ${msg.content}`,
+        !msg.preview.startsWith('codex stream'),
+        `should not contain codex stream messages, got: ${msg.preview}`,
       );
     }
 
     // Verify ordering: oldest visible first
-    assert.equal(body.messages[0].content, 'user msg 0');
-    assert.equal(body.messages[9].content, 'codex callback 4');
+    assert.equal(body.messages[0].preview, 'user msg 0');
+    assert.equal(body.messages[9].preview, 'codex callback 4');
   });
 
   // ---- Legacy thread backward compatibility (cloud P1 regression) ----
@@ -2720,8 +2962,8 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     // All 5 messages should be visible (3 legacy codex + 2 user)
     assert.equal(body.messages.length, 5, 'legacy untagged cat messages must be visible in play mode');
-    assert.equal(body.messages[0].content, 'legacy codex msg 0');
-    assert.equal(body.messages[4].content, 'user msg 1');
+    assert.equal(body.messages[0].preview, 'legacy codex msg 0');
+    assert.equal(body.messages[4].preview, 'user msg 1');
   });
 
   test('GET thread-context play mode hides tagged stream but shows legacy in same thread', async () => {
@@ -2791,7 +3033,7 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     // 4 visible: 2 legacy + 1 callback + 1 user. Stream hidden.
     assert.equal(body.messages.length, 4, 'tagged stream hidden, legacy + callback + user visible');
-    const contents = body.messages.map((m) => m.content);
+    const contents = body.messages.map((m) => m.preview);
     assert.ok(!contents.includes('thinking output'), 'stream must be hidden');
     assert.ok(contents.includes('legacy reply'), 'legacy must be visible');
     assert.ok(contents.includes('callback speech'), 'callback must be visible');
@@ -2843,8 +3085,8 @@ describe('Callback Routes', () => {
     const body = JSON.parse(response.body);
     assert.equal(body.messages.length, 2, 'only 2 messages match keyword');
     // Highest relevance first: "redis lock contention fix" (2/2) before "redis connection pool" (1/2)
-    assert.equal(body.messages[0].content, 'redis lock contention fix', 'highest relevance first');
-    assert.equal(body.messages[1].content, 'redis connection pool', 'lower relevance second');
+    assert.equal(body.messages[0].preview, 'redis lock contention fix', 'highest relevance first');
+    assert.equal(body.messages[1].preview, 'redis connection pool', 'lower relevance second');
   });
 
   // ---- TD091: threadId echo in thread-context ----

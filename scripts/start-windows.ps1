@@ -499,6 +499,11 @@ try {
     $apiNodeEnv = if ($Dev) { 'development' } else { 'production' }
     $globalSidecarOwner = if ($useRedis -and -not $Dev) { "1" } else { $null }
     $runtimeRootMarker = if (-not $Dev) { $ProjectRoot } else { $null }
+    $workspaceRootMarker = if (-not $Dev) {
+        if ($env:CAT_CAFE_WORKSPACE_ROOT) { $env:CAT_CAFE_WORKSPACE_ROOT } else { $ProjectRoot }
+    } else {
+        $env:CAT_CAFE_WORKSPACE_ROOT
+    }
     $runtimeEnvOverrides = @{
         REDIS_URL = $env:REDIS_URL
         MEMORY_STORE = $env:MEMORY_STORE
@@ -517,6 +522,7 @@ try {
         CAT_CAFE_SERVICE_AUDIO_ENABLED = $env:CAT_CAFE_SERVICE_AUDIO_ENABLED
         CAT_CAFE_PROVISION_GLOBAL_SIDECAR = $globalSidecarOwner
         CAT_CAFE_RUNTIME_ROOT = $runtimeRootMarker
+        CAT_CAFE_WORKSPACE_ROOT = $workspaceRootMarker
     }
 
     # Embedding sidecar (and other Cat Cafe ML services) are reconciled by the

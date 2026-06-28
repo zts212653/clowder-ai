@@ -61,9 +61,10 @@ describe('F200 HW-4 根因②a: parseShellReadPaths', () => {
   it('P1 (砚砚 HW-4 review): quote-aware split — rg regex alternation not mis-cut', () => {
     // 砚砚 audit 实测 false negative: 引号内 | 是 regex alternation 不是 shell pipe.
     // 裸 split 会把 "Feat 20|F20|F200" 切碎导致路径漏算 → [].
-    assert.deepEqual(parseShellReadPaths(`/bin/zsh -lc 'rg -n "Feat 20|F20|F200" /home/user/MEMORY.md'`), [
-      '/home/user/MEMORY.md',
-    ]);
+    assert.deepEqual(
+      parseShellReadPaths(`/bin/zsh -lc 'rg -n "Feat 20|F20|F200" /home/user/.codex/memories/MEMORY.md'`),
+      ['/home/user/.codex/memories/MEMORY.md'],
+    );
     // 回归保护：引号外的 pipe 仍要切（rg --files discovery | rg → 不算消费）
     assert.deepEqual(parseShellReadPaths(`/bin/zsh -lc 'rg --files docs | rg foo'`), []);
     // 引号内 ; 不切（多段判定只认引号外分隔符）

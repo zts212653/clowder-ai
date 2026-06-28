@@ -33,16 +33,16 @@ export async function handleFeishuAction(actionId: string, ctx: HandleActionCont
         // Auto-switch to websocket when no verification token (same as legacy route).
         // QR-based login is typically for internal/dev setups without public webhook URL.
         const currentMode = ctx.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook';
-        const verificationToken = ctx.env.FEISHU_VERIFICATION_TOKEN;
-        const effectiveMode =
-          currentMode === 'webhook' && (!verificationToken || verificationToken.trim() === '')
-            ? 'websocket'
-            : currentMode;
+        const verificationToken = ctx.env.FEISHU_VERIFICATION_TOKEN?.trim();
+        const effectiveMode = currentMode === 'webhook' && !verificationToken ? 'websocket' : currentMode;
         const targets: Record<string, string> = {
           FEISHU_APP_ID: status.appId,
           FEISHU_APP_SECRET: status.appSecret,
           FEISHU_CONNECTION_MODE: effectiveMode,
         };
+        if (effectiveMode === 'webhook' && verificationToken) {
+          targets.FEISHU_VERIFICATION_TOKEN = verificationToken;
+        }
         return {
           render: 'status',
           data: { status: 'confirmed' },

@@ -23,6 +23,7 @@ import {
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
+  providerRequiresThreadWorkspace,
   resolveBuiltinClientForProvider,
   resolveForClient,
   validateRuntimeProviderBinding,
@@ -71,7 +72,7 @@ import { resolveActiveProjectRoot } from '../../../../../utils/active-project-ro
 import { resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { DEFAULT_CLI_TIMEOUT_MS, resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot, isSameProject } from '../../../../../utils/monorepo-root.js';
-import { isUnderAllowedRoot } from '../../../../../utils/project-path.js';
+import { pathsEqual, validateProjectPathDetailed } from '../../../../../utils/project-path.js';
 import { tcpProbe } from '../../../../../utils/tcp-probe.js';
 import type { AgentPaneRegistry } from '../../../../terminal/agent-pane-registry.js';
 import type { TmuxGateway } from '../../../../terminal/tmux-gateway.js';
@@ -254,6 +255,23 @@ export function _resetStaticIdentityRegistryRevisionForTests(): void {
 
 function sessionIdentityKey(userId: string, catId: CatId, threadId: string): string {
   return `${userId}:${catId as string}:${threadId}`;
+}
+
+function normalizeSessionWorkspacePath(workingDirectory: string): string {
+  return resolve(workingDirectory);
+}
+
+function buildSessionWorkspaceFingerprint(workingDirectory: string): string {
+  const normalized = normalizeSessionWorkspacePath(workingDirectory);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function getStoredSessionWorkspaceFingerprint(session: SessionRecord | null | undefined): string | undefined {
+  if (!session) return undefined;
+  return (
+    session.workspaceFingerprint ??
+    (session.workingDirectory ? buildSessionWorkspaceFingerprint(session.workingDirectory) : undefined)
+  );
 }
 
 function isAntigravityRuntimeSessionInit(msg: AgentMessage): boolean {
@@ -860,6 +878,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // The PATCH bind endpoint writes to sessionChainStore but not sessionManager,
     // so a freshly-bound session would be missed if we gate on sessionId being truthy.
     const sessionChainActive = isSessionChainEnabled(catId);
+    let activeSessionRecordForResume: SessionRecord | null = null;
     if (isBgCarrier && bgChainKey && deps.sessionChainStore && sessionChainActive) {
       // F198 Bug #3: bg resolves its resume target via the chainKey record's
       // latestResumeSessionId (the daemon's previous fork UUID). bg reuses one
@@ -899,6 +918,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             // Chain exists but no active session → previous was sealed; don't resume
             sessionId = undefined;
           } else if (activeRec.cliSessionId) {
+            activeSessionRecordForResume = activeRec;
             // F118 AC-C6: Overflow circuit breaker — too many consecutive restore failures (#86)
             // Note: time-based "stale" check removed — idle sessions are healthy,
             // only repeated restore failures indicate a toxic session.
@@ -970,13 +990,30 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    const catConfig = catRegistry.tryGet(catId as string)?.config;
+    const provider = catConfig?.clientId;
+    const requiresThreadWorkspace = providerRequiresThreadWorkspace(provider);
+
     // Resolve workingDirectory from thread's projectPath
     let workingDirectory: string | undefined;
+    let threadProjectPath: string | undefined;
     let bootcampWorkspaceError: Error | undefined;
+    let workspaceResolutionError: Error | undefined;
+    let workspaceResolutionFailureMessage: string | undefined;
     if (threadStore) {
+      let thread: Awaited<ReturnType<IThreadStore['get']>> | null | undefined;
       try {
-        const thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
-        if (thread?.createdAt) threadCreatedAt = thread.createdAt;
+        thread = await preflightRace(Promise.resolve(threadStore.get(threadId)), 'threadStore.get', signal);
+      } catch (err) {
+        workspaceResolutionFailureMessage = `Unable to resolve thread workspace for ${threadId}: ${err instanceof Error ? err.message : String(err)}`;
+        log.warn(
+          { catId, threadId, err },
+          'threadStore.get failed during workspace resolution — proceeding without workingDirectory',
+        );
+      }
+      if (thread) {
+        if (thread.createdAt) threadCreatedAt = thread.createdAt;
+        if (thread.projectPath) threadProjectPath = thread.projectPath;
         // #836: Reborn session strategy — force new session every invocation.
         // Uses store lookup (isRebornSession) instead of thread field because
         // Redis stores strategy in separate hash fields not hydrated by get().
@@ -1006,8 +1043,28 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // F101: Game threads use virtual projectPaths (e.g. 'games/werewolf') for
           // categorization only — they are not real filesystem directories. Skip them
           // to avoid triggering the F070 governance gate on a non-existent path.
-          if (!thread.projectPath.startsWith('games/') && isUnderAllowedRoot(thread.projectPath)) {
-            workingDirectory = thread.projectPath;
+          if (thread.projectPath.startsWith('games/')) {
+            workspaceResolutionFailureMessage = `OpenCode requires a filesystem thread projectPath for ${threadId}; virtual game projectPath ${thread.projectPath} cannot be used as a working directory.`;
+          } else {
+            const validatedProjectPath = await validateProjectPathDetailed(thread.projectPath);
+            if (!validatedProjectPath.ok) {
+              const isTransient = validatedProjectPath.reason === 'io_error';
+              workspaceResolutionFailureMessage = isTransient
+                ? `Unable to validate thread projectPath for ${threadId}: ${thread.projectPath}. ${validatedProjectPath.message ?? 'Transient filesystem error.'} Retry; if it persists, re-bind the thread's project workspace.`
+                : `Invalid thread projectPath for ${threadId}: ${thread.projectPath}. Expected an existing directory under allowed roots.`;
+              log.warn(
+                {
+                  catId,
+                  threadId,
+                  projectPath: thread.projectPath,
+                  reason: validatedProjectPath.reason,
+                  message: validatedProjectPath.message,
+                },
+                'thread projectPath failed validation during workspace resolution',
+              );
+            } else {
+              workingDirectory = validatedProjectPath.path;
+            }
           }
         } else if (thread?.bootcampState) {
           const bootcampWorkspace = await resolveBootcampWorkspaceRoot();
@@ -1016,15 +1073,74 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           } else {
             bootcampWorkspaceError = new Error(bootcampWorkspace.error);
           }
+        } else if (requiresThreadWorkspace) {
+          workspaceResolutionFailureMessage = `OpenCode requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning OpenCode.`;
         }
-      } catch {
-        // Thread store timeout or error — proceed without workingDirectory
       }
+    }
+    if (requiresThreadWorkspace && threadStore && !workingDirectory && !bootcampWorkspaceError) {
+      workspaceResolutionError = new Error(
+        workspaceResolutionFailureMessage ??
+          `OpenCode requires a thread projectPath for ${threadId}. Bind the thread to a project workspace before spawning OpenCode.`,
+      );
     }
     if (bootcampWorkspaceError) {
       throw bootcampWorkspaceError;
     }
+    if (workspaceResolutionError) {
+      throw workspaceResolutionError;
+    }
     const workingProjectRoot = workingDirectory ? findMonorepoRoot(workingDirectory) : undefined;
+    const sessionWorkspaceBinding =
+      provider === 'opencode' && workingDirectory
+        ? {
+            workingDirectory: normalizeSessionWorkspacePath(workingDirectory),
+            workspaceFingerprint: buildSessionWorkspaceFingerprint(workingDirectory),
+          }
+        : {};
+    const hasSessionWorkspaceBinding = 'workspaceFingerprint' in sessionWorkspaceBinding;
+    if (provider === 'opencode' && sessionId && workingDirectory) {
+      const requestedSessionId = sessionId;
+      const storedWorkspaceFingerprint = getStoredSessionWorkspaceFingerprint(activeSessionRecordForResume);
+      const currentWorkspaceFingerprint = buildSessionWorkspaceFingerprint(workingDirectory);
+      if (!storedWorkspaceFingerprint || !pathsEqual(storedWorkspaceFingerprint, currentWorkspaceFingerprint)) {
+        const reason = storedWorkspaceFingerprint ? 'workspace_mismatch' : 'workspace_unknown';
+        log.warn(
+          {
+            catId,
+            threadId,
+            invocationId,
+            reason,
+            threadProjectPath: threadProjectPath ?? null,
+            workingDirectory,
+            requestedSessionId,
+            storedWorkingDirectory: activeSessionRecordForResume?.workingDirectory ?? null,
+            storedWorkspaceFingerprint: activeSessionRecordForResume?.workspaceFingerprint ?? null,
+            currentWorkspaceFingerprint,
+          },
+          'OpenCode resume workspace guard dropped stale session',
+        );
+        sessionId = undefined;
+        sessionManager.delete(userId, catId, threadId).catch(() => {});
+        yield {
+          type: 'system_info' as const,
+          catId,
+          content: JSON.stringify({
+            type: 'opencode_resume_workspace_guard',
+            action: 'start_fresh',
+            reason,
+            threadId,
+            threadProjectPath: threadProjectPath ?? null,
+            workingDirectory,
+            requestedSessionId,
+            storedWorkingDirectory: activeSessionRecordForResume?.workingDirectory ?? null,
+            storedWorkspaceFingerprint: activeSessionRecordForResume?.workspaceFingerprint ?? null,
+            currentWorkspaceFingerprint,
+          }),
+          timestamp: Date.now(),
+        };
+      }
+    }
 
     // Shared-state preflight — covers ALL cats (Claude/Codex/Gemini), vendor-agnostic.
     // Three-layer defense model (shared-rules §14):
@@ -1131,6 +1247,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           'threadStore.get:mission',
           signal,
         );
+        /* @segment M1 — Dispatch Mission Context */
         if (thread) {
           const { buildMissionPack, formatMissionPackPrompt } = await import(
             '../../../../../config/governance/mission-pack.js'
@@ -1149,8 +1266,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
-    const catConfig = catRegistry.tryGet(catId as string)?.config;
-    const provider = catConfig?.clientId;
     const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
     const defaultModel = catConfig?.defaultModel?.trim() || undefined;
     // Account resolution, proxy registration, and runtime config always use the
@@ -1218,7 +1333,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       openai: 'openai',
       google: 'google',
       kimi: 'kimi',
-      dare: 'openai',
       opencode: 'anthropic',
       openrouter: 'openai',
     };
@@ -1250,7 +1364,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // ── F161: Data-driven env var injection via resolveEnvMap ──────────────
     // Standard provider credential env vars (OPENAI_API_KEY, GEMINI_API_KEY, etc.)
-    // are resolved from BUILTIN_ENV_MAPS templates. Cat Cafe internal routing vars
+    // are resolved from BUILTIN_ENV_MAPS templates. Clowder AI internal routing vars
     // (CAT_CAFE_*_PROFILE_MODE, CODEX_AUTH_MODE, proxy) remain explicit below.
     const userEnvTemplates = resolvedAccount?.envVars ? extractUserEnvTemplates(resolvedAccount.envVars) : undefined;
 
@@ -1267,14 +1381,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         const envFromMap = resolveEnvMap(protocolKey, undefined, credentialAccount, userEnvTemplates);
         Object.assign(callbackEnv, envFromMap);
       }
-      // Dare has its own env vars regardless of effectiveProtocol (dare's protocol = 'openai')
-      if (provider === 'dare') {
-        const dareEnv = resolveEnvMap('dare', undefined, credentialAccount);
-        Object.assign(callbackEnv, dareEnv);
-      }
     }
 
-    // ── Cat Cafe internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
+    // ── Clowder AI internal routing vars (not in BUILTIN_ENV_MAPS) ──────────
     if (effectiveProtocol === 'anthropic') {
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'api_key';
@@ -1331,7 +1440,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Fallback for unresolved accounts on anthropic/opencode providers
       callbackEnv.CAT_CAFE_ANTHROPIC_PROFILE_MODE = 'subscription';
     }
-    // Note: google and dare protocol branches no longer need explicit credential injection
+    // Note: google protocol branch no longer needs explicit credential injection
     // — fully handled by resolveEnvMap above.
 
     // F171: User-defined env vars from account config.
@@ -1467,9 +1576,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     const openCodeExternalDirs: string[] = [];
+    const openCodeAllowedWorkspaceDirs = workingDirectory ? resolve(workingDirectory) : undefined;
     if (provider === 'opencode') {
       if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
-        // External project — grant access to Cat Cafe host root (configs, MCP, etc.)
+        // External project — grant access to Clowder AI host root (configs, MCP, etc.)
         openCodeExternalDirs.push(hostProjectRoot);
       }
       if (workingProjectRoot && workingProjectRoot !== workingDirectory) {
@@ -1507,6 +1617,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         hasBaseUrl: Boolean(resolvedAccount.baseUrl),
         omitProviderAuth: !isApiKey,
         mcpServerPath,
+        ...(openCodeAllowedWorkspaceDirs ? { allowedWorkspaceDirs: openCodeAllowedWorkspaceDirs } : {}),
         // F203 Phase I: inject compiled L0 + OPENCODE.md into instructions.
         instructions: openCodeL0InstructionPaths,
         // #935: External directory permissions for Windows/cross-project access.
@@ -1630,6 +1741,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       effectivePrompt = `${stagingPrepend}\n\n---\n\n${effectivePrompt}`;
     }
 
+    /* @segment M2 — Transcript Path Hints */
     effectivePrompt = appendTranscriptPathHints(effectivePrompt, TRANSCRIPT_DIR, threadId);
 
     capturePromptIfEnabled({
@@ -2159,6 +2271,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                   // This is normal — NOT a "session replaced" event. Just update the tracked ID.
                   await deps.sessionChainStore.update(existing.id, {
                     cliSessionId: msg.sessionId,
+                    ...sessionWorkspaceBinding,
                     ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
                     updatedAt: Date.now(),
                   });
@@ -2233,6 +2346,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     const inheritedFailures = existing.consecutiveRestoreFailures ?? 0;
                     const newRec = await deps.sessionChainStore.create({
                       cliSessionId: msg.sessionId,
+                      ...sessionWorkspaceBinding,
                       threadId,
                       catId,
                       userId,
@@ -2240,17 +2354,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
                     if (inheritedFailures > 0) {
                       await deps.sessionChainStore.update(newRec.id, {
                         consecutiveRestoreFailures: inheritedFailures,
+                        ...sessionWorkspaceBinding,
                         ...(params.continuityCapsule ? { continuityCapsule: params.continuityCapsule } : {}),
                       });
                     } else if (params.continuityCapsule) {
                       await deps.sessionChainStore.update(newRec.id, {
+                        ...sessionWorkspaceBinding,
                         continuityCapsule: params.continuityCapsule,
                       });
                     }
                   }
                 }
-              } else if (params.continuityCapsule) {
+              } else if (params.continuityCapsule || hasSessionWorkspaceBinding) {
                 await deps.sessionChainStore.update(existing.id, {
+                  ...sessionWorkspaceBinding,
                   continuityCapsule: params.continuityCapsule,
                 });
               }
@@ -2258,6 +2375,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               // No active session (first invocation or previous was sealed)
               const newRec = await deps.sessionChainStore.create({
                 cliSessionId: msg.sessionId,
+                ...sessionWorkspaceBinding,
                 threadId,
                 catId,
                 userId,

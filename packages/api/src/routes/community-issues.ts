@@ -9,6 +9,8 @@
  * POST   /api/community-issues/:id/dispatch  → 手动触发 triage
  * POST   /api/community-issues/:id/triage-complete → 猫上报 triage 结果
  * POST   /api/community-issues/:id/resolve   → co-creator拍板 accept/decline
+ * POST   /api/community-issues/:id/report   → D1: 标记已回复（case.reported）
+ * POST   /api/community-issues/:id/waive-closure → D1: 免除公开回复要求
  * GET    /api/community-board?repo=xxx       → 聚合看板（issues + PR projection）
  */
 
@@ -32,7 +34,10 @@ import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { ICommunityEventLog } from '../domains/community/CommunityEventLog.js';
 import type { ICommunityObjectStore } from '../domains/community/CommunityObjectStore.js';
+import type { ICommunityRepoConfigStore } from '../domains/community/CommunityRepoConfigStore.js';
 import { registerRoutingTracking } from '../domains/community/community-auto-tracking.js';
+import { computeClosureChecklist } from '../domains/community/community-closure-checklist.js';
+import { parseRouteRecommendation } from '../domains/community/community-route-recommendation.js';
 import { derivePrGroup } from '../domains/community/derivePrGroup.js';
 import { type GhIssueFull, mapGitHubIssue } from '../domains/community/GitHubIssueFetcher.js';
 import { type GhPrFull, type GhPrReview, mapGitHubPr } from '../domains/community/GitHubPrFetcher.js';
@@ -42,6 +47,7 @@ import { TriageOrchestrator } from '../domains/community/TriageOrchestrator.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
+import { type CommunityDecisionQueueFindingStore, communityDecisionQueueRoutes } from './community-decision-queue.js';
 
 interface CallbackAuthVerifier {
   verify(invocationId: string, callbackToken: string): Promise<VerifyResult>;
@@ -69,6 +75,11 @@ export interface CommunityIssuesRoutesOptions {
   // F168 Phase C C2.2: narrator spawn driver (optional; fire-and-forget after case.triaged)
   // Inject NarratorDriver constructed in index.ts with the shared wakeCat + RoleResolver.
   narratorDriver?: NarratorDriver;
+  // F168 Phase D D3/D4: reconciliation finding store for read model
+  // D-PR2 AC line 305: return open/acknowledged/waived/resolved findings for D-PR3 UX
+  findingStore?: CommunityDecisionQueueFindingStore;
+  // F168 Phase F: per-repo routing config for auto-route (SO-3)
+  repoConfigStore?: Pick<ICommunityRepoConfigStore, 'getByRepo'>;
 }
 
 const VALID_ISSUE_TYPES = ['bug', 'feature', 'enhancement', 'question'] as const;
@@ -212,8 +223,10 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       }
     }
 
-    // F168 Phase C C2.2: fire-and-forget narrator spawn after case.triaged (SPIKE-1 candidate a)
-    // NarratorDriver handles idempotency (INV-3) and error absorption internally.
+    // F168 Phase D D0.1: narrator eligibility gate + fire-and-forget spawn after case.triaged
+    // Manual dispatch always passes (INV-D0.2) — no event log read needed.
+    // D3 auto-reconciler will add the full gate check: read events → find case.bootstrap →
+    // compute lastWakeActivityAt from delivery-policy → call shouldSpawnNarratorForCase.
     if (opts.narratorDriver) {
       void opts.narratorDriver
         .spawnNarrator({
@@ -402,8 +415,53 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
     }
 
     const entry = { ...result.data, timestamp: Date.now() } as import('@cat-cafe/shared').TriageEntry;
-    const orchestrator = new TriageOrchestrator({ communityIssueStore, threadStore: opts.threadStore });
-    return orchestrator.recordTriageEntry(id, entry);
+    const orchestrator = new TriageOrchestrator({
+      communityIssueStore,
+      threadStore: opts.threadStore,
+      repoConfigStore: opts.repoConfigStore,
+    });
+    const triageResult = await orchestrator.recordTriageEntry(id, entry);
+
+    // P1-R2-3: Auto-routed issues must emit case.routed event + register tracking,
+    // matching the /resolve path's integration. Without this, auto-routed issues
+    // won't update CommunityObjectStore projection or create issue_tracking tasks.
+    if (triageResult.action === 'auto-routed' && opts.eventLog) {
+      try {
+        const subjectKey = `issue:${issue.repo}#${issue.issueNumber}`;
+        const routedEvent: CommunityEvent = {
+          sourceEventId: `routed:${id}:${triageResult.threadId}`,
+          subjectKey,
+          kind: 'case.routed',
+          classification: 'state-changing',
+          payload: {
+            ownerThreadId: triageResult.threadId,
+            catId: triageResult.targetCatId,
+            ownerRole: triageResult.targetCatId,
+            relatedFeature: issue.relatedFeature ?? null,
+            routedAt: Date.now(),
+          },
+          at: Date.now(),
+        };
+        const { appended } = await opts.eventLog.append(routedEvent);
+        if (appended) {
+          if (opts.projector) {
+            try {
+              await opts.projector.apply(routedEvent);
+            } catch {
+              // best-effort — projector failure does not block tracking
+            }
+          }
+          await registerRoutingTracking(routedEvent, opts.taskStore, {
+            fetchCommentCursor: opts.fetchIssueCommentCursor,
+            userId: resolveUserId(request, { defaultUserId: 'system' }) ?? 'system',
+          });
+        }
+      } catch {
+        // Best-effort — event log failure never blocks triage-complete
+      }
+    }
+
+    return triageResult;
   });
 
   const resolveSchema = z.object({
@@ -467,7 +525,11 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       }
     }
 
-    const orchestrator = new TriageOrchestrator({ communityIssueStore, threadStore: opts.threadStore });
+    const orchestrator = new TriageOrchestrator({
+      communityIssueStore,
+      threadStore: opts.threadStore,
+      repoConfigStore: opts.repoConfigStore,
+    });
     if (result.data.decision === 'accepted') {
       await orchestrator.routeAccepted(
         id,
@@ -553,41 +615,51 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
           (e) => e.authoredByRole === 'narrator' && e.routeRecommendation != null,
         );
         if (narratorEntry) {
-          const narratorRec = narratorEntry.routeRecommendation as { kind: string; threadId?: string };
-          // Compute agreed: narrator recommendation matches owner decision
-          let agreed: boolean;
-          if (result.data.decision === 'declined') {
-            agreed = narratorRec.kind === 'decline';
+          const parsed = parseRouteRecommendation(narratorEntry.routeRecommendation);
+          if (!parsed.ok) {
+            request.log.warn(
+              { subjectKey: `issue:${issue.repo}#${issue.issueNumber}`, reason: parsed.reason },
+              '[F168] resolve: narrator routeRecommendation failed parse — skipping eval event',
+            );
           } else {
-            // accepted: compare route kind + threadId if applicable
-            const ownerRR = result.data.routeRecommendation;
-            if (!ownerRR) {
-              // Owner accepted without specifying route → doesn't match narrator recommendation
-              agreed = false;
+            const narratorRec = parsed.value;
+            // Compute agreed: narrator recommendation matches owner decision
+            let agreed: boolean;
+            if (result.data.decision === 'declined') {
+              agreed = narratorRec.kind === 'decline';
             } else {
-              agreed =
-                ownerRR.kind === narratorRec.kind &&
-                (ownerRR.kind !== 'existing-thread' ||
-                  (ownerRR as { threadId: string }).threadId === narratorRec.threadId);
+              // accepted: compare route kind + threadId if applicable
+              const ownerRR = result.data.routeRecommendation;
+              if (!ownerRR) {
+                // Owner accepted without specifying route → doesn't match narrator recommendation
+                agreed = false;
+              } else {
+                agreed =
+                  ownerRR.kind === narratorRec.kind &&
+                  (ownerRR.kind !== 'existing-thread' ||
+                    (ownerRR.kind === 'existing-thread' &&
+                      narratorRec.kind === 'existing-thread' &&
+                      ownerRR.threadId === narratorRec.threadId));
+              }
             }
-          }
-          const subjectKey = `issue:${issue.repo}#${issue.issueNumber}`;
-          const evalEvent: CommunityEvent = {
-            sourceEventId: `route-eval:${id}:${Date.now()}`,
-            subjectKey,
-            kind: 'case.route_decision_eval',
-            classification: 'informational',
-            payload: {
-              narratorRecommendation: narratorRec,
-              ownerDecision: {
-                threadId: resolvedThreadId ?? null,
-                verdict: result.data.decision,
+            const subjectKey = `issue:${issue.repo}#${issue.issueNumber}`;
+            const evalEvent: CommunityEvent = {
+              sourceEventId: `route-eval:${id}:${Date.now()}`,
+              subjectKey,
+              kind: 'case.route_decision_eval',
+              classification: 'informational',
+              payload: {
+                narratorRecommendation: narratorRec,
+                ownerDecision: {
+                  threadId: resolvedThreadId ?? null,
+                  verdict: result.data.decision,
+                },
+                agreed,
               },
-              agreed,
-            },
-            at: Date.now(),
-          };
-          await opts.eventLog.append(evalEvent);
+              at: Date.now(),
+            };
+            await opts.eventLog.append(evalEvent);
+          }
         }
       } catch {
         // Best-effort — eval recording failure never blocks resolve
@@ -769,6 +841,273 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
     };
   });
 
+  // ── F168 Phase F: validate-route (SO-2 state machine) ──────────────────────
+  // POST /api/community-issues/:id/validate-route
+  // Target cat accepts or rejects a routed issue.
+  // INV-F2: routeAcceptance only changeable via this endpoint.
+  // INV-F3: rejected → clears assignedCatId + assignedThreadId + state → pending-decision.
+
+  const validateRouteSchema = z.object({
+    decision: z.enum(['accept', 'reject']),
+    reason: z.string().optional(),
+  });
+
+  app.post('/api/community-issues/:id/validate-route', async (request, reply) => {
+    if (!request.callbackAuth) {
+      reply.status(401);
+      return { error: 'Callback authentication required' };
+    }
+
+    const { id } = request.params as { id: string };
+    const issue = await communityIssueStore.get(id);
+    if (!issue) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+
+    // INV-F2: routeAcceptance must be pending
+    if (issue.routeAcceptance !== 'pending') {
+      reply.status(409);
+      return {
+        error: 'Route validation requires routeAcceptance=pending',
+        currentRouteAcceptance: issue.routeAcceptance ?? null,
+      };
+    }
+
+    // Identity check: only the assigned cat can validate
+    const callerCatId = request.callbackAuth.catId as string;
+    if (issue.assignedCatId !== callerCatId) {
+      reply.status(403);
+      return {
+        error: 'Only the assigned cat can validate this route',
+        expected: issue.assignedCatId,
+        actual: callerCatId,
+      };
+    }
+
+    const parsed = validateRouteSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid body', details: parsed.error.issues };
+    }
+
+    if (parsed.data.decision === 'accept') {
+      const updated = await communityIssueStore.update(id, {
+        routeAcceptance: 'accepted',
+        lastActivity: { at: Date.now(), event: `route-validated-by-${callerCatId}` },
+      });
+
+      // Emit case.route-validated event (best-effort)
+      if (opts.eventLog) {
+        try {
+          const event: CommunityEvent = {
+            sourceEventId: `route-validated:${id}:${Date.now()}`,
+            subjectKey: `issue:${issue.repo}#${issue.issueNumber}`,
+            kind: 'case.route_validated',
+            classification: 'state-changing',
+            payload: { catId: callerCatId, decision: 'accept', validatedAt: Date.now() },
+            at: Date.now(),
+          };
+          const { appended } = await opts.eventLog.append(event);
+          if (appended && opts.projector) {
+            await opts.projector.apply(event);
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
+      return updated;
+    }
+
+    // INV-F3: reject → clear assignment, state → pending-decision
+    const updated = await communityIssueStore.update(id, {
+      routeAcceptance: 'rejected',
+      assignedCatId: null,
+      assignedThreadId: null,
+      state: 'pending-decision',
+      lastActivity: { at: Date.now(), event: `route-rejected-by-${callerCatId}` },
+    });
+
+    // P1-R3-2: Delete tracking task registered by auto-route. Without this,
+    // the rejected issue keeps polling for GitHub activity on the old thread.
+    if (opts.taskStore) {
+      try {
+        const subjectKey = `issue:${issue.repo}#${issue.issueNumber}`;
+        const trackingTask = await opts.taskStore.getBySubject(subjectKey);
+        if (trackingTask) {
+          await opts.taskStore.delete(trackingTask.id);
+        }
+      } catch {
+        // Best-effort — cleanup failure does not block rejection
+      }
+    }
+
+    // Emit case.route-rejected event (best-effort)
+    if (opts.eventLog) {
+      try {
+        const event: CommunityEvent = {
+          sourceEventId: `route-rejected:${id}:${Date.now()}`,
+          subjectKey: `issue:${issue.repo}#${issue.issueNumber}`,
+          kind: 'case.route_rejected',
+          classification: 'state-changing',
+          payload: { catId: callerCatId, decision: 'reject', reason: parsed.data.reason, rejectedAt: Date.now() },
+          at: Date.now(),
+        };
+        const { appended } = await opts.eventLog.append(event);
+        if (appended && opts.projector) {
+          await opts.projector.apply(event);
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    return updated;
+  });
+
+  // ── F168 Phase D D1: closure action API ────────────────────────────────────
+
+  // POST /api/community-issues/:id/report
+  // Appends case.reported event. Unlike dispatch (best-effort), closure
+  // endpoints MUST fail visibly if event log or projector is absent.
+  const reportSchema = z.object({
+    publicCommentUrl: z.string().min(1),
+    actor: z.string().min(1),
+  });
+
+  // States where report/waive are not applicable (terminal states)
+  const CLOSURE_TERMINAL_STATES = new Set(['closed', 'declined']);
+  // States where closure actions (report/waive) are semantically valid.
+  // Only cases that have been fixed (or already reported) should accept closure actions.
+  const CLOSURE_VALID_STATES = new Set(['fixed', 'reported']);
+
+  app.post('/api/community-issues/:id/report', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const item = await communityIssueStore.get(id);
+    if (!item) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+
+    if (!opts.eventLog || !opts.projector) {
+      reply.status(501);
+      return { error: 'Community event log or projector not configured — closure endpoints require both' };
+    }
+
+    // State guard: derive effective state from projection (preferred) or legacy item.state (fallback).
+    // Handles: objectStore present+projection found, objectStore present+no projection, objectStore absent.
+    const subjectKey = `issue:${item.repo}#${item.issueNumber}`;
+    const projState = opts.objectStore ? (await opts.objectStore.get(subjectKey))?.state : undefined;
+    const effectiveState = projState ?? item.state;
+
+    if (effectiveState) {
+      if (CLOSURE_TERMINAL_STATES.has(effectiveState)) {
+        reply.status(409);
+        return { error: `Cannot report on a ${effectiveState} case — terminal state` };
+      }
+      if (!CLOSURE_VALID_STATES.has(effectiveState)) {
+        reply.status(409);
+        return { error: `Cannot report on a ${effectiveState} case — closure actions require fixed or reported state` };
+      }
+    }
+
+    const parsed = reportSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid payload', details: parsed.error.issues };
+    }
+    const at = Date.now();
+    const communityEvent: CommunityEvent = {
+      sourceEventId: `report:${id}:${at}`,
+      subjectKey,
+      kind: 'case.reported',
+      classification: 'state-changing',
+      payload: {
+        publicCommentUrl: parsed.data.publicCommentUrl,
+        actor: parsed.data.actor,
+        reportedAt: at,
+      },
+      at,
+    };
+
+    const { appended } = await opts.eventLog.append(communityEvent);
+    if (appended) {
+      await opts.projector.apply(communityEvent);
+    }
+
+    return { subjectKey, appended, eventId: communityEvent.sourceEventId };
+  });
+
+  // POST /api/community-issues/:id/waive-closure
+  // Appends case.waived event with required reason/actor/evidence.
+  // Waiver does NOT change case state — it satisfies the closure invariant
+  // so that fixed→closed can proceed without a public comment.
+  const waiveClosureSchema = z.object({
+    reason: z.string().min(1),
+    actor: z.string().min(1),
+    evidence: z.string().min(1),
+  });
+
+  app.post('/api/community-issues/:id/waive-closure', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const item = await communityIssueStore.get(id);
+    if (!item) {
+      reply.status(404);
+      return { error: 'Community issue not found' };
+    }
+
+    if (!opts.eventLog || !opts.projector) {
+      reply.status(501);
+      return { error: 'Community event log or projector not configured — closure endpoints require both' };
+    }
+
+    // State guard: derive effective state from projection (preferred) or legacy item.state (fallback).
+    const subjectKey = `issue:${item.repo}#${item.issueNumber}`;
+    const projState = opts.objectStore ? (await opts.objectStore.get(subjectKey))?.state : undefined;
+    const effectiveState = projState ?? item.state;
+
+    if (effectiveState) {
+      if (CLOSURE_TERMINAL_STATES.has(effectiveState)) {
+        reply.status(409);
+        return { error: `Cannot waive closure on a ${effectiveState} case — terminal state` };
+      }
+      if (!CLOSURE_VALID_STATES.has(effectiveState)) {
+        reply.status(409);
+        return {
+          error: `Cannot waive closure on a ${effectiveState} case — closure actions require fixed or reported state`,
+        };
+      }
+    }
+
+    const parsed = waiveClosureSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid payload — reason, actor, and evidence are all required', details: parsed.error.issues };
+    }
+    const at = Date.now();
+    const communityEvent: CommunityEvent = {
+      sourceEventId: `waive:${id}:${at}`,
+      subjectKey,
+      kind: 'case.waived',
+      classification: 'state-changing',
+      payload: {
+        reason: parsed.data.reason,
+        actor: parsed.data.actor,
+        evidence: parsed.data.evidence,
+        waivedAt: at,
+      },
+      at,
+    };
+
+    const { appended } = await opts.eventLog.append(communityEvent);
+    if (appended) {
+      await opts.projector.apply(communityEvent);
+    }
+
+    return { subjectKey, appended, eventId: communityEvent.sourceEventId };
+  });
+
   // ── F168 Phase B Task 6: awaiting_external endpoint ──────────────────────────
   // POST /api/community-issues/:subjectKey/await-external
   // Declares that the owner is waiting for an external response.
@@ -878,7 +1217,25 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       ? [...new Set((await opts.communityPrStore.listAll()).map((p) => p.repo))]
       : [];
 
-    const repos = [...new Set([...issueRepos, ...prRepos, ...communityPrRepos])].sort();
+    const projectionRepos: string[] = [];
+    if (opts.objectStore) {
+      try {
+        const subjectKeys = await opts.objectStore.listSubjectKeys();
+        for (const subjectKey of subjectKeys) {
+          const parsedIssue = parseIssueSubjectKey(subjectKey);
+          if (parsedIssue) {
+            projectionRepos.push(parsedIssue.repoFullName);
+            continue;
+          }
+          const parsedPr = parsePrSubjectKey(subjectKey);
+          if (parsedPr) projectionRepos.push(parsedPr.repoFullName);
+        }
+      } catch {
+        /* best-effort: repo discovery should keep legacy sources available */
+      }
+    }
+
+    const repos = [...new Set([...issueRepos, ...prRepos, ...communityPrRepos, ...projectionRepos])].sort();
     return { repos };
   });
 
@@ -972,6 +1329,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               projectionState: proj.state,
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
+              closureChecklist: computeClosureChecklist(proj),
             };
           } catch {
             return issue;
@@ -1020,6 +1378,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               projectionState: proj.state,
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
+              closureChecklist: computeClosureChecklist(proj),
             });
           } catch {
             /* best-effort */
@@ -1042,6 +1401,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               projectionState: proj.state,
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
+              closureChecklist: computeClosureChecklist(proj),
             };
           } catch {
             return item;
@@ -1087,6 +1447,7 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
               projectionState: proj.state,
               nextOwner: proj.nextOwner,
               closureWaiver: proj.closureWaiver,
+              closureChecklist: computeClosureChecklist(proj),
             });
           } catch {
             /* best-effort */
@@ -1096,9 +1457,62 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
         /* best-effort: listSubjectKeys failure must not break the board */
       }
 
-      return { repo, issues: enrichedIssues, prItems: enrichedPrItems };
+      const finalIssues = enrichedIssues;
+      const finalPrItems = enrichedPrItems;
+
+      // AC-F6: resolve thread names for board display
+      if (opts.threadStore) {
+        const threadIds = [...new Set(finalIssues.map((i) => i.assignedThreadId).filter(Boolean) as string[])];
+        const threadNameMap = new Map<string, string | null>();
+        await Promise.all(
+          threadIds.map(async (tid) => {
+            try {
+              const thread = await opts.threadStore!.get(tid);
+              threadNameMap.set(tid, thread?.title ?? null);
+            } catch {
+              threadNameMap.set(tid, null);
+            }
+          }),
+        );
+        const issuesWithThreadNames = finalIssues.map((issue) => ({
+          ...issue,
+          assignedThreadName: issue.assignedThreadId ? (threadNameMap.get(issue.assignedThreadId) ?? null) : null,
+        }));
+        return { repo, issues: issuesWithThreadNames, prItems: finalPrItems };
+      }
+
+      return { repo, issues: finalIssues, prItems: finalPrItems };
+    }
+
+    // No objectStore path — still resolve thread names if threadStore available
+    if (opts.threadStore) {
+      const threadIds = [...new Set(issues.map((i) => i.assignedThreadId).filter(Boolean) as string[])];
+      const threadNameMap = new Map<string, string | null>();
+      await Promise.all(
+        threadIds.map(async (tid) => {
+          try {
+            const thread = await opts.threadStore!.get(tid);
+            threadNameMap.set(tid, thread?.title ?? null);
+          } catch {
+            threadNameMap.set(tid, null);
+          }
+        }),
+      );
+      const issuesWithThreadNames = issues.map((issue) => ({
+        ...issue,
+        assignedThreadName: issue.assignedThreadId ? (threadNameMap.get(issue.assignedThreadId) ?? null) : null,
+      }));
+      return { repo, issues: issuesWithThreadNames, prItems };
     }
 
     return { repo, issues, prItems };
+  });
+
+  await app.register(communityDecisionQueueRoutes, {
+    communityIssueStore,
+    taskStore,
+    communityPrStore: opts.communityPrStore,
+    objectStore: opts.objectStore,
+    findingStore: opts.findingStore,
   });
 };

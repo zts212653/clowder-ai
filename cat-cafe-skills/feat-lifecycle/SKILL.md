@@ -79,6 +79,11 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
    并在 spec 中补一节：`## 需求点 Checklist`（模板见 `cat-cafe-skills/refs/requirements-checklist-template.md`）
 
+   **F244 Tips Contribution**：若 feature 有用户可见能力/工作流变化，在 spec 中保留 `## Tips Contribution（F244）`：
+   - 计划新增/更新 1-2 条 tips，指向现有 truth source。
+   - 或写 `tips_exempt: {reason}`（仅纯内部重构/无用户可感知变化）。
+   - 这是贡献门，不是数量门；真正有用性由 reviewer 判断，CI 只守 sourceRef/context/action/anchor。
+
 3. **更新 ROADMAP.md**：末尾加 `| F042 | 名称 | spec | Owner | {source} | [F042](features/...) |`
    - Source 列：`internal`（内部立项）或 `community [#xx](url)`（社区 issue 立项，附链接）
 

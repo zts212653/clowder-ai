@@ -102,6 +102,28 @@ describe('ReviewFeedbackRouter', () => {
     assert.equal(messageMock.messages.length, 0);
   });
 
+  it('delivers audit-only repair notifications', async () => {
+    const router = createRouter();
+    const result = await router.route(
+      {
+        repoFullName: 'owner/repo',
+        prNumber: 42,
+        routingAudit: {
+          kind: 'legacy-auto-rotated-repaired',
+          previousThreadId: 'thread_rotated_1',
+          repairedThreadId: 'th-original',
+        },
+        newComments: [],
+        newDecisions: [],
+      },
+      tracking,
+    );
+
+    assert.equal(result.kind, 'notified');
+    assert.equal(messageMock.messages.length, 1);
+    assert.ok(messageMock.messages[0].content.includes('PR review feedback 路由异常已修复'));
+  });
+
   it('broadcasts socket event', async () => {
     const router = createRouter();
     await router.route(
@@ -131,6 +153,62 @@ describe('ReviewFeedbackRouter', () => {
 });
 
 describe('buildReviewFeedbackContent', () => {
+  it('prepends routing anomaly audit when a legacy rotated task was repaired', () => {
+    const content = buildReviewFeedbackContent({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      routingAudit: {
+        kind: 'legacy-auto-rotated-repaired',
+        previousThreadId: 'thread_rotated_1',
+        repairedThreadId: 'th-original',
+      },
+      newDecisions: [],
+      newComments: [
+        {
+          id: 1,
+          author: 'bot',
+          body: 'Review feedback',
+          createdAt: '2026-06-18',
+          commentType: 'conversation',
+        },
+      ],
+    });
+
+    assert.match(content.split('\n')[0], /⚠️ \*\*PR review feedback 路由异常已修复\*\*/);
+    assert.ok(content.includes('task 指向 auto-rotated thread `thread_rotated_1`'));
+    assert.ok(content.includes('已修回注册 thread `th-original`'));
+    assert.ok(content.includes('📋 **Review Feedback**'), 'audit must not replace the normal feedback payload');
+  });
+
+  it('keeps severity header first when routing audit is also present', () => {
+    const content = buildReviewFeedbackContent({
+      repoFullName: 'owner/repo',
+      prNumber: 42,
+      routingAudit: {
+        kind: 'legacy-auto-rotated-repaired',
+        previousThreadId: 'thread_rotated_1',
+        repairedThreadId: 'th-original',
+      },
+      newDecisions: [],
+      newComments: [
+        {
+          id: 1,
+          author: 'chatgpt-codex-connector[bot]',
+          body: '![P1 Badge](https://img.shields.io/badge/P1-red?style=flat) Important issue',
+          createdAt: '2026-06-18',
+          commentType: 'inline',
+        },
+      ],
+    });
+
+    const lines = content.split('\n');
+    assert.match(lines[0], /\*\*Review 检测到 P1\*\*/);
+    assert.ok(
+      lines.findIndex((line) => line.includes('PR review feedback 路由异常已修复')) > 0,
+      'audit should remain visible after the severity header',
+    );
+  });
+
   it('renders three-section format (OQ-2)', () => {
     const content = buildReviewFeedbackContent({
       repoFullName: 'owner/repo',

@@ -5,6 +5,7 @@
  * it for system prompt injection when dispatching cats to external projects.
  */
 import type { DispatchMissionPack } from '@cat-cafe/shared';
+import { renderSegment } from '../../domains/cats/services/context/prompt-template-loader.js';
 
 export interface ThreadContext {
   title?: string | undefined;
@@ -28,29 +29,20 @@ export function buildMissionPack(thread: ThreadContext): DispatchMissionPack {
 
 /**
  * Format mission pack as a prompt block for system prompt injection.
+ * Template: assets/prompt-templates/m1-dispatch-mission.md
  */
 export function formatMissionPackPrompt(pack: DispatchMissionPack): string {
-  const lines = [
-    '## Dispatch Mission Context',
-    '',
-    `mission:    ${pack.mission}`,
-    `work_item:  ${pack.workItem}`,
-    `phase:      ${pack.phase}`,
-  ];
+  const doneWhenBlock =
+    pack.doneWhen.length > 0 ? ['done_when:', ...pack.doneWhen.map((c) => `  - ${c}`)].join('\n') : '';
+  const linksBlock = pack.links.length > 0 ? ['links:', ...pack.links.map((l) => `  - ${l}`)].join('\n') : '';
 
-  if (pack.doneWhen.length > 0) {
-    lines.push('done_when:');
-    for (const criterion of pack.doneWhen) {
-      lines.push(`  - ${criterion}`);
-    }
-  }
-
-  if (pack.links.length > 0) {
-    lines.push('links:');
-    for (const link of pack.links) {
-      lines.push(`  - ${link}`);
-    }
-  }
-
-  return lines.join('\n');
+  return (
+    renderSegment('M1', {
+      MISSION: pack.mission,
+      WORK_ITEM: pack.workItem,
+      PHASE: pack.phase,
+      DONE_WHEN_BLOCK: doneWhenBlock,
+      LINKS_BLOCK: linksBlock,
+    }) ?? ''
+  );
 }

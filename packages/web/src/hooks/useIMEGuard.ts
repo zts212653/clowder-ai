@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /**
  * Guard against IME composition Enter triggering form submit.
@@ -19,21 +19,38 @@ import { useCallback, useRef } from 'react';
 export function useIMEGuard() {
   const composingRef = useRef(false);
   const rafRef = useRef(0);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const onCompositionStart = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
     composingRef.current = true;
   }, []);
 
   const onCompositionEnd = useCallback(() => {
-    // Delay clearing by one frame so the subsequent keydown(Enter)
-    // in Chrome still sees composingRef === true.
+    // Delay clearing by one frame + one timer turn. In browser Chrome the Enter
+    // that confirms IME candidates can arrive immediately after compositionend;
+    // in test/jsdom some environments flush rAF aggressively, so we keep the ref
+    // alive until the next macrotask to avoid same-turn false negatives.
     rafRef.current = requestAnimationFrame(() => {
-      composingRef.current = false;
+      timeoutRef.current = setTimeout(() => {
+        composingRef.current = false;
+        timeoutRef.current = null;
+      }, 0);
     });
   }, []);
 
   const isComposing = useCallback(() => composingRef.current, []);
+
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   return { onCompositionStart, onCompositionEnd, isComposing } as const;
 }

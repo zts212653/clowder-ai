@@ -10,7 +10,7 @@
  * 默认持久化；用户可见状态禁止默认 TTL（LL-048）。
  */
 
-import type { CatId, ThreadPhase } from '@cat-cafe/shared';
+import type { CatId, ThreadKind, ThreadPhase } from '@cat-cafe/shared';
 import { generateThreadId } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
@@ -578,8 +578,8 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
-  /** F229: Set or clear threadKind marker for concierge thread. */
-  async updateThreadKind(threadId: string, kind: 'concierge' | null): Promise<void> {
+  /** F229 / F167: Set or clear threadKind marker for concierge / gate-keeping thread. */
+  async updateThreadKind(threadId: string, kind: ThreadKind | null): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (kind === null) {
       await this.deleteDetailFields(key, 'threadKind');
@@ -599,7 +599,7 @@ export class RedisThreadStore implements IThreadStore {
 
   async updatePreferredWorkspaceMode(
     threadId: string,
-    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | null,
+    mode: 'dev' | 'recall' | 'schedule' | 'tasks' | 'community' | 'artifacts' | 'approval' | 'trajectory' | null,
   ): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     if (mode === null) {
@@ -1208,7 +1208,16 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
-    const validModes = new Set(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts']);
+    const validModes = new Set([
+      'dev',
+      'recall',
+      'schedule',
+      'tasks',
+      'community',
+      'artifacts',
+      'approval',
+      'trajectory',
+    ]);
     if (data.preferredWorkspaceMode && validModes.has(data.preferredWorkspaceMode)) {
       result.preferredWorkspaceMode = data.preferredWorkspaceMode as Thread['preferredWorkspaceMode'];
     }
@@ -1222,9 +1231,9 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
-    // F229: Restore concierge thread marker (written by updateThreadKind; validate value)
-    if (data.threadKind === 'concierge') {
-      result.threadKind = 'concierge';
+    // F229 / F167: Restore thread kind marker (written by updateThreadKind; validate value)
+    if (data.threadKind === 'concierge' || data.threadKind === 'gate-keeping') {
+      result.threadKind = data.threadKind;
     }
     return result;
   }

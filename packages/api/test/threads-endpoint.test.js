@@ -815,6 +815,35 @@ describe('Thread API', () => {
     });
     assert.equal(res.statusCode, 400);
   });
+
+  // 砚砚 re-review P2 regression: F233 Phase C C3 trajectory mode end-to-end through
+  // PATCH route + ThreadStore. Without trajectory in route schema / Thread union /
+  // RedisThreadStore validModes, thread-driven auto-open to trajectory panel blocked.
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: trajectory (F233 C3)', async () => {
+    const thread = threadStore.create('alice', 'F188 提包球 Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'trajectory' },
+    });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.preferredWorkspaceMode, 'trajectory');
+    const fetched = await app.inject({ method: 'GET', url: `/api/threads/${thread.id}` });
+    assert.equal(JSON.parse(fetched.body).preferredWorkspaceMode, 'trajectory');
+  });
+
+  // F246 approval-hub regression (was also missing from route schema before this fix)
+  it('PATCH /api/threads/:id accepts preferredWorkspaceMode: approval (F246)', async () => {
+    const thread = threadStore.create('alice', 'F246 Approval Thread');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { preferredWorkspaceMode: 'approval' },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).preferredWorkspaceMode, 'approval');
+  });
 });
 
 describe('Thread soft-delete preserves data (Phase D)', () => {

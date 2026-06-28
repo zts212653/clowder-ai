@@ -4,7 +4,13 @@
  * AC-A7: classifyArtifactView — 产物按 type/数据可用性分发到内容查看策略。
  */
 import { describe, expect, it } from 'vitest';
-import { artifactRowMeta, classifyArtifactView, prRefToUrl, resolveAssetUrl } from '../artifacts/artifact-view';
+import {
+  artifactActionLabel,
+  artifactRowMeta,
+  classifyArtifactView,
+  prRefToUrl,
+  resolveAssetUrl,
+} from '../artifacts/artifact-view';
 
 describe('F232 AC-A5 artifactRowMeta — catId 昵称映射 + 相对时间', () => {
   const resolveNickname = (id: string): string | undefined =>
@@ -56,6 +62,26 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
     expect(classifyArtifactView({ type: 'code', name: 'a.ts', ref: 'src/a.ts' })).toBe('text');
   });
 
+  it('code 脚本扩展名(.ps1/.bat/.pl) → text (ledger-only source preview)', () => {
+    expect(classifyArtifactView({ type: 'code', name: 'install.ps1', ref: 'scripts/install.ps1' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'start.bat', ref: 'scripts/start.bat' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: '_sanitize-rules.pl', ref: 'scripts/_sanitize-rules.pl' })).toBe(
+      'text',
+    );
+  });
+
+  it('code 源文件扩展名与 API 分类名单保持同步 → text', () => {
+    expect(classifyArtifactView({ type: 'code', name: 'index.html', ref: 'packages/web/index.html' })).toBe('text');
+    expect(
+      classifyArtifactView({ type: 'code', name: 'CaptureAppAudio.swift', ref: 'Sources/CaptureAppAudio.swift' }),
+    ).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'MainActivity.kt', ref: 'app/MainActivity.kt' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Plugin.scala', ref: 'project/Plugin.scala' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Widget.vue', ref: 'src/Widget.vue' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'Panel.svelte', ref: 'src/Panel.svelte' })).toBe('text');
+    expect(classifyArtifactView({ type: 'code', name: 'theme.less', ref: 'styles/theme.less' })).toBe('text');
+  });
+
   it('file 二进制扩展名(.pdf) + url → download', () => {
     expect(classifyArtifactView({ type: 'file', name: '报告.pdf', url: '/uploads/r.pdf' })).toBe('download');
   });
@@ -93,6 +119,41 @@ describe('F232 AC-A7 classifyArtifactView — 产物 → 内容查看策略', ()
 
   it('video 无 url → fallback', () => {
     expect(classifyArtifactView({ type: 'video', name: 'missing.mp4' })).toBe('fallback');
+  });
+
+  // F232 polish: widget type support
+  it('widget → fallback (跳回原消息看内容)', () => {
+    expect(classifyArtifactView({ type: 'widget', name: '架构图' })).toBe('fallback');
+  });
+});
+
+describe('F232 polish: artifactActionLabel — 类型化按钮文案', () => {
+  it('audio → 播放', () => {
+    expect(artifactActionLabel('audio')).toBe('播放');
+  });
+
+  it('video → 播放', () => {
+    expect(artifactActionLabel('video')).toBe('播放');
+  });
+
+  it('file → 打开', () => {
+    expect(artifactActionLabel('file')).toBe('打开');
+  });
+
+  it('image → 打开', () => {
+    expect(artifactActionLabel('image')).toBe('打开');
+  });
+
+  it('code → 打开', () => {
+    expect(artifactActionLabel('code')).toBe('打开');
+  });
+
+  it('pr → 打开', () => {
+    expect(artifactActionLabel('pr')).toBe('打开');
+  });
+
+  it('widget → 打开', () => {
+    expect(artifactActionLabel('widget')).toBe('打开');
   });
 });
 

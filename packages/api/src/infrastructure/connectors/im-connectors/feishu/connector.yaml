@@ -45,7 +45,7 @@ config:
     type: operation
     label: 飞书扫码授权
     required: false
-    target: [FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_CONNECTION_MODE]
+    target: [FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_CONNECTION_MODE, FEISHU_VERIFICATION_TOKEN]
     actions:
       - id: qr-generate
         label: 生成二维码

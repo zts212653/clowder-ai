@@ -79,7 +79,7 @@ Clowder 不绑定模型。当前支持的 Agent CLI / adapter：
 
 ### 方式 B：源码安装
 
-**前置要求：** [Node.js 20+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
+**前置要求：** [Node.js 24+](https://nodejs.org/) · [pnpm 9+](https://pnpm.io/) · [Redis 7+](https://redis.io/) *（可选 — 用 `--memory` 跳过）* · Git
 
 ```bash
 # 1. 克隆

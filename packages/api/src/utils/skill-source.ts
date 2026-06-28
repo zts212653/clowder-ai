@@ -16,7 +16,7 @@ function resolveCurrentWorktreeSkillsSource(): string {
   return resolve(process.cwd(), 'cat-cafe-skills');
 }
 
-/** Canonical Cat Cafe skill source used by capability writeback and drift resolution. */
+/** Canonical Clowder AI skill source used by capability writeback and drift resolution. */
 export async function resolveCatCafeSkillsSource(): Promise<string> {
   return resolveCurrentWorktreeSkillsSource();
 }

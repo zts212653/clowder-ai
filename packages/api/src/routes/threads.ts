@@ -19,11 +19,13 @@ import {
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { TranscriptWriter } from '../domains/cats/services/session/TranscriptWriter.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
 import type {
@@ -39,6 +41,7 @@ import { resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
 const log = createModuleLogger('routes/threads');
+const WRITE_OPS = new Set(['edit', 'create', 'delete']);
 
 interface ThreadIndexBuilder {
   markThreadDirty(threadId: string): void;
@@ -71,12 +74,49 @@ export interface ThreadsRoutesOptions {
   labelStore?: ILabelStore;
   /** F102: keep thread evidence search in sync after title-only updates */
   indexBuilder?: ThreadIndexBuilder;
+  /** F232: active session lookup for pre-seal file artifact visibility. */
+  sessionChainStore?: ISessionChainStore;
+  /** F232: in-memory transcript buffer reader for pre-seal file artifact visibility. */
+  transcriptWriter?: TranscriptWriter;
   /**
    * F229: Reserved — no longer used by GET /api/threads.
    * createdBy=userId (P1 fix) means threadStore.list(userId) already returns concierge threads;
    * threadKind='concierge' filter handles default exclusion / includeConcierge=true inclusion.
    */
   conciergeThreadService?: import('../domains/concierge/ConciergeThreadService.js').ConciergeThreadService;
+}
+
+async function collectLiveFileLedger(
+  sessionChainStore: ISessionChainStore | undefined,
+  transcriptWriter: TranscriptWriter | undefined,
+  threadId: string,
+  userId: string,
+): Promise<Array<{ ref: string; label: string; updatedAt: number; updatedBy: string }>> {
+  if (!sessionChainStore || !transcriptWriter) return [];
+
+  try {
+    const sessions = await Promise.resolve(sessionChainStore.getChainByThread(threadId));
+    const activeSessions = sessions.filter((session) => session.status === 'active' && session.userId === userId);
+    const fileArrays = await Promise.all(
+      activeSessions.map(async (session) => {
+        const files = await transcriptWriter.getFilesTouched(session.id, {
+          threadId,
+          catId: session.catId,
+        });
+        return files
+          .filter((file) => file.ops.some((op) => WRITE_OPS.has(op)))
+          .map((file) => ({
+            ref: file.path,
+            label: file.path.split('/').pop() ?? file.path,
+            updatedAt: session.updatedAt,
+            updatedBy: session.catId,
+          }));
+      }),
+    );
+    return fileArrays.flat();
+  } catch {
+    return [];
+  }
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -248,7 +288,7 @@ const updateThreadSchema = z
     bubbleCli: z.enum(['global', 'expanded', 'collapsed']).optional(),
     /** F168: Preferred workspace mode for auto-switch on thread open. null clears. */
     preferredWorkspaceMode: z
-      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts'])
+      .enum(['dev', 'recall', 'schedule', 'tasks', 'community', 'artifacts', 'approval', 'trajectory'])
       .nullable()
       .optional(),
     /** F187: Thread label IDs. */
@@ -734,9 +774,11 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     const prTasks = allTasks.filter((t) => t.kind === 'pr_tracking' && t.userId === userId);
     const mem = await threadStore.getThreadMemory(threadId);
     // P1 fix (砚砚 review): ledger 含 file/plan/feature-doc 文档产物（F148 类型），不止 file；都映射为面板 file 类，不静默丢
-    const fileLedger = (mem?.recentArtifacts ?? []).filter(
+    const persistedFileLedger = (mem?.recentArtifacts ?? []).filter(
       (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
     );
+    const liveFileLedger = await collectLiveFileLedger(opts.sessionChainStore, opts.transcriptWriter, threadId, userId);
+    const fileLedger = [...persistedFileLedger, ...liveFileLedger];
     const artifacts = aggregateThreadArtifacts({ messages, prTasks, fileLedger });
     return { threadId, artifacts };
   });
@@ -762,7 +804,11 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
         const fileLedger = (mem?.recentArtifacts ?? []).filter(
           (a) => a.type === 'file' || a.type === 'plan' || a.type === 'feature-doc',
         );
-        const artifacts = aggregateThreadArtifacts({ messages, prTasks, fileLedger });
+        const artifacts = aggregateThreadArtifacts({
+          messages,
+          prTasks,
+          fileLedger,
+        });
         return artifacts.map((a) => ({
           ...a,
           threadId: thread.id,

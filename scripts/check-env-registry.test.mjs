@@ -64,9 +64,6 @@ const ALLOWLIST = new Map([
   ['WECOM_AGENT_SECRET', 'F240: defined in connectors/wecom/connector.yaml'],
   ['WECOM_TOKEN', 'F240: defined in connectors/wecom/connector.yaml'],
   ['WECOM_ENCODING_AES_KEY', 'F240: defined in connectors/wecom/connector.yaml'],
-  ['GITHUB_AUTHORITATIVE_REVIEW_LOGINS', 'F240: deprecated, defined in plugins/github/plugin.yaml'],
-  ['GITHUB_SETUP_NOISE_BOT_LOGINS', 'F240: defined in plugins/github/plugin.yaml'],
-  ['GITHUB_TOKEN', 'F240: defined in plugins/github/plugin.yaml'],
 ]);
 
 // ── Extract registered names from env-registry.ts ──

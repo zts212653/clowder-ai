@@ -831,7 +831,7 @@ describe('Skills Route', () => {
     }
   });
 
-  it('GET /api/skills ignores same-id plugin capabilities for Cat Cafe source skill policy', async () => {
+  it('GET /api/skills ignores same-id plugin capabilities for Clowder AI source skill policy', async () => {
     // Use 'feat-lifecycle' — confirmed globally enabled in real config.
     // Avoids test env pollution from disabled skills in .cat-cafe/capabilities.json.
     const skillName = 'feat-lifecycle';
@@ -841,7 +841,7 @@ describe('Skills Route', () => {
 
     await Promise.all([mkdir(projectDir, { recursive: true }), mkdir(homeDir, { recursive: true })]);
     // Seed project config with a disabled same-id plugin entry.
-    // The test verifies the plugin disable doesn't leak into the Cat Cafe source skill.
+    // The test verifies the plugin disable doesn't leak into the Clowder AI source skill.
     await writeCapabilitiesConfig(projectDir, {
       version: 2,
       capabilities: [
@@ -871,10 +871,10 @@ describe('Skills Route', () => {
       assert.equal(res.statusCode, 200);
       const body = JSON.parse(res.body);
       const target = body.skills.find((skill) => skill.name === skillName && skill.source === 'cat-cafe');
-      assert.ok(target, `${skillName} Cat Cafe source skill should still be listed`);
+      assert.ok(target, `${skillName} Clowder AI source skill should still be listed`);
       assert.equal(target.source, 'cat-cafe');
-      assert.equal(target.globalEnabled, true, 'same-id plugin disable must not disable Cat Cafe skill');
-      assert.deepEqual(target.mountPaths, [], 'unmounted Cat Cafe skill should report actual mounted providers');
+      assert.equal(target.globalEnabled, true, 'same-id plugin disable must not disable Clowder AI skill');
+      assert.deepEqual(target.mountPaths, [], 'unmounted Clowder AI skill should report actual mounted providers');
       assert.deepEqual(target.mountHealth, {
         enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
         mountedCount: 0,
@@ -935,6 +935,93 @@ describe('Skills Route', () => {
         true,
         'enabled skills should still be mounted',
       );
+    } finally {
+      await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
+      await rm(projectDir, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('POST /api/skills/sync clears project-local mountPaths:[] disable when global skill is enabled (F228 KD-6 Path A affirmative)', async () => {
+    // Affirmative regression test for KD-6 unconditional cascade.
+    //
+    // Scenario: external project has skill X locally disabled (mountPaths:[]),
+    // global state has skill X enabled. Per KD-6 (operator/mindfn IM sync 2026-06-17 +
+    // F228 spec scenarios 6/7), ANY caller passing authoritative disabledSkills
+    // must clear the local mountPaths:[] — including plain reconciliation paths
+    // (POST /api/skills/sync, /api/skills/sync-skill, mount-rule edits), not just
+    // explicit global toggle.
+    //
+    // This locks the behavior as test-enforced contract so future reviewers don't
+    // re-raise the same P1 frame about "plain reconciliation re-enabling local disable"
+    // (cloud codex 8 rounds on clowder-ai#962; @gpt52 砚砚 on cat-cafe#2391, both
+    // withdrew after KD-6 design context).
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = join('/tmp', `skills-route-kd6-affirmative-main-${Date.now()}`);
+    const projectDir = join('/tmp', `skills-route-kd6-affirmative-${Date.now()}`);
+    await mkdir(mainRoot, { recursive: true });
+    await mkdir(projectDir, { recursive: true });
+    // global state: tdd enabled with default mount paths
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'tdd',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+    // external project state: tdd locally disabled via mountPaths:[]
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'tdd',
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: [],
+        },
+      ],
+    });
+
+    const app = await buildSessionSkillsApp({ mainProjectRoot: mainRoot });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/skills/sync',
+        headers: OWNER_SESSION_HEADERS,
+        payload: { projectPath: projectDir },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+
+      // KD-6 Path A: plain sync clears local mountPaths:[] disable, mounts skill
+      const projectConfig = await readCapabilitiesConfig(projectDir);
+      const tdd = projectConfig?.capabilities.find(
+        (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && cap.id === 'tdd',
+      );
+      assert.ok(tdd, 'tdd capability must be present in project config after sync');
+      assert.ok(
+        Array.isArray(tdd.mountPaths) && tdd.mountPaths.length > 0,
+        `KD-6: local mountPaths:[] must be cleared on plain sync; got ${JSON.stringify(tdd.mountPaths)}`,
+      );
+
+      // Filesystem symlinks must exist for all default mount points
+      for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+        const link = join(projectDir, `.${provider}/skills/tdd`);
+        assert.equal(
+          (await lstat(link)).isSymbolicLink(),
+          true,
+          `KD-6: ${provider} symlink must exist after unconditional cascade clears local disable`,
+        );
+      }
     } finally {
       await app.close();
       await rm(mainRoot, { recursive: true, force: true });
@@ -1464,7 +1551,7 @@ describe('Skills Route', () => {
     }
   });
 
-  it('POST /api/skills/sync converts legacy Cat Cafe directory mounts before plugin sync', async () => {
+  it('POST /api/skills/sync converts legacy Clowder AI directory mounts before plugin sync', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const mainRoot = join('/tmp', `skills-route-test-plugin-sync-legacy-root-main-${Date.now()}`);
@@ -1515,11 +1602,11 @@ describe('Skills Route', () => {
 
       assert.equal(res.statusCode, 200, res.payload);
       const rootStat = await lstat(providerRoot);
-      assert.equal(rootStat.isDirectory(), true, 'legacy Cat Cafe root should become a real provider directory');
-      assert.equal(rootStat.isSymbolicLink(), false, 'legacy Cat Cafe directory symlink should be converted');
+      assert.equal(rootStat.isDirectory(), true, 'legacy Clowder AI root should become a real provider directory');
+      assert.equal(rootStat.isSymbolicLink(), false, 'legacy Clowder AI directory symlink should be converted');
 
       const catCafeSkillLink = join(providerRoot, 'debugging');
-      assert.equal((await lstat(catCafeSkillLink)).isSymbolicLink(), true, 'Cat Cafe skills should remain mounted');
+      assert.equal((await lstat(catCafeSkillLink)).isSymbolicLink(), true, 'Clowder AI skills should remain mounted');
       assert.equal(
         resolve(dirname(catCafeSkillLink), await readlink(catCafeSkillLink)),
         resolve(sourceSkillsDir, 'debugging'),

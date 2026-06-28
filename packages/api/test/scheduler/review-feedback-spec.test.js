@@ -212,7 +212,7 @@ describe('ReviewFeedbackTaskSpec', () => {
 
     let cursorCommitted = false;
     const signal = {
-      task: mockTaskItem,
+      repairedTask: mockTaskItem,
       repoFullName: 'owner/repo',
       prNumber: 42,
       newComments: [{ id: 1, author: 'alice', body: 'hi', createdAt: '2026-01-01', commentType: 'conversation' }],
@@ -254,11 +254,17 @@ describe('ReviewFeedbackTaskSpec', () => {
       commitCursor: () => {},
     };
 
-    await spec.run.execute({ ...baseSignal, task: mockTaskItem }, 'pr:owner/repo#42');
+    await spec.run.execute({ ...baseSignal, repairedTask: mockTaskItem }, 'pr:owner/repo#42');
     await spec.run.execute(
       {
         ...baseSignal,
-        task: mockTask({ repoFullName: 'owner/repo', prNumber: 42, catId: 'codex', threadId: 'th-1', userId: 'u-1' }),
+        repairedTask: mockTask({
+          repoFullName: 'owner/repo',
+          prNumber: 42,
+          catId: 'codex',
+          threadId: 'th-1',
+          userId: 'u-1',
+        }),
       },
       'pr:owner/repo#42',
     );
@@ -286,7 +292,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     });
 
     const signal = {
-      task: mockTaskItem,
+      repairedTask: mockTaskItem,
       repoFullName: 'owner/repo',
       prNumber: 42,
       newComments: [],
@@ -557,7 +563,7 @@ describe('ReviewFeedbackTaskSpec', () => {
 
     let cursorCommitted = false;
     const signal = {
-      task: mockTaskItem,
+      repairedTask: mockTaskItem,
       repoFullName: 'owner/repo',
       prNumber: 42,
       newComments: [],
@@ -1004,8 +1010,7 @@ describe('ReviewFeedbackTaskSpec', () => {
     assert.equal(gateResult.run, true);
     await spec.run.execute(gateResult.workItems[0].signal, 'pr:owner/repo#42', {});
 
-    // Verify patchAutomationState was called with correct cursor values
-    // #949: now 2 calls — cursor commit + completedReviewCount increment
+    // Verify patchAutomationState was called with correct cursor values.
     assert.ok(store._patchCalls.length >= 1, 'should have at least 1 patchAutomationState call');
     const cursorCall = store._patchCalls.find((c) => c.patch.review?.lastCommentCursor !== undefined);
     assert.ok(cursorCall, 'should have a cursor commit patch');

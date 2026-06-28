@@ -14,6 +14,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
 import { getThreadLiveInvocations } from '../domains/cats/services/agents/invocation/getThreadLiveInvocations.js';
 import {
   type InvocationQueue,
@@ -59,6 +60,8 @@ export interface QueueRoutesOptions {
    *  for backward compat in tests. */
   invocationRecordStore?: IInvocationRecordStore;
   draftStore?: IDraftStore;
+  /** F233 PR3: ball-custody event sink for zombie reconciliation side effects. */
+  ballCustody?: IBallCustodyIngest;
   /** F194 AC-B7: when helper detects zombies, reconcileZombies clears their
    *  TaskProgress snapshot so the frontend doesn't show phantom progress. Optional —
    *  cleanup still marks records `failed` even without this. */
@@ -137,6 +140,7 @@ async function resolveActiveInvocations(
   draftStore: IDraftStore | undefined,
   log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
   taskProgressStore?: TaskProgressStore,
+  ballCustody?: IBallCustodyIngest,
   invocationRegistry?: QueueRoutesOptions['invocationRegistry'],
 ): Promise<Array<{ catId: string; startedAt: number }>> {
   if (!recordStore || !draftStore) {
@@ -179,6 +183,7 @@ async function resolveActiveInvocations(
       void reconcileZombies(result.zombies, {
         invocationRecordStore: recordStore,
         taskProgressStore,
+        ballCustody,
         log,
       }).catch((err) => log.warn({ err, feature: 'F194' }, 'reconcileZombies failed'));
     }
@@ -227,6 +232,7 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       opts.draftStore,
       request.log,
       opts.taskProgressStore,
+      opts.ballCustody,
       opts.invocationRegistry,
     );
     const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);

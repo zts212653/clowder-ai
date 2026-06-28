@@ -78,6 +78,12 @@ export interface ITaskStore {
   create(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
   get(taskId: string): TaskItem | null | Promise<TaskItem | null>;
   update(taskId: string, input: UpdateTaskInput): TaskItem | null | Promise<TaskItem | null>;
+  /** Conditionally update only when the task still belongs to the expected thread. */
+  updateIfThreadId(
+    taskId: string,
+    expectedThreadId: string,
+    input: UpdateTaskInput,
+  ): TaskItem | null | Promise<TaskItem | null>;
   listByThread(threadId: string): TaskItem[] | Promise<TaskItem[]>;
   delete(taskId: string): boolean | Promise<boolean>;
   /** Delete all tasks in a thread (cascade delete support) */
@@ -130,6 +136,8 @@ export class TaskStore implements ITaskStore {
       updatedAt: now,
       automationState: input.automationState,
       userId: input.userId,
+      probe: input.probe,
+      resolveMode: input.resolveMode,
       // F193 Phase E (dispatch gate)
       ...(input.relatedFeatureId ? { relatedFeatureId: input.relatedFeatureId } : {}),
       ...(input.detectedFeatureIds?.length ? { detectedFeatureIds: input.detectedFeatureIds } : {}),
@@ -170,6 +178,8 @@ export class TaskStore implements ITaskStore {
           status: isTrackingKind(existing.kind) && existing.status === 'done' ? 'todo' : existing.status,
           why: input.why,
           userId: input.userId ?? existing.userId,
+          probe: input.probe !== undefined ? input.probe : existing.probe,
+          resolveMode: input.resolveMode !== undefined ? input.resolveMode : existing.resolveMode,
           automationState: input.automationState
             ? this.mergeAutomationState(existing.automationState, input.automationState)
             : existing.automationState,
@@ -252,7 +262,9 @@ export class TaskStore implements ITaskStore {
       ...(input.status !== undefined ? { status: input.status } : {}),
       ...(input.why !== undefined ? { why: input.why } : {}),
       ...(input.automationState !== undefined ? { automationState: input.automationState } : {}),
-      // #949: thread rotation — allow reassigning to a new thread
+      ...(input.probe !== undefined ? { probe: input.probe } : {}),
+      ...(input.resolveMode !== undefined ? { resolveMode: input.resolveMode } : {}),
+      // Generic task move support: callers that change threadId own the UX contract.
       ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
       // F193-E1 P1-4: allow patching dispatchGate
       ...(input.dispatchGate !== undefined ? { dispatchGate: input.dispatchGate } : {}),
@@ -261,6 +273,13 @@ export class TaskStore implements ITaskStore {
 
     this.tasks.set(taskId, updated);
     return updated;
+  }
+
+  updateIfThreadId(taskId: string, expectedThreadId: string, input: UpdateTaskInput): TaskItem | null {
+    const existing = this.tasks.get(taskId);
+    if (!existing) return null;
+    if (existing.threadId !== expectedThreadId) return null;
+    return this.update(taskId, input);
   }
 
   listByThread(threadId: string): TaskItem[] {

@@ -10,7 +10,7 @@ import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 
 ensureFakeCliOnPath('opencode');
 
-// ── Mock helpers (same pattern as dare-agent-service.test.js) ──
+// ── Mock helpers ──
 
 function createMockProcess(exitCode = 0) {
   const stdout = new PassThrough();
@@ -413,7 +413,7 @@ describe('OpenCodeAgentService', () => {
     assert.strictEqual(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.example/v1');
   });
 
-  test('cwd is workingDirectory (unlike DARE which uses darePath)', async () => {
+  test('cwd is workingDirectory', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
     const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
@@ -423,6 +423,43 @@ describe('OpenCodeAgentService', () => {
 
     const opts = spawnFn.mock.calls[0].arguments[2];
     assert.strictEqual(opts.cwd, '/tmp/project');
+  });
+
+  test('does not put invocation workspace into the parent OpenCode env', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(service.invoke('Test', { workingDirectory: '/tmp/project' }));
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    assert.strictEqual(
+      opts.env.ALLOWED_WORKSPACE_DIRS,
+      undefined,
+      'mcp.cat-cafe.environment in OPENCODE_CONFIG is the workspace source of truth',
+    );
+  });
+
+  test('does not let stale account ALLOWED_WORKSPACE_DIRS override the invocation workspace', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const promise = collect(
+      service.invoke('Test', {
+        workingDirectory: '/tmp/project',
+        accountEnv: { ALLOWED_WORKSPACE_DIRS: '/stale/account/workspace' },
+      }),
+    );
+    emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await promise;
+
+    const opts = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(
+      opts.env.ALLOWED_WORKSPACE_DIRS,
+      undefined,
+      'OpenCode parent env must not carry a stale workspace; mcp.cat-cafe.environment is the authoritative child env',
+    );
   });
 
   test('yields error + done on CLI exit failure', async () => {

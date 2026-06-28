@@ -4,7 +4,9 @@ related_features: [F155, F020, F092, F111, F128, F226, F227, F102, F099]
 topics: [concierge, desktop-pet, pet-skin, routing, small-model, voice, memory, ux, community]
 doc_kind: spec
 created: 2026-06-09
+updated: 2026-06-20
 community_issue: "clowder-ai#841"
+tips_exempt: "UX bug fixes (PR #2474) — no new user-visible capability, only fixes to existing concierge panel behavior"
 ---
 
 # F229: 猫猫球 — 前台猫常驻入口（Cat Ball Concierge）
@@ -101,7 +103,7 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 
 - 桌宠动效系统（呼吸/打盹/状态表情）+ 皮肤生态（开源用户自家猫形象）
 - **PetSkinContract**：参考 `hatch-pet` 的 Codex pet atlas/QA/provenance 纪律，但 F229 不降级为纯桌宠。PetSkin 是 `conciergeState -> petState` 的纯投影；动画是增强信号，状态必须同时有非 pet 通道表达；完整 8x9 atlas defer，v0 只要求 idle/running/review/failed 四态打通（见 `docs/features/F229-petskin-contract.md`）
-- **素材池已开仓**：`assets/F229/desktop-pet-sprite/`（README 含 production pipeline 五步 + Maine Coon验证的云端生图 prompt 模板）——Maine Coon raw sheet ×2 已入库（fbb0e8add）；v1 默认Ragdoll + 孟加拉/暹罗 sheet 待生成
+- **素材池已开仓**：`assets/F229/desktop-pet-sprite/`（README 含 production pipeline 五步 + Maine Coon验证的云端生图 prompt 模板）——Maine Coon raw sheet ×2 已入库（fbb0e8add）；v1 默认Ragdoll + 孟加拉/暹罗 sheet 待生成。后续四猫视觉刷新以醋醋喵漫画母图和 `docs/videos/cucu-pr-flow/character-bible-v0.1.md` 为上游 canon：Maine Coon猫猫球的母图就是醋醋喵漫画里的Maine Coon，不从通用Maine Coon prompt 重新采样。
 - 主动冒泡（新版本发布等白名单事件，安静优先）
 - OpenCLI 式页面操作演示（#841 终态收编：猫操作页面给用户看，操作前用户确认）
 
@@ -151,11 +153,28 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 - [ ] AC-D2: escalation 传原始对话不传小模型总结（测试断言，KD-8 合规）→ R7
 - [ ] AC-D3: 小模型不可用时自动降级全走值班大猫（测试）→ R7
 
+### operator UX 遗留 Bug（operator 2026-06-18/06-21 多次反馈，跨 Phase 修）
+- [x] BUG-UX-1: Maine Coon桌宠"狗皮膏药"——球按钮底色 `var(--cafe-surface-elevated)` 实心不透明方块，应为透明底浮在页面上。operator 2026-06-18 + 2026-06-21 两次报告。**已修复**：PR #2474 merged 2026-06-21，移除实心 `backgroundColor` + `boxShadow`，改为透明 `drop-shadow` filter
+- [x] BUG-UX-2: 调查报告 anchor 列表可读性崩溃——InvestigationReportCard 内文字一个字一个字竖排，列宽塌缩到单字符宽度。operator 2026-06-21 截图。**已修复**：PR #2474 merged 2026-06-21，flex 容器加 `min-w-0` + title span 加 `truncate`
+- [x] BUG-UX-3: 面板不可拉伸——宽度写死 `w-80`(320px)，无 CSS resize handle。operator 要求可拖拽调整面板大小 + 持久化记住尺寸。operator 2026-06-18 + 2026-06-21 两次要求——**width resize PR #2474 merged 2026-06-21 + height resize PR #2481 merged 2026-06-21**
+- [x] BUG-UX-4: 猫猫球回复中可读性差——猫签名（`[Siamese/gemini-3.5-flash🐾]`）、`@co-creator`、内部协作格式对用户可见，应在 concierge 上下文中 strip 掉或简化。**已修复**：PR #2474 merged 2026-06-21，ConciergeMessageContent 渲染层 strip `[name/model🐾]` 签名 + 内部路由 mention
+- [x] BUG-UX-5: Maine Coon拖动困难——operator 报告"好难拖动"，拖拽交互手感差（可能是拖拽区域 vs 点击区域冲突、touchAction 设置、或 drag threshold 过大）。operator 2026-06-21。**已修复**：PR #2474 merged 2026-06-21，drag threshold 5→8px + 移除阻塞拖拽的 `pointerEvents:'none'`
+- [x] BUG-UX-7: 猫猫球不渲染 Markdown——值班猫回复中 Markdown 语法显示为原始文本。**已修复**：PR #2488 merged 2026-06-22，统一使用 `MarkdownContent` 组件 + `buildMdComponents(tp?)` 工厂模式，textProcessor 覆盖所有文本容器（p/strong/em/del/h1-h6/li/a/th/td），code/pre 排除。gpt52 local review 2 轮 + cloud review 0 P1/P2
+- [x] BUG-UX-8: 原地看（peek）内容无收起机制。**已修复**：同 PR #2488——re-click toggle + ✕ dismiss button
+- [x] BUG-UX-9: 跳转动作错误显示为"原地看" ✅ PR #2531 修复。根因：小模型（gemini-3.5-flash）默认写 `[原地看 Rn]`，旧 `shouldSkipAction` 静默丢弃不兼容组合。修复：`resolveAction` 自动纠正 verb↔anchor 不匹配（peek→teleport / teleport→peek），前端按钮文字改用 `action.action` 显示正确动词
+
 ### Phase E（桌宠化 + 形象生态）
 - [x] AC-E0-1: PetSkinContract v0 — `conciergeState → petState` pure projection (4 states: idle/running/review/failed), shared types + `projectToPetState()` function, 10 unit tests
 - [x] AC-E0-2: ragdoll-v1 skin — manifest (`pet.json`) + 4 individual sprite PNGs (idle/running/review/failed), three QA gates pass (readability/identity-diff/provenance)
 - [x] AC-E0-3: ConciergeBall skin-aware resolution — `resolvePetSprite(ballState, skin)` with ragdoll-v1 (v0 4-state projection) + yarn-ball (legacy 8-state direct, filename override for needs-confirmation→confirm.png) backward compat, 19 web unit tests
 - [x] AC-E0-4: Settings page skin display — dynamic `SKIN_DISPLAY_NAMES[skin]` + default `ragdoll-v1` in store + API validation + `FALLBACK_SPRITE_PATH`
+- [x] AC-E1-1: yanyan-codex 9-state animated atlas — `CodexPetState` expanded 4→9 states (idle/running-right/running-left/waving/jumping/failed/waiting/running/review), V1 projection map, 2MB spritesheet (1536×1872, 8×9 grid, 192×208 cells), `pet.json` manifest + provenance
+- [x] AC-E1-2: CSS sprite animation engine — `useSpriteAnimation` hook (setTimeout chain, per-frame timing, prefers-reduced-motion respect, config-change reset), pure computation helpers (`computeBackgroundPosition`, `computeScaledBackgroundPosition`, `nextFrame`, `computeConfigKey`)
+- [x] AC-E1-3: AtlasSprite renderer — aspect-ratio-aware scaling (192×208→59×64 height-fit), CSS background-image + background-position stepping, integer display-coordinate position computation (P2 fix: avoids float rounding drift on non-square cells)
+- [x] AC-E1-4: Backward compatibility — ragdoll-v1 fallback entries for new states (running-right→running.png, waiting→idle.png, etc.), `PetSpriteResult` discriminated union (`string | AtlasSpriteResult`), 29 web + 20 shared + 5 animation unit tests
+- [x] AC-E2-1: Skin picker unlock — Settings page `皮肤` section upgraded from locked chip to 3 `RadioOption`s (`yanyan-codex` / `ragdoll-v1` / `yarn-ball`), reusing existing optimistic `updateConfig()` partial PUT flow
+- [x] AC-E1-5: xianxian-codex 9-state animated atlas — parallel `xianxian-codex` skin using same `YANYAN_ATLAS_ROWS` config + dynamic base path selection in `usePetSkin.ts`, 733KB spritesheet (1536×1872, 8×9 grid, 192×208 cells), `pet.json` manifest (ragdoll, seal bicolor, video-extraction provenance), Settings 4th radio option, API zod validator + shared type + store type aligned (6/6 consumer sites). 37 web tests (8 new). BUG-UX-6 素材升级 pipeline 首个产出
+- [x] AC-E2-2: Default skin change for unconfigured users — `CONCIERGE_CONFIG_DEFAULTS.skin` changed to `yanyan-codex`; existing TTL=0 persisted configs intentionally remain untouched and must switch via the unlocked picker
 
 ## Dependencies
 
@@ -200,6 +219,8 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 | KD-18 | PetSkinContract：参考 `hatch-pet` 的 atlas/QA/provenance 纪律，但 PetSkin 必须是 concierge 状态机的纯投影，不是平行状态机。`conciergeState` 是唯一真值源，PetSkin 只定义 `conciergeState -> petState`；缺失状态 fallback idle；pet 永远是增强信号，不是唯一状态信号；验收有三道闸：readability / identity-diff / provenance | operator 2026-06-13："要学习人家的好处比较好…但也不必换成这个…前台猫猫不止是一个好看的桌宠" + Ragdoll cowork 收敛（投影函数 + 三道闸 + v0 四态竖切） | 2026-06-13 |
 | KD-19 | AC-A3 鲁棒性不依赖值班猫 marker 遵从：sonnet×gemini25 对照实测——Claude 族遵从 marker，Gemini 族（默认值班猫）不遵从（知道协议却不执行 + 倾向自跑工具无视注入上下文）。KD-17 "值班猫用 marker→validator 解析" 假设对默认 Gemini 失效，纯 prompt 强化无效。解法两层：① 修 `ConciergeEvidenceStore.search` 透传 `scope:threads/all + mode:hybrid + depth:raw`（底层 evidence store 已支持、concierge 接口收窄没透传）——召回 thread 讨论（治 P1-C 召回偏差：AC-A3 找的是讨论记录非结论文档）+ passage messageId（治 P1-A peek）；② validator 从 HandleMap **全量兜底**呈现"相关记录"可点列表（thread→teleport/peek，复用现有 action 类型），marker 降级 bonus（遵守则正文精准高亮）。docs 类型"打开文档"是不存在的新前后端 action，降 Phase B 增强（不阻塞 AC-A3）。KD-17 marker 解析保留，新增不依赖遵从的兜底层。符合 KD-7 provider-agnostic（AC-A3 不绑高遵从度模型，靠系统兜底不靠贵模型）；否决"换默认值班猫为 Claude 族"（违反 KD-7 + flash 更省） | sonnet alpha 对照实测（2026-06-13）+ Ragdoll spec owner 拍（opus-48）；operator 否决窗口开放 | 2026-06-13 |
 | KD-20 | go 路径 navigation gating：**marker 优先 + triage-go fallback**。"跟去"导航由 Phase A KD-19 inline marker button（PR #2295）实现——点击直跳，read-only 不经 confirm friction。triage-go 保留为 R-handle miss fallback（用户描述目标但无可匹配 HandleMap 记录时触发 triage confirm card）。原则：**triage-only-for-write**（relay/propose_thread/investigate 产生外部影响必须 gating；navigation read-only 不需要）。KD-9 三动作分叉精神 = 用户选择权，marker 直跳 UX 最直接；triage-go 重复造轮子违反 P1 面向终态。AC-B1 "跟去（teleport 跟进）"措辞兼容两种实现 | opus-47 愿景守护 verdict（Phase B intermediate）+ sonnet alpha 实测：marker path production 已验 + triage-go 路径 duty cat 未触发（自然降级为 marker 直达） | 2026-06-15 |
+| KD-21 | 四猫视觉 canon 从具体故事母图派生，不从泛用猫 prompt 重新发明。F229 的Maine Coon/yanyan-codex 皮肤上游 canon = 醋醋喵漫画母图；后续补Maine Coon/Ragdoll/Siamese/布偶等角色设定图时，先落 `docs/videos/cucu-pr-flow/character-bible-v0.1.md`，再派生 PetSkin atlas/sprite。F229 只消费 sprite/atlas 与 `conciergeState -> petState` 投影，不把角色设计权藏进猫猫球实现。 | operator 2026-06-20 对醋醋喵重制和 F229 猫猫球视觉源的收敛：原本漫画足以生成三猫设定图，Maine Coon猫设就是醋醋喵母图。 | 2026-06-20 |
+| KD-22 | ConciergePanel.tsx 文件大小 exception：origin/main 已是 550 lines（远超 350 hard limit），UX bugs PR #2474 提取 `usePanelWidth` hook 后 net +16（566 lines）。operator 批准 exception 放行，全量拆分（消息渲染/header/input area 分离）记为独立 task 不阻塞本 PR。350-line 限制无自动 gate（`pnpm gate`/`pnpm check` 不含行数检查），为 reviewer 人肉判断 | operator 2026-06-21 exception signoff；gpt52 R5 review 僵局升级后operator拍板 | 2026-06-21 |
 
 ## Review Gate / 分工（operator 拍板 2026-06-09 msg 0001781074572950）
 

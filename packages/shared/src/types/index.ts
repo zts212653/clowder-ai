@@ -51,6 +51,8 @@ export {
   type AgentKeyFailureReason,
   isAgentKeyFailureReason,
 } from './agent-key-reasons.js';
+// Approval Hub types (F246 统一审批中心)
+export type { ApprovalFeatureId, ApprovalItem, ApprovalItemStatus } from './approval-hub.js';
 // Authorization types (猫猫授权系统)
 export type {
   AuthorizationAuditEntry,
@@ -94,10 +96,11 @@ export type {
   ThreadPhase,
   UpdateBacklogDispatchProgressInput,
 } from './backlog.js';
-// F233 Phase B: Ball Custody event-stream types (event-sourcing; impl stays in api)
+// F233 Phase B + Phase C: Ball Custody event-stream types (event-sourcing; impl stays in api)
 export type {
   BallCustodyEvent,
   BallCustodyProjection,
+  BallEuthanasiaKind, // Phase C C1a (KD-C1/C2): cloud R1 P2 修正 — C1b/C1c consumers 经 @cat-cafe/shared barrel 拿 type
   BallEventClassification,
   BallEventKind,
   BallIntent,
@@ -228,6 +231,7 @@ export type {
 } from './community-event.js';
 export type {
   CommunityIssueItem,
+  CommunityRepoConfig,
   ConsensusResult,
   ConsensusState,
   CreateCommunityIssueInput,
@@ -236,12 +240,16 @@ export type {
   IntakeChecklistItem,
   IssueState,
   IssueType,
+  ParseRouteRecommendationResult,
   PrBoardGroup,
   QuestionGrade,
   QuestionId,
   QuestionResult,
   ReplyState,
+  RouteAcceptance,
   RouteRecommendation,
+  RouteSource,
+  TriageConfidence,
   TriageEntry,
   UpdateCommunityIssueInput,
   Verdict,
@@ -249,6 +257,8 @@ export type {
 // Community Issue types (F168 社区事务编排引擎)
 export {
   DEFAULT_INTAKE_CHECKLIST,
+  deriveTriageConfidence,
+  parseRouteRecommendation,
   validateIntakeChecklist,
 } from './community-issue.js';
 // Community Issue Draft types (F235)
@@ -278,6 +288,7 @@ export type {
   ConciergeConfig,
   ConciergeThreadKind,
   ConfirmationStatus,
+  GateKeepingThreadKind,
   InvestigationAnchor,
   InvestigationJob,
   InvestigationJobStatus,
@@ -285,6 +296,7 @@ export type {
   PendingConfirmation,
   RelayReceipt,
   RelayReceiptStatus,
+  ThreadKind,
   TriagePlan,
   TriagePlanIntent,
   TriagePlanResult,
@@ -335,6 +347,19 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+// Dispatch proposal types (F246 Phase B: F193 E3 cross-thread dispatch)
+export type { DispatchProposal, DispatchProposalStatus, EffectClass } from './dispatch-proposal.js';
+// Dossier distillation proposal types (F208 Phase E 画像蒸馏)
+export type {
+  DistillationEvidenceRef,
+  DistillationProposalStatus,
+  DistillationSourceEvent,
+  DossierDistillationProposal,
+} from './dossier-distillation.js';
+export {
+  DISTILLATION_SOURCE_EVENTS,
+  isDistillationSourceEvent,
+} from './dossier-distillation.js';
 // F233 Phase A: 值班简报 DTO (pure-projection aggregator output; impl stays in api)
 export type { BallEntry, BallEntryKind, DutyBriefing, DutyBriefingCounts } from './duty-briefing.js';
 // F227: Event Memory types (cognitive-transition event index)
@@ -357,6 +382,42 @@ export type {
   CreateExternalProjectInput,
   ExternalProject,
 } from './external-project.js';
+// F233 Phase C C2a: Feat Trajectory types (OQ-8 三源 source-contract: event-stream / historical-stitched / git-ref-snapshot)
+export type {
+  BallShapedTrajectoryKind,
+  FeatThreadJoinMethod,
+  FeatThreadJoinProvenance,
+  FeatTrajectoryEntry,
+  FeatTrajectoryKind,
+  FeatTrajectoryProjection,
+  FeatTrajectorySource,
+  GitRefEntryIdParts,
+  GitRefSnapshot,
+  GitShapedTrajectoryKind,
+  HistoricalTrajectoryKind,
+  StaleBucket,
+  TrajectoryProvenance,
+} from './feat-trajectory.js';
+export { makeGitRefEntryId } from './feat-trajectory.js';
+// F245: Friction Signal Eval types
+export type {
+  ActionableFrictionCandidate,
+  ClassifiedFrictionCluster,
+  FrictionChannel,
+  FrictionCluster,
+  FrictionClusterActionability,
+  FrictionClusterMember,
+  FrictionFollowupDraft,
+  FrictionRollupInput,
+  FrictionRollupReport,
+  FrictionRollupSourceSelector,
+  FrictionRootCause,
+  FrictionSensorForm,
+  FrictionSeverity,
+  FrictionSignal,
+  FrictionTailSummary,
+  ReferenceOnlyFrictionCluster,
+} from './friction-signal.js';
 // F222: Frustration Auto-Issue types
 export type {
   CreateFrustrationIssueInput,
@@ -579,13 +640,18 @@ export type {
   PluginResourceStatus,
   PluginStatus,
 } from './plugin.js';
-// Profile update proposal types (F231 Phase C 养熟循环)
 export type {
+  CollectionSignalKind,
   ProfileUpdateApproveOverrides,
   ProfileUpdateProposal,
   ProfileUpdateProposalStatus,
   ProfileUpdateSignalProvenance,
   ProfileUpdateTargetLayer,
+} from './profile-update.js';
+// Profile update proposal types (F231 Phase C 养熟循环)
+export {
+  COLLECTION_SIGNAL_KINDS,
+  isAllowedCollectionSignal,
 } from './profile-update.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
@@ -721,6 +787,7 @@ export type {
   SuggestedCrossPostActionSource,
   TaskItem,
   TaskKind,
+  TaskProbeSpec,
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';

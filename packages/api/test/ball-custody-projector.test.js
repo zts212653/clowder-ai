@@ -59,11 +59,12 @@ describe('BallCustodyProjector — apply 字段 effect', () => {
 
   it('task.blocked → blocked + blockedSinceAt=at + lastWakeAt 清空', async () => {
     const { store, proj } = setup();
-    await proj.apply(ev('task.blocked', { at: 5000 }));
+    await proj.apply(ev('task.blocked', { at: 5000, payload: { resolveMode: 'bounces_back' } }));
     const p = await store.get('ball:task:t1');
     assert.strictEqual(p.state, 'blocked');
     assert.strictEqual(p.blockedSinceAt, 5000);
     assert.strictEqual(p.lastWakeAt, null);
+    assert.strictEqual(p.resolveMode, 'bounces_back');
   });
 
   it('ball.held → active + heldUntil + holder', async () => {
@@ -118,6 +119,20 @@ describe('BallCustodyProjector — apply 字段 effect', () => {
     assert.strictEqual(p.heldUntil, null);
   });
 
+  it('stale hold_expired 不会把替换后的当前 hold 标 dead（cloud review P2）', async () => {
+    const { proj, store } = setup();
+    await proj.apply(ev('ball.held', { payload: { catId: 'catX', fireAt: 99_999 }, at: 100 }));
+    await proj.apply(ev('ball.held', { payload: { catId: 'catX', fireAt: 111_111 }, at: 200 }));
+
+    await proj.apply(ev('ball.hold_expired', { payload: { catId: 'catX', fireAt: 99_999 }, at: 300 }));
+
+    const p = await store.get('ball:task:t1');
+    assert.strictEqual(p.state, 'active');
+    assert.strictEqual(p.heldUntil, 111_111);
+    assert.strictEqual(p.lastRejectedEvent.kind, 'ball.hold_expired');
+    assert.strictEqual(p.lastRejectedEvent.payload.fireAt, 99_999);
+  });
+
   it('离开 active 的转移清 heldUntil（failure-mode：task.blocked / handed_cvo / void_pass）', async () => {
     for (const leave of [
       ev('task.blocked', { at: 200 }),
@@ -145,6 +160,7 @@ describe('BallCustodyProjector — apply 字段 effect', () => {
       const p = await s.store.get('ball:task:t1');
       assert.strictEqual(p.blockedSinceAt, null, `${exit.kind} should clear blockedSinceAt`);
       assert.strictEqual(p.lastWakeAt, null, `${exit.kind} should clear lastWakeAt`);
+      assert.strictEqual(p.resolveMode, null, `${exit.kind} should clear resolveMode`);
     }
   });
 

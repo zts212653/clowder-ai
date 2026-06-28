@@ -12,6 +12,7 @@ const a2aDomain = {
   evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
   frequency: 'daily',
   sourceAdapter: 'f167-runtime-eval',
+  sourceRefsKind: 'a2a-snapshot-attribution',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',
@@ -29,6 +30,7 @@ const memoryDomain = {
   evalCat: { catId: 'opus47', handle: '@opus47', model: 'claude-opus-4-7' },
   frequency: 'daily',
   sourceAdapter: 'f200-f188-memory-eval',
+  sourceRefsKind: 'memory-recall-snapshot',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',

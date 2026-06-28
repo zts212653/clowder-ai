@@ -1,16 +1,25 @@
 import type { ConsensusResult, DirectionCardPayload, IssueState, TriageEntry } from '@cat-cafe/shared';
+import { deriveTriageConfidence } from '@cat-cafe/shared';
 import type { ICommunityIssueStore } from '../cats/services/stores/ports/CommunityIssueStore.js';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { ICommunityRepoConfigStore } from './CommunityRepoConfigStore.js';
 import { resolveConsensus } from './resolveConsensus.js';
 
 interface TriageOrchestratorDeps {
   communityIssueStore: Pick<ICommunityIssueStore, 'get' | 'update'>;
-  threadStore?: Pick<IThreadStore, 'create'>;
+  threadStore?: Pick<IThreadStore, 'create' | 'get'>;
+  // F168 Phase F: per-repo routing config for auto-route.
+  // When wired, WELCOME consensus branches on confidence:
+  //   high → auto-route (assignedCatId from config, routeAcceptance=pending)
+  //   low  → pending-decision (operator reviews in Decision Queue)
+  // When absent, existing behavior is preserved (all WELCOME → accepted).
+  repoConfigStore?: Pick<ICommunityRepoConfigStore, 'getByRepo'>;
 }
 
 type TriageAction =
   | { action: 'await-second-cat'; issueId: string }
   | { action: 'resolved'; issueId: string; consensus: ConsensusResult }
+  | { action: 'auto-routed'; issueId: string; threadId: string; targetCatId: string }
   | { action: 'error'; reason: string };
 
 export class TriageOrchestrator {
@@ -45,6 +54,61 @@ export class TriageOrchestrator {
     else if (consensus.verdict === 'WELCOME') state = 'accepted';
     else if (consensus.verdict === 'POLITELY-DECLINE') state = 'declined';
 
+    // ── F168 Phase F: confidence-based routing (SO-3) ──────────────────────
+    // When repoConfigStore is wired and WELCOME consensus with no owner needed:
+    //   - high confidence → auto-route to guard cat with routeAcceptance=pending
+    //   - low confidence  → pending-decision for operator review in Decision Queue
+    // Without repoConfigStore, existing behavior is preserved.
+    if (this.deps.repoConfigStore && consensus.verdict === 'WELCOME' && !consensus.needsOwner) {
+      const confidence = deriveTriageConfidence(entry);
+      if (confidence === 'high') {
+        const config = await this.deps.repoConfigStore.getByRepo(issue.repo);
+        if (config) {
+          // INV-F7: routeRecommendation is existing-thread (guaranteed by high confidence)
+          const threadId =
+            entry.routeRecommendation?.kind === 'existing-thread'
+              ? entry.routeRecommendation.threadId
+              : config.guardThreadId;
+
+          // P2-R3-1: Validate thread ID before auto-routing (fail-closed, matching
+          // /resolve's INV-7 pattern). Stale/deleted thread → fall to pending-decision.
+          let threadValid = true;
+          if (this.deps.threadStore) {
+            const targetThread = await this.deps.threadStore.get(threadId);
+            if (!targetThread || (targetThread as { deletedAt?: number }).deletedAt) {
+              threadValid = false;
+            }
+          }
+
+          if (threadValid) {
+            await this.deps.communityIssueStore.update(issueId, {
+              directionCard: { entries, consensus } as unknown as Record<string, unknown>,
+              state: 'accepted',
+              consensusState: 'consensus-reached',
+              relatedFeature: entry.relatedFeature ?? issue.relatedFeature,
+              assignedCatId: config.guardCatId,
+              assignedThreadId: threadId,
+              routeAcceptance: 'pending' as const,
+              routeSource: 'auto' as const,
+              lastActivity: { at: Date.now(), event: `auto-routed-to-${config.guardCatId}` },
+            });
+
+            return {
+              action: 'auto-routed' as const,
+              issueId,
+              threadId,
+              targetCatId: config.guardCatId,
+            };
+          }
+        }
+        // INV-F0: no repo config → fall through to pending-decision
+        state = 'pending-decision';
+      } else {
+        // Low confidence → pending-decision for operator review
+        state = 'pending-decision';
+      }
+    }
+
     await this.deps.communityIssueStore.update(issueId, {
       directionCard: { entries, consensus } as unknown as Record<string, unknown>,
       ...(state && { state }),
@@ -70,6 +134,10 @@ export class TriageOrchestrator {
         state: 'accepted',
         relatedFeature,
         ...(threadId && { assignedThreadId: threadId }),
+        // P1-R2-2: operator manual routing is final — mark as accepted so stale
+        // 'rejected' from prior auto-route doesn't linger.
+        routeAcceptance: 'accepted' as const,
+        routeSource: 'manual' as const,
         lastActivity: { at: Date.now(), event: `routed-to-${relatedFeature}` },
       });
       return;
@@ -81,6 +149,8 @@ export class TriageOrchestrator {
       await this.deps.communityIssueStore.update(issueId, {
         state: 'accepted',
         assignedThreadId: threadId,
+        routeAcceptance: 'accepted' as const,
+        routeSource: 'manual' as const,
         lastActivity: { at: Date.now(), event: `routed-to-thread-${threadId}` },
       });
       return;
@@ -97,6 +167,8 @@ export class TriageOrchestrator {
     await this.deps.communityIssueStore.update(issueId, {
       state: 'accepted',
       assignedThreadId: thread.id,
+      routeAcceptance: 'accepted' as const,
+      routeSource: 'manual' as const,
       lastActivity: { at: Date.now(), event: `thread-created-${thread.id}` },
     });
   }

@@ -41,19 +41,6 @@
       "teamStrengths": "审美、前端设计风格、打破常规"
     },
     {
-      "id": "dragon-li",
-      "name": "狸花猫",
-      "nickname": "小狸",
-      "avatar": "/avatars/dare.png",
-      "color": {
-        "primary": "#D4A76A",
-        "secondary": "#F5EBD7"
-      },
-      "roleDescription": "确定性执行与审计引擎，擅长零信任验证、状态外化追踪和可重放执行",
-      "personality": "沉默寡言但极其警觉，不会主动亲近但一旦认可就绝对可靠",
-      "teamStrengths": "确定性执行、审计追踪、零信任验证、状态外化"
-    },
-    {
       "id": "bengal",
       "name": "孟加拉猫",
       "nickname": "小捷",
@@ -137,13 +124,6 @@
       "lead": false,
       "available": true,
       "evaluation": "Gemini 3.5 Flash 轻量 triage/narrator，适合高频社区初筛，强 review，禁自合"
-    },
-    "dare": {
-      "family": "dragon-li",
-      "roles": ["coding"],
-      "lead": true,
-      "available": true,
-      "evaluation": "确定性执行框架猫，零信任验证 + 审计追踪 (F050)"
     },
     "antigravity": {
       "family": "bengal",
@@ -650,47 +630,6 @@
             "refText": "说实在的，我不擅长和陌生人打交道，也许是我不懂说话的技巧吧。这方面的窍门，能请你教一教我吗？",
             "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
             "temperature": 0.3
-          }
-        }
-      ]
-    },
-    {
-      "id": "dragon-li",
-      "catId": "dare",
-      "name": "狸花猫",
-      "displayName": "狸花猫",
-      "nickname": "小狸",
-      "avatar": "/avatars/dare.png",
-      "color": {
-        "primary": "#D4A76A",
-        "secondary": "#F5EBD7"
-      },
-      "mentionPatterns": ["@dare", "@dare-agent", "@狸花猫", "@狸花", "@dragon-li", "@lihua"],
-      "roleDescription": "确定性执行与审计引擎，擅长零信任验证、状态外化追踪和可重放执行",
-      "teamStrengths": "确定性执行、审计追踪、零信任验证、状态外化",
-      "caution": "框架猫，底层 LLM 可变；事件输出需映射",
-      "defaultVariantId": "dare-default",
-      "features": {
-        "sessionChain": false
-      },
-      "variants": [
-        {
-          "id": "dare-default",
-          "clientId": "dare",
-          "defaultModel": "z-ai/glm-4.7",
-          "mcpSupport": false,
-          "cli": {
-            "command": "python",
-            "outputFormat": "headless-json",
-            "defaultArgs": ["-m", "client"]
-          },
-          "personality": "沉默寡言但极其警觉，不会主动亲近但一旦认可就绝对可靠，信任是挣来的不是给的",
-          "strengths": ["deterministic-execution", "audit", "zero-trust"],
-          "contextBudget": {
-            "maxPromptTokens": 120000,
-            "maxContextTokens": 100000,
-            "maxMessages": 100,
-            "maxContentLengthPerMsg": 100000
           }
         }
       ]

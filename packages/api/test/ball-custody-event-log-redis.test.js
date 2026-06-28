@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import {
   assertRedisIsolationOrThrow,
-  cleanupPrefixedRedisKeys,
+  cleanupClientKeyspace,
   redisIsolationSkipReason,
 } from './helpers/redis-test-helpers.js';
 
@@ -34,14 +34,15 @@ describe('BallCustodyEventLog (Redis)', { skip: redisIsolationSkipReason(REDIS_U
   let log;
   let connected = false;
 
-  const KEY_PATTERNS = ['ballcustody:events:*'];
+  // 唯一 keyPrefix 隔离 key 空间（plan:237 race fix）——与 projector-redis 不同前缀，并发不互清
+  const TEST_KEY_PREFIX = 'f233bc-eltest:';
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'BallCustodyEventLog');
     const mod = await import('../dist/domains/ball-custody/BallCustodyEventLog.js');
     RedisBallCustodyEventLog = mod.RedisBallCustodyEventLog;
     createRedisClient = (await import('@cat-cafe/shared/utils')).createRedisClient;
-    redis = createRedisClient(REDIS_URL);
+    redis = createRedisClient({ url: REDIS_URL, keyPrefix: TEST_KEY_PREFIX });
     await redis.ping();
     connected = true;
     log = new RedisBallCustodyEventLog(redis);
@@ -52,7 +53,7 @@ describe('BallCustodyEventLog (Redis)', { skip: redisIsolationSkipReason(REDIS_U
   });
 
   beforeEach(async () => {
-    await cleanupPrefixedRedisKeys(redis, KEY_PATTERNS);
+    await cleanupClientKeyspace(redis);
   });
 
   describe('append — 幂等（INV-1/3）', () => {

@@ -37,7 +37,7 @@ export interface MemoryLibraryHealth {
   staleAnchors: { count: number };
   orphanEdges: { count: number };
   verificationDebt: { needsReviewCount: number };
-  searchQuality: { totalSearches: number; zeroHitCount: number; lowHitCount: number };
+  searchQuality: { totalSearches: number; observedSearches: number; zeroHitCount: number; lowHitCount: number };
   knowledgeFeed: { pendingCount: number; needsReviewCount: number };
 }
 
@@ -211,11 +211,13 @@ function resolveHandoffFeatureId(finding: MemoryFinding, domain: EvalDomainRegis
   return match ? match[1] : domain.handoffTargetResolver.featureId;
 }
 
-function recallMetricRefs(): string[] {
+/** @internal exported for testing (HW-7) */
+export function recallMetricRefs(): string[] {
   return [
     'consumed_mrr',
     'consumed_at_3',
     'search_abandon_rate',
+    'search_zero_hit_rate', // HW-7: primary recall signal — zero-hit rate is recall-layer first cause
     'grep_fallback_rate',
     'non_first_selection_rate',
     'traversal_completion',
@@ -243,6 +245,12 @@ function libraryHealthValues(health: MemoryLibraryHealth): Record<string, number
     stale_anchor_count: health.staleAnchors.count,
     verification_debt_count: health.verificationDebt.needsReviewCount,
     search_zero_hit_count: health.searchQuality.zeroHitCount,
+    // HW-7: rate is the primary recall signal (in recallMetricRefs);
+    // count alone doesn't normalize for search volume changes
+    search_zero_hit_rate:
+      health.searchQuality.observedSearches > 0
+        ? health.searchQuality.zeroHitCount / health.searchQuality.observedSearches
+        : 0,
   };
 }
 

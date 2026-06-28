@@ -71,6 +71,7 @@ function AppShellContent({ children }: AppShellProps) {
       {/* F229: concierge ball + panel — root-level mount for INV-6 route survival.
           z-30 (ball) < z-[35] (presentation surface). */}
       <ConciergeHost />
+      {/* F246 Phase C: Approval Hub moved to workspace panel tab — drawer removed */}
     </div>
   );
 }

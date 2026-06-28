@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=scripts/lib/node-runtime-guard.sh
 source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
+# shellcheck source=scripts/lib/quickstart-freshness.sh
+source "$SCRIPT_DIR/lib/quickstart-freshness.sh"
 DEFAULT_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-alpha"
 DEFAULT_LEGACY_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-main-test"
 DEFAULT_ALPHA_BRANCH="alpha/main-sync"
@@ -391,6 +393,42 @@ status_alpha_worktree() {
   echo "env_source: $env_source_display"
 }
 
+# ADR-039-alpha: build-freshness gate for alpha worktree (mirrors runtime-worktree.sh Invariant 3).
+#
+# Why: alpha:start syncs origin/main (ff-only), which moves HEAD and brings in new TypeScript
+# source. Without rebuilding, the old dist/ is served:
+#   - @cat-cafe/shared is resolved via its package.json "main" field → dist/index.js; even
+#     tsx watch loads stale compiled shared when the package is imported.
+#   - packages/mcp-server/dist/index.js is the MCP entry point (always node, not tsx).
+# The freshness gate (HEAD-keyed stamp) rebuilds only when source moved, preserving
+# quick-start for unchanged worktrees.
+build_alpha_stale_packages() {
+  local head_commit
+  head_commit="$(git -C "$ALPHA_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+
+  # Order: shared first (api/mcp-server depend on it), then api, then mcp-server.
+  if needs_rebuild "$ALPHA_DIR/packages/shared/dist/index.js" \
+      "$ALPHA_DIR/packages/shared/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: shared stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/shared" run build
+    record_build_stamp "$ALPHA_DIR/packages/shared/dist/.build-commit" "$head_commit"
+  fi
+
+  if needs_rebuild "$ALPHA_DIR/packages/api/dist/index.js" \
+      "$ALPHA_DIR/packages/api/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: api stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/api" run build
+    record_build_stamp "$ALPHA_DIR/packages/api/dist/.build-commit" "$head_commit"
+  fi
+
+  if needs_rebuild "$ALPHA_DIR/packages/mcp-server/dist/index.js" \
+      "$ALPHA_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"; then
+    info "alpha dist: mcp-server stale/missing; rebuilding"
+    pnpm -C "$ALPHA_DIR/packages/mcp-server" run build
+    record_build_stamp "$ALPHA_DIR/packages/mcp-server/dist/.build-commit" "$head_commit"
+  fi
+}
+
 start_alpha_worktree() {
   if ! worktree_exists && legacy_worktree_exists; then
     migrate_legacy_alpha_worktree
@@ -406,6 +444,7 @@ start_alpha_worktree() {
   fi
 
   ensure_alpha_dependencies
+  build_alpha_stale_packages
 
   source_env_if_present
   apply_alpha_env

@@ -12,6 +12,7 @@ const domain = {
   evalCat: { catId: 'codex', handle: '@codex', model: 'gpt-5.5' },
   frequency: 'daily',
   sourceAdapter: 'f167-runtime-eval',
+  sourceRefsKind: 'a2a-snapshot-attribution',
   threadPolicy: {
     role: 'working-home',
     stateSot: 'registry',
@@ -147,6 +148,43 @@ describe('eval:a2a live verdict generator', () => {
     assert.doesNotMatch(markdown, /Contract Demo Fixture/);
     assert.doesNotMatch(markdown, /docs\/harness-feedback\/snapshots/);
     assert.match(markdown, new RegExp(`snapshot:bundle/${verdictId}/snapshot`));
+  });
+
+  it('preserves counter_window through YAML → bundle JSON round-trip (F167 sibling-PR P1)', () => {
+    // Without parser + bundle support for counter_window, the silent false
+    // positive fix dies at the artifact boundary: formatter writes it, reader
+    // strips it, eval cats see only window (trace) and underreport rates.
+    const { root, snapshotPath: baseSnapshotPath, attributionPath } = createRawArtifacts();
+    const harnessFeedbackRoot = join(root, 'docs/harness-feedback');
+    // Append counter_window to the snapshot YAML (after window block).
+    // mkdirSync handled in createRawArtifacts; we patch the existing file.
+    const original = readFileSync(baseSnapshotPath, 'utf8');
+    const withCounterWindow = original.replace(
+      /( {2}duration_hours: 24\n)/,
+      '$1\ncounter_window:\n  start_ms: 1779512800000\n  end_ms: 1779516400000\n  duration_hours: 1\n',
+    );
+    writeFileSync(baseSnapshotPath, withCounterWindow);
+
+    const verdictId = '2026-05-22-eval-a2a-live-verdict-cwin';
+    generateA2aLiveVerdict({
+      verdictId,
+      rawSnapshotPath: baseSnapshotPath,
+      rawAttributionPath: attributionPath,
+      harnessFeedbackRoot,
+      domain,
+      generatedAt: '2026-05-22T18:02:00.000Z',
+      generatorCommit: 'test-commit',
+    });
+
+    const bundleSnapshot = JSON.parse(
+      readFileSync(join(harnessFeedbackRoot, 'bundles', verdictId, 'snapshot.json'), 'utf8'),
+    );
+    assert.ok(bundleSnapshot.counterWindow, 'bundle snapshot must carry counterWindow forward');
+    assert.equal(bundleSnapshot.counterWindow.startMs, 1779512800000);
+    assert.equal(bundleSnapshot.counterWindow.endMs, 1779516400000);
+    assert.equal(bundleSnapshot.counterWindow.durationHours, 1);
+    // Trace window stays distinct (silent FP fix invariant)
+    assert.equal(bundleSnapshot.window.durationHours, 24);
   });
 
   it('normalizes provenance raw input paths to repo-relative portable paths', () => {

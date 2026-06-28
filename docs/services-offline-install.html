@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>离线安装指南 — Clowder AI</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:860px;margin:2em auto;padding:0 1.5em;color:#1f2937;line-height:1.6}
+  h1,h2,h3{border-bottom:1px solid #e5e7eb;padding-bottom:.3em;margin-top:1.6em}
+  h1{font-size:1.9em}h2{font-size:1.5em}h3{font-size:1.2em;border-bottom:none}
+  code{background:#f3f4f6;padding:.15em .4em;border-radius:3px;font-size:.92em}
+  pre{background:#0f172a;color:#e2e8f0;padding:1em;border-radius:6px;overflow-x:auto}
+  pre code{background:transparent;padding:0;color:inherit}
+  a{color:#2563eb;text-decoration:none}a:hover{text-decoration:underline}
+  table{border-collapse:collapse;margin:1em 0}th,td{border:1px solid #d1d5db;padding:.4em .7em}th{background:#f3f4f6}
+  blockquote{border-left:4px solid #d1d5db;margin:0;padding:.2em 1em;color:#4b5563;background:#f9fafb}
+</style></head><body>
+<h1>服务离线/受限网络安装指南</h1>
+<p>Cat Café 的语音/嵌入/LLM 服务通过 Console 设置页一键安装，背后跑 <code>scripts/services/&lt;service&gt;-install.{sh,ps1}</code>。脚本要做两件涉及网络的事：</p>
+<ol>
+<li><code>pip install</code> 拉 Python 依赖</li>
+<li>下载模型文件（HuggingFace Hub <code>snapshot_download</code> 或直接 curl Piper voice）</li>
+</ol>
+<p>在国内 / 内网 / 受限网络下任一步可能失败。本文给出可选的解决方案，按&quot;轻 → 重&quot;排序。</p>
+<hr>
+<h2>1. 国内镜像（最常用，5 秒配好）</h2>
+<p>在 <code>&lt;repo-root&gt;/.env</code> 增加：</p>
+<pre><code class="language-env"># HuggingFace 国内镜像（whisper / TTS / embedding / LLM 模型都走这个）
+HF_ENDPOINT=https://hf-mirror.com
+
+# pip 国内镜像（清华，覆盖 pip 主索引）
+PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 可选 fallback 到官方源（清华没同步的包会走这里）
+PIP_EXTRA_INDEX_URL=https://pypi.org/simple
+</code></pre>
+<p>重启 Cat Café 后重新点击安装即可。macOS / Linux 由 <code>scripts/download-source-overrides.sh</code> 注入到子进程；Windows 由 <code>scripts/start-windows.ps1</code> 加载 <code>.env</code> 后传给安装脚本。它们会覆盖 pip、<code>huggingface_hub</code> 与 Piper voice 直链下载源。</p>
+<blockquote>
+<p>其它常用 pip 镜像：阿里 <code>https://mirrors.aliyun.com/pypi/simple/</code>、腾讯 <code>https://mirrors.cloud.tencent.com/pypi/simple/</code>。</p>
+</blockquote>
+<hr>
+<h2>2. 内网（企业 PyPI / 内部 HF Mirror）</h2>
+<p>公司有内部 PyPI mirror（如 Artifactory / Nexus / Harbor / devpi）时：</p>
+<pre><code class="language-env">PIP_INDEX_URL=https://pypi.your-corp.com/simple
+PIP_EXTRA_INDEX_URL=https://pypi.org/simple   # 若内部源没同步，回落官方
+</code></pre>
+<p>内部 HuggingFace 镜像（少见，但有些公司有）：</p>
+<pre><code class="language-env">HF_ENDPOINT=https://hf.your-corp.com
+</code></pre>
+<hr>
+<h2>3. 完全离线 / 手动准备模型</h2>
+<p>如果连镜像都访问不了，可以手动把模型放到 Cat Café 期望的缓存路径里，<strong>重试 install 会自动识别已存在的模型并跳过下载</strong>（<code>huggingface_hub.snapshot_download</code> 内建缓存检查 + Cat Café piper 脚本也会查文件存在）。</p>
+<h3>3.1 HuggingFace 模型缓存路径</h3>
+<p>所有用 <code>snapshot_download</code> 拉的模型（whisper MLX / Kokoro TTS / Qwen3-Embedding / Qwen2.5 LLM / Jina / multilingual-e5 …）都缓存在：</p>
+<pre><code>~/.cache/huggingface/hub/models--&lt;org&gt;--&lt;name&gt;/
+</code></pre>
+<p>注意目录名里 <code>/</code> 会被替换成 <code>--</code>。例如：</p>
+<table>
+<thead>
+<tr>
+<th>repo ID</th>
+<th>缓存目录</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>mlx-community/whisper-large-v3-turbo</code></td>
+<td><code>~/.cache/huggingface/hub/models--mlx-community--whisper-large-v3-turbo/</code></td>
+</tr>
+<tr>
+<td><code>Qwen/Qwen2.5-3B-Instruct</code></td>
+<td><code>~/.cache/huggingface/hub/models--Qwen--Qwen2.5-3B-Instruct/</code></td>
+</tr>
+<tr>
+<td><code>jinaai/jina-embeddings-v2-base-zh</code></td>
+<td><code>~/.cache/huggingface/hub/models--jinaai--jina-embeddings-v2-base-zh/</code></td>
+</tr>
+</tbody></table>
+<p>最简单的手动准备方法：让 CLI 写入 HuggingFace Hub cache，而不是下载到普通目录：</p>
+<pre><code class="language-bash"># 在能上网的机器上拉好
+python -m pip install -U huggingface_hub
+export HF_HOME="$PWD/hf-cache"
+huggingface-cli download &lt;repo-id&gt;
+
+# 把整个 Hub cache 目录拷到内网机器对应位置
+tar czf hf-cache.tgz -C "$HF_HOME" hub
+# 内网机器上：
+mkdir -p ~/.cache/huggingface
+tar xzf hf-cache.tgz -C ~/.cache/huggingface
+</code></pre>
+<p>放好后 Console 点击「重试安装」（或者「安装」），脚本会跑 <code>snapshot_download</code>，发现本地已存在就直接返回，不再尝试网络下载。</p>
+<h3>3.2 Piper voice 模型路径</h3>
+<p>Piper voice 不走 huggingface_hub，是 install 脚本直接 curl 到 <code>${CAT_CAFE_HOME}/piper-models</code>。默认 <code>CAT_CAFE_HOME</code> 是仓库根目录下的 <code>.cat-cafe</code>；如果你启动 Cat Café 时覆盖了它，手动下载也要使用同一个值：</p>
+<pre><code>${CAT_CAFE_HOME}/piper-models/&lt;voice&gt;.onnx
+${CAT_CAFE_HOME}/piper-models/&lt;voice&gt;.onnx.json
+</code></pre>
+<p>例：</p>
+<pre><code>${CAT_CAFE_HOME}/piper-models/zh_CN-huayan-medium.onnx
+${CAT_CAFE_HOME}/piper-models/zh_CN-huayan-medium.onnx.json
+</code></pre>
+<p>手动下载：</p>
+<pre><code class="language-bash"># 在 Clowder AI 仓库根目录运行；如已设置 CAT_CAFE_HOME，请保持相同值
+CAT_CAFE_HOME="${CAT_CAFE_HOME:-$PWD/.cat-cafe}"
+mkdir -p "$CAT_CAFE_HOME/piper-models"
+# 直链（国内镜像）：
+curl -L -o "$CAT_CAFE_HOME/piper-models/zh_CN-huayan-medium.onnx" \
+  https://hf-mirror.com/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx
+curl -L -o "$CAT_CAFE_HOME/piper-models/zh_CN-huayan-medium.onnx.json" \
+  https://hf-mirror.com/rhasspy/piper-voices/resolve/main/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx.json
+</code></pre>
+<p>放好后重试 install，脚本检测到文件存在就跳过下载（见 <code>scripts/services/tts-install.sh</code> 中的文件存在判断）。</p>
+<h3>3.3 venv 依赖离线安装</h3>
+<p>如果 pip install 也跑不通，可以在能上网的机器先把 wheel 包打包：</p>
+<pre><code class="language-bash"># 在能上网的机器
+mkdir wheels &amp;&amp; cd wheels
+pip download fastembed onnxruntime fastapi uvicorn &#39;huggingface_hub[hf_xet]&#39;
+# 或者按 install 脚本里的包列表全装一遍
+
+# 拷到内网机器后：
+pip install --no-index --find-links=./wheels fastembed onnxruntime fastapi uvicorn &#39;huggingface_hub[hf_xet]&#39;
+</code></pre>
+<p>注意：要在跟内网机器<strong>相同平台 + 相同 Python 版本</strong>的能上网机器上 download wheel，否则平台不匹配。最佳实践是用 Docker：<code>python:3.11-slim-bookworm</code> / <code>python:3.11-windowsservercore</code> 等容器内 download。</p>
+<hr>
+<h2>4. 平台兼容性</h2>
+<p>某些模型 / wheel 在特定平台没有预编译，这不是网络问题，是架构限制：</p>
+<table>
+<thead>
+<tr>
+<th>平台</th>
+<th>限制</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Windows ARM64 原生 Python</strong></td>
+<td><code>transformers</code>/<code>safetensors</code>/<code>tokenizers</code> 都没有 ARM64 wheel；需装 x86 Python 通过模拟运行（详见 Console LLM 服务的引导）</td>
+</tr>
+<tr>
+<td><strong>Linux x86 (musl/Alpine)</strong></td>
+<td>fastembed 有些 ONNX runtime 不兼容 musl glibc，需用 manylinux 镜像</td>
+</tr>
+<tr>
+<td><strong>Intel Mac</strong></td>
+<td>不支持 MLX；自动 fallback 到 fastembed/sentence-transformers + faster-whisper</td>
+</tr>
+</tbody></table>
+<p>矩阵已经按这些约束自动选模型（见 <code>scripts/services/recommendation-matrix.yaml</code>）。</p>
+<hr>
+<h2>5. 故障排查</h2>
+<p>Cat Café Console 安装失败的 toast 现在会包含针对性 hint：识别到 <code>ConnectionError</code> 提示配镜像，识别到 <code>RepositoryNotFoundError</code> 提示走 HF Mirror，识别到 piper 下载失败提示手动放 voice 文件等。</p>
+<p>如果 hint 没指出明显方向，看完整日志：</p>
+<ul>
+<li>Console → 服务卡片 → 点击模型旁查看日志按钮（或 <code>data/logs/api/&lt;service-id&gt;.log</code>）</li>
+<li>安装阶段 stderr / stdout 都会写到该 log</li>
+</ul>
+<p>常见 error pattern：</p>
+<table>
+<thead>
+<tr>
+<th>错误片段</th>
+<th>含义</th>
+<th>解决方法</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ConnectionError</code> / <code>ProxyError</code></td>
+<td>网络不通</td>
+<td>配 PIP_INDEX_URL / HF_ENDPOINT</td>
+</tr>
+<tr>
+<td><code>Could not find a version</code></td>
+<td>wheel 找不到</td>
+<td>走 PIP_EXTRA_INDEX_URL 回落官方源；或换 Python 版本</td>
+</tr>
+<tr>
+<td><code>RepositoryNotFoundError</code></td>
+<td>HF 网络问题（不是真的 404）</td>
+<td>配 HF_ENDPOINT 镜像</td>
+</tr>
+<tr>
+<td><code>Failed to download model: &lt;voice&gt;.onnx</code></td>
+<td>Piper voice 拉取失败</td>
+<td>手动放到 ${CAT_CAFE_HOME}/piper-models/</td>
+</tr>
+<tr>
+<td><code>is not supported in TextEmbedding</code></td>
+<td>fastembed 白名单不收</td>
+<td>换模型名（参考矩阵推荐 + 自定义模型 hint 的 fastembed catalog 链接）</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>6. 永久禁用某项服务</h2>
+<p>如果一直装不上又用不到，可以在 Console 卸载该服务（删 venv）。卸载后 API server 启动时不会再 autostart 它。</p>
+
+</body></html>

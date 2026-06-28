@@ -58,6 +58,12 @@ const TRANSITION_TABLE: Record<string, TransitionRule> = {
 
   'case.triaged': { from: '*', to: 'triaged' },
   'case.routed': { from: '*', to: 'routed' },
+  // F168 Phase F: route validation events (SO-2 state machine)
+  // route_validated: target cat accepted the auto-route → stays routed
+  // route_rejected: target cat rejected → back to triaged so the operator decision queue
+  //   picks it up again (DIRECTION_SUPPRESSING_PROJECTION_STATES has 'routed')
+  'case.route_validated': { from: new Set<CommunityObjectState>(['routed']), to: 'routed' },
+  'case.route_rejected': { from: new Set<CommunityObjectState>(['routed']), to: 'triaged' },
   'case.declined': { from: '*', to: 'declined' },
   'case.reported': { from: '*', to: 'reported' },
 

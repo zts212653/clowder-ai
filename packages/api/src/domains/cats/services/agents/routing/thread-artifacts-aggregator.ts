@@ -13,7 +13,7 @@
  *   分类直接由数据源类型决定（rich block kind / task kind / ledger entry type）。
  */
 
-import type { RichBlock, ThreadArtifactDTO } from '@cat-cafe/shared';
+import { isSourceCodeExtension, type RichBlock, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 
 const THREAD_SCAN_PAGE = 200;
@@ -86,9 +86,15 @@ const AUDIO_NAME_MAX = 24;
 
 /** F232 A.2: video 扩展名集合——mimeType 优先，扩展名 fallback（无 mimeType 的旧 file block）。 */
 const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v', 'ogv']);
+
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+function ledgerArtifactType(f: AggregatorFileLedgerEntry): 'file' | 'code' {
+  const ext = extensionOf(f.ref);
+  return isSourceCodeExtension(ext) ? 'code' : 'file';
 }
 
 /** 单个 rich block → 产物（每 kind 一个 flat mapper；不收录的 kind 返回 []）。 */
@@ -115,8 +121,12 @@ function blockToArtifacts(b: RichBlock, msg: AggregatorMessage): ThreadArtifactD
       return [
         { ...base, type: 'audio', name: b.title ?? (b.text ? b.text.slice(0, AUDIO_NAME_MAX) : 'voice'), url: b.url },
       ];
+    case 'html_widget':
+      return [{ ...base, type: 'widget', name: b.title ?? 'Widget' }];
+    case 'interactive':
+      return [{ ...base, type: 'widget', name: b.title ?? b.description ?? 'Interactive' }];
     default:
-      return []; // card / checklist / interactive / html_widget 不收录（F232 OQ-3）
+      return []; // card / checklist 不收录
   }
 }
 
@@ -149,7 +159,7 @@ function prTasksToArtifacts(prTasks: AggregatorPrTask[]): ThreadArtifactDTO[] {
 
 function fileLedgerToArtifacts(fileLedger: AggregatorFileLedgerEntry[]): ThreadArtifactDTO[] {
   return fileLedger.map((f) => ({
-    type: 'file' as const,
+    type: ledgerArtifactType(f),
     name: f.label,
     catId: f.updatedBy,
     createdAt: f.updatedAt,

@@ -1,3 +1,4 @@
+import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
@@ -112,12 +113,28 @@ export interface SopTraceSourceSelector {
 }
 
 /**
+ * F236 Track-2 AC-E4 — replayable anchor telemetry rollup selector for eval:anchor-first.
+ * Provider resolves this window selector → getAnchorTelemetryRollup(window) → rollup
+ * snapshot with per-tool open-rate, charsSaved, drillChars, double-sided netBenefit.
+ * Shape mirrors FrictionRollupSourceSelector (window + kind discriminator).
+ */
+export interface AnchorTelemetrySourceSelector {
+  kind: 'anchor-telemetry-snapshot';
+  /** Window start (inclusive), epoch ms */
+  windowStartMs: number;
+  /** Window end (exclusive), epoch ms; must be > windowStartMs */
+  windowEndMs: number;
+}
+
+/**
  * F192 Phase H 收尾 PR-2 — `VerdictSourceRefs` is a discriminated union (砚砚 R1 Q3).
  * - a2a branch: `{snapshotName, attributionName}` (kind optional, default a2a)
  * - capability-wakeup branch: `CapabilityWakeupSourceSelector` (kind required)
  * - task-outcome branch: `TaskOutcomeSnapshotSourceRefs` (kind required, PR1 schema-only)
  * - memory branch: `MemoryRecallSourceSelector` (kind required, memory wire-up)
  * - sop branch: `SopTraceSourceSelector` (kind required, sop-wiring)
+ * - friction branch: `FrictionRollupSourceSelector` (kind required, F245 PR1b live sink)
+ * - anchor-telemetry branch: `AnchorTelemetrySourceSelector` (kind required, F236 Track-2)
  *
  * 砚砚 R1 P1 #2: generator MUST receive explicit `sources` (sanitized
  * evidence refs / replayable selector); tool NEVER fabricates evidence.
@@ -127,7 +144,9 @@ export type VerdictSourceRefs =
   | CapabilityWakeupSourceSelector
   | TaskOutcomeSnapshotSourceRefs
   | MemoryRecallSourceSelector
-  | SopTraceSourceSelector;
+  | SopTraceSourceSelector
+  | FrictionRollupSourceSelector
+  | AnchorTelemetrySourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

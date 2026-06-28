@@ -13,7 +13,7 @@ const missingHealth: AgentHookStatusResponse = {
       status: 'missing',
       drifted: true,
       reason: 'target file does not exist',
-      targetPath: '/home/user/session-start-recall.sh',
+      targetPath: '/home/user/.claude/hooks/session-start-recall.sh',
       diff: { kind: 'text', message: 'target file is missing' },
     },
     {
@@ -21,7 +21,7 @@ const missingHealth: AgentHookStatusResponse = {
       status: 'missing',
       drifted: true,
       reason: 'Claude settings is missing managed SessionStart/Stop hook entries',
-      targetPath: '/home/user/settings.json',
+      targetPath: '/home/user/.claude/settings.json',
       diff: { kind: 'json', message: 'managed SessionStart/Stop hook entries are missing', fields: ['hooks'] },
     },
     {
@@ -29,7 +29,7 @@ const missingHealth: AgentHookStatusResponse = {
       status: 'configured',
       drifted: false,
       reason: 'configured',
-      targetPath: '/home/user/hooks.json',
+      targetPath: '/home/user/.codex/hooks.json',
     },
   ],
 };

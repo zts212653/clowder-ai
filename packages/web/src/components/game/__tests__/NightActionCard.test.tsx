@@ -9,7 +9,7 @@ Object.assign(globalThis as Record<string, unknown>, { React });
 const targets: SeatView[] = [
   { seatId: 'P2', actorType: 'cat', actorId: 'opus', displayName: '宪宪', alive: true },
   { seatId: 'P3', actorType: 'cat', actorId: 'codex', displayName: '砚砚', alive: true },
-  { seatId: 'P6', actorType: 'cat', actorId: 'dare', displayName: 'Dare', alive: false },
+  { seatId: 'P6', actorType: 'cat', actorId: 'sonnet', displayName: 'Sonnet', alive: false },
 ];
 
 function render(overrides: Partial<Parameters<typeof NightActionCard>[0]> = {}): string {

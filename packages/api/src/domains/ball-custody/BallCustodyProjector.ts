@@ -14,12 +14,13 @@
  *  - rebuild(replay) 得逐字段相同 projection（INV-2，无漂移）。
  */
 
-import type { BallCustodyEvent, BallCustodyProjection, BallIntent } from '@cat-cafe/shared';
+import type { BallCustodyEvent, BallCustodyProjection, BallIntent, BallResolveMode } from '@cat-cafe/shared';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
 import { transition } from './ball-custody-state-machine.js';
 
 const VALID_INTENTS: BallIntent[] = ['handoff', 'fyi', 'done_notify'];
+const VALID_RESOLVE_MODES: BallResolveMode[] = ['bounces_back', 'completes'];
 
 function createInitialProjection(subjectKey: string, now: number): BallCustodyProjection {
   return {
@@ -62,6 +63,10 @@ function applyFieldEffects(proj: BallCustodyProjection, event: BallCustodyEvent,
       // 新 blocked episode：blockedSinceAt 记 episode identity，清 lastWakeAt（去重锚重置）
       proj.blockedSinceAt = now;
       proj.lastWakeAt = null;
+      proj.resolveMode =
+        typeof p.resolveMode === 'string' && VALID_RESOLVE_MODES.includes(p.resolveMode as BallResolveMode)
+          ? (p.resolveMode as BallResolveMode)
+          : null;
       break;
     case 'ball.wake_sent':
       // best-effort 唤醒已发的记录（仅 blocked 接受，见 transition）
@@ -91,6 +96,7 @@ function clearStaleTransientFields(proj: BallCustodyProjection, event: BallCusto
   if (proj.state !== 'blocked') {
     proj.blockedSinceAt = null;
     proj.lastWakeAt = null;
+    proj.resolveMode = null;
   }
   if (proj.state !== 'parked') {
     proj.intent = null;

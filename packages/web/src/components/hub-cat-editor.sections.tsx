@@ -62,6 +62,7 @@ export function IdentitySection({
   form,
   hasError,
   avatarUploading,
+  hasDossier,
   onChange,
   onAvatarUpload,
   onRefAudioUpload,
@@ -70,6 +71,8 @@ export function IdentitySection({
   form: HubCatEditorFormState;
   hasError?: boolean;
   avatarUploading: boolean;
+  /** F208 OQ-9: true when this cat has a structured dossier profile. */
+  hasDossier?: boolean;
   onChange: (patch: FormPatch) => void;
   onAvatarUpload: (file: File) => Promise<void>;
   onRefAudioUpload: (file: File) => Promise<void>;
@@ -184,6 +187,14 @@ export function IdentitySection({
         onChange={(hex) => onChange({ colorPrimary: hex, colorSecondary: hex })}
       />
 
+      {hasDossier && (
+        <p className="rounded-lg bg-conn-purple-bg px-3 py-1.5 text-xs text-conn-purple-text">
+          此猫已有结构化能力画像，擅长领域由画像驱动。此字段保留为社区兜底。
+          <a href="/settings?s=profiles" className="ml-1 underline hover:no-underline">
+            前往画像页 →
+          </a>
+        </p>
+      )}
       <TextField
         label="擅长领域"
         ariaLabel="Team Strengths"
@@ -332,7 +343,6 @@ export function buildCallHint(
     opencode: { cli: 'opencode', pathSuffix: ocPath ?? '/v1/chat/completions' },
     openai: { cli: 'codex', pathSuffix: '/v1/responses' },
     google: { cli: 'gemini', pathSuffix: `/models/${model || '...'}:generateContent` },
-    dare: { cli: 'dare', pathSuffix: '/v1/chat/completions' },
   };
   const info = cliEndpoints[client];
   if (!info) return null;
@@ -553,7 +563,7 @@ export function AccountSection({
                   required
                   placeholder={defaultAcpStartupArgsForClient(form.clientId) || '--acp'}
                 />
-                <p className="-mt-1 text-[11px] leading-4 text-cafe-muted">
+                <p className="-mt-1 text-micro leading-4 text-cafe-muted">
                   空格分隔，如 <code className="text-cafe-secondary">acp --pure</code> 或{' '}
                   <code className="text-cafe-secondary">--acp --mode agent</code>。带空格的值用引号包裹。
                 </p>

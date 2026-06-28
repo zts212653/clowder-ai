@@ -13,18 +13,28 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 
 describe('TranscriptWriter', () => {
   let tmpDir;
+  let writers;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'transcript-test-'));
+    writers = [];
   });
 
   afterEach(async () => {
+    await Promise.all(writers.map((writer) => writer.drainPendingWrites()));
     await rm(tmpDir, { recursive: true, force: true });
   });
 
   async function loadModules() {
     const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
     return { TranscriptWriter };
+  }
+
+  async function createWriter(options = {}) {
+    const { TranscriptWriter } = await loadModules();
+    const writer = new TranscriptWriter({ dataDir: tmpDir, ...options });
+    writers.push(writer);
+    return writer;
   }
 
   const SESSION_INFO = {
@@ -37,8 +47,7 @@ describe('TranscriptWriter', () => {
 
   describe('appendEvent()', () => {
     test('appends events to in-memory buffer', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'assistant',
@@ -53,8 +62,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('events have auto-incremented eventNo', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, { type: 'assistant', content: [{ type: 'text', text: 'A' }] });
       writer.appendEvent(SESSION_INFO, { type: 'user', content: [{ type: 'text', text: 'B' }] });
@@ -67,8 +75,7 @@ describe('TranscriptWriter', () => {
 
   describe('flush()', () => {
     test('writes events.jsonl to correct directory structure', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'assistant',
@@ -103,8 +110,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('writes index.json with sparse offsets', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir, indexStride: 2 });
+      const writer = await createWriter({ indexStride: 2 });
 
       // Write 5 events
       for (let i = 0; i < 5; i++) {
@@ -136,8 +142,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('clears buffer after flush', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'assistant',
@@ -149,8 +154,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('flush with no events is no-op', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       // Should not throw
       await writer.flush(SESSION_INFO);
@@ -160,8 +164,7 @@ describe('TranscriptWriter', () => {
 
   describe('generateExtractiveDigest()', () => {
     test('produces digest with basic session info', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'assistant',
@@ -183,8 +186,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('extracts tool names from tool_use events', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'tool_use',
@@ -214,8 +216,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('extracts file paths from tool_use events', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'tool_use',
@@ -240,8 +241,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('extracts errors from tool_result error events', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'tool_result',
@@ -259,8 +259,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('F211 E4: folds repeated recovered runtime noise into digest diagnostics', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, { type: 'tool_result', is_error: true, content: 'context canceled' }, 'inv-1');
       writer.appendEvent(SESSION_INFO, { type: 'tool_result', is_error: true, content: 'context canceled' }, 'inv-1');
@@ -283,8 +282,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('F211 E4: keeps one promoted error when repeated runtime noise is terminal', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -310,8 +308,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('F211 E4: keeps non-MCP status refused errors out of MCP noise folding', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -339,8 +336,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('F211 E4: does not recover terminal noise from another invocation', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -368,8 +364,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('F211 E4: preserves chronological order for retained single noise errors', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -396,8 +391,7 @@ describe('TranscriptWriter', () => {
       // In production, appendEvent receives AgentMessage objects (cast to Record<string,unknown>).
       // AgentMessage uses toolName/toolInput (not name/input) and type:'error'+error (not is_error+content).
       // The digest extractor must read the correct fields.
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       // Real AgentMessage shape for tool_use (from ClaudeAgentService)
       writer.appendEvent(SESSION_INFO, {
@@ -447,8 +441,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('captures recent visible assistant text for session-continuity bootstrap', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'text',
@@ -481,8 +474,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('coalesces streamed text chunks before keeping recent messages', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -518,8 +510,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('preserves repeated-cat turn boundaries within one invocation', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -555,8 +546,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('excludes leaked tool-call payloads from recent visible messages', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -586,8 +576,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('excludes leaked tool-call payloads split across streamed text chunks', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(
         SESSION_INFO,
@@ -629,8 +618,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('captures latest continuity capsule from session seal system_info', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       const continuityCapsule = {
         v: 1,
@@ -660,8 +648,7 @@ describe('TranscriptWriter', () => {
     });
 
     test('writes digest.extractive.json during flush', async () => {
-      const { TranscriptWriter } = await loadModules();
-      const writer = new TranscriptWriter({ dataDir: tmpDir });
+      const writer = await createWriter();
 
       writer.appendEvent(SESSION_INFO, {
         type: 'assistant',

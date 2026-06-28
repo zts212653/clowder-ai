@@ -352,3 +352,272 @@ describe('Task 9 — board aggregation projection enrichment', () => {
     await app.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC-F6: Thread name resolution for board display
+// ---------------------------------------------------------------------------
+
+function makeThreadStore(threads = []) {
+  const map = new Map(threads.map((t) => [t.id, t]));
+  return {
+    get: async (threadId) => map.get(threadId) ?? null,
+    create: async (_userId, title) => {
+      const thread = {
+        id: `thread-new-${Date.now()}`,
+        title,
+        projectPath: '',
+        createdBy: 'test',
+        participants: [],
+        lastActiveAt: Date.now(),
+        createdAt: Date.now(),
+      };
+      map.set(thread.id, thread);
+      return thread;
+    },
+  };
+}
+
+function makeFakeIssueStoreWithAssignment() {
+  const issues = [
+    {
+      id: 'issue-assigned',
+      repo: 'owner/repo',
+      issueNumber: 101,
+      issueType: 'bug',
+      title: 'Assigned issue',
+      state: 'discussing',
+      replyState: 'replied',
+      assignedThreadId: 'thread-ops-1',
+      assignedCatId: 'codex',
+      linkedPrNumbers: [],
+      directionCard: null,
+      ownerDecision: null,
+      relatedFeature: null,
+      guardianAssignment: null,
+      lastActivity: { at: 2000, event: 'replied' },
+      createdAt: 1000,
+      updatedAt: 2000,
+    },
+    {
+      id: 'issue-unassigned',
+      repo: 'owner/repo',
+      issueNumber: 102,
+      issueType: 'question',
+      title: 'Unassigned issue',
+      state: 'unreplied',
+      replyState: 'unreplied',
+      assignedThreadId: null,
+      assignedCatId: null,
+      linkedPrNumbers: [],
+      directionCard: null,
+      ownerDecision: null,
+      relatedFeature: null,
+      guardianAssignment: null,
+      lastActivity: { at: 1500, event: 'created' },
+      createdAt: 1500,
+      updatedAt: 1500,
+    },
+  ];
+  return {
+    listByRepo: async (repo) => issues.filter((i) => i.repo === repo),
+    get: async () => null,
+    create: async () => null,
+    update: async () => null,
+    listAll: async () => [],
+    getByRepoAndNumber: async () => null,
+    delete: async () => null,
+  };
+}
+
+describe('AC-F6 — thread name resolution in board response', () => {
+  it('issues with assignedThreadId include assignedThreadName from threadStore', async () => {
+    const threadStore = makeThreadStore([
+      {
+        id: 'thread-ops-1',
+        title: '社区 issue / pr 运维',
+        projectPath: '',
+        createdBy: 'system',
+        participants: ['codex'],
+        lastActiveAt: 5000,
+        createdAt: 1000,
+      },
+    ]);
+    const app = await buildApp({
+      communityIssueStore: makeFakeIssueStoreWithAssignment(),
+      threadStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/community-board?repo=owner/repo' });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+
+    const assigned = body.issues.find((i) => i.issueNumber === 101);
+    assert.ok(assigned, 'assigned issue must be present');
+    assert.strictEqual(
+      assigned.assignedThreadName,
+      '社区 issue / pr 运维',
+      'assignedThreadName must be resolved from threadStore',
+    );
+
+    const unassigned = body.issues.find((i) => i.issueNumber === 102);
+    assert.ok(unassigned, 'unassigned issue must be present');
+    assert.strictEqual(unassigned.assignedThreadName, null, 'unassigned issue should have null assignedThreadName');
+
+    await app.close();
+  });
+
+  it('missing thread in store results in null assignedThreadName (no crash)', async () => {
+    const threadStore = makeThreadStore([]); // empty — thread not found
+    const issueStore = makeFakeIssueStoreWithAssignment();
+    const app = await buildApp({
+      communityIssueStore: issueStore,
+      threadStore,
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/community-board?repo=owner/repo' });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+
+    const assigned = body.issues.find((i) => i.issueNumber === 101);
+    assert.ok(assigned, 'assigned issue must be present');
+    assert.strictEqual(assigned.assignedThreadName, null, 'missing thread should yield null, not crash');
+
+    await app.close();
+  });
+
+  it('without threadStore: assignedThreadName is absent (backward compatible)', async () => {
+    const app = await buildApp({
+      communityIssueStore: makeFakeIssueStoreWithAssignment(),
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/community-board?repo=owner/repo' });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+
+    const assigned = body.issues.find((i) => i.issueNumber === 101);
+    assert.ok(assigned, 'assigned issue must be present');
+    // Without threadStore, no thread name resolution — field should not be present
+    assert.ok(!('assignedThreadName' in assigned), 'assignedThreadName should NOT be present without threadStore');
+
+    await app.close();
+  });
+
+  it('deduplicates thread lookups for issues sharing the same assignedThreadId', async () => {
+    let lookupCount = 0;
+    const threadStore = {
+      get: async (threadId) => {
+        lookupCount++;
+        if (threadId === 'thread-shared')
+          return {
+            id: 'thread-shared',
+            title: '共享运维线程',
+            projectPath: '',
+            createdBy: 'system',
+            participants: [],
+            lastActiveAt: 3000,
+            createdAt: 1000,
+          };
+        return null;
+      },
+      create: async () => ({
+        id: 'dummy',
+        title: 'dummy',
+        projectPath: '',
+        createdBy: 'test',
+        participants: [],
+        lastActiveAt: 0,
+        createdAt: 0,
+      }),
+    };
+    const issues = [
+      {
+        id: 'i1',
+        repo: 'owner/repo',
+        issueNumber: 201,
+        issueType: 'bug',
+        title: 'Issue A',
+        state: 'discussing',
+        replyState: 'replied',
+        assignedThreadId: 'thread-shared',
+        assignedCatId: 'codex',
+        linkedPrNumbers: [],
+        directionCard: null,
+        ownerDecision: null,
+        relatedFeature: null,
+        guardianAssignment: null,
+        lastActivity: { at: 2000, event: 'replied' },
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+      {
+        id: 'i2',
+        repo: 'owner/repo',
+        issueNumber: 202,
+        issueType: 'bug',
+        title: 'Issue B',
+        state: 'discussing',
+        replyState: 'replied',
+        assignedThreadId: 'thread-shared',
+        assignedCatId: 'codex',
+        linkedPrNumbers: [],
+        directionCard: null,
+        ownerDecision: null,
+        relatedFeature: null,
+        guardianAssignment: null,
+        lastActivity: { at: 2000, event: 'replied' },
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+      {
+        id: 'i3',
+        repo: 'owner/repo',
+        issueNumber: 203,
+        issueType: 'bug',
+        title: 'Issue C',
+        state: 'discussing',
+        replyState: 'replied',
+        assignedThreadId: 'thread-shared',
+        assignedCatId: 'codex',
+        linkedPrNumbers: [],
+        directionCard: null,
+        ownerDecision: null,
+        relatedFeature: null,
+        guardianAssignment: null,
+        lastActivity: { at: 2000, event: 'replied' },
+        createdAt: 1000,
+        updatedAt: 2000,
+      },
+    ];
+    const issueStore = {
+      listByRepo: async () => issues,
+      get: async () => null,
+      create: async () => null,
+      update: async () => null,
+      listAll: async () => [],
+      getByRepoAndNumber: async () => null,
+      delete: async () => null,
+    };
+
+    const app = await buildApp({ communityIssueStore: issueStore, threadStore });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/api/community-board?repo=owner/repo' });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+
+    // All three issues should have the thread name
+    for (const num of [201, 202, 203]) {
+      const issue = body.issues.find((i) => i.issueNumber === num);
+      assert.ok(issue, `issue #${num} must be present`);
+      assert.strictEqual(issue.assignedThreadName, '共享运维线程', `issue #${num} must have resolved thread name`);
+    }
+
+    // Thread lookup should be deduplicated — only 1 call for the shared thread
+    assert.strictEqual(lookupCount, 1, `threadStore.get should be called once for shared thread, got ${lookupCount}`);
+
+    await app.close();
+  });
+});

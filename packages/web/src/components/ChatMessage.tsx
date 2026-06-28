@@ -38,7 +38,6 @@ const BREED_STYLES: Record<string, { radius: string; font?: string }> = {
   ragdoll: { radius: 'rounded-2xl rounded-bl-sm' },
   'maine-coon': { radius: 'rounded-2xl rounded-br-sm', font: 'font-mono' },
   siamese: { radius: 'rounded-2xl rounded-tr-sm' },
-  'dragon-li': { radius: 'rounded-lg rounded-tl-sm', font: 'font-mono' },
 };
 const DEFAULT_BREED_STYLE = { radius: 'rounded-2xl' };
 
@@ -52,7 +51,6 @@ function formatTime(ts: number): string {
 }
 
 const DELIVERED_AT_GAP_THRESHOLD = 5000;
-
 function formatDualTime(timestamp: number, deliveredAt?: number): string {
   if (!deliveredAt || deliveredAt - timestamp <= DELIVERED_AT_GAP_THRESHOLD) {
     return formatTime(timestamp);
@@ -189,7 +187,19 @@ export function ChatMessage({
   // working log while the callback terminal text renders as the body.
   const mergedCliStdout = message.extra?.stream?.cliStdout;
   const mergedSpeechContent = message.extra?.stream?.speechContent;
-  const cliStdoutContent = mergedCliStdout ?? (isStreamOrigin ? message.content : undefined);
+  const cachedR21SpeechStdout =
+    isStreamOrigin &&
+    !message.isStreaming &&
+    mergedCliStdout === '' &&
+    message.content.trim().length === 0 &&
+    typeof mergedSpeechContent === 'string' &&
+    mergedSpeechContent.trim().length > 0
+      ? mergedSpeechContent
+      : undefined;
+  const projectedCliStdout =
+    isStreamOrigin && mergedCliStdout === '' && message.content.trim().length > 0 ? message.content : mergedCliStdout;
+  const cliStdoutContent =
+    cachedR21SpeechStdout ?? projectedCliStdout ?? (isStreamOrigin ? message.content : undefined);
   const cliEvents = toCliEvents(message.toolEvents, cliStdoutContent);
   const hasCliBlock = cliEvents.length > 0;
   const cliStatus = message.isStreaming
@@ -197,7 +207,6 @@ export function ChatMessage({
     : message.variant === 'error'
       ? ('failed' as const)
       : ('done' as const);
-
   if (isSummary && message.summary) {
     return (
       <div data-message-id={message.id}>
