@@ -175,7 +175,7 @@ export function formatCliNotFoundError(command: string, platform: NodeJS.Platfor
         ? 'curl.exe -fsSL https://antigravity.google/cli/install.cmd -o install.cmd && install.cmd && del install.cmd'
         : 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     kimi: 'uv tool install --python 3.13 kimi-cli',
-    opencode: 'npm install -g opencode',
+    opencode: 'npm install -g opencode-ai',
   };
   const hint = installHints[command] ?? `install the "${command}" CLI`;
   return `${command} CLI 未找到。请先运行 \`${hint}\` 安装，再重试。`;
