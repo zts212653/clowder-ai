@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds the Cat Cafe Windows installer package.
+  Builds the Clowder AI Windows installer package.
 
 .DESCRIPTION
   Full pipeline:
@@ -266,7 +266,7 @@ Install it with the official bootstrapper:
 
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri https://antigravity.google/cli/install.cmd -OutFile `$env:TEMP\antigravity-cli-install.cmd; & `$env:TEMP\antigravity-cli-install.cmd"
 
-Offline Cat Cafe packages intentionally do not vendor agy until Google
+Offline Clowder AI packages intentionally do not vendor agy until Google
 publishes a redistributable native binary contract.
 "@ | Set-Content -Path $agyInstructionsPath -Encoding ascii
 Write-Ok "agy-install-instructions.txt written"
@@ -396,7 +396,7 @@ if (-not $SkipInstaller) {
         if (Test-Path $unofficial) {
             Copy-Item $unofficial $zhIsl
         } else {
-            $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+            $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl"
             Invoke-WebRequest -Uri $url -OutFile $zhIsl -ErrorAction Stop
         }
         Write-Host "  Installed ChineseSimplified.isl" -ForegroundColor Gray
