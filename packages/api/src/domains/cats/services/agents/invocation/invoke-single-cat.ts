@@ -93,9 +93,11 @@ import {
   parseOpenCodeModel,
   safeProviderName,
   summarizeOpenCodeRuntimeConfigForDebug,
+} from '../providers/opencode-config-template.js';
+import {
   writeOpenCodeInstructionsOnlyConfig,
   writeOpenCodeRuntimeConfig,
-} from '../providers/opencode-config-template.js';
+} from '../providers/opencode-config-writer.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
 import { buildContextManagementHint, queueContextHint, takeContextHintPrefix } from './context-management-hint.js';
 
@@ -1602,7 +1604,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Remap model prefix when provider name collides with OpenCode builtins
       // (e.g. 'openai/gpt-4o' → 'openai-compat/gpt-4o') so the CLI -m arg
       // matches the remapped provider key in opencode.json.
-      const safeProvider = safeProviderName(effectiveProviderName);
+      // Only remap for api_key — OAuth uses native providers, no custom entry
+      // in opencode.json, so remapping to 'openai-compat/...' would reference a nonexistent provider.
+      const safeProvider = isApiKey ? safeProviderName(effectiveProviderName) : effectiveProviderName;
       const safeModel =
         safeProvider !== effectiveProviderName && effectiveModel.startsWith(`${effectiveProviderName}/`)
           ? `${safeProvider}/${effectiveModel.slice(effectiveProviderName.length + 1)}`
@@ -1623,12 +1627,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         instructions: openCodeL0InstructionPaths,
         // #935: External directory permissions for Windows/cross-project access.
         ...(openCodeExternalDirs.length > 0 ? { externalDirectories: openCodeExternalDirs } : {}),
+        // OAuth: MCP-only config — no custom provider entry, so OpenCode uses its
+        // native auth handler instead of an empty apiKey placeholder.
+        mcpOnly: !isApiKey,
       } as const;
-      openCodeRuntimeConfigPath = writeOpenCodeRuntimeConfig(
+      openCodeRuntimeConfigPath = await writeOpenCodeRuntimeConfig(
         projectRoot,
         catId as string,
         invocationId,
         runtimeConfigOptions,
+        workingDirectory,
       );
       callbackEnv.OPENCODE_CONFIG = openCodeRuntimeConfigPath;
       // Credentials: only for api_key auth.
@@ -1647,6 +1655,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           invocationId,
           openCodeConfigPath: openCodeRuntimeConfigPath,
           apiType,
+          authType: resolvedAccount.authType,
+          mcpOnly: !isApiKey,
           callbackEnvSummary: {
             opencodeConfig: callbackEnv.OPENCODE_CONFIG,
             ocBaseUrl: callbackEnv[OC_BASE_URL_ENV] ?? null,

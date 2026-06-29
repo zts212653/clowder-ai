@@ -17,14 +17,15 @@
  *   - System prompt: prepended to prompt text (ACP agents have no system prompt flag)
  */
 
-import type { CatId } from '@cat-cafe/shared';
+import type { CapabilitiesConfig, CatId } from '@cat-cafe/shared';
+import { readCapabilitiesConfig } from '../../../../../../config/capabilities/capability-orchestrator.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
 import { createAcpSessionState, flushAcpThinking, transformAcpEvent } from './acp-event-transformer.js';
-import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
+import { resolveAcpMcpServers, resolveDisabledServerIds, resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer, AcpNewSessionResult } from './types.js';
 
@@ -36,7 +37,13 @@ export interface AcpAgentServiceConfig {
   poolKey: PoolKey;
   /** Project root (monorepo root) — used as default session cwd */
   projectRoot: string;
-  /** MCP servers to pass to each ACP session (resolved from mcpWhitelist) */
+  /**
+   * MCP whitelist from ACP variant config. When set, MCP servers are resolved
+   * at invoke time from capabilities.json (not frozen at construction time).
+   * This ensures capability toggles take effect without registry rebuild.
+   */
+  mcpWhitelist?: string[];
+  /** @deprecated Pre-resolved MCP servers. Prefer mcpWhitelist for invoke-time resolution. */
   mcpServers?: AcpMcpServer[];
   /** Provider name for metadata (e.g. 'google', 'opencode'). Defaults to 'acp'. */
   providerName?: string;
@@ -56,6 +63,9 @@ export class AcpAgentService implements AgentService {
   private readonly pool: AcpProcessPool;
   private readonly poolKey: PoolKey;
   private readonly projectRoot: string;
+  /** Invoke-time whitelist — when non-null, MCP servers are resolved fresh each invoke. */
+  private readonly mcpWhitelist: string[] | null;
+  /** Pre-resolved servers (legacy/test path). Used only when mcpWhitelist is null. */
   private readonly mcpServers: AcpMcpServer[];
   private readonly providerName: string;
   private readonly modelName: string;
@@ -67,6 +77,7 @@ export class AcpAgentService implements AgentService {
     this.pool = config.pool;
     this.poolKey = config.poolKey;
     this.projectRoot = config.projectRoot;
+    this.mcpWhitelist = config.mcpWhitelist ?? null;
     this.mcpServers = config.mcpServers ?? [];
     this.providerName = config.providerName ?? 'acp';
     this.modelName = config.modelName ?? config.sessionModel ?? 'acp';
@@ -164,15 +175,52 @@ export class AcpAgentService implements AgentService {
     const MAX_SCRATCHPAD_SUPPRESSED_EVENTS = 50;
 
     try {
-      // F145 Phase E: merge user project MCP servers per-invoke (thread.projectPath → workingDirectory)
-      // F161 gate: when mcpSupport is disabled, skip ALL MCP — both base (already []) and per-project.
-      let invokeServers = this.mcpServers;
+      // #712 P1-1: resolve MCP servers at invoke time from capabilities.json
+      // so capability toggles take effect immediately without registry rebuild.
+      // P1-2: check project-local capabilities.json first, fall back to runtime root.
       const userProjectRoot = options?.workingDirectory;
+      let baseMcpServers: AcpMcpServer[];
+      if (this.mcpWhitelist !== null) {
+        let capConfig: CapabilitiesConfig | null = null;
+        // Track which root supplied capabilities.json — external MCP entries
+        // with relative paths must resolve against the config source, not runtime root.
+        let configSourceRoot = this.projectRoot;
+        if (this.mcpSupportEnabled && userProjectRoot && userProjectRoot !== this.projectRoot) {
+          try {
+            capConfig = await readCapabilitiesConfig(userProjectRoot);
+            configSourceRoot = userProjectRoot;
+          } catch {
+            /* No project-local config — fall back to runtime root */
+          }
+        }
+        if (!capConfig) {
+          try {
+            capConfig = await readCapabilitiesConfig(this.projectRoot);
+            configSourceRoot = this.projectRoot;
+          } catch {
+            /* best-effort — resolveAcpMcpServers handles null config */
+          }
+        }
+        const disabled = resolveDisabledServerIds(this.projectRoot, this.catId as string, capConfig);
+        baseMcpServers = await resolveAcpMcpServers(this.projectRoot, this.mcpWhitelist, undefined, {
+          mcpSupport: this.mcpSupportEnabled,
+          disabledServerIds: disabled,
+          catId: this.catId as string,
+          capabilitiesConfig: capConfig,
+          configSourceRoot,
+        });
+      } else {
+        baseMcpServers = this.mcpServers;
+      }
+
+      // F145 Phase E: merge user project .mcp.json servers per-invoke
+      // F161 gate: when mcpSupport is disabled, skip ALL MCP
+      let invokeServers = baseMcpServers;
       if (this.mcpSupportEnabled && userProjectRoot && userProjectRoot !== this.projectRoot) {
-        const baseNames = new Set(this.mcpServers.map((s) => s.name));
+        const baseNames = new Set(baseMcpServers.map((s) => s.name));
         const userServers = resolveUserProjectMcpServers(userProjectRoot, baseNames);
         if (userServers.length > 0) {
-          invokeServers = [...this.mcpServers, ...userServers];
+          invokeServers = [...baseMcpServers, ...userServers];
         }
       }
 

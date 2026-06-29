@@ -1,22 +1,26 @@
 /**
  * MCP Probe Helpers
  *
- * Probes an MCP stdio server with `tools/list` and returns lightweight
- * connection + tool metadata for the Capability Center UI.
+ * Probes an MCP server (stdio or streamableHttp) with `tools/list` and returns
+ * lightweight connection + tool metadata for the Capability Center UI.
  */
 
 import type { CapabilityEntry, McpToolInfo } from '@cat-cafe/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { resolvePencilCommand } from '../config/capabilities/capability-orchestrator.js';
 
 export interface McpProbeResult {
   connectionStatus: 'connected' | 'disconnected' | 'unknown';
   tools?: McpToolInfo[];
+  /** Error detail when connectionStatus is 'disconnected'. */
+  error?: string;
 }
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
+const DEFAULT_HTTP_PROBE_TIMEOUT_MS = 8000;
 const SLOW_START_PROBE_TIMEOUT_MS = 7000;
 const CLOSE_TIMEOUT_MS = 300;
 const MIN_STEP_TIMEOUT_MS = 100;
@@ -44,6 +48,18 @@ function sanitizeEnv(env: Record<string, string> | undefined): Record<string, st
     if (typeof value === 'string') safe[key] = value;
   }
   return safe;
+}
+
+/**
+ * Resolve `${ENV_VAR}` references in header values from process.env.
+ * Supports bare `${VAR}` as well as embedded `Bearer ${VAR}` patterns.
+ */
+function resolveEnvVarsInRecord(record: Record<string, string>): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const [key, value] of Object.entries(record)) {
+    resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
+  }
+  return resolved;
 }
 
 function remainingTimeout(deadlineMs: number): number {
@@ -105,9 +121,59 @@ export async function probeMcpCapability(
   if (capability.type !== 'mcp') return { connectionStatus: 'unknown' };
   if (!capability.mcpServer) return { connectionStatus: 'unknown' };
 
-  let command = capability.mcpServer.command;
-  let args = capability.mcpServer.args;
-  if ((!command || command.trim().length === 0) && capability.mcpServer.resolver === 'pencil') {
+  const isHttp = capability.mcpServer.transport === 'streamableHttp';
+  if (isHttp) return probeHttpMcp(capability, options);
+  return probeStdioMcp(capability, options);
+}
+
+async function probeHttpMcp(capability: CapabilityEntry, options: { timeoutMs?: number }): Promise<McpProbeResult> {
+  const url = capability.mcpServer?.url;
+  if (!url) return { connectionStatus: 'unknown' };
+
+  // #712 review P1-10: validate URL scheme to prevent SSRF via file:// / gopher:// etc.
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { connectionStatus: 'disconnected', error: 'Invalid URL' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { connectionStatus: 'disconnected', error: `Unsupported scheme: ${parsed.protocol}` };
+  }
+
+  const timeoutMs = options.timeoutMs ?? DEFAULT_HTTP_PROBE_TIMEOUT_MS;
+  const deadlineMs = Date.now() + timeoutMs;
+  const requestInit: RequestInit = {};
+  if (capability.mcpServer?.headers && Object.keys(capability.mcpServer.headers).length > 0) {
+    requestInit.headers = resolveEnvVarsInRecord(capability.mcpServer.headers);
+  }
+
+  const transport = new StreamableHTTPClientTransport(parsed, { requestInit });
+  const client = new Client({ name: 'cat-cafe-capability-probe', version: '0.1.0' }, { capabilities: {} });
+
+  try {
+    await withTimeout(client.connect(transport), remainingTimeout(deadlineMs));
+    const result = await withTimeout(client.listTools(), remainingTimeout(deadlineMs));
+    return {
+      connectionStatus: 'connected',
+      tools: normalizeTools(result.tools ?? []),
+    };
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
+  } finally {
+    await transport.close().catch(() => {});
+  }
+}
+
+async function probeStdioMcp(
+  capability: CapabilityEntry,
+  options: { projectRoot: string; timeoutMs?: number },
+): Promise<McpProbeResult> {
+  const mcp = capability.mcpServer;
+  if (!mcp) return { connectionStatus: 'unknown' };
+  let command = mcp.command;
+  let args = mcp.args;
+  if ((!command || command.trim().length === 0) && mcp.resolver === 'pencil') {
     const resolved = await resolvePencilCommand();
     if (!resolved) return { connectionStatus: 'unknown' };
     command = resolved.command;
@@ -120,11 +186,10 @@ export async function probeMcpCapability(
   const serverParams: StdioServerParameters = {
     command,
     args,
-    cwd: capability.mcpServer.workingDir ?? options.projectRoot,
-    // Probe only needs tools/list result; discard stderr to avoid pipe backpressure.
+    cwd: mcp.workingDir ?? options.projectRoot,
     stderr: 'ignore',
   };
-  const env = sanitizeEnv(capability.mcpServer.env);
+  const env = sanitizeEnv(mcp.env);
   if (env && Object.keys(env).length > 0) serverParams.env = env;
 
   const transport = new StdioClientTransport(serverParams);
@@ -137,11 +202,8 @@ export async function probeMcpCapability(
       connectionStatus: 'connected',
       tools: normalizeTools(result.tools ?? []),
     };
-  } catch {
-    return {
-      connectionStatus: 'disconnected',
-      tools: [],
-    };
+  } catch (err) {
+    return { connectionStatus: 'disconnected', tools: [], error: (err as Error).message };
   } finally {
     await closeTransportBounded(transport).catch(() => {});
   }

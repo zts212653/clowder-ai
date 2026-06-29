@@ -17,6 +17,7 @@ import {
   ensureCatCafeMainServer,
   generateCliConfigs,
   healCatCafeMcpTopology,
+  inheritFullyBlockedMcpCapabilitiesForNewCat,
   migrateLegacyCatCafeCapability,
   migrateResolverBackedCapabilities,
   orchestrate,
@@ -261,7 +262,13 @@ describe('writeCapabilitiesConfig', () => {
 
     await writeCapabilitiesConfig(dir, config);
     const read = await readCapabilitiesConfig(dir);
-    assert.deepEqual(read, { ...config, version: 2 });
+    // readCapabilitiesConfig fills globalEnabled from enabled (in-memory migration)
+    const expected = {
+      ...config,
+      version: 2,
+      capabilities: config.capabilities.map((c) => ({ ...c, globalEnabled: c.enabled })),
+    };
+    assert.deepEqual(read, expected);
   });
 });
 
@@ -1019,7 +1026,8 @@ describe('migrateLegacyCatCafeCapability', () => {
 
     for (const entry of [collab, memory, signals]) {
       assert.equal(entry?.enabled, false);
-      assert.deepEqual(entry?.overrides, [{ catId: 'codex', enabled: true }]);
+      assert.equal(entry?.overrides, undefined, 'overrides converted during migration');
+      assert.equal(entry?.blockedCats, undefined, 'no cats blocked (legacy only had enabled:true overrides)');
       assert.deepEqual(entry?.mcpServer?.env, { CAT_CAFE_FOO: 'bar' });
       assert.equal(entry?.mcpServer?.workingDir, '/tmp/cat-cafe');
     }
@@ -1240,7 +1248,7 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
   // (which previously hosted limb tools via registerFullToolset), NOT from
   // arbitrary first split — otherwise migration silently re-enables limb when
   // user had cat-cafe disabled.
-  it('supplemental splits inherit enabled/overrides/env from legacy cat-cafe (not first split) when migrating', () => {
+  it('supplemental splits inherit enabled/blockedCats/env from legacy cat-cafe (not first split) when migrating', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe',
@@ -1283,11 +1291,8 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
     const limb = result.config.capabilities.find((c) => c.id === 'cat-cafe-limb');
     assert.ok(limb, 'limb must be added');
     assert.equal(limb.enabled, false, 'limb must inherit DISABLED from legacy cat-cafe (P1: no silent re-enable)');
-    assert.deepEqual(
-      limb.overrides,
-      [{ catId: 'opus-47', enabled: true }],
-      'limb must inherit per-cat overrides from legacy cat-cafe',
-    );
+    assert.equal(limb.overrides, undefined, 'overrides converted to blockedCats during migration');
+    assert.equal(limb.blockedCats, undefined, 'no cats blocked (legacy only had enabled:true overrides)');
     assert.deepEqual(
       limb.mcpServer?.env,
       { CAT_CAFE_LIMB_TOKEN: 'legacy-token' },
@@ -1298,14 +1303,16 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
     const audio = result.config.capabilities.find((c) => c.id === 'cat-cafe-audio');
     assert.ok(audio, 'audio must be added');
     assert.equal(audio.enabled, false, 'audio must inherit DISABLED from legacy cat-cafe');
-    assert.deepEqual(audio.overrides, [{ catId: 'opus-47', enabled: true }]);
+    assert.equal(audio.overrides, undefined, 'overrides converted during migration');
+    assert.equal(audio.blockedCats, undefined, 'no cats blocked');
     assert.deepEqual(audio.mcpServer?.env, { CAT_CAFE_LIMB_TOKEN: 'legacy-token' });
     assert.equal(audio.mcpServer?.workingDir, '/legacy-dir');
 
     const finance = result.config.capabilities.find((c) => c.id === 'cat-cafe-finance');
     assert.ok(finance, 'finance must be added');
     assert.equal(finance.enabled, false, 'finance must inherit DISABLED from legacy cat-cafe');
-    assert.deepEqual(finance.overrides, [{ catId: 'opus-47', enabled: true }]);
+    assert.equal(finance.overrides, undefined, 'overrides converted during migration');
+    assert.equal(finance.blockedCats, undefined, 'no cats blocked');
     assert.deepEqual(finance.mcpServer?.env, { CAT_CAFE_LIMB_TOKEN: 'legacy-token' });
     assert.equal(finance.mcpServer?.workingDir, '/legacy-dir');
   });
@@ -1568,7 +1575,7 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
   });
 
   // Fresh 3-split (no legacy cat-cafe) — limb falls back to inherit from first split
-  it('inherits disabled + overrides + env from first split when fresh 3-split (no legacy cat-cafe)', () => {
+  it('inherits disabled + blockedCats + env from first split when fresh 3-split (no legacy cat-cafe)', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe-collab',
@@ -1608,7 +1615,8 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
       false,
       'must inherit disabled state from first split (no legacy cat-cafe to inherit from)',
     );
-    assert.deepEqual(limb.overrides, [{ catId: 'codex', enabled: true }]);
+    assert.equal(limb.overrides, undefined, 'overrides converted during migration');
+    assert.equal(limb.blockedCats, undefined, 'no cats blocked (legacy only had enabled:true overrides)');
     assert.deepEqual(limb.mcpServer?.env, { CAT_CAFE_FOO: 'bar' });
     assert.equal(limb.mcpServer?.workingDir, '/tmp/cat-cafe');
   });
@@ -1991,6 +1999,7 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
         id: 'cat-cafe-limb',
         type: 'mcp',
         enabled: false,
+        globalEnabled: false,
         source: 'external',
         mcpServer: { command: 'node', args: ['/repo/packages/mcp-server/dist/limb.js'] },
       },
@@ -2067,6 +2076,72 @@ describe('ensureCatCafeMainServer (F193 Phase C semantics)', () => {
   });
 });
 
+describe('inheritFullyBlockedMcpCapabilitiesForNewCat', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('cap-inherit-blocks');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('adds a new cat to MCP blockedCats when all existing cats are already blocked', async () => {
+    await writeCapabilitiesConfig(
+      dir,
+      makeConfig([
+        {
+          id: 'project-disabled-tool',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: ['opus', 'codex'],
+        },
+        {
+          id: 'partially-disabled-tool',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: ['opus'],
+        },
+      ]),
+    );
+
+    const changed = await inheritFullyBlockedMcpCapabilitiesForNewCat(dir, 'spark', new Set(['opus', 'codex']));
+
+    assert.equal(changed, true);
+    const config = await readCapabilitiesConfig(dir);
+    const fullyBlocked = config?.capabilities.find((cap) => cap.id === 'project-disabled-tool');
+    const partiallyBlocked = config?.capabilities.find((cap) => cap.id === 'partially-disabled-tool');
+    assert.deepEqual(fullyBlocked?.blockedCats, ['opus', 'codex', 'spark']);
+    assert.deepEqual(partiallyBlocked?.blockedCats, ['opus']);
+  });
+
+  it('does not change partial blocks or empty catalogs', async () => {
+    await writeCapabilitiesConfig(
+      dir,
+      makeConfig([
+        {
+          id: 'enabled-tool',
+          type: 'mcp',
+          enabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: [],
+        },
+      ]),
+    );
+
+    const changed = await inheritFullyBlockedMcpCapabilitiesForNewCat(dir, 'spark', new Set(['opus']));
+
+    assert.equal(changed, false);
+    const config = await readCapabilitiesConfig(dir);
+    assert.deepEqual(config?.capabilities[0]?.blockedCats, []);
+  });
+});
+
 // ────────── Resolve per-cat ──────────
 
 describe('resolveServersForCat', () => {
@@ -2079,7 +2154,14 @@ describe('resolveServersForCat', () => {
         source: 'cat-cafe',
         mcpServer: { command: 'node', args: ['index.js'] },
       },
-      { id: 'disabled', type: 'mcp', enabled: false, source: 'external', mcpServer: { command: 'echo', args: [] } },
+      {
+        id: 'disabled',
+        type: 'mcp',
+        enabled: false,
+        globalEnabled: false,
+        source: 'external',
+        mcpServer: { command: 'echo', args: [] },
+      },
     ]);
 
     const servers = resolveServersForCat(config, 'opus');
@@ -2088,7 +2170,7 @@ describe('resolveServersForCat', () => {
     assert.equal(servers.find((s) => s.name === 'disabled')?.enabled, false);
   });
 
-  it('applies per-cat override', () => {
+  it('applies per-cat blockedCats', () => {
     const config = makeConfig([
       {
         id: 'tool',
@@ -2096,17 +2178,66 @@ describe('resolveServersForCat', () => {
         enabled: true,
         source: 'external',
         mcpServer: { command: 'echo', args: [] },
-        overrides: [{ catId: 'codex', enabled: false }],
+        blockedCats: ['codex'],
       },
     ]);
 
-    // codex has override → disabled
+    // codex is blocked → disabled
     const codexServers = resolveServersForCat(config, 'codex');
     assert.equal(codexServers[0].enabled, false);
 
-    // opus has no override → uses global (true)
+    // opus is not blocked → uses global (true)
     const opusServers = resolveServersForCat(config, 'opus');
     assert.equal(opusServers[0].enabled, true);
+  });
+
+  it('falls back to legacy enabled when globalEnabled is absent (#712 P1-4 regression)', () => {
+    // Invoke-time paths read raw JSON (readFileSync), bypassing
+    // readCapabilitiesConfig's in-memory migration.  isMcpEnabledForCat must
+    // honor legacy `enabled` as fallback when `globalEnabled` is missing.
+    const config = makeConfig([
+      {
+        id: 'legacy-disabled',
+        type: 'mcp',
+        enabled: false,
+        // no globalEnabled — simulate a config that hasn't been migrated yet
+        source: 'external',
+        mcpServer: { command: 'echo', args: [] },
+      },
+      {
+        id: 'legacy-enabled',
+        type: 'mcp',
+        enabled: true,
+        // no globalEnabled
+        source: 'external',
+        mcpServer: { command: 'echo', args: ['hi'] },
+      },
+      {
+        id: 'canonical-overrides-legacy',
+        type: 'mcp',
+        enabled: true,
+        globalEnabled: false, // canonical wins over legacy
+        source: 'external',
+        mcpServer: { command: 'echo', args: [] },
+      },
+    ]);
+
+    const servers = resolveServersForCat(config, 'opus');
+    assert.equal(
+      servers.find((s) => s.name === 'legacy-disabled')?.enabled,
+      false,
+      'legacy enabled:false must disable when globalEnabled is absent',
+    );
+    assert.equal(
+      servers.find((s) => s.name === 'legacy-enabled')?.enabled,
+      true,
+      'legacy enabled:true must enable when globalEnabled is absent',
+    );
+    assert.equal(
+      servers.find((s) => s.name === 'canonical-overrides-legacy')?.enabled,
+      false,
+      'globalEnabled:false must override legacy enabled:true',
+    );
   });
 
   it('treats resolver-backed stdio MCPs as transport-usable before local resolution', () => {
@@ -2161,7 +2292,7 @@ describe('resolveServersForCat', () => {
     assert.equal(servers[0].enabled, false);
   });
 
-  it('enables streamableHttp for Anthropic cat, disables for non-Anthropic cat', () => {
+  it('enables streamableHttp for remote-capable cats and disables it for unsupported cats', () => {
     const config = makeConfig([
       {
         id: 'remote-tool',
@@ -2184,6 +2315,13 @@ describe('resolveServersForCat', () => {
     assert.equal(opusServers[0].enabled, true);
     assert.equal(opusServers[0].transport, 'streamableHttp');
     assert.equal(opusServers[0].url, 'https://mcp.example.com/sse');
+
+    const opencodeServers = resolveServersForCat(config, 'opencode');
+    assert.equal(opencodeServers.length, 1);
+    assert.equal(opencodeServers[0].name, 'remote-tool');
+    assert.equal(opencodeServers[0].enabled, true);
+    assert.equal(opencodeServers[0].transport, 'streamableHttp');
+    assert.equal(opencodeServers[0].url, 'https://mcp.example.com/sse');
 
     // codex is openai → streamableHttp should be disabled
     const codexServers = resolveServersForCat(config, 'codex');
@@ -2230,35 +2368,14 @@ describe('generateCliConfigs', () => {
     ]);
 
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
-    await generateCliConfigs(config, paths);
+    await generateCliConfigs(config, paths, dir);
 
-    // At least one config should exist
-    let configCount = 0;
-    try {
-      await readFile(paths.anthropic, 'utf-8');
-      configCount++;
-    } catch {
-      /* ok */
-    }
-    try {
-      await readFile(paths.openai, 'utf-8');
-      configCount++;
-    } catch {
-      /* ok */
-    }
-    try {
-      await readFile(paths.google, 'utf-8');
-      configCount++;
-    } catch {
-      /* ok */
-    }
-
-    assert.ok(configCount > 0, 'At least one CLI config should be generated');
+    // Gemini config should be generated (only persistent-config provider)
+    const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
+    assert.ok(geminiData.mcpServers, 'Gemini CLI config should be generated');
   });
 
   it('restores CLI config file permissions during rollback', async () => {
@@ -2308,8 +2425,6 @@ describe('generateCliConfigs', () => {
     if (!hasGoogleCat) return;
 
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -2335,7 +2450,7 @@ describe('generateCliConfigs', () => {
       },
     ]);
 
-    await generateCliConfigs(config, paths);
+    await generateCliConfigs(config, paths, dir);
     const data = JSON.parse(await readFile(paths.google, 'utf-8'));
 
     assert.equal(data.mcpServers.jetbrains, undefined, 'invalid managed entry should be removed');
@@ -2359,8 +2474,6 @@ describe('generateCliConfigs', () => {
       });
     }
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
       antigravity: join(dir, '.gemini', 'antigravity', 'mcp_config.json'),
     };
@@ -2386,7 +2499,7 @@ describe('generateCliConfigs', () => {
     delete process.env.CAT_CAFE_AGENT_KEY_FILES;
     delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
     try {
-      await generateCliConfigs(config, paths);
+      await generateCliConfigs(config, paths, dir);
       const data = JSON.parse(await readFile(paths.antigravity, 'utf-8'));
 
       assert.deepEqual(data.mcpServers['cat-cafe-collab'].env, {
@@ -2413,8 +2526,6 @@ describe('generateCliConfigs', () => {
     if (!hasAnyCats) return;
 
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -2435,7 +2546,7 @@ describe('generateCliConfigs', () => {
     process.env.PENCIL_MCP_BIN = explicitBin;
     process.env.PENCIL_MCP_APP = 'vscode';
     try {
-      await generateCliConfigs(config, paths);
+      await generateCliConfigs(config, paths, dir);
     } finally {
       if (originalEnv === undefined) delete process.env.PENCIL_MCP_BIN;
       else process.env.PENCIL_MCP_BIN = originalEnv;
@@ -2443,9 +2554,10 @@ describe('generateCliConfigs', () => {
       else process.env.PENCIL_MCP_APP = originalApp;
     }
 
-    const codexRaw = await readFile(paths.openai, 'utf-8');
-    assert.ok(codexRaw.includes(explicitBin));
-    assert.ok(codexRaw.includes('vscode'));
+    // Gemini config should contain the resolved pencil entry
+    const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
+    assert.ok(geminiData.mcpServers?.pencil, 'resolved pencil should be written to Gemini config');
+    assert.ok(geminiData.mcpServers.pencil.command.includes('custom-pencil'));
 
     const resolvedState = await readResolvedMcpState(dir);
     assert.deepEqual(resolvedState.pencil, {
@@ -2461,8 +2573,6 @@ describe('generateCliConfigs', () => {
     if (!hasAnyCats) return;
 
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -2481,18 +2591,13 @@ describe('generateCliConfigs', () => {
     process.env.PENCIL_MCP_BIN = join(dir, 'missing-pencil');
     delete process.env.PENCIL_MCP_APP;
     try {
-      await generateCliConfigs(config, paths);
+      await generateCliConfigs(config, paths, dir);
     } finally {
       if (originalEnv !== undefined) process.env.PENCIL_MCP_BIN = originalEnv;
       if (originalApp !== undefined) process.env.PENCIL_MCP_APP = originalApp;
     }
 
-    const claudeData = JSON.parse(await readFile(paths.anthropic, 'utf-8'));
-    assert.equal(claudeData.mcpServers?.pencil, undefined);
-
-    const codexRaw = await readFile(paths.openai, 'utf-8');
-    assert.ok(!codexRaw.includes('[mcp_servers.pencil]'));
-
+    // Gemini config should NOT contain the unresolved pencil entry
     const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
     assert.equal(geminiData.mcpServers?.pencil, undefined);
 
@@ -2543,13 +2648,11 @@ describe('generateCliConfigs', () => {
     });
   });
 
-  it('serializes streamableHttp to Claude config and omits it from Codex/Gemini', async () => {
+  it('omits streamableHttp entries from Gemini persistent config', async () => {
     const hasAnyCats = catRegistry.getAllIds().length > 0;
     if (!hasAnyCats) return;
 
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -2569,25 +2672,10 @@ describe('generateCliConfigs', () => {
       },
     ]);
 
-    await generateCliConfigs(config, paths);
-
-    // Claude config should contain the streamableHttp entry with url
-    const claudeData = JSON.parse(await readFile(paths.anthropic, 'utf-8'));
-    const remoteTool = claudeData.mcpServers['remote-tool'];
-    assert.ok(remoteTool, 'streamableHttp server should be written to Claude config');
-    assert.equal(remoteTool.type, 'http');
-    assert.equal(remoteTool.url, 'https://mcp.example.com/sse');
-    assert.deepEqual(remoteTool.headers, { Authorization: 'Bearer tok' });
-
-    // Codex config should NOT contain the streamableHttp entry
-    try {
-      const codexRaw = await readFile(paths.openai, 'utf-8');
-      assert.ok(!codexRaw.includes('remote-tool'), 'streamableHttp should not appear in Codex config');
-    } catch {
-      // File may not exist if no openai cats — that's fine
-    }
+    await generateCliConfigs(config, paths, dir);
 
     // Gemini config should NOT contain the streamableHttp entry
+    // (streamableHttp is only supported in invoke-time configs for Claude/Kimi/OpenCode)
     try {
       const geminiData = JSON.parse(await readFile(paths.google, 'utf-8'));
       assert.equal(
@@ -2642,7 +2730,7 @@ describe('healCatCafeMcpTopology (F193 Phase C shared migration chain)', () => {
     }
   });
 
-  it('canonical 5-split + no main is a no-op', () => {
+  it('canonical 6-split + no main is a no-op', () => {
     const config = makeConfig([
       {
         id: 'cat-cafe-collab',
@@ -2691,6 +2779,59 @@ describe('healCatCafeMcpTopology (F193 Phase C shared migration chain)', () => {
     const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/root' });
     assert.equal(result.migrated, false, 'canonical 6-split must be no-op');
     assert.equal(result.config.capabilities.length, 6);
+  });
+
+  it('realigns legacy process.execPath commands to portable node', () => {
+    const config = makeConfig([
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/collab.js'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/memory.js'] },
+      },
+      {
+        id: 'cat-cafe-signals',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/signals.js'] },
+      },
+      {
+        id: 'cat-cafe-limb',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/limb.js'] },
+      },
+      {
+        id: 'cat-cafe-audio',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/audio.js'] },
+      },
+      {
+        id: 'cat-cafe-finance',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: process.execPath, args: ['/root/packages/mcp-server/dist/finance.js'] },
+      },
+    ]);
+
+    const result = healCatCafeMcpTopology(config, { catCafeRepoRoot: '/root' });
+    assert.equal(result.migrated, true, 'legacy process.execPath command should be realigned to portable node');
+    for (const capability of result.config.capabilities) {
+      assert.equal(capability.mcpServer?.command, 'node');
+    }
   });
 
   it('migrated flag aggregates from all 4 chain steps', () => {
@@ -2841,8 +2982,6 @@ describe('orchestrate', () => {
         geminiConfig: join(dir, 'x.json'),
       },
       {
-        anthropic: join(dir, '.mcp.json'),
-        openai: join(dir, 'out.toml'),
         google: join(dir, 'out.json'),
       },
     );
@@ -2878,8 +3017,6 @@ describe('orchestrate', () => {
         geminiConfig: join(dir, '.gemini', 'settings.json'),
       },
       {
-        anthropic: join(dir, '.mcp.json'),
-        openai: join(dir, '.codex', 'config.toml'),
         google: join(dir, '.gemini', 'settings.json'),
       },
     );

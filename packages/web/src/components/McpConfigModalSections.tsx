@@ -201,6 +201,7 @@ function McpStdioFields({
             onChange={onEnvPairsChange}
             addLabel="环境变量"
             valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
+            sensitive
           />
         </FormItem>
       )}
@@ -244,6 +245,7 @@ function McpHttpFields({
             onChange={onHeadersChange}
             addLabel="标头"
             valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
+            sensitive
           />
         </FormItem>
       )}

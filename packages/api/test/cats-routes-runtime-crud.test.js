@@ -573,9 +573,17 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patchBody.cat.commandArgs, undefined);
   });
 
-  it('POST /api/cats defaults mcpSupport=true for Codex/Gemini clients when omitted', async () => {
+  it('POST /api/cats defaults mcpSupport=true for Codex/Gemini/ACP clients when omitted', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const { createProviderProfile } = await import('./helpers/create-test-account.js');
+    const acpProfile = await createProviderProfile(projectRoot, {
+      displayName: 'Default ACP',
+      authType: 'api_key',
+      protocol: 'openai',
+      apiKey: 'sk-default-acp',
+      models: ['test-model'],
+    });
 
     const Fastify = (await import('fastify')).default;
     const { catsRoutes } = await import('../dist/routes/cats.js');
@@ -586,6 +594,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     for (const spec of [
       { catId: 'runtime-openai', clientId: 'openai', accountRef: 'codex', model: 'gpt-5.4' },
       { catId: 'runtime-gemini', clientId: 'google', accountRef: 'gemini', model: 'gemini-2.5-pro' },
+      {
+        catId: 'runtime-acp',
+        clientId: 'acp',
+        accountRef: acpProfile.id,
+        model: 'test-model',
+        acp: { command: 'test-cli', startupArgs: ['--acp'] },
+      },
     ]) {
       const res = await app.inject({
         method: 'POST',
@@ -605,6 +620,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           clientId: spec.clientId,
           accountRef: spec.accountRef,
           defaultModel: spec.model,
+          ...(spec.acp ? { acp: spec.acp } : {}),
         }),
       });
 
@@ -613,6 +629,71 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       assert.equal(body.cat.id, spec.catId);
       assert.equal(body.cat.mcpSupport, true);
     }
+  });
+
+  it('POST /api/cats extends MCP blockedCats when a tool is disabled for all existing members', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const { readCapabilitiesConfig, writeCapabilitiesConfig } = await import(
+      '../dist/config/capabilities/capability-orchestrator.js'
+    );
+    await writeCapabilitiesConfig(projectRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'project-disabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: ['opus'],
+        },
+        {
+          id: 'enabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: [],
+        },
+      ],
+    });
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: {
+        'content-type': 'application/json',
+        'x-cat-cafe-user': 'codex',
+      },
+      body: JSON.stringify({
+        catId: 'runtime-codex-blocked',
+        name: 'Runtime Codex Blocked',
+        displayName: 'Runtime Codex Blocked',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#334155', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-codex-blocked'],
+        roleDescription: 'runtime',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+
+    assert.equal(res.statusCode, 201, `create failed: ${res.body}`);
+    const config = await readCapabilitiesConfig(projectRoot);
+    const projectDisabledTool = config?.capabilities.find((cap) => cap.id === 'project-disabled-tool');
+    const enabledTool = config?.capabilities.find((cap) => cap.id === 'enabled-tool');
+    assert.deepEqual(projectDisabledTool?.blockedCats, ['opus', 'runtime-codex-blocked']);
+    assert.deepEqual(enabledTool?.blockedCats, []);
   });
 
   it('PATCH /api/cats/:id rejects provider bindings that do not resolve to an existing account', async () => {
@@ -1655,14 +1736,14 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patchBody.cat.provider, undefined);
     assert.equal(
       patchBody.cat.mcpSupport,
-      false,
-      'generic ACP switch without explicit mcpSupport or whitelist must reset stale MCP support',
+      true,
+      'generic ACP switch without explicit mcpSupport or whitelist must default MCP support on',
     );
 
     const afterRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const afterBody = JSON.parse(afterRes.body);
     const opusAfter = afterBody.cats.find((cat) => cat.id === 'opus');
-    assert.equal(opusAfter.mcpSupport, false, 'GET should confirm generic ACP migration is MCP-off by default');
+    assert.equal(opusAfter.mcpSupport, true, 'GET should confirm generic ACP migration is MCP-on by default');
   });
 
   it('PATCH /api/cats/:id resets stale CLI config when switching client families', async () => {
@@ -2630,7 +2711,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       }),
     });
     assert.equal(createRes.statusCode, 201, `create failed: ${createRes.body}`);
-    assert.equal(JSON.parse(createRes.body).cat.mcpSupport, false, 'generic ACP without whitelist stays MCP-off');
+    assert.equal(JSON.parse(createRes.body).cat.mcpSupport, true, 'generic ACP without whitelist defaults MCP-on');
 
     const acpConfig = {
       command: 'test-cli',
@@ -2762,12 +2843,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(patchRes.statusCode, 200, `patch failed: ${patchRes.body}`);
     const patched = JSON.parse(patchRes.body);
-    assert.equal(patched.cat.mcpSupport, false, 'removing whitelist should reset generic ACP MCP support');
+    assert.equal(patched.cat.mcpSupport, true, 'removing whitelist should preserve generic ACP MCP support');
     assert.deepEqual(patched.cat.acp, commandOnlyAcpConfig, 'command-only ACP patch should persist');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'acp-remove-whitelist');
-    assert.equal(listed.mcpSupport, false, 'GET should confirm removed whitelist leaves generic ACP MCP-off');
+    assert.equal(listed.mcpSupport, true, 'GET should confirm removed whitelist preserves MCP support');
   });
 
   it('PATCH /api/cats/:id clears stale provider when migrating opencode → generic ACP (covers the currentCat.provider != null clear branch)', async () => {

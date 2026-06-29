@@ -1,26 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { ModalOverlay, type SkillIssue, SkillIssueList } from './skill-issue-view';
+import { DriftIssueList } from './DriftBanner';
+import type { DriftType, ScopeIssues } from './drift-types';
+import { driftTypeLabel } from './drift-types';
+import { ModalOverlay } from './skill-issue-view';
 
-/** One scope (global or a project) with its backend-computed issue list. */
-export interface ScopeIssues {
-  /** 'global' or the project path. */
-  key: string;
-  /** Display label, e.g. '全局' or the project name. */
-  label: string;
-  /** Project path; undefined for the global scope. */
-  path?: string;
-  issues: SkillIssue[];
-}
+export type { ScopeIssues } from './drift-types';
 
 /**
- * AllProjectsSyncBanner — "全部 Skill" tab cross-scope anomaly banner.
+ * AllProjectsSyncBanner — "全部 X" tab cross-scope anomaly banner.
  *
- * F228: shows a tree of scopes (/global + each /project), each listing its
- * backend-computed skill issues. No client-side re-computation.
+ * F228→F249: Unified for both Skills and MCP. Shows a tree of scopes
+ * (/global + each /project), each listing its backend-computed issues.
+ * The `type` prop controls display labels only — data shape is identical.
  */
 export function AllProjectsSyncBanner({
+  type,
   scopes,
   scopesWithIssues,
   syncing,
@@ -28,6 +24,8 @@ export function AllProjectsSyncBanner({
   onSyncAll,
   onSyncScope,
 }: {
+  /** 'skill' or 'mcp' — controls display labels. */
+  type: DriftType;
   scopes: ScopeIssues[];
   scopesWithIssues: ScopeIssues[];
   syncing: boolean;
@@ -37,18 +35,21 @@ export function AllProjectsSyncBanner({
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const issueScopeCount = scopesWithIssues.length;
+  const label = driftTypeLabel(type);
 
   if (scopes.length === 0) {
     return <p className="text-xs text-cafe-muted">未发现项目</p>;
   }
   if (issueScopeCount === 0) {
-    return <p className="text-xs text-cafe-muted">✓ 全部 Skill 同步一致</p>;
+    return <p className="text-xs text-cafe-muted">✓ 全部 {label} 同步一致</p>;
   }
 
   return (
     <div className="rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <p className="text-sm font-bold text-conn-amber-text">检测到 {issueScopeCount} 处 Skill 异常</p>
+        <p className="text-sm font-bold text-conn-amber-text">
+          检测到 {issueScopeCount} 处 {label} 异常
+        </p>
         <button
           type="button"
           onClick={() => setShowDetail(true)}
@@ -62,6 +63,7 @@ export function AllProjectsSyncBanner({
 
       {showDetail && (
         <AllProjectsIssueDetailDialog
+          type={type}
           scopes={scopesWithIssues}
           syncing={syncing}
           onClose={() => setShowDetail(false)}
@@ -74,18 +76,21 @@ export function AllProjectsSyncBanner({
 }
 
 function AllProjectsIssueDetailDialog({
+  type,
   scopes,
   syncing,
   onClose,
   onSyncAll,
   onSyncScope,
 }: {
+  type: DriftType;
   scopes: ScopeIssues[];
   syncing: boolean;
   onClose: () => void;
   onSyncAll: () => void;
   onSyncScope?: (projectPath?: string) => void;
 }) {
+  const label = driftTypeLabel(type);
   // Per-scope collapse state — scopes start expanded so anomalies are visible,
   // and each can be folded away once handled.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -100,7 +105,7 @@ function AllProjectsIssueDetailDialog({
   return (
     <ModalOverlay onClose={onClose} maxWidthClass="max-w-2xl">
       <div className="flex shrink-0 items-center justify-between gap-3">
-        <h3 className="text-sm font-bold text-cafe">项目 Skill 异常详情</h3>
+        <h3 className="text-sm font-bold text-cafe">项目 {label} 异常详情</h3>
         <button
           type="button"
           aria-label="关闭"
@@ -112,7 +117,7 @@ function AllProjectsIssueDetailDialog({
       </div>
 
       <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto text-xs">
-        {scopes.length === 0 && <p className="text-cafe-muted">暂无 Skill 异常详情。</p>}
+        {scopes.length === 0 && <p className="text-cafe-muted">暂无 {label} 异常详情。</p>}
 
         {scopes.map((scope) => {
           const isOpen = !collapsed.has(scope.key);
@@ -142,7 +147,7 @@ function AllProjectsIssueDetailDialog({
               </div>
               {isOpen && (
                 <div className="px-2 pb-2 pl-6">
-                  <SkillIssueList issues={scope.issues} />
+                  <DriftIssueList issues={scope.issues} />
                 </div>
               )}
             </section>

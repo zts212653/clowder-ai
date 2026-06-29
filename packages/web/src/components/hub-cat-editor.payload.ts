@@ -10,7 +10,6 @@ import {
   splitMentionPatterns,
   splitStrengthTags,
 } from './hub-cat-editor.model';
-import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 
 function trimText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -162,8 +161,8 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
       : cat?.accountRef
         ? { accountRef: null as null }
         : {};
-  const mcpSupportPatch =
-    cat && form.clientId !== cat.clientId ? { mcpSupport: defaultMcpSupportForClient(form.clientId) } : {};
+  // #712: always send the form's mcpSupport value so the user can toggle it explicitly
+  const mcpSupportPatch = { mcpSupport: form.mcpSupport };
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliPatch =
     trimmedCliEffort.length > 0
@@ -249,6 +248,11 @@ export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData) 
   const currentProvider = normalizeOptionalText(cat.provider);
   if (nextProvider === currentProvider) {
     delete payload.provider;
+  }
+
+  // #712: skip mcpSupport when it hasn't changed
+  if (form.mcpSupport === (cat.mcpSupport ?? true)) {
+    delete payload.mcpSupport;
   }
 
   return payload;

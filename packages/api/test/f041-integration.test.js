@@ -24,9 +24,7 @@ const {
   orchestrate,
 } = await import('../dist/config/capabilities/capability-orchestrator.js');
 
-const { readClaudeMcpConfig, readCodexMcpConfig, readGeminiMcpConfig } = await import(
-  '../dist/config/capabilities/mcp-config-adapters.js'
-);
+const { readGeminiMcpConfig } = await import('../dist/config/capabilities/mcp-config-adapters.js');
 
 const { needsMcpInjection, buildMcpCallbackInstructions } = await import(
   '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
@@ -76,6 +74,7 @@ describe('F041 Config Round-Trip', () => {
           id: 'disabled-tool',
           type: /** @type {'mcp'} */ ('mcp'),
           enabled: false,
+          globalEnabled: false,
           source: /** @type {'external'} */ ('external'),
           mcpServer: { command: 'echo', args: [] },
         },
@@ -84,44 +83,24 @@ describe('F041 Config Round-Trip', () => {
 
     await writeCapabilitiesConfig(dir, config);
 
-    // Generate CLI configs
+    // #712: Only Gemini gets persistent CLI config; Claude/Codex use invoke-time injection
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
-    await generateCliConfigs(config, paths);
+    await generateCliConfigs(config, paths, dir);
 
-    // Read back each CLI config
-    const claudeServers = await readClaudeMcpConfig(paths.anthropic);
-    const codexServers = await readCodexMcpConfig(paths.openai);
+    // Read back Gemini CLI config — the only persistent config
     const geminiServers = await readGeminiMcpConfig(paths.google);
-
-    // Claude/Gemini: only enabled servers (no 'enabled' field in these formats)
-    assert.ok(
-      claudeServers.find((s) => s.name === 'cat-cafe'),
-      'Claude should have cat-cafe',
-    );
-    assert.ok(
-      claudeServers.find((s) => s.name === 'filesystem'),
-      'Claude should have filesystem',
-    );
-    assert.ok(!claudeServers.find((s) => s.name === 'disabled-tool'), 'Claude should NOT have disabled tool');
 
     assert.ok(
       geminiServers.find((s) => s.name === 'cat-cafe'),
       'Gemini should have cat-cafe',
     );
-    assert.ok(!geminiServers.find((s) => s.name === 'disabled-tool'), 'Gemini should NOT have disabled tool');
-
-    // Codex: all servers with explicit enabled field
     assert.ok(
-      codexServers.find((s) => s.name === 'cat-cafe'),
-      'Codex should have cat-cafe',
+      geminiServers.find((s) => s.name === 'filesystem'),
+      'Gemini should have filesystem',
     );
-    const disabledInCodex = codexServers.find((s) => s.name === 'disabled-tool');
-    assert.ok(disabledInCodex, 'Codex should have disabled-tool (with enabled=false)');
-    assert.equal(disabledInCodex.enabled, false, 'disabled-tool should be disabled in Codex');
+    assert.ok(!geminiServers.find((s) => s.name === 'disabled-tool'), 'Gemini should NOT have disabled tool');
   });
 
   it('orchestrate idempotent: run twice with same config = same output', async () => {
@@ -129,10 +108,10 @@ describe('F041 Config Round-Trip', () => {
       claudeConfig: join(dir, '.mcp.json'),
       codexConfig: join(dir, 'x.toml'),
       geminiConfig: join(dir, 'x.json'),
+      kimiConfig: join(dir, 'x-kimi.json'),
     };
+    // #712: Only Gemini gets persistent CLI config
     const cliPaths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -163,10 +142,10 @@ describe('F041 Cloud P1-1: bootstrap generates CLI configs', () => {
       claudeConfig: join(dir, '.mcp.json'),
       codexConfig: join(dir, '.codex', 'config.toml'),
       geminiConfig: join(dir, '.gemini', 'settings.json'),
+      kimiConfig: join(dir, '.kimi', 'mcp.json'),
     };
+    // #712: Only Gemini gets persistent CLI config
     const cliPaths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
 
@@ -175,19 +154,9 @@ describe('F041 Cloud P1-1: bootstrap generates CLI configs', () => {
     assert.ok(config, 'Bootstrap should return config');
 
     // CLI configs should be generated after bootstrap
-    await generateCliConfigs(config, cliPaths);
+    await generateCliConfigs(config, cliPaths, dir);
 
-    // Verify CLI configs contain split cat-cafe servers
-    const claudeServers = await readClaudeMcpConfig(cliPaths.anthropic);
-    assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-collab'));
-    assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-memory'));
-    assert.ok(claudeServers.find((s) => s.name === 'cat-cafe-signals'));
-
-    const codexServers = await readCodexMcpConfig(cliPaths.openai);
-    assert.ok(codexServers.find((s) => s.name === 'cat-cafe-collab'));
-    assert.ok(codexServers.find((s) => s.name === 'cat-cafe-memory'));
-    assert.ok(codexServers.find((s) => s.name === 'cat-cafe-signals'));
-
+    // Verify Gemini CLI config contains split cat-cafe servers
     const geminiServers = await readGeminiMcpConfig(cliPaths.google);
     const collab = geminiServers.find((s) => s.name === 'cat-cafe-collab');
     const memory = geminiServers.find((s) => s.name === 'cat-cafe-memory');
@@ -196,12 +165,17 @@ describe('F041 Cloud P1-1: bootstrap generates CLI configs', () => {
     assert.ok(memory);
     assert.ok(signals);
     for (const server of [collab, memory, signals]) {
+      // #712: env placeholders now include all MCP_CALLBACK_ENV_KEYS from mcp-constants.ts
       assert.deepEqual(server.env, {
         CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
         CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
         CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
         CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
+        CAT_CAFE_CAT_ID: '${CAT_CAFE_CAT_ID}',
+        CAT_CAFE_THREAD_ID: '${CAT_CAFE_THREAD_ID}',
         CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
+        CAT_CAFE_RUN_TYPE: '${CAT_CAFE_RUN_TYPE}',
+        CAT_CAFE_AUDIT_TOPIC: '${CAT_CAFE_AUDIT_TOPIC}',
       });
     }
   });
@@ -244,51 +218,39 @@ describe('F041 Hot-Reload: toggle → CLI config regenerated', () => {
     };
     await writeCapabilitiesConfig(dir, config);
 
+    // #712: Only Gemini gets persistent CLI config
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
-    await generateCliConfigs(config, paths);
+    await generateCliConfigs(config, paths, dir);
 
-    // Verify both present
-    let claude = await readClaudeMcpConfig(paths.anthropic);
+    // Verify both present in Gemini
+    let gemini = await readGeminiMcpConfig(paths.google);
     assert.ok(
-      claude.find((s) => s.name === 'filesystem'),
-      'filesystem should be in Claude config',
+      gemini.find((s) => s.name === 'filesystem'),
+      'filesystem should be in Gemini config',
     );
 
-    // 2. PATCH: disable filesystem globally
+    // 2. PATCH: disable filesystem globally (set both enabled and globalEnabled)
     const updated = await readCapabilitiesConfig(dir);
     assert.ok(updated);
     const fsCap = updated.capabilities.find((c) => c.id === 'filesystem');
     assert.ok(fsCap);
     fsCap.enabled = false;
+    fsCap.globalEnabled = false;
     await writeCapabilitiesConfig(dir, updated);
-    await generateCliConfigs(updated, paths);
+    await generateCliConfigs(updated, paths, dir);
 
-    // 3. Verify: filesystem removed from Claude/Gemini configs
-    claude = await readClaudeMcpConfig(paths.anthropic);
-    assert.ok(
-      !claude.find((s) => s.name === 'filesystem'),
-      'filesystem should be REMOVED from Claude config after disable',
-    );
-    assert.ok(
-      claude.find((s) => s.name === 'cat-cafe'),
-      'cat-cafe should still be present',
-    );
-
-    const gemini = await readGeminiMcpConfig(paths.google);
+    // 3. Verify: filesystem removed from Gemini config
+    gemini = await readGeminiMcpConfig(paths.google);
     assert.ok(
       !gemini.find((s) => s.name === 'filesystem'),
       'filesystem should be REMOVED from Gemini config after disable',
     );
-
-    // Codex: should have filesystem with enabled=false
-    const codex = await readCodexMcpConfig(paths.openai);
-    const fsCodex = codex.find((s) => s.name === 'filesystem');
-    assert.ok(fsCodex, 'Codex should still list filesystem');
-    assert.equal(fsCodex.enabled, false, 'filesystem should be disabled in Codex');
+    assert.ok(
+      gemini.find((s) => s.name === 'cat-cafe'),
+      'cat-cafe should still be present',
+    );
   });
 
   it('re-enabling MCP tool via PATCH restores it in CLI configs', async () => {
@@ -307,6 +269,7 @@ describe('F041 Hot-Reload: toggle → CLI config regenerated', () => {
           id: 'filesystem',
           type: /** @type {'mcp'} */ ('mcp'),
           enabled: false,
+          globalEnabled: false,
           source: /** @type {'external'} */ ('external'),
           mcpServer: { command: 'npx', args: ['@mcp/fs'] },
         },
@@ -314,34 +277,28 @@ describe('F041 Hot-Reload: toggle → CLI config regenerated', () => {
     };
     await writeCapabilitiesConfig(dir, config);
 
+    // #712: Only Gemini gets persistent CLI config
     const paths = {
-      anthropic: join(dir, '.mcp.json'),
-      openai: join(dir, '.codex', 'config.toml'),
       google: join(dir, '.gemini', 'settings.json'),
     };
-    await generateCliConfigs(config, paths);
+    await generateCliConfigs(config, paths, dir);
 
-    // Verify filesystem not in Claude
-    let claude = await readClaudeMcpConfig(paths.anthropic);
-    assert.ok(!claude.find((s) => s.name === 'filesystem'), 'filesystem starts disabled in Claude');
+    // Verify filesystem not in Gemini
+    let gemini = await readGeminiMcpConfig(paths.google);
+    assert.ok(!gemini.find((s) => s.name === 'filesystem'), 'filesystem starts disabled in Gemini');
 
-    // 2. PATCH: re-enable filesystem
+    // 2. PATCH: re-enable filesystem (set both enabled and globalEnabled)
     const updated = await readCapabilitiesConfig(dir);
     assert.ok(updated);
     const fsCap = updated.capabilities.find((c) => c.id === 'filesystem');
     assert.ok(fsCap);
     fsCap.enabled = true;
+    fsCap.globalEnabled = true;
     await writeCapabilitiesConfig(dir, updated);
-    await generateCliConfigs(updated, paths);
+    await generateCliConfigs(updated, paths, dir);
 
-    // 3. Verify: filesystem restored in all configs
-    claude = await readClaudeMcpConfig(paths.anthropic);
-    assert.ok(
-      claude.find((s) => s.name === 'filesystem'),
-      'filesystem should be RESTORED in Claude config after re-enable',
-    );
-
-    const gemini = await readGeminiMcpConfig(paths.google);
+    // 3. Verify: filesystem restored in Gemini config
+    gemini = await readGeminiMcpConfig(paths.google);
     assert.ok(
       gemini.find((s) => s.name === 'filesystem'),
       'filesystem should be RESTORED in Gemini config after re-enable',
@@ -421,6 +378,7 @@ describe('F041 Discovery Consistency', () => {
       claudeConfig: claudeFile,
       codexConfig: join(dir, 'nonexistent.toml'),
       geminiConfig: join(dir, 'nonexistent.json'),
+      kimiConfig: join(dir, 'nonexistent-kimi.json'),
     });
 
     // F193/F195/F207: 6 splits (collab/memory/signals/limb/audio/finance) + pencil + jetbrains. No legacy 'cat-cafe'.
@@ -468,6 +426,7 @@ describe('F041 Discovery Consistency', () => {
       claudeConfig: claudeFile,
       codexConfig: join(dir, 'x.toml'),
       geminiConfig: geminiFile,
+      kimiConfig: join(dir, 'x-kimi.json'),
     });
 
     // cat-cafe + shared (deduplicated — first wins = claude version)
@@ -481,8 +440,8 @@ describe('F041 Discovery Consistency', () => {
 // 4. Per-Cat Override Resolution
 // ════════════════════════════════════════════════════
 
-describe('F041 Per-Cat Override Resolution', () => {
-  it('global enabled + per-cat disabled = disabled for that cat', () => {
+describe('F041 Per-Cat Access Resolution (globalEnabled + blockedCats)', () => {
+  it('globalEnabled true + blockedCats blocks specific cat', () => {
     const config = {
       version: /** @type {1} */ (1),
       capabilities: [
@@ -490,21 +449,22 @@ describe('F041 Per-Cat Override Resolution', () => {
           id: 'tool',
           type: /** @type {'mcp'} */ ('mcp'),
           enabled: true,
+          globalEnabled: true,
           source: /** @type {'external'} */ ('external'),
           mcpServer: { command: 'echo', args: [] },
-          overrides: [{ catId: 'codex', enabled: false }],
+          blockedCats: ['codex'],
         },
       ],
     };
 
     const codex = resolveServersForCat(config, 'codex');
-    assert.equal(codex[0].enabled, false, 'Codex should have override disabled');
+    assert.equal(codex[0].enabled, false, 'Codex should be blocked');
 
     const opus = resolveServersForCat(config, 'opus');
     assert.equal(opus[0].enabled, true, 'Opus should use global enabled');
   });
 
-  it('global disabled + per-cat enabled = enabled for that cat only', () => {
+  it('globalEnabled false disables all cats regardless of blockedCats', () => {
     const config = {
       version: /** @type {1} */ (1),
       capabilities: [
@@ -512,24 +472,25 @@ describe('F041 Per-Cat Override Resolution', () => {
           id: 'tool',
           type: /** @type {'mcp'} */ ('mcp'),
           enabled: false,
+          globalEnabled: false,
           source: /** @type {'external'} */ ('external'),
           mcpServer: { command: 'echo', args: [] },
-          overrides: [{ catId: 'gemini', enabled: true }],
+          blockedCats: [],
         },
       ],
     };
 
     const gemini = resolveServersForCat(config, 'gemini');
-    assert.equal(gemini[0].enabled, true, 'Gemini override should be enabled');
+    assert.equal(gemini[0].enabled, false, 'Gemini should be disabled (global off)');
 
     const opus = resolveServersForCat(config, 'opus');
-    assert.equal(opus[0].enabled, false, 'Opus should use global disabled');
+    assert.equal(opus[0].enabled, false, 'Opus should be disabled (global off)');
 
     const codex = resolveServersForCat(config, 'codex');
-    assert.equal(codex[0].enabled, false, 'Codex should use global disabled');
+    assert.equal(codex[0].enabled, false, 'Codex should be disabled (global off)');
   });
 
-  it('multiple per-cat overrides are independent', () => {
+  it('multiple blockedCats are independent', () => {
     const config = {
       version: /** @type {1} */ (1),
       capabilities: [
@@ -537,12 +498,10 @@ describe('F041 Per-Cat Override Resolution', () => {
           id: 'tool',
           type: /** @type {'mcp'} */ ('mcp'),
           enabled: true,
+          globalEnabled: true,
           source: /** @type {'external'} */ ('external'),
           mcpServer: { command: 'echo', args: [] },
-          overrides: [
-            { catId: 'codex', enabled: false },
-            { catId: 'gemini', enabled: false },
-          ],
+          blockedCats: ['codex', 'gemini'],
         },
       ],
     };

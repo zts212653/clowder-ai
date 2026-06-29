@@ -18,6 +18,7 @@ import {
   writeCodexMcpConfig,
   writeGeminiMcpConfig,
   writeKimiMcpConfig,
+  writeOpenCodeMcpConfig,
 } from '../dist/config/capabilities/mcp-config-adapters.js';
 
 /** @param {string} prefix */
@@ -308,6 +309,10 @@ describe('readAntigravityMcpConfig', () => {
   });
 });
 
+// readOpenCodeMcpConfig removed — had zero production callers (OpenCode
+// config is built at invoke time via opencode-config-template.ts, not read
+// back via this adapter). See commit for cleanup rationale.
+
 // ────────── Writers ──────────
 
 describe('writeClaudeMcpConfig', () => {
@@ -455,7 +460,7 @@ describe('writeCodexMcpConfig', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('writes MCP servers to TOML', async () => {
+  it('writes MCP servers to TOML with approval mode for cat-cafe', async () => {
     const file = join(dir, 'config.toml');
     await writeCodexMcpConfig(file, [
       { name: 'cat_cafe', command: 'node', args: ['index.js'], enabled: true, source: 'cat-cafe' },
@@ -467,6 +472,37 @@ describe('writeCodexMcpConfig', () => {
     assert.ok(raw.includes('[mcp_servers.cat_cafe]'));
     assert.ok(raw.includes('[mcp_servers.disabled]'));
     assert.ok(raw.includes('enabled = true'));
+    assert.ok(raw.includes('enabled = false'));
+    // #712: cat-cafe source servers get auto-approve for non-interactive codex exec
+    assert.ok(raw.includes('default_tools_approval_mode = "approve"'), 'cat-cafe must have approval mode');
+    // Count occurrences — only cat-cafe server should have it, not external
+    const approveCount = (raw.match(/default_tools_approval_mode/g) || []).length;
+    assert.equal(approveCount, 1, 'only cat-cafe source servers get approval mode');
+  });
+
+  it('removes disabled managed entries but preserves disabled external entries', async () => {
+    const file = join(dir, 'config.toml');
+    // Pre-seed with an existing managed plugin entry in TOML
+    await writeFile(
+      file,
+      `[mcp_servers."plugin:test:toolset"]
+command = "node"
+args = ["server.js"]
+enabled = true
+`,
+    );
+
+    // Disable the managed entry; external disabled entry should survive
+    await writeCodexMcpConfig(file, [
+      { name: 'plugin:test:toolset', command: 'node', args: ['server.js'], enabled: false, source: 'cat-cafe' },
+      { name: 'user-disabled', command: 'echo', args: [], enabled: false, source: 'external' },
+    ]);
+
+    const raw = await readFile(file, 'utf-8');
+    // Managed disabled entry must be deleted (prevents discovery orphan re-import)
+    assert.ok(!raw.includes('plugin:test:toolset'), 'disabled managed entry must be removed from TOML');
+    // External disabled entry preserved (user owns it)
+    assert.ok(raw.includes('[mcp_servers.user-disabled]'), 'disabled external entry must be preserved');
     assert.ok(raw.includes('enabled = false'));
   });
 
@@ -480,6 +516,33 @@ describe('writeCodexMcpConfig', () => {
     assert.ok(raw.includes('[model]'));
     assert.ok(raw.includes('name = "gpt-4"'));
     assert.ok(raw.includes('[mcp_servers.test]'));
+  });
+
+  it('resolves relative workingDir from project root for Codex TOML', async () => {
+    const file = join(dir, '.codex', 'config.toml');
+    const toolDir = join(dir, 'tools');
+    const toolPath = join(toolDir, 'server');
+    const dataPath = join(toolDir, 'data.json');
+    await mkdir(toolDir, { recursive: true });
+    await writeFile(toolPath, '#!/usr/bin/env node\n');
+    await writeFile(dataPath, '{}\n');
+
+    await writeCodexMcpConfig(file, [
+      {
+        name: 'relative-root-tool',
+        command: './server',
+        args: ['data.json'],
+        workingDir: 'tools',
+        enabled: true,
+        source: 'external',
+      },
+    ]);
+
+    const servers = await readCodexMcpConfig(file);
+    const server = servers.find((s) => s.name === 'relative-root-tool');
+    assert.ok(server);
+    assert.equal(server.command, toolPath);
+    assert.deepEqual(server.args, [dataPath]);
   });
 
   it('injects workspace env into managed Clowder AI servers', async () => {
@@ -655,16 +718,17 @@ describe('writeGeminiMcpConfig', () => {
     ]);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(data.mcpServers['cat-cafe-collab'].env, {
-      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-    });
+    const geminiEnv = data.mcpServers['cat-cafe-collab'].env;
+    assert.equal(geminiEnv.CAT_CAFE_API_URL, '${CAT_CAFE_API_URL}');
+    assert.equal(geminiEnv.CAT_CAFE_INVOCATION_ID, '${CAT_CAFE_INVOCATION_ID}');
+    assert.equal(geminiEnv.CAT_CAFE_CALLBACK_TOKEN, '${CAT_CAFE_CALLBACK_TOKEN}');
+    assert.equal(geminiEnv.CAT_CAFE_USER_ID, '${CAT_CAFE_USER_ID}');
+    assert.equal(geminiEnv.CAT_CAFE_CAT_ID, '${CAT_CAFE_CAT_ID}');
+    assert.equal(geminiEnv.CAT_CAFE_THREAD_ID, '${CAT_CAFE_THREAD_ID}');
+    assert.equal(geminiEnv.CAT_CAFE_SIGNAL_USER, '${CAT_CAFE_SIGNAL_USER}');
   });
 
-  it('injects callback env placeholders for preserved legacy cat-cafe server', async () => {
+  it('#712: preserves legacy cat-cafe monolith in gemini config when F213 cannot prove ownership', async () => {
     const file = join(dir, 'settings.json');
     await writeFile(
       file,
@@ -680,13 +744,8 @@ describe('writeGeminiMcpConfig', () => {
     ]);
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(data.mcpServers['cat-cafe'].env, {
-      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-    });
+    assert.ok(data.mcpServers['cat-cafe'], 'legacy entry preserved (F213 cannot prove ownership)');
+    assert.ok(data.mcpServers['cat-cafe-collab'], 'split server should be written');
   });
 
   it('keeps project-level pencil entry when a resolved command is available', async () => {
@@ -819,13 +878,14 @@ describe('writeKimiMcpConfig', () => {
     ]);
 
     const raw = JSON.parse(await readFile(file, 'utf-8'));
-    assert.deepEqual(raw.mcpServers['cat-cafe'].env, {
-      CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-      CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-      CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-      CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-      CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-    });
+    const kimiEnv = raw.mcpServers['cat-cafe'].env;
+    assert.equal(kimiEnv.CAT_CAFE_API_URL, '${CAT_CAFE_API_URL}');
+    assert.equal(kimiEnv.CAT_CAFE_INVOCATION_ID, '${CAT_CAFE_INVOCATION_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_CALLBACK_TOKEN, '${CAT_CAFE_CALLBACK_TOKEN}');
+    assert.equal(kimiEnv.CAT_CAFE_USER_ID, '${CAT_CAFE_USER_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_CAT_ID, '${CAT_CAFE_CAT_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_THREAD_ID, '${CAT_CAFE_THREAD_ID}');
+    assert.equal(kimiEnv.CAT_CAFE_SIGNAL_USER, '${CAT_CAFE_SIGNAL_USER}');
   });
 
   // F213 Phase B: L5 cleanup applied to Kimi writer (.kimi/mcp.json).
@@ -872,6 +932,54 @@ describe('writeKimiMcpConfig', () => {
     const data = JSON.parse(await readFile(file, 'utf-8'));
     assert.ok(data.mcpServers['unrelated-tool']);
     assert.equal(data.mcpServers['cat-cafe'], undefined);
+  });
+});
+
+describe('writeOpenCodeMcpConfig', () => {
+  /** @type {string} */ let dir;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir('opencode-write');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('writes stdio and remote MCP servers in OpenCode format', async () => {
+    const file = join(dir, 'opencode.json');
+    await writeOpenCodeMcpConfig(file, [
+      {
+        name: 'context7',
+        command: '',
+        args: [],
+        enabled: true,
+        source: 'external',
+        transport: 'streamableHttp',
+        url: 'https://mcp.context7.com/mcp',
+        headers: { Authorization: 'Bearer test-token' },
+      },
+      {
+        name: 'filesystem',
+        command: 'npx',
+        args: ['-y', '@mcp/fs'],
+        enabled: true,
+        source: 'external',
+        env: { DEBUG: '1' },
+      },
+    ]);
+
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.deepEqual(raw.mcp.context7, {
+      type: 'remote',
+      url: 'https://mcp.context7.com/mcp',
+      enabled: true,
+      headers: { Authorization: 'Bearer test-token' },
+    });
+    assert.deepEqual(raw.mcp.filesystem, {
+      type: 'local',
+      command: ['npx', '-y', '@mcp/fs'],
+      environment: { DEBUG: '1' },
+    });
   });
 });
 
@@ -962,83 +1070,26 @@ describe('writeAntigravityMcpConfig', () => {
     }
   });
 
-  it('preserves legacy cat-cafe entry while backfilling readonly env', async () => {
+  it('#712: preserves legacy cat-cafe monolith in antigravity config when F213 cannot prove ownership', async () => {
+    // F213 cleanup only removes entries matching known managed markers (echoLegacyShim).
+    // A legacy node-based entry cannot be proven managed → preserved for safety.
     const file = join(dir, 'mcp_config.json');
-    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
-    const originalWsr = process.env.CAT_CAFE_WORKSPACE_ROOT;
-    delete process.env.ALLOWED_WORKSPACE_DIRS;
-    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-    try {
-      await writeFile(
-        file,
-        JSON.stringify({
-          mcpServers: {
-            'cat-cafe': { command: 'node', args: ['legacy-index.js'] },
-          },
-        }),
-      );
+    await writeFile(
+      file,
+      JSON.stringify({
+        mcpServers: {
+          'cat-cafe': { command: 'node', args: ['legacy-index.js'] },
+        },
+      }),
+    );
 
-      await writeAntigravityMcpConfig(file, [
-        { name: 'cat-cafe-memory', command: 'node', args: ['memory.js'], enabled: true, source: 'cat-cafe' },
-      ]);
+    await writeAntigravityMcpConfig(file, [
+      { name: 'cat-cafe-memory', command: 'node', args: ['memory.js'], enabled: true, source: 'cat-cafe' },
+    ]);
 
-      const servers = await readAntigravityMcpConfig(file);
-      const legacy = servers.find((s) => s.name === 'cat-cafe');
-      assert.ok(legacy);
-      assert.deepEqual(legacy.env, {
-        CAT_CAFE_API_URL: expectedAntigravityApiUrl(),
-        CAT_CAFE_READONLY: 'true',
-        ALLOWED_WORKSPACE_DIRS: process.cwd(),
-      });
-    } finally {
-      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
-      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
-      if (originalWsr === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWsr;
-    }
-  });
-
-  it('forces readonly env keys over legacy antigravity values while preserving unrelated env', async () => {
-    const file = join(dir, 'mcp_config.json');
-    const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
-    const originalWsr = process.env.CAT_CAFE_WORKSPACE_ROOT;
-    delete process.env.ALLOWED_WORKSPACE_DIRS;
-    delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-    try {
-      await writeFile(
-        file,
-        JSON.stringify({
-          mcpServers: {
-            'cat-cafe': {
-              command: 'node',
-              args: ['legacy-index.js'],
-              env: {
-                CAT_CAFE_API_URL: 'http://legacy.invalid:9999',
-                CAT_CAFE_READONLY: 'false',
-                EXTRA_FLAG: 'keep-me',
-              },
-            },
-          },
-        }),
-      );
-
-      await writeAntigravityMcpConfig(file, [
-        { name: 'cat-cafe-memory', command: 'node', args: ['memory.js'], enabled: true, source: 'cat-cafe' },
-      ]);
-
-      const raw = JSON.parse(await readFile(file, 'utf-8'));
-      assert.deepEqual(raw.mcpServers['cat-cafe'].env, {
-        CAT_CAFE_API_URL: expectedAntigravityApiUrl(),
-        CAT_CAFE_READONLY: 'true',
-        ALLOWED_WORKSPACE_DIRS: process.cwd(),
-        EXTRA_FLAG: 'keep-me',
-      });
-    } finally {
-      if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
-      else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;
-      if (originalWsr === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
-      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWsr;
-    }
+    const raw = JSON.parse(await readFile(file, 'utf-8'));
+    assert.ok(raw.mcpServers['cat-cafe'], 'legacy entry preserved (F213 cannot prove ownership)');
+    assert.ok(raw.mcpServers['cat-cafe-memory'], 'split server should be written');
   });
 
   it('F061 Bug-F: respects ALLOWED_WORKSPACE_DIRS env override when set', async () => {

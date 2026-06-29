@@ -6,9 +6,9 @@
  * with cascade-disabled skills from global state.
  */
 
-import { stat } from 'node:fs/promises';
 import type { MountRules } from '@cat-cafe/shared';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
+import { listAllProjectPaths } from '../config/governance/list-all-projects.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { type SyncProjectResult, syncProject } from './skill-sync-engine.js';
 
@@ -72,14 +72,13 @@ async function syncAllUnlocked(
     if (!globalMountPathsBySkill.has(name)) globalMountPathsBySkill.set(name, [...paths]);
   }
 
-  // List registered projects via GovernanceRegistry
+  // #712: Unified project enumeration (governance + nested thread-derived).
+  // listAllProjectPaths already excludes catCafeRoot and validates paths.
   let projectPaths: string[];
   try {
-    const { GovernanceRegistry } = await import('../config/governance/governance-registry.js');
-    const entries = await new GovernanceRegistry(catCafeRoot).listAll();
-    projectPaths = entries.map((e) => e.projectPath);
+    projectPaths = await listAllProjectPaths(catCafeRoot);
   } catch (err) {
-    const msg = `Failed to read governance registry: ${(err as Error).message}`;
+    const msg = `Failed to enumerate projects: ${(err as Error).message}`;
     console.warn(`[F228] ${msg}`);
     warnings.push(msg);
     return { perProject, warnings };
@@ -87,23 +86,6 @@ async function syncAllUnlocked(
 
   // Sync each external project (main is handled by the caller)
   for (const projectPath of projectPaths) {
-    if (projectPath === catCafeRoot) continue;
-
-    // Stale registry entries (deleted temp-dirs, old worktrees) are silently
-    // skipped — they are NOT propagation failures. The root cause is a
-    // pre-existing test bug where project-setup tests register temp dirs in
-    // the real governance-registry without cleaning up (tracked separately).
-    try {
-      const pathStat = await stat(projectPath);
-      if (!pathStat.isDirectory()) {
-        console.warn(`[F228] skipping stale registry entry (not a directory): ${projectPath}`);
-        continue;
-      }
-    } catch {
-      console.warn(`[F228] skipping stale registry entry (path missing): ${projectPath}`);
-      continue;
-    }
-
     try {
       const result = await withCapabilityLock(projectPath, async () => {
         const projectMountRules = await readMountRules(projectPath, catCafeRoot);

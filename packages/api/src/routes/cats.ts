@@ -26,6 +26,10 @@ import {
   validateModelFormatForProvider,
   validateRuntimeProviderBinding,
 } from '../config/account-resolver.js';
+import {
+  inheritFullyBlockedMcpCapabilitiesForNewCat,
+  removeDeletedCatFromBlockedMcps,
+} from '../config/capabilities/capability-orchestrator.js';
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
@@ -93,23 +97,21 @@ function resolveGenericAcpMcpSupport(
   acpConfig: AcpRouteConfig | null | undefined,
 ): boolean | undefined {
   if (explicitMcpSupport !== undefined) return explicitMcpSupport;
-  return (acpConfig?.mcpWhitelist?.length ?? 0) > 0 ? true : undefined;
+  return acpConfig ? true : undefined;
 }
 
 function resolveGenericAcpMcpSupportForPatch(
   explicitMcpSupport: boolean | undefined,
   acpConfig: AcpRouteConfig | null | undefined,
   isClientSwitchToGenericAcp: boolean,
-  currentAcpConfig: { mcpWhitelist?: string[] } | undefined,
 ): boolean | undefined {
   if (explicitMcpSupport !== undefined) return explicitMcpSupport;
   if (acpConfig !== undefined && acpConfig !== null) {
-    if (acpConfig.mcpWhitelist !== undefined) return acpConfig.mcpWhitelist.length > 0;
-    if (isClientSwitchToGenericAcp) return false;
-    if ((currentAcpConfig?.mcpWhitelist?.length ?? 0) > 0) return false;
+    if (acpConfig.mcpWhitelist !== undefined && acpConfig.mcpWhitelist.length > 0) return true;
+    if (isClientSwitchToGenericAcp) return true;
     return undefined;
   }
-  return isClientSwitchToGenericAcp ? false : undefined;
+  return isClientSwitchToGenericAcp ? true : undefined;
 }
 
 const catIdSchema = z
@@ -486,6 +488,62 @@ function getManagedCatalogIds(projectRoot: string): Set<string> {
   }
 }
 
+/**
+ * #712: Inherit fully-blocked MCP state for all projects with capabilities.json.
+ *
+ * When a new cat is added, any MCP entry where ALL existing cats are in blockedCats
+ * should also block the new cat (the MCP is effectively fully disabled). The main
+ * call site only handles projectRoot; this function covers all other projects
+ * via the unified listAllProjectPaths (#712).
+ */
+async function inheritBlockedMcpForAllProjects(
+  alreadyHandledRoot: string,
+  newCatId: string,
+  existingCatIds: ReadonlySet<string>,
+): Promise<void> {
+  const catCafeRoot = resolveProjectRoot();
+  const { listAllProjectPaths } = await import('../config/governance/list-all-projects.js');
+
+  // listAllProjectPaths already excludes catCafeRoot, deduplicates, and validates.
+  // We also need catCafeRoot itself if it differs from alreadyHandledRoot.
+  const allPaths = await listAllProjectPaths(catCafeRoot);
+  if (resolve(catCafeRoot) !== resolve(alreadyHandledRoot)) {
+    allPaths.unshift(catCafeRoot);
+  }
+
+  // Filter out the already-handled root (caller already did this one)
+  const resolvedHandled = resolve(alreadyHandledRoot);
+  const toProcess = allPaths.filter((p) => resolve(p) !== resolvedHandled);
+
+  await Promise.all(
+    toProcess.map((p) => inheritFullyBlockedMcpCapabilitiesForNewCat(p, newCatId, existingCatIds).catch(() => {})),
+  );
+}
+
+/**
+ * #712: Remove a deleted cat from blockedCats across all projects.
+ *
+ * Counterpart to inheritBlockedMcpForAllProjects — when a cat is deleted,
+ * its ID should be cleaned from every MCP's blockedCats to avoid ghost entries.
+ */
+async function cleanupBlockedMcpForAllProjects(projectRoot: string, deletedCatId: string): Promise<void> {
+  const catCafeRoot = resolveProjectRoot();
+  const { listAllProjectPaths } = await import('../config/governance/list-all-projects.js');
+
+  const allPaths = await listAllProjectPaths(catCafeRoot);
+  // Also include catCafeRoot itself (listAllProjectPaths excludes it)
+  allPaths.unshift(catCafeRoot);
+  // And the active projectRoot if different
+  if (resolve(projectRoot) !== resolve(catCafeRoot)) {
+    const resolvedProject = resolve(projectRoot);
+    if (!allPaths.some((p) => resolve(p) === resolvedProject)) {
+      allPaths.push(projectRoot);
+    }
+  }
+
+  await Promise.all(allPaths.map((p) => removeDeletedCatFromBlockedMcps(p, deletedCatId).catch(() => {})));
+}
+
 interface CatsRoutesOptions {
   onCatalogChanged?: (cats: Record<string, CatConfig>) => Promise<void> | void;
 }
@@ -681,6 +739,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             (body.clientId === 'anthropic' ||
               body.clientId === 'openai' ||
               body.clientId === 'google' ||
+              body.clientId === 'kimi' ||
               body.clientId === 'opencode'),
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
@@ -697,6 +756,12 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       return { error: message };
     }
 
+    await inheritFullyBlockedMcpCapabilitiesForNewCat(projectRoot, body.catId, managedIdsBefore);
+    // #712: Also inherit fully-blocked MCP state for all governance-registered projects.
+    // Without this, only the active project's capabilities.json gets the new cat added
+    // to blockedCats — other projects' fully-disabled MCPs silently become enabled for
+    // the new member.
+    await inheritBlockedMcpForAllProjects(projectRoot, body.catId, managedIdsBefore);
     const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
     await configEventBus.emitChangeAsync({
       source: 'cat-config',
@@ -841,7 +906,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       });
       const nextGenericAcpMcpSupport =
         effectiveClient === 'acp'
-          ? resolveGenericAcpMcpSupportForPatch(body.mcpSupport, body.acp, isClientSwitch, currentAcpConfig)
+          ? resolveGenericAcpMcpSupportForPatch(body.mcpSupport, body.acp, isClientSwitch)
           : body.mcpSupport;
       updateRuntimeCat(projectRoot, request.params.id, {
         ...(body.name !== undefined ? { name: body.name } : {}),
@@ -944,6 +1009,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         }
         throw err;
       }
+      // #712: Remove deleted cat from blockedCats across all projects.
+      // Without this, the deleted cat's ID lingers as a ghost entry in MCP
+      // access control, which is harmless at runtime but confusing in the UI.
+      await cleanupBlockedMcpForAllProjects(projectRoot, request.params.id);
       await reconcileCatRegistry(projectRoot, managedIdsBefore);
       await configEventBus.emitChangeAsync({
         source: 'cat-config',

@@ -105,6 +105,15 @@ function createClaudeAgentService(options = {}) {
   return new ClaudeAgentService({ l0CompilerFn: buildFakeL0Compiler(), ...options });
 }
 
+function writeCapabilitiesConfig(projectRoot, capabilities) {
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    join(projectRoot, '.cat-cafe', 'capabilities.json'),
+    JSON.stringify({ version: 1, capabilities }),
+    'utf8',
+  );
+}
+
 // --- Test cases ---
 
 test('F203 AC-C5: -p carrier passes --system-prompt-file with compiled L0 path', async () => {
@@ -1104,6 +1113,207 @@ test('returns undefined when no default MCP server candidate exists', () => {
   }
 });
 
+test('#712: merges user .mcp.json servers as base layer — managed entries take precedence', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-mcp-merge-'));
+  const mcpDistDir = join(root, 'packages', 'mcp-server', 'dist');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-project-'));
+  mkdirSync(mcpDistDir, { recursive: true });
+  writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
+  for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+    writeFileSync(join(mcpDistDir, entry), '// stub', 'utf8');
+  }
+  // User .mcp.json with a custom server and a stale managed server
+  writeFileSync(
+    join(projectDir, '.mcp.json'),
+    JSON.stringify({
+      mcpServers: {
+        filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+        'cat-cafe-collab': { command: 'echo', args: ['stale-should-be-ignored'] },
+      },
+    }),
+    'utf8',
+  );
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    spawnFn,
+    model: 'claude-test-model',
+    mcpServerPath: join(mcpDistDir, 'index.js'),
+  });
+
+  try {
+    const promise = collect(
+      service.invoke('hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-merge',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-merge',
+        },
+      }),
+    );
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpConfigIdx = args.indexOf('--mcp-config');
+    assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present');
+    assert.ok(args.includes('--strict-mcp-config'), '--strict-mcp-config should be present');
+
+    const parsed = JSON.parse(args[mcpConfigIdx + 1]);
+    // User-owned server should be merged in
+    assert.ok(parsed.mcpServers.filesystem, 'user-owned filesystem should be merged');
+    assert.deepEqual(parsed.mcpServers.filesystem.args, ['-y', '@mcp/fs']);
+    // Managed split servers should be present
+    assert.ok(parsed.mcpServers['cat-cafe-collab'], 'managed cat-cafe-collab should be present');
+    // Stale user copy should NOT override managed entry
+    assert.notEqual(parsed.mcpServers['cat-cafe-collab'].command, 'echo', 'stale user entry must not override managed');
+    assert.equal(
+      parsed.mcpServers['cat-cafe-collab'].command,
+      process.execPath,
+      'managed entry should use the runtime Node executable',
+    );
+    assert.equal(
+      parsed.mcpServers['cat-cafe-collab'].env.ALLOWED_WORKSPACE_DIRS,
+      projectDir,
+      'managed split servers must receive the invocation workspace root',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test('#712: Claude reads capabilities from runtime root while cwd is user project', async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-runtime-root-'));
+  const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-cap-root-'));
+  mkdirSync(mcpDistDir, { recursive: true });
+  for (const entry of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+    writeFileSync(join(mcpDistDir, entry), '// stub', 'utf8');
+  }
+  writeCapabilitiesConfig(runtimeRoot, [
+    {
+      id: 'cat-cafe-collab',
+      type: 'mcp',
+      globalEnabled: false,
+      source: 'cat-cafe',
+      mcpServer: { command: 'node', args: [] },
+    },
+    {
+      id: 'cat-cafe-memory',
+      type: 'mcp',
+      globalEnabled: true,
+      source: 'cat-cafe',
+      mcpServer: { command: 'node', args: [] },
+    },
+  ]);
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    spawnFn,
+    model: 'claude-test-model',
+    mcpServerPath: join(mcpDistDir, 'index.js'),
+  });
+
+  try {
+    const promise = collect(
+      service.invoke('hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-cap-root',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-cap-root',
+          CAT_CAFE_CAT_ID: 'opus',
+        },
+      }),
+    );
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    assert.equal(parsed.mcpServers['cat-cafe-collab'], undefined, 'disabled runtime capability must not be injected');
+    assert.ok(parsed.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+test('#712: Claude merge excludes disabled capability-managed user entries', async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-disabled-merge-runtime-'));
+  const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-disabled-merge-project-'));
+  mkdirSync(mcpDistDir, { recursive: true });
+  for (const entry of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+    writeFileSync(join(mcpDistDir, entry), '// stub', 'utf8');
+  }
+  writeCapabilitiesConfig(runtimeRoot, [
+    {
+      id: 'filesystem',
+      type: 'mcp',
+      globalEnabled: false,
+      source: 'external',
+      mcpServer: { command: 'npx', args: ['-y', '@mcp/fs'] },
+    },
+    {
+      id: 'cat-cafe-memory',
+      type: 'mcp',
+      globalEnabled: true,
+      source: 'cat-cafe',
+      mcpServer: { command: 'node', args: [] },
+    },
+  ]);
+  writeFileSync(
+    join(projectDir, '.mcp.json'),
+    JSON.stringify({
+      mcpServers: {
+        filesystem: { command: 'npx', args: ['-y', '@mcp/fs-stale'] },
+        'cat-cafe': { command: 'node', args: ['legacy-monolith.js'] },
+        'my-tool': { command: 'node', args: ['tool.js'] },
+      },
+    }),
+    'utf8',
+  );
+
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = createClaudeAgentService({
+    spawnFn,
+    model: 'claude-test-model',
+    mcpServerPath: join(mcpDistDir, 'index.js'),
+  });
+
+  try {
+    const promise = collect(
+      service.invoke('hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          CAT_CAFE_API_URL: 'http://localhost:3004',
+          CAT_CAFE_INVOCATION_ID: 'inv-disabled-merge',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-disabled-merge',
+          CAT_CAFE_CAT_ID: 'opus',
+        },
+      }),
+    );
+    emitClaudeEvents(proc, [{ type: 'result', subtype: 'success' }]);
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const parsed = JSON.parse(args[args.indexOf('--mcp-config') + 1]);
+    assert.equal(parsed.mcpServers.filesystem, undefined, 'disabled capability must not be re-added from .mcp.json');
+    assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'legacy monolith alias must not be re-added from .mcp.json');
+    assert.ok(parsed.mcpServers['my-tool'], 'unmanaged user server should still be merged');
+    assert.ok(parsed.mcpServers['cat-cafe-memory'], 'enabled capability should still be injected');
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-empty-env-'));
   const apiCwd = join(root, 'packages', 'api');
@@ -1111,6 +1321,10 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
   mkdirSync(apiCwd, { recursive: true });
   mkdirSync(mcpDistDir, { recursive: true });
   writeFileSync(join(mcpDistDir, 'index.js'), 'export {};', 'utf8');
+  // #712: Create split entrypoint stubs so the fallback path resolves them
+  for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+    writeFileSync(join(mcpDistDir, entry), 'export {};', 'utf8');
+  }
 
   const previousCwd = process.cwd();
   const previousEnv = process.env.CAT_CAFE_MCP_SERVER_PATH;
@@ -1121,7 +1335,7 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     process.chdir(apiCwd);
     process.env.CAT_CAFE_MCP_SERVER_PATH = '';
 
-    const service = createClaudeAgentService({ spawnFn });
+    const service = createClaudeAgentService({ spawnFn, model: 'claude-test-model' });
     const promise = collect(
       service.invoke('hello', {
         callbackEnv: {
@@ -1138,7 +1352,13 @@ test('falls back to default MCP path when CAT_CAFE_MCP_SERVER_PATH is empty', as
     const mcpConfigIdx = args.indexOf('--mcp-config');
     assert.ok(mcpConfigIdx >= 0, '--mcp-config should be present when fallback resolves');
     const parsed = JSON.parse(args[mcpConfigIdx + 1]);
-    assert.equal(realpathSync(parsed.mcpServers['cat-cafe'].args[0]), realpathSync(join(mcpDistDir, 'index.js')));
+    // #712: Split servers instead of monolith cat-cafe
+    assert.ok(parsed.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
+    assert.equal(parsed.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
+    assert.equal(
+      realpathSync(parsed.mcpServers['cat-cafe-collab'].args[0]),
+      realpathSync(join(mcpDistDir, 'collab.js')),
+    );
   } finally {
     process.chdir(previousCwd);
     if (previousEnv === undefined) {

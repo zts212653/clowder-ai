@@ -2245,8 +2245,8 @@ async function main(): Promise<void> {
       writeCapabilities: async (config) => {
         const root = resolveActiveProjectRoot();
         await writeCapabilitiesConfig(root, config);
-        const { paths } = resolveStartupCliConfigContext(root);
-        await generateCliConfigs(config, paths);
+        const { projectRoot, paths } = resolveStartupCliConfigContext(root);
+        await generateCliConfigs(config, paths, projectRoot);
       },
       withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
       limbAdapterFactory: async (pluginId, limbYamlPath) => {
@@ -3047,6 +3047,8 @@ async function main(): Promise<void> {
   await app.register(skillsWriteRoutes);
   await app.register((await import('./routes/mount-rules.js')).mountRulesRoutes);
   await app.register((await import('./routes/skills-drift.js')).skillsDriftRoutes);
+  await app.register((await import('./routes/mcp-drift.js')).mcpDriftRoutes);
+  await app.register((await import('./routes/drift.js')).unifiedDriftRoutes);
   await app.register(memoryRoutes, { memoryStore, threadStore });
 
   // Session chain (F24)

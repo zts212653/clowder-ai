@@ -1,10 +1,6 @@
 import { HubIcon } from '../hub-icons';
-import {
-  SettingsResourceToggleSwitch,
-  settingsResourceAvatarClass,
-  settingsResourceCardClass,
-  settingsResourceRowClass,
-} from '../SettingsResourceCard';
+import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
+import { CapabilityRow } from './capability-settings-ui';
 import {
   SettingsBadge,
   SettingsCard,
@@ -64,94 +60,75 @@ export function SkillRow({
     : (({ all: 'emerald', partial: 'amber', none: 'red', unknown: 'slate' } as const)[ss.status] ?? 'slate');
 
   return (
-    <div className={settingsResourceCardClass}>
-      <div className={settingsResourceRowClass}>
-        <button
-          type="button"
-          onClick={onPreview}
-          className="flex min-w-0 flex-1 items-center gap-4"
-          style={{ textAlign: 'left' }}
-        >
-          <div className={settingsResourceAvatarClass}>{skill.name.charAt(0).toUpperCase()}</div>
-          <div className="min-w-0 flex-1">
-            <SettingsText as="p" variant="sm" tone="default" className="font-bold">
-              {skill.name}
-            </SettingsText>
-            <SettingsText as="p" tone="secondary" className="mt-0.5 truncate">
-              {skill.description || skill.trigger || '—'}
-            </SettingsText>
-            <SettingsText as="p" tone="muted" className="mt-0.5">
-              {skill.category || '未分类'}
-            </SettingsText>
-          </div>
-        </button>
-
-        <div className="flex shrink-0 items-center gap-2">
-          {scope === SCOPE_ALL ? (
-            <SettingsBadge tone={syncTone}>{syncLabel}</SettingsBadge>
-          ) : (
-            <SettingsBadge tone={allMounted ? 'emerald' : 'amber'}>
-              {allMounted
-                ? '全部挂载'
-                : `${skill.governance.mountedCount}/${skill.governance.requiredMountCount} 已挂载`}
-            </SettingsBadge>
-          )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2 pl-2">
-          {skill.controls && (
-            <>
-              <SettingsResourceToggleSwitch
-                enabled={effectiveEnabled}
-                busy={isGlobalToggling}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggle(skill, !effectiveEnabled);
-                }}
-                title={toggleTitle}
-              />
-              <SettingsIconButton
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onExpandMounts(skill.id);
-                }}
-                title="按挂载规则"
-              >
-                <HubIcon name="layers" className="h-3.5 w-3.5" />
-              </SettingsIconButton>
-            </>
-          )}
-        </div>
-      </div>
-
-      {skill.governance.requiresMcp.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pb-3" style={{ paddingInline: '1rem' }}>
-          {skill.governance.requiresMcp.map((dep) => (
-            <SettingsBadge
-              key={`${skill.id}:${dep.id}`}
-              tone={dep.status === 'ready' ? 'emerald' : dep.status === 'missing' ? 'red' : 'amber'}
-              size="xxs"
+    <CapabilityRow
+      name={skill.name}
+      description={skill.description || skill.trigger}
+      subInfo={skill.category || '未分类'}
+      onClick={onPreview}
+      badges={
+        scope === SCOPE_ALL ? (
+          <SettingsBadge tone={syncTone}>{syncLabel}</SettingsBadge>
+        ) : (
+          <SettingsBadge tone={allMounted ? 'emerald' : 'amber'}>
+            {allMounted ? '全部挂载' : `${skill.governance.mountedCount}/${skill.governance.requiredMountCount} 已挂载`}
+          </SettingsBadge>
+        )
+      }
+      actions={
+        skill.controls ? (
+          <>
+            <SettingsResourceToggleSwitch
+              enabled={effectiveEnabled}
+              busy={isGlobalToggling}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggle(skill, !effectiveEnabled);
+              }}
+              title={toggleTitle}
+            />
+            <SettingsIconButton
+              onClick={(e) => {
+                e.stopPropagation();
+                onExpandMounts(skill.id);
+              }}
+              title="按挂载规则"
             >
-              {dep.id}:{dep.status}
-            </SettingsBadge>
-          ))}
-        </div>
-      )}
-
-      {isMountExpanded && skill.controls && (
-        <PerMountPointToggles
-          skillId={skill.id}
-          scope={scope}
-          mounts={skill.governance.mounts}
-          mountPaths={skill.mountPaths}
-          enabledMountPoints={skill.governance.enabledMountPoints}
-          toggling={toggling}
-          onMountPointToggle={(mountPointId, enabled, toggleScope) =>
-            onMountPointToggle(skill, mountPointId, enabled, toggleScope)
-          }
-        />
-      )}
-    </div>
+              <HubIcon name="layers" className="h-3.5 w-3.5" />
+            </SettingsIconButton>
+          </>
+        ) : undefined
+      }
+      expandedContent={
+        <>
+          {skill.governance.requiresMcp.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-3" style={{ paddingInline: '1rem' }}>
+              {skill.governance.requiresMcp.map((dep) => (
+                <SettingsBadge
+                  key={`${skill.id}:${dep.id}`}
+                  tone={dep.status === 'ready' ? 'emerald' : dep.status === 'missing' ? 'red' : 'amber'}
+                  size="xxs"
+                >
+                  {dep.id}:{dep.status}
+                </SettingsBadge>
+              ))}
+            </div>
+          )}
+          {isMountExpanded && skill.controls && (
+            <PerMountPointToggles
+              skillId={skill.id}
+              scope={scope}
+              mounts={skill.governance.mounts}
+              mountPaths={skill.mountPaths}
+              enabledMountPoints={skill.governance.enabledMountPoints}
+              toggling={toggling}
+              onMountPointToggle={(mountPointId, enabled, toggleScope) =>
+                onMountPointToggle(skill, mountPointId, enabled, toggleScope)
+              }
+            />
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -256,50 +233,6 @@ function PerMountPointToggles({
           })}
       </div>
     </SettingsCardSubSection>
-  );
-}
-
-export function SkillsScopeTabs({
-  scope,
-  onScopeChange,
-  allCount,
-  projectCount,
-}: {
-  scope: SkillScope;
-  onScopeChange: (scope: SkillScope) => void;
-  allCount: number;
-  projectCount: number;
-}) {
-  const tabs = [
-    { key: SCOPE_ALL, label: '全部 Skill', count: allCount },
-    { key: SCOPE_PROJECT, label: '项目 Skill', count: projectCount },
-  ];
-  return (
-    <nav
-      aria-label="Skill scope"
-      data-testid="skills-scope-tabs"
-      className="flex border-b border-[var(--console-border-soft)]"
-    >
-      {tabs.map((tab) => {
-        const active = tab.key === scope;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            aria-current={active ? 'page' : undefined}
-            onClick={() => onScopeChange(tab.key)}
-            className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
-              active
-                ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
-                : 'text-cafe-muted hover:text-cafe-secondary'
-            }`}
-          >
-            {tab.label}
-            <span className={`ml-1 text-xs ${active ? 'opacity-80' : 'text-cafe-muted'}`}>{tab.count}</span>
-          </button>
-        );
-      })}
-    </nav>
   );
 }
 

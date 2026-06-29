@@ -1,19 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { CapabilityBoardItem, CapabilityBoardResponse, CatFamily } from '../capability-board-ui';
-import { getProjectPaths, projectDisplayName } from '../ThreadSidebar/thread-utils';
+import { projectDisplayName } from '../ThreadSidebar/thread-utils';
+import { readApiError } from './settings-utils';
+import { useKnownProjects } from './useKnownProjects';
 
 export { projectDisplayName };
 
 type McpCapabilityBoardItem = CapabilityBoardItem & { type: 'mcp' };
-
-async function readApiError(res: Response): Promise<string> {
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
-  return data.error ?? `请求失败 (${res.status})`;
-}
 
 export function useCapabilityState(filterType: 'mcp' = 'mcp') {
   const [items, setItems] = useState<McpCapabilityBoardItem[]>([]);
@@ -26,8 +22,8 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
   const [error, setError] = useState<string | null>(null);
   const fetchGeneration = useRef(0);
 
-  const threads = useChatStore((state) => state.threads);
-  const knownProjects = useMemo(() => getProjectPaths(threads), [threads]);
+  const [serverKnownProjects, setServerKnownProjects] = useState<string[]>([]);
+  const knownProjects = useKnownProjects(serverKnownProjects);
 
   const fetchItems = useCallback(
     async (forProject?: string) => {
@@ -38,7 +34,7 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
         setError(null);
         const query = new URLSearchParams();
         if (forProject) query.set('projectPath', forProject);
-        if (filterType === 'mcp') query.set('probe', 'true');
+        // F249 §8.4: MCP list must NOT probe tools — lazy load in modal instead.
         const queryString = query.toString();
         const res = await apiFetch(`/api/capabilities${queryString ? `?${queryString}` : ''}`);
         if (!isCurrent()) return;
@@ -54,6 +50,7 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
         setItems(data.items.filter((item): item is McpCapabilityBoardItem => item.type === 'mcp'));
         setCatFamilies(data.catFamilies);
         setResolvedProjectPath(data.projectPath);
+        if (data.knownProjectPaths) setServerKnownProjects(data.knownProjectPaths);
       } catch {
         if (!isCurrent()) return;
         setError('网络错误');
@@ -84,16 +81,22 @@ export function useCapabilityState(filterType: 'mcp' = 'mcp') {
       setError(null);
       setToggling(key);
       try {
+        // F249: project tab toggles must use scope='project' so backend writes blockedCats.
+        // Per-cat toggle on project tab: scope='project' + mountPointId=catId.
+        // Global tab: scope='global' (whole) or scope='cat' (per-cat).
+        const isProjectScope = !!projectPath;
+        const scope = isProjectScope ? 'project' : catId ? 'cat' : 'global';
         const body: Record<string, unknown> = {
           capabilityId: item.id,
           capabilityType: 'mcp',
           source: item.source,
           pluginId: item.pluginId,
-          scope: catId ? 'cat' : 'global',
+          scope,
           enabled,
           projectPath: projectPath ?? undefined,
         };
-        if (catId) body.catId = catId;
+        if (isProjectScope && catId) body.mountPointId = catId;
+        else if (catId) body.catId = catId;
         const res = await apiFetch('/api/capabilities', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },

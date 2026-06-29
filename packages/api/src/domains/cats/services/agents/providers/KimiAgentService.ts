@@ -18,7 +18,6 @@ import { collectImageAccessDirectories } from './image-cli-bridge.js';
 import { extractImagePaths } from './image-paths.js';
 import {
   buildApiKeyEnv,
-  buildProjectMcpArgs,
   readKimiContextUsedTokens,
   readKimiModelConfigInfo,
   readKimiSessionId,
@@ -89,7 +88,7 @@ export class KimiAgentService implements AgentService {
     // the temp dir would leak — finally cleanup (line ~440) is gated by the try block below
     // and the early-return jumps over it. Source clowder-ai#944 has the same regression.
     const tempMcpConfig = this.mcpServerPath
-      ? writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
+      ? await writeMcpConfigFile(workingDirectory, this.mcpServerPath, options?.callbackEnv)
       : null;
     const modelConfig = readKimiModelConfigInfo(effectiveModel, options?.callbackEnv);
     const supportsThinking =
@@ -123,8 +122,6 @@ export class KimiAgentService implements AgentService {
       }
       if (tempMcpConfig) {
         args.push('--mcp-config-file', tempMcpConfig);
-      } else {
-        args.push(...buildProjectMcpArgs(workingDirectory));
       }
       for (const dir of imageAccessDirs) {
         args.push('--add-dir', dir);

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
@@ -159,12 +159,36 @@ async function withWorkspaceEnv(env, fn) {
   }
 }
 
+async function withRuntimeRootEnv(runtimeRoot, fn) {
+  const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+  try {
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    await fn();
+  } finally {
+    if (previousRuntimeRoot === undefined) {
+      delete process.env.CAT_CAFE_RUNTIME_ROOT;
+    } else {
+      process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+    }
+  }
+}
+
 async function collectCodexSpawnArgs(workingDirectory) {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
-  const promise = collect(service.invoke('hello from workspace env test', { workingDirectory }));
+  const promise = collect(
+    service.invoke('hello from workspace env test', {
+      workingDirectory,
+      callbackEnv: {
+        CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+        CAT_CAFE_INVOCATION_ID: 'inv-workspace-env',
+        CAT_CAFE_CALLBACK_TOKEN: 'tok-workspace-env',
+        CAT_CAFE_CAT_ID: 'codex',
+      },
+    }),
+  );
   emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-workspace-env' }]);
   await promise;
 
@@ -182,6 +206,23 @@ function assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, expected, rea
 
 function makeTempDir(prefix) {
   return mkdtempSync(join(import.meta.dirname ?? '.', prefix));
+}
+
+function writeCapabilitiesConfig(projectRoot, capabilities) {
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    join(projectRoot, '.cat-cafe', 'capabilities.json'),
+    JSON.stringify({ version: 1, capabilities }),
+    'utf8',
+  );
+}
+
+function writeMcpDistStubs(projectRoot, entrypoints = ['index.js']) {
+  const mcpDistDir = join(projectRoot, 'packages', 'mcp-server', 'dist');
+  mkdirSync(mcpDistDir, { recursive: true });
+  for (const entrypoint of entrypoints) {
+    writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+  }
 }
 
 // --- Test cases ---
@@ -296,8 +337,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         ['cat-cafe-audio', 'audio.js'],
         ['cat-cafe-finance', 'finance.js'],
       ];
+      const runtimeNodeCommand = JSON.stringify(process.execPath);
       for (const [serverId, entrypoint] of splitServers) {
-        assert.ok(args.includes(`mcp_servers.${serverId}.command="node"`), `must inject ${serverId} command`);
+        assert.ok(
+          args.includes(`mcp_servers.${serverId}.command=${runtimeNodeCommand}`),
+          `must inject ${serverId} runtime Node command`,
+        );
         const argsConfig = args.find((arg) => arg.startsWith(`mcp_servers.${serverId}.args=[`));
         assert.ok(argsConfig, `must inject ${serverId} mcp args config`);
         assert.ok(
@@ -396,6 +441,86 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('Codex MCP config reads capabilities from runtime root while cwd is user project', async () => {
+    const runtimeRoot = makeTempDir('.tmp-codex-runtime-cap-root-');
+    const projectDir = makeTempDir('.tmp-codex-user-project-');
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+    mkdirSync(mcpDistDir, { recursive: true });
+    for (const entrypoint of ['index.js', 'collab.js', 'memory.js']) {
+      writeFileSync(join(mcpDistDir, entrypoint), '// stub');
+    }
+    writeCapabilitiesConfig(runtimeRoot, [
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        globalEnabled: false,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+      {
+        id: 'runtime-tool',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'external',
+        mcpServer: { command: 'node', args: ['runtime-tool.js'] },
+      },
+    ]);
+
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      const promise = collect(
+        service.invoke('hello from user project', {
+          workingDirectory: projectDir,
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-runtime-root',
+            CAT_CAFE_CALLBACK_TOKEN: 'tok-runtime-root',
+            CAT_CAFE_CAT_ID: 'codex',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-runtime-root' }]);
+      await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      // Disabled capabilities are skipped entirely (no CLI args injected).
+      // L5 writeCodexMcpConfig already removes disabled entries from .codex/config.toml.
+      assert.ok(
+        !args.some((a) => a.includes('mcp_servers.cat-cafe-collab')),
+        'disabled runtime capability must not appear in CLI args at all',
+      );
+      assert.ok(
+        args.includes(`mcp_servers.cat-cafe-memory.command=${JSON.stringify(process.execPath)}`),
+        'enabled runtime capability is injected with runtime Node',
+      );
+      assert.ok(args.includes('mcp_servers.runtime-tool.command="node"'), 'external runtime capability is injected');
+      assert.ok(
+        args.includes(`mcp_servers.cat-cafe-memory.env.ALLOWED_WORKSPACE_DIRS="${projectDir}"`),
+        'workspace authorization still uses the thread workingDirectory',
+      );
+    } finally {
+      if (previousRuntimeRoot === undefined) {
+        delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      } else {
+        process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   test('Codex MCP config prefers explicit ALLOWED_WORKSPACE_DIRS over thread workingDirectory', async () => {
     const tmpRoot = makeTempDir('.tmp-mcp-explicit-env-');
 
@@ -434,6 +559,170 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       const args = await collectCodexSpawnArgs();
       assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, '/workspace/root', 'CAT_CAFE_WORKSPACE_ROOT fallback');
     });
+  });
+
+  test('Codex MCP external env stays out of argv and command-only servers stay enabled', async () => {
+    const projectDir = makeTempDir('.tmp-codex-external-env-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'secret-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            env: { SECRET_TOKEN: 'super-secret-token' },
+          },
+        },
+      ]);
+
+      await withRuntimeRootEnv(projectDir, async () => {
+        const promise = collect(
+          service.invoke('hello external env', {
+            workingDirectory: projectDir,
+            callbackEnv: {
+              CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+              CAT_CAFE_INVOCATION_ID: 'inv-secret',
+              CAT_CAFE_CALLBACK_TOKEN: 'tok-secret',
+              CAT_CAFE_CAT_ID: 'codex',
+            },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-secret' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(
+          args.includes(`mcp_servers.secret-tool.command=${JSON.stringify(process.execPath)}`),
+          'env-wrapped external server must use runtime Node for the wrapper',
+        );
+        assert.ok(args.includes('mcp_servers.secret-tool.enabled=true'), 'external server must stay enabled');
+        assert.ok(
+          !args.some((arg) => arg.includes('SECRET_TOKEN') || arg.includes('super-secret-token')),
+          'external MCP env names and values must not be exposed in argv',
+        );
+      });
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP external relative command resolves against workingDir', async () => {
+    const projectDir = makeTempDir('.tmp-codex-relative-command-project-');
+    const toolDir = makeTempDir('.tmp-codex-relative-command-tool-');
+    const toolPath = join(toolDir, 'server');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      writeFileSync(toolPath, '#!/usr/bin/env node\n', 'utf8');
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'relative-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: './server',
+            workingDir: toolDir,
+          },
+        },
+      ]);
+
+      await withRuntimeRootEnv(projectDir, async () => {
+        const promise = collect(
+          service.invoke('hello relative command', {
+            workingDirectory: projectDir,
+            callbackEnv: {
+              CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+              CAT_CAFE_INVOCATION_ID: 'inv-relative-command',
+              CAT_CAFE_CALLBACK_TOKEN: 'tok-relative-command',
+              CAT_CAFE_CAT_ID: 'codex',
+            },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-relative-command' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        assert.ok(args.includes(`mcp_servers.relative-tool.command="${toolPath}"`));
+        assert.ok(!args.includes('mcp_servers.relative-tool.command="./server"'));
+      });
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(toolDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP external relative workingDir resolves from project root', async () => {
+    const projectDir = makeTempDir('.tmp-codex-relative-workdir-project-');
+    const toolDir = join(projectDir, 'tools');
+    const toolPath = join(toolDir, 'server');
+    const dataPath = join(toolDir, 'data.json');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(projectDir);
+      mkdirSync(toolDir, { recursive: true });
+      writeFileSync(toolPath, '#!/usr/bin/env node\n', 'utf8');
+      writeFileSync(dataPath, '{}\n', 'utf8');
+      writeCapabilitiesConfig(projectDir, [
+        {
+          id: 'relative-root-tool',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: './server',
+            args: ['data.json'],
+            env: { SECRET_TOKEN: 'super-secret-token' },
+            workingDir: 'tools',
+          },
+        },
+      ]);
+
+      await withRuntimeRootEnv(projectDir, async () => {
+        const promise = collect(
+          service.invoke('hello relative workingDir', {
+            workingDirectory: projectDir,
+            callbackEnv: {
+              CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+              CAT_CAFE_INVOCATION_ID: 'inv-relative-workdir',
+              CAT_CAFE_CALLBACK_TOKEN: 'tok-relative-workdir',
+              CAT_CAFE_CAT_ID: 'codex',
+            },
+          }),
+        );
+        emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-relative-workdir' }]);
+        await promise;
+
+        const args = spawnFn.mock.calls[0].arguments[1];
+        const serverArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.relative-root-tool.args=['));
+        assert.ok(serverArgsConfig, 'env-wrapped external server must emit wrapper args');
+        const specPath = serverArgsConfig.match(/, "([^"]+mcp-env-spec\.json)"\]$/)?.[1];
+        assert.ok(specPath, 'wrapper args must include a readable spec path');
+        const spec = JSON.parse(readFileSync(specPath, 'utf8'));
+        assert.equal(spec.command, toolPath);
+        assert.deepEqual(spec.args, [dataPath]);
+        assert.equal(spec.cwd, toolDir);
+        assert.ok(
+          !args.some((arg) => arg.includes('SECRET_TOKEN') || arg.includes('super-secret-token')),
+          'external MCP env names and values must not be exposed in argv',
+        );
+      });
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
   });
 
   test('does not include resume when no sessionId', async () => {

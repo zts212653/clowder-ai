@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -195,16 +195,17 @@ describe('GeminiAcpAdapter', () => {
     assert.equal(doneMsg.metadata.provider, 'google');
   });
 
-  it('passes mcpServers to session/new when configured', async () => {
+  it('passes mcpServers to session/new when mcpServers configured', async () => {
     const { pool: p, captured } = createPoolWithAutoRespond();
     pool = p;
-    const mcpServers = [{ name: 'test-server', command: 'node', args: ['test.js'], env: [{ name: 'K', value: 'V' }] }];
+    // F161: AcpAgentService receives pre-resolved mcpServers from AcpServiceFactory
+    // (whitelist → server resolution happens at factory level, not adapter level)
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool,
       poolKey: TEST_POOL_KEY,
       projectRoot: '/tmp',
-      mcpServers,
+      mcpServers: [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'] }],
     });
 
     const messages = [];
@@ -214,7 +215,8 @@ describe('GeminiAcpAdapter', () => {
 
     const sessionNew = captured.find((m) => m.method === 'session/new');
     assert.ok(sessionNew, 'Expected session/new in captured messages');
-    assert.deepStrictEqual(sessionNew.params.mcpServers, mcpServers);
+    assert.ok(sessionNew.params.mcpServers.length > 0, 'Should have resolved MCP servers');
+    assert.equal(sessionNew.params.mcpServers[0].name, 'cat-cafe-collab');
   });
 
   it('reloads resumed ACP sessions with fresh callback MCP env', async () => {
@@ -2488,9 +2490,8 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     pool = p;
 
     const mcpServers = [
-      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [{ name: 'EXISTING', value: 'keep' }] },
+      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] },
       { name: 'cat-cafe-memory', command: 'node', args: ['memory.js'], env: [] },
-      { name: 'playwright', command: 'npx', args: ['@playwright/mcp'], env: [] },
     ];
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
@@ -2518,7 +2519,7 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.ok(sessionNew, 'Expected session/new');
     const servers = sessionNew.params.mcpServers;
 
-    // cat-cafe-collab should have callback env merged + keep existing
+    // cat-cafe-collab should have callback env merged
     const collab = servers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
     const collabEnvMap = Object.fromEntries(collab.env.map((e) => [e.name, e.value]));
@@ -2526,109 +2527,20 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.equal(collabEnvMap.CAT_CAFE_INVOCATION_ID, 'inv-123');
     assert.equal(collabEnvMap.CAT_CAFE_CALLBACK_TOKEN, 'tok-abc');
     assert.equal(collabEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
-    assert.equal(collabEnvMap.EXISTING, 'keep', 'Existing env entries should be preserved');
 
     // cat-cafe-memory should also get callback env
     const memory = servers.find((s) => s.name === 'cat-cafe-memory');
+    assert.ok(memory, 'cat-cafe-memory should be present');
     const memoryEnvMap = Object.fromEntries(memory.env.map((e) => [e.name, e.value]));
     assert.equal(memoryEnvMap.CAT_CAFE_API_URL, 'http://localhost:3004');
     assert.equal(memoryEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
-
-    // playwright (non cat-cafe) should be unchanged
-    const pw = servers.find((s) => s.name === 'playwright');
-    assert.deepStrictEqual(pw.env, [], 'Non-cat-cafe servers should not get callback env');
-  });
-
-  it('injects into exact "cat-cafe" server name (not just prefixed)', async () => {
-    const { pool: p, captured } = createPoolWithAutoRespond();
-    pool = p;
-
-    const mcpServers = [
-      { name: 'cat-cafe', command: 'node', args: ['cat-cafe.js'], env: [{ name: 'EXISTING', value: 'keep' }] },
-      { name: 'pencil', command: 'node', args: ['pencil.js'], env: [{ name: 'UNCHANGED', value: 'yes' }] },
-    ];
-    const adapter = new GeminiAcpAdapter({
-      catId: 'gemini',
-      pool,
-      poolKey: TEST_POOL_KEY,
-      projectRoot: '/tmp',
-      mcpServers,
-    });
-
-    const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-      CAT_CAFE_INVOCATION_ID: 'inv-acp-123',
-      CAT_CAFE_CALLBACK_TOKEN: 'token-acp-123',
-      CAT_CAFE_USER_ID: 'default-user',
-      CAT_CAFE_CAT_ID: 'gemini',
-      CAT_CAFE_SIGNAL_USER: 'gemini',
-    };
-
-    for await (const _ of adapter.invoke('hello', { callbackEnv })) {
-      /* drain */
-    }
-
-    const sessionNew = captured.find((m) => m.method === 'session/new');
-    const sentServers = sessionNew.params.mcpServers;
-
-    const catCafe = sentServers.find((s) => s.name === 'cat-cafe');
-    const catCafeEnv = Object.fromEntries(catCafe.env.map((e) => [e.name, e.value]));
-    assert.equal(catCafeEnv.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
-    assert.equal(catCafeEnv.CAT_CAFE_CALLBACK_TOKEN, 'token-acp-123');
-    assert.equal(catCafeEnv.EXISTING, 'keep');
-
-    const pencil = sentServers.find((s) => s.name === 'pencil');
-    const pencilEnv = Object.fromEntries(pencil.env.map((e) => [e.name, e.value]));
-    assert.equal(pencilEnv.CAT_CAFE_INVOCATION_ID, undefined, 'pencil should not get callback env');
-    assert.equal(pencilEnv.UNCHANGED, 'yes');
-  });
-
-  it('overwrites placeholder env values with real callback env', async () => {
-    const { pool: p, captured } = createPoolWithAutoRespond();
-    pool = p;
-
-    const mcpServers = [
-      {
-        name: 'cat-cafe-collab',
-        command: 'node',
-        args: ['collab.js'],
-        env: [
-          { name: 'CAT_CAFE_API_URL', value: '${CAT_CAFE_API_URL}' },
-          { name: 'CAT_CAFE_CALLBACK_TOKEN', value: '${CAT_CAFE_CALLBACK_TOKEN}' },
-        ],
-      },
-    ];
-    const adapter = new GeminiAcpAdapter({
-      catId: 'gemini',
-      pool,
-      poolKey: TEST_POOL_KEY,
-      projectRoot: '/tmp',
-      mcpServers,
-    });
-
-    const callbackEnv = {
-      CAT_CAFE_API_URL: 'http://localhost:3004',
-      CAT_CAFE_CALLBACK_TOKEN: 'real-token',
-    };
-
-    for await (const _ of adapter.invoke('test', { callbackEnv })) {
-      /* drain */
-    }
-
-    const sessionNew = captured.find((m) => m.method === 'session/new');
-    const collab = sessionNew.params.mcpServers[0];
-    const envMap = Object.fromEntries(collab.env.map((e) => [e.name, e.value]));
-    assert.equal(envMap.CAT_CAFE_API_URL, 'http://localhost:3004', 'Placeholder should be overwritten');
-    assert.equal(envMap.CAT_CAFE_CALLBACK_TOKEN, 'real-token', 'Placeholder should be overwritten');
   });
 
   it('passes servers unchanged when no callbackEnv', async () => {
     const { pool: p, captured } = createPoolWithAutoRespond();
     pool = p;
 
-    const mcpServers = [
-      { name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [{ name: 'FOO', value: 'bar' }] },
-    ];
+    const mcpServers = [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] }];
     const adapter = new GeminiAcpAdapter({
       catId: 'gemini',
       pool,
@@ -2642,6 +2554,98 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     }
 
     const sessionNew = captured.find((m) => m.method === 'session/new');
-    assert.deepStrictEqual(sessionNew.params.mcpServers, mcpServers, 'Should pass through unchanged');
+    assert.ok(sessionNew, 'Expected session/new');
+    // Should have resolved servers from whitelist but without callbackEnv injection
+    const collab = sessionNew.params.mcpServers.find((s) => s.name === 'cat-cafe-collab');
+    assert.ok(collab, 'cat-cafe-collab should be present');
+    assert.deepStrictEqual(collab.env, [], 'No callbackEnv = empty env on builtin servers');
+  });
+
+  // F161 architecture change: capabilities.json-aware filtering (disabled capabilities,
+  // legacy cat-cafe expansion, expandManagedMcpNamesForUserMerge) moved from adapter
+  // invoke-time to factory-level resolveAcpMcpServers(). AcpAgentService.invoke() only
+  // does simple name-based user project exclusion via resolveUserProjectMcpServers().
+  // Factory/resolver-level tests: acp-mcp-resolver.test.js (37 tests covering disabled
+  // capabilities, whitelist expansion, user project merge with managed name exclusion).
+
+  it('user project servers with names not in base servers pass through', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+    const projectRoot = mkdtempSync(join(tmpdir(), 'gemini-acp-user-passthrough-root-'));
+    const userRoot = mkdtempSync(join(tmpdir(), 'gemini-acp-user-passthrough-user-'));
+    try {
+      writeFileSync(
+        join(userRoot, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@mcp/fs'] },
+            'my-tool': { command: 'node', args: ['tool.js'] },
+          },
+        }),
+        'utf8',
+      );
+
+      // No base mcpServers — simulates factory excluding disabled capabilities
+      const adapter = new GeminiAcpAdapter({
+        catId: 'gemini',
+        pool,
+        poolKey: TEST_POOL_KEY,
+        projectRoot,
+      });
+
+      for await (const _ of adapter.invoke('test', { workingDirectory: userRoot })) {
+        /* drain */
+      }
+
+      const sessionNew = captured.find((m) => m.method === 'session/new');
+      assert.ok(sessionNew, 'Expected session/new');
+      const names = sessionNew.params.mcpServers.map((s) => s.name);
+      // Without base servers, all user servers pass through (no name exclusion)
+      assert.deepStrictEqual(names, ['filesystem', 'my-tool']);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(userRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('user project servers with names matching base servers are excluded', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+    const projectRoot = mkdtempSync(join(tmpdir(), 'gemini-acp-user-exclude-root-'));
+    const userRoot = mkdtempSync(join(tmpdir(), 'gemini-acp-user-exclude-user-'));
+    try {
+      writeFileSync(
+        join(userRoot, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            'cat-cafe-collab': { command: 'python', args: ['override.py'] },
+            'my-tool': { command: 'node', args: ['tool.js'] },
+          },
+        }),
+        'utf8',
+      );
+
+      const adapter = new GeminiAcpAdapter({
+        catId: 'gemini',
+        pool,
+        poolKey: TEST_POOL_KEY,
+        projectRoot,
+        mcpServers: [{ name: 'cat-cafe-collab', command: 'node', args: ['collab.js'], env: [] }],
+      });
+
+      for await (const _ of adapter.invoke('test', { workingDirectory: userRoot })) {
+        /* drain */
+      }
+
+      const sessionNew = captured.find((m) => m.method === 'session/new');
+      assert.ok(sessionNew, 'Expected session/new');
+      const names = sessionNew.params.mcpServers.map((s) => s.name);
+      assert.ok(names.includes('cat-cafe-collab'), 'base server retained');
+      assert.ok(!names.some((n, i) => n === 'cat-cafe-collab' && i > 0), 'user duplicate excluded');
+      assert.ok(names.includes('my-tool'), 'non-conflicting user server included');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+      rmSync(userRoot, { recursive: true, force: true });
+    }
   });
 });

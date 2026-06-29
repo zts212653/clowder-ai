@@ -37,16 +37,18 @@ import {
   type DiscoveryPaths,
   deduplicateDiscoveredMcpServers,
   discoverExternalMcpServers,
+  discoverExternalMcpServersTagged,
   generateCliConfigs,
   healCatCafeMcpTopology,
   readCapabilitiesConfig,
-  resolveServersForCat,
+  resolvePencilCommand,
   toCapabilityEntry,
   withCapabilityLock,
   writeCapabilitiesConfig,
 } from '../config/capabilities/capability-orchestrator.js';
 import { sanitizeCapabilityForResponse } from '../config/capabilities/capability-redaction.js';
 import {
+  isLocalCapabilityWriteRequest,
   requireCapabilityWriteOwner,
   requireLocalCapabilityWriteRequest,
   resolveCapabilityWriteSessionUserId,
@@ -56,6 +58,7 @@ import { validateSkillName } from '../config/governance/skill-sync.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import { parsePluginManifest } from '../domains/plugin/plugin-manifest.js';
+import { syncMcpAll } from '../mcp/mcp-sync-all.js';
 import { parseManifestSkillMeta, readSkillMeta, type SkillMeta } from '../skills/skill-meta.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
@@ -81,7 +84,7 @@ function enabledMountTargetIds(rules: MountRules): string[] {
 
 function currentSkillMountTargetIds(cap: CapabilityEntry, rules: MountRules): string[] {
   if (Array.isArray(cap.mountPaths)) return cap.mountPaths;
-  const isEnabled = cap.globalEnabled ?? cap.enabled;
+  const isEnabled = cap.globalEnabled ?? true;
   return isEnabled ? enabledMountTargetIds(rules) : [];
 }
 
@@ -100,7 +103,7 @@ function createCatCafeSkillCapabilityFromGlobalPolicy(
   skillId: string,
   globalCap: CapabilityEntry | null,
 ): CapabilityEntry {
-  const globalEnabled = globalCap ? (globalCap.globalEnabled ?? globalCap.enabled) : true;
+  const globalEnabled = globalCap ? (globalCap.globalEnabled ?? true) : true;
   const entry: CapabilityEntry = {
     id: skillId,
     type: 'skill',
@@ -299,14 +302,18 @@ export function shouldPropagateManagedSkillToggle(
 }
 
 function canReadSensitiveMcpConfig(request: FastifyRequest): boolean {
+  // Local loopback access in single-user mode: safe to show launch fields
+  // (command/args/url) — the user owns the machine and the config.
+  if (isLocalCapabilityWriteRequest(request)) return true;
+  // Non-local / multi-user: require configured owner identity match.
   const sessionUserId = resolveCapabilityWriteSessionUserId(request);
   return !!sessionUserId && !requireCapabilityWriteOwner(sessionUserId, { requireConfiguredOwner: true });
 }
 
-function buildBoardMcpServer(
+async function buildBoardMcpServer(
   cap: CapabilityEntry,
   options?: { includeLaunchFields?: boolean },
-): CapabilityBoardItem['mcpServer'] | undefined {
+): Promise<CapabilityBoardItem['mcpServer'] | undefined> {
   const sanitized = sanitizeCapabilityForResponse(cap);
   const server = sanitized?.mcpServer;
   if (!server) return undefined;
@@ -316,8 +323,19 @@ function buildBoardMcpServer(
     ...(server.resolver && { resolver: server.resolver }),
   };
   if (options?.includeLaunchFields) {
-    if (server.command) boardServer.command = server.command;
-    if (Array.isArray(server.args)) boardServer.args = [...server.args];
+    let command = server.command;
+    let args = server.args;
+    // Resolver-based MCPs (e.g. pencil) store no command/args in config —
+    // resolve at board-build time so the modal shows the actual binary path.
+    if (!command && server.resolver === 'pencil') {
+      const resolved = await resolvePencilCommand().catch(() => null);
+      if (resolved) {
+        command = resolved.command;
+        args = resolved.args;
+      }
+    }
+    if (command) boardServer.command = command;
+    if (Array.isArray(args)) boardServer.args = [...args];
     if (server.url) boardServer.url = server.url;
   }
   if (server.env) boardServer.env = { ...server.env };
@@ -344,6 +362,17 @@ function resolveCatCafeSkillsSourceDir(): string {
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
 
+/** Names that should never be re-added from external config discovery. */
+const CAT_CAFE_BUILTIN_NAMES = new Set([
+  'cat-cafe',
+  'cat-cafe-collab',
+  'cat-cafe-memory',
+  'cat-cafe-signals',
+  'cat-cafe-limb',
+  'cat-cafe-audio',
+  'cat-cafe-finance',
+]);
+
 /**
  * Discovery reads project-local CLI configs for providers that are project scoped.
  * Antigravity is the exception: its MCP config is global under ~/.gemini/antigravity.
@@ -360,10 +389,7 @@ function getDiscoveryPaths(projectRoot: string) {
 
 function getCliConfigPaths(projectRoot: string) {
   return {
-    anthropic: join(projectRoot, '.mcp.json'),
-    openai: join(projectRoot, '.codex', 'config.toml'),
     google: join(projectRoot, '.gemini', 'settings.json'),
-    kimi: join(projectRoot, '.kimi', 'mcp.json'),
     antigravity: join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'),
   };
 }
@@ -454,26 +480,32 @@ export function describeMcpCapability(cap: CapabilityEntry, tools?: McpToolInfo[
  * Groups catIds by breedId (e.g. ragdoll → [opus, opus-45, sonnet]).
  */
 function buildCatFamilies(): CatFamily[] {
-  const familyMap = new Map<string, { name: string; catIds: string[] }>();
+  const familyMap = new Map<string, { name: string; catIds: string[]; catNames: Record<string, string> }>();
 
   for (const catId of catRegistry.getAllIds()) {
     const entry = catRegistry.tryGet(catId as string);
     if (!entry) continue;
     const breedId = entry.config.breedId ?? 'unknown';
     const breedName = entry.config.breedDisplayName ?? breedId;
+    const cfg = entry.config;
+    // Build a human-friendly label: "布偶猫(Opus) - catId"
+    const variant = cfg.variantLabel ? `(${cfg.variantLabel})` : '';
+    const catLabel = `${breedName}${variant} - ${catId as string}`;
 
     let family = familyMap.get(breedId);
     if (!family) {
-      family = { name: breedName, catIds: [] };
+      family = { name: breedName, catIds: [], catNames: {} };
       familyMap.set(breedId, family);
     }
     family.catIds.push(catId as string);
+    family.catNames[catId as string] = catLabel;
   }
 
   return Array.from(familyMap.entries()).map(([id, f]) => ({
     id,
     name: f.name,
     catIds: f.catIds.sort(),
+    catNames: f.catNames,
   }));
 }
 
@@ -529,6 +561,11 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     const isExternalProject = !pathsEqual(projectRoot, mainRoot);
+    // F249: Distinguish global view (no projectPath) from project view.
+    // Startup dir can be both — same config file but different toggle derivation:
+    //   global → enabled from globalEnabled + overrides
+    //   project → enabled from blockedCats only
+    const isProjectView = !!query.projectPath;
     // Always load global config for external projects so newly discovered skills
     // inherit global disabled state (per-skill, not all-or-nothing bootstrap gate)
     const globalConfig = isExternalProject ? await readCapabilitiesConfig(mainRoot) : null;
@@ -538,7 +575,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     // without requiring a full re-bootstrap.  writeXxxMcpConfig functions
     // are idempotent merge-writers, so repeated calls are safe and cheap.
     try {
-      await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+      await generateCliConfigs(config, getCliConfigPaths(projectRoot), projectRoot);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException | undefined)?.code;
       if (code !== 'EPERM' && code !== 'EACCES') throw error;
@@ -667,41 +704,38 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       if (config.capabilities.length !== before) configDirty = true;
     }
 
-    // Re-discover project-level + user-level MCP servers on each GET.
-    // Adds newly configured servers to capabilities.json without re-bootstrap.
-    const projectLevelPaths = getDiscoveryPaths(projectRoot);
-    const userLevelPaths: DiscoveryPaths = {
-      claudeConfig: join(home, '.claude', 'mcp.json'),
-      codexConfig: join(home, '.codex', 'config.toml'),
-      geminiConfig: join(home, '.gemini', 'settings.json'),
-      kimiConfig: join(home, '.kimi', 'mcp.json'),
-      antigravityConfig: join(home, '.gemini', 'antigravity', 'mcp_config.json'),
-    };
-    const [projectLevelServers, userLevelServers] = await Promise.all([
-      discoverExternalMcpServers(projectLevelPaths),
-      discoverExternalMcpServers(userLevelPaths),
-    ]);
-    const discoveredServers = deduplicateDiscoveredMcpServers([...projectLevelServers, ...userLevelServers]);
-    // Skip legacy Clowder AI names — a stale 'cat-cafe' entry in user config should
-    // not be re-added alongside the split 'cat-cafe-*' built-in entries.
-    // F193/F207 split-only: include supplemental built-ins so discovery doesn't
-    // re-add stale user-level entries alongside managed split servers.
-    const CAT_CAFE_BUILTIN_NAMES = new Set([
-      'cat-cafe',
-      'cat-cafe-collab',
-      'cat-cafe-memory',
-      'cat-cafe-signals',
-      'cat-cafe-limb',
-      'cat-cafe-audio',
-      'cat-cafe-finance',
-    ]);
-    for (const server of discoveredServers) {
-      if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
-      const exists = config.capabilities.some((c) => c.type === 'mcp' && c.id === server.name);
-      if (!exists) {
-        config.capabilities.push(toCapabilityEntry(server));
+    // One-time discovery from external config files (.claude/mcp.json, etc.).
+    // Only runs when discoveryVersion is absent or outdated — NOT on every GET.
+    // After #712, capabilities.json is the single source of truth; external
+    // config files are legacy artifacts written by old PROVIDER_WRITERS.
+    // Manual re-sync: POST /api/capabilities/mcp/discover.
+    const CURRENT_DISCOVERY_VERSION = 1;
+    if (!config.discoveryVersion || config.discoveryVersion < CURRENT_DISCOVERY_VERSION) {
+      const projectLevelPaths = getDiscoveryPaths(projectRoot);
+      const userLevelPaths: DiscoveryPaths = {
+        claudeConfig: join(home, '.claude', 'mcp.json'),
+        codexConfig: join(home, '.codex', 'config.toml'),
+        geminiConfig: join(home, '.gemini', 'settings.json'),
+        kimiConfig: join(home, '.kimi', 'mcp.json'),
+        antigravityConfig: join(home, '.gemini', 'antigravity', 'mcp_config.json'),
+      };
+      const [projectTagged, userTagged] = await Promise.all([
+        discoverExternalMcpServersTagged(projectLevelPaths),
+        discoverExternalMcpServersTagged(userLevelPaths),
+      ]);
+      // Deduplicate across project + user level (project wins)
+      const seen = new Set(config.capabilities.filter((c) => c.type === 'mcp').map((c) => c.id));
+      for (const { server, discoveredFrom } of [...projectTagged, ...userTagged]) {
+        if (CAT_CAFE_BUILTIN_NAMES.has(server.name)) continue;
+        if (seen.has(server.name)) continue;
+        seen.add(server.name);
+        const entry = toCapabilityEntry(server);
+        entry.discoveredFrom = discoveredFrom;
+        config.capabilities.push(entry);
         configDirty = true;
       }
+      config.discoveryVersion = CURRENT_DISCOVERY_VERSION;
+      configDirty = true;
     }
 
     if (configDirty) {
@@ -746,25 +780,50 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const items: CapabilityBoardItem[] = [];
 
     // MCP capabilities
+    // Index global MCP caps by id for effectiveGlobalEnabled inheritance.
+    const globalMcpMap = new Map(
+      (globalConfig?.capabilities ?? []).filter((c) => c.type === 'mcp').map((c) => [c.id, c] as const),
+    );
     for (const cap of config.capabilities) {
       if (cap.type !== 'mcp') continue;
+      // F249 Bug 3 fix: For external projects, when the project entry has no
+      // project-level override (blockedCats undefined), inherit globalEnabled
+      // from the main config. Without this, toggling on the global tab only
+      // updates the main config's globalEnabled while the project's stale copy
+      // is shown — the user sees the project toggle unchanged.
+      const inheritFromGlobal = isExternalProject && cap.blockedCats === undefined;
+      const globalCap = inheritFromGlobal ? globalMcpMap.get(cap.id) : undefined;
+      const effectiveGlobalEnabled = globalCap ? (globalCap.globalEnabled ?? true) : (cap.globalEnabled ?? true);
+      // Per-cat state: blockedCats only (blacklist). Same field for both views.
+      const baseCap = !isProjectView && inheritFromGlobal && globalCap ? globalCap : cap;
       const cats: Record<string, boolean> = {};
       for (const catId of catIds) {
-        const servers = resolveServersForCat(config, catId);
-        const server = servers.find((s) => s.name === cap.id);
-        cats[catId] = server?.enabled ?? false;
+        cats[catId] = !(baseCap.blockedCats?.includes(catId) ?? false);
       }
+      const catValues = Object.values(cats);
+      // Parent toggle: global = globalEnabled (declared policy);
+      // project = derived from blockedCats (all cats unblocked = enabled).
+      const projectEnabled = isProjectView
+        ? catValues.length > 0
+          ? catValues.some(Boolean)
+          : true
+        : effectiveGlobalEnabled;
       const mcpItem: CapabilityBoardItem = {
         id: cap.id,
         type: 'mcp',
         source: cap.source,
-        enabled: cap.enabled,
+        enabled: projectEnabled,
+        globalEnabled: effectiveGlobalEnabled,
         cats,
-        mcpServer: buildBoardMcpServer(cap, { includeLaunchFields: includeMcpLaunchFields }),
+        mcpServer: await buildBoardMcpServer(cap, { includeLaunchFields: includeMcpLaunchFields }),
         layer: 'L1',
         pluginId: cap.pluginId,
+        // F249: project-level fields
+        blockedCats: cap.blockedCats,
+        hasOverride: cap.mcpServerOverride !== undefined,
         ...(cap.ecosystem && { ecosystem: cap.ecosystem }),
         ...(cap.lockVersion && { lockVersion: cap.lockVersion }),
+        ...(cap.discoveredFrom && { discoveredFrom: cap.discoveredFrom }),
       };
       const mcpDesc = describeMcpCapability(cap);
       if (mcpDesc) mcpItem.description = mcpDesc;
@@ -780,16 +839,14 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         const provider = entry?.config.clientId ?? 'unknown';
         const presentForProvider = (mountPointSkills[provider] ?? []).includes(cap.id);
         if (!presentForProvider) continue; // Sparse cats: omit irrelevant cats so frontend filter works
-        const override = cap.overrides?.find((o) => o.catId === catId);
-        const enabled = override ? override.enabled : (cap.globalEnabled ?? cap.enabled);
-        cats[catId] = enabled;
+        cats[catId] = cap.globalEnabled ?? true;
       }
       const skillItem: CapabilityBoardItem = {
         id: cap.id,
         type: 'skill',
         source: cap.source,
-        enabled: cap.globalEnabled ?? cap.enabled,
-        globalEnabled: cap.globalEnabled ?? cap.enabled,
+        enabled: cap.globalEnabled ?? true,
+        globalEnabled: cap.globalEnabled ?? true,
         cats,
         layer: cap.source === 'external' ? 'L3' : 'L2',
         pluginId: cap.pluginId,
@@ -819,7 +876,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       const probeEntries: Array<readonly [string, McpProbeResult]> = [];
       const probeOne = async (cap: (typeof mcpCaps)[number]): Promise<readonly [string, McpProbeResult]> => {
         const boardItem = mcpItemById.get(cap.id);
-        const anyCatEnabled = boardItem ? Object.values(boardItem.cats).some(Boolean) : cap.enabled;
+        const anyCatEnabled = boardItem ? Object.values(boardItem.cats).some(Boolean) : (cap.globalEnabled ?? true);
         if (!anyCatEnabled) {
           return [cap.id, { connectionStatus: 'unknown' }] as const;
         }
@@ -925,12 +982,22 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const knownProjectPaths = await buildKnownProjectPaths(catCafeRoot, projectRoot, registry);
 
     // 8. Build response with cat family + project metadata
+    // F249: Include complete cat list for per-cat toggle rendering
+    const allCats = [...catRegistry.getAllIds()].map((catId) => {
+      const catEntry = catRegistry.tryGet(catId);
+      return { catId, displayName: catEntry?.config.displayName ?? catId };
+    });
+
+    // F249: deterministic ordering so different projects show consistent lists.
+    items.sort((a, b) => a.id.localeCompare(b.id));
+
     const response: CapabilityBoardResponse = {
       items,
       catFamilies: buildCatFamilies(),
       projectPath: projectRoot,
       knownProjectPaths,
       skillHealth,
+      allCats,
     };
     if (governanceHealth) {
       response.governanceHealth = governanceHealth;
@@ -989,14 +1056,16 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'pluginId must be a string when provided' };
     }
 
-    // F228: Validate scope per capability type.
+    // F228 + F249: Validate scope per capability type.
+    // Skills: "global" (enable/disable everywhere) or "project" (mount/unmount for one project).
+    // MCP: "global", "cat" (per-agent override), or "project" (F249: per-project blockedCats).
     const validSkillScopes = new Set(['global', 'project']);
-    const validMcpScopes = new Set(['global', 'cat']);
+    const validMcpScopes = new Set(['global', 'cat', 'project']);
     const validScopes = body.capabilityType === 'skill' ? validSkillScopes : validMcpScopes;
     if (!validScopes.has(body.scope)) {
       reply.status(400);
       return {
-        error: `Invalid scope "${body.scope}" for ${body.capabilityType}. ${body.capabilityType === 'skill' ? 'Skills accept "global" or "project".' : 'MCP accepts "global" or "cat".'}`,
+        error: `Invalid scope "${body.scope}" for ${body.capabilityType}. ${body.capabilityType === 'skill' ? 'Skills accept "global" or "project".' : 'MCP accepts "global", "cat", or "project".'}`,
       };
     }
 
@@ -1005,10 +1074,16 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'catId required when scope is "cat"' };
     }
 
-    // F228: mountPointId is only valid for skill toggles (project or global scope)
-    if (body.mountPointId && (body.capabilityType !== 'skill' || body.scope === 'cat')) {
+    // F228: mountPointId validation per type.
+    // Skills: mountPointId selects specific mount point (project or global scope).
+    // MCP F249: mountPointId overloaded as catId for per-cat blockedCats toggle (project scope only).
+    if (body.mountPointId && body.capabilityType === 'skill' && body.scope === 'cat') {
       reply.status(400);
       return { error: 'mountPointId is only supported for skill scope="project" or scope="global" toggles' };
+    }
+    if (body.mountPointId && body.capabilityType === 'mcp' && body.scope !== 'project') {
+      reply.status(400);
+      return { error: 'MCP mountPointId (catId for per-cat toggle) is only supported with scope="project"' };
     }
 
     // Multi-project: accept projectPath in body.
@@ -1103,37 +1178,71 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
               : current.filter((p) => p !== body.mountPointId);
             const derived = (cap.mountPaths ?? []).length > 0;
             if (body.scope === 'global') {
-              cap.enabled = derived;
               cap.globalEnabled = derived;
             }
           } else if (isManaged && mountRules) {
             // Whole-skill toggle
+            // F228: project scope only changes mountPaths. globalEnabled
+            // is the global state; must not be mutated by project toggles.
+            // Project enabled state is derived from mountPaths.
             if (body.scope === 'global') {
-              cap.enabled = body.enabled;
               cap.globalEnabled = body.enabled;
             }
             cap.mountPaths = body.enabled ? enabledMountTargetIds(mountRules) : [];
+          } else if (body.capabilityType === 'mcp' && body.scope === 'project') {
+            // F249: MCP project scope → write blockedCats
+            const allCatIds = [...catRegistry.getAllIds()] as string[];
+            if (body.mountPointId) {
+              // Per-cat toggle: mountPointId = catId
+              const targetCatId = body.mountPointId;
+              if (!allCatIds.includes(targetCatId)) {
+                reply.status(400);
+                return { error: `Unknown catId: ${targetCatId}` };
+              }
+              const currentBlocked = cap.blockedCats ?? [];
+              if (body.enabled) {
+                // Enable for this cat = remove from blockedCats
+                cap.blockedCats = currentBlocked.filter((id) => id !== targetCatId);
+              } else {
+                // Disable for this cat = add to blockedCats
+                if (!currentBlocked.includes(targetCatId)) {
+                  cap.blockedCats = [...currentBlocked, targetCatId];
+                }
+              }
+            } else {
+              // Whole-MCP project toggle
+              cap.blockedCats = body.enabled ? [] : [...allCatIds];
+            }
+            // Clean up empty blockedCats; also clear legacy overrides
+            if (cap.blockedCats && cap.blockedCats.length === 0) delete cap.blockedCats;
+            if (cap.overrides) delete cap.overrides;
           } else {
-            // Non-skill (MCP/limb)
-            cap.enabled = body.enabled;
+            // Non-skill (MCP/limb) global: write globalEnabled + sync blockedCats.
+            // Same pattern as Skills: global toggle resets all per-cat state.
+            const allCatIds = [...catRegistry.getAllIds()] as string[];
+            cap.globalEnabled = body.enabled;
+            cap.blockedCats = body.enabled ? [] : [...allCatIds];
+            if (cap.blockedCats.length === 0) delete cap.blockedCats;
+            if (cap.overrides) delete cap.overrides;
           }
         } else {
-          // scope === 'cat' (MCP only)
-          if (!cap.overrides) cap.overrides = [];
-          const existing = cap.overrides.find((o) => o.catId === body.catId!);
-          if (existing) existing.enabled = body.enabled;
-          else cap.overrides.push({ catId: body.catId!, enabled: body.enabled });
-          if (body.enabled === cap.enabled) {
-            cap.overrides = cap.overrides.filter((o) => o.catId !== body.catId!);
-            if (cap.overrides.length === 0) delete cap.overrides;
+          // scope === 'cat' (MCP only) — per-cat toggle, write blockedCats.
+          // Same as project per-cat toggle: add/remove from blacklist.
+          if (!cap.blockedCats) cap.blockedCats = [];
+          if (body.enabled) {
+            cap.blockedCats = cap.blockedCats.filter((id) => id !== body.catId!);
+          } else {
+            if (!cap.blockedCats.includes(body.catId!)) cap.blockedCats.push(body.catId!);
           }
+          if (cap.blockedCats.length === 0) delete cap.blockedCats;
+          if (cap.overrides) delete cap.overrides;
         }
       }
 
       // Persist config (once for all skills)
       try {
         await writeCapabilitiesConfig(projectRoot, config);
-        await generateCliConfigs(config, getCliConfigPaths(projectRoot));
+        await generateCliConfigs(config, getCliConfigPaths(projectRoot), projectRoot);
       } catch (persistErr) {
         // Rollback all caps
         for (const { cap, skillId } of targets) {
@@ -1145,6 +1254,22 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
         }
         await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
         throw persistErr;
+      }
+
+      // F249: Cascade global MCP toggle to all registered projects.
+      // Triggers on parent toggle OR when per-cat convergence changed globalEnabled.
+      const hasMcpGlobalToggle =
+        body.capabilityType === 'mcp' && body.scope === 'global' && !body.catId && !body.mountPointId;
+      const mcpGlobalChanged =
+        body.capabilityType === 'mcp' &&
+        targets.some(({ cap, skillId }) => {
+          const before = beforeSnapshots.get(skillId);
+          return before && cap.globalEnabled !== before.globalEnabled;
+        });
+      if (hasMcpGlobalToggle || mcpGlobalChanged) {
+        await syncMcpAll(projectRoot).catch((err) => {
+          console.warn('[F249] MCP cascade sync failed after global toggle:', (err as Error).message);
+        });
       }
 
       // Filesystem reconciliation (once for all skills)
@@ -1214,7 +1339,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
             Object.assign(cap, snapshot);
           }
           await writeCapabilitiesConfig(projectRoot, config).catch(() => {});
-          await generateCliConfigs(config, getCliConfigPaths(projectRoot)).catch(() => {});
+          await generateCliConfigs(config, getCliConfigPaths(projectRoot), projectRoot).catch(() => {});
           throw syncErr;
         }
       }

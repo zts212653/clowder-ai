@@ -517,7 +517,7 @@ describe('resolveServersForCat with overrides', () => {
         {
           id: 'tool',
           type: 'mcp',
-          enabled: false,
+          globalEnabled: false,
           source: 'external',
           mcpServer: { command: 'echo', args: [] },
           overrides: [{ catId: 'opus', enabled: true }],
@@ -530,6 +530,157 @@ describe('resolveServersForCat with overrides', () => {
 
     const codex = resolveServersForCat(config, 'codex');
     assert.equal(codex[0].enabled, false);
+  });
+
+  it('returns project-only MCPs from single project config (R4 P1-1)', async () => {
+    const { resolveServersForCat } = await import('../dist/config/capabilities/capability-orchestrator.js');
+
+    // F249: resolver takes a single project config — no global+project merge
+    /** @type {any} */
+    const projectConfig = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'global-tool',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['global'] },
+          blockedCats: [],
+        },
+        {
+          id: 'project-only-tool',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['project-only'] },
+          blockedCats: [],
+        },
+      ],
+    };
+
+    const servers = resolveServersForCat(projectConfig, 'opus');
+    const names = servers.map((s) => s.name);
+    assert.ok(names.includes('global-tool'), 'synced global tool present');
+    assert.ok(names.includes('project-only-tool'), 'project-only tool must be returned');
+    assert.equal(servers.find((s) => s.name === 'project-only-tool').enabled, true);
+  });
+
+  it('applies blockedCats to project MCPs (R4 P1-1)', async () => {
+    const { resolveServersForCat } = await import('../dist/config/capabilities/capability-orchestrator.js');
+
+    // F249: resolver takes single project config directly
+    /** @type {any} */
+    const projectConfig = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'project-tool',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['project'] },
+          blockedCats: ['codex'],
+        },
+      ],
+    };
+
+    const codex = resolveServersForCat(projectConfig, 'codex');
+    assert.equal(codex.length, 0, 'blocked cat must not see project-only tool');
+
+    const opus = resolveServersForCat(projectConfig, 'opus');
+    assert.equal(opus.length, 1, 'unblocked cat must see project-only tool');
+    assert.equal(opus[0].name, 'project-tool');
+  });
+
+  it('single config preserves blockedCats per-tool (R4 P1-1)', async () => {
+    const { resolveServersForCat } = await import('../dist/config/capabilities/capability-orchestrator.js');
+
+    // F249: resolver takes a single project config — no global+project merge
+    /** @type {any} */
+    const projectConfig = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'shared-tool',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['shared'] },
+          blockedCats: ['codex'],
+        },
+        {
+          id: 'local-only',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['local'] },
+          blockedCats: [],
+        },
+      ],
+    };
+
+    // codex: shared-tool blocked, local-only accessible
+    const codex = resolveServersForCat(projectConfig, 'codex');
+    assert.equal(codex.length, 1);
+    assert.equal(codex[0].name, 'local-only');
+
+    // opus: both accessible
+    const opus = resolveServersForCat(projectConfig, 'opus');
+    assert.equal(opus.length, 2);
+    const opusNames = opus.map((s) => s.name);
+    assert.ok(opusNames.includes('shared-tool'));
+    assert.ok(opusNames.includes('local-only'));
+  });
+
+  it('project enabled derives from blockedCats, not globalEnabled (R5 P1 regression)', async () => {
+    const { resolveServersForCat } = await import('../dist/config/capabilities/capability-orchestrator.js');
+
+    // F249: resolver takes a single project config. Project enabled derives from
+    // blockedCats, regardless of what globalEnabled says.
+    /** @type {any} */
+    const projectUnblocked = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'tool-a',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['a'] },
+          blockedCats: [],
+        },
+      ],
+    };
+
+    // Board derives enabled from cats: any cat enabled → item enabled
+    const catIds = ['opus', 'codex'];
+    const cats = {};
+    for (const catId of catIds) {
+      const servers = resolveServersForCat(projectUnblocked, catId);
+      const server = servers.find((s) => s.name === 'tool-a');
+      cats[catId] = server?.enabled ?? false;
+    }
+    const boardEnabled = Object.values(cats).some(Boolean);
+    assert.equal(boardEnabled, true, 'blockedCats=[] → board item enabled must be true');
+
+    // Converse: all cats blocked → item disabled
+    /** @type {any} */
+    const projectBlocked = {
+      version: 1,
+      capabilities: [
+        {
+          id: 'tool-a',
+          type: 'mcp',
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['a'] },
+          blockedCats: ['opus', 'codex'],
+        },
+      ],
+    };
+
+    const blockedCats = {};
+    for (const catId of catIds) {
+      const servers = resolveServersForCat(projectBlocked, catId);
+      const server = servers.find((s) => s.name === 'tool-a');
+      blockedCats[catId] = server?.enabled ?? false;
+    }
+    const blockedEnabled = Object.values(blockedCats).some(Boolean);
+    assert.equal(blockedEnabled, false, 'blockedCats=[all] → board item enabled must be false');
   });
 });
 
@@ -2206,6 +2357,81 @@ describe('GET /api/capabilities (Fastify)', () => {
       await app.close();
     }
   });
+
+  it('project board item enabled reflects blockedCats, not globalEnabled (R5 P1 route-level regression)', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    // External project: globalEnabled=false synced, but blockedCats=[] → all cats have access
+    const projectDir = await makeTmpDir('r5-regression');
+    await writeCapabilitiesConfig(projectDir, {
+      version: 1,
+      capabilities: [
+        {
+          id: 'r5-test-tool',
+          type: 'mcp',
+          enabled: false,
+          globalEnabled: false,
+          source: 'external',
+          mcpServer: { command: 'echo', args: ['r5'] },
+          blockedCats: [],
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      // Request with projectPath → isExternalProject=true
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = res.json();
+      const item = body.items.find((entry) => entry.id === 'r5-test-tool');
+      assert.ok(item, 'r5-test-tool board item must exist');
+
+      // R5 fix: enabled derived from resolver (blockedCats=[]) → true
+      // Old bug: enabled = globalEnabled ?? cap.enabled = false
+      assert.equal(item.enabled, true, 'globalEnabled=false + blockedCats=[] → board enabled must be true');
+      assert.equal(item.globalEnabled, false, 'globalEnabled still reflects global state');
+
+      // Converse: all cats blocked → item disabled
+      const allCatIds = body.catFamilies.flatMap((f) => f.catIds);
+      assert.ok(allCatIds.length > 0, 'test requires registered cats');
+      await writeCapabilitiesConfig(projectDir, {
+        version: 1,
+        capabilities: [
+          {
+            id: 'r5-test-tool',
+            type: 'mcp',
+            enabled: false,
+            globalEnabled: false,
+            source: 'external',
+            mcpServer: { command: 'echo', args: ['r5'] },
+            blockedCats: allCatIds,
+          },
+        ],
+      });
+
+      const res2 = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(res2.statusCode, 200);
+      const item2 = res2.json().items.find((entry) => entry.id === 'r5-test-tool');
+      assert.ok(item2, 'r5-test-tool board item must exist after blockedCats update');
+      assert.equal(item2.enabled, false, 'blockedCats=[allCatIds] → board enabled must be false');
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
 });
 
 describe('PATCH /api/capabilities write auth (Fastify)', () => {
@@ -2594,7 +2820,7 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       assert.equal(res.statusCode, 200, res.payload);
       assert.equal(await realpath(linkPath), await realpath(externalSource));
       const config = await readCapabilitiesConfig(projectDir);
-      assert.equal(config?.capabilities[0]?.enabled, false);
+      assert.equal(config?.capabilities[0]?.globalEnabled, false);
     } finally {
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -3345,9 +3571,9 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
       const external = config?.capabilities.find(
         (cap) => cap.type === 'skill' && cap.id === 'debugging' && cap.source === 'external',
       );
-      assert.equal(external?.enabled, false, 'external skill should be toggled');
+      assert.equal(external?.globalEnabled, false, 'external skill should be toggled');
       assert.deepEqual(external?.mountPaths, ['claude'], 'external mount policy should be preserved');
-      assert.equal(firstParty?.enabled, true, 'first-party Clowder AI skill must stay enabled');
+      assert.equal(firstParty?.globalEnabled, true, 'first-party Cat Cafe skill must stay enabled');
       assert.deepEqual(firstParty?.mountPaths, ['claude'], 'first-party mount policy must be preserved');
     } finally {
       await app.close();

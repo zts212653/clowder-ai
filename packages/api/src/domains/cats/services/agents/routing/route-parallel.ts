@@ -74,6 +74,30 @@ import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_S
 
 const log = createModuleLogger('route-parallel');
 
+/**
+ * Wrap an agent stream so iteration-time errors yield synthetic error+done events
+ * instead of propagating into mergeStreams (which silently drops errored streams).
+ * Without this, @all can lose a cat's response with zero user-visible feedback.
+ */
+async function* wrapStreamWithErrorRecovery(
+  stream: AsyncIterable<AgentMessage>,
+  catId: CatId,
+): AsyncGenerator<AgentMessage> {
+  try {
+    yield* stream;
+  } catch (err) {
+    log.error({ catId, err }, 'Parallel stream iteration error — synthesizing error+done');
+    yield {
+      type: 'error' as AgentMessageType,
+      catId,
+      content: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? err.message : String(err),
+      timestamp: Date.now(),
+    } as AgentMessage;
+    yield { type: 'done' as AgentMessageType, catId, timestamp: Date.now() } as AgentMessage;
+  }
+}
+
 export async function* routeParallel(
   deps: RouteStrategyDeps,
   targetCats: CatId[],
@@ -564,8 +588,11 @@ export async function* routeParallel(
   // same-name queue drift (search→graph→search).
   const pendingToolResultsByCat = new Map<string, Array<{ toolName: string; toolUseId?: string }>>();
   const invocationStartedAt = Date.now();
-  for await (const msg of mergeStreams(streams, (idx, err) => {
-    log.error({ streamIndex: idx, err }, 'Parallel stream error');
+  // Wrap each stream so iteration errors surface as error+done events
+  // instead of being silently dropped by mergeStreams.
+  const recoveredStreams = streams.map((s, idx) => wrapStreamWithErrorRecovery(s, targetCats[idx]!));
+  for await (const msg of mergeStreams(recoveredStreams, (idx, err) => {
+    log.error({ streamIndex: idx, catId: targetCats[idx], err }, 'Parallel stream error (post-recovery)');
   })) {
     const effectiveMsgs: AgentMessage[] = [];
     if (msg.type === 'text' && msg.content && msg.catId) {

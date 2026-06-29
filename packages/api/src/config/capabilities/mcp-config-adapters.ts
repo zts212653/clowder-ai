@@ -1,21 +1,31 @@
 /**
- * MCP Config Adapters — F041 三猫 CLI 配置读写
+ * MCP Config Adapters — F041 CLI 配置読写
  *
- * 读写三种 MCP 配置格式，归一化为 McpServerDescriptor 内部模型。
+ * 読写六种 MCP 配置格式，归一化为 McpServerDescriptor 内部模型。
  *
- * Claude:      .mcp.json                         — { mcpServers: { name: { command, args, env } } }
- * Codex:       .codex/config.toml               — [mcp_servers.<name>] command/args/env/enabled
- * Gemini:      .gemini/settings.json            — { mcpServers: { name: { command, args, env, cwd } } }
- * Antigravity: ~/.gemini/antigravity/mcp_config.json — { mcpServers: { name: { command, args, env, cwd } } }
- * Kimi:        .kimi/mcp.json                   — { mcpServers: { name: { url|command, args, env, headers } } }
+ * Persistent (written at startup via generateCliConfigs / PROVIDER_WRITERS):
+ *   Gemini:      .gemini/settings.json            — { mcpServers: { name: { command, args, env, cwd } } }
+ *   Antigravity: ~/.gemini/antigravity/mcp_config.json — { mcpServers: { name: { command, args, env, cwd } } }
+ *
+ * Invoke-time only (temp file or CLI args per invocation, NOT written at startup):
+ *   Claude:      --mcp-config JSON --strict-mcp-config at invoke time
+ *   Codex:       --config mcp_servers.X... inline overrides at invoke time
+ *   Kimi:        temp mcp.json via writeMcpConfigFile + --mcp-config-file
+ *   OpenCode:    temp opencode.json via writeOpenCodeRuntimeConfig + OPENCODE_CONFIG
+ *
+ * Read adapters (readClaudeMcpConfig, readCodexMcpConfig, etc.) are still used
+ * for bootstrap discovery. Write adapters are available for invoke-time writers
+ * even when not called from PROVIDER_WRITERS.
  */
 
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { McpServerDescriptor } from '@cat-cafe/shared';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { DEPRECATED_MANAGED_SERVERS, isOurOwnedDeprecatedEntry } from './deprecated-managed-servers.js';
+import { MCP_CALLBACK_ENV_KEYS } from './mcp-constants.js';
 
 /**
  * F213 Phase B (2026-05-26): shared L5 cleanup helper for any MCP config writer.
@@ -63,20 +73,49 @@ export function applyDeprecatedManagedCleanup(existingServers: Record<string, un
 
 const log = createModuleLogger('mcp-config-adapters');
 
-const GEMINI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
-  CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-  CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-  CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-  CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-  CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-};
-const KIMI_CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = {
-  CAT_CAFE_API_URL: '${CAT_CAFE_API_URL}',
-  CAT_CAFE_INVOCATION_ID: '${CAT_CAFE_INVOCATION_ID}',
-  CAT_CAFE_CALLBACK_TOKEN: '${CAT_CAFE_CALLBACK_TOKEN}',
-  CAT_CAFE_USER_ID: '${CAT_CAFE_USER_ID}',
-  CAT_CAFE_SIGNAL_USER: '${CAT_CAFE_SIGNAL_USER}',
-};
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
+function isAbsoluteMcpPath(value: string): boolean {
+  return isAbsolute(value) || WINDOWS_ABSOLUTE_PATH_PATTERN.test(value);
+}
+
+function resolveMcpWorkingDir(workingDir: string | undefined, projectRoot: string): string | undefined {
+  const trimmed = workingDir?.trim();
+  if (!trimmed) return undefined;
+  if (isAbsolute(trimmed)) return resolve(trimmed);
+  if (WINDOWS_ABSOLUTE_PATH_PATTERN.test(trimmed)) return trimmed;
+  return resolve(projectRoot, trimmed);
+}
+
+function isPathLikeMcpCommand(command: string): boolean {
+  return isAbsoluteMcpPath(command) || command.startsWith('.') || command.includes('/') || command.includes('\\');
+}
+
+function resolveCodexMcpCommand(command: string, workingDir: string | undefined, projectRoot: string): string {
+  if (!isPathLikeMcpCommand(command) || isAbsoluteMcpPath(command)) return command;
+  if (workingDir) {
+    const fromWorkDir = resolve(workingDir, command);
+    if (existsSync(fromWorkDir)) return fromWorkDir;
+  }
+  const fromRoot = resolve(projectRoot, command);
+  if (existsSync(fromRoot)) return fromRoot;
+  return command;
+}
+
+function resolveCodexMcpArg(arg: string, workingDir: string | undefined, projectRoot: string): string {
+  if (isAbsoluteMcpPath(arg) || arg.startsWith('-')) return arg;
+  if (workingDir) {
+    const fromWorkDir = resolve(workingDir, arg);
+    if (existsSync(fromWorkDir)) return fromWorkDir;
+  }
+  const fromRoot = resolve(projectRoot, arg);
+  if (existsSync(fromRoot)) return fromRoot;
+  return arg;
+}
+
+const CAT_CAFE_ENV_PLACEHOLDERS: Readonly<Record<string, string>> = Object.fromEntries(
+  MCP_CALLBACK_ENV_KEYS.map((key) => [key, `\${${key}}`]),
+);
 
 /**
  * Resolve the workspace root that Bengal will operate inside (where pwd/git
@@ -153,18 +192,14 @@ function isCatCafeServer(name: string): boolean {
   return name === 'cat-cafe' || name.startsWith('cat-cafe-');
 }
 
-function ensureGeminiCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
+/**
+ * Ensure cat-cafe-* MCP servers carry the invoke-time callback env placeholders.
+ * Shared by Gemini and Kimi writers (identical logic, previously duplicated).
+ */
+function ensureCatCafeEnvPlaceholders(name: string, env?: Record<string, string>): Record<string, string> | undefined {
   if (!isCatCafeServer(name)) return env;
   return {
-    ...GEMINI_CAT_CAFE_ENV_PLACEHOLDERS,
-    ...(env ?? {}),
-  };
-}
-
-function ensureKimiCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
-  if (!isCatCafeServer(name)) return env;
-  return {
-    ...KIMI_CAT_CAFE_ENV_PLACEHOLDERS,
+    ...CAT_CAFE_ENV_PLACEHOLDERS,
     ...(env ?? {}),
   };
 }
@@ -326,7 +361,6 @@ export async function writeClaudeMcpConfig(filePath: string, servers: McpServerD
     }
   }
 
-  // Keep user entries not in managed list untouched (they're already in existingServers)
   await ensureDir(filePath);
   await writeFile(filePath, `${JSON.stringify({ mcpServers: existingServers }, null, 2)}\n`, 'utf-8');
 }
@@ -354,6 +388,12 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
   // entries. See `applyDeprecatedManagedCleanup` above + ADR-036 amendment.
   applyDeprecatedManagedCleanup(existingMcp, 'codex');
 
+  // Codex TOML has no `cwd` field. If the CLI's cwd differs from the project
+  // root, relative args (e.g. "packages/mcp-server/dist/protocol-server.js")
+  // break silently. Resolve relative args to absolute paths as a safety net.
+  // Project root = parent of the .codex/ directory that contains this config.
+  const projectRoot = resolve(dirname(filePath), '..');
+
   // Update/add only managed entries; preserve user's own servers
   for (const s of servers) {
     // Skip URL-based servers — Codex only supports stdio transport.
@@ -362,10 +402,28 @@ export async function writeCodexMcpConfig(filePath: string, servers: McpServerDe
       delete existingMcp[s.name];
       continue;
     }
-    const entry: Record<string, unknown> = { command: s.command, args: s.args };
+
+    // Disabled managed server → remove from TOML. Mirrors writeClaudeMcpConfig
+    // (Claude has no enabled field so it deletes unconditionally). For Codex,
+    // we only delete managed entries (source='cat-cafe') to preserve user-owned
+    // servers the user may have manually disabled. Leaving stale disabled managed
+    // entries in TOML causes discovery to re-import them as source:"external"
+    // orphans, blocking plugin re-enable (the "non-plugin entry" error).
+    if (!s.enabled && s.source === 'cat-cafe') {
+      delete existingMcp[s.name];
+      continue;
+    }
+
+    // Resolve relative command/args to absolute for Codex (no cwd support in TOML).
+    const workingDir = resolveMcpWorkingDir(s.workingDir, projectRoot);
+    const command = resolveCodexMcpCommand(s.command, workingDir, projectRoot);
+    const resolvedArgs = s.args.map((arg) => resolveCodexMcpArg(arg, workingDir, projectRoot));
+
+    const entry: Record<string, unknown> = { command, args: resolvedArgs };
     const env = ensureWorkspaceEnvForManagedCatCafe(s, s.env);
     if (env && Object.keys(env).length > 0) entry.env = env;
     entry.enabled = s.enabled;
+    if (s.source === 'cat-cafe') entry.default_tools_approval_mode = 'approve';
     existingMcp[s.name] = entry;
   }
 
@@ -407,7 +465,7 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
     }
     if (s.enabled) {
       const entry: Record<string, unknown> = { command: s.command, args: s.args };
-      const env = ensureGeminiCatCafeEnv(s.name, s.env);
+      const env = ensureCatCafeEnvPlaceholders(s.name, s.env);
       if (env && Object.keys(env).length > 0) entry.env = env;
       if (s.workingDir) entry.cwd = s.workingDir;
       existingMcp[s.name] = entry;
@@ -417,14 +475,13 @@ export async function writeGeminiMcpConfig(filePath: string, servers: McpServerD
     }
   }
 
-  // Keep legacy cat-cafe entries functional even when they are preserved as
-  // non-managed servers (e.g. migration leftovers in user's settings).
+  // Ensure split cat-cafe-* entries have required Gemini env placeholders.
   for (const [name, value] of Object.entries(existingMcp)) {
     if (!isCatCafeServer(name)) continue;
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const cfg = value as Record<string, unknown>;
     const currentEnv = toStringRecord(cfg.env);
-    cfg.env = ensureGeminiCatCafeEnv(name, currentEnv);
+    cfg.env = ensureCatCafeEnvPlaceholders(name, currentEnv);
     existingMcp[name] = cfg;
   }
 
@@ -524,7 +581,7 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
       continue;
     }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
-    const env = ensureKimiCatCafeEnv(s.name, s.env);
+    const env = ensureCatCafeEnvPlaceholders(s.name, s.env);
     if (env && Object.keys(env).length > 0) entry.env = env;
     if (s.workingDir) entry.cwd = s.workingDir;
     existingMcp[s.name] = entry;
@@ -535,7 +592,7 @@ export async function writeKimiMcpConfig(filePath: string, servers: McpServerDes
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const cfg = value as Record<string, unknown>;
     const currentEnv = toStringRecord(cfg.env);
-    cfg.env = ensureKimiCatCafeEnv(name, currentEnv);
+    cfg.env = ensureCatCafeEnvPlaceholders(name, currentEnv);
     existingMcp[name] = cfg;
   }
 
@@ -587,6 +644,77 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
   }
 
   existing.mcpServers = existingMcp;
+  await ensureDir(filePath);
+  await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
+}
+
+/**
+ * Convert a server descriptor to OpenCode's MCP entry format.
+ *
+ * Exported for invoke-time use (opencode-config-template.ts `buildOpenCodeMcpSync`
+ * and `writeOpenCodeRuntimeConfig` pencil entry) — same format conversion as the
+ * writer, but without file I/O.
+ */
+export function toOpenCodeMcpEntry(s: { command: string; args?: readonly string[]; env?: Record<string, string> }): {
+  type: string;
+  command: string[];
+  environment?: Record<string, string>;
+} {
+  const entry: { type: string; command: string[]; environment?: Record<string, string> } = {
+    type: 'local',
+    command: [s.command, ...(s.args ?? [])],
+  };
+  if (s.env && Object.keys(s.env).length > 0) entry.environment = s.env;
+  return entry;
+}
+
+export function toOpenCodeRemoteMcpEntry(s: { url: string; headers?: Record<string, string> }): {
+  type: 'remote';
+  url: string;
+  enabled: true;
+  headers?: Record<string, string>;
+} {
+  const entry: { type: 'remote'; url: string; enabled: true; headers?: Record<string, string> } = {
+    type: 'remote',
+    url: s.url,
+    enabled: true,
+  };
+  if (s.headers && Object.keys(s.headers).length > 0) entry.headers = s.headers;
+  return entry;
+}
+
+/** Write McpServerDescriptor[] → OpenCode opencode.json mcp section (merge: preserves provider/model config) */
+export async function writeOpenCodeMcpConfig(filePath: string, servers: McpServerDescriptor[]): Promise<void> {
+  const raw = await safeReadFile(filePath);
+  let existing: Record<string, unknown> = {};
+  if (raw) {
+    const parsed = safeJsonParse(raw);
+    if (parsed) existing = parsed;
+  }
+
+  const existingMcp: Record<string, unknown> =
+    existing.mcp && typeof existing.mcp === 'object' ? { ...(existing.mcp as Record<string, unknown>) } : {};
+
+  applyDeprecatedManagedCleanup(existingMcp, 'opencode');
+
+  for (const s of servers) {
+    if (!s.enabled) {
+      delete existingMcp[s.name];
+      continue;
+    }
+    if (s.transport === 'streamableHttp') {
+      if (s.url) existingMcp[s.name] = toOpenCodeRemoteMcpEntry({ url: s.url, headers: s.headers });
+      else delete existingMcp[s.name];
+      continue;
+    }
+    if (!s.command || s.command.trim().length === 0) {
+      delete existingMcp[s.name];
+      continue;
+    }
+    existingMcp[s.name] = toOpenCodeMcpEntry(s);
+  }
+
+  existing.mcp = existingMcp;
   await ensureDir(filePath);
   await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, 'utf-8');
 }

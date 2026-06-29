@@ -10,6 +10,11 @@ import {
   type PluginResourceDef,
   STANDARD_MOUNT_POINT_IDS,
 } from '@cat-cafe/shared';
+import {
+  installMcpCapability,
+  type McpConfigIO,
+  removeMcpCapability,
+} from '../../config/capabilities/capability-mcp-service.js';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
 import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
@@ -405,15 +410,60 @@ export class PluginResourceActivator {
     if (resource.transport !== 'streamableHttp' && !resource.command) {
       throw new Error('MCP resource must declare a command');
     }
-    await this.upsertCapabilityEntry(manifest, resource, true);
+
+    // #712: Use shared MCP service (heal → write → generateCli → audit)
+    // instead of generic upsertCapabilityEntry which bypassed topology heal
+    // and audit logging.
+    const projectRoot = this.deps.resolveProjectRoot();
+    const capId = resourceCapId(manifest.id, resource);
+    const entry: CapabilityEntry = {
+      id: capId,
+      type: 'mcp',
+      enabled: true,
+      source: 'cat-cafe',
+      pluginId: manifest.id,
+      mcpServer: this.buildMcpServer(manifest, resource),
+    };
+
+    const { before } = await installMcpCapability(projectRoot, entry, this.mcpConfigIO(), {
+      userId: `plugin:${manifest.id}`,
+    });
+
+    // Type transition cleanup: if the old entry was a different type,
+    // clean up its runtime resources (schedule task, limb node).
+    if (before && before.type !== 'mcp' && before.enabled) {
+      if (before.type === 'schedule' && this.deps.taskRunner) {
+        const taskId = scheduleTaskIdForCapability(manifest.id, before);
+        if (taskId) {
+          try {
+            this.deps.taskRunner.unregister(taskId);
+          } catch {
+            /* best-effort */
+          }
+        }
+      } else if (before.type === 'limb' && before.limbNodeId) {
+        try {
+          this.deps.limbRegistry.deregister(before.limbNodeId);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
   }
 
   private async deactivateMcp(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
-    // First disable: triggers CLI config regeneration which tells writers to delete the entry.
-    // If we only removeCapabilityEntry, the row vanishes before generateCliConfigs runs,
-    // so the CLI writer never sees the disabled server and leaves stale config behind.
-    await this.upsertCapabilityEntry(manifest, resource, false);
-    await this.removeCapabilityEntry(manifest, resource);
+    // #712: Use shared MCP service with hard-remove.
+    // removeMcpCapability(hard=true) handles the two-phase dance internally:
+    //   1. Disable → write → CLI regen  (so CLI writers see disabled state and clean up)
+    //   2. Splice → write → CLI regen   (entry removed from capabilities.json)
+    const projectRoot = this.deps.resolveProjectRoot();
+    const capId = resourceCapId(manifest.id, resource);
+
+    await removeMcpCapability(projectRoot, capId, this.mcpConfigIO(), {
+      hard: true,
+      pluginId: manifest.id,
+      userId: `plugin:${manifest.id}`,
+    });
   }
 
   private async activateSchedule(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -607,6 +657,25 @@ export class PluginResourceActivator {
   }
 
   private async removeOrphanedPluginEntries(manifest: PluginManifest, declaredIds: Set<string>): Promise<void> {
+    // #712 P2: Route orphaned MCP entries through the shared service
+    // (removeMcpCapability handles disable→remove + heal + audit).
+    // Done BEFORE the main lock since removeMcpCapability manages its own locking.
+    const preConfig = await this.deps.readCapabilities();
+    if (preConfig) {
+      const mcpOrphanIds = preConfig.capabilities
+        .filter((c) => c.pluginId === manifest.id && c.type === 'mcp' && !declaredIds.has(normalizeCapId(c.id)))
+        .map((c) => c.id);
+      const projectRoot = this.deps.resolveProjectRoot();
+      for (const capId of mcpOrphanIds) {
+        await removeMcpCapability(projectRoot, capId, this.mcpConfigIO(), {
+          hard: true,
+          pluginId: manifest.id,
+          userId: `plugin:${manifest.id}`,
+        });
+      }
+    }
+
+    // Remaining (non-MCP) orphans: limb + schedule — batch in one lock.
     const limbNodeIds: string[] = [];
     const scheduleTaskIds: string[] = [];
     await this.deps.withCapabilityLock(async () => {
@@ -616,37 +685,18 @@ export class PluginResourceActivator {
       const orphaned = config.capabilities.filter(isOrphan);
       if (orphaned.length === 0) return;
 
-      // Phase 1: disable orphaned MCP entries so CLI config writers see the disabled
-      // descriptor and can delete the stale generated server entries.
-      const hasMcpOrphans = orphaned.some((c) => c.type === 'mcp' && c.enabled);
-      if (hasMcpOrphans) {
-        const disableSnap = structuredClone(config);
-        const disableNext = structuredClone(config);
-        for (const cap of disableNext.capabilities) {
-          if (isOrphan(cap) && cap.type === 'mcp' && cap.enabled) {
-            cap.enabled = false;
-          }
+      for (const cap of orphaned) {
+        if (cap.type === 'limb' && cap.enabled && cap.limbNodeId) {
+          limbNodeIds.push(cap.limbNodeId);
         }
-        await this.writeCapabilitiesWithRollback(disableSnap, disableNext);
-      }
-
-      // Phase 2: remove all orphaned entries.
-      const freshConfig = await this.deps.readCapabilities();
-      if (!freshConfig) return;
-      const previous = structuredClone(freshConfig);
-      const next = structuredClone(freshConfig);
-      for (const cap of next.capabilities) {
-        if (isOrphan(cap)) {
-          if (cap.type === 'limb' && cap.enabled && cap.limbNodeId) {
-            limbNodeIds.push(cap.limbNodeId);
-          }
-          // F202 Phase 2: collect orphaned schedule tasks for post-lock unregistration
-          if (cap.type === 'schedule' && cap.enabled) {
-            const taskId = scheduleTaskIdForCapability(manifest.id, cap);
-            if (taskId) scheduleTaskIds.push(taskId);
-          }
+        // F202 Phase 2: collect orphaned schedule tasks for post-lock unregistration
+        if (cap.type === 'schedule' && cap.enabled) {
+          const taskId = scheduleTaskIdForCapability(manifest.id, cap);
+          if (taskId) scheduleTaskIds.push(taskId);
         }
       }
+      const previous = structuredClone(config);
+      const next = structuredClone(config);
       next.capabilities = next.capabilities.filter((c) => !isOrphan(c));
       await this.writeCapabilitiesWithRollback(previous, next);
     });
@@ -676,6 +726,15 @@ export class PluginResourceActivator {
       }
       if (changed) await this.writeCapabilitiesWithRollback(previous, next);
     });
+  }
+
+  /** Adapt DI deps to the shared McpConfigIO interface (#712). */
+  private mcpConfigIO(): McpConfigIO {
+    return {
+      readConfig: () => this.deps.readCapabilities(),
+      writeAndRegenCli: (config) => this.deps.writeCapabilities(config),
+      withLock: (fn) => this.deps.withCapabilityLock(fn),
+    };
   }
 
   private buildMcpServer(

@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useState } from 'react';
 import { HubIcon } from './hub-icons';
 
 export interface KVPair {
@@ -29,7 +30,7 @@ export function FormSection({ children }: { children: React.ReactNode }) {
   return <div className="space-y-2 rounded-xl p-3">{children}</div>;
 }
 
-export function FormItem({ label, children }: { label: string; children: React.ReactNode }) {
+export function FormItem({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="space-y-2">
       <p className="text-sm font-bold text-cafe">{label}</p>
@@ -109,16 +110,56 @@ export function DynamicList({
   );
 }
 
+/** Value input with optional eye toggle for sensitive fields (env vars, headers). */
+function SecretValueInput({
+  value,
+  placeholder,
+  sensitive,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  sensitive: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [visible, setVisible] = useState(!sensitive);
+  return (
+    <div className="relative flex-1">
+      <input
+        type={visible ? 'text' : 'password'}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        className={`w-full ${formInputClass}${sensitive ? ' pr-8' : ''}`}
+      />
+      {sensitive && (
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-cafe-muted transition-colors hover:text-cafe-accent"
+          title={visible ? '隐藏' : '显示'}
+          aria-label={visible ? '隐藏值' : '显示值'}
+        >
+          <HubIcon name={visible ? 'eye' : 'eye-off'} className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function DynamicKVList({
   pairs,
   onChange,
   addLabel,
   valuePlaceholder = '值',
+  sensitive = false,
 }: {
   pairs: KVPair[];
   onChange: (pairs: KVPair[]) => void;
   addLabel: string;
   valuePlaceholder?: string;
+  /** When true, value inputs default to password mode with eye toggle. */
+  sensitive?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -135,16 +176,15 @@ export function DynamicKVList({
             placeholder="键"
             className={`flex-1 ${formInputClass}`}
           />
-          <input
-            type="text"
+          <SecretValueInput
             value={pair.value}
-            onChange={(event) => {
+            placeholder={valuePlaceholder}
+            sensitive={sensitive}
+            onChange={(newValue) => {
               const next = [...pairs];
-              next[index] = { ...next[index], value: event.target.value };
+              next[index] = { ...next[index], value: newValue };
               onChange(next);
             }}
-            placeholder={valuePlaceholder}
-            className={`flex-1 ${formInputClass}`}
           />
           <button
             type="button"

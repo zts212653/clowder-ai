@@ -36,10 +36,7 @@ function restoreEnv() {
 
 function getCliConfigPaths(projectRoot) {
   return {
-    anthropic: join(projectRoot, '.mcp.json'),
-    openai: join(projectRoot, '.codex', 'config.toml'),
     google: join(projectRoot, '.gemini', 'settings.json'),
-    kimi: join(projectRoot, '.kimi', 'mcp.json'),
   };
 }
 
@@ -311,9 +308,10 @@ describe('capabilities MCP write routes', () => {
     });
 
     assert.equal(res.statusCode, 200, res.payload);
-    assert.doesNotMatch(res.payload, /new-secret/);
-    assert.equal(res.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
-    assert.equal(res.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
+    // F249: sanitizeCapabilityForResponse returns raw values for frontend eye-toggle editing.
+    // Response contains plaintext — frontend handles display masking.
+    assert.equal(res.json().capability.mcpServer.env.API_KEY, 'new-secret');
+    assert.equal(res.json().capability.mcpServer.headers.Authorization, 'Bearer new-secret');
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
     assert.equal(cap?.mcpServer?.env?.API_KEY, 'new-secret');
@@ -520,7 +518,9 @@ describe('capabilities MCP write routes', () => {
     assert.deepEqual(res.json().capability.mcpServer.args, ['stdio-server', '--flag']);
   });
 
-  it('redacts MCP preview and install response secrets without changing persisted config', async () => {
+  it('returns raw secrets in preview/install responses for frontend eye-toggle editing', async () => {
+    // F249: sanitizeCapabilityForResponse returns raw values — frontend masks display.
+    // Persisted config also stores raw values. Audit logs still use sanitizeCapabilityForAudit.
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
     const payload = {
       id: 'secret-mcp',
@@ -537,9 +537,8 @@ describe('capabilities MCP write routes', () => {
       payload,
     });
     assert.equal(preview.statusCode, 200, preview.payload);
-    assert.doesNotMatch(preview.payload, /install-secret/);
-    assert.equal(preview.json().entry.mcpServer.headers.Authorization, REDACTED_SECRET);
-    assert.equal(preview.json().entry.mcpServer.env.API_KEY, REDACTED_SECRET);
+    assert.equal(preview.json().entry.mcpServer.headers.Authorization, 'Bearer install-secret');
+    assert.equal(preview.json().entry.mcpServer.env.API_KEY, 'install-secret');
 
     const install = await app.inject({
       method: 'POST',
@@ -548,9 +547,8 @@ describe('capabilities MCP write routes', () => {
       payload,
     });
     assert.equal(install.statusCode, 200, install.payload);
-    assert.doesNotMatch(install.payload, /install-secret/);
-    assert.equal(install.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
-    assert.equal(install.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
+    assert.equal(install.json().capability.mcpServer.headers.Authorization, 'Bearer install-secret');
+    assert.equal(install.json().capability.mcpServer.env.API_KEY, 'install-secret');
 
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
@@ -584,7 +582,8 @@ describe('capabilities MCP write routes', () => {
     });
 
     assert.equal(res.statusCode, 200, res.payload);
-    assert.doesNotMatch(res.payload, /new-secret/);
+    // F249: response returns raw values for frontend eye-toggle editing
+    assert.match(res.payload, /new-secret/);
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
     assert.deepEqual(cap?.mcpServer?.env, { API_KEY: 'new-secret', KEEP: 'yes' });

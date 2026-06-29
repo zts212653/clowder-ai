@@ -1030,16 +1030,19 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     // Pre-write a valid capabilities.json so syncProject can read config
     await writeCapabilitiesConfig(projectRoot, { version: 2, capabilities: [] });
 
-    // Make capabilities.json read-only so updateConfigAfterSync fails with EACCES.
-    // The .cat-cafe/ directory itself stays writable → backup mkdir succeeds,
-    // but writeFile to capabilities.json throws.
-    const capPath = join(projectRoot, '.cat-cafe', 'capabilities.json');
-    await chmod(capPath, 0o444);
+    // Make .cat-cafe/ directory read-only so atomic writeCapabilitiesConfig fails.
+    // With atomic write (temp file + rename), file-level chmod is insufficient —
+    // rename() needs only directory write permission on POSIX, so we must block
+    // the directory to prevent temp file creation.
+    const catCafeDir = join(projectRoot, '.cat-cafe');
+    const capPath = join(catCafeDir, 'capabilities.json');
+    await chmod(catCafeDir, 0o555);
 
     // syncDrift should fail because final config write is blocked
     await assert.rejects(() => syncDriftCompat(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, {}));
 
     // Restore write permission for cleanup
+    await chmod(catCafeDir, 0o755).catch(() => {});
     await chmod(capPath, 0o644).catch(() => {});
 
     // THE KEY ASSERTION: user-owned conflict blocker must be restored

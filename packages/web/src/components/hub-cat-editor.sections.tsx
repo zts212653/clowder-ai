@@ -585,6 +585,18 @@ export function AccountSection({
             ) : null}
           </>
         )}
+        <SelectField
+          label="MCP Support"
+          value={form.mcpSupport ? 'true' : 'false'}
+          options={[
+            { value: 'true', label: '开启' },
+            { value: 'false', label: '关闭' },
+          ]}
+          onChange={(value) => onChange({ mcpSupport: value === 'true' })}
+        />
+        <p className="-mt-1 text-micro leading-4 text-cafe-muted">
+          控制该成员是否接收 Cat Cafe MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。
+        </p>
       </div>
     </SectionCard>
   );

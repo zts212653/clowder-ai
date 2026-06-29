@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch } from '@/utils/api-client';
 import { McpModalActions, McpPreviewSection, McpToolsSection } from './McpConfigModalPanels';
 import {
-  MaskedSecretNote,
   type McpEditData,
   McpIdentitySection,
   type McpInstallPreview,
@@ -15,8 +15,6 @@ import {
   McpTransportFields,
 } from './McpConfigModalSections';
 import { type KVPair, kvToObj } from './mcp-form-helpers';
-
-const REDACTED_CAPABILITY_SECRET = '••••••';
 
 export interface McpConfigModalProps {
   projectPath?: string;
@@ -41,16 +39,13 @@ interface BuildPayloadInput {
   isEdit: boolean;
 }
 
-function recordToPairs(record: Record<string, string> | undefined): KVPair[] {
-  if (!record || Object.keys(record).length === 0) return [{ key: '', value: '' }];
+function recordToPairs(record: Record<string, string> | undefined, addDefault = true): KVPair[] {
+  if (!record || Object.keys(record).length === 0) return addDefault ? [{ key: '', value: '' }] : [];
   return Object.entries(record).map(([key, value]) => ({ key, value }));
 }
 
 function sanitizedRecord(pairs: KVPair[]): Record<string, string> {
-  return kvToObj(pairs, {
-    omitBlankValue: true,
-    omitValues: [REDACTED_CAPABILITY_SECRET],
-  });
+  return kvToObj(pairs, { omitBlankValue: true });
 }
 
 function stdioPayload(input: BuildPayloadInput): Record<string, unknown> {
@@ -88,8 +83,39 @@ async function readApiError(res: Response, fallback: string): Promise<string> {
 
 function modalSubtitle(readOnly: boolean, isEdit: boolean): string {
   if (readOnly) return '托管 MCP 为只读预览，敏感值仅显示键名。';
-  if (isEdit) return '留空或保留遮罩值会沿用现有配置，不会把遮罩写回后端。';
+  if (isEdit) return '敏感值已掩码，未改动的字段保留原值。';
   return '先预览将改动的 CLI 配置，再确认安装。';
+}
+
+type ProbeConnectionStatus = 'connected' | 'disconnected' | 'timeout' | 'error' | 'unknown';
+
+/** Build the ad-hoc probe request body from current form state. */
+function buildProbeBody(
+  transport: McpTransport,
+  command: string,
+  args: string[],
+  url: string,
+  headers: KVPair[],
+  envPairs: KVPair[],
+  probeProjectPath?: string,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (transport === 'streamableHttp') {
+    if (url.trim()) body.url = url.trim();
+    body.transport = 'streamableHttp';
+    const h = sanitizedRecord(headers);
+    if (Object.keys(h).length > 0) body.headers = h;
+  } else {
+    if (command.trim()) body.command = command.trim();
+    const cleanArgs = args.map((a) => a.trim()).filter(Boolean);
+    if (cleanArgs.length > 0) body.args = cleanArgs;
+  }
+  const env = sanitizedRecord(envPairs);
+  if (Object.keys(env).length > 0) body.env = env;
+  // #712 P2-1: project-scoped probe resolves saved config + relative paths
+  // against the project root instead of STARTUP_REPO_ROOT.
+  if (probeProjectPath) body.projectPath = probeProjectPath;
+  return body;
 }
 
 export function McpConfigModal({
@@ -97,7 +123,7 @@ export function McpConfigModal({
   editId,
   editData,
   readOnly = false,
-  tools,
+  tools: initialTools,
   onSaved,
   onClose,
 }: McpConfigModalProps) {
@@ -106,20 +132,20 @@ export function McpConfigModal({
   const [transport, setTransport] = useState<McpTransport>(editData?.transport ?? 'stdio');
   const [command, setCommand] = useState(editData?.command ?? '');
   const [args, setArgs] = useState<string[]>(editData?.args?.length ? editData.args : ['']);
-  const [envPairs, setEnvPairs] = useState<KVPair[]>(recordToPairs(editData?.env));
+  const [envPairs, setEnvPairs] = useState<KVPair[]>(recordToPairs(editData?.env, !isEdit));
   const [url, setUrl] = useState(editData?.url ?? '');
-  const [headers, setHeaders] = useState<KVPair[]>(recordToPairs(editData?.headers));
+  const [headers, setHeaders] = useState<KVPair[]>(recordToPairs(editData?.headers, !isEdit));
   const [preview, setPreview] = useState<McpInstallPreview | null>(null);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const maskedSecretKeys = useMemo(() => {
-    return [...envPairs, ...headers]
-      .filter((pair) => pair.key && pair.value === REDACTED_CAPABILITY_SECRET)
-      .map((pair) => pair.key);
-  }, [envPairs, headers]);
+  // Tool probing state — modal owns probing so user can re-probe with edited config.
+  const [probeTools, setProbeTools] = useState<McpTool[] | undefined>(initialTools);
+  const [probeLoading, setProbeLoading] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeStatus, setProbeStatus] = useState<ProbeConnectionStatus>('unknown');
 
   const resetPreview = useCallback(() => setPreview(null), []);
 
@@ -145,6 +171,52 @@ export function McpConfigModal({
       isEdit,
     });
   }, [args, command, editData?.resolver, envPairs, headers, id, isEdit, projectPath, transport, url]);
+
+  // Probe tools using the current form values (ad-hoc, no save required).
+  const handleProbeTools = useCallback(async () => {
+    if (!id.trim()) return;
+    setProbeLoading(true);
+    setProbeError(null);
+    try {
+      const probeBody = buildProbeBody(transport, command, args, url, headers, envPairs, projectPath);
+      const res = await apiFetch(`/api/mcp/${encodeURIComponent(id)}/tools`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(probeBody),
+      });
+      const data = (await res.json()) as {
+        tools?: McpTool[];
+        connectionStatus?: ProbeConnectionStatus;
+        error?: string;
+      };
+      setProbeTools(data.tools ?? []);
+      setProbeStatus(data.connectionStatus ?? 'unknown');
+      if (data.error) setProbeError(data.error);
+    } catch {
+      setProbeError('探测请求失败');
+      setProbeStatus('error');
+    } finally {
+      setProbeLoading(false);
+    }
+  }, [args, command, envPairs, headers, id, projectPath, transport, url]);
+
+  // Auto-probe on mount for edit mode (existing MCP).
+  const mountProbed = useRef(false);
+  useEffect(() => {
+    if (mountProbed.current) return;
+    if (isEdit && editId && !initialTools) {
+      mountProbed.current = true;
+      void handleProbeTools();
+    }
+  }, [editId, handleProbeTools, initialTools, isEdit]);
+
+  // Sync externally provided tools (from parent's initial load).
+  useEffect(() => {
+    if (initialTools) {
+      setProbeTools(initialTools);
+      setProbeStatus('connected');
+    }
+  }, [initialTools]);
 
   const handlePreview = useCallback(async () => {
     if (!id.trim()) return;
@@ -201,9 +273,35 @@ export function McpConfigModal({
     }
   }, [handleInstall]);
 
-  return (
+  // F249 §8.3: "恢复全局配置" — clear project override, restore to global config
+  const [restoring, setRestoring] = useState(false);
+  const canRestoreGlobal = isEdit && !!projectPath;
+  const handleRestoreGlobal = useCallback(async () => {
+    if (!editId || !projectPath) return;
+    setError(null);
+    setRestoring(true);
+    try {
+      const res = await apiFetch('/api/capabilities/mcp/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editId, projectPath, clearOverride: true }),
+      });
+      if (!res.ok) {
+        setError(await readApiError(res as Response, '恢复失败'));
+        return;
+      }
+      onSaved();
+      onClose();
+    } catch {
+      setError('网络错误');
+    } finally {
+      setRestoring(false);
+    }
+  }, [editId, onClose, onSaved, projectPath]);
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--console-overlay-backdrop)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--console-overlay-backdrop)] px-4 backdrop-blur-sm"
       data-testid="mcp-config-modal"
     >
       <button type="button" aria-label="关闭" className="absolute inset-0 cursor-default" onClick={onClose} />
@@ -265,24 +363,44 @@ export function McpConfigModal({
               resetPreview();
             }}
           />
-          {!readOnly && <MaskedSecretNote keys={maskedSecretKeys} />}
-          <McpToolsSection tools={tools} />
+          <McpToolsSection
+            tools={probeTools}
+            loading={probeLoading}
+            connectionStatus={probeStatus}
+            error={probeError}
+            onProbe={readOnly ? undefined : handleProbeTools}
+          />
           <McpPreviewSection preview={preview} />
         </div>
         {!readOnly && (
-          <McpModalActions
-            isEdit={isEdit}
-            id={id}
-            preview={preview}
-            saving={saving}
-            previewing={previewing}
-            installing={installing}
-            onCancel={onClose}
-            onPreview={handlePreview}
-            onSaveOrInstall={isEdit ? handleSave : handleInstall}
-          />
+          <div className="mt-3 flex items-center justify-between">
+            <div>
+              {canRestoreGlobal && (
+                <button
+                  type="button"
+                  disabled={restoring}
+                  onClick={handleRestoreGlobal}
+                  className="rounded-lg border border-[var(--console-border-soft)] px-3 py-1.5 text-xs text-cafe-muted transition-colors hover:text-cafe-accent disabled:opacity-50"
+                >
+                  {restoring ? '恢复中…' : '恢复全局配置'}
+                </button>
+              )}
+            </div>
+            <McpModalActions
+              isEdit={isEdit}
+              id={id}
+              preview={preview}
+              saving={saving}
+              previewing={previewing}
+              installing={installing}
+              onCancel={onClose}
+              onPreview={handlePreview}
+              onSaveOrInstall={isEdit ? handleSave : handleInstall}
+            />
+          </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

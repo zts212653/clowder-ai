@@ -8,6 +8,36 @@
 import type { MarketplaceEcosystem } from './marketplace.js';
 import type { MountRuleEntry, SkillsSyncState } from './mount-rules.js';
 
+// ─── F249: MCP Sync Types ────────────────────────────────────────
+
+/**
+ * F249: Structured env entry for MCP servers.
+ * Supports ${ENV_VAR} variable references resolved at invoke time.
+ */
+export interface McpEnvEntry {
+  key: string;
+  /** Value or `${ENV_VAR}` reference resolved from process.env at invoke time. */
+  value: string;
+  /** true = Console UI masks the value by default (eye toggle to reveal). */
+  sensitive: boolean;
+}
+
+/**
+ * F249: Per-project MCP sync tracking state.
+ * Stored at capabilities.json#mcpSync per project.
+ */
+export interface McpSyncState {
+  /** SHA-256 hash of global MCP config at last sync. */
+  sourceConfigHash: string;
+  /** ISO 8601 timestamp of last successful sync. */
+  lastSyncedAt: string;
+  /**
+   * MCP IDs whose project-config disabled entry (blockedCats = all cats)
+   * originated from a global cascade, not explicit user action.
+   */
+  cascadeDisabledMcps?: string[];
+}
+
 /** MCP transport type — stdio (default) or remote HTTP (TD104) */
 export type McpTransport = 'stdio' | 'streamableHttp';
 
@@ -59,7 +89,11 @@ export interface CapabilityEntry {
    * Migration: startup fills this from `enabled` for skill entries that lack it.
    */
   globalEnabled?: boolean;
-  /** Per-cat overrides (only stores differences from global; MCP only — not applicable to skills) */
+  /**
+   * @deprecated Legacy per-cat overrides. Superseded by `blockedCats`.
+   * Migration converts to `blockedCats` at startup; runtime ignores this field.
+   * Kept on the type for legacy config deserialization only.
+   */
   overrides?: CatCapabilityOverride[];
   /** MCP server descriptor (only for type: 'mcp') */
   mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
@@ -84,6 +118,27 @@ export interface CapabilityEntry {
   limbNodeId?: string;
   /** F202 Phase 2: Runtime task ID assigned by TaskRunnerV2 (schedule resources only) */
   scheduleTaskId?: string;
+  /**
+   * F249: Blacklist — cat IDs that cannot use this MCP.
+   * Canonical per-cat access field for MCP (supersedes legacy `overrides`).
+   * undefined/absent = all cats can use it. Empty array = all cats can use it.
+   * Contains all cat IDs = fully disabled.
+   * Only meaningful for type: 'mcp'.
+   */
+  blockedCats?: string[];
+  /**
+   * F249: Project-level MCP server config override (full replacement).
+   * When present, this project uses this config instead of the global mcpServer.
+   * Absent = use global mcpServer.
+   * Only meaningful for type: 'mcp' in project-level capabilities.json.
+   */
+  mcpServerOverride?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
+  /**
+   * Which external config file this MCP was discovered from.
+   * e.g. "claude-project", "codex-user", "gemini-user", "kimi-project".
+   * Absent for manually added or cat-cafe managed entries.
+   */
+  discoveredFrom?: string;
 }
 
 /** Sanitized MCP server details included in the capability board payload. */
@@ -131,6 +186,18 @@ export interface CapabilitiesConfig {
    * Records the last sync hash and timestamp per project.
    */
   skillsSync?: SkillsSyncState;
+  /**
+   * F249: MCP sync tracking per project.
+   * Records the global MCP config hash at last sync.
+   */
+  mcpSync?: McpSyncState;
+  /**
+   * Tracks the last completed external MCP discovery pass.
+   * When absent or < CURRENT_DISCOVERY_VERSION, a one-time import from
+   * external config files (.claude/mcp.json, etc.) runs on next GET.
+   * After import, the version is stamped and subsequent GETs skip discovery.
+   */
+  discoveryVersion?: number;
 }
 
 /** Capabilities board response — what the GET API returns */
@@ -167,6 +234,12 @@ export interface CapabilityBoardItem {
   lockVersion?: LockVersion;
   /** F202: Plugin that owns this capability */
   pluginId?: string;
+  /** F249: Blacklist — cat IDs that cannot use this MCP in this project. */
+  blockedCats?: string[];
+  /** F249: Whether this MCP has a project-level config override. */
+  hasOverride?: boolean;
+  /** Which external config file this MCP was discovered from (e.g. "claude-project"). */
+  discoveredFrom?: string;
 }
 
 /** Lightweight MCP tool info for board display */
@@ -183,6 +256,8 @@ export interface CatFamily {
   name: string;
   /** All catIds belonging to this family */
   catIds: string[];
+  /** Per-cat display labels — catId → "布偶猫(Opus) - catId" */
+  catNames?: Record<string, string>;
 }
 
 /** Skill mount health summary */
@@ -209,6 +284,8 @@ export interface CapabilityBoardResponse {
   skillHealth?: SkillHealthSummary;
   /** F070: Governance health for this project */
   governanceHealth?: GovernanceHealthSummary;
+  /** F249: All cat IDs with display names — frontend uses to render per-cat toggles. */
+  allCats?: Array<{ catId: string; displayName: string }>;
 }
 
 // ─── F070: Portable Governance Types ──────────────────────────────
@@ -335,6 +412,16 @@ export interface McpInstallRequest {
   resolver?: string;
   projectPath?: string;
   ecosystem?: MarketplaceEcosystem;
+  /**
+   * F249: When true, cascade the new MCP entry to all governance-registered projects.
+   * When false/absent, only save to global config with globalEnabled=false.
+   */
+  syncAll?: boolean;
+  /**
+   * F249 §8.3: When true + projectPath present, clear mcpServerOverride to restore global config.
+   * The MCP entry's mcpServer (synced from global) becomes the active config again.
+   */
+  clearOverride?: boolean;
 }
 
 /** POST /api/capabilities/mcp/preview response */

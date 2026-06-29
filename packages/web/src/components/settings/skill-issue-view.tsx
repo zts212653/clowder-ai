@@ -3,66 +3,6 @@
 import { type ReactNode, useEffect } from 'react';
 
 /**
- * skill-issue-view — F228 frontend rendering of backend-computed skill issues.
- *
- * The backend (`/api/skills/drift-check`) is the single source of truth: it
- * returns a display-ready, de-duplicated per-skill issue list. The UI renders
- * it verbatim — no client-side scenario re-computation or cross-referencing of
- * separate endpoints.
- */
-
-export type SkillIssueType =
-  | 'conflict'
-  | 'mount-missing'
-  | 'unregistered'
-  | 'phantom'
-  | 'config-new'
-  | 'config-orphan'
-  | 'stale-mount';
-
-export interface SkillIssue {
-  skill: string;
-  type: SkillIssueType;
-  mountPoint?: string;
-  message: string;
-}
-
-/** Group a flat issue list by skill name, preserving the backend's order. */
-export function groupIssuesBySkill(issues: SkillIssue[]): Array<{ skill: string; messages: string[] }> {
-  const map = new Map<string, string[]>();
-  for (const issue of issues) {
-    const list = map.get(issue.skill);
-    if (list) list.push(issue.message);
-    else map.set(issue.skill, [issue.message]);
-  }
-  return Array.from(map, ([skill, messages]) => ({ skill, messages }));
-}
-
-/** Render issues as `skill → message(s)` rows (the per-scope leaf of the tree). */
-export function SkillIssueList({ issues }: { issues: SkillIssue[] }) {
-  const grouped = groupIssuesBySkill(issues);
-  if (grouped.length === 0) {
-    return <p className="text-xs text-cafe-muted">✓ 无异常</p>;
-  }
-  return (
-    <ul className="space-y-1.5">
-      {grouped.map(({ skill, messages }) => (
-        <li key={skill}>
-          <p className="font-medium text-cafe">{skill}</p>
-          <ul className="ml-3 mt-0.5 space-y-0.5">
-            {messages.map((message) => (
-              <li key={message} className="text-cafe-muted">
-                {message}
-              </li>
-            ))}
-          </ul>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/**
  * Modal overlay with backdrop-click + Escape dismissal (F228 UX fix #1).
  * Clicking the dimmed backdrop or pressing Escape calls `onClose`; clicks inside
  * the panel are stopped from bubbling so they don't dismiss.

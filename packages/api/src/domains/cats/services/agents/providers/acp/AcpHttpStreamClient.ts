@@ -18,6 +18,7 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { request as nodeHttpRequest } from 'node:http';
 import { dirname, isAbsolute } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -97,6 +98,13 @@ export class AcpHttpStreamClient {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
     }
+    // #712: Re-create bootstrap CWD if cleaned up by OS temp-dir rotation or agent exit.
+    // Skip when a test spawnFn is injected — the directory may be a fake path
+    // (e.g. '/my/project') that can't be created on CI runners.
+    if (!this.config.spawnFn) {
+      mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
+    }
+
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -374,7 +382,9 @@ export class AcpHttpStreamClient {
               continue;
             }
 
-            const msgId = msg.id as string | undefined;
+            // #712: id can be 0 (Kimi CLI uses numeric ids). Use explicit null check.
+            const rawMsgId = msg.id as string | number | undefined;
+            const msgId = rawMsgId != null ? String(rawMsgId) : undefined;
             const method = msg.method as string | undefined;
 
             if (msgId === id && !method) {
@@ -411,7 +421,9 @@ export class AcpHttpStreamClient {
         if (buffer.trim()) {
           try {
             const msg = JSON.parse(buffer.trim()) as Record<string, unknown>;
-            const msgId = msg.id as string | undefined;
+            // #712: same numeric id treatment as main loop
+            const rawBufId = msg.id as string | number | undefined;
+            const msgId = rawBufId != null ? String(rawBufId) : undefined;
             const method = msg.method as string | undefined;
             if (msgId === id && !method) {
               finalResponseReceived = true;
@@ -650,8 +662,13 @@ export class AcpHttpStreamClient {
         }
         if (responsePromise) await responsePromise;
       } else {
+        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
+        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
         const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption = params.options?.find((o) => o.kind === 'allow_once') ?? params.options?.[0];
+        const allowOption =
+          params.options?.find((o) => o.kind === 'allow_always') ??
+          params.options?.find((o) => o.kind === 'allow_once') ??
+          params.options?.[0];
         await respond({ optionId: allowOption?.optionId ?? 'allow_once' });
       }
       return;

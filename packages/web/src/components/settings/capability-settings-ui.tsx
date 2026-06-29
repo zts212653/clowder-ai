@@ -1,11 +1,140 @@
 'use client';
 
-import type { MouseEvent } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { useMemo } from 'react';
 import type { CapabilityBoardItem, CatFamily } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
-import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
+import {
+  SettingsResourceToggleSwitch,
+  settingsResourceActionGroupClass,
+  settingsResourceAvatarClass,
+  settingsResourceCardClass,
+  settingsResourceRowClass,
+} from '../SettingsResourceCard';
+import { SettingsText } from './primitives';
 import { projectDisplayName } from './useCapabilityState';
+
+// ── ScopeTabs (shared global/project tab bar) ──────────────────────────────
+
+export interface ScopeTab {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * Underline tab bar for global/project scope — shared by Skill and MCP pages.
+ *
+ * `actions` renders right-aligned buttons (MCP uses this for "新增 MCP" etc).
+ */
+export function ScopeTabs({
+  tabs,
+  activeKey,
+  onTabChange,
+  ariaLabel,
+  actions,
+}: {
+  tabs: ScopeTab[];
+  activeKey: string;
+  onTabChange: (key: string) => void;
+  ariaLabel?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between border-b border-[var(--console-border-soft)]">
+      <nav aria-label={ariaLabel} className="flex">
+        {tabs.map((tab) => {
+          const active = tab.key === activeKey;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              aria-current={active ? 'page' : undefined}
+              onClick={() => onTabChange(tab.key)}
+              className={`inline-flex items-center px-5 py-2.5 text-sm font-semibold transition-colors ${
+                active
+                  ? 'border-b-2 border-[var(--console-button-emphasis)] text-[var(--console-button-emphasis)]'
+                  : 'text-cafe-muted hover:text-cafe-secondary'
+              }`}
+            >
+              {tab.label}
+              <span className={`ml-1 text-xs ${active ? 'opacity-80' : 'text-cafe-muted'}`}>{tab.count}</span>
+            </button>
+          );
+        })}
+      </nav>
+      {actions && <div className="flex items-center gap-2">{actions}</div>}
+    </div>
+  );
+}
+
+// ── CapabilityRow (shared card/row layout for MCP and Skill items) ───────────
+
+/**
+ * Shared card row for capability items (MCP & Skill).
+ *
+ * Both pages render the same structural layout: avatar → name/description →
+ * badges → toggle + action buttons → optional expanded content.
+ * Only the content differs (MCP shows transport info; Skill shows category).
+ */
+export function CapabilityRow({
+  name,
+  description,
+  subInfo,
+  subInfoMono = false,
+  onClick,
+  badges,
+  actions,
+  expandedContent,
+}: {
+  /** Display name (also drives avatar letter). */
+  name: string;
+  /** Description line below the name. */
+  description?: string;
+  /** Optional third line (MCP: transport info; Skill: category). */
+  subInfo?: string;
+  /** Render subInfo in monospace (default: false). */
+  subInfoMono?: boolean;
+  /** Click handler for the card's main clickable area. */
+  onClick?: () => void;
+  /** Badges rendered between name area and actions. */
+  badges?: ReactNode;
+  /** Toggle + action buttons rendered in the action group. */
+  actions?: ReactNode;
+  /** Content shown below the main row (e.g. per-cat toggles, mount points). */
+  expandedContent?: ReactNode;
+}) {
+  return (
+    <div className={settingsResourceCardClass}>
+      <div className={settingsResourceRowClass}>
+        <button
+          type="button"
+          onClick={onClick}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-4"
+          style={{ textAlign: 'left' }}
+        >
+          <div className={settingsResourceAvatarClass}>{name.charAt(0).toUpperCase()}</div>
+          <div className="min-w-0 flex-1">
+            <SettingsText as="p" variant="sm" tone="default" className="font-bold">
+              {name}
+            </SettingsText>
+            <SettingsText as="p" tone="secondary" className="mt-0.5 truncate">
+              {description || '—'}
+            </SettingsText>
+            {subInfo && (
+              <SettingsText as="p" tone="muted" className={`mt-0.5 truncate${subInfoMono ? ' font-mono' : ''}`}>
+                {subInfo}
+              </SettingsText>
+            )}
+          </div>
+        </button>
+        {badges && <div className="flex shrink-0 items-center gap-2">{badges}</div>}
+        {actions && <div className={settingsResourceActionGroupClass}>{actions}</div>}
+      </div>
+      {expandedContent}
+    </div>
+  );
+}
 
 const AVATAR_COLORS = ['#C65F3D', '#8B6E5A', '#A0522D', '#7B6B63', '#9B7653', '#6F5946'];
 
@@ -136,9 +265,10 @@ export function PerCatToggles({
               {relevantCats.map((catId) => {
                 const enabled = item.cats[catId] ?? false;
                 const busy = toggling === `${item.id}:${catId}`;
+                const catLabel = family.catNames?.[catId] ?? catId;
                 return (
                   <div key={catId} className="flex items-center justify-between">
-                    <span className="text-xs text-cafe-secondary">{catId}</span>
+                    <span className="text-xs text-cafe-secondary">{catLabel}</span>
                     <ToggleSwitch
                       enabled={enabled}
                       busy={busy}

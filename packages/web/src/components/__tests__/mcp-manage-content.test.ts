@@ -146,13 +146,19 @@ describe('McpManageContent', () => {
     expect(container.textContent).toContain('新增 MCP');
   });
 
-  it('requests probed capability data for MCP status and tools', async () => {
+  it('requests capability data without probe (F249: lazy-load tools in modal)', async () => {
     await renderContent();
 
-    expect(mockFetch.mock.calls[0][0]).toBe('/api/capabilities?probe=true');
+    // F249 §8.4: list must NOT probe tools — no probe=true in query.
+    // DriftBanner / useDriftSync may fire their own fetch first, so find by URL not index.
+    const capCall = mockFetch.mock.calls.find(
+      (args: unknown[]) => typeof args[0] === 'string' && (args[0] as string).startsWith('/api/capabilities'),
+    );
+    expect(capCall).toBeTruthy();
+    expect(capCall![0]).toBe('/api/capabilities');
   });
 
-  it('opens managed MCP cards in a read-only modal', async () => {
+  it('opens managed MCP cards in a read-only modal (tools lazy-loaded)', async () => {
     await renderContent();
 
     await act(async () => {
@@ -161,7 +167,9 @@ describe('McpManageContent', () => {
 
     expect(container.querySelector('[data-testid="mcp-config-modal"]')).toBeTruthy();
     expect(container.textContent).toContain('PENCIL_TOKEN');
-    expect(container.textContent).toContain('draw_frame');
+    // F249 §8.4: tools are NOT preloaded in list response — the modal auto-probes
+    // via POST /api/mcp/:id/tools on mount. At render time, tools section
+    // shows placeholder text, not the tool names from the list response.
     expect(container.textContent).not.toContain('保存');
   });
 
@@ -220,8 +228,8 @@ describe('McpManageContent', () => {
   });
 
   it('hard-deletes external MCP on uninstall', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
+    // useConfirm is globally mocked (test-setup.ts) to resolve true,
+    // replacing the old window.confirm spy.
     await renderContent();
 
     const trashButtons = Array.from(container.querySelectorAll('button[title="卸载此 MCP"]'));
@@ -239,8 +247,6 @@ describe('McpManageContent', () => {
     expect(deleteCalls).toHaveLength(1);
     expect(deleteCalls[0][0]).toContain('/api/capabilities/mcp/custom-mcp?');
     expect(deleteCalls[0][0]).toContain('hard=true');
-
-    confirmSpy.mockRestore();
   });
 
   it('renders plugin-owned MCP resources as readonly and routes management to plugins', async () => {

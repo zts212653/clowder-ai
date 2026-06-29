@@ -16,6 +16,15 @@ process.env.PATH = `${stubBinDir}:${process.env.PATH}`;
 const { KimiAgentService } = await import('../dist/domains/cats/services/agents/providers/KimiAgentService.js');
 const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
 
+function writeCapabilitiesConfig(projectRoot, capabilities) {
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(
+    join(projectRoot, '.cat-cafe', 'capabilities.json'),
+    JSON.stringify({ version: 1, capabilities }),
+    'utf8',
+  );
+}
+
 async function collect(iterable) {
   const items = [];
   for await (const item of iterable) {
@@ -283,6 +292,9 @@ test('api-key mode maps selected model into official kimi env overrides', async 
         },
       }),
     );
+    // #712: writeMcpConfigFile is now async — flush microtask queue so the
+    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
+    await new Promise((r) => setImmediate(r));
     const args = spawnFn.mock.calls[0].arguments[1];
     const env = spawnFn.mock.calls[0].arguments[2]?.env ?? {};
     assert.ok(!args.includes('--model'));
@@ -341,6 +353,10 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
       'utf8',
     );
     writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+    // #712: Create split entrypoint stubs so the fallback path finds them
+    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
+    }
 
     const promise = collect(
       service.invoke('Hello', {
@@ -353,17 +369,22 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
         },
       }),
     );
+    // #712: writeMcpConfigFile is now async — flush microtask queue so the
+    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
+    await new Promise((r) => setImmediate(r));
     const args = spawnFn.mock.calls[0].arguments[1];
     const mcpFlagIndex = args.indexOf('--mcp-config-file');
     assert.ok(mcpFlagIndex >= 0);
     const mcpPath = args[mcpFlagIndex + 1];
     const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
-    assert.ok(mcpConfig.mcpServers['cat-cafe']);
+    assert.ok(mcpConfig.mcpServers['cat-cafe-collab'], 'split server cat-cafe-collab expected');
+    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'split server cat-cafe-memory expected');
     assert.ok(mcpConfig.mcpServers.filesystem);
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].command, 'node');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
-    assert.equal(mcpConfig.mcpServers['cat-cafe'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
+    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].command, process.execPath);
+    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
+    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_INVOCATION_ID, 'invoke-123');
+    assert.equal(mcpConfig.mcpServers['cat-cafe-collab'].env.CAT_CAFE_CALLBACK_TOKEN, 'token-123');
+    assert.equal(mcpConfig.mcpServers['cat-cafe'], undefined, 'monolith must not be injected');
 
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
     await promise;
@@ -371,6 +392,160 @@ test('injects cat-cafe MCP config file when callback env is present', async () =
     rmSync(shareDir, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(mcpServerDir, { recursive: true, force: true });
+  }
+});
+
+test('Kimi MCP config reads capabilities from runtime root while cwd is user project', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-cap-root-'));
+  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-cap-root-'));
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'kimi-runtime-cap-root-'));
+  const mcpServerDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({
+    spawnFn,
+    model: 'kimi-code/kimi-for-coding',
+    mcpServerPath: join(mcpServerDir, 'index.js'),
+  });
+
+  try {
+    mkdirSync(mcpServerDir, { recursive: true });
+    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
+    }
+    writeCapabilitiesConfig(runtimeRoot, [
+      {
+        id: 'cat-cafe-collab',
+        type: 'mcp',
+        globalEnabled: false,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+    ]);
+
+    const promise = collect(
+      service.invoke('Hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          KIMI_SHARE_DIR: shareDir,
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'invoke-cap-root',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-cap-root',
+          CAT_CAFE_CAT_ID: 'opus',
+        },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpPath = args[args.indexOf('--mcp-config-file') + 1];
+    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
+    assert.equal(
+      mcpConfig.mcpServers['cat-cafe-collab'],
+      undefined,
+      'disabled runtime capability must not be injected',
+    );
+    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'enabled runtime capability must be injected');
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
+test('Kimi MCP merge excludes disabled capability-managed user entries', async () => {
+  const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-disabled-merge-'));
+  const projectDir = mkdtempSync(join(tmpdir(), 'kimi-project-disabled-merge-'));
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'kimi-runtime-disabled-merge-'));
+  const mcpServerDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
+  const proc = createMockProcess();
+  const spawnFn = createMockSpawnFn(proc);
+  const service = new KimiAgentService({
+    spawnFn,
+    model: 'kimi-code/kimi-for-coding',
+    mcpServerPath: join(mcpServerDir, 'index.js'),
+  });
+
+  try {
+    mkdirSync(join(projectDir, '.kimi'), { recursive: true });
+    mkdirSync(mcpServerDir, { recursive: true });
+    writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
+    }
+    writeCapabilitiesConfig(runtimeRoot, [
+      {
+        id: 'filesystem',
+        type: 'mcp',
+        globalEnabled: false,
+        source: 'external',
+        mcpServer: { command: 'npx', args: ['-y', '@mcp/fs'] },
+      },
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        globalEnabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+    ]);
+    writeFileSync(
+      join(projectDir, '.kimi', 'mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          filesystem: { command: 'npx', args: ['-y', '@mcp/fs-stale'] },
+          'cat-cafe': { command: 'node', args: ['legacy-monolith.js'] },
+          'my-tool': { command: 'node', args: ['tool.js'] },
+        },
+      }),
+      'utf8',
+    );
+
+    const promise = collect(
+      service.invoke('Hello', {
+        workingDirectory: projectDir,
+        callbackEnv: {
+          KIMI_SHARE_DIR: shareDir,
+          CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+          CAT_CAFE_INVOCATION_ID: 'invoke-disabled-merge',
+          CAT_CAFE_CALLBACK_TOKEN: 'token-disabled-merge',
+          CAT_CAFE_CAT_ID: 'opus',
+        },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const mcpPath = args[args.indexOf('--mcp-config-file') + 1];
+    const mcpConfig = JSON.parse(readFileSync(mcpPath, 'utf8'));
+    assert.equal(
+      mcpConfig.mcpServers.filesystem,
+      undefined,
+      'disabled capability must not be re-added from .kimi/mcp.json',
+    );
+    assert.equal(
+      mcpConfig.mcpServers['cat-cafe'],
+      undefined,
+      'legacy monolith alias must not be re-added from .kimi/mcp.json',
+    );
+    assert.ok(mcpConfig.mcpServers['my-tool'], 'unmanaged user server should still be merged');
+    assert.ok(mcpConfig.mcpServers['cat-cafe-memory'], 'enabled capability should still be injected');
+
+    emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
+    await promise;
+  } finally {
+    rmSync(shareDir, { recursive: true, force: true });
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true });
   }
 });
 
@@ -389,6 +564,10 @@ test('creates Kimi share dir before writing temp MCP config on fresh setups', as
 
   try {
     writeFileSync(join(mcpServerDir, 'index.js'), '// stub', 'utf8');
+    // #712: Create split entrypoint stubs so the fallback path finds them
+    for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+      writeFileSync(join(mcpServerDir, entry), '// stub', 'utf8');
+    }
     const promise = collect(
       service.invoke('Hello', {
         workingDirectory: projectDir,
@@ -400,12 +579,17 @@ test('creates Kimi share dir before writing temp MCP config on fresh setups', as
         },
       }),
     );
+    // #712: writeMcpConfigFile is now async — flush microtask queue so the
+    // generator reaches spawnCli before we inspect spawnFn.mock.calls.
+    await new Promise((r) => setImmediate(r));
 
     const args = spawnFn.mock.calls[0].arguments[1];
     const mcpFlagIndex = args.indexOf('--mcp-config-file');
     assert.ok(mcpFlagIndex >= 0);
     const mcpPath = args[mcpFlagIndex + 1];
-    assert.ok(readFileSync(mcpPath, 'utf8').includes('cat-cafe'));
+    const content = readFileSync(mcpPath, 'utf8');
+    assert.ok(content.includes('cat-cafe-collab'), 'split server expected in config');
+    assert.ok(!content.includes('"cat-cafe"'), 'monolith must not appear in config');
 
     emitKimiEvents(proc, [{ role: 'assistant', content: 'ok' }]);
     const msgs = await promise;

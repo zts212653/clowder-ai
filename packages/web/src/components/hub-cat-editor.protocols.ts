@@ -12,6 +12,7 @@ export function defaultMcpSupportForClient(client: ClientId): boolean {
     client === 'google' ||
     client === 'kimi' ||
     client === 'opencode' ||
-    client === 'antigravity'
+    client === 'antigravity' ||
+    client === 'acp'
   );
 }

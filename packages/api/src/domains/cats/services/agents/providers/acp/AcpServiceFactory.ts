@@ -14,7 +14,8 @@ import { AcpClient } from './AcpClient.js';
 import { AcpHttpStreamClient } from './AcpHttpStreamClient.js';
 import { AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstrapCwd } from './acp-bootstrap-cwd.js';
-import { resolveAcpMcpServers } from './acp-mcp-resolver.js';
+// resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
+// for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
 
@@ -133,9 +134,9 @@ async function prepareAcpSpawnContext(
   }
   let acpSpawnEnv: Record<string, string> | undefined = acpEnvResult.env;
 
-  let openCodeAcpSpawnConfig: ReturnType<typeof prepareOpenCodeAcpSpawnConfig>;
+  let openCodeAcpSpawnConfig: Awaited<ReturnType<typeof prepareOpenCodeAcpSpawnConfig>>;
   try {
-    openCodeAcpSpawnConfig = prepareOpenCodeAcpSpawnConfig({
+    openCodeAcpSpawnConfig = await prepareOpenCodeAcpSpawnConfig({
       projectRoot: bootstrap.projectRoot,
       profileId,
       clientId: config.clientId,
@@ -252,16 +253,14 @@ export async function createAcpServiceForConfig(
   if (!spawn) return null;
   const pool = await ensureAcpPool(input, bootstrap, spawn);
 
-  const mcpServers = resolveAcpMcpServers(bootstrap.projectRoot, acpConfig.mcpWhitelist ?? [], undefined, {
-    mcpSupport: config.mcpSupport,
-  });
-
+  // #712 P1-1: pass whitelist — MCP resolution happens at invoke time in
+  // AcpAgentService so capability toggles take effect without registry rebuild.
   return new AcpAgentService({
     catId,
     pool,
     poolKey: bootstrap.poolKey,
     projectRoot: bootstrap.projectRoot,
-    mcpServers,
+    mcpWhitelist: acpConfig.mcpWhitelist ?? [],
     providerName: config.clientId === 'acp' ? 'acp' : config.clientId,
     modelName: spawn.sessionModel ?? config.defaultModel ?? 'acp',
     sessionModel: spawn.sessionModel,

@@ -5,8 +5,8 @@ import {
   type OpenCodeRuntimeConfigDebugSummary,
   parseOpenCodeModel,
   summarizeOpenCodeRuntimeConfigForDebug,
-  writeOpenCodeRuntimeConfig,
 } from './opencode-config-template.js';
+import { writeOpenCodeRuntimeConfig } from './opencode-config-writer.js';
 
 export interface OpenCodeAcpSpawnAccount {
   id: string;
@@ -76,9 +76,9 @@ function resolveEffectiveOpenCodeModel(
  * intentionally excludes per-invocation instructions/MCP and only pins provider,
  * model, and credentials at process spawn time.
  */
-export function prepareOpenCodeAcpSpawnConfig(
+export async function prepareOpenCodeAcpSpawnConfig(
   options: OpenCodeAcpSpawnConfigOptions,
-): PreparedOpenCodeAcpSpawnConfig | null {
+): Promise<PreparedOpenCodeAcpSpawnConfig | null> {
   if (!isOpenCodeAcpTarget(options.clientId)) return null;
 
   const effective = resolveEffectiveOpenCodeModel(options.providerName, options.defaultModel);
@@ -98,7 +98,7 @@ export function prepareOpenCodeAcpSpawnConfig(
     omitProviderAuth: account?.authType !== 'api_key',
   } as const;
 
-  const configPath = writeOpenCodeRuntimeConfig(
+  const configPath = await writeOpenCodeRuntimeConfig(
     options.projectRoot,
     options.profileId,
     'acp-pool',

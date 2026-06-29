@@ -4,19 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { SettingsResourceToggleSwitch } from '../SettingsResourceCard';
 import { AllProjectsSyncBanner } from './AllProjectsSyncBanner';
-import { ProjectSelector } from './capability-settings-ui';
+import { ProjectSelector, ScopeTabs } from './capability-settings-ui';
+import { DriftBanner } from './DriftBanner';
 import { MountRulesPanel } from './MountRulesPanel';
 import { SettingsStatusStrip } from './primitives';
 import { SettingsPageHeader } from './SettingsPageHeader';
 import { SkillPreviewModal } from './SkillPreviewModal';
-import { SkillsDriftBanner } from './SkillsDriftBanner';
-import {
-  SkillRow,
-  SkillsEmptyState,
-  SkillsFilterToolbar,
-  SkillsScopeTabs,
-  SkillsSummaryFooter,
-} from './SkillsSubComponents';
+import { SkillRow, SkillsEmptyState, SkillsFilterToolbar, SkillsSummaryFooter } from './SkillsSubComponents';
 import type { SettingsSkillItem, SkillScope, SkillsApiData, SkillsData } from './skills-types';
 import {
   ALL_CATEGORIES,
@@ -179,9 +173,15 @@ export function SkillsContent() {
     <div className="space-y-5">
       <SettingsPageHeader title="Skill 管理" subtitle="点击卡片预览/编辑" />
 
-      <SkillsScopeTabs
-        scope={scope}
-        onScopeChange={(nextScope) => {
+      <ScopeTabs
+        tabs={[
+          { key: SCOPE_ALL, label: '全部 Skill', count: scopeCounts.all },
+          { key: SCOPE_PROJECT, label: '项目 Skill', count: scopeCounts.project },
+        ]}
+        activeKey={scope}
+        ariaLabel="Skill scope"
+        onTabChange={(key) => {
+          const nextScope = key as SkillScope;
           setScope(nextScope);
           setActiveCategory(ALL_CATEGORIES);
           setExpandedMounts(null);
@@ -190,13 +190,10 @@ export function SkillsContent() {
             void controls.refetch(null);
           } else {
             setData(null);
-            // switchProject updates projectPathRef (used by toggle) AND fetches capabilities
             controls.switchProject(selectedProjectPath ?? null);
             void fetchSkills(selectedProjectPath);
           }
         }}
-        allCount={scopeCounts.all}
-        projectCount={scopeCounts.project}
       />
 
       {scope === SCOPE_PROJECT && (
@@ -237,6 +234,7 @@ export function SkillsContent() {
           <div className="min-w-0 flex-1">
             {scope === SCOPE_ALL && (
               <AllProjectsSyncBanner
+                type="skill"
                 scopes={sync.scopeIssues}
                 scopesWithIssues={sync.scopesWithIssues}
                 syncing={sync.syncing}
@@ -246,7 +244,8 @@ export function SkillsContent() {
               />
             )}
             {scope === SCOPE_PROJECT && (
-              <SkillsDriftBanner
+              <DriftBanner
+                type="skill"
                 projectPath={selectedProjectPath}
                 refreshToken={driftRefreshToken}
                 onResolved={refreshSelectedSkills}

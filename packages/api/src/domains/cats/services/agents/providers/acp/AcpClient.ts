@@ -12,6 +12,7 @@
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 
@@ -158,6 +159,16 @@ export class AcpClient {
       const binDir = dirname(command);
       childEnv.PATH = childEnv.PATH ? `${binDir}:${childEnv.PATH}` : binDir;
     }
+    // #712: Re-create bootstrap CWD if it was cleaned up by OS temp-dir rotation
+    // or by the ACP agent process on exit. Node.js spawn() returns ENOENT when the
+    // cwd doesn't exist, even though the command binary itself exists — the error
+    // message misleadingly points at the command path.
+    // Skip when a test spawnFn is injected — the directory may be a fake path
+    // (e.g. '/my/project') that can't be created on CI runners.
+    if (!this.config.spawnFn) {
+      mkdirSync(this.config.cwd, { recursive: true, mode: 0o700 });
+    }
+
     const spawnOpts: SpawnOptions & { stdio: ['pipe', 'pipe', 'pipe'] } = {
       cwd: this.config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -458,11 +469,30 @@ export class AcpClient {
           }
           scheduleIdleCheck(); // Schedule stall check (remaining time)
         } else if (pendingTool) {
-          // Tool still executing — suppress stall, let absolute timeoutMs be the guard
-          log.info(
-            { sessionId, idleSinceMs, eventCount, pendingTool },
-            'Stream idle watchdog: tool still pending, suppressing stall',
-          );
+          // Tool still executing — allow extra time, but cap at TOOL_EXECUTION_CEILING_MS.
+          // Before this fix, pendingTool suppressed stall indefinitely without rescheduling,
+          // causing sessions (esp. kimi-acp) to block for up to 15min turn budget on hung tools.
+          const TOOL_EXECUTION_CEILING_MS = 180_000; // 3 minutes max for a single tool call
+          if (idleSinceMs >= TOOL_EXECUTION_CEILING_MS) {
+            log.error(
+              { sessionId, idleSinceMs, eventCount, pendingTool },
+              'Stream idle watchdog: tool execution exceeded ceiling — terminating',
+            );
+            this.cancelSession(sessionId);
+            promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
+            done = true;
+            if (waitResolve) {
+              const r = waitResolve;
+              waitResolve = null;
+              r();
+            }
+          } else {
+            log.info(
+              { sessionId, idleSinceMs, eventCount, pendingTool },
+              'Stream idle watchdog: tool still pending, scheduling follow-up check',
+            );
+            scheduleIdleCheck(); // Reschedule — don't dead-end
+          }
         } else {
           // Stall — terminate the stream and cancel the upstream session
           log.error({ sessionId, idleSinceMs, eventCount }, 'Stream idle watchdog: stall — terminating');
@@ -695,15 +725,23 @@ export class AcpClient {
         return;
       }
 
-      const id = msg.id as string | undefined;
+      // #712: id can be 0 (Kimi CLI uses numeric ids starting at 0).
+      // `0` is falsy in JS, so use explicit null check instead of truthiness.
+      const id = msg.id as string | number | undefined;
+      const hasId = id !== undefined && id !== null;
+      const idStr = hasId ? String(id) : undefined;
       const method = msg.method as string | undefined;
 
-      if (id && this.pending.has(id) && !method) {
+      if (hasId && idStr && this.pending.has(idStr) && !method) {
         // Response to one of our requests
-        const { resolve } = this.pending.get(id)!;
-        this.pending.delete(id);
+        const { resolve } = this.pending.get(idStr)!;
+        this.pending.delete(idStr);
         resolve(msg as unknown as AcpResponse);
-      } else if (method && !id) {
+      } else if (method && hasId) {
+        // Request from agent (permission, fs, terminal) — needs our response.
+        // Checked before notifications so id:0 (Kimi) is not misrouted.
+        this.handleAgentRequest(msg as unknown as AcpAgentRequest);
+      } else if (method && !hasId) {
         if (method === ACP_METHODS.requestPermission) {
           // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
           // Best-effort auto-approve with synthetic id (Gemini may ignore it).
@@ -728,9 +766,6 @@ export class AcpClient {
             listener(msg as unknown as AcpNotification);
           }
         }
-      } else if (method && id) {
-        // Request from agent (permission, fs, terminal) — needs our response
-        this.handleAgentRequest(msg as unknown as AcpAgentRequest);
       }
     });
   }
@@ -813,7 +848,12 @@ export class AcpClient {
       } else {
         // Default: auto-approve (allow_once)
         const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption = params.options?.find((o) => o.kind === 'allow_once') ?? params.options?.[0];
+        // Prefer allow_always (session-wide) over allow_once to avoid repeated permission
+        // prompts for every MCP tool call. Kimi sends optionId "approve_for_session" for this.
+        const allowOption =
+          params.options?.find((o) => o.kind === 'allow_always') ??
+          params.options?.find((o) => o.kind === 'allow_once') ??
+          params.options?.[0];
         respond({ optionId: allowOption?.optionId ?? 'allow_once' });
       }
     } else {

@@ -10,9 +10,6 @@ function redactRecord(record: Record<string, string> | undefined): Record<string
 export function sanitizeCapabilityForAudit(entry: CapabilityEntry | null): CapabilityEntry | null {
   if (!entry) return null;
   const sanitized: CapabilityEntry = { ...entry };
-  if (entry.overrides) {
-    sanitized.overrides = entry.overrides.map((override) => ({ ...override }));
-  }
   if (!entry.mcpServer) return sanitized;
 
   const mcpServer: NonNullable<CapabilityEntry['mcpServer']> = { ...entry.mcpServer };
@@ -29,7 +26,14 @@ export function sanitizeCapabilityForAudit(entry: CapabilityEntry | null): Capab
   return sanitized;
 }
 
-export const sanitizeCapabilityForResponse = sanitizeCapabilityForAudit;
+/**
+ * Client-side app: return real values for editing — no need to mask from the local user.
+ * Frontend handles display masking via password inputs + eye toggle.
+ * Audit logs continue using sanitizeCapabilityForAudit (always redacted).
+ */
+export function sanitizeCapabilityForResponse(entry: CapabilityEntry | null): CapabilityEntry | null {
+  return entry;
+}
 
 export function sanitizeCapabilityAuditEntry(entry: CapabilityAuditEntry): CapabilityAuditEntry {
   return {

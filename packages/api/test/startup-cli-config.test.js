@@ -21,10 +21,10 @@ describe('resolveStartupCliConfigContext', () => {
       const context = resolveStartupCliConfigContext(apiCwd);
 
       assert.equal(context.projectRoot, root);
-      assert.equal(context.paths.anthropic, join(root, '.mcp.json'));
-      assert.equal(context.paths.openai, join(root, '.codex', 'config.toml'));
+      assert.equal(context.paths.anthropic, undefined, 'claude uses invoke-time --mcp-config');
+      assert.equal(context.paths.openai, undefined, 'codex uses invoke-time --config overrides');
       assert.equal(context.paths.google, join(root, '.gemini', 'settings.json'));
-      assert.equal(context.paths.kimi, join(root, '.kimi', 'mcp.json'));
+      assert.equal(context.paths.kimi, undefined, 'kimi uses invoke-time temp files');
       assert.equal(context.paths.antigravity, join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'));
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -44,10 +44,10 @@ describe('resolveStartupCliConfigContext', () => {
       const context = resolveStartupCliConfigContext(apiCwd, { CAT_CAFE_WORKSPACE_ROOT: root });
 
       assert.equal(context.projectRoot, root);
-      assert.equal(context.paths.anthropic, join(root, '.mcp.json'));
-      assert.equal(context.paths.openai, join(root, '.codex', 'config.toml'));
+      assert.equal(context.paths.anthropic, undefined, 'claude uses invoke-time --mcp-config');
+      assert.equal(context.paths.openai, undefined, 'codex uses invoke-time --config overrides');
       assert.equal(context.paths.google, join(root, '.gemini', 'settings.json'));
-      assert.equal(context.paths.kimi, join(root, '.kimi', 'mcp.json'));
+      assert.equal(context.paths.kimi, undefined, 'kimi uses invoke-time temp files');
       assert.equal(context.paths.antigravity, join(homedir(), '.gemini', 'antigravity', 'mcp_config.json'));
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -99,17 +99,16 @@ describe('resolveStartupCliConfigContext', () => {
         join(runtime, 'packages', 'mcp-server', 'dist', 'memory.js'),
       );
 
-      const claude = JSON.parse(await readFile(join(root, '.mcp.json'), 'utf-8'));
+      // Claude and Codex are invoke-time only — no persistent files should be written.
+      // Only Gemini .gemini/settings.json should be generated at startup.
+      const gemini = JSON.parse(await readFile(join(root, '.gemini', 'settings.json'), 'utf-8'));
       assert.equal(
-        claude.mcpServers['cat-cafe-memory'].args[0],
+        gemini.mcpServers['cat-cafe-memory'].args[0],
         join(runtime, 'packages', 'mcp-server', 'dist', 'memory.js'),
       );
-      assert.equal(claude.mcpServers['cat-cafe-memory'].env.ALLOWED_WORKSPACE_DIRS, root);
-
-      const codex = await readFile(join(root, '.codex', 'config.toml'), 'utf-8');
-      assert.match(codex, new RegExp(join(runtime, 'packages', 'mcp-server', 'dist', 'memory.js')));
-      assert.match(codex, /ALLOWED_WORKSPACE_DIRS/);
-      assert.match(codex, new RegExp(root));
+      // Gemini uses callback env placeholders (not ALLOWED_WORKSPACE_DIRS directly)
+      assert.ok(gemini.mcpServers['cat-cafe-memory'].env, 'env should be present');
+      assert.equal(gemini.mcpServers['cat-cafe-memory'].env.CAT_CAFE_API_URL, '${CAT_CAFE_API_URL}');
     } finally {
       if (originalAwd === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
       else process.env.ALLOWED_WORKSPACE_DIRS = originalAwd;

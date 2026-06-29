@@ -29,6 +29,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { type CatId, createCatId } from '@cat-cafe/shared';
+import { resolveCatCafeNodeCommand } from '../../../../../config/capabilities/mcp-constants.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
@@ -317,7 +318,7 @@ export class ClaudeBgCarrierService implements AgentService {
             writeFileSync(
               this.mcpConfigFilePath,
               JSON.stringify({
-                mcpServers: { 'cat-cafe': { command: 'node', args: [this.mcpServerPath] } },
+                mcpServers: { 'cat-cafe': { command: resolveCatCafeNodeCommand(), args: [this.mcpServerPath] } },
               }),
               'utf-8',
             );
@@ -327,7 +328,7 @@ export class ClaudeBgCarrierService implements AgentService {
           args.push(
             '--mcp-config',
             JSON.stringify({
-              mcpServers: { 'cat-cafe': { command: 'node', args: [this.mcpServerPath] } },
+              mcpServers: { 'cat-cafe': { command: resolveCatCafeNodeCommand(), args: [this.mcpServerPath] } },
             }),
           );
         }

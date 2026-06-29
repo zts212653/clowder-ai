@@ -17,10 +17,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
-import {
-  generateOpenCodeRuntimeConfig,
-  writeOpenCodeRuntimeConfig,
-} from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
+import { generateOpenCodeRuntimeConfig } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
+import { writeOpenCodeRuntimeConfig } from '../dist/domains/cats/services/agents/providers/opencode-config-writer.js';
 
 const projectRoot = resolve(import.meta.dirname, '../../..');
 const projectOpenCodeConfigPath = join(projectRoot, 'opencode.json');
@@ -84,7 +82,7 @@ describe('F203 Phase I — opencode-config-template instructions', () => {
     const { tmpdir } = await import('node:os');
     const tempRoot = mkdtempSync(join(tmpdir(), 'f203-i-test-'));
     try {
-      const configPath = writeOpenCodeRuntimeConfig(tempRoot, 'opencode', 'inv-test-001', {
+      const configPath = await writeOpenCodeRuntimeConfig(tempRoot, 'opencode', 'inv-test-001', {
         providerName: 'anthropic',
         models: ['claude-opus-4-6'],
         instructions: ['/tmp/compiled-l0.md', '/project/OPENCODE.md'],
@@ -196,7 +194,7 @@ describe('F203 Phase I — OpenCode runtime invariants (AC-I6)', () => {
 describe('F203 Phase I — instructions-only config content verification', () => {
   test('writeOpenCodeInstructionsOnlyConfig writes ONLY schema + instructions (no provider)', async () => {
     const { writeOpenCodeInstructionsOnlyConfig } = await import(
-      '../dist/domains/cats/services/agents/providers/opencode-config-template.js'
+      '../dist/domains/cats/services/agents/providers/opencode-config-writer.js'
     );
     const { mkdtempSync, rmSync, readFileSync: readFs } = await import('node:fs');
     const { tmpdir } = await import('node:os');

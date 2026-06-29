@@ -53,6 +53,7 @@
     "check:video-new": "node --test test/scripts/video-new-project.test.mjs",
     "check:scripts-ascii-only": "node scripts/check-scripts-ascii-only.mjs",
     "check:guides": "node scripts/gen-guide-catalog.mjs",
+    "check:biome-version": "node scripts/check-biome-version.mjs",
     "check:fix": "pnpm biome check --write .",
     "test": "pnpm -r --workspace-concurrency=1 --if-present run test",
     "test:api:redis": "pnpm --filter @cat-cafe/api run test:redis",
