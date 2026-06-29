@@ -57,6 +57,20 @@ test('windows desktop build script retries pnpm deploy on EPERM', async () => {
   assert.match(buildScript, /Remove-Item \$out -Recurse -Force/);
 });
 
+test('windows desktop build script downloads official Inno Setup ChineseSimplified language file', async () => {
+  const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
+
+  assert.match(
+    buildScript,
+    /https:\/\/raw\.githubusercontent\.com\/jrsoftware\/issrc\/main\/Files\/Languages\/ChineseSimplified\.isl/,
+  );
+  assert.doesNotMatch(
+    buildScript,
+    /Files\/Languages\/Unofficial\/ChineseSimplified\.isl/,
+    'ChineseSimplified.isl is now an official Inno Setup language file; the old Unofficial URL 404s',
+  );
+});
+
 test('windows desktop build script Defender cleanup runs in finally block', async () => {
   const buildScript = await readFile(desktopBuildScriptPath, 'utf8');
 
