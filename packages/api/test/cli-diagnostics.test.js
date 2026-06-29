@@ -190,7 +190,7 @@ test('AC-A7: formatCliStderrForLog truncates to last 1000 chars after sanitize (
   assert.ok(out.includes('final error line'), 'tail content should be preserved');
 });
 
-test('all 9 reasonCodes produce non-empty publicSummary + publicHint', () => {
+test('all known reasonCodes produce non-empty publicSummary + publicHint', () => {
   const cases = [
     ['Invalid `signature` in `thinking` block: foo', 'invalid_thinking_signature'],
     ['no rollout found', 'missing_rollout'],

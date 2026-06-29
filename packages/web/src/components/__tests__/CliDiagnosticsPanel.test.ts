@@ -238,6 +238,7 @@ describe('F212 CliDiagnosticsPanel (AC-B2/B3/B4)', () => {
       'network_error',
       'spawn_failed',
       'missing_rollout',
+      'session_not_found',
       'context_window_exceeded',
       'invalid_thinking_signature',
       'tool_call_parse_failed',
