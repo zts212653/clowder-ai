@@ -148,9 +148,13 @@ export function PluginsContent() {
                 </div>
               </button>
               <div className={settingsResourceActionGroupClass}>
-                <SettingsBadge tone={statusCfg.tone} className="shrink-0 font-medium">
-                  {statusCfg.label}
-                </SettingsBadge>
+                {/* Show status badge only when toggle doesn't already communicate the state.
+                    "已配置"/"未配置" are informative; "已启用" is redundant with the toggle. */}
+                {!(showResourceToggle && isRuntimeEnabled) && (
+                  <SettingsBadge tone={statusCfg.tone} className="shrink-0 font-medium">
+                    {statusCfg.label}
+                  </SettingsBadge>
+                )}
                 {showResourceToggle && (
                   <SettingsResourceToggleSwitch
                     enabled={isRuntimeEnabled}
