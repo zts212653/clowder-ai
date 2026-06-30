@@ -190,6 +190,11 @@ async function syncProjectUnlocked(
   const sourceResolutionRoot = opts.mainProjectRoot ?? projectRoot;
   const effectiveSourceMap = new Map<string, string>();
   const customSourceSkillNames = new Set<string>();
+  // Plugin skills without a resolvable source (no skillsSource, not in
+  // globalCustomSourceSkills). These are handled by the separate plugin skill
+  // loop in skills-write.ts — syncProject preserves their config entries but
+  // does NOT attempt to mount/unmount them.
+  const passthroughPluginSkills = new Set<string>();
   // First: populate from globalCustomSourceSkills (authoritative, already
   // resolved by the caller against the main project root).
   if (opts.globalCustomSourceSkills) {
@@ -218,6 +223,19 @@ async function syncProjectUnlocked(
         : resolve(sourceResolutionRoot, cap.skillsSource);
       effectiveSourceMap.set(cap.id, resolved);
       customSourceSkillNames.add(cap.id);
+    } else if (cap.pluginId) {
+      // Plugin skill without explicit skillsSource — the plugin skill loop in
+      // skills-write.ts resolves the source from plugin manifests and handles
+      // mounting. Preserve the config entry (add to allSkillNames) but don't
+      // map to default cat-cafe source or attempt mount/unmount.
+      //
+      // This covers both cascade and non-cascade modes:
+      // - Skills WITH skillsSource get cascade removal treatment above (lines
+      //   208-215: in globalCustomSourceSkills → resolved, not in → orphan).
+      // - Skills WITHOUT skillsSource were never globally registered with a
+      //   source path — they're project-local plugins or legacy entries that
+      //   predate skillsSource. The plugin loop resolves them from manifests.
+      passthroughPluginSkills.add(cap.id);
     } else {
       effectiveSourceMap.set(cap.id, skillsSource);
     }
@@ -225,8 +243,9 @@ async function syncProjectUnlocked(
   for (const name of sourceNames) {
     if (!effectiveSourceMap.has(name)) effectiveSourceMap.set(name, skillsSource);
   }
-  // All skill names = default source dir ∪ custom-source skills from config ∪ global custom-source.
-  const allSkillNames = [...new Set([...sourceNames, ...customSourceSkillNames])];
+  // All skill names = default source dir ∪ custom-source skills from config ∪
+  // global custom-source ∪ passthrough plugin skills (preserved, not managed).
+  const allSkillNames = [...new Set([...sourceNames, ...customSourceSkillNames, ...passthroughPluginSkills])];
 
   // F228: project state is mountPaths-first. An explicit empty mountPaths means
   // locally disabled; non-empty mountPaths means locally enabled, even if legacy
@@ -257,8 +276,10 @@ async function syncProjectUnlocked(
   if (opts.mountPathsBySkill) {
     for (const [k, v] of opts.mountPathsBySkill) mountPathsBySkill.set(k, [...v]);
   }
-  const enabledNames = allSkillNames.filter((n) => !disabledSet.has(n));
-  const disabledNames = allSkillNames.filter((n) => disabledSet.has(n));
+  // Passthrough plugin skills are excluded from mount/unmount — they're only in
+  // allSkillNames to prevent config removal. The plugin loop handles them.
+  const enabledNames = allSkillNames.filter((n) => !disabledSet.has(n) && !passthroughPluginSkills.has(n));
+  const disabledNames = allSkillNames.filter((n) => disabledSet.has(n) && !passthroughPluginSkills.has(n));
 
   // F228 KD-6: When disabledSkills is authoritative (ANY cascading caller — global
   // toggle, mount-rule reconciliation, OR plain reconciliation), and a skill is enabled

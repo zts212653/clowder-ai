@@ -111,7 +111,6 @@ export function resolvePluginSkillSourcesFromDirs(
 
   const results: PluginSkillInfo[] = [];
   const byPlugin = groupPluginSkillCapabilities(config);
-
   for (const [pluginId, caps] of byPlugin) {
     const selected = selectPluginManifest(pluginId, pluginsDirs);
     if (!selected) continue;

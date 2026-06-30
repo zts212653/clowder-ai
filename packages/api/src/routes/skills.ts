@@ -271,9 +271,12 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       pluginCaps.map(async (cap): Promise<SkillEntry | null> => {
         const skillsSource = cap.skillsSource;
         if (!skillsSource) return null;
-        // F228: resolve skillsSource against instance root, not target project root.
-        // co-creator formula: resolve(instanceRoot, skillsSource)
-        const src = resolve(repoRoot, skillsSource);
+        // F228: resolve skillsSource against the project that owns the capability entry.
+        // skillsSource is stored as relative(projectDir, sourceDir) in that project's
+        // capabilities.json, so it must be resolved against projectRoot.  For the main
+        // project projectRoot === repoRoot, so there's no behavioral change for
+        // instance-level plugins.
+        const src = resolve(projectRoot, skillsSource);
         const [claude, codex, gemini, kimi] = await Promise.all([
           isSkillMountedAtPoint(mountPointDirCandidates.claude, src, cap.id, mainSkillsSrc),
           isSkillMountedAtPoint(mountPointDirCandidates.codex, src, cap.id, mainSkillsSrc),
@@ -319,7 +322,9 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     const capConfig = await readCapabilitiesConfig(projectRoot);
     const sourceNames = new Set(sourceSkills);
     const capSkillNames = new Set(
-      capConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe').map((c) => c.id) ?? [],
+      capConfig?.capabilities
+        .filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId)
+        .map((c) => c.id) ?? [],
     );
     const unregistered = sourceSkills.filter((n) => !capSkillNames.has(n));
     const phantom = [...capSkillNames].filter((n) => !sourceNames.has(n));
