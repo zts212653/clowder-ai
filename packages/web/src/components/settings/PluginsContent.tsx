@@ -1,6 +1,6 @@
 'use client';
 
-import type { PluginInfo, PluginStatus } from '@cat-cafe/shared';
+import type { PluginInfo } from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
@@ -15,14 +15,6 @@ import {
 import { PluginConfigPanel } from './PluginConfigPanel';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
-
-type BadgeTone = 'emerald' | 'amber' | 'slate' | 'red' | 'purple' | 'blue';
-const STATUS_CONFIG: Record<PluginStatus, { label: string; tone: BadgeTone }> = {
-  enabled: { label: '已启用', tone: 'emerald' },
-  configured: { label: '已配置', tone: 'amber' },
-  partial: { label: '部分启用', tone: 'amber' },
-  not_configured: { label: '未配置', tone: 'slate' },
-};
 
 const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
   id: 'github',
@@ -112,7 +104,6 @@ export function PluginsContent() {
   return (
     <div className="flex flex-col gap-3.5" data-testid="plugins-list">
       {plugins.map((plugin) => {
-        const statusCfg = STATUS_CONFIG[plugin.status];
         const isExpanded = expandedId === plugin.id;
         const isRuntimeEnabled = plugin.status === 'enabled' || plugin.status === 'partial';
         const showResourceToggle = plugin.resources.length > 0 && (plugin.configured || isRuntimeEnabled);
@@ -148,13 +139,11 @@ export function PluginsContent() {
                 </div>
               </button>
               <div className={settingsResourceActionGroupClass}>
-                {/* Show status badge only when toggle doesn't already communicate the state.
-                    "已配置"/"未配置" are informative; "已启用" is redundant with the toggle. */}
-                {!(showResourceToggle && isRuntimeEnabled) && (
-                  <SettingsBadge tone={statusCfg.tone} className="shrink-0 font-medium">
-                    {statusCfg.label}
-                  </SettingsBadge>
-                )}
+                {/* Config status badge — always visible, purely reflects whether
+                    credentials/config are present. Toggle independently shows on/off. */}
+                <SettingsBadge tone={plugin.configured ? 'amber' : 'slate'} className="shrink-0 font-medium">
+                  {plugin.configured ? '已配置' : '未配置'}
+                </SettingsBadge>
                 {showResourceToggle && (
                   <SettingsResourceToggleSwitch
                     enabled={isRuntimeEnabled}
