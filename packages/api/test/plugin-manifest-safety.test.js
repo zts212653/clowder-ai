@@ -1074,8 +1074,8 @@ describe('PluginResourceActivator skill safety', () => {
     assert.ok(existsSync(join(projectRoot, '.claude', 'skills', 'plugin-skill')));
     assert.ok(existsSync(join(projectRoot, '.codex', 'skills', 'plugin-skill')));
     assert.equal(persisted.capabilities[0].enabled, true);
-    // mountPaths cleared — addSkill defaults to all mount points
-    assert.equal(persisted.capabilities[0].mountPaths, undefined);
+    // F228: mountPaths is always explicit — re-enable resets to all active targets
+    assert.deepEqual(persisted.capabilities[0].mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
   });
 
   it('registers plugin skill but does not mount through provider skills root symlink', async () => {

@@ -93,7 +93,6 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
     }
   };
 
-  const isEnabled = plugin.status === 'enabled' || plugin.status === 'partial';
   const hasSteps = plugin.setupSteps && plugin.setupSteps.length > 0;
 
   return (
@@ -175,7 +174,7 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
       )}
 
       <div className="flex items-center justify-end gap-2">
-        {plugin.hasHealthCheck && isEnabled && (
+        {plugin.hasHealthCheck && (
           <button
             type="button"
             onClick={() => void handleTest()}

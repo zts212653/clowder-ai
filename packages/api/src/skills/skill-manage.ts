@@ -339,9 +339,16 @@ export async function addSkill(
   // never undefined. Each project (main or external) gets mountPaths derived from
   // its own mount rules; the caller (e.g. PluginResourceActivator) shouldn't need
   // to know per-project mount topology.
+  //
+  // Re-enable transition (disabled → enabled): reset mountPaths to all active targets
+  // rather than preserving stale mount restrictions from the disabled state. The old
+  // mountPaths were the state at disable-time and don't reflect the user's intent when
+  // they click "enable plugin".  Idempotent re-activation (already enabled) preserves
+  // the existing policy.
+  const wasDisabled = existing && existing.enabled === false;
   const effectiveMountPaths = opts.mountPaths
     ? [...opts.mountPaths]
-    : existing?.mountPaths?.length
+    : existing?.mountPaths?.length && !wasDisabled
       ? [...existing.mountPaths]
       : enabled
         ? activeMountTargets(projectRoot, mountRules).map((t) => t.id)

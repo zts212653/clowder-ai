@@ -101,7 +101,8 @@ export async function checkStaleness(
   const currentNames = await listSourceSkillNames(sourceRoot);
   const config = await readCapabilitiesConfig(configRoot);
   const managedNames =
-    config?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe').map((c) => c.id) ?? [];
+    config?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId).map((c) => c.id) ??
+    [];
 
   return {
     stale: syncState === null || syncState.sourceManifestHash !== currentHash,
