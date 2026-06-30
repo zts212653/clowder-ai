@@ -92,7 +92,7 @@ export interface SkillConfigStore {
  * governance registry. syncAll internally builds globalCustomSourceSkills
  * from the main config, so plugin skill sources resolve correctly.
  */
-async function cascadeToProjects(mainProjectRoot: string, catCafeSkillsSource: string): Promise<void> {
+export async function cascadeToProjects(mainProjectRoot: string, catCafeSkillsSource: string): Promise<void> {
   try {
     const cascadeMountRules = await readMountRules(mainProjectRoot, mainProjectRoot);
     await syncAll(mainProjectRoot, catCafeSkillsSource, {

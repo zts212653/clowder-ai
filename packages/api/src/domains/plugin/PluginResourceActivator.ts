@@ -18,7 +18,7 @@ import {
 } from '../../config/capabilities/capability-mcp-service.js';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import { addSkill, removeSkill } from '../../skills/skill-manage.js';
+import { addSkill, cascadeToProjects, removeSkill } from '../../skills/skill-manage.js';
 import { classifyMountPath } from '../../skills/skill-sync-engine.js';
 import { buildSkillMountTargets } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
@@ -323,6 +323,10 @@ export class PluginResourceActivator {
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
     const capId = resourceCapId(manifest.id, resource);
+    // Don't pass cascade to addSkill — cascade only after conflict validation
+    // passes.  If all mount points conflict the activator rolls back the config;
+    // cascading before that would propagate a doomed entry to external projects
+    // (Codex R4 P2).
     await this.deps.withCapabilityLock(async () => {
       const previousConfig = await this.deps.readCapabilities();
       const rollbackConfig = () =>
@@ -338,7 +342,6 @@ export class PluginResourceActivator {
             readCapabilities: this.deps.readCapabilities,
             writeCapabilities: this.deps.writeCapabilities,
           },
-          ...(this.deps.skillsSourceDir ? { cascade: { catCafeSkillsSource: this.deps.skillsSourceDir } } : {}),
         });
       } catch (err) {
         // addSkill writes config before mounting — roll back on mount throw
@@ -355,6 +358,10 @@ export class PluginResourceActivator {
         throw new Error(`All skill mount points conflict for plugin skill '${capId}': ${conflictPaths}`);
       }
     });
+    // Cascade after validation — config is confirmed, safe to propagate
+    if (this.deps.skillsSourceDir) {
+      await cascadeToProjects(projectRoot, this.deps.skillsSourceDir);
+    }
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -366,11 +373,17 @@ export class PluginResourceActivator {
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
     const capId = resourceCapId(manifest.id, resource);
 
+    // Derive skillsSource from resource path so removeSkill can unmount even
+    // for legacy entries that don't have skillsSource persisted (Codex R4 P2).
+    const skillSourceDir = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
+    const skillsSource = dirname(skillSourceDir);
+
     await this.deps.withCapabilityLock(() =>
       removeSkill(projectRoot, skillName, {
         mountRules,
         pluginId: manifest.id,
         capabilityId: capId,
+        skillsSource,
         configStore: {
           readCapabilities: this.deps.readCapabilities,
           writeCapabilities: this.deps.writeCapabilities,
