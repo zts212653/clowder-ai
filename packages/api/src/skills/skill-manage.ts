@@ -372,9 +372,12 @@ export async function addSkill(
   }
   await writeCapabilitiesWithRollback(store, previous, config);
 
-  // 2. Mount symlinks
+  // 2. Mount symlinks — use effectiveMountPaths (not opts.mountPaths) so the
+  // filesystem matches the config entry written above.  opts.mountPaths is the
+  // raw caller input and may be undefined, which would mount everywhere even
+  // when the effective policy restricts to a subset (Codex R3 P2).
   const result: SkillOperationResult = enabled
-    ? await mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, opts.mountPaths)
+    ? await mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, effectiveMountPaths)
     : { mounted: [], unmounted: [], conflicts: [] };
 
   // 3. Cascade to governance-registered projects (non-critical)
