@@ -33,6 +33,14 @@ const otelProvider = new NodeTracerProvider({
 });
 otelProvider.register();
 
+/** PR-O3: valid waitSourceRef fixture — wakeAfterMs now requires waitSourceRef. */
+const VALID_WAIT_SOURCE_REF = {
+  kind: 'github_issue',
+  value: 'test/c1-sample',
+  expectedSignal: 'test completion',
+  slaUntilMs: 3_600_000,
+};
+
 describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06-12 build verdict)', () => {
   let registry;
   let threadStore;
@@ -132,7 +140,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000 },
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r1.statusCode, 200);
     const firstTaskId = JSON.parse(r1.body).taskId;
@@ -145,7 +153,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000 },
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r2.statusCode, 200);
     const secondTaskId = JSON.parse(r2.body).taskId;
@@ -200,7 +208,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'first', nextStep: 'continue', wakeAfterMs: 10_000 },
+      payload: { reason: 'first', nextStep: 'continue', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r.statusCode, 200);
 
@@ -220,7 +228,12 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'long-wait', nextStep: 'await-external', wakeAfterMs: 30 * 60_000 },
+      payload: {
+        reason: 'long-wait',
+        nextStep: 'await-external',
+        wakeAfterMs: 30 * 60_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
     });
 
     otelExporter.reset();
@@ -229,7 +242,7 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'new-wait', nextStep: 'pivot', wakeAfterMs: 60_000 },
+      payload: { reason: 'new-wait', nextStep: 'pivot', wakeAfterMs: 60_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
 
     const sampleSpan = otelExporter
@@ -256,14 +269,14 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000 },
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     otelExporter.reset();
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000 },
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
 
     const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');
@@ -287,14 +300,14 @@ describe('F192 D — C1 zombie-hold per-fire sample span event (eval:a2a 2026-06
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000 },
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 5_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     otelExporter.reset();
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000 },
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 60_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
 
     const sampleSpan = otelExporter.getFinishedSpans().find((s) => s.name === 'cat_cafe.a2a.c1.hold_zombie_sample');

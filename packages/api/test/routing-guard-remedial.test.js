@@ -98,4 +98,14 @@ describe('F177 Phase H — buildRemedialPrompt', () => {
     assert.match(p, /@co-creator/);
     assert.match(p, /不要重做/);
   });
+
+  // F167 Phase P fix: remedial prompt must steer "等人" to @co-creator/@句柄, NOT hold_ball.
+  test('等co-creator/等猫回复 明确指向 @co-creator/@句柄 而非 hold_ball（Phase P 双触发修复）', () => {
+    const p = buildRemedialPrompt();
+    assert.match(p, /等co-creator/);
+    // 等人 bullet explicitly tells the cat NOT to hold_ball
+    assert.match(p, /等co-creator[^\n]*不要 hold_ball/);
+    // hold_ball option is scoped to 无回调 external conditions (not 等人)
+    assert.match(p, /无回调/);
+  });
 });

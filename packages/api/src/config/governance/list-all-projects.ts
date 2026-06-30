@@ -45,7 +45,7 @@ const SAFETY_MAX_DEPTH = 20;
  * List all project paths that have project-scoped capabilities.json,
  * excluding catCafeRoot itself.
  *
- * @param catCafeRoot - The main Cat Cafe project root
+ * @param catCafeRoot - The main Clowder AI project root
  * @param opts.maxScanDepth - Max directory depth for nested scan (default: 20).
  *   This is a safety valve, not a semantic bound — validateProjectPath()
  *   imposes no depth limit, and this scanner should match that behavior.

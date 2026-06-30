@@ -15,6 +15,7 @@
  * Split from anchor-telemetry.ts (cloud R3 P1: 350-line file cap).
  */
 
+import { type AnchorAdoptionRollup, summarizeAdoption } from './anchor-adoption-rollup.js';
 import type { AnchorDrillTool, AnchorPreviewTool, AnchorTelemetrySnapshot } from './anchor-telemetry.js';
 import { getAnchorTelemetrySnapshot } from './anchor-telemetry.js';
 
@@ -24,12 +25,27 @@ const EVICTION_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 export interface AnchorPreviewEventInput {
   tool: AnchorPreviewTool;
-  /** Item IDs (messageId / taskId) surfaced in this preview response. */
+  /** Item IDs (messageId / taskId) surfaced in this preview response; may be empty for zero-result calls. */
   itemIds: string[];
   /** Total chars of the returned (anchored/preview) payload. */
   returnedChars: number;
   /** Total chars of the original (full) payload before anchor truncation. */
   originalChars: number;
+  /**
+   * F236 Track-1 adoption eval: resolved response mode after default fallback.
+   * 'anchor' = token-lean preview (default), 'full' = complete bodies.
+   */
+  modeResolved?: 'anchor' | 'full';
+  /**
+   * F236 Track-1 adoption eval: how the mode was determined.
+   * 'explicit' = cat passed responseMode param.
+   * 'default' = fell through to anchor (no explicit param).
+   * 'legacy_equivalent' = cat used a pre-existing equivalent control
+   *   (e.g. get_message mode=preview, search_evidence depth=summary).
+   */
+  modeSource?: 'explicit' | 'default' | 'legacy_equivalent';
+  /** F236 Track-1 adoption eval: which cat made this call. */
+  catId?: string;
   /** Test-only: override timestamp for deterministic eviction tests. */
   _testTimestamp?: number;
 }
@@ -42,6 +58,12 @@ export interface AnchorPreviewEvent {
   itemCount: number;
   returnedChars: number;
   originalChars: number;
+  /** F236 Track-1 adoption eval: resolved response mode. */
+  modeResolved?: 'anchor' | 'full';
+  /** F236 Track-1 adoption eval: how the mode was determined. */
+  modeSource?: 'explicit' | 'default' | 'legacy_equivalent';
+  /** F236 Track-1 adoption eval: which cat made this call. */
+  catId?: string;
 }
 
 export interface AnchorDrillEventInput {
@@ -50,6 +72,8 @@ export interface AnchorDrillEventInput {
   itemId: string;
   /** Total chars served in the full drill response. */
   fullDrillChars: number;
+  /** True when the drilled file was modified since it was anchored (stale content). */
+  stale?: boolean;
   /** Test-only: override timestamp for deterministic eviction tests. */
   _testTimestamp?: number;
 }
@@ -60,6 +84,8 @@ export interface AnchorDrillEvent {
   tool: AnchorDrillTool;
   itemId: string;
   fullDrillChars: number;
+  /** True when the drilled file was modified since it was anchored. */
+  stale?: boolean;
 }
 
 // --- Track-2 internal state (ring buffer) ---
@@ -84,11 +110,10 @@ function evictOldDrillEvents(): void {
 
 /**
  * Record a per-response preview event with correlation keys.
+ * Empty itemIds still matter for adoption; item-level open-rate just gets no join keys.
  * Evicts events older than 24h before appending (INV-2).
  */
 export function recordAnchorPreviewEvent(input: AnchorPreviewEventInput): void {
-  // Cloud R5 P2: empty polls (0 items) create rollup noise — skip silently.
-  if (input.itemIds.length === 0) return;
   evictOldPreviewEvents();
   const event: AnchorPreviewEvent = {
     id: String(++eventCounter),
@@ -98,6 +123,10 @@ export function recordAnchorPreviewEvent(input: AnchorPreviewEventInput): void {
     itemCount: input.itemIds.length,
     returnedChars: input.returnedChars,
     originalChars: input.originalChars,
+    // F236 Track-1 adoption eval fields (gpt52 R1 P1/P2 fix)
+    ...(input.modeResolved ? { modeResolved: input.modeResolved } : {}),
+    ...(input.modeSource ? { modeSource: input.modeSource } : {}),
+    ...(input.catId ? { catId: input.catId } : {}),
   };
   previewEvents.push(event);
 }
@@ -114,6 +143,7 @@ export function recordAnchorDrillEvent(input: AnchorDrillEventInput): void {
     tool: input.tool,
     itemId: input.itemId,
     fullDrillChars: input.fullDrillChars,
+    ...(input.stale ? { stale: true } : {}),
   };
   drillEvents.push(event);
 }
@@ -156,6 +186,8 @@ export interface AnchorTelemetryRollup {
   perTool: Record<string, AnchorToolRollup>;
   /** Drills whose itemId matched no preview event in the window. */
   orphanDrills: number;
+  /** Adoption lens for cat-controlled mode, including full-mode calls. */
+  adoption: AnchorAdoptionRollup;
   /** Track-1 aggregate snapshot included for cross-reference. */
   track1Snapshot: AnchorTelemetrySnapshot;
 }
@@ -176,9 +208,14 @@ export interface AnchorRollupWindow {
  *  4. Compute per-tool stats including double-sided net benefit.
  */
 export function getAnchorTelemetryRollup(window: AnchorRollupWindow): AnchorTelemetryRollup {
-  const windowPreviews = previewEvents.filter(
+  const allWindowPreviews = previewEvents.filter(
     (e) => e.timestamp >= window.windowStartMs && e.timestamp < window.windowEndMs,
   );
+  // F236 Track-1 (gpt52 R2 P1): exclude full-mode events from savings/open-rate rollup.
+  // Full-mode returns complete bodies (returnedChars ≈ originalChars, charsSaved ≈ 0),
+  // counting them would dilute anchor savings metrics and sunset judgments.
+  // Full-mode events remain in the event log for adoption-eval queries.
+  const windowPreviews = allWindowPreviews.filter((e) => e.modeResolved !== 'full');
   const windowDrills = drillEvents.filter(
     (e) => e.timestamp >= window.windowStartMs && e.timestamp < window.windowEndMs,
   );
@@ -292,6 +329,7 @@ export function getAnchorTelemetryRollup(window: AnchorRollupWindow): AnchorTele
   return {
     perTool,
     orphanDrills,
+    adoption: summarizeAdoption(allWindowPreviews),
     track1Snapshot: getAnchorTelemetrySnapshot(),
   };
 }

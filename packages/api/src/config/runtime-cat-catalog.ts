@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
   CatBreed,
@@ -18,6 +18,7 @@ import type { AcpVariantConfig } from './cat-config-loader.js';
 import { _resetCachedConfig, loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { clearVoiceCache } from './cat-voices.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
+import { addTemplateVariantTombstone, type TemplateVariantTombstoneInput } from './template-variant-tombstones.js';
 
 export interface RuntimeCatInput {
   catId: string;
@@ -39,7 +40,9 @@ export interface RuntimeCatInput {
   clientId: ClientId;
   defaultModel: string;
   mcpSupport: boolean;
-  cli: CliConfig;
+  /** F247 KD-17: cloud-only cats (Remote MCP) omit cli to skip local dispatch.
+   * When cli is absent, mention routing queues the mention without spawning a CLI. */
+  cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget;
@@ -68,7 +71,8 @@ export interface RuntimeCatUpdate {
   clientId?: ClientId;
   defaultModel?: string;
   mcpSupport?: boolean;
-  cli?: CliConfig;
+  /** F247 KD-17: cli null to remove (cloud-only mode), CliConfig to update, undefined to skip. */
+  cli?: CliConfig | null;
   commandArgs?: string[];
   cliConfigArgs?: string[];
   contextBudget?: ContextBudget | null;
@@ -112,6 +116,46 @@ function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): 
     .filter((pattern) => pattern.length > 0)
     .map((pattern) => (pattern.startsWith('@') ? pattern : `@${pattern}`));
   return Array.from(new Set(values));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function findTemplateVariantTombstoneInput(projectRoot: string, catId: string): TemplateVariantTombstoneInput | null {
+  let templateRaw: string;
+  try {
+    templateRaw = readFileSync(resolveProjectTemplatePath(projectRoot), 'utf-8');
+  } catch {
+    return null;
+  }
+
+  let templateJson: unknown;
+  try {
+    templateJson = JSON.parse(templateRaw);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(templateJson) || !Array.isArray(templateJson.breeds)) return null;
+  for (const breedUnknown of templateJson.breeds) {
+    if (!isRecord(breedUnknown)) continue;
+    if (typeof breedUnknown.id !== 'string') continue;
+    const breedCatId = typeof breedUnknown.catId === 'string' ? breedUnknown.catId : undefined;
+    const variants = Array.isArray(breedUnknown.variants) ? breedUnknown.variants : [];
+    for (const variantUnknown of variants) {
+      if (!isRecord(variantUnknown)) continue;
+      if (typeof variantUnknown.id !== 'string') continue;
+      const resolvedCatId = typeof variantUnknown.catId === 'string' ? variantUnknown.catId : breedCatId;
+      if (resolvedCatId !== catId) continue;
+      return {
+        breedId: breedUnknown.id,
+        variantId: variantUnknown.id,
+        catId: resolvedCatId,
+      };
+    }
+  }
+  return null;
 }
 
 function readOrBootstrapCatalog(projectRoot: string): CatCafeConfig {
@@ -223,7 +267,8 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           : {}),
         defaultModel: input.defaultModel,
         mcpSupport: input.mcpSupport,
-        cli: input.cli,
+        // F247 KD-17: omit cli for cloud-only cats (Remote MCP, no local dispatch).
+        ...(input.cli ? { cli: input.cli } : {}),
         ...(input.accountRef != null && input.accountRef.trim().length > 0
           ? { accountRef: input.accountRef.trim() }
           : {}),
@@ -402,7 +447,14 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   if (patch.clientId !== undefined) variant.clientId = patch.clientId;
   if (patch.defaultModel !== undefined) variant.defaultModel = patch.defaultModel;
   if (patch.mcpSupport !== undefined) variant.mcpSupport = patch.mcpSupport;
-  if (patch.cli !== undefined) variant.cli = patch.cli;
+  // F247 KD-17: patch.cli === null means remove (cloud-only mode); object means update.
+  if (patch.cli !== undefined) {
+    if (patch.cli === null) {
+      delete variant.cli;
+    } else {
+      variant.cli = patch.cli;
+    }
+  }
   if (patch.contextBudget !== undefined) {
     if (patch.contextBudget) {
       variant.contextBudget = patch.contextBudget;
@@ -532,6 +584,7 @@ export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeCon
   if (!located) {
     throw new Error(`Cat "${catId}" not found in runtime catalog`);
   }
+  const templateVariantTombstoneInput = findTemplateVariantTombstoneInput(projectRoot, catId);
   const breed = catalog.breeds[located.breedIndex] as Record<string, any>;
   if (breed.variants.length === 1) {
     catalog.breeds = catalog.breeds.filter((_: unknown, index: number) => index !== located.breedIndex);
@@ -546,6 +599,10 @@ export function deleteRuntimeCat(projectRoot: string, catId: string): CatCafeCon
     const nextRoster = { ...catalog.roster };
     delete nextRoster[catId];
     catalog.roster = nextRoster;
+  }
+
+  if (templateVariantTombstoneInput) {
+    addTemplateVariantTombstone(catalog as Record<string, unknown>, templateVariantTombstoneInput);
   }
 
   return writeAndValidateCatalog(projectRoot, catalog);

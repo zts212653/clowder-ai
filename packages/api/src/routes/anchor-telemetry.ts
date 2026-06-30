@@ -37,8 +37,18 @@ import {
   anchorReturnedCount,
 } from '../infrastructure/telemetry/instruments.js';
 
-/** A preview-returning anchor tool. Bounded set keeps the metric label safe. */
-export type AnchorPreviewTool = 'pending-mentions' | 'thread-context' | 'list-tasks';
+/**
+ * A preview-returning anchor tool. Bounded set keeps the metric label safe.
+ * F236 Phase C: 'cc-read' | 'cc-grep' | 'cc-glob' for cc native tool anchor化.
+ */
+export type AnchorPreviewTool =
+  | 'pending-mentions'
+  | 'thread-context'
+  | 'list-tasks'
+  | 'get-message'
+  | 'cc-read'
+  | 'cc-grep'
+  | 'cc-glob';
 
 export interface AnchorReturnedRecord {
   /** Which preview read-tool returned the payload. */
@@ -49,14 +59,15 @@ export interface AnchorReturnedRecord {
 
 /**
  * A full-drill anchor tool — serves the FULL body (not a preview):
- * `get-message` (mode=full) and `list-tasks` (taskId → that task's full why).
+ * MCP tools: `get-message` (mode=full) and `list-tasks` (taskId → full why).
+ * cc native tools: `cc-read` / `cc-grep` / `cc-glob` (bounded Read pass-through
+ * after an anchor preview — cat follows a locator with offset/limit drill).
  * Recording these under drill volume (NOT preview-return volume) keeps the
- * per-tool request/response volume accounting honest: a `list-tasks?taskId`
- * full-why response is a drill-volume response, not a preview-volume response.
- * (This is volume categorization, not a drill/preview open-rate split — open-rate
- * is Track-2's scope, see module docstring.)
+ * per-tool request/response volume accounting honest.
+ * (Volume categorization, not drill/preview open-rate split — open-rate is
+ * Track-2's scope, see module docstring.)
  */
-export type AnchorDrillTool = 'get-message' | 'list-tasks';
+export type AnchorDrillTool = 'get-message' | 'list-tasks' | 'cc-read' | 'cc-grep' | 'cc-glob';
 
 export interface AnchorFullDrillRecord {
   /** Which tool served the full drill. */

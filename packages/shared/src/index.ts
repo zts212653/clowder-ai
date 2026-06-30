@@ -15,8 +15,13 @@ export * from './capability-tips.js';
 export * from './cli-effort.js';
 // Export command parser + core commands (F142 Phase B)
 export { parseCommand } from './command-parser.js';
-export type { CodexPetState, PetStateProjection } from './concierge/pet-skin-projection.js';
-// Export PetSkinContract projection (F229 Phase E0 + E1)
+export type {
+  AutonomousPetState,
+  CodexPetState,
+  PetBehaviorOutput,
+  PetStateProjection,
+} from './concierge/pet-skin-projection.js';
+// Export PetSkinContract projection (F229 Phase E0 + E1 + E4)
 export {
   PET_STATE_PROJECTION_V0,
   PET_STATE_PROJECTION_V1,

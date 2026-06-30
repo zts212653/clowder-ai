@@ -28,6 +28,34 @@ export interface ConciergeConfig {
   muted: boolean;
   /** 球位置 (PR-A3b INV-P3: per-user 持久化) — null = default bottom-right */
   ballPosition: { x: number; y: number } | null;
+  /** 球大小 (E3: per-user 持久化, 48-192px) — undefined/null = BALL_SIZE_DEFAULT */
+  ballSize?: number;
+  /** 自主行为引擎开关 (E4, default true). When false, cat stays in business-projected state. */
+  behaviorEnabled?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Ball size constants (E3: resizable ball)
+// ---------------------------------------------------------------------------
+
+/** Minimum ball size — "pocket cat" (48px). Any smaller loses icon readability. */
+export const BALL_SIZE_MIN = 48;
+
+/** Maximum ball size — matches native sprite atlas resolution (192×208 cells). */
+export const BALL_SIZE_MAX = 192;
+
+/** Default ball size — legacy BALL_SIZE constant (72px squircle). */
+export const BALL_SIZE_DEFAULT = 72;
+
+/**
+ * Clamp and sanitize a ballSize value.
+ * Returns BALL_SIZE_DEFAULT for undefined/null/NaN, rounds to integer,
+ * and clamps to [BALL_SIZE_MIN, BALL_SIZE_MAX].
+ */
+export function clampBallSize(size: number | null | undefined): number {
+  if (size == null || Number.isNaN(size)) return BALL_SIZE_DEFAULT;
+  const rounded = Math.round(size);
+  return Math.max(BALL_SIZE_MIN, Math.min(BALL_SIZE_MAX, rounded));
 }
 
 /** ConciergeConfig 默认值（dutyCatProfileId 由 API 层根据 roster 解析） */
@@ -39,6 +67,8 @@ export const CONCIERGE_CONFIG_DEFAULTS: Omit<ConciergeConfig, 'dutyCatProfileId'
   proactivePolicy: 'quiet-badge',
   muted: false,
   ballPosition: null,
+  ballSize: BALL_SIZE_DEFAULT,
+  behaviorEnabled: true,
 };
 
 /**

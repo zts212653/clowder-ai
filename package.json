@@ -48,8 +48,9 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "lint": "pnpm -r run lint",
-    "check": "pnpm biome check . --diagnostic-level=error && pnpm check:features && pnpm check:capability-tips && pnpm check:sop-definitions && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:pre-merge-gate && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only",
+    "check": "pnpm biome check . --diagnostic-level=error && pnpm check:biome-review-worktrees && pnpm check:features && pnpm check:capability-tips && pnpm check:sop-definitions && pnpm check:skills:manifest && pnpm check:skills:surfaces && pnpm check:env-ports && pnpm check:env-registry && pnpm check:env-example && pnpm check:start-profile-isolation && pnpm check:pre-merge-gate && pnpm check:guides && pnpm check:followup-tails && pnpm check:scripts-ascii-only",
     "video:new": "node scripts/video-forge/new-project.mjs",
+    "check:biome-review-worktrees": "node --test scripts/biome-review-worktrees-ignore.test.mjs",
     "check:video-new": "node --test test/scripts/video-new-project.test.mjs",
     "check:scripts-ascii-only": "node scripts/check-scripts-ascii-only.mjs",
     "check:guides": "node scripts/gen-guide-catalog.mjs",
@@ -89,7 +90,7 @@
     "clean": "pnpm -r run clean && rm -rf node_modules",
     "check:start-profile-isolation": "node --test scripts/start-dev-profile-isolation.test.mjs",
     "check:brand-dictionary": "node --test scripts/brand-dictionary-helper.test.mjs",
-    "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs"
+    "check:brand-guard": "node --test scripts/intake-from-opensource.test.mjs scripts/lib/intake-gh-retry.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.1",
@@ -102,5 +103,10 @@
     "node": ">=24.0.0",
     "pnpm": ">=8.0.0"
   },
-  "packageManager": "pnpm@9.15.4"
+  "packageManager": "pnpm@9.15.4",
+  "gate": {
+    "autoFixAllowlist": [
+      "biome"
+    ]
+  }
 }

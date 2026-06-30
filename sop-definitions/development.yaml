@@ -42,13 +42,21 @@ stages:
           key: REDIS_URL
           must_include: ":6398"
           must_not_include: ":6399"
-    pitfalls:
       - id: impl-design-gate-before-code
-        text: 跳过 Design Gate 直接写代码
-        severity: warn
+        text: 跳过 Design Gate（含 User Journey 落盘）直接写代码
+        severity: blocker
         predicate:
           type: manual_only
-          reason: Design Gate evidence is feature-specific and not yet represented by a structured artifact.
+          reason: Design Gate evidence and User Journey section are feature-doc fields; upgrade to feature_doc_readiness_check when checker script is available.
+          future_candidate: feature_doc_readiness_check
+      - id: impl-user-journey-missing
+        text: 用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）
+        severity: blocker
+        predicate:
+          type: command_pattern
+          must_match: pnpm check:features|node scripts/check-feature-truth
+          reason: "check-feature-truth.mjs now checks changed feature docs for ## User Journey presence. F252 root cause — session vs thread scope mismatch went undetected because journey was never written down."
+    pitfalls:
       - id: impl-post-compact-recall-loss
         text: 压缩后忘了当前在做什么
         severity: warn
@@ -82,6 +90,19 @@ stages:
         predicate:
           type: command_pattern
           must_match: pnpm gate|pnpm test|pnpm --filter .* test|node --test
+
+  - id: fresh_context
+    label: Fresh-Context Pre-Review
+    suggested_skill: fresh-context-review
+    optional: true
+    hard_rules: []
+    pitfalls:
+      - id: fresh-context-not-approval
+        text: Fresh-context 是 finding generator，不是 approval authority——不产出 verdict，不记入 Review Provenance Matrix
+        severity: warn
+        predicate:
+          type: manual_only
+          reason: Fresh-context output is free-form finding list, not a structured verdict event.
 
   - id: review
     label: Review
@@ -129,6 +150,13 @@ stages:
         predicate:
           type: sha_dedup
           scope: cloud_review
+      - id: merge-feature-doc-truth
+        text: merge 前核对 feature doc 是否说真话（Status/AC/Phase vs 代码现实），merge 后记录已合入状态
+        severity: blocker
+        predicate:
+          type: manual_only
+          reason: Claimed-done vs code-real reconciliation is semantic; check-feature-truth mechanically guards only obvious status/timeline drift. Detailed pre/post steps live in merge-gate SKILL Step 7.5.
+          future_candidate: feature_doc_truth_check
     pitfalls:
       - id: merge-local-squash-close
         text: 本地 squash + push + gh pr close（PR 显示 closed 不是 merged）

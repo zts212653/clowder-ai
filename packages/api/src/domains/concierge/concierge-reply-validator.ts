@@ -66,38 +66,32 @@ type ActionVerb = '跳过去' | '原地看';
  * Resolve the actual action type and display verb, auto-correcting when the
  * duty cat picked the wrong verb for the anchor's capabilities.
  *
- * BUG-UX-9 root cause: small duty cats (gemini-3.5-flash) default to [原地看 Rn]
- * for everything. Without auto-correction, peek on a thread-without-messageId
- * was silently dropped → user sees no button at all.
+ * BUG-UX-12: thread anchors → ALWAYS teleport, regardless of what the duty cat
+ * requested or whether the anchor has a messageId. Concierge actions pointing to
+ * threads are semantically jumps — "原地看" confuses users.
+ * (operator feedback: "这些按钮本质的含义不是跳转吗？！")
  *
- * Auto-correction rules:
- * - peek requested but no messageId + thread type → convert to teleport
- * - teleport requested but non-thread type + has messageId → convert to peek
- * - neither correction possible → null (truly incompatible, fail-closed)
+ * Resolution rules:
+ * - thread type → always teleport (BUG-UX-12, supersedes BUG-UX-9 partial fix)
+ * - non-thread → null (fail-closed: frontend can only navigate to real threadIds)
+ *
+ * Note: MARKER_PATTERN still parses [原地看 Rn] for backward compat (old stored
+ * messages, non-compliant models), but resolveAction auto-corrects all thread
+ * markers to teleport. Non-thread anchors are consistently unactionable — matching
+ * buildConciergeActions fallback behavior (L197: `if (anchor.type !== 'thread') continue`).
  */
 function resolveAction(
-  requestedType: 'concierge_teleport' | 'concierge_peek',
+  _requestedType: 'concierge_teleport' | 'concierge_peek',
   anchor: { messageId?: string; type: string },
 ): { actionType: 'concierge_teleport' | 'concierge_peek'; displayVerb: ActionVerb } | null {
-  // Happy path: requested action is compatible with anchor
-  if (requestedType === 'concierge_teleport' && anchor.type === 'thread') {
-    return { actionType: 'concierge_teleport', displayVerb: '跳过去' };
-  }
-  if (requestedType === 'concierge_peek' && anchor.messageId) {
-    return { actionType: 'concierge_peek', displayVerb: '原地看' };
-  }
-
-  // Auto-correct: peek on thread without messageId → teleport
-  if (requestedType === 'concierge_peek' && !anchor.messageId && anchor.type === 'thread') {
+  // BUG-UX-12: thread anchors → always teleport
+  if (anchor.type === 'thread') {
     return { actionType: 'concierge_teleport', displayVerb: '跳过去' };
   }
 
-  // Auto-correct: teleport on non-thread with messageId → peek
-  if (requestedType === 'concierge_teleport' && anchor.type !== 'thread' && anchor.messageId) {
-    return { actionType: 'concierge_peek', displayVerb: '原地看' };
-  }
-
-  // Truly incompatible (non-thread without messageId) → fail-closed
+  // Non-thread anchors are not navigable — frontend can only route to real threadIds.
+  // Returning peek here would cause handleTeleport to navigate to e.g. /thread/feature:F229
+  // which is invalid. Consistent with buildConciergeActions fallback which also skips non-thread.
   return null;
 }
 
@@ -202,6 +196,7 @@ export async function buildConciergeActions(
   const actions: ConciergeAction[] = [];
   for (const { anchor } of handles) {
     if (anchor.type !== 'thread') continue; // only real threads are navigable
+    // BUG-UX-12: only teleport for thread anchors — no peek buttons
     actions.push({
       action: 'concierge_teleport',
       label: `跳过去：${anchor.title}`,
@@ -210,13 +205,6 @@ export async function buildConciergeActions(
         ...(anchor.messageId != null ? { messageId: anchor.messageId } : {}),
       },
     });
-    if (anchor.messageId) {
-      actions.push({
-        action: 'concierge_peek',
-        label: `原地看：${anchor.title}`,
-        payload: { threadId: anchor.threadId, messageId: anchor.messageId },
-      });
-    }
   }
   return actions.slice(0, FALLBACK_MAX_ACTIONS);
 }

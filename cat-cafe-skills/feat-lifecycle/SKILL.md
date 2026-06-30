@@ -75,7 +75,7 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
    **从标准模板创建**：复制 `cat-cafe-skills/refs/feature-doc-template.md` 中「模板正文」部分，替换占位符（`{NNN}`/`{Feature Name}`/`{YYYY-MM-DD}` 等）。模板包含 Dashboard parser 所需的全部硬性格式。
 
-   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + Current State + What + AC + Dependencies 必须保留（全新能力的 Current State 写 "N/A（无既有基线）"，不是删段）。
+   轻量 Feature（≤1 Phase）可省略 Timeline/Review Gate/Links/Key Decisions，但 Frontmatter + Status 行 + Why + Current State + What + User Journey（或 `user_journey_exempt`）+ AC + Dependencies 必须保留（全新能力的 Current State 写 "N/A（无既有基线）"，不是删段）。
 
    并在 spec 中补一节：`## 需求点 Checklist`（模板见 `cat-cafe-skills/refs/requirements-checklist-template.md`）
 
@@ -144,12 +144,13 @@ Step 2 写完 spec，Why / 现状 / AC 逐条过这道自检：
 
 **讨论结束必须做**：
 1. 落盘到 `feature-discussions/YYYY-MM-DD-{topic}/README.md`（含operator experience、决策过程、优先级排序）
-2. ROADMAP.md 该 Feature 行 ref 讨论文档链接
-3. Commit：`docs: {topic} discussion + backlog update [{猫猫签名}]`
+2. **回填 User Journey 到 spec**（F252 教训 🔴）：Discussion 中operator口述的用户旅程期望，必须回填到 feature doc 的 `## User Journey` 段。讨论落盘 ≠ spec 记录——reviewer 冷启动读 spec，不读 discussion 记录。
+3. ROADMAP.md 该 Feature 行 ref 讨论文档链接
+4. Commit：`docs: {topic} discussion + backlog update [{猫猫签名}]`
 
 ## Design Gate (设计确认) 🔴
 
-**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准开 worktree。**
+**Discussion → writing-plans 之间的必经关卡。UX 没确认，不准开 worktree。User Journey 没落盘，不准过 Design Gate。**
 
 按功能类型分流确认：
 
@@ -168,6 +169,18 @@ Step 2 写完 spec，Why / 现状 / AC 逐条过这道自检：
 4. 把发现记录到 Design Gate 讨论里（避免重复造轮子）
 
 详见 `shared-rules.md` §13 元思考触发器。先搜现状，再开讨论。
+
+**User Journey 前置门禁（F252 教训）🔴**：
+
+涉及用户可感知变化的 Feature，Design Gate 前 spec 的 `## User Journey` 段必须已落盘，否则 **Design Gate 不放行**。
+
+| 检查项 | 必须 | 说明 |
+|--------|------|------|
+| `## User Journey` 段存在 | ✅ | 非 exempt feature 不能缺段 |
+| Primary Journey 有 `Scope unit` | ✅ | 防 F252 的 session/thread/feature 搞混 |
+| Flow 用用户语言 | ✅ | "点击 thread 标题看回放"，不是"调用 StoryPlayer.replay()" |
+| operator口述期望已回填 | ✅ | Discussion 落盘 ≠ spec 记录（F252 直接原因） |
+| 非用户可感知 | — | 写 `user_journey_exempt: {reason}`，不能靠缺段默认跳过 |
 
 **架构归属一问（F191）🔴**：
 
@@ -264,6 +277,23 @@ harness / skill / MCP / shared-rules 类 feature 的 spec **必须含 `## Eval /
 **Step 0: 愿景对照（必须先做，不可跳过）🔴**
 
 AC 全打勾 ≠ 完成（F041 教训：12 项 AC ✅ 但 UI 不可用）。先读原始 Discussion/Interview，自问三个问题：① operator最初要解决的核心问题？② 交付物解决了吗？③ operator用这个功能体验如何？
+
+**User Journey 逐步验收（F252 教训）🔴**：
+
+涉及用户可感知变化的 Feature，愿景守护时必须**按 spec 的 User Journey 逐步走一遍**：
+1. 按 Primary Journey 的 Flow，从 Entry 开始逐步操作
+2. 每步截图对照 spec 描述（截图放 `project-evidence/`）
+3. Scope unit 是否正确（F252 根因：session vs thread 搞混）
+4. Non-goals 是否被误实现
+5. 任一步走不通 → BLOCKED，踢回修改
+
+User Journey 验收表（守护猫必须输出）：
+
+```markdown
+| Journey | 步骤 | Spec 描述 | 实际行为 | 截图 | 匹配？ |
+|---------|------|-----------|---------|------|--------|
+| Primary | Step 1 | "从 thread 列表点击回放" | [截图] | evidence/... | ✅/❌ |
+```
 
 **愿景守护证物对照表（F114 Gate — 缺表 = BLOCKED）**：
 
@@ -402,7 +432,25 @@ AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
 
 **Step 5**: 真相源同步 — 所有关联文档 `feature_ids` 正确；Links 章节无遗漏
 
-**Step 6**: Commit：`docs(Fxxx): mark feature as done [{猫猫签名}]`，body 含 What/Why/Evolved from
+**Step 5.5: Feature truth close evidence（F253 教训）🔴**
+
+在 Status→done、BACKLOG 移除、README completed、reflection、CloseGateReport 全部写完后，必须运行：
+
+```bash
+pnpm check:features
+```
+
+`PASS check-feature-truth` 是 feature close 的硬证据；失败则不能 close，先修真相源再提交。尤其要防：
+
+- `[backlog-active] BACKLOG contains Fxxx, but all records are done`：Step 4 漏移除 BACKLOG
+- `[backlog-missing] Active feature Fxxx is missing from BACKLOG`：active/done 状态和热层不一致
+- `[doc-status-drift]`：Status 行和 Timeline merged 记录互相打架
+
+**不要自动改 BACKLOG**：BACKLOG 是手写策展热层，机器只能报错，不能替猫判断 done/active。`check-feature-truth` 已经每次从 feature docs fresh-generate index 到 tempdir；不需要额外"自动重生成 index"兜底。
+
+**暂不做 diff-scope 降级**：feature truth 红灯代表共享真相源会误导所有猫，优先全局修正；若未来 unrelated blocker 成本持续过高，再单独评估 per-feature close checker 或 owner 指针，不在 close 流程里静默放过红灯。
+
+**Step 6**: Commit：`docs(Fxxx): mark feature as done [{猫猫签名}]`，body 含 What/Why/Evolved from + `pnpm check:features` PASS 摘要
 
 ## Quick Reference
 
@@ -411,7 +459,7 @@ AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
 | Kickoff | 分 ID → 聚合文件 → BACKLOG → 双向链接 | `docs/features/Fxxx.md` |
 | Discussion | 采访/开放 → 落盘 → BACKLOG ref | `feature-discussions/` |
 | **Design Gate** | **分流 → 确认（UX→operator/后端→猫猫/架构→两边）** | `feature-discussions/{date}-{fid}-design/` |
-| Completion | 愿景对照 → 跨猫验证 → 更新状态 → 移出 BACKLOG | `docs/features/Fxxx.md` |
+| Completion | 愿景对照 → 跨猫验证 → 更新状态 → 移出 BACKLOG → `pnpm check:features` PASS | `docs/features/Fxxx.md` |
 
 ## Common Mistakes
 
@@ -431,10 +479,11 @@ AC-A5 ❌ unmet → delete(why: 经评估不属于 MVP scope)
 | 等 feat close 才补 Phase 进度 | merge-gate Step 7.5 每次 merge 实时同步（Phase ✅ + AC + Timeline） |
 | 社区 issue 批量打 feature 标签不逐个审核 | 每个 issue 必须过 Step 0 关联检测（F114/F115/F116 教训） |
 | 社区 feature 只在开源仓打标签，BACKLOG 不同步 | ROADMAP.md 必须同步加 Source=community 条目 |
+| Status 标 done 后没跑 feature truth gate | close 前必须跑 `pnpm check:features`，PASS 才能提交 |
 
 ## 下一步
 
 - Kickoff 后 → **Design Gate**（按类型分流确认）→ `writing-plans`
-- 开发完成后 → `quality-gate` → `request-review`
+- 开发完成后 → `quality-gate` → [`fresh-context-review`] → `request-review`
 - Review 通过后 → `merge-gate`（合入）→ 回来用 completion 闭环
 - 讨论收敛后 → `collaborative-thinking` Mode C（沉淀 ADR/规则/教训）

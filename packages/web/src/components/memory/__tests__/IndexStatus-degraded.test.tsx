@@ -27,6 +27,7 @@ function makeStatus(overrides: Partial<IndexStatusData> = {}): IndexStatusData {
     passagesCount: 0,
     passageVectorsCount: 0,
     passageVectorsSupported: true,
+    passageWarmupActive: false,
     edgesCount: 0,
     lastRebuildAt: null,
     embeddingModel: 'cl100k_base',

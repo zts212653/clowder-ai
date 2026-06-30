@@ -40,6 +40,19 @@ config:
       envName: FEISHU_CONNECTION_MODE
       value: webhook
 
+  # ── Hidden value field (#1035, .env-only power-user config) ──
+  # Outbound group-chat `@alias` → Feishu `<at>` token map (JSON string).
+  # Hidden because JSON-in-textbox is a poor Hub UI affordance; users set this
+  # in .env. Listed here so `resolveConnectorEnv` (Hub QR re-activate path)
+  # walks the key and picks the value up from process.env instead of dropping
+  # it on every post-save re-activation.
+  - envName: FEISHU_GROUP_BOT_MENTIONS_JSON
+    type: input
+    label: Group Bot Mentions (JSON, .env-only)
+    sensitive: false
+    required: false
+    hidden: true
+
   # ── Operation field: QR bind state machine ──
   - name: feishu_qr_login
     type: operation

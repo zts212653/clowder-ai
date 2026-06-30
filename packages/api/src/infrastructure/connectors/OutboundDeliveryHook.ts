@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CatId, catRegistry, type RichBlock } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import { resolveInternalRouteUrl } from '../../utils/upload-paths.js';
+
 import { ConnectorMessageFormatter, type MessageEnvelope, type MessageOrigin } from './ConnectorMessageFormatter.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import { renderAllRichBlocksPlaintext } from './rich-block-plaintext.js';
@@ -324,16 +324,21 @@ export class OutboundDeliveryHook {
                       const absPath = resolve?.(item.url);
                       if (absPath) {
                         await adapter.sendMedia(binding.externalChatId, { type: 'image', absPath });
-                      } else if (
-                        item.url.startsWith('https://') ||
-                        item.url.startsWith('/uploads/') ||
-                        item.url.startsWith('/api/connector-media/')
-                      ) {
-                        const resolvedUrl = resolveInternalRouteUrl(item.url);
+                      } else if (item.url.startsWith('https://')) {
+                        // External HTTPS URL: adapter can download + upload to platform
                         await adapter.sendMedia(binding.externalChatId, {
                           type: 'image',
-                          url: resolvedUrl,
+                          url: item.url,
                         });
+                      } else if (item.url.startsWith('/uploads/') || item.url.startsWith('/api/connector-media/')) {
+                        // Internal route URL — resolver failed (file not found or resolver not configured).
+                        // Converting to http://localhost is NOT usable by external platforms (e.g. Feishu's
+                        // SSRF protection blocks http:// + localhost). Skip with warning instead of sending
+                        // an unusable localhost URL as text fallback.
+                        this.opts.log.warn(
+                          { blockKind: block.kind, url: item.url, hasResolver: !!resolve },
+                          '[OutboundDeliveryHook] media_gallery image skipped — local file not found (resolver returned undefined)',
+                        );
                       } else {
                         this.opts.log.warn(
                           { blockKind: block.kind, url: item.url },

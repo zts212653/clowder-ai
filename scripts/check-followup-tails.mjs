@@ -53,6 +53,10 @@ const SEMANTIC_EXEMPTIONS = [
   // "deferred catch-up", "deferred load", "deferred init", and variants with
   // an intermediate noun: "deferred embed catch-up" / "deferred sidecar load".
   /\bdeferred\b[\s\w-]{0,40}\b(catch[\s-]?up|initialization|load|loading|fetch|spawn|callback|fire|hook|event|task|operation|promise)\b/i,
+  // "deferred" used in comparison/contrast with another concept (code semantic):
+  // "deferred≠resolved", "deferred != resolved" — refers to a code concept name
+  // (e.g. notice_deferred event kind), NOT deferred work.
+  /\bdeferred\s*[≠!=<>]{1,2}\s*\w+/i,
   // "stub" used to describe Python module compatibility shim — common for
   // Windows ARM64 fastembed cases (py_rust_stemmers stub before pip install).
   // Matches "stub <package-name>", "<verb> stub for <package>", etc.

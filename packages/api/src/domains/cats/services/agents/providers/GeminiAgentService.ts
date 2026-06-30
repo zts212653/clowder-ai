@@ -330,18 +330,49 @@ function formatAgyPrintTimeout(timeoutMs: number): string | null {
   return `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`;
 }
 
-function removeValuedCliFlags(args: readonly string[], flags: ReadonlySet<string>): string[] {
+const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
+  ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
+  ['gemini-2.5-pro-preview', 'Gemini 3.1 Pro (High)'],
+  ['gemini-2.5-pro-exp', 'Gemini 3.1 Pro (High)'],
+  ['gemini-2.5-flash', 'Gemini 3.5 Flash (High)'],
+  ['gemini-2.5-flash-preview', 'Gemini 3.5 Flash (High)'],
+  ['gemini-3.1-pro', 'Gemini 3.1 Pro (High)'],
+  ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (High)'],
+  ['gemini-3.5-flash', 'Gemini 3.5 Flash (High)'],
+]);
+
+function normalizeAgyModelSelector(model: string): string {
+  const trimmed = model.trim();
+  return AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID.get(trimmed) ?? trimmed;
+}
+
+function removeValuedCliFlags(
+  args: readonly string[],
+  flags: ReadonlySet<string>,
+  options: { readonly consumeValueTokens?: 'single' | 'untilNextFlag' } = {},
+): string[] {
   const result: string[] = [];
+  const consumeUntilNextFlag = options.consumeValueTokens === 'untilNextFlag';
+  const skipValueTokens = (startIndex: number): number => {
+    let nextIndex = startIndex;
+    while (nextIndex < args.length) {
+      const nextArg = args[nextIndex];
+      if (nextArg == null || nextArg.startsWith('-')) break;
+      if (!consumeUntilNextFlag) return nextIndex + 1;
+      nextIndex++;
+    }
+    return nextIndex;
+  };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg == null) continue;
     const equalsIndex = arg.indexOf('=');
     if (equalsIndex > 0 && flags.has(arg.slice(0, equalsIndex))) {
+      if (consumeUntilNextFlag) i = skipValueTokens(i + 1) - 1;
       continue;
     }
     if (flags.has(arg)) {
-      const nextArg = args[i + 1];
-      if (nextArg != null && !nextArg.startsWith('-')) i++;
+      i = skipValueTokens(i + 1) - 1;
       continue;
     }
     result.push(arg);
@@ -349,7 +380,7 @@ function removeValuedCliFlags(args: readonly string[], flags: ReadonlySet<string
   return result;
 }
 
-const ANTIGRAVITY_USER_BLOCKED_FLAGS = new Set(['--dangerously-skip-permissions']);
+const ANTIGRAVITY_USER_BLOCKED_FLAGS = new Set(['--dangerously-skip-permissions', '--model']);
 
 function insertArgsBeforeFlag(args: string[], flag: string, insertion: readonly string[]): void {
   const index = args.indexOf(flag);
@@ -715,7 +746,16 @@ export class GeminiAgentService implements AgentService {
   private async *invokeAntigravityCLI(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
     const yieldedToolCallIds = new Set<string>();
     const yieldedToolResults = new Set<string>();
-    const requestedModelOverride = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE;
+    const requestedModelOverrideRaw = options?.callbackEnv?.CAT_CAFE_GEMINI_MODEL_OVERRIDE?.trim();
+    const requestedModelOverride =
+      requestedModelOverrideRaw !== undefined && requestedModelOverrideRaw.length > 0
+        ? normalizeAgyModelSelector(requestedModelOverrideRaw)
+        : undefined;
+    const configuredAgyModel = normalizeAgyModelSelector(this.model);
+    let agyModel = configuredAgyModel;
+    if (requestedModelOverride !== undefined) {
+      agyModel = requestedModelOverride;
+    }
     // F210 cache-leak fix (cloud P2)：normalize 成绝对路径。spawn cwd 现在是独立 sandbox（与
     // workingDirectory 解耦），若 workingDirectory 是相对路径（AgentServiceOptions 不强制绝对，
     // 直连 caller/测试可传 `.`），`--add-dir workingDirectory` 会相对 sandbox cwd 解析 → AGY 授权
@@ -724,13 +764,13 @@ export class GeminiAgentService implements AgentService {
     const workingDirectory = resolve(options?.workingDirectory ?? process.cwd());
     let metadata: MessageMetadata = {
       provider: 'google',
-      model: 'account-selected (antigravity-cli)',
+      model: agyModel ? `${agyModel} (antigravity-cli --model)` : 'account-selected (antigravity-cli)',
       modelVerified: false,
       diagnostics: {
         antigravityCli: {
-          modelSelection: 'account-side selected model',
+          modelSelection: agyModel ? 'cli --model flag' : 'account-side selected model',
           configuredCatModel: this.model,
-          ...(requestedModelOverride ? { unsupportedModelOverride: requestedModelOverride } : {}),
+          ...(requestedModelOverride ? { requestedModelOverride } : {}),
         },
       },
     };
@@ -738,7 +778,7 @@ export class GeminiAgentService implements AgentService {
     try {
       agyProfile = resolveAgyProfile({
         catId: this.catId as string,
-        expectedModel: this.model,
+        expectedModel: configuredAgyModel,
         workingDirectory,
         config: this.agyProfileConfig,
       });
@@ -754,13 +794,17 @@ export class GeminiAgentService implements AgentService {
       return;
     }
     if (agyProfile) {
+      agyModel = agyProfile.expectedModel;
+      if (requestedModelOverride !== undefined) {
+        agyModel = requestedModelOverride;
+      }
       metadata = {
         provider: 'google',
-        model: `${agyProfile.expectedModel} (antigravity-cli profile)`,
+        model: agyModel ? `${agyModel} (antigravity-cli profile)` : 'account-selected (antigravity-cli profile)',
         modelVerified: false,
         diagnostics: {
           antigravityCli: {
-            modelSelection: 'isolated profile settings',
+            modelSelection: agyModel ? 'isolated profile settings + cli --model flag' : 'isolated profile settings',
             configuredCatModel: this.model,
             profile: {
               profileId: agyProfile.profileId,
@@ -769,7 +813,7 @@ export class GeminiAgentService implements AgentService {
               trustedWorkspaces: agyProfile.trustedWorkspaces,
               autoApprove: agyProfile.autoApprove,
             },
-            ...(requestedModelOverride ? { unsupportedModelOverride: requestedModelOverride } : {}),
+            ...(requestedModelOverride ? { requestedModelOverride } : {}),
           },
         },
       };
@@ -793,6 +837,9 @@ export class GeminiAgentService implements AgentService {
     if (printTimeout) {
       args.push('--print-timeout', printTimeout);
     }
+    if (agyModel) {
+      args.push('--model', agyModel);
+    }
     const requestedSessionId = options?.sessionId;
     let emittedSessionInit = false;
     if (requestedSessionId) {
@@ -806,28 +853,15 @@ export class GeminiAgentService implements AgentService {
         timestamp: Date.now(),
       };
     }
-    if (requestedModelOverride) {
-      yield {
-        type: 'system_info',
-        catId: this.catId,
-        content: JSON.stringify({
-          type: 'antigravity_cli_model_override_unsupported',
-          requestedModel: requestedModelOverride,
-          reason: agyProfile
-            ? 'AGY CLI profile model selection is configured through isolated settings; no verified per-call --model/env override exists.'
-            : 'AGY CLI uses the account-side selected model; no verified per-call --model/env override exists.',
-        }),
-        metadata,
-        timestamp: Date.now(),
-      };
-    }
     args.push('--print', effectivePrompt);
 
     const userParts: string[] = [];
     for (const arg of options?.cliConfigArgs ?? []) {
       userParts.push(...arg.trim().split(/\s+/));
     }
-    const filteredUserParts = removeValuedCliFlags(userParts, ANTIGRAVITY_USER_BLOCKED_FLAGS);
+    const filteredUserParts = removeValuedCliFlags(userParts, ANTIGRAVITY_USER_BLOCKED_FLAGS, {
+      consumeValueTokens: 'untilNextFlag',
+    });
     if (filteredUserParts.length > 0) {
       const accumulativeFlags = new Set(['--add-dir']);
       const userFlags = new Set(filteredUserParts.filter((p) => p.startsWith('-')));
@@ -1164,9 +1198,7 @@ export class GeminiAgentService implements AgentService {
       const agyLogText = readAntigravityLogText(agyLogPath);
       const observedProfileModel = agyProfile ? extractAntigravityCliSelectedModelLabel(agyLogText) : null;
       const profileModelMissing = Boolean(agyProfile && !observedProfileModel);
-      const profileModelMismatch = Boolean(
-        agyProfile && observedProfileModel && observedProfileModel !== agyProfile.expectedModel,
-      );
+      const profileModelMismatch = Boolean(agyProfile && observedProfileModel && observedProfileModel !== agyModel);
       if (agyProfile && observedProfileModel) {
         metadata = {
           ...metadata,
@@ -1388,7 +1420,7 @@ export class GeminiAgentService implements AgentService {
         yield {
           type: 'error',
           catId: this.catId,
-          error: `AGY profile selected model mismatch: expected "${agyProfile.expectedModel}", observed "${observedProfileModel}".`,
+          error: `AGY profile selected model mismatch: expected "${agyModel}", observed "${observedProfileModel}".`,
           metadata,
           timestamp: Date.now(),
         };
@@ -1396,7 +1428,7 @@ export class GeminiAgentService implements AgentService {
         yield {
           type: 'error',
           catId: this.catId,
-          error: `AGY profile selected model was not verified: expected "${agyProfile.expectedModel}", but no selected model label was observed in AGY logs.`,
+          error: `AGY profile selected model was not verified: expected "${agyModel}", but no selected model label was observed in AGY logs.`,
           metadata,
           timestamp: Date.now(),
         };

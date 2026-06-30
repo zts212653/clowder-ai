@@ -95,7 +95,7 @@ function buildReportingProtocol(
       ];
     case 'blocking-ack':
       return [
-        '**回报模式：blocking-ack** — 遇阻塞点必须等主 Thread ack 才能继续：发 `[BLOCKING]` 请求到主 Thread，并在本 Thread 调 `cat_cafe_hold_ball` 等 ack / 超时。',
+        '**回报模式：blocking-ack** — 遇阻塞点必须等主 Thread ack 才能继续：发 `[BLOCKING]` 请求到主 Thread，并在本 Thread 调 `cat_cafe_hold_ball({ wakeAfterMs, waitSourceRef: { kind: "thread_message", value: "<主ThreadId>", expectedSignal: "ack message", slaUntilMs } })` 等 ack / 超时。',
         '持球在**本（下游）Thread**，主 Thread 不背轮询责任；非阻塞推进无需逐步回报。',
         routingLine,
       ];

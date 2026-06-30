@@ -30,6 +30,8 @@ export interface ThreadItemProps {
   onToggleFavorite?: (id: string, favorited: boolean) => void | Promise<void>;
   onUpdatePreferredCats?: (id: string, cats: string[]) => void | Promise<void>;
   onUpdateLabels?: (id: string, labels: string[]) => void | Promise<void>;
+  /** F252 Phase E: open Meow Theater replay for this thread */
+  onReplay?: (id: string) => void;
   isPinned?: boolean;
   isFavorited?: boolean;
   threadState?: ThreadState;
@@ -61,6 +63,7 @@ export function ThreadItem({
   preferredCats,
   threadLabels,
   isHubThread,
+  onReplay,
 }: ThreadItemProps) {
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
@@ -168,6 +171,11 @@ export function ThreadItem({
         window.open(`${API_URL}/api/export/thread/${id}?format=md`);
       });
   }, [id]);
+
+  const startReplay = useCallback(() => {
+    setIsMoreOpen(false);
+    onReplay?.(id);
+  }, [id, onReplay]);
 
   const toggleFavorite = useCallback(() => {
     if (!onToggleFavorite) return;
@@ -296,6 +304,11 @@ export function ThreadItem({
                   <ThreadActionMenuItem icon={<ExportIcon />} onClick={exportThread}>
                     导出对话
                   </ThreadActionMenuItem>
+                  {onReplay && (
+                    <ThreadActionMenuItem icon={<ReplayIcon />} onClick={startReplay}>
+                      回放剧场
+                    </ThreadActionMenuItem>
+                  )}
                   {onUpdateLabels && (
                     <ThreadLabelPicker
                       threadId={id}
@@ -415,6 +428,15 @@ function RenameIcon() {
     <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M11.013 1.427a1.75 1.75 0 112.474 2.474l-7.2 7.2a2 2 0 01-.84.49l-2.22.634a.75.75 0 01-.926-.926l.634-2.22a2 2 0 01.49-.84l7.588-7.588zm1.414 1.06a.25.25 0 00-.353 0L11.2 3.36l1.44 1.44.874-.874a.25.25 0 000-.353l-1.086-1.086zM11.58 5.86l-1.44-1.44-6.072 6.072a.5.5 0 00-.123.21l-.303 1.06 1.06-.303a.5.5 0 00.21-.123l6.668-6.668z" />
       <path d="M2.25 13A.75.75 0 013 12.25v-.5a.75.75 0 011.5 0v.5c0 .138.112.25.25.25h8a.75.75 0 010 1.5h-8A1.75 1.75 0 012.25 13z" />
+    </svg>
+  );
+}
+
+/** F252 Phase E: play/replay icon for Meow Theater */
+function ReplayIcon() {
+  return (
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M4 2.5a.5.5 0 01.8-.4l8 6a.5.5 0 010 .8l-8 6a.5.5 0 01-.8-.4v-12z" />
     </svg>
   );
 }

@@ -51,7 +51,10 @@ describe('handleFeishuAction', () => {
     });
   });
 
-  it('persists pending verification token when QR auth confirms webhook mode', async () => {
+  it('always defaults to websocket regardless of verification token', async () => {
+    // QR-based login always sets websocket mode — verification token presence
+    // should NOT keep webhook mode (webhook requires public callback URL which
+    // may be blocked by CF Access / NAT).
     const result = await handleFeishuAction('qr-status', {
       env: {
         FEISHU_CONNECTION_MODE: 'webhook',
@@ -84,8 +87,7 @@ describe('handleFeishuAction', () => {
     assert.deepEqual(result.targetValues, {
       FEISHU_APP_ID: 'cli_feishu_webhook',
       FEISHU_APP_SECRET: 'sec_feishu_webhook',
-      FEISHU_CONNECTION_MODE: 'webhook',
-      FEISHU_VERIFICATION_TOKEN: 'vt_pending',
+      FEISHU_CONNECTION_MODE: 'websocket',
     });
   });
 });

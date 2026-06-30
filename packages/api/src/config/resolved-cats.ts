@@ -1,13 +1,13 @@
 import { catRegistry } from '@cat-cafe/shared';
-import { bootstrapCatCatalog, resolveCatCatalogPath } from './cat-catalog-store.js';
-import { loadCatConfig, toAllCatConfigs } from './cat-config-loader.js';
+import { bootstrapCatCatalog } from './cat-catalog-store.js';
+import { loadResolvedCatConfig, toAllCatConfigs } from './cat-config-loader.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 
 export function getProjectResolvedCats(projectRoot: string) {
   try {
     const templatePath = resolveProjectTemplatePath(projectRoot);
     bootstrapCatCatalog(projectRoot, templatePath);
-    return toAllCatConfigs(loadCatConfig(resolveCatCatalogPath(projectRoot)));
+    return toAllCatConfigs(loadResolvedCatConfig(templatePath));
   } catch {
     return {};
   }

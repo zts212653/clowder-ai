@@ -197,7 +197,16 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
     const snapshotStats = opts.metricsSnapshotStore?.stats() ?? null;
     const errorRate = await computeRecentErrorRate(opts.getMetricsText);
 
-    const otelEnabled = !process.env.OTEL_SDK_DISABLED;
+    // Phase K fix: use actual init state, not env-var proxy.
+    // getMetricsText is null when initTelemetry() returned null handles
+    // (either OTEL_SDK_DISABLED=true or validateSalt() failed).
+    const otelEnabled = !!opts.getMetricsText;
+    const disabledReason: string | undefined = otelEnabled
+      ? undefined
+      : process.env.OTEL_SDK_DISABLED === 'true'
+        ? 'OTEL_SDK_DISABLED=true'
+        : 'HMAC salt validation failed (TELEMETRY_HMAC_SALT not configured)';
+
     const readinessOk = !readiness || readiness.status === 'ready';
     const threshold = Number.parseFloat(process.env.TELEMETRY_ALERT_ERROR_RATE ?? '0.3');
     const errorRateOk = errorRate === null || errorRate < threshold;
@@ -208,6 +217,7 @@ export const telemetryRoutes: FastifyPluginAsync<TelemetryRoutesOptions> = async
       status: healthy ? 'healthy' : 'degraded',
       uptime: process.uptime(),
       otelEnabled,
+      disabledReason,
       readiness: readiness ?? undefined,
       errorRate,
       traceStore: traceStats,

@@ -1294,6 +1294,68 @@ export class RedisThreadStore implements IThreadStore {
     return raw === 'reborn';
   }
 
+  /**
+   * F247 AC-B1c-1: Update a cloud cat's ChatGPT chat URL binding for this thread.
+   *
+   * Stored as individual Redis hash field `cloudBinding:<catId>` (NOT a single
+   * JSON-stringified map). Pattern matches existing `memberSS:<catId>` —
+   * separate fields are NEVER hydrated by `.get()` / `hydrateThread()`, which
+   * gives privacy-by-absence: cloudCatBindings cannot leak through default
+   * thread serialization paths (get_thread_context, thread export, cross-post,
+   * memory index) because it simply isn't on the in-memory Thread object after
+   * a Redis read.
+   *
+   * Owner authorization MUST be enforced at the route/MCP layer; this method
+   * does not check ownership.
+   *
+   * URL format validation is NOT enforced here; callers MUST pre-validate with
+   * `isValidChatGptChatUrl()`.
+   *
+   * **Delete-race guard (gpt52 R1 P2-1)**: HSET path uses `HSET_IF_HAS_ID_LUA`
+   * to fail-closed when the canonical `id` field is gone (thread deleted
+   * between route's `get()` and this write). Without the guard, raw HSET would
+   * resurrect a deleted thread's detail hash with only `cloudBinding:*` fields —
+   * an orphan hash inconsistent with the rest of this store's atomic update
+   * convention (see line 40, 568, 637, 972 for the existing pattern).
+   *
+   * HDEL path remains bare: Redis HDEL on a non-existent key is a safe no-op
+   * (returns 0, does not create the hash), so the same race cannot resurrect.
+   */
+  async updateCloudCatBinding(threadId: string, catId: string, chatUrl: string | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    const field = `cloudBinding:${catId}`;
+    if (chatUrl === null) {
+      // HDEL on missing hash returns 0 — no orphan resurrection risk.
+      await this.redis.hdel(key, field);
+    } else {
+      // HSET via guarded Lua: returns 0 (silently skipped) if thread.id field is gone.
+      // Callers are expected to validate thread existence via the route layer; this
+      // is defense-in-depth against TOCTOU between route.get() and store write.
+      await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, field, chatUrl);
+    }
+  }
+
+  /**
+   * F247 AC-B1c-1: Read all cloud cat bindings for this thread.
+   *
+   * Scans the thread detail hash for `cloudBinding:<catId>` fields and returns
+   * them as a flat `Record<catId, chatUrl>`. Empty object when no bindings.
+   *
+   * Owner authorization MUST be enforced at the route/MCP layer.
+   */
+  async getCloudCatBindings(threadId: string): Promise<Record<string, string>> {
+    const key = ThreadKeys.detail(threadId);
+    const data = await this.redis.hgetall(key);
+    const result: Record<string, string> = {};
+    for (const [field, value] of Object.entries(data)) {
+      if (field.startsWith('cloudBinding:') && typeof value === 'string' && value.length > 0) {
+        const catId = field.slice('cloudBinding:'.length);
+        if (catId.length > 0) result[catId] = value;
+      }
+    }
+    return result;
+  }
+
   async setPendingContinuation(
     threadId: string,
     catId: string,

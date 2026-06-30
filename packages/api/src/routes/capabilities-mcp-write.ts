@@ -94,34 +94,41 @@ function mergeSecretRecord(
   return merged;
 }
 
+function mergeMcpServerConfig(
+  existingServer: CapabilityEntry['mcpServer'] | CapabilityEntry['mcpServerOverride'],
+  entryServer: CapabilityEntry['mcpServer'],
+  request: McpInstallRequest,
+): CapabilityEntry['mcpServer'] | undefined {
+  if (!entryServer) return existingServer ? { ...existingServer } : undefined;
+
+  const baseServer: Partial<NonNullable<CapabilityEntry['mcpServer']>> = existingServer ? { ...existingServer } : {};
+  const mergedServer: NonNullable<CapabilityEntry['mcpServer']> = { ...baseServer, ...entryServer };
+  if (request.transport === undefined && baseServer.transport !== undefined) {
+    mergedServer.transport = baseServer.transport;
+  }
+  if (request.command === undefined && baseServer.command !== undefined) mergedServer.command = baseServer.command;
+  if (request.args === undefined && baseServer.args !== undefined) mergedServer.args = baseServer.args;
+  if (request.url === undefined && baseServer.url !== undefined) mergedServer.url = baseServer.url;
+  const env = mergeSecretRecord(existingServer?.env, entryServer.env);
+  const headers = mergeSecretRecord(existingServer?.headers, entryServer.headers);
+  if (env) mergedServer.env = env;
+  else delete mergedServer.env;
+  if (headers) mergedServer.headers = headers;
+  else delete mergedServer.headers;
+  return mergedServer;
+}
+
 function mergeExternalMcpEntry(
   existing: CapabilityEntry,
   entry: CapabilityEntry,
   request: McpInstallRequest,
 ): CapabilityEntry {
-  const entryServer = entry.mcpServer;
-  if (!entryServer) return { ...existing, ...entry, overrides: existing.overrides };
-
-  const baseServer: Partial<NonNullable<CapabilityEntry['mcpServer']>> = existing.mcpServer
-    ? { ...existing.mcpServer }
-    : {};
-  const mergedServer: NonNullable<CapabilityEntry['mcpServer']> = { ...baseServer, ...entryServer };
-  if (request.transport === undefined && baseServer.transport !== undefined)
-    mergedServer.transport = baseServer.transport;
-  if (request.command === undefined && baseServer.command !== undefined) mergedServer.command = baseServer.command;
-  if (request.args === undefined && baseServer.args !== undefined) mergedServer.args = baseServer.args;
-  if (request.url === undefined && baseServer.url !== undefined) mergedServer.url = baseServer.url;
-  const env = mergeSecretRecord(existing.mcpServer?.env, entryServer.env);
-  const headers = mergeSecretRecord(existing.mcpServer?.headers, entryServer.headers);
-  if (env) mergedServer.env = env;
-  else delete mergedServer.env;
-  if (headers) mergedServer.headers = headers;
-  else delete mergedServer.headers;
+  const mergedServer = mergeMcpServerConfig(existing.mcpServer, entry.mcpServer, request);
 
   return {
     ...existing,
     ...entry,
-    mcpServer: mergedServer,
+    ...(mergedServer ? { mcpServer: mergedServer } : {}),
     overrides: existing.overrides,
   };
 }
@@ -272,7 +279,13 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
         // F249 §4.1: projectPath present → write mcpServerOverride (not mcpServer).
         // The entry's mcpServer stays as the synced-from-global value.
         const existing = config.capabilities[existingIdx];
-        existing.mcpServerOverride = entry.mcpServer ? { ...entry.mcpServer } : undefined;
+        const mergedOverride = mergeMcpServerConfig(
+          existing.mcpServerOverride ?? existing.mcpServer,
+          entry.mcpServer,
+          body,
+        );
+        if (mergedOverride) existing.mcpServerOverride = mergedOverride;
+        else delete existing.mcpServerOverride;
         afterEntry = existing;
         config.capabilities[existingIdx] = afterEntry;
       } else if (existingIdx >= 0) {
@@ -567,15 +580,9 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
   // ── POST /api/capabilities/mcp/discover — manual sync from external configs ──
   app.post('/api/capabilities/mcp/discover', async (request, reply) => {
-    const userId = resolveCapabilityWriteSessionUserId(request);
-    if (!userId) {
-      reply.status(401);
-      return { error: 'Identity required (session cookie)' };
-    }
-    const localError = requireLocalCapabilityWriteRequest(request);
-    if (localError) {
-      reply.status(localError.status);
-      return { error: localError.error };
+    const access = requireWriteAccess(request, reply);
+    if (!access.userId) {
+      return { error: access.error };
     }
 
     let projectRoot = getProjectRoot();

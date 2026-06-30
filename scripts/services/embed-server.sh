@@ -58,6 +58,14 @@ if [ ! -d "$VENV_DIR" ]; then
     exit 1
   fi
 fi
+
+# HF_HUB_OFFLINE must be set AFTER auto-install completes -- the installer
+# needs network access to download models from HuggingFace.
+# Without this, transformers/huggingface_hub tries to online-verify the model
+# on every start and fails with SSLEOFError behind proxies/firewalls.
+# (mirrors tts-server.sh pattern; cloud codex P1: PR #1924)
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+
 source "$VENV_DIR/bin/activate"
 
 echo "Starting Embedding server: model=$MODEL, port=$PORT"

@@ -73,13 +73,29 @@ fi
   // Claude's hook schema: hooks.<EventName> = Array<{ hooks: Array<{ type, command, timeout? }> }>
   // Each event maps to an array of hook groups, each group has a `hooks` array of entries.
   // Format verified against ~/.claude/settings.json (global hooks use this exact schema).
-  const hookEntry = (cmd: string) => ({
-    hooks: [{ type: 'command' as const, command: cmd, timeout: 5000 }],
+  // cc hooks timeout is in SECONDS (not ms) — validated by hook schema: max 600s
+  // matcher (optional): regex applied to tool name; omit = fires on all tools
+  const hookEntry = (cmd: string, timeout = 5, matcher?: string) => ({
+    ...(matcher ? { matcher } : {}),
+    hooks: [{ type: 'command' as const, command: cmd, timeout }],
   });
+
+  // F236 Phase E: register the anchor PostToolUse hook alongside the capture script.
+  // The anchor hook (f236-anchor-posttool.mjs) may replace tool output via stdout
+  // AND writes eval events to /tmp. Both hooks run — cc chains PostToolUse groups.
+  // Capture script runs first (sidecar append, no stdout), anchor hook runs second
+  // (may output anchor replacement + writes eval jsonl).
+  const anchorHookPath = join(cwd, '.claude', 'hooks', 'f236-anchor-posttool.mjs');
+  const postToolUseHooks = [hookEntry(scriptPath)];
+  if (existsSync(anchorHookPath)) {
+    // Scope to cc-native read tools only (matches repo-level .claude/settings.json)
+    postToolUseHooks.push(hookEntry(anchorHookPath, 10, 'Read|Grep|Glob'));
+  }
+
   const settings = {
     hooks: {
       Stop: [hookEntry(scriptPath)],
-      PostToolUse: [hookEntry(scriptPath)],
+      PostToolUse: postToolUseHooks,
     },
   };
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');

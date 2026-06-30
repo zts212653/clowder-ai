@@ -56,6 +56,32 @@ describe('thread navigation history bridge', () => {
     expect(fakeWindow.dispatched).toEqual([]);
   });
 
+  it('uses full-page navigation when current route is outside (chat) group (BUG-UX-12b)', () => {
+    // When on /settings (non-chat route), the (chat)/layout.tsx event listener
+    // is not mounted — pushState alone won't trigger React re-render.
+    // pushThreadRouteWithHistory should fall back to location.assign.
+    const assigned: string[] = [];
+    const fakeWindow = createFakeWindow('/settings');
+    (fakeWindow.location as { pathname: string; assign?: (url: string) => void }).assign = (url: string) =>
+      assigned.push(url);
+
+    const href = pushThreadRouteWithHistory('thread-123', fakeWindow);
+
+    expect(href).toBe('/thread/thread-123');
+    expect(assigned).toEqual(['/thread/thread-123']);
+    // Must NOT use pushState/dispatchEvent path (no listener on non-chat pages)
+    expect(fakeWindow.dispatched).toEqual([]);
+  });
+
+  it('still uses pushState for in-chat navigation (/, /thread/*)', () => {
+    // Existing behavior: in-chat routes use pushState + event
+    for (const path of ['/', '/thread/thread-a']) {
+      const fakeWindow = createFakeWindow(path);
+      pushThreadRouteWithHistory('thread-new', fakeWindow);
+      expect(fakeWindow.dispatched).toEqual([CHAT_THREAD_ROUTE_EVENT]);
+    }
+  });
+
   it('assigns document routes for hub navigation outside the chat route store', () => {
     const assigned: string[] = [];
     const href = assignDocumentRoute('/memory?from=thread-b', {

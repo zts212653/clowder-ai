@@ -63,6 +63,16 @@ function enqueueEntry(queue, overrides = {}) {
   return result.entry;
 }
 
+async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
+  const start = Date.now();
+  // biome-ignore lint: polling helper
+  while (true) {
+    if (predicate()) return;
+    if (Date.now() - start > timeoutMs) throw new Error('timeout');
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 describe('QueueProcessor', () => {
   let deps;
   let processor;
@@ -158,6 +168,49 @@ describe('QueueProcessor', () => {
       undefined,
       'usageByCat must remain undefined when provider emitted no usage',
     );
+  });
+
+  it('governance-blocked queue invocation stays failed and never flips to succeeded', async () => {
+    const customDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          yield {
+            type: 'system_info',
+            catId: 'opus',
+            content: JSON.stringify({
+              type: 'governance_blocked',
+              projectPath: '/home/user/projects/EchoAgent',
+              reasonKind: 'needs_bootstrap',
+              invocationId: 'inv-stub',
+            }),
+            timestamp: Date.now(),
+          };
+          yield {
+            type: 'done',
+            catId: 'opus',
+            timestamp: Date.now(),
+            errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+          };
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+    });
+    const customProcessor = new QueueProcessor(customDeps);
+    const entry = enqueueEntry(customDeps.queue);
+    customDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    const result = await customProcessor.processNext('t1', 'u1');
+    assert.equal(result.started, true, 'queue entry should start executing');
+    await new Promise((r) => setTimeout(r, 100));
+
+    const updateCalls = customDeps.invocationRecordStore.update.mock.calls;
+    const failedCall = updateCalls.find(
+      (c) => c.arguments[1]?.status === 'failed' && c.arguments[1]?.error === 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+    );
+    assert.ok(failedCall, 'queue path must persist governance-blocked invocations as failed');
+
+    const succeededCall = updateCalls.find((c) => c.arguments[1]?.status === 'succeeded');
+    assert.equal(succeededCall, undefined, 'governance-blocked queue invocations must not be finalized as succeeded');
   });
 
   it('succeeded + stale user queued entry → auto-dequeues and starts execution', async () => {
@@ -363,6 +416,40 @@ describe('QueueProcessor', () => {
       (call) => call.arguments[1]?.status === 'canceled',
     );
     assert.ok(canceledUpdate, 'aborted queued invocation should be recorded as canceled');
+  });
+
+  it('user cancel during queued execution cleans up streaming placeholders', async () => {
+    let controller;
+    const streamingHook = {
+      onStreamStart: mock.fn(async () => {}),
+      onStreamChunk: mock.fn(async () => {}),
+      onStreamEnd: mock.fn(async () => {}),
+      cleanupPlaceholders: mock.fn(async () => {}),
+    };
+    deps.invocationTracker.startAll.mock.mockImplementation(() => {
+      controller = new AbortController();
+      return controller;
+    });
+    deps.router.routeExecution = mock.fn(async function* () {
+      yield { type: 'text', catId: 'opus', content: 'before cancel', timestamp: Date.now() };
+      controller.abort('user_cancel');
+      yield { type: 'done', catId: 'opus', isFinal: true, timestamp: Date.now() };
+    });
+    const cancelProcessor = new QueueProcessor({ ...deps, streamingHook });
+
+    enqueueEntry(deps.queue);
+
+    const result = await cancelProcessor.processNext('t1', 'u1');
+    assert.equal(result.started, true);
+    await waitFor(() => streamingHook.cleanupPlaceholders.mock.calls.length >= 1);
+
+    assert.ok(streamingHook.onStreamStart.mock.calls.length >= 1, 'onStreamStart should be called');
+    assert.ok(streamingHook.onStreamEnd.mock.calls.length >= 1, 'onStreamEnd should be called on cancel');
+    assert.equal(
+      streamingHook.cleanupPlaceholders.mock.calls.length,
+      1,
+      'cancel path should clean up the streaming placeholder exactly once',
+    );
   });
 
   it('excludes the current processing agent entry from A2A cross-path dedup', async () => {
@@ -2314,6 +2401,59 @@ describe('QueueProcessor', () => {
       assert.ok(
         streamingHook.cleanupPlaceholders.mock.calls.length >= 1,
         'cleanupPlaceholders should be called when all deliveries succeed',
+      );
+    });
+
+    it('governance-blocked failure cleans up streaming placeholders', async () => {
+      const streamingHook = {
+        onStreamStart: mock.fn(async () => {}),
+        onStreamChunk: mock.fn(async () => {}),
+        onStreamEnd: mock.fn(async () => {}),
+        cleanupPlaceholders: mock.fn(async () => {}),
+      };
+
+      const hookDeps = stubDeps({
+        router: {
+          routeExecution: mock.fn(async function* () {
+            yield {
+              type: 'system_info',
+              catId: 'opus',
+              content: JSON.stringify({
+                type: 'governance_blocked',
+                projectPath: '/home/user/projects/EchoAgent',
+                reasonKind: 'needs_bootstrap',
+                invocationId: 'inv-stub',
+              }),
+              timestamp: Date.now(),
+            };
+            yield {
+              type: 'done',
+              catId: 'opus',
+              timestamp: Date.now(),
+              errorCode: 'GOVERNANCE_BOOTSTRAP_REQUIRED',
+            };
+          }),
+          ackCollectedCursors: mock.fn(async () => {}),
+        },
+        streamingHook,
+      });
+      const hookProcessor = new QueueProcessor(hookDeps);
+
+      const entry = enqueueEntry(hookDeps.queue);
+      hookDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+      await hookProcessor.processNext('t1', 'u1');
+      await waitFor(() => streamingHook.cleanupPlaceholders.mock.calls.length >= 1);
+
+      assert.ok(streamingHook.onStreamStart.mock.calls.length >= 1, 'onStreamStart should be called');
+      assert.ok(
+        streamingHook.onStreamEnd.mock.calls.length >= 1,
+        'governance failure should finalize the streaming session',
+      );
+      assert.equal(
+        streamingHook.cleanupPlaceholders.mock.calls.length,
+        1,
+        'governance failure should clean up the streaming placeholder exactly once',
       );
     });
 

@@ -329,28 +329,47 @@ test(
   'cli supervisor escalates stubborn supervised child before parent kill grace elapses',
   { skip: process.platform === 'win32' && 'Unix process-group supervisor is not used on Windows' },
   async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'cat-cafe-cli-supervisor-stubborn-'));
+    const readyPath = join(tempDir, 'ready.txt');
+    const termPath = join(tempDir, 'term.txt');
     const supervisorPath = fileURLToPath(new URL('../dist/utils/cli-supervisor.js', import.meta.url));
-    const childScript = ['process.on("SIGTERM", () => {});', 'setInterval(() => {}, 60_000);'].join('\n');
-    const supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
-      env: {
-        ...process.env,
-        CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
-        CAT_CAFE_SUPERVISOR_POLL_MS: '100',
-        CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '150',
-      },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    let stderr = '';
-    supervisor.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
+    const childScript = [
+      'const fs = require("node:fs");',
+      `const readyPath = ${JSON.stringify(readyPath)};`,
+      `const termPath = ${JSON.stringify(termPath)};`,
+      'process.on("SIGTERM", () => { fs.writeFileSync(termPath, "SIGTERM"); });',
+      'fs.writeFileSync(readyPath, String(process.pid));',
+      'setTimeout(() => process.exit(88), 10_000);',
+      'setInterval(() => {}, 60_000);',
+    ].join('\n');
+    let supervisor;
 
     try {
+      supervisor = nodeSpawn(process.execPath, [supervisorPath, '--', process.execPath, '-e', childScript], {
+        env: {
+          ...process.env,
+          CAT_CAFE_SUPERVISOR_PARENT_PID: '999999',
+          CAT_CAFE_SUPERVISOR_POLL_MS: '2000',
+          CAT_CAFE_SUPERVISOR_KILL_GRACE_MS: '150',
+        },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      supervisor.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      const readyDeadline = Date.now() + 1_500;
+      while (!existsSync(readyPath) && Date.now() < readyDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(existsSync(readyPath), true, `stubborn child was not ready; stderr=${stderr}`);
+
       const exit = await new Promise((resolve) => {
         const timer = setTimeout(() => {
-          supervisor.kill('SIGKILL');
+          supervisor?.kill('SIGKILL');
           resolve({ timedOut: true, stderr });
-        }, 2_000);
+        }, 5_000);
         supervisor.once('exit', (code, signal) => {
           clearTimeout(timer);
           resolve({ code, signal, stderr });
@@ -358,9 +377,17 @@ test(
       });
 
       assert.notEqual(exit.timedOut, true, `supervisor did not escalate: ${exit.stderr}`);
+      assert.equal(await readFile(termPath, 'utf8'), 'SIGTERM');
       assert.equal(exit.code, 137, `SIGKILL child should surface as 137; stderr=${exit.stderr}`);
     } finally {
-      supervisor.kill('SIGKILL');
+      supervisor?.kill('SIGKILL');
+      try {
+        const childPid = Number(await readFile(readyPath, 'utf8'));
+        if (Number.isFinite(childPid)) process.kill(childPid, 'SIGKILL');
+      } catch {
+        // Child already exited or never reached readiness.
+      }
+      await rm(tempDir, { recursive: true, force: true });
     }
   },
 );

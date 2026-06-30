@@ -118,6 +118,44 @@ export function buildHoldExpiredEvent(input: HeldEventInput): BallCustodyEvent {
   };
 }
 
+// ─── F167 Phase P: wakeWhen condition met ──────────────────────────────────
+
+export interface WakeConditionMetEventInput {
+  threadId: string;
+  catId: string;
+  /** Command that was run */
+  command: string;
+  /** Exit code (null = killed by timeout/cancel) */
+  exitCode: number | null;
+  /** Whether the command timed out */
+  timedOut: boolean;
+  /** How long the command ran */
+  durationMs: number;
+  /** Unix ms */
+  at: number;
+}
+
+/**
+ * F167 Phase P: managed command completed → ball.wake_condition_met.
+ * Fires when a wakeWhen command finishes (exit, timeout, or cancel).
+ */
+export function buildWakeConditionMetEvent(input: WakeConditionMetEventInput): BallCustodyEvent {
+  return {
+    sourceEventId: `wakecond:${input.threadId}:${input.catId}:${input.at}`,
+    subjectKey: `ball:thread:${input.threadId}`,
+    kind: 'ball.wake_condition_met',
+    classification: 'state-changing',
+    payload: {
+      catId: input.catId,
+      command: input.command,
+      exitCode: input.exitCode,
+      timedOut: input.timedOut,
+      durationMs: input.durationMs,
+    },
+    at: input.at,
+  };
+}
+
 export interface TaskBlockedEventInput {
   taskId: string;
   threadId: string;

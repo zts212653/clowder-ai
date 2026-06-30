@@ -476,4 +476,133 @@ describe('MCP Evidence Tools', () => {
     assert.ok(description.includes('memory-search-best-practices'), 'description should point to the search skill');
     assert.ok(description.includes('docs + threads'), 'description should recommend multi-scope coverage searches');
   });
+
+  // ── F256 Phase B: expansion hints formatting ──────────────────────────
+
+  test('F256 Phase B: renders "📎 Related directions" block when expansionHints present', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'Routing System',
+            anchor: 'F102-routing',
+            snippet: 'core routing',
+            confidence: 'high',
+            sourceType: 'feature',
+          },
+        ],
+        expansionHints: [
+          {
+            anchor: 'F208-capability-profile',
+            title: 'Capability Profile Routing',
+            kind: 'feature',
+            sourcePath: 'features/F208.md',
+            provenance: {
+              source: 'frontmatter-alias',
+              via: 'keyword:routing',
+              confidence: 'heuristic',
+            },
+          },
+          {
+            anchor: 'thread-abc123-digest',
+            title: 'Discussion about routing',
+            kind: 'thread',
+            provenance: {
+              source: 'source-thread',
+              via: 'thread-abc123',
+              confidence: 'heuristic',
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'routing' });
+    const text = result.content[0].text;
+
+    assert.ok(text.includes('📎 Related directions'), 'should render expansion hints header');
+    assert.ok(text.includes('F208-capability-profile'), 'should render frontmatter-alias hint anchor');
+    assert.ok(text.includes('Capability Profile Routing'), 'should render hint title');
+    // AC-B2 (砚砚 P2): provenance shows source type + via
+    assert.ok(
+      text.includes('[frontmatter-alias: keyword:routing]'),
+      'should render provenance source type + via (砚砚 P2 fix)',
+    );
+    assert.ok(text.includes('thread-abc123-digest'), 'should render source-thread hint anchor');
+    assert.ok(text.includes('[source-thread: thread-abc123]'), 'should render source-thread provenance (砚砚 P2 fix)');
+  });
+
+  test('F256 Phase B: no "📎 Related directions" block when expansionHints absent', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: [
+          {
+            title: 'Some Feature',
+            anchor: 'F100',
+            snippet: 'basic feature',
+            confidence: 'high',
+            sourceType: 'feature',
+          },
+        ],
+        // No expansionHints field
+      }),
+    });
+
+    const result = await handleSearchEvidence({ query: 'basic' });
+    const text = result.content[0].text;
+
+    assert.ok(!text.includes('📎 Related directions'), 'should NOT render expansion block when hints absent');
+  });
+
+  test('F256 Phase B: include_expansion=false sends param to API', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    /** @type {string | URL | undefined} */
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ results: [], degraded: false }),
+      };
+    };
+
+    await handleSearchEvidence({ query: 'test', include_expansion: false });
+
+    assert.ok(capturedUrl, 'expected fetch to be called');
+    const parsed = new URL(String(capturedUrl));
+    assert.equal(parsed.searchParams.get('include_expansion'), 'false', 'should pass include_expansion=false to API');
+  });
+
+  test('F256 Phase B: include_expansion=true does NOT send param to API (default)', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+
+    /** @type {string | URL | undefined} */
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return {
+        ok: true,
+        json: async () => ({ results: [], degraded: false }),
+      };
+    };
+
+    await handleSearchEvidence({ query: 'test', include_expansion: true });
+
+    assert.ok(capturedUrl, 'expected fetch to be called');
+    const parsed = new URL(String(capturedUrl));
+    assert.equal(
+      parsed.searchParams.get('include_expansion'),
+      null,
+      'should not send include_expansion when true (default)',
+    );
+  });
 });

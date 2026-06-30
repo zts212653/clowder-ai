@@ -280,15 +280,30 @@ export function registerCallbackTaskRoutes(
         // F236 Track-2: per-event drill record with correlation key for drill↔preview join.
         recordAnchorDrillEvent({ tool: 'list-tasks', itemId: taskId!, fullDrillChars: listTasksChars });
       }
-    } else {
-      recordAnchorReturned({ tool: 'list-tasks', returnedChars: listTasksChars });
-      // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
-      // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
       recordAnchorPreviewEvent({
         tool: 'list-tasks',
         itemIds: tasks.map((t) => t.id),
         returnedChars: payload.tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
         originalChars: tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
+        modeResolved: 'full',
+        modeSource: 'legacy_equivalent',
+        catId: actor.catId,
+      });
+    } else {
+      recordAnchorReturned({ tool: 'list-tasks', returnedChars: listTasksChars });
+      // F236 Track-2: per-event preview record with correlation keys for drill↔preview open-rate.
+      // Both sides use content-only measurement (cloud R4 P1: JSON metadata skew fix).
+      // list-tasks overview predates the Phase C `responseMode` param — its bounded
+      // summary behavior is the legacy equivalent of anchor mode. Tag it so adoption
+      // eval can distinguish "cat used old mechanism" from "cat explicitly chose anchor".
+      recordAnchorPreviewEvent({
+        tool: 'list-tasks',
+        itemIds: tasks.map((t) => t.id),
+        returnedChars: payload.tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
+        originalChars: tasks.reduce((sum, t) => sum + (t.why?.length ?? 0), 0),
+        modeResolved: 'anchor',
+        modeSource: 'legacy_equivalent',
+        catId: actor.catId,
       });
     }
     return payload;

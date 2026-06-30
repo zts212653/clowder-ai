@@ -1,0 +1,26 @@
+---
+domainId: eval:qc
+displayName: QC Pipeline Eval
+systemThreadId: thread_eval_qc
+evalCat:
+  catId: opus
+  handle: "@opus"
+  model: claude-opus-4-6
+frequency: weekly
+sourceAdapter: qc-metrics-eval
+sourceRefsKind: qc-metrics-rollup
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F253
+  ownerCatId: opus
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 336

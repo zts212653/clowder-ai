@@ -144,6 +144,7 @@ export function useDriftSync({
   /** Resolve drift for one scope. */
   const resolveScope = useCallback(
     async (action: 'sync', projectPath?: string) => {
+      if (type === 'mcp' && !projectPath) return;
       const res = await apiFetch('/api/drift/resolve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -177,8 +178,8 @@ export function useDriftSync({
     setSyncing(true);
     setSyncAllError(null);
     try {
-      // Global first so cascade config reaches projects, then each project.
-      await resolveScope('sync', undefined);
+      // Skills have a global cascade step; MCP resolve is project-scoped.
+      if (type === 'skill') await resolveScope('sync', undefined);
       for (const path of projectPaths) {
         await resolveScope('sync', path);
       }
@@ -188,7 +189,7 @@ export function useDriftSync({
     } finally {
       setSyncing(false);
     }
-  }, [fetchScopeReports, projectPaths, resolveScope]);
+  }, [fetchScopeReports, projectPaths, resolveScope, type]);
 
   return {
     syncing,

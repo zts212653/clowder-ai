@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { bootstrapCatCatalog, resolveCatCatalogPath, writeCatCatalog } = await import(
   '../dist/config/cat-catalog-store.js'
@@ -10,7 +11,15 @@ const { bootstrapCatCatalog, resolveCatCatalogPath, writeCatCatalog } = await im
 const { createRuntimeCat, deleteRuntimeCat, readRuntimeCatCatalog, updateRuntimeCat } = await import(
   '../dist/config/runtime-cat-catalog.js'
 );
-const { getAcpConfig, _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
+const { getAcpConfig, loadResolvedCatConfig, toAllCatConfigs, _resetCachedConfig } = await import(
+  '../dist/config/cat-config-loader.js'
+);
+const { readCapabilitiesConfig, writeCapabilitiesConfig } = await import(
+  '../dist/config/capabilities/capability-orchestrator.js'
+);
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_TEMPLATE_PATH = join(__dirname, '..', '..', '..', 'cat-template.json');
 
 function validConfig() {
   return {
@@ -204,6 +213,141 @@ function makeSiblingTemplate(seedCatId) {
   return config;
 }
 
+function writeRepoTemplateWithStaleAgyOpusCatalog(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+  writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+  const catalog = JSON.parse(JSON.stringify(template));
+  delete catalog.roster['agy-opus'];
+  const bengal = catalog.breeds.find((breed) => breed.id === 'bengal');
+  bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2));
+
+  return templatePath;
+}
+
+function writeRepoTemplateWithStaleAgyOpusAndLegacyDeletedAntigOpus(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+  writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+  const catalog = JSON.parse(JSON.stringify(template));
+  delete catalog.roster['agy-opus'];
+  const bengal = catalog.breeds.find((breed) => breed.id === 'bengal');
+  bengal.variants = bengal.variants.filter(
+    (variant) => variant.id !== 'agy-opus' && variant.id !== 'antigravity-claude',
+  );
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2));
+
+  return templatePath;
+}
+
+function writeRepoTemplateWithStaleAgyOpusAndCustomAgyOpus(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+  writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+  const catalog = JSON.parse(JSON.stringify(template));
+  const bengal = catalog.breeds.find((breed) => breed.id === 'bengal');
+  bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+  catalog.breeds.push({
+    id: 'custom-agy-opus',
+    catId: 'agy-opus',
+    name: 'Custom AGY Opus',
+    displayName: 'Custom AGY Opus',
+    avatar: '/avatars/custom-agy-opus.png',
+    color: { primary: '#334155', secondary: '#e2e8f0' },
+    mentionPatterns: ['@custom-agy-opus'],
+    roleDescription: 'Custom runtime member using the agy-opus catId',
+    defaultVariantId: 'custom-agy-opus-default',
+    variants: [
+      {
+        id: 'custom-agy-opus-default',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+        mcpSupport: true,
+        cli: { command: 'codex', outputFormat: 'json' },
+      },
+    ],
+  });
+  catalog.roster['agy-opus'] = {
+    family: 'custom-agy-opus',
+    roles: ['assistant'],
+    lead: false,
+    available: true,
+    evaluation: 'custom runtime member',
+  };
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2));
+
+  return templatePath;
+}
+
+function writeRepoTemplateWithStaleAgyOpusAndCustomAgyOpusAlias(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+  writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+  const catalog = JSON.parse(JSON.stringify(template));
+  const bengal = catalog.breeds.find((breed) => breed.id === 'bengal');
+  bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+  catalog.breeds.push({
+    id: 'custom-agy-opus-alias',
+    catId: 'custom-agy-opus-alias',
+    name: 'Custom AGY Opus Alias',
+    displayName: 'Custom AGY Opus Alias',
+    avatar: '/avatars/custom-agy-opus-alias.png',
+    color: { primary: '#334155', secondary: '#e2e8f0' },
+    mentionPatterns: ['@agy-opus'],
+    roleDescription: 'Custom runtime member using the agy-opus mention alias',
+    defaultVariantId: 'custom-agy-opus-alias-default',
+    variants: [
+      {
+        id: 'custom-agy-opus-alias-default',
+        clientId: 'openai',
+        defaultModel: 'gpt-5.4',
+        mcpSupport: true,
+        cli: { command: 'codex', outputFormat: 'json' },
+      },
+    ],
+  });
+  catalog.roster['custom-agy-opus-alias'] = {
+    family: 'custom-agy-opus-alias',
+    roles: ['assistant'],
+    lead: false,
+    available: true,
+    evaluation: 'custom runtime alias owner',
+  };
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(catalog, null, 2));
+
+  return templatePath;
+}
+
+function writeRepoTemplateAsRuntimeCatalog(projectRoot) {
+  const templatePath = join(projectRoot, 'cat-template.json');
+  const template = JSON.parse(readFileSync(REPO_TEMPLATE_PATH, 'utf-8'));
+  writeFileSync(templatePath, JSON.stringify(template, null, 2));
+  mkdirSync(join(projectRoot, '.cat-cafe'), { recursive: true });
+  writeFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), JSON.stringify(template, null, 2));
+  return templatePath;
+}
+
+function collectCatalogCatIds(catalog) {
+  const catIds = new Set();
+  for (const breed of catalog.breeds ?? []) {
+    if (typeof breed.catId === 'string') catIds.add(breed.catId);
+    for (const variant of breed.variants ?? []) {
+      const catId = typeof variant.catId === 'string' ? variant.catId : breed.catId;
+      if (catId) catIds.add(catId);
+    }
+  }
+  return [...catIds].sort();
+}
+
 describe('cat-catalog-store', () => {
   // Isolate provider profiles to a clean tmpdir so tests don't read from ~/.cat-cafe/
   let savedGlobalRoot;
@@ -320,6 +464,154 @@ describe('cat-catalog-store', () => {
     assert.ok(customBreed, 'custom runtime breed should be preserved');
     assert.equal(customBreed?.variants[0]?.accountRef, undefined);
   });
+
+  it('persists new template variants into matching existing runtime breeds during bootstrap', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusCatalog(projectRoot);
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const bengal = hydrated.breeds.find((breed) => breed.id === 'bengal');
+    const agyOpus = bengal?.variants.find((variant) => variant.id === 'agy-opus');
+
+    assert.ok(agyOpus, 'bootstrap should persist agy-opus into the runtime catalog');
+    assert.equal(agyOpus.catId, 'agy-opus');
+    assert.ok(hydrated.roster['agy-opus'], 'bootstrap should persist the agy-opus roster entry');
+  });
+
+  it('extends fully blocked MCPs when bootstrap backfills AGY Opus', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-blocked-mcp-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusCatalog(projectRoot);
+    const staleCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const existingCatIds = collectCatalogCatIds(staleCatalog);
+    await writeCapabilitiesConfig(projectRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: 'project-disabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: existingCatIds,
+        },
+        {
+          id: 'enabled-tool',
+          type: 'mcp',
+          enabled: true,
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'echo', args: [] },
+          blockedCats: [],
+        },
+      ],
+    });
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const config = await readCapabilitiesConfig(projectRoot);
+    const projectDisabledTool = config?.capabilities.find((cap) => cap.id === 'project-disabled-tool');
+    const enabledTool = config?.capabilities.find((cap) => cap.id === 'enabled-tool');
+    assert.deepEqual(projectDisabledTool?.blockedCats, [...existingCatIds, 'agy-opus']);
+    assert.deepEqual(enabledTool?.blockedCats, []);
+  });
+
+  it('does not resurrect legacy-deleted template variants while backfilling agy-opus', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-legacy-deleted-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusAndLegacyDeletedAntigOpus(projectRoot);
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const bengal = hydrated.breeds.find((breed) => breed.id === 'bengal');
+    assert.ok(
+      bengal?.variants.some((variant) => variant.id === 'agy-opus'),
+      'F210 agy-opus should still backfill into an existing bengal runtime breed',
+    );
+    assert.equal(
+      bengal?.variants.some((variant) => variant.id === 'antigravity-claude' || variant.catId === 'antig-opus'),
+      false,
+      'legacy-deleted built-in variants must not be resurrected by template backfill',
+    );
+
+    const resolved = loadResolvedCatConfig(templatePath);
+    assert.ok(toAllCatConfigs(resolved)['agy-opus'], 'resolved reads should expose the F210 backfilled variant');
+    assert.equal(toAllCatConfigs(resolved)['antig-opus'], undefined);
+  });
+
+  it('does not backfill AGY Opus when that catId is already used by a runtime member', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-conflict-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusAndCustomAgyOpus(projectRoot);
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const bengal = hydrated.breeds.find((breed) => breed.id === 'bengal');
+    const hasTemplateAgyOpus = bengal?.variants.some((variant) => {
+      if (variant.id === 'agy-opus') return true;
+      return variant.catId === 'agy-opus';
+    });
+    assert.equal(
+      hasTemplateAgyOpus,
+      false,
+      'bootstrap must not add template agy-opus when the catId is already occupied',
+    );
+    assert.equal(hydrated.roster['agy-opus']?.family, 'custom-agy-opus');
+
+    const all = toAllCatConfigs(loadResolvedCatConfig(templatePath));
+    assert.equal(all['agy-opus']?.breedId, 'custom-agy-opus');
+  });
+
+  it('does not backfill AGY Opus when its mention alias is already used by a runtime member', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-alias-conflict-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusAndCustomAgyOpusAlias(projectRoot);
+
+    const catalogPath = bootstrapCatCatalog(projectRoot, templatePath);
+    const hydrated = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const bengal = hydrated.breeds.find((breed) => breed.id === 'bengal');
+    assert.equal(
+      bengal?.variants.some((variant) => variant.id === 'agy-opus'),
+      false,
+      'bootstrap must not add template agy-opus when its alias is already occupied',
+    );
+    assert.equal(hydrated.roster['custom-agy-opus-alias']?.family, 'custom-agy-opus-alias');
+
+    const all = toAllCatConfigs(loadResolvedCatConfig(templatePath));
+    assert.equal(all['agy-opus'], undefined);
+    assert.equal(all['custom-agy-opus-alias']?.breedId, 'custom-agy-opus-alias');
+  });
+
+  it('allows runtime writes to template-injected variants after bootstrap persists them', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-agy-opus-write-'));
+    const templatePath = writeRepoTemplateWithStaleAgyOpusCatalog(projectRoot);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+    await updateRuntimeCat(projectRoot, 'agy-opus', { available: false });
+
+    const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    assert.equal(hydrated.roster['agy-opus']?.available, false);
+  });
+
+  for (const catId of ['agy-opus', 'antig-opus']) {
+    it(`does not re-add deleted template variant ${catId} during bootstrap or resolved reads`, async () => {
+      const projectRoot = mkdtempSync(join(tmpdir(), `cat-catalog-store-${catId}-delete-`));
+      const templatePath = writeRepoTemplateAsRuntimeCatalog(projectRoot);
+
+      bootstrapCatCatalog(projectRoot, templatePath);
+      await deleteRuntimeCat(projectRoot, catId);
+      bootstrapCatCatalog(projectRoot, templatePath);
+
+      const hydrated = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+      const rawVariants = hydrated.breeds.flatMap((breed) => breed.variants ?? []);
+      assert.equal(
+        rawVariants.some((variant) => (variant.catId ?? '') === catId || variant.id === catId),
+        false,
+      );
+      assert.equal(hydrated.roster?.[catId], undefined);
+
+      const resolved = loadResolvedCatConfig(templatePath);
+      assert.equal(toAllCatConfigs(resolved)[catId], undefined);
+    });
+  }
 
   it('creates a new runtime member without corrupting v2 top-level fields', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
@@ -484,6 +776,112 @@ describe('cat-catalog-store', () => {
       else process.env.CAT_TEMPLATE_PATH = saved;
       _resetCachedConfig();
     }
+  });
+
+  it('migrates legacy built-in Gemini consumer carrier to AGY without touching custom Google cats', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    const siameseVariant = template.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    siameseVariant.clientId = 'google';
+    siameseVariant.cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete siameseVariant.provider;
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyVariant = catalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.defaultModel = 'gemini-3.1-pro-preview';
+    legacyVariant.cli = { command: 'gemini', outputFormat: 'stream-json', defaultArgs: [] };
+    legacyVariant.acp = {
+      command: 'gemini',
+      startupArgs: ['--acp', '--approval-mode', 'yolo'],
+      supportsMultiplexing: true,
+    };
+    delete legacyVariant.provider;
+    catalog.breeds.push({
+      id: 'custom-google',
+      catId: 'custom-google',
+      name: 'Custom Google',
+      displayName: 'Custom Google',
+      avatar: '/avatars/gemini.png',
+      color: { primary: '#5B9BD5', secondary: '#D6E9F8' },
+      mentionPatterns: ['@custom-google'],
+      roleDescription: 'Custom Google fallback',
+      defaultVariantId: 'custom-google-default',
+      variants: [
+        {
+          id: 'custom-google-default',
+          clientId: 'google',
+          defaultModel: 'enterprise-model',
+          mcpSupport: true,
+          cli: { command: 'gemini', outputFormat: 'stream-json', defaultArgs: ['--enterprise'] },
+          acp: { command: 'gemini', startupArgs: ['--acp'] },
+        },
+      ],
+    });
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migrated = rawCatalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    assert.deepEqual(migrated.cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    assert.equal(migrated.acp, null, 'legacy built-in Gemini ACP must be tombstoned so getAcpConfig cannot revive it');
+    assert.equal(
+      migrated.defaultModel,
+      'Gemini 3.1 Pro (High)',
+      'legacy built-in Gemini model ids must migrate to AGY selector labels',
+    );
+
+    const custom = rawCatalog.breeds.find((breed) => breed.id === 'custom-google').variants[0];
+    assert.deepEqual(custom.cli, { command: 'gemini', outputFormat: 'stream-json', defaultArgs: ['--enterprise'] });
+    assert.deepEqual(custom.acp, { command: 'gemini', startupArgs: ['--acp'] });
+  });
+
+  it('migrates persisted Gemini 2.5 ids to AGY selector labels when carrier is already AGY', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyVariant = catalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    legacyVariant.catId = 'gemini25';
+    legacyVariant.clientId = 'google';
+    legacyVariant.defaultModel = 'gemini-2.5-pro';
+    legacyVariant.cli = { command: 'agy', outputFormat: 'plainText', defaultArgs: [] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const migrated = rawCatalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    assert.deepEqual(migrated.cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    assert.equal(migrated.defaultModel, 'Gemini 3.1 Pro (High)');
+  });
+
+  it('preserves built-in Gemini fallback model ids when custom CLI args prevent carrier migration', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = makeF127BootstrapTemplate();
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+
+    const catalog = makeF127BootstrapTemplate();
+    const legacyVariant = catalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    legacyVariant.clientId = 'google';
+    legacyVariant.defaultModel = 'gemini-enterprise-fallback';
+    legacyVariant.cli = { command: 'gemini', outputFormat: 'stream-json', defaultArgs: ['--enterprise'] };
+    delete legacyVariant.provider;
+    writeCatCatalog(projectRoot, catalog);
+
+    bootstrapCatCatalog(projectRoot, templatePath);
+
+    const rawCatalog = JSON.parse(readFileSync(resolveCatCatalogPath(projectRoot), 'utf-8'));
+    const preserved = rawCatalog.breeds.find((breed) => breed.id === 'siamese').variants[0];
+    assert.deepEqual(preserved.cli, { command: 'gemini', outputFormat: 'stream-json', defaultArgs: ['--enterprise'] });
+    assert.equal(preserved.defaultModel, 'gemini-enterprise-fallback');
   });
 
   it('keeps sessionChain updates scoped to non-default variants', async () => {

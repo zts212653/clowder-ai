@@ -14,6 +14,7 @@ import {
   ENV_CATEGORIES,
   ENV_VARS,
   hasSensitiveEditableVars,
+  isEditableEnvVar,
   isSensitiveEditableEnvVar,
   maskUrlCredentials,
 } from '../dist/config/env-registry.js';
@@ -151,6 +152,34 @@ describe('env-registry', () => {
     const def = ENV_VARS.find((v) => v.name === 'DEFAULT_OWNER_USER_ID');
     assert.ok(def, 'DEFAULT_OWNER_USER_ID should be in registry');
     assert.equal(def.runtimeEditable, false, 'trust anchor must not be editable from Hub');
+  });
+
+  it('locks startup-only telemetry vars as non-editable and hot-reloadable ones as editable (F153 Phase K)', () => {
+    const STARTUP_ONLY = [
+      'OTEL_SDK_DISABLED',
+      'TELEMETRY_HMAC_SALT',
+      'PROMETHEUS_PORT',
+      'OTEL_EXPORTER_OTLP_ENDPOINT',
+      'TELEMETRY_EXPORT_RAW_SYSTEM_IDS',
+      // BurnRateMonitor caches thresholds at construction — env change
+      // without restart has no effect (cloud review P1, PR #2594).
+      'TELEMETRY_ALERT_ERROR_RATE',
+      'TELEMETRY_ALERT_P95_LATENCY_S',
+      'TELEMETRY_ALERT_ACTIVE_INVOCATIONS',
+    ];
+    const HOT_RELOADABLE = ['PROMPT_CAPTURE', 'PROMPT_CAPTURE_CATS'];
+    for (const name of STARTUP_ONLY) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.runtimeEditable, false, `${name} is startup-only — must not be editable from Hub`);
+      assert.equal(isEditableEnvVar(def), false, `${name} must be rejected by isEditableEnvVar`);
+    }
+    for (const name of HOT_RELOADABLE) {
+      const def = ENV_VARS.find((v) => v.name === name);
+      assert.ok(def, `${name} should be in registry`);
+      assert.equal(def.runtimeEditable, true, `${name} is hot-reloadable — must be editable from Hub`);
+      assert.equal(isEditableEnvVar(def), true, `${name} must pass isEditableEnvVar`);
+    }
   });
 });
 
@@ -684,6 +713,53 @@ describe('PATCH /api/config/env (route)', () => {
       const body = JSON.parse(res.payload);
       assert.match(body.error, /not editable/i);
       assert.equal(readFileSync(envFilePath, 'utf8'), 'REDIS_URL=redis://localhost:6399/15\n');
+    } finally {
+      await app.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects startup-only telemetry vars from hub writes (F153 Phase K regression)', async () => {
+    const { configRoutes } = await import('../dist/routes/config.js');
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-env-'));
+    const envFilePath = resolve(tempRoot, '.env');
+    writeFileSync(envFilePath, 'OTEL_SDK_DISABLED=false\nPROMETHEUS_PORT=9464\n', 'utf8');
+
+    const app = Fastify({ logger: false });
+    try {
+      await configRoutes(app, {
+        projectRoot: tempRoot,
+        envFilePath,
+        auditLog: { append: async () => {} },
+      });
+      await app.ready();
+
+      // Startup-only telemetry var must be rejected
+      const otelRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'OTEL_SDK_DISABLED', value: 'true' }],
+        },
+      });
+      assert.equal(otelRes.statusCode, 400, 'OTEL_SDK_DISABLED should be rejected');
+      assert.match(JSON.parse(otelRes.payload).error, /not editable/i);
+
+      // BurnRateMonitor caches thresholds at construction — must also be rejected
+      const alertRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/config/env',
+        headers: { 'x-cat-cafe-user': 'codex' },
+        payload: {
+          updates: [{ name: 'TELEMETRY_ALERT_ERROR_RATE', value: '0.5' }],
+        },
+      });
+      assert.equal(alertRes.statusCode, 400, 'TELEMETRY_ALERT_ERROR_RATE should be rejected (startup-only)');
+
+      // Verify .env file unchanged for startup-only var
+      const envContent = readFileSync(envFilePath, 'utf8');
+      assert.match(envContent, /OTEL_SDK_DISABLED=false/, 'startup-only var must not be written');
     } finally {
       await app.close();
       rmSync(tempRoot, { recursive: true, force: true });

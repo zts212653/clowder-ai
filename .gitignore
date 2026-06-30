@@ -3,6 +3,9 @@ node_modules/
 
 # Build outputs
 dist/
+
+# F253 Phase C: gate-last-run sentinel (written by pnpm gate, read by pre-push Layer 4)
+.gate-last-run
 docs/.doc-index.json
 
 # Runtime-written sentinel queue (MarkerQueue auto-writes ephemeral yaml here).
@@ -148,6 +151,7 @@ desktop-dist/
 bundled/
 docs/bug-report/werewolf-investigation/poster-screenshot.png
 .worktrees/
+.review-worktrees/
 
 # Raw avatar source images (large, pre-sliced originals)
 assets/avatars/raw/

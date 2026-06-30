@@ -51,6 +51,10 @@ const ALLOWLIST = new Map([
   ['FEISHU_BOT_OPEN_ID', 'F240: defined in connectors/feishu/connector.yaml'],
   ['FEISHU_ADMIN_OPEN_IDS', 'F240: defined in connectors/feishu/connector.yaml'],
   ['FEISHU_CONNECTION_MODE', 'F240: defined in connectors/feishu/connector.yaml'],
+  [
+    'FEISHU_GROUP_BOT_MENTIONS_JSON',
+    'F240: connector-scoped power-user env (#1035 — JSON map for outbound @alias resolution; .env-only, not surfaced in Hub UI)',
+  ],
   ['DINGTALK_APP_KEY', 'F240: defined in connectors/dingtalk/connector.yaml'],
   ['DINGTALK_APP_SECRET', 'F240: defined in connectors/dingtalk/connector.yaml'],
   ['XIAOYI_AK', 'F240: defined in connectors/xiaoyi/connector.yaml'],

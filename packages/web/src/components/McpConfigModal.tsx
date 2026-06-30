@@ -44,8 +44,11 @@ function recordToPairs(record: Record<string, string> | undefined, addDefault = 
   return Object.entries(record).map(([key, value]) => ({ key, value }));
 }
 
-function sanitizedRecord(pairs: KVPair[]): Record<string, string> {
-  return kvToObj(pairs, { omitBlankValue: true });
+const REDACTED_VALUE = '••••••';
+
+function sanitizedRecord(pairs: KVPair[], options: { omitRedacted?: boolean } = {}): Record<string, string> {
+  const filtered = options.omitRedacted ? pairs.filter((pair) => pair.value !== REDACTED_VALUE) : pairs;
+  return kvToObj(filtered, { omitBlankValue: true });
 }
 
 function stdioPayload(input: BuildPayloadInput): Record<string, unknown> {
@@ -59,7 +62,7 @@ function stdioPayload(input: BuildPayloadInput): Record<string, unknown> {
 function httpPayload(input: BuildPayloadInput): Record<string, unknown> {
   const payload: Record<string, unknown> = { transport: 'streamableHttp' };
   if (input.url.trim()) payload.url = input.url.trim();
-  const headers = sanitizedRecord(input.headers);
+  const headers = sanitizedRecord(input.headers, { omitRedacted: input.isEdit });
   if (Object.keys(headers).length > 0) payload.headers = headers;
   return payload;
 }
@@ -70,7 +73,7 @@ function buildMcpPayload(input: BuildPayloadInput): Record<string, unknown> {
     ...(input.projectPath ? { projectPath: input.projectPath } : {}),
     ...(input.transport === 'streamableHttp' ? httpPayload(input) : stdioPayload(input)),
   };
-  const env = sanitizedRecord(input.envPairs);
+  const env = sanitizedRecord(input.envPairs, { omitRedacted: input.isEdit });
   if (Object.keys(env).length > 0) payload.env = env;
   if (input.resolver && !input.isEdit) payload.resolver = input.resolver;
   return payload;
@@ -103,14 +106,14 @@ function buildProbeBody(
   if (transport === 'streamableHttp') {
     if (url.trim()) body.url = url.trim();
     body.transport = 'streamableHttp';
-    const h = sanitizedRecord(headers);
+    const h = sanitizedRecord(headers, { omitRedacted: true });
     if (Object.keys(h).length > 0) body.headers = h;
   } else {
     if (command.trim()) body.command = command.trim();
     const cleanArgs = args.map((a) => a.trim()).filter(Boolean);
     if (cleanArgs.length > 0) body.args = cleanArgs;
   }
-  const env = sanitizedRecord(envPairs);
+  const env = sanitizedRecord(envPairs, { omitRedacted: true });
   if (Object.keys(env).length > 0) body.env = env;
   // #712 P2-1: project-scoped probe resolves saved config + relative paths
   // against the project root instead of STARTUP_REPO_ROOT.

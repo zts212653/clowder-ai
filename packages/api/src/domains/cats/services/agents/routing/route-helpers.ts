@@ -167,6 +167,28 @@ export interface RouteOptions {
    *  Separate from frustrationAutoIssueEligible because A2A/multi-mention callbacks
    *  suppress frustration issues but still need verdict-pass handoff guards. */
   verdictPassWarningEnabled?: boolean | undefined;
+  /** F254 B3: Freshness re-invoke enqueue — called when doneMsg.metadata.freshnessReinvoke.shouldReinvoke
+   *  is true. Enqueues a new invocation for the same (cat, thread) to address unseen messages. */
+  freshnessReinvokeEnqueue?:
+    | ((entry: {
+        threadId: string;
+        userId: string;
+        content: string;
+        source: 'agent';
+        sourceCategory: 'freshness';
+        targetCats: string[];
+        callerCatId: string;
+        autoExecute: true;
+        priority: 'normal';
+        intent: 'execute';
+        /** Notice IDs that triggered this re-invoke (for event log correlation) */
+        freshnessContext: {
+          sourceNoticeIds: string[];
+          senders: string[];
+          reason: string;
+        };
+      }) => void)
+    | undefined;
 }
 
 export interface IncrementalContextResult {

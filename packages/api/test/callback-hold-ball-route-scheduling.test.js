@@ -17,6 +17,17 @@ import assert from 'node:assert/strict';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
+/**
+ * PR-O3: all wakeAfterMs payloads now require waitSourceRef.
+ * This fixture satisfies the schema without distracting from the test's focus.
+ */
+const VALID_WAIT_SOURCE_REF = {
+  kind: 'github_issue',
+  value: 'AgeOfLearning/cat-cafe#999',
+  expectedSignal: 'issue closed',
+  slaUntilMs: 3_600_000,
+};
+
 describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
   let registry;
   let threadStore;
@@ -126,7 +137,12 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { reason: 'CI still running', nextStep: 'check build status', wakeAfterMs: 60_000 },
+      payload: {
+        reason: 'CI still running',
+        nextStep: 'check build status',
+        wakeAfterMs: 60_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
     });
 
     assert.equal(response.statusCode, 200);
@@ -169,7 +185,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000 },
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r1.statusCode, 200, 'first hold should succeed');
     const firstTaskId = JSON.parse(r1.body).taskId;
@@ -179,7 +195,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000 },
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r2.statusCode, 200, 'second hold should succeed');
     const secondTaskId = JSON.parse(r2.body).taskId;
@@ -219,7 +235,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000 },
+      payload: { reason: 'wait-A', nextStep: 'continue-A', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
     assert.equal(r1.statusCode, 200);
     const firstTaskId = JSON.parse(r1.body).taskId;
@@ -234,7 +250,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000 },
+      payload: { reason: 'wait-B', nextStep: 'continue-B', wakeAfterMs: 20_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
 
     // Caller must see 500 (clear signal that new hold didn't stick).
@@ -279,14 +295,24 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': codex.invocationId, 'x-callback-token': codex.callbackToken },
-      payload: { reason: 'codex-wait', nextStep: 'codex-next', wakeAfterMs: 10_000 },
+      payload: {
+        reason: 'codex-wait',
+        nextStep: 'codex-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
     });
     // opus holds
     await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': opus.invocationId, 'x-callback-token': opus.callbackToken },
-      payload: { reason: 'opus-wait', nextStep: 'opus-next', wakeAfterMs: 10_000 },
+      payload: {
+        reason: 'opus-wait',
+        nextStep: 'opus-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
     });
 
     // Neither should have been cancelled by the other — single-slot is per (thread, cat).
@@ -329,7 +355,12 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers,
-      payload: { reason: 'real-hold', nextStep: 'real-next', wakeAfterMs: 10_000 },
+      payload: {
+        reason: 'real-hold',
+        nextStep: 'real-next',
+        wakeAfterMs: 10_000,
+        waitSourceRef: VALID_WAIT_SOURCE_REF,
+      },
     });
     assert.equal(r.statusCode, 200, 'hold_ball must succeed');
 
@@ -361,7 +392,12 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     const thread = await threadStore.create('user-hb-429', 'hb429');
     const { invocationId, callbackToken } = await registry.create('user-hb-429', 'codex', thread.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
-    const payload = { reason: 'waiting', nextStep: 'continue', wakeAfterMs: 10_000 };
+    const payload = {
+      reason: 'waiting',
+      nextStep: 'continue',
+      wakeAfterMs: 10_000,
+      waitSourceRef: VALID_WAIT_SOURCE_REF,
+    };
 
     for (let i = 1; i <= 3; i++) {
       const r = await app.inject({ method: 'POST', url: '/api/callbacks/hold-ball', headers, payload });
@@ -392,7 +428,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { reason: 'x', nextStep: 'y', wakeAfterMs: 10_000 },
+      payload: { reason: 'x', nextStep: 'y', wakeAfterMs: 10_000, waitSourceRef: VALID_WAIT_SOURCE_REF },
     });
 
     assert.equal(response.statusCode, 500);

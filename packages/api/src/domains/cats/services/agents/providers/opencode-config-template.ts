@@ -253,7 +253,13 @@ export function generateOpenCodeRuntimeConfig(options: OpenCodeRuntimeConfigOpti
   };
 
   if (mcpServerPath) {
-    const mcp = buildOpenCodeMcpSync(mcpServerPath, catId, capabilitiesProjectRoot, workingDirectory);
+    const mcp = buildOpenCodeMcpSync(
+      mcpServerPath,
+      catId,
+      capabilitiesProjectRoot,
+      workingDirectory,
+      allowedWorkspaceDirs,
+    );
     if (Object.keys(mcp).length > 0) config.mcp = mcp;
   }
 

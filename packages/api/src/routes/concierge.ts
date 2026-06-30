@@ -66,6 +66,10 @@ const patchConciergeConfigSchema = z
     muted: z.boolean(),
     /** PR-A3b: ball position persistence (INV-P3) */
     ballPosition: z.object({ x: z.number().finite(), y: z.number().finite() }).nullable(),
+    /** E3: ball size persistence (48-192px, see BALL_SIZE_MIN/MAX) */
+    ballSize: z.number().int().min(48).max(192),
+    /** E4: autonomous behavior engine toggle */
+    behaviorEnabled: z.boolean(),
   })
   .partial()
   .strict();

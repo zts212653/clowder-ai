@@ -9,7 +9,7 @@
 
 # ─── 开发流程链 ─────────────────────────────────────────
 # feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-#     → quality-gate → request-review → receive-review
+#     → quality-gate → [fresh-context-review] → request-review → receive-review
 #     → merge-gate → feat-lifecycle(完成)
 
 skills:
@@ -262,9 +262,31 @@ skills:
       - "收到 review 反馈"
       - "merge"
     output: "Spec compliance report + vision alignment"
-    next: ["request-review"]
+    next: ["fresh-context-review", "request-review"]
     sop_step: 2
     merged_from: ["spec-compliance-check", "verification-before-completion"]
+
+  # ── Fresh-Context Pre-Review（可选，F253 Phase B） ──
+  fresh-context-review:
+    category: "开发流程"
+    description: >
+      Author-triggered fresh-context scan of PR diff.
+      Finding generator, NOT approval authority.
+      Use when: quality-gate 通过且 PR 非 trivial，想降低正式 reviewer 认知负荷。
+      Not for: 正式 review verdict、approval、merge decision。
+      Output: Finding list（附在 review request 中）。
+    triggers:
+      - "fresh context"
+      - "pre-review scan"
+      - "找新眼看看"
+    not_for:
+      - "正式 review"
+      - "approval"
+      - "merge"
+    output: "Finding list (attached to review request)"
+    next: ["request-review"]
+    sop_step: 2.5
+    optional: true
 
   # ── 请求 Review ──
   request-review:

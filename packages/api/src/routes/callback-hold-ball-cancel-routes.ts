@@ -6,6 +6,7 @@ import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskSt
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
 import { executeHoldCancel, findHoldBallTask } from './hold-ball-cancel.js';
 import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
 
@@ -72,6 +73,10 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       executeHoldCancel(task, { dynamicTaskStore, taskRunner });
       const catId = task.createdBy?.replace('hold-ball:', '') ?? 'unknown';
+      // P1-1: also cancel any running wakeWhen command for this (thread, cat)
+      if (threadId) {
+        cancelWakeWhenRunner(threadId, catId);
+      }
       log.info({ taskId, threadId, catId, userId }, 'F167 Phase J: hold_ball cancelled by user');
 
       if (withFeedback && threadId && deps.onHoldBallCancelFeedback) {

@@ -39,6 +39,27 @@ created: {YYYY-MM-DD}
 
 {Phase B 的设计说明。按需增减 Phase。}
 
+## User Journey
+
+<!-- F252 教训：用户旅程必须在 Design Gate 前落盘到 spec。涉及用户可感知变化的 feat 必填；纯后端/重构/无用户可感知变化写 `user_journey_exempt: {reason}`，不能靠缺段默认跳过。Discussion 阶段operator口述的期望必须回填到本节。 -->
+
+### Primary Journey: {用户语言命名}
+- **Scope unit**: thread | feature | session | message | workspace
+- **Actor**: operator / 猫猫 / 新用户
+- **Entry**: {从哪里开始}
+- **Flow**:
+  1. {入口} → 用户看到 ...
+  2. 用户点击 ... → 系统展示 ...
+  3. ... → {终态}
+- **Success evidence**: {截图 / 录屏 / Playwright path}
+- **Non-goals**: {明确不覆盖什么}
+
+### Supporting Journeys（多 surface / 多 actor 才写）
+
+| ID | Scope unit | Actor | Flow | Evidence |
+|----|------------|-------|------|----------|
+| S1 | {unit} | {谁} | {入口 → ... → 终态} | {截图路径} |
+
 ## Acceptance Criteria
 
 <!-- 立项愿景硬度自检（F216→F219）：每条 AC 必须 ① trace 回 Why 的某诉求 ② 非作者可复核（命令/数字/截图）。重构/降复杂度类须实测可量（数字下降），不是"提了可测性就算"。详见 feat-lifecycle SKILL.md。 -->
@@ -145,7 +166,7 @@ created: {YYYY-MM-DD}
 
 - **小 Feature**（≤1 Phase，几天完成）：可以省略 Timeline、Review Gate、Links、Key Decisions
 - **大 Feature**（多 Phase，跨周）：建议所有段落都填
-- **最低要求**：Frontmatter + Status 行 + Why + Current State + What + AC + Dependencies（全新能力的 Current State 写 "N/A（无既有基线）"）
+- **最低要求**：Frontmatter + Status 行 + Why + Current State + What + User Journey（或 `user_journey_exempt`）+ AC + Dependencies（全新能力的 Current State 写 "N/A（无既有基线）"）
 
 ---
 

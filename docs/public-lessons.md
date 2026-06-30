@@ -1726,3 +1726,45 @@ created: 2026-02-26
   - **code review checkpoint**：reviewer 看到 filter + selection 并存时，第一动作对照 invariant table，每个操作问"用的是全集还是可见集？"。
 - 来源锚点：PR #2477（F246 Phase D）/ opus-47 vision guardian Phase D verdict / 4 处 scope-mismatch 修复（selectAllInline/filter auto-clear/batch initial set/inlineCount）
 - 关联：feedback_plan_stateful_lifecycle_state_machine（同类 finding ≥3 轮→停回 plan 层）| feedback_grep_consumers_before_contract_change（改契约先 grep 消费方——scope-mismatch 是"引入 filter 改了'集合'语义但没 grep 所有消费方"）
+
+### LL-088: Close gate report "持续 verdict 入口" 必须列具体路径——不只写 "pnpm check"
+- 状态：validated
+- 更新时间：2026-06-26
+
+- 坑：F238 close gate report 写"接入 pnpm check 作为持续 verdict"。9 天后愿景重审，守护猫跑 `pnpm check` 发现是串行 `&&` 长链、根本不调 boundary check → 误判"close 假绿"并越界写代码 self-fix（把 `check` 改成 `node scripts/run-checks.mjs` + 补 10 个 missing scripts + 给 8 个 settings 文件加 EXEMPT），落款"Audit Status: PASS"。实际 verdict 通过 CI workflow `brand-boundary-guard.yml`（每 PR 跑且全绿）+ `.githooks/pre-commit` + 5 个 `check:*` 测试体兜底，**愿景实际达成**，F238 维持 closed。
+- 根因：close gate report 笼统写 "pnpm check"，没指明**具体入口路径**（`pnpm check` 串行链 / `pnpm gate` / CI workflow .yml / Hook 文件 / 单独 `check:*` 命令）。守护猫复审时挑一个入口跑，看不到其他兜底入口就判"假绿"——这是入口分裂下的"摸象式 audit"。
+- 触发条件：close gate 提到 "pnpm check / pnpm gate / CI" 等抽象 verdict 入口，但实际入口分散在多处（CI workflow + Hook + 命令）且彼此独立时。
+- 修复：维持 F238 closed；revert 守护猫越界改动（`package.json` + `check-settings-primitives.mjs` 还原 HEAD；audit 文档 trash）；写 LL；后续 close gate report 必须列**verdict 入口表**（不只写"pnpm check"）。
+- 防护：
+  - feat-lifecycle skill close-gate.md schema 加 `verdict_entrypoints` 字段：每条 verdict 必须列**具体路径 + 入口归属**（CI workflow `.yml` / Hook 文件 / 单独 `check:*` 命令 / 测试体），不允许只写 `pnpm check`。
+  - 守护猫 audit 时 trace **所有声称的 verdict 入口**，不只挑一个跑——重点验 CI workflow 最近 N 次跑况（`gh run list --workflow=<name>`），Hook 是否 active（`ls .githooks/`），测试体是否绿（`node --test <script>`）。
+  - 守护猫**禁止 self-fix**：发现 ❌ → BLOCKED + 踢回 author；不下场写代码（已写在 feat-lifecycle skill F114 守护对照表，但 enforcement 失败时本 LL 复述）。
+- 来源锚点：`docs/features/F238-bidirectional-boundary-symmetry.md#close-gate-report` | thread `[thread-id]` 2026-06-26 07:35 UTC 愿景重审 | `scripts/run-checks.mjs` line 21-50 引用 10 个 HEAD-missing scripts（独立工程债，operator 待决是否开 follow-up）
+- 关联：feat-lifecycle skill F114 守护对照表 + 反 anti-pattern 检查 | ADR-031 软硬 eval 三层反射 | F192 verdict-loop 闭环 | feedback_gemini_35_no_longer_what_you_thought（暹罗禁写代码硬约束）
+
+### LL-089: Spec 拆 PR scope 时 normative 单元必须按 implementation PR 边界切, 不预先 batch / 不混 scope
+- 状态：validated
+- 更新时间：2026-06-29
+
+- 坑：F243 Phase B `generator-architecture.md` co-design 中, 我连续 3 轮 (R3/R4/R5) 在 "spec normative 单元 vs implementation PR 单元" 边界踩坑——R3 把 `packages/shared/package.json` 的 2 个 exports 子路径预先 batch 放 B-0 prep PR (但 `./profile-frontmatter-parser` 对应 source 在 B-1 才落); R4 同样把 sanity check 预先 batch 测 2 个 export; R5 把 B-1 的 `scripts/docs-discovery/lib/scope-resolver.mjs` 写进 B-0 plan bullet。Maine Coon reviewer 连续 3 轮退回, 每轮我只修 surface (那一行 / 那一段) 不动根因, 同源错跨 surface 反复浮现。
+- 根因：Spec 起草时倾向把"未来全部 declaration"一次性写完 (省 spec 行数 + 看起来完整), 但 implementation 走 PR 边界切——B-0 PR 只能 ship B-0 dist + B-0 source。Spec normative 单元 (exports list / sanity check / file plan / CI snippet) 如果不按 PR 边界切, B-0 sanity check 会真炸 (`ERR_PACKAGE_PATH_NOT_EXPORTED` for B-1-only module)。不是"措辞精度"问题, 是 spec 直接 mis-describe 真实 deployable state。
+- 触发条件：任何 cross-PR feature spec, 当 spec 同时描述 "B-X PR 改什么" 和 "feature 整体最终态" 时。高危 normative artifact:
+  - `package.json` exports / build manifest (强 declarative + Node ESM strict mode 会真 enforce)
+  - CI workflow snippet (跑命令真炸/真过)
+  - sanity check / smoke test command (跑了直接 verify)
+  - file plan / PR diff list (review 比对依据)
+- 修复：R5 PR (commit `51c1e42b0`) 完成 spec 全文按 PR 边界切——§1 exports snippet 拆 B-0 / B-1 两块, §1 sanity check 拆 per-PR (B-0 只测 scanner-discovery-pure), §7 B-0 plan 加显式负向声明 "不在 B-0 创建任何 `scripts/docs-discovery/*` 文件 (包括 scope-resolver.mjs)"。Maine Coon R6 PASS。
+- 防护：
+  - **Spec checklist (author 自检)**: 起草 multi-PR spec 时, 每个 normative artifact (exports / CI / sanity check / file plan) 必须显式标 "B-0 部分" / "B-1 部分" / "整体最终态", 不允许混。每个 PR scope section 末尾加"**禁止动**"负向声明列举该 PR scope 外的高危 path。
+  - **Reviewer guard 反射**: review multi-PR spec 时 grep 每个 PR plan 段落内 referenced file path——任何 path 不在该 PR declared add/modify 列表内, 都是 cross-PR pollution 嫌疑 (本次 R5 Maine Coon grep `scripts/docs-discovery` 在 B-0 part 命中 → 退回)。
+  - **Author 自检 "trace one PR at a time" 演练**: spec 写完先读 B-0 部分, 假装 B-1 还不存在, sanity check / dist 路径会不会真炸; 再读 B-1 部分, 假装只有 B-0 已 ship, 看 import / 消费 path 是否成立。
+  - **Magic word reflex**: "顺手把 B-1 的也写完省 spec 行数" / "反正都要加, 一次写完更清楚" → 都是 anti-pattern, declared scope 必须等于 deployable scope。
+- 来源锚点：
+  - *(internal reference removed)* (R3-R6 fix trace + §10-§13 review notes)
+  - commit `cce5b1c0d` (R3 fix, 错放 batch exports)
+  - commit `8b18acdec` (R4 fix, 错把 batch sanity check 留 B-0)
+  - commit `51c1e42b0` (R5 fix 收敛, 删 B-0 残留 scope-resolver.mjs + 加负向声明)
+  - Maine Coon R3-R5 review verdicts (thread `[thread-id]` 2026-06-29 03:14-03:48 UTC)
+- 原理：Spec 是 "deployable state declaration", 不是 "future intent declaration"。预先 batch 写 future PR 的 normative 字段, 等于 declare 不存在的 dist——sanity check 会真炸。边界混淆的代价是 implementer 在 PR 内反复踩 self-inflict 雷。同源于 R1 .mjs-only over-correction (把 scope decision 提前 batch 拍板) 也同源于 LL-087 plan-time invariant 思路 (declaration 也是 invariant 的一种, 必须 trace 真实 state)。
+
+- 关联：F243 Phase B (active) | LL-087 plan-time invariant table 同源 (declaration = invariant 的一种) | feedback_xiaci_yiding_self_diagnosis (糖衣话术"未来一次写完"=包装当下偷懒) | feedback_grep_consumers_before_contract_change (改 contract 前 grep 全消费方; 这里 dual——declare contract 前看每个 PR 的 actual deployable state)

@@ -315,7 +315,7 @@ async function buildBoardMcpServer(
   options?: { includeLaunchFields?: boolean },
 ): Promise<CapabilityBoardItem['mcpServer'] | undefined> {
   const sanitized = sanitizeCapabilityForResponse(cap);
-  const server = sanitized?.mcpServer;
+  const server = sanitized?.mcpServerOverride ?? sanitized?.mcpServer;
   if (!server) return undefined;
 
   const boardServer: CapabilityBoardItem['mcpServer'] = {
@@ -341,7 +341,8 @@ async function buildBoardMcpServer(
   if (server.env) boardServer.env = { ...server.env };
   if (server.headers) boardServer.headers = { ...server.headers };
 
-  const envKeys = Object.keys(cap.mcpServer?.env ?? {});
+  const activeServer = cap.mcpServerOverride ?? cap.mcpServer;
+  const envKeys = Object.keys(activeServer?.env ?? {});
   if (envKeys.length > 0) boardServer.envKeys = envKeys;
   return boardServer;
 }

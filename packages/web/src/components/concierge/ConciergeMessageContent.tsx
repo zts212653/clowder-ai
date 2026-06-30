@@ -6,18 +6,16 @@
  * clickable inline buttons. Non-marker text rendered as-is.
  *
  * AC-2: teleport → pushThreadRouteWithHistory (path, not query — Bug1 fix)
- * AC-3: peek with messageId → inline peek button → API call
- * AC-4: peek without messageId → validator skips → no matching action → plain text
+ * BUG-UX-12: ALL concierge actions are teleport (thread jump). No peek buttons.
  * AC-5: no raw [verb Rn] bracket text ever visible
  * AC-6: KD-19 fallback actions (no handle/verb) → card buttons below still work
  */
 
-import { Children, type ReactNode, useCallback, useState } from 'react';
+import { Children, type ReactNode, useCallback } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
-import { apiFetch } from '@/utils/api-client';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 
@@ -67,9 +65,18 @@ const CAT_SIGNATURE_RE = /\[[\w一-鿿-]+(?:\/[\w一-鿿.-]+)?🐾\]\s*/g;
 const INTERNAL_MENTION_RE =
   /(?:^|\s)@(?:l\.s\.|landy|you|opus(?:-?4[678])?|sonnet|fable5|codex|gpt52|spark|gemini(?:-?(?:25|35))?|antigravity|antig-opus)(?![a-zA-Z0-9_-])/gi;
 
+/** Matches <!-- triage-plan --> ... <!-- /triage-plan --> blocks (BUG-UX-13 defense-in-depth).
+ *  API strips these before storage, but if strip fails the frontend must not leak raw markup. */
+const TRIAGE_PLAN_MARKER_RE = /<!--\s*triage-plan\s*-->[\s\S]*?<!--\s*\/triage-plan\s*-->/g;
+
 /** Clean internal markers from user-visible concierge content */
 function stripInternalMarkers(text: string): string {
-  return text.replace(CAT_SIGNATURE_RE, '').replace(INTERNAL_MENTION_RE, '').trim();
+  return text
+    .replace(TRIAGE_PLAN_MARKER_RE, '')
+    .replace(CAT_SIGNATURE_RE, '')
+    .replace(INTERNAL_MENTION_RE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -77,10 +84,6 @@ function stripInternalMarkers(text: string): string {
 // ---------------------------------------------------------------------------
 
 export function ConciergeMessageContent({ content, actions }: ConciergeMessageContentProps) {
-  const [peekLoading, setPeekLoading] = useState<string | null>(null);
-  const [peekContent, setPeekContent] = useState<Record<string, string>>({});
-  const [peekError, setPeekError] = useState<string | null>(null);
-
   // Build lookup: "verb:handle" → action
   const actionMap = new Map<string, InlineAction>();
   for (const a of actions) {
@@ -89,6 +92,8 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
     }
   }
 
+  // BUG-UX-12: all concierge actions are semantically thread navigation (jump).
+  // Single handler for all actions — teleport to thread, scroll to message if present.
   const handleTeleport = useCallback((action: InlineAction) => {
     const { threadId, messageId: msgId } = action.payload;
     if (!threadId) return;
@@ -99,63 +104,15 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
     if (msgId) {
       const plan = planTeleport({ threadId, messageId: msgId, currentThreadId });
       if (plan.scrollNow) {
-        // Same thread: scroll to target message + kick resolver for out-of-window targets.
-        // Matches CardBlock.tsx same-thread path (gpt52 review P1 fix).
         scrollToMessage(plan.scrollNow);
         kickTeleportResolve();
       } else if (plan.navigateTo) {
-        // Cross thread: pathname route (/thread/X) + pushState (Bug1 fix parity).
         pushThreadRouteWithHistory(plan.navigateTo, window);
       }
     } else {
-      // No messageId — navigate to thread via pathname route
       pushThreadRouteWithHistory(threadId, window);
     }
   }, []);
-
-  const handlePeek = useCallback(
-    async (action: InlineAction, handle: string) => {
-      // BUG-UX-8: toggle — if already showing, collapse on re-click
-      if (peekContent[handle]) {
-        setPeekContent((prev) => {
-          const next = { ...prev };
-          delete next[handle];
-          return next;
-        });
-        return;
-      }
-
-      const { threadId, messageId: msgId } = action.payload;
-      if (!threadId || !msgId) return;
-
-      setPeekLoading(handle);
-      setPeekError(null);
-
-      try {
-        const res = await apiFetch(`/api/concierge/peek?threadId=${threadId}&messageId=${msgId}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const data = (await res.json()) as {
-          window: Array<{ id: string; content: string; catId: string | null; userId: string; isTarget: boolean }>;
-        };
-
-        const rendered = data.window
-          .map((m) => {
-            const prefix = m.isTarget ? '→ ' : '  ';
-            const sender = m.catId ? `🐱 ${m.catId}` : `👤 ${m.userId}`;
-            return `${prefix}${sender}: ${m.content?.slice(0, 200) ?? ''}`;
-          })
-          .join('\n');
-
-        setPeekContent((prev) => ({ ...prev, [handle]: rendered }));
-      } catch (err) {
-        setPeekError(err instanceof Error ? err.message : '查看失败');
-      } finally {
-        setPeekLoading(null);
-      }
-    },
-    [peekContent],
-  );
 
   // BUG-UX-4: strip internal team markers before rendering
   const cleanContent = stripInternalMarkers(content);
@@ -187,28 +144,24 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
         const action = actionMap.get(`${verb}:${handle}`);
 
         if (action) {
-          const isTeleport = action.action === 'concierge_teleport';
-          const isPeek = action.action === 'concierge_peek';
-
+          // BUG-UX-12: all concierge actions are semantically navigation (thread jumps).
+          // Always display and behave as teleport — covers both new actions (API now
+          // always returns teleport for threads) and old stored messages with stale peek.
           parts.push(
             <button
               key={`m-${handle}-${match.index}`}
               type="button"
-              onClick={() => {
-                if (isTeleport) handleTeleport(action);
-                if (isPeek) handlePeek(action, handle);
-              }}
+              onClick={() => handleTeleport(action)}
               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors"
               style={{
-                backgroundColor: isTeleport ? 'var(--cafe-primary-soft, #e0e7ff)' : 'var(--cafe-accent-soft, #fef3c7)',
-                color: isTeleport ? 'var(--cafe-primary, #4f46e5)' : 'var(--cafe-accent, #d97706)',
+                backgroundColor: 'var(--cafe-primary-soft, #e0e7ff)',
+                color: 'var(--cafe-primary, #4f46e5)',
                 border: 'none',
               }}
               title={action.label}
-              disabled={peekLoading === handle}
             >
-              {isPeek ? '👁 ' : '→ '}
-              {action.action === 'concierge_teleport' ? '跳过去' : '原地看'} {handle}
+              {'→ '}
+              跳过去 {handle}
             </button>,
           );
         } else {
@@ -235,42 +188,5 @@ export function ConciergeMessageContent({ content, actions }: ConciergeMessageCo
     });
   };
 
-  return (
-    <>
-      <MarkdownContent content={cleanContent} disableCommandPrefix textProcessor={processMarkers} />
-      {/* BUG-UX-8: Peek content as collapsible blocks below, with dismiss button */}
-      {Object.entries(peekContent).map(([handle, text]) => (
-        <div
-          key={`peek-${handle}`}
-          className="mt-1 mb-1 p-2 rounded text-xs relative"
-          style={{
-            backgroundColor: 'var(--cafe-surface-sunken, #f5f5f4)',
-            whiteSpace: 'pre-wrap',
-            borderLeft: '2px solid var(--cafe-accent, #d97706)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() =>
-              setPeekContent((prev) => {
-                const next = { ...prev };
-                delete next[handle];
-                return next;
-              })
-            }
-            className="absolute top-1 right-1 text-xs cursor-pointer opacity-50 hover:opacity-100 px-1"
-            title="收起"
-          >
-            ✕
-          </button>
-          {text}
-        </div>
-      ))}
-      {peekError && (
-        <div className="text-xs mt-1" style={{ color: 'var(--cafe-error, #ef4444)' }}>
-          {peekError}
-        </div>
-      )}
-    </>
-  );
+  return <MarkdownContent content={cleanContent} disableCommandPrefix textProcessor={processMarkers} />;
 }

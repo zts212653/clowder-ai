@@ -41,7 +41,10 @@ export function ScopeTabs({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-[var(--console-border-soft)]">
+    <div
+      className="flex items-center justify-between console-divider-b"
+      data-testid={ariaLabel === 'Skill scope' ? 'skills-scope-tabs' : undefined}
+    >
       <nav aria-label={ariaLabel} className="flex">
         {tabs.map((tab) => {
           const active = tab.key === activeKey;

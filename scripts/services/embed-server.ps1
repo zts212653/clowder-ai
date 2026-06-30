@@ -58,6 +58,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "Core deps missing in embed-venv. Run embed-install.ps1 first."
 }
 
+# HF_HUB_OFFLINE prevents huggingface_hub from online-verifying cached models
+# on every start -- avoids SSLEOFError behind proxies/firewalls.
+# Must be set AFTER any auto-install that needs network access.
+# (mirrors tts-server.sh pattern; cloud codex P1: PR #1924)
+if (-not $env:HF_HUB_OFFLINE) { $env:HF_HUB_OFFLINE = "1" }
+
 $Model = $env:EMBED_MODEL
 if (-not $Model) {
     Write-Error "EMBED_MODEL env var required - backend specifies model, no fallback default."

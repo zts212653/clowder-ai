@@ -286,6 +286,77 @@ describe('ToolUsageMetricsAggregator (AC-F9)', () => {
     assert.equal(report.listRecentAdoptionRate.sufficient, false);
   });
 
+  test('F256 Phase B (AC-B3): expansionFollowupRate aggregated from analyzeExpansionFollowup', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const { computeFromThreads } = await import('../dist/domains/memory/ToolUsageMetricsAggregator.js');
+    const eventLog = new ToolEventLog(redis);
+
+    // 10 threads; each has a search_evidence with expansion hints.
+    // 6 of them have a followup graph_resolve that references a hint anchor → 60%.
+    for (let i = 0; i < 10; i++) {
+      await eventLog.append({
+        invocationId: `i${i}`,
+        sessionId: 's1',
+        threadId: `tExp${i}`,
+        catId: 'c1',
+        toolName: 'search_evidence',
+        timestamp: i * 100,
+        turnIndex: 0,
+        status: 'success',
+        summary: {
+          resultCount: 2,
+          topScore: 0.8,
+          nudgeEmitted: false,
+          expansionHintAnchors: ['F208-capability-profile', 'thread-abc-digest'],
+        },
+      });
+      if (i < 6) {
+        // Cat followed the hint — graph_resolve with selectedAnchor matching a hint
+        await eventLog.append({
+          invocationId: `i${i}f`,
+          sessionId: 's1',
+          threadId: `tExp${i}`,
+          catId: 'c1',
+          toolName: 'graph_resolve',
+          timestamp: i * 100 + 10,
+          turnIndex: 1,
+          status: 'success',
+          summary: { selectedAnchor: 'F208-capability-profile' },
+        });
+      }
+    }
+
+    const threads = Array.from({ length: 10 }, (_, i) => ({ threadId: `tExp${i}` }));
+    const report = await computeFromThreads(eventLog, threads);
+    assert.equal(report.expansionFollowupRate.sufficient, true);
+    assert.equal(report.expansionFollowupRate.value, 60.0, '6/10 = 60% of hint events had followup');
+    assert.equal(report.expansionFollowupRate.sampleN, 10);
+  });
+
+  test('F256 Phase B (AC-B3): expansionFollowupRate is zero when no expansion events exist', async () => {
+    const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
+    const { computeFromThreads } = await import('../dist/domains/memory/ToolUsageMetricsAggregator.js');
+    const eventLog = new ToolEventLog(redis);
+
+    // Regular search events without expansion hints
+    await eventLog.append({
+      invocationId: 'i1',
+      sessionId: 's1',
+      threadId: 'tNoExp',
+      catId: 'c1',
+      toolName: 'search_evidence',
+      timestamp: 100,
+      turnIndex: 0,
+      status: 'success',
+      summary: { resultCount: 1, topScore: 0.9, nudgeEmitted: false },
+    });
+
+    const report = await computeFromThreads(eventLog, [{ threadId: 'tNoExp' }]);
+    assert.equal(report.expansionFollowupRate.sufficient, false);
+    assert.equal(report.expansionFollowupRate.value, null);
+    assert.equal(report.expansionFollowupRate.sampleN, 0);
+  });
+
   test('FM-5 nudge_failure_rate uses confound排除: failed iff !followed AND grep fallback', async () => {
     const { ToolEventLog } = await import('../dist/domains/cats/services/tool-usage/ToolEventLog.js');
     const { computeFromThreads } = await import('../dist/domains/memory/ToolUsageMetricsAggregator.js');

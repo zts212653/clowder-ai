@@ -78,6 +78,16 @@ export function makeStitchedEntryId(featId: string, at: number, stitchType: stri
   return `stitch:${featId}:${at}:${stitchType}`;
 }
 
+/** Thread split entry id: `split:{proposalId}` — idempotent per proposal. */
+export function makeThreadSplitEntryId(proposalId: string): string {
+  return `split:${proposalId}`;
+}
+
+/** Cross-post merge entry id: `merge:{messageId}` — idempotent per message. */
+export function makeCrossPostEntryId(messageId: string): string {
+  return `merge:${messageId}`;
+}
+
 /**
  * Redis key namespace (照 Phase B BallCustodyKeys 模式)。
  * 同一 cell `feat-trajectory` 下 projection + entries store 分桶。

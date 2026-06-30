@@ -14,43 +14,55 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import { DispatchProposalKeys } from '../../../cats/services/stores/redis-keys/dispatch-proposal-keys.js';
 import type { CreateDispatchProposalInput, IDispatchProposalStore } from '../ports/IDispatchProposalStore.js';
 
-/** CAS transition: pending → approved. Atomic status check + field update + index removal.
+/** CAS transition: pending → approved. Atomic status check + field update + index ops.
  *  deliveredMessageId is recorded separately via recordDelivery() AFTER successful delivery,
- *  so the CAS transition never leaks a delivery on a lost race (R2 P1-2 fix). */
+ *  so the CAS transition never leaks a delivery on a lost race (R2 P1-2 fix).
+ *  KEYS[3] = userSettled sorted set (F246 Phase F history index, score=decidedAt). */
 const CAS_APPROVE_LUA = `
   local key = KEYS[1]
   local pendingKey = KEYS[2]
+  local settledKey = KEYS[3]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'pending' then return 0 end
   redis.call('HSET', key, 'status', 'approved',
     'decidedAt', ARGV[1],
     'decidedBy', ARGV[2])
   redis.call('ZREM', pendingKey, ARGV[3])
+  redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
   return 1
 `;
 
-/** CAS rollback: approved → pending. Restores retryability when delivery fails (Cloud P1-2 fix). */
+/**
+ * CAS rollback: approved → pending. Restores retryability when delivery fails (Cloud P1-2 fix).
+ * KEYS[3] = userSettled sorted set: must be removed atomically to prevent stale entries from
+ * crowding out real history at small limits in listSettledByUser (Phase F P2 fix).
+ */
 const CAS_REVERT_PENDING_LUA = `
   local key = KEYS[1]
   local pendingKey = KEYS[2]
+  local settledKey = KEYS[3]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'approved' then return 0 end
   redis.call('HSET', key, 'status', 'pending')
   redis.call('HDEL', key, 'decidedAt', 'decidedBy')
   redis.call('ZADD', pendingKey, ARGV[1], ARGV[2])
+  redis.call('ZREM', settledKey, ARGV[2])
   return 1
 `;
 
-/** CAS transition: pending → rejected. Atomic status check + field update + index removal. */
+/** CAS transition: pending → rejected. Atomic status check + field update + index ops.
+ *  KEYS[3] = userSettled sorted set (F246 Phase F history index, score=decidedAt). */
 const CAS_REJECT_LUA = `
   local key = KEYS[1]
   local pendingKey = KEYS[2]
+  local settledKey = KEYS[3]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'pending' then return 0 end
   redis.call('HSET', key, 'status', 'rejected',
     'decidedAt', ARGV[1],
     'decidedBy', ARGV[2])
   redis.call('ZREM', pendingKey, ARGV[3])
+  redis.call('ZADD', settledKey, ARGV[1], ARGV[3])
   return 1
 `;
 
@@ -127,9 +139,19 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
 
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
+    const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
     const now = Date.now();
 
-    const result = await this.redis.eval(CAS_APPROVE_LUA, 2, key, pendingKey, String(now), userId, proposalId);
+    const result = await this.redis.eval(
+      CAS_APPROVE_LUA,
+      3,
+      key,
+      pendingKey,
+      settledKey,
+      String(now),
+      userId,
+      proposalId,
+    );
 
     if (result === 0) return null;
 
@@ -152,12 +174,14 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
 
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
+    const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
 
     const result = await this.redis.eval(
       CAS_REVERT_PENDING_LUA,
-      2,
+      3,
       key,
       pendingKey,
+      settledKey,
       String(proposal.createdAt),
       proposalId,
     );
@@ -178,9 +202,19 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
 
     const key = DispatchProposalKeys.detail(proposalId);
     const pendingKey = DispatchProposalKeys.userPending(proposal.ownerUserId);
+    const settledKey = DispatchProposalKeys.userSettled(proposal.ownerUserId);
     const now = Date.now();
 
-    const result = await this.redis.eval(CAS_REJECT_LUA, 2, key, pendingKey, String(now), userId, proposalId);
+    const result = await this.redis.eval(
+      CAS_REJECT_LUA,
+      3,
+      key,
+      pendingKey,
+      settledKey,
+      String(now),
+      userId,
+      proposalId,
+    );
 
     if (result === 0) return null;
 
@@ -190,6 +224,28 @@ export class RedisDispatchProposalStore implements IDispatchProposalStore {
       decidedAt: now,
       decidedBy: userId,
     };
+  }
+
+  async listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]> {
+    const settledKey = DispatchProposalKeys.userSettled(userId);
+    // Reverse order: newest first (highest score = most recent decidedAt)
+    const ids = await this.redis.zrevrange(settledKey, 0, limit - 1);
+    if (!ids.length) return [];
+
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) {
+      pipeline.hgetall(DispatchProposalKeys.detail(id));
+    }
+    const results = await pipeline.exec();
+    if (!results) return [];
+
+    const proposals: DispatchProposal[] = [];
+    for (const [err, raw] of results) {
+      if (err || !raw || typeof raw !== 'object' || Object.keys(raw as Record<string, string>).length === 0) continue;
+      const p = hydrateProposal(raw as Record<string, string>);
+      if (p.status === 'approved' || p.status === 'rejected') proposals.push(p);
+    }
+    return proposals;
   }
 
   async findByClientMessageId(clientMessageId: string, sourceThreadId: string): Promise<DispatchProposal | null> {

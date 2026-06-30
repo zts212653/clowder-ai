@@ -100,6 +100,72 @@ export function TextInput({
 }
 
 // ---------------------------------------------------------------------------
+// RangeSlider (E3: ballSize)
+// ---------------------------------------------------------------------------
+
+export function RangeSlider({
+  value,
+  min,
+  max,
+  step = 1,
+  disabled,
+  label,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  disabled?: boolean;
+  /** Shown next to the current value, e.g. "72px" */
+  label?: (v: number) => string;
+  /** Called with the final value on pointer-up / key-up (not during drag). */
+  onChange: (value: number) => void;
+}) {
+  // P1 fix: buffer locally during drag, commit only on release.
+  // Without this, continuous onChange hits updateConfig's pendingRef guard
+  // and the slider sticks at a stale intermediate value.
+  const [local, setLocal] = useState(value);
+
+  // Sync external value (e.g. after API round-trip confirms)
+  useEffect(() => {
+    setLocal(value);
+  }, [value]);
+
+  const commit = useCallback(() => {
+    if (local !== value) onChange(local);
+  }, [local, value, onChange]);
+
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={local}
+        disabled={disabled}
+        onChange={(e) => setLocal(Number(e.target.value))}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        className="w-full max-w-xs accent-[var(--cafe-accent)] disabled:opacity-50"
+      />
+      <span
+        className="shrink-0 tabular-nums"
+        style={{
+          fontSize: 'var(--console-font-sm, 0.875rem)',
+          color: 'var(--cafe-text)',
+          minWidth: '3.5rem',
+          textAlign: 'right',
+        }}
+      >
+        {label ? label(local) : local}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // RadioOption
 // ---------------------------------------------------------------------------
 

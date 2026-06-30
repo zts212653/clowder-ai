@@ -5,7 +5,6 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
-import { useCallbackAuthAggregate, useCallbackAuthAvailable } from '@/stores/callbackAuthStore';
 import { useChatStore } from '@/stores/chatStore';
 import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
@@ -153,10 +152,6 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
   );
 }
 
-const DEGRADED_COLOR = 'var(--semantic-warning)';
-const BROKEN_COLOR = 'var(--semantic-critical)';
-const BROKEN_THRESHOLD = 6;
-
 function BellIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
@@ -226,13 +221,6 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
   const isStandalone = isSettingsRoute && searchParams?.get('standalone') === '1';
   const isSettings = isSettingsRoute && !isStandalone;
 
-  const aggregate = useCallbackAuthAggregate();
-  const isAvailable = useCallbackAuthAvailable();
-  const unviewed = isAvailable ? aggregate.unviewedFailures24h : 0;
-  const showBadge = unviewed > 0;
-  const badgeColor = unviewed >= BROKEN_THRESHOLD ? BROKEN_COLOR : DEGRADED_COLOR;
-  const badgeText = unviewed > 99 ? '99+' : String(unviewed);
-
   return (
     <button
       type="button"
@@ -242,29 +230,12 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
           ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
           : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
       }`}
-      title={showBadge ? `设置 · MCP Callback Auth 24h ${unviewed} 次未查看失败` : '设置'}
+      title="设置"
       aria-current={isSettings ? 'page' : undefined}
       data-guide-id="hub.trigger"
       data-testid="settings-button"
-      data-callback-auth-unviewed={showBadge ? String(unviewed) : undefined}
     >
       <SettingsIcon className="h-5 w-5" />
-      {showBadge && (
-        <span
-          data-testid="settings-callback-auth-badge"
-          className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full text-micro font-bold flex items-center justify-center"
-          style={{
-            backgroundColor: badgeColor,
-            color: 'var(--cafe-accent-foreground)',
-            maxWidth: '22px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {badgeText}
-        </span>
-      )}
     </button>
   );
 }

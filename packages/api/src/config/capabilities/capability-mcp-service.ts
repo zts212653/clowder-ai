@@ -61,7 +61,7 @@ export function fileBasedMcpIO(projectRoot: string, cliConfigPaths?: CliConfigPa
 // ────────── Options ──────────
 
 export interface McpServiceOpts {
-  /** Cat Cafe monorepo root for topology healing. */
+  /** Clowder AI monorepo root for topology healing. */
   catCafeRepoRoot?: string;
   /** User/actor id recorded in the audit log. */
   userId?: string;

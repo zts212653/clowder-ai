@@ -247,6 +247,7 @@ export const recallMetricsRoutes: FastifyPluginAsync<RecallMetricsRoutesOptions>
         const resultCount = r.result_count ?? (candidates.length > 0 ? candidates.length : undefined);
         return {
           id: r.recall_id,
+          toolName: r.tool_name,
           query: r.query,
           mode: r.mode ?? undefined,
           scope: r.scope ?? undefined,

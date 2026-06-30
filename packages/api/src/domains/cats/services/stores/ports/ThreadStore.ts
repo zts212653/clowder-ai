@@ -195,6 +195,21 @@ export interface Thread {
    *  'resume' (default) = normal session continuation / bootstrap / continuation capsule.
    *  'reborn' = force new session every invocation, skip bootstrap digest, skip continuation. */
   memberSessionStrategy?: Record<string, 'resume' | 'reborn'>;
+  /** F247 AC-B1c-1 (KD-20 + KD-21): Local-only operational sidecar — per-cloud-cat
+   *  ChatGPT chat URL binding.
+   *
+   *  Map of `catId` → ChatGPT chat URL (`^https://chatgpt\.com/c/[a-zA-Z0-9-]+/?$`,
+   *  see `utils/chatgpt-chat-url.ts`).
+   *
+   *  PRIVACY GUARANTEES (AC-B1c-8): Stripped from default `GET /api/threads/:id` via
+   *  `sanitizeThreadForResponse`. Owner-only access via dedicated
+   *  `/api/threads/:id/cloud-bindings` GET/PATCH endpoints. NOT serialized into
+   *  `get_thread_context` MCP tool / cross-post payloads / memory index / thread
+   *  export. Forbidden in plain `PATCH /api/threads/:id` body (rejected by
+   *  `updateThreadSchema.strict()`).
+   *
+   *  See `docs/features/F247-cloud-cat-family.md` KD-20 / KD-21 for design. */
+  cloudCatBindings?: Record<CatId, string>;
 }
 
 /** #813: Pending continuation state per cat. Written by seal, consumed at next invocation. */
@@ -425,6 +440,21 @@ export interface IThreadStore {
     catId: string,
     strategy: 'resume' | 'reborn' | null,
   ): void | Promise<void>;
+  /** F247 AC-B1c-1: Set or clear a cloud cat's ChatGPT chat URL binding for this thread.
+   *  `chatUrl=null` clears the specific catId binding (stale binding recovery / explicit unbind).
+   *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
+   *  does not check ownership.
+   *
+   *  URL format validation is NOT enforced here either — callers MUST validate via
+   *  `isValidChatGptChatUrl()` from `utils/chatgpt-chat-url.ts` before writing.
+   *  See `docs/features/F247-cloud-cat-family.md` AC-B1c-11 for URL contract. */
+  updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void | Promise<void>;
+  /** F247 AC-B1c-1: Read all cloud cat bindings for this thread. Returns empty object
+   *  when no bindings exist (never returns undefined for ergonomic callers).
+   *
+   *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
+   *  does not check ownership. */
+  getCloudCatBindings(threadId: string): Record<CatId, string> | Promise<Record<CatId, string>>;
   /** F224: Coordinator-facing strategy read. Undefined means default resume. */
   getMemberSessionStrategy?(
     threadId: string,
@@ -936,6 +966,29 @@ export class ThreadStore implements IThreadStore {
         }
       }
     }
+  }
+
+  updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (chatUrl === null) {
+      if (thread.cloudCatBindings) {
+        delete thread.cloudCatBindings[catId];
+        if (Object.keys(thread.cloudCatBindings).length === 0) {
+          delete thread.cloudCatBindings;
+        }
+      }
+      return;
+    }
+    if (!thread.cloudCatBindings) thread.cloudCatBindings = {};
+    thread.cloudCatBindings[catId] = chatUrl;
+  }
+
+  getCloudCatBindings(threadId: string): Record<CatId, string> {
+    const thread = this.get(threadId);
+    if (!thread || !thread.cloudCatBindings) return {};
+    // Defensive copy — callers should not mutate internal state.
+    return { ...thread.cloudCatBindings };
   }
 
   /** #836: Check if cat uses reborn strategy in this thread. */

@@ -1,6 +1,6 @@
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -19,8 +19,10 @@ const {
   getCatEffort,
   getAcpConfig,
   getCatFamily,
+  bootstrapDefaultCatCatalog,
   _resetCachedConfig,
 } = await import('../dist/config/cat-config-loader.js');
+const { getProjectResolvedCats } = await import('../dist/config/resolved-cats.js');
 
 /** Create a temp JSON file with given content, return path */
 function writeTempConfig(data) {
@@ -951,6 +953,24 @@ describe('getCatEffort', () => {
   });
 });
 describe('F32-b P4c: Sonnet variant in project config', () => {
+  function writeAgyOpusProjectWithStaleCatalog() {
+    const projectDir = mkdtempSync(join(tmpdir(), 'cat-agy-opus-overlay-'));
+    const templatePath = join(projectDir, 'cat-template.json');
+    const repoTemplatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const template = JSON.parse(readFileSync(repoTemplatePath, 'utf-8'));
+    writeFileSync(templatePath, JSON.stringify(template));
+
+    const runtimeDir = join(projectDir, '.cat-cafe');
+    mkdirSync(runtimeDir, { recursive: true });
+    const existingCatalog = JSON.parse(JSON.stringify(template));
+    delete existingCatalog.roster['agy-opus'];
+    const bengal = existingCatalog.breeds.find((breed) => breed.id === 'bengal');
+    bengal.variants = bengal.variants.filter((variant) => variant.id !== 'agy-opus');
+    writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(existingCatalog));
+
+    return { projectDir, templatePath };
+  }
+
   it('project cat-template.json loads with Sonnet variant', () => {
     const config = loadCatConfig();
     const ragdoll = config.breeds.find((b) => b.id === 'ragdoll');
@@ -994,14 +1014,14 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
   });
 
-  it('total cat count is 15 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gemini + gemini25 + gemini35 + kimi + antigravity + antig-opus + opencode)', () => {
+  it('total cat count is 17 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + gpt-pro + gemini + gemini25 + gemini35 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 15);
+    assert.equal(Object.keys(all).length, 17);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
@@ -1010,13 +1030,71 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.codex);
     assert.ok(all.gpt52);
     assert.ok(all.spark); // F032 Phase E: new cat added
+    assert.ok(all['gpt-pro']); // F247: cloud pro cat added
     assert.ok(all.gemini);
     assert.ok(all.gemini25);
     assert.ok(all.gemini35); // Gemini 3.5 Flash standalone breed
     assert.ok(all.kimi); // Kimi CLI cat (moonshot)
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
     assert.ok(all['antig-opus']); // F061: Bengal cat Claude variant
+    assert.ok(all['agy-opus']); // F210: Bengal cat AGY CLI Claude Opus variant
     assert.ok(all.opencode); // F105: OpenCode external agent
+  });
+
+  it('keeps AGY CLI Opus under Bengal while preserving Antigravity IDE Opus', () => {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
+    const config = loadCatConfig(templatePath);
+    const all = toAllCatConfigs(config);
+
+    assert.equal(all['agy-opus'].breedId, 'bengal');
+    assert.equal(all['agy-opus'].clientId, 'google');
+    assert.equal(all['agy-opus'].accountRef, 'gemini');
+    assert.equal(all['agy-opus'].defaultModel, 'Claude Opus 4.6 (Thinking)');
+    assert.deepEqual(all['agy-opus'].cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    assert.deepEqual(all['agy-opus'].mentionPatterns, ['@agy-opus', '@agy-opus46', '@孟加拉agyopus']);
+
+    assert.equal(all['antig-opus'].clientId, 'antigravity');
+    assert.equal(all['antig-opus'].defaultModel, 'claude-opus-4-6');
+    assert.equal(all['antig-opus'].cli, undefined);
+  });
+
+  it('surfaces AGY CLI Opus when an existing runtime catalog lacks the new built-in variant', () => {
+    const { templatePath } = writeAgyOpusProjectWithStaleCatalog();
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    try {
+      const all = toAllCatConfigs(loadCatConfig());
+      assert.equal(all['agy-opus'].breedId, 'bengal');
+      assert.equal(all['agy-opus'].defaultModel, 'Claude Opus 4.6 (Thinking)');
+      assert.deepEqual(all['agy-opus'].cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CAT_TEMPLATE_PATH;
+      } else {
+        process.env.CAT_TEMPLATE_PATH = saved;
+      }
+    }
+  });
+
+  it('bootstraps AGY CLI Opus into an existing runtime catalog during API startup', () => {
+    const { templatePath } = writeAgyOpusProjectWithStaleCatalog();
+
+    const all = toAllCatConfigs(bootstrapDefaultCatCatalog(templatePath));
+
+    assert.equal(all['agy-opus'].breedId, 'bengal');
+    assert.equal(all['agy-opus'].defaultModel, 'Claude Opus 4.6 (Thinking)');
+    assert.deepEqual(all['agy-opus'].cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
+  });
+
+  it('resolves AGY CLI Opus for project cats when runtime catalog predates the variant', () => {
+    const { projectDir } = writeAgyOpusProjectWithStaleCatalog();
+
+    const all = getProjectResolvedCats(projectDir);
+
+    assert.equal(all['agy-opus'].breedId, 'bengal');
+    assert.equal(all['agy-opus'].defaultModel, 'Claude Opus 4.6 (Thinking)');
+    assert.deepEqual(all['agy-opus'].cli, { command: 'agy', outputFormat: 'plainText', defaultArgs: [] });
   });
 
   it('antigravity variants have no cli config (F061 Bridge replaces CDP)', () => {
@@ -1346,6 +1424,237 @@ describe('#772: template breeds must not leak into runtime', () => {
         getCatFamily('sonnet', config),
         'ragdoll',
         'family should resolve from the catalog-owned variant roster entry',
+      );
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('skips allowlisted template variant backfill when its catId is already used by another runtime breed', () => {
+    const templateBreeds = [
+      {
+        id: 'bengal',
+        catId: 'antigravity',
+        name: 'Bengal',
+        displayName: 'Bengal',
+        avatar: '/avatars/bengal.png',
+        color: { primary: '#000', secondary: '#fff' },
+        mentionPatterns: ['@antigravity'],
+        roleDescription: 'bengal lead',
+        defaultVariantId: 'antigravity-default',
+        variants: [
+          {
+            id: 'antigravity-default',
+            clientId: 'google',
+            defaultModel: 'gemini-3.1-pro',
+            mcpSupport: true,
+            personality: 'default bengal',
+          },
+          {
+            id: 'agy-opus',
+            catId: 'agy-opus',
+            clientId: 'antigravity',
+            defaultModel: 'claude-opus-4-6',
+            mcpSupport: true,
+            personality: 'template agy opus',
+          },
+        ],
+      },
+      makeBreed('custom-agy-opus', 'agy-opus', ['@custom-agy-opus']),
+    ];
+    const catalogBreeds = [
+      {
+        id: 'bengal',
+        catId: 'antigravity',
+        name: 'Bengal',
+        displayName: 'Bengal',
+        avatar: '/avatars/bengal.png',
+        color: { primary: '#000', secondary: '#fff' },
+        mentionPatterns: ['@antigravity'],
+        roleDescription: 'bengal lead',
+        defaultVariantId: 'antigravity-default',
+        variants: [
+          {
+            id: 'antigravity-default',
+            clientId: 'google',
+            defaultModel: 'gemini-3.1-pro',
+            mcpSupport: true,
+            personality: 'default bengal',
+          },
+        ],
+      },
+      makeBreed('custom-agy-opus', 'agy-opus', ['@custom-agy-opus']),
+    ];
+    const { templatePath } = setupProjectDir(
+      templateBreeds,
+      catalogBreeds,
+      {
+        antigravity: {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: true,
+          available: true,
+          evaluation: 'template-bengal',
+        },
+        'agy-opus': {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: false,
+          available: true,
+          evaluation: 'template-agy-opus',
+        },
+      },
+      {
+        antigravity: {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: true,
+          available: true,
+          evaluation: 'catalog-bengal',
+        },
+        'agy-opus': {
+          family: 'custom-agy-opus',
+          roles: ['assistant'],
+          lead: false,
+          available: true,
+          evaluation: 'catalog-custom',
+        },
+      },
+    );
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.equal(all['agy-opus']?.breedId, 'custom-agy-opus');
+      assert.deepEqual(
+        config.roster['agy-opus']?.roles,
+        ['assistant'],
+        'runtime-owned roster must survive when a pruned template variant uses the same catId',
+      );
+      const bengal = config.breeds.find((breed) => breed.id === 'bengal');
+      assert.equal(
+        bengal?.variants.some((variant) => variant.id === 'agy-opus'),
+        false,
+        'resolved reads must not keep template agy-opus when catId is occupied',
+      );
+    } finally {
+      if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;
+      else process.env.CAT_TEMPLATE_PATH = saved;
+      _resetCachedConfig();
+    }
+  });
+
+  it('skips allowlisted template variant backfill when its mention alias is already used by runtime catalog', () => {
+    const templateBreeds = [
+      {
+        id: 'bengal',
+        catId: 'antigravity',
+        name: 'Bengal',
+        displayName: 'Bengal',
+        avatar: '/avatars/bengal.png',
+        color: { primary: '#000', secondary: '#fff' },
+        mentionPatterns: ['@antigravity'],
+        roleDescription: 'bengal lead',
+        defaultVariantId: 'antigravity-default',
+        variants: [
+          {
+            id: 'antigravity-default',
+            clientId: 'google',
+            defaultModel: 'gemini-3.1-pro',
+            mcpSupport: true,
+            personality: 'default bengal',
+          },
+          {
+            id: 'agy-opus',
+            catId: 'agy-opus',
+            mentionPatterns: ['@agy-opus'],
+            clientId: 'antigravity',
+            defaultModel: 'claude-opus-4-6',
+            mcpSupport: true,
+            personality: 'template agy opus',
+          },
+        ],
+      },
+      makeBreed('custom-alias-owner', 'custom-alias-owner', ['@agy-opus']),
+    ];
+    const catalogBreeds = [
+      {
+        id: 'bengal',
+        catId: 'antigravity',
+        name: 'Bengal',
+        displayName: 'Bengal',
+        avatar: '/avatars/bengal.png',
+        color: { primary: '#000', secondary: '#fff' },
+        mentionPatterns: ['@antigravity'],
+        roleDescription: 'bengal lead',
+        defaultVariantId: 'antigravity-default',
+        variants: [
+          {
+            id: 'antigravity-default',
+            clientId: 'google',
+            defaultModel: 'gemini-3.1-pro',
+            mcpSupport: true,
+            personality: 'default bengal',
+          },
+        ],
+      },
+      makeBreed('custom-alias-owner', 'custom-alias-owner', ['@agy-opus']),
+    ];
+    const { templatePath } = setupProjectDir(
+      templateBreeds,
+      catalogBreeds,
+      {
+        antigravity: {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: true,
+          available: true,
+          evaluation: 'template-bengal',
+        },
+        'agy-opus': {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: false,
+          available: true,
+          evaluation: 'template-agy-opus',
+        },
+      },
+      {
+        antigravity: {
+          family: 'bengal',
+          roles: ['operator'],
+          lead: true,
+          available: true,
+          evaluation: 'catalog-bengal',
+        },
+        'custom-alias-owner': {
+          family: 'custom-alias-owner',
+          roles: ['assistant'],
+          lead: false,
+          available: true,
+          evaluation: 'catalog-custom-alias-owner',
+        },
+      },
+    );
+
+    const saved = process.env.CAT_TEMPLATE_PATH;
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    _resetCachedConfig();
+    try {
+      const config = loadCatConfig();
+      const all = toAllCatConfigs(config);
+      assert.equal(all['custom-alias-owner']?.breedId, 'custom-alias-owner');
+      assert.equal(all['agy-opus'], undefined, 'template agy-opus must not backfill over an occupied alias');
+      const bengal = config.breeds.find((breed) => breed.id === 'bengal');
+      assert.equal(
+        bengal?.variants.some((variant) => variant.id === 'agy-opus'),
+        false,
+        'resolved reads must not keep template agy-opus when its alias is occupied',
       );
     } finally {
       if (saved === undefined) delete process.env.CAT_TEMPLATE_PATH;

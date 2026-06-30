@@ -4,11 +4,12 @@ related_features: [F215, F216, F023]
 topics: [tech-debt, architecture, refactor, routing, dispatch, vision]
 doc_kind: spec
 created: 2026-06-02
+tips_exempt: status-only correction (spec to in-progress for lint dogfood); F219 core work not yet implemented, no user-facing capability
 ---
 
 # F219: 核心引擎技术债盘点 + 架构演进
 
-> **Status**: spec | **Owner**: Ragdoll（Ragdoll/Opus-4.8）| **Priority**: P1
+> **Status**: in-progress（解耦的"立项愿景硬度自检 SOP gate"已 PR #2034 merged；核心引擎债主体待启动）| **Owner**: Ragdoll（Ragdoll/Opus-4.8）| **Priority**: P1
 >
 > **operator signoff**：operator 2026-06-02 04:45 UTC 明确立项 "f219 这个立项哦"，scope = 聚焦核心引擎债（不贪全量），routeSerial 走快线打头。立项前讨论见 Links 讨论草案。
 

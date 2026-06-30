@@ -23,8 +23,14 @@ import type {
 import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { bootstrapCatCatalog, readCatCatalogRaw, resolveCatCatalogPath } from './cat-catalog-store.js';
+import { bootstrapCatCatalog, readCatCatalogRaw } from './cat-catalog-store.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
+import {
+  hasOccupiedMentionAlias,
+  isTemplateVariantBackfillAllowed,
+  normalizeMentionAlias,
+} from './template-variant-backfill.js';
+import { collectTemplateVariantTombstoneCatIds, isTemplateVariantTombstoned } from './template-variant-tombstones.js';
 import { isValidTimeZone } from './time-zone.js';
 
 const log = createModuleLogger('cat-config');
@@ -321,21 +327,101 @@ function mergeById(base: HasId[], overlay: HasId[]): HasId[] {
 
 type BreedWithResolvedCatIds = HasId & {
   catId?: string;
+  defaultVariantId?: string;
+  mentionPatterns?: string[];
   variants?: Array<{
+    id?: string;
     catId?: string;
+    mentionPatterns?: string[];
   }>;
 };
 
-function collectResolvedCatIds(breeds: BreedWithResolvedCatIds[]): Set<string> {
+type RuntimeIdentityOccupancy = {
+  catIds: Set<string>;
+  mentionAliases: Set<string>;
+};
+
+function resolveVariantMentionPatterns(
+  breed: BreedWithResolvedCatIds,
+  variant: NonNullable<BreedWithResolvedCatIds['variants']>[number],
+  catId: string,
+): string[] {
+  if (Array.isArray(variant.mentionPatterns) && variant.mentionPatterns.length > 0) return variant.mentionPatterns;
+  if (variant.id === breed.defaultVariantId && Array.isArray(breed.mentionPatterns)) return breed.mentionPatterns;
+  return [`@${catId}`];
+}
+
+function collectResolvedIdentityOccupancy(breeds: BreedWithResolvedCatIds[]): RuntimeIdentityOccupancy {
   const catIds = new Set<string>();
+  const mentionAliases = new Set<string>();
   for (const breed of breeds) {
     if (breed.catId) catIds.add(breed.catId);
     for (const variant of Array.isArray(breed.variants) ? breed.variants : []) {
       const resolvedCatId = variant.catId ?? breed.catId;
-      if (resolvedCatId) catIds.add(resolvedCatId);
+      if (!resolvedCatId) continue;
+      catIds.add(resolvedCatId);
+      for (const pattern of resolveVariantMentionPatterns(breed, variant, resolvedCatId)) {
+        const normalized = normalizeMentionAlias(pattern);
+        if (normalized) mentionAliases.add(normalized);
+      }
     }
   }
-  return catIds;
+  return { catIds, mentionAliases };
+}
+
+function collectResolvedCatIds(breeds: BreedWithResolvedCatIds[]): Set<string> {
+  return collectResolvedIdentityOccupancy(breeds).catIds;
+}
+
+function removeUnavailableTemplateVariants(
+  merged: Record<string, unknown>,
+  catalogJson: Record<string, unknown>,
+  catalogBreeds: BreedWithResolvedCatIds[],
+): Set<string> {
+  const removedCatIds = new Set<string>();
+  if (!Array.isArray(merged.breeds)) return removedCatIds;
+
+  const catalogBreedsById = new Map(catalogBreeds.map((breed) => [breed.id, breed]));
+  const occupancy = collectResolvedIdentityOccupancy(catalogBreeds);
+  const catalogRoster = isPlainObject(catalogJson.roster) ? (catalogJson.roster as Record<string, unknown>) : {};
+  for (const breed of merged.breeds as BreedWithResolvedCatIds[]) {
+    if (typeof breed.id !== 'string') continue;
+    if (!Array.isArray(breed.variants)) continue;
+
+    const catalogBreed = catalogBreedsById.get(breed.id);
+    const catalogVariantIds = new Set(
+      (Array.isArray(catalogBreed?.variants) ? catalogBreed.variants : [])
+        .map((variant) => variant.id)
+        .filter((id): id is string => typeof id === 'string'),
+    );
+
+    breed.variants = breed.variants.filter((variant) => {
+      if (typeof variant.id !== 'string') return true;
+      if (catalogVariantIds.has(variant.id)) return true;
+
+      const catId = variant.catId ?? breed.catId;
+      if (!catId) return true;
+      const input = {
+        breedId: breed.id,
+        variantId: variant.id,
+        catId,
+        mentionPatterns: resolveVariantMentionPatterns(breed, variant, catId),
+      };
+      const rosterEntry = catalogRoster[catId];
+      const ownedByCatalogRoster = isPlainObject(rosterEntry) && rosterEntry.family === breed.id;
+      if (isTemplateVariantTombstoned(catalogJson, input)) {
+        removedCatIds.add(catId);
+        return false;
+      }
+      const hasOccupiedCatId = occupancy.catIds.has(catId);
+      const hasOccupiedAlias = hasOccupiedMentionAlias(input.mentionPatterns, occupancy.mentionAliases);
+      let keep = isTemplateVariantBackfillAllowed(input, occupancy);
+      if (!keep && ownedByCatalogRoster && !hasOccupiedCatId && !hasOccupiedAlias) keep = true;
+      if (!keep) removedCatIds.add(catId);
+      return keep;
+    });
+  }
+  return removedCatIds;
 }
 
 /**
@@ -360,6 +446,7 @@ function mergeTemplateWithCatalog(templatePath: string): string | null {
   if (Array.isArray(merged.breeds)) {
     merged.breeds = (merged.breeds as BreedWithResolvedCatIds[]).filter((breed) => catalogBreedIds.has(breed.id));
   }
+  const unavailableTemplateVariantCatIds = removeUnavailableTemplateVariants(merged, catalogJson, catalogBreeds);
   const runtimeCatIds = Array.isArray(merged.breeds)
     ? collectResolvedCatIds(merged.breeds as BreedWithResolvedCatIds[])
     : new Set<string>();
@@ -369,44 +456,26 @@ function mergeTemplateWithCatalog(templatePath: string): string | null {
   // (bootstrap writes breeds:[] + owner roster; template roster must not leak).
   const baseBreeds = Array.isArray(baseJson.breeds) ? (baseJson.breeds as BreedWithResolvedCatIds[]) : [];
   const templateOnlyCatIds = collectResolvedCatIds(baseBreeds.filter((breed) => !catalogBreedIds.has(breed.id)));
+  const tombstonedCatIds = collectTemplateVariantTombstoneCatIds(catalogJson);
   for (const runtimeCatId of runtimeCatIds) templateOnlyCatIds.delete(runtimeCatId);
-  if (templateOnlyCatIds.size > 0 && merged.roster && typeof merged.roster === 'object') {
+  for (const runtimeCatId of runtimeCatIds) tombstonedCatIds.delete(runtimeCatId);
+  for (const runtimeCatId of runtimeCatIds) unavailableTemplateVariantCatIds.delete(runtimeCatId);
+  if (
+    (templateOnlyCatIds.size > 0 || tombstonedCatIds.size > 0 || unavailableTemplateVariantCatIds.size > 0) &&
+    merged.roster &&
+    typeof merged.roster === 'object'
+  ) {
     for (const key of Object.keys(merged.roster as Record<string, unknown>)) {
       if (templateOnlyCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
+      if (tombstonedCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
+      if (unavailableTemplateVariantCatIds.has(key)) delete (merged.roster as Record<string, unknown>)[key];
     }
   }
 
   return JSON.stringify(merged);
 }
 
-/**
- * Load and validate the resolved cat config source.
- * Explicit filePath reads that file directly.
- * Default resolution: cat-template.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
- * Catalog fields override config fields (deep merge); config fields absent from catalog are preserved.
- */
-export function loadCatConfig(filePath?: string): CatCafeConfig {
-  let raw: string;
-  let resolvedPath = filePath;
-  if (filePath) {
-    try {
-      raw = readFileSync(filePath, 'utf-8');
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
-    }
-  } else {
-    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-    const merged = mergeTemplateWithCatalog(templatePath);
-    if (merged !== null) {
-      raw = merged;
-      resolvedPath = resolveCatCatalogPath(dirname(templatePath));
-    } else {
-      raw = readTemplate(templatePath);
-      resolvedPath = templatePath;
-    }
-  }
-
+function parseCatConfig(raw: string): CatCafeConfig {
   const json: unknown = JSON.parse(raw);
   const result = catCafeConfigSchema.safeParse(json);
   if (!result.success) {
@@ -437,11 +506,38 @@ export function loadCatConfig(filePath?: string): CatCafeConfig {
   return result.data as unknown as CatCafeConfig;
 }
 
+export function loadResolvedCatConfig(templatePath?: string): CatCafeConfig {
+  const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+  const raw = mergeTemplateWithCatalog(resolvedTemplatePath) ?? readTemplate(resolvedTemplatePath);
+  return parseCatConfig(raw);
+}
+
+/**
+ * Load and validate the resolved cat config source.
+ * Explicit filePath reads that file directly.
+ * Default resolution: cat-template.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
+ * Catalog fields override config fields (deep merge); config fields absent from catalog are preserved.
+ */
+export function loadCatConfig(filePath?: string): CatCafeConfig {
+  if (filePath) {
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
+    }
+    return parseCatConfig(raw);
+  }
+
+  return loadResolvedCatConfig();
+}
+
 export function bootstrapDefaultCatCatalog(templatePath?: string): CatCafeConfig {
   const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
   const projectRoot = dirname(resolvedTemplatePath);
-  const catalogPath = bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
-  return loadCatConfig(catalogPath);
+  bootstrapCatCatalog(projectRoot, resolvedTemplatePath);
+  return loadResolvedCatConfig(resolvedTemplatePath);
 }
 
 /** Get the default variant for a breed */

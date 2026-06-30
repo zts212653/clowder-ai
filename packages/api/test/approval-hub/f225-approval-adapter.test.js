@@ -82,4 +82,60 @@ describe('F225ApprovalAdapter', () => {
     const [item] = adapter.listPending('user-1');
     assert.equal(item.sourceMessageId, 'msg-card-123');
   });
+
+  // F246 Phase G: listSettled — approval history for F225 session handoff proposals
+  describe('listSettled', () => {
+    it('returns approved SessionHandoffProposals as SettledApprovalItems', async () => {
+      const store = new InMemorySessionHandoffProposalStore();
+      const p = createHandoff(store);
+      store.claimForApproval(p.proposalId);
+      store.finalizeApproval(p.proposalId);
+
+      const adapter = new F225ApprovalAdapter(store);
+      const items = await adapter.listSettled('user-1');
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].proposalId, p.proposalId);
+      assert.equal(items[0].sourceFeatureId, 'F225');
+      assert.equal(items[0].status, 'approved');
+      assert.equal(items[0].ownerUserId, 'user-1');
+      assert.ok(typeof items[0].decidedAt === 'number');
+      assert.ok(typeof items[0].decidedBy === 'string');
+    });
+
+    it('returns rejected SessionHandoffProposals as SettledApprovalItems', async () => {
+      const store = new InMemorySessionHandoffProposalStore();
+      const p = createHandoff(store);
+      store.markRejected(p.proposalId);
+
+      const adapter = new F225ApprovalAdapter(store);
+      const items = await adapter.listSettled('user-1');
+
+      assert.equal(items.length, 1);
+      assert.equal(items[0].status, 'rejected');
+      assert.ok(typeof items[0].decidedAt === 'number');
+    });
+
+    it('does NOT return pending proposals in listSettled', async () => {
+      const store = new InMemorySessionHandoffProposalStore();
+      createHandoff(store); // stays pending
+
+      const adapter = new F225ApprovalAdapter(store);
+      const items = await adapter.listSettled('user-1');
+
+      assert.equal(items.length, 0, 'pending proposals must NOT appear in settled history');
+    });
+
+    it('does NOT return another user settled proposals', async () => {
+      const store = new InMemorySessionHandoffProposalStore();
+      const p = createHandoff(store, { userId: 'other-user' });
+      store.claimForApproval(p.proposalId);
+      store.finalizeApproval(p.proposalId);
+
+      const adapter = new F225ApprovalAdapter(store);
+      const items = await adapter.listSettled('user-1');
+
+      assert.equal(items.length, 0, 'must not return other user proposals');
+    });
+  });
 });

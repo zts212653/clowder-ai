@@ -52,6 +52,19 @@ export interface PassageResult {
   createdAt?: string;
   /** AC-I8: surrounding passages within the context window */
   context?: PassageResult[];
+  /**
+   * @internal Whether this passage was found via semantic NN or entity registry
+   * (not cross-post lexical FTS). Used by BUG-UX-14 scope guard to allow
+   * semantically-relevant new items while blocking lexical cross-post contamination.
+   */
+  _semanticHit?: boolean;
+  /**
+   * @internal Whether this NN-tagged passage was ALSO found via lexical FTS
+   * (set during hybrid RRF merge). Cross-posts share literal query terms and
+   * appear in both lexical and NN results. Purely semantic discoveries appear
+   * only in NN results. The scope guard uses this to distinguish them.
+   */
+  _alsoLexical?: boolean;
 }
 
 export interface EmbedDeps {
@@ -738,6 +751,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       speaker: hit.speaker,
       position: hit.position,
       createdAt: hit.createdAt,
+      _semanticHit: true, // entity registry is a strong signal, not cross-post contamination
     };
   }
 
@@ -796,6 +810,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       const passage = semanticPassages[i];
       const key = passageVectorKey(passage.docAnchor, passage.passageId);
       scores.set(key, (scores.get(key) ?? 0) + nnWeight / (rrfK + i));
+      // BUG-UX-14 R4: if this passage was already found by lexical FTS,
+      // mark it _alsoLexical so the scope guard can distinguish cross-posts
+      // (found by both lexical+NN) from pure NN discoveries (NN only).
+      const existing = passageMap.get(key);
+      if (existing && !existing._semanticHit) {
+        passage._alsoLexical = true;
+      }
       passageMap.set(key, passage);
     }
 
@@ -865,6 +886,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         position: row.position ?? undefined,
         rank: hit.distance ?? index,
         createdAt: row.created_at ?? undefined,
+        _semanticHit: true,
       });
     }
     return passages;
@@ -891,13 +913,59 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       if (!passageOrder.has(passage.docAnchor)) passageOrder.set(passage.docAnchor, index);
     }
 
+    // BUG-UX-14 fix: when a scope filter is active (scope != 'all'), guard against
+    // cross-post contamination from passage matches (both lexical AND semantic).
+    //
+    // Passage FTS/NN searches ALL passages without scope filter. A cross-posted
+    // passage in thread B that references topic X causes thread B to leak into
+    // results, leading to teleport buttons that navigate to the wrong thread.
+    //
+    // Guard strategy:
+    //  When doc-level FTS already found primary matches (hasDocLevelResults=true),
+    //  block passage-only new items UNLESS they have at least one purely-semantic
+    //  passage (found by NN only, not by lexical FTS). Cross-posts share literal
+    //  query terms and appear in BOTH lexical and NN results (_alsoLexical=true).
+    //  Pure NN discoveries don't share literal terms — they're semantically
+    //  related via embedding similarity but not lexical cross-posts.
+    //
+    //  When doc-level FTS found nothing (hasDocLevelResults=false), passage search
+    //  is the sole discovery channel — allow through, but verify parent doc kind
+    //  matches scope (R3 kind-scope check below).
+    //
+    // When threadId is specified, passages already passed the threadAnchor filter
+    // (line 887), so they belong to the explicitly requested thread — always allowed.
+    const scopeActive = options?.scope && options.scope !== 'all';
+    const hasExplicitThreadTarget = !!threadAnchor;
+    const hasDocLevelResults = results.length > 0;
+
     for (const [anchor, pList] of passagesByAnchor) {
       let item = results.find((r) => r.anchor === anchor);
       if (!item) {
+        // When scope is active, no explicit thread target, AND doc-level FTS
+        // already found primary matches — block passage-only new items unless
+        // at least one passage is a pure NN discovery (semantic but NOT also
+        // found by lexical FTS). Cross-posts are found by lexical FTS because
+        // they share literal query terms; pure NN discoveries only match via
+        // embedding similarity (BUG-UX-14 R4, cloud P1 on hybrid cross-posts).
+        if (scopeActive && !hasExplicitThreadTarget && hasDocLevelResults) {
+          const hasPurelySemanticDiscovery = pList.some((p) => p._semanticHit && !p._alsoLexical);
+          if (!hasPurelySemanticDiscovery) continue;
+        }
         const parentDoc = this.db?.prepare('SELECT * FROM evidence_docs WHERE anchor = ?').get(anchor) as
           | RowShape
           | undefined;
         if (parentDoc) {
+          // BUG-UX-14 R3 (cloud P1): verify parent doc kind matches scope filter.
+          // Even when the lexical guard above is skipped (hasDocLevelResults=false),
+          // a doc of the wrong kind must not leak into scoped results.
+          // e.g. a session doc passage must not appear in scope='threads' results.
+          if (scopeActive && !hasExplicitThreadTarget) {
+            const effectiveKind =
+              options?.scope === 'threads' ? 'thread' : options?.scope === 'sessions' ? 'session' : undefined;
+            const excludeSessionAndThread = options?.scope === 'docs' || options?.scope === 'memory';
+            if (effectiveKind && parentDoc.kind !== effectiveKind) continue;
+            if (excludeSessionAndThread && (parentDoc.kind === 'session' || parentDoc.kind === 'thread')) continue;
+          }
           item = rowToItem(parentDoc);
           item.summary = `[passage match] ${pList[0].speaker ? `${pList[0].speaker}: ` : ''}${pList[0].content.slice(0, 200)}`;
           results.push(item);

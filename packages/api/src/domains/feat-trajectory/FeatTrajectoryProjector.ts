@@ -30,15 +30,19 @@ import type {
   GitShapedTrajectoryKind,
   StaleBucket,
 } from '@cat-cafe/shared';
+import type { CrossPostSnapshot } from './CrossPostCollector.js';
 import type { IFeatTrajectoryStore } from './FeatTrajectoryStore.js';
 import {
+  makeCrossPostEntryId,
   makeEventStreamEntryId,
   makeFeatSubjectKey,
   makeGitRefEntryId,
   makeGitRefSubjectKey,
+  makeThreadSplitEntryId,
   STALE_BUCKET_THRESHOLDS_MS,
   staleBucketForAge,
 } from './feat-trajectory-keys.js';
+import type { ThreadSplitSnapshot } from './ThreadSplitCollector.js';
 
 /**
  * Map ball-custody event → trajectory kind（conservative per 砚砚 step 3 advisory #1）。
@@ -267,6 +271,62 @@ export class FeatTrajectoryProjector {
       }
     }
 
+    await this.store.save(proj);
+  }
+
+  /**
+   * Thread split source — approved thread proposal → thread_split trajectory entry.
+   *
+   * F233 emitter: ThreadSplitCollector scans proposals, projector converts to entries.
+   * Idempotent: entryId = `split:{proposalId}`, same proposal → upsert.
+   */
+  async applyThreadSplit(snapshot: ThreadSplitSnapshot): Promise<void> {
+    const entry: FeatTrajectoryEntry = {
+      entryId: makeThreadSplitEntryId(snapshot.proposalId),
+      subjectKey: makeFeatSubjectKey(snapshot.featId),
+      featId: snapshot.featId,
+      at: snapshot.splitAt,
+      kind: 'thread_split',
+      source: 'event-stream',
+      payload: {
+        parentThreadId: snapshot.parentThreadId,
+        childThreadId: snapshot.childThreadId,
+        proposalId: snapshot.proposalId,
+        catId: snapshot.catId,
+      },
+    };
+
+    const existing = await this.store.get(snapshot.featId);
+    const proj = existing ?? createInitialFeatTrajectoryProjection(snapshot.featId, snapshot.splitAt);
+    upsertEntry(proj, entry);
+    await this.store.save(proj);
+  }
+
+  /**
+   * Cross-post source — cross-thread message → thread_merge trajectory entry.
+   *
+   * F233 emitter: CrossPostCollector scans messages, projector converts to entries.
+   * Idempotent: entryId = `merge:{messageId}`, same message → upsert.
+   */
+  async applyCrossPost(snapshot: CrossPostSnapshot): Promise<void> {
+    const entry: FeatTrajectoryEntry = {
+      entryId: makeCrossPostEntryId(snapshot.messageId),
+      subjectKey: makeFeatSubjectKey(snapshot.featId),
+      featId: snapshot.featId,
+      at: snapshot.postedAt,
+      kind: 'thread_merge',
+      source: 'event-stream',
+      payload: {
+        sourceThreadId: snapshot.sourceThreadId,
+        targetThreadId: snapshot.targetThreadId,
+        messageId: snapshot.messageId,
+        catId: snapshot.catId,
+      },
+    };
+
+    const existing = await this.store.get(snapshot.featId);
+    const proj = existing ?? createInitialFeatTrajectoryProjection(snapshot.featId, snapshot.postedAt);
+    upsertEntry(proj, entry);
     await this.store.save(proj);
   }
 

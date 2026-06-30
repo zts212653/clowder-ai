@@ -19,9 +19,10 @@ created: 2026-04-23
 > **Phase D2a (backend)**: ✅ merged 2026-04-25 via PR #1393 (byCat counter + 24h ring buffer)
 > **Phase D2b-1 (in-context surface)**: ✅ merged 2026-04-25 via PR #1397 (squash `74ea5ebec`)
 > **Phase D2b-2 (system-level health indicator, rev3 — interaction semantics 闭环)**: ✅ merged 2026-04-26 via PR #1425 (squash `5f3f949b7`) — unread badge (lastViewedAt + viewedUpTo + monotonic cutoff + safe-side >= + effective max + reconcile-from-snapshot + watermark stale-poll guard) + click 始终 default openHub + maxWidth 22px size cap. Replaces rev0/rev1/rev2 (3 alpha rejections + 6 cloud Codex P2/P1 rounds全部修)
+> **Phase D2b-2 badge removed**: 2026-06-26 via PR #2606 — 主界面 settings gear 不再显示 callback-auth unread badge（内部诊断指标不应在主界面通知用户），诊断数据保留在 settings → observability → Callback Auth 面板。mark-viewed 基础设施保留供面板使用。同 PR 修复面板在设置页空白的 bug（CallbackAuthSnapshotMount 从 chat layout 提升到 AppShell）。
 > **Phase D2b-3 (deep-dive stats card)**: ✅ merged 2026-04-25 via PR #1403 (squash `b59eff071`)
 >
-> **F174 D2b 三层"明厨亮灶"模型完整落地** — D2b-1 现场富块 + D2b-2 HubButton badge merge (复用通知 mental model，零 top-bar 增量) + D2b-3 stats deep-dive。
+> **F174 D2b 三层"明厨亮灶"模型当前形态** — D2b-1 现场富块 + D2b-2 mark-viewed 基础设施（badge 已移除，诊断留在 observability panel）+ D2b-3 stats deep-dive。
 
 ## Why
 
@@ -325,10 +326,11 @@ interface CallbackTool<T> {
   - **D2b-1 in-context 富块**（P0 · 现场层）— ✅ merged 2026-04-25 via PR #1397
     - [x] AC-D4: thread 内 callback auth 失败时，server post 一条 card 富块 (`meta.kind='callback_auth_failure'`)，使用 `CALLBACK_AUTH_SOURCE` connector，前端通过 `CallbackAuthFailureBlock` 渲染 amber 边框 + reason badge + tool/cat/when + 详情/重试(disabled, pending D2b-3/follow-up)/隐藏类似消息
     - [x] AC-D5: dedup 实现：5-tuple `(reason, tool, catId, threadId, userId)` 5min 窗口去重；"隐藏类似消息" 按钮 → POST `/api/debug/callback-auth/hide-similar` 触发 24h opt-out；`stale_invocation` / `unknown_invocation` / `missing_creds` 不 surface in-context；dedup map 自动 prune 过期 entry；race-window-safe (synchronous slot reservation before async append)
-  - **D2b-2 system-level health indicator**（P0 · 实体层 — twice revised after alpha 反馈）— PR #1403 (rev0 per-cat dot) → PR #1410 (rev1 standalone plug indicator) → PR #1419 (rev2 HubButton badge merge ✅ merged)
-    - **当前形态（rev2）**：HubButton badge merge — `HubButton.tsx` 内部加 `useCallbackAuthAggregate` + `useCallbackAuthAvailable` hooks；24h failures > 0 时右上角渲染 amber/red 数字 badge（0 失败 = 无 badge，top-bar 视觉零增量）；click without badge = `openHub()` default，click with badge = `openHub('observability', 'callback-auth')` deep-link to D2b-3。复用 GitHub/iOS 通知 badge mental model，无新增 top-bar 图标
-    - [x] AC-D6 (rev3): 系统级 affordance merge 进 HubButton (top-bar 现有 entity)，复用 GitHub bell icon / Slack unread / iOS app badge **未读 → 看过 → 消失** 通知 mental model；非 owner 不渲染；不在 top-bar 增加新图标
-    - [x] AC-D7 (rev3): HubButton badge 显示 `unviewedFailures24h`（不是 totalFailures24h）— 进入 observability/callback-auth subtab 自动 mark-viewed → badge 消失 / 仅显示 viewed 之后的新失败；click HubButton **始终走 default openHub()**（撤回 deep-link，尊重用户原意图）；badge size 严守 max-width 22px（即使 99+ 也不撑爆 hub icon）
+  - **D2b-2 system-level health indicator**（P0 · 实体层 — twice revised after alpha 反馈，**badge 已于 PR #2606 移除**）— PR #1403 (rev0 per-cat dot) → PR #1410 (rev1 standalone plug indicator) → PR #1419 (rev2 HubButton badge merge) → PR #2606 (badge 从主界面移除)
+    - **当前形态（PR #2606 后）**：主界面 settings gear 不再显示 callback-auth badge。内部诊断指标不应在主 UI 通知用户（operator裁定）。mark-viewed 基础设施（`lastViewedAt` / `unviewedFailures24h` / `markViewed()`）保留，仅服务 observability panel 的 unviewed watermark 和诊断状态。`CallbackAuthSnapshotMount` 从 chat layout 提升到 AppShell，确保所有路由（含 settings）的面板数据可用
+    - ~~rev2/rev3 形态（已被 PR #2606 移除）~~：HubButton badge merge — `ActivityBar.tsx` SettingsButton 内部加 `useCallbackAuthAggregate` + `useCallbackAuthAvailable` hooks；24h unviewed failures > 0 时右上角渲染 amber/red 数字 badge；进入 observability/callback-auth subtab 自动 mark-viewed → badge 消失。经 4 次 alpha 否决 + 8 轮 cloud Codex review 后收敛，但operator最终裁定：callback auth 作为内部诊断指标不值得占用主界面通知位（"为什么这个 callback auth 失败这么特殊需要在我的主界面知道"）
+    - [x] ~~AC-D6 (rev3)~~: 系统级 affordance merge 进 HubButton — **已随 badge 移除而不再适用**
+    - [x] ~~AC-D7 (rev3)~~: HubButton badge 显示 `unviewedFailures24h` — **已随 badge 移除而不再适用**；mark-viewed 机制保留供 panel 使用
     - ~~rev0 形态（已 revert via #1410）~~：ThreadItem 参与者 16px avatar 角上 colored dot。被operator alpha 验收 #1 否决（"莫名其妙的颜色"——头像角点缺 affordance/legend，用户没有 mental model 把"红点"和"callback auth"对应起来）。CatAvatar dot props 保留以备后用，但默认调用点不再启用
     - ~~rev1 形态（已 revert via #1419）~~：独立 `<CallbackAuthHealthIndicator />` 在 ChatContainerHeader top-bar 加专属 plug SVG 图标 + badge。被operator alpha 验收 #2 否决（"top 栏位置宝贵，plug 图标冗余"——affordance 修对了但 placement 又错，top-bar 是稀缺位）。整组件 + 测试在 #1419 删除
     - HubCallbackAuthPanel 内部的 affected-cats roster 仍使用 `<CallbackAuthCatAvatar>` (48px + "AFFECTED CATS" 文本 affordance)，那是 panel-internal context，用户主动打开后明确知道"这是 callback auth 数据"

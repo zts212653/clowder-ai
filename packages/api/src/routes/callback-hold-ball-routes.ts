@@ -11,19 +11,22 @@
  * reminder scheduler; that is intentionally deferred.
  */
 
+import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { IBallCustodyIngest } from '../domains/ball-custody/BallCustodyIngest.js';
-import { buildHeldEvent } from '../domains/ball-custody/ball-custody-events.js';
+import { buildHeldEvent, buildWakeConditionMetEvent } from '../domains/ball-custody/ball-custody-events.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { extractHoldBallClaims } from '../infrastructure/grounding/claim-extractors.js';
 import { checkGrounding } from '../infrastructure/grounding/grounding-checker.js';
 import { groundingSampleStore } from '../infrastructure/grounding/grounding-sample-singleton.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { KILL_GRACE_MS, ManagedRunner } from '../infrastructure/managed-runner.js';
 import type { DynamicTaskStore } from '../infrastructure/scheduler/DynamicTaskStore.js';
 import type { TaskRunnerV2 } from '../infrastructure/scheduler/TaskRunnerV2.js';
 import type { TaskTemplate } from '../infrastructure/scheduler/templates/types.js';
+import { holdBallPendingInputReject, holdBallUngroundedTimerReject } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { emitC1HoldCancellation } from './callback-hold-ball-c1-emit.js';
@@ -74,13 +77,45 @@ export function incrementHoldCount(threadId: string, catId: string, now: number 
 }
 
 /**
- * F167 Phase O PR-O2: WaitSourceRef schema for structured wait grounding.
+ * F167 Phase P review P1-1 fix: active wakeWhen runner registry.
+ * Keyed by `${threadId}:${catId}` — single-slot semantics means at most one
+ * active runner per (thread, cat). Cancel/replace paths call cancelWakeWhenRunner()
+ * so the old process is killed and its completion callback knows to bail out.
+ */
+const activeRunners = new Map<string, ManagedRunner>();
+
+/**
+ * Cancel a running wakeWhen command for a (threadId, catId) pair.
+ * Exported so cancel routes can call it alongside executeHoldCancel.
+ * No-op if no runner is active for the given key.
+ */
+export function cancelWakeWhenRunner(threadId: string, catId: string): void {
+  const key = `${threadId}:${catId}`;
+  const runner = activeRunners.get(key);
+  if (runner) {
+    runner.cancel();
+    activeRunners.delete(key);
+    log.info({ threadId, catId }, 'F167 Phase P: cancelled wakeWhen runner (cancel/replace)');
+  }
+}
+
+/** Test-only: get the active runners map size for assertions. */
+export function getActiveRunnerCount(): number {
+  return activeRunners.size;
+}
+
+/**
+ * F167 Phase O PR-O2 → PR-O3: WaitSourceRef schema for structured wait grounding.
  * Per R3.1 OQ-5: slaUntilMs is REQUIRED (no SLA = no hold).
- * 'reporter_handle' | 'pending_input' require anchorRef (narrative kinds too forgeable).
+ * 'reporter_handle' requires anchorRef (narrative kind, too forgeable without anchor).
+ *
+ * PR-O3: 'pending_input' REMOVED — it semantically meant "wait for human/cat to type
+ * in the Hub", which should be @co-creator (传球选项3) not hold_ball. This was the primary
+ * backdoor enabling the "hold_ball instead of @co-creator" misuse pattern.
  */
 const waitSourceRefSchema = z
   .object({
-    kind: z.enum(['github_issue', 'github_comment', 'thread_message', 'task', 'reporter_handle', 'pending_input']),
+    kind: z.enum(['github_issue', 'github_comment', 'thread_message', 'task', 'reporter_handle', 'managed_command']),
     value: z.string().min(1),
     anchorRef: z.string().optional(),
     expectedSignal: z.string().min(1),
@@ -88,22 +123,61 @@ const waitSourceRefSchema = z
   })
   .refine(
     (data) => {
-      // anchorRef REQUIRED for narrative kinds
-      if ((data.kind === 'reporter_handle' || data.kind === 'pending_input') && !data.anchorRef) {
+      // anchorRef REQUIRED for narrative kinds (reporter_handle only after pending_input removal)
+      if (data.kind === 'reporter_handle' && !data.anchorRef) {
         return false;
       }
       return true;
     },
-    { message: 'anchorRef is required for reporter_handle and pending_input kinds' },
+    { message: 'anchorRef is required for reporter_handle kind' },
   );
 
-const holdBallSchema = z.object({
-  reason: z.string().min(1).max(500),
-  nextStep: z.string().min(1).max(500),
-  wakeAfterMs: z.number().int().min(5_000).max(3_600_000),
-  /** F167 Phase O: structured wait source for grounding telemetry (optional in PR-O2 shadow). */
-  waitSourceRef: waitSourceRefSchema.optional(),
+const wakeWhenSchema = z.object({
+  command: z.string().min(1),
+  cwd: z.string().optional(),
+  timeoutMs: z.number().int().min(1_000).max(3_600_000).optional(),
 });
+
+const holdBallSchema = z
+  .object({
+    reason: z.string().min(1).max(500),
+    nextStep: z.string().min(1).max(500),
+    wakeAfterMs: z.number().int().min(5_000).max(3_600_000).optional(),
+    /** F167 Phase P: run a command and wake when it completes (mutually exclusive with wakeAfterMs). */
+    wakeWhen: wakeWhenSchema.optional(),
+    /**
+     * F167 Phase O → PR-O3: structured wait source for grounding telemetry.
+     * REQUIRED for wakeAfterMs mode — you must declare what external condition
+     * justifies the timer. wakeWhen mode is self-grounded (the command IS the source).
+     *
+     * If you are waiting for a human (co-creator / another cat) to reply in the Hub,
+     * do NOT hold_ball — use @co-creator or @句柄 instead (传球选项 1 or 3).
+     */
+    waitSourceRef: waitSourceRefSchema.optional(),
+  })
+  .refine(
+    (data) => {
+      const hasWakeAfter = data.wakeAfterMs != null;
+      const hasWakeWhen = data.wakeWhen != null;
+      return (hasWakeAfter || hasWakeWhen) && !(hasWakeAfter && hasWakeWhen);
+    },
+    { message: 'Exactly one of wakeAfterMs or wakeWhen must be provided' },
+  )
+  .refine(
+    (data) => {
+      // PR-O3: wakeAfterMs mode REQUIRES waitSourceRef — must declare what you're waiting for.
+      // wakeWhen mode is self-grounded (the command is the external condition).
+      if (data.wakeAfterMs != null && data.waitSourceRef == null) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message:
+        'waitSourceRef is required when using wakeAfterMs — declare what external condition ' +
+        'you are polling. If waiting for a human reply, use @co-creator instead of hold_ball.',
+    },
+  );
 
 export interface HoldBallRouteDeps {
   registry: InvocationRegistry;
@@ -140,6 +214,189 @@ export interface HoldBallRouteDeps {
    * active PR/issue tracking exists → hasEventCallback policy context.
    */
   taskStore?: CrossStoreTaskStore;
+  /**
+   * F167 Phase P: invocation trigger for wakeWhen command completion.
+   * When provided, wakeWhen command results are delivered via invokeTrigger.
+   * When absent, wakeWhen falls back to message-only delivery (no cat auto-invocation).
+   */
+  invokeTrigger?: {
+    trigger(
+      threadId: string,
+      catId: string,
+      userId: string,
+      message: string,
+      messageId: string,
+      contentBlocks?: undefined,
+      policy?: { sourceCategory?: string },
+    ): void | Promise<unknown>;
+  };
+}
+
+/**
+ * F167 Phase P: fire-and-forget managed command runner.
+ * Extracted from route handler to reduce cognitive complexity.
+ *
+ * P1-1 fix: runner stored in activeRunners registry, cancel/replace-aware.
+ * P1-2 fix: fallback task only removed on successful message delivery.
+ */
+function launchWakeWhenRunner(opts: {
+  wakeWhen: { command: string; cwd?: string; timeoutMs?: number };
+  reason: string;
+  nextStep: string;
+  threadId: string;
+  catId: string;
+  userId: string;
+  taskId: string;
+  deps: HoldBallRouteDeps;
+  taskRunner: TaskRunnerV2;
+  dynamicTaskStore: DynamicTaskStore;
+  messageStore: IMessageStore;
+  socketManager: SocketManager;
+}): void {
+  const {
+    wakeWhen,
+    reason,
+    nextStep,
+    threadId,
+    catId,
+    userId,
+    taskId,
+    deps,
+    taskRunner,
+    dynamicTaskStore,
+    messageStore,
+    socketManager,
+  } = opts;
+  const runner = new ManagedRunner();
+  const registryKey = `${threadId}:${catId}`;
+
+  // P1-1: cancel any existing runner for this (thread, cat) before starting new one
+  cancelWakeWhenRunner(threadId, catId);
+  activeRunners.set(registryKey, runner);
+
+  void (async () => {
+    try {
+      const result = await runner.launch(wakeWhen.command, {
+        cwd: wakeWhen.cwd,
+        timeoutMs: wakeWhen.timeoutMs,
+      });
+
+      // P1-1 staleness check: if this runner was replaced or cancelled while running,
+      // the registry will have a different runner (or none). Don't deliver stale wake.
+      if (activeRunners.get(registryKey) !== runner) {
+        log.info(
+          { threadId, catId, command: wakeWhen.command, taskId },
+          'F167 Phase P: wakeWhen runner completed but was replaced/cancelled — skipping delivery',
+        );
+        return;
+      }
+      // Remove self from registry (completed normally)
+      activeRunners.delete(registryKey);
+
+      const statusLabel = result.timedOut
+        ? '⏰ 超时'
+        : result.exitCode === 0
+          ? '✅ 成功'
+          : `❌ 退出码 ${result.exitCode}`;
+      const wakeContent =
+        `持球唤醒（命令完成）：你之前因为「${reason}」持球，运行了「${wakeWhen.command}」。\n` +
+        `结果：${statusLabel}（耗时 ${Math.round(result.durationMs / 1000)}s）\n` +
+        `${result.tailOutput ? `输出尾部：\n\`\`\`\n${result.tailOutput}\n\`\`\`\n` : ''}` +
+        `下一步：${nextStep}`;
+
+      deps.ballCustody
+        ?.record(
+          buildWakeConditionMetEvent({
+            threadId,
+            catId,
+            command: wakeWhen.command,
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            durationMs: result.durationMs,
+            at: Date.now(),
+          }),
+        )
+        .catch((err) => log.warn({ threadId, catId, err }, 'F167 Phase P: failed to record ball.wake_condition_met'));
+
+      const triggerContent = `${SCHEDULER_TRIGGER_PREFIX} ${wakeContent}`;
+      let messageId: string | undefined;
+      try {
+        const stored = await messageStore.append({
+          userId: 'scheduler',
+          catId: null,
+          content: triggerContent,
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+          source: { ...HOLD_BALL_SOURCE, meta: { taskId, threadId, catId, wakeWhen: true } },
+        });
+        messageId = stored.id;
+        socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
+          threadId,
+          message: {
+            id: stored.id,
+            type: 'connector',
+            content: stored.content,
+            source: { ...HOLD_BALL_SOURCE, meta: { taskId, threadId, catId, wakeWhen: true } },
+            timestamp: stored.timestamp,
+          },
+        });
+      } catch (err) {
+        log.error({ threadId, catId, err }, 'F167 Phase P: failed to deliver wake message');
+      }
+
+      if (deps.invokeTrigger && messageId) {
+        try {
+          void Promise.resolve(
+            deps.invokeTrigger.trigger(threadId, catId, userId, triggerContent, messageId, undefined, {
+              sourceCategory: 'scheduled',
+            }),
+          ).catch(() => {});
+        } catch {
+          // Best-effort
+        }
+      }
+
+      // P1-2 fix: only remove fallback task if wake message was successfully delivered.
+      // If delivery failed (messageId undefined), keep the fallback so the cat still gets woken.
+      if (messageId) {
+        try {
+          taskRunner.unregister(taskId);
+          dynamicTaskStore.remove(taskId);
+        } catch {
+          // Best-effort cleanup
+        }
+      } else {
+        log.warn(
+          { threadId, catId, taskId },
+          'F167 Phase P: wake message delivery failed — keeping fallback reminder task alive',
+        );
+      }
+
+      log.info(
+        {
+          threadId,
+          catId,
+          command: wakeWhen.command,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          durationMs: result.durationMs,
+          taskId,
+          delivered: !!messageId,
+        },
+        'F167 Phase P: wakeWhen command completed',
+      );
+    } catch (err) {
+      // Clean up registry on unexpected failure too
+      if (activeRunners.get(registryKey) === runner) {
+        activeRunners.delete(registryKey);
+      }
+      log.error(
+        { threadId, catId, command: wakeWhen.command, err },
+        'F167 Phase P: wakeWhen runner failed — fallback reminder will still fire',
+      );
+    }
+  })();
 }
 
 export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldBallRouteDeps): void {
@@ -150,13 +407,26 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     if (!record) return;
     const actor = deriveCallbackActor(record);
 
+    // PR-O3 eval counters: detect misuse attempts BEFORE schema parse.
+    // These fire on every attempt regardless of other validation failures,
+    // tracking how often cats still TRY the patterns we're blocking.
+    const rawBody = request.body as Record<string, unknown> | null;
+    if (rawBody?.wakeAfterMs != null && rawBody?.waitSourceRef == null) {
+      holdBallUngroundedTimerReject.add(1);
+    }
+    if ((rawBody?.waitSourceRef as Record<string, unknown> | null)?.kind === 'pending_input') {
+      holdBallPendingInputReject.add(1);
+    }
+
     const parsed = holdBallSchema.safeParse(request.body);
     if (!parsed.success) {
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { reason, nextStep, wakeAfterMs } = parsed.data;
+    const { reason, nextStep, wakeWhen } = parsed.data;
+    // wakeAfterMs: explicit timed wake, OR derived from wakeWhen timeout (for single-slot/visibility)
+    const wakeAfterMs = parsed.data.wakeAfterMs ?? wakeWhen?.timeoutMs ?? 600_000;
     const { threadId, catId, userId } = actor;
     const catIdStr = catId as string;
 
@@ -257,7 +527,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       );
 
     const taskId = `hold-ball-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const fireAt = Date.now() + wakeAfterMs;
+    // P2-2 cloud review fix: for wakeWhen, the fallback reminder must fire AFTER the
+    // runner's timeout + grace period, not at the same time. Otherwise both the runner
+    // timeout wake and the fallback reminder can fire simultaneously (race → double wake).
+    const fallbackBuffer = wakeWhen ? KILL_GRACE_MS + 10_000 : 0;
+    const fireAt = Date.now() + wakeAfterMs + fallbackBuffer;
     // F167 Phase M (M-2): de-frozen wake copy — guide re-evaluation instead of
     // commanding execution of a possibly-stale reason. The wake fires later (or after
     // defer), by which time the awaited condition may have changed; so prompt the cat
@@ -333,6 +607,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         /* threadStore lookup failure → fall back to 'product' */
       }
     }
+    // P1-1: cancel any active wakeWhen runner for this (thread, cat) before replacing.
+    // launchWakeWhenRunner also does this, but a wakeAfterMs replacement must cancel too.
+    if (pendingHolds.length > 0) {
+      cancelWakeWhenRunner(threadId, catIdStr);
+    }
     const cancelNow = Date.now();
     for (const prior of pendingHolds) {
       const priorFireAt = (prior.trigger as { fireAt?: number }).fireAt ?? cancelNow;
@@ -366,7 +645,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const newCount = incrementHoldCount(threadId, catIdStr);
 
     const wakeAtStr = new Date(fireAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    const holdMessage = `🏓 ${catIdStr} 持球中 — ${reason}。预计 ${wakeAtStr} 唤醒，下一步：${nextStep}`;
+    const holdMessage = wakeWhen
+      ? `🏓 ${catIdStr} 持球中 — ${reason}。命令「${wakeWhen.command}」已启动，完成后自动唤醒。下一步：${nextStep}`
+      : `🏓 ${catIdStr} 持球中 — ${reason}。预计 ${wakeAtStr} 唤醒，下一步：${nextStep}`;
     const holdSource = { ...HOLD_BALL_SOURCE, meta: { taskId, threadId, catId: catIdStr } };
     try {
       const stored = await messageStore.append({
@@ -392,6 +673,24 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       log.warn({ threadId, catId: catIdStr, err }, 'F167 C1: failed to post hold_ball visibility message');
     }
 
+    // ── F167 Phase P: wakeWhen — launch managed command, wake cat on completion ──
+    if (wakeWhen) {
+      launchWakeWhenRunner({
+        wakeWhen,
+        reason,
+        nextStep,
+        threadId,
+        catId: catIdStr,
+        userId,
+        taskId,
+        deps,
+        taskRunner,
+        dynamicTaskStore,
+        messageStore,
+        socketManager,
+      });
+    }
+
     log.info(
       {
         threadId,
@@ -399,6 +698,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         reason,
         nextStep,
         wakeAfterMs,
+        wakeWhen: wakeWhen ? { command: wakeWhen.command, timeoutMs: wakeWhen.timeoutMs } : undefined,
         taskId,
         holdsInWindow: newCount,
         windowMs: HOLD_WINDOW_MS,
@@ -414,6 +714,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
       windowMs: HOLD_WINDOW_MS,
       wakeAt: new Date(fireAt).toISOString(),
+      ...(wakeWhen ? { wakeWhen: { command: wakeWhen.command, pid: null } } : {}),
     };
   });
 

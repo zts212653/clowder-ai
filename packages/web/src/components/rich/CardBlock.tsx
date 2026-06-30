@@ -378,7 +378,6 @@ export function CardBlock({
             : { method: 'POST' };
         const res = await apiFetch(`/api/concierge/triage/${planId}/confirm`, requestInit);
         if (!res.ok) throw new Error(`确认失败: ${res.status}`);
-        setCopiedAction('concierge_triage_confirm');
 
         // If backend returns a thread, the confirmed action has transferred the user's intent:
         // go => target thread, propose_thread => newly-created investigation thread.
@@ -387,14 +386,24 @@ export function CardBlock({
         const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         const threadId = typeof data.threadId === 'string' ? data.threadId : '';
         if ((intent === 'go' || intent === 'propose_thread') && threadId) {
+          setCopiedAction('concierge_triage_confirm');
           useConciergeStore.getState().onNavigationAction();
           pushThreadRouteWithHistory(threadId, window);
+        } else if ((intent === 'go' || intent === 'propose_thread') && !threadId) {
+          // BUG-UX-13 cloud P2: server already consumed the plan (status=completed) before
+          // responding, so a second click would 409. Mark terminal + show error.
+          setCopiedAction('concierge_triage_confirm');
+          setError('已确认，但目标对话未找到。请手动跳转到目标对话。');
         } else if (intent === 'investigate') {
+          setCopiedAction('concierge_triage_confirm');
           // AC-B2: extract investigationJobId → InvestigationProgress polls and renders report
           const jobId = typeof data.investigationJobId === 'string' ? data.investigationJobId : '';
           if (jobId) {
             setInvestigationJobId(jobId);
           }
+        } else {
+          // Other intents (or no intent): mark terminal on success
+          setCopiedAction('concierge_triage_confirm');
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : '确认失败');
@@ -451,7 +460,10 @@ export function CardBlock({
         return;
       }
       if (action === 'concierge_peek') {
-        await handleConciergePeek(payload);
+        // BUG-UX-12: normalize old stored peek actions to teleport.
+        // Pre-UX-12 messages may have concierge_peek in rich blocks; redirect to
+        // teleport so card buttons behave consistently with inline markers.
+        handleConciergeTeleport(payload);
         return;
       }
       // F229 Phase B: propose_thread action
@@ -553,7 +565,9 @@ export function CardBlock({
                   : a.action === 'concierge_triage_cancel'
                     ? '已取消'
                     : '已复制'
-                : a.label;
+                : a.action === 'concierge_peek'
+                  ? a.label.replace('原地看', '跳过去')
+                  : a.label;
 
             return (
               <button

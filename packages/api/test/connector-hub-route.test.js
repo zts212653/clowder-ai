@@ -172,7 +172,7 @@ describe('F134 follow-up — Feishu QR bind routes', () => {
     }
   });
 
-  it('GET /api/connector/feishu/qrcode-status preserves explicit webhook mode when verification token exists', async () => {
+  it('GET /api/connector/feishu/qrcode-status always defaults to websocket regardless of verification token', async () => {
     const cleanupConfigRoot = useTemporaryConfigRoot('feishu-qr-config-');
     const tmpDir = mkdtempSync(join(os.tmpdir(), 'feishu-qr-bind-'));
     const envFilePath = join(tmpDir, '.env');
@@ -211,8 +211,8 @@ describe('F134 follow-up — Feishu QR bind routes', () => {
 
       assert.equal(res.statusCode, 200);
       assert.equal(body.status, 'confirmed');
-      assert.equal(process.env.FEISHU_CONNECTION_MODE, 'webhook');
-      assert.doesNotMatch(readFileSync(envFilePath, 'utf8'), /FEISHU_CONNECTION_MODE=websocket/);
+      assert.equal(process.env.FEISHU_CONNECTION_MODE, 'websocket');
+      assert.match(readFileSync(envFilePath, 'utf8'), /FEISHU_CONNECTION_MODE=websocket/);
     } finally {
       await app.close();
       cleanupConfigRoot();

@@ -93,7 +93,17 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
       method: 'POST',
       url: '/api/callbacks/hold-ball',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { reason: 'waiting on CI', nextStep: 'check status', wakeAfterMs: 60_000 },
+      payload: {
+        reason: 'waiting on CI',
+        nextStep: 'check status',
+        wakeAfterMs: 60_000,
+        waitSourceRef: {
+          kind: 'github_issue',
+          value: 'test/ball-custody',
+          expectedSignal: 'CI pass',
+          slaUntilMs: 3_600_000,
+        },
+      },
     });
 
     assert.equal(response.statusCode, 200);

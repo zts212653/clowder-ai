@@ -5,11 +5,12 @@ topics: [a2a, session, continuation, message, bubble, dedup, reliability, queue,
 doc_kind: spec
 created: 2026-06-04
 community_issue: clowder-ai#834 (含 #813 #814 #815 #836)
+tips_exempt: status-only correction (spec to in-progress for lint dogfood); F224 implementation pending, no user-facing capability
 ---
 
 # F224: A2A 协作的会话/消息状态可靠性（会话延续协调器 + 消息去重 + 触发合并 + 重生会话）
 
-> **Status**: spec | **Owner**: Ragdoll (Opus-4.8) | **Priority**: P1 | **Source**: community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834)
+> **Status**: in-progress（coordinator skeleton + red tests 已 PR #2104 merged，Phase A wire 待续）| **Owner**: Ragdoll (Opus-4.8) | **Priority**: P1 | **Source**: community [clowder-ai#834](https://github.com/zts212653/clowder-ai/pull/834)
 >
 > **F220 姊妹 feat**：F220 管"看得见 + 卡死能自救 + invocation 卡死根因"；F224 管"会话/消息状态可靠（不丢/不重/不乱）"。两者同属"信得过的猫间协作"愿景，**分属不同架构轴**——F220 = invocation-hang / slot 轴，F224 = session-continuation / message 轴。两轴只共享 `QueueProcessor` 文件，**不共享根因**（之前一直被缠在一起，导致"又 intake 又改"的错觉）。
 >

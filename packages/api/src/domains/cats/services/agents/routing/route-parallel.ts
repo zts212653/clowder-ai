@@ -395,6 +395,16 @@ export async function* routeParallel(
           },
         );
         boundaryByCat.set(catId, inc.boundaryId);
+
+        // F254 Phase A (AC-A3 seed): Initialize seenCursor from delivery boundary
+        if (inc.boundaryId && deps.deliveryCursorStore) {
+          try {
+            await deps.deliveryCursorStore.ackSeenCursor(userId, catId, threadId, inc.boundaryId);
+          } catch (err) {
+            log.warn({ catId: catId as string, err }, '[F254] seenCursor seed failed');
+          }
+        }
+
         if (inc.degradation) {
           degradationMsgs.push({
             type: 'system_info' as AgentMessageType,
@@ -520,6 +530,10 @@ export async function* routeParallel(
         // helper namespace bridge 失效 → ideate/parallel 场景气泡又裂。
         ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
         ...(options.routeSpan ? { routeSpan: options.routeSpan } : {}),
+        // F247 AC-B1c-3 PR-C: Plumb raw mention text for cloud bridge dispatch.
+        // Parallel routes are user-initiated (no A2A), so mentioningCatId = userId.
+        mentionContent: message,
+        mentioningCatId: userId as import('@cat-cafe/shared').CatId,
         continuityCapsule,
         isLastCat: false,
       });

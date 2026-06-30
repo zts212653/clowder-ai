@@ -222,3 +222,40 @@ describe('embedIndexedItems (shared utility with batch splitting + consistency c
     assert.equal(consistencyChecked, false, 'should not check consistency without allDocsProvider');
   });
 });
+
+describe('embedPassages', () => {
+  it('uses smaller batches for long passage warmup requests', async () => {
+    const { embedPassages } = await import('../../dist/domains/memory/embed-utils.js');
+
+    const batchSizes = [];
+    const mockEmbedding = {
+      isReady: () => true,
+      reprobeIfNeeded: async () => {},
+      embed: async (texts) => {
+        batchSizes.push(texts.length);
+        return texts.map(() => new Float32Array([0.1, 0.2]));
+      },
+      getModelInfo: () => ({ modelId: 'test', modelRev: 'v1', dim: 2 }),
+    };
+
+    const upserted = [];
+    const mockPassageVectorStore = {
+      upsert: (passageKey) => upserted.push(passageKey),
+    };
+
+    const passages = Array.from({ length: 40 }, (_, i) => ({
+      docAnchor: `thread-${i}`,
+      passageId: `msg-${i}`,
+      content: `Long warmup passage ${i} ${'x'.repeat(1000)}`,
+    }));
+
+    await embedPassages({
+      passages,
+      embedding: mockEmbedding,
+      passageVectorStore: mockPassageVectorStore,
+    });
+
+    assert.deepEqual(batchSizes, [8, 8, 8, 8, 8], 'passage warmup should avoid bulk requests that hit 3s timeout');
+    assert.equal(upserted.length, 40, 'all passage vectors should still be written');
+  });
+});

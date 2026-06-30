@@ -142,8 +142,16 @@ export function ChatInputMenus({
                   />
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold" style={{ color: opt.color }}>
-                    {opt.label}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm font-semibold truncate" style={{ color: opt.color }}>
+                      {opt.label}
+                    </span>
+                    {opt.isCloud && opt.providerLabel && (
+                      <span className="shrink-0 text-micro leading-tight px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+                        {'☁️ '}
+                        {opt.providerLabel}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-cafe-muted">{opt.desc}</div>
                 </div>

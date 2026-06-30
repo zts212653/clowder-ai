@@ -41,6 +41,7 @@ export function buildOpenCodeMcpSync(
   catId?: string,
   capabilitiesProjectRoot?: string,
   workingDirectory?: string,
+  allowedWorkspaceDirs?: string,
 ): Record<string, OpenCodeMcpEntry> {
   const distDir = dirname(mcpServerPath);
   const binaryProjectRoot = resolve(distDir, '../../..');
@@ -52,11 +53,15 @@ export function buildOpenCodeMcpSync(
     // F249: Project config is the single truth source for MCP resolution.
     // Try project first; fall back to global for uninitialized projects.
     let capConfig = null;
+    let accessScope: 'global' | 'project' = 'global';
     if (workingDirectory && workingDirectory !== capabilityRoot) {
       try {
         const projectRaw = readFileSync(join(workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
         const parsed = JSON.parse(projectRaw);
-        if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
+        if (parsed?.version === 1 || parsed?.version === 2) {
+          capConfig = parsed;
+          accessScope = 'project';
+        }
       } catch {
         /* No project config — fall back to global */
       }
@@ -67,7 +72,7 @@ export function buildOpenCodeMcpSync(
       if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
     }
     if (capConfig && catId) {
-      for (const s of resolveServersForCat(capConfig, catId) as Array<{
+      for (const s of resolveServersForCat(capConfig, catId, { accessScope }) as Array<{
         name: string;
         enabled: boolean;
         command: string;
@@ -88,7 +93,11 @@ export function buildOpenCodeMcpSync(
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
           const epPath = join(distDir, ep);
           if (existsSync(epPath)) {
-            mcp[s.name] = toOpenCodeMcpEntry({ command: resolveCatCafeNodeCommand(), args: [epPath] });
+            mcp[s.name] = toOpenCodeMcpEntry({
+              command: resolveCatCafeNodeCommand(),
+              args: [epPath],
+              env: allowedWorkspaceDirs ? { ...(s.env ?? {}), ALLOWED_WORKSPACE_DIRS: allowedWorkspaceDirs } : s.env,
+            });
           }
         } else if (s.resolver === 'pencil') {
           // Pencil needs async resolution — handled in writeOpenCodeRuntimeConfig
@@ -104,7 +113,11 @@ export function buildOpenCodeMcpSync(
 
   if (!resolved) {
     for (const [name, entrypoint] of CAT_CAFE_SPLIT_ENTRYPOINTS) {
-      mcp[name] = toOpenCodeMcpEntry({ command: resolveCatCafeNodeCommand(), args: [join(distDir, entrypoint)] });
+      mcp[name] = toOpenCodeMcpEntry({
+        command: resolveCatCafeNodeCommand(),
+        args: [join(distDir, entrypoint)],
+        env: allowedWorkspaceDirs ? { ALLOWED_WORKSPACE_DIRS: allowedWorkspaceDirs } : undefined,
+      });
     }
   }
   log.debug(
@@ -132,7 +145,7 @@ export function resolveCapabilityMcpNamesSync(capabilitiesProjectRoot: string, c
     const raw = readFileSync(join(capabilitiesProjectRoot, '.cat-cafe', 'capabilities.json'), 'utf-8');
     const capConfig = JSON.parse(raw);
     if (capConfig?.version === 1 || capConfig?.version === 2) {
-      for (const s of resolveServersForCat(capConfig, catId) as Array<{ name: string }>) {
+      for (const s of resolveServersForCat(capConfig, catId, { accessScope: 'global' }) as Array<{ name: string }>) {
         names.add(s.name);
       }
     }

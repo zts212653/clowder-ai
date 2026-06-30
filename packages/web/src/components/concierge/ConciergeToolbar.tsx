@@ -75,7 +75,7 @@ export function ConciergeToolbar() {
   return (
     <div
       data-testid="concierge-toolbar"
-      className="absolute bottom-[calc(100%+8px)] right-0 flex flex-col items-end gap-2 pointer-events-auto"
+      className="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 flex flex-row items-center gap-2 pointer-events-auto"
       role="toolbar"
       aria-label="猫猫能力工具栏"
     >

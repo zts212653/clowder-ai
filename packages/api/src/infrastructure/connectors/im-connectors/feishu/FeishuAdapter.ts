@@ -67,9 +67,31 @@ export interface FeishuMediaPayload {
   fileName?: string;
 }
 
+/**
+ * #1035: Outbound group-chat @mention alias.
+ * Bot Pollers filter inbound on `mentions[].id.open_id`; plain `@name` text in
+ * outbound body never produces such a mention. Map an alias (e.g. `胖胖虾`) to
+ * a real Feishu OpenID so the body `@胖胖虾` is rendered as a real `<at>` token.
+ */
+export interface FeishuMentionAlias {
+  /** Feishu OpenID of the target user/bot (e.g. `ou_xxx`). */
+  openId: string;
+  /**
+   * Display name used in text-message `<at user_id="...">@displayName</at>`.
+   * Card markdown uses self-closing `<at id=ou_xxx></at>` and Feishu auto-renders the name.
+   */
+  displayName?: string;
+}
+
 export interface FeishuAdapterOptions {
   /** Feishu Verification Token for webhook event authentication. If not set, token verification is skipped. */
   verificationToken?: string | undefined;
+  /**
+   * #1035: Outbound `@alias` → Feishu `<at>` token resolution map (group-chat scoped).
+   * Keys are bare aliases (no leading `@`); values include the target OpenID.
+   * Unconfigured aliases pass through unchanged; `@` mid-token (e.g. inside an email) is not replaced.
+   */
+  groupBotMentions?: Record<string, FeishuMentionAlias>;
 }
 
 export class FeishuAdapter implements IStreamableOutboundAdapter {
@@ -77,6 +99,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
   private readonly client: lark.Client;
   private readonly log: FastifyBaseLogger;
   private readonly verificationToken: string | null;
+  private readonly groupBotMentions: Record<string, FeishuMentionAlias>;
   private tokenManager: FeishuTokenManager | null = null;
   private uploadFetchFn: typeof fetch = globalThis.fetch;
   private sendMessageFn: ((params: { chatId: string; content: string; msgType: string }) => Promise<unknown>) | null =
@@ -98,6 +121,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     });
     this.log = log;
     this.verificationToken = options?.verificationToken ?? null;
+    this.groupBotMentions = options?.groupBotMentions ?? {};
   }
 
   /**
@@ -572,20 +596,98 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     if (cached && cached.expiresAt > Date.now()) return cached.name;
 
     const token = await this.tokenManager?.getTenantAccessToken();
-    if (!token) return undefined;
+    if (!token) {
+      this.log.warn({ openId }, '[FeishuAdapter] resolveSenderName: no tenant access token');
+      return undefined;
+    }
     try {
       const res = await (this.uploadFetchFn ?? globalThis.fetch)(
         `https://open.feishu.cn/open-apis/contact/v3/users/${openId}?user_id_type=open_id`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      if (!res.ok) return undefined;
+      if (!res.ok) {
+        this.log.warn(
+          { openId, status: res.status },
+          '[FeishuAdapter] resolveSenderName failed — check contact:user.base:readonly scope',
+        );
+        return undefined;
+      }
       const data = (await res.json()) as { data?: { user?: { name?: string } } };
       const name = data?.data?.user?.name;
       if (name) {
         this.senderNameCache.set(openId, { name, expiresAt: Date.now() + FeishuAdapter.CACHE_TTL_MS });
       }
       return name;
-    } catch {
+    } catch (err) {
+      this.log.warn({ openId, err }, '[FeishuAdapter] resolveSenderName threw');
+      return undefined;
+    }
+  }
+
+  /**
+   * Fallback: resolve sender name from the chat members API.
+   * Works even when Contact API returns 41050 (user not in app's contact scope).
+   * Uses the same senderNameCache as resolveSenderName().
+   */
+  async resolveSenderNameFromChat(openId: string, chatId: string): Promise<string | undefined> {
+    // Check cache first (shared with resolveSenderName)
+    const cached = this.senderNameCache.get(openId);
+    if (cached && cached.expiresAt > Date.now()) return cached.name;
+
+    const token = await this.tokenManager?.getTenantAccessToken();
+    if (!token) return undefined;
+    try {
+      const fetchFn = this.uploadFetchFn ?? globalThis.fetch;
+      let pageToken: string | undefined;
+
+      // Paginate through all members (page_size=50 per request)
+      do {
+        const url = new URL(`https://open.feishu.cn/open-apis/im/v1/chats/${chatId}/members`);
+        url.searchParams.set('member_id_type', 'open_id');
+        url.searchParams.set('page_size', '50');
+        if (pageToken) url.searchParams.set('page_token', pageToken);
+
+        const res = await fetchFn(url.toString(), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          this.log.warn(
+            { chatId, status: res.status },
+            '[FeishuAdapter] resolveSenderNameFromChat: chat members API failed',
+          );
+          return undefined;
+        }
+        const data = (await res.json()) as {
+          data?: {
+            items?: Array<{ member_id?: string; name?: string }>;
+            has_more?: boolean;
+            page_token?: string;
+          };
+        };
+        const members = data?.data?.items;
+        if (!members) return undefined;
+
+        // Cache ALL members from this page (amortize the API call)
+        for (const m of members) {
+          if (m.member_id && m.name) {
+            this.senderNameCache.set(m.member_id, {
+              name: m.name,
+              expiresAt: Date.now() + FeishuAdapter.CACHE_TTL_MS,
+            });
+          }
+        }
+
+        // If target found in cache, return immediately — skip remaining pages
+        const found = this.senderNameCache.get(openId);
+        if (found) return found.name;
+
+        pageToken = data?.data?.has_more ? data.data.page_token : undefined;
+      } while (pageToken);
+
+      // Exhausted all pages without finding target
+      return undefined;
+    } catch (err) {
+      this.log.warn({ chatId, openId, err }, '[FeishuAdapter] resolveSenderNameFromChat threw');
       return undefined;
     }
   }
@@ -642,9 +744,54 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     return `<at user_id="${sender.id}">${sender.name ?? '用户'}</at> ${text}`;
   }
 
+  /**
+   * #1035: Resolve `@alias` patterns in outbound body text to Feishu `<at>` tokens.
+   *
+   * - `text` mode → `<at user_id="ou_xxx">@displayName</at>` (for `msg_type: text`)
+   * - `card_markdown` mode → `<at id=ou_xxx></at>` (Feishu auto-renders display name in cards)
+   *
+   * Only matches `@` preceded by start-of-string or a delimiter (whitespace, brackets,
+   * Chinese open-quotes, full-width space), so `user@example.com` is NOT replaced.
+   * Unknown aliases pass through unchanged.
+   * Aliases are matched on bare unicode letters/digits/underscore (no leading `@` in the key).
+   */
+  private resolveBodyMentions(text: string, mode: 'text' | 'card_markdown'): string {
+    if (!text) return text;
+    const aliases = this.groupBotMentions;
+    // Fast-path: empty config (most common when feature unused)
+    let hasAny = false;
+    for (const _ in aliases) {
+      hasAny = true;
+      break;
+    }
+    if (!hasAny) return text;
+
+    const pattern = /(^|[\s([【「『　])@([\p{L}\p{N}_]+)/gu;
+    return text.replace(pattern, (match, prefix, alias) => {
+      // Own-property check guards against Object.prototype keys (constructor / toString /
+      // hasOwnProperty / …) that would otherwise resolve to truthy inherited members and
+      // emit `<at id=undefined></at>`. parseGroupBotMentionsEnv uses Object.create(null)
+      // already, but callers may pass plain-object maps directly via FeishuAdapterOptions.
+      // (Reviewer cloud-Codex P2 R3, cat-cafe#2611.)
+      if (!Object.hasOwn(aliases, alias)) return match;
+      const entry = aliases[alias];
+      if (!entry) return match; // unknown alias passes through
+      if (mode === 'text') {
+        // F134-feishu-group-chat.md line 730 + prependAtMention (line 720) both render the
+        // bare display name inside the tag; Feishu adds the visible `@` itself. Adding our
+        // own `@` here would break protocol shape and the platform may fail to resolve the
+        // mention. (Reviewer P1, cat-cafe#2611.)
+        const name = entry.displayName ?? alias;
+        return `${prefix}<at user_id="${entry.openId}">${name}</at>`;
+      }
+      // card_markdown: Feishu renders display name from contact resolution
+      return `${prefix}<at id=${entry.openId}></at>`;
+    });
+  }
+
   async sendReply(externalChatId: string, content: string, metadata?: Record<string, unknown>): Promise<void> {
     const sender = (metadata as { replyToSender?: { id: string; name?: string } } | undefined)?.replyToSender;
-    const text = this.prependAtMention(content, sender);
+    const text = this.resolveBodyMentions(this.prependAtMention(content, sender), 'text');
     await this.sendLarkMessage(externalChatId, 'text', JSON.stringify({ text }));
   }
 
@@ -656,7 +803,7 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     metadata?: Record<string, unknown>,
   ): Promise<void> {
     const sender = (metadata as { replyToSender?: { id: string; name?: string } } | undefined)?.replyToSender;
-    const text = this.prependAtMention(textContent, sender);
+    const text = this.resolveBodyMentions(this.prependAtMention(textContent, sender), 'card_markdown');
     const card = formatFeishuCard(blocks, catDisplayName, text);
     await this.sendLarkMessage(externalChatId, 'interactive', JSON.stringify(card));
   }
@@ -677,7 +824,10 @@ export class FeishuAdapter implements IStreamableOutboundAdapter {
     if (envelope.subtitle) {
       elements.push({ tag: 'markdown', content: `**${envelope.subtitle}**` });
     }
-    elements.push({ tag: 'markdown', content: `${atPrefix}${envelope.body}` });
+    elements.push({
+      tag: 'markdown',
+      content: `${atPrefix}${this.resolveBodyMentions(envelope.body, 'card_markdown')}`,
+    });
     if (envelope.footer) {
       elements.push({ tag: 'hr' });
       elements.push({ tag: 'markdown', content: envelope.footer });

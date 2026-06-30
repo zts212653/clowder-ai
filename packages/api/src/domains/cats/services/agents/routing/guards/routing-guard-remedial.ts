@@ -73,7 +73,8 @@ export const REMEDIAL_PROMPT =
   '[路由守卫] 你刚才的回复没有合法的路由出口（既没有行首 @句柄传球，也没有调用 cat_cafe_hold_ball 持球）。\n' +
   '请只补一个出口，不要重做刚才的工作：\n' +
   '- 传球：另起一行，行首独立写 @句柄（如 @opus48）\n' +
-  '- 持球等外部条件：调用 cat_cafe_hold_ball\n' +
+  '- 等co-creator / 等另一只猫回复 → 用 @co-creator / @句柄，不要 hold_ball：对方的消息会触发你，hold 定时器只是冗余的第二次触发\n' +
+  '- 持球等**无回调**的外部条件（远端 CI / cloud verdict / webhook；本地长命令用 wakeWhen）：调用 cat_cafe_hold_ball\n' +
   '- 升级co-creator：另起一行行首写 @co-creator';
 
 export function buildRemedialPrompt(): string {

@@ -501,14 +501,6 @@ function buildConnectorStatusWithStoredConfig(): {
   return { projectRoot, manifests, status: buildConnectorStatus(process.env, manifests, connectorEnvById) };
 }
 
-function resolveStoredConnectorEnv(
-  connectorId: string,
-  manifest: ConnectorManifest,
-): Record<string, string | undefined> {
-  loadAllConnectorConfigs(resolveActiveProjectRoot(), [manifest]);
-  return resolveConnectorEnv(connectorId, manifest.config.filter(isValueField));
-}
-
 export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> = async (app, opts) => {
   const { threadStore } = opts;
   const feishuQrBindClient = opts.feishuQrBindClient ?? new DefaultFeishuQrBindClient();
@@ -629,17 +621,12 @@ export const connectorHubRoutes: FastifyPluginAsync<ConnectorHubRoutesOptions> =
         return status;
       }
 
+      // QR-based login → always default to websocket (works behind CF Access / NAT).
       const updates = [
         { name: 'FEISHU_APP_ID', value: status.appId ?? null },
         { name: 'FEISHU_APP_SECRET', value: status.appSecret ?? null },
+        { name: 'FEISHU_CONNECTION_MODE', value: 'websocket' },
       ];
-      const feishuManifest = getConnectorManifests().get('feishu');
-      const feishuEnv = feishuManifest ? resolveStoredConnectorEnv('feishu', feishuManifest) : process.env;
-      const currentMode = feishuEnv.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook';
-      const verificationToken = feishuEnv.FEISHU_VERIFICATION_TOKEN;
-      if (currentMode === 'webhook' && (!verificationToken || verificationToken.trim() === '')) {
-        updates.push({ name: 'FEISHU_CONNECTION_MODE', value: 'websocket' });
-      }
       const writeError = await applyAuditedConnectorSecretUpdates(
         app,
         'feishu',

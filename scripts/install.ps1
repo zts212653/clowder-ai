@@ -109,7 +109,7 @@ function Invoke-PnpmInstallWithCapturedOutput {
     # Spinner state for live progress display.
     # Use a hashtable so ForEach-Object scriptblock mutations are visible
     # in the outer scope (PowerShell 5.1 closes over reference types but
-    # not value types — $script:scope would also work, but a hashtable
+    # not value types -- $script:scope would also work, but a hashtable
     # is cleaner inside a function that may be dot-sourced).
     $spin = @{
         Chars    = @('-', '\', '|', '/')

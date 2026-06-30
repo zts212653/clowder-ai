@@ -1,7 +1,8 @@
 ---
 name: merge-gate
+tips_exempt: harness/SOP workflow change (merge-gate Step 7.5 dev-process gate); no end-user capability
 description: >
-  合入 main 的完整流程：门禁检查 → PR → remote review → squash merge → Phase 文档同步 → 清理。
+  合入 main 的完整流程：门禁检查 → PR → remote review → Feature Doc Truth 核对(pre-merge) → squash merge → 记录已合入(post-merge) → 清理。
   Use when: reviewer 放行后准备合入、开 PR、触发remote review、准备 merge。
   Not for: 开发中、review 未通过、自检未完成。
   Output: PR merged + worktree cleaned。
@@ -81,6 +82,77 @@ echo "$CURRENT_HEAD"
 - cloudReviewSha：`{short_sha|none}`
 - headChangeCause：`{local-gate|cloud-finding|ci-fix|rebase|pr-meta}`
 - nextGateOwner：`{local-peer|cloud|ci|author|guardian}`
+
+### Evidence Manifest（F253 Phase A — Review Provenance Matrix 超集）
+
+merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组装并验证** evidence manifest。evidence manifest 是 Review Provenance Matrix 的超集，从 PR metadata + gate 输出实时组装——**不是独立存储的文件**。
+
+**字段定义**：
+
+| 字段 | 来源 | 说明 |
+|------|------|------|
+| `head` | `git rev-parse HEAD`（当前 worktree） | 当前 HEAD SHA |
+| `localPeerReviewSha` | Review Provenance Matrix 已有 | 本地跨猫 review 覆盖的 SHA |
+| `cloudReviewSha` | Review Provenance Matrix 已有 | remote review 覆盖的 SHA |
+| `headChangeCause` | Review Provenance Matrix 已有 | HEAD 变化原因 |
+| `nextGateOwner` | Review Provenance Matrix 已有 | 下一步门禁所有者 |
+| `gate_passed` | 适用 gate 的退出码 | 对应 gate 是否通过——完整 PR 用 `pnpm gate`（Step 0），exempt PR（SKILL.md/docs-only）用 light path（biome + check:features + git diff --check） |
+| `gate_commands` | 实际执行的命令 | 完整 PR: `["pnpm gate"]`；exempt PR: `["pnpm biome check .", "node scripts/check-feature-truth.mjs", "git diff --check"]`（按实际记录，不硬编码） |
+| `trigger_reason` | 猫判断 | PR 涉及共享代码则 "shared/ changed — full QC"，否则按触发策略表 |
+| `stale` | `head` vs **headChangeCause 决定的活跃 review 源** | 按 `headChangeCause`（不是 `nextGateOwner`）判定哪个 review 源必须覆盖 `head`：`cloud-finding` → 只看 `cloudReviewSha`；`local-gate` → 只看 `localPeerReviewSha`；`ci-fix` → 只看 `localPeerReviewSha`（ci-fix 始终路由到 local peer re-review，见 Step 5.7 判定规则——即使上一次 `headChangeCause` 是 `cloud-finding`，CI 修复后的 HEAD 由 local peer 覆盖）；`rebase` → pure rebase + 0 code delta + reviewer pre-approval = continuity 有效，否则继承上次；`pr-meta` → 不改 SHA，不影响 review 覆盖。exempt PR（无 cloud）始终只看 `localPeerReviewSha`。`nextGateOwner` 是路由字段（谁下一步行动），不参与 stale 判定 |
+| `verdict` | 猫判断 | `passed`（review APPROVE on final HEAD）/ `blocked`（未 APPROVE）/ `pending` |
+
+**组装时机**：Step 6.9（Evidence Validation Checker）中组装，紧接在 Step 6.8 之后、Step 7 merge 之前。
+
+**与 Review Provenance Matrix 的关系**：Evidence Manifest ⊇ Review Provenance Matrix。前 5 个字段 = Matrix 原有字段（改名 `currentHead` → `head`），后 5 个是 F253 新增的 gate/evidence 字段。猫不需要维护两份——执行 merge-gate 时按 Evidence Manifest 全量检查即可，Matrix 是其子集。
+
+### Evidence Validation Checker（F253 Phase A — Step 6.9）🔴
+
+**位置**：在 Step 6.8（Hotfix Cross-Cat Review Gate）之后、Step 7.5a（Feature Doc Truth 核对）之前执行。
+
+**5 项硬条件**——任一不满足 → **BLOCKED，不执行 merge**：
+
+| # | 检查项 | 验证方式 | 失败动作 |
+|---|--------|----------|----------|
+| E1 | `head` === PR current HEAD | `git rev-parse HEAD` vs `gh pr view {PR_NUMBER} --json headRefOid --jq '.headRefOid'` | BLOCKED — HEAD 不一致，可能有 unpushed commit |
+| E2 | `stale` === false | 按 `headChangeCause` 判定的活跃 review 源覆盖当前 `head`（见上方 `stale` 字段定义的完整映射表）。`nextGateOwner=author` 时（merge-ready 态），沿用最后一次 `headChangeCause` 确定的活跃源；`nextGateOwner=ci/guardian` 时，review 覆盖规则不变（CI/guardian 是额外 gate，不改变 review 覆盖链） | BLOCKED — 活跃 review 源的 SHA 过期，需要 re-review |
+| E3 | reviewer provenance 闭合 | 至少一个 review 源（local 或 cloud）非空且覆盖 `head`（exempt PR 无 cloud 时只看 local） | BLOCKED — 缺 review provenance |
+| E4 | `verdict` !== "blocked" | review 结果为 APPROVE（非 BLOCK / CHANGES_REQUESTED） | BLOCKED — reviewer 未放行 |
+| E5 | `gate_passed` === true | 适用 gate 通过——完整 PR: `pnpm gate`（Step 0）；exempt PR（SKILL.md/docs-only）: light path（见上方 `gate_commands` 定义） | BLOCKED — gate 未通过或未跑 |
+
+**通过时输出**（cloud-finding 流程示例）：
+```
+✅ Evidence validation passed
+  head: abc1234
+  headChangeCause: cloud-finding → active review source: cloud
+  review coverage: cloud=abc1234 ✓ (local=def5678, not active for this headChangeCause — ok)
+  gate: passed (pnpm gate)
+  stale: false
+  verdict: passed
+```
+
+**通过时输出**（exempt SKILL.md PR 示例）：
+```
+✅ Evidence validation passed
+  head: ghi9012
+  headChangeCause: local-gate → active review source: local (exempt, no cloud)
+  review coverage: local=ghi9012 ✓
+  gate: passed (light path: biome + check:features + git diff --check)
+  stale: false
+  verdict: passed
+```
+
+**失败时输出示例**：
+```
+❌ Evidence validation BLOCKED
+  E2 FAIL: headChangeCause=cloud-finding → active source=cloud
+           cloudReviewSha=def5678 ≠ head=abc1234
+  → 需要重新触发 cloud review 覆盖当前 HEAD
+```
+
+**不是脚本——是猫执行的 checklist**。Phase A 的 evidence validation 是猫在 merge-gate 流程中人工检查 + 报告的步骤。如果需要自动化，可在后续 Phase 写 `scripts/check-qc-evidence.mjs`，但 Phase A 不做。
+
+**与已有 Review Continuity Guard 的关系**：Review Continuity Guard 定义了"HEAD 变了怎么判 nextGateOwner"的规则；Evidence Validation Checker 在 merge 前**执行**这些规则的最终验证。前者是政策，后者是门禁。
 
 ### `pnpm gate` — Latest Main 全量门禁（Step 0，开 PR 前必跑）
 
@@ -259,14 +331,30 @@ if [ "$IS_HOTFIX" = "true" ]; then
   fi
   echo "✅ Hotfix cross-cat review: Author=$PR_AUTHOR, Approved by=$REVIEWERS"
 fi
+
+# 6.9 Evidence Validation Checker（F253 Phase A）🔴
+#   组装 evidence manifest → 验证 5 项硬条件（E1-E5）→ 通过才继续
+#   → 详见上方「Evidence Validation Checker（Step 6.9）」
+#   E1: head === PR current HEAD
+#   E2: stale === false (review SHA covers head)
+#   E3: reviewer provenance 闭合
+#   E4: verdict !== "blocked"
+#   E5: gate_passed === true
 ```
 
 ```bash
+# 7.5a Pre-merge: Feature Doc Truth 核对（在 merge 之前！）🔴
+#   拿这个 PR 的代码现实对账 feature doc 当前的声称，确认 doc 没对 main 撒谎。
+#   机械兜底（已含在 Step 0 `pnpm gate`）——硬拦明显 status↔timeline drift：
+node scripts/check-feature-truth.mjs
+# → 详见下方「Feature Doc Truth 核对（Step 7.5）」§ 7.5a（含人工核对项）
+
 # 7. Squash merge（GitHub 处理，禁止本地 squash！）
 gh pr merge {PR_NUMBER} --squash --delete-branch
 
-# 7.5 Phase 文档同步（每次 merge 必做！）🔴
-# → 见下方「Phase 文档同步」章节
+# 7.5b Post-merge: 记录已合入状态（每次 merge 必做！）🔴
+#   Phase ✅ / AC 打勾 / Timeline 记 merged / Status 推进 → commit → 复跑 check-feature-truth
+# → 详见下方「Feature Doc Truth 核对（Step 7.5）」§ 7.5b
 ```
 
 ### Step 7.6: Hotfix 升级 Review Cron 注册（F177 Phase E）🔴
@@ -299,6 +387,8 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short
   exit 1
 fi
+# 本段从主仓（持有 main 的 worktree）执行；7.5b 已 cd 至此，git checkout main 幂等 no-op。
+# 勿在 feature worktree 执行 git checkout main（main 被主仓占用会被拒绝，见 7.5b）。
 git checkout main && git pull origin main
 git worktree remove ../cat-cafe-{feature-name}
 git branch -d {branch-name} && git worktree prune
@@ -386,31 +476,52 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | 误报 | 留 comment 解释，视为通过 |
 | 架构/改法建议（非 P1/P2） | **过 VERIFY 三道门再决定改不改**（见 receive-review VERIFY）。云端没有运行环境，理论推理 < 本地实测。改坏能跑的功能 = P0 |
 
-### Phase 文档同步（Step 7.5）🔴
+### Feature Doc Truth 核对（Step 7.5）🔴
 
-**为什么在 merge-gate 而不是 feat-lifecycle close**：一个 Feature 拆 N 个 Phase/PR，如果等 close 才更新文档，中间所有 session 冷启动读到的都是过时状态。**每次 merge 都是一次增量文档同步。**
+**为什么在 merge-gate 而不是 feat-lifecycle close**：一个 Feature 拆 N 个 Phase/PR，如果等 close 才核对/更新文档，中间所有 session 冷启动读到的都是过时甚至**说谎**的状态。**每次 merge 都是一次"代码现实 ↔ feature doc"对账**——merge 前核对 doc 没撒谎，merge 后记录已合入。这不是只在最后做的事，是每个 PR 的增量动作。
 
-**流程**：
+#### 7.5a — Pre-merge：核对 feature doc 是否说真话（在 Step 7 merge 之前）
 
-1. **识别 Feature**：从 PR title/branch name 提取 `F{NNN}`（如 `feat/f088-phase-c`）
-   - 没有 Feature ID → 跳过（纯 TD/hotfix 不需要）
+merge 是把状态写进 main 的不可逆点（其他 session 立即读到）。合之前，拿**这个 PR 的代码现实**对账 feature doc 当前的声称，确认没有对 main 撒谎：
 
-2. **更新 feature doc** `docs/features/F{NNN}-*.md`：
+1. **识别 Feature**：从 PR title/branch 提取 `F{NNN}`（无 Feature ID → 跳过，纯 TD/hotfix 不需要）。
+2. **声称 vs 代码现实**（人工 — 语义层机器判不了）：
+   - feature doc 里标 ✅ 的 Phase / 打勾的 `[x]` AC，**这个 PR（及历史）的代码真做了吗**？严防"doc 声称完成但代码是 stub / 没做"——糖衣包装"未做"（参 self-evolution「下次一定」）。
+   - **Status 行**和真实开发阶段一致吗？（写 `spec`/`spike` 但代码已在跑 = 撒谎）
+   - 反向：代码已做的，doc 漏记了吗？
+3. **机械兜底** `node scripts/check-feature-truth.mjs`（已含在 Step 0 `pnpm gate`）：硬拦**明显**矛盾 —— Status 仍是 pre-development（`spec`/`design`/`idea`/`draft`/`spike`/...）但 `## Timeline` 已有 merged PR 且无 reopen 标记。机器**只抓这一类零歧义 drift，不替你判 AC/Phase 语义**。
+4. **核对不过 → 先修 doc 再 merge**：doc 撒谎（过度声称 / 漏记 / Status 虚高）当场修正、commit、重新核对。**禁止带着说谎的 doc 合进 main。**
+
+#### 7.5b — Post-merge：记录已合入状态（在 Step 7 merge 之后）
+
+⚠️ **切到持有 main 的 worktree 再 commit**：`gh pr merge --squash --delete-branch` 之后你仍在 feature worktree 上。直接 commit 会落到**已合并/已删的 feature branch**（或留脏工作树让 Step 8 fail-closed abort）。而且 worktree 开发场景下 `main` 由主仓 worktree 持有——**在 feature worktree `git checkout main` 会被 git 拒绝**（ref 已被另一 worktree 占用）。所以切到持有 main 的 worktree（而非 checkout）：
+
+```bash
+# 找到持有 main 的 worktree（通常是主仓 cat-cafe/），cd 过去做 doc-sync：
+MAIN_WT="$(git worktree list --porcelain \
+  | awk '/^worktree /{wt=substr($0,10)} /^branch refs\/heads\/main$/{print wt; exit}')"
+cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync 落点切到 main
+```
+
+然后**在 main 上**把这个 PR 带来的增量写进 feature doc：
+
+1. **更新 feature doc** `docs/features/F{NNN}-*.md`：
    - **Phase 状态**：本 PR 对应的 Phase 标记从 📋/🚧 → ✅
-   - **AC 打勾**：本 PR 实际完成的 AC 项 `[ ]` → `[x]`
+   - **AC 打勾**：本 PR 实际完成的 AC 项 `[ ]` → `[x]`（只勾代码真做了的 —— 7.5a 已核对）
    - **Timeline**：加一行 `| {YYYY-MM-DD} | Phase {X} merged (PR #{N}) |`
-   - **Status 行**：如果是第一个 Phase 完成，`spec` → `in-progress`
-   - **不做**：不动 Dependencies/Risk/Links 等（那些是 kickoff/completion 的事）
+   - **Status 行**：第一个 Phase 完成 `spec` → `in-progress`；最后一个 Phase 视情况推进（`done` 留给 completion 愿景守护）
+   - **不做**：不动 Dependencies/Risk/Links（kickoff/completion 的事）
+2. **Commit + push**：在 main 上 `git commit` + `git push origin main`，message `docs(F{NNN}): sync phase progress after PR #{N} merge`（文档同步不需走 review）。
+3. **复验**：再跑一次 `node scripts/check-feature-truth.mjs` —— 确认 post-merge 写入没引入新 drift（例如加了 merged Timeline 却忘把 `spec` 推进成 `in-progress`，lint 会抓）。
 
-3. **Commit**：`docs(F{NNN}): sync phase progress after PR #{N} merge`
-   - 如果 merge 在 worktree 清理前完成，在 main 上直接 commit
-   - 这是文档同步，不需要走 review
+> 落点说明：7.5b 切到持有 main 的 worktree（通常是主仓）做 doc-sync；后续 Step 8 清理本就从主仓发起（`git worktree remove ../cat-cafe-{name}`），此时已在 main worktree，其 `git checkout main` 幂等 no-op。单仓无独立 feature worktree 时 `git worktree list` 只返回主仓，cd 即原地。
 
 **检查清单**：
-- [ ] Feature doc 里本 Phase 标 ✅
-- [ ] 相关 AC 打勾
-- [ ] Timeline 有 merge 记录
-- [ ] Status 行与实际进度一致
+- [ ] **(pre)** doc 标 ✅ 的 Phase / 打勾 AC 都有代码支撑（没撒谎）
+- [ ] **(pre)** `check-feature-truth` 绿（无 status↔timeline drift）
+- [ ] **(post)** 本 Phase 标 ✅ + 相关 AC 打勾
+- [ ] **(post)** Timeline 有 merged 记录 + Status 行与实际进度一致
+- [ ] **(post)** 复验 `check-feature-truth` 仍绿
 
 ## Quick Reference
 
@@ -420,7 +531,9 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | P1/P2 清零？ | 检查 review 记录 |
 | BACKLOG 更新？ | `grep '\[x\]' docs/ROADMAP.md` |
 | 云端通过？ | `gh pr checks {PR}` |
-| Phase 文档同步？ | feature doc Phase ✅ + AC 打勾 + Timeline 有记录 |
+| Evidence validation 通过？(Step 6.9) | E1-E5 五项全绿（head 一致 + review 不 stale + provenance 闭合 + verdict passed + gate passed） |
+| Feature doc 说真话？(pre-merge) | doc 标 ✅/打勾 AC 有代码支撑 + `node scripts/check-feature-truth.mjs` 绿 |
+| 已合入状态记录？(post-merge) | feature doc Phase ✅ + AC 打勾 + Timeline 有 merged 记录 + Status 推进 |
 
 ## Common Mistakes
 
@@ -438,7 +551,9 @@ gh api --paginate repos/{OWNER}/{REPO}/pulls/{PR_NUMBER}/comments \
 | 本地 merge 后 `gh pr close` | `gh pr close` = 放弃，`gh pr merge` = 合入 |
 | 不等remote review 直接合入 | 必须等 0 P1/P2 |
 | 把截图/录屏/.pen 直接 commit 到仓库根目录 | Step 0.5 Root Artifact Guard 先拦截；先归档再开 PR |
-| Merge 后不更新 feature doc | Step 7.5 Phase 文档同步（每次 merge 必做！） |
+| 跳过 evidence validation 直接 merge | Step 6.9 五项 E1-E5 全过才能进 Step 7；不组装 evidence = 不知道 review 是否 stale |
+| Merge **前**不核对 feature doc 说真话 | Step 7.5a：标 ✅/打勾 AC 必须有代码支撑，`check-feature-truth` 绿，再 merge |
+| Merge **后**不记录已合入状态 | Step 7.5b：Phase ✅ + AC 打勾 + Timeline 记 merged + Status 推进 |
 | Merge 后不清理 review 沙盒 | Step 8.5 按 review-target-id 回收 `/tmp/cat-cafe-review/` |
 
 ### **⚠️⚠️ 反面案例（PR #160）— 必须记住**
@@ -527,3 +642,21 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 2. 愿景进度（哪些 AC ✅ 了）
 3. 下个 Phase 方向 + 新发现
 4. "方向对吗？" → operator确认 → 继续下一个 Phase
+
+---
+
+## CI Repair Loop (F253 Phase C)
+
+When CI fails after push:
+
+1. Read CI output → `classifyCiError(output)` (from `scripts/classify-ci-error.mjs`) → get error class + deterministic flag
+2. If non-deterministic → **escalate immediately** (post to thread, @ author)
+3. If deterministic + round < 2 → run `autoFixCommand`, commit, push
+4. If deterministic + round ≥ 2 → **escalate** (same error class won't auto-fix after 2 tries)
+5. Track round count via PR label `ci-repair-round:N`
+
+**Allowlisted auto-fixes**: biome format, biome lint (non-suspicious)
+**Never auto-fix**: test failures, type errors, lint/suspicious, unknown errors
+
+Use `shouldAutoFix(classification, sameClassRound)` to check the protocol.
+State machine: idle → attempt_1 → attempt_2 → escalated (terminal).

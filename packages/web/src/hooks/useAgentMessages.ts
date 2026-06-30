@@ -30,7 +30,12 @@ import {
   markReplacedInvocation,
   removeReplacedInvocation,
 } from './shared-replaced-invocations';
-import { formatAgyProgressDetail, formatVisibleSystemInfo, isInternalSystemInfoTelemetry } from './system-info-visible';
+import {
+  formatAgyProgressDetail,
+  formatSessionSealRequested,
+  formatVisibleSystemInfo,
+  isInternalSystemInfoTelemetry,
+} from './system-info-visible';
 import {
   type ActiveSeedSource,
   clearActiveBubble as clearActiveBubbleLedger,
@@ -138,6 +143,45 @@ function shouldCatchUpEmptyFinalStreamBubble(message: ChatMessage | undefined): 
   if (!message || message.type !== 'assistant' || message.origin !== 'stream') return false;
   if (message.content.trim().length > 0) return false;
   return (message.toolEvents?.length ?? 0) > 0 || (message.thinking?.trim().length ?? 0) > 0;
+}
+
+function isSameParentLocalToolOnlyResidue(
+  message: ChatMessage,
+  finalized: ChatMessage,
+  parentInvocationId: string,
+): boolean {
+  if (message.id === finalized.id) return false;
+  if (!message.id.startsWith('msg-')) return false;
+  if (message.type !== 'assistant' || message.catId !== finalized.catId || message.origin !== 'stream') {
+    return false;
+  }
+  if (message.extra?.stream?.invocationId !== parentInvocationId) return false;
+  if (message.content.trim().length > 0) return false;
+  return (message.toolEvents?.length ?? 0) > 0 || (message.thinking?.trim().length ?? 0) > 0;
+}
+
+function terminalizeSameParentLocalToolOnlyResidues(
+  messages: ChatMessage[],
+  finalized: ChatMessage | undefined,
+  invocationId: string | undefined,
+): { found: boolean; messages: ChatMessage[]; terminalized: boolean } {
+  if (!finalized || finalized.type !== 'assistant' || finalized.origin !== 'stream' || !finalized.catId) {
+    return { found: false, messages, terminalized: false };
+  }
+  const parentInvocationId = finalized.extra?.stream?.invocationId ?? invocationId;
+  if (!parentInvocationId) return { found: false, messages, terminalized: false };
+  let found = false;
+  let terminalized = false;
+  const nextMessages = messages.map((message) => {
+    if (!isSameParentLocalToolOnlyResidue(message, finalized, parentInvocationId)) {
+      return message;
+    }
+    found = true;
+    if (message.isStreaming === false) return message;
+    terminalized = true;
+    return { ...message, isStreaming: false };
+  });
+  return { found, messages: terminalized ? nextMessages : messages, terminalized };
 }
 
 interface AgentMsg {
@@ -587,7 +631,23 @@ function shouldSkipBackgroundParentOnlyResidueRecovery(
   const boundInv = message.extra?.stream?.invocationId;
   const boundTurn = message.extra?.stream?.turnInvocationId;
   if (boundInv !== incomingInvocationId || boundTurn) return false;
-  return !(activeRef?.id === message.id && isCurrentFreshParentSeed(activeRef, msg.timestamp, msg.seq));
+  // Check 1: bgStreamRef tracks this message as the current fresh parent seed.
+  if (activeRef?.id === message.id && isCurrentFreshParentSeed(activeRef, msg.timestamp, msg.seq)) return false;
+  // Check 2 (F194 saga17+): runtime ledger bridge for active→background transition.
+  // When the active path created a parent-only seed and the user switched threads,
+  // bgStreamRefs is cleared (line 4100) but the runtime ledger still knows which
+  // bubble is active. Allow recovery — same bridge pattern as invocation_created
+  // handler (line 655-668). Z3-safe: the ledger holds ONE entry per (thread, cat);
+  // finalized/done bubbles have been cleared, so stale residues cannot be recovered.
+  const ledgerEntry = getActiveBubbleLedger(getThreadRuntimeLedger(), msg.threadId, msg.catId);
+  if (
+    ledgerEntry?.messageId === message.id &&
+    ledgerEntry.seedSource === 'fresh-parent-seed' &&
+    isCurrentFreshParentSeed(ledgerEntry, msg.timestamp, msg.seq)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function hasBackgroundParentOnlyResidue(
@@ -1284,8 +1344,8 @@ export function consumeBackgroundSystemInfo(
           sessionSeq: parsed.sessionSeq,
           sessionSealed: true,
         });
-        const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
-        sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
+        const visibleSessionSeal = formatSessionSealRequested(parsed);
+        if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
       }
     } else if (parsed?.type === 'mode_switch_proposal') {
       const by = parsed.proposedBy ?? '猫猫';
@@ -4792,6 +4852,31 @@ export function useAgentMessages() {
               if (tid) {
                 requestStreamCatchUp(tid);
               }
+            } else {
+              const residueTerminalization = terminalizeSameParentLocalToolOnlyResidues(
+                stateAfterFinalize.messages,
+                finalized,
+                msg.invocationId,
+              );
+              if (residueTerminalization.found) {
+                const tid = msg.threadId ?? stateAfterFinalize.currentThreadId;
+                if (residueTerminalization.terminalized) {
+                  stateAfterFinalize.replaceMessages(residueTerminalization.messages, stateAfterFinalize.hasMore);
+                }
+                console.warn(
+                  '[stream-catchup] done(isFinal) with same-parent local tool residue — requesting catch-up',
+                  {
+                    catId: msg.catId,
+                    threadId: tid,
+                    messageId,
+                    invocationId: msg.invocationId,
+                    terminalizedResidue: residueTerminalization.terminalized,
+                  },
+                );
+                if (tid) {
+                  requestStreamCatchUp(tid);
+                }
+              }
             }
           }
 
@@ -5459,8 +5544,8 @@ export function useAgentMessages() {
               sessionSeq: parsed.sessionSeq,
               sessionSealed: true,
             });
-            const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
-            sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
+            const visibleSessionSeal = formatSessionSealRequested(parsed);
+            if (visibleSessionSeal) sysContent = visibleSessionSeal.content;
           }
         } catch {
           /* not JSON, use raw content */

@@ -203,6 +203,11 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       undefined,
       'successful remedial exit should not emit a guard failure notice',
     );
+    assert.deepEqual(
+      codexMessages[0].extra?.stream,
+      { invocationId: 'outer-inv-1', turnInvocationId: 'outer-inv-1' },
+      'route-only remedial keeps first-pass content visible, so persisted stream identity must stay on the first pass',
+    );
 
     const yieldedTextEvents = yielded.filter((m) => m.type === 'text');
     const yieldedText = yieldedTextEvents.map((m) => m.content);
@@ -215,8 +220,13 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
     assert.equal(done?.mentionsUser, true, 'final done event should preserve co-creator mention notification');
     assert.equal(
       yieldedTextEvents[0]?.invocationId,
+      'outer-inv-1',
+      'preserved first-pass visible text must keep the first-pass invocation identity',
+    );
+    assert.notEqual(
+      yieldedTextEvents[0]?.invocationId,
       done?.invocationId,
-      'preserved first-pass text must be restamped to the same remedial turn identity as done',
+      'route-only remedial must not retag original visible text as the remedial turn',
     );
   });
 
@@ -271,6 +281,26 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       yielded.filter((m) => m.type === 'text').map((m) => m.content),
       ['Invalid first-pass response.'],
       'first-pass text should be withheld until the route-only remedial validates it',
+    );
+    const firstPassTextIndex = yielded.findIndex(
+      (m) => m.type === 'text' && m.invocationId === 'outer-inv-1' && m.content === 'Invalid first-pass response.',
+    );
+    const remedialLifecycleIndex = yielded.findIndex((m) => {
+      if (m.type !== 'system_info' || !m.content) {
+        return false;
+      }
+      try {
+        const parsed = JSON.parse(m.content);
+        return parsed.type === 'invocation_created' && parsed.invocationId === 'codex-inv-2';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(firstPassTextIndex >= 0, 'guard must replay preserved text on the first-pass invocation');
+    assert.ok(remedialLifecycleIndex >= 0, 'guard must still stream the route-only remedial lifecycle event');
+    assert.ok(
+      firstPassTextIndex < remedialLifecycleIndex,
+      'preserved first-pass text must replay before the route-only remedial boundary can replace its turn',
     );
 
     const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
@@ -805,7 +835,7 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
       ],
     ]);
 
-    const { appended, calls } = await runRoute(service, 'thread-routing-guard-1f');
+    const { appended, calls, yielded } = await runRoute(service, 'thread-routing-guard-1f');
 
     assert.equal(calls.length, 2, 'original tool-using response should trigger fake-hold remediation');
     const codexMessages = appended.filter((m) => m.catId === 'codex' && m.origin === 'stream');
@@ -819,6 +849,38 @@ describe('F177 Phase H — route-serial routing guard remedial invoke', () => {
         ['tool_use', 'cat_cafe_hold_ball'],
       ],
       'when remedial keeps original text, persisted toolEvents must keep original work evidence plus the routing exit',
+    );
+    assert.deepEqual(
+      yielded
+        .filter((m) => m.type === 'tool_use' || m.type === 'tool_result')
+        .map((m) => [m.type, m.toolName ?? null, m.invocationId]),
+      [
+        ['tool_use', 'cat_cafe_search_evidence', 'outer-inv-1'],
+        ['tool_result', null, 'outer-inv-1'],
+        ['tool_use', 'cat_cafe_hold_ball', 'outer-inv-1'],
+      ],
+      'live tool evidence should use the same visible turn identity as the preserved first-pass content',
+    );
+    const remedialHoldBallToolIndex = yielded.findIndex(
+      (m) => m.type === 'tool_use' && m.toolName === 'cat_cafe_hold_ball' && m.invocationId === 'outer-inv-1',
+    );
+    const remedialLifecycleIndex = yielded.findIndex((m) => {
+      if (m.type !== 'system_info' || !m.content) return false;
+      try {
+        const parsed = JSON.parse(m.content);
+        return parsed.type === 'invocation_created' && parsed.invocationId === 'codex-inv-2';
+      } catch {
+        return false;
+      }
+    });
+    assert.ok(remedialHoldBallToolIndex >= 0, 'routing-exit hold_ball evidence must stream live');
+    assert.ok(
+      remedialLifecycleIndex >= 0,
+      'route-only remedial lifecycle boundary still belongs to the remedial invocation',
+    );
+    assert.ok(
+      remedialHoldBallToolIndex < remedialLifecycleIndex,
+      'restamped routing-exit tool evidence must stream before the remedial lifecycle boundary replaces the visible turn',
     );
   });
 

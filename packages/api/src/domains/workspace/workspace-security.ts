@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { resolveStartupProjectRoot } from '../../utils/startup-root.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -114,9 +115,36 @@ export interface WorktreeEntry {
   head: string;
 }
 
+function worktreeIdForRoot(root: string): string {
+  return basename(root).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function isGitWorktreeUnavailableError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const stderr =
+    typeof err === 'object' && err !== null && 'stderr' in err ? String((err as { stderr?: unknown }).stderr) : '';
+  return code === 'ENOENT' || (code === '128' && stderr.includes('not a git repository'));
+}
+
+function fallbackWorktreeEntry(cwd: string): WorktreeEntry {
+  const root = resolveStartupProjectRoot(cwd);
+  return {
+    id: worktreeIdForRoot(root),
+    root,
+    branch: 'exported',
+    head: 'nogit',
+  };
+}
+
 export async function listWorktrees(repoRoot?: string): Promise<WorktreeEntry[]> {
   const cwd = repoRoot ?? process.cwd();
-  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd });
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd }));
+  } catch (err) {
+    if (isGitWorktreeUnavailableError(err)) return [fallbackWorktreeEntry(cwd)];
+    throw err;
+  }
   const entries: WorktreeEntry[] = [];
   let current: Partial<WorktreeEntry> = {};
 
@@ -126,7 +154,7 @@ export async function listWorktrees(repoRoot?: string): Promise<WorktreeEntry[]>
       const root = line.slice('worktree '.length);
       current = {
         root,
-        id: basename(root).replace(/[^a-zA-Z0-9_-]/g, '_'),
+        id: worktreeIdForRoot(root),
         branch: 'HEAD',
         head: '',
       };

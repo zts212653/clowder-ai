@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
-const { _clearCachesForTest, findMonorepoRoot } = await import('../dist/utils/monorepo-root.js');
+const { _clearCachesForTest, findMonorepoRoot, isSameProject } = await import('../dist/utils/monorepo-root.js');
 
 describe('findMonorepoRoot', () => {
   afterEach(() => {
@@ -21,5 +21,25 @@ describe('findMonorepoRoot', () => {
     assert.equal(findMonorepoRoot(subdir), subdir);
     assert.equal(findMonorepoRoot(nested), nested);
     assert.equal(findMonorepoRoot(project), project);
+  });
+
+  it('treats no-git public exports and their synthetic worktrees as the same project', () => {
+    const project = mkdtempSync(join(tmpdir(), 'public-export-project-'));
+    const worktree = mkdtempSync(join(tmpdir(), 'public-export-worktree-'));
+
+    writeFileSync(join(project, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    writeFileSync(join(worktree, '.git'), `gitdir: ${join(project, '.git', 'worktrees', 'public-export-worktree')}\n`);
+
+    assert.equal(isSameProject(worktree, project), true);
+  });
+
+  it('treats no-git public export subdirectories as the same project root', () => {
+    const project = mkdtempSync(join(tmpdir(), 'public-export-subdir-project-'));
+    const subdir = join(project, 'packages', 'api');
+
+    writeFileSync(join(project, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+    mkdirSync(subdir, { recursive: true });
+
+    assert.equal(isSameProject(subdir, project), true);
   });
 });

@@ -589,6 +589,12 @@ export interface AgentRouterOptions {
   conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions */
   conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
+  /** F247 AC-B1c-3 PR-C: Cloud invoke bridge for @gpt-pro → ChatGPT dispatch */
+  cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  /** F254 B3: freshnessReinvokeCheck for invoke-single-cat terminal hook */
+  freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
+  /** F254 Phase C: Freshness state store for carrier tier persistence */
+  freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
 }
 
 /**
@@ -653,6 +659,12 @@ export class AgentRouter {
   private conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B */
   private conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
+  /** F247 AC-B1c-3 PR-C */
+  private cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge;
+  /** F254 B3 */
+  private freshnessReinvokeCheck?: import('../invocation/invoke-single-cat.js').InvocationDeps['freshnessReinvokeCheck'];
+  /** F254 Phase C */
+  private freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
   private speechMentionRe: RegExp;
 
   /**
@@ -759,6 +771,9 @@ export class AgentRouter {
     this.conciergeConfigStore = options.conciergeConfigStore;
     this.conciergeHandleMapStore = options.conciergeHandleMapStore;
     this.conciergeTriagePlanStore = options.conciergeTriagePlanStore;
+    this.cloudInvokeBridge = options.cloudInvokeBridge;
+    this.freshnessReinvokeCheck = options.freshnessReinvokeCheck;
+    this.freshnessStateStore = options.freshnessStateStore;
   }
 
   refreshFromRegistry(agentRegistry: AgentRegistry): void {
@@ -1353,6 +1368,9 @@ export class AgentRouter {
         ...(this.conciergeConfigStore ? { conciergeConfigStore: this.conciergeConfigStore } : {}),
         ...(this.conciergeHandleMapStore ? { conciergeHandleMapStore: this.conciergeHandleMapStore } : {}),
         ...(this.conciergeTriagePlanStore ? { conciergeTriagePlanStore: this.conciergeTriagePlanStore } : {}),
+        ...(this.cloudInvokeBridge ? { cloudInvokeBridge: this.cloudInvokeBridge } : {}),
+        ...(this.freshnessReinvokeCheck ? { freshnessReinvokeCheck: this.freshnessReinvokeCheck } : {}),
+        ...(this.freshnessStateStore ? { freshnessStateStore: this.freshnessStateStore } : {}),
       },
       messageStore: this.messageStore,
       deliveryCursorStore: this.deliveryCursorStore,
@@ -1567,6 +1585,8 @@ export class AgentRouter {
       /** #949 P2: Whether verdict-without-pass warning fires at route end.
        *  true/undefined = warn (default). false = suppress for connector-sourced flows only. */
       verdictPassWarningEnabled?: boolean;
+      /** F254 B3: Freshness re-invoke enqueue for routing layer consumption */
+      freshnessReinvokeEnqueue?: RouteOptions['freshnessReinvokeEnqueue'];
     },
   ): AsyncIterable<AgentMessage> {
     const cleanMessage = stripIntentTags(message);
@@ -1667,6 +1687,7 @@ export class AgentRouter {
       queueHasQueuedMessages: options?.queueHasQueuedMessages,
       hasQueuedOrActiveAgentForCat: options?.hasQueuedOrActiveAgentForCat,
       deferA2AEnqueue: options?.deferA2AEnqueue,
+      freshnessReinvokeEnqueue: options?.freshnessReinvokeEnqueue,
       invocationController: options?.invocationController,
       trackA2ASlot: options?.trackA2ASlot,
       completeA2ASlots: options?.completeA2ASlots,

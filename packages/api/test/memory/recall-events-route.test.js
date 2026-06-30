@@ -98,6 +98,25 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
       null,
     );
     insertRecallEvent.run(
+      'r-list-recent',
+      'opus',
+      'inv-list-recent',
+      'list_recent',
+      '',
+      null,
+      'docs',
+      '[]',
+      '[]',
+      0,
+      0,
+      0,
+      0,
+      0,
+      1005,
+      'thread-owned',
+      3,
+    );
+    insertRecallEvent.run(
       'r-2',
       'codex',
       'inv-2',
@@ -177,11 +196,28 @@ describe('GET /api/recall/events — F102 ownership guard', () => {
     assert.equal(res.statusCode, 200, 'owner gets 200');
     const body = res.json();
     assert.ok(Array.isArray(body.events), 'events is an array');
-    assert.equal(body.events.length, 3, 'three recall events');
+    assert.equal(body.events.length, 4, 'four recall events');
     const docEvent = body.events.find((event) => event.query === 'F102');
     assert.ok(docEvent, 'doc event present');
+    assert.equal(docEvent.toolName, 'search_evidence');
     assert.equal(docEvent.results[0].anchor, 'F102');
     assert.equal(docEvent.resultCount, 1);
+  });
+
+  it('200: returns toolName for query-less navigation events', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/recall/events?threadId=thread-owned',
+      headers: AUTH_HEADER,
+    });
+    assert.equal(res.statusCode, 200, 'owner gets 200');
+    const body = res.json();
+    const event = body.events.find((item) => item.id === 'r-list-recent');
+    assert.ok(event, 'list_recent event present');
+    assert.equal(event.query, '', 'list_recent has no query by design');
+    assert.equal(event.toolName, 'list_recent');
+    assert.equal(event.scope, 'docs');
+    assert.equal(event.resultCount, 3);
   });
 
   it('200: returns reported hit count even when no candidate anchors were persisted', async () => {

@@ -207,6 +207,14 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
                   hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                     opts.queueProcessor?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   deferA2AEnqueue: (e: any) => opts.queueProcessor?.enqueueRaw(e),
+                  // F254 B3: freshness re-invoke enqueue for retry endpoint.
+                  // Without this, freshnessReinvoke metadata from invoke-single-cat is
+                  // silently dropped — same class as the messages.ts immediate-path fix.
+                  // Matches QueueProcessor + messages.ts pattern: strip freshnessContext.
+                  freshnessReinvokeEnqueue: (e: any) => {
+                    const { freshnessContext: _ctx, ...queueFields } = e;
+                    opts.queueProcessor?.enqueueRaw(queueFields);
+                  },
                 }
               : {}),
             cursorBoundaries,

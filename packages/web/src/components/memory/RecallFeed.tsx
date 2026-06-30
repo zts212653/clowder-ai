@@ -2,22 +2,33 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { anchorToHref, type RecallEvent, useRecallEvents } from '@/hooks/useRecallEvents';
+import {
+  anchorToHref,
+  type RecallEvent,
+  recallEventDisplayTitle,
+  recallEventResultLabel,
+  useRecallEvents,
+} from '@/hooks/useRecallEvents';
 import { ExpandableText } from '../ExpandableText';
 
 function RecallCard({ event }: { event: RecallEvent }) {
   const [expanded, setExpanded] = useState(false);
+  const displayTitle = recallEventDisplayTitle(event);
+  const resultLabel = recallEventResultLabel(event);
+  const resultLabelTone = event.resultCount == null ? 'text-cafe-secondary' : 'text-cafe-interactive';
 
   return (
     <div className="rounded-lg bg-[var(--console-card-bg)] p-2.5">
       <button type="button" onClick={() => setExpanded(!expanded)} className="flex w-full items-center gap-2 text-left">
         <span className="text-xs text-cafe-secondary">{expanded ? '\u25BE' : '\u25B8'}</span>
-        <span className="flex-1 text-sm font-medium text-cafe-black truncate" title={event.query}>
-          {event.query}
+        <span className="flex-1 text-sm font-medium text-cafe-black truncate" title={displayTitle}>
+          {displayTitle}
         </span>
-        {event.resultCount != null && (
-          <span className="rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro font-semibold text-cafe-interactive">
-            {event.resultCount} 条命中
+        {resultLabel && (
+          <span
+            className={`rounded bg-[var(--console-panel-bg)] px-1.5 py-0.5 text-micro font-semibold ${resultLabelTone}`}
+          >
+            {resultLabel}
           </span>
         )}
       </button>

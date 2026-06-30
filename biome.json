@@ -9,6 +9,7 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
+      "!.review-worktrees",
       "!gitnexus",
       "!.claude/skills",
       "!assets/avatars",

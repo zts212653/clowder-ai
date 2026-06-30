@@ -15,6 +15,7 @@
 import type { ApprovalItem } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
@@ -48,6 +49,21 @@ function jumpToApproval(threadId: string, messageId?: string): void {
 
 export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
   const close = useApprovalHubStore((s) => s.close);
+
+  // Thread title lookup for F193 dispatch context (Bug 1 fix).
+  // Called unconditionally (Rules of Hooks); value used only when sourceFeatureId === 'F193'.
+  // Array.isArray guard: test mocks may return non-arrays; treat them as empty.
+  const rawThreads = useChatStore((s) => s.threads as Thread[] | unknown);
+  const threads: Thread[] = Array.isArray(rawThreads) ? rawThreads : [];
+  const f193TargetThreadId = item.sourceFeatureId === 'F193' ? String(item.detail.targetThreadId ?? '') : '';
+  const sourceThreadTitle = useMemo(
+    () => threads.find((t) => t.id === item.sourceThreadId)?.title ?? item.sourceThreadId,
+    [threads, item.sourceThreadId],
+  );
+  const targetThreadTitle = useMemo(
+    () => (f193TargetThreadId ? (threads.find((t) => t.id === f193TargetThreadId)?.title ?? f193TargetThreadId) : null),
+    [threads, f193TargetThreadId],
+  );
 
   const isStale = useMemo(() => item.expiresAt != null && item.expiresAt < Date.now(), [item.expiresAt]);
 
@@ -129,9 +145,17 @@ export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
         </div>
       )}
 
-      {/* F193: dispatch proposal detail */}
+      {/* F193: dispatch proposal detail — thread routing context (Bug 1 fix) */}
       {item.sourceFeatureId === 'F193' && (
         <div className="text-micro opacity-80 space-y-0.5">
+          {/* Thread routing: 从哪个 thread → 往哪个 thread.
+               Each side gets its own truncation so a long source title can't hide the destination. */}
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="opacity-60 shrink-0">从：</span>
+            <span className="truncate flex-1">{sourceThreadTitle}</span>
+            <span className="opacity-60 shrink-0">→</span>
+            <span className="truncate flex-1">{targetThreadTitle ?? f193TargetThreadId}</span>
+          </div>
           {item.detail.content != null && <p className="line-clamp-3">{String(item.detail.content)}</p>}
           {item.detail.targetCats != null && (
             <p>
@@ -146,31 +170,44 @@ export function ApprovalItemCard({ item }: { item: ApprovalItem }) {
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-1">
-        {/* F193 inlineApprovable: approve/reject directly in Hub */}
-        {item.sourceFeatureId === 'F193' && item.inlineApprovable ? (
+        {item.sourceFeatureId === 'F193' ? (
           <>
+            {/* F193 inlineApprovable: approve/reject directly in Hub */}
+            {item.inlineApprovable && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={!!decidingState}
+                  className="px-3 py-1 text-micro font-medium rounded-md text-white disabled:opacity-50"
+                  style={{ backgroundColor: 'var(--semantic-success, #22c55e)' }}
+                  data-testid="approve-btn"
+                >
+                  {decidingState === 'approving' ? '...' : '批准'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReject}
+                  disabled={!!decidingState}
+                  className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] hover:bg-[var(--semantic-error,#ef4444)] hover:text-white disabled:opacity-50"
+                  data-testid="reject-btn"
+                >
+                  {decidingState === 'rejecting' ? '...' : '拒绝'}
+                </button>
+              </>
+            )}
+            {/* F193 always has a jump button so operator can view context before deciding */}
             <button
               type="button"
-              onClick={handleApprove}
-              disabled={!!decidingState}
-              className="px-3 py-1 text-micro font-medium rounded-md text-white disabled:opacity-50"
-              style={{ backgroundColor: 'var(--semantic-success, #22c55e)' }}
-              data-testid="approve-btn"
+              onClick={handleJump}
+              className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] hover:bg-[var(--cafe-muted)]"
+              data-testid="jump-btn"
             >
-              {decidingState === 'approving' ? '...' : '批准'}
-            </button>
-            <button
-              type="button"
-              onClick={handleReject}
-              disabled={!!decidingState}
-              className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] hover:bg-[var(--semantic-error,#ef4444)] hover:text-white disabled:opacity-50"
-              data-testid="reject-btn"
-            >
-              {decidingState === 'rejecting' ? '...' : '拒绝'}
+              查看上下文
             </button>
           </>
         ) : (
-          /* F128/F225: jump to thread for full approval context */
+          /* F128/F225/F231: jump to thread for full approval context */
           <button
             type="button"
             onClick={handleJump}

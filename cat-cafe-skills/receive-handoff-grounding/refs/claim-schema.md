@@ -139,11 +139,11 @@ export interface SourceRef {
 
 ```typescript
 export type WaitSourceRef = {
-  kind: 'github_issue' | 'github_comment' | 'thread_message' | 'task' | 'reporter_handle' | 'pending_input';
-  value: string;             // 主对象标识 (issue id / comment id / thread message id / task id / handle / input ref)
+  kind: 'github_issue' | 'github_comment' | 'thread_message' | 'task' | 'reporter_handle' | 'pending_input' | 'managed_command';
+  value: string;             // 主对象标识 (issue id / comment id / thread message id / task id / handle / input ref / command string)
   anchorRef?: string;        // REQUIRED when kind ∈ {'reporter_handle', 'pending_input'}
                              // narrative kinds 必须锚到 durable id (GitHub issue/comment id 或 thread messageId/task id)
-  expectedSignal: string;    // 等什么信号醒 (e.g. 'comment_from_reporter', 'review_state_change', 'cvo_message')
+  expectedSignal: string;    // 等什么信号醒 (e.g. 'comment_from_reporter', 'review_state_change', 'cvo_message', 'command_exit')
   slaUntilMs: number;        // REQUIRED — 不是 optional; 无 SLA = no hold, route to needs-info/sweep
 };
 ```
@@ -153,6 +153,7 @@ export type WaitSourceRef = {
 - `slaUntilMs` REQUIRED；缺 → `hold_ball` fail-closed，路由 daily sweep
 - `slaUntilMs - now <= 3_600_000` — mirror `wakeAfterMs <= 1h`；不允许 multi-hold extension
 - `kind ∈ {'reporter_handle', 'pending_input'}` → `anchorRef` REQUIRED（narrative 太 forgeable，必须锚到 durable object id）
+- `kind = 'managed_command'`（F167 Phase P）→ `value` = command string, `expectedSignal` = 'command_exit'; T0 binding（server-side managed runner 直接管理进程生命周期）
 
 ### OwnershipState (R3.1 Maine Coon OQ-6, PR-O3 implement)
 

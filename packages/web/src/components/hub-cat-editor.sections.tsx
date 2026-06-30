@@ -595,7 +595,8 @@ export function AccountSection({
           onChange={(value) => onChange({ mcpSupport: value === 'true' })}
         />
         <p className="-mt-1 text-micro leading-4 text-cafe-muted">
-          控制该成员是否接收 Cat Cafe MCP 工具（post_message、search_evidence 等）。关闭后该成员无法使用协作和记忆工具。
+          控制该成员是否接收 Clowder AI MCP 工具（post_message、search_evidence
+          等）。关闭后该成员无法使用协作和记忆工具。
         </p>
       </div>
     </SectionCard>

@@ -82,6 +82,12 @@ export interface ConnectorGatewayConfig {
   feishuAdminOpenIds?: string | undefined;
   /** F134-E: 'webhook' (default) or 'websocket' (long-connection via WSClient) */
   feishuConnectionMode?: 'webhook' | 'websocket' | undefined;
+  /**
+   * #1035: Outbound group-chat `@alias` → Feishu `<at>` token map (JSON string).
+   * Example: `{"胖胖虾":{"openId":"ou_xxx","displayName":"胖胖虾"}}`
+   * Malformed JSON disables the feature (logged warn, no crash).
+   */
+  feishuGroupBotMentionsJson?: string | undefined;
   dingtalkAppKey?: string | undefined;
   dingtalkAppSecret?: string | undefined;
   weixinBotToken?: string | undefined;
@@ -243,6 +249,8 @@ export function loadConnectorGatewayConfig(): ConnectorGatewayConfig {
     feishuBotOpenId: process.env.FEISHU_BOT_OPEN_ID,
     feishuAdminOpenIds: process.env.FEISHU_ADMIN_OPEN_IDS,
     feishuConnectionMode: process.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook',
+    // #1035: outbound `@alias` → Feishu `<at>` token map (JSON string)
+    feishuGroupBotMentionsJson: process.env.FEISHU_GROUP_BOT_MENTIONS_JSON,
     dingtalkAppKey: process.env.DINGTALK_APP_KEY,
     dingtalkAppSecret: process.env.DINGTALK_APP_SECRET,
     weixinBotToken: process.env.WEIXIN_BOT_TOKEN,
@@ -297,6 +305,7 @@ export function applyConnectorGatewayAutostartPolicy(
     feishuVerificationToken: undefined,
     feishuBotOpenId: undefined,
     feishuAdminOpenIds: undefined,
+    feishuGroupBotMentionsJson: undefined,
     dingtalkAppKey: undefined,
     dingtalkAppSecret: undefined,
     weixinBotToken: undefined,
@@ -325,6 +334,7 @@ function configToEnvMap(config: ConnectorGatewayConfig): Record<string, string |
     FEISHU_APP_SECRET: config.feishuAppSecret,
     FEISHU_VERIFICATION_TOKEN: config.feishuVerificationToken,
     FEISHU_BOT_OPEN_ID: config.feishuBotOpenId,
+    FEISHU_GROUP_BOT_MENTIONS_JSON: config.feishuGroupBotMentionsJson,
     FEISHU_ADMIN_OPEN_IDS: config.feishuAdminOpenIds,
     FEISHU_CONNECTION_MODE: config.feishuConnectionMode,
     DINGTALK_APP_KEY: config.dingtalkAppKey,

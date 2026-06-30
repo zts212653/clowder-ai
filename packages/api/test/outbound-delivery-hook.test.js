@@ -554,6 +554,142 @@ describe('OutboundDeliveryHook', () => {
     });
   });
 
+  // Phase 5 / media_gallery: image delivery via sendMedia
+  describe('media_gallery block delivery via sendMedia', () => {
+    it('sends image via absPath when mediaPathResolver resolves /api/connector-media/ URL', async () => {
+      const mediaSent = [];
+      const richSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply(chatId, content) {
+          feishuMock.sent.push({ chatId, content });
+        },
+        async sendRichMessage(chatId, text, blocks, catName) {
+          richSent.push({ chatId, text, blocks, catName });
+        },
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: (url) => {
+          if (url.startsWith('/api/connector-media/'))
+            return `/data/connector-media/${url.slice('/api/connector-media/'.length)}`;
+          return undefined;
+        },
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [
+        { id: 'mg1', kind: 'media_gallery', v: 1, items: [{ url: '/api/connector-media/haircut_options.jpg' }] },
+      ];
+      await hook.deliver('thread-abc', 'Here are hairstyle options', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 1, 'sendMedia should be called for media_gallery image');
+      assert.equal(mediaSent[0].chatId, 'chat-1');
+      assert.equal(mediaSent[0].payload.type, 'image');
+      assert.equal(
+        mediaSent[0].payload.absPath,
+        '/data/connector-media/haircut_options.jpg',
+        'should use absPath not URL',
+      );
+      assert.equal(mediaSent[0].payload.url, undefined, 'must not pass url when absPath is available');
+    });
+
+    it('does NOT send localhost URL to adapter when resolver returns undefined for /api/connector-media/', async () => {
+      const mediaSent = [];
+      const replySent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply(chatId, content) {
+          replySent.push({ chatId, content });
+        },
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: () => undefined, // resolver can't find the file
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [
+        { id: 'mg1', kind: 'media_gallery', v: 1, items: [{ url: '/api/connector-media/haircut_options.jpg' }] },
+      ];
+      await hook.deliver('thread-abc', 'Here are hairstyle options', 'opus', blocks);
+
+      // sendMedia must NOT be called with a localhost URL (Feishu can't reach it)
+      assert.equal(mediaSent.length, 0, 'sendMedia must NOT be called when file not found locally');
+      // No localhost URLs should leak to the adapter as text replies either
+      for (const r of replySent) {
+        assert.ok(!r.content.includes('localhost'), 'must not send localhost URL as text fallback');
+      }
+    });
+
+    it('does NOT send localhost URL to adapter when resolver returns undefined for /uploads/', async () => {
+      const mediaSent = [];
+      const replySent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply(chatId, content) {
+          replySent.push({ chatId, content });
+        },
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: () => undefined,
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'mg1', kind: 'media_gallery', v: 1, items: [{ url: '/uploads/generated_image.jpg' }] }];
+      await hook.deliver('thread-abc', 'Generated image', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 0, 'sendMedia must NOT be called when resolver fails for /uploads/ path');
+      for (const r of replySent) {
+        assert.ok(!r.content.includes('localhost'), 'must not send localhost URL as text fallback');
+      }
+    });
+
+    it('sends image via external https URL when no absPath available', async () => {
+      const mediaSent = [];
+      const mediaAdapter = {
+        connectorId: 'feishu',
+        async sendReply() {},
+        async sendRichMessage() {},
+        async sendMedia(chatId, payload) {
+          mediaSent.push({ chatId, payload });
+        },
+      };
+      hook = new OutboundDeliveryHook({
+        bindingStore,
+        adapters: new Map([['feishu', mediaAdapter]]),
+        log: noopLog(),
+        mediaPathResolver: () => undefined,
+      });
+      bindingStore.bind('feishu', 'chat-1', 'thread-abc', 'user-1');
+
+      const blocks = [{ id: 'mg1', kind: 'media_gallery', v: 1, items: [{ url: 'https://example.com/image.jpg' }] }];
+      await hook.deliver('thread-abc', 'External image', 'opus', blocks);
+
+      assert.equal(mediaSent.length, 1, 'sendMedia should be called for https:// URL');
+      assert.equal(mediaSent[0].payload.type, 'image');
+      assert.equal(mediaSent[0].payload.url, 'https://example.com/image.jpg');
+    });
+  });
+
   describe('F134 replyToSender regression (P1 fixes)', () => {
     it('passes replyToSender metadata when messageLookup returns source.sender (AC-C1)', async () => {
       const messageLookup = async (_id) => ({

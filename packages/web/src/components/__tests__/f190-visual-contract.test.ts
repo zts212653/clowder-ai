@@ -1408,7 +1408,8 @@ describe('#723 round 9 — install button, error suppression, breadcrumb, tab/ca
   });
 
   it('HubObservabilityTab chart stroke: CSS variable, not raw hex', () => {
-    const src = readSrc('HubObservabilityTab.tsx');
+    // TrendChart extracted to HubObservabilityOverview.tsx in Phase K
+    const src = readSrc('HubObservabilityOverview.tsx');
     expect(src).toContain('var(--dataviz-trend-line)');
     expect(src).not.toMatch(/stroke="#[0-9A-Fa-f]{6}"/);
   });

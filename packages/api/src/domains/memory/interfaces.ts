@@ -356,6 +356,8 @@ export type RebuildProgressCallback = (phase: string, percent: number) => void;
 export interface IIndexBuilder {
   rebuild(options?: { force?: boolean; onProgress?: RebuildProgressCallback }): Promise<RebuildResult>;
   startPassageEmbeddingWarmup(): void;
+  /** True while background passage-vector backfill is running. */
+  isPassageWarmupActive(): boolean;
   incrementalUpdate(changedPaths: string[]): Promise<void>;
   checkConsistency(): Promise<ConsistencyReport>;
 }

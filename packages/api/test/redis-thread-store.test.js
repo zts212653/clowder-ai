@@ -130,6 +130,56 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
     assert.equal(participants.length, 2);
   });
 
+  it('updateCloudCatBinding() does not recreate detail hash for deleted thread (F247 AC-B1c-1 delete race, gpt52 R2 P1)', async () => {
+    // Pin the HSET_IF_HAS_ID_LUA guard added in R1 fix for the delete race:
+    // raw HSET would resurrect a deleted thread's detail hash with only
+    // cloudBinding:* fields. The Lua guard checks HEXISTS 'id' first and
+    // fails closed if the thread is gone.
+    const thread = await store.create('alice', 'Cloud Binding Test');
+    const deleted = await store.delete(thread.id);
+    assert.equal(deleted, true);
+    // Sanity: detail hash is gone after delete.
+    const idAfterDelete = await redis.hget(threadDetailKey(thread.id), 'id');
+    assert.equal(idAfterDelete, null, 'thread detail hash should be gone after delete');
+
+    // Race: caller invokes updateCloudCatBinding after delete.
+    await store.updateCloudCatBinding(thread.id, 'codex', 'https://chatgpt.com/c/abc-123');
+
+    // The guard must NOT resurrect the hash with cloudBinding:* fields.
+    const fieldsAfter = await redis.hkeys(threadDetailKey(thread.id));
+    assert.deepEqual(
+      fieldsAfter,
+      [],
+      `detail hash should remain empty after blocked write; saw fields: ${JSON.stringify(fieldsAfter)}`,
+    );
+    // And getCloudCatBindings on a deleted thread returns empty.
+    const bindings = await store.getCloudCatBindings(thread.id);
+    assert.deepEqual(bindings, {});
+  });
+
+  it('updateCloudCatBinding(null) on deleted thread is a safe no-op (no hash resurrection)', async () => {
+    const thread = await store.create('alice', 'Deleted Binding Clear');
+    await store.delete(thread.id);
+    // Should not throw, should not create the hash.
+    await store.updateCloudCatBinding(thread.id, 'codex', null);
+    const fieldsAfter = await redis.hkeys(threadDetailKey(thread.id));
+    assert.deepEqual(fieldsAfter, []);
+  });
+
+  it('getCloudCatBindings() returns only cloudBinding:* fields, not other hash members (orphan isolation)', async () => {
+    const thread = await store.create('alice', 'Multi Cat Bindings');
+    await store.updateCloudCatBinding(thread.id, 'codex', 'https://chatgpt.com/c/aaa');
+    await store.updateCloudCatBinding(thread.id, 'opus', 'https://chatgpt.com/c/bbb');
+    const bindings = await store.getCloudCatBindings(thread.id);
+    assert.deepEqual(bindings, {
+      codex: 'https://chatgpt.com/c/aaa',
+      opus: 'https://chatgpt.com/c/bbb',
+    });
+    // The .get() path must NOT hydrate cloudCatBindings (privacy by absence).
+    const fetched = await store.get(thread.id);
+    assert.equal(fetched.cloudCatBindings, undefined, 'cloudCatBindings should not be hydrated by .get()');
+  });
+
   it('addParticipants() does not recreate participants for deleted thread (delete race)', async () => {
     const thread = await store.create('user1', 'Deleted Chat');
     const deleted = await store.delete(thread.id);

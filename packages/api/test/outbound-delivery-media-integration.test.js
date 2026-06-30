@@ -112,10 +112,14 @@ describe('OutboundDeliveryHook — media delivery integration', () => {
     assert.equal(sendMediaCalls.length, 0);
   });
 
-  it('passes /uploads media_gallery image URL through to sendMedia when resolver cannot resolve absPath', async () => {
+  it('skips /uploads media_gallery image when resolver cannot resolve absPath — no sendMedia call', async () => {
+    // When mediaPathResolver returns undefined for /uploads/ URLs, converting them to
+    // http://localhost:... is NOT usable by external platforms (Feishu/WeChat SSRF protection
+    // blocks http:// + localhost). Fix: skip with warning log instead of passing unusable URL.
     const { OutboundDeliveryHook } = await import('../dist/infrastructure/connectors/OutboundDeliveryHook.js');
 
     const sendMediaCalls = [];
+    const warnCalls = [];
     const mockAdapter = {
       connectorId: 'weixin',
       async sendReply() {},
@@ -132,7 +136,14 @@ describe('OutboundDeliveryHook — media delivery integration', () => {
         },
       },
       adapters: new Map([['weixin', mockAdapter]]),
-      log: { info() {}, warn() {}, error() {}, debug() {} },
+      log: {
+        info() {},
+        warn(...args) {
+          warnCalls.push(args);
+        },
+        error() {},
+        debug() {},
+      },
       mediaPathResolver: () => undefined,
     });
 
@@ -145,11 +156,13 @@ describe('OutboundDeliveryHook — media delivery integration', () => {
       },
     ]);
 
-    assert.equal(sendMediaCalls.length, 1);
-    assert.equal(sendMediaCalls[0].payload.type, 'image');
-    assert.ok(sendMediaCalls[0].payload.url.endsWith('/uploads/photo.jpg'), 'URL should end with /uploads/photo.jpg');
-    assert.ok(sendMediaCalls[0].payload.url.startsWith('http'), 'URL should be resolved to absolute HTTP URL');
-    assert.equal(sendMediaCalls[0].payload.absPath, undefined);
+    // Internal-route URLs that can't be resolved to absPath are SKIPPED (not sent as localhost URLs)
+    assert.equal(
+      sendMediaCalls.length,
+      0,
+      'sendMedia must NOT be called — /uploads/ URL with no absPath should be skipped',
+    );
+    assert.ok(warnCalls.length > 0, 'a warning should be logged when skipping');
   });
 
   it('does not send media when adapter lacks sendMedia', async () => {

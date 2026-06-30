@@ -269,6 +269,51 @@ export class RedisMessageStore {
     return messages;
   }
 
+  /**
+   * F233: List messages that carry cross-post metadata (extra.crossPost.sourceThreadId).
+   * Uses SCAN + pipeline HGET to check the `extra` field efficiently, then hydrates
+   * only matching messages. For the FeatTrajectoryCollectorScheduler's CrossPostCollector.
+   */
+  async listCrossPostMessages(): Promise<StoredMessage[]> {
+    const matchPattern = `${this.keyPrefix}${MessageKeys.detail('*')}`;
+    const results: StoredMessage[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 200);
+      cursor = nextCursor;
+      if (keys.length === 0) continue;
+      // Pipeline: fetch only the `extra` field to check for cross-post metadata
+      const pipeline = this.redis.pipeline();
+      for (const key of keys) pipeline.hget(this.stripPrefix(key), 'extra');
+      const extraResults = await pipeline.exec();
+      // Collect IDs of messages with cross-post metadata
+      const matchedIds: string[] = [];
+      for (let i = 0; i < (extraResults?.length ?? 0); i++) {
+        const [err, extraRaw] = extraResults![i]!;
+        if (err || !extraRaw || typeof extraRaw !== 'string') continue;
+        try {
+          const parsed = JSON.parse(extraRaw);
+          if (parsed?.crossPost?.sourceThreadId) {
+            // Extract ID from key: strip prefix, then strip "msg:" prefix
+            const stripped = this.stripPrefix(keys[i]);
+            const id = stripped.replace(/^msg:/, '');
+            matchedIds.push(id);
+          }
+        } catch {
+          // malformed JSON — skip
+        }
+      }
+      // Hydrate matched messages — only include delivered ones
+      for (const id of matchedIds) {
+        const msg = await this.getById(id);
+        if (msg && (!msg.deliveryStatus || msg.deliveryStatus === 'delivered')) {
+          results.push(msg);
+        }
+      }
+    } while (cursor !== '0');
+    return results;
+  }
+
   /** Reassign a message to a different userId and move user-timeline membership. */
   async reassignUserId(id: string, nextUserId: string): Promise<StoredMessage | null> {
     const msg = await this.getById(id);

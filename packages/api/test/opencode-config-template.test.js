@@ -480,6 +480,56 @@ describe('generateOpenCodeRuntimeConfig', () => {
     }
   });
 
+  test('passes allowed workspace env into capabilities-backed managed MCP entries', async () => {
+    const cleanup = ensureCatRegistered('cat-test-oc-allowed-workspace', 'opencode');
+    const tempRoot = mkdtempSync(join(tmpdir(), 'opencode-mcp-env-'));
+    const distDir = join(tempRoot, 'packages', 'mcp-server', 'dist');
+    const projectRoot = join(tempRoot, 'project');
+    const allowedWorkspaceDirs = join(tempRoot, 'allowed-workspace');
+    try {
+      const { CAT_CAFE_SPLIT_ENTRYPOINTS } = await import('../dist/config/capabilities/capability-orchestrator.js');
+      mkdirSync(distDir, { recursive: true });
+      mkdirSync(projectRoot, { recursive: true });
+      writeFileSync(join(distDir, 'index.js'), '');
+      for (const entrypoint of CAT_CAFE_SPLIT_ENTRYPOINTS.values()) {
+        writeFileSync(join(distDir, entrypoint), '');
+      }
+      const [serverName] = CAT_CAFE_SPLIT_ENTRYPOINTS.keys();
+      writeCapabilitiesConfig(projectRoot, [
+        {
+          id: serverName,
+          type: 'mcp',
+          enabled: false,
+          globalEnabled: false,
+          source: 'cat-cafe',
+          mcpServer: { command: 'node', args: ['stale.js'] },
+          blockedCats: [],
+        },
+      ]);
+
+      const config = generateOpenCodeRuntimeConfig({
+        providerName: 'anthropic',
+        models: ['anthropic/claude-opus-4-6'],
+        defaultModel: 'anthropic/claude-opus-4-6',
+        apiType: 'anthropic',
+        mcpServerPath: join(distDir, 'index.js'),
+        catId: 'cat-test-oc-allowed-workspace',
+        capabilitiesProjectRoot: tempRoot,
+        workingDirectory: projectRoot,
+        allowedWorkspaceDirs,
+      });
+
+      assert.equal(
+        config.mcp?.[serverName]?.environment?.ALLOWED_WORKSPACE_DIRS,
+        allowedWorkspaceDirs,
+        'managed split MCPs need invocation workspace env in OpenCode runtime config',
+      );
+    } finally {
+      cleanup();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('resolveWorkspaceRoot reads ALLOWED_WORKSPACE_DIRS from environment', () => {
     const originalAwd = process.env.ALLOWED_WORKSPACE_DIRS;
     const originalWorkspace = process.env.CAT_CAFE_WORKSPACE_ROOT;

@@ -51,9 +51,11 @@ export interface SourceRef {
 // ── WaitSourceRef (R3.1 OQ-5) ─────────────────────────────────
 
 export interface WaitSourceRef {
-  kind: 'github_issue' | 'github_comment' | 'thread_message' | 'task' | 'reporter_handle' | 'pending_input';
+  kind: 'github_issue' | 'github_comment' | 'thread_message' | 'task' | 'reporter_handle' | 'managed_command';
+  // PR-O3: 'pending_input' removed — it was a backdoor for "wait for human reply in Hub"
+  // which should be @co-creator, not hold_ball.
   value: string;
-  /** REQUIRED when kind ∈ {'reporter_handle', 'pending_input'} */
+  /** REQUIRED when kind = 'reporter_handle' */
   anchorRef?: string;
   expectedSignal: string;
   /** REQUIRED — no SLA = no hold, route to needs-info/sweep. */

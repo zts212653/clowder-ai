@@ -23,6 +23,7 @@ export interface RecallResultItem {
 
 export interface RecallEvent {
   id: string;
+  toolName?: string;
   query: string;
   mode?: string;
   scope?: string;
@@ -45,6 +46,32 @@ export function anchorToHref(anchor: string | undefined): string | null {
 
 const SEARCH_TOOL_NAMES = ['search_evidence', 'cat_cafe_search_evidence'];
 const UNKNOWN_QUERY = '(unknown)';
+
+function scopeSuffix(scope: string | undefined): string {
+  return scope ? ` · ${scope}` : '';
+}
+
+export function recallEventDisplayTitle(event: RecallEvent): string {
+  const query = event.query.trim();
+  if (query) return query;
+
+  switch (event.toolName) {
+    case 'list_recent':
+      return `最近记忆${scopeSuffix(event.scope)}`;
+    case 'graph_resolve':
+      return `关系图${scopeSuffix(event.scope)}`;
+    case 'search_evidence':
+    case 'cat_cafe_search_evidence':
+      return '未知查询';
+    default:
+      return event.toolName ? `${event.toolName}${scopeSuffix(event.scope)}` : '未知查询';
+  }
+}
+
+export function recallEventResultLabel(event: RecallEvent): string | undefined {
+  if (event.resultCount != null) return `${event.resultCount} 条命中`;
+  return event.results != null ? '命中数未记录' : undefined;
+}
 
 /**
  * Check if a tool_use label refers to search_evidence.
@@ -248,6 +275,7 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
       const params = parseDetail(evt.detail);
       const recall: RecallEvent = {
         id: evt.id,
+        toolName: 'search_evidence',
         query: params.query || params.q || UNKNOWN_QUERY,
         mode: params.mode,
         scope: params.scope,
@@ -279,11 +307,12 @@ export function filterRecallEvents(events: ToolEvent[]): RecallEvent[] {
 
 /**
  * Deduplicate recall events: live toolEvents take precedence (richer detail)
- * over API history events. Dedup key = timestamp + query (stable across both sources).
+ * over API history events. Dedup key = timestamp + toolName + query.
  */
 export function deduplicateRecallEvents(live: RecallEvent[], history: RecallEvent[]): RecallEvent[] {
-  const seen = new Set(live.map((e) => `${e.timestamp}:${e.query}`));
-  const unique = history.filter((e) => !seen.has(`${e.timestamp}:${e.query}`));
+  const eventKey = (e: RecallEvent) => `${e.timestamp}:${e.toolName ?? ''}:${e.query}`;
+  const seen = new Set(live.map(eventKey));
+  const unique = history.filter((e) => !seen.has(eventKey(e)));
   return [...live, ...unique].sort((a, b) => a.timestamp - b.timestamp);
 }
 

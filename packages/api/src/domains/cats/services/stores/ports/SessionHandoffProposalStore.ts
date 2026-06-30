@@ -63,6 +63,11 @@ export interface ISessionHandoffProposalStore {
    */
   listPendingByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
   /**
+   * F246 Phase G: list settled (approved|rejected) proposals for a given user, newest first.
+   * Used by F225ApprovalAdapter.listSettled to populate the approval history tab.
+   */
+  listSettledByUser(userId: string, limit?: number): SessionHandoffProposal[] | Promise<SessionHandoffProposal[]>;
+  /**
    * A4 cooldown: most recent proposal (ANY status, incl. rejected/expired) for this cat+thread.
    * Enforces a per-(user,thread,cat) cooldown so a reject/expire can't be immediately re-spammed
    * (砚砚 P2 — ≤1 pending alone doesn't stop rapid re-cards after reject).
@@ -218,6 +223,18 @@ export class InMemorySessionHandoffProposalStore implements ISessionHandoffPropo
       }
     }
     result.sort((a, b) => b.createdAt - a.createdAt);
+    return result.slice(0, Math.max(0, limit));
+  }
+
+  /** F246 Phase G: settled (approved|rejected) proposals for a user, newest-decided first. */
+  listSettledByUser(userId: string, limit = 100): SessionHandoffProposal[] {
+    const result: SessionHandoffProposal[] = [];
+    for (const p of this.proposals.values()) {
+      if (p.userId === userId && (p.status === 'approved' || p.status === 'rejected')) {
+        result.push(clone(p));
+      }
+    }
+    result.sort((a, b) => b.updatedAt - a.updatedAt);
     return result.slice(0, Math.max(0, limit));
   }
 

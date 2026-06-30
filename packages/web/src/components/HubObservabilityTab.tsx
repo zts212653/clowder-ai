@@ -1,27 +1,13 @@
 'use client';
 
-import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubCallbackAuthPanel } from './HubCallbackAuthPanel';
 import { HubEvalTab } from './HubEvalTab';
+import { MetricCard, OverviewPanel } from './HubObservabilityOverview';
 import { TraceBrowser } from './HubTraceTree';
-
-interface HealthData {
-  status: 'healthy' | 'degraded';
-  uptime: number;
-  otelEnabled: boolean;
-  readiness?: { status: 'ready' | 'degraded'; checks: Record<string, { ok: boolean; ms: number; error?: string }> };
-  errorRate: number | null;
-  traceStore: { spanCount: number; maxSpans: number; oldestStoredAt: number | null } | null;
-  metricsSnapshotStore: { snapshotCount: number; maxSnapshots: number } | null;
-  timestamp: number;
-}
-
-interface MetricsSnapshot {
-  timestamp: number;
-  metrics: Record<string, number>;
-}
+import type { HealthData } from './observability-helpers';
+import { formatUptime } from './observability-helpers';
 
 type SubTab = 'overview' | 'traces' | 'health' | 'callback-auth' | 'eval';
 
@@ -81,104 +67,6 @@ export function HubObservabilityTab({ initialSubTab = 'overview', subTabNonce }:
       {subTab === 'health' && <HealthPanel />}
       {subTab === 'callback-auth' && <HubCallbackAuthPanel />}
       {subTab === 'eval' && <HubEvalTab />}
-    </div>
-  );
-}
-
-function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-lg bg-cafe-surface-elevated px-4 py-3">
-      <div className="text-xs text-cafe-muted">{label}</div>
-      <div className="mt-1 text-xl font-semibold text-cafe">{value}</div>
-      {sub && <div className="text-xs text-cafe-secondary">{sub}</div>}
-    </div>
-  );
-}
-
-function OverviewPanel() {
-  const [snapshots, setSnapshots] = useState<MetricsSnapshot[]>([]);
-  const [loading, setLoading] = useState(true);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
-
-  const fetchHistory = useCallback(async () => {
-    try {
-      const since = Date.now() - 30 * 60 * 1000;
-      const res = await apiFetch(`/api/telemetry/metrics/history?since=${since}`);
-      if (res.ok) {
-        const data = (await res.json()) as { snapshots: MetricsSnapshot[] };
-        setSnapshots(data.snapshots);
-      }
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchHistory();
-    timerRef.current = setInterval(fetchHistory, 30_000);
-    return () => clearInterval(timerRef.current);
-  }, [fetchHistory]);
-
-  const latest = snapshots.length > 0 ? snapshots[snapshots.length - 1]!.metrics : {};
-
-  const invOk = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="ok"');
-  const invErr = sumByPrefix(latest, 'cat_cafe_invocation_completed', 'status="error"');
-  const invocations = sumByPrefix(latest, 'cat_cafe_cat_invocation_count');
-  const activeInv = sumByPrefix(latest, 'cat_cafe_invocation_active');
-
-  if (loading) return <p className="text-sm text-cafe-muted">...</p>;
-
-  return (
-    <div className="space-y-4" data-guide-id="observability.overview-panel">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <MetricCard label="Invocation (ok)" value={String(invOk)} />
-        <MetricCard
-          label="Invocation (error)"
-          value={String(invErr)}
-          sub={invOk + invErr > 0 ? `${((invErr / (invOk + invErr)) * 100).toFixed(1)}% error` : undefined}
-        />
-        <MetricCard label="Invocations" value={String(invocations)} />
-        <MetricCard label="Active" value={String(activeInv)} />
-        <MetricCard label="Snapshots" value={`${snapshots.length}`} sub="(last 30min)" />
-      </div>
-
-      {snapshots.length > 1 && (
-        <TrendChart snapshots={snapshots} metricPrefix="cat_cafe_invocation_completed" label="Invocation Completed" />
-      )}
-    </div>
-  );
-}
-
-function TrendChart({
-  snapshots,
-  metricPrefix,
-  label,
-}: {
-  snapshots: MetricsSnapshot[];
-  metricPrefix: string;
-  label: string;
-}) {
-  if (snapshots.length < 2) return null;
-
-  const values = snapshots.map((s) => sumByPrefix(s.metrics, metricPrefix));
-  const max = Math.max(...values, 1);
-  const width = 400;
-  const height = 80;
-  const step = width / (values.length - 1);
-
-  const points = values.map((v, i) => `${i * step},${height - (v / max) * height}`).join(' ');
-
-  return (
-    <div
-      className="rounded-lg bg-cafe-surface-elevated p-3"
-      style={{ '--dataviz-trend-line': 'var(--chart-4)' } as React.CSSProperties}
-    >
-      <div className="mb-2 text-xs text-cafe-muted">{label}</div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-20 w-full" preserveAspectRatio="none">
-        <polyline points={points} fill="none" stroke="var(--dataviz-trend-line)" strokeWidth="2" />
-      </svg>
     </div>
   );
 }
@@ -250,20 +138,4 @@ function HealthPanel() {
       )}
     </div>
   );
-}
-
-function sumByPrefix(metrics: Record<string, number>, prefix: string, filter?: string): number {
-  let total = 0;
-  for (const [key, value] of Object.entries(metrics)) {
-    if (!key.startsWith(prefix)) continue;
-    if (filter && !key.includes(filter)) continue;
-    total += value;
-  }
-  return total;
-}
-
-function formatUptime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }

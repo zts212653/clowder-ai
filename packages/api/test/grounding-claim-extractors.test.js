@@ -143,7 +143,14 @@ describe('extractHoldBallClaims', () => {
     assert.equal(claims[0].sourceRef.value, 'msg_anchor_456');
   });
 
-  test('with waitSourceRef kind=pending_input: maps to messageId with anchorRef', () => {
+  test('PR-O3: pending_input kind removed — was backdoor for "wait for human reply"', () => {
+    // 'pending_input' was removed from WaitSourceRef['kind'] in PR-O3 because
+    // it enabled the misuse pattern: cats hold_ball to wait for human reply
+    // instead of using @co-creator. The type system now rejects it; this test
+    // documents the removal.
+    // Passing pending_input at runtime will produce an undefined refKind
+    // (no mapping in WAIT_SOURCE_TO_SOURCE_REF), caught by schema validation
+    // before reaching this code path.
     const claims = extractHoldBallClaims({
       reason: 'Waiting for user input on design question',
       waitSourceRef: {
@@ -154,8 +161,27 @@ describe('extractHoldBallClaims', () => {
         slaUntilMs: 900_000,
       },
     });
-    assert.equal(claims[0].sourceRef.kind, 'messageId');
-    assert.equal(claims[0].sourceRef.value, 'msg_design_789');
+    // refKind is undefined (no mapping) → sourceRef.kind is undefined
+    assert.equal(claims[0].sourceRef.kind, undefined, 'pending_input has no mapping after PR-O3 removal');
+  });
+
+  test('with waitSourceRef kind=managed_command: maps to webhook_id sourceRef', () => {
+    const claims = extractHoldBallClaims({
+      reason: 'Waiting for pnpm gate to complete',
+      waitSourceRef: {
+        kind: 'managed_command',
+        value: 'pnpm gate',
+        expectedSignal: 'command exits',
+        slaUntilMs: 600_000,
+      },
+    });
+    assert.equal(claims.length, 1);
+    const [claim] = claims;
+    assert.equal(claim.claimType, 'wait');
+    assert.equal(claim.sourceRef.kind, 'webhook_id');
+    assert.equal(claim.sourceRef.value, 'pnpm gate');
+    assert.ok(claim.waitSourceRef);
+    assert.equal(claim.waitSourceRef.kind, 'managed_command');
   });
 
   test('without waitSourceRef: extracts wait claim with unstructured sentinel sourceRef', () => {

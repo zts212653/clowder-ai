@@ -6,7 +6,15 @@
 export const SOP_DEFINITION_IDS = ['development'] as const;
 export type SopDefinitionId = (typeof SOP_DEFINITION_IDS)[number];
 
-export const DEVELOPMENT_SOP_STAGE_IDS = ['kickoff', 'impl', 'quality_gate', 'review', 'merge', 'completion'] as const;
+export const DEVELOPMENT_SOP_STAGE_IDS = [
+  'kickoff',
+  'impl',
+  'quality_gate',
+  'fresh_context',
+  'review',
+  'merge',
+  'completion',
+] as const;
 export type DevelopmentSopStageId = (typeof DEVELOPMENT_SOP_STAGE_IDS)[number];
 export const DEVELOPMENT_SOP_DEFINITION = {
   id: 'development',
@@ -73,19 +81,34 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
           predicate: { type: 'env_check', key: 'REDIS_URL', mustInclude: ':6398', mustNotInclude: ':6399' },
         },
-      ],
-      pitfalls: [
         {
           id: 'impl-design-gate-before-code',
-          kind: 'pitfall',
-          text: '跳过 Design Gate 直接写代码',
-          severity: 'warn',
+          kind: 'hard_rule',
+          text: '跳过 Design Gate（含 User Journey 落盘）直接写代码',
+          severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
           predicate: {
             type: 'manual_only',
-            reason: 'Design Gate evidence is feature-specific and not yet represented by a structured artifact.',
+            reason:
+              'Design Gate evidence and User Journey section are feature-doc fields; upgrade to feature_doc_readiness_check when checker script is available.',
+            futureCandidate: 'feature_doc_readiness_check',
           },
         },
+        {
+          id: 'impl-user-journey-missing',
+          kind: 'hard_rule',
+          text: '用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          predicate: {
+            type: 'command_pattern',
+            reason:
+              'check-feature-truth.mjs now checks changed feature docs for ## User Journey presence. F252 root cause — session vs thread scope mismatch went undetected because journey was never written down.',
+            mustMatch: 'pnpm check:features|node scripts/check-feature-truth',
+          },
+        },
+      ],
+      pitfalls: [
         {
           id: 'impl-post-compact-recall-loss',
           kind: 'pitfall',
@@ -139,6 +162,25 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'quality-gate' },
           predicate: { type: 'command_pattern', mustMatch: 'pnpm gate|pnpm test|pnpm --filter .* test|node --test' },
+        },
+      ],
+    },
+    {
+      id: 'fresh_context',
+      label: 'Fresh-Context Pre-Review',
+      suggestedSkill: 'fresh-context-review',
+      hardRules: [],
+      pitfalls: [
+        {
+          id: 'fresh-context-not-approval',
+          kind: 'pitfall',
+          text: 'Fresh-context 是 finding generator，不是 approval authority——不产出 verdict，不记入 Review Provenance Matrix',
+          severity: 'warn',
+          owner: { type: 'stage_suggested_skill', skill: 'fresh-context-review' },
+          predicate: {
+            type: 'manual_only',
+            reason: 'Fresh-context output is free-form finding list, not a structured verdict event.',
+          },
         },
       ],
     },
@@ -207,6 +249,19 @@ export const DEVELOPMENT_SOP_DEFINITION = {
           severity: 'warn',
           owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
           predicate: { type: 'sha_dedup', scope: 'cloud_review' },
+        },
+        {
+          id: 'merge-feature-doc-truth',
+          kind: 'hard_rule',
+          text: 'merge 前核对 feature doc 是否说真话（Status/AC/Phase vs 代码现实），merge 后记录已合入状态',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
+          predicate: {
+            type: 'manual_only',
+            reason:
+              'Claimed-done vs code-real reconciliation is semantic; check-feature-truth mechanically guards only obvious status/timeline drift. Detailed pre/post steps live in merge-gate SKILL Step 7.5.',
+            futureCandidate: 'feature_doc_truth_check',
+          },
         },
       ],
       pitfalls: [

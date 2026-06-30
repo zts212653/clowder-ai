@@ -4,23 +4,34 @@ import { describe, it } from 'node:test';
 import { buildGeneratedSopDefinitionsSource } from './lib/sop-definition-codegen.mjs';
 import { loadSopDefinitionCatalog, validateSopDefinition } from './sop-definitions.mjs';
 
-const EXPECTED_DEVELOPMENT_STAGES = ['kickoff', 'impl', 'quality_gate', 'review', 'merge', 'completion'];
+const EXPECTED_DEVELOPMENT_STAGES = [
+  'kickoff',
+  'impl',
+  'quality_gate',
+  'fresh_context',
+  'review',
+  'merge',
+  'completion',
+];
 
 const EXPECTED_PORTED_RULE_TEXTS = [
   'Feature spec 必须有 AC + 需求点 checklist',
   '没有co-creator确认就直接开始实现',
   'worktree 开之前必须 main 双向同步 (ahead=0 behind=0)',
   'Redis 只用 6398，禁碰 6399',
-  '跳过 Design Gate 直接写代码',
+  '跳过 Design Gate（含 User Journey 落盘）直接写代码',
+  '用户可感知 Feature 缺 User Journey 段（或 user_journey_exempt）',
   '压缩后忘了当前在做什么',
   '改 MCP tool / skill manifest / route / callback 等约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
   '自检报告必须包含愿景覆盖度',
   '声称完成但没跑全量测试',
+  'Fresh-context 是 finding generator，不是 approval authority——不产出 verdict，不记入 Review Provenance Matrix',
   '同一个体不能 review 自己的代码',
   'Review 请求必须附原始需求摘录',
   '收到 P1 修完后没 re-trigger review',
   '必须用 gh pr merge --squash（禁止本地 squash）',
   '云端 review 同一 SHA 不重复触发',
+  'merge 前核对 feature doc 是否说真话（Status/AC/Phase vs 代码现实），merge 后记录已合入状态',
   '本地 squash + push + gh pr close（PR 显示 closed 不是 merged）',
   '合入后擅自更新 runtime',
   'feat close 前必须跨猫愿景守护',
@@ -52,7 +63,7 @@ describe('SOP definition catalog', () => {
     );
   });
 
-  it('ports all 19 development SOP rules into development.yaml with predicates', () => {
+  it('ports all 22 development SOP rules into development.yaml with predicates', () => {
     const { runtimeDefinitions } = loadSopDefinitionCatalog();
     const development = runtimeDefinitions[0];
 
@@ -65,7 +76,7 @@ describe('SOP definition catalog', () => {
     assert.equal(development.stages.find((stage) => stage.id === 'impl')?.suggestedSkill, 'writing-plans');
 
     const rules = development.stages.flatMap((stage) => [...stage.hardRules, ...stage.pitfalls]);
-    assert.equal(rules.length, 19);
+    assert.equal(rules.length, 22);
     assert.deepEqual(
       rules.map((rule) => rule.text),
       EXPECTED_PORTED_RULE_TEXTS,

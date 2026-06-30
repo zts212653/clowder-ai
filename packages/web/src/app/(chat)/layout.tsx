@@ -4,7 +4,6 @@ import { usePathname } from 'next/navigation';
 import { useLayoutEffect, useState } from 'react';
 import { ChatContainer } from '@/components/ChatContainer';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadIdFromPathname } from '@/components/ThreadSidebar/thread-navigation';
-import { CallbackAuthSnapshotMount } from '@/stores/callbackAuthStore';
 import { resolveLayoutThreadId } from './layout-thread-id';
 
 function getThreadRouteSnapshot(): string {
@@ -40,13 +39,8 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <>
-      {/*
-        F174 D2b-2 + cloud P2 #1403 (round 10): mount the callback-auth snapshot
-        provider as a render-isolated null leaf so the 30s poll tick re-render
-        stays inside this component instead of bubbling through ChatLayout →
-        ChatContainer → thread tree.
-      */}
-      <CallbackAuthSnapshotMount />
+      {/* CallbackAuthSnapshotMount moved to AppShell — it needs to be available
+          on all routes (settings, memory, etc.), not just chat. */}
       <ChatContainer threadId={threadId} />
       {children}
     </>

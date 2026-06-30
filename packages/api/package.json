@@ -5,10 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch --exclude \"dist/**\" --exclude \"../shared/dist/**\" src/index.ts",
+    "dev": "while true; do NODE_OPTIONS=\"--import $PWD/scripts/sigusr1-guard.mjs${NODE_OPTIONS:+ $NODE_OPTIONS}\" tsx watch --exclude \"dist/**\" --exclude \"../shared/dist/**\" src/index.ts; ec=$?; if [ $ec -eq 0 ] || [ $ec -eq 130 ]; then break; fi; echo \"[api] dev exited ($ec) — auto-restarting in 1s\"; sleep 1; done",
+    "verify:sigusr1": "node scripts/verify-sigusr1-guard.mjs",
     "build": "pnpm --dir ../shared build && tsc && node ./scripts/copy-marketplace-catalog-data.mjs",
     "start": "node dist/index.js",
-    "test": "pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js && pnpm run test:cli",
+    "test": "pnpm --filter @cat-cafe/mcp-server... build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh node --import $(pwd)/test/helpers/setup-cat-registry.js --test --test-timeout=60000 test/*.test.js test/**/*.test.js && pnpm run test:cli",
     "test:public": "pnpm --dir ../shared build && pnpm --dir ../mcp-server build && pnpm run build && CAT_CAFE_DISABLE_SHARED_STATE_PREFLIGHT=1 bash ./scripts/with-test-home.sh bash ./scripts/run-public-tests.sh",
     "test:antigravity-smoke": "RUN_ANTIGRAVITY_SMOKE=true pnpm run build && RUN_ANTIGRAVITY_SMOKE=true bash ./scripts/with-test-home.sh node --test test/antigravity-smoke.test.js",
     "smoke:f210-agy-profiles": "pnpm run build && node dist/scripts/f210-agy-profile-smoke.js",

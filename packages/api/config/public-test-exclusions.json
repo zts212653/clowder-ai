@@ -335,6 +335,15 @@
       "expiresOn": "2026-06-30"
     },
     {
+      "id": "f236-cc-anchor-hook",
+      "match": "f236-cc-anchor-hook\\.test",
+      "category": "source_only",
+      "reason": "F236 cc anchor hook coverage imports the source-only root .claude hook implementation that is not part of the public export.",
+      "owner": "@zts212653",
+      "introducedBy": "68dd499d9",
+      "expiresOn": "2026-07-07"
+    },
+    {
       "id": "github-schedule-factories",
       "match": "github-schedule-factories\\.test",
       "category": "source_only",

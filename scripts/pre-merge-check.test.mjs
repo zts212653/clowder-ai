@@ -29,6 +29,9 @@ if (args[0] === 'branch' && args[1] === '--show-current') {
 }
 
 if (args[0] === 'status' && args[1] === '--porcelain') {
+  if (process.env.STUB_GIT_DIRTY) {
+    process.stdout.write(process.env.STUB_GIT_DIRTY + '\\n');
+  }
   process.exit(0);
 }
 
@@ -60,6 +63,14 @@ if (args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
   process.exit(0);
 }
 
+if (args[0] === 'add') {
+  process.exit(0);
+}
+
+if (args[0] === 'commit') {
+  process.exit(0);
+}
+
 process.stderr.write(\`unexpected git invocation: \${args.join(' ')}\\n\`);
 process.exit(1);
 `;
@@ -87,6 +98,7 @@ const command =
         : args[0];
 const knownCommands = new Set([
   'install',
+  'run check:fix',
   'run check:biome-version',
   'build',
   'test',
@@ -96,6 +108,9 @@ const knownCommands = new Set([
   '--filter @cat-cafe/web lint',
   '--filter @cat-cafe/api run',
 ]);
+if (command === 'run check:fix' && process.env.STUB_CHECKFIX_FAIL === '1') {
+  process.exit(1);
+}
 if (!knownCommands.has(command)) {
   process.stderr.write(\`unexpected pnpm invocation: \${args.join(' ')}\\n\`);
   process.exit(1);
@@ -224,6 +239,64 @@ describe('pre-merge-check dependency refresh order', () => {
     assert.ok(
       !result.logLines.includes('pnpm --filter @cat-cafe/api run test:public'),
       `full mode must not run public test suite, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+});
+
+describe('pre-merge-check --auto-fix mode (F253)', () => {
+  it('runs pnpm run check:fix before normal gate steps when --auto-fix is passed', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, ['--auto-fix']);
+
+    assert.equal(result.status, 0, result.stderr);
+    const checkFixIndex = result.logLines.indexOf('pnpm run check:fix');
+    const installIndex = result.logLines.indexOf('pnpm install --frozen-lockfile');
+
+    assert.notEqual(checkFixIndex, -1, `expected pnpm run check:fix to run, got:\n${result.logLines.join('\n')}`);
+    assert.ok(checkFixIndex < installIndex, `expected check:fix before install, got:\n${result.logLines.join('\n')}`);
+  });
+
+  it('does not run pnpm run check:fix when --auto-fix is not passed', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(
+      !result.logLines.includes('pnpm run check:fix'),
+      `check:fix must not run without --auto-fix, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('does not commit pre-existing dirty files with --auto-fix (P1)', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, ['--no-rebase', '--auto-fix'], {
+      STUB_GIT_DIRTY: ' M user-wip.ts',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    // git add -A must NOT be used — it would swallow user WIP
+    assert.ok(
+      !result.logLines.some((l) => l === 'git add -A'),
+      `git add -A must not be used when pre-existing dirty files exist, got:\n${result.logLines.join('\n')}`,
+    );
+    // No commit should happen since the only dirty file was pre-existing, not auto-fix produced
+    assert.ok(
+      !result.logLines.some((l) => l.startsWith('git commit')),
+      `must not commit when only pre-existing dirty files exist, got:\n${result.logLines.join('\n')}`,
+    );
+  });
+
+  it('shows warning when check:fix fails instead of success message (P2)', (t) => {
+    const bash = requireBash(t);
+    const result = runGate(bash, ['--auto-fix'], {
+      STUB_CHECKFIX_FAIL: '1',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    // Must show warning about failure, not unconditional success
+    assert.ok(
+      result.stdout.includes('auto-fix exited with code'),
+      `expected warning about check:fix failure, got stdout:\n${result.stdout}`,
     );
   });
 });

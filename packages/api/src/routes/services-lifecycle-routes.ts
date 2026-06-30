@@ -233,6 +233,28 @@ export async function registerServiceLifecycleRoutes(
     log: app.log,
   });
 
+  /**
+   * Detect non-runtime environments where sidecar lifecycle should be blocked.
+   * Dev worktrees set WORKTREE_PORT_OFFSET; alpha worktrees set
+   * CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED. Both share ~/.cat-cafe/services.json
+   * whose persistent config overrides env-level flags (EMBED_ENABLED=0 etc.),
+   * so we must guard at the API level.
+   */
+  function isNonRuntimeEnv(): boolean {
+    const offset = lifecycleEnv.WORKTREE_PORT_OFFSET;
+    if (offset && offset !== '0') return true;
+    return lifecycleEnv.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED === '1';
+  }
+
+  /** Reject sidecar lifecycle mutations from worktree environments. */
+  function rejectIfWorktree(reply: LifecycleReply): boolean {
+    if (isNonRuntimeEnv()) {
+      reply.status(409);
+      return true;
+    }
+    return false;
+  }
+
   async function findOwnedServiceProcessPids(service: ServiceManifest): Promise<number[]> {
     const processes = await lookupProcesses();
     return processes
@@ -404,6 +426,9 @@ export async function registerServiceLifecycleRoutes(
     async (request, reply) => {
       const operator = requireLifecycleOwner(request, reply);
       if (!operator) return lifecycleOwnerError(reply);
+      if (rejectIfWorktree(reply)) {
+        return { error: 'Service sidecar management is disabled in worktree environments' };
+      }
       const service = getServiceManifest(request.params.id);
       if (!service) {
         reply.status(404);
@@ -488,6 +513,9 @@ export async function registerServiceLifecycleRoutes(
     async (request, reply) => {
       const operator = requireLifecycleOwner(request, reply);
       if (!operator) return lifecycleOwnerError(reply);
+      if (rejectIfWorktree(reply)) {
+        return { error: 'Service sidecar management is disabled in worktree environments' };
+      }
       const service = getServiceManifest(request.params.id);
       if (!service) {
         reply.status(404);
@@ -617,6 +645,9 @@ export async function registerServiceLifecycleRoutes(
   app.post<{ Params: { id: string } }>('/api/services/:id/uninstall', async (request, reply) => {
     const operator = requireLifecycleOwner(request, reply);
     if (!operator) return lifecycleOwnerError(reply);
+    if (rejectIfWorktree(reply)) {
+      return { error: 'Service sidecar management is disabled in worktree environments' };
+    }
     const service = getServiceManifest(request.params.id);
     if (!service) {
       reply.status(404);
@@ -672,6 +703,10 @@ export async function registerServiceLifecycleRoutes(
   });
 
   async function startService(service: ServiceManifest, operator: string, reply: LifecycleReply) {
+    if (rejectIfWorktree(reply)) {
+      return { error: 'Service sidecar management is disabled in worktree environments' };
+    }
+
     const startScript = service.scripts?.start;
     if (!startScript) {
       reply.status(400);
@@ -1051,6 +1086,23 @@ export async function registerServiceLifecycleRoutes(
   }
 
   async function reconcileServiceStartup(): Promise<void> {
+    // Worktrees share ~/.cat-cafe/services.json with the runtime, so a
+    // user-installed service (enabled: true) would auto-start in EVERY
+    // worktree API, all fighting for the same port (e.g. 131 embed-api.py
+    // zombies on 9880). Worktrees disable sidecars via EMBED_ENABLED=0 in
+    // start-dev.sh, but resolveEffectiveServiceConfig reads the persistent
+    // config first and never falls through to env-based derivation.
+    // Guard: skip auto-start entirely when running in a non-runtime env
+    // (dev worktrees via WORKTREE_PORT_OFFSET, alpha via SIDECAR_LIFECYCLE_DISABLED).
+    if (isNonRuntimeEnv()) {
+      app.log.info(
+        'service startup reconciler skipped (worktree offset=%s, sidecar-disabled=%s)',
+        lifecycleEnv.WORKTREE_PORT_OFFSET ?? '<unset>',
+        lifecycleEnv.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED ?? '<unset>',
+      );
+      return;
+    }
+
     const candidates = SERVICE_MANIFESTS.filter((service) => service.scripts?.start);
     if (candidates.length === 0) return;
 
@@ -1088,6 +1140,9 @@ export async function registerServiceLifecycleRoutes(
   app.post<{ Params: { id: string } }>('/api/services/:id/stop', async (request, reply) => {
     const operator = requireLifecycleOwner(request, reply);
     if (!operator) return lifecycleOwnerError(reply);
+    if (rejectIfWorktree(reply)) {
+      return { error: 'Service sidecar management is disabled in worktree environments' };
+    }
     const service = getServiceManifest(request.params.id);
     if (!service) {
       reply.status(404);
@@ -1166,6 +1221,7 @@ export async function registerServiceLifecycleRoutes(
     async (request, reply) => {
       const operator = requireLifecycleOwner(request, reply);
       if (!operator) return lifecycleOwnerError(reply);
+      if (rejectIfWorktree(reply)) return { error: 'Service sidecar management is disabled in worktree environments' };
       const service = getServiceManifest(request.params.id);
       if (!service) {
         reply.status(404);

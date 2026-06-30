@@ -107,11 +107,13 @@ claim "reviewer 已 approve PR"。
 | `ScheduledTaskStore.find(kind='hold', thread=<id>)` | T1 | scheduled task or null |
 | EYES counter on subject message | T1 | reaction count |
 | reporter SLA / explicit deadline in `WaitSourceRef.slaUntilMs` | T1 | timestamp |
+| `ManagedRunner` active for `(threadId, catId)` (F167 Phase P) | T0 | pid + command or null |
 
 **Rule (R3.1)**：
 
 - `hold_ball` 必须能反推到上述至少一个 callback；缺 → `WaitSourceRef.slaUntilMs` REQUIRED + short SLA
 - 已有 event/callback → **不调 `hold_ball`**，但 ownership valid 时 **keep event-backed tracker**
+- `wakeWhen` 模式 = `managed_command` resolver（T0，服务端有进程在跑，完成后自动唤醒）
 - 长 / 不可预测 wait → 路由 daily sweep / needs-info
 
 ### 5. Cross-thread routing

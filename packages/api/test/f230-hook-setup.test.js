@@ -210,6 +210,69 @@ test('hook setup: capture script preserves valid JSON with enrichment on complex
 });
 
 // ---------------------------------------------------------------------------
+// F236 Phase E: anchor hook registration in managed sessions
+// ---------------------------------------------------------------------------
+
+test('hook setup: registers F236 anchor hook as second PostToolUse group when hook file exists', async () => {
+  const tmpCwd = makeTmpCwd();
+  const sidecarPath = join(tmpCwd, 'sidecar.jsonl');
+
+  // Create the anchor hook file in the expected location
+  const hookDir = join(tmpCwd, '.claude', 'hooks');
+  mkdirSync(hookDir, { recursive: true });
+  writeFileSync(join(hookDir, 'f236-anchor-posttool.mjs'), '#!/usr/bin/env node\n// stub');
+
+  const result = await setupHookInfrastructure(tmpCwd, sidecarPath);
+  try {
+    const settings = JSON.parse(readFileSync(result.settingsPath, 'utf8'));
+    assert.ok(Array.isArray(settings.hooks.PostToolUse), 'PostToolUse must be an array');
+    assert.equal(settings.hooks.PostToolUse.length, 2, 'PostToolUse must have 2 hook groups (capture + anchor)');
+
+    // First group = capture script
+    assert.ok(
+      settings.hooks.PostToolUse[0].hooks[0].command.includes('hook-capture.sh'),
+      'First PostToolUse group must be the capture script',
+    );
+
+    // Second group = F236 anchor hook
+    assert.ok(
+      settings.hooks.PostToolUse[1].hooks[0].command.includes('f236-anchor-posttool.mjs'),
+      'Second PostToolUse group must be the F236 anchor hook',
+    );
+    assert.equal(
+      settings.hooks.PostToolUse[1].hooks[0].timeout,
+      10,
+      'F236 anchor hook should have 10s timeout (Node.js startup + processing)',
+    );
+    assert.equal(
+      settings.hooks.PostToolUse[1].matcher,
+      'Read|Grep|Glob',
+      'F236 anchor hook should only fire on cc-native read tools',
+    );
+  } finally {
+    await result.cleanup();
+  }
+});
+
+test('hook setup: does NOT register F236 anchor hook when hook file is absent', async () => {
+  const tmpCwd = makeTmpCwd();
+  const sidecarPath = join(tmpCwd, 'sidecar.jsonl');
+  // Do NOT create the anchor hook file
+
+  const result = await setupHookInfrastructure(tmpCwd, sidecarPath);
+  try {
+    const settings = JSON.parse(readFileSync(result.settingsPath, 'utf8'));
+    assert.equal(
+      settings.hooks.PostToolUse.length,
+      1,
+      'PostToolUse must have only 1 hook group (capture script only) when anchor hook absent',
+    );
+  } finally {
+    await result.cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Sidecar file
 // ---------------------------------------------------------------------------
 

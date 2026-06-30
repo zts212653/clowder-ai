@@ -1,12 +1,12 @@
 ---
-feature_ids: [F055]
+feature_ids: [F250]
 related_features: [F045]
 topics: [plan-board, task-progress, multi-cat, right-panel, ux]
 doc_kind: spec
 created: 2026-03-03
 ---
 
-# F055 — 猫猫祟祟（Plan Board）
+# F250 — 猫猫祟祟（Plan Board）
 
 > **Status**: done | **Owner**: Ragdoll (Opus)
 > **Reviewer**: Maine Coon (Codex) — local + cloud
@@ -14,6 +14,7 @@ created: 2026-03-03
 > **Completed**: 2026-03-03
 > **PR**: #202 (`71a18914`)
 > **Evolved from**: F045（计划看板 stale bug）→ 发现设计层问题 → 新立项
+> **改号记录**: 原 F055，因与 F055-a2a-mcp-structured-routing 号码撞车，2026-06-25 改号为 F250
 
 ## Why
 

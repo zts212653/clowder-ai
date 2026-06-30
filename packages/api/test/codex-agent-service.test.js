@@ -123,6 +123,15 @@ const CAT_CAFE_SPLIT_SERVER_IDS = [
   'cat-cafe-audio',
   'cat-cafe-finance',
 ];
+const CAT_CAFE_SPLIT_ENTRYPOINTS = [
+  'index.js',
+  'collab.js',
+  'memory.js',
+  'signals.js',
+  'limb.js',
+  'audio.js',
+  'finance.js',
+];
 // F213 (2026-05-26): Legacy `cat-cafe` no longer auto-provisioned nor env-overlayed.
 // L5 startup cleanup (writeCodexMcpConfig + deprecated-managed-servers registry)
 // removes user-config legacy entries; L4 per-invocation only writes split servers.
@@ -174,25 +183,33 @@ async function withRuntimeRootEnv(runtimeRoot, fn) {
 }
 
 async function collectCodexSpawnArgs(workingDirectory) {
+  const runtimeRoot = makeTempDir('.tmp-codex-spawn-runtime-root-');
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
-  const promise = collect(
-    service.invoke('hello from workspace env test', {
-      workingDirectory,
-      callbackEnv: {
-        CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
-        CAT_CAFE_INVOCATION_ID: 'inv-workspace-env',
-        CAT_CAFE_CALLBACK_TOKEN: 'tok-workspace-env',
-        CAT_CAFE_CAT_ID: 'codex',
-      },
-    }),
-  );
-  emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-workspace-env' }]);
-  await promise;
+  try {
+    writeMcpDistStubs(runtimeRoot, CAT_CAFE_SPLIT_ENTRYPOINTS);
+    await withRuntimeRootEnv(runtimeRoot, async () => {
+      const promise = collect(
+        service.invoke('hello from workspace env test', {
+          workingDirectory,
+          callbackEnv: {
+            CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+            CAT_CAFE_INVOCATION_ID: 'inv-workspace-env',
+            CAT_CAFE_CALLBACK_TOKEN: 'tok-workspace-env',
+            CAT_CAFE_CAT_ID: 'codex',
+          },
+        }),
+      );
+      emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-mcp-workspace-env' }]);
+      await promise;
+    });
 
-  return spawnFn.mock.calls[0].arguments[1];
+    return spawnFn.mock.calls[0].arguments[1];
+  } finally {
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
 }
 
 function assertWorkspaceScopedServersUseAllowedWorkspaceDirs(args, expected, reason) {
@@ -291,12 +308,22 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
   });
 
   test('injects cat-cafe MCP config from runtime root, not thread workingDirectory', async () => {
-    const tmpRoot = makeTempDir('.tmp-mcp-test-');
+    const runtimeRoot = makeTempDir('.tmp-mcp-runtime-root-');
+    const threadWorkspace = makeTempDir('.tmp-mcp-thread-workspace-');
     const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
     const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
-    const mcpDistDir = join(tmpRoot, 'packages', 'mcp-server', 'dist');
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
     mkdirSync(mcpDistDir, { recursive: true });
-    for (const entrypoint of ['index.js', 'collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
+    for (const entrypoint of [
+      'index.js',
+      'collab.js',
+      'memory.js',
+      'signals.js',
+      'limb.js',
+      'audio.js',
+      'finance.js',
+    ]) {
       writeFileSync(join(mcpDistDir, entrypoint), '// stub');
     }
 
@@ -307,9 +334,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     try {
       delete process.env.ALLOWED_WORKSPACE_DIRS;
       delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
       const promise = collect(
         service.invoke('hello from outside cwd', {
-          workingDirectory: tmpRoot,
+          workingDirectory: threadWorkspace,
           callbackEnv: {
             CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
             CAT_CAFE_INVOCATION_ID: 'inv-test-1',
@@ -350,7 +378,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           `${serverId} args must point at ${entrypoint}`,
         );
         assert.ok(
-          !argsConfig.includes(tmpRoot),
+          !argsConfig.includes(threadWorkspace),
           `${serverId} args must not resolve MCP binary from thread workingDirectory`,
         );
         assert.ok(args.includes(`mcp_servers.${serverId}.enabled=true`), `must inject ${serverId} enabled=true`);
@@ -359,7 +387,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           `${serverId} must have default_tools_approval_mode="approve" for non-interactive codex exec`,
         );
         assert.ok(
-          args.includes(`mcp_servers.${serverId}.env.ALLOWED_WORKSPACE_DIRS="${tmpRoot}"`),
+          args.includes(`mcp_servers.${serverId}.env.ALLOWED_WORKSPACE_DIRS="${threadWorkspace}"`),
           `${serverId} must receive the thread workspace as ALLOWED_WORKSPACE_DIRS`,
         );
         // full callback env coverage on every split server (regression guard for F168/F140 cross-thread auth)
@@ -437,7 +465,13 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       } else {
         process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
       }
-      rmSync(tmpRoot, { recursive: true, force: true });
+      if (previousRuntimeRoot === undefined) {
+        delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      } else {
+        process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(threadWorkspace, { recursive: true, force: true });
     }
   });
 
@@ -445,6 +479,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const runtimeRoot = makeTempDir('.tmp-codex-runtime-cap-root-');
     const projectDir = makeTempDir('.tmp-codex-user-project-');
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
+    const previousCatCafeWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
     const mcpDistDir = join(runtimeRoot, 'packages', 'mcp-server', 'dist');
     mkdirSync(mcpDistDir, { recursive: true });
     for (const entrypoint of ['index.js', 'collab.js', 'memory.js']) {
@@ -480,6 +516,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
 
     try {
       process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+      delete process.env.ALLOWED_WORKSPACE_DIRS;
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
       const promise = collect(
         service.invoke('hello from user project', {
           workingDirectory: projectDir,
@@ -495,11 +533,15 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       await promise;
 
       const args = spawnFn.mock.calls[0].arguments[1];
-      // Disabled capabilities are skipped entirely (no CLI args injected).
-      // L5 writeCodexMcpConfig already removes disabled entries from .codex/config.toml.
+      // Disabled capabilities still need a per-invocation override because
+      // Codex layers project/user config.toml entries after persistent cleanup.
       assert.ok(
-        !args.some((a) => a.includes('mcp_servers.cat-cafe-collab')),
-        'disabled runtime capability must not appear in CLI args at all',
+        args.includes('mcp_servers.cat-cafe-collab.enabled=false'),
+        'disabled runtime capability must emit enabled=false so layered config.toml entries cannot revive it',
+      );
+      assert.ok(
+        !args.some((a) => a.startsWith('mcp_servers.cat-cafe-collab.command=')),
+        'disabled runtime capability should not emit launch fields',
       );
       assert.ok(
         args.includes(`mcp_servers.cat-cafe-memory.command=${JSON.stringify(process.execPath)}`),
@@ -516,6 +558,84 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       } else {
         process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
       }
+      if (previousAllowedWorkspaceDirs === undefined) {
+        delete process.env.ALLOWED_WORKSPACE_DIRS;
+      } else {
+        process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
+      }
+      if (previousCatCafeWorkspaceRoot === undefined) {
+        delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      } else {
+        process.env.CAT_CAFE_WORKSPACE_ROOT = previousCatCafeWorkspaceRoot;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config keeps managed split authority when same-name external entry has unsupported transport', async () => {
+    const runtimeRoot = makeTempDir('.tmp-codex-managed-shadow-root-');
+    const projectDir = makeTempDir('.tmp-codex-managed-shadow-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'cat-cafe-limb',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            command: 'node',
+            args: ['/stale/user/cat-cafe-limb.js'],
+            transport: 'streamableHttp',
+            resolver: 'pencil',
+            env: { ALLOWED_WORKSPACE_DIRS: '/stale/user/workspace', STALE_SECRET: 'must-not-leak' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello managed shadow', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-managed-shadow',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-managed-shadow',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-managed-shadow' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const limbArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe-limb.args=['));
+          assert.ok(args.includes(`mcp_servers.cat-cafe-limb.command=${JSON.stringify(process.execPath)}`));
+          assert.ok(limbArgsConfig?.includes('packages/mcp-server/dist/limb.js'));
+          assert.ok(args.includes(`mcp_servers.cat-cafe-limb.env.ALLOWED_WORKSPACE_DIRS="${projectDir}"`));
+          assert.ok(args.includes('mcp_servers.cat-cafe-limb.env.CAT_CAFE_INVOCATION_ID="inv-managed-shadow"'));
+          assert.ok(
+            !args.some(
+              (arg) => arg.includes('/stale/user') || arg.includes('STALE_SECRET') || arg.includes('must-not-leak'),
+            ),
+          );
+        });
+      });
+    } finally {
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
     }

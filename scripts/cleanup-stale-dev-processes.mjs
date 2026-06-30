@@ -50,7 +50,125 @@ const RULES = [
     match: (p) => p.ppid === 1 && /\bpnpm\b.*\balpha:start\b/.test(p.command),
     reason: 'orphaned alpha:start process',
   },
+  // F247 KD-19: MCP wrapper lifecycle hygiene gate.
+  //
+  // The npx MCP server wrappers (agent-browser-mcp / @playwright/mcp / pinchtab-mcp)
+  // do NOT exit cleanly when their stdio parent dies. Each cat invocation that
+  // touches one leaves an `npm exec ...` + `node .../-mcp` pair behind, accumulating
+  // across days. See LL-056 (cleanup must group by resource ownership, not just PID)
+  // + feedback_agent_browser_zombie (5 reoccurrences).
+  //
+  // Rules below match by **command structure** (executable + first subcommand),
+  // NOT substring search, per codex/砚砚 R1 P1+P2:
+  //   - substring `mcp` is unsafe; `pinchtab-darwin-arm64 server --upstream-mcp-config`
+  //     would be mis-killed under the R0 draft.
+  //   - explicit MCP wrapper match — never matches `node` / `npm` / `playwright` generic
+  //   - pinchtab `server` / `bridge` long-lived daemons EXPLICITLY excluded by
+  //     subcommand check (server/bridge as first arg → not MCP wrapper, skip)
+  //   - 8h age threshold — active cat sessions are < 8h, only stale wrappers caught
+  //   - no ppid===1 requirement — wrappers' npm exec parents may still be alive
+  //     but the wrapper itself is dead weight (LL-056: parent chain alone isn't
+  //     the right ownership model)
+  {
+    id: 'stale-agent-browser-mcp-wrapper',
+    minAgeSeconds: 8 * HOUR,
+    match: (p) => matchAgentBrowserMcpWrapper(p.command),
+    reason: 'stale agent-browser-mcp wrapper (>8h, unused MCP server lifetime)',
+  },
+  {
+    id: 'stale-playwright-mcp-wrapper',
+    minAgeSeconds: 8 * HOUR,
+    match: (p) => matchPlaywrightMcpWrapper(p.command),
+    reason: 'stale @playwright/mcp wrapper (>8h)',
+  },
+  {
+    id: 'stale-pinchtab-mcp-wrapper',
+    minAgeSeconds: 8 * HOUR,
+    match: (p) => matchPinchtabMcpWrapper(p.command),
+    reason: 'stale pinchtab-mcp wrapper (>8h)',
+  },
 ];
+
+// F247 KD-19 R1: command-structure matchers.
+// Each parses the command into [executable, ...args], then checks executable
+// basename + first relevant arg. NEVER substring-searches the full command —
+// that would mis-flag `pinchtab-darwin-arm64 server --upstream-mcp-config x.json`.
+
+/** Tokenize a `ps` command into whitespace-separated argv parts. */
+function tokenizeCommand(command) {
+  return command.trim().split(/\s+/);
+}
+
+/** Get the final path segment of an executable path or token. */
+function execBasename(token) {
+  if (!token) return '';
+  const idx = token.lastIndexOf('/');
+  return idx >= 0 ? token.slice(idx + 1) : token;
+}
+
+/** `pinchtab` / `pinchtab-mcp` / `pinchtab-darwin-arm64` / `pinchtab-linux-x64` etc. */
+function isPinchtabBinaryBasename(name) {
+  return /^pinchtab(?:-[a-z]+(?:-[a-z0-9]+)?)?$/.test(name);
+}
+
+/** agent-browser-mcp matcher: `npm exec agent-browser-mcp` OR `node .../agent-browser-mcp`. */
+export function matchAgentBrowserMcpWrapper(command) {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length < 2) return false;
+  const [exec, ...rest] = tokens;
+  const execBase = execBasename(exec);
+  // form 1: `npm exec agent-browser-mcp [args...]`
+  if (execBase === 'npm' && rest[0] === 'exec' && rest[1] === 'agent-browser-mcp') return true;
+  // form 2: `node /abs/path/.../agent-browser-mcp [args...]`
+  if (execBase === 'node' && rest.length >= 1 && execBasename(rest[0]) === 'agent-browser-mcp') return true;
+  return false;
+}
+
+/** @playwright/mcp wrapper: `npm exec @playwright/mcp[@version]` OR `node .../playwright-mcp`. */
+export function matchPlaywrightMcpWrapper(command) {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length < 2) return false;
+  const [exec, ...rest] = tokens;
+  const execBase = execBasename(exec);
+  // form 1: `npm exec @playwright/mcp[@version] [args...]`
+  if (execBase === 'npm' && rest[0] === 'exec' && /^@playwright\/mcp(?:@\S+)?$/.test(rest[1] ?? '')) return true;
+  // form 2: `node /abs/path/.../playwright-mcp [args...]`
+  if (execBase === 'node' && rest.length >= 1 && execBasename(rest[0]) === 'playwright-mcp') return true;
+  return false;
+}
+
+/**
+ * Pinchtab MCP wrapper matcher. Three accepted invocation shapes:
+ *   1. Direct `pinchtab-mcp` binary — basename is the MCP itself, any args.
+ *      e.g. `pinchtab-mcp --port 9090` / `/usr/local/bin/pinchtab-mcp ...`
+ *   2. Wrapped via npx / `npm exec` — npx/npm front the binary.
+ *      e.g. `npx pinchtab-mcp ...` / `npm exec pinchtab-mcp ...`
+ *   3. Subcommand form on platform-tagged binary — `<pinchtab-XXX> mcp [args]`.
+ *      e.g. `pinchtab-darwin-arm64 mcp` / `/home/user/pinchtab mcp`.
+ *      First sub-arg MUST be exactly `mcp`. `server` / `bridge` / anything else
+ *      is rejected (the long-lived non-MCP daemons of PinchTab).
+ */
+export function matchPinchtabMcpWrapper(command) {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length < 1) return false;
+  const [exec, ...rest] = tokens;
+  const execBase = execBasename(exec);
+
+  // form 1: direct `pinchtab-mcp` binary — name IS the MCP wrapper.
+  if (execBase === 'pinchtab-mcp') return true;
+
+  // form 2: npx / npm exec wrappers around the binary.
+  if (execBase === 'npx' && rest[0] === 'pinchtab-mcp') return true;
+  if (execBase === 'npm' && rest[0] === 'exec' && rest[1] === 'pinchtab-mcp') return true;
+
+  // form 3: platform-tagged binary with `mcp` subcommand. Excludes `pinchtab-mcp`
+  // here since form 1 already handled that direct-binary case.
+  if (isPinchtabBinaryBasename(execBase) && execBase !== 'pinchtab-mcp') {
+    return rest[0] === 'mcp';
+  }
+
+  return false;
+}
 
 export function parseElapsedSeconds(raw) {
   const value = raw.trim();

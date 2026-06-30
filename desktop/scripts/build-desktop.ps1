@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds the Clowder AI Windows installer package.
+  Builds the Cat Cafe Windows installer package.
 
 .DESCRIPTION
   Full pipeline:
@@ -266,7 +266,7 @@ Install it with the official bootstrapper:
 
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri https://antigravity.google/cli/install.cmd -OutFile `$env:TEMP\antigravity-cli-install.cmd; & `$env:TEMP\antigravity-cli-install.cmd"
 
-Offline Clowder AI packages intentionally do not vendor agy until Google
+Offline Cat Cafe packages intentionally do not vendor agy until Google
 publishes a redistributable native binary contract.
 "@ | Set-Content -Path $agyInstructionsPath -Encoding ascii
 Write-Ok "agy-install-instructions.txt written"

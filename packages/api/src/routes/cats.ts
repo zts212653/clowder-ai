@@ -31,8 +31,14 @@ import {
   removeDeletedCatFromBlockedMcps,
 } from '../config/capabilities/capability-orchestrator.js';
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
-import { bootstrapCatCatalog, resolveCatCatalogPath } from '../config/cat-catalog-store.js';
-import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
+import { bootstrapCatCatalog } from '../config/cat-catalog-store.js';
+import {
+  getAcpConfig,
+  getRoster,
+  loadCatConfig,
+  loadResolvedCatConfig,
+  toAllCatConfigs,
+} from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
@@ -213,7 +219,8 @@ const updateCatSchema = z.object({
   clientId: clientSchema.optional(),
   defaultModel: modelSchema.optional(),
   mcpSupport: z.boolean().optional(),
-  cli: cliSchema.optional(),
+  // F247 KD-17: nullable to allow removing cli (cloud-only Remote MCP cats skip local dispatch).
+  cli: cliSchema.nullable().optional(),
   commandArgs: z.array(z.string().min(1)).optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
   provider: z.string().min(1).nullable().optional(),
@@ -243,7 +250,9 @@ interface CatResponseMetadata {
 function buildCatResponseMetadataResolver(projectRoot: string) {
   let roster: Record<string, RosterEntry> = {};
   try {
-    roster = getRoster(loadCatConfig(resolveCatCatalogPath(projectRoot)));
+    const templatePath = resolveProjectTemplatePath(projectRoot);
+    bootstrapCatCatalog(projectRoot, templatePath);
+    roster = getRoster(loadResolvedCatConfig(templatePath));
   } catch {
     roster = {};
   }
@@ -258,7 +267,7 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
     case 'openai':
       return { command: 'codex', outputFormat: 'json' };
     case 'google':
-      return { command: 'gemini', outputFormat: 'stream-json' };
+      return { command: 'agy', outputFormat: 'plainText' };
     case 'kimi':
       return { command: 'kimi', outputFormat: 'stream-json' };
     case 'opencode':
@@ -321,13 +330,16 @@ function resolveNextCli(params: {
   effectiveClient: ClientId;
   hasCommandArgsPatch: boolean;
   nextCommandArgs: string[];
-}): CliConfig | undefined {
+}): CliConfig | null | undefined {
   const { body, currentCat, effectiveClient, hasCommandArgsPatch, nextCommandArgs } = params;
   const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
   const defaultCli = defaultCliForClient(effectiveClient);
   const defaultEffort = getDefaultCliEffortForProvider(effectiveClient);
 
   if (body.cli !== undefined) {
+    // F247 KD-17: explicit null means remove cli (cloud-only mode, Remote MCP cat).
+    // Forward null untouched; updateRuntimeCat will delete variant.cli.
+    if (body.cli === null) return null;
     const baseCli =
       isClientSwitch || !currentCat.cli
         ? {
@@ -468,7 +480,7 @@ async function toCatResponse(
 }
 
 async function reconcileCatRegistry(projectRoot: string, managedIdsBefore: ReadonlySet<string>) {
-  const runtimeCats = toAllCatConfigs(loadCatConfig(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json')));
+  const runtimeCats = toAllCatConfigs(loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot)));
   const extraCats = catRegistry.getAllConfigs();
   catRegistry.reset();
   for (const [id, config] of Object.entries(runtimeCats)) {
@@ -482,7 +494,7 @@ async function reconcileCatRegistry(projectRoot: string, managedIdsBefore: Reado
 
 function getManagedCatalogIds(projectRoot: string): Set<string> {
   try {
-    return new Set(Object.keys(toAllCatConfigs(loadCatConfig(resolve(projectRoot, '.cat-cafe', 'cat-catalog.json')))));
+    return new Set(Object.keys(toAllCatConfigs(loadResolvedCatConfig(resolveProjectTemplatePath(projectRoot)))));
   } catch {
     return new Set();
   }
@@ -714,7 +726,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           acp: body.acp,
         });
       } else {
-        const resolvedCli = buildResolvedCliConfig(body.clientId, defaultCliForClient(body.clientId), body.cli);
+        // F247 KD-17: cloud-only providers (Remote MCP) skip local CLI dispatch.
+        // Caller signals cloud-only via provider="openai-chatgpt-pro" (future: more cloud markers).
+        const explicitProviderForCloud = 'provider' in body ? body.provider : undefined;
+        const isCloudOnlyProvider = explicitProviderForCloud === 'openai-chatgpt-pro';
+        const resolvedCli = isCloudOnlyProvider
+          ? undefined
+          : buildResolvedCliConfig(body.clientId, defaultCliForClient(body.clientId), body.cli);
         createRuntimeCat(projectRoot, {
           catId: body.catId,
           name: body.name,
@@ -741,7 +759,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               body.clientId === 'google' ||
               body.clientId === 'kimi' ||
               body.clientId === 'opencode'),
-          cli: resolvedCli,
+          // F247 KD-17: cli omitted when cloud-only (Remote MCP) provider.
+          ...(resolvedCli ? { cli: resolvedCli } : {}),
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
           ...(body.provider || providerNameForValidation
             ? { provider: body.provider ?? providerNameForValidation }

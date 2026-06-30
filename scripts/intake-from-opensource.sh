@@ -261,9 +261,18 @@ _brand_scope_count() {
   printf '%s\n' "$scope_files" | sed '/^[[:space:]]*$/d' | sort -u | wc -l | tr -d ' '
 }
 
+# gh retry + stderr-capture helpers. See scripts/lib/intake-gh-retry.sh for
+# rationale (subshell-safe via tempfile after gpt52's cat-cafe#2549 V1 finding).
+# shellcheck source=lib/intake-gh-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/intake-gh-retry.sh"
+
 resolve_absorb_pr_brand_scope() {
   if [ -z "$ABSORB_PR" ]; then return 1; fi
-  gh pr diff "$ABSORB_PR" --repo "$SOURCE_REPO" --name-only 2>/dev/null \
+  local out
+  if ! out=$(_gh_with_retry pr diff "$ABSORB_PR" --repo "$SOURCE_REPO" --name-only); then
+    return 1
+  fi
+  printf '%s\n' "$out" \
     | sed 's/\r$//; /^[[:space:]]*$/d' \
     | sort -u
 }
@@ -545,6 +554,109 @@ validate_review_proof_continuity() {
   return 1
 }
 
+validate_absorb_pr_scope_alignment() {
+  local scope_issue_bodies_b64="$1"
+  local absorb_pr_files="${2:-}"
+
+  if [ -z "$absorb_pr_files" ]; then
+    absorb_pr_files=$(resolve_absorb_pr_brand_scope || true)
+  fi
+  if [ -z "$absorb_pr_files" ]; then
+    echo -e "${RED}✗ Cannot resolve absorb PR #$ABSORB_PR file list for Path Guard${NC}"
+    return 1
+  fi
+
+  local out_of_scope_files
+  out_of_scope_files=$(INTENT_BODIES_B64="$scope_issue_bodies_b64" ABSORB_PR_FILES="$absorb_pr_files" node -e '
+const scopeBodies = String(process.env.INTENT_BODIES_B64 || "")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .map((line) => Buffer.from(line, "base64").toString("utf8").replace(/\r/g, ""));
+const absorbFiles = String(process.env.ABSORB_PR_FILES || "")
+  .split("\n")
+  .map((line) => line.trim())
+  .filter(Boolean);
+const decisionTokenRe = /\b(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\b/i;
+
+function normalizeToken(value) {
+  return String(value || "").trim().replace(/^`|`$/g, "");
+}
+
+function getMarkdownLinkTarget(value) {
+  const match = String(value || "").trim().match(/^\[[^\]]*]\(([^)\n]+)\)$/);
+  return match ? normalizeToken(match[1]) : "";
+}
+
+function matchesDeclaredToken(fragment, file) {
+  const value = String(fragment || "").trim();
+  if (!value) return false;
+  if (value === file) return true;
+  if (value === `\`${file}\``) return true;
+  return getMarkdownLinkTarget(value) === file;
+}
+
+function matchesDeclaredException(rawLine, file) {
+  const withoutBullet = String(rawLine || "").replace(/^[-*]\s+/, "").trim();
+  if (!withoutBullet) return false;
+  if (matchesDeclaredToken(withoutBullet, file)) return true;
+
+  const beforeReason = withoutBullet.split(":", 1)[0].trim();
+  return matchesDeclaredToken(beforeReason, file);
+}
+
+function isDeclaredInDecisionTable(file) {
+  for (const body of scopeBodies) {
+    const lines = body.split("\n");
+    for (const rawLine of lines) {
+      if (!rawLine.trim().startsWith("|")) continue;
+      const cells = rawLine
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      if (cells.length < 3) continue;
+      if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+      if (!decisionTokenRe.test(cells.slice(1).join(" | "))) continue;
+      if (matchesDeclaredToken(cells[0], file)) return true;
+    }
+  }
+  return false;
+}
+
+function isDeclaredInExceptions(file) {
+  for (const body of scopeBodies) {
+    const lines = body.split("\n");
+    let inExceptions = false;
+    for (const rawLine of lines) {
+      const headingMatch = rawLine.match(/^##+\s+(.+)$/);
+      if (headingMatch) {
+        inExceptions = /exceptions?/i.test(headingMatch[1]);
+        continue;
+      }
+      if (!inExceptions) continue;
+      if (/^\s*(none|none\.)\s*$/i.test(rawLine)) continue;
+      if (matchesDeclaredException(rawLine, file)) return true;
+    }
+  }
+  return false;
+}
+
+const extras = absorbFiles.filter((file) => !isDeclaredInDecisionTable(file) && !isDeclaredInExceptions(file));
+process.stdout.write(extras.join("\n"));
+')
+
+  if [ -n "$out_of_scope_files" ]; then
+    echo -e "${RED}✗ Absorb PR #$ABSORB_PR includes file(s) outside Intake Intent Issue #$INTENT_ISSUE${NC}"
+    echo "  Allowed scope = decision-table files + explicit Exceptions section."
+    echo "  Extra files:"
+    printf '%s\n' "$out_of_scope_files" | sed 's/^/    - /'
+    echo "  Fix: split the extra file into another PR, or declare it explicitly under ## Exceptions."
+    return 1
+  fi
+
+  return 0
+}
+
 run_absorbed_record_guard() {
   if [ "$SKIP_ABSORBED_GUARD" = true ]; then
     echo -e "${YELLOW}⚠ --skip-absorbed-guard enabled: bypassing absorbed intake strict guard${NC}"
@@ -691,6 +803,69 @@ run_absorbed_record_guard() {
     return 1
   fi
 
+  local scope_issue_ids
+  scope_issue_ids=$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const ids=[...body.matchAll(/Closes\\s+(?:cat-cafe#|#)(\\d+)\\b/ig)].map((m)=>m[1]); process.stdout.write([...new Set(ids)].join('\\n'))")
+
+  local scope_issue_bodies_b64=""
+  local scope_issue_id
+  while IFS= read -r scope_issue_id; do
+    [ -z "$scope_issue_id" ] && continue
+
+    local scope_issue_info
+    if [ "$scope_issue_id" = "$INTENT_ISSUE" ]; then
+      scope_issue_info="$intent_info"
+    else
+      scope_issue_info=$(gh issue view "$scope_issue_id" --repo "$SOURCE_REPO" --json state,stateReason,labels,body,url,title 2>/dev/null || true)
+      if [ -z "$scope_issue_info" ]; then
+        echo -e "${RED}✗ Cannot fetch Intake Intent Issue #$scope_issue_id from $SOURCE_REPO${NC}"
+        return 1
+      fi
+
+      local scope_issue_state
+      local scope_issue_state_reason
+      scope_issue_state=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.state||'')")
+      scope_issue_state_reason=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(d.stateReason||'')")
+      if [ "$scope_issue_state" = "OPEN" ]; then
+        :
+      elif [ "$scope_issue_state" = "CLOSED" ]; then
+        if [ "$scope_issue_state_reason" = "NOT_PLANNED" ]; then
+          echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is CLOSED as NOT_PLANNED; cannot widen absorb PR scope with it${NC}"
+          return 1
+        fi
+        if [ "$absorb_pr_state" != "MERGED" ]; then
+          echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is CLOSED, so absorb PR #$ABSORB_PR must be MERGED${NC}"
+          echo "  Closed sibling issue + open absorb PR indicates a broken multi-intent intake chain."
+          return 1
+        fi
+      else
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is $scope_issue_state (expected OPEN or CLOSED)${NC}"
+        return 1
+      fi
+
+      local scope_issue_label_ok
+      scope_issue_label_ok=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const labels=(d.labels||[]).map(l=>String(l.name||'').toLowerCase()); console.log(labels.includes('intake') ? 'yes' : 'no')")
+      if [ "$scope_issue_label_ok" != "yes" ]; then
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is missing required label: intake${NC}"
+        return 1
+      fi
+
+      local scope_issue_table_ok
+      scope_issue_table_ok=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); const body=String(d.body||''); const normalized=body.replace(/[*_\`~]/g,''); const hasHeader=/##+\\s*[^\\n]*?(?:逐文件决策表|Per[- ]?file\\s+decision|Cluster[- ]?level\\s+decision\\s+table|Decision\\s+Table|决策|Classification|Plan\\s+v\\d|Lane)/i.test(normalized); const hasRow=/\\|\\s*[^|\\n]+\\s*\\|\\s*[^|\\n]+\\s*\\|[^|\\n]*(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk|skip|public[- ]?only)\\b/i.test(normalized); console.log(hasHeader && hasRow ? 'yes' : 'no')")
+      if [ "$scope_issue_table_ok" != "yes" ]; then
+        echo -e "${RED}✗ Intake Intent Issue #$scope_issue_id is missing a valid per-file decision table${NC}"
+        return 1
+      fi
+    fi
+
+    local scope_issue_body_b64
+    scope_issue_body_b64=$(echo "$scope_issue_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); process.stdout.write(Buffer.from(String(d.body||''),'utf8').toString('base64'))")
+    if [ -n "$scope_issue_bodies_b64" ]; then
+      scope_issue_bodies_b64+=$'\n'
+    fi
+    scope_issue_bodies_b64+="$scope_issue_body_b64"
+  done <<< "$scope_issue_ids"
+
+  validate_absorb_pr_scope_alignment "$scope_issue_bodies_b64" "${BRAND_SCOPE_FILES:-}" || return 1
   validate_review_proof_continuity "$absorb_pr_head" "$review_proof_mode" || return 1
 
   echo -e "${GREEN}✓ Absorbed intake strict guard passed.${NC}"
@@ -769,9 +944,15 @@ if [ "$RECORD_DECISION" = true ]; then
       if [ -n "$ABSORB_PR" ]; then
         BRAND_SCOPE_FILES=$(resolve_absorb_pr_brand_scope || true)
         if [ -z "$BRAND_SCOPE_FILES" ]; then
-          echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard${NC}"
+          echo -e "${RED}✗ Could not resolve absorb PR #$ABSORB_PR file list for scoped Brand Guard (after 3 retries with backoff)${NC}"
           echo "  Refusing to fall back to whole-repo scan during absorbed record; whole-repo scan has known pre-existing false positives."
           echo "  Check: gh pr diff $ABSORB_PR --repo $SOURCE_REPO --name-only"
+          _captured_stderr=$(_gh_last_stderr || true)
+          if [ -n "$_captured_stderr" ]; then
+            echo ""
+            echo "  Last gh stderr captured (for diagnosis):"
+            printf '%s\n' "$_captured_stderr" | sed 's/^/    /'
+          fi
           exit 1
         fi
       fi
@@ -890,7 +1071,11 @@ if [ "$ADVANCE_LEDGER" = true ]; then
     RECORDED_SHAS=$(node -e "const l=JSON.parse(require('fs').readFileSync('$INTAKE_LEDGER','utf-8')); l.entries.filter(e=>e.target_merge_commit).forEach(e=>console.log(String(e.target_merge_commit||'').trim().toLowerCase()))" 2>/dev/null || true)
     for c in $(git -C "$TARGET_DIR" rev-list --first-parent "$OLD_HEAD".."$CURRENT_HEAD" 2>/dev/null); do
       MSG=$(git -C "$TARGET_DIR" log --format=%s -1 "$c" 2>/dev/null || true)
-      if echo "$MSG" | grep -qE "^sync:.*(cat-cafe|clowder-ai|v[0-9]+\.[0-9]+|outbound)"; then continue; fi
+      # Skip sync commits: matches both squash-merge format ("sync: ..." as commit subject)
+      # AND GitHub UI's default merge commit format ("Merge pull request #N from <user>/sync/<topic>").
+      # Without the second alternative, sync PRs merged via the UI's "Create a merge commit" path
+      # were misclassified as non-sync and blocked advance-ledger (clowder-ai#1020 regression).
+      if echo "$MSG" | grep -qE "^sync:.*(cat-cafe|clowder-ai|v[0-9]+\.[0-9]+|outbound)|^Merge pull request #[0-9]+ from [^ ]+/sync/"; then continue; fi
       # Check if this landed mainline commit is covered by an entries[] record
       recorded_match=false
       while IFS= read -r recorded; do

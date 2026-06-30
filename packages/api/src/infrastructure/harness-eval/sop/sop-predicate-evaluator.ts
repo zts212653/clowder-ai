@@ -166,27 +166,37 @@ function evaluateCommandPattern(
   predicate: PredicateCommandPattern,
   trace: SopTrace,
 ): SopEvalResult {
-  const commands = trace.commands.map((c) => c.command);
-
   if (predicate.mustMatch) {
     const patterns = predicate.mustMatch.split('|');
-    const found = commands.some((cmd) => patterns.some((pattern) => new RegExp(pattern).test(cmd)));
+    // A command only counts as "matched" when it was invoked AND succeeded
+    // (exitCode === 0 or absent). A non-zero exitCode means the check failed
+    // and the blocker is not truly satisfied.
+    const found = trace.commands.some(
+      (c) =>
+        patterns.some((pattern) => new RegExp(pattern).test(c.command)) &&
+        (c.exitCode === undefined || c.exitCode === 0),
+    );
     if (!found) {
+      const cmdSummary = trace.commands
+        .map((c) => (c.exitCode != null ? `${c.command}(exit:${c.exitCode})` : c.command))
+        .join(',');
       return violation(
         ruleId,
         stageId,
         kind,
         severity,
         'command_pattern',
-        `required command pattern "${predicate.mustMatch}" not found in session commands`,
-        `commands:[${commands.join(',')}]`,
+        `required command pattern "${predicate.mustMatch}" not found (or failed) in session commands`,
+        `commands:[${cmdSummary}]`,
       );
     }
   }
 
   if (predicate.mustNotMatch) {
+    // mustNotMatch checks command invocation regardless of exit code —
+    // running a forbidden command is a violation even if it failed.
     const patterns = predicate.mustNotMatch.split('|');
-    const matched = commands.find((cmd) => patterns.some((pattern) => new RegExp(pattern).test(cmd)));
+    const matched = trace.commands.find((c) => patterns.some((pattern) => new RegExp(pattern).test(c.command)));
     if (matched) {
       return violation(
         ruleId,
@@ -194,8 +204,8 @@ function evaluateCommandPattern(
         kind,
         severity,
         'command_pattern',
-        `forbidden command pattern "${predicate.mustNotMatch}" matched: "${matched}"`,
-        `command:${matched}`,
+        `forbidden command pattern "${predicate.mustNotMatch}" matched: "${matched.command}"`,
+        `command:${matched.command}`,
       );
     }
   }

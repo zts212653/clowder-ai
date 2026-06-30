@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import { ClaudeBgCarrierService } from '../dist/domains/cats/services/agents/providers/ClaudeBgCarrierService.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-function buildFakeSpawn({ stdout = '', exitCode = 0 }) {
+function buildFakeSpawn({ stdout = '', exitCode = 0, onClose }) {
   return (_cmd, _args, _opts) => {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
@@ -23,6 +23,7 @@ function buildFakeSpawn({ stdout = '', exitCode = 0 }) {
     setImmediate(() => {
       if (stdout) child.stdout.emit('data', Buffer.from(stdout));
       child.emit('close', exitCode);
+      onClose?.();
     });
     return child;
   };
@@ -37,23 +38,24 @@ test('F198-C AC-C2: emits status message when state.detail changes from null to 
   // Initial state: working, detail null
   writeFileSync(join(jobDir, 'state.json'), JSON.stringify({ state: 'working', daemonShort: shortId }));
 
-  // After 100ms: update detail
-  setTimeout(() => {
-    writeFileSync(
-      join(jobDir, 'state.json'),
-      JSON.stringify({ state: 'working', daemonShort: shortId, detail: 'searching for F198 evidence...' }),
-    );
-  }, 120);
+  const fakeSpawn = buildFakeSpawn({
+    stdout: `backgrounded · ${shortId}\n`,
+    onClose: () => {
+      setTimeout(() => {
+        writeFileSync(
+          join(jobDir, 'state.json'),
+          JSON.stringify({ state: 'working', daemonShort: shortId, detail: 'searching for F198 evidence...' }),
+        );
+      }, 80);
 
-  // After 250ms: transition to done
-  setTimeout(() => {
-    writeFileSync(
-      join(jobDir, 'state.json'),
-      JSON.stringify({ state: 'done', daemonShort: shortId, output: { result: 'found it' } }),
-    );
-  }, 260);
-
-  const fakeSpawn = buildFakeSpawn({ stdout: `backgrounded · ${shortId}\n` });
+      setTimeout(() => {
+        writeFileSync(
+          join(jobDir, 'state.json'),
+          JSON.stringify({ state: 'done', daemonShort: shortId, output: { result: 'found it' } }),
+        );
+      }, 400);
+    },
+  });
   const service = new ClaudeBgCarrierService({
     l0CompilerFn: fakeL0Compiler,
     spawnFn: fakeSpawn,

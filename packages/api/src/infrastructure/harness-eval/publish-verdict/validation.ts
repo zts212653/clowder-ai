@@ -1,5 +1,6 @@
 import { basename, isAbsolute, resolve } from 'node:path';
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
+import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import { resolveSafeRawPath } from '../safe-path.js';
 import { VERDICT_CLASSES } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
@@ -66,11 +67,41 @@ export function isAnchorTelemetrySourceRefs(
   return refs.kind === 'anchor-telemetry-snapshot';
 }
 
+/**
+ * F253 Phase C — discriminator helper for QC metrics selector.
+ */
+export function isQcMetricsSourceRefs(refs: VerdictSourceRefs | undefined): refs is QcMetricsSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'qc-metrics-rollup';
+}
+
+/**
+ * F253 Phase C — structural validator for QC metrics selector.
+ * Returns user-facing error detail; handler maps to 400 invalid_source_ref.
+ */
+export function validateQcMetricsSelector(selector: QcMetricsSelector): string | null {
+  if (selector.kind !== 'qc-metrics-rollup') {
+    return `expected kind='qc-metrics-rollup', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return `windowEndMs (${selector.windowEndMs}) must be > windowStartMs (${selector.windowStartMs})`;
+  }
+  return null;
+}
+
 export const KNOWN_SOURCE_REFS_KINDS = [
   'a2a-snapshot-attribution',
   'anchor-telemetry-snapshot',
   'capability-wakeup-trial-window',
   'memory-recall-snapshot',
+  'qc-metrics-rollup',
   'sop-trace-eval',
   'task-outcome-snapshot',
   'friction-rollup-snapshot',
@@ -121,6 +152,7 @@ export function inferSourceRefsKind(refs: VerdictSourceRefs | undefined): string
   // default) and would swallow kind-discriminated selectors otherwise.
   if (isAnchorTelemetrySourceRefs(refs)) return 'anchor-telemetry-snapshot';
   if (isFrictionSourceRefs(refs)) return 'friction-rollup-snapshot';
+  if (isQcMetricsSourceRefs(refs)) return 'qc-metrics-rollup';
   if (isA2aSourceRefs(refs)) return 'a2a-snapshot-attribution';
   if (refs && typeof refs === 'object' && 'kind' in refs && typeof refs.kind === 'string') {
     return refs.kind;

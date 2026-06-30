@@ -167,6 +167,151 @@ export function classifyStep(step: TrajectoryStep): StepBucket {
   return 'unknown_activity'; // unknown type, no tool data — logged but not sent to frontend
 }
 
+/**
+ * F211 REG-followup: detect a "deferred / progress-only" terminal planner text.
+ *
+ * classifyStep() classifies ANY non-empty plannerResponse as `terminal_output`,
+ * so a turn that merely *announces* it is about to produce the deliverable
+ * ("好了，证据链够了。让我整理分析。") sets hasText=true and the turn silently
+ * "completes" while the human sees a half-thought. This predicate flags that
+ * shape so the service can auto-nudge ("请直接输出最终答案") once instead of
+ * finishing silently.
+ *
+ * HIGH-PRECISION TAIL predicate (converged with codex), NOT a broad keyword net:
+ *   the LAST sentence is a first-person deliverable-deferral
+ *   (intent marker 让我/我来/接下来我… + deliverable verb 整理/分析/输出/写/总结…)
+ *   with NO substantive content after the verb (no colon-delivered body, no long tail).
+ * A post-answer suggestion ("…接下来可以优化Z") is not first-person-deferral → no
+ * false positive; an inline "我来总结：方案A最优" delivers after the verb → no false positive.
+ *
+ * Marker/verb sets are exported so coverage (English / new phrasings) can be
+ * extended without restructuring; callers log near-miss tails to drive iteration.
+ */
+export const DEFERRAL_INTENT_MARKERS = [
+  '让我',
+  '我来',
+  '我现在',
+  '我先',
+  '我继续',
+  '我再',
+  '接下来我',
+  '然后我',
+  '我接下来',
+  'let me',
+  "i'll",
+  'i will',
+];
+
+export const DELIVERABLE_VERBS = [
+  '整理',
+  '分析',
+  '输出',
+  '写',
+  '总结',
+  '梳理',
+  '给出',
+  '汇总',
+  '撰写',
+  '组织',
+  'analyze',
+  'organize',
+  'summarize',
+  'write up',
+  'compile',
+];
+
+/** Max chars allowed after the deliverable verb before it counts as delivered content. */
+const DEFERRAL_TAIL_OBJECT_MAX = 6;
+
+export function isDeferredProgressOnlyTerminal(text: string | null | undefined): boolean {
+  const trimmed = nonEmptyString(text);
+  if (!trimmed) return false;
+
+  const sentences = trimmed
+    .split(/[。！？!?\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const last = sentences.at(-1);
+  if (!last) return false;
+  const lower = last.toLowerCase();
+
+  // (1) first-person deliverable-deferral intent in the tail sentence
+  if (!DEFERRAL_INTENT_MARKERS.some((m) => lower.includes(m))) return false;
+
+  // (2) a deliverable-production verb is present
+  let lastVerbEnd = -1;
+  for (const verb of DELIVERABLE_VERBS) {
+    const idx = lower.lastIndexOf(verb);
+    if (idx >= 0) lastVerbEnd = Math.max(lastVerbEnd, idx + verb.length);
+  }
+  if (lastVerbEnd < 0) return false;
+
+  // (3) the verb is the TAIL (deferral), not followed by delivered content.
+  //     A colon that introduces inline content marks a DELIVERY ("我来总结：<answer>"),
+  //     not a deferral — even when the delivered body itself contains a deliverable verb
+  //     (which would otherwise drag lastVerbEnd into the answer and hide the boundary).
+  //     This whole-sentence colon check supersedes the older after-the-verb-only one
+  //     (cloud #2558 P2).
+  const colonIdx = last.search(/[：:]/);
+  if (colonIdx >= 0 && last.slice(colonIdx + 1).trim().length > 0) return false;
+  //     A long tail past the verb is a substantive answer, not a bare deferral.
+  const after = last.slice(lastVerbEnd).trim();
+  if (after.length > DEFERRAL_TAIL_OBJECT_MAX) return false;
+  return true;
+}
+
+/** Max tail length still considered "short" (future-action-shaped, not a delivered answer). */
+const DEFERRAL_NEAR_MISS_MAX_TAIL_LEN = 40;
+
+export interface DeferralNearMiss {
+  /** Why the high-precision predicate did not fire on this future-action tail. */
+  reason: 'no_deliverable_verb' | 'content_after_verb';
+  /** Length of the terminal tail sentence (structural — NOT the content). */
+  tailLen: number;
+  hasIntentMarker: boolean;
+  hasDeliverableVerb: boolean;
+}
+
+/**
+ * Observability for predicate iteration (NOT a behavioral gate). A terminal tail
+ * that LOOKS like a first-person future-action deferral (short + intent marker)
+ * but `isDeferredProgressOnlyTerminal` did NOT fire is a NEAR-MISS worth logging:
+ * its structural shape drives extension of the marker/verb sets toward English /
+ * new phrasings. Returns ONLY structural fields — never the raw text — so callers
+ * can log it without leaking user content. Returns null when the text is a
+ * confirmed deferral (a hit, not a miss), delivers content inline (colon), is not
+ * future-action-shaped (no intent marker), or is a long/substantive answer.
+ */
+export function deferralNearMissSignal(text: string | null | undefined): DeferralNearMiss | null {
+  const trimmed = nonEmptyString(text);
+  if (!trimmed) return null;
+  // A confirmed deferral is a HIT, not a miss — nothing to iterate on.
+  if (isDeferredProgressOnlyTerminal(trimmed)) return null;
+
+  const sentences = trimmed
+    .split(/[。！？!?\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const last = sentences.at(-1);
+  if (!last) return null;
+  // A long tail is a delivered answer, not a half-thought deferral.
+  if (last.length > DEFERRAL_NEAR_MISS_MAX_TAIL_LEN) return null;
+
+  const lower = last.toLowerCase();
+  // Only first-person future-action tails are near-misses (low-noise gate).
+  if (!DEFERRAL_INTENT_MARKERS.some((m) => lower.includes(m))) return null;
+  // A colon delivers content inline → a real answer, not a deferral miss.
+  if (/[：:]/.test(last)) return null;
+
+  const hasDeliverableVerb = DELIVERABLE_VERBS.some((v) => lower.includes(v));
+  return {
+    reason: hasDeliverableVerb ? 'content_after_verb' : 'no_deliverable_verb',
+    tailLen: last.length,
+    hasIntentMarker: true,
+    hasDeliverableVerb,
+  };
+}
+
 export function transformTrajectorySteps(
   steps: TrajectoryStep[],
   catId: CatId,

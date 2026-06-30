@@ -1117,6 +1117,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
   const root = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-mcp-merge-'));
   const mcpDistDir = join(root, 'packages', 'mcp-server', 'dist');
   const projectDir = mkdtempSync(join(tmpdir(), 'cat-cafe-claude-project-'));
+  const previousAllowedWorkspaceDirs = process.env.ALLOWED_WORKSPACE_DIRS;
   mkdirSync(mcpDistDir, { recursive: true });
   writeFileSync(join(mcpDistDir, 'index.js'), '// stub', 'utf8');
   for (const entry of ['collab.js', 'memory.js', 'signals.js', 'limb.js', 'finance.js']) {
@@ -1143,6 +1144,7 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
   });
 
   try {
+    delete process.env.ALLOWED_WORKSPACE_DIRS;
     const promise = collect(
       service.invoke('hello', {
         workingDirectory: projectDir,
@@ -1180,6 +1182,8 @@ test('#712: merges user .mcp.json servers as base layer — managed entries take
       'managed split servers must receive the invocation workspace root',
     );
   } finally {
+    if (previousAllowedWorkspaceDirs === undefined) delete process.env.ALLOWED_WORKSPACE_DIRS;
+    else process.env.ALLOWED_WORKSPACE_DIRS = previousAllowedWorkspaceDirs;
     rmSync(root, { recursive: true, force: true });
     rmSync(projectDir, { recursive: true, force: true });
   }

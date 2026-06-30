@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 
 const SOURCE_SCRIPT = resolve(process.cwd(), 'scripts/intake-from-opensource.sh');
+const GH_RETRY_LIB = resolve(process.cwd(), 'scripts/lib/intake-gh-retry.sh');
 const HOOK_SCRIPT = resolve(process.cwd(), '.githooks/pre-commit');
 const DICTIONARY_HELPER = resolve(process.cwd(), 'scripts/brand-dictionary-helper.mjs');
 const DICTIONARY_YAML = resolve(process.cwd(), 'assets/brand-dictionary.yaml');
@@ -41,6 +42,8 @@ function makeFixture() {
   mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
+  mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
   // F238 Phase C: dictionary helper + YAML for classify_path()
@@ -69,6 +72,8 @@ function makeRemoteFixture() {
   mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
   mkdirSync(join(repoRoot, 'docs', 'ops'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
+  mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
   git(sandboxRoot, 'init', '--bare', 'clowder-ai-remote.git');
@@ -279,6 +284,39 @@ describe('intake-from-opensource.sh --advance-ledger', () => {
     assert.notEqual(updatedLedger.last_reviewed_target_head, currentHead);
   });
 
+  it('treats a "Merge pull request from sync/" commit as a sync commit (auto-skip)', () => {
+    // Regression: GitHub default merge commit format "Merge pull request #N from <user>/sync/<topic>"
+    // does not start with "sync:" prefix, so the old regex `^sync:` only matched squash-merged
+    // sync PRs (where commit subject = PR title with sync: prefix). Real-world sync PRs merged
+    // via the GitHub UI's default "Create a merge commit" path were misclassified as non-sync
+    // and blocked advance-ledger. Example: clowder-ai#1020 merge commit `29f9a7cad` with subject
+    // "Merge pull request #1020 from zts212653/sync/cat-cafe-3ca74e03-v2".
+    const fixture = makeFixture();
+    fixtures.push(fixture.sandboxRoot);
+
+    const oldHead = commitFile(fixture.targetRoot, 'README.md', 'base\n', 'chore: base');
+
+    // Create a sync branch and merge it with GitHub's default merge commit format
+    git(fixture.targetRoot, 'checkout', '-b', 'sync/cat-cafe-3ca74e03-v2');
+    commitFile(fixture.targetRoot, 'synced.txt', 'synced\n', 'sync: cat-cafe 3ca74e03 → clowder-ai (manifest v3)');
+    git(fixture.targetRoot, 'checkout', 'main');
+    git(
+      fixture.targetRoot,
+      'merge',
+      '--no-ff',
+      'sync/cat-cafe-3ca74e03-v2',
+      '-m',
+      'Merge pull request #1020 from zts212653/sync/cat-cafe-3ca74e03-v2',
+    );
+
+    writeLedger(fixture.ledgerPath, oldHead, []);
+
+    const output = runAdvance(fixture.repoRoot);
+    assert.match(output, /Ledger advanced to:/);
+    const updatedLedger = JSON.parse(readFileSync(fixture.ledgerPath, 'utf-8'));
+    assert.equal(updatedLedger.last_reviewed_target_head, git(fixture.targetRoot, 'rev-parse', 'HEAD'));
+  });
+
   it('advances to target origin/main even when local target checkout is stale', () => {
     const fixture = makeRemoteFixture();
     fixtures.push(fixture.sandboxRoot);
@@ -372,6 +410,8 @@ function makeBrandFixture(overrides = {}) {
 
   mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
+  mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
   // Phase 2 dictionary-driven scan needs only the self-contained helper and dictionary YAML.
@@ -723,6 +763,8 @@ function makeHookFixture() {
   // Install intake script
   mkdirSync(join(repoRoot, 'scripts'), { recursive: true });
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
+  mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
+  cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
   // Install pre-commit hook
@@ -810,13 +852,26 @@ function makeRecordFixture(mock = {}) {
   const absorbPrHead = mock.absorbPrHead ?? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const absorbPrHeadShort = absorbPrHead.slice(0, 8);
 
-  const mockIssueJson = JSON.stringify(
-    {
-      state: mock.issueState ?? 'OPEN',
-      stateReason: mock.issueStateReason ?? ((mock.issueState ?? 'OPEN') === 'CLOSED' ? 'COMPLETED' : ''),
-      labels: (mock.issueLabels ?? ['intake']).map((name) => ({ name })),
-      body:
-        mock.issueBody ??
+  function pickDefined(...values) {
+    for (const value of values) {
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  }
+
+  function buildIssuePayload(issueNumber, issueMock = {}) {
+    const issueState = pickDefined(issueMock.issueState, mock.issueState, 'OPEN');
+    return {
+      state: issueState,
+      stateReason: pickDefined(
+        issueMock.issueStateReason,
+        mock.issueStateReason,
+        issueState === 'CLOSED' ? 'COMPLETED' : '',
+      ),
+      labels: pickDefined(issueMock.issueLabels, mock.issueLabels, ['intake']).map((name) => ({ name })),
+      body: pickDefined(
+        issueMock.issueBody,
+        mock.issueBody,
         [
           '## 社区 PR 信息',
           '- Source: clowder-ai#495',
@@ -826,12 +881,20 @@ function makeRecordFixture(mock = {}) {
           '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
           '| .env.example | generated | skip | public-only |',
         ].join('\n'),
-      url: 'https://github.com/zts212653/clowder-ai/issues/1234',
-      title: 'intake(clowder-ai#495): test fixture',
-    },
-    null,
-    2,
-  );
+      ),
+      url: pickDefined(issueMock.issueUrl, `https://github.com/zts212653/clowder-ai/issues/${issueNumber}`),
+      title: pickDefined(issueMock.issueTitle, 'intake(clowder-ai#495): test fixture'),
+    };
+  }
+  const issueFixtures = mock.issueMap
+    ? Object.fromEntries(
+        Object.entries(mock.issueMap).map(([issueNumber, issueMock]) => [
+          issueNumber,
+          buildIssuePayload(issueNumber, issueMock),
+        ]),
+      )
+    : { 1234: buildIssuePayload('1234') };
+  const mockIssueMapJson = JSON.stringify(issueFixtures, null, 2);
   const mockAbsorbPrJson = JSON.stringify(
     {
       state: mock.absorbPrState ?? 'OPEN',
@@ -900,9 +963,13 @@ if [ "\${1:-}" = "issue" ] && [ "\${2:-}" = "view" ]; then
   if [ "$repo" != "zts212653/cat-cafe" ]; then
     exit 1
   fi
-  cat <<'JSON'
-${mockIssueJson}
-JSON
+  issue_id="\${3:-}"
+  MOCK_ISSUE_ID="$issue_id" node - <<'NODE'
+const issues = ${mockIssueMapJson};
+const issue = issues[process.env.MOCK_ISSUE_ID];
+if (!issue) process.exit(1);
+process.stdout.write(JSON.stringify(issue, null, 2));
+NODE
   exit 0
 fi
 
@@ -995,6 +1062,7 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
         'Source PR: clowder-ai#777',
       ].join('\n'),
       absorbPrBody: 'Closes #1234\nSource: clowder-ai#777',
+      absorbPrFiles: [{ path: 'packages/api/src/foo.ts' }],
     });
     fixtures.push(f.sandboxRoot);
 
@@ -1038,6 +1106,11 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
         'Source PR: [#777](https://github.com/zts212653/clowder-ai/pull/777)',
       ].join('\n'),
       absorbPrBody: 'Closes #1234\nSource: clowder-ai#777',
+      absorbPrFiles: [
+        { path: 'packages/api/src/foo.ts' },
+        { path: 'packages/api/src/bar.ts' },
+        { path: 'packages/api/test/baz.test.js' },
+      ],
     });
     fixtures.push(f.sandboxRoot);
 
@@ -1078,6 +1151,7 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
         '**Source PR**: [#777](https://github.com/zts212653/clowder-ai/pull/777) — fix something',
       ].join('\n'),
       absorbPrBody: 'Closes #1234\nSource: clowder-ai#777',
+      absorbPrFiles: [{ path: 'packages/api/src/foo.ts' }],
     });
     fixtures.push(f.sandboxRoot);
 
@@ -1155,6 +1229,7 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
         'Source PR: clowder-ai#777',
       ].join('\n'),
       absorbPrBody: 'Closes #1234\nSource: clowder-ai#777',
+      absorbPrFiles: [{ path: 'packages/api/src/foo.ts' }],
     });
     fixtures.push(f.sandboxRoot);
 
@@ -1263,6 +1338,418 @@ describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
     assert.equal(record.absorb_pr, 1236);
     assert.equal(record.review_proof, 'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1');
     assert.equal(record.intent_issue, undefined, 'must use intake_intent_issue (existing schema), not intent_issue');
+  });
+
+  it('blocks absorbed record when absorb PR includes a file outside the Intent Issue table and exceptions', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+        '',
+        '## Exceptions',
+        '',
+        'None.',
+      ].join('\n'),
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'packages/api/src/config/env-registry.ts' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+    assert.match(err.stdout, /includes file\(s\) outside Intake Intent Issue #1234/);
+    assert.match(err.stdout, /packages\/api\/src\/config\/env-registry\.ts/);
+  });
+
+  it('blocks undeclared mailbox review request files in absorb PR diff', () => {
+    const f = makeRecordFixture({
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'docs/mailbox/2026-06-28-intake-review-request.md' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /includes file\(s\) outside Intake Intent Issue #1234/);
+    assert.match(err.stdout, /docs\/mailbox\/2026-06-28-intake-review-request\.md/);
+  });
+
+  it('allows mailbox review request files when explicitly declared in the Intake Intent Issue body', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+        '',
+        '## Exceptions',
+        '',
+        '- `docs/mailbox/2026-06-28-intake-review-request.md`: cross-cat review packet for this intake.',
+      ].join('\n'),
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'docs/mailbox/2026-06-28-intake-review-request.md' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows explicit exception-list files declared in the Intake Intent Issue body', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+        '',
+        '## Exceptions',
+        '',
+        '- `docs/features/index.json`: feature index refresh tied to intake bookkeeping.',
+      ].join('\n'),
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'docs/features/index.json' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows explicit root-level exception entries with reasons in the Intake Intent Issue body', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+        '',
+        '## Exceptions',
+        '',
+        '- `package.json`: dependency metadata refresh tied to intake bookkeeping.',
+      ].join('\n'),
+      absorbPrFiles: [{ path: 'packages/web/src/components/hub-accounts.view.ts' }, { path: 'package.json' }],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows declared root-level files in the Intake Intent Issue decision table', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| package.json | sync dependency metadata | absorb | root-level source file |',
+      ].join('\n'),
+      absorbPrFiles: [{ path: 'package.json' }],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows declared Next.js route paths in plain Intake Intent Issue table cells', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/app/(chat)/thread/[threadId]/page.tsx | sync thread route UI | absorb | declared app route file |',
+      ].join('\n'),
+      absorbPrFiles: [{ path: 'packages/web/src/app/(chat)/thread/[threadId]/page.tsx' }],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows declared path shapes that the old parser could not whitelist exhaustively', () => {
+    const f = makeRecordFixture({
+      issueBody: [
+        '## 社区 PR 信息',
+        '- Source: clowder-ai#495',
+        '',
+        '## 逐文件决策表',
+        '| File | 社区改动摘要 | 决策 | 理由 |',
+        '| packages/web/src/app/@slot/中文/[threadId]/page.tsx | sync localized slot route | absorb | declared exact file |',
+      ].join('\n'),
+      absorbPrFiles: [{ path: 'packages/web/src/app/@slot/中文/[threadId]/page.tsx' }],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('allows absorb PR files declared across multiple closed intake intent issues', () => {
+    const f = makeRecordFixture({
+      issueMap: {
+        1234: {
+          issueBody: [
+            '## 社区 PR 信息',
+            '- Source: clowder-ai#495',
+            '',
+            '## 逐文件决策表',
+            '| File | 社区改动摘要 | 决策 | 理由 |',
+            '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+            '',
+            '## Exceptions',
+            '',
+            'None.',
+          ].join('\n'),
+        },
+        1235: {
+          issueBody: [
+            '## 社区 PR 信息',
+            '- Source: clowder-ai#496',
+            '',
+            '## 逐文件决策表',
+            '| File | 社区改动摘要 | 决策 | 理由 |',
+            '| docs/features/index.json | index refresh | absorb | paired with sibling intake in same absorb PR |',
+          ].join('\n'),
+          issueTitle: 'intake(clowder-ai#496): sibling fixture',
+        },
+      },
+      absorbPrBody: 'Closes #1234\nCloses #1235\nSource: clowder-ai#495',
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'docs/features/index.json' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(output, /Absorbed intake strict guard passed/);
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('blocks closed sibling intake issues from widening scope while absorb PR is open', () => {
+    const f = makeRecordFixture({
+      issueMap: {
+        1234: {
+          issueBody: [
+            '## 社区 PR 信息',
+            '- Source: clowder-ai#495',
+            '',
+            '## 逐文件决策表',
+            '| File | 社区改动摘要 | 决策 | 理由 |',
+            '| packages/web/src/components/hub-accounts.view.ts | fix | absorb | keep truthfulness |',
+          ].join('\n'),
+        },
+        1235: {
+          issueState: 'CLOSED',
+          issueStateReason: 'COMPLETED',
+          issueBody: [
+            '## 社区 PR 信息',
+            '- Source: clowder-ai#496',
+            '',
+            '## 逐文件决策表',
+            '| File | 社区改动摘要 | 决策 | 理由 |',
+            '| docs/features/index.json | stale sibling file | absorb | should not widen an open absorb PR |',
+          ].join('\n'),
+          issueTitle: 'intake(clowder-ai#496): closed sibling fixture',
+        },
+      },
+      absorbPrBody: 'Closes #1234\nCloses #1235\nSource: clowder-ai#495',
+      absorbPrFiles: [
+        { path: 'packages/web/src/components/hub-accounts.view.ts' },
+        { path: 'docs/features/index.json' },
+      ],
+    });
+    fixtures.push(f.sandboxRoot);
+    const env = { PATH: `${f.mockBin}:${process.env.PATH}` };
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      env,
+    );
+
+    assert.match(err.stdout, /Intake Intent Issue #1235 is CLOSED, so absorb PR #1236 must be MERGED/);
   });
 
   it('scopes mandatory brand guard to absorb PR files and ignores pre-existing public docs', () => {

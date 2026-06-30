@@ -51,7 +51,13 @@ import {
   prependAntigravityContinuityControlBlock,
 } from './antigravity-continuity-bootstrap.js';
 import type { UpstreamErrorKind } from './antigravity-event-transformer.js';
-import { classifyStep, humanErrorMessage, transformTrajectorySteps } from './antigravity-event-transformer.js';
+import {
+  classifyStep,
+  deferralNearMissSignal,
+  humanErrorMessage,
+  isDeferredProgressOnlyTerminal,
+  transformTrajectorySteps,
+} from './antigravity-event-transformer.js';
 import {
   collectImagePathsFromSteps,
   publishAntigravityImages,
@@ -87,6 +93,13 @@ import { isReadOnlyRunCommand, RunCommandExecutor } from './executors/RunCommand
 const log = createModuleLogger('antigravity-service');
 const STREAM_ERROR_GRACE_WINDOW_MS = 4_500;
 const STALL_PROBE_MAX_ATTEMPTS = 2;
+// F211 REG-followup: when the terminal planner text only ANNOUNCES a deliverable
+// without delivering it, nudge once for the real answer; cap at one nudge per
+// invocation so a persistently-deferring model surfaces incomplete_response
+// instead of looping (preserves REG12 termination — never stalls).
+const DEFERRED_TERMINAL_NUDGE_MAX_ATTEMPTS = 1;
+const DEFERRED_TERMINAL_NUDGE_PROMPT =
+  '请直接输出最终答案，不要只描述下一步要做什么。如果还需要更多步骤，请现在就执行并给出结果。';
 const DEFAULT_AUTO_RESUME_MAX_ATTEMPTS = 1;
 const DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS = [1_000, 3_000, 5_000, 10_000, 15_000, 20_000, 30_000, 36_000];
 
@@ -136,16 +149,30 @@ function sanitizeAutoResumeMaxAttempts(value?: number): number {
   return Math.max(0, Math.floor(value));
 }
 
-function hasTerminalPlannerText(steps: readonly TrajectoryStep[]): boolean {
-  return steps.some((step) => {
-    if (step.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') return false;
+/**
+ * The LAST non-empty terminal planner text in a batch (the model's final answer),
+ * or null if none. The last qualifying step wins so a multi-planner batch reports
+ * the most recent terminal text. Used both for terminal-text presence and for the
+ * F211 REG-followup deferred/progress-only detection (isDeferredProgressOnlyTerminal).
+ */
+function extractTerminalPlannerText(steps: readonly TrajectoryStep[]): string | null {
+  let result: string | null = null;
+  for (const step of steps) {
+    if (step.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') continue;
     if (step.status !== 'CORTEX_STEP_STATUS_DONE' && step.status !== 'FINISHED' && step.status !== 'DONE') {
-      return false;
+      continue;
     }
-    if (step.plannerResponse?.stopReason === 'STOP_REASON_CLIENT_STREAM_ERROR') return false;
-    const text = step.plannerResponse?.modifiedResponse ?? step.plannerResponse?.response;
-    return typeof text === 'string' && text.trim() !== '';
-  });
+    if (step.plannerResponse?.stopReason === 'STOP_REASON_CLIENT_STREAM_ERROR') continue;
+    // `||` (not `??`): a blank modifiedResponse must fall through to response, matching
+    // the transformer's displayed `modifiedResponse || response` (#2558).
+    const text = step.plannerResponse?.modifiedResponse || step.plannerResponse?.response;
+    if (typeof text === 'string' && text.trim() !== '') result = text;
+  }
+  return result;
+}
+
+function hasTerminalPlannerText(steps: readonly TrajectoryStep[]): boolean {
+  return extractTerminalPlannerText(steps) !== null;
 }
 
 function isAssistantPrefillTailError(rawError: string): boolean {
@@ -886,6 +913,9 @@ export class AntigravityAgentService implements AgentService {
       // first send so cascade retries / rotation continuations (which resend prompt text) don't
       // re-deliver the image bytes.
       let pendingMediaItems = imageMediaItems.length > 0 ? imageMediaItems : undefined;
+      // F211 REG-followup: invocation-scoped so the deferred-terminal nudge cap
+      // survives across the send/poll loop iterations (anti-loop: at most one nudge).
+      let deferredNudgeCount = 0;
       while (true) {
         // Abort check BEFORE send: getOrCreateSession's reuse wait (settleRunningCascadeForReuse) can
         // block while a busy cascade settles, so a follow-up may have been cancelled in the meantime —
@@ -915,6 +945,12 @@ export class AntigravityAgentService implements AgentService {
 
         let hasText = false;
         let hasTerminalText = false;
+        // F211 REG-followup: the LAST terminal planner text seen this turn, for
+        // deferred/progress-only detection at completion. The length is captured
+        // here (where it is provably a string) because TS's flow analysis pins the
+        // `let` to a non-string type at the post-loop completion block.
+        let terminalPlannerText: string | null = null;
+        let terminalPlannerTextLen = 0;
         let fatalSeen = false;
         let terminalAbort = false;
         let cursorAutoApproveAttempted = false;
@@ -1859,7 +1895,31 @@ export class AntigravityAgentService implements AgentService {
                 yield msg;
               }
 
-              if (batchHasTerminalPlannerText && !batchHasFatalError) hasTerminalText = true;
+              // F211 (#2558): capture the completed terminal-planner snapshot from ANY
+              // batch carrying it. The text can land on a non-terminal (still-RUNNING)
+              // batch while the cascade flips to IDLE as an empty terminal close, and the
+              // grow-in-place batch carries only a suffix delta in `steps` — so the
+              // bridge's full latest-planner snapshot (cursor.latestPlannerText) is the
+              // single source of truth, NOT gated on this batch being terminal. Covers
+              // both batch-boundary variants (cloud #2558 P1 rounds 1 & 3).
+              const plannerSnapshot = batch.cursor.latestPlannerText;
+              if (typeof plannerSnapshot === 'string' && plannerSnapshot.trim() !== '') {
+                terminalPlannerText = plannerSnapshot;
+                terminalPlannerTextLen = plannerSnapshot.length;
+              }
+              if (batchHasTerminalPlannerText && !batchHasFatalError) {
+                hasTerminalText = true;
+                // Fallback when no bridge snapshot is present (older path / partial test
+                // mocks): extract from the batch steps. This may be a suffix delta — the
+                // snapshot above is preferred precisely to avoid that.
+                if (terminalPlannerText === null) {
+                  const tt = extractTerminalPlannerText(batch.steps);
+                  if (tt) {
+                    terminalPlannerText = tt;
+                    terminalPlannerTextLen = tt.length;
+                  }
+                }
+              }
 
               if (modelCapacityRetryDelayMs != null) {
                 log.info(
@@ -2260,6 +2320,71 @@ export class AntigravityAgentService implements AgentService {
             metadata: { ...metadata, diagnostics },
             timestamp: Date.now(),
           };
+        }
+
+        // F211 REG-followup: a terminal planner response that only ANNOUNCES a
+        // deliverable ("让我整理分析。") without delivering it sets hasText=true, so
+        // the empty_response backstop above is skipped and the turn would finish
+        // SILENTLY on a half-thought. Detect that deferred shape and nudge ONCE in
+        // the SAME cascade for the real answer; if it persists, surface
+        // incomplete_response rather than completing silently. A terminal tail that
+        // LOOKS deferred but the predicate misses is logged as a near-miss
+        // (observability only — drives marker/verb iteration; it never nudges).
+        // F211 (#2558): gate on the captured planner snapshot itself, not on the
+        // text-bearing batch having been terminal — the terminal signal can arrive on a
+        // separate empty close batch (round 3). A non-null snapshot means a planner with
+        // displayable text was the latest output; clean termination (no fatal/abort) plus
+        // a deferred tail is the silent-failure shape to recover.
+        if (terminalPlannerText !== null && !fatalSeen && !terminalAbort && !sawImageOutput) {
+          if (isDeferredProgressOnlyTerminal(terminalPlannerText)) {
+            if (deferredNudgeCount < DEFERRED_TERMINAL_NUDGE_MAX_ATTEMPTS) {
+              deferredNudgeCount += 1;
+              log.info(
+                { cascadeId, deferredNudgeCount },
+                'deferred/progress-only terminal text — nudging once for the final answer',
+              );
+              // Follow-up on the SAME cascade (no rotation) so the model keeps its
+              // context; re-enter the send/poll loop with the nudge prompt. The deferred
+              // half-thought was already yielded as a text bubble, so flag the recovered
+              // answer with textMode:replace (the same guard retry recovery uses) — the
+              // route/queue aggregators append by default, and we want the answer to
+              // SUPERSEDE the half-thought, not trail it (cloud #2558 P2).
+              pendingTextReplace = true;
+              promptForCurrentCascade = DEFERRED_TERMINAL_NUDGE_PROMPT;
+              continue;
+            }
+            // Already nudged once and STILL deferred — do not finish silently.
+            const deferredDiagnostics = {
+              cascadeId,
+              deferredNudgeCount,
+              totalStepsSeen,
+              lastDelivered,
+              hasText,
+              terminalTextLen: terminalPlannerTextLen,
+            };
+            log.warn(
+              deferredDiagnostics,
+              'deferred/progress-only terminal text persisted after nudge — surfacing incomplete_response',
+            );
+            await flushSideEffectJournalAudit();
+            yield {
+              type: 'error',
+              catId: this.catId,
+              error: 'Antigravity terminal response only described the next step without delivering it',
+              errorCode: 'incomplete_response',
+              metadata: { ...metadata, diagnostics: deferredDiagnostics },
+              timestamp: Date.now(),
+            };
+          } else {
+            // Near-miss observability: structural shape only, never raw content.
+            const nearMiss = deferralNearMissSignal(terminalPlannerText);
+            if (nearMiss) {
+              log.info(
+                { cascadeId, ...nearMiss },
+                'deferred-terminal near-miss: future-action tail did not match the predicate (iteration signal)',
+              );
+            }
+          }
         }
 
         // F172 Phase C: publish any images found in tool results (legacy / future-proof path).

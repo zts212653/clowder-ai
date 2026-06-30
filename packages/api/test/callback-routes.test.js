@@ -684,6 +684,8 @@ describe('Callback Routes', () => {
   test('GET pending-mentions returns empty array when no mentions', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
 
     const response = await app.inject({
       method: 'GET',
@@ -694,6 +696,14 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.mentions.length, 0);
+
+    const snap = getAnchorEventSnapshot();
+    const event = snap.previewEvents.find((e) => e.tool === 'pending-mentions');
+    assert.ok(event, 'empty pending-mentions response must still record adoption telemetry');
+    assert.deepStrictEqual(event.itemIds, []);
+    assert.strictEqual(event.modeResolved, 'anchor');
+    assert.strictEqual(event.modeSource, 'default');
+    assert.strictEqual(event.catId, 'opus');
   });
 
   // ---- GET /api/callbacks/thread-context ----
@@ -904,6 +914,8 @@ describe('Callback Routes', () => {
 
     const logs = [];
     app.log.info = (obj) => logs.push(obj);
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
 
     await app.inject({
       method: 'GET',
@@ -917,6 +929,13 @@ describe('Callback Routes', () => {
       drillLog.contextCount >= 1,
       'fullDrillChars accounting must include context neighbors (not undercounted)',
     );
+
+    const snap = getAnchorEventSnapshot();
+    const adoptionEvent = snap.previewEvents.find((e) => e.tool === 'get-message' && e.itemIds.includes(target.id));
+    assert.ok(adoptionEvent, 'get-message full mode must record a Track-2 adoption event');
+    assert.strictEqual(adoptionEvent.modeResolved, 'full');
+    assert.strictEqual(adoptionEvent.modeSource, 'legacy_equivalent');
+    assert.strictEqual(adoptionEvent.catId, 'opus');
   });
 
   test('thread-context anchor cuts content payload ≥60% vs full bodies (F236 AC-A1)', async () => {
@@ -993,7 +1012,9 @@ describe('Callback Routes', () => {
     const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
       '../dist/routes/anchor-telemetry.js'
     );
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
     resetAnchorTelemetryForTest();
+    resetAnchorEventLogForTest();
 
     const res = await app.inject({
       method: 'GET',
@@ -1031,9 +1052,81 @@ describe('Callback Routes', () => {
       assert.equal(snap.drillByTool['list-tasks'], 1, 'taskId drill must record as a drill');
       assert.equal(snap.returnedByTool['list-tasks'], 1, 'taskId drill must NOT be counted as a preview return');
     }
+    {
+      const snap = getAnchorEventSnapshot();
+      const adoptionEvent = snap.previewEvents.find(
+        (e) => e.tool === 'list-tasks' && e.modeResolved === 'full' && e.itemIds.includes(task.id),
+      );
+      assert.ok(adoptionEvent, 'list-tasks taskId full mode must record a Track-2 adoption event');
+      assert.strictEqual(adoptionEvent.modeSource, 'legacy_equivalent');
+      assert.strictEqual(adoptionEvent.catId, 'opus');
+    }
   });
 
-  test('list-tasks taskId matching no task records NO drill volume (cloud P2: empty drill not counted)', async () => {
+  test('list-tasks preview records legacy_equivalent adoption event with catId (F236 modeSource tail)', async () => {
+    const app = await createApp();
+    const threadA = await threadStore.create('user-1', 'thread-a');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
+    const task = await taskStore.create({
+      threadId: threadA.id,
+      title: 'adoption task',
+      why: 'why'.repeat(200),
+      createdBy: 'user',
+      ownerCatId: 'opus',
+    });
+
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/list-tasks',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const snap = getAnchorEventSnapshot();
+    const event = snap.previewEvents.find((e) => e.tool === 'list-tasks' && e.itemIds.includes(task.id));
+    assert.ok(event, 'list-tasks preview must record a Track-2 adoption event');
+    assert.strictEqual(event.modeResolved, 'anchor');
+    assert.strictEqual(event.modeSource, 'legacy_equivalent');
+    assert.strictEqual(event.catId, 'opus');
+  });
+
+  test('get-message preview records legacy_equivalent adoption event (F236 modeSource tail)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const message = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'M'.repeat(600),
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${message.id}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.message.truncated, true, 'default preview should remain bounded');
+
+    const snap = getAnchorEventSnapshot();
+    const event = snap.previewEvents.find((e) => e.tool === 'get-message' && e.itemIds.includes(message.id));
+    assert.ok(event, 'get-message preview must record a Track-2 adoption event');
+    assert.strictEqual(event.modeResolved, 'anchor');
+    assert.strictEqual(event.modeSource, 'legacy_equivalent');
+    assert.strictEqual(event.catId, 'opus');
+    assert.equal(snap.drillEvents.length, 0, 'preview mode must not be recorded as full drill');
+  });
+
+  test('list-tasks taskId matching no task records skips drill volume but counts full-mode adoption', async () => {
     const app = await createApp();
     const threadA = await threadStore.create('user-1', 'thread-a');
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadA.id);
@@ -1049,7 +1142,9 @@ describe('Callback Routes', () => {
     const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
       '../dist/routes/anchor-telemetry.js'
     );
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
     resetAnchorTelemetryForTest();
+    resetAnchorEventLogForTest();
 
     const res = await app.inject({
       method: 'GET',
@@ -1062,6 +1157,15 @@ describe('Callback Routes', () => {
     const snap = getAnchorTelemetrySnapshot();
     assert.equal(snap.drillByTool['list-tasks'] ?? 0, 0, 'empty drill (no task served) must NOT count as a drill');
     assert.equal(snap.returnedByTool['list-tasks'] ?? 0, 0, 'a taskId query is not a preview return either');
+
+    const eventSnap = getAnchorEventSnapshot();
+    assert.equal(eventSnap.drillEvents.length, 0, 'empty drill must not record an item-level drill event');
+    const adoptionEvent = eventSnap.previewEvents.find((e) => e.tool === 'list-tasks');
+    assert.ok(adoptionEvent, 'empty taskId full-control call must still record adoption telemetry');
+    assert.deepStrictEqual(adoptionEvent.itemIds, []);
+    assert.strictEqual(adoptionEvent.modeResolved, 'full');
+    assert.strictEqual(adoptionEvent.modeSource, 'legacy_equivalent');
+    assert.strictEqual(adoptionEvent.catId, 'opus');
   });
 
   test('GET thread-context rejects messageId from another thread', async () => {
@@ -2308,6 +2412,71 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 401);
   });
 
+  // ---- F236 Track-1: responseMode=anchor|full on pending-mentions ----
+
+  test('GET pending-mentions responseMode=full returns full message body (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const longContent = `@opus ${'detail '.repeat(80)}FINAL INSTRUCTION: ship it now`;
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: ['opus'],
+      timestamp: Date.now(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.mentions.length, 1);
+    const m = body.mentions[0];
+    // Full mode: complete message content, no truncation
+    assert.equal(m.message, longContent, 'full mode must return the complete mention content');
+    assert.equal(m.contentLength, longContent.length);
+    assert.equal(m.requiresDrill, false, 'full mode never requires drill');
+    // Full mode: no drillDown (already have full content)
+    assert.equal('drillDown' in m, false, 'full mode must not include drillDown pointer');
+    // Must still have from, id, timestamp
+    assert.ok(m.from);
+    assert.ok(m.id);
+    assert.ok(m.timestamp);
+  });
+
+  test('GET pending-mentions default (no responseMode) uses anchor mode (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const longContent = `@opus ${'detail '.repeat(80)}FINAL INSTRUCTION: ship it now`;
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: ['opus'],
+      timestamp: Date.now(),
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const m = body.mentions[0];
+    // Default = anchor: truncated + requiresDrill
+    assert.ok(m.requiresDrill, 'long mention in anchor mode must require drill');
+    assert.ok(m.drillDown, 'anchor mode must include drillDown pointer');
+    assert.ok(m.message.length < longContent.length, 'anchor mode must truncate long content');
+  });
+
   // ---- SQLite memory service callbacks (F102 Phase D1) ----
 
   test('GET search-evidence returns results from evidence store', async () => {
@@ -3138,6 +3307,270 @@ describe('Callback Routes', () => {
     assert.equal(response.statusCode, 200);
     const body = JSON.parse(response.body);
     assert.equal(body.threadId, 'thread-other', 'cross-thread read must echo the requested threadId');
+  });
+
+  // ---- F236 Track-1: responseMode=anchor|full on thread-context ----
+
+  test('GET thread-context responseMode=full returns full content instead of preview (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const longContent = 'Z'.repeat(2000);
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    assert.equal(body.messages.length, 1);
+    const msg = body.messages[0];
+    // Full mode: content field with full body, not truncated preview
+    assert.equal(msg.content, longContent, 'full mode must return the complete original content');
+    assert.equal(msg.contentLength, longContent.length);
+    assert.equal(msg.truncated, false, 'full mode is never truncated');
+    // Full mode: no drillDown (already have full content)
+    assert.equal('drillDown' in msg, false, 'full mode must not include drillDown pointer');
+    // Full mode: no preview field (uses content instead)
+    assert.equal('preview' in msg, false, 'full mode uses content field, not preview');
+    // Must still have id, threadId, timestamp, speaker
+    assert.ok(msg.id);
+    assert.ok(msg.threadId);
+    assert.ok(msg.timestamp);
+    assert.ok(msg.speaker);
+  });
+
+  test('GET thread-context responseMode=anchor keeps anchor behavior (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const longContent = 'Z'.repeat(2000);
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=anchor',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const msg = body.messages[0];
+    // Anchor mode: preview field with truncated content
+    assert.ok('preview' in msg, 'anchor mode uses preview field');
+    assert.ok(msg.truncated, 'long content must be truncated in anchor mode');
+    assert.ok(msg.drillDown, 'anchor mode must include drillDown pointer');
+    assert.equal('content' in msg, false, 'anchor mode uses preview, not content');
+  });
+
+  test('GET thread-context default (no responseMode) uses anchor mode (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    const longContent = 'Z'.repeat(2000);
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: longContent,
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const msg = body.messages[0];
+    // Default = anchor
+    assert.ok('preview' in msg, 'default must be anchor mode');
+    assert.ok(msg.truncated, 'default must truncate long content');
+  });
+
+  test('GET thread-context responseMode=full preserves image hints (F236 Track-1)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'Look at this image',
+      contentBlocks: [
+        { type: 'text', text: 'Look at this image' },
+        { type: 'image', url: '/uploads/cat.png' },
+      ],
+      mentions: [],
+      timestamp: 1,
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const body = JSON.parse(response.body);
+    const msg = body.messages[0];
+    assert.equal(msg.content, 'Look at this image');
+    assert.ok(msg.imageUrls && msg.imageUrls.length > 0, 'full mode must preserve image hints');
+  });
+
+  // ---- F236 Track-1: telemetry contract tests (gpt52 R1 P1/P2 fix) ----
+
+  test('thread-context responseMode=full must NOT pollute Track-1 anchor savings (P1 fix)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({ userId: 'user-1', catId: null, content: 'test body', mentions: [], timestamp: 1 });
+
+    const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
+      '../dist/routes/anchor-telemetry.js'
+    );
+    resetAnchorTelemetryForTest();
+
+    // full-mode request — should NOT record in Track-1 aggregate
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snap = getAnchorTelemetrySnapshot();
+    assert.strictEqual(
+      snap.returnedByTool['thread-context'] ?? 0,
+      0,
+      'full-mode must NOT count in Track-1 anchor savings (P1: telemetry contamination)',
+    );
+  });
+
+  test('thread-context default anchor mode records Track-1 savings normally', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({ userId: 'user-1', catId: null, content: 'test body', mentions: [], timestamp: 1 });
+
+    const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
+      '../dist/routes/anchor-telemetry.js'
+    );
+    resetAnchorTelemetryForTest();
+
+    // default anchor-mode — should record in Track-1
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snap = getAnchorTelemetrySnapshot();
+    assert.strictEqual(snap.returnedByTool['thread-context'], 1, 'anchor-mode must count in Track-1 savings');
+  });
+
+  test('thread-context Track-2 event tags modeResolved/modeSource/catId (P2 adoption eval)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({ userId: 'user-1', catId: null, content: 'adoption test', mentions: [], timestamp: 1 });
+
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
+
+    // explicit full mode
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snapFull = getAnchorEventSnapshot();
+    const fullEvent = snapFull.previewEvents.find((e) => e.tool === 'thread-context');
+    assert.ok(fullEvent, 'full-mode must still record Track-2 event for adoption bucketing');
+    assert.strictEqual(fullEvent.modeResolved, 'full');
+    assert.strictEqual(fullEvent.modeSource, 'explicit');
+    assert.strictEqual(fullEvent.catId, 'opus');
+
+    resetAnchorEventLogForTest();
+
+    // default anchor (no responseMode param)
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snapDefault = getAnchorEventSnapshot();
+    const defaultEvent = snapDefault.previewEvents.find((e) => e.tool === 'thread-context');
+    assert.ok(defaultEvent, 'default anchor must record Track-2 event');
+    assert.strictEqual(defaultEvent.modeResolved, 'anchor');
+    assert.strictEqual(defaultEvent.modeSource, 'default');
+    assert.strictEqual(defaultEvent.catId, 'opus');
+  });
+
+  test('pending-mentions responseMode=full must NOT pollute Track-1 anchor savings (P1 fix)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'hey @opus',
+      mentions: ['opus'],
+      timestamp: 1,
+    });
+
+    const { getAnchorTelemetrySnapshot, resetAnchorTelemetryForTest } = await import(
+      '../dist/routes/anchor-telemetry.js'
+    );
+    resetAnchorTelemetryForTest();
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snap = getAnchorTelemetrySnapshot();
+    assert.strictEqual(
+      snap.returnedByTool['pending-mentions'] ?? 0,
+      0,
+      'full-mode mentions must NOT count in Track-1 anchor savings',
+    );
+  });
+
+  test('pending-mentions Track-2 event tags adoption eval fields (P2 fix)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'hey @opus adoption test',
+      mentions: ['opus'],
+      timestamp: 1,
+    });
+
+    const { getAnchorEventSnapshot, resetAnchorEventLogForTest } = await import('../dist/routes/anchor-event-log.js');
+    resetAnchorEventLogForTest();
+
+    await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/pending-mentions?responseMode=full',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    const snap = getAnchorEventSnapshot();
+    const ev = snap.previewEvents.find((e) => e.tool === 'pending-mentions');
+    assert.ok(ev, 'full-mode mentions must still record Track-2 event');
+    assert.strictEqual(ev.modeResolved, 'full');
+    assert.strictEqual(ev.modeSource, 'explicit');
+    assert.strictEqual(ev.catId, 'opus');
   });
 
   // ---- TD091: POST /api/callbacks/register-pr-tracking ----

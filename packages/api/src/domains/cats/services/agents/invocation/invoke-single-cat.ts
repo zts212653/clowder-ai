@@ -570,6 +570,48 @@ export interface InvocationDeps {
   readonly conciergeHandleMapStore?: import('../../../../concierge/ConciergeHandleMapStore.js').IConciergeHandleMapStore;
   /** F229 Phase B: TriagePlan store for triage-plan marker → confirm/cancel card actions (optional, fail-open) */
   readonly conciergeTriagePlanStore?: import('../../../../concierge/ConciergeTriagePlanStore.js').IConciergeTriagePlanStore;
+  /**
+   * F247 AC-B1c-2: Cloud invoke bridge — fire-and-forget dispatch for cloud-only
+   * cats (Remote MCP, provider='openai-chatgpt-pro'). When the KD-17 guard
+   * fires we still need to notify the cloud cat that it was @ mentioned;
+   * the bridge handles that via PinchTab CDP in PR-C.
+   *
+   * Optional / fail-open: tests + early environments without PinchTab can
+   * pass `null`; the bridge then never gets invoked and the KD-17 guard
+   * silently skips dispatch (same as the original B1a behavior). When the
+   * bridge IS wired, dispatch is fire-and-forget — invokeSingleCat does
+   * NOT block on the cloud cat's response (it travels back through the
+   * cloud cat's own MCP read tool on the next invocation).
+   */
+  readonly cloudInvokeBridge?: import('../../cloud-bridge/types.js').ICloudInvokeBridge | null;
+  /**
+   * F254 Phase B3/B4: Optional freshness re-invoke callback.
+   * Called after invocation terminal event to decide if a re-invoke is needed
+   * for unacknowledged high-priority notices. The routing layer wires this
+   * with access to Redis + event log + InvocationRegistry.
+   *
+   * Returns reinvoke decision or null (fail-open). When shouldReinvoke=true,
+   * the returned prompt/senders are used for the re-invoke invocation.
+   */
+  /**
+   * F254 Phase C: Freshness invocation state store (optional).
+   * Used to persist the carrier tier at invocation start so callback routes
+   * can derive a RuntimeCapabilityDescriptor without AgentService access.
+   */
+  readonly freshnessStateStore?: import('../../freshness/FreshnessInvocationStateStore.js').FreshnessInvocationStateStore;
+  readonly freshnessReinvokeCheck?: (params: {
+    invocationId: string;
+    threadId: string;
+    catId: import('@cat-cafe/shared').CatId;
+    userId: string;
+  }) => Promise<{
+    shouldReinvoke: boolean;
+    reason: string;
+    skipReason?: string;
+    noticeIds: string[];
+    senders: string[];
+    reinvokePrompt?: string;
+  } | null>;
 }
 
 /**
@@ -582,6 +624,30 @@ export interface InvocationParams {
   readonly prompt: string;
   readonly userId: string;
   readonly threadId: string;
+  /**
+   * F247 AC-B1c-2/12: For cloud-cat dispatches via the bridge, the **raw**
+   * mention text (the user's / mentioning cat's words — NOT the fully
+   * orchestrated `prompt` which includes system context, dynamic injection,
+   * chain history etc). Used as the `intent` field in the runtime delta
+   * payload so the cloud cat sees what was actually asked.
+   *
+   * Optional and currently NOT plumbed by `route-serial` / `route-parallel`
+   * (PR-B is a library drop; PR-C will plumb this through both routes +
+   * wire `cloudInvokeBridge` into `AgentRouter.getStrategyDeps`). When
+   * absent, the bridge dispatch is suppressed (KD-17 guard falls back to
+   * B1a no-op behavior), which is safer than sending the wrong text to
+   * the cloud cat.
+   */
+  readonly mentionContent?: string;
+  /**
+   * F247 AC-B1c-2/12: For cloud-cat dispatches via the bridge, the catId of
+   * the local cat that @ mentioned the cloud cat. Used as `calledBy` in the
+   * delta payload so the cloud cat knows whose ack to address.
+   *
+   * Optional + currently not plumbed (see `mentionContent` note above).
+   * When absent, bridge dispatch is suppressed.
+   */
+  readonly mentioningCatId?: CatId;
   readonly contentBlocks?: readonly MessageContent[];
   readonly uploadDir?: string;
   readonly signal?: AbortSignal;
@@ -611,6 +677,85 @@ export interface InvocationParams {
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, service, prompt, userId, threadId, isLastCat, signal: callerSignal } = params;
+
+  // F247 KD-17: cloud-only cats (Remote MCP) skip local CLI dispatch.
+  // The mention is already persisted in the thread; the cloud cat reads it via
+  // its own MCP read tools on next invocation. Detect via explicit `provider`
+  // marker (matches POST handler symmetry); antigravity / ACP cats are NOT
+  // caught — they have their own dispatch path even without cli.command.
+  //
+  // F247 AC-B1c-2 (PR-B): instead of silently returning, fire the cloud-invoke
+  // bridge (if wired) so the cloud cat actually GETS the @ mention through
+  // its bound ChatGPT chat. Fire-and-forget — never block the invocation
+  // generator on bridge success. Errors are absorbed by the bridge itself
+  // (emits fallback `system_info` if PinchTab unavailable, AC-B1c-4).
+  const cloudOnlyConfig = catRegistry.tryGet(catId as string)?.config;
+  if (cloudOnlyConfig && cloudOnlyConfig.provider === 'openai-chatgpt-pro') {
+    log.info(
+      { catId, threadId, userId, provider: cloudOnlyConfig.provider, clientId: cloudOnlyConfig.clientId },
+      'F247 KD-17: cloud-only cat (Remote MCP) — skipping local dispatch; dispatching B1c bridge',
+    );
+    // Fire-and-forget bridge dispatch (AC-B1c-2). The bridge:
+    //  - Builds the 5-field thread runtime delta payload (AC-B1c-12).
+    //  - Calls PinchTab CDP adapter to inject + capture chat URL (PR-C).
+    //  - Writes binding back to thread metadata.
+    //  - Emits fallback notification on failure (AC-B1c-4).
+    //
+    // gpt52 R1 P1-2 contract: `mentionContent` is the RAW mention text (not
+    // the orchestrated `prompt`, which already includes system context /
+    // chain history). `mentioningCatId` is the local cat that @ mentioned
+    // (not the thread owner `userId`). Both are plumbed from `route-serial`
+    // / `route-parallel` in PR-C; until then they're absent → bridge
+    // dispatch is suppressed (silently falls back to B1a no-op). This is
+    // SAFER than sending the wrong text or "called by alice" to the cloud
+    // cat (cloud cat would see misleading context and write back to wrong
+    // attribution).
+    //
+    // gpt52 R1 P1-1 contract: `cloudInvokeBridge` is currently NOT supplied
+    // by `AgentRouter.getStrategyDeps` either — also a PR-C wiring step. So
+    // even with mentionContent / mentioningCatId plumbed, the `if` below
+    // short-circuits today. PR-B = library drop; PR-C = runtime wiring.
+    if (deps.cloudInvokeBridge && params.mentionContent && params.mentioningCatId) {
+      const threadMetadata = threadStore ? await threadStore.get(threadId) : null;
+      deps.cloudInvokeBridge
+        .dispatch({
+          catId,
+          threadId,
+          userId,
+          threadTitle: threadMetadata?.title ?? null,
+          // Participants list: pulled from thread.participants (includes the
+          // cloud cat itself + other recently-active cats). Handle resolution
+          // is best-effort — we use the catId as the handle if no separate
+          // handle registry is present. PR-C may enrich with a real handle map.
+          participants: (threadMetadata?.participants ?? []).map((pCatId) => ({
+            catId: pCatId,
+            handle: `@${pCatId}`,
+          })),
+          calledBy: params.mentioningCatId,
+          intent: params.mentionContent,
+        })
+        .catch((err: unknown) => {
+          log.warn(
+            { catId, threadId, err: err instanceof Error ? err.message : String(err) },
+            'F247 AC-B1c-2: bridge dispatch promise rejected (caught — should be impossible)',
+          );
+        });
+    } else if (deps.cloudInvokeBridge) {
+      // Telemetry: bridge IS wired but params lack the new fields. This is
+      // expected during PR-B/C-rollout window; flagging so we can spot the
+      // case in logs and confirm PR-C plumbed them in.
+      log.info(
+        { catId, threadId, hasMentionContent: !!params.mentionContent, hasMentioningCatId: !!params.mentioningCatId },
+        'F247 AC-B1c-2: bridge wired but mentionContent/mentioningCatId missing (PR-C will plumb)',
+      );
+    }
+    yield {
+      type: 'done' as const,
+      catId,
+      timestamp: Date.now(),
+    };
+    return;
+  }
 
   // F198 Bug #3: a bg carrier has no stable per-conversation sessionId — the
   // daemon forks a fresh UUID every `--bg --resume` round. Derive a stable
@@ -680,6 +825,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // "missing required parameter". Inject the live threadId so prompt template
     // can resolve to a concrete value.
     CAT_CAFE_THREAD_ID: threadId,
+    // F254 AC-C2: Runtime mode for freshness gate descriptor derivation.
+    // The MCP server reads this to construct RuntimeCapabilityDescriptor,
+    // which parameterizes held/notice behavior per carrier tier.
+    // carrierTier is extracted after this block and persisted to Redis
+    // via freshnessStateStore.setCarrierTier() (producer side of AC-C2).
+    ...((service as unknown as { _carrierTier?: string })._carrierTier
+      ? { CAT_CAFE_RUNTIME_MODE: (service as unknown as { _carrierTier: string })._carrierTier }
+      : {}),
     ...(process.env.CAT_CAFE_SIGNAL_USER ? { CAT_CAFE_SIGNAL_USER: process.env.CAT_CAFE_SIGNAL_USER } : {}),
     // Per-cat git author identity (W1: cats are Agents with identity).
     // GIT_AUTHOR_NAME/GIT_COMMITTER_NAME override the runtime git config's pinned
@@ -702,6 +855,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       })(),
     ),
   };
+
+  // F254 AC-C2: Persist carrier tier at invocation start (fire-and-forget, fail-open).
+  // Callback routes read this via FreshnessInvocationStateStore.get() to derive
+  // RuntimeCapabilityDescriptor — closing the producer/consumer chain.
+  const carrierTier = (service as unknown as { _carrierTier?: string })._carrierTier;
+  if (deps.freshnessStateStore && carrierTier) {
+    deps.freshnessStateStore.setCarrierTier(invocationId, carrierTier).catch(() => {
+      // Fail-open: Redis write failure must not block invocation.
+    });
+  }
 
   const auditLog = getEventAuditLog();
   const promptDigest = createPromptDigest(prompt);
@@ -1255,12 +1418,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           const { buildMissionPack, formatMissionPackPrompt } = await import(
             '../../../../../config/governance/mission-pack.js'
           );
-          capturedMissionPack = buildMissionPack({
+          // clowder-ai#1037: buildMissionPack returns null when the thread has
+          // no concrete mission anchor (title/phase/backlogItemId all empty).
+          // Skip M1 injection in that case so the model is not handed an empty
+          // dispatch marker on a chat-only thread.
+          const pack = buildMissionPack({
             title: thread.title ?? undefined,
             phase: thread.phase ?? undefined,
             backlogItemId: thread.backlogItemId ?? undefined,
           });
-          missionPrefix = formatMissionPackPrompt(capturedMissionPack);
+          if (pack) {
+            capturedMissionPack = pack;
+            missionPrefix = formatMissionPackPrompt(pack);
+          }
         }
       } catch {
         // Thread store timeout — proceed without mission context
@@ -2781,6 +2951,32 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               spanId: sc.spanId,
               ...(parentSid ? { parentSpanId: parentSid } : {}),
             };
+          }
+          // F254 B3/B4: Check for freshness re-invoke after terminal event.
+          // Fail-open: errors here never block the done signal.
+          if (deps.freshnessReinvokeCheck && !hadError && !signal?.aborted) {
+            try {
+              const decision = await deps.freshnessReinvokeCheck({
+                invocationId,
+                threadId,
+                catId,
+                userId: params.userId,
+              });
+              if (decision) {
+                // Attach decision to done metadata for routing layer.
+                // Initialize metadata if missing (some provider paths emit done without it).
+                if (!out.metadata) {
+                  (out as unknown as Record<string, unknown>).metadata = {};
+                }
+                (out.metadata as unknown as Record<string, unknown>).freshnessReinvoke = decision;
+                log.info(
+                  { catId, threadId, invocationId, shouldReinvoke: decision.shouldReinvoke, reason: decision.reason },
+                  '[F254-B3] freshness re-invoke decision',
+                );
+              }
+            } catch (err) {
+              log.warn({ catId, threadId, invocationId, err }, '[F254-B3] freshness re-invoke check failed, fail-open');
+            }
           }
         }
         yield out;

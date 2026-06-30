@@ -17,9 +17,22 @@ import {
   MultiMentionOrchestrator,
 } from '../domains/cats/services/agents/routing/MultiMentionOrchestrator.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
+import {
+  checkFreshnessForPostMessage,
+  createQueueChecker,
+} from '../domains/cats/services/freshness/checkFreshnessForPostMessage.js';
+import type { FreshnessAttentionEventLog } from '../domains/cats/services/freshness/FreshnessAttentionEventLog.js';
+import { FreshnessInvocationStateStore } from '../domains/cats/services/freshness/FreshnessInvocationStateStore.js';
+import {
+  descriptorFromDriver,
+  descriptorFromProviderFallback,
+} from '../domains/cats/services/freshness/RuntimeCapabilityDescriptor.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
+import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 
@@ -60,8 +73,16 @@ export interface MultiMentionRouteDeps {
   router: AgentRouter;
   invocationRecordStore: IInvocationRecordStore;
   invocationTracker?: InvocationTracker | undefined;
+  /** F254 AC-A6: DeliveryCursorStore for freshness gate (seenCursor) */
+  deliveryCursorStore?: DeliveryCursorStore;
+  /** F254 AC-A7: Event log for recording held/forward decisions */
+  freshnessEventLog?: FreshnessAttentionEventLog;
+  /** F254 R2: ThreadStore for play-mode visibility filter in freshness gate */
+  threadStore?: IThreadStore;
+  /** F254 AC-C2: Redis client for FreshnessInvocationStateStore carrierTier lookup */
+  redis?: import('@cat-cafe/shared/utils').RedisClient;
   /** F122B B6: InvocationQueue for unified dispatch */
-  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat'>;
+  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'countAgentEntriesForThread' | 'hasQueuedAgentForCat' | 'list'>;
   /** F122B B6: QueueProcessor for execution + response hook */
   queueProcessor?: {
     tryAutoExecute?(threadId: string): Promise<void>;
@@ -467,6 +488,90 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
         error: 'Anti-cascade: caller is an active multi-mention target',
         hint: 'Cannot create multi-mention while responding to one',
       });
+    }
+
+    // F254 AC-A6: Freshness gate — hold multi_mention if initiator has unseen messages
+    // in their thread. Fail-open: no cursor → forward; error → forward (log + continue).
+    if (deps.deliveryCursorStore) {
+      try {
+        // P1 fix (gpt52 R1+R2): full visibility filter aligned with post_message gate —
+        // baseline (deleted/non-delivered/briefing) + play-mode (canViewMessage/stream origin).
+        const needsFreshnessPlayFilter = deps.threadStore
+          ? await (async () => {
+              const thread = await deps.threadStore!.get(record.threadId);
+              return !!thread && (thread.thinkingMode ?? 'debug') === 'play';
+            })()
+          : false;
+        const freshnessViewer = needsFreshnessPlayFilter
+          ? { type: 'cat' as const, catId: callerCatId }
+          : { type: 'user' as const };
+
+        const messageFilter = (msg: Record<string, unknown>): boolean => {
+          // Baseline visibility (applies in ALL modes):
+          if (msg.deletedAt) return false;
+          if (!isDelivered(msg as unknown as Parameters<typeof isDelivered>[0])) return false;
+          if (msg.origin === 'briefing') return false;
+          // Play-mode visibility:
+          if (needsFreshnessPlayFilter) {
+            if (!canViewMessage(msg as unknown as Parameters<typeof canViewMessage>[0], freshnessViewer)) return false;
+            if (msg.origin === 'stream' && msg.catId && msg.catId !== callerCatId) return false;
+          }
+          return true;
+        };
+
+        // F254 AC-C2/C3: Derive RuntimeCapabilityDescriptor from stored carrierTier.
+        // Provider-only fallback (gpt52 terminal review P1): non-Claude services
+        // don't write carrierTier to Redis, so derive from provider alone for
+        // ASYNC_CLOUD_PROVIDERS (openai).
+        const callerCatConfig = catRegistry.tryGet(callerCatId as string);
+        const callerProvider = callerCatConfig?.config?.clientId ?? 'unknown';
+        let freshnessDescriptor;
+        if (deps.redis && record.invocationId) {
+          const stateStore = new FreshnessInvocationStateStore(deps.redis);
+          const state = await stateStore.get(record.invocationId);
+          if (state?.carrierTier) {
+            freshnessDescriptor = descriptorFromDriver(callerProvider, state.carrierTier);
+          } else {
+            freshnessDescriptor = descriptorFromProviderFallback(callerProvider);
+          }
+        } else {
+          freshnessDescriptor = descriptorFromProviderFallback(callerProvider);
+        }
+
+        const freshnessDecision = await checkFreshnessForPostMessage({
+          userId: record.userId,
+          catId: callerCatId,
+          threadId: record.threadId,
+          invocationId: record.invocationId,
+          toolName: 'multi_mention',
+          cursorStore: deps.deliveryCursorStore,
+          messageStore: deps.messageStore,
+          messageFilter,
+          // AC-A7: record held/forward decisions as events
+          eventLog: deps.freshnessEventLog,
+          // F254 queue-aware gate: detect queued messages hidden by isDelivered()
+          queueChecker: deps.invocationQueue ? createQueueChecker(deps.invocationQueue) : undefined,
+          // F254 AC-C3: descriptor parameterizes held/notice behavior per carrier tier
+          descriptor: freshnessDescriptor,
+        });
+        if (freshnessDecision.decision === 'held') {
+          return {
+            status: 'held',
+            reason: 'newer_messages_available',
+            unseenCount: freshnessDecision.unseenCount,
+            previews: freshnessDecision.previews ?? [],
+            omittedCount: freshnessDecision.omittedCount ?? 0,
+            // P2 fix (gpt52 R1): multi_mention has no acknowledgeHeld param,
+            // so don't advertise send_with_acknowledge action
+            actions: ['read_latest', 'revise'],
+          };
+        }
+      } catch (err) {
+        request.log.warn(
+          { err, catId: callerCatId, threadId: record.threadId },
+          '[F254] multi_mention freshness gate error, fail-open',
+        );
+      }
     }
 
     const createParams = {

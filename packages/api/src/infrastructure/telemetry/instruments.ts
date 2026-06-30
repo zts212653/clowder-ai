@@ -448,6 +448,82 @@ export const groundingBudgetExhaustedTotal = lazy(() =>
   }),
 );
 
+// --- F167 Phase O PR-O3: Hold-ball misuse detection counters ---
+
+/**
+ * Counts attempts to call hold_ball with wakeAfterMs but no waitSourceRef.
+ * Schema now rejects these (PR-O3), so this counter tracks how often cats
+ * still TRY the misuse pattern — feeds F192 weekly verdict to measure
+ * whether the cognitive fix (soft layer) is landing.
+ */
+export const holdBallUngroundedTimerReject = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.hold_ball.ungrounded_timer_reject', {
+    description: 'F167 PR-O3: hold_ball called with wakeAfterMs but no waitSourceRef (schema rejected)',
+  }),
+);
+
+/**
+ * Counts attempts to use the removed 'pending_input' kind in waitSourceRef.
+ * This backdoor let cats express "wait for human reply" through hold_ball
+ * instead of using @co-creator.
+ */
+export const holdBallPendingInputReject = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.hold_ball.pending_input_reject', {
+    description: 'F167 PR-O3: hold_ball called with pending_input kind (backdoor removed, schema rejected)',
+  }),
+);
+
+// --- F254 AC-B5: Freshness gate + notice + re-invoke telemetry ---
+
+/** Gate held: post_message/cross_post blocked because thread has unseen messages. */
+export const freshnessGateHeld = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.gate_held', {
+    description: 'F254 freshness gate held decisions (unseen messages blocked side-effect)',
+  }),
+);
+
+/** Gate forward: post_message/cross_post allowed (no unseen, or acknowledged). */
+export const freshnessGateForward = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.gate_forward', {
+    description: 'F254 freshness gate forward decisions (side-effect allowed)',
+  }),
+);
+
+/** Notice attached: content-free "you have unseen messages" notice delivered to cat. */
+export const freshnessNoticeAttached = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.notice_attached', {
+    description: 'F254 content-free freshness notice attached to read-only tool response',
+  }),
+);
+
+/** Notice acked: cat advanced seenCursor past notice (implicitly read the messages). */
+export const freshnessNoticeAcked = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.notice_acked', {
+    description: 'F254 freshness notice implicitly acked (seenCursor caught up)',
+  }),
+);
+
+/** Notice deferred: cat held_ball despite unresolved notices (chose to exit without reading). */
+export const freshnessNoticeDeferred = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.notice_deferred', {
+    description: 'F254 freshness notice deferred at hold_ball (cat exited without reading)',
+  }),
+);
+
+/** Re-invoke triggered: invocation ended with unresolved high-priority notices → re-invoke queued. */
+export const freshnessReinvokeTriggered = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.reinvoke_triggered', {
+    description: 'F254 freshness re-invoke triggered (unresolved notices → new invocation)',
+  }),
+);
+
+/** Re-invoke skipped: invocation ended but re-invoke not needed (cursor caught up, quota, etc). */
+export const freshnessReinvokeSkipped = lazy(() =>
+  meter().createCounter('cat_cafe.freshness.reinvoke_skipped', {
+    description: 'F254 freshness re-invoke skipped (cursor caught up / quota / already handled)',
+  }),
+);
+
 /** Liveness state type. */
 export type LivenessState = 'dead' | 'idle-silent' | 'busy-silent' | 'active';
 
@@ -520,4 +596,15 @@ export function warmupCounters(): void {
   groundingResolverTotal.add(0);
   groundingCacheHitTotal.add(0);
   groundingBudgetExhaustedTotal.add(0);
+  // F167 PR-O3: hold_ball misuse detection
+  holdBallUngroundedTimerReject.add(0);
+  holdBallPendingInputReject.add(0);
+  // F254 AC-B5: freshness gate + notice + re-invoke
+  freshnessGateHeld.add(0);
+  freshnessGateForward.add(0);
+  freshnessNoticeAttached.add(0);
+  freshnessNoticeAcked.add(0);
+  freshnessNoticeDeferred.add(0);
+  freshnessReinvokeTriggered.add(0);
+  freshnessReinvokeSkipped.add(0);
 }

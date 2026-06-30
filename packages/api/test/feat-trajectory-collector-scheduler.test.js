@@ -214,6 +214,9 @@ describe('FeatTrajectoryCollectorScheduler', () => {
       'warn-log fires on setLastCollectorTickAt error',
     );
   });
+
+  // New collector wiring tests (threadSplit + crossPost) moved to
+  // feat-trajectory-scheduler-new-collectors.test.js for file-size hygiene (P2 fix).
 });
 
 describe('createFeatTrajectoryCollectorTaskSpec', () => {

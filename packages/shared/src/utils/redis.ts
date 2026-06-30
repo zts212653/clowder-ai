@@ -49,6 +49,8 @@ export const SessionKeys = {
   deliveryCursor: (userId: string, catId: string, threadId: string) => `delivery-cursor:${userId}:${catId}:${threadId}`,
   /** Per-cat mention ack cursor — tracks last acknowledged @mention (#77) */
   mentionAck: (userId: string, catId: string, threadId: string) => `mention-ack:${userId}:${catId}:${threadId}`,
+  /** F254: Per-cat seen cursor — tracks what the cat actually READ mid-turn (independent from delivery cursor) */
+  seenCursor: (userId: string, catId: string, threadId: string) => `seen-cursor:${userId}:${catId}:${threadId}`,
   catState: (catId: string) => `state:${catId}`,
   taskQueue: (catId: string) => `tasks:${catId}`,
   messageChannel: () => 'chat:messages',
@@ -140,6 +142,38 @@ export class SessionStore {
   /** Delete a mention ack cursor (#77) */
   async deleteMentionAckCursor(userId: string, catId: string, threadId: string): Promise<number> {
     return this.redis.del(SessionKeys.mentionAck(userId, catId, threadId));
+  }
+
+  // ---- F254 Seen Cursor ----
+  // Independent namespace from delivery cursor. Tracks what the cat actually
+  // READ mid-turn (via list_recent/get_thread_context/get_message).
+  // MUST NOT affect delivery cursor or incremental injection (AC-A9).
+
+  /** Get the last seen message ID for a cat in a thread (F254) */
+  async getSeenCursor(userId: string, catId: string, threadId: string): Promise<string | null> {
+    return this.redis.get(SessionKeys.seenCursor(userId, catId, threadId));
+  }
+
+  /**
+   * Atomically set seen cursor only if messageId > current value (F254).
+   * Uses same Lua CAS script as delivery/mention cursors.
+   * Returns true if cursor was advanced, false if noop.
+   */
+  async setSeenCursor(
+    userId: string,
+    catId: string,
+    threadId: string,
+    messageId: string,
+    ttlSeconds = 604800, // 7 days, same as other cursors
+  ): Promise<boolean> {
+    const key = SessionKeys.seenCursor(userId, catId, threadId);
+    const result = (await this.redis.eval(SET_IF_GREATER_LUA, 1, key, messageId, String(ttlSeconds))) as number;
+    return result === 1;
+  }
+
+  /** Delete a seen cursor (F254) */
+  async deleteSeenCursor(userId: string, catId: string, threadId: string): Promise<number> {
+    return this.redis.del(SessionKeys.seenCursor(userId, catId, threadId));
   }
 
   async getCatState(catId: string): Promise<Record<string, unknown> | null> {

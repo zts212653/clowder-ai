@@ -107,6 +107,161 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 - 主动冒泡（新版本发布等白名单事件，安静优先）
 - OpenCLI 式页面操作演示（#841 终态收编：猫操作页面给用户看，操作前用户确认）
 
+#### Phase E3: Resizable Ball（猫猫球可拖拽缩放）
+
+> operator 2026-06-26："我能够拖动猫猫球的大小让这只猫变大点吗？现在有的时候感觉这只大猫猫太小了"
+
+- **技术基础**：精灵图每帧 192×208px，当前显示 72×72px（缩了 ~2.7x）——放大到 ~190px 之前零像素感
+- react-rnd 已支持 resize，当前 `enableResizing={false}` 关着，打开即可
+- 大小持久化到 `ConciergeConfig.ballSize`（跟 `ballPosition` 同套路，TTL=0 铁律 5）
+- 动态 size 替换 `BALL_SIZE` 常量，toolbar 位置 / viewport clamp / resize handler 跟着走
+- 范围：`minSize: 48px`（口袋猫）→ `maxSize: 192px`（素材原始分辨率极限）
+- **实现清单**（Maine Coon codex 审计）：不能只打开 `enableResizing`，还需 ① `ConciergeConfig` 补 `ballSize?: number` 字段（shared type）② API schema 接纳 ③ conciergeStore 读写 ④ ConciergeHost clamp + toolbar 跟随 ⑤ settings 页 UI（滑块 or 预设）⑥ 全套测试。E3 是 E4 的参数基础——size 调步幅/频率/碰撞半径
+- **创意加分**（Siamese35 2026-06-26/27 提案）：resize 手柄用小鱼干 🐟 图标；不同体型有不同重力反馈（大猫落地"吨！"微震，小猫轻飘滑落）
+- **体型影响行为**（gemini35 补充）：大猫散步频率低但步幅大，小猫散步频率高但步幅小——size 不只是视觉缩放，还可以做行为参数调制
+
+#### Phase E4: Autonomous Behavior Engine（猫猫自主生活引擎）
+
+> operator 2026-06-26："猫应该能自己跑起来！甚至和我们的界面交互！比如拖到界面边边可以猫猫躲起来！加点让他真的在 Hub 内生活的感觉"
+
+从"工具型状态机"升级为"生活型行为引擎"。利用已有 9 态精灵图（idle/running-left/running-right/jumping/waving/waiting/running/review/failed），加入时间驱动和空间交互的自主行为层。
+
+**核心行为（按技术复杂度排序）**：
+
+1. **消息惊起** 🟢 简单 — 收到新消息/结果时 jumping 蹦一下（已有 ballState 变化钩子，几行代码）
+2. **深度睡眠** 🟡 中等 — 用户 idle 5min → 猫就地躺倒缩团 + Zzz 气泡 → 鼠标靠近伸懒腰唤醒
+3. **边缘躲猫猫** 🟡 中等 — 拖到浏览器边缘贴边释放 → 刺溜滑进去只露眼睛和耳朵探头 → 鼠标靠近爬出来拍灰（waving）
+4. **自主溜达** 🟡 中等 — idle 一段时间后随机散步（running 动画），但要仔细调频率避免"猫挡住我在点的东西"
+5. **追逐光标** 🔴 需打磨 — 极低概率（~1%），鼠标在猫附近晃动时锁定→扭屁股→扑过去（jumping），需碰撞回避区
+
+**互动玩法扩展**（operator 2026-06-26："投喂小鱼干？猫粮？"）：
+- 投喂系统：用户喂鱼干/猫粮 → 猫猫反应（蹭蹭/打滚/呼噜）
+- 与 Hub UI 元素交互：路过未读红点好奇扑一下、在输入框上打滚
+- 具体交互设计由Siamese出方案
+
+**事件驱动主动行为**（operator 2026-06-26："QQ宠物/拓麻歌子/宝可梦GO！猫要更主动！不是默默无闻等我找的猫！结合定时任务或 event 主动找operator撒娇！"）：
+
+家里已有丰富的事件源可以驱动前台猫主动行为：
+
+| 事件源 | 触发行为 | 猫猫表现 |
+|--------|----------|----------|
+| `ball.hold_expired` / `ball.void_pass` 累积 N 个 | "有 N 个球掉地上了！" | 焦急 waving + badge |
+| `ball.frozen` / `ball.abandoned` | "这只猫好像卡住了…" | 担心 waiting 态 |
+| `task.idle_long`（僵尸任务） | "这个任务好久没人动了" | 好奇地看向任务方向 |
+| `invocation.died`（猫崩了） | "有只猫崩了！" | 惊吓 jumping + failed 态 |
+| CI fail（CiCdRouter） | "构建挂了！" | 惊起 jumping |
+| PR merged | 开心蹦跶 | jumping + 得意脸 |
+| 新 community issue | "有人来串门了~" | 好奇 running 到角落 |
+| operator长时间 idle | 主动撒娇蹭过来 | waving + 冒爱心 |
+| operator深夜在线 | "operator该睡了喵~" | 打瞌睡暗示 |
+| 定时日报 | 汇总掉球/完成/活跃 | 抱着小本本 waiting |
+| 新 feature merged | "家里又多了一个功能！" | 开心 running |
+| 长时间未读 thread | 往那个方向 waving | 探头提醒 |
+
+参考系：QQ宠物的"饿了/想你了/无聊了" + 拓麻歌子的需求驱动 + 宝可梦GO 的位置交互——核心是**有温度的主动**，不是通知轰炸。
+
+**架构决策（2026-06-27 三猫 brainstorm 综合）**：
+
+> 参与猫：Siamese35（创意方向）、Ragdoll48（架构判断）、Maine Coon codex（技术实现 + 接口收窄）
+
+**A. 双输入优先级合成**（opus48 架构判断）：
+
+```
+petState = compose(
+  business: projectToPetState(conciergeState),  // KD-18 纯函数不动
+  autonomous: behaviorEngine(time, space, events)
+)
+```
+
+- **KD-18 投影函数保持不变**——autonomous 层在 KD-18 输出端合成，不是平行状态机
+- 合成规则：business 有活跃态时 business 赢；business idle 持续 N 秒后 autonomous 接管
+- **滞回（Hysteresis）**：business→autonomous 需要 idle 超时（防闪烁）；autonomous→business 立即切回（用户感知零延迟）
+- 单一选择器点（ConciergeHost 层），不分散到各组件
+
+**A.1 状态隔离（Maine Coon codex 收窄）**：
+
+- **`ConciergeBallState` 不可写入 autonomous 行为**——业务 8 态仍是唯一真相源（`shared/types/concierge.ts:55`）
+- E4 在前端新增 `usePetBehavior()` hook：输入 `businessPetState + local timers + socket events + pointer/viewport`，输出 `visualPetState + overlay + positionIntent`
+- 这样 KD-18 投影链完全不被污染——"猫伸懒腰"是前端视觉叠加层，不是 business state
+
+**B. 双子系统**（opus48）：
+
+| 子系统 | 输入 | 输出 | 生命期 |
+|--------|------|------|--------|
+| `EventBehavior` | business 事件（ball.hold_expired, CI fail, PR merged...） | 短暂情绪态 + badge | 事件驱动，秒级 |
+| `AmbientBehavior` | 时间 + 空间 + 用户 idle | 持续环境行为（散步/睡觉/探头） | 时间驱动，分钟级 |
+
+两系统独立运行，EventBehavior 优先级 > AmbientBehavior（事件打断环境行为）。
+
+**C. "探头探脑"非侵入式主动**（gemini35 创意方向）：
+
+- 猫主动行为表现为**朝事件方向位移 30-50px** + **无字微气泡**（`!` / `❤️` / `?`）
+- hover 微气泡展开一行文字（"有 3 个球掉地上了"），不 hover 则 3s 后自动消散
+- **零强制打断**：用户永远可以忽略，猫不会跳到视野中央抢焦点
+
+**D. "三不"红线**（gemini35）：
+
+1. **不抢焦点**（No focus hijack）：猫的主动行为不触发 modal / dialog / toast
+2. **不挡中央**（No central obstruction）：自主溜达的路径避开 viewport 中心 40% 区域
+3. **不轰炸事件**（No event spamming）：EventBehavior 频率上限 + 事件合并（5 个掉球合成一次提醒）
+
+**E. 五项 failure mode 防护**（opus48）：
+
+1. 状态闪烁 → 滞回 + cooldown
+2. 事件风暴 → 合并队列 + 频率上限
+3. 精灵图不够 → **OQ-9 Sprite Gap Audit**（"探头/伸懒腰/打滚"需要确认现有 9 态是否够用，可能需要扩展 atlas）
+4. CPU 负载 → requestAnimationFrame + 可见性 API（页面不可见时暂停）
+5. 用户厌烦 → muted 一键关闭 + proactivePolicy 分级（已有 ambient/quiet-badge）
+
+**F. 事件通道（Maine Coon codex）**：
+
+- 复用已有 Socket.IO 通道（`SocketManager` 已有 `broadcastToRoom`/`emitToUser` + `BroadcastRateMonitor`）
+- **新开窄事件 `concierge:event`**，不塞 `agent_message`（避免污染现有消息流）
+- payload 精简：`{ kind: string, severity: 'low'|'medium'|'high', targetThreadId?: string, count?: number, expiresAt?: number }`
+- 前端统一进 EventBehavior 队列做合并 + cooldown
+
+**架构原则**：
+- 行为引擎是 KD-18 投影的下游合成层，不是平行状态机
+- `ConciergeBallState` 是业务真相源，autonomous 行为只在前端 `usePetBehavior()` 合成视觉层
+- 后端推送复用 Socket.IO `concierge:event` 窄通道（不污染 `agent_message`）
+- 安静优先（继承 Clippy 反面教训 Risk §1）：用户正在交互时暂停自主行为；OQ-4 白名单分级仍生效
+- 所有行为可在设置页关闭（respect `muted` + 新增 `behaviorEnabled` 开关）
+- 主动行为频率上限（防 QQ 宠物末期的"疯狂弹窗"退化）
+
+#### 前台猫人格（跨 Phase 问题 · OQ-8）
+
+> operator 2026-06-26："前台的Siamese缺少猫味！他完全不猫猫！他好像是可怜的Siamese被硬套上制服当前台上班打工猫"
+
+**问题**：当前值班猫 prompt 过于工具化，输出没有猫的性格（猫德/摸鱼/好奇/傲娇）。
+
+**三猫收敛方案（2026-06-27 brainstorm）**：
+
+- **v1（解耦）**：只改 concierge system prompt 的 persona 注入。猫人格 = 行为倾向概率分布（例：60% 好奇 + 20% 傲娇 + 20% 打工猫），不是加"喵~"后缀或角色扮演剧本。Prompt persona 独立于视觉态，可以先做
+- **v2（同步）**：视觉态反哺 prompt context。猫在 AmbientBehavior 睡觉时语气慵懒（"嗯…你说的那个…"），猫在 EventBehavior 兴奋时语气活泼（"！发现了！"）。视觉-文字一致性
+- **gemini35 创意补充**：不同猫种对应不同人格基底——Ragdoll温柔黏人、Maine Coon沉稳可靠、Siamese活泼话多。但用户可通过 `personaTone` 设置覆盖
+- **与 E4 行为引擎协同**：视觉上猫在"生活"（E4），文字上猫也得有"猫味"（OQ-8 v1/v2）
+
+## User Journey
+
+**Scope unit**: Cat Ball（猫猫球）— Hub 任意页面常驻悬浮入口
+
+**Primary flow** (Phase A — 前台开张):
+1. 用户在 Hub 任意页面看到右下角猫猫球（桌宠形态，默认Ragdoll皮肤）
+2. 点击猫猫球 → 弹出工具栏（聊聊/传话/调查）
+3. 点"聊聊" → 展开气泡面板，输入一句话
+4. 前台猫回复：功能发现（"最近有什么新功能"）/ 记忆导航（"之前讨论的 X 在哪"，回复含跳转+原地看按钮）/ 求助引导（触发 guide）
+5. 猫猫球可拖拽移动、缩放（48–192px），位置+大小持久化
+
+**Relay flow** (Phase B — 总机能力):
+1. 点"传话" → 前台猫分诊：直接跳转（go）/ 创建中继任务（relay）/ 发起调查（investigate）
+2. Relay: 确认卡片 → 用户确认 → 目标猫处理 → 结果回流到猫猫球
+3. Investigate: 后台调查 → 进度轮询 → 报告渲染（anchor 列表可点击跳转）
+
+**Autonomous behavior** (Phase E4 — 自主生活引擎):
+1. 猫猫球闲置 10s 后进入自主行为：随机溜达（中心回避）、新消息惊起（跳跃）、长时间无操作摇手+💤
+2. 业务状态（用户交互/回复中）立即中断自主行为，零延迟切回
+3. 设置页可关闭自主行为
+
 ## 需求点 Checklist
 
 | ID | 需求点（operator experience/转述） | AC 编号 | 验证方式 | 状态 |
@@ -120,6 +275,9 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 | R7 | "小模型发现自己干不了→喊大喵（优先 flash/sonnet/spark）" | AC-D1, AC-D2 | 延迟数字 + 代码断言 | [ ] |
 | R8 | 桌宠/派蒙式常驻陪伴 | Phase E（AC 启动时补） | 录屏 | [ ] |
 | R9 | #841 悬浮入口 + 页面上下文（社区） | AC-A1 | 截图/录屏 | [x] |
+| R10 | "猫猫太小了！能拖大点吗？"（可拖拽缩放） | AC-E3-1 | 录屏 + 截图 | [x] |
+| R11 | "猫应该能自己跑起来！在 Hub 内生活的感觉"（自主行为） | AC-E4-1~7 | 录屏 | [x] |
+| R12 | "前台的Siamese缺少猫味！完全不猫猫"（人格/猫德） | OQ-8 | 对话截图 | [ ] |
 
 ### 覆盖检查
 - [x] 每个需求点都能映射到至少一个 AC（R8 远期 Phase 启动时补编号）
@@ -175,6 +333,14 @@ Cat Café 三个多月迭代 200+ feature，"一句话的事"和"一个 feature 
 - [x] AC-E2-1: Skin picker unlock — Settings page `皮肤` section upgraded from locked chip to 3 `RadioOption`s (`yanyan-codex` / `ragdoll-v1` / `yarn-ball`), reusing existing optimistic `updateConfig()` partial PUT flow
 - [x] AC-E1-5: xianxian-codex 9-state animated atlas — parallel `xianxian-codex` skin using same `YANYAN_ATLAS_ROWS` config + dynamic base path selection in `usePetSkin.ts`, 733KB spritesheet (1536×1872, 8×9 grid, 192×208 cells), `pet.json` manifest (ragdoll, seal bicolor, video-extraction provenance), Settings 4th radio option, API zod validator + shared type + store type aligned (6/6 consumer sites). 37 web tests (8 new). BUG-UX-6 素材升级 pipeline 首个产出
 - [x] AC-E2-2: Default skin change for unconfigured users — `CONCIERGE_CONFIG_DEFAULTS.skin` changed to `yanyan-codex`; existing TTL=0 persisted configs intentionally remain untouched and must switch via the unlocked picker
+- [x] AC-E3-1: Resizable ball via react-rnd `enableResizing={{ bottomRight: true }}` + `lockAspectRatio` — drag bottom-right corner to resize 48–192px (native atlas resolution ceiling). `clampBallSize()` shared utility (handles undefined/null/NaN, rounds, clamps). `ConciergeConfig.ballSize` persisted TTL=0. AtlasSprite dynamic scaling `Math.round(containerSize * 0.88)` height-fit. RangeSlider local state buffering + commit-on-pointerUp (P1 fix: pendingRef single-flight guard). Settings section 6 "猫猫球大小" slider + reset. `conciergeProjection.ts` extraction for store file-size hygiene (377→329 lines). 13 shared + full web test suite green. gpt52 local review 4 rounds (R1: 1P1 RangeSlider + 1P2 mailbox; R2: 0 findings on PR code, 1P1 store line-count → extraction; R3: 1P1 withdrawn dist-freshness; final: 0 findings) + cloud review 3 rounds (封板 LL-072, R3 stale ratio 60%). PR #2614
+- [x] AC-E4-1: `usePetBehavior()` hook — dual-input priority composition (business > autonomous, 10s idle hysteresis, zero-delay interrupt). Pure computation core `petBehaviorCore.ts` + React hook `usePetBehavior.ts`. `computeBehaviorPhase()` three-state machine (business→idle-countdown→autonomous). Single selector in ConciergeHost. 27 unit tests covering phase transitions + timing. PR #2631
+- [x] AC-E4-2: State isolation — ConciergeBallState read-only input. Autonomous outputs visual overlay only (`PetBehaviorOutput`), never writes to concierge store. Pure functions in `petBehaviorCore.ts` have zero store imports. Safety tests assert output shape is purely declarative. PR #2631
+- [x] AC-E4-3: 消息惊起 — `computeEventBehavior()` fires `jumping` on new message (2s burst, 5s cooldown). P1 fix: EventBehavior extracted to run independently of phase gate (spec §B dual-subsystem, not gated behind 10s idle delay). Phase-independence test + cooldown test + duration test. PR #2631
+- [x] AC-E4-4: 自主溜达 — `computeWalkDelta()` center-avoiding random walk (WALK_STEP_PX=40, WALK_COOLDOWN_MS=120s). 8-direction seed mapping + center avoidance (reverse + nearest-edge push) + viewport boundary clamping. Safety tests verify center 40% avoidance across all seeds. PR #2631
+- [x] AC-E4-5: 空闲提醒 — user idle 5min → `waving` + 💤 overlay. Mouse proximity <80px → wake to `idle`. `computeAmbientBehavior()` priority chain: idle reminder > random walk > idle default. Proximity wake test + overlay test. PR #2631
+- [x] AC-E4-6: "三不" safety enforcement — dedicated `petBehaviorSafety.test.ts` (195 lines): ① no focus hijack (output shape purely declarative, no side effects) ② no central obstruction (walk from center always exits center 40%, walk from edge stays outside) ③ no event spamming (rapid message cooldown ≤2 bounces, walk cooldown ≤2 walks, finite bounce duration). PR #2631
+- [x] AC-E4-7: Settings `behaviorEnabled` toggle — `ConciergeConfig.behaviorEnabled` field, default `true`. `ConciergeHost` passes `behaviorEnabled && !hidden` to hook (INV-3 hidden gate enforcement). Interacts with `muted`: muted=true also suppresses. Store read/write + API validation + TTL=0 persistence. PR #2631
 
 ## Dependencies
 

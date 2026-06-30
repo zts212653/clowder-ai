@@ -1,7 +1,13 @@
 // F102 Batch 3 — parseTextResults + anchorToHref + deduplicateRecallEvents
 import { describe, expect, it } from 'vitest';
 import type { RecallEvent } from '../useRecallEvents';
-import { anchorToHref, deduplicateRecallEvents, parseTextResults } from '../useRecallEvents';
+import {
+  anchorToHref,
+  deduplicateRecallEvents,
+  parseTextResults,
+  recallEventDisplayTitle,
+  recallEventResultLabel,
+} from '../useRecallEvents';
 
 const SAMPLE_OUTPUT = `Found 2 result(s):
 
@@ -116,11 +122,12 @@ describe('anchorToHref', () => {
 
 // F102 bugfix regression: deduplicateRecallEvents
 describe('deduplicateRecallEvents', () => {
-  const makeRecall = (id: string, query: string, timestamp: number): RecallEvent => ({
+  const makeRecall = (id: string, query: string, timestamp: number, extra: Partial<RecallEvent> = {}): RecallEvent => ({
     id,
     query,
     timestamp,
     resultCount: 1,
+    ...extra,
   });
 
   it('returns only live events when history is empty (thread switch clears stale)', () => {
@@ -167,5 +174,65 @@ describe('deduplicateRecallEvents', () => {
 
   it('handles both empty — returns empty array', () => {
     expect(deduplicateRecallEvents([], [])).toEqual([]);
+  });
+});
+
+describe('recallEventDisplayTitle', () => {
+  it('renders query-less list_recent events as readable memory navigation', () => {
+    const event: RecallEvent = {
+      id: 'recent-docs',
+      query: '',
+      toolName: 'list_recent',
+      scope: 'docs',
+      timestamp: 1000,
+    };
+
+    expect(recallEventDisplayTitle(event)).toBe('最近记忆 · docs');
+  });
+
+  it('keeps search_evidence queries as the primary title', () => {
+    const event: RecallEvent = {
+      id: 'search',
+      query: 'workspace_navigate feature owner',
+      toolName: 'search_evidence',
+      timestamp: 1000,
+    };
+
+    expect(recallEventDisplayTitle(event)).toBe('workspace_navigate feature owner');
+  });
+});
+
+describe('recallEventResultLabel', () => {
+  it('shows explicit hit counts when telemetry recorded resultCount', () => {
+    expect(
+      recallEventResultLabel({
+        id: 'search',
+        query: 'F102',
+        timestamp: 1000,
+        resultCount: 0,
+        results: [],
+      }),
+    ).toBe('0 条命中');
+  });
+
+  it('marks historical rows with candidates but missing resultCount as telemetry-unknown', () => {
+    expect(
+      recallEventResultLabel({
+        id: 'unknown',
+        query: 'oversized search',
+        timestamp: 1000,
+        results: [],
+      }),
+    ).toBe('命中数未记录');
+  });
+
+  it('does not label pending live tool_use events before a result arrives', () => {
+    expect(
+      recallEventResultLabel({
+        id: 'pending',
+        query: 'F200',
+        timestamp: 1000,
+      }),
+    ).toBeUndefined();
   });
 });

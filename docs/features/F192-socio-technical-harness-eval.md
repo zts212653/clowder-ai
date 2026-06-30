@@ -5,6 +5,7 @@ topics: [harness-engineering, eval, socio-technical, observability, cat-user-fee
 doc_kind: spec
 created: 2026-05-07
 tips_exempt: harness-internal eval infra — no user-visible capability change
+user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 
 # F192: Socio-Technical Harness Eval — harness 共创评估体系

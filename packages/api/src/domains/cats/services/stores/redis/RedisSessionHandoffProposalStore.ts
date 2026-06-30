@@ -21,6 +21,7 @@ import type {
   HandoffCheckpointPatch,
   ISessionHandoffProposalStore,
 } from '../ports/SessionHandoffProposalStore.js';
+import { CAS_AND_SETTLE_LUA, CAS_STATUS_LUA, RELEASE_DEDUP_LUA } from './redis-handoff-lua-scripts.js';
 
 const ACTIVE_STATUSES: ReadonlySet<string> = new Set(['pending', 'approving']);
 
@@ -31,6 +32,8 @@ const HandoffKeys = {
     `handoff-proposals:catthread:${userId}:${catId}:${threadId}`,
   /** F246 Approval Hub: per-user index for listPendingByUser (score=createdAt). */
   user: (userId: string) => `handoff-proposals:user:${userId}`,
+  /** F246 Phase G: per-user settled (approved|rejected) index for listSettledByUser (score=updatedAt). */
+  settledUser: (userId: string) => `handoff-proposals:settled:${userId}`,
   dedup: (userId: string, clientRequestId: string) => `handoff-proposal-dedup:${userId}:${clientRequestId}`,
 };
 
@@ -38,38 +41,6 @@ const HandoffKeys = {
  * user-visible proposal state which stays TTL=0 per LL-048) — bounded well beyond any
  * callbackPost retry window so the key self-cleans without leaking. */
 const DEDUP_TTL_SECONDS = 3600;
-
-/**
- * Compare-and-delete: DEL the dedup key only if it still points at the expected proposalId, so a
- * release never wipes a sibling's reservation that already replaced the key.
- * KEYS[1] = dedup key; ARGV[1] = expectedProposalId.
- */
-const RELEASE_DEDUP_LUA = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  return redis.call('DEL', KEYS[1])
-end
-return 0
-`;
-
-/**
- * CAS Lua: atomically check current status ∈ expected (comma-separated) → HSET field/value pairs.
- * KEYS[1] = detail hash; ARGV[1] = expected statuses ("pending" | "pending,approving");
- * ARGV[2..] = HSET pairs (caller includes new status + updatedAt).
- * Returns 1 on match, 0 otherwise (incl. missing key — HGET returns false).
- */
-const CAS_STATUS_LUA = `
-local current = redis.call('HGET', KEYS[1], 'status')
-if not current then return 0 end
-local matched = false
-for st in string.gmatch(ARGV[1], '[^,]+') do
-  if st == current then matched = true end
-end
-if not matched then return 0 end
-local fields = {}
-for i = 2, #ARGV do fields[#fields + 1] = ARGV[i] end
-if #fields > 0 then redis.call('HSET', KEYS[1], unpack(fields)) end
-return 1
-`;
 
 export class RedisSessionHandoffProposalStore implements ISessionHandoffProposalStore {
   private readonly redis: RedisClient;
@@ -147,19 +118,22 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
   }
 
   async finalizeApproval(proposalId: string): Promise<SessionHandoffProposal | null> {
-    const ok = await this.cas(proposalId, 'approving', ['status', 'approved', 'updatedAt', String(Date.now())]);
+    // Pre-read to obtain userId (needed for index key computation in casAndSettle).
+    // The CAS check inside casAndSettle is still atomic — pre-read is only for userId.
+    const existing = await this.get(proposalId);
+    if (!existing || existing.status !== 'approving') return null;
+    const ok = await this.casAndSettle(proposalId, existing.userId, 'approving', 'approved', Date.now());
     if (!ok) return null;
-    const result = await this.get(proposalId);
-    if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
-    return result;
+    return this.get(proposalId);
   }
 
   async markRejected(proposalId: string): Promise<SessionHandoffProposal | null> {
-    const ok = await this.cas(proposalId, 'pending', ['status', 'rejected', 'updatedAt', String(Date.now())]);
+    // Pre-read to obtain userId (needed for index key computation in casAndSettle).
+    const existing = await this.get(proposalId);
+    if (!existing || existing.status !== 'pending') return null;
+    const ok = await this.casAndSettle(proposalId, existing.userId, 'pending', 'rejected', Date.now());
     if (!ok) return null;
-    const result = await this.get(proposalId);
-    if (result) await this.redis.zrem(HandoffKeys.user(result.userId), proposalId);
-    return result;
+    return this.get(proposalId);
   }
 
   async markExpired(proposalId: string): Promise<SessionHandoffProposal | null> {
@@ -203,6 +177,26 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       if (!d.proposalId || d.status !== 'pending') continue;
       out.push(hydrate(d));
       if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  async listSettledByUser(userId: string, limit = 100): Promise<SessionHandoffProposal[]> {
+    // Read from settled ZSet (score=updatedAt), newest first (ZREVRANGE).
+    const ids = await this.redis.zrevrange(HandoffKeys.settledUser(userId), 0, limit - 1);
+    if (ids.length === 0) return [];
+    const pipeline = this.redis.pipeline();
+    for (const id of ids) pipeline.hgetall(HandoffKeys.detail(id));
+    const results = await pipeline.exec();
+    if (!results) return [];
+    const out: SessionHandoffProposal[] = [];
+    for (const [err, data] of results) {
+      if (err || !data || typeof data !== 'object') continue;
+      const d = data as Record<string, string>;
+      if (!d.proposalId) continue;
+      // Double-check status in case of stale index membership
+      if (d.status !== 'approved' && d.status !== 'rejected') continue;
+      out.push(hydrate(d));
     }
     return out;
   }
@@ -264,6 +258,31 @@ export class RedisSessionHandoffProposalStore implements ISessionHandoffProposal
       HandoffKeys.detail(proposalId),
       expected,
       ...pairs,
+    )) as number;
+    return result === 1;
+  }
+
+  /**
+   * Atomic CAS + settled-index update via CAS_AND_SETTLE_LUA.
+   * Eliminates the crash window between status transition and ZADD.
+   */
+  private async casAndSettle(
+    proposalId: string,
+    userId: string,
+    expectedStatus: string,
+    newStatus: string,
+    updatedAt: number,
+  ): Promise<boolean> {
+    const result = (await this.redis.eval(
+      CAS_AND_SETTLE_LUA,
+      3,
+      HandoffKeys.detail(proposalId), // KEYS[1]
+      HandoffKeys.user(userId), // KEYS[2]
+      HandoffKeys.settledUser(userId), // KEYS[3]
+      expectedStatus, // ARGV[1]
+      newStatus, // ARGV[2]
+      String(updatedAt), // ARGV[3]
+      proposalId, // ARGV[4]
     )) as number;
     return result === 1;
   }

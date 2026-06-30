@@ -50,6 +50,9 @@ export function ConciergePanel() {
   const invocationStatus = useConciergeStore((s) => s.invocationStatus);
   const muted = useConciergeStore((s) => s.muted);
   const setMuted = useConciergeStore((s) => s.setMuted);
+  const behaviorEnabled = useConciergeStore((s) => s.behaviorEnabled);
+  const setBehaviorEnabled = useConciergeStore((s) => s.setBehaviorEnabled);
+  const notifyMessage = useConciergeStore((s) => s.notifyMessage);
   const threadId = useConciergeStore((s) => s.threadId);
   // A3a P2 fix: pre-filled prompt from toolbar ability buttons (找找看/新功能/传话)
   const pendingPrompt = useConciergeStore((s) => s.pendingPrompt);
@@ -138,6 +141,34 @@ export function ConciergePanel() {
     }
   }, [messages, invocationStatus, setInvocationStatus]);
 
+  // E4 cloud-fix R2-2: notify store when new cat messages arrive (AC-E4-3 消息惊起 trigger).
+  // Tracks non-user message count; any increase → notifyMessage() → lastMessageTimestamp update.
+  // Three-phase initialization to avoid treating loaded history as new messages:
+  //   Phase 1 (sentinel -1): very first render (messages=[]) — record baseline, don't trigger
+  //   Phase 2 (!historySettled): first messages change after mount — history load, update baseline
+  //   Phase 3 (steady): real-time tracking — notify on count increase
+  const prevCatMsgCountRef = useRef(-1);
+  const historySettledRef = useRef(false);
+  useEffect(() => {
+    const catCount = messages.filter((m) => !m.isUser).length;
+    if (prevCatMsgCountRef.current === -1) {
+      // Phase 1: very first render — set initial baseline
+      prevCatMsgCountRef.current = catCount;
+      return;
+    }
+    if (!historySettledRef.current) {
+      // Phase 2: first change after mount — treat as history load settling
+      historySettledRef.current = true;
+      prevCatMsgCountRef.current = catCount;
+      return;
+    }
+    // Phase 3: steady state — real-time tracking
+    if (catCount > prevCatMsgCountRef.current) {
+      notifyMessage();
+    }
+    prevCatMsgCountRef.current = catCount;
+  }, [messages, notifyMessage]);
+
   // Continued polling every 5 s while in_progress (bridges initial burst for slow replies)
   useEffect(() => {
     if (invocationStatus !== 'in_progress') return;
@@ -178,6 +209,11 @@ export function ConciergePanel() {
   const handleClose = useCallback(() => setSurfaceState('toolbar'), [setSurfaceState]);
   // AC-A6: muted toggle — accessible from panel
   const handleMuteToggle = useCallback(() => void setMuted(!muted), [muted, setMuted]);
+  // AC-E4-7: behavior toggle — disable autonomous animations
+  const handleBehaviorToggle = useCallback(
+    () => void setBehaviorEnabled(!behaviorEnabled),
+    [behaviorEnabled, setBehaviorEnabled],
+  );
 
   // F229 UX: cancel/stop in-progress invocation via scoped per-cat cancel (F122B AC-B9).
   // Uses /cancel/:catId (scoped to the duty cat) instead of /force-reset (whole-thread nuclear).
@@ -376,6 +412,24 @@ export function ConciergePanel() {
             ].join(' ')}
           >
             <CafeIcon name={muted ? 'bell' : 'bell-off'} className="w-4 h-4" />
+          </button>
+          {/* AC-E4-7: behavior toggle — disable/enable autonomous cat animations */}
+          <button
+            type="button"
+            aria-label={behaviorEnabled ? '关闭自主行为' : '开启自主行为'}
+            onClick={handleBehaviorToggle}
+            title={behaviorEnabled ? '关闭猫猫自主活动' : '开启猫猫自主活动'}
+            style={{
+              color: behaviorEnabled ? 'var(--cafe-text-muted)' : 'var(--semantic-warning)',
+            }}
+            className={[
+              'p-1 rounded',
+              'transition-colors duration-150',
+              'hover:opacity-80',
+              'focus:outline-none focus-visible:ring-1 focus-visible:ring-[color:var(--cafe-accent)]',
+            ].join(' ')}
+          >
+            <CafeIcon name="paw" className="w-4 h-4" />
           </button>
           <button
             type="button"

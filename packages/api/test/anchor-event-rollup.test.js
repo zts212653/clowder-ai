@@ -251,4 +251,126 @@ describe('AnchorEventLog — rollup (core)', () => {
     assert.ok(rollup.track1Snapshot.returnedByTool !== undefined);
     assert.ok(rollup.track1Snapshot.drillByTool !== undefined);
   });
+
+  it('excludes modeResolved=full events from rollup savings (gpt52 R2 P1)', () => {
+    const now = Date.now();
+    // An anchor preview (should be counted)
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-1'],
+      returnedChars: 100,
+      originalChars: 1000,
+      modeResolved: 'anchor',
+      modeSource: 'default',
+      _testTimestamp: now,
+    });
+    // A full-mode call (should NOT be counted in savings rollup)
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-2'],
+      returnedChars: 500,
+      originalChars: 500,
+      modeResolved: 'full',
+      modeSource: 'explicit',
+      _testTimestamp: now + 1,
+    });
+
+    const rollup = getAnchorTelemetryRollup({
+      windowStartMs: now - 1000,
+      windowEndMs: now + 10000,
+    });
+
+    const tc = rollup.perTool['thread-context'];
+    assert.ok(tc, 'thread-context must have rollup entry (from anchor event)');
+    assert.strictEqual(tc.previewResponses, 1, 'only anchor events count as preview responses');
+    assert.strictEqual(tc.previewedItems, 1, 'only anchor event items counted');
+    assert.strictEqual(tc.returnedChars, 100, 'full-mode returnedChars must not be included');
+    assert.strictEqual(tc.originalChars, 1000, 'full-mode originalChars must not be included');
+    assert.strictEqual(tc.charsSaved, 900, 'savings must reflect only anchor events');
+  });
+
+  it('summarizes adoption lens by modeResolved/modeSource without filtering full-mode calls', () => {
+    const now = Date.now();
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-explicit-anchor'],
+      returnedChars: 100,
+      originalChars: 1000,
+      modeResolved: 'anchor',
+      modeSource: 'explicit',
+      catId: 'opus',
+      _testTimestamp: now,
+    });
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-explicit-full'],
+      returnedChars: 1000,
+      originalChars: 1000,
+      modeResolved: 'full',
+      modeSource: 'explicit',
+      catId: 'opus',
+      _testTimestamp: now + 1,
+    });
+    recordAnchorPreviewEvent({
+      tool: 'pending-mentions',
+      itemIds: ['msg-default-anchor'],
+      returnedChars: 90,
+      originalChars: 900,
+      modeResolved: 'anchor',
+      modeSource: 'default',
+      catId: 'sonnet',
+      _testTimestamp: now + 2,
+    });
+    recordAnchorPreviewEvent({
+      tool: 'get-message',
+      itemIds: ['msg-legacy-anchor'],
+      returnedChars: 80,
+      originalChars: 800,
+      modeResolved: 'anchor',
+      modeSource: 'legacy_equivalent',
+      catId: 'codex',
+      _testTimestamp: now + 3,
+    });
+
+    const rollup = getAnchorTelemetryRollup({
+      windowStartMs: now - 1000,
+      windowEndMs: now + 10000,
+    });
+
+    assert.deepStrictEqual(rollup.adoption, {
+      explicitAnchorCalls: 1,
+      explicitFullCalls: 1,
+      defaultAnchorCalls: 1,
+      defaultFullCalls: 0,
+      legacyEquivalentAnchorCalls: 1,
+      legacyEquivalentFullCalls: 0,
+      uniqueCatsExplicitAnchor: 1,
+      unknownModeCalls: 0,
+    });
+  });
+
+  it('counts adoption for zero-item mode-controlled responses without item-level open-rate noise', () => {
+    const now = Date.now();
+    recordAnchorPreviewEvent({
+      tool: 'list-tasks',
+      itemIds: [],
+      returnedChars: 0,
+      originalChars: 0,
+      modeResolved: 'anchor',
+      modeSource: 'legacy_equivalent',
+      catId: 'codex',
+      _testTimestamp: now,
+    });
+
+    const rollup = getAnchorTelemetryRollup({
+      windowStartMs: now - 1000,
+      windowEndMs: now + 10000,
+    });
+
+    assert.strictEqual(rollup.adoption.legacyEquivalentAnchorCalls, 1);
+    assert.strictEqual(rollup.adoption.unknownModeCalls, 0);
+    assert.strictEqual(rollup.perTool['list-tasks'].previewResponses, 1);
+    assert.strictEqual(rollup.perTool['list-tasks'].previewedItems, 0);
+    assert.strictEqual(rollup.perTool['list-tasks'].openRateByItem, 0);
+  });
 });

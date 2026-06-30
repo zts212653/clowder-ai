@@ -38,6 +38,8 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     assert.ok(text.includes('Memory navigation'));
     assert.ok(text.includes('cat_cafe_graph_resolve'), 'nudge mentions graph_resolve');
     assert.ok(text.includes('cat_cafe_list_recent'), 'nudge mentions list_recent');
+    // F256 Phase A AC-A3: nudge should link to search best practices skill
+    assert.ok(text.includes('memory-search-best-practices'), 'no_match nudge links to search skill');
   });
 
   test('low_hit (no high/mid doc anchors) emits nudge despite having results', async () => {
@@ -56,6 +58,8 @@ describe('search_evidence nudge (AC-F3 + KD-7)', () => {
     const text = result.content[0].text;
     assert.ok(text.includes('Memory navigation'), 'low-hit must emit nudge');
     assert.ok(text.includes('graph_resolve'));
+    // F256 Phase A AC-A3: nudge should link to search best practices skill
+    assert.ok(text.includes('memory-search-best-practices'), 'low_hit nudge links to search skill');
   });
 
   test('high-confidence doc anchor present → NO nudge (would be noise)', async () => {

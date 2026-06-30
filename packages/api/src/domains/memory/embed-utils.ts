@@ -3,6 +3,8 @@ import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.
 import type { VectorStore } from './VectorStore.js';
 
 const EMBED_BATCH_SIZE = 64;
+// Passage contents are much longer than doc summaries; keep warmup calls below the 3s client timeout.
+const PASSAGE_EMBED_BATCH_SIZE = 8;
 
 export interface EmbedPipelineContext {
   items: EvidenceItem[];
@@ -57,8 +59,8 @@ export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<v
   await ctx.embedding.reprobeIfNeeded();
   if (!ctx.embedding.isReady()) return;
 
-  for (let offset = 0; offset < ctx.passages.length; offset += EMBED_BATCH_SIZE) {
-    const batch = ctx.passages.slice(offset, offset + EMBED_BATCH_SIZE);
+  for (let offset = 0; offset < ctx.passages.length; offset += PASSAGE_EMBED_BATCH_SIZE) {
+    const batch = ctx.passages.slice(offset, offset + PASSAGE_EMBED_BATCH_SIZE);
     const vectors = await ctx.embedding.embed(batch.map((p) => p.content));
     for (let i = 0; i < batch.length; i++) {
       const passage = batch[i];

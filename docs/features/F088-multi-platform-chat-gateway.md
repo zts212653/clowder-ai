@@ -11,6 +11,22 @@ created: 2026-03-09
 > **Status**: in-progress | **Core Completed**: 2026-04-10 | **Owner**: Ragdoll
 > Phase K (Telegram reliability hardening) fully merged 2026-05-07 (community clowder-ai#524/#641/#642)
 
+## User Journey
+
+**Scope unit**: IM 群聊 / DM 用户（飞书、Telegram）
+
+**Flow**:
+1. 用户在飞书群或 Telegram 对话里发消息（文字 / 语音 / 图片）
+2. FeishuAdapter / TelegramAdapter 接收事件 → ConnectorRouter 路由到对应 thread
+3. Cat 处理并生成回复（文字 / 语音 / 图片）
+4. OutboundDeliveryHook 向绑定的外部 chat 投递回复：
+   - 文字 → sendReply / sendRichMessage
+   - 语音 → sendMedia (audio)
+   - 图片（media_gallery block）→ absPath 直接上传，否则 https:// URL 下载后上传；内部 /uploads/ 路径无法解析时 skip（不发 localhost URL）
+5. 用户在原 IM 客户端看到猫的回复（包括图片直接可见，而不是无法打开的路径）
+
+---
+
 ## Why
 
 Cat Café 目前只能通过 Web UI 和猫猫对话。operator和未来用户希望在**已有的工作聊天工具**中直接与猫猫交互，不用切换窗口。

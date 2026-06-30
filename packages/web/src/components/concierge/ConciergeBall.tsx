@@ -5,7 +5,7 @@
  *
  * V1 (P0): 替换 emoji → 布偶猫 PNG sprite
  * V2 (P0): 全部颜色从 OKLCH token 来，零 Tailwind 原生色
- * V3 (P1): 方圆形底座 72×72 + 猫图 64×64 + 状态指示点
+ * V3 (P1): 方圆形底座 + 猫图 + 状态指示点 (E3: dynamic size via ballSize store)
  * V4 (P1): idle 态呼吸动画（4s 慢呼吸，reduced-motion 降级）
  * V5 (P1): 八态 sprite 映射 + crossfade 过渡
  * V6 (Phase E0): PetSkinContract v0 — projection-driven sprite resolution
@@ -26,6 +26,11 @@ import { useSpriteAnimation } from './useSpriteAnimation';
 
 interface ConciergeBallProps {
   ballState: ConciergeBallState;
+  /** E4: Autonomous behavior visual override — when set, sprite uses this state
+   *  while dot/label retain the business ballState (AC-E4-2: state isolation). */
+  visualOverride?: string | null;
+  /** E4: Autonomous behavior overlay emoji (micro-bubble above cat). */
+  autonomousOverlay?: string | null;
 }
 
 // State → indicator dot color via CSS var (V2: zero Tailwind native color)
@@ -66,12 +71,13 @@ const STATE_LABELS: Record<ConciergeBallState, string> = {
  *   An <img> element with position offset inside overflow:hidden is the most
  *   reliable cross-browser approach for spritesheet alpha.
  *
- * Display size: aspect-ratio-aware scaling.
- * Atlas cells are 192×208 (not square). To fit inside the 64×64 display area
- * while preserving aspect ratio, we height-fit: 64px height → 59px width.
- * (64 × 192/208 ≈ 59.08)
+ * Display size: aspect-ratio-aware scaling (E3: dynamic via containerSize).
+ * Atlas cells are 192×208 (not square). To fit inside the container
+ * while preserving aspect ratio, we height-fit: containerSize * 0.88 height.
+ * At default 72px ball: displayHeight=63 → displayWidth≈58.
+ * At max 192px ball: displayHeight=169 → displayWidth≈156 (still within atlas cell).
  */
-function AtlasSprite({ atlas }: { atlas: AtlasSpriteResult }) {
+function AtlasSprite({ atlas, containerSize }: { atlas: AtlasSpriteResult; containerSize: number }) {
   const { frameIndex } = useSpriteAnimation({
     frameCount: atlas.frameCount,
     frameDurations: atlas.frameDurations,
@@ -80,8 +86,8 @@ function AtlasSprite({ atlas }: { atlas: AtlasSpriteResult }) {
     cellHeight: atlas.cellHeight,
   });
 
-  // Height-fit: display height = 64px, width scales proportionally
-  const displayHeight = 64;
+  // E3: height-fit to 88% of container (matches non-atlas img padding ratio)
+  const displayHeight = Math.round(containerSize * 0.88);
   const displayWidth = Math.round(displayHeight * (atlas.cellWidth / atlas.cellHeight));
 
   // Full spritesheet dimensions at display scale
@@ -125,12 +131,13 @@ function AtlasSprite({ atlas }: { atlas: AtlasSpriteResult }) {
 // ConciergeBall component
 // ---------------------------------------------------------------------------
 
-export function ConciergeBall({ ballState }: ConciergeBallProps) {
+export function ConciergeBall({ ballState, visualOverride, autonomousOverlay }: ConciergeBallProps) {
   const setSurfaceState = useConciergeStore((s) => s.setSurfaceState);
   const surfaceState = useConciergeStore((s) => s.surfaceState);
   const unseenResultCount = useConciergeStore((s) => s.unseenResultCount);
   const isDragging = useConciergeStore((s) => s.isDragging);
   const setIsDragging = useConciergeStore((s) => s.setIsDragging);
+  const ballSize = useConciergeStore((s) => s.ballSize);
 
   const handleClick = () => {
     // INV-P1: suppress click after drag (drag threshold ~5px in ConciergeHost)
@@ -149,7 +156,9 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
   };
 
   const skin = useConciergeStore((s) => s.skin);
-  const spriteResult = resolvePetSprite(ballState, skin);
+  // E4: autonomous visual override → sprite uses autonomous state while dot/label keep business state
+  const spriteState = visualOverride ?? ballState;
+  const spriteResult = resolvePetSprite(spriteState, skin);
   const isAtlas = typeof spriteResult !== 'string' && spriteResult.kind === 'atlas';
   const dotColor = STATE_DOT_COLORS[ballState] ?? 'var(--accent-300)';
   const stateLabel = STATE_LABELS[ballState] ?? ballState;
@@ -157,7 +166,7 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
   const isIdle = ballState === 'idle';
 
   return (
-    <div aria-live="polite" aria-atomic="false" className="pointer-events-none">
+    <div aria-live="polite" aria-atomic="false" className="pointer-events-none w-full h-full">
       <button
         type="button"
         aria-label={`猫猫球 — ${stateLabel}`}
@@ -171,7 +180,7 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
         className={[
           'pointer-events-auto',
           'relative flex items-center justify-center',
-          'w-[72px] h-[72px]',
+          'w-full h-full',
           // Squircle: border-radius 16px per design spec (§7)
           'rounded-2xl',
           // Bug fix: disable CSS transition + breathing animation during drag.
@@ -187,18 +196,16 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
         ].join(' ')}
         onClick={handleClick}
       >
-        {/* Cat sprite — 64×64 (or aspect-ratio-aware) inside 72×72 base */}
+        {/* Cat sprite — fills parent (E3: dynamic size via Rnd wrapper) */}
         {isAtlas ? (
-          <AtlasSprite atlas={spriteResult as AtlasSpriteResult} />
+          <AtlasSprite atlas={spriteResult as AtlasSpriteResult} containerSize={ballSize} />
         ) : (
           // biome-ignore lint/performance/noImgElement: sprite image, not content — Next Image optimization not applicable
           <img
             src={spriteResult as string}
             alt=""
             aria-hidden="true"
-            width={64}
-            height={64}
-            className="object-contain"
+            className="w-[88%] h-[88%] object-contain"
             style={{
               transition: 'opacity 300ms ease-in-out',
               imageRendering: 'pixelated',
@@ -220,6 +227,17 @@ export function ConciergeBall({ ballState }: ConciergeBallProps) {
               'border-2 border-[color:var(--cafe-surface-canvas)]',
             ].join(' ')}
           />
+        )}
+
+        {/* E4: Autonomous behavior overlay micro-bubble (💤 etc.) */}
+        {autonomousOverlay && (
+          <span
+            aria-hidden="true"
+            className="absolute -top-3 left-1/2 -translate-x-1/2 text-lg pointer-events-none animate-bounce"
+            style={{ animationDuration: '2s' }}
+          >
+            {autonomousOverlay}
+          </span>
         )}
 
         {/* State indicator dot (always shown, color varies by state) */}

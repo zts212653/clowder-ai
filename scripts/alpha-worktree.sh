@@ -253,6 +253,10 @@ apply_alpha_env() {
   export AUDIO_SERVICE_ENABLED=0
   export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
   export CONNECTOR_GATEWAY_AUTOSTART=0
+  # Alpha shares ~/.cat-cafe/services.json with runtime — persistent config
+  # overrides env-level EMBED_ENABLED=0 etc. Tell the API guard to block
+  # sidecar lifecycle mutations and auto-start reconciliation.
+  export CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED=1
 
   # Next.js dev only reads .env files relative to its own cwd (packages/web/),
   # not monorepo root .env, and does not always pick up exported NEXT_PUBLIC_*

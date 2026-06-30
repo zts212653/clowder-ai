@@ -1,6 +1,7 @@
 import type { FrictionRollupSourceSelector } from '@cat-cafe/shared';
 import type { Redis } from 'ioredis';
 import type { CapabilityWakeupSourceSelector } from '../capability-wakeup/capability-wakeup-trial-provider.js';
+import type { QcMetricsSelector } from '../qc-metrics-provider.js';
 import type { SopTraceInput } from '../sop/sop-trace-adapter.js';
 import type { TaskOutcomeVerdict } from '../task-outcome/task-outcome-episode.js';
 import type { VerdictHandoffPacket } from '../verdict-handoff.js';
@@ -135,6 +136,7 @@ export interface AnchorTelemetrySourceSelector {
  * - sop branch: `SopTraceSourceSelector` (kind required, sop-wiring)
  * - friction branch: `FrictionRollupSourceSelector` (kind required, F245 PR1b live sink)
  * - anchor-telemetry branch: `AnchorTelemetrySourceSelector` (kind required, F236 Track-2)
+ * - qc branch: `QcMetricsSelector` (kind required, F253 Phase C)
  *
  * 砚砚 R1 P1 #2: generator MUST receive explicit `sources` (sanitized
  * evidence refs / replayable selector); tool NEVER fabricates evidence.
@@ -146,7 +148,8 @@ export type VerdictSourceRefs =
   | MemoryRecallSourceSelector
   | SopTraceSourceSelector
   | FrictionRollupSourceSelector
-  | AnchorTelemetrySourceSelector;
+  | AnchorTelemetrySourceSelector
+  | QcMetricsSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).

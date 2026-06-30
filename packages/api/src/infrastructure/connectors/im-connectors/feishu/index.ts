@@ -19,7 +19,7 @@ import type {
   MediaDownloadFn,
 } from '../../im-connector-plugin.js';
 import type { IOutboundAdapter } from '../../OutboundDeliveryHook.js';
-import { FeishuAdapter } from './FeishuAdapter.js';
+import { FeishuAdapter, type FeishuMentionAlias } from './FeishuAdapter.js';
 import { FeishuTokenManager } from './FeishuTokenManager.js';
 import { handleFeishuAction } from './feishu-action-handler.js';
 
@@ -49,6 +49,67 @@ function getState(adapter: IOutboundAdapter): FeishuPluginState {
   return state;
 }
 
+/**
+ * #1035: Parse the `FEISHU_GROUP_BOT_MENTIONS_JSON` env var into a `groupBotMentions` map.
+ *
+ * Expected JSON shape: `{ "<alias>": { "openId": "ou_xxx", "displayName": "?" }, ... }`
+ * Returns `undefined` (i.e. feature disabled) when:
+ *   - env var is unset / empty
+ *   - JSON parse fails
+ *   - schema doesn't match (logged as warn so misconfig is visible without crashing bootstrap)
+ *
+ * Exported for unit testing.
+ */
+export function parseGroupBotMentionsEnv(
+  raw: string | undefined,
+  log: { warn: (obj: unknown, msg: string) => void },
+): Record<string, FeishuMentionAlias> | undefined {
+  if (!raw || !raw.trim()) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    log.warn({ err: (err as Error).message }, '[Feishu] FEISHU_GROUP_BOT_MENTIONS_JSON parse failed; feature disabled');
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    log.warn({ got: typeof parsed }, '[Feishu] FEISHU_GROUP_BOT_MENTIONS_JSON must be a JSON object; feature disabled');
+    return undefined;
+  }
+  // Note: prototype-pollution defense lives at the lookup site
+  // (FeishuAdapter.resolveBodyMentions uses Object.hasOwn) so this stays a plain
+  // record for ergonomic equality checks in tests.
+  const out: Record<string, FeishuMentionAlias> = {};
+  for (const [rawAlias, value] of Object.entries(parsed as Record<string, unknown>)) {
+    // Reviewer P2 R2 (cat-cafe#2611): trim is store + validate, not just validate.
+    // The resolver regex captures bare unicode words (`@good`), so a stored padded key
+    // like `"  good  "` would never match. Same for openId / displayName — padded values
+    // produce malformed outbound `<at user_id="  ou_xxx  ">…</at>` tokens.
+    const alias = typeof rawAlias === 'string' ? rawAlias.trim() : '';
+    if (!alias) continue;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      log.warn({ alias }, '[Feishu] FEISHU_GROUP_BOT_MENTIONS_JSON entry skipped (not an object)');
+      continue;
+    }
+    const entry = value as Record<string, unknown>;
+    const openIdRaw = entry.openId;
+    if (typeof openIdRaw !== 'string' || !openIdRaw.trim()) {
+      log.warn({ alias }, '[Feishu] FEISHU_GROUP_BOT_MENTIONS_JSON entry skipped (missing or blank openId)');
+      continue;
+    }
+    const openId = openIdRaw.trim();
+    const displayNameRaw = typeof entry.displayName === 'string' ? entry.displayName.trim() : '';
+    const displayName = displayNameRaw || undefined;
+    if (out[alias]) {
+      // Two raw keys normalized to the same alias (e.g. `"good"` + `"  good  "`).
+      // Last entry wins (preserves JSON iteration order); warn so misconfig is visible.
+      log.warn({ alias }, '[Feishu] FEISHU_GROUP_BOT_MENTIONS_JSON duplicate alias after trim; later entry wins');
+    }
+    out[alias] = displayName ? { openId, displayName } : { openId };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** Helper: route a parsed Feishu event through the inbound callback. */
 async function routeParsedEvent(
   feishu: FeishuAdapter,
@@ -60,6 +121,11 @@ async function routeParsedEvent(
   if (parsed.chatType === 'group') {
     if (!senderName) {
       senderName = await feishu.resolveSenderName(parsed.senderId).catch(() => undefined);
+    }
+    // Fallback: Contact API may fail with 41050 (user not in contact scope).
+    // Chat members API works for all group members the bot can see.
+    if (!senderName) {
+      senderName = await feishu.resolveSenderNameFromChat(parsed.senderId, parsed.chatId).catch(() => undefined);
     }
     if (!chatName) {
       chatName = await feishu.resolveChatName(parsed.chatId).catch(() => undefined);
@@ -128,6 +194,8 @@ const feishuPlugin: IMConnectorPlugin = {
     'FEISHU_CONNECTION_MODE',
     'FEISHU_BOT_OPEN_ID',
     'FEISHU_ADMIN_OPEN_IDS',
+    // #1035: outbound `@alias` → Feishu `<at>` token map (JSON string)
+    'FEISHU_GROUP_BOT_MENTIONS_JSON',
   ],
 
   isConfigured(env) {
@@ -139,6 +207,7 @@ const feishuPlugin: IMConnectorPlugin = {
     const { env, log } = ctx;
     const adapter = new FeishuAdapter(env.FEISHU_APP_ID!, env.FEISHU_APP_SECRET!, log, {
       verificationToken: env.FEISHU_VERIFICATION_TOKEN,
+      groupBotMentions: parseGroupBotMentionsEnv(env.FEISHU_GROUP_BOT_MENTIONS_JSON, log),
     });
     // Support test injection via _testOverrides (bootstrap passes _feishuTokenManagerOverride)
     const tokenManager =

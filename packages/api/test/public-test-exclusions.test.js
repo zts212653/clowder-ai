@@ -48,6 +48,7 @@ const LEGACY_EXCLUSIONS = [
   'capabilities-route\\.test',
   'antigravity-run-command-executor\\.test',
   'f203-phase-i-opencode-l0\\.test',
+  'f236-cc-anchor-hook\\.test',
   'github-schedule-factories\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
@@ -113,6 +114,17 @@ test('resolver preserves legacy public test file selection parity', async () => 
   });
 
   assert.deepEqual(resolved.selectedFiles, expected);
+});
+
+test('resolver excludes source-only cc anchor hook coverage from the public gate', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({
+    packageRoot,
+    configPath: registryPath,
+  });
+
+  assert.ok(resolved.excludedFiles.includes('test/f236-cc-anchor-hook.test.js'));
+  assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
 });
 
 test('validator rejects malformed, expired, or zero-match exclusion entries', async () => {

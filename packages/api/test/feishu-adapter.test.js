@@ -1000,4 +1000,234 @@ describe('FeishuAdapter', () => {
       assert.equal(inferFeishuFileType('Doc.DOCX'), 'doc');
     });
   });
+
+  // ── #1035: outbound group bot @mention resolution ──
+  // Bug: body text like `@胖胖虾` in Feishu outbound messages is sent as plain text,
+  // so the target bot's poller (which filters on mentions[].open_id) never sees it.
+  // Fix: `FeishuAdapterOptions.groupBotMentions` aliases → Feishu `<at>` tokens.
+  // Card markdown uses `<at id=ou_xxx></at>` (Feishu auto-renders display name).
+  // Text messages use `<at user_id="ou_xxx">@displayName</at>` (F134 §FeishuAdapter @sender).
+  describe('outbound group bot mention rendering (#1035)', () => {
+    const TEST_ALIASES = {
+      胖胖虾: { openId: 'ou_pang_test_alias_1035', displayName: '胖胖虾' },
+      毅马仕: { openId: 'ou_yi_test_alias_1035', displayName: '毅马仕' },
+    };
+
+    it('sendFormattedReply: leaves body unchanged when groupBotMentions not configured', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog());
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply('oc_group', {
+        header: '🐱 Cat',
+        subtitle: 'T1',
+        body: '@胖胖虾 看看这个',
+        footer: '12:00',
+      });
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('胖胖虾'));
+      assert.ok(bodyEl, 'body element should exist');
+      assert.ok(bodyEl.content.includes('@胖胖虾'), 'plain @alias preserved when no map configured');
+      assert.ok(!bodyEl.content.includes('<at id='), 'no <at> token injected without configuration');
+    });
+
+    it('sendFormattedReply: replaces configured alias with <at id=ou_xxx></at> in card markdown', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply('oc_group', {
+        header: '🐱 Cat',
+        subtitle: 'T1',
+        body: '@胖胖虾 帮我看一下这个 bug',
+        footer: '12:00',
+      });
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('帮我看一下'));
+      assert.ok(bodyEl, 'body element should exist');
+      assert.ok(
+        bodyEl.content.includes('<at id=ou_pang_test_alias_1035></at>'),
+        `expected card <at id=...></at> token, got: ${bodyEl.content}`,
+      );
+      assert.ok(!bodyEl.content.includes('@胖胖虾'), 'plain @胖胖虾 should be replaced');
+    });
+
+    it('sendFormattedReply: leaves unknown @alias unchanged', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply('oc_group', {
+        header: '🐱 Cat',
+        subtitle: 'T1',
+        body: '@未知机器人 看看这个',
+        footer: '12:00',
+      });
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('未知机器人'));
+      assert.ok(bodyEl, 'body element should exist');
+      assert.ok(bodyEl.content.includes('@未知机器人'), 'unknown alias preserved');
+      assert.ok(!bodyEl.content.includes('<at id='), 'no <at> token for unknown alias');
+    });
+
+    it('sendFormattedReply: configured alias coexists with replyToSender prefix', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply(
+        'oc_group',
+        {
+          header: '🐱 Cat',
+          subtitle: 'T1',
+          body: '@胖胖虾 我们一起看看 @毅马仕 提的 bug',
+          footer: '12:00',
+        },
+        { replyToSender: { id: 'ou_sender_landy', name: 'You' } },
+      );
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('一起看看'));
+      assert.ok(bodyEl, 'body element should exist');
+      // sender prefix (card mode also uses <at id=...>; preserves existing line 752 syntax)
+      assert.ok(bodyEl.content.includes('ou_sender_landy'), `expected sender prefix; got: ${bodyEl.content}`);
+      // both body aliases resolved
+      assert.ok(
+        bodyEl.content.includes('<at id=ou_pang_test_alias_1035></at>'),
+        `expected first body alias resolved; got: ${bodyEl.content}`,
+      );
+      assert.ok(
+        bodyEl.content.includes('<at id=ou_yi_test_alias_1035></at>'),
+        `expected second body alias resolved; got: ${bodyEl.content}`,
+      );
+      assert.ok(!bodyEl.content.includes('@胖胖虾'), 'plain @胖胖虾 should be replaced');
+      assert.ok(!bodyEl.content.includes('@毅马仕'), 'plain @毅马仕 should be replaced');
+    });
+
+    it('sendFormattedReply: does NOT mistake Object.prototype keys (constructor/toString/hasOwnProperty) for alias', async () => {
+      // Reviewer cloud-Codex P2 R3 (cat-cafe#2611): `aliases[alias]` does a prototype
+      // lookup, so an outbound body like `@constructor` would resolve to `Object`
+      // constructor (truthy), then `entry.openId` → undefined, rendering the broken
+      // token `<at id=undefined></at>` instead of passing the unknown alias through.
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply('oc_group', {
+        header: '🐱 Cat',
+        subtitle: 'T1',
+        body: 'Discuss @constructor and @toString and @hasOwnProperty handling',
+        footer: '12:00',
+      });
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('Discuss'));
+      assert.ok(bodyEl, 'body element should exist');
+      assert.ok(bodyEl.content.includes('@constructor'), 'prototype key constructor must pass through unchanged');
+      assert.ok(bodyEl.content.includes('@toString'), 'prototype key toString must pass through unchanged');
+      assert.ok(bodyEl.content.includes('@hasOwnProperty'), 'prototype key hasOwnProperty must pass through unchanged');
+      assert.ok(!bodyEl.content.includes('<at id='), 'no <at> token for prototype key');
+      assert.ok(!bodyEl.content.includes('undefined'), 'must not render undefined into token');
+    });
+
+    it('sendFormattedReply: does NOT mistake mid-token @ (e.g. email-like) for alias', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: {
+          example: { openId: 'ou_example_test', displayName: 'example' },
+        },
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendFormattedReply('oc_group', {
+        header: '🐱 Cat',
+        subtitle: 'T1',
+        body: 'Contact user@example.com for help',
+        footer: '12:00',
+      });
+
+      const card = JSON.parse(sendCalls[0].content);
+      const bodyEl = card.elements.find((e) => typeof e.content === 'string' && e.content.includes('example.com'));
+      assert.ok(bodyEl, 'body element should exist');
+      assert.ok(bodyEl.content.includes('user@example.com'), 'email-like @-token must NOT be replaced');
+      assert.ok(!bodyEl.content.includes('<at id='), 'no <at> token for mid-word @');
+    });
+
+    it('sendReply: replaces configured alias with text-mode <at user_id="...">name</at> (no extra @)', async () => {
+      // Per F134-feishu-group-chat.md line 730 + existing prependAtMention (line 720),
+      // text-mode mentions render bare name inside the tag — Feishu renders the leading `@`.
+      // Reviewer P1 (cat-cafe#2611): earlier version added an extra `@` prefix that broke
+      // protocol shape vs the documented `<at user_id="ou_xxx">You</at>`.
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      await adapter.sendReply('oc_group', '@胖胖虾 看一下这个', {
+        replyToSender: { id: 'ou_sender_landy', name: 'You' },
+      });
+
+      assert.equal(sendCalls[0].msgType, 'text');
+      const payload = JSON.parse(sendCalls[0].content);
+      // sender prefix (text mode uses <at user_id="...">name</at> per line 720)
+      assert.ok(payload.text.includes('<at user_id="ou_sender_landy">You</at>'), 'sender prefix preserved');
+      // body alias resolved in text mode — bare displayName inside the tag (matches F134 + sender form)
+      assert.ok(
+        payload.text.includes('<at user_id="ou_pang_test_alias_1035">胖胖虾</at>'),
+        `expected text-mode <at user_id="...">name</at> with bare name; got: ${payload.text}`,
+      );
+      assert.ok(
+        !payload.text.includes('<at user_id="ou_pang_test_alias_1035">@胖胖虾</at>'),
+        'must NOT have extra @ inside the tag (would break F134 protocol shape)',
+      );
+      assert.ok(!payload.text.endsWith('@胖胖虾 看一下这个'), 'plain @alias should not appear unchanged at end');
+    });
+
+    it('sendRichMessage: replaces configured alias in card markdown textContent', async () => {
+      const adapter = new FeishuAdapter('app-id', 'app-secret', noopLog(), {
+        groupBotMentions: TEST_ALIASES,
+      });
+      const sendCalls = [];
+      adapter._injectSendMessage(async (params) => {
+        sendCalls.push(params);
+      });
+
+      const blocks = [{ id: 'b1', kind: 'card', v: 1, title: 'Heads up', bodyMarkdown: 'check' }];
+      await adapter.sendRichMessage('oc_group', '@胖胖虾 看一下这个 review', blocks, '布偶猫');
+
+      const card = JSON.parse(sendCalls[0].content);
+      const allContent = JSON.stringify(card.elements);
+      assert.ok(
+        allContent.includes('<at id=ou_pang_test_alias_1035></at>'),
+        `expected card <at id=...></at> token in textContent; got: ${allContent}`,
+      );
+      assert.ok(!allContent.includes('@胖胖虾'), 'plain @胖胖虾 should not remain in textContent');
+    });
+  });
 });

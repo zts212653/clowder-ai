@@ -37,8 +37,11 @@ function resolveBody(resolutions) {
 describe('/api/drift/resolve — resolutions validation', () => {
   /** @type {import('fastify').FastifyInstance} */
   let app;
+  let previousOwner;
 
   beforeEach(async () => {
+    previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
     app = Fastify({ logger: false });
     app.addHook('preHandler', async (request) => {
       const raw = request.headers['x-test-session-user'];
@@ -52,6 +55,8 @@ describe('/api/drift/resolve — resolutions validation', () => {
 
   afterEach(async () => {
     await app?.close();
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
   });
 
   it('accepts valid use-global resolution', async () => {

@@ -190,7 +190,11 @@ export function resolvePetSprite(
   // -- atlas skins (yanyan-codex / xianxian-codex: same 9-state layout) --
   if (skin === 'yanyan-codex' || skin === 'xianxian-codex') {
     const base = skin === 'xianxian-codex' ? XIANXIAN_CODEX_BASE : YANYAN_CODEX_BASE;
-    const petState = projectToPetState(ballState, PET_STATE_PROJECTION_V1);
+    // E4: if ballState is already a valid CodexPetState (autonomous override), use directly
+    const petState =
+      ballState in YANYAN_ATLAS_ROWS
+        ? (ballState as CodexPetState)
+        : projectToPetState(ballState, PET_STATE_PROJECTION_V1);
     const rowConfig = YANYAN_ATLAS_ROWS[petState] ?? YANYAN_ATLAS_ROWS.idle;
     return {
       kind: 'atlas',
@@ -198,7 +202,7 @@ export function resolvePetSprite(
       petState,
       row: rowConfig.row,
       frameCount: rowConfig.frameCount,
-      frameDurations: [...rowConfig.frameDurations],
+      frameDurations: rowConfig.frameDurations,
       cellWidth: ATLAS_CELL_WIDTH,
       cellHeight: ATLAS_CELL_HEIGHT,
     };
@@ -212,7 +216,11 @@ export function resolvePetSprite(
   }
 
   // -- ragdoll-v1 projection path (V0: 4-state individual sprites) --
-  const petState = projectToPetState(ballState, PET_STATE_PROJECTION_V0);
+  // E4: if ballState is already a valid CodexPetState, use directly (autonomous override)
+  const petState =
+    ballState in PET_STATE_SPRITES
+      ? (ballState as CodexPetState)
+      : projectToPetState(ballState, PET_STATE_PROJECTION_V0);
   const filename = PET_STATE_SPRITES[petState] ?? PET_STATE_SPRITES.idle;
   return `${RAGDOLL_V1_BASE}/${filename}`;
 }

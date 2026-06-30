@@ -10,7 +10,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat as statPath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, extname, join, relative, resolve, sep } from 'node:path';
@@ -638,6 +638,76 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   await rename(tmpPath, filePath);
 }
 
+function writeCapabilitiesConfigSync(projectRoot: string, config: CapabilitiesConfig): void {
+  const dir = safePath(projectRoot, CONFIG_SUBDIR);
+  mkdirSync(dir, { recursive: true });
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  try {
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Ignore cleanup failures.
+    }
+    throw err;
+  }
+}
+
+export function inheritFullyBlockedMcpCapabilitiesForNewCatInConfig(
+  config: CapabilitiesConfig,
+  newCatId: string,
+  existingCatIds: ReadonlySet<string>,
+): boolean {
+  const existingIds = [...existingCatIds].filter((id) => id !== newCatId);
+  if (existingIds.length === 0) return false;
+
+  let changed = false;
+  for (const cap of config.capabilities) {
+    if (cap.type !== 'mcp' || !Array.isArray(cap.blockedCats)) continue;
+    const blocked = new Set(cap.blockedCats);
+    if (blocked.has(newCatId)) continue;
+    if (!existingIds.every((id) => blocked.has(id))) continue;
+
+    cap.blockedCats = [...cap.blockedCats, newCatId];
+    changed = true;
+  }
+
+  return changed;
+}
+
+export function inheritFullyBlockedMcpCapabilitiesForNewCatsSync(
+  projectRoot: string,
+  newCatIds: readonly string[],
+  existingCatIds: ReadonlySet<string>,
+): boolean {
+  if (newCatIds.length === 0) return false;
+
+  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
+  let config: CapabilitiesConfig;
+  try {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8')) as CapabilitiesConfig;
+    if (data.version !== 2 || !Array.isArray(data.capabilities)) return false;
+    config = data;
+  } catch {
+    return false;
+  }
+
+  let changed = false;
+  const inheritedIds = new Set(existingCatIds);
+  for (const newCatId of newCatIds) {
+    if (inheritFullyBlockedMcpCapabilitiesForNewCatInConfig(config, newCatId, inheritedIds)) {
+      changed = true;
+    }
+    inheritedIds.add(newCatId);
+  }
+
+  if (changed) writeCapabilitiesConfigSync(projectRoot, config);
+  return changed;
+}
+
 export async function inheritFullyBlockedMcpCapabilitiesForNewCat(
   projectRoot: string,
   newCatId: string,
@@ -650,16 +720,7 @@ export async function inheritFullyBlockedMcpCapabilitiesForNewCat(
     const config = await readCapabilitiesConfig(projectRoot);
     if (!config) return false;
 
-    let changed = false;
-    for (const cap of config.capabilities) {
-      if (cap.type !== 'mcp' || !Array.isArray(cap.blockedCats)) continue;
-      const blocked = new Set(cap.blockedCats);
-      if (blocked.has(newCatId)) continue;
-      if (!existingIds.every((id) => blocked.has(id))) continue;
-
-      cap.blockedCats = [...cap.blockedCats, newCatId];
-      changed = true;
-    }
+    const changed = inheritFullyBlockedMcpCapabilitiesForNewCatInConfig(config, newCatId, new Set(existingIds));
 
     if (changed) await writeCapabilitiesConfig(projectRoot, config);
     return changed;
@@ -1330,6 +1391,11 @@ export interface CliConfigPaths {
 /** Providers that support streamableHttp transport (URL-based MCP). */
 const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic', 'kimi', 'opencode']);
 
+interface ResolveServersForCatOptions {
+  /** global = globalEnabled is the master switch; project = blockedCats is the project access source. */
+  accessScope?: 'global' | 'project';
+}
+
 /**
  * Determine whether an MCP capability is enabled for a specific cat.
  * Single source of truth for per-cat MCP access resolution (invoke-time).
@@ -1339,7 +1405,14 @@ const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic', 'kimi', 'opencode']);
  *   (invoke-time paths read raw JSON, bypassing readCapabilitiesConfig migration)
  * - `blockedCats` = per-cat blacklist (cat in list → disabled)
  */
-export function isMcpEnabledForCat(cap: CapabilityEntry, catId: string): boolean {
+export function isMcpEnabledForCat(
+  cap: CapabilityEntry,
+  catId: string,
+  options: ResolveServersForCatOptions = {},
+): boolean {
+  if (options.accessScope === 'project' && Array.isArray(cap.blockedCats)) {
+    return !cap.blockedCats.includes(catId);
+  }
   if (!(cap.globalEnabled ?? cap.enabled ?? true)) return false;
   return !cap.blockedCats?.includes(catId);
 }
@@ -1355,7 +1428,11 @@ export function isMcpEnabledForCat(cap: CapabilityEntry, catId: string): boolean
  * - mcpServerOverride > mcpServer: project override takes full priority
  * - globalEnabled / per-cat overrides: used for global-context board display
  */
-export function resolveServersForCat(config: CapabilitiesConfig, catId: string): McpServerDescriptor[] {
+export function resolveServersForCat(
+  config: CapabilitiesConfig,
+  catId: string,
+  options: ResolveServersForCatOptions = {},
+): McpServerDescriptor[] {
   const entry = catRegistry.tryGet(catId);
   const provider = entry?.config.clientId;
 
@@ -1369,7 +1446,7 @@ export function resolveServersForCat(config: CapabilitiesConfig, catId: string):
     if (!mcpServer) continue;
 
     // Per-cat access: single source of truth via isMcpEnabledForCat
-    const enabledFromConfig = isMcpEnabledForCat(cap, catId);
+    const enabledFromConfig = isMcpEnabledForCat(cap, catId, options);
 
     const transportSupported =
       mcpServer.transport === 'streamableHttp'
@@ -1412,7 +1489,7 @@ function collectServersPerProvider(config: CapabilitiesConfig): Record<string, M
       providerServers[provider] = new Map();
     }
 
-    const servers = resolveServersForCat(config, catId as string);
+    const servers = resolveServersForCat(config, catId as string, { accessScope: 'project' });
     for (const s of servers) {
       // If any cat of this provider has it enabled, it's enabled for the provider
       const existing = providerServers[provider].get(s.name);

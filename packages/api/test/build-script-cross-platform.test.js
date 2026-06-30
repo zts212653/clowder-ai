@@ -24,6 +24,23 @@ test('api build script avoids unix-only file copy commands', async () => {
   assert.doesNotMatch(buildScript, /\bcp\s+src\/marketplace\/catalog-data/);
 });
 
+test('api test script builds mcp-server with workspace dependencies first', async () => {
+  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const testScript = packageJson.scripts?.test;
+
+  assert.equal(typeof testScript, 'string');
+  assert.match(testScript, /pnpm --filter @cat-cafe\/mcp-server\.\.\. build/);
+  assert.doesNotMatch(
+    testScript,
+    /pnpm --dir \.\.\/mcp-server build/,
+    'direct mcp-server build can run before workspace deps have dist artifacts',
+  );
+  assert.ok(
+    testScript.indexOf('pnpm --filter @cat-cafe/mcp-server... build') < testScript.indexOf('pnpm run build'),
+    'mcp-server dependency build must run before API build/test execution',
+  );
+});
+
 test('desktop package includes main process local require dependencies', async () => {
   const desktopPackage = JSON.parse(await readFile(desktopPackageJsonPath, 'utf8'));
   const mainSource = await readFile(desktopMainPath, 'utf8');

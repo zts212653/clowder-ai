@@ -9,7 +9,7 @@ tips_exempt: L0-internal per-user alignment injection — harness plumbing, no u
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
 
-> **Status**: in-progress | **Owner**: Ragdoll（Ragdoll Fable-5） | **Priority**: P1
+> **Status**: in-progress (Phase C 功能性完成，观察期 — 所有 AC ✅，零有机使用待解) | **Owner**: Ragdoll（Ragdoll Fable-5） | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -177,37 +177,27 @@ operator experience（2026-06-11）：
 | C2 | ✅ 完成 | `proposal_mqg11vxc8ypclgv4` operator approved，但 2 天零有机使用 → C3 必须 |
 | **C3** | ✅ merged | PR #2354 (`37f7dedc`) — KD-9 whitelist enum + KD-10 eval counters + distillation trigger |
 
-### Wave 2（当前，不需额外 spec）
+### Wave 2 ✅（已完成）
 
-**B3 — Fixture overlay 编译回归测试**
-- fixture instance catalog + fixture capsule/primer → 编译断言 private overlay 锚点生效
-- 公共 baseline 断言：缺 overlay 可编译 + 无私有锚点泄漏
-- 隔离原则：tracked 测试不依赖本机 gitignored 真实数据（KD-6），CI/社区环境稳定
-- 48 建议：测试做成"fixture 三态 × overlay 有无"矩阵，覆盖 Phase A 已有的 capsule 三态 + Phase B 新增的 instance/primer overlay
+- **B3 — Fixture overlay 编译回归测试** ✅ `compile-system-prompt-l0.test.mjs` 4 项 regression
+- **C2 — 首次真实 propose→approve→write 循环** ✅ `proposal_mqg11vxc8ypclgv4` operator approved
+- **eval(a) — 守门软化监控** ⏳ 运营观察中，无新代码需求
 
-**C2 — 首次真实 propose→approve→write 循环**
-- 用 `cat_cafe_propose_profile_update` 提一条正向轨迹（"做对的时刻"进 primer）
-- 需 runtime 在线 + operator 在 Hub 审批卡片
-- 验收标准：primer 文件被实际写入 + provenance 归档 + settled 卡片可追溯
-- 48 关键洞察：eval on zero activation = useless，C2 必须先跑通才有 eval 对象
+### Wave 3 ✅（C3 已完成，eval 观察中）
 
-**eval(a) — 守门软化监控（运营观察，非新代码）**
-- 注入 capsule 后猫 review 是否变软？对比基线（approve-with-follow-up 回潮 = P0 回归）
-- 观察窗口：Wave 2 落地后自然产生的 review 数据
+- **C3 — 采集白名单 + 蒸馏管道** ✅ PR #2354 merged — KD-9 whitelist enum + eval counters + distillation trigger
+- **eval(b) — 循环指标** ⏳ 需有机使用产生数据；当前 `profile_update.proposed` = 0
 
-### Wave 3（需 fable spec 或三猫草案）
+### 激活问题（2026-06-26 诊断 + 修复）
 
-**C3 — 采集白名单 + 蒸馏管道**
-- 采集端：KD-9 白名单写成 closed enum type guard（48 建议）+ lint/test 守护
-  - 允许：operator 明示 / 猫主动声明 / magic-word / message 坐标 / 签字·驳回 / reaction
-  - 禁止：classifier / regex 扫对话 / LLM 标注
-- 蒸馏 trigger：KD-10 runtime-neutral，锚 invocation/session-seal/turn-completed 事件
-  - codex/gpt52 path 有 fallback 覆盖（Stop hook 不可靠，codex 代码证据 KD-10）
-- 48 建议：C1 是骨架，C3 = 给骨架接 feeder——没 feeder 就是 manual-only 入口
-
-**eval(b) — 循环指标（C3 之后）**
-- propose→approve 周期、写入质量、画像漂移检测
-- 依赖 C3 自动采集产生足够数据
+**现象**：C3 merged 后 8 天（6/18→6/26），`profile_update.proposed` counter = 0，零有机使用。
+**operator 6/17 诊断**："功能不在大猫猫们的认知路径上" + "harness = 软 + 硬 + eval，缺 eval + 缺自动 trigger = dead code on shelf"
+**根因**：L6 wakeup entry 太抽象（"发现operator偏好变化"需要猫自我判断，对比其他 entry 都是具体信号触发）+ 缺硬层 trigger
+**修复**（commit `92ce87000`，2026-06-26）：
+1. L6 wakeup entry 具体化 — 5 个可观测触发条件（Magic Word / operator 直说 / 重复纠正 / 明确表扬 / 个人近况）
+2. post-compact hook 加 profile activation nudge — 系统级注入，proto-硬层
+3. refs wakeup-index 同步
+**观察**：修复后等第二个 7 天窗口（→7/3），看 counter 是否 >0
 
 ### operator 裁定（2026-06-17）
 

@@ -215,7 +215,7 @@ describe('ball-custody transition — 虚空 + 唤醒', () => {
 describe('INV-10 完整性穷举：全 state × event 无未定义', () => {
   it('每个 (state, event) transition 返回 well-formed result，不 throw', () => {
     assert.strictEqual(ALL_BALL_STATES.length, 8); // new + 7
-    assert.strictEqual(ALL_BALL_EVENT_KINDS.length, 16); // Phase B 13 + Phase C 3 安乐死 kinds
+    assert.strictEqual(ALL_BALL_EVENT_KINDS.length, 17); // Phase B 13 + Phase C 3 安乐死 + Phase P 1 wakeWhen
     for (const state of ALL_BALL_STATES) {
       for (const kind of ALL_BALL_EVENT_KINDS) {
         const r = transition(

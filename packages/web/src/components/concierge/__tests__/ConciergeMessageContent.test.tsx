@@ -34,8 +34,6 @@ vi.mock('@/stores/chatStore', () => ({
   }),
 }));
 
-vi.mock('@/utils/api-client', () => ({ apiFetch: vi.fn() }));
-
 const mockScrollToMessage = vi.fn();
 vi.mock('@/utils/scrollToMessage', () => ({ scrollToMessage: (...args: unknown[]) => mockScrollToMessage(...args) }));
 
@@ -143,8 +141,9 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
     expect(pushStateSpy).not.toHaveBeenCalled();
   });
 
-  // AC-3: peek marker with messageId → inline button
-  it('renders [原地看 R2] as inline button when action has messageId', () => {
+  // BUG-UX-12: old stored peek actions display as teleport
+  it('renders old [原地看 R2] action as teleport button (BUG-UX-12)', () => {
+    // Old messages may have concierge_peek stored — frontend always shows teleport
     const actions = [
       {
         action: 'concierge_peek' as const,
@@ -161,7 +160,8 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
 
     const buttons = container.querySelectorAll('button');
     expect(buttons.length).toBe(1);
-    expect(buttons[0].textContent).toContain('原地看');
+    // BUG-UX-12: always shows teleport text, never peek
+    expect(buttons[0].textContent).toContain('跳过去');
     expect(buttons[0].textContent).toContain('R2');
   });
 
@@ -456,6 +456,84 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
     });
   });
 
+  // BUG-UX-10: peek button with no messageId falls back to teleport
+  describe('BUG-UX-10: peek without messageId falls back to teleport', () => {
+    it('navigates to thread when peek button clicked without messageId', () => {
+      // Old message before BUG-UX-9 fix: action=concierge_peek, no messageId
+      const actions = [
+        {
+          action: 'concierge_peek' as const,
+          label: '原地看：Thread Topic',
+          handle: 'R1',
+          verb: '原地看',
+          payload: { threadId: 'thread_stale' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '[原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button')!;
+      act(() => {
+        button.click();
+      });
+
+      // Should fall back to teleport (navigate to thread), not silently do nothing
+      expect(pushStateSpy).toHaveBeenCalledWith(expect.anything(), '', expect.stringContaining('/thread/thread_stale'));
+    });
+
+    it('displays teleport styling and text for peek without messageId (P2)', () => {
+      const actions = [
+        {
+          action: 'concierge_peek' as const,
+          label: '原地看：Thread Topic',
+          handle: 'R1',
+          verb: '原地看',
+          payload: { threadId: 'thread_stale' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '[原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button')!;
+      // Button text should show teleport verb and icon, not peek
+      expect(button.textContent).toContain('跳过去');
+      expect(button.textContent).toContain('→');
+      expect(button.textContent).not.toContain('原地看');
+      expect(button.textContent).not.toContain('👁');
+    });
+  });
+
+  // BUG-UX-12: old stored peek actions with messageId still navigate correctly
+  describe('BUG-UX-12: old peek actions navigate as teleport', () => {
+    it('old peek action with messageId navigates to thread (teleport behavior)', () => {
+      const actions = [
+        {
+          action: 'concierge_peek' as const,
+          label: '原地看：Message',
+          handle: 'R1',
+          verb: '原地看',
+          payload: { threadId: 'thread_abc', messageId: 'msg_1' },
+        },
+      ];
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content: '[原地看 R1]', actions }));
+      });
+
+      const button = container.querySelector('button')!;
+      act(() => {
+        button.click();
+      });
+
+      // BUG-UX-12: clicking navigates (teleport), does NOT call peek API
+      expect(pushStateSpy).toHaveBeenCalledWith(expect.anything(), '', expect.stringContaining('/thread/thread_abc'));
+    });
+  });
+
   // AC-6: card actions fallback (no handle/verb) → no inline buttons, text unchanged
   it('does not crash on actions without handle/verb (KD-19 fallback)', () => {
     const actions = [
@@ -479,5 +557,45 @@ describe('ConciergeMessageContent (Bug2 inline marker buttons)', () => {
     // Should render cleanly — no crash, no spurious buttons
     expect(container.textContent).toBe('纯文本，没有标记');
     expect(container.querySelector('button')).toBeNull();
+  });
+
+  // BUG-UX-13: triage-plan markers must be stripped from user-visible content
+  describe('BUG-UX-13: triage-plan marker stripping (defense-in-depth)', () => {
+    it('strips <!-- triage-plan --> block from rendered content', () => {
+      const content = [
+        '为您准备了以下跳转分诊计划，请您确认：',
+        '',
+        '<!-- triage-plan -->',
+        '**意图**: go',
+        '**目标**: R2',
+        '**原文**: 帮我跳转到猫猫球的thread',
+        '**操作**: 传送您前往 F229 猫猫球功能的讨论 thread。',
+        '<!-- /triage-plan -->',
+      ].join('\n');
+
+      act(() => {
+        root.render(createElement(ConciergeMessageContent, { content, actions: [] }));
+      });
+
+      // Triage markers and field content must not be visible
+      expect(container.textContent).not.toContain('triage-plan');
+      expect(container.textContent).not.toContain('意图');
+      expect(container.textContent).not.toContain('操作');
+      // Preamble text should still render
+      expect(container.textContent).toContain('为您准备了以下跳转分诊计划');
+    });
+
+    it('handles content with no triage markers unchanged', () => {
+      act(() => {
+        root.render(
+          createElement(ConciergeMessageContent, {
+            content: '普通回复，没有 triage 标记',
+            actions: [],
+          }),
+        );
+      });
+
+      expect(container.textContent).toBe('普通回复，没有 triage 标记');
+    });
   });
 });

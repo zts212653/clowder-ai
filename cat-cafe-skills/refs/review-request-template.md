@@ -44,6 +44,21 @@ Why: {一句话}
 {需要 operator 判断的价值取舍——必须附 Decision Packet（格式见 `refs/decision-matrix.md`）}
 {如果没有价值 OQ，写"无"——回滚成本低的技术选择猫猫自决，不升级}
 
+## Fresh-Context Findings（如有）
+<!-- 仅当 author 触发了 fresh-context pre-review 时填写此节。未触发时删除此节。 -->
+<!-- 详见 cat-cafe-skills/fresh-context-review/SKILL.md -->
+
+Agent: {cat signature}
+SHA scanned: {short sha}
+Total findings: {N} ({P1} P1, {P2} P2, {P3} P3)
+
+| # | Finding | Author 处置 | 状态 |
+|---|---------|------------|------|
+| FC-1 | {摘要} | fixed (commit {sha}) | ✅ |
+| FC-2 | {摘要} | dismissed: {理由} | ❌ |
+
+**Reviewer delta tracking**: 正式 reviewer 请在你的 findings 中标注 `[FC:covered]`（fresh-context 已发现）或 `[FC:new]`（新发现）或 `[FC:N/A]`（不适用）。详见 receive-review skill "Reviewer Delta Annotation"。
+
 ## Next Action
 {希望 reviewer 做什么}
 
@@ -52,15 +67,46 @@ Why: {一句话}
 - Start Command: `pnpm review:start`（或等价命令）
 - Ports: `web={port}`, `api={port}`（禁止 3003/3004/3011/3012/4111）
 
+### 沙盒 Bootstrap（reviewer 在干净 sandbox 复跑 Validation 前必做）
+
+```bash
+# 1. 清掉继承的 NODE_ENV=production（否则 pnpm install 跳过 devDependencies → vitest/build 报 react resolve 失败）
+unset NODE_ENV
+# 等价：每条 pnpm 前缀 env -u NODE_ENV，或 NODE_ENV=development pnpm install
+
+# 2. 干净安装依赖
+pnpm install --frozen-lockfile
+
+# 3. 如 Validation 链涉及 packages/api/test/* import dist/* → 必须先 build shared/api
+pnpm --filter @cat-cafe/shared build
+pnpm --filter @cat-cafe/api run build   # 仅当 targeted API test import dist/ 时
+```
+
+事故来源：cat-cafe#1489 reviewer 复跑撞 `ERR_MODULE_NOT_FOUND`；intake clowder-ai#1010 review 撞 `react/jsx-dev-runtime` resolve fail（gpt52 在 review worktree 复跑时）。两次都不是 author 代码 bug，是 sandbox bootstrap chain 缺失。author 在 PR Validation 段落必须显式列上述前置（不是"自检通过"就够）。
+
 ## 自检证据
 
 ### Spec 合规
 {quality-gate 自检报告摘要}
 
 ### 测试结果
+
+**写入前置依赖链 + 实际跑过的命令，reviewer 在沙盒裸跑必须能复现。**
+
+```bash
+# Bootstrap（与 Review Sandbox 段落同步，sandbox 已跑则只写 author 跑的）
+unset NODE_ENV
+pnpm install --frozen-lockfile
+pnpm --filter @cat-cafe/shared build   # 如 targeted test 依赖 dist/
+
+# Targeted vitest / node:test（最高风险 validation 链）
 pnpm --filter @cat-cafe/api test       # X passed, 0 failed
 pnpm --filter @cat-cafe/web test       # X passed, 0 failed
 pnpm -r --if-present run build         # 成功
+
+# Full code gate (multi-file code change 必跑，per opensource-ops Rule 12 + feedback #2347)
+pnpm gate                              # ✓ pre-merge-check.sh 全套
+```
 
 ### 相关文档
 - Plan: `feature-specs/...`

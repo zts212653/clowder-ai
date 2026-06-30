@@ -102,3 +102,22 @@ export const PET_STATE_PROJECTION_V1: PetStateProjection = {
 export function projectToPetState(ballState: string, projection: PetStateProjection): CodexPetState {
   return projection.map[ballState as ConciergeBallState] ?? projection.fallback;
 }
+
+// ---------------------------------------------------------------------------
+// E4: Autonomous Behavior Engine types
+// ---------------------------------------------------------------------------
+
+/** Subset of CodexPetState used by autonomous behaviors (OQ-9 v0 existing sprites). */
+export type AutonomousPetState = 'idle' | 'jumping' | 'waving' | 'running' | 'running-left' | 'running-right';
+
+/** Output of usePetBehavior() — visual overlay that composes with business pet state. */
+export interface PetBehaviorOutput {
+  /** Visual pet state when autonomous is active, null when business takes priority. */
+  visualState: CodexPetState | null;
+  /** Micro-bubble overlay emoji (null = no overlay). */
+  overlay: string | null;
+  /** Position intent — delta from current position in px (null = stay put). */
+  positionDelta: { dx: number; dy: number } | null;
+  /** Whether autonomous layer is currently active (for debugging / settings UI). */
+  isAutonomousActive: boolean;
+}

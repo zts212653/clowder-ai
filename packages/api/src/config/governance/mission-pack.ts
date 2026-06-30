@@ -16,12 +16,28 @@ export interface ThreadContext {
 /**
  * Build a structured mission pack from thread metadata.
  * This is injected into the system prompt when dispatching to external projects.
+ *
+ * Returns `null` when the thread has no concrete mission/work-item content
+ * (clowder-ai#1037 accepted scope). Only `title` and `backlogItemId` can supply
+ * that content — `phase` alone leaves `mission` / `work_item` as placeholders
+ * ('External project task' / 'unspecified'), which the model interprets as
+ * "dispatcher sent the marker but forgot the task body". So `phase` by itself
+ * is NOT an injection anchor.
  */
-export function buildMissionPack(thread: ThreadContext): DispatchMissionPack {
+export function buildMissionPack(thread: ThreadContext): DispatchMissionPack | null {
+  const title = thread.title?.trim() ? thread.title.trim() : undefined;
+  const phase = thread.phase?.trim() ? thread.phase.trim() : undefined;
+  const backlogItemId = thread.backlogItemId?.trim() ? thread.backlogItemId.trim() : undefined;
+
+  // Anchor set: only fields that can supply concrete mission/work-item content.
+  if (!title && !backlogItemId) {
+    return null;
+  }
+
   return {
-    mission: thread.title ?? 'External project task',
-    workItem: thread.backlogItemId ?? thread.title ?? 'unspecified',
-    phase: thread.phase ?? 'unknown',
+    mission: title ?? 'External project task',
+    workItem: backlogItemId ?? title ?? 'unspecified',
+    phase: phase ?? 'unknown',
     doneWhen: [],
     links: [],
   };

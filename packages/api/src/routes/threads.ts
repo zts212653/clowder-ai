@@ -35,9 +35,11 @@ import type {
   Thread,
   ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { SYSTEM_USER_IDS } from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
+import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
 import { validateProjectPath } from '../utils/project-path.js';
-import { resolveUserId } from '../utils/request-identity.js';
+import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
 const log = createModuleLogger('routes/threads');
@@ -229,11 +231,15 @@ function parseOptionalBooleanQuery(value: string | boolean | undefined): boolean
 export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thread {
   // Cloud Codex P2: strip internal-only fields that should not appear in API responses.
   // pendingContinuation is per-cat/user session state — not client-visible.
-  if (thread.pendingContinuation) {
-    const { pendingContinuation: _, ...sanitized } = thread;
-    return sanitized as Thread;
-  }
-  return thread;
+  // F247 AC-B1c-1: cloudCatBindings is owner-only operational sidecar — not visible via
+  //   default thread GET. Owner-only access goes through `/api/threads/:id/cloud-bindings`.
+  //   Defense-in-depth: Redis-backed threads already exclude this field via separate
+  //   hash storage (not hydrated by `.get()`); this strip protects the in-memory path.
+  const hasPendingContinuation = !!thread.pendingContinuation;
+  const hasCloudCatBindings = !!thread.cloudCatBindings;
+  if (!hasPendingContinuation && !hasCloudCatBindings) return thread;
+  const { pendingContinuation: _pc, cloudCatBindings: _ccb, ...sanitized } = thread;
+  return sanitized as Thread;
 }
 
 function isConciergeThread(thread: Thread): boolean {
@@ -617,6 +623,121 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
     const patchUserId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
     return sanitizeThreadForResponse(updated, patchUserId);
+  });
+
+  // ─── F247 AC-B1c-1: cloudCatBindings owner-only endpoints ───
+  //
+  // Per KD-20 / KD-21, these are owner-only operational sidecar endpoints. The same
+  // data MUST NOT leak through the default `GET /api/threads/:id` (stripped by
+  // `sanitizeThreadForResponse`) nor through `get_thread_context` / thread export /
+  // cross-post / memory index paths (see AC-B1c-8 privacy fixtures).
+
+  const cloudBindingPatchSchema = z
+    .object({
+      catId: catIdSchema(),
+      /** ChatGPT chat URL — must match CHATGPT_CHAT_URL_REGEX. `null` clears the binding. */
+      chatUrl: z
+        .union([
+          z.string().regex(CHATGPT_CHAT_URL_REGEX, 'chatUrl must be canonical https://chatgpt.com/c/<id>'),
+          z.null(),
+        ])
+        .nullable(),
+    })
+    .strict();
+
+  // GET /api/threads/:id/cloud-bindings — STRICT user-owned only.
+  // Returns `{ bindings: Record<catId, chatUrl> }`. Empty object when no bindings.
+  //
+  // Auth model (R3-hardened defense-in-depth):
+  //   1. resolveStrictUserId: session cookie / non-browser header only. null → 401.
+  //   2. Reserved-identity reject: `system` / `scheduler` literals MUST NOT acquire
+  //      ownership via `x-cat-cafe-user` header. These are internal-only emitters
+  //      (orchestrator messages, scheduled tasks); accepting them as user-supplied
+  //      identity would let any non-browser caller spoof system owners.
+  //   3. System-thread reject: cloud bindings are user-owned operational sidecar;
+  //      system threads (default lobby / connector hub / eval domain / etc.) have
+  //      no user-owner semantics for this feature → 403 (NOT 404, so the caller
+  //      knows the thread exists but the endpoint is N/A).
+  //   4. Strict literal owner match: `thread.createdBy === userId`.
+  //
+  // History:
+  //   - R0: `resolveUserId(... defaultUserId: 'default-user')` + `createdBy === 'system'`
+  //         exemption (copied from reveal endpoint) → ANYONE could read system thread
+  //         bindings, even un-authed (gpt52 R2 P0).
+  //   - R1: strict resolver only, but `x-cat-cafe-user: system` header still spoofed
+  //         system owner on system threads (gpt52 R3 P0). Codified by a wishful test.
+  //   - R2 (here): reject reserved identities at auth layer + reject system-owned
+  //         threads at thread layer → no spoof path remains. Echoes F077 R9 fix
+  //         pattern + F24 P1-3 reserved-identity discipline.
+  app.get<{ Params: { id: string } }>('/api/threads/:id/cloud-bindings', async (request, reply) => {
+    const { id } = request.params;
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    if (SYSTEM_USER_IDS.has(userId)) {
+      // Reserved internal identity cannot be acquired through user-facing endpoints.
+      reply.status(401);
+      return { error: 'Reserved internal identity cannot be used' };
+    }
+    const thread = await threadStore.get(id);
+    if (!thread || thread.deletedAt) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+    if (SYSTEM_USER_IDS.has(thread.createdBy)) {
+      // System threads have no user-owner semantics for cloud bindings.
+      reply.status(403);
+      return { error: 'Cloud cat bindings are not supported on system-owned threads' };
+    }
+    if (thread.createdBy !== userId) {
+      reply.status(403);
+      return { error: 'Only the thread owner can read cloud cat bindings' };
+    }
+    const bindings = await threadStore.getCloudCatBindings(id);
+    return { bindings };
+  });
+
+  // PATCH /api/threads/:id/cloud-bindings — STRICT user-owned only.
+  // Body: `{ catId: string, chatUrl: string | null }`. `chatUrl=null` clears the catId binding.
+  // URL must match CHATGPT_CHAT_URL_REGEX (AC-B1c-11). Returns `{ bindings: ... }` post-update.
+  //
+  // Auth model: same 4 layers as GET (strict resolver / reserved-identity reject /
+  // system-thread reject / literal owner match). See GET doc above for history.
+  app.patch<{ Params: { id: string } }>('/api/threads/:id/cloud-bindings', async (request, reply) => {
+    const { id } = request.params;
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    if (SYSTEM_USER_IDS.has(userId)) {
+      reply.status(401);
+      return { error: 'Reserved internal identity cannot be used' };
+    }
+    const parseResult = cloudBindingPatchSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parseResult.error.issues };
+    }
+    const thread = await threadStore.get(id);
+    if (!thread || thread.deletedAt) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+    if (SYSTEM_USER_IDS.has(thread.createdBy)) {
+      reply.status(403);
+      return { error: 'Cloud cat bindings are not supported on system-owned threads' };
+    }
+    if (thread.createdBy !== userId) {
+      reply.status(403);
+      return { error: 'Only the thread owner can update cloud cat bindings' };
+    }
+    const { catId, chatUrl } = parseResult.data;
+    await threadStore.updateCloudCatBinding(id, catId as CatId, chatUrl);
+    const bindings = await threadStore.getCloudCatBindings(id);
+    return { bindings };
   });
 
   // DELETE /api/threads/:id - 删除对话 (with cascade delete)

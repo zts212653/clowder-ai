@@ -10,6 +10,12 @@ export const DispatchProposalKeys = {
   /** Sorted set of pending proposal IDs for a user (score=createdAt): dispatch-proposal-user-pending:{userId} */
   userPending: (userId: string) => `dispatch-proposal-user-pending:${userId}`,
 
+  /**
+   * F246 Phase F: Sorted set of settled (approved|rejected) proposal IDs for a user
+   * (score=decidedAt): dispatch-proposal-user-settled:{userId}
+   */
+  userSettled: (userId: string) => `dispatch-proposal-user-settled:${userId}`,
+
   /** Idempotency lookup: dispatch-proposal-clientmsg:{sourceThreadId}:{clientMessageId} → proposalId */
   clientMsg: (sourceThreadId: string, clientMessageId: string) =>
     `dispatch-proposal-clientmsg:${sourceThreadId}:${clientMessageId}`,

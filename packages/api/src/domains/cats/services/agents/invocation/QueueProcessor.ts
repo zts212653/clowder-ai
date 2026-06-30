@@ -1165,6 +1165,9 @@ export class QueueProcessor {
       // Without this, queued/connector invocations succeed without writing usageByCat, leaving 159+ orphans
       // in the daily usage report.
       const collectedUsage = new Map<string, TokenUsage>();
+      // F070 parity with messages.ts: governance gate reports terminal retryability via done.errorCode.
+      // QueueProcessor must honor that terminal signal instead of falling through to succeeded.
+      let governanceErrorCode: string | undefined;
 
       // F088 fix: Track per-turn content for outbound delivery (same pattern as ConnectorInvokeTrigger)
       const outboundTurns: Array<{
@@ -1247,6 +1250,12 @@ export class QueueProcessor {
           signalForCat: (catId: string) => invocationTracker.getController?.(threadId, catId)?.signal,
           queueHasQueuedMessages: (tid: string) => queue.hasQueuedNonAgentForThread(tid),
           deferA2AEnqueue: (e: any) => queue.enqueue(e),
+          // F254 B3: freshness re-invoke enqueue — strips freshnessContext before queueing
+          // (queue only stores standard QueueEntry fields; context is for event-log correlation).
+          freshnessReinvokeEnqueue: (e: any) => {
+            const { freshnessContext: _ctx, ...queueFields } = e;
+            queue.enqueue(queueFields);
+          },
           hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
             queue.hasActiveOrQueuedAgentForCat(tid, catId, { excludeEntryId: entry.id }),
           invocationController: controller,
@@ -1306,6 +1315,10 @@ export class QueueProcessor {
           if (metadata?.usage) {
             collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), metadata.usage));
           }
+        }
+        const errorCode = (msg as { errorCode?: unknown }).errorCode;
+        if (msg.type === 'done' && typeof errorCode === 'string') {
+          governanceErrorCode = errorCode;
         }
 
         // F088 fix: collect per-turn content for outbound delivery
@@ -1425,7 +1438,18 @@ export class QueueProcessor {
           const entryCat = entry.targetCats[0] ?? 'unknown';
           this.suppressedAutoResume.set(QueueProcessor.slotKey(threadId, entryCat), Date.now());
         }
+        await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
         return finalStatus;
+      }
+
+      if (governanceErrorCode) {
+        await invocationRecordStore.update(invocationId, {
+          status: 'failed',
+          error: governanceErrorCode,
+        });
+        finalStatus = 'failed';
+        await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
+        return 'failed';
       }
 
       // 9. Ack cursors + mark succeeded
@@ -1497,18 +1521,7 @@ export class QueueProcessor {
       // cleanupStreamingOnFailure — onStreamEnd moves sessions from active →
       // pendingCleanup; cleanupPlaceholders only acts on pendingCleanup, so
       // calling it alone is a no-op when sessions are still active.
-      if (this.deps.streamingHook && invocationId) {
-        try {
-          const STREAM_START_TIMEOUT_MS = 5000;
-          if (streamStartPromise) {
-            await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
-          }
-          await this.deps.streamingHook.onStreamEnd(threadId, '', invocationId);
-          await this.deps.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
-        } catch (cleanupErr) {
-          log.warn({ err: cleanupErr, threadId }, '[QueueProcessor] Error-path streaming cleanup failed');
-        }
-      }
+      await this.cleanupStreamingOnFailure(threadId, invocationId, streamStartPromise, log);
 
       // R3 P2 fix (#873): Deliver error message to external IM so user sees
       // a reply instead of silence (mirrors ConnectorInvokeTrigger error path).
@@ -1618,6 +1631,25 @@ export class QueueProcessor {
       }
       // Chain auto-dequeue is handled by tryExecuteNext* (calls onInvocationComplete
       // AFTER releasing processingThreads mutex to avoid self-blocking).
+    }
+  }
+
+  private async cleanupStreamingOnFailure(
+    threadId: string,
+    invocationId: string | undefined,
+    streamStartPromise: Promise<void> | undefined,
+    log: LoggerLike,
+  ): Promise<void> {
+    if (!this.deps.streamingHook || !invocationId) return;
+    try {
+      const STREAM_START_TIMEOUT_MS = 5000;
+      if (streamStartPromise) {
+        await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
+      }
+      await this.deps.streamingHook.onStreamEnd(threadId, '', invocationId);
+      await this.deps.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
+    } catch (cleanupErr) {
+      log.warn({ err: cleanupErr, threadId }, '[QueueProcessor] Error-path streaming cleanup failed');
     }
   }
 

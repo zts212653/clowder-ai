@@ -12,7 +12,7 @@ type TestMessage = {
   isStreaming?: boolean;
   timestamp: number;
   toolEvents?: Array<{ id: string; type: string; label: string; timestamp: number }>;
-  extra?: { stream?: { invocationId: string } };
+  extra?: { stream?: { invocationId: string; turnInvocationId?: string } };
 };
 
 const mockAddMessage = vi.fn();
@@ -227,6 +227,55 @@ describe('useAgentMessages stream catch-up (Bug C safety net)', () => {
     });
 
     expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+  });
+
+  it('requests catch-up when final done leaves a still-streaming same-parent local tool-only residue', () => {
+    storeState.messages = [
+      {
+        id: 'msg-turn-main-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'final text bubble that received the assistant speech',
+        origin: 'stream',
+        isStreaming: true,
+        timestamp: Date.now(),
+        toolEvents: [
+          { id: 'tool-main-1', type: 'tool_use', label: 'codex -> command_execution', timestamp: Date.now() },
+        ],
+        extra: { stream: { invocationId: 'parent-inv', turnInvocationId: 'turn-main' } },
+      },
+      {
+        id: 'msg-turn-residue-codex',
+        type: 'assistant',
+        catId: 'codex',
+        content: '',
+        origin: 'stream',
+        isStreaming: true,
+        timestamp: Date.now() + 1,
+        toolEvents: [
+          { id: 'tool-residue-1', type: 'tool_use', label: 'codex -> command_execution', timestamp: Date.now() + 1 },
+        ],
+        extra: { stream: { invocationId: 'parent-inv', turnInvocationId: 'turn-residue' } },
+      },
+    ];
+
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'done',
+        catId: 'codex',
+        invocationId: 'parent-inv',
+        turnInvocationId: 'turn-main',
+        isFinal: true,
+        threadId: 'thread-1',
+      });
+    });
+
+    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
+    expect(storeState.messages.find((message) => message.id === 'msg-turn-residue-codex')?.isStreaming).toBe(false);
   });
 
   it('does NOT request catch-up when non-final done has an empty CLI/tool bubble', () => {

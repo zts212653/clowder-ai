@@ -124,15 +124,12 @@ export function HubCallbackAuthPanel() {
   const error = useCallbackAuthError();
   const markViewed = useCallbackAuthMarkViewed();
 
-  // F174 D2b-2 rev3: opening this panel = "看过 callback auth" → POST mark-viewed
-  // → ActivityBar unread badge clears. Implements GitHub bell icon / iOS app badge
-  // mental model. Effect runs once on mount (markViewed is a stable zustand
-  // action). Errors silently swallowed inside markViewed (badge updates on
-  // next successful poll regardless).
+  // Opening this panel = "看过 callback auth" → POST mark-viewed to server.
+  // Advances the lastViewedAt watermark so unviewedFailures24h resets. Fires
+  // on mount regardless of isAvailable. markViewed handles errors silently.
   useEffect(() => {
-    if (!isAvailable) return;
     void markViewed();
-  }, [isAvailable, markViewed]);
+  }, [markViewed]);
 
   if (error && !isAvailable) {
     return (

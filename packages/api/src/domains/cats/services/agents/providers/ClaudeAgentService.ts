@@ -416,11 +416,15 @@ export class ClaudeAgentService implements AgentService {
         // F249: Project config is the single truth source for MCP resolution.
         // Try project first; fall back to global for uninitialized projects.
         let capConfig = null;
+        let accessScope: 'global' | 'project' = 'global';
         if (options?.workingDirectory && options.workingDirectory !== capabilitiesProjectRoot) {
           try {
             const projectRaw = readFileSync(join(options.workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
             const parsed = JSON.parse(projectRaw);
-            if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
+            if (parsed?.version === 1 || parsed?.version === 2) {
+              capConfig = parsed;
+              accessScope = 'project';
+            }
           } catch {
             /* No project config — fall back to global */
           }
@@ -431,7 +435,7 @@ export class ClaudeAgentService implements AgentService {
           if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
         }
         if (capConfig && catId) {
-          for (const s of resolveServersForCat(capConfig, catId)) {
+          for (const s of resolveServersForCat(capConfig, catId, { accessScope })) {
             managedMcpServerNames.add(s.name);
             if (!s.enabled) continue;
             if (s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name)) {

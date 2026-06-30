@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const srcPath = resolve(testDir, '..', 'HubObservabilityTab.tsx');
+const helpersPath = resolve(testDir, '..', 'observability-helpers.ts');
 const src = readFileSync(srcPath, 'utf8');
+const helpers = readFileSync(helpersPath, 'utf8');
 
 describe('F153 HealthPanel 503 degraded handling', () => {
   it('fetchHealth parses body when response status is 503', () => {
@@ -20,9 +22,10 @@ describe('F153 HealthPanel 503 degraded handling', () => {
   });
 
   it('HealthData interface includes status, readiness, and errorRate fields', () => {
-    expect(src).toContain("status: 'healthy' | 'degraded'");
-    expect(src).toContain('readiness?:');
-    expect(src).toContain('errorRate: number | null');
+    // HealthData extracted to observability-helpers.ts in Phase K
+    expect(helpers).toContain("status: 'healthy' | 'degraded'");
+    expect(helpers).toContain('readiness?:');
+    expect(helpers).toContain('errorRate: number | null');
   });
 
   it('HealthPanel renders readiness checks section', () => {

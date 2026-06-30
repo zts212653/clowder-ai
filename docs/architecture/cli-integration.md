@@ -15,9 +15,10 @@ created: 2026-02-26
 Cat Cafe 需要调用三个不同厂商的 AI Agent：
 - **Ragdoll** → Claude Code CLI (`claude`)
 - **Maine Coon** → OpenAI Codex CLI (`codex`)
-- **Siamese** → Google Antigravity CLI (`agy`，默认) / Gemini CLI (`gemini`，显式 fallback)
+- **Siamese** → Google Antigravity CLI (`agy`，Gemini 模型默认) / Gemini CLI (`gemini`，显式 fallback)
+- **Bengal** → Antigravity IDE Bridge；AGY CLI 上的 Claude Opus 变体也归Bengal
 
-这些 CLI 有不同的调用方式、输出格式和 Session 管理机制。Claude / Codex / `gemini-cli` 走 NDJSON 流；`antigravity-cli` 走 `agy --print` plain text，并在 `GeminiAgentService` 内独立分类。本文档记录我们的集成方案和踩过的坑。
+这些 CLI 有不同的调用方式、输出格式和 Session 管理机制。Claude / Codex / `gemini-cli` 走 NDJSON 流；`antigravity-cli` 走 `agy --print` plain text，并在 `GeminiAgentService` 内独立分类。AGY carrier 不等于猫族：Google 工具 + Gemini 模型归Siamese；Google/AGY 工具 + Claude Opus 模型归Bengal。本文档记录我们的集成方案和踩过的坑。
 
 ---
 
@@ -32,7 +33,7 @@ Cat Cafe 需要调用三个不同厂商的 AI Agent：
                 ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
 │ ClaudeAgentService│ │ CodexAgentService │ │ GeminiAgentService│
-│  (Ragdoll Opus)     │ │  (Maine Coon Codex)    │ │  (Siamese Gemini)   │
+│  (Ragdoll Opus)     │ │  (Maine Coon Codex)    │ │  (Google/AGY CLI) │
 └─────────┬─────────┘ └─────────┬─────────┘ └─────────┬─────────┘
           │                     │                     │
           └─────────────────────┼─────────────────────┘
@@ -261,7 +262,7 @@ function transformCodexEvent(event, catId): AgentMessage | null {
 
 | Adapter | 命令 | 场景 |
 |---------|------|------|
-| `antigravity-cli` (默认，非 ACP) | `agy --print "..."` | Google consumer 非 ACP headless carrier |
+| `antigravity-cli` (默认，非 ACP) | `agy --model <selector> --print "..."` | Google/AGY 非 ACP headless carrier；Gemini 模型归Siamese，Claude Opus 模型归Bengal |
 | `gemini-cli` (fallback / ACP) | `gemini -p "..." -o stream-json -y` / `gemini --acp` | enterprise / API-key fallback；catalog 配置 ACP 时的主路径 |
 | `antigravity` | `open -a Antigravity` | IDE 模式，MCP 回传 |
 
@@ -270,6 +271,7 @@ function transformCodexEvent(event, catId): AgentMessage | null {
 **antigravity-cli 调用方式：**
 ```bash
 agy \
+  --model "Gemini 3.1 Pro (High)" \
   --conversation agy-<uuid> \
   --add-dir "$WORKDIR" \
   --dangerously-skip-permissions \
@@ -278,7 +280,8 @@ agy \
 ```
 
 **antigravity-cli 关键边界：**
-- `agy` 1.0.1 没有可验证的 `--model` flag；模型来自账号侧 `/model` 默认选择，所以 `modelVerified=false`。
+- `agy` 2026-06-28 local refresh exposes a top-level `--model` flag. Cat Cafe owns that flag and strips user-supplied `--model` from freeform args.
+- Model identity is not the same as carrier identity: AGY + Gemini selector routes to Siamese; AGY + `Claude Opus 4.6 (Thinking)` routes to Bengal.
 - resume stdout 可能回放旧回复 + 新回复，因此 resumed text 事件使用 `textMode: "replace"`。
 - timeout / missing selected model 可能以 exit code 0 + stdout error 文本出现，必须由 plain-text parser 分类。
 - fresh conversation 的 `Warning: conversation "agy-..." not found.` 是可清理噪音，只能锚定 Cat Cafe 生成的 `agy-*` session id。
@@ -477,5 +480,5 @@ packages/api/src/
 └── domains/cats/services/
     ├── ClaudeAgentService.ts # Ragdoll
     ├── CodexAgentService.ts  # Maine Coon
-    └── GeminiAgentService.ts # Siamese
+    └── GeminiAgentService.ts # Google/AGY CLI carrier（暹罗 Gemini + 孟加拉 AGY Opus）
 ```

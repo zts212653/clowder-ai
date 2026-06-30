@@ -31,6 +31,9 @@ export class DeliveryCursorStore {
   private readonly cursors: Map<string, string> = new Map();
   /** Mention-ack cursors — separate namespace from delivery cursors (#77) */
   private readonly mentionAckCursors: Map<string, string> = new Map();
+  /** F254: Seen cursors — independent namespace tracking what cat READ mid-turn.
+   *  MUST NOT affect delivery cursor or incremental injection (AC-A9). */
+  private readonly seenCursors: Map<string, string> = new Map();
 
   constructor(sessionStore?: SessionStore) {
     this.sessionStore = sessionStore ?? null;
@@ -170,6 +173,68 @@ export class DeliveryCursorStore {
     this.upsertMap(this.mentionAckCursors, key, effective);
   }
 
+  // ---- F254 Seen Cursor ----
+  // Independent namespace tracking what the cat actually READ mid-turn.
+  // Uses same monotonic CAS pattern as delivery/mention cursors.
+  // CRITICAL: pushing seenCursor MUST NOT affect deliveryCursor (AC-A9).
+
+  /**
+   * Get the last seen message ID for a cat in a thread (F254).
+   * Returns undefined if no seen cursor exists (= fail-open in freshness gate).
+   */
+  async getSeenCursor(userId: string, catId: CatId, threadId: string): Promise<string | undefined> {
+    const key = cursorKey(userId, catId, threadId);
+    const memValue = this.seenCursors.get(key);
+    if (this.sessionStore) {
+      try {
+        const redisValue = await this.sessionStore.getSeenCursor(userId, catId, threadId);
+        if (redisValue != null) {
+          return memValue && memValue > redisValue ? memValue : redisValue;
+        }
+      } catch (err) {
+        log.warn({ err }, 'getSeenCursor failed, fallback to in-memory');
+      }
+    }
+    return memValue;
+  }
+
+  /**
+   * Acknowledge seen messages up to a message ID (monotonic forward only, F254).
+   * Called by MCP tools (list_recent, get_thread_context, get_message) when
+   * cat reads thread messages, and by post_message on successful send.
+   */
+  async ackSeenCursor(userId: string, catId: CatId, threadId: string, messageId: string): Promise<void> {
+    const key = cursorKey(userId, catId, threadId);
+    const memCursor = this.seenCursors.get(key);
+    const effective = memCursor && memCursor > messageId ? memCursor : messageId;
+
+    if (this.sessionStore) {
+      try {
+        const advanced = await this.sessionStore.setSeenCursor(userId, catId, threadId, effective);
+        if (advanced) {
+          this.upsertMap(this.seenCursors, key, effective);
+        } else {
+          try {
+            const actual = await this.sessionStore.getSeenCursor(userId, catId, threadId);
+            if (actual) this.upsertMap(this.seenCursors, key, actual);
+          } catch {
+            // GET failed after CAS noop — memory stays unchanged (safe)
+          }
+        }
+        return;
+      } catch (err) {
+        log.warn({ err }, 'setSeenCursor failed, fallback to in-memory');
+      }
+    }
+
+    // In-memory fallback: monotonic check then write (no await gap = safe)
+    const current = this.seenCursors.get(key);
+    if (current && effective <= current) {
+      return;
+    }
+    this.upsertMap(this.seenCursors, key, effective);
+  }
+
   // ---- Helpers ----
 
   /** Insert or update a cursor map, enforcing MAX_CURSORS eviction. */
@@ -189,7 +254,7 @@ export class DeliveryCursorStore {
   // ---- Cleanup ----
 
   /**
-   * Cleanup all per-cat delivery + mention-ack cursors for one user's thread.
+   * Cleanup all per-cat delivery + mention-ack + seen cursors for one user's thread.
    * Called during thread cascade delete to avoid stale cursor accumulation.
    */
   async deleteByThreadForUser(userId: string, threadId: string): Promise<number> {
@@ -207,6 +272,11 @@ export class DeliveryCursorStore {
         } catch (err) {
           log.warn({ err }, 'deleteMentionAckCursor failed, continue cleanup in-memory');
         }
+        try {
+          deleted += await this.sessionStore.deleteSeenCursor(userId, catId, threadId);
+        } catch (err) {
+          log.warn({ err }, 'deleteSeenCursor failed, continue cleanup in-memory');
+        }
       }
     }
 
@@ -221,6 +291,12 @@ export class DeliveryCursorStore {
     for (const key of this.mentionAckCursors.keys()) {
       if (key.startsWith(prefix) && key.endsWith(suffix)) {
         this.mentionAckCursors.delete(key);
+        deleted++;
+      }
+    }
+    for (const key of this.seenCursors.keys()) {
+      if (key.startsWith(prefix) && key.endsWith(suffix)) {
+        this.seenCursors.delete(key);
         deleted++;
       }
     }

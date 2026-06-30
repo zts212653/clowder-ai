@@ -12,6 +12,16 @@ const SAFE_VERDICT_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 const SANITIZE_RULES_VERSION = 'f236-anchor-telemetry-v1';
 const ROLLUP_COMPONENT_ID = 'anchor-telemetry-rollup';
 const ROLLUP_COMPONENT_NAME = 'anchor-first preview/drill open-rate rollup';
+const EMPTY_ADOPTION_ROLLUP: AnchorTelemetryRollup['adoption'] = {
+  explicitAnchorCalls: 0,
+  explicitFullCalls: 0,
+  defaultAnchorCalls: 0,
+  defaultFullCalls: 0,
+  legacyEquivalentAnchorCalls: 0,
+  legacyEquivalentFullCalls: 0,
+  uniqueCatsExplicitAnchor: 0,
+  unknownModeCalls: 0,
+};
 
 /**
  * F236 AC-E3 — sunset signal thresholds.
@@ -147,6 +157,15 @@ function buildSnapshot(
   const activationCounts: Record<string, number> = {
     orphan_drills: rollup.orphanDrills,
   };
+  const adoption = normalizeAdoptionRollup(rollup.adoption);
+  activationCounts.adoption_explicit_anchor_calls = adoption.explicitAnchorCalls;
+  activationCounts.adoption_explicit_full_calls = adoption.explicitFullCalls;
+  activationCounts.adoption_default_anchor_calls = adoption.defaultAnchorCalls;
+  activationCounts.adoption_default_full_calls = adoption.defaultFullCalls;
+  activationCounts.adoption_legacy_equivalent_anchor_calls = adoption.legacyEquivalentAnchorCalls;
+  activationCounts.adoption_legacy_equivalent_full_calls = adoption.legacyEquivalentFullCalls;
+  activationCounts.adoption_unique_cats_explicit_anchor = adoption.uniqueCatsExplicitAnchor;
+  activationCounts.adoption_unknown_mode_calls = adoption.unknownModeCalls;
   for (const [tool, stats] of Object.entries(rollup.perTool)) {
     activationCounts[`${tool}_preview_responses`] = stats.previewResponses;
     activationCounts[`${tool}_previewed_items`] = stats.previewedItems;
@@ -373,6 +392,18 @@ function renderVerdictMarkdown(
   lines.push(`- Orphan drills: ${rollup.orphanDrills}`);
   lines.push('');
 
+  const adoption = normalizeAdoptionRollup(rollup.adoption);
+  lines.push('Adoption Detail:');
+  lines.push(
+    `- explicitAnchorCalls=${adoption.explicitAnchorCalls}; explicitFullCalls=${adoption.explicitFullCalls}; uniqueCatsExplicitAnchor=${adoption.uniqueCatsExplicitAnchor}`,
+  );
+  lines.push(`- defaultAnchorCalls=${adoption.defaultAnchorCalls}; defaultFullCalls=${adoption.defaultFullCalls}`);
+  lines.push(
+    `- legacyEquivalentAnchorCalls=${adoption.legacyEquivalentAnchorCalls}; legacyEquivalentFullCalls=${adoption.legacyEquivalentFullCalls}`,
+  );
+  lines.push(`- unknownModeCalls=${adoption.unknownModeCalls}`);
+  lines.push('');
+
   // Evidence section (canonical format for eval-hub-read-model extractEvidenceRefs)
   lines.push('Evidence:');
   for (const ref of packet.evidencePacket.snapshotRefs) lines.push(`- ${ref}`);
@@ -389,4 +420,10 @@ function renderVerdictMarkdown(
   lines.push('');
 
   return lines.join('\n');
+}
+
+function normalizeAdoptionRollup(
+  adoption: AnchorTelemetryRollup['adoption'] | undefined,
+): AnchorTelemetryRollup['adoption'] {
+  return { ...EMPTY_ADOPTION_ROLLUP, ...adoption };
 }

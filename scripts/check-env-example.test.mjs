@@ -36,6 +36,7 @@ const EXAMPLE_ALLOWLIST = new Map([
   ['FEISHU_APP_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['FEISHU_APP_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['FEISHU_VERIFICATION_TOKEN', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
+  ['FEISHU_GROUP_BOT_MENTIONS_JSON', 'F240 connector-scoped power-user env (#1035), not global env registry'],
   ['DINGTALK_APP_KEY', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['DINGTALK_APP_SECRET', 'F240 connector manifest/preconfigured gateway env, not global env registry'],
   ['WECOM_BOT_ID', 'F240 connector manifest/preconfigured gateway env, not global env registry'],

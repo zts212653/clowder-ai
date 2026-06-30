@@ -123,6 +123,8 @@ const EXPECTED_TOOLS = [
   'cat_cafe_list_labels',
   // F061 Bug-F workaround: MCP shell exec for read-only commands
   'cat_cafe_shell_exec',
+  // F236 Phase C: cc native Read/Grep/Glob anchor mode control
+  'cat_cafe_set_read_mode',
   // F195 Phase B: Audio capture + transcription tools
   'cat_cafe_audio_list_sources',
   'cat_cafe_audio_capture_start',
@@ -200,6 +202,8 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_list_labels',
   // F061 Bug-F workaround: MCP shell exec for read-only commands
   'cat_cafe_shell_exec',
+  // F236 Phase C: cc native Read/Grep/Glob anchor mode control
+  'cat_cafe_set_read_mode',
   // F168 Phase B Task 6: declare awaiting_external state for a community case
   'cat_cafe_community_await_external',
 ];
@@ -311,6 +315,24 @@ describe('MCP Server Tool Registration', () => {
 
     const checkTool = server._registeredTools.cat_cafe_check_permission_status;
     assert.ok(checkTool, 'check_permission_status tool should exist');
+  });
+
+  // F167 Phase P fix: hold_ball description must steer "等人" to @co-creator/@cat, NOT hold_ball,
+  // and scope wakeWhen to local commands (concept-boundary hardening — primary root cause).
+  test('hold_ball description excludes "等人" waits and scopes wakeWhen (F167 Phase P)', async () => {
+    const { createServer } = await import('../dist/index.js');
+    const server = createServer();
+    const holdTool = server._registeredTools.cat_cafe_hold_ball;
+    assert.ok(holdTool, 'hold_ball tool should exist');
+    const desc = holdTool.description;
+    assert.ok(typeof desc === 'string' && desc.length > 0, 'hold_ball must have a description string');
+    // #1-misuse exclusion: waiting on a person's reply is @co-creator/@cat, never a hold.
+    assert.match(desc, /waiting for co-creator\/user OR another cat to reply/);
+    assert.match(desc, /redundant 2nd trigger/);
+    // an inbound co-creator/cat message counts as a callback (Phase M clarifier extension)
+    assert.match(desc, /sending a message into this thread IS such a callback/);
+    // wakeWhen scoped to local commands, not a universal "smart wait"
+    assert.match(desc, /LOCAL COMMANDS ONLY/);
   });
 
   test('post_message schema exposes threadId as optional (F178 agent-key auth)', async () => {
@@ -491,6 +513,8 @@ const KNOWN_WRITE_TOOLS = [
   // F192 Phase H AC-H4: publish verdict creates branch + commit + PR (write)
   'cat_cafe_publish_verdict',
   'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
+  // F236 Phase C: set_read_mode writes mode file via callbackPost
+  'cat_cafe_set_read_mode',
   'signal_mark_read',
   'signal_summarize',
   'signal_start_study',

@@ -465,10 +465,14 @@ export function ChatMessage({
   const catHeader = catStyle ? (
     <div className="mb-1 flex flex-col gap-1 min-w-0">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="text-xs font-semibold" style={{ color: catStyle.textColor, opacity: 0.8 }}>
+        <span
+          className="text-xs font-semibold truncate max-w-[140px] sm:max-w-[200px] md:max-w-[280px]"
+          style={{ color: catStyle.textColor, opacity: 0.8 }}
+          title={catStyle.label}
+        >
           {catStyle.label}
         </span>
-        <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+        <span className="text-xs text-cafe-muted shrink-0">{formatTime(message.timestamp)}</span>
         <CopyIdButton messageId={message.id} />
         {isWhisper && (
           <span

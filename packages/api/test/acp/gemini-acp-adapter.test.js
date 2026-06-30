@@ -2536,6 +2536,93 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
     assert.equal(memoryEnvMap.CAT_CAFE_THREAD_ID, 'thread-acp-123');
   });
 
+  it('injects into exact "cat-cafe" server name (not just prefixed)', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+
+    const mcpServers = [
+      { name: 'cat-cafe', command: 'node', args: ['cat-cafe.js'], env: [{ name: 'EXISTING', value: 'keep' }] },
+      { name: 'pencil', command: 'node', args: ['pencil.js'], env: [{ name: 'UNCHANGED', value: 'yes' }] },
+    ];
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      mcpServers,
+    });
+
+    const callbackEnv = {
+      CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+      CAT_CAFE_INVOCATION_ID: 'inv-acp-123',
+      CAT_CAFE_CALLBACK_TOKEN: 'token-acp-123',
+      CAT_CAFE_USER_ID: 'default-user',
+      CAT_CAFE_CAT_ID: 'gemini',
+      CAT_CAFE_SIGNAL_USER: 'gemini',
+    };
+
+    for await (const _ of adapter.invoke('hello', { callbackEnv })) {
+      /* drain */
+    }
+
+    const sessionNew = captured.find((m) => m.method === 'session/new');
+    assert.ok(sessionNew, 'Expected session/new');
+    const sentServers = sessionNew.params.mcpServers;
+
+    const catCafe = sentServers.find((s) => s.name === 'cat-cafe');
+    assert.ok(catCafe, 'cat-cafe should be present');
+    const catCafeEnv = Object.fromEntries(catCafe.env.map((e) => [e.name, e.value]));
+    assert.equal(catCafeEnv.CAT_CAFE_API_URL, 'http://127.0.0.1:3004');
+    assert.equal(catCafeEnv.CAT_CAFE_CALLBACK_TOKEN, 'token-acp-123');
+    assert.equal(catCafeEnv.EXISTING, 'keep');
+
+    const pencil = sentServers.find((s) => s.name === 'pencil');
+    assert.ok(pencil, 'pencil should be present');
+    const pencilEnv = Object.fromEntries(pencil.env.map((e) => [e.name, e.value]));
+    assert.equal(pencilEnv.CAT_CAFE_INVOCATION_ID, undefined, 'pencil should not get callback env');
+    assert.equal(pencilEnv.UNCHANGED, 'yes');
+  });
+
+  it('overwrites placeholder env values with real callback env', async () => {
+    const { pool: p, captured } = createPoolWithAutoRespond();
+    pool = p;
+
+    const mcpServers = [
+      {
+        name: 'cat-cafe-collab',
+        command: 'node',
+        args: ['collab.js'],
+        env: [
+          { name: 'CAT_CAFE_API_URL', value: '${CAT_CAFE_API_URL}' },
+          { name: 'CAT_CAFE_CALLBACK_TOKEN', value: '${CAT_CAFE_CALLBACK_TOKEN}' },
+        ],
+      },
+    ];
+    const adapter = new GeminiAcpAdapter({
+      catId: 'gemini',
+      pool,
+      poolKey: TEST_POOL_KEY,
+      projectRoot: '/tmp',
+      mcpServers,
+    });
+
+    const callbackEnv = {
+      CAT_CAFE_API_URL: 'http://localhost:3004',
+      CAT_CAFE_CALLBACK_TOKEN: 'real-token',
+    };
+
+    for await (const _ of adapter.invoke('test', { callbackEnv })) {
+      /* drain */
+    }
+
+    const sessionNew = captured.find((m) => m.method === 'session/new');
+    assert.ok(sessionNew, 'Expected session/new');
+    const collab = sessionNew.params.mcpServers[0];
+    const envMap = Object.fromEntries(collab.env.map((e) => [e.name, e.value]));
+    assert.equal(envMap.CAT_CAFE_API_URL, 'http://localhost:3004', 'Placeholder should be overwritten');
+    assert.equal(envMap.CAT_CAFE_CALLBACK_TOKEN, 'real-token', 'Placeholder should be overwritten');
+  });
+
   it('passes servers unchanged when no callbackEnv', async () => {
     const { pool: p, captured } = createPoolWithAutoRespond();
     pool = p;
@@ -2555,7 +2642,6 @@ describe('GeminiAcpAdapter callbackEnv passthrough', () => {
 
     const sessionNew = captured.find((m) => m.method === 'session/new');
     assert.ok(sessionNew, 'Expected session/new');
-    // Should have resolved servers from whitelist but without callbackEnv injection
     const collab = sessionNew.params.mcpServers.find((s) => s.name === 'cat-cafe-collab');
     assert.ok(collab, 'cat-cafe-collab should be present');
     assert.deepStrictEqual(collab.env, [], 'No callbackEnv = empty env on builtin servers');

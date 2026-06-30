@@ -4,6 +4,8 @@ related_features: [F114, F167, F173]
 topics: [governance, harness-engineering, quality, close-gate, magic-words, cat-mind]
 doc_kind: spec
 created: 2026-04-27
+user_journey_exempt: pure harness governance (close-gate structure, magic-words, cat-mind guard) — no user-perceivable surface changes
+tips_exempt: harness governance internals (close-gate, magic-words, cat-mind guard) — no user-visible capability change
 ---
 
 # F177: Harness Update — Close Gate 结构化判据 + 四心智专属护栏

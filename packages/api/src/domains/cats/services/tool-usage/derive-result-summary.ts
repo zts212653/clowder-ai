@@ -105,6 +105,20 @@ function deriveSearchEvidence(text: string): ResultSummary {
     summary._f200HasPrivateHits = true;
   }
 
+  // F256 Phase B: extract expansion hint anchors from "📎 Related directions" block
+  if (text.includes('📎 Related directions')) {
+    const expansionAnchors: string[] = [];
+    const hintRe = /^\s+-\s+(\S+):/gm;
+    const hintSection = text.slice(text.indexOf('📎 Related directions'));
+    let hm: RegExpExecArray | null;
+    hm = hintRe.exec(hintSection);
+    while (hm !== null) {
+      if (hm[1]) expansionAnchors.push(hm[1]);
+      hm = hintRe.exec(hintSection);
+    }
+    if (expansionAnchors.length > 0) summary.expansionHintAnchors = expansionAnchors;
+  }
+
   return summary;
 }
 

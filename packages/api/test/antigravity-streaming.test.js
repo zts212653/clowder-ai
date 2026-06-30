@@ -182,9 +182,45 @@ describe('G2: pollForSteps yields steps incrementally', () => {
 
     assert.equal(yielded[0].steps[0].plannerResponse.response, '发现了关键信息。');
     assert.equal(yielded[1].steps[0].plannerResponse.response, '让我发评估到 thread。');
+    // F211 (#2558): the mutation batch's step above carries only the suffix delta, but its
+    // cursor must surface the COMPLETE latest planner text so the service's deferred-tail
+    // detection sees the full sentence, not just the streamed chunk.
+    assert.equal(yielded[1].cursor.latestPlannerText, '发现了关键信息。让我发评估到 thread。');
     assert.equal(yielded.at(-1).cursor.terminalSeen, true);
     assert.equal(yielded.at(-1).cursor.lastDeliveredStepCount, 1);
     assert.ok(trajectoryCallCount >= 3, 'unchanged IDLE status must still get one follow-up full fetch');
+  });
+
+  test('F211 (#2558): cursor.latestPlannerText falls back to response when modifiedResponse is blank', async () => {
+    // Antigravity can return modifiedResponse:'' with the real text in response; the
+    // transformer displays `modifiedResponse || response`, so the cursor snapshot must
+    // surface the same non-empty field (a `??` would snapshot the empty string).
+    const bridge = createBridge();
+    let callCount = 0;
+    const trajectories = [
+      {
+        status: 'CASCADE_RUN_STATUS_IDLE',
+        numTotalSteps: 1,
+        trajectory: {
+          steps: [
+            {
+              type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+              status: 'CORTEX_STEP_STATUS_DONE',
+              plannerResponse: { modifiedResponse: '', response: '让我整理分析。' },
+            },
+          ],
+        },
+      },
+    ];
+    mock.method(bridge, 'getTrajectory', async () => trajectories[Math.min(callCount++, trajectories.length - 1)]);
+    mock.method(bridge, 'getTrajectorySteps', async () => []);
+
+    const yielded = [];
+    for await (const batch of bridge.pollForSteps('cascade-1', 0, 40, 5)) {
+      yielded.push(batch);
+    }
+
+    assert.equal(yielded.at(-1).cursor.latestPlannerText, '让我整理分析。');
   });
 
   test('F211-REG12: dirty-IDLE terminal exception requires text on the generating planner', async () => {

@@ -7,6 +7,7 @@ import { assert, runSourceOnlySnippet } from './install-script-test-helpers.js';
 const testDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(testDir, '..', '..', '..');
 const installScriptText = readFileSync(resolve(repoRoot, 'scripts', 'install.sh'), 'utf8');
+const installPs1Text = readFileSync(resolve(repoRoot, 'scripts', 'install.ps1'), 'utf8');
 
 test('install script supports macOS (Darwin) as a platform', () => {
   assert.match(installScriptText, /Darwin\)/);
@@ -17,6 +18,24 @@ test('install script supports macOS (Darwin) as a platform', () => {
 test('install script header lists macOS as supported', () => {
   assert.match(installScriptText, /macOS/);
   assert.match(installScriptText, /Homebrew/);
+});
+
+test('Windows installer salt generation uses PowerShell 5.1-compatible RNG API', () => {
+  assert.match(
+    installPs1Text,
+    /\[System\.Security\.Cryptography\.RandomNumberGenerator\]::Create\(\)/,
+    'install.ps1 must create an RNG instance available on .NET Framework',
+  );
+  assert.match(
+    installPs1Text,
+    /\$rng\.GetBytes\(\$bytes\)/,
+    'install.ps1 must fill the byte array through the instance API',
+  );
+  assert.doesNotMatch(
+    installPs1Text,
+    /\[System\.Security\.Cryptography\.RandomNumberGenerator\]::Fill\(\$bytes\)/,
+    'RandomNumberGenerator.Fill is unavailable on Windows PowerShell 5.1 / .NET Framework',
+  );
 });
 
 test('install script does not require sudo on macOS', () => {

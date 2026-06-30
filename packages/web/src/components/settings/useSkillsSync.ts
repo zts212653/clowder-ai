@@ -27,7 +27,7 @@ function visibleIssues(drift: { issues: DriftIssue[] } | undefined | null): Drif
  *
  * F249: Core drift logic delegates to useDriftSync({ type: 'skill' }).
  */
-export function useSkillsSync({ scope, composedItems, controls, refreshToken = 0 }: UseSkillsSyncOptions) {
+export function useSkillsSync({ scope, composedItems, controls, fetchSkills, refreshToken = 0 }: UseSkillsSyncOptions) {
   const drift = useDriftSync({
     type: 'skill',
     projectPaths: controls.knownProjects,
@@ -62,8 +62,24 @@ export function useSkillsSync({ scope, composedItems, controls, refreshToken = 0
     return map;
   }, [composedItems, drift]);
 
+  const refreshAllScopeData = async () => {
+    await Promise.all([fetchSkills(), controls.refetch(null)]);
+  };
+
+  const handleSyncAllScopes = async () => {
+    await drift.handleSyncAllScopes();
+    await refreshAllScopeData();
+  };
+
+  const handleSyncScope = async (projectPath?: string) => {
+    await drift.handleSyncScope(projectPath);
+    await refreshAllScopeData();
+  };
+
   return {
     ...drift,
+    handleSyncAllScopes,
+    handleSyncScope,
     skillProjectSync,
   };
 }

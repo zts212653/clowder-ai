@@ -101,6 +101,7 @@ interface StreamingHookLike {
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveUserId } from '../utils/request-identity.js';
+import { cancelWakeWhenRunner } from './callback-hold-ball-routes.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
@@ -264,6 +265,15 @@ function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | 
   try {
     const cancelled = cancelPendingHoldsForThread(threadId, deps);
     if (cancelled.length > 0) {
+      // P1-3 fix (cloud R2): also cancel running wakeWhen commands for each cancelled hold.
+      // Without this, the runner continues executing after the fallback task is removed,
+      // and posts a stale wake when it completes.
+      for (const task of cancelled) {
+        const catId = task.createdBy?.replace('hold-ball:', '') ?? '';
+        if (catId) {
+          cancelWakeWhenRunner(threadId, catId);
+        }
+      }
       log.info(
         { threadId, cancelledCount: cancelled.length, taskIds: cancelled.map((t) => t.id) },
         'F167 Phase J: auto-cancelled pending hold-ball tasks on user message',
@@ -1210,6 +1220,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
                     queueHasQueuedMessages: (tid: string) =>
                       opts.invocationQueue?.hasQueuedNonAgentForThread(tid) ?? false,
                     deferA2AEnqueue: (e) => opts.invocationQueue?.enqueue(e as any),
+                    // F254 B3: freshness re-invoke enqueue for immediate (foreground) invocations.
+                    // Without this, freshnessReinvoke metadata from invoke-single-cat is silently
+                    // dropped in the immediate path — re-invoke only fires for queue-driven entries.
+                    // Matches QueueProcessor pattern: strip freshnessContext before enqueue.
+                    freshnessReinvokeEnqueue: (e: any) => {
+                      const { freshnessContext: _ctx, ...queueFields } = e;
+                      opts.invocationQueue?.enqueue(queueFields);
+                    },
                     hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
                       opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
                   }
@@ -1850,6 +1868,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               icon: m.source.icon,
               ...(m.source.url ? { url: m.source.url } : {}),
               ...(m.source.meta ? { meta: m.source.meta } : {}),
+              ...(m.source.sender ? { sender: m.source.sender } : {}),
             },
           }
         : {}),

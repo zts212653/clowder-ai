@@ -30,11 +30,13 @@ export interface BaseToolEvent {
   status: ToolStatus;
 }
 
-/** search_evidence summary — supports FM-5 (nudge effectiveness). */
+/** search_evidence summary — supports FM-5 (nudge effectiveness) + F256 expansion tracking. */
 export interface SearchEvidenceSummary {
   resultCount: number;
   topScore: number | null;
   nudgeEmitted: boolean;
+  /** F256 Phase B: expansion hints emitted in this search result */
+  expansionHintAnchors?: string[];
 }
 
 /**
@@ -87,4 +89,12 @@ export interface NudgeFollowupAnalysis {
   followed: boolean;
   followupTool: string | null;
   fallbackGrepDetected: boolean;
+}
+
+/** F256 Phase B: was an expansion hint anchor followed up by graph_resolve / search_evidence? */
+export interface ExpansionFollowupAnalysis {
+  searchEvent: ToolEvent;
+  hintAnchors: string[];
+  followedAnchors: string[];
+  followupRate: number;
 }

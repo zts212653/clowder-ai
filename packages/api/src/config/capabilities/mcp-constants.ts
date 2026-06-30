@@ -13,7 +13,7 @@ export const CAT_CAFE_SPLIT_ENTRYPOINTS = new Map([
   ['cat-cafe-finance', 'finance.js'],
 ]);
 
-/** Use the Node executable that is already running Cat Cafe for managed MCP servers. */
+/** Use the Node executable that is already running Clowder AI for managed MCP servers. */
 export function resolveCatCafeNodeCommand(): string {
   return process.execPath?.trim() || 'node';
 }

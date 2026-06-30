@@ -1332,7 +1332,11 @@ main() {
         if [ -f "scripts/anthropic-proxy.mjs" ]; then
             echo "  启动 Anthropic Proxy (端口 $PROXY_PORT)..."
             PROXY_UPSTREAMS="${ANTHROPIC_PROXY_UPSTREAMS_PATH:-$PROJECT_DIR/.cat-cafe/proxy-upstreams.json}"
-            background_eval_with_null_stdin "ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams \"$PROXY_UPSTREAMS\""
+            PROXY_MODEL_MAP_ARG=""
+            if [ -n "${ANTHROPIC_PROXY_MODEL_MAP:-}" ]; then
+                PROXY_MODEL_MAP_ARG="--model-map $ANTHROPIC_PROXY_MODEL_MAP"
+            fi
+            background_eval_with_null_stdin "ANTHROPIC_PROXY_PORT=$PROXY_PORT node scripts/anthropic-proxy.mjs --port $PROXY_PORT --upstreams \"$PROXY_UPSTREAMS\" $PROXY_MODEL_MAP_ARG"
             PROXY_PID=$!
             sleep 1
             if kill -0 $PROXY_PID 2>/dev/null; then

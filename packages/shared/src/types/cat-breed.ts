@@ -32,8 +32,8 @@ export interface ContextBudget {
 import type { CliEffortValue } from '../cli-effort.js';
 
 export interface CliConfig {
-  readonly command: string; // 'claude' | 'codex' | 'gemini'
-  readonly outputFormat: string; // 'stream-json' | 'json'
+  readonly command: string; // 'claude' | 'codex' | 'agy' | ...
+  readonly outputFormat: string; // 'stream-json' | 'json' | 'plainText'
   readonly defaultArgs?: readonly string[];
   /**
    * Reasoning effort level — each CLI maps to its own flag:

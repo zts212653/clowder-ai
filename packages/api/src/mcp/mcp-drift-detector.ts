@@ -51,19 +51,34 @@ function computeDriftHash(globalEntries: CapabilityEntry[], projectEntries: Capa
   const sortedProject = [...projectEntries].sort((a, b) => a.id.localeCompare(b.id));
   hash.update('global:');
   for (const e of sortedGlobal) {
-    hash.update(`${e.id}:${canonicalJson(e.mcpServer ?? {})}|`);
+    hash.update(`${e.id}:${canonicalJson(mcpDriftSnapshot(e))}|`);
   }
   hash.update('project:');
   for (const e of sortedProject) {
-    hash.update(`${e.id}:${canonicalJson(e.mcpServer ?? {})}:${canonicalJson(e.mcpServerOverride ?? null)}|`);
+    hash.update(`${e.id}:${canonicalJson(mcpDriftSnapshot(e))}:${canonicalJson(e.mcpServerOverride ?? null)}|`);
   }
   return hash.digest('hex').slice(0, 16);
 }
 
-/** Compute a config hash for a single MCP server descriptor (for comparison). */
-function serverHash(server: CapabilityEntry['mcpServer']): string {
+function normalizedBlockedCats(entry: CapabilityEntry): string[] {
+  return [...(entry.blockedCats ?? [])].sort();
+}
+
+function mcpDriftSnapshot(entry: CapabilityEntry): {
+  mcpServer: CapabilityEntry['mcpServer'];
+  globalEnabled: boolean;
+  blockedCats: string[];
+} {
+  return {
+    mcpServer: entry.mcpServer,
+    globalEnabled: entry.globalEnabled ?? entry.enabled ?? true,
+    blockedCats: normalizedBlockedCats(entry),
+  };
+}
+
+function entryConfigHash(entry: CapabilityEntry): string {
   return createHash('sha256')
-    .update(canonicalJson(server ?? {}))
+    .update(canonicalJson(mcpDriftSnapshot(entry)))
     .digest('hex')
     .slice(0, 16);
 }
@@ -122,9 +137,9 @@ export async function checkMcpProject(
     const projectEntry = projectMcpMap.get(mcpId);
     if (!projectEntry) continue;
 
-    const globalHash = serverHash(globalEntry.mcpServer);
-    // Compare against the non-override config (what the project received at last sync)
-    const projectHash = serverHash(projectEntry.mcpServer);
+    const globalHash = entryConfigHash(globalEntry);
+    // Compare against the non-override config/state (what the project received at last sync)
+    const projectHash = entryConfigHash(projectEntry);
 
     if (globalHash !== projectHash) {
       issues.push({

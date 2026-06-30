@@ -7,32 +7,33 @@ function redactRecord(record: Record<string, string> | undefined): Record<string
   return Object.fromEntries(Object.keys(record).map((key) => [key, REDACTED_CAPABILITY_SECRET]));
 }
 
+function sanitizeMcpServer<T extends CapabilityEntry['mcpServer'] | CapabilityEntry['mcpServerOverride']>(
+  server: T,
+): T {
+  if (!server) return server;
+  const sanitized = { ...server };
+  if (Array.isArray(server.args)) {
+    sanitized.args = [...server.args];
+  }
+  const redactedEnv = redactRecord(server.env);
+  const redactedHeaders = redactRecord(server.headers);
+  if (redactedEnv) sanitized.env = redactedEnv;
+  else delete sanitized.env;
+  if (redactedHeaders) sanitized.headers = redactedHeaders;
+  else delete sanitized.headers;
+  return sanitized as T;
+}
+
 export function sanitizeCapabilityForAudit(entry: CapabilityEntry | null): CapabilityEntry | null {
   if (!entry) return null;
   const sanitized: CapabilityEntry = { ...entry };
-  if (!entry.mcpServer) return sanitized;
-
-  const mcpServer: NonNullable<CapabilityEntry['mcpServer']> = { ...entry.mcpServer };
-  if (Array.isArray(entry.mcpServer.args)) {
-    mcpServer.args = [...entry.mcpServer.args];
-  }
-  const redactedEnv = redactRecord(entry.mcpServer.env);
-  const redactedHeaders = redactRecord(entry.mcpServer.headers);
-  if (redactedEnv) mcpServer.env = redactedEnv;
-  else delete mcpServer.env;
-  if (redactedHeaders) mcpServer.headers = redactedHeaders;
-  else delete mcpServer.headers;
-  sanitized.mcpServer = mcpServer;
+  if (entry.mcpServer) sanitized.mcpServer = sanitizeMcpServer(entry.mcpServer);
+  if (entry.mcpServerOverride) sanitized.mcpServerOverride = sanitizeMcpServer(entry.mcpServerOverride);
   return sanitized;
 }
 
-/**
- * Client-side app: return real values for editing — no need to mask from the local user.
- * Frontend handles display masking via password inputs + eye toggle.
- * Audit logs continue using sanitizeCapabilityForAudit (always redacted).
- */
 export function sanitizeCapabilityForResponse(entry: CapabilityEntry | null): CapabilityEntry | null {
-  return entry;
+  return sanitizeCapabilityForAudit(entry);
 }
 
 export function sanitizeCapabilityAuditEntry(entry: CapabilityAuditEntry): CapabilityAuditEntry {

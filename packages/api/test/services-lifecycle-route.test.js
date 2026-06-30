@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -19,6 +19,15 @@ const SESSION_HEADERS = { 'x-test-session-user': 'you' };
 const TRUSTED_ORIGIN_HEADERS = { origin: 'http://localhost:3003', host: 'localhost:3003' };
 const ORIGINAL_OWNER_ID = 'you';
 process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_ID;
+
+async function waitForFile(path, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for ${path}`);
+}
 
 async function buildApp(options = {}) {
   const app = Fastify({ logger: false });
@@ -2580,17 +2589,24 @@ describe('service lifecycle write routes', () => {
   it('marks timed-out scripts even when they emitted output before termination', async () => {
     const scriptDir = mkdtempSync(join(tmpdir(), 'cat-cafe-service-timeout-'));
     const scriptPath = join(scriptDir, 'slow.sh');
-    writeFileSync(scriptPath, 'printf "started\\n"; sleep 2\n');
+    const readyPath = join(scriptDir, 'ready');
+    writeFileSync(scriptPath, `printf "started\\n"; : > ${JSON.stringify(readyPath)}; sleep 5\n`);
 
-    const result = await runServiceScript({
-      serviceId: 'test-service',
-      action: 'install',
-      scriptPath,
-      timeoutMs: 20,
-    });
+    try {
+      const run = runServiceScript({
+        serviceId: 'test-service',
+        action: 'install',
+        scriptPath,
+        timeoutMs: 1_000,
+      });
+      await waitForFile(readyPath);
+      const result = await run;
 
-    assert.equal(result.timedOut, true);
-    assert.match(result.output ?? '', /started/);
+      assert.equal(result.timedOut, true);
+      assert.match(result.output ?? '', /started/);
+    } finally {
+      rmSync(scriptDir, { recursive: true, force: true });
+    }
   });
 });
 

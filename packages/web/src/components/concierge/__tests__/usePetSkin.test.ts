@@ -207,6 +207,56 @@ describe('resolvePetSprite — xianxian-codex (atlas)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// E4: Autonomous CodexPetState passthrough (cloud review P2-1 fix)
+// ---------------------------------------------------------------------------
+describe('resolvePetSprite — autonomous CodexPetState passthrough', () => {
+  it('preserves autonomous "jumping" for yanyan-codex atlas (E4 override path)', () => {
+    const result = resolvePetSprite('jumping', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.kind).toBe('atlas');
+    expect(result.petState).toBe('jumping');
+    expect(result.row).toBe(4); // jumping is row 4
+  });
+
+  it('preserves autonomous "waving" for yanyan-codex atlas', () => {
+    const result = resolvePetSprite('waving', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('waving');
+    expect(result.row).toBe(3);
+  });
+
+  it('preserves autonomous "running" for xianxian-codex atlas', () => {
+    const result = resolvePetSprite('running', 'xianxian-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('running');
+    expect(result.row).toBe(7);
+  });
+
+  it('preserves autonomous "running-right" for atlas skins', () => {
+    const result = resolvePetSprite('running-right', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('running-right');
+    expect(result.row).toBe(1);
+  });
+
+  it('preserves autonomous "running-left" for atlas skins', () => {
+    const result = resolvePetSprite('running-left', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('running-left');
+    expect(result.row).toBe(2);
+  });
+
+  it('still projects business ConciergeBallState through V1 map', () => {
+    // "thinking" is a ConciergeBallState, not a CodexPetState — must still project
+    const result = resolvePetSprite('thinking', 'yanyan-codex') as AtlasSpriteResult;
+    expect(result.petState).toBe('running'); // V1: thinking → running
+  });
+
+  it('preserves autonomous "jumping" for ragdoll-v1 (individual sprites)', () => {
+    // ragdoll-v1 has a PET_STATE_SPRITES entry for jumping → idle.png
+    // When E4 sends "jumping" directly, it should resolve to the jumping entry
+    const result = resolvePetSprite('jumping', 'ragdoll-v1');
+    expect(typeof result).toBe('string');
+    expect(result).toBe('/concierge/skins/ragdoll-v1/idle.png'); // ragdoll-v1 maps jumping → idle.png
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Backward compat: ragdoll-v1 still returns string with expanded CodexPetState
 // ---------------------------------------------------------------------------
 describe('resolvePetSprite — ragdoll-v1 backward compat with 9-state', () => {

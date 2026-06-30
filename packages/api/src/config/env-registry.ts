@@ -602,6 +602,13 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'ANNOTATION_DATA_DIR',
+    defaultValue: '{repoRoot}/data/stories',
+    description: 'Story annotation + export 存储目录（F252 Phase D）',
+    category: 'storage',
+    sensitive: false,
+  },
+  {
     name: 'DOCS_ROOT',
     defaultValue: '{repoRoot}/docs',
     description: 'Docs 根目录路径（F102 记忆系统用）',
@@ -1588,6 +1595,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'HMAC salt — 遥测系统 ID 伪名化用。生产环境必设，缺失则禁用 OTel',
     category: 'telemetry',
     sensitive: true,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_EXPORT_RAW_SYSTEM_IDS',
@@ -1595,6 +1603,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 1 跳过 HMAC，导出原始系统 ID（仅限自托管受控环境）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'PROMETHEUS_PORT',
@@ -1602,6 +1611,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Prometheus /metrics 抓取端口',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'OTEL_EXPORTER_OTLP_ENDPOINT',
@@ -1609,6 +1619,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'OTLP 导出端点（设置后同时推送 traces/metrics/logs 到该端点）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'OTEL_SDK_DISABLED',
@@ -1616,6 +1627,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: '设为 true 完全禁用 OTel SDK',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_ALERT_ERROR_RATE',
@@ -1623,6 +1635,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Burn-rate 告警：错误率阈值（0-1）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_ALERT_P95_LATENCY_S',
@@ -1630,6 +1643,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Burn-rate 告警：P95 延迟阈值（秒）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'TELEMETRY_ALERT_ACTIVE_INVOCATIONS',
@@ -1637,6 +1651,7 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Burn-rate 告警：活跃 invocation 数阈值',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: false,
   },
   {
     name: 'PROMPT_CAPTURE',
@@ -1644,6 +1659,8 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Prompt X-Ray 开关（on=启用 canonical prompt 捕获）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: true,
+    allowedValues: ['off', 'on'],
   },
   {
     name: 'PROMPT_CAPTURE_CATS',
@@ -1651,12 +1668,20 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'Prompt X-Ray 白名单：逗号分隔 catId（空=全部）',
     category: 'telemetry',
     sensitive: false,
+    runtimeEditable: true,
   },
   // --- antigravity (F061 Bridge) ---
   {
     name: 'ANTIGRAVITY_PORT',
     defaultValue: '(未设置 → 自动发现)',
     description: 'Antigravity Language Server ConnectRPC 端口（覆盖自动发现）',
+    category: 'antigravity',
+    sensitive: false,
+  },
+  {
+    name: 'PINCHTAB_CDP_PORT',
+    defaultValue: '9870',
+    description: 'PinchTab Chrome CDP 调试端口（覆盖默认 remote-debugging-port）',
     category: 'antigravity',
     sensitive: false,
   },

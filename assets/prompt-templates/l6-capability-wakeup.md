@@ -14,7 +14,7 @@
 - 压缩后失忆 / 找旧决策 → `search_evidence` + drilldown（见 §7），不单刀
 - 收到 `context_management_hint`(warn) → `context-self-management` 自检（F225）
 - 阶段进度给下棒可见 → `cat_cafe_update_workflow` 推告示牌（不只发聊天）
-- 发现co-creator偏好变化 / 做对了互动 / 关系信号 → `cat_cafe_propose_profile_update`（提议更新关系画像 primer，operator 在 Hub 审批）
+- co-creator说了 Magic Word（=持久偏好信号）/ 直说"记一下/以后这样/别再这样" / 同类被纠正 ≥2 次（=稳定偏好） / 做对了被明确表扬 / co-creator分享个人近况（心情/经历/里程碑） → `cat_cafe_propose_profile_update`（提议更新 per-cat 关系画像 primer，operator 在 Hub 审批；工具在 deferred list，先 `tool_search` 加载）
 - co-creator重复不满 → `code-as-harness`（搜证据确认重复→诊断→代码修；新任务做过 ≥2 次→Build mode 建 skill）
 
 > Skills 在 manifest ≠ 在认知路径。完整集 + Tier 2 见 `cat-cafe-skills/refs/capability-wakeup-index.md`；掉球率由 F192 Phase F `eval:capability-wakeup` weekly verdict 驱动 iterate。

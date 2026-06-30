@@ -119,14 +119,14 @@ function setInputValue(input: HTMLInputElement, value: string): void {
 
 // F228: backend emits display-ready issues; the frontend renders them verbatim.
 const DEFAULT_CONFLICT_ISSUE = {
-  skill: 'browser-preview',
-  type: 'conflict',
-  provider: 'claude',
+  id: 'browser-preview',
+  issueType: 'conflict',
+  mountPoint: 'claude',
   message: 'claude 存在同名目录占用（立即同步会覆盖和清理已有内容，请先确认是否需要进行备份）',
 };
 
-function driftResponse(projectRoot: string | undefined, issues: unknown[] = [], isIgnored = false): Response {
-  return jsonResponse({ result: { issues, driftHash: `hash:${projectRoot ?? 'global'}`, isIgnored }, projectRoot });
+function driftResponse(projectPath: string | undefined, issues: unknown[] = []): Response {
+  return jsonResponse({ result: { issues, driftHash: `hash:${projectPath ?? 'global'}` }, projectPath });
 }
 
 /** Default drift routing: an anomaly in the global scope, projects clean. */
@@ -152,11 +152,11 @@ function mockBothApis(
     if (url.startsWith('/api/capabilities')) {
       return Promise.resolve(jsonResponse(capOverride ?? capabilitiesPayload));
     }
-    if (url === '/api/skills/drift-check') {
-      const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+    if (url === '/api/drift/check') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { type?: string; projectPath?: string };
       return Promise.resolve(driftResponse(body.projectPath, driftIssuesFor(body.projectPath)));
     }
-    if (url === '/api/skills/drift-resolve' && init?.method === 'POST') {
+    if (url === '/api/drift/resolve' && init?.method === 'POST') {
       return Promise.resolve(jsonResponse({ ok: true }));
     }
     return Promise.resolve(jsonResponse(skillsOverride ?? skillsPayload));
@@ -779,12 +779,12 @@ describe('SkillsContent', () => {
       if (url.startsWith('/api/capabilities')) {
         return Promise.resolve(jsonResponse({ ...capabilitiesPayload, projectPath: projectA }));
       }
-      if (url === '/api/skills/drift-check') {
-        const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+      if (url === '/api/drift/check') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { type?: string; projectPath?: string };
         // Global scope has an anomaly so the banner + dialog render.
         return Promise.resolve(driftResponse(body.projectPath, body.projectPath ? [] : [DEFAULT_CONFLICT_ISSUE]));
       }
-      if (url === '/api/skills/drift-resolve' && init?.method === 'POST') {
+      if (url === '/api/drift/resolve' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
       return Promise.resolve(jsonResponse(skillsPayload));
@@ -814,10 +814,9 @@ describe('SkillsContent', () => {
     });
     await flushEffects();
 
-    // F228: sync-all resolves global + every project scope via drift-resolve.
+    // F249: sync-all resolves global + every non-resolved project scope via drift-resolve.
     const syncCalls = mockFetch.mock.calls.filter(
-      (c: unknown[]) =>
-        String(c[0]) === '/api/skills/drift-resolve' && (c[1] as { method?: string })?.method === 'POST',
+      (c: unknown[]) => String(c[0]) === '/api/drift/resolve' && (c[1] as { method?: string })?.method === 'POST',
     );
     const bodies = syncCalls.map((c) => JSON.parse((c[1] as { body: string }).body));
     expect(bodies.every((b) => b.action === 'sync')).toBe(true);
@@ -825,7 +824,7 @@ describe('SkillsContent', () => {
       .map((b) => b.projectPath)
       .filter(Boolean)
       .sort();
-    expect(projectBodies).toEqual([projectA, projectB].sort());
+    expect(projectBodies).toEqual([projectB]);
     // Plus one global scope resolve (no projectPath).
     expect(bodies.some((b) => !b.projectPath)).toBe(true);
 
@@ -846,12 +845,12 @@ describe('SkillsContent', () => {
           jsonResponse({ ...capabilitiesPayload, projectPath: projectA, knownProjectPaths: [projectA, projectB] }),
         );
       }
-      if (url === '/api/skills/drift-check') {
-        const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+      if (url === '/api/drift/check') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { type?: string; projectPath?: string };
         // Global scope anomaly so the all-skills banner renders.
         return Promise.resolve(driftResponse(body.projectPath, body.projectPath ? [] : [DEFAULT_CONFLICT_ISSUE]));
       }
-      if (url === '/api/skills/drift-resolve' && init?.method === 'POST') {
+      if (url === '/api/drift/resolve' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
       return Promise.resolve(jsonResponse(skillsPayload));
@@ -945,17 +944,17 @@ describe('SkillsContent', () => {
           jsonResponse({ ...capabilitiesPayload, projectPath: projectA, knownProjectPaths: [projectA, projectB] }),
         );
       }
-      if (url === '/api/skills/drift-check') {
-        const body = JSON.parse(String(init?.body ?? '{}')) as { projectPath?: string };
+      if (url === '/api/drift/check') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { type?: string; projectPath?: string };
         return Promise.resolve(
           driftResponse(
             body.projectPath,
             body.projectPath === projectB
               ? [
                   {
-                    skill: 'browser-preview',
-                    type: 'conflict',
-                    provider: 'claude',
+                    id: 'browser-preview',
+                    issueType: 'conflict',
+                    mountPoint: 'claude',
                     message: 'claude 存在同名目录占用（立即同步会覆盖和清理已有内容，请先确认是否需要进行备份）',
                   },
                 ]
@@ -973,14 +972,14 @@ describe('SkillsContent', () => {
     await flushEffects();
     await flushEffects();
 
-    // F228: all-skills fetches the global scope plus every project scope.
+    // F249: all-skills fetches global plus every non-resolved project scope.
     const driftScopes = new Set(
       mockFetch.mock.calls
-        .filter((call: unknown[]) => String(call[0]) === '/api/skills/drift-check')
+        .filter((call: unknown[]) => String(call[0]) === '/api/drift/check')
         .map((call) => JSON.parse(String((call[1] as { body?: string })?.body ?? '{}')).projectPath ?? 'global'),
     );
     expect(driftScopes.has('global')).toBe(true);
-    expect(driftScopes.has(projectA)).toBe(true);
+    expect(driftScopes.has(projectA)).toBe(false);
     expect(driftScopes.has(projectB)).toBe(true);
     expect(container.textContent).toContain('检测到 1 处 Skill 异常');
 
@@ -1022,8 +1021,8 @@ describe('SkillsContent', () => {
     // F228: project-scope anomalies come from the backend drift-check `issues`
     // (config-sync + mount), rendered per-skill. No client-side recomputation.
     const projectIssues = [
-      { skill: 'new-local-skill', type: 'config-orphan', message: '本项目残留，全局已移除' },
-      { skill: 'browser-preview', type: 'mount-missing', provider: 'codex', message: 'codex 未挂载' },
+      { id: 'new-local-skill', issueType: 'config-orphan', message: '本项目残留，全局已移除' },
+      { id: 'browser-preview', issueType: 'mount-missing', mountPoint: 'codex', message: 'codex 未挂载' },
     ];
     mockBothApis(undefined, undefined, (projectPath?: string) => (projectPath ? projectIssues : []));
     await render(React.createElement(SkillsContent));
@@ -1040,7 +1039,7 @@ describe('SkillsContent', () => {
       b.textContent?.includes('查看详情'),
     );
     expect(issueButton).toBeTruthy();
-    expect(container.textContent).toContain('检测到');
+    expect(container.textContent).toContain('发现');
     expect(container.textContent).toContain('项 Skill 异常');
     // Banner stays compact: action buttons live inside the dialog only.
     expect(container.textContent).not.toContain('立即同步');
@@ -1081,11 +1080,11 @@ describe('SkillsContent', () => {
       if (url.startsWith('/api/capabilities')) {
         return Promise.resolve(jsonResponse({ ...capabilitiesPayload, projectPath: selectedProjectPath }));
       }
-      if (url === '/api/skills/drift-check') {
+      if (url === '/api/drift/check') {
         return Promise.resolve(
           jsonResponse({
-            result: { issues: [], driftHash: 'fresh-after-mount-rules', isIgnored: false },
-            projectRoot: '/path/to/project',
+            result: { issues: [], driftHash: 'fresh-after-mount-rules' },
+            projectPath: '/path/to/project',
           }),
         );
       }
@@ -1141,7 +1140,7 @@ describe('SkillsContent', () => {
     expect(urls).toContain(`/api/skills?projectPath=${encodeURIComponent(selectedProjectPath)}`);
     expect(urls).toContain(`/api/capabilities?projectPath=${encodeURIComponent(selectedProjectPath)}`);
 
-    const driftRefresh = mockFetch.mock.calls.find((call: unknown[]) => String(call[0]) === '/api/skills/drift-check');
+    const driftRefresh = mockFetch.mock.calls.find((call: unknown[]) => String(call[0]) === '/api/drift/check');
     expect(driftRefresh).toBeTruthy();
     expect(JSON.parse(String((driftRefresh?.[1] as { body?: string })?.body ?? '{}'))).toMatchObject({
       projectPath: selectedProjectPath,

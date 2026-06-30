@@ -474,6 +474,8 @@ export function SessionChainPanel({ threadId, catInvocations, onViewSession }: S
                             查看
                           </button>
                         )}
+                        {/* Session replay entry removed — Phase E AC-E1 sunset.
+                            Canonical replay is now Theater Overlay via ThreadItem "回放剧场" (PR E-1). */}
                         <button
                           type="button"
                           className="text-micro px-2 py-0.5 rounded border border-[var(--_accent-20)] text-[var(--color-cafe-accent)] hover:bg-[var(--_accent-5)] disabled:opacity-50"

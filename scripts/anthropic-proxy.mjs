@@ -42,6 +42,19 @@ const UPSTREAMS_PATH =
   process.env.ANTHROPIC_PROXY_UPSTREAMS_PATH ||
   resolve(PROJECT_ROOT, '.cat-cafe', 'proxy-upstreams.json');
 const MAX_RETRIES = parseCount(getArg('max-retries') || process.env.ANTHROPIC_PROXY_MAX_RETRIES, 3);
+
+/**
+ * CLI model-map: --model-map slug1=model1,slug2=model2
+ * Applies modelOverride to matching slugs (merges with file-based config).
+ * Enables third-party proxies to receive the correct model name even when
+ * the Claude CLI blocks certain model identifiers (e.g. claude-fable-5).
+ */
+const MODEL_MAP_RAW = getArg('model-map') || '';
+const CLI_MODEL_MAP = Object.fromEntries(
+  MODEL_MAP_RAW.split(',')
+    .map((pair) => pair.trim().split('='))
+    .filter(([k, v]) => k && v),
+);
 const UPSTREAM_TIMEOUT_MS = parseInt(
   getArg('upstream-timeout') || process.env.ANTHROPIC_PROXY_UPSTREAM_TIMEOUT_MS || '60000',
   10,
@@ -125,11 +138,34 @@ function createProxyError(err, fallbackStatus = 502) {
   };
 }
 
-/** Load upstream mapping from config file. Re-read on each request for hot-reload. */
+/**
+ * Load upstream mapping from config file. Re-read on each request for hot-reload.
+ *
+ * Supports two entry formats (backward compatible):
+ *   "slug": "https://upstream-url"                          // string → URL only
+ *   "slug": { "target": "https://url", "modelOverride": "claude-fable-5" }  // object → URL + config
+ *
+ * Returns normalized map: { slug: { target: string, modelOverride?: string } }
+ */
 function loadUpstreams() {
   try {
     const raw = readFileSync(UPSTREAMS_PATH, 'utf-8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const normalized = {};
+    for (const [slug, value] of Object.entries(parsed)) {
+      if (typeof value === 'string') {
+        normalized[slug] = { target: value };
+      } else if (value && typeof value === 'object' && typeof value.target === 'string') {
+        normalized[slug] = value;
+      }
+    }
+    // Merge CLI --model-map overrides (takes precedence over file config)
+    for (const [slug, model] of Object.entries(CLI_MODEL_MAP)) {
+      if (normalized[slug]) {
+        normalized[slug].modelOverride = model;
+      }
+    }
+    return normalized;
   } catch {
     return {};
   }
@@ -333,7 +369,8 @@ const server = createServer(async (req, res) => {
   const restPath = match[2] || '/';
 
   const upstreams = loadUpstreams();
-  const targetBase = upstreams[slug]?.replace(/\/+$/, '');
+  const upstreamEntry = upstreams[slug];
+  const targetBase = upstreamEntry?.target?.replace(/\/+$/, '');
 
   if (!targetBase) {
     res.writeHead(404, { 'content-type': 'application/json' });
@@ -348,6 +385,8 @@ const server = createServer(async (req, res) => {
     );
     return;
   }
+
+  const modelOverride = upstreamEntry.modelOverride || undefined;
 
   // NB: Do NOT use `new URL(restPath, targetBase)` — when restPath is absolute
   // (starts with "/"), the URL constructor discards the base URL's path component.
@@ -380,11 +419,31 @@ const server = createServer(async (req, res) => {
   // Sanitize request body: strip thinking blocks from conversation history
   // to prevent "Invalid signature in thinking block" errors from corrupted
   // gateway responses stored in Claude Code sessions.
-  const sanitizedBody = stripThinkingFromRequest(body);
+  let sanitizedBody = stripThinkingFromRequest(body);
   if (DEBUG && sanitizedBody.length !== body.length) {
     console.log(
       `[proxy #${reqId}] stripped thinking blocks from request (${body.length} → ${sanitizedBody.length} bytes)`,
     );
+  }
+
+  // Model rewrite: when upstream config has modelOverride, replace the model
+  // in the request body before forwarding. This allows Claude CLI (which
+  // blocks certain model names client-side) to use a safe alias while the
+  // upstream receives the real model name.
+  if (modelOverride && sanitizedBody.length > 0) {
+    try {
+      const parsed = JSON.parse(sanitizedBody.toString('utf-8'));
+      if (parsed.model && parsed.model !== modelOverride) {
+        const originalModel = parsed.model;
+        parsed.model = modelOverride;
+        sanitizedBody = Buffer.from(JSON.stringify(parsed), 'utf-8');
+        if (DEBUG) {
+          console.log(`[proxy #${reqId}] model rewrite: ${originalModel} → ${modelOverride}`);
+        }
+      }
+    } catch {
+      /* not JSON, skip rewrite */
+    }
   }
 
   // Forward headers (strip hop-by-hop)
@@ -539,9 +598,15 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   const upstreams = loadUpstreams();
   const slugs = Object.keys(upstreams);
+  const overrides = slugs.filter((s) => upstreams[s].modelOverride);
   console.log(`[anthropic-proxy] listening on http://127.0.0.1:${PORT}`);
   console.log(`[anthropic-proxy] upstreams file: ${UPSTREAMS_PATH}`);
   console.log(`[anthropic-proxy] upstreams: ${slugs.length > 0 ? slugs.join(', ') : '(none)'}`);
+  if (overrides.length) {
+    console.log(
+      `[anthropic-proxy] model overrides: ${overrides.map((s) => `${s}→${upstreams[s].modelOverride}`).join(', ')}`,
+    );
+  }
   console.log(`[anthropic-proxy] upstream timeout: ${UPSTREAM_TIMEOUT_MS}ms`);
   console.log(`[anthropic-proxy] debug: ${DEBUG ? 'ON' : 'OFF'}`);
 });

@@ -1,28 +1,54 @@
 ---
 feature_ids: [F249]
-related_features: [F041, F043, F145, F178, F213, F228]
-topics: [mcp, capability-dashboard, multi-project, sync, drift-detection, plugin]
+related_features: [F041, F043, F145, F178, F213, F228, F240]
+topics: [mcp, capability-dashboard, multi-project, sync, drift-detection, single-source, plugin]
 doc_kind: spec
-created: 2026-06-17
-tips_exempt: design-phase spec — capability tips added when feature reaches implementation
+created: 2026-06-25
+tips_exempt: design-phase spec - capability tips added when feature reaches implementation
 ---
 
 # F249: Multi-Project MCP Sync Management — 多项目 MCP 配置同步管理
 
-> **Status**: design | **Owner**: @opus (布偶猫/宪宪) | **Priority**: P1
+> **Status**: in-progress | **Owner**: community @mindfn + cat-cafe maintainers | **Priority**: P1 | **Created**: 2026-06-25
+
+## Provenance
+
+- **Community PR**: [clowder-ai#713](https://github.com/zts212653/clowder-ai/pull/713) — `fix(#712): unify MCP config to capabilities.json single source of truth`
+- **Merge commit**: `031ba9abca4f36698929dbfdd7a41c4083478b16`
+- **Bug issue**: [clowder-ai#712](https://github.com/zts212653/clowder-ai/issues/712) — MCP 配置多源不一致
+- **Intake issue**: [cat-cafe#2656](https://github.com/zts212653/clowder-ai/issues/2656)
+- **Author**: `@mindfn`（lang，`authorAssociation=COLLABORATOR`，同 F240 IM connectors / F228 / F161 / F237 贡献者）
+
+## 编号纠错背景
+
+PR #713 原使用 F240，但家里 F240 已分配给 IM Connector Plugin Architecture（PR #903，已 absorbed）。operator 2026-06-25 signoff 分配 F249。
 
 ---
 
-## 一、Why
+## Why
 
 Skill 侧（F228）已实现完整的多项目管理体系。MCP 配置目前还停留在扁平模型，缺失项目级管理、按成员控制、漂移检测、级联同步。本 Feature 对齐 F228 架构，在 MCP 侧建立对等能力。
+
+## What
+
+F249 takes the public #712 MCP single-source work as the base and extends it into multi-project MCP management: global/project capability layers, per-project drift detection, cascade sync, scoped UI controls, and safe MCP env editing. The public source of truth should stay in cat-cafe and sync outward so clowder-ai does not keep a stale target-only feature doc.
+
+## User Journey
+
+**Scope unit**：Console Settings 的 Skill / MCP 管理页，按"全部"和"项目"两个 scope 管理同一套 capabilities 真相源。
+
+1. 用户进入 Settings → Skill 或 MCP 管理，默认看到"全部" scope，用于管理全局 capability 目录和所有项目同步状态。
+2. 系统在后台检查 global + 已知项目的 drift，并在出现异常时显示跨项目同步 banner；用户点击"查看详情"查看具体项目和具体 Skill / MCP 的异常列表。
+3. 用户可以选择"同步全部"一次性让 global 和所有非主项目 scope 对齐，也可以只同步某个项目 scope；同步完成后列表和开关状态刷新，避免继续显示旧挂载状态。
+4. 用户切到"项目" scope 后选择具体项目，看到该项目的完整 Skill / MCP 回显、项目级挂载/阻塞状态和 drift banner；项目级开关只影响该项目，不覆盖全局配置。
+5. 对敏感 env/header 字段，Console 默认掩码显示；编辑或探测时未改动的掩码值不会被提交回后端，从而避免把占位符写成真实 secret。
 
 ---
 
 ## 一-B、前置：#712 单源改造（PR #713 已实现）
 
 > **PR**: [#713 fix(#712): unify MCP config to capabilities.json single source](https://github.com/zts212653/clowder-ai/pull/713)
-> **状态**: 待合入 | **分支**: `fix/712-mcp-config-single-source`
+> **状态**: clowder-ai 已合入 | **source merge**: `031ba9abca4f36698929dbfdd7a41c4083478b16`
 
 F249 的多项目同步体系建立在 #712 改造的基础之上。改造前 MCP 配置散落在多个位置，改造后统一到 `capabilities.json` 单一真相源。
 
@@ -145,7 +171,7 @@ MCP 默认对所有猫可见。只记录"谁不能用"：
 |---|---|
 | `undefined` 或不存在 | 全部猫可用（默认） |
 | `[]` | 全部猫可用 |
-| `['gemini']` | 只有暹罗猫不能用 |
+| `['gemini']` | 只有Siamese不能用 |
 | `[全部猫 ID]` | 该项目完全禁用此 MCP |
 
 **新增成员级联**：遍历所有项目 MCP entries → 对 `blockedCats` 包含所有现有猫的 entry（= 完全禁用），把新成员加入 `blockedCats`。其他项目不动。
@@ -662,8 +688,8 @@ skill 侧已有 `POST /api/skills/drift-check` 和 `POST /api/skills/drift-resol
 │  ┌ MCP 卡片 ────────────────────────┐   │
 │  │ cat-cafe-collab    [全局开关] [▼] │   │
 │  │  ┌ 按猫 toggle ──────────────┐  │   │  ← 展开
-│  │  │ 布偶猫 [✓]  缅因猫 [✓]    │  │   │
-│  │  │ 暹罗猫 [✗]                 │  │   │
+│  │  │ Ragdoll [✓]  Maine Coon [✓]    │  │   │
+│  │  │ Siamese [✗]                 │  │   │
 │  │  └───────────────────────────┘  │   │
 │  └──────────────────────────────────┘   │
 │                                          │
@@ -702,7 +728,7 @@ sensitive 状态持久化到 capabilities.json
 API 返回每个 MCP entry 的 `blockedCats` + 响应顶层的 `allCats` 完整猫列表。前端渲染逻辑：
 
 ```
-allCats: [{ catId: 'opus', displayName: '布偶猫' }, { catId: 'codex', ... }, ...]
+allCats: [{ catId: 'opus', displayName: 'Ragdoll' }, { catId: 'codex', ... }, ...]
 blockedCats: ['gemini']
 
 前端对比：
@@ -834,7 +860,7 @@ MCP 侧 banner / 弹窗 / 同步流程与 skill 侧**除展示信息外完全一
 
 ---
 
-## 十二、Acceptance Criteria
+## Acceptance Criteria
 
 ### Phase A（数据模型 + 同步引擎）
 - [x] `globalEnabled` 在所有 capability entries 上统一使用，旧 `enabled` init 时一次性迁移
@@ -861,3 +887,20 @@ MCP 侧 banner / 弹窗 / 同步流程与 skill 侧**除展示信息外完全一
 ### Phase D（插件 + 固化）
 - [ ] 插件 MCP 走统一接口，级联正常
 - [ ] 插件 MCP 禁止项目 override
+
+## Dependencies
+
+- F228 skill multi-project management model
+- F213 stale MCP config cleanup
+- Community PR clowder-ai#713 / issue #712 single-source MCP config groundwork
+- GovernanceRegistry project discovery
+
+## Risk
+
+| Risk | Mitigation |
+|---|---|
+| Multi-project MCP config drifts silently after global edits | Add drift detection and explicit sync/resolve actions |
+| Sensitive env/header values leak through Console editing | Keep sensitive metadata and masked-value no-op semantics |
+| Plugin-owned MCP entries become user-edited local forks | Mark plugin entries and restrict project-level override where needed |
+
+---

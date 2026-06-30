@@ -62,6 +62,12 @@ export interface IDispatchProposalStore {
 
   /** Idempotency lookup: find proposal by clientMessageId + sourceThreadId. */
   findByClientMessageId(clientMessageId: string, sourceThreadId: string): Promise<DispatchProposal | null>;
+
+  /**
+   * F246 Phase F: List settled (approved|rejected) proposals for a user.
+   * Returns at most `limit` items sorted by decidedAt descending (newest first).
+   */
+  listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,5 +137,13 @@ export class InMemoryDispatchProposalStore implements IDispatchProposalStore {
       }
     }
     return null;
+  }
+
+  async listSettledByUser(userId: string, limit: number): Promise<DispatchProposal[]> {
+    return [...this.proposals.values()]
+      .filter((p) => p.ownerUserId === userId && (p.status === 'approved' || p.status === 'rejected'))
+      .sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))
+      .slice(0, limit)
+      .map((p) => ({ ...p }));
   }
 }

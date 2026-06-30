@@ -17,6 +17,20 @@ export type ApprovalFeatureId = 'F128' | 'F225' | 'F193' | 'F231';
  */
 export type ApprovalItemStatus = 'pending' | 'stale';
 
+/**
+ * F246 Phase F: Settled (approved/rejected) approval item for history view.
+ * Omits the pending-specific `status` from ApprovalItem and adds decided* fields.
+ */
+export type SettledStatus = 'approved' | 'rejected';
+
+export interface SettledApprovalItem extends Omit<ApprovalItem, 'status' | 'expiresAt' | 'inlineApprovable'> {
+  status: SettledStatus;
+  /** Epoch ms when the operator decided. */
+  decidedAt: number;
+  /** userId of the decision-maker (always the operator). */
+  decidedBy: string;
+}
+
 /** Unified DTO that all feature adapters produce. */
 export interface ApprovalItem {
   /** Canonical proposal ID from the source store. */

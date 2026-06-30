@@ -292,33 +292,33 @@ describe('DirectoryPickerModal', () => {
   });
 
   it('creates the thread with the currently browsed directory without requiring a separate directory confirm', async () => {
-    const projectsPath = `${CWD_PATH}/projects`;
-    const targetPath = `${projectsPath}/cat-cafe`;
+    const projectsPath = `${CWD_PATH}/sandbox`;
+    const targetPath = `${projectsPath}/inner`;
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/projects/cwd') return jsonOk({ path: CWD_PATH });
       if (path === '/api/backlog/items') return jsonOk({ items: [] });
       if (path === `/api/projects/browse?path=${encodeURIComponent(CWD_PATH)}`) {
         return jsonOk({
           current: CWD_PATH,
-          name: 'project',
-          parent: '/path/to',
+          name: 'cat-cafe',
+          parent: '/home/user/projects',
           homePath: CWD_PATH,
-          entries: [{ name: 'projects', path: projectsPath, isDirectory: true }],
+          entries: [{ name: 'sandbox', path: projectsPath, isDirectory: true }],
         });
       }
       if (path === `/api/projects/browse?path=${encodeURIComponent(projectsPath)}`) {
         return jsonOk({
           current: projectsPath,
-          name: 'projects',
+          name: 'sandbox',
           parent: CWD_PATH,
           homePath: CWD_PATH,
-          entries: [{ name: 'cat-cafe', path: targetPath, isDirectory: true }],
+          entries: [{ name: 'inner', path: targetPath, isDirectory: true }],
         });
       }
       if (path === `/api/projects/browse?path=${encodeURIComponent(targetPath)}`) {
         return jsonOk({
           current: targetPath,
-          name: 'cat-cafe',
+          name: 'inner',
           parent: projectsPath,
           homePath: CWD_PATH,
           entries: [],
@@ -340,20 +340,18 @@ describe('DirectoryPickerModal', () => {
     expect(container.textContent).not.toContain('选择此目录');
 
     const projectsBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('projects'),
+      b.textContent?.includes('sandbox'),
     );
-    if (!projectsBtn) throw new Error('projects directory button not found');
+    if (!projectsBtn) throw new Error('sandbox directory button not found');
     await act(async () => {
       projectsBtn.click();
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    const catCafeBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('cat-cafe'),
-    );
-    if (!catCafeBtn) throw new Error('cat-cafe directory button not found');
+    const innerBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('inner'));
+    if (!innerBtn) throw new Error('inner directory button not found');
     await act(async () => {
-      catCafeBtn.click();
+      innerBtn.click();
       await new Promise((r) => setTimeout(r, 0));
     });
 

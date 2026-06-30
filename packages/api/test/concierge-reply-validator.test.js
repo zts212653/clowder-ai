@@ -37,7 +37,8 @@ describe('extractConciergeActions', () => {
     assert.equal(actions[0].verb, '跳过去');
   });
 
-  it('extracts peek action from [原地看 R1]', async () => {
+  // BUG-UX-12: [原地看 R1] on thread → resolves to teleport (thread = always jump)
+  it('resolves [原地看 R1] on thread to teleport (BUG-UX-12)', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('thread_c', [
       { label: 'R1', anchor: { threadId: 'thread_abc', messageId: 'msg_456', title: '记忆搜索', type: 'thread' } },
@@ -45,25 +46,25 @@ describe('extractConciergeActions', () => {
 
     const actions = await extractConciergeActions('看看这里 [原地看 R1]', 'thread_c', store);
     assert.equal(actions.length, 1);
-    assert.equal(actions[0].action, 'concierge_peek');
+    assert.equal(actions[0].action, 'concierge_teleport', 'thread → always teleport');
     assert.equal(actions[0].payload.threadId, 'thread_abc');
     assert.equal(actions[0].payload.messageId, 'msg_456');
-    assert.equal(actions[0].label, '原地看：记忆搜索');
+    assert.equal(actions[0].label, '跳过去：记忆搜索');
     // Bug2 AC-1: handle+verb for inline marker rendering
     assert.equal(actions[0].handle, 'R1');
-    assert.equal(actions[0].verb, '原地看');
+    assert.equal(actions[0].verb, '原地看', 'original text verb kept for marker matching');
   });
 
-  it('extracts both teleport and peek from the same reply', async () => {
+  // BUG-UX-12: both verbs on same thread handle → both resolve to teleport → deduplicated
+  it('deduplicates [跳过去] and [原地看] on same thread handle (BUG-UX-12)', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('thread_c', [
       { label: 'R1', anchor: { threadId: 't1', messageId: 'm1', title: 'Topic A', type: 'thread' } },
     ]);
 
     const actions = await extractConciergeActions('你可以 [跳过去 R1] 或者 [原地看 R1]', 'thread_c', store);
-    assert.equal(actions.length, 2);
+    assert.equal(actions.length, 1, 'both resolve to teleport → deduplicated');
     assert.equal(actions[0].action, 'concierge_teleport');
-    assert.equal(actions[1].action, 'concierge_peek');
   });
 
   it('extracts multiple R-handles from a single reply', async () => {
@@ -122,17 +123,17 @@ describe('extractConciergeActions', () => {
     assert.equal(actions[0].payload.threadId, 't_thread_only');
   });
 
-  // BUG-UX-9: [跳过去 R1] on non-thread with messageId → auto-correct to peek
-  it('auto-corrects teleport to peek when anchor is non-thread with messageId (BUG-UX-9)', async () => {
+  // BUG-UX-12 P1: non-thread anchors are not navigable — frontend can only route to real
+  // threadIds. Even with messageId, non-thread anchors must not produce actions (previously
+  // BUG-UX-9 auto-corrected to peek, but peek is removed from frontend).
+  it('skips non-thread anchor with messageId (frontend cannot navigate to feature:F229)', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('thread_c', [
       { label: 'R1', anchor: { threadId: 'feature:F229', messageId: 'msg_99', title: 'F229', type: 'feature' } },
     ]);
 
     const actions = await extractConciergeActions('[跳过去 R1]', 'thread_c', store);
-    assert.equal(actions.length, 1, 'auto-corrected to peek, not dropped');
-    assert.equal(actions[0].action, 'concierge_peek', 'action type auto-corrected');
-    assert.equal(actions[0].verb, '跳过去', 'original text verb kept for frontend marker matching');
+    assert.equal(actions.length, 0, 'non-thread anchor must not produce actions (even with messageId)');
   });
 
   // BUG-UX-9: mixed markers on thread-only — both resolve to teleport, deduplicated
@@ -145,6 +146,36 @@ describe('extractConciergeActions', () => {
     const actions = await extractConciergeActions('[跳过去 R1] 或者 [原地看 R1]', 'thread_c', store);
     // Both resolve to teleport — should deduplicate to 1
     assert.equal(actions.length, 1, 'deduplicated after auto-correction');
+    assert.equal(actions[0].action, 'concierge_teleport');
+  });
+
+  // BUG-UX-12: thread anchors → always teleport, even when duty cat wrote [原地看]
+  // and anchor has messageId. Concierge actions pointing to threads are semantically
+  // jumps — "原地看" confuses users. (operator: "这些按钮本质的含义不是跳转吗？！")
+  it('auto-corrects peek to teleport on thread WITH messageId (BUG-UX-12)', async () => {
+    const store = new MemoryConciergeHandleMapStore();
+    await store.setHandles('thread_c', [
+      { label: 'R1', anchor: { threadId: 'thread_abc', messageId: 'msg_456', title: '记忆搜索', type: 'thread' } },
+    ]);
+
+    const actions = await extractConciergeActions('看看这里 [原地看 R1]', 'thread_c', store);
+    assert.equal(actions.length, 1);
+    // BUG-UX-12: must be teleport, not peek — thread actions = jump
+    assert.equal(actions[0].action, 'concierge_teleport', 'thread anchor must resolve to teleport');
+    assert.equal(actions[0].label, '跳过去：记忆搜索', 'label must say 跳过去');
+    assert.equal(actions[0].payload.threadId, 'thread_abc');
+    assert.equal(actions[0].payload.messageId, 'msg_456', 'messageId preserved for scroll-to');
+  });
+
+  // BUG-UX-12: [跳过去 R1] and [原地看 R1] on thread WITH messageId → both teleport → dedup to 1
+  it('deduplicates when both verbs resolve to teleport on thread with messageId (BUG-UX-12)', async () => {
+    const store = new MemoryConciergeHandleMapStore();
+    await store.setHandles('thread_c', [
+      { label: 'R1', anchor: { threadId: 't1', messageId: 'm1', title: 'Topic A', type: 'thread' } },
+    ]);
+
+    const actions = await extractConciergeActions('你可以 [跳过去 R1] 或者 [原地看 R1]', 'thread_c', store);
+    assert.equal(actions.length, 1, 'both resolve to teleport → deduplicated');
     assert.equal(actions[0].action, 'concierge_teleport');
   });
 
@@ -214,7 +245,8 @@ describe('buildConciergeActions (KD-19 fallback)', () => {
     assert.equal(actions[0].payload.threadId, 'th1');
   });
 
-  it('falls back to all thread handles when no markers (gemini non-compliance)', async () => {
+  // BUG-UX-12: fallback now only generates teleport (no peek for threads)
+  it('falls back to all thread handles as teleport only (BUG-UX-12)', async () => {
     const store = new MemoryConciergeHandleMapStore();
     await store.setHandles('t', [
       { label: 'R1', anchor: { threadId: 'th1', messageId: 'm1', title: 'A', type: 'thread' } },
@@ -222,10 +254,11 @@ describe('buildConciergeActions (KD-19 fallback)', () => {
     ]);
 
     const actions = await buildConciergeActions('纯文本回复，没有任何标记', 't', store);
-    const teleports = actions.filter((a) => a.action === 'concierge_teleport');
-    assert.equal(teleports.length, 2, 'fallback surfaces both threads as teleport');
-    const peeks = actions.filter((a) => a.action === 'concierge_peek');
-    assert.equal(peeks.length, 1, 'only R1 (has messageId) gets peek');
+    assert.equal(actions.length, 2, 'one teleport per thread, no peek');
+    assert.ok(
+      actions.every((a) => a.action === 'concierge_teleport'),
+      'all actions are teleport',
+    );
   });
 
   it('fallback skips non-thread handles (only real threads navigable)', async () => {
@@ -241,6 +274,21 @@ describe('buildConciergeActions (KD-19 fallback)', () => {
       actions.every((a) => a.payload.threadId === 'th2'),
       'feature-type handle must be skipped (not navigable)',
     );
+  });
+
+  // BUG-UX-12: fallback should only generate teleport, never peek for threads
+  it('fallback generates only teleport actions, no peek (BUG-UX-12)', async () => {
+    const store = new MemoryConciergeHandleMapStore();
+    await store.setHandles('t', [
+      { label: 'R1', anchor: { threadId: 'th1', messageId: 'm1', title: 'A', type: 'thread' } },
+      { label: 'R2', anchor: { threadId: 'th2', title: 'B', type: 'thread' } },
+    ]);
+
+    const actions = await buildConciergeActions('纯文本回复，没有任何标记', 't', store);
+    const peeks = actions.filter((a) => a.action === 'concierge_peek');
+    assert.equal(peeks.length, 0, 'no peek actions for thread anchors');
+    const teleports = actions.filter((a) => a.action === 'concierge_teleport');
+    assert.equal(teleports.length, 2, 'all thread anchors get teleport');
   });
 
   it('returns empty when HandleMap empty and no markers', async () => {

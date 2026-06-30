@@ -274,6 +274,47 @@ describe('F236 AC-E3 — anchor-first live verdict sunset signals', () => {
     assert.equal(pmFinding.proposedAction[0].action, 'keep-observe');
   });
 
+  it('renders adoption lens counts in snapshot and verdict markdown', async () => {
+    const { generateAnchorFirstLiveVerdict } = await import(IMPORT_LIVE_VERDICT);
+
+    const rollup = {
+      perTool: {
+        'thread-context': healthyToolStats(),
+      },
+      orphanDrills: 0,
+      adoption: {
+        explicitAnchorCalls: 2,
+        explicitFullCalls: 1,
+        defaultAnchorCalls: 3,
+        defaultFullCalls: 0,
+        legacyEquivalentAnchorCalls: 4,
+        legacyEquivalentFullCalls: 0,
+        uniqueCatsExplicitAnchor: 2,
+        unknownModeCalls: 0,
+      },
+      track1Snapshot: { returnedByTool: {}, returnedCharsByTool: {}, drillByTool: {}, drillCharsByTool: {} },
+    };
+
+    const artifact = generateAnchorFirstLiveVerdict({
+      verdictId: 'test-adoption-lens',
+      harnessFeedbackRoot,
+      domain: DOMAIN,
+      rollup,
+      selector: stubSelector(),
+      submittedPacket: stubPacket(),
+      generatedAt: '2026-06-22T12:00:00.000Z',
+    });
+
+    const snapshot = JSON.parse(readFileSync(join(artifact.bundleDir, 'snapshot.json'), 'utf8'));
+    const activationCounts = snapshot.components[0].activationCounts;
+    assert.equal(activationCounts.adoption_explicit_anchor_calls, 2);
+    assert.equal(activationCounts.adoption_legacy_equivalent_anchor_calls, 4);
+    assert.equal(activationCounts.adoption_unique_cats_explicit_anchor, 2);
+    assert.match(artifact.markdown, /Adoption Detail:/);
+    assert.match(artifact.markdown, /explicitAnchorCalls=2/);
+    assert.match(artifact.markdown, /legacyEquivalentAnchorCalls=4/);
+  });
+
   it('includes sunsetAssessment summary in attribution root', async () => {
     const { generateAnchorFirstLiveVerdict } = await import(IMPORT_LIVE_VERDICT);
 

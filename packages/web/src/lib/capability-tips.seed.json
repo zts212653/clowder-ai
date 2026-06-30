@@ -403,6 +403,28 @@
     "owner": "codex"
   },
   {
+    "id": "feature-f210-agy-gemini-default",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F210-antigravity-cli-migration.md", "anchor": "AGY model-flag refresh" },
+    "structureSource": {
+      "path": "docs/features/F210-antigravity-cli-migration.md",
+      "anchor": "Current local Antigravity CLI exposes `--model`"
+    },
+    "bodySource": {
+      "path": "docs/features/F210-antigravity-cli-migration.md",
+      "anchor": "Gemini-family cats after the Gemini CLI consumer deadline"
+    },
+    "contexts": ["feature_dev", "review"],
+    "audience": ["developer", "maintainer"],
+    "body": "Gemini-family cats now default to AGY with runtime-owned --model; if a run still shows gemini --acp, reload or migrate the runtime catalog.",
+    "action": {
+      "type": "open_source",
+      "label": "打开 F210",
+      "sourceRef": { "path": "docs/features/F210-antigravity-cli-migration.md", "anchor": "AGY model-flag refresh" }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f242-convention-graph",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F242-code-graph-layer-spike.md", "anchor": "Code Graph Layer Spike" },

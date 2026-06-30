@@ -139,15 +139,21 @@ describe('AnchorEventLog — eviction (INV-2: 24h TTL)', () => {
     assert.strictEqual(snap.drillEvents[0].itemId, 'msg-new');
   });
 
-  it('silently drops empty-itemIds previews (cloud R5 P2: zero-item noise)', () => {
+  it('records empty-itemIds previews for adoption while leaving no join keys', () => {
     recordAnchorPreviewEvent({
       tool: 'pending-mentions',
       itemIds: [],
       returnedChars: 0,
       originalChars: 0,
+      modeResolved: 'anchor',
+      modeSource: 'default',
     });
     const snap = getAnchorEventSnapshot();
-    assert.strictEqual(snap.previewEvents.length, 0, 'empty itemIds should not be recorded');
+    assert.strictEqual(snap.previewEvents.length, 1, 'zero-result calls still count for adoption');
+    assert.deepStrictEqual(snap.previewEvents[0].itemIds, []);
+    assert.strictEqual(snap.previewEvents[0].itemCount, 0);
+    assert.strictEqual(snap.previewEvents[0].modeResolved, 'anchor');
+    assert.strictEqual(snap.previewEvents[0].modeSource, 'default');
   });
 
   it('keeps events within 24h window', () => {
@@ -167,5 +173,132 @@ describe('AnchorEventLog — eviction (INV-2: 24h TTL)', () => {
     });
     const snap = getAnchorEventSnapshot();
     assert.strictEqual(snap.previewEvents.length, 2);
+  });
+});
+
+describe('AnchorEventLog — adoption eval fields (F236 Track-1 gpt52 R1 P1/P2)', () => {
+  beforeEach(() => resetAnchorEventLogForTest());
+
+  it('stores modeResolved + modeSource + catId on preview events', () => {
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-1'],
+      returnedChars: 100,
+      originalChars: 100,
+      modeResolved: 'full',
+      modeSource: 'explicit',
+      catId: 'opus',
+    });
+    const snap = getAnchorEventSnapshot();
+    const ev = snap.previewEvents[0];
+    assert.strictEqual(ev.modeResolved, 'full');
+    assert.strictEqual(ev.modeSource, 'explicit');
+    assert.strictEqual(ev.catId, 'opus');
+  });
+
+  it('stores anchor/default mode fields for default anchor calls', () => {
+    recordAnchorPreviewEvent({
+      tool: 'pending-mentions',
+      itemIds: ['msg-2'],
+      returnedChars: 50,
+      originalChars: 500,
+      modeResolved: 'anchor',
+      modeSource: 'default',
+      catId: 'sonnet',
+    });
+    const snap = getAnchorEventSnapshot();
+    const ev = snap.previewEvents[0];
+    assert.strictEqual(ev.modeResolved, 'anchor');
+    assert.strictEqual(ev.modeSource, 'default');
+    assert.strictEqual(ev.catId, 'sonnet');
+  });
+
+  it('omits adoption fields when not provided (backward compat)', () => {
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-3'],
+      returnedChars: 200,
+      originalChars: 2000,
+    });
+    const snap = getAnchorEventSnapshot();
+    const ev = snap.previewEvents[0];
+    assert.strictEqual(ev.modeResolved, undefined);
+    assert.strictEqual(ev.modeSource, undefined);
+    assert.strictEqual(ev.catId, undefined);
+  });
+});
+
+describe('AnchorEventLog — cc native tools (F236 Phase C)', () => {
+  beforeEach(() => resetAnchorEventLogForTest());
+
+  it('records cc-read preview events with adoption fields', () => {
+    recordAnchorPreviewEvent({
+      tool: 'cc-read',
+      itemIds: ['file:/src/foo.ts'],
+      returnedChars: 80,
+      originalChars: 5000,
+      modeResolved: 'anchor',
+      modeSource: 'explicit',
+      catId: 'opus',
+    });
+    const snap = getAnchorEventSnapshot();
+    assert.strictEqual(snap.previewEvents.length, 1);
+    const ev = snap.previewEvents[0];
+    assert.strictEqual(ev.tool, 'cc-read');
+    assert.strictEqual(ev.modeResolved, 'anchor');
+    assert.strictEqual(ev.modeSource, 'explicit');
+    assert.strictEqual(ev.returnedChars, 80);
+    assert.strictEqual(ev.originalChars, 5000);
+  });
+
+  it('records cc-grep preview events', () => {
+    recordAnchorPreviewEvent({
+      tool: 'cc-grep',
+      itemIds: ['grep:TODO'],
+      returnedChars: 150,
+      originalChars: 3000,
+      modeResolved: 'anchor',
+      modeSource: 'explicit',
+    });
+    const snap = getAnchorEventSnapshot();
+    assert.strictEqual(snap.previewEvents.length, 1);
+    assert.strictEqual(snap.previewEvents[0].tool, 'cc-grep');
+  });
+
+  it('records cc-glob preview events', () => {
+    recordAnchorPreviewEvent({
+      tool: 'cc-glob',
+      itemIds: ['glob:src/**/*.ts'],
+      returnedChars: 100,
+      originalChars: 2000,
+    });
+    const snap = getAnchorEventSnapshot();
+    assert.strictEqual(snap.previewEvents.length, 1);
+    assert.strictEqual(snap.previewEvents[0].tool, 'cc-glob');
+  });
+
+  it('cc tools participate in rollup alongside MCP tools', () => {
+    // MCP tool event
+    recordAnchorPreviewEvent({
+      tool: 'thread-context',
+      itemIds: ['msg-1'],
+      returnedChars: 100,
+      originalChars: 1000,
+    });
+    // cc tool event
+    recordAnchorPreviewEvent({
+      tool: 'cc-read',
+      itemIds: ['file:/a.ts'],
+      returnedChars: 50,
+      originalChars: 5000,
+      modeResolved: 'anchor',
+      modeSource: 'explicit',
+    });
+    const snap = getAnchorEventSnapshot();
+    assert.strictEqual(snap.previewEvents.length, 2);
+    // Both tool types coexist
+    const tools = snap.previewEvents.map((e) => e.tool);
+    assert.ok(tools.includes('thread-context'));
+    assert.ok(tools.includes('cc-read'));
   });
 });

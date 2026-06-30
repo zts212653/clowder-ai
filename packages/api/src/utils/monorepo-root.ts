@@ -98,6 +98,16 @@ function resolveGitCommonDir(projectPath: string): string | null {
     // No .git found — result stays null
   }
 
+  if (result === null) {
+    const workspaceRoot = findMonorepoRoot(projectPath);
+    if (existsSync(join(workspaceRoot, 'pnpm-workspace.yaml'))) {
+      // Public exports are intentionally shipped without .git. Treat the
+      // workspace marker as a logical project boundary so same-export
+      // subdirectories and synthetic test worktrees do not look external.
+      result = resolve(workspaceRoot, '.git');
+    }
+  }
+
   _gitCommonDirCache.set(key, result);
   return result;
 }

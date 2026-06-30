@@ -23,11 +23,18 @@ const WAIT_SOURCE_TO_SOURCE_REF: Record<WaitSourceRef['kind'], SourceRef['kind']
   task: 'task_id',
   // Narrative kinds use anchorRef as the sourceRef value.
   reporter_handle: 'messageId',
-  pending_input: 'messageId',
+  // PR-O3: 'pending_input' removed — was backdoor for "wait for human reply in Hub".
+  // F167 Phase P: managed command runner — maps to webhook_id (the command string
+  // is an external trigger reference, not a task_id; the hold-ball taskId is generated
+  // after the grounding call so can't be threaded through).
+  managed_command: 'webhook_id',
 };
 
-/** Narrative wait kinds that use anchorRef instead of value for sourceRef. */
-const NARRATIVE_WAIT_KINDS: ReadonlySet<WaitSourceRef['kind']> = new Set(['reporter_handle', 'pending_input']);
+/**
+ * Narrative wait kinds that use anchorRef instead of value for sourceRef.
+ * PR-O3: 'pending_input' removed (only reporter_handle remains).
+ */
+const NARRATIVE_WAIT_KINDS: ReadonlySet<WaitSourceRef['kind']> = new Set(['reporter_handle']);
 
 // ── Truncation helper ────────────────────────────────────────
 
@@ -84,9 +91,8 @@ export function extractHoldBallClaims(ctx: HoldBallClaimContext): ClaimInput[] {
   if (ctx.waitSourceRef) {
     const wsr = ctx.waitSourceRef;
     const refKind = WAIT_SOURCE_TO_SOURCE_REF[wsr.kind];
-    // Narrative kinds (reporter_handle, pending_input) use anchorRef as the
-    // sourceRef value — the "value" field is the handle/input-key, not an
-    // addressable source reference.
+    // Narrative kind (reporter_handle) uses anchorRef as the sourceRef value —
+    // the "value" field is the handle, not an addressable source reference.
     const refValue = NARRATIVE_WAIT_KINDS.has(wsr.kind) && wsr.anchorRef ? wsr.anchorRef : wsr.value;
 
     return [

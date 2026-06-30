@@ -13,8 +13,8 @@
  */
 
 // ---------------------------------------------------------------------------
-// Event kinds（全 16 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
-// Phase B 13 种 + Phase C 3 安乐死 kinds（KD-C2 三独立 kind 非单 kind+severity）
+// Event kinds（全 17 种，每种在 state-machine 转移表必有一行——INV-10 穷举钉死）
+// Phase B 13 种 + Phase C 3 安乐死 + Phase P 1 wakeWhen kind
 // ---------------------------------------------------------------------------
 
 export type BallEventKind =
@@ -31,6 +31,7 @@ export type BallEventKind =
   | 'task.idle_long' // blocked 长期无活动（→ zombie）
   | 'task.done' // task 完成（→ resolved，唯一正常终结；probe completes 也走这条）
   | 'ball.wake_sent' // informational：bounces_back 唤醒已发，更新 lastWakeAt，不改 state（仅 blocked 接受）
+  | 'ball.wake_condition_met' // F167 Phase P: wakeWhen managed command completed → cat woken with result
   // ---------- Phase C 安乐死（KD-C1/C2，operator 6-18 拍板） ----------
   | 'ball.frozen' // 冷冻：暂停推进可解冻（payload: { why, by, kind:'frozen' }）→ resolved
   | 'ball.degraded' // 降级：明确降优先级（payload: { why, by, kind:'degraded' }）→ resolved
@@ -50,6 +51,7 @@ export interface BallCustodyEvent {
    * - invocation：`inv:{invocationId}:started|hb:{draftUpdatedAt}|died`
    * - task：`task:{taskId}:blocked:{blockedSinceAt}` / `:unblocked:{at}` / `:idle:{at}` / `:done`
    * - ball.wake_sent：`wake:{taskId}:{blockedSinceAt}:{at}`
+   * - ball.wake_condition_met：`wakecond:{threadId}:{catId}:{at}`
    * - 安乐死类（Phase C，ball.frozen/degraded/abandoned）：`euthanasia:{subjectKey}:{kind}:{at}`
    *   含 kind（KD-C2 三独立 kind 语义独立）。同一 ball 同一 kind 同一 ms 视为同事件（Lua append
    *   幂等去重）；跨 ms 或跨 kind 视为独立事件（事件流时间轴诚实 + 同 ms 三 kind 可并存进事件流）。

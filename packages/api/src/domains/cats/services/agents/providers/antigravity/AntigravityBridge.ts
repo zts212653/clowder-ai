@@ -241,6 +241,14 @@ export interface DeliveryCursor {
   awaitingUserInput?: boolean;
   lastTrajectoryAt?: number;
   livenessEvidence?: BridgeLivenessEvidence;
+  /**
+   * F211 (#2558): the COMPLETE text of the latest planner response in the latest
+   * turn, computed from the raw trajectory. The emitted `steps` carry suffix-only
+   * deltas when a planner grows in place, so consumers that need the full terminal
+   * text (e.g. deferred/progress-only detection) must read this snapshot, not the
+   * delta batch. Null when no planner text is present in the latest turn.
+   */
+  latestPlannerText?: string | null;
 }
 
 export interface StepBatch {
@@ -1074,6 +1082,16 @@ export class AntigravityBridge {
         hadMutation = diff.hadMutation;
       }
       const latestPlanner = latestPlannerResponseInLatestTurn(allSteps);
+      // F211 (#2558): full snapshot of the latest planner text (not the streamed
+      // suffix delta) so deferred/progress-only detection sees the complete tail.
+      // Only when the planner actually has displayable text (excludes thinking-only
+      // and stream-error steps); covers DONE and generating-with-text alike.
+      const latestPlannerText =
+        latestPlanner !== undefined && plannerStepHasDisplayableText(latestPlanner)
+          ? // `||` (not `??`) so a blank modifiedResponse falls through to response,
+            // matching the transformer's displayed `modifiedResponse || response` (#2558).
+            latestPlanner.plannerResponse?.modifiedResponse || latestPlanner.plannerResponse?.response || null
+          : null;
       const latestPlannerIsGenerating = latestPlanner?.status === 'CORTEX_STEP_STATUS_GENERATING';
       const latestGeneratingPlannerHasText =
         latestPlannerIsGenerating && latestPlanner !== undefined && plannerStepHasDisplayableText(latestPlanner);
@@ -1135,6 +1153,7 @@ export class AntigravityBridge {
             awaitingUserInput,
             ...(trajectoryAt === undefined ? {} : { lastTrajectoryAt: trajectoryAt }),
             livenessEvidence,
+            latestPlannerText,
           },
         };
         // F211-REG8: in busy-reuse, defer terminating until the follow-up's own turn has started.

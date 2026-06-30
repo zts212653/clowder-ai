@@ -500,7 +500,36 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assert.ok(args.includes('--add-dir'));
     assert.equal(args[args.indexOf('--add-dir') + 1], workDir);
     assert.equal(args[args.indexOf('--print') + 1], 'System identity\n\nSay hi');
-    assert.equal(args.includes('--model'), false, 'agy 1.0.1 has no verified --model flag');
+    const modelIdx = args.indexOf('--model');
+    assert.ok(modelIdx >= 0, 'agy now supports per-session --model and runtime should pass the cat model');
+    assert.equal(args[modelIdx + 1], 'Gemini 3.5 Flash (High)');
+  });
+
+  test('normalizes legacy Gemini model ids before agy --model spawn', async () => {
+    for (const [legacyModelId, agySelector] of [
+      ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (High)'],
+      ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
+      ['gemini-2.5-flash', 'Gemini 3.5 Flash (High)'],
+    ]) {
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new GeminiAgentService({
+        spawnFn,
+        adapter: 'antigravity-cli',
+        model: legacyModelId,
+      });
+
+      const promise = collect(service.invoke('legacy model id should normalize before agy spawn'));
+      emitPlainText(proc, 'AGY_MODEL_NORMALIZED_OK\n');
+      const msgs = await promise;
+
+      const args = spawnFn.mock.calls[0].arguments[1];
+      const modelIdx = args.indexOf('--model');
+      assert.ok(modelIdx >= 0);
+      assert.equal(args[modelIdx + 1], agySelector);
+      const done = msgs.find((m) => m.type === 'done');
+      assert.equal(done?.metadata?.model, `${agySelector} (antigravity-cli --model)`);
+    }
   });
 
   test('F212: AGY empty plain-text completion yields user-visible silent_completion diagnostics', async () => {
@@ -1747,7 +1776,7 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     assertFileRemoved(capturedLogPath, 'runtime-owned AGY log file must be removed after stale resume handling');
   });
 
-  test('reports per-call model override as unsupported without passing --model to agy', async () => {
+  test('passes per-call model override through agy --model', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new GeminiAgentService({ spawnFn, adapter: 'antigravity-cli' });
@@ -1760,20 +1789,57 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
     emitPlainText(proc, 'AGY_MODEL_BOUNDARY_OK\n');
 
     const msgs = await promise;
-    const info = msgs.find((m) => {
+    const unsupportedInfo = msgs.find((m) => {
       if (m.type !== 'system_info' || typeof m.content !== 'string') return false;
       return JSON.parse(m.content).type === 'antigravity_cli_model_override_unsupported';
     });
-    assert.ok(info, 'unsupported model override should be explicit system_info');
-    const payload = JSON.parse(info.content);
-    assert.equal(payload.requestedModel, 'gemini-override-should-not-be-used');
-    assert.match(payload.reason, /account-side selected model/);
+    assert.equal(unsupportedInfo, undefined, 'model override is now represented by runtime-owned --model');
 
     const done = msgs.find((m) => m.type === 'done');
+    assert.equal(done?.metadata?.model, 'gemini-override-should-not-be-used (antigravity-cli --model)');
     assert.equal(done?.metadata?.modelVerified, false);
+    assert.equal(done?.metadata?.diagnostics?.antigravityCli?.modelSelection, 'cli --model flag');
+    assert.equal(
+      done?.metadata?.diagnostics?.antigravityCli?.requestedModelOverride,
+      'gemini-override-should-not-be-used',
+    );
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.equal(args.includes('--model'), false);
+    const modelIdx = args.indexOf('--model');
+    assert.ok(modelIdx >= 0);
+    assert.equal(args[modelIdx + 1], 'gemini-override-should-not-be-used');
+  });
+
+  test('filters user AGY --model overrides so runtime-owned model wins', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new GeminiAgentService({
+      spawnFn,
+      adapter: 'antigravity-cli',
+      model: 'Gemini 3.5 Flash (High)',
+    });
+
+    const promise = collect(
+      service.invoke('user model override attempt', {
+        cliConfigArgs: ['--model Gemini 3.5 Flash (Low) --model=Gemini 3.1 Pro (Low) --add-dir /tmp/extra-agy-dir'],
+      }),
+    );
+    emitPlainText(proc, 'AGY_MODEL_FILTER_OK\n');
+    await promise;
+
+    const args = spawnFn.mock.calls[0].arguments[1];
+    const modelIndexes = args.flatMap((arg, index) => (arg === '--model' ? [index] : []));
+    assert.deepEqual(modelIndexes, [args.indexOf('--model')], 'only the runtime-owned --model flag should remain');
+    assert.equal(args[modelIndexes[0] + 1], 'Gemini 3.5 Flash (High)');
+    assert.equal(
+      args.some((arg) => arg.startsWith('--model=')),
+      false,
+      'equals-form user --model must be removed',
+    );
+    for (const strayModelToken of ['3.5', '3.1', 'Flash', 'Pro', '(Low)']) {
+      assert.equal(args.includes(strayModelToken), false, `user --model token ${strayModelToken} must be removed`);
+    }
+    assert.ok(args.includes('/tmp/extra-agy-dir'), 'unrelated user --add-dir should remain');
   });
 
   test('passes image inputs as local path hints and add-dir access, not native image flags', async () => {
@@ -2342,7 +2408,8 @@ describe('GeminiAgentService (adapter selection)', () => {
         `Expected agy command, got: ${spawnedCommand}`,
       );
       assert.ok(call.arguments[1].includes('--print'));
-      assert.equal(call.arguments[1].includes('--model'), false, 'default antigravity-cli must not pass --model');
+      const modelIdx = call.arguments[1].indexOf('--model');
+      assert.ok(modelIdx >= 0, 'default antigravity-cli should pass --model');
     } finally {
       if (previousAdapter === undefined) delete process.env.GEMINI_ADAPTER;
       else process.env.GEMINI_ADAPTER = previousAdapter;

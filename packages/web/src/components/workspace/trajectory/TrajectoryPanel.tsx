@@ -253,10 +253,19 @@ export function TrajectoryPanel() {
           </div>
         ) : (
           <>
-            {/* 头部统计 */}
+            {/* 头部统计 + Feature Story 入口 */}
             <div className="mb-3 flex items-center gap-2 text-micro text-neutral-500">
               <span className="text-conn-purple-text font-semibold">{selectedFeat}</span>
               <span>{entries.length} 个事件</span>
+              <a
+                href={`/story/feat:${encodeURIComponent(selectedFeat)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-1 text-conn-purple-text/70 hover:text-conn-purple-text transition-colors"
+                title={`打开 ${selectedFeat} Feature Story 泳道视图`}
+              >
+                🎬 Story
+              </a>
               {projection && <SourceCounts counts={projection.countsBySource} />}
             </div>
             {/* 垂直时间轴 */}

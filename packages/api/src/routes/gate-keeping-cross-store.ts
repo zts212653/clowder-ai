@@ -76,7 +76,7 @@ export function extractRepoAndNumber(input: string): { repo: string; number: str
  *      thread — spec L900-904: "球已分发下游 → keeper 不能 hold_ball"
  *
  * When `waitSourceRef` is provided:
- *   - Non-GitHub kinds (thread_message, task, reporter_handle, pending_input)
+ *   - Non-GitHub kinds (thread_message, task, reporter_handle, managed_command)
  *     → return false: GitHub tracking can't cover non-GitHub waits.
  *   - GitHub kinds (github_issue, github_comment) → extract subject
  *     (repo + number) and match against same-thread + cross-thread tracking.
@@ -102,7 +102,7 @@ export async function detectEventCallback(
 
     // PR-O4 R2: tracking tasks are GitHub-based (pr_tracking, issue_tracking).
     // Non-GitHub waitSourceRef kinds (thread_message, task, reporter_handle,
-    // pending_input) are definitionally not covered by GitHub tracking.
+    // managed_command) are definitionally not covered by GitHub tracking.
     const isGitHubWait = waitSourceRef.kind === 'github_issue' || waitSourceRef.kind === 'github_comment';
     if (!isGitHubWait) return false;
 

@@ -1,53 +1,96 @@
 #!/usr/bin/env node
-/**
- * check-biome-version.mjs — Verify installed Biome matches package.json spec.
- *
- * Called by .githooks/pre-commit BIOME GUARD to detect stale local installs.
- * Exit 0 = OK, exit 1 = version mismatch or biome not installed.
- */
 
-import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const root = join(__dirname, '..');
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
+const DEFAULT_LOCKFILE_PATH = path.join(REPO_ROOT, 'pnpm-lock.yaml');
+const DEFAULT_INSTALLED_PACKAGE_PATH = path.join(REPO_ROOT, 'node_modules', '@biomejs', 'biome', 'package.json');
 
-// Read the spec from package.json devDependencies
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf-8'));
-const spec = pkg.devDependencies?.['@biomejs/biome'];
-if (!spec) {
-  console.error('check-biome-version: @biomejs/biome not in devDependencies');
-  process.exit(1);
+function getLockedBiomeVersion(lockfilePath = DEFAULT_LOCKFILE_PATH) {
+  const lockfile = readFileSync(lockfilePath, 'utf8');
+  const matches = [...lockfile.matchAll(/['"]?@biomejs\/biome@([^'":\s]+)['"]?:/g)].map((match) => match[1]);
+  const uniqueVersions = [...new Set(matches)];
+
+  if (uniqueVersions.length === 0) {
+    throw new Error(`Could not find @biomejs/biome in ${lockfilePath}`);
+  }
+
+  if (uniqueVersions.length > 1) {
+    throw new Error(
+      `Expected exactly one locked @biomejs/biome version in ${lockfilePath}, found: ${uniqueVersions.join(', ')}`,
+    );
+  }
+
+  return uniqueVersions[0];
 }
 
-// Get installed version
-let installed;
-try {
-  installed = execSync('pnpm exec biome --version', { cwd: root, encoding: 'utf-8' })
-    .trim()
-    .replace(/^Version:\s*/i, '');
-} catch {
-  console.error('check-biome-version: biome not installed — run pnpm install');
-  process.exit(1);
+function readInstalledBiomeVersion(installedPackagePath = DEFAULT_INSTALLED_PACKAGE_PATH) {
+  if (!existsSync(installedPackagePath)) {
+    return null;
+  }
+
+  const pkg = JSON.parse(readFileSync(installedPackagePath, 'utf8'));
+  return typeof pkg.version === 'string' ? pkg.version : null;
 }
 
-// Simple semver range check: strip ^ or ~ prefix and compare major.minor
-const specClean = spec.replace(/^[\^~>=<\s]+/, '');
-const [specMajor, specMinor] = specClean.split('.').map(Number);
-const [instMajor, instMinor] = installed.split('.').map(Number);
+function verifyBiomeVersion({
+  lockfilePath = DEFAULT_LOCKFILE_PATH,
+  installedPackagePath = DEFAULT_INSTALLED_PACKAGE_PATH,
+} = {}) {
+  const lockedVersion = getLockedBiomeVersion(lockfilePath);
+  const installedVersion = readInstalledBiomeVersion(installedPackagePath);
 
-if (specMajor !== instMajor) {
-  console.error(`check-biome-version: major mismatch — spec ${spec} vs installed ${installed}. Run pnpm install.`);
-  process.exit(1);
+  if (!installedVersion) {
+    return {
+      ok: false,
+      lockedVersion,
+      installedVersion: null,
+      message:
+        `Biome ${lockedVersion} is required by pnpm-lock.yaml but is not installed locally. ` +
+        'Run `env -u NODE_ENV pnpm install --frozen-lockfile` to refresh this worktree.',
+    };
+  }
+
+  if (installedVersion !== lockedVersion) {
+    return {
+      ok: false,
+      lockedVersion,
+      installedVersion,
+      message:
+        `Biome version mismatch: expected ${lockedVersion} from pnpm-lock.yaml, found ${installedVersion} in node_modules. ` +
+        'Run `env -u NODE_ENV pnpm install --frozen-lockfile` before trusting local Biome results.',
+    };
+  }
+
+  return {
+    ok: true,
+    lockedVersion,
+    installedVersion,
+    message: `Biome version OK (${installedVersion})`,
+  };
 }
 
-// For ^ range: minor must be >= spec minor
-if (spec.startsWith('^') && instMinor < specMinor) {
-  console.error(`check-biome-version: minor too low — spec ${spec} vs installed ${installed}. Run pnpm install.`);
-  process.exit(1);
+function main() {
+  try {
+    const result = verifyBiomeVersion();
+    if (!result.ok) {
+      console.error(result.message);
+      process.exit(1);
+    }
+
+    console.log(result.message);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
 
-// OK
-process.exit(0);
+const isEntryPoint = process.argv[1] && new URL(process.argv[1], 'file://').href === import.meta.url;
+if (isEntryPoint) {
+  main();
+}
+
+export { getLockedBiomeVersion, verifyBiomeVersion };

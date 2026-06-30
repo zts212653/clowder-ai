@@ -8,7 +8,7 @@
 ### 开发流程链
 ```
 feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-    → quality-gate → request-review → receive-review
+    → quality-gate → [fresh-context-review] → request-review → receive-review
     → merge-gate → feat-lifecycle(完成)
 ```
 
@@ -25,6 +25,7 @@ feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → 
 | `code-as-harness` | 重复摩擦/陌生任务→搜证据→诊断→代码修/建 harness | — |
 | `debugging` | 遇到 bug（系统化定位） | — |
 | `quality-gate` | 开发完了自检（愿景+spec+验证） | ② |
+| `fresh-context-review` | *（可选）* Author-triggered pre-review scan（finding generator, not approval） | ②½ |
 | `request-review` | 发 review 请求给 reviewer | ③ |
 | `receive-review` | 处理 review 反馈（Red→Green） | ③ |
 | `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |

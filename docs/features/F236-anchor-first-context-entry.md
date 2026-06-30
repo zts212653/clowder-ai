@@ -5,13 +5,34 @@ topics: [context-engineering, token-budget, mcp, harness]
 doc_kind: spec
 created: 2026-06-15
 tips_exempt: harness-internal anchor telemetry + eval domain — no user-visible capability change
+user_journey_exempt: "Harness/internal tool-return contract for cats and eval telemetry — no end-user journey surface"
 ---
 
 # F236: Anchor-First Context 入口 — 返回侧 token 减负
 
-> **Status**: in-progress (Phase A+B done · **Phase A/B-Eval DONE** [Track-1 chars/volume + Track-2 open-rate + AC-E3 sunset trigger] · Phase C = cat-controlled mode（2026-06-24 pivot）：MCP-tools cat-mode V1 + cc-native spike-gated) | **Owner**: Ragdoll (Ragdoll opus-48 愿景守护；Track-2/AC-E3 实现 opus-4.6) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203
+> **Status**: done | **Completed**: 2026-06-29 | **Owner**: Ragdoll (Ragdoll opus-48 愿景守护；Track-2/AC-E3 实现 opus-4.6) + Maine Coon/Maine Coon (gpt-5.5 close sync) | **Priority**: P1 | **Created**: 2026-06-15 | **Companion ADR**: ADR-203 | **Close evidence**: Cat Café-owned anchor-first path merged and verified; AC-C3/AC-C0d accepted by operator as runtime-compat future-scope after RTK/Headroom/Codex/OpenCode/AGY source-audited refresh.
 >
-> **Timeline**: 2026-06-18 — Phase A + B merged (PR #2381, squash `9af8b2093`)：anchor-first 协作读工具（thread-context/pending-mentions/list-tasks 默认 preview + drillDown）+ get-message bounded drill（mode=preview|full + fullDrillChars telemetry）。本地 gpt52/codex 跨族 review + 云端 Codex 2 轮（封板）。**2026-06-18 — Phase A/B-Eval Track-1（anchor telemetry OTel chars/volume substrate）merged（PR #2411，squash `21ae2c83b`）：gpt52 跨族 review + 云端 Codex 3 轮（round-2 逼出 open-rate 信号模型岔路 → Maine Coon eval-owner 裁定收口 chars/volume，open-rate→Track-2）。** **2026-06-22 — Phase A/B-Eval Track-2（per-event open-rate model + `eval:anchor-first` domain）merged（PR #2490，squash `5251c2f75`）：Maine Coon本地 3 轮跨族 review + 云端 Codex 5 轮（封板 LL-072）。25 tests。** **2026-06-22 — AC-E3 sunset 触发（PR #2507，squash `d09024c90`）：per-tool sunset signal flags + eval 猫双信号判据 + verdict.md sunset section。gpt52 本地 3 轮跨族 review + 云端 Codex 1 轮（2 P1 pushback→P3 + 1 P2 fixed）。10 tests。**
+> **Timeline**: 2026-06-18 — Phase A + B merged (PR #2381, squash `9af8b2093`)：anchor-first 协作读工具（thread-context/pending-mentions/list-tasks 默认 preview + drillDown）+ get-message bounded drill（mode=preview|full + fullDrillChars telemetry）。本地 gpt52/codex 跨族 review + 云端 Codex 2 轮（封板）。**2026-06-18 — Phase A/B-Eval Track-1（anchor telemetry OTel chars/volume substrate）merged（PR #2411，squash `21ae2c83b`）：gpt52 跨族 review + 云端 Codex 3 轮（round-2 逼出 open-rate 信号模型岔路 → Maine Coon eval-owner 裁定收口 chars/volume，open-rate→Track-2）。** **2026-06-22 — Phase A/B-Eval Track-2（per-event open-rate model + `eval:anchor-first` domain）merged（PR #2490，squash `5251c2f75`）：Maine Coon本地 3 轮跨族 review + 云端 Codex 5 轮（封板 LL-072）。25 tests。** **2026-06-22 — AC-E3 sunset 触发（PR #2507，squash `d09024c90`）：per-tool sunset signal flags + eval 猫双信号判据 + verdict.md sunset section。gpt52 本地 3 轮跨族 review + 云端 Codex 1 轮（2 P1 pushback→P3 + 1 P2 fixed）。10 tests。** **2026-06-25 — Phase C Track-1 MCP cat-mode V1（`responseMode=anchor|full` on `get_thread_context` + `get_pending_mentions`）merged（PR #2546）：per-call mode 参数 + telemetry adoption eval fields（modeResolved/modeSource/catId）+ full-mode telemetry isolation（OTel + rollup）。gpt52 本地 2 轮跨族 review + 云端 Codex 2 轮（1 P1 fixed frontmatter + 2 P2 pushback→P3）。7 new tests。** **2026-06-25 — Phase C cc native anchor（PostToolUse hook for Read/Grep/Glob + MCP `cat_cafe_set_read_mode` + session mode file）merged（PR #2552，squash `68dd499d9`）：AC-C1/C2/C5 ✅，AC-C4 partial（type+shape ready, consumer→Phase E）。gpt52 本地 3 轮跨族 review + 云端 Codex 2 轮（R1: P1 hookSpecificOutput + P2 Glob truncation fixed；R2: 封板 stale 67%、1 new P1 scope pushback→Phase E）。68 tests。** **2026-06-25 — Phase E eval consumer bridge（PR #2559）：AnchorEvalBridgeConsumer（pure transform + lifecycle helpers）+ carrier eval tailer wiring + hook-setup anchor hook registration。gpt52 本地 review + 云端 Codex 5 轮（R1: P2 timeout unit；R2: P1 frontmatter + P2 matcher；R3: P2 tool name validation；R4: P1 carrier file-size extraction；R5: 0 findings）。AC-C4 preview side done, drill side remaining。30 tests。** **2026-06-26 — F236 cleanup batch（PR #2565，squash `145bd52b2`）：AC-C4 drill side closure（hook `appendDrillEvalEvent()` + consumer `evalEntriesToDrillEvents()` + `AnchorDrillTool` cc extension）+ modeSource `'legacy_equivalent'` schema/consumer ready + `/tmp` session file cleanup（mode + eval）+ MCP description per-invocation clarification。gpt52 本地 review（0 blocking）+ 云端 Codex 1 轮（0 findings）。12 new tests（118 total F236）。** **2026-06-26 — Stale Read detection + per-tool strategy（PR #2585，squash `7f73b2ffb`）：per-invocation mtime state file + `checkFileStale()` on bounded drill → `⚠️ [F236-STALE]` warning prepend + eval `stale` field + `fullDrillChars` counts delivered content（gpt52 R1 P2 fix）。KD-7 per-tool strategy DECIDED（Bash/WebFetch 不做 anchor）。gpt52 本地 R1 review（1 P2 fixed → 0 blocking `03b36ef85`）+ 云端 Codex 1 轮（1 P1 pushback→dismissed: rule scope mismatch `.claude/hooks/` ≠ `packages/`）。131 tests（+13 new stale tests）。** **2026-06-28 — modeSource `legacy_equivalent` wiring merged（PR #2641，squash `9141e43c`）：`get-message` preview/full + `list-tasks` preview/full emit Track-2 legacy-equivalent adoption events; rollup exposes adoption lens counts; live verdict snapshot/markdown renders Adoption Detail。cloud review R1-R4 fixed 3 P2 + 1 P1, final cloud pass on `86b2f326`; pnpm gate passed。** **2026-06-29 — runtime-compat evidence refresh + close accepted**：RTK/Headroom/OpenAI Codex/OpenCode/AGY source-audited matrix added; opus-48 VG APPROVE; operator accepted AC-C3/C0d as runtime-compat future-scope; formal close gate/reflection/harness-feedback added; F236 removed from BACKLOG.
+
+## Completion Boundary (2026-06-29)
+
+F236 core close means: **Cat Café-owned return-side token reduction is live, cat-controlled, drillable, and eval-visible**. That scope is complete:
+- MCP collaboration readers: preview/default anchor + bounded full drill (`get_thread_context`, `get_pending_mentions`, `list_tasks`, `get_message`) — PR #2381 / #2546 / #2641.
+- cc-native Read/Grep/Glob: `cat_cafe_set_read_mode()` controls session mode; PostToolUse hook handles Read/Grep/Glob; bounded Read is the escape hatch — PR #2552 / #2559 / #2565.
+- Eval loop: chars/volume, open-rate, adoption lens, stale flag, cc preview+drill bridge, live verdict rendering — PR #2411 / #2490 / #2507 / #2559 / #2565 / #2585 / #2641.
+- Safety boundaries: locator-not-synopsis, fail-open full mode, stale warning, Bash/WebFetch no-anchor decision — PR #2552 / #2585 + KD-7.
+
+What is **not** a F236 core blocker anymore:
+- **AC-C0c historical residue**: the original spike left "Glob shape / interactive carrier parity" pending because it only exercised sdk-cli. Later implementation closed the actual product path: hook setup scopes F236 to `Read|Grep|Glob`; `cat_cafe_set_read_mode` documents Read/Grep/Glob mode; the interactive PTY carrier tails, ingests, final-drains, and cleans F236 eval/mode/state files. A manual carrier smoke run can still be useful as guardian evidence, but no known implementation tail remains.
+- **AC-C3 / AC-C0d cross-runtime expansion**: codex/agy/opencode model-side output anchoring depends on external runtime hook capabilities. 2026-06-29 runtime-compat refresh (RTK / Headroom / OpenAI Codex source / OpenCode / AGY evidence, see AC-C3/C0d below) shows the external-runtime world mostly uses weaker patterns: instruction awareness, shell command rewrite, API proxy compression, or custom tool replacement. None is equivalent to Cat Café-owned cc Read/Grep/Glob PostToolUse anchor-first today. That is a separate runtime-compatibility spike/feature, not unfinished Cat Café F236 work.
+
+Close result: F236 core is done. Do not keep reopening F236 for future runtime families unless operator explicitly expands scope; create a separate runtime-compat feature if Codex shell/MCP, OpenCode custom-tool, or Headroom proxy paths are pursued.
+
+## Architecture Ownership
+
+Architecture cell: harness-eval
+Map delta: none
+Why: F236 extends the existing anchor-first eval telemetry contract and callback emit sites; it does not introduce a new Store/Queue/Router/Adapter/Dispatcher/Binding.
 
 ## Why
 
@@ -134,25 +155,48 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 ### Phase C: cc 原生工具 anchor 化（spike-gated — 这才是大头）
 > 前置 spike（与Maine Coon一起）：实测 cc PostToolUse hook + `updatedToolOutput` 能否 replace Read/Grep/Glob 返回。**spike 不过则本 Phase 不启动**（不脑补——文档说能 ≠ 我们场景能用）。
 - [x] **AC-C0b (spike) ✅ PASS**: Grep shape（正文在顶层 `.content`）shape-matched replace 实证
-- [ ] AC-C0c (spike) pending: Glob shape / 多 Read `tool_use_id` 独立 / session 持久化 / **interactive carrier parity**（本 spike 是 sdk-cli ≠ carrier；Phase C 若含 interactive carrier 须单独 AC 在 carrier path 复测）
-- [ ] AC-C1: Read 返回默认 anchorized（文件路径 + 总行数 + 预览 + `read_file_slice` drill 指针），全文按需 drill
-- [ ] AC-C2: Grep/Glob 返回分组 anchor（命中文件 + 计数 + drill），不 inline 全部命中行
-- [ ] AC-C3: PostToolUse 仅 cc；**codex/agy 两条候选路**（spike-gated，operator 2026-06-17）：
-    - **浅路（学 rtk）**：注入 shell 命令重写 hook（codex/agy 有 PreToolUse/shell hook，rtk 已证）——广但只压 shell 命令，碰不到内置工具 output
-    - **深路（output anchor）**：需 codex/agy 有 cc PostToolUse 等价机制、能改**它们模型侧**的 tool_result
-    - ⚠️ **核心未知（深路必验）**：我们的 transform 层改的是 **cat-cafe 侧存储/展示**（≠ codex/agy 模型 context，省不到它们 token，且那侧 F148 已覆盖）——深路要省 codex/agy 模型 token，**必须它们自己有 output hook**，不是我们 transform 能代劳。（修正：前文"transform 可改"指 cat-cafe 侧，非模型侧）
-    - opencode：transformer 不发 tool_result，锁定
-- [~] AC-C0d (spike) 文档+家里实测查证（2026-06-17，**Maine Coon P1 改判 + operator纠正 agy 分形态**）：能力真相 **cc（实测 PASS）>> codex（限 shell）> agy-IDE/Bengal（observe-only）；agy-CLI/Siamese（待查）**——下方逐条
-    - **codex**（`.codex/hooks.json` PostToolUse，`decision:block`+`reason` 替换 tool result）：覆盖 Bash/apply_patch/MCP，**不覆盖 file-read 工具** → 深路对 codex 限 shell（读文件 hook 不生效）
-    - **agy 分两形态**（operator 2026-06-17 纠正，我之前笼统混了 — F210/F061 实测证）：
-        - **Bengal（Antigravity IDE / Language Server，@antig-opus）= observe-only，深路不成立** ✅：SDK README PostToolCallHook 归 inspect/read-only + 家里 **F061 AC-2cR4 实测**（@antig-opus 2026-04-21/23）`view_file`/`grep_search`/`list_dir` 全 **LS 内部 DONE 自闭环、不走 Cat Café Bridge writeback**，carrier 插不进去。这个站得住
-        - **Siamese（Antigravity CLI / `agy --print`，@gemini gemini25）= hook 能力待单独查**：F210 证Siamese走 `antigravity-cli` adapter；CLI 形态的 hook（`~/.gemini/config/hooks.json`）能不能改 output 与 IDE **可能不同**——我之前 WebSearch 没区分 CLI/IDE 就笼统说"agy observe-only"，又一次"没区分清楚就下结论"。留 Phase C 实测
-        - **纠正前文"最接近 cc"**：observe≠transform + 漏 recall F061 + 没分 CLI/IDE 形态
-    - **修正**：spike A 从"rtk 用 rules.md"误推"agy 没 hook"——官方文档推翻（agy 有 PostToolCallHook，rtk 只是没用它）。又一次旁证脑补被查证纠偏
-    - **实测（nonce probe）留 Phase C**：cc 已证 PostToolUse output replace 范式真实（核心打底）+ codex/agy hook/config 已查到；codex 实测烧贵配额（Maine Coon额度），spike 阶段 cost>边际价值，Phase C 实现期实测确认
-    - 来源：codex `developers.openai.com/codex/hooks` / agy **官方 SDK README（PostToolCallHook read-only）+ 家里 F061 AC-2cR4 实测**（`antigravity.google/docs/hooks` 返空，Maine Coon改用 SDK README 核验）（checked 2026-06-17）
-- [ ] AC-C4: 双边 eval 对 cc 工具同样适用（Read drill 净收益 = 省 − drill 成本）
-- [ ] **AC-C5（控制机制 = cat-controlled mode — 2026-06-24 pivot，详见下方 pivot 块）**: 不再"系统猜何时 anchor"，而是**猫显式选 mode（anchor / full）**、系统零任务分类。anchor mode 内护栏：locator-not-synopsis（硬不变量）+ 全文一跳逃生（证完才默认开）。默认 fail-open。eval = 反馈/调默认、**非 gate**。**AC-C1/C2 的"默认 anchorized"改为"猫选 anchor mode 时 anchorized"。**
+- [x] AC-C0c (spike + implementation closure) **cat-mode signaling PASS + carrier/product path closed（2026-06-25 spike + PR #2552/#2559/#2565）**：
+    - ✅ **机制实证**：猫写 session 级 mode 文件 → cc PostToolUse hook 读 + 条件分支（anchor / pass-through）；✅ session 持久化（hook 每 Read 独立 fire、不走缓存跳过）；✅ bounded drill 逃生（`Read(offset,limit)` 不被二次 anchor）；✅ fail-open（无 mode 文件 = 全文）。**anti-confound**：nonce 双标（`ORIGINAL_NONCE`→`ANCHOR_NONCE`）证 hook 真换了模型侧输出 + action.log 12 次决策。
+    - 🔑 **ergonomics 采纳**：猫设 mode 的干净方案 = **MCP 工具 `cat_cafe_set_read_mode(mode)`**（写 mode 文件，绕开 Bash 沙盒权限——我们自己的 MCP 工具不受限）。
+    - ⚠️ **anomaly（可控、非阻断）**：同 session re-read 已读文件时 `tool_response.file` 可能空（cc 缓存）→ locator 行数为 0（anchor 正文 + drill 指针仍正确）→ **Phase C 实现须 fallback：hook 从磁盘 stat 取行数**（path 在 tool input 里、拿得到）。
+    - ✅ **原 pending 清账（2026-06-28）**：Glob shape 不再是未实现项（PR #2552 landed Read/Grep/Glob hook path + shape guard；`cat_cafe_set_read_mode` 明确 Read/Grep/Glob）；interactive carrier parity 不再是未接线项（PR #2559/#2565 landed interactive PTY eval tailer ingestion, final drain, and session file cleanup）。可选的 manual carrier smoke test 属于 completion guardian evidence，不是 F236 core blocker。
+- [x] AC-C1: Read 返回默认 anchorized（文件路径 + 总行数 + 预览 + `read_file_slice` drill 指针），全文按需 drill — ✅ PostToolUse hook shape-matched replace `.file.content` → locator anchor
+- [x] AC-C2: Grep/Glob 返回分组 anchor（命中文件 + 计数 + drill），不 inline 全部命中行 — ✅ Grep `.content` replace + Glob filenames truncated (max 10) + shape guard
+- [ ] AC-C3: **future-scope / not F236 core blocker** — PostToolUse anchor-first 已在 cc product path 落地；codex/agy/opencode/headroom 是 runtime-compat 问题，不是 F236 core 未完成项。
+    - **operator pushback 后的 2026-06-29 refresh（不只看官方 hook，补看 RTK / Headroom / OpenCode / OpenAI Codex source）**：开源项目的做法不是单一路径，而是四类 weaker-than-F236 pattern：
+        1. **Instruction awareness**：RTK 的 Codex 集成把 `RTK.md`/awareness 注入 `AGENTS.md`；Headroom 的 CodexAdapter 同样同步 memory 到 `AGENTS.md`。这能影响模型选择，但不能强制改模型侧 tool output。
+        2. **Shell command rewrite**：RTK 对 Claude/Gemini/Cursor/OpenCode 的核心路径是 pre-exec command rewrite；RTK OpenCode plugin 只拦 `bash|shell` 并重写 `args.command`。这能压 `cat/sed/rg`，但不是 Read/Grep/Glob tool_result anchoring。
+        3. **API/proxy tool_result transform**：Headroom 在 provider message/proxy 层有 `ToolResultInterceptor`，能 rewrite request messages 里的 `tool_result`；但默认保护 `Read/Grep/Glob/Write/Edit`，理由是精确读内容常被后续 edit old_string 依赖。Headroom 的 Codex 审计也把 Codex 读文件建模成 shell `cat/sed/head/tail/nl`，不是原生 Read tool。
+        4. **Custom/same-name tool replacement**：OpenCode docs/type surface 支持 plugin/custom tool，且同名可 override built-in；这是最接近 F236 深路的外部 runtime 候选，但 smoke 被 provider 403 挡住，尚未形成可合入证据。
+    - **Runtime matrix（2026-06-29）**:
+
+        | Runtime / project | F236 deep anchor equivalent today? | What is actually feasible | Evidence / caveat |
+        | --- | --- | --- | --- |
+        | Claude Code / Cat Café-owned cc path | Yes, done | Shape-matched PostToolUse replaces Read/Grep/Glob model-side output; bounded Read drill pass-through | PR #2552/#2559/#2565; AC-C0a/C0b/C0c/C1/C2/C4/C5 |
+        | OpenAI Codex CLI | No for native Read/Grep/Glob; shallow routes exist | `PreToolUse.updatedInput` can rewrite Bash/apply_patch/extension-tool input; PostToolUse can block or replace model-visible response with feedback for supported tools; `updatedMCPToolOutput` is explicitly unsupported; no native Read/Grep/Glob handler found in open-source Codex | OpenAI Codex source `codex-rs/hooks/src/engine/output_parser.rs`, `core/src/tools/handlers/shell/shell_command.rs`, `core/src/tools/registry.rs`; Headroom Codex audit treats file reads as shell commands |
+        | RTK Codex integration | No | Awareness docs in `AGENTS.md`/`RTK.md`; no programmatic Codex hook | RTK `hooks/codex/README.md`: prompt-level guidance only |
+        | RTK OpenCode integration | No for deep output anchor | `tool.execute.before` rewrites shell/Bash command text | RTK `hooks/opencode/rtk.ts` only handles `bash|shell` |
+        | Headroom | Not a runtime-global F236 substitute | Proxy can compress/replace observed `tool_result` messages, with progressive disclosure; defaults exclude exact read/edit tools | Headroom `proxy/interceptors/base.py`, `config.py`, `audit/codex.py`; transport-layer control is stronger than instruction awareness but different from runtime-native Read/Grep ownership |
+        | OpenCode custom/plugin tools | Candidate, not proven | Override built-in `read/grep/glob` or add Cat Café anchor tools that return locator+drill anchors | OpenCode docs and local plugin type surface support same-name custom tools; local smoke blocked by provider 403, so treat as runtime-compat feature work |
+        | AGY / Antigravity IDE | No-go for current F236 deep path | IDE/tool observation does not expose proven successful model-side output replacement; F061 showed LS-internal reads self-close outside Cat Cafe bridge | F061 AC-2cR4 + AGY docs/local SDK notes; public hook SPA not enough evidence for mutation semantics |
+        | AGY CLI (`agy --print`) | Unproven | Needs product-specific probe for successful tool output mutation; do not infer from IDE or from hook existence | F210 proves CLI adapter shape; no current red-green nonce proof |
+
+    - **Design conclusion**：AC-C3 扩的是 external runtime family。Codex 可做一条 **shell/MCP shallow route**（rewrite `cat/sed/head/tail/nl/rg` 或引导使用 Cat Café anchor MCP tools），OpenCode 可做一条 **custom-tool deep-ish route**，Headroom 可做 **proxy route**；这些都应归一个新的 runtime-compat feature，带各 runtime 自己的 red-green smoke 和 token accounting，不把 F236 core close 卡住。
+- [~] AC-C0d (spike evidence for AC-C3) **2026-06-29 refreshed and source-audited**：
+    - **What changed from 2026-06-17 note**：旧结论把 "codex = 限 shell / opencode = transformer no tool_result" 写得太粗。更新后更精确：Codex hook plumbing 比"只有 Bash"更宽（Bash/apply_patch/extension/MCP supported-tool family，PostToolUse feedback 可改 model-visible response），但仍没有被证成的 native Read/Grep/Glob replacement；OpenCode 不应简单判 no-go，反而是 custom/same-name tool override 的最佳候选；RTK current upstream 已支持 OpenCode，但它仍是 shell rewrite，不是 deep anchor。
+    - **Source audit ledger**:
+
+        | Source | Audited revision / source | Verdict for AC-C3 |
+        | --- | --- | --- |
+        | RTK | local ref `/home/user/projects/ref/rtk`, `origin/develop` 2026-06-29 (`36dd8f24792b...`) | Use: proves community shell-rewrite and Codex awareness patterns; does not prove deep Codex/OpenCode output anchoring |
+        | Headroom | local ref `/home/user/projects/ref/headroom`, `origin/main` 2026-06-29 (`ad0034f981...`) | Use-with-caveat: proxy/message-layer route and Codex transcript audit are strong design evidence; internal corpus numbers are not Cat Café production evidence |
+        | OpenAI Codex source | local ref `/home/user/projects/ref/openai-codex`, HEAD `cfead68e5d3984b247cf0758e3e53b19165de848` | Use: confirms supported hook payloads and unsupported `updatedMCPToolOutput`; no native Read/Grep/Glob handler found |
+        | OpenCode docs/types | official docs + local `@opencode-ai/plugin` type surface | Use-with-caveat: custom/same-name tool override is plausible; provider-blocked smoke means not accepted as done |
+        | AGY | local `agy` CLI/help + Antigravity guide/SDK notes + F061/F210 project evidence | Use-with-caveat: no current proof of successful tool output mutation; keep CLI separate from IDE |
+
+    - **Closure rule**：closing F236 requires operator to accept AC-C3/C0d as runtime-compat future-scope after this refreshed evidence, or explicitly expand F236 scope to own a new runtime-compat implementation. If expanded, first candidate should be an OpenCode-first custom-tool spike, second Codex shell/MCP shallow route; AGY waits for a concrete mutation API/probe.
+- [x] AC-C4: 双边 eval 对 cc 工具同样适用（Read drill 净收益 = 省 − drill 成本）——**preview side done（PR #2559）, drill side done（PR #2565, squash `145bd52b2`）**：`AnchorEvalBridgeConsumer` transforms eval jsonl → `recordAnchorPreviewEvent()` + `recordAnchorDrillEvent()` + `recordAnchorFullDrill()`；hook `appendDrillEvalEvent()` emits `kind:'drill'` entries on bounded Read pass-through when anchor mode active；`AnchorDrillTool` type extended with `cc-read | cc-grep | cc-glob`；consumer dual-path processing (preview vs drill via `kind` discriminator)；carrier wires `cleanupSessionFiles()` for eval jsonl + mode file；118 tests
+- [x] **AC-C5（控制机制 = cat-controlled mode — 2026-06-24 pivot，详见下方 pivot 块）**: 不再"系统猜何时 anchor"，而是**猫显式选 mode（anchor / full）**、系统零任务分类。anchor mode 内护栏：locator-not-synopsis（硬不变量）+ 全文一跳逃生（证完才默认开）。默认 fail-open。eval = 反馈/调默认、**非 gate**。**AC-C1/C2 的"默认 anchorized"改为"猫选 anchor mode 时 anchorized"。** — ✅ MCP `cat_cafe_set_read_mode` + session mode file + PostToolUse hook conditional branch
 
 #### 🔄 设计 pivot（2026-06-24）：cat-controlled mode（Maine Coon failure-mode 审计 + operator cold-start 纠偏）
 
@@ -169,13 +213,36 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 - **默认（猫没选时）= fail-open 给全文**；多信号阈值（字节/行数 + grep fan-out + 压缩比，非单 magic number）仅作"猫没选时的智能默认"、**非 gate**。
 - **eval（Phase A/B-Eval）角色**：观察 mode 使用 + 给猫反馈 + 调默认，**非 enforce 闸门**（刹车≠气囊）。
 
-**Open（待 spike / 设计）**：① cc 原生"猫 signal mode → hook 读"可行性（**spike 进行中**）；② 默认 mode 值 + mode 表达 ergonomics（session / per-turn / per-call）；③ anchor mode 内是否需 size 下限护栏（防猫 anchor 小文件还变瞎）。
+**Closed / Deferred（2026-06-28 清账）**：① cc 原生"猫 signal mode → hook 读"可行性已证（见 AC-C0c）；② 默认 mode 值 + ergonomics 已定并落地（MCP `responseMode` per-call + cc session mode via `cat_cafe_set_read_mode`）；③ anchor mode 内 size 下限不作为预置任务分类器实现，后续只由 `eval:anchor-first` / blindness evidence 驱动调默认或加 guard。
 
 **Supersedes**：AC-C5 v1"debug/review 默认全文"（task 分类）+ 下方「防瞎子设计」的"任务感知"条 — 均弃；fail-open / locator / 逃生 / 多信号阈值并入本设计。
 
+#### Track 1 实现设计：MCP-tools cat-mode = `responseMode` 参数（Maine Coon grounded 分析 2026-06-25，opus-48 spot-check 核验）
+
+**核心校正**：operator"每个读取工具都加参数"**理念对、落地不能机械一刀全加**——只加在**投影点**（当前替猫做 preview/full 选择 + 返回体大到值得切），不是所有 read 工具（Maine Coon 读实际工具签名得出，非拍脑袋）。
+
+**工具分类**（opus-48 spot-check：`search_evidence.depth=summary|raw` evidence-tools.ts:54 实锤、`read_session_events.view` 工具接口证实）：
+- **✅ 加 `responseMode=anchor|full`**（真投影点、当前缺 per-call 控制）：`get_thread_context`、`get_pending_mentions`。
+- **🔵 已有等价控制、不叠新参数**（避免冗余/撞名）：`get_message`（`mode=preview|full`）和 `list_tasks`（`taskId` 作 full-why drill terminal）归 F236 `legacy_equivalent` adoption / anchor-tax rollup；`search_evidence`（`depth=summary|raw`）和 `read_session_events`（`view=raw|chat|handoff`）属于 memory/session recall 控制面，不混入 F236 anchor-tax 净收益模型，避免把 recall eval 信号污染到返回侧 token 账。
+- **⛔ 不加**（非长 body 投影点，加 = 噪音/假灵活）：`graph_resolve`、`list_recent`、`read_invocation_detail`、`read_session_digest`、`get_thread_cats`、`list_threads`。
+
+**命名（硬层，Maine Coon catch）**：新字段 **`responseMode=anchor|full`**，**不叫 `mode`**（`mode` 已被 search_evidence/get_message 占、语义不同）；已有工具保留原字段、服务端内部归一化到统一"输出模式"概念。**默认**：协作工具 `anchor`（沿用 Phase A/B 现状、不破坏行为）。
+
+**软/硬/eval 三层（ADR-031）**：
+- **软**：工具 description 必须写清「何时 anchor / 何时 full / 默认 / drill terminal」；`drillDown` hint 同步带参数 —— **否则参数存在猫不知道 = 白加（operator P0）**。
+- **硬**：`responseMode` schema + 默认 + 服务端归一化；invariant 测试：anchor 返回 **locator not synopsis** / full 真绕过 anchor / drill terminal 不二次 anchor。
+- **eval**：见下 adoption lens。
+
+**Adoption eval（接现有 `eval:anchor-first`、不新开域；Maine Coon：无 Track-2 跨请求 join 陷阱——serve-time 直接记录、不事后反推 payload）**：
+- serve-time event 加字段：`modeResolved`(anchor/full/terminal) + `modeSource`(explicit/default/legacy_equivalent) + `catId` + `tool`。
+- adoption lens：`explicitAnchorCalls` / `explicitFullCalls` / `defaultAnchorCalls` / `defaultFullCalls` / `legacyEquivalentAnchorCalls` / `legacyEquivalentFullCalls` / `uniqueCatsExplicitAnchor` → 答operator"多少猫显式选 anchor" + **闭合冷启动担忧（不猜有没有人用、直接量）**。
+- **现有 net-benefit / open-rate / 变瞎子全按 `modeSource` 分桶** —— 否则"默认 anchor"和"猫主动选 anchor"混一起、数据没法解释。
+
+**46 最小第一刀（Maine Coon建议 + opus-48 采纳）**：① `get_thread_context.responseMode` → ② `get_pending_mentions.responseMode` → `get_message` 保持现状 → 其余不动（本 doc 已写明为何不动）。
+
 ## Eval / Tracking Contract（F192 / ADR-031）
 
-> **本节 = eval spec（要测什么）；实现闭环见上「Phase A/B-Eval」节**（telemetry 聚合 → verdict → sunset 触发，接 F192）。现状：Phase A/B 已 emit telemetry，verdict/触发闭环待 Phase A/B-Eval 还债——别把"emit 了 telemetry"当成"有 eval 闭环"。
+> **本节 = eval spec（要测什么）；实现闭环见上「Phase A/B-Eval」节**（telemetry 聚合 → verdict → sunset 触发，接 F192）。现状：Phase A/B-Eval 已落地；后续只按 verdict 证据调默认/回退，不再把"emit telemetry"误写成"闭环未还债"。
 
 1. **Primary Users + Activation**：所有 runtime 的猫调协作读工具时；activation = 工具返回走 anchorized 路径的比例。
 2. **Friction Metric（双边公式 — Maine Coon KD，不许单边报喜）**：
@@ -198,7 +265,7 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 - **诚实标注省略**：preview 必须明示"省了 N 行 / 这是 head+tail / 中间有 X"，绝不制造"看全了"假象
 - **drill 极低成本**：一跳拿到，否则猫懒得 drill 就瞎
 - **保守默认**：只 anchor 超大输出，宁可少省不误伤
-- **任务感知（难点，待设计）**：debug/review 默认给全文、浏览可 anchor——hook 不知任务，对"读代码"类默认保守
+- **任务感知（已弃用为主控）**：不再做 debug/review/browser 任务分类；由猫显式选 `anchor|full` mode，系统只提供 locator-not-synopsis + 一跳 drill + eval 回退。
 - **eval 必测判断质量**：见 Sunset Signal ②，不只测 token
 
 > Maine Coon有粮后 review 此段（failure-mode 审计强）。**这是 F236「该不该实现 / 怎么实现才不伤判断」的关键闸门，比技术 spike 更重要。**
@@ -211,10 +278,10 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 | **硬** | route projection helper 强制 preview（最内层封顶）；regression fixture 守 token 上限；lint 检测新读类工具缺 preview（Phase B） |
 | **eval** | 双边 telemetry（returnedChars / anchorOpenRate / fullDrillChars / 返工）+ **blindness signal（任务正确性 / 返工率，测变瞎子）**；sunset **双信号**监控 anchor tax ① + 变瞎子 ② |
 
-## Architecture cell
-- **Architecture cell**: MCP server tools + API callback routes（返回 payload 组装）
-- **Map delta**: update required（callback route 新增 projection helper 层）
-- **Why**: 在已有 callback route 返回构造前插入 anchorize 投影，不新建 Store/Router/Adapter
+## Architecture Ownership (final)
+- **Architecture cell**: harness-eval
+- **Map delta**: none
+- **Why**: 最终实现落在现有 callback route / MCP tool / cc hook / harness-eval telemetry extension points 内；没有新增 Store / Queue / Router / Adapter / Dispatcher / Binding。
 
 ## Dependencies
 - **Evolved from**: F148（消息侧分层，本 feat 是返回侧姊妹篇）
@@ -227,4 +294,6 @@ spike（2026-06-16，C0a Read / C0b Grep ✅ 实证）证明 cc PostToolUse hook
 - KD-3: drill 终点（get_message）也必须 bounded，否则 dump 只推迟 — Maine Coon发现
 - KD-4: V1 不碰 outputSchema 迁移 / subagent schema（subprocess 不可达）— Maine Coon收窄
 - KD-5: eval 双边公式，不许单边报省 — Maine Coon anchor tax 风险
-- KD-6: **cc 大头可解（C0a/C0b 已实证 PASS，2026-06-16）**——`claude -p/sdk-cli` 下 shape-matched PostToolUse replace（Read `.file.content` / Grep `.content`）+ bounded drill pass-through 实测打通；built-in replacement 须匹配原 output shape（字符串被忽略，Maine Coon caveat 实证）。rtk 只用 PreToolUse 没做到。interactive carrier parity 待 Phase C 单独验 — Ragdoll×Maine Coon双猫 spike（更正"runtime 锁定"初稿误判，吸取 Workflow-schema 脑补教训）
+- KD-6: **cc 大头可解（C0a/C0b 已实证 PASS，2026-06-16；carrier/product path closed by PR #2552/#2559/#2565）**——`claude -p/sdk-cli` 下 shape-matched PostToolUse replace（Read `.file.content` / Grep `.content`）+ bounded drill pass-through 实测打通；built-in replacement 须匹配原 output shape（字符串被忽略，Maine Coon caveat 实证）。rtk 只用 PreToolUse 没做到。interactive PTY carrier 后续实现已挂 hook、tail eval jsonl、final drain、cleanup session files；剩余 manual smoke 属 completion guardian evidence，不是 core blocker。
+- KD-7: **Bash/WebFetch 不做 anchor（per-tool 策略，2026-06-26 Ragdoll自决）**——Bash 输出是自由格式文本（无结构化 metadata 可提取 locator），WebFetch 返回整页 HTML/text（无有意义的 "drill" 概念）。anchoring 这些需要 content-aware truncation 违反 ADR-031 locator-not-synopsis 不变量。F236 anchor scope = 有结构化输出 shape 的工具（Read/Grep/Glob/MCP 协作工具），freeform 输出不 anchor
+- KD-8: **AC-C3/C0d runtime-compat 降级签收（2026-06-29）**——RTK/Headroom/OpenAI Codex/OpenCode/AGY refresh 证明外部 runtime 现有主流做法是 awareness / shell rewrite / proxy compression / custom tool replacement，均非 F236 core 等价。operator accepted AC-C3/C0d as future-scope; next work, if any, should be a separate runtime-compat feature.

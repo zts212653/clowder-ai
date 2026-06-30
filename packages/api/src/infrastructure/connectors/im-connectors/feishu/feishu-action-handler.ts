@@ -30,19 +30,16 @@ export async function handleFeishuAction(actionId: string, ctx: HandleActionCont
       const status = await qrClient.poll(qrPayload);
       if (status.status === 'confirmed' && status.appId && status.appSecret) {
         log.info('[Feishu handleAction] QR confirmed — credentials acquired');
-        // Auto-switch to websocket when no verification token (same as legacy route).
-        // QR-based login is typically for internal/dev setups without public webhook URL.
-        const currentMode = ctx.env.FEISHU_CONNECTION_MODE === 'websocket' ? 'websocket' : 'webhook';
-        const verificationToken = ctx.env.FEISHU_VERIFICATION_TOKEN?.trim();
-        const effectiveMode = currentMode === 'webhook' && !verificationToken ? 'websocket' : currentMode;
+        // QR-based login is for local/dev setups — always default to websocket.
+        // WebSocket doesn't need a public callback URL, so it works behind
+        // Cloudflare Access / NAT / firewalls where webhook callbacks can't reach.
+        // Users who explicitly need webhook mode can set FEISHU_CONNECTION_MODE
+        // in their env or via the config store after connecting.
         const targets: Record<string, string> = {
           FEISHU_APP_ID: status.appId,
           FEISHU_APP_SECRET: status.appSecret,
-          FEISHU_CONNECTION_MODE: effectiveMode,
+          FEISHU_CONNECTION_MODE: 'websocket',
         };
-        if (effectiveMode === 'webhook' && verificationToken) {
-          targets.FEISHU_VERIFICATION_TOKEN = verificationToken;
-        }
         return {
           render: 'status',
           data: { status: 'confirmed' },

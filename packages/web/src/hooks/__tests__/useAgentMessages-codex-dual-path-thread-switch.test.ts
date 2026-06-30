@@ -380,6 +380,54 @@ describe('Codex dual-path thread switch — one reply must stay ONE bubble', () 
     expect(nextTurnBubble?.toolEvents).toHaveLength(1);
   });
 
+  it('[pre-invocation_created tools] background tool events before invocation_created converge to parent-only seed', () => {
+    // Real production scenario: codex streams text + tool events on the active path
+    // WITHOUT turnInvocationId (invocation_created hasn't arrived yet). The active
+    // path creates a parent-only bubble (seedSource: 'fresh-parent-seed') and records
+    // it in the runtime ledger. When the operator switches threads, bgStreamRefs is
+    // cleared (line 4100). Late tool events on the background path must RECOVER the
+    // existing streaming bubble, not create a second empty one.
+    //
+    // Root cause: shouldSkipBackgroundParentOnlyResidueRecovery (line 590) checked
+    // only bgStreamRefs (activeRef), which is undefined after active→background
+    // transition. The fix adds a runtime ledger bridge (same pattern as the
+    // invocation_created handler at line 655-668).
+    harness.render();
+
+    // Phase 1: active path — text + tool (no turn)
+    harness.send(textY('开始处理，先跑几个命令看看……', 1100));
+    harness.send(toolY(1110, 'rg -n "OKF" packages/'));
+
+    let bubblesY = threadCodexStreamBubbles(THREAD_Y);
+    expect(bubblesY).toHaveLength(1);
+    expect(bubblesY[0]?.id).toBe(`msg-${PARENT}-codex`);
+
+    // Phase 2: operator switches to thread X (BEFORE invocation_created arrives)
+    useChatStore.getState().setCurrentThread(THREAD_X);
+
+    // Phase 3: more tool events arrive on the background path (no turn).
+    // Without the fix: shouldSkipBackgroundParentOnlyResidueRecovery returns true
+    // because activeRef is undefined → recovery skipped → new empty bubble → SPLIT.
+    harness.send(toolY(1120, 'sed -n "1,220p" packages/web/foo.ts'));
+    harness.send(toolY(1130, 'rg -n "split" packages/web/'));
+
+    bubblesY = threadCodexStreamBubbles(THREAD_Y);
+    // Must be ONE bubble, not two
+    expect(bubblesY).toHaveLength(1);
+    expect(bubblesY[0]?.content).toContain('开始处理');
+    expect(bubblesY[0]?.toolEvents?.length ?? 0).toBeGreaterThanOrEqual(3);
+
+    // Cleanup: done finalizes
+    harness.send({
+      type: 'done' as const,
+      catId: 'codex' as const,
+      threadId: THREAD_Y,
+      invocationId: PARENT,
+      timestamp: 1150,
+    });
+    expect(getActiveBubble(getThreadRuntimeLedger(), THREAD_Y, 'codex')).toBeUndefined();
+  });
+
   it('[Z3 redline] genuinely different turns (each with its own invocation_created) stay SEPARATE', () => {
     // Two distinct codex turns on the SAME parent chain in thread Y. Each turn
     // carries its OWN explicit turnInvocationId on its events (real backend stamps

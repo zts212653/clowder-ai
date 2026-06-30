@@ -575,6 +575,10 @@ export class IndexBuilder implements IIndexBuilder {
     return { docsIndexed: indexed, docsSkipped: skipped, durationMs: Date.now() - start };
   }
 
+  isPassageWarmupActive(): boolean {
+    return this.passageEmbeddingWarmupInFlight !== null;
+  }
+
   startPassageEmbeddingWarmup(): void {
     // F209 fix: passage embedding is a recall accelerator (passage_fts stays canonical),
     // so it MUST NOT block rebuild()/listen(). Call this only after the API is listening.
@@ -950,19 +954,22 @@ export class IndexBuilder implements IIndexBuilder {
     const deps = this.embedDeps;
     if (!deps?.passageVectorStore) return;
 
-    try {
-      const db = this.store.getDb();
-      const existingStmt = db.prepare('SELECT 1 AS present FROM passage_vectors WHERE passage_key = ? LIMIT 1');
-      let lastId = 0;
+    const db = this.store.getDb();
+    const existingStmt = db.prepare('SELECT 1 AS present FROM passage_vectors WHERE passage_key = ? LIMIT 1');
+    let lastId = 0;
+    let consecutiveErrors = 0;
 
-      for (;;) {
-        const whereClauses = ['id > ?'];
-        const params: unknown[] = [lastId];
-        if (docAnchors?.length) {
-          whereClauses.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
-          params.push(...docAnchors);
-        }
-        const rows = db
+    for (;;) {
+      const whereClauses = ['id > ?'];
+      const params: unknown[] = [lastId];
+      if (docAnchors?.length) {
+        whereClauses.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
+        params.push(...docAnchors);
+      }
+
+      let rows: Array<PassageEmbeddingRow & { id: number }>;
+      try {
+        rows = db
           .prepare(
             `SELECT id, doc_anchor AS docAnchor, passage_id AS passageId, content
              FROM evidence_passages
@@ -971,18 +978,31 @@ export class IndexBuilder implements IIndexBuilder {
              LIMIT ?`,
           )
           .all(...params, PASSAGE_EMBED_SCAN_BATCH_SIZE) as Array<PassageEmbeddingRow & { id: number }>;
-        if (rows.length === 0) return;
+      } catch {
+        // DB read error — stop scanning (structural problem, not transient)
+        return;
+      }
+      if (rows.length === 0) return;
 
-        lastId = rows[rows.length - 1]!.id;
-        const missing = rows.filter((r) => !existingStmt.get(passageVectorKey(r.docAnchor, r.passageId)));
+      lastId = rows[rows.length - 1]!.id;
+      const missing = rows.filter((r) => !existingStmt.get(passageVectorKey(r.docAnchor, r.passageId)));
+
+      try {
         await embedPassages({
           passages: missing,
           embedding: deps.embedding,
           passageVectorStore: deps.passageVectorStore,
         });
+        consecutiveErrors = 0;
+      } catch {
+        // Batch-level fail-open: skip this batch, continue with the next.
+        // passage_fts remains canonical — vectors are an accelerator.
+        consecutiveErrors++;
+        if (consecutiveErrors >= 3) {
+          // 3 consecutive batch failures → embedding service likely down, stop gracefully
+          return;
+        }
       }
-    } catch {
-      // fail-open: passage vectors are an accelerator; passage_fts remains canonical.
     }
   }
 

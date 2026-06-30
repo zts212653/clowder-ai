@@ -68,6 +68,8 @@ import {
 } from './domains/cats/services/agents/providers/l0-compiler.js';
 import { AgentRegistry } from './domains/cats/services/agents/registry/AgentRegistry.js';
 import { AuthorizationManager } from './domains/cats/services/auth/AuthorizationManager.js';
+import { createFreshnessReinvokeCheck } from './domains/cats/services/freshness/createFreshnessReinvokeCheck.js';
+import { FreshnessInvocationStateStore } from './domains/cats/services/freshness/FreshnessInvocationStateStore.js';
 import {
   AgentRouter,
   AuditEventTypes,
@@ -301,6 +303,16 @@ export function getSocketManager(): SocketManager {
 }
 
 const PROCESS_START_AT = Date.now();
+
+// Guard against a stray SIGUSR1 opening the V8 inspector. Node's default
+// SIGUSR1 handler starts the debugger; on Node 24 + tsx, a subsequent debugger
+// attach/detach crashes the process with ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING
+// (taking the API down with ELIFECYCLE exit 1). Installing our own listener
+// overrides that default so the inspector never auto-opens. Logged so a stray
+// signal still leaves a forensic trace if it ever recurs.
+process.on('SIGUSR1', () => {
+  console.warn('[api] Ignoring SIGUSR1 — inspector auto-open suppressed (see index.ts guard)');
+});
 
 function hasRuntimeSessionDrain(service: AgentService): service is AgentService & {
   drainRuntimeSession(runtimeSessionId: string): Promise<RuntimeSessionSealReaperDrainResult>;
@@ -1512,6 +1524,71 @@ async function main(): Promise<void> {
     await import('./domains/concierge/ConciergeInvestigationJobStore.js');
   const conciergeInvestigationJobStore = redis ? new _RIJSEarly(redis) : new _MIJSEarly();
 
+  // F247 AC-B1c-3 PR-C: Cloud invoke bridge — @gpt-pro → ChatGPT dispatch
+  const { PinchTabBridgeAdapter } = await import('./domains/cats/services/cloud-bridge/pinchtab-bridge-adapter.js');
+  const { CloudInvokeBridge, buildFallbackMessageContent } = await import(
+    './domains/cats/services/cloud-bridge/cloud-invoke-bridge.js'
+  );
+  const bridgeLogger = (await import('./infrastructure/logger.js')).createModuleLogger('cloud-bridge');
+  const cloudInvokeBridge = new CloudInvokeBridge({
+    pinchTabAdapter: new PinchTabBridgeAdapter(),
+    emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason, detail }) => {
+      // Post a system_info message into the thread so the user sees the fallback
+      const content = buildFallbackMessageContent({ reason, detail, catId: fbCatId });
+      try {
+        // P1-2 fix: persisted system fallback must use catId: null to pass
+        // isSystemUserMessage() — otherwise userId-scoped queries in
+        // RedisMessageStore/MessageStore filter them out on reload.
+        // The `content` field (from buildFallbackMessageContent) already
+        // identifies which cat the failure is about.
+        await messageStore.append({
+          threadId: fbThreadId,
+          userId: 'system',
+          content,
+          catId: null,
+          mentions: [],
+          timestamp: Date.now(),
+        });
+        // Broadcast uses bridgeCatId for real-time UI attribution
+        // (AgentMessage.catId is CatId, not nullable)
+        const bridgeCatId = fbCatId as unknown as import('@cat-cafe/shared').CatId;
+        socketManager?.broadcastAgentMessage(
+          {
+            type: 'system_info',
+            content,
+            catId: bridgeCatId,
+            timestamp: Date.now(),
+          },
+          fbThreadId,
+        );
+      } catch (e) {
+        bridgeLogger.warn({ fbThreadId, fbCatId, reason, err: e }, 'F247 B1c: fallback emit failed');
+      }
+    },
+    threadStore,
+    logger: bridgeLogger,
+  });
+
+  // F254 B3: Create freshness re-invoke check (fail-open: only when Redis available)
+  // P1-1 fix: pass getSeenCursor from DeliveryCursorStore (real per-(user,cat,thread) cursor)
+  // P2-1 fix: lazy ref for hasQueuedOrActiveAgentForCat (InvocationQueue created after AgentRouter)
+  let invocationQueueRef: {
+    hasActiveOrQueuedAgentForCat(threadId: string, catId: string, opts?: { excludeEntryId?: string }): boolean;
+  } | null = null;
+  const freshnessReinvokeCheck = redis
+    ? createFreshnessReinvokeCheck({
+        redis,
+        messageStore,
+        getSeenCursor: (userId, catId, threadId) => deliveryCursorStore.getSeenCursor(userId, catId, threadId),
+        hasQueuedOrActiveAgentForCat: (threadId, catId) =>
+          invocationQueueRef?.hasActiveOrQueuedAgentForCat(threadId, catId) ?? false,
+      })
+    : undefined;
+
+  // F254 Phase C: Freshness state store for carrier tier persistence.
+  // Shared instance — lightweight (just holds a Redis ref, no state).
+  const freshnessStateStore = redis ? new FreshnessInvocationStateStore(redis) : undefined;
+
   // Shared AgentRouter — used by messagesRoutes and invocationsRoutes
   router = new AgentRouter({
     agentRegistry,
@@ -1549,10 +1626,15 @@ async function main(): Promise<void> {
     conciergeConfigStore: conciergeConfigStoreShared,
     conciergeHandleMapStore: conciergeHandleMapStoreShared,
     conciergeTriagePlanStore,
+    cloudInvokeBridge,
+    ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
+    ...(freshnessStateStore ? { freshnessStateStore } : {}),
   });
 
   // F39: Message queue delivery
   const invocationQueue = new InvocationQueue();
+  // P2-1 fix: wire lazy ref now that InvocationQueue exists
+  invocationQueueRef = invocationQueue;
   const sessionContinuationCoordinator = new SessionContinuationCoordinator({
     threadStore: {
       getMemberSessionStrategy: async (threadId, catId, userId) => {
@@ -1837,10 +1919,14 @@ async function main(): Promise<void> {
   // if Redis-backed ports are unavailable (no Redis client), skip cw wire entirely
   // (eval-cat-invocation domain instructions filtering will degrade gracefully:
   // cw cats see base instructions without publish section, handler returns 501).
+  const { createQcGeneratorAdapter } = await import(
+    './infrastructure/harness-eval/publish-verdict/qc-generator-adapter.js'
+  );
   const verdictGenerators: Partial<Record<EvalDomainId, ReturnType<typeof createA2aGeneratorAdapter>>> = {
     'eval:a2a': createA2aGeneratorAdapter(),
     'eval:sop': createSopGeneratorAdapter(),
     'eval:task-outcome': createTaskOutcomeGeneratorAdapter(),
+    'eval:qc': createQcGeneratorAdapter(),
   };
   if (toolEventLog && skillLoadEventLog) {
     const { createCapabilityWakeupGeneratorAdapter } = await import(
@@ -2432,6 +2518,7 @@ async function main(): Promise<void> {
     guideSessionStore,
     labelStore,
     dispatchProposalStore,
+    redis, // F254 Phase B: raw Redis for freshness notice event log + state store
     holdBallDeps: {
       registry,
       taskRunner: taskRunnerV2,
@@ -2924,6 +3011,99 @@ async function main(): Promise<void> {
     agentKeyRegistry,
   });
 
+  // F252 Phase C: Story rendering BFF (consumes feat trajectory projection → rendering DTO)
+  const { storyRenderingRoutes } = await import('./routes/story-rendering.js');
+  await app.register(storyRenderingRoutes, {
+    featTrajectoryStore,
+    threadStore: threadStore as { get(threadId: string): Promise<{ id: string; title?: string | null } | null> },
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
+
+  // F252 Phase D: Story annotations CRUD (annotations at arbitrary timeline points)
+  const { AnnotationFileStore } = await import('./domains/story/annotation-store.js');
+  const { storyAnnotationRoutes } = await import('./routes/story-annotations.js');
+  const annotationDataDir = process.env.ANNOTATION_DATA_DIR ?? `${findMonorepoRoot(process.cwd())}/data/stories`;
+  const annotationStore = new AnnotationFileStore(annotationDataDir);
+  await app.register(storyAnnotationRoutes, {
+    annotationStore,
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
+
+  // F252 Phase D: Story export (sanitized public sharing)
+  const { StoryExportStore } = await import('./domains/story/export-store.js');
+  const { storyExportRoutes } = await import('./routes/story-export.js');
+  const { buildCatIdentityAliases } = await import('./domains/story/content-sanitizer.js');
+  const exportStore = new StoryExportStore(annotationDataDir); // shares data/stories/ root
+  // Build identity alias map from breeds config for Class D redaction coverage
+  const exportCatConfig = bootstrapDefaultCatCatalog();
+  const catIdentityAliases = buildCatIdentityAliases(
+    exportCatConfig.breeds.map((b) => ({
+      catId: b.catId,
+      name: b.name,
+      displayName: b.displayName,
+      nickname: b.nickname,
+      mentionPatterns: [...b.mentionPatterns],
+      variants: b.variants.map((v) => ({
+        catId: v.catId,
+        displayName: v.displayName,
+        variantLabel: v.variantLabel,
+        mentionPatterns: v.mentionPatterns ? [...v.mentionPatterns] : undefined,
+      })),
+    })),
+    'coCreator' in exportCatConfig && exportCatConfig.coCreator
+      ? {
+          name: exportCatConfig.coCreator.name,
+          aliases: [...exportCatConfig.coCreator.aliases],
+          mentionPatterns: [...exportCatConfig.coCreator.mentionPatterns],
+        }
+      : undefined,
+  );
+  await app.register(storyExportRoutes, {
+    exportStore,
+    annotationStore,
+    catIdentityAliases,
+    fetchTranscriptEvents: async (storyId) => {
+      // Parse session:<sessionId> → look up via sessionChainStore → read JSONL via transcriptReader
+      const sessionMatch = storyId.match(/^session:(.+)$/);
+      if (!sessionMatch) return []; // feat: stories or unknown format — no transcript source yet
+
+      const sessionId = sessionMatch[1];
+      const session = await sessionChainStore.get(sessionId);
+      if (!session) return [];
+
+      // Read all events (limit=10000 to get full session; paginate if needed)
+      const result = await transcriptReader.readEvents(sessionId, session.threadId, session.catId, undefined, 10000);
+
+      // Map TranscriptReader events to export format
+      return result.events.map((te) => {
+        const ev = te.event as Record<string, unknown>;
+        return {
+          id: `${te.sessionId}:${te.eventNo}`,
+          at: te.t,
+          kind: (ev.kind as string) ?? (ev.type as string) ?? 'unknown',
+          content:
+            typeof ev.content === 'string'
+              ? ev.content
+              : typeof ev.text === 'string'
+                ? ev.text
+                : JSON.stringify(ev.content ?? ev),
+          ...(ev.toolName !== undefined && { toolName: ev.toolName as string }),
+          ...(ev.toolArgs !== undefined && {
+            toolArgs: typeof ev.toolArgs === 'string' ? ev.toolArgs : JSON.stringify(ev.toolArgs),
+          }),
+          ...(ev.toolResult !== undefined && {
+            toolResult: typeof ev.toolResult === 'string' ? ev.toolResult : JSON.stringify(ev.toolResult),
+          }),
+          ...(te.catId && { catId: te.catId }),
+        };
+      });
+    },
+    callbackRegistry: registry,
+    agentKeyRegistry,
+  });
+
   // F076: External projects + Need Audit
   const { ExternalProjectStore } = await import('./domains/projects/external-project-store.js');
   const { IntentCardStore } = await import('./domains/projects/intent-card-store.js');
@@ -2990,6 +3170,11 @@ async function main(): Promise<void> {
             app.log.info(
               `[api] F102: embedding service catch-up rebuild completed - ${result.docsIndexed} indexed, ${result.docsSkipped} skipped (${elapsedMs}ms)`,
             );
+            // Backfill passage vectors that were missed when API started before
+            // the embedding service was ready. Without this, only newly indexed
+            // passages get vectors — the ~N thousands indexed while embed was
+            // down remain lexical-only until the next full restart.
+            memoryServices.indexBuilder?.startPassageEmbeddingWarmup();
           })
           .catch((error) => {
             appendServiceLog(service.id, `[start] evidence rebuild failed: ${String(error)}\n`);
@@ -3593,6 +3778,13 @@ async function main(): Promise<void> {
     log: app.log,
   });
 
+  // F167 Phase P: late-bind invokeTrigger into holdBallDeps for wakeWhen command completion.
+  // holdBallDeps is defined before invokeTrigger exists, but the route handler reads
+  // deps.invokeTrigger at request time (closure over object reference), so late binding is safe.
+  if (callbackOpts.holdBallDeps) {
+    (callbackOpts.holdBallDeps as unknown as Record<string, unknown>).invokeTrigger = invokeTrigger;
+  }
+
   // F140: Feedback filter (Rule A self-authored only post-E.2 cutover)
   const { createGitHubFeedbackFilter } = await import('./infrastructure/email/github-feedback-filter.js');
   const { createSetupNoiseFilter } = await import('./infrastructure/email/setup-noise-filter.js');
@@ -4135,6 +4327,9 @@ async function main(): Promise<void> {
   // F236 Track-2: eval:anchor-first provider is unconditionally wired (pure ctor,
   // no store deps — wraps in-memory getAnchorTelemetryRollup). Same rationale as friction.
   wiredPublishDomains.add('eval:anchor-first');
+  // F253 Phase C: eval:qc provider is unconditionally wired (pure ctor, zero-baseline
+  // metrics, no runtime deps). Phase C bootstrap → keep_observe verdicts.
+  wiredPublishDomains.add('eval:qc');
   if (toolEventLog && skillLoadEventLog) {
     wiredPublishDomains.add('eval:capability-wakeup');
   }
@@ -4237,6 +4432,8 @@ async function main(): Promise<void> {
       { RealGhClient },
       { RealFeatIndexLookup },
       { RealThreadSearch },
+      { ThreadSplitCollector },
+      { CrossPostCollector },
     ] = await Promise.all([
       import('./domains/feat-trajectory/FeatTrajectoryCollectorScheduler.js'),
       import('./domains/feat-trajectory/FeatTrajectoryCollectorTaskSpec.js'),
@@ -4246,6 +4443,8 @@ async function main(): Promise<void> {
       import('./domains/feat-trajectory/RealGhClient.js'),
       import('./domains/feat-trajectory/RealFeatIndexLookup.js'),
       import('./domains/feat-trajectory/RealThreadSearch.js'),
+      import('./domains/feat-trajectory/ThreadSplitCollector.js'),
+      import('./domains/feat-trajectory/CrossPostCollector.js'),
     ]);
 
     const trajIntervalMs = Number.parseInt(process.env.F233_FEAT_TRAJECTORY_COLLECTOR_INTERVAL_MS ?? '', 10);
@@ -4309,10 +4508,56 @@ async function main(): Promise<void> {
         error: app.log.error.bind(app.log),
       },
     });
+    // F233: Thread feat lookup adapter — maps threadId → featId by checking
+    // thread labels (feat:F### / F###) and title. Used by ThreadSplitCollector
+    // and CrossPostCollector to associate proposals/messages with features.
+    // Label ID → name resolution mirrors trajThreadSearch (cloud round 5 P2 fix).
+    const threadFeatLookup = {
+      async lookupByThreadId(threadId: string) {
+        try {
+          const thread = await threadStore.get(threadId);
+          if (!thread) return null;
+          // Check labels first (most reliable)
+          if (thread.labels?.length) {
+            const ownerUserId = getOwnerUserId();
+            const allLabels = await labelStore.list(ownerUserId);
+            const idToName = new Map(allLabels.map((l: { id: string; name: string }) => [l.id, l.name]));
+            for (const labelId of thread.labels) {
+              const name = idToName.get(labelId) ?? labelId;
+              const m = name.match(/^(?:feat:)?(F\d{2,4})$/i);
+              if (m) return m[1].toUpperCase();
+            }
+          }
+          // Fallback: check title for F### token
+          if (thread.title) {
+            const m = thread.title.match(/\b(F\d{2,4})\b/i);
+            if (m) return m[1].toUpperCase();
+          }
+          return null;
+        } catch {
+          return null; // graceful degradation
+        }
+      },
+    };
+    // F233: ThreadSplitCollector — scans approved proposals with createdThreadId.
+    // Adapter wraps proposalStore.listByUser (single owner, bounded volume).
+    const trajThreadSplitCollector = new ThreadSplitCollector({
+      proposalStore: { listAll: async () => proposalStore.listByUser(getOwnerUserId(), 10000) },
+      featIndex: threadFeatLookup,
+    });
+    // F233: CrossPostCollector — scans messages with extra.crossPost metadata.
+    // RedisMessageStore.listCrossPostMessages() uses SCAN + HGET for efficiency.
+    const trajCrossPostCollector = new CrossPostCollector({
+      messageStore:
+        messageStore as import('./domains/cats/services/stores/redis/RedisMessageStore.js').RedisMessageStore,
+      featIndex: threadFeatLookup,
+    });
     const trajScheduler = new FeatTrajectoryCollectorScheduler({
       collector: trajCollector,
       projector: trajProjector,
       store: featTrajectoryStore,
+      threadSplitCollector: trajThreadSplitCollector,
+      crossPostCollector: trajCrossPostCollector,
       logger: {
         info: app.log.info.bind(app.log),
         warn: app.log.warn.bind(app.log),

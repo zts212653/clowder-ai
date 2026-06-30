@@ -5,7 +5,7 @@
  * （TRANSITION_TABLE 而非 if-chain，降单函数 cognitive complexity）。
  * 调用方（projector）负责持久化 + 字段 effect（heldUntil/blockedSinceAt/lastWakeAt）。
  *
- * INV-10（完整性）：全 8 state × 13 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
+ * INV-10（完整性）：全 8 state × 17 event 的每格行为确定（转移 or 显式 reject），穷举测试钉死。
  * 复杂守卫拆成独立 resolver：
  *   - ball.handed_cvo：payload.intent 三态（handoff→parked / done_notify→resolved / fyi→不变）
  *   - ball.hold_expired：需 payload.fireAt 匹配 snapshot.heldUntil，防旧 reminder 误杀新 hold
@@ -42,6 +42,7 @@ export const ALL_BALL_EVENT_KINDS: BallCustodyEvent['kind'][] = [
   'task.idle_long',
   'task.done',
   'ball.wake_sent',
+  'ball.wake_condition_met',
   // ─── Phase C 安乐死 (KD-C1/C2) ───
   'ball.frozen',
   'ball.degraded',
@@ -116,6 +117,8 @@ const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'task.idle_long': { from: set('active', 'blocked', 'parked', 'void'), to: 'zombie' },
   'task.done': { from: '*', to: 'resolved' }, // 唯一正常终结；resolved 幂等不复活
   'ball.wake_sent': { from: set('blocked'), to: 'blocked' }, // informational；非 blocked → reject（ignore）
+  // F167 Phase P: wakeWhen command completed — ball stays active (cat is being woken with result)
+  'ball.wake_condition_met': { from: set('active'), to: 'active' },
   // ─── Phase C 安乐死（KD-C1/C2 + 砚砚 R0：7 非-resolved → resolved；resolved → 自然 reject 无规则）───
   // KD-C2 三独立 kind 共享转移行为（语义独立 / payload.kind 区分 / simple table 一致性）
   'ball.frozen': { from: set('new', 'active', 'blocked', 'parked', 'dead', 'void', 'zombie'), to: 'resolved' },

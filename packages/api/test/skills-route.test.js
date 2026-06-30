@@ -4,8 +4,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { DEFAULT_MOUNT_RULES } from '@cat-cafe/shared';
@@ -17,6 +17,7 @@ import {
 import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
 import { skillsRoutes } from '../dist/routes/skills.js';
 import { skillsWriteRoutes } from '../dist/routes/skills-write.js';
+import { resolveStartupProjectRoot } from '../dist/utils/startup-root.js';
 
 const AUTH_HEADERS = { 'x-cat-cafe-user': 'test-user' };
 const OWNER_SESSION_HEADERS = {
@@ -26,11 +27,7 @@ const OWNER_SESSION_HEADERS = {
 };
 
 function resolveRepoSkillsDir() {
-  const repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  }).trim();
-  return join(repoRoot, 'cat-cafe-skills');
+  return join(resolveStartupProjectRoot(), 'cat-cafe-skills');
 }
 
 async function listSourceSkillNames(sourceSkillsDir) {
@@ -62,6 +59,20 @@ async function buildSessionSkillsApp(opts = {}) {
 }
 
 describe('Skills Route', () => {
+  it('resolves the source skills directory without requiring cwd to be a git checkout', async () => {
+    const previousCwd = process.cwd();
+    const nonGitDir = await mkdtemp(join(tmpdir(), 'skills-route-nogit-'));
+    try {
+      process.chdir(nonGitDir);
+
+      const sourceSkillsDir = resolveRepoSkillsDir();
+      assert.equal((await stat(join(sourceSkillsDir, 'manifest.yaml'))).isFile(), true);
+    } finally {
+      process.chdir(previousCwd);
+      await rm(nonGitDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns 401 when no identity header is provided', async () => {
     const app = Fastify();
     await app.register(skillsRoutes);
@@ -292,13 +303,7 @@ describe('Skills Route', () => {
     const projectDir = join('/tmp', `skills-route-test-fallback-project-${Date.now()}`);
     const homeDir = join('/tmp', `skills-route-test-fallback-home-${Date.now()}`);
     const prevHome = process.env.HOME;
-    const mainRepo = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-    })
-      .split('\n')[0]
-      .replace(/^worktree\s+/, '')
-      .trim();
+    const mainRepo = resolveStartupProjectRoot();
     const mainSkillsDir = join(mainRepo, 'cat-cafe-skills');
 
     await Promise.all([

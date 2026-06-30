@@ -12,7 +12,7 @@ import { catRegistry } from '@cat-cafe/shared';
 
 const REPO_ROOT_TEMPLATE = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
 const CAT_TEMPLATE_PATH = REPO_ROOT_TEMPLATE;
-const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 6700; // 6500→6700: gemini35 standalone breed adds ~78 chars to roster
+const FULL_RUNTIME_PROMPT_CHAR_BUDGET = 6900; // 6500→6700→6900: gemini35 + gpt-pro roster growth
 
 function assertWithinFullRuntimePromptBudget(prompt) {
   assert.ok(
@@ -1759,8 +1759,8 @@ describe('SystemPromptBuilder', () => {
         featureId: 'F073',
       },
     });
-    // 6200→6500→6700→6800: decision funnel §17 + gemini35 standalone breed roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 6800, `Prompt with SOP hint is ${prompt.length} chars, expected < 6800`);
+    // 6200→6500→6700→6800→6900: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
+    assert.ok(prompt.length < 6900, `Prompt with SOP hint is ${prompt.length} chars, expected < 6900`);
   });
 
   // --- F092: Voice Mode prompt injection ---
@@ -1807,8 +1807,8 @@ describe('SystemPromptBuilder', () => {
       },
       voiceMode: true,
     });
-    // 6200→6500→6700→6800: decision funnel §17 + gemini35 standalone breed roster growth + F208 dossier l0RosterSummary
-    assert.ok(prompt.length < 6800, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6800`);
+    // 6200→6500→6700→6800→6900: decision funnel §17 + roster growth + F208 dossier l0RosterSummary
+    assert.ok(prompt.length < 6900, `Prompt with voice mode + SOP hint is ${prompt.length} chars, expected < 6900`);
   });
 
   test('buildInvocationContext injects bootcamp mode when bootcampState provided', async () => {
@@ -2172,7 +2172,9 @@ describe('SystemPromptBuilder', () => {
   });
 
   // KD-17: marker-based instructions replace old Rule #3 (actions array output)
-  test('F229 KD-17: concierge prompt has marker instructions [跳过去 R] [原地看 R], not actions array', async () => {
+  // BUG-UX-12: prompt teaches only [跳过去 R] (teleport). [原地看 R] removed — all
+  // concierge actions are semantically thread jumps, no inline peek.
+  test('F229 KD-17: concierge prompt has [跳过去 R] marker, no [原地看 R] (BUG-UX-12)', async () => {
     const { buildInvocationContext } = await import('../dist/domains/cats/services/context/SystemPromptBuilder.js');
     const result = buildInvocationContext({
       catId: 'sonnet',
@@ -2192,9 +2194,10 @@ describe('SystemPromptBuilder', () => {
       },
     });
 
-    // New marker instructions must be present
+    // [跳过去 R] marker instruction must be present (only navigation verb)
     assert.ok(result.includes('[跳过去 R'), 'should contain [跳过去 R] marker instruction');
-    assert.ok(result.includes('[原地看 R'), 'should contain [原地看 R] marker instruction');
+    // BUG-UX-12: [原地看 R] removed from prompt — no longer a taught verb
+    assert.ok(!result.includes('[原地看 R'), 'should NOT contain [原地看 R] — peek removed (BUG-UX-12)');
 
     // Old Rule #3 (actions array literal) must be gone
     assert.ok(!result.includes('{ actions: [{ action:'), 'old Rule #3 actions array literal must be removed');

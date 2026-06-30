@@ -11,6 +11,10 @@ export interface CatOption {
   avatar: string;
   /** Group mention (e.g. @thread, @all) — renders group icon instead of cat avatar */
   isGroup?: boolean;
+  /** F247 AC-C-4: Cloud cat (Remote MCP, no local CLI) — renders cloud tag badge */
+  isCloud?: boolean;
+  /** F247 AC-C-4: Human-readable provider label for cloud tag (e.g. "via ChatGPT Pro") */
+  providerLabel?: string;
 }
 
 /** Static group mention shortcuts — shown at top of autocomplete.
@@ -77,18 +81,40 @@ function isAvailable(cat: CatData): boolean {
   return cat.roster?.available !== false;
 }
 
+/**
+ * F247 AC-C-4: Cloud provider label map.
+ * Key: provider prefix matched via startsWith. Value: human-readable label.
+ * Extensible — add new cloud providers here when they join.
+ */
+const CLOUD_PROVIDER_LABELS: ReadonlyArray<[prefix: string, label: string]> = [
+  ['openai-chatgpt-pro', 'via ChatGPT Pro'],
+];
+
+/** F247 AC-C-4: Detect cloud cat and return provider label, or undefined for local cats. */
+function detectCloudProvider(cat: CatData): string | undefined {
+  if (!cat.provider) return undefined;
+  for (const [prefix, label] of CLOUD_PROVIDER_LABELS) {
+    if (cat.provider.startsWith(prefix)) return label;
+  }
+  return undefined;
+}
+
 export function buildCatOptions(cats: CatData[]): CatOption[] {
   const breedGroups = buildBreedGroupOptions(cats);
   const individuals = cats
     .filter((cat) => cat.mentionPatterns.length > 0 && isAvailable(cat))
-    .map((cat) => ({
-      id: cat.id,
-      label: formatCatLabel(cat),
-      desc: cat.roleDescription,
-      insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
-      color: catColorVar(cat.id, 'primary'),
-      avatar: cat.avatar,
-    }));
+    .map((cat) => {
+      const providerLabel = detectCloudProvider(cat);
+      return {
+        id: cat.id,
+        label: formatCatLabel(cat),
+        desc: cat.roleDescription,
+        insert: `@${cat.mentionPatterns[0].replace(/^@/, '')} `,
+        color: catColorVar(cat.id, 'primary'),
+        avatar: cat.avatar,
+        ...(providerLabel ? { isCloud: true as const, providerLabel } : {}),
+      };
+    });
   // Group mentions (@thread, @all, @全体xx猫) are low-frequency — put them
   // at the bottom so individual cats occupy the prime visible slots.
   // Users can still reach groups via arrow-up or by typing the filter text.

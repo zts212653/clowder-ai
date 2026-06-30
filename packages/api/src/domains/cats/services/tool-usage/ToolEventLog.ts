@@ -9,7 +9,7 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import { TOOL_EVENT_LOG_TTL_SECONDS, toolEventLogKey } from '../stores/redis-keys/tool-event-log-keys.js';
-import type { NudgeFollowupAnalysis, ToolEvent } from './event-log-types.js';
+import type { ExpansionFollowupAnalysis, NudgeFollowupAnalysis, ToolEvent } from './event-log-types.js';
 
 const log = createModuleLogger('tool-event-log');
 
@@ -315,6 +315,69 @@ export class ToolEventLog {
         followed: Boolean(followupTool),
         followupTool: followupTool?.toolName ?? null,
         fallbackGrepDetected: Boolean(grepEvent),
+      });
+    });
+    return result;
+  }
+
+  /**
+   * F256 Phase B (AC-B3): Analyze expansion hint followup.
+   * For each search_evidence event with expansionHintAnchors, check whether
+   * any of those anchors appear in subsequent graph_resolve / search_evidence
+   * calls within the lookahead window.
+   */
+  async analyzeExpansionFollowup(threadId: string, lookaheadTurns: number): Promise<ExpansionFollowupAnalysis[]> {
+    const events = await this.readByThread(threadId);
+    const result: ExpansionFollowupAnalysis[] = [];
+    events.forEach((event, idx) => {
+      if (event.toolName !== 'search_evidence') return;
+      const summary = event.summary as { expansionHintAnchors?: string[] };
+      if (!summary?.expansionHintAnchors || summary.expansionHintAnchors.length === 0) return;
+
+      const hintAnchors = summary.expansionHintAnchors;
+      const hintSet = new Set(hintAnchors.map((a) => a.toLowerCase()));
+
+      // Same-cat lookahead window (same pattern as nudge followup)
+      const lookahead: ToolEvent[] = [];
+      for (let j = idx + 1; j < events.length && lookahead.length < lookaheadTurns; j++) {
+        const e = events[j]!;
+        if (e.catId === event.catId) lookahead.push(e);
+      }
+
+      // Check if any lookahead event references one of the expansion hint anchors
+      const followedAnchors: string[] = [];
+      for (const e of lookahead) {
+        if (e.toolName === 'graph_resolve') {
+          // graph_resolve query might be the anchor itself
+          const gSummary = e.summary as { selectedAnchor?: string; rankedCandidateAnchors?: string[] };
+          if (gSummary?.selectedAnchor && hintSet.has(gSummary.selectedAnchor.toLowerCase())) {
+            followedAnchors.push(gSummary.selectedAnchor);
+          }
+          if (gSummary?.rankedCandidateAnchors) {
+            for (const a of gSummary.rankedCandidateAnchors) {
+              if (hintSet.has(a.toLowerCase()) && !followedAnchors.includes(a)) {
+                followedAnchors.push(a);
+              }
+            }
+          }
+        } else if (e.toolName === 'search_evidence') {
+          // Check if the search query contains an expansion hint anchor
+          const sSummary = e.summary as { _f200Candidates?: Array<{ anchor: string }> };
+          if (sSummary?._f200Candidates) {
+            for (const c of sSummary._f200Candidates) {
+              if (hintSet.has(c.anchor.toLowerCase()) && !followedAnchors.includes(c.anchor)) {
+                followedAnchors.push(c.anchor);
+              }
+            }
+          }
+        }
+      }
+
+      result.push({
+        searchEvent: event,
+        hintAnchors: hintAnchors,
+        followedAnchors,
+        followupRate: hintAnchors.length > 0 ? followedAnchors.length / hintAnchors.length : 0,
       });
     });
     return result;

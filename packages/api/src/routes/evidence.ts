@@ -55,6 +55,8 @@ const searchSchema = z.object({
   currentThreadId: z.string().optional(),
   /** F200 HW-1: search intent — topk (default) or coverage (exhaustive multi-scope) */
   intent: z.enum(['topk', 'coverage']).optional(),
+  /** F256 Phase B: opt-out of expansion hints in topk results (default: true) */
+  include_expansion: z.enum(['true', 'false', '1', '0']).optional(),
 });
 
 export type {
@@ -86,6 +88,14 @@ export interface EvidenceSearchResponse {
     durationMs: number;
   }>;
   deprecationWarnings?: string[];
+  /** F256 Phase B: expansion hints — related directions surfaced from topk results */
+  expansionHints?: Array<{
+    anchor: string;
+    title: string;
+    kind: string;
+    sourcePath?: string;
+    provenance: { source: string; via: string; confidence: string };
+  }>;
 }
 
 export interface EvidenceRoutesOptions {
@@ -129,6 +139,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       recentArtifactRefs: rawArtifactRefs,
       currentThreadId,
       intent,
+      include_expansion: rawIncludeExpansion,
     } = parseResult.data;
 
     // F200 HW-1: intent=coverage → CoverageSearchService bypass (separate pipeline)
@@ -202,6 +213,19 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       const resolvedSources = resolveResult?.sources;
       // Tag per-result source when dimension is explicit (single-source)
       const singleSource = resolvedSources && resolvedSources.length === 1 ? resolvedSources[0] : undefined;
+
+      // F256 Phase B: expansion hints for topk results (opt-out via include_expansion=false)
+      const wantExpansion = rawIncludeExpansion !== 'false' && rawIncludeExpansion !== '0';
+      let expansionHints: import('../domains/memory/TopkExpansionService.js').ExpansionHint[] | undefined;
+      if (wantExpansion && items.length > 0 && opts.evidenceStore.searchWithMeta) {
+        try {
+          const { TopkExpansionService } = await import('../domains/memory/TopkExpansionService.js');
+          const expansionService = new TopkExpansionService(opts.evidenceStore);
+          expansionHints = await expansionService.expand(items, q);
+        } catch {
+          /* fail-open: expansion failure does not block search */
+        }
+      }
 
       // Phase F: assemble task context for salience gating (no-op when absent)
       const salienceCtx: SalienceTaskContext = {
@@ -322,6 +346,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         ...(injectionSources && injectionSources.length > 0 ? { injectionSources } : {}),
         ...(responseGroups && responseGroups.length > 0 ? { collectionGroups: responseGroups } : {}),
         ...(resolveResult?.deprecationWarnings ? { deprecationWarnings: resolveResult.deprecationWarnings } : {}),
+        ...(expansionHints && expansionHints.length > 0 ? { expansionHints } : {}),
       } satisfies Partial<EvidenceSearchResponse>;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -470,6 +495,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         passages_count: passageCount,
         passage_vectors_count: passageVectorCount,
         passage_vectors_supported: passageVectorsSupported,
+        passage_warmup_active: opts.indexBuilder?.isPassageWarmupActive() ?? false,
         edges_count: edgeCount,
         vectors_count: vectorsCount,
         last_rebuild_at: lastUpdated,
@@ -550,6 +576,25 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       reply.status(500);
       return { error: 'reindex failed', message: String(err) };
     }
+  });
+
+  // Passage embedding warmup trigger — re-starts background embedding for passages
+  // that don't have vectors yet. Safe to call repeatedly (skips already-embedded).
+  app.post('/api/evidence/warmup', async (request, reply) => {
+    // Use the same direct-IP guard as /reindex and /rebuild — isDirectLoopbackRequest
+    // was overly strict here (rejects when any proxy-forwarding header is present,
+    // even though the request genuinely originates from localhost).
+    const ip = request.ip;
+    if (ip !== '127.0.0.1' && ip !== '::1' && ip !== '::ffff:127.0.0.1') {
+      reply.status(403);
+      return { error: 'Forbidden: localhost only' };
+    }
+    if (!opts.indexBuilder) {
+      reply.status(503);
+      return { error: 'warmup not available' };
+    }
+    opts.indexBuilder.startPassageEmbeddingWarmup();
+    return { ok: true };
   });
 
   // F188 Phase A: Full rebuild endpoint (AC-A1)

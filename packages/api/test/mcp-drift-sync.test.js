@@ -126,6 +126,30 @@ describe('mcp-drift-detector: checkMcpProject', () => {
     assert.equal(result.summary.mismatch, 1);
   });
 
+  it('detects config-mismatch when MCP enablement state differs', async () => {
+    const global = capConfig([
+      mcpEntry('shared-mcp', {
+        globalEnabled: false,
+        blockedCats: ['codex'],
+        mcpServer: { command: 'node', args: ['same.js'] },
+      }),
+    ]);
+    const project = capConfig([
+      mcpEntry('shared-mcp', {
+        globalEnabled: true,
+        blockedCats: [],
+        mcpServer: { command: 'node', args: ['same.js'] },
+      }),
+    ]);
+
+    const result = await checkMcpProject('/fake/project', '/fake/global', global, project);
+
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0].type, 'config-mismatch');
+    assert.equal(result.issues[0].mcpId, 'shared-mcp');
+    assert.equal(result.summary.mismatch, 1);
+  });
+
   it('reports correct summary counts for mixed issues', async () => {
     const global = capConfig([
       mcpEntry('new-one'),

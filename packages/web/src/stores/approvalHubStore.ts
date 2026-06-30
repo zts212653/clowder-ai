@@ -11,7 +11,7 @@
  * Phase B: approve/reject actions for inlineApprovable items (F193).
  */
 
-import type { ApprovalItem } from '@cat-cafe/shared';
+import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
 import { create } from 'zustand';
 import { apiFetch } from '@/utils/api-client';
 
@@ -34,7 +34,13 @@ interface ApprovalHubState {
   selectedIds: Set<string>;
   /** AC-D5: Results of the last batch operation (cleared on next batch) */
   batchResults: BatchItemResult[];
+  /** F246 Phase F: Settled (approved|rejected) history items */
+  settledItems: SettledApprovalItem[];
+  settledIsLoading: boolean;
+  settledError: string | null;
   fetchPending: () => Promise<void>;
+  /** F246 Phase F: fetch settled history (approved|rejected proposals) */
+  fetchSettled: (limit?: number) => Promise<void>;
   open: () => void;
   close: () => void;
   toggle: () => void;
@@ -63,6 +69,9 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
   deciding: {},
   selectedIds: new Set<string>(),
   batchResults: [],
+  settledItems: [],
+  settledIsLoading: false,
+  settledError: null,
 
   fetchPending: async () => {
     set({ isLoading: true, error: null });
@@ -73,6 +82,18 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
       set({ items: data.items, count: data.count, isLoading: false });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Unknown error', isLoading: false });
+    }
+  },
+
+  fetchSettled: async (limit = 50) => {
+    set({ settledIsLoading: true, settledError: null });
+    try {
+      const res = await apiFetch(`/api/approval-hub/settled?limit=${limit}`);
+      if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+      const data = (await res.json()) as { items: SettledApprovalItem[]; count: number };
+      set({ settledItems: data.items, settledIsLoading: false });
+    } catch (err) {
+      set({ settledError: err instanceof Error ? err.message : 'Unknown error', settledIsLoading: false });
     }
   },
 

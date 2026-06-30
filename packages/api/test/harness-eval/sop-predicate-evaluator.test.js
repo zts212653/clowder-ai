@@ -84,6 +84,43 @@ describe('Predicate: command_pattern', () => {
     const result = evalP({ type: 'command_pattern', mustMatch: 'pnpm gate|pnpm test|node --test' });
     assert.equal(result.status, 'pass'); // baseTrace has 'pnpm gate'
   });
+
+  it('violates when mustMatch command has non-zero exitCode', () => {
+    const trace = {
+      ...baseTrace,
+      commands: [{ command: 'pnpm check:features', exitCode: 1 }],
+    };
+    const result = evalP({ type: 'command_pattern', mustMatch: 'pnpm check:features' }, trace);
+    assert.equal(result.status, 'violation');
+    assert.ok(result.violation?.message.includes('pnpm check:features'));
+  });
+
+  it('passes when mustMatch command has exitCode 0', () => {
+    const trace = {
+      ...baseTrace,
+      commands: [{ command: 'pnpm check:features', exitCode: 0 }],
+    };
+    const result = evalP({ type: 'command_pattern', mustMatch: 'pnpm check:features' }, trace);
+    assert.equal(result.status, 'pass');
+  });
+
+  it('passes when mustMatch command has no exitCode (backward compat)', () => {
+    const trace = {
+      ...baseTrace,
+      commands: [{ command: 'pnpm check:features' }],
+    };
+    const result = evalP({ type: 'command_pattern', mustMatch: 'pnpm check:features' }, trace);
+    assert.equal(result.status, 'pass');
+  });
+
+  it('violates mustNotMatch even when command has non-zero exitCode', () => {
+    const trace = {
+      ...baseTrace,
+      commands: [{ command: 'git merge --squash', exitCode: 1 }],
+    };
+    const result = evalP({ type: 'command_pattern', mustNotMatch: 'git merge --squash' }, trace);
+    assert.equal(result.status, 'violation');
+  });
 });
 
 // ---- env_check (AC-E18, AC-E22) ----
@@ -557,11 +594,11 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 19 total rules in development.yaml
-    assert.equal(results.length, 19, `expected 19 rules, got ${results.length}`);
+    // 22 total rules in development.yaml (21 from main + impl-user-journey-missing)
+    assert.equal(results.length, 22, `expected 22 rules, got ${results.length}`);
 
-    // 8 manual_only rules -> skipped
-    assert.equal(skipped.length, 8, `expected 8 skipped (manual_only), got ${skipped.length}`);
+    // 10 manual_only rules -> skipped (fresh-context-not-approval is manual_only)
+    assert.equal(skipped.length, 10, `expected 10 skipped (manual_only), got ${skipped.length}`);
 
     // Nominal trace should produce 0 violations
     assert.equal(

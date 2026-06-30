@@ -298,6 +298,15 @@ function formatHandleFreeLabel(catId: string, config: CatConfig | undefined): st
   return `${config.displayName}${variantPart}(${catId})`;
 }
 
+function compactRosterModel(model: string): string {
+  return model.replace(/-\d{8}$/u, '').replace(/^kimi-code\//u, '');
+}
+
+function compactRosterCell(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -381,6 +390,7 @@ function buildTeammateRoster(currentCatId: CatId): string | null {
     } catch {
       resolvedModel = config.defaultModel ?? '';
     }
+    resolvedModel = compactRosterModel(resolvedModel);
     const mentionCell = resolvedModel ? `${mention} · ${resolvedModel}` : mention;
     // F208 KD-12: dossier l0RosterSummary → legacy teamStrengths → roleDescription
     const projectRoot = findMonorepoRoot();
@@ -392,13 +402,16 @@ function buildTeammateRoster(currentCatId: CatId): string | null {
         `[F208 KD-9] cat "${id}" has dossier entry but missing l0RosterSummary — falling back to config.teamStrengths`,
       );
     }
-    const strengths = dossierSummary ?? config.teamStrengths ?? config.roleDescription;
+    const strengths = compactRosterCell(dossierSummary ?? config.teamStrengths ?? config.roleDescription, 52);
     // F167 Phase E (KD-20): surface hard restrictions alongside caution — data-driven
     // replacement for the retired L3 role-gate. Sender sees e.g. "禁止写代码" so they
     // self-regulate which cat to @ for which task; no harness-side regex.
     const restrictionsNote =
       config.restrictions && config.restrictions.length > 0 ? `**硬限制**：${config.restrictions.join('、')}` : null;
-    const cautionCell = [config.caution ?? null, restrictionsNote].filter(Boolean).join('；') || '—';
+    const cautionCell = compactRosterCell(
+      [config.caution ?? null, restrictionsNote].filter(Boolean).join('；') || '—',
+      72,
+    );
     rows.push(`| ${label} | ${mentionCell} | ${strengths} | ${cautionCell} |`);
   }
 

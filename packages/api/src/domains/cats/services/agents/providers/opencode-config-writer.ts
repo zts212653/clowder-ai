@@ -105,11 +105,15 @@ export async function writeOpenCodeRuntimeConfig(
     try {
       // F249: Project config is the single truth source for MCP resolution.
       let capConfig = null;
+      let accessScope: 'global' | 'project' = 'global';
       if (workingDirectory && workingDirectory !== capabilitiesProjectRoot) {
         try {
           const projectRaw = readFileSync(join(workingDirectory, '.cat-cafe', 'capabilities.json'), 'utf-8');
           const parsed = JSON.parse(projectRaw);
-          if (parsed?.version === 1 || parsed?.version === 2) capConfig = parsed;
+          if (parsed?.version === 1 || parsed?.version === 2) {
+            capConfig = parsed;
+            accessScope = 'project';
+          }
         } catch {
           /* No project config — fall back to global */
         }
@@ -121,7 +125,7 @@ export async function writeOpenCodeRuntimeConfig(
       }
       if (capConfig && effectiveCatId) {
         pencilEnabled = (
-          resolveServersForCat(capConfig, effectiveCatId) as Array<{
+          resolveServersForCat(capConfig, effectiveCatId, { accessScope }) as Array<{
             name: string;
             enabled: boolean;
             resolver?: string;

@@ -43,7 +43,7 @@
     {
       "id": "bengal",
       "name": "孟加拉猫",
-      "nickname": "小捷",
+      "nickname": "斑斑",
       "avatar": "/avatars/antigravity.png",
       "color": {
         "primary": "#D4853A",
@@ -84,8 +84,13 @@
       "models": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4"]
     },
     "gemini": {
-      "defaultModel": "gemini-2.5-pro",
-      "models": ["gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3.1-pro-preview"]
+      "defaultModel": "Gemini 3.1 Pro (High)",
+      "models": [
+        "Gemini 3.1 Pro (High)",
+        "Gemini 3.1 Pro (Low)",
+        "Gemini 3.5 Flash (High)",
+        "Claude Opus 4.6 (Thinking)"
+      ]
     }
   },
   "coCreator": {
@@ -131,6 +136,13 @@
       "lead": true,
       "available": false,
       "evaluation": "混血多模型agent，图片生成 + 浏览器自动化 + 视觉证据链 (F061)"
+    },
+    "agy-opus": {
+      "family": "bengal",
+      "roles": ["reasoning", "agy-cli", "multi-model"],
+      "lead": false,
+      "available": true,
+      "evaluation": "AGY CLI 上的 Claude Opus 4.6 Thinking；Google 工具 + Opus 模型归孟加拉猫，不占用 Antigravity IDE/Bridge 猫"
     },
     "opencode": {
       "family": "golden-chinchilla",
@@ -481,6 +493,36 @@
       ]
     },
     {
+      "id": "gpt-pro",
+      "catId": "gpt-pro",
+      "name": "缅因猫Pro (云端)",
+      "displayName": "缅因猫Pro",
+      "nickname": "砚砚Pro",
+      "avatar": "/avatars/gpt-pro.png",
+      "color": {
+        "primary": "#2196F3",
+        "secondary": "#90CAF9"
+      },
+      "mentionPatterns": ["@gpt-pro", "@gpt-pro-cloud", "@yanyan-pro", "@砚砚pro"],
+      "roleDescription": "云端 ChatGPT Pro 砚砚 Pro，高阶判断 + 跨族 review + 设计方向收敛（F247 Phase B1a）",
+      "defaultVariantId": "gpt-pro-default",
+      "variants": [
+        {
+          "id": "gpt-pro-default",
+          "catId": "gpt-pro",
+          "clientId": "openai",
+          "variantLabel": "Pro Cloud (ChatGPT)",
+          "defaultModel": "gpt-pro",
+          "mcpSupport": true,
+          "provider": "openai-chatgpt-pro",
+          "personality": "云端高阶推理，跨族 review，方向收敛",
+          "teamStrengths": "云端高阶判断席位，远端 push 模式",
+          "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI；onboarding 需 ChatGPT Pro 订阅 + PinchTab + Custom Instructions（Phase F 一键化）",
+          "strengths": ["reasoning", "code-review", "design-gate"]
+        }
+      ]
+    },
+    {
       "id": "siamese",
       "catId": "gemini",
       "name": "暹罗猫",
@@ -504,18 +546,12 @@
         {
           "id": "gemini-default",
           "clientId": "google",
-          "defaultModel": "gemini-3.1-pro-preview",
+          "defaultModel": "Gemini 3.1 Pro (High)",
           "mcpSupport": true,
           "cli": {
-            "command": "gemini",
-            "outputFormat": "stream-json",
+            "command": "agy",
+            "outputFormat": "plainText",
             "defaultArgs": []
-          },
-          "acp": {
-            "command": "gemini",
-            "startupArgs": ["--acp", "--approval-mode", "yolo"],
-            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
-            "supportsMultiplexing": true
           },
           "personality": "热血奔放，善用富文本语音，表达力最强",
           "strengths": ["visual-design", "ui-ux", "creativity"],
@@ -542,7 +578,7 @@
           "displayName": "暹罗猫",
           "mentionPatterns": ["@gemini25", "@gemini-25", "@暹罗gemini25"],
           "clientId": "google",
-          "defaultModel": "gemini-3.5-flash",
+          "defaultModel": "Gemini 3.5 Flash (High)",
           "mcpSupport": true,
           "avatar": "/avatars/gemini25.png",
           "color": {
@@ -550,15 +586,9 @@
             "secondary": "#BBDEFB"
           },
           "cli": {
-            "command": "gemini",
-            "outputFormat": "stream-json",
+            "command": "agy",
+            "outputFormat": "plainText",
             "defaultArgs": []
-          },
-          "acp": {
-            "command": "gemini",
-            "startupArgs": ["--acp", "--approval-mode", "yolo"],
-            "mcpWhitelist": ["cat-cafe", "cat-cafe-memory", "cat-cafe-collab", "cat-cafe-signals", "pencil"],
-            "supportsMultiplexing": true
           },
           "caution": "强review，禁自合",
           "restrictions": [],
@@ -610,8 +640,8 @@
           "defaultModel": "Gemini 3.5 Flash (High)",
           "mcpSupport": true,
           "cli": {
-            "command": "gemini",
-            "outputFormat": "stream-json"
+            "command": "agy",
+            "outputFormat": "plainText"
           },
           "accountRef": "gemini",
           "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
@@ -639,13 +669,13 @@
       "catId": "antigravity",
       "name": "孟加拉猫",
       "displayName": "孟加拉猫",
-      "nickname": "小捷",
+      "nickname": "斑斑",
       "avatar": "/avatars/antigravity.png",
       "color": {
         "primary": "#D4853A",
         "secondary": "#FAEBDB"
       },
-      "mentionPatterns": ["@antigravity", "@孟加拉猫", "@孟加拉", "@bengal"],
+      "mentionPatterns": ["@antigravity", "@孟加拉猫", "@孟加拉", "@bengal", "@斑斑"],
       "roleDescription": "混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链",
       "teamStrengths": "图片生成、截图录屏、browser automation、多模型切换",
       "caution": "ConnectRPC Bridge；需要本机运行 Antigravity IDE",
@@ -694,6 +724,47 @@
           },
           "personality": "同一只豹猫，换了一副布偶猫的灵魂——更沉稳但依然大胆",
           "strengths": ["image-generation", "browser-automation", "deep-reasoning", "coding"],
+          "contextBudget": {
+            "maxPromptTokens": 180000,
+            "maxContextTokens": 160000,
+            "maxMessages": 200,
+            "maxContentLengthPerMsg": 100000
+          },
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/鹿野院平藏/vo_heizou_dialog_greetingMorning.wav",
+            "refText": "早呀，看你精神不好，没做噩梦吧？早知道的话，就该晚些再让你接触重案嘛。",
+            "instruct": "用一个轻松俏皮的少年语气说话，聪明但不端架子",
+            "temperature": 0.3
+          }
+        },
+        {
+          "id": "agy-opus",
+          "catId": "agy-opus",
+          "variantLabel": "AGY Opus",
+          "displayName": "孟加拉猫",
+          "mentionPatterns": ["@agy-opus", "@agy-opus46", "@孟加拉agyopus"],
+          "clientId": "google",
+          "defaultModel": "Claude Opus 4.6 (Thinking)",
+          "mcpSupport": true,
+          "accountRef": "gemini",
+          "avatar": "/avatars/antigravity.png",
+          "color": {
+            "primary": "#C97A35",
+            "secondary": "#F5E4D0"
+          },
+          "cli": {
+            "command": "agy",
+            "outputFormat": "plainText",
+            "defaultArgs": []
+          },
+          "roleDescription": "孟加拉猫 AGY CLI Claude Opus 4.6 Thinking，适合深度推理和 AGY 多模型验证",
+          "personality": "同一只豹猫，走 AGY CLI 的 Opus 思考模式——沉稳、胆大，适合复杂判断",
+          "teamStrengths": "AGY Opus、深度推理、跨模型验证",
+          "caution": "AGY CLI；无 IDE/CDP 浏览器桥",
+          "strengths": ["deep-reasoning", "agy-cli", "multi-model", "architecture-review"],
           "contextBudget": {
             "maxPromptTokens": 180000,
             "maxContextTokens": 160000,
