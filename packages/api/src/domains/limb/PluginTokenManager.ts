@@ -86,10 +86,16 @@ export class PluginTokenManager {
   }
 
   private buildCacheKey(): string {
+    // Include tokenEndpoint + baseUrl in the fingerprint so two plugins with
+    // the same credentials but different token endpoints don't share a cached
+    // token (Codex review R2 P2).
+    const tokenUrl = this.auth.tokenEndpoint.startsWith('http')
+      ? this.auth.tokenEndpoint
+      : `${this.baseUrl}${this.auth.tokenEndpoint}`;
     const resolvedParams = Object.entries(this.auth.tokenParams)
       .map(([k, v]) => `${k}=${this.resolveTemplate(v)}`)
       .join('&');
-    const fingerprint = createHash('sha256').update(resolvedParams).digest('hex').slice(0, 16);
+    const fingerprint = createHash('sha256').update(`${tokenUrl}\n${resolvedParams}`).digest('hex').slice(0, 16);
     return `${REDIS_KEY_PREFIX}${this.auth.type}:${fingerprint}`;
   }
 
