@@ -292,13 +292,11 @@ done
     );
     chmodSync(fakeTar, 0o755);
 
-    const originalPath = process.env.PATH;
-    process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
     try {
-      const first = installPlugin(TEST_ROOT, archiveA, BUILTIN_IDS);
+      const first = installPlugin(TEST_ROOT, archiveA, BUILTIN_IDS, { tarBin: fakeTar });
       await waitForFile(join(controlDir, 'race-a-started'));
 
-      const second = installPlugin(TEST_ROOT, archiveB, BUILTIN_IDS);
+      const second = installPlugin(TEST_ROOT, archiveB, BUILTIN_IDS, { tarBin: fakeTar });
       await waitForFile(join(controlDir, 'race-b-started'));
 
       writeFileSync(join(controlDir, 'race-a-release'), '');
@@ -313,7 +311,6 @@ done
     } finally {
       writeFileSync(join(controlDir, 'race-a-release'), '');
       writeFileSync(join(controlDir, 'race-b-release'), '');
-      process.env.PATH = originalPath;
     }
   });
 });

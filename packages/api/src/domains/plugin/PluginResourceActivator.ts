@@ -6,6 +6,7 @@ import {
   type CapabilitiesConfig,
   type CapabilityEntry,
   type ILimbNode,
+  type MountRules,
   type PluginManifest,
   type PluginResourceDef,
   STANDARD_MOUNT_POINT_IDS,
@@ -17,9 +18,9 @@ import {
 } from '../../config/capabilities/capability-mcp-service.js';
 import { readMountRules } from '../../config/mount/mount-rules-store.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
-import { mountSkillSymlinks, unmountSkillSymlinks } from '../../skills/skill-manage.js';
+import { addSkill, removeSkill } from '../../skills/skill-manage.js';
 import { classifyMountPath } from '../../skills/skill-sync-engine.js';
-import { buildSkillMountTargets, isManagedDirectoryLevelSkillsSymlink } from '../../utils/skill-mount.js';
+import { buildSkillMountTargets } from '../../utils/skill-mount.js';
 import type { LimbRegistry } from '../limb/LimbRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId, resourcePathBasename } from './PluginRegistry.js';
 import { resolvePluginEnv } from './plugin-config-store.js';
@@ -38,13 +39,24 @@ export interface ActivatePluginResult {
   resources: ActivationResult[];
 }
 
-export type LimbAdapterFactory = (pluginId: string, limbYamlPath: string) => Promise<ILimbNode>;
+export type LimbAdapterFactory = (
+  pluginId: string,
+  limbYamlPath: string,
+  pluginConfig: Record<string, string>,
+) => Promise<ILimbNode>;
 
 /** Minimal TaskRunner interface for schedule resource activation (F202 Phase 2) */
 export interface ScheduleTaskRunner {
   /** Register a builtin task that may arrive after start() — does NOT mark as dynamic */
   registerPostStart(task: TaskSpec_P1): void;
   unregister(taskId: string): boolean;
+}
+
+interface PendingLimbNodeSwap {
+  oldNodeId?: string;
+  oldNode?: ILimbNode;
+  refreshedNode: ILimbNode;
+  capabilityChanged: boolean;
 }
 
 export interface PluginResourceActivatorDeps {
@@ -62,6 +74,8 @@ export interface PluginResourceActivatorDeps {
   taskRunner?: ScheduleTaskRunner;
   /** F202 Phase 2: Dependencies injected into schedule factory createTaskSpec */
   scheduleFactoryDeps?: ScheduleFactoryDeps;
+  /** F228: cat-cafe-skills source dir for cascading skill changes to external projects. */
+  skillsSourceDir?: string;
 }
 
 export function withPersistedLimbNodeId<T extends ILimbNode>(node: T, persistedNodeId?: string): T {
@@ -91,6 +105,29 @@ export async function assertPluginResourceInsideRoot(
   }
 }
 
+async function countExistingManagedSkillMounts(
+  projectRoot: string,
+  skillName: string,
+  skillsSource: string,
+  mountRules: MountRules,
+): Promise<number> {
+  const mountDirs = [
+    ...STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled).map((id) =>
+      join(projectRoot, mountRules.mountPoints[id].path),
+    ),
+    ...buildSkillMountTargets(projectRoot, homedir(), mountRules)
+      .filter((target) => target.kind === 'custom')
+      .flatMap((target) => target.candidates),
+  ];
+
+  const managedStatuses = await Promise.all(
+    mountDirs.map(
+      async (mountDir) => (await classifyMountPath(join(mountDir, skillName), skillsSource, skillName)) === 'managed',
+    ),
+  );
+  return managedStatuses.filter(Boolean).length;
+}
+
 function fallbackScheduleTaskId(manifestId: string, resourceName?: string): string | undefined {
   return resourceName ? `schedule:${manifestId}:${resourceName}` : undefined;
 }
@@ -111,9 +148,20 @@ export interface PluginLimbRehydrationDeps {
   capabilities: CapabilitiesConfig | null;
   pluginRegistry: Pick<import('./PluginRegistry.js').PluginRegistry, 'getManifest'>;
   pluginsDir: string;
-  limbAdapterRegistry: Map<string, (yamlPath: string) => Promise<ILimbNode>>;
+  limbAdapterRegistry: Map<string, (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>>;
   limbRegistry: Pick<LimbRegistry, 'register'>;
   log?: Pick<Console, 'info' | 'warn'>;
+}
+
+function resolveRuntimePluginConfig(manifest: PluginManifest): Record<string, string> {
+  if (manifest.config.length === 0) return {};
+  const resolved = resolvePluginEnv([manifest]);
+  const env: Record<string, string> = {};
+  for (const field of manifest.config) {
+    const val = resolved[field.envName];
+    if (val) env[field.envName] = val;
+  }
+  return env;
 }
 
 export async function rehydrateEnabledPluginLimbs(deps: PluginLimbRehydrationDeps): Promise<void> {
@@ -136,7 +184,8 @@ export async function rehydrateEnabledPluginLimbs(deps: PluginLimbRehydrationDep
     try {
       const yamlPath = resolvePluginResourcePath(deps.pluginsDir, manifest.id, limbResource.path);
       await assertPluginResourceInsideRoot(deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-      const node = withPersistedLimbNodeId(await factory(yamlPath), cap.limbNodeId);
+      const pluginConfig = resolveRuntimePluginConfig(manifest);
+      const node = withPersistedLimbNodeId(await factory(yamlPath, pluginConfig), cap.limbNodeId);
       await deps.limbRegistry.register(node);
       deps.log?.info(`[api] F202: Rehydrated limb for plugin '${manifest.id}'`);
     } catch (err) {
@@ -262,103 +311,73 @@ export class PluginResourceActivator {
     if (!skillStat.isDirectory()) {
       throw new Error(`Skill resource must be a directory: ${skillSourceDir}`);
     }
-    const skillMdPath = join(skillSourceDir, 'SKILL.md');
-    if (!existsSync(skillMdPath)) {
+    if (!existsSync(join(skillSourceDir, 'SKILL.md'))) {
       throw new Error(`Skill resource directory must contain SKILL.md: ${skillSourceDir}`);
     }
+
     const skillName = resourcePathBasename(resource.path);
     const projectRoot = this.deps.resolveProjectRoot();
+    const skillsSource = dirname(skillSourceDir);
+    const relativeSkillsSource = relative(projectRoot, skillsSource);
+
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
-    const mountPaths = await this.readExistingPluginSkillMountPaths(manifest, resource);
-
-    // F228: Use mountSkillSymlinks for filesystem + injected deps for config.
-    // Directory-level symlink pre-check: if a mount point skills dir is a symlink
-    // pointing to a different source (e.g. cat-cafe-skills), mountSkillSymlinks
-    // will record a conflict — not a hard error for plugin activation.
-    const skillsSource = dirname(skillSourceDir);
-    for (const mountPointId of STANDARD_MOUNT_POINT_IDS) {
-      if (!mountRules.mountPoints[mountPointId].enabled) continue;
-      const skillsDir = join(projectRoot, mountRules.mountPoints[mountPointId].path);
+    const capId = resourceCapId(manifest.id, resource);
+    await this.deps.withCapabilityLock(async () => {
+      const previousConfig = await this.deps.readCapabilities();
+      const rollbackConfig = () =>
+        this.deps.writeCapabilities(structuredClone(previousConfig ?? { version: 1, capabilities: [] }));
+      let result: Awaited<ReturnType<typeof addSkill>>;
       try {
-        await isManagedDirectoryLevelSkillsSymlink(skillsDir, skillsSource);
+        result = await addSkill(projectRoot, skillName, skillsSource, {
+          mountRules,
+          pluginId: manifest.id,
+          capabilityId: capId,
+          skillsSource: relativeSkillsSource,
+          configStore: {
+            readCapabilities: this.deps.readCapabilities,
+            writeCapabilities: this.deps.writeCapabilities,
+          },
+          ...(this.deps.skillsSourceDir ? { cascade: { catCafeSkillsSource: this.deps.skillsSourceDir } } : {}),
+        });
       } catch (err) {
-        // Legacy directory-level mount to a different source (e.g. cat-cafe-skills).
-        // Only skip mount points not targeted by this plugin skill — for target mount points,
-        // an invalid root symlink must hard-fail to prevent writing outside project.
-        const isTarget = !mountPaths || mountPaths.includes(mountPointId);
-        if (isTarget) throw err as Error;
+        // addSkill writes config before mounting — roll back on mount throw
+        await rollbackConfig();
+        throw err;
       }
-    }
-
-    // Mount symlinks first (rollback only newly created if config write fails)
-    const mountResult = await mountSkillSymlinks(
-      projectRoot,
-      skillName,
-      skillsSource,
-      mountRules,
-      mountPaths ?? undefined,
-    );
-
-    // P1-2: Fail activation when all mount points conflict and nothing is mounted
-    // (including already-managed symlinks from previous activation)
-    if (mountResult.mounted.length === 0 && mountResult.conflicts.length > 0) {
-      const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
-      let existingManagedCount = 0;
-      for (const target of targets) {
-        for (const dir of target.candidates) {
-          const status = await classifyMountPath(join(dir, skillName), skillsSource, skillName);
-          if (status === 'managed') existingManagedCount++;
-        }
+      const existingManagedCount =
+        result.mounted.length === 0 && result.conflicts.length > 0
+          ? await countExistingManagedSkillMounts(projectRoot, skillName, skillsSource, mountRules)
+          : 0;
+      if (result.mounted.length === 0 && existingManagedCount === 0 && result.conflicts.length > 0) {
+        await rollbackConfig();
+        const conflictPaths = result.conflicts.map((conflict) => conflict.path).join(', ');
+        throw new Error(`All skill mount points conflict for plugin skill '${capId}': ${conflictPaths}`);
       }
-      if (existingManagedCount === 0) {
-        throw new Error(
-          `All mount points conflict for skill '${skillName}': ${mountResult.conflicts.map((c) => c.path).join(', ')}`,
-        );
-      }
-    }
-
-    try {
-      await this.upsertCapabilityEntry(manifest, resource, true);
-    } catch (err) {
-      // P2-1: Rollback uses exact paths from mount result (covers standard + custom)
-      const { rm: rmFile } = await import('node:fs/promises');
-      for (const m of mountResult.mounted) {
-        try {
-          await rmFile(m.path);
-        } catch {
-          /* best-effort rollback */
-        }
-      }
-      throw err;
-    }
+    });
   }
 
   private async deactivateSkill(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
     if (!resource.path) return;
 
-    const skillSourceDir = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     const skillName = resourcePathBasename(resource.path);
     const projectRoot = this.deps.resolveProjectRoot();
     const mainProjectRoot = this.deps.resolveMainProjectRoot?.() ?? projectRoot;
     const mountRules = await readMountRules(projectRoot, mainProjectRoot);
-
-    // Unmount symlinks + update config using injected deps
-    await unmountSkillSymlinks(projectRoot, skillName, dirname(skillSourceDir), mountRules);
-    await this.upsertCapabilityEntry(manifest, resource, false);
-  }
-
-  private async readExistingPluginSkillMountPaths(
-    manifest: PluginManifest,
-    resource: PluginResourceDef,
-  ): Promise<readonly string[] | undefined> {
-    const config = await this.deps.readCapabilities();
-    if (!config) return undefined;
     const capId = resourceCapId(manifest.id, resource);
-    const existing = config.capabilities.find(
-      (c) => normalizeCapId(c.id) === capId && c.pluginId === manifest.id && c.type === 'skill',
+
+    await this.deps.withCapabilityLock(() =>
+      removeSkill(projectRoot, skillName, {
+        mountRules,
+        pluginId: manifest.id,
+        capabilityId: capId,
+        configStore: {
+          readCapabilities: this.deps.readCapabilities,
+          writeCapabilities: this.deps.writeCapabilities,
+        },
+        ...(this.deps.skillsSourceDir ? { cascade: { catCafeSkillsSource: this.deps.skillsSourceDir } } : {}),
+      }),
     );
-    return Array.isArray(existing?.mountPaths) ? [...existing.mountPaths] : undefined;
   }
 
   private async activateLimb(manifest: PluginManifest, resource: PluginResourceDef): Promise<void> {
@@ -369,7 +388,8 @@ export class PluginResourceActivator {
 
     const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
     await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
-    const node = await this.deps.limbAdapterFactory(manifest.id, yamlPath);
+    const pluginConfig = resolveRuntimePluginConfig(manifest);
+    const node = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
     const previous = await this.upsertCapabilityEntry(manifest, resource, true, node.nodeId);
     const capId = resourceCapId(manifest.id, resource);
     const previousEntry = previous?.capabilities.find(
@@ -537,6 +557,7 @@ export class PluginResourceActivator {
     enabled: boolean,
     limbNodeId?: string,
     scheduleTaskId?: string,
+    skillsSource?: string,
   ): Promise<CapabilitiesConfig | null> {
     return this.deps.withCapabilityLock(async () => {
       const config = await this.deps.readCapabilities();
@@ -592,6 +613,7 @@ export class PluginResourceActivator {
             delete existing.limbNodeId;
           }
         }
+        if (skillsSource) existing.skillsSource = skillsSource;
         // staleLimbNodeId is deregistered after the write below
         staleLimbNodeIdToClean = staleLimbNodeId;
       } else {
@@ -603,6 +625,7 @@ export class PluginResourceActivator {
           pluginId: manifest.id,
           ...(limbNodeId ? { limbNodeId } : {}),
           ...(scheduleTaskId ? { scheduleTaskId } : {}),
+          ...(skillsSource ? { skillsSource } : {}),
         };
 
         if (resource.type === 'mcp') {
@@ -718,13 +741,33 @@ export class PluginResourceActivator {
       const next = structuredClone(config);
 
       const mcpEnv = this.buildMcpEnv(manifest);
+      const pluginConfig = resolveRuntimePluginConfig(manifest);
       let changed = false;
+      const pendingLimbSwaps: PendingLimbNodeSwap[] = [];
       for (const cap of next.capabilities) {
-        if (cap.pluginId !== manifest.id || cap.type !== 'mcp' || !cap.mcpServer) continue;
-        cap.mcpServer.env = mcpEnv.env;
-        changed = true;
+        if (cap.pluginId !== manifest.id) continue;
+        if (this.syncMcpCapabilityEnv(cap, mcpEnv)) changed = true;
+        const limbSwap = await this.prepareLimbCapabilityRefresh(manifest, cap, pluginConfig);
+        if (limbSwap) {
+          pendingLimbSwaps.push(limbSwap);
+          if (limbSwap.capabilityChanged) changed = true;
+        }
       }
-      if (changed) await this.writeCapabilitiesWithRollback(previous, next);
+      if (changed) {
+        await this.writeCapabilitiesWithRollback(previous, next);
+        try {
+          await this.applyPendingLimbSwaps(pendingLimbSwaps);
+        } catch (err) {
+          try {
+            await this.writeCapabilitiesWithRollback(next, previous);
+          } catch {
+            /* Preserve the registry swap failure; config rollback is best-effort here. */
+          }
+          throw err;
+        }
+      } else {
+        await this.applyPendingLimbSwaps(pendingLimbSwaps);
+      }
     });
   }
 
@@ -759,14 +802,87 @@ export class PluginResourceActivator {
     };
   }
 
-  private buildMcpEnv(manifest: PluginManifest): { env?: Record<string, string> } {
-    if (manifest.config.length === 0) return {};
-    const resolved = resolvePluginEnv([manifest]);
-    const env: Record<string, string> = {};
-    for (const field of manifest.config) {
-      const val = resolved[field.envName];
-      if (val) env[field.envName] = val;
+  private syncMcpCapabilityEnv(cap: CapabilityEntry, mcpEnv: { env?: Record<string, string> }): boolean {
+    if (cap.type !== 'mcp' || !cap.mcpServer) return false;
+    cap.mcpServer.env = mcpEnv.env;
+    return true;
+  }
+
+  private async prepareLimbCapabilityRefresh(
+    manifest: PluginManifest,
+    cap: CapabilityEntry,
+    pluginConfig: Record<string, string>,
+  ): Promise<PendingLimbNodeSwap | null> {
+    if (cap.type !== 'limb' || !cap.enabled) return null;
+
+    const normalizedCapId = normalizeCapId(cap.id);
+    const resource = manifest.resources.find((r) => resourceCapId(manifest.id, r) === normalizedCapId);
+    if (!resource?.path) return null;
+    if (!this.deps.limbAdapterFactory) {
+      throw new Error('No limb adapter factory configured');
     }
+
+    const yamlPath = resolvePluginResourcePath(this.deps.pluginsDir, manifest.id, resource.path);
+    await assertPluginResourceInsideRoot(this.deps.pluginsDir, manifest, yamlPath, 'Limb resource');
+    const refreshedNode = await this.deps.limbAdapterFactory(manifest.id, yamlPath, pluginConfig);
+    const oldNodeId = cap.limbNodeId;
+    const oldNode = oldNodeId ? this.deps.limbRegistry.getNodeHandle(oldNodeId) : undefined;
+    const capabilityChanged = oldNodeId !== refreshedNode.nodeId;
+    if (!capabilityChanged) {
+      return { oldNodeId, oldNode, refreshedNode, capabilityChanged };
+    }
+    cap.limbNodeId = refreshedNode.nodeId;
+    return { oldNodeId, oldNode, refreshedNode, capabilityChanged };
+  }
+
+  private async applyPendingLimbSwaps(swaps: PendingLimbNodeSwap[]): Promise<void> {
+    const applied: PendingLimbNodeSwap[] = [];
+    try {
+      for (const swap of swaps) {
+        await this.replaceRegisteredLimbNode(swap.oldNodeId, swap.refreshedNode);
+        applied.push(swap);
+      }
+    } catch (err) {
+      for (const swap of applied.reverse()) {
+        await this.restoreRegisteredLimbNode(swap);
+      }
+      throw err;
+    }
+  }
+
+  private async replaceRegisteredLimbNode(oldNodeId: string | undefined, refreshedNode: ILimbNode): Promise<void> {
+    const oldNode = oldNodeId ? this.deps.limbRegistry.getNodeHandle(oldNodeId) : undefined;
+    if (oldNodeId) this.deps.limbRegistry.deregister(oldNodeId);
+    try {
+      await this.deps.limbRegistry.register(refreshedNode);
+    } catch (err) {
+      if (oldNode) {
+        try {
+          await this.deps.limbRegistry.register(oldNode);
+        } catch {
+          /* best-effort rollback */
+        }
+      }
+      throw err;
+    }
+  }
+
+  private async restoreRegisteredLimbNode(swap: PendingLimbNodeSwap): Promise<void> {
+    try {
+      this.deps.limbRegistry.deregister(swap.refreshedNode.nodeId);
+    } catch {
+      /* best-effort registry rollback */
+    }
+    if (!swap.oldNode) return;
+    try {
+      await this.deps.limbRegistry.register(swap.oldNode);
+    } catch {
+      /* best-effort registry rollback */
+    }
+  }
+
+  private buildMcpEnv(manifest: PluginManifest): { env?: Record<string, string> } {
+    const env = resolveRuntimePluginConfig(manifest);
     return Object.keys(env).length > 0 ? { env } : {};
   }
 

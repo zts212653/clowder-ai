@@ -145,4 +145,47 @@ describe('PluginsContent GitHub configuration', () => {
       ],
     });
   });
+
+  it('keeps the disable toggle visible for enabled plugins after config is removed', async () => {
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugins') {
+        return jsonResponse({
+          plugins: [
+            {
+              id: 'weixin-mp',
+              name: '微信公众号',
+              version: '1.0.0',
+              icon: 'message-circle',
+              iconBg: '#10b981',
+              status: 'enabled',
+              configured: false,
+              hasHealthCheck: true,
+              config: [],
+              resources: [{ type: 'limb', path: 'limbs/weixin-mp.yml' }],
+            },
+          ],
+        });
+      }
+      if (url === '/api/plugins/weixin-mp/disable' && init?.method === 'POST') {
+        return jsonResponse({ ok: true });
+      }
+      return jsonResponse({}, 404);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PluginsContent));
+    });
+    await flushEffects();
+
+    const disableToggle = container.querySelector('button[title="禁用"]');
+    expect(disableToggle).toBeTruthy();
+    expect(disableToggle?.parentElement?.closest('button')).toBeNull();
+
+    await act(async () => {
+      disableToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flushEffects();
+
+    expect(mockApiFetch.mock.calls.some((call) => call[0] === '/api/plugins/weixin-mp/disable')).toBe(true);
+  });
 });

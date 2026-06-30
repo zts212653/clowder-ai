@@ -23,6 +23,10 @@ function safeHostname(url: string): string {
   }
 }
 
+function resourceBadgeKey(resource: PluginInfo['resources'][number], index: number): string {
+  return `${resource.type}:${resource.path ?? resource.name ?? index}`;
+}
+
 interface Props {
   plugin: PluginInfo;
   onUpdated: () => void;
@@ -38,10 +42,10 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
   const handleSave = async () => {
     const updates = plugin.config
       .filter((f) => fieldValues[f.envName] !== undefined)
-      .map((f) => ({
-        name: f.envName,
-        value: fieldValues[f.envName] === '' ? null : fieldValues[f.envName]!,
-      }));
+      .map((f) => {
+        const v = fieldValues[f.envName] as string;
+        return { name: f.envName, value: v === '' ? null : v };
+      });
     if (updates.length === 0) {
       setResult({ type: 'error', msg: '请填写至少一个配置项' });
       return;
@@ -108,7 +112,10 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
       if (data.ok) {
         setResult({ type: 'success', msg: `连接成功 · 状态: ${data.status}` });
       } else {
-        setResult({ type: 'error', msg: data.error ?? `连接失败 · 状态: ${data.status ?? 'unknown'}` });
+        const detail = data.error
+          ? `${data.error}${data.status ? ` (${data.status})` : ''}`
+          : `连接失败 · 状态: ${data.status ?? 'unknown'}`;
+        setResult({ type: 'error', msg: detail });
       }
     } catch {
       setResult({ type: 'error', msg: '网络错误' });
@@ -124,33 +131,25 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
   return (
     <div className="space-y-3.5" style={{ paddingInline: '1rem', paddingBottom: '1rem' }}>
       {hasSteps &&
-        plugin.setupSteps!.map((step, idx) => (
-          <div key={idx} className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <StepBadge num={idx + 1} />
-              <span
-                className="font-medium"
-                style={{ fontSize: 'var(--console-font-compact)', lineHeight: '20px', color: 'var(--cafe-text)' }}
-              >
-                {step}
-              </span>
-            </div>
-            {idx === 0 && plugin.docsUrl && isSafeUrl(plugin.docsUrl) && (
-              <div className="ml-[26px]">
-                <a href={plugin.docsUrl} target="_blank" rel="noopener noreferrer" className="console-inline-link">
-                  <ExternalLinkIcon />
-                  <span>{safeHostname(plugin.docsUrl)} → 查看官方文档</span>
-                </a>
-              </div>
-            )}
+        plugin.setupSteps?.map((step, idx) => (
+          <div key={step} className="flex items-center gap-1.5">
+            <StepBadge num={idx + 1} />
+            <span
+              className="font-medium"
+              style={{ fontSize: 'var(--console-font-compact)', lineHeight: '20px', color: 'var(--cafe-text)' }}
+            >
+              {step}
+            </span>
           </div>
         ))}
 
-      {!hasSteps && plugin.docsUrl && isSafeUrl(plugin.docsUrl) && (
-        <a href={plugin.docsUrl} target="_blank" rel="noopener noreferrer" className="console-inline-link">
-          <ExternalLinkIcon />
-          <span>{safeHostname(plugin.docsUrl)} → 查看官方文档</span>
-        </a>
+      {plugin.docsUrl && isSafeUrl(plugin.docsUrl) && (
+        <div className={hasSteps ? 'ml-[26px]' : ''}>
+          <a href={plugin.docsUrl} target="_blank" rel="noopener noreferrer" className="console-inline-link">
+            <ExternalLinkIcon />
+            <span>{safeHostname(plugin.docsUrl)} → 查看官方文档</span>
+          </a>
+        </div>
       )}
 
       {plugin.config.length > 0 && (
@@ -182,9 +181,9 @@ export function PluginConfigPanel({ plugin, onUpdated }: Props) {
 
       {plugin.resources.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {plugin.resources.map((r, i) => (
+          {plugin.resources.map((r, idx) => (
             <span
-              key={i}
+              key={resourceBadgeKey(r, idx)}
               className={`rounded-[13px] px-2.5 py-0.5 text-label font-medium ${
                 r.enabled ? 'bg-conn-emerald-bg text-conn-emerald-text' : 'bg-cafe-surface-sunken text-cafe-muted'
               }`}

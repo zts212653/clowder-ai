@@ -2206,13 +2206,16 @@ async function main(): Promise<void> {
       './domains/plugin/PluginResourceActivator.js'
     );
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
+    const { PluginLimbAdapter } = await import('./domains/limb/PluginLimbAdapter.js');
+    const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
+    const { weixinMpHandlers } = await import('./plugins/weixin-mp/index.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
     );
     const { resolveStartupCliConfigContext } = await import('./config/capabilities/startup-cli-config.js');
     const monorepoRoot = findMonorepoRoot(process.cwd());
-    const pluginsDir = join(monorepoRoot, 'plugins');
+    const pluginsDir = join(monorepoRoot, 'packages', 'api', 'src', 'plugins');
     const { loadAllPluginConfigs, resolvePluginEnv } = await import('./domains/plugin/plugin-config-store.js');
     const pluginRegistry = new PluginRegistry(pluginsDir);
     pluginRegistry.scan();
@@ -2226,7 +2229,10 @@ async function main(): Promise<void> {
       return githubManifest ? resolvePluginEnv([githubManifest]) : {};
     };
 
-    const limbAdapterRegistry = new Map<string, (yamlPath: string) => Promise<ILimbNode>>();
+    const limbAdapterRegistry = new Map<
+      string,
+      (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>
+    >();
 
     // F202 Phase 2: Schedule factory registry + GitHub factories
     const scheduleFactoryRegistry = new ScheduleFactoryRegistry();
@@ -2236,11 +2242,17 @@ async function main(): Promise<void> {
     // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
 
+    limbAdapterRegistry.set('weixin-mp', async (yamlPath, pluginConfig) => {
+      const declaration = loadLimbDeclaration(yamlPath);
+      return new PluginLimbAdapter({ declaration, pluginConfig, redis, handlers: weixinMpHandlers });
+    });
+
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
       resolveMainProjectRoot: () => monorepoRoot,
       pluginsDir,
       limbRegistry,
+      skillsSourceDir: join(monorepoRoot, 'cat-cafe-skills'),
       readCapabilities: () => readCapabilitiesConfig(resolveActiveProjectRoot()),
       writeCapabilities: async (config) => {
         const root = resolveActiveProjectRoot();
@@ -2249,7 +2261,7 @@ async function main(): Promise<void> {
         await generateCliConfigs(config, paths, projectRoot);
       },
       withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
-      limbAdapterFactory: async (pluginId, limbYamlPath) => {
+      limbAdapterFactory: async (pluginId, limbYamlPath, pluginConfig) => {
         const factory = limbAdapterRegistry.get(pluginId);
         if (!factory) {
           throw new Error(
@@ -2257,7 +2269,7 @@ async function main(): Promise<void> {
               `Limb resources require a concrete adapter (see Phase 2 for examples).`,
           );
         }
-        return factory(limbYamlPath);
+        return factory(limbYamlPath, pluginConfig);
       },
       // F202 Phase 2: schedule resource activation deps
       scheduleFactoryRegistry,

@@ -39,6 +39,10 @@ const PLUGIN_ENTRY = 'index.js';
 /** Valid connector ID: lowercase alphanumeric + hyphens, 1-64 chars, no leading/trailing hyphen. */
 const CONNECTOR_ID_PATTERN = /^[a-z][a-z0-9-]{0,62}[a-z0-9]$/;
 
+function resolveTarCommand(tarBin?: string): string {
+  return tarBin?.trim() || 'tar';
+}
+
 function isValidConnectorId(id: string): boolean {
   return id.length >= 1 && id.length <= 64 && CONNECTOR_ID_PATTERN.test(id) && !id.includes('--');
 }
@@ -69,6 +73,10 @@ export interface InstalledPluginMeta {
 export interface PluginInstallError {
   code: 'INVALID_ARCHIVE' | 'MISSING_MANIFEST' | 'MISSING_ENTRY' | 'ID_CONFLICT' | 'EXTRACT_FAILED';
   message: string;
+}
+
+export interface PluginInstallOptions {
+  tarBin?: string;
 }
 
 // ── Paths ──
@@ -130,6 +138,7 @@ export async function installPlugin(
   projectRoot: string,
   archivePath: string,
   builtinIds: ReadonlySet<string>,
+  opts: PluginInstallOptions = {},
 ): Promise<PluginInstallResult | PluginInstallError> {
   const pluginsDir = resolvePluginsDir(projectRoot);
   mkdirSync(pluginsDir, { recursive: true });
@@ -138,7 +147,7 @@ export async function installPlugin(
   try {
     // Extract tar.gz
     try {
-      await execFileAsync('tar', ['xzf', archivePath, '-C', tmpDir]);
+      await execFileAsync(resolveTarCommand(opts.tarBin), ['xzf', archivePath, '-C', tmpDir]);
     } catch (err) {
       return { code: 'EXTRACT_FAILED', message: `Failed to extract archive: ${(err as Error).message}` };
     }

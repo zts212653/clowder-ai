@@ -1,0 +1,164 @@
+# 微信公众号 Limb 声明 — 可执行的 REST API 元数据
+# 通用 PluginLimbAdapter 从此文件驱动 HTTP 调用和 invoke handler
+
+nodeId: weixin-mp
+displayName: 微信公众号
+platform: weixin
+baseUrl: https://api.weixin.qq.com/cgi-bin
+
+# ─── 认证配置（模板变量引用插件配置）──────────────────────
+auth:
+  type: client_credentials
+  tokenEndpoint: /token
+  tokenParams:
+    grant_type: client_credential
+    appid: ${WEIXIN_MP_APP_ID}
+    secret: ${WEIXIN_MP_APP_SECRET}
+  tokenResponsePath: access_token
+  tokenPlacement: query
+  tokenParamName: access_token
+  tokenExpiredCodes: [40001, 40014, 42001]
+  ttlSeconds: 7200
+
+# ─── 错误解析 ────────────────────────────────────────────
+error:
+  codePath: errcode
+  messagePath: errmsg
+
+# ─── 能力声明（agent 发现用）─────────────────────────────
+capabilities:
+  - cap: content_read
+    commands:
+      - weixin_mp.check_status
+      - weixin_mp.list_drafts
+      - weixin_mp.publish_status
+    authLevel: free
+  - cap: content_publish
+    commands:
+      - weixin_mp.create_draft
+      - weixin_mp.submit_publish
+      - weixin_mp.upload_image
+      - weixin_mp.upload_material
+      - weixin_mp.convert_markdown
+    authLevel: leased
+
+# ─── 命令定义 ────────────────────────────────────────────
+commands:
+
+  # ── invoke 类型（本地函数处理）──────────────────────────
+
+  weixin_mp.check_status:
+    type: invoke
+    handler: weixin-mp:check_status
+    description: 检查公众号连接状态（配置 + access_token 可达性）
+    params: {}
+
+  weixin_mp.convert_markdown:
+    type: invoke
+    handler: weixin-mp:convert_markdown
+    description: 将 Markdown 转换为微信兼容内联样式 HTML（发文前必须调用）
+    params:
+      markdown:
+        type: string
+        required: true
+        desc: Markdown 格式正文
+
+  weixin_mp.upload_image:
+    type: invoke
+    handler: weixin-mp:upload_image
+    description: 上传图片到微信 CDN（返回可在文章正文中使用的链接）
+    params:
+      imageUrl:
+        type: string
+        required: true
+        desc: 图片 URL（支持 jpg/png/gif/bmp）
+
+  weixin_mp.upload_material:
+    type: invoke
+    handler: weixin-mp:upload_material
+    description: 上传永久图片素材，返回 media_id（用作封面图）
+    params:
+      imageUrl:
+        type: string
+        required: true
+        desc: 图片 URL
+
+  # ── rest 类型（YAML 驱动 HTTP 调用）────────────────────
+
+  weixin_mp.create_draft:
+    type: rest
+    description: 创建草稿箱文章
+    endpoint: /draft/add
+    method: POST
+    body:
+      articles:
+        - title: ${params.title}
+          content: ${params.content}
+          author: ${params.author}
+          digest: ${params.digest}
+          thumb_media_id: ${params.thumbMediaId}
+          show_cover_pic: 1
+    params:
+      title:
+        type: string
+        required: true
+        desc: 文章标题（1-64 字）
+      content:
+        type: string
+        required: true
+        desc: 微信兼容 HTML（先调用 convert_markdown）
+      thumbMediaId:
+        type: string
+        required: true
+        desc: 封面图素材 media_id（先调用 upload_material）
+      author:
+        type: string
+        desc: 作者名（最长 16 字）
+      digest:
+        type: string
+        desc: 摘要（最长 120 字）
+
+  weixin_mp.submit_publish:
+    type: rest
+    description: 发布草稿
+    endpoint: /freepublish/submit
+    method: POST
+    body:
+      media_id: ${params.mediaId}
+    params:
+      mediaId:
+        type: string
+        required: true
+        desc: 草稿 media_id（由 create_draft 返回）
+
+  weixin_mp.list_drafts:
+    type: rest
+    description: 列出草稿箱中的文章
+    endpoint: /draft/batchget
+    method: POST
+    body:
+      offset: ${params.offset}
+      count: ${params.count}
+      no_content: 1
+    params:
+      offset:
+        type: number
+        default: 0
+        desc: 起始位置
+      count:
+        type: number
+        default: 10
+        desc: 获取数量（最大 20）
+
+  weixin_mp.publish_status:
+    type: rest
+    description: 查询文章发布状态
+    endpoint: /freepublish/get
+    method: POST
+    body:
+      publish_id: ${params.publishId}
+    params:
+      publishId:
+        type: string
+        required: true
+        desc: 发布任务 ID（由 submit_publish 返回）
