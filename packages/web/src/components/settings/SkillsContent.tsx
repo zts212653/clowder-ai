@@ -166,7 +166,11 @@ export function SkillsContent() {
           } else {
             // F228: Auto-select first known project when entering project scope.
             // No "全局技能" fallback — the "全部 Skill" tab is the global view.
-            const target = selectedProjectPath ?? controls.knownProjects[0] ?? null;
+            // Use controls.projectPath (explicit user selection), NOT selectedProjectPath
+            // which falls back to resolvedProjectPath (instance root). The instance root
+            // is excluded from the ProjectSelector dropdown, so falling back to it would
+            // show one project in the dropdown while targeting a different project for data.
+            const target = controls.projectPath ?? controls.knownProjects[0] ?? null;
             controls.switchProject(target);
           }
         }}

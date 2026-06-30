@@ -328,18 +328,25 @@ export async function addSkill(
     }
   }
 
-  // Compute effective mountPaths: caller-specified > project's active mount targets.
+  // Look up existing entry BEFORE computing mountPaths so we can preserve
+  // user-customized mount policy on idempotent re-activation (e.g. server
+  // restart, plugin manifest update). Without this, addSkill defaults to all
+  // active mount targets and silently overwrites per-project mount choices.
+  const existing = findSkillEntry(config.capabilities, capId, pluginId);
+
+  // Compute effective mountPaths: caller-specified > existing policy > active mount targets.
   // Same contract as updateSkillMountPaths in skill-sync-config — always explicit,
   // never undefined. Each project (main or external) gets mountPaths derived from
   // its own mount rules; the caller (e.g. PluginResourceActivator) shouldn't need
   // to know per-project mount topology.
   const effectiveMountPaths = opts.mountPaths
     ? [...opts.mountPaths]
-    : enabled
-      ? activeMountTargets(projectRoot, mountRules).map((t) => t.id)
-      : [];
+    : existing?.mountPaths?.length
+      ? [...existing.mountPaths]
+      : enabled
+        ? activeMountTargets(projectRoot, mountRules).map((t) => t.id)
+        : [];
 
-  const existing = findSkillEntry(config.capabilities, capId, pluginId);
   if (existing) {
     existing.enabled = enabled;
     existing.globalEnabled = enabled;
