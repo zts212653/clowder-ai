@@ -30,13 +30,6 @@ export class ReconciliationDedup {
   async isNotified(repo: string, type: 'pr' | 'issue', number: number): Promise<boolean> {
     const result = await this.redis.get(this.notifiedKey(repo, type, number));
     if (result === null) return false;
-
-    // Older F141 keys were written with a 7-day TTL. Touching them during
-    // scans makes the "already notified" fact persistent instead of letting
-    // long-open issues reappear every week.
-    // TODO(2026-07-01): remove this migration rewrite after TTL-backed keys
-    // have either expired or been upgraded in live Redis.
-    await this.markNotified(repo, type, number);
     return true;
   }
 

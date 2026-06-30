@@ -58,19 +58,8 @@ function repairLineStartMentionWhitespace(text: string, entries: readonly Mentio
   return repaired;
 }
 
-/** @deprecated Suppression system removed — line-start mentions always route. Kept for backward compat. */
-export type MentionSuppressionReason = 'no_action' | 'cross_paragraph';
-
-/** @deprecated Suppression system removed. Kept for backward compat. */
-export interface SuppressedA2AMention {
-  readonly catId: CatId;
-  readonly reason: MentionSuppressionReason;
-}
-
 export interface A2AMentionAnalysis {
   readonly mentions: CatId[];
-  /** @deprecated Always empty — suppression system removed. */
-  readonly suppressed: SuppressedA2AMention[];
   /** F182: routing errors for disabled cats detected in text @ parsing */
   readonly routing_warnings: CatRoutingError[];
 }
@@ -81,30 +70,18 @@ export interface InlineActionMention {
   readonly lineText: string;
 }
 
-/** @deprecated Mode is ignored — line-start mentions always route regardless of mode. */
-export type MentionActionabilityMode = 'strict' | 'relaxed';
-
-export interface A2AMentionParseOptions {
-  /** @deprecated Ignored — line-start mentions always route. Kept for backward compat. */
-  readonly mode?: MentionActionabilityMode;
-}
-
 /**
  * Parse A2A @mentions from cat response text.
  * F27: Returns all matched CatIds (up to MAX_A2A_MENTION_TARGETS).
  *
  * Line-start @mention = always actionable. No keyword gate.
  */
-export function parseA2AMentions(text: string, currentCatId?: CatId, _options: A2AMentionParseOptions = {}): CatId[] {
-  return analyzeA2AMentions(text, currentCatId, _options).mentions;
+export function parseA2AMentions(text: string, currentCatId?: CatId): CatId[] {
+  return analyzeA2AMentions(text, currentCatId).mentions;
 }
 
-export function analyzeA2AMentions(
-  text: string,
-  currentCatId?: CatId,
-  _options: A2AMentionParseOptions = {},
-): A2AMentionAnalysis {
-  if (!text) return { mentions: [], suppressed: [], routing_warnings: [] };
+export function analyzeA2AMentions(text: string, currentCatId?: CatId): A2AMentionAnalysis {
+  if (!text) return { mentions: [], routing_warnings: [] };
 
   // 1. Strip fenced code blocks
   const stripped = text.replace(/```[\s\S]*?```/g, '');
@@ -177,7 +154,7 @@ export function analyzeA2AMentions(
     }
   }
 
-  return { mentions: found, suppressed: [], routing_warnings };
+  return { mentions: found, routing_warnings };
 }
 
 /**

@@ -66,8 +66,11 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
               },
               subjectKey: task.subjectKey!,
             });
-          } catch {
-            // fail-open: skip PRs where check fails
+          } catch (err) {
+            opts.log.warn(
+              { err, taskId: task.id, subjectKey: task.subjectKey },
+              '[conflict-check] fail-open: skipping PR where check failed',
+            );
           }
         }
 

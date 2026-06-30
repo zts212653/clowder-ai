@@ -569,8 +569,11 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               // #320 KD-15: unified subject_key format
               subjectKey: trackingTask.subjectKey!,
             });
-          } catch {
-            // fail-open: skip PRs where fetch fails
+          } catch (err) {
+            opts.log.warn(
+              { err, taskId: task.id, subjectKey: task.subjectKey },
+              '[review-feedback] fail-open: skipping PR where fetch failed',
+            );
           }
         }
 

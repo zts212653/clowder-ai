@@ -156,7 +156,7 @@ import {
   fetchPrCiStatus,
   ReviewFeedbackRouter,
 } from './infrastructure/email/index.js';
-import { fetchLatestIssueCommentCursor, maxGithubId } from './infrastructure/github/comment-cursors.js';
+import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken } from './infrastructure/github/gh-cli-env.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
@@ -2260,11 +2260,8 @@ async function main(): Promise<void> {
     ]);
     return {
       review: {
-        lastCommentCursor: maxGithubId([
-          ...(reviewComments as { id?: unknown }[]),
-          ...(issueComments as { id?: unknown }[]),
-        ]),
-        lastDecisionCursor: maxGithubId(reviews as { id?: unknown }[]),
+        lastCommentCursor: 0,
+        lastDecisionCursor: 0,
       },
       ...(ciStatus
         ? {

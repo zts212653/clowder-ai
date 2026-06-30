@@ -414,8 +414,11 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                 subjectKey: task.subjectKey!,
               });
             }
-          } catch {
-            // fail-open: skip issues where fetch fails
+          } catch (err) {
+            opts.log.warn(
+              { err, taskId: task.id, subjectKey: task.subjectKey },
+              '[issue-comment] fail-open: skipping issue where fetch failed',
+            );
           }
         }
 
