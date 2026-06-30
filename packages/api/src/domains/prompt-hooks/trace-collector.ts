@@ -113,6 +113,19 @@ export function collectTrace(
         },
       ];
     }
+  } else if (hasNativeL0 && sessionContent.length > 0) {
+    // Native L0 with pack-only content: record aggregate segment so that
+    // segments array is consistent with sessionCharCount/sessionTokenEstimate.
+    sessionSegments = [
+      {
+        segmentId: 'session-init-pack-only',
+        stage: 'session-init',
+        status: 'observed',
+        contentHash: hashContent(sessionContent),
+        charCount: sessionContent.length,
+        tokenEstimate: estimateTokens(sessionContent),
+      },
+    ];
   }
 
   // Per-turn: stage-level observation only (no annotateSegments for invocation context)

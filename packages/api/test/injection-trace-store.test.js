@@ -340,6 +340,26 @@ describe('TraceCollector', () => {
     assert.equal(segments.length, 0);
   });
 
+  test('collectTrace records pack-only segment for native-L0 with session content', async () => {
+    const { collectTrace } = await import('../dist/domains/prompt-hooks/trace-collector.js');
+
+    // hasNativeL0 = true, non-empty sessionContent → should create pack-only segment
+    const result = collectTrace('test-cat', 'pack-only session content', '', true);
+
+    // segments should contain a session-init entry (not be empty)
+    const sessionSegments = result.segments.filter((s) => s.stage === 'session-init');
+    assert.equal(sessionSegments.length, 1, 'should have one session-init segment for pack-only');
+    assert.equal(sessionSegments[0].segmentId, 'session-init-pack-only');
+    assert.equal(sessionSegments[0].status, 'observed');
+    assert.ok(sessionSegments[0].contentHash !== null);
+    assert.equal(sessionSegments[0].charCount, 'pack-only session content'.length);
+    assert.ok(sessionSegments[0].tokenEstimate > 0);
+
+    // Aggregate counts should be consistent with segment
+    assert.equal(result.sessionCharCount, sessionSegments[0].charCount);
+    assert.ok(result.sessionTokenEstimate > 0);
+  });
+
   test('hashContent produces deterministic 16-char hex', async () => {
     const { hashContent } = await import('../dist/domains/prompt-hooks/trace-collector.js');
     const h1 = hashContent('hello');
