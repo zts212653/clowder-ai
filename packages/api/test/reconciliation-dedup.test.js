@@ -91,13 +91,10 @@ describe('ReconciliationDedup', () => {
     assert.equal(entry.ttl, undefined);
   });
 
-  it('rewrites old TTL markers to persistent on read (migration active until 2026-07-01)', async () => {
-    // Old F141 keys had 7-day TTL. isNotified() rewrites them as persistent
-    // so long-open issues don't reappear every week.
+  it('migrates old TTL markers to persistent markers when observed', async () => {
     await redis.set('f141:notified:zts212653/cat-cafe#pr-101', '1', 'EX', 604800);
 
     assert.equal(await dedup.isNotified('zts212653/cat-cafe', 'pr', 101), true);
-    // Key IS rewritten — TTL removed, now persistent
     const entry = redis.store.get('f141:notified:zts212653/cat-cafe#pr-101');
     assert.equal(entry.value, '1');
     assert.equal(entry.exToken, undefined);
