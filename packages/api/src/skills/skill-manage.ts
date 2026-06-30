@@ -326,6 +326,18 @@ export async function addSkill(
           'Plugin skills must use a unique name that does not match any built-in skill.',
       );
     }
+    // Guard: reject cross-plugin skill ID collisions. Two plugins with the same
+    // skill basename (e.g. `skills/publish`) would share bare `cap.id` in
+    // syncProject/updateSkillMountPaths maps, overwriting each other's state.
+    const crossPluginCollision = config.capabilities.find(
+      (c) => c.type === 'skill' && c.id === capId && c.source === 'cat-cafe' && c.pluginId && c.pluginId !== pluginId,
+    );
+    if (crossPluginCollision) {
+      throw new Error(
+        `Plugin skill "${capId}" (plugin: ${pluginId}) conflicts with skill "${capId}" ` +
+          `from plugin "${crossPluginCollision.pluginId}". Plugin skills must have unique names across all plugins.`,
+      );
+    }
   }
 
   // Look up existing entry BEFORE computing mountPaths so we can preserve
