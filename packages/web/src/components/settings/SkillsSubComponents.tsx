@@ -12,7 +12,7 @@ import {
   SettingsText,
   SettingsToolbar,
 } from './primitives';
-import type { SettingsSkillItem, SkillMount, SkillProjectSyncSummary, SkillScope, SkillsData } from './skills-types';
+import type { SettingsSkillItem, SkillMount, SkillProjectSyncSummary, SkillScope, SkillsSummary } from './skills-types';
 import { MOUNT_POINT_KEYS, SCOPE_ALL, SCOPE_PROJECT } from './skills-types';
 
 export function SkillRow({
@@ -41,11 +41,22 @@ export function SkillRow({
     scope: 'global' | 'project',
   ) => void;
 }) {
-  const allMounted = skill.governance.allMounted;
+  // F228: badge reflects config intent (mountPaths), not filesystem state.
+  // Filesystem mount state is shown per-mount-point and by drift banner.
+  // mountPaths semantics: undefined = no explicit policy (default all), [] = disabled, [...] = specific.
+  const enabledMountPoints = skill.governance.enabledMountPoints ?? MOUNT_POINT_KEYS;
+  const hasExplicitMountPolicy = skill.mountPaths != null;
+  const configuredMountPaths = hasExplicitMountPolicy ? new Set(skill.mountPaths) : new Set(enabledMountPoints);
+  const configuredCount = enabledMountPoints.filter((id) => configuredMountPaths.has(id)).length;
+  const allMounted = configuredCount >= enabledMountPoints.length;
   const isGlobalToggling = toggling === skill.id;
   const isMountExpanded = expandedMounts === skill.id;
   const isProject = scope === SCOPE_PROJECT;
-  const effectiveEnabled = isProject ? (skill.mountPaths?.length ?? 0) > 0 : (skill.controls?.enabled ?? false);
+  const effectiveEnabled = isProject
+    ? hasExplicitMountPolicy
+      ? skill.mountPaths!.length > 0
+      : (skill.controls?.enabled ?? false)
+    : (skill.controls?.enabled ?? false);
   const toggleTitle = `${isProject ? '项目' : '全局'}${effectiveEnabled ? '禁用' : '启用'}`;
   const ss = syncSummary;
   const syncLabel = !ss
@@ -70,7 +81,7 @@ export function SkillRow({
           <SettingsBadge tone={syncTone}>{syncLabel}</SettingsBadge>
         ) : (
           <SettingsBadge tone={allMounted ? 'emerald' : 'amber'}>
-            {allMounted ? '全部挂载' : `${skill.governance.mountedCount}/${skill.governance.requiredMountCount} 已挂载`}
+            {allMounted ? '全部挂载' : `${configuredCount}/${enabledMountPoints.length} 已挂载`}
           </SettingsBadge>
         )
       }
@@ -279,7 +290,7 @@ export function SkillsSummaryFooter({
   projectCount,
   syncedProjects,
 }: {
-  summary: SkillsData['summary'];
+  summary: SkillsSummary;
   scope: SkillScope;
   projectCount: number;
   syncedProjects: number;

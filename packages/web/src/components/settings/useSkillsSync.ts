@@ -2,17 +2,16 @@
 
 import { useMemo } from 'react';
 import type { DriftIssue } from './drift-types';
-import type { SettingsSkillItem, SkillProjectSyncSummary, SkillScope, SkillsData } from './skills-types';
+import type { SettingsSkillItem, SkillProjectSyncSummary, SkillScope } from './skills-types';
 import { SCOPE_ALL } from './skills-types';
 import { useDriftSync } from './useDriftSync';
 import type { useSkillControls } from './useSkillControls';
 
 interface UseSkillsSyncOptions {
   scope: SkillScope;
-  data: SkillsData | null;
   composedItems: SettingsSkillItem[];
   controls: ReturnType<typeof useSkillControls>;
-  fetchSkills: (forProject?: string) => Promise<void>;
+  fetchSkills: (forProject?: string | null) => Promise<void>;
   /** Increment to force re-fetch of scope reports (e.g. after skill toggle). */
   refreshToken?: number;
 }

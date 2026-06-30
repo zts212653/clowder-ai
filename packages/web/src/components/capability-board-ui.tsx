@@ -25,6 +25,12 @@ export interface CapabilityBoardItem {
   triggers?: string[];
   category?: string;
   mounts?: Record<string, boolean>;
+  mountHealth?: {
+    enabledMountPoints: string[];
+    mountedCount: number;
+    requiredCount: number;
+    allMounted: boolean;
+  };
   tools?: { name: string; description?: string }[];
   connectionStatus?: 'connected' | 'disconnected' | 'unknown';
   mcpServer?: {

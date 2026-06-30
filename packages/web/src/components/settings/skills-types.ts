@@ -22,53 +22,10 @@ export interface SkillMountHealth {
   allMounted: boolean;
 }
 
-export interface SkillEntry {
-  name: string;
-  category: string;
-  trigger: string;
-  description?: string;
-  source?: 'cat-cafe' | 'external';
-  globalEnabled?: boolean;
-  mountPaths?: string[];
-  mounts: SkillMount;
-  mountHealth?: SkillMountHealth;
-  requiresMcp: SkillMcpDependency[];
-}
-
-export interface SkillsStaleness {
-  stale: boolean;
-  currentHash?: string;
-  recordedHash?: string;
-  newSkills: string[];
-  removedSkills: string[];
-}
-
-export interface MountIssue {
-  skill: string;
-  unmountedMountPoints: string[];
-}
-
-export interface SkillsData {
-  skills: SkillEntry[];
-  summary: {
-    total: number;
-    allMounted: boolean;
-    registrationConsistent: boolean;
-    registrationIssues?: {
-      unregistered: string[];
-      phantom: string[];
-    };
-    mountIssues?: MountIssue[];
-  };
-  staleness: SkillsStaleness | null;
-}
-
-export interface SkillsApiEntry extends Omit<SkillEntry, 'requiresMcp'> {
-  requiresMcp?: SkillMcpDependency[];
-}
-
-export interface SkillsApiData extends Omit<SkillsData, 'skills'> {
-  skills: SkillsApiEntry[];
+export interface SkillsSummary {
+  total: number;
+  allMounted: boolean;
+  registrationConsistent: boolean;
 }
 
 export interface SettingsSkillItem {
@@ -95,7 +52,7 @@ export interface SettingsSkillItem {
     enabled: boolean;
     cats: Record<string, boolean>;
     canToggle: boolean;
-  } | null;
+  };
 }
 
 export interface SkillProjectSyncSummary {
@@ -123,72 +80,64 @@ export function matchesSkillSearch(skill: SettingsSkillItem, needle: string): bo
   return `${skill.name} ${skill.category} ${skill.trigger} ${skill.description ?? ''}`.toLowerCase().includes(needle);
 }
 
-export function normalizeSkillsData(payload: SkillsApiData): SkillsData {
-  return {
-    ...payload,
-    skills: payload.skills.map((skill) => ({
-      ...skill,
-      requiresMcp: skill.requiresMcp ?? [],
-    })),
-  };
+/** Staleness context derived from capabilities skillHealth. */
+export interface SkillStalenessCtx {
+  unregistered: string[];
+  phantom: string[];
 }
 
-function isNonPluginCatCafeSkillCapability(item: CapabilityBoardItem): boolean {
-  return item.type === 'skill' && item.source === 'cat-cafe' && !item.pluginId;
-}
+/**
+ * Build skill items from capabilities data.
+ *
+ * Capabilities items are the sole iteration source — plugin skills
+ * show up automatically via their CapabilityBoardItem entries.
+ */
+export function composeSkillItems(
+  capabilityItems: CapabilityBoardItem[],
+  staleness?: SkillStalenessCtx | null,
+): SettingsSkillItem[] {
+  const skillCaps = capabilityItems.filter((i) => i.type === 'skill');
+  const staleNewNames = new Set(staleness?.unregistered ?? []);
+  const staleRemovedNames = new Set(staleness?.phantom ?? []);
 
-export function composeSkillItems(governance: SkillsData, capabilityItems: CapabilityBoardItem[]): SettingsSkillItem[] {
-  const capMap = new Map<string, CapabilityBoardItem>();
-  const firstPartyCatCafeCapMap = new Map<string, CapabilityBoardItem>();
-  for (const item of capabilityItems) {
-    capMap.set(item.id, item);
-    if (isNonPluginCatCafeSkillCapability(item)) {
-      firstPartyCatCafeCapMap.set(item.id, item);
-    }
-  }
-
-  const staleNewNames = new Set(governance.staleness?.newSkills ?? []);
-  const staleRemovedNames = new Set(governance.staleness?.removedSkills ?? []);
-
-  return governance.skills.map((skill) => {
-    const isCatCafeSourceSkill = (skill.source ?? 'cat-cafe') === 'cat-cafe';
-    const cap = (isCatCafeSourceSkill ? firstPartyCatCafeCapMap.get(skill.name) : undefined) ?? capMap.get(skill.name);
-    const legacyMountedCount = getMountedCount(skill.mounts);
-    const mountHealth =
-      skill.mountHealth ??
-      ({
-        enabledMountPoints: MOUNT_POINT_KEYS,
-        mountedCount: legacyMountedCount,
-        requiredCount: MOUNT_POINT_KEYS.length,
-        allMounted: legacyMountedCount === MOUNT_POINT_KEYS.length,
-      } satisfies SkillMountHealth);
+  return skillCaps.map((cap) => {
+    const mounts: SkillMount = (cap.mounts as SkillMount) ?? {
+      claude: false,
+      codex: false,
+      gemini: false,
+      kimi: false,
+    };
+    const mountedCount = cap.mountHealth?.mountedCount ?? getMountedCount(mounts);
+    const requiredMountCount = cap.mountHealth?.requiredCount ?? MOUNT_POINT_KEYS.length;
+    const allMounted = cap.mountHealth?.allMounted ?? mountedCount === requiredMountCount;
+    const enabledMountPoints = cap.mountHealth?.enabledMountPoints ?? MOUNT_POINT_KEYS;
+    const trigger = cap.triggers?.join('、') || '';
+    const category = cap.category ?? '未分类';
     return {
-      id: skill.name,
-      name: skill.name,
-      category: skill.category,
-      trigger: skill.trigger,
-      description: skill.description,
-      source: skill.source ?? cap?.source ?? 'cat-cafe',
-      mountPaths: skill.mountPaths ?? cap?.mountPaths,
-      pluginId: cap?.pluginId,
+      id: cap.id,
+      name: cap.id,
+      category,
+      trigger,
+      description: cap.description,
+      source: cap.source,
+      mountPaths: cap.mountPaths,
+      pluginId: cap.pluginId,
       governance: {
-        mounts: skill.mounts,
-        mountedCount: mountHealth.mountedCount,
-        requiredMountCount: mountHealth.requiredCount,
-        allMounted: mountHealth.allMounted,
-        enabledMountPoints: mountHealth.enabledMountPoints,
-        requiresMcp: skill.requiresMcp,
-        isStaleNew: staleNewNames.has(skill.name),
-        isStaleRemoved: staleRemovedNames.has(skill.name),
+        mounts,
+        mountedCount,
+        requiredMountCount,
+        allMounted,
+        enabledMountPoints,
+        requiresMcp: [],
+        isStaleNew: staleNewNames.has(cap.id),
+        isStaleRemoved: staleRemovedNames.has(cap.id),
       },
-      controls: cap
-        ? {
-            source: cap.source,
-            enabled: cap.globalEnabled ?? cap.enabled,
-            cats: cap.cats ?? {},
-            canToggle: true,
-          }
-        : null,
+      controls: {
+        source: cap.source,
+        enabled: cap.globalEnabled ?? cap.enabled,
+        cats: cap.cats ?? {},
+        canToggle: true,
+      },
     };
   });
 }

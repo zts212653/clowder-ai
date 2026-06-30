@@ -176,12 +176,15 @@ export function ProjectSelector({
   /** When true, show a read-only project label even when there's only one project */
   alwaysShow?: boolean;
 }) {
+  // F228: Only external projects appear as selectable entries.
+  // resolvedPath (instance root) is the default "home" view — the "全部 Skill"
+  // tab already provides global scope, so the project dropdown should only
+  // list external projects without a redundant "全局技能" entry.
   const allPaths = useMemo(() => {
     const set = new Set<string>();
-    if (resolvedPath) set.add(resolvedPath);
     for (const path of knownProjects) set.add(path);
     return Array.from(set);
-  }, [resolvedPath, knownProjects]);
+  }, [knownProjects]);
 
   if (allPaths.length === 0 && !alwaysShow) return null;
   if (allPaths.length <= 1 && !alwaysShow) return null;
@@ -204,18 +207,15 @@ export function ProjectSelector({
       <select
         id="cap-project-select"
         aria-label="选择项目"
-        value={currentSelection ?? ''}
+        value={currentSelection ?? allPaths[0] ?? ''}
         onChange={(event) => onSwitch(event.target.value || null)}
         className="min-w-0 flex-1 truncate rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-field-bg)] px-2 py-1.5 text-xs text-cafe-secondary"
       >
-        <option value="">{projectDisplayName(resolvedPath)}</option>
-        {allPaths
-          .filter((path) => path !== resolvedPath)
-          .map((path) => (
-            <option key={path} value={path}>
-              {projectDisplayName(path)}
-            </option>
-          ))}
+        {allPaths.map((path) => (
+          <option key={path} value={path}>
+            {projectDisplayName(path)}
+          </option>
+        ))}
       </select>
     </div>
   );
