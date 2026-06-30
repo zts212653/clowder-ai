@@ -51,6 +51,7 @@ interface SkillEntry {
   mounts: SkillMount;
   mountHealth: SkillMountHealth;
   requiresMcp?: SkillMcpDependency[];
+  pluginId?: string;
 }
 
 interface MountIssue {
@@ -95,11 +96,7 @@ async function loadDisabledCatCafeSkillNames(projectRoot: string): Promise<Set<s
   return new Set(
     config?.capabilities
       .filter(
-        (cap) =>
-          cap.type === 'skill' &&
-          cap.source === 'cat-cafe' &&
-          !cap.pluginId &&
-          (cap.globalEnabled ?? cap.enabled) === false,
+        (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && (cap.globalEnabled ?? cap.enabled) === false,
       )
       .map((cap) => cap.id) ?? [],
   );
@@ -110,7 +107,7 @@ function collectCatCafeSkillPolicy(
 ): Map<string, CatCafeSkillPolicyInfo> {
   const lookup = new Map<string, CatCafeSkillPolicyInfo>();
   for (const cap of config?.capabilities ?? []) {
-    if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
+    if (cap.type !== 'skill' || cap.source !== 'cat-cafe') continue;
     lookup.set(cap.id, {
       source: 'cat-cafe',
       enabled: cap.globalEnabled ?? cap.enabled,
@@ -264,13 +261,65 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
     }
     const skills = ordered.map((n) => mountLookup.get(n)!).filter(Boolean);
 
+    // Plugin-provided skills: discover from capabilities.json entries with pluginId + skillsSource.
+    // Collected into a separate array and sorted by (pluginId, name) for deterministic order
+    // across projects — Promise.all completion order is non-deterministic (#F228 ordering fix).
+    const pluginCaps = (skillsCapConfig?.capabilities ?? []).filter(
+      (c) => c.type === 'skill' && c.pluginId && c.skillsSource && !sourceSet.has(c.id),
+    );
+    const pluginSkills: SkillEntry[] = await Promise.all(
+      pluginCaps.map(async (cap): Promise<SkillEntry | null> => {
+        const skillsSource = cap.skillsSource;
+        if (!skillsSource) return null;
+        // F228: resolve skillsSource against instance root, not target project root.
+        // co-creator formula: resolve(instanceRoot, skillsSource)
+        const src = resolve(repoRoot, skillsSource);
+        const [claude, codex, gemini, kimi] = await Promise.all([
+          isSkillMountedAtPoint(mountPointDirCandidates.claude, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.codex, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.gemini, src, cap.id, mainSkillsSrc),
+          isSkillMountedAtPoint(mountPointDirCandidates.kimi, src, cap.id, mainSkillsSrc),
+        ]);
+        const mounts: SkillMount = { claude, codex, gemini, kimi };
+        // F228: mountPaths-first — mountPaths is the sole truth for active state
+        const declaredMountPaths = Array.isArray(cap.mountPaths) ? new Set(cap.mountPaths) : null;
+        const pluginDisabled = declaredMountPaths !== null ? declaredMountPaths.size === 0 : false;
+        const requiredMountPoints = pluginDisabled
+          ? []
+          : declaredMountPaths
+            ? enabledMountPoints.filter((id) => declaredMountPaths.has(id))
+            : enabledMountPoints;
+        const mountedCount = requiredMountPoints.filter((id) => mounts[id]).length;
+        const allIds = [...enabledMountPoints, ...customMountTargets.map((t) => t.id)];
+        return {
+          name: cap.id,
+          category: '插件',
+          trigger: '',
+          source: 'cat-cafe',
+          globalEnabled: declaredMountPaths !== null ? declaredMountPaths.size > 0 : (cap.globalEnabled ?? cap.enabled),
+          mountPaths: cap.mountPaths ?? [],
+          pluginId: cap.pluginId,
+          mounts,
+          mountHealth: {
+            enabledMountPoints: allIds,
+            mountedCount,
+            requiredCount: requiredMountPoints.length,
+            allMounted: mountedCount === requiredMountPoints.length,
+          },
+        };
+      }),
+    ).then((results) =>
+      results
+        .filter((r): r is SkillEntry => r !== null)
+        .sort((a, b) => (a.pluginId ?? '').localeCompare(b.pluginId ?? '') || a.name.localeCompare(b.name)),
+    );
+    skills.push(...pluginSkills);
+
     // Registration consistency check
     const capConfig = await readCapabilitiesConfig(projectRoot);
     const sourceNames = new Set(sourceSkills);
     const capSkillNames = new Set(
-      capConfig?.capabilities
-        .filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId)
-        .map((c) => c.id) ?? [],
+      capConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe').map((c) => c.id) ?? [],
     );
     const unregistered = sourceSkills.filter((n) => !capSkillNames.has(n));
     const phantom = [...capSkillNames].filter((n) => !sourceNames.has(n));

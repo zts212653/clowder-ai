@@ -139,6 +139,10 @@ export interface CapabilityEntry {
    * Absent for manually added or cat-cafe managed entries.
    */
   discoveredFrom?: string;
+  /** F204: Skill source directory (parent of skill subdirs). Stored at registration
+   *  time so mount-health checks don't need to reverse-lookup from plugin manifests.
+   *  Relative to project root. Only for type: 'skill' with pluginId. */
+  skillsSource?: string;
 }
 
 /** Sanitized MCP server details included in the capability board payload. */
@@ -200,6 +204,13 @@ export interface CapabilitiesConfig {
   discoveryVersion?: number;
 }
 
+export interface CapabilitySkillMountHealth {
+  enabledMountPoints: string[];
+  mountedCount: number;
+  requiredCount: number;
+  allMounted: boolean;
+}
+
 /** Capabilities board response — what the GET API returns */
 export interface CapabilityBoardItem {
   id: string;
@@ -218,6 +229,8 @@ export interface CapabilityBoardItem {
   category?: string;
   /** Skill mount status per mount point (symlink correctness check) */
   mounts?: Record<string, boolean>;
+  /** Per-skill mount health derived from mount rules + this skill's mountPaths policy. */
+  mountHealth?: CapabilitySkillMountHealth;
   /** Mount point aliases where this skill is intentionally mounted in the selected project. */
   mountPaths?: string[];
   /** MCP tools discovered via probe (only when ?probe=true) */

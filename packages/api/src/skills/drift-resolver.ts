@@ -32,6 +32,13 @@ export interface SyncDriftOptions {
   skillMountPaths?: Record<string, readonly string[]>;
   globalSkillMountPaths?: Record<string, readonly string[]>;
   configOrphans?: Iterable<string>;
+  /** Custom-source skills from global config. Passed to syncProject so it
+   *  knows about plugin skills that aren't yet in the project config.
+   *  Values should be resolved absolute paths. */
+  globalCustomSourceSkills?: ReadonlyMap<string, { skillsSource: string; pluginId?: string }>;
+  /** Main project root. Passed to syncProject for resolving relative
+   *  skillsSource paths in external project config entries. */
+  mainProjectRoot?: string;
 }
 
 interface BlockerBackup {
@@ -112,6 +119,8 @@ async function syncDriftUnlocked(
       additionalRemovedSkills: new Set(opts?.configOrphans ?? []),
       preserveGlobalCascade: true,
       force: false,
+      globalCustomSourceSkills: opts?.globalCustomSourceSkills,
+      mainProjectRoot: opts?.mainProjectRoot,
     });
 
     // Success: clean up backups

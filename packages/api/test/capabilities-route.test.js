@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -1084,12 +1084,82 @@ describe('GET /api/capabilities (Fastify)', () => {
       const debugging = (body.items ?? []).find((item) => item.type === 'skill' && item.id === 'debugging');
       assert.ok(debugging, 'debugging skill should be present');
       assert.deepEqual(debugging.mounts, { claude: true, codex: true, gemini: true, kimi: false });
+      assert.deepEqual(debugging.mountHealth, {
+        enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
+        mountedCount: 3,
+        requiredCount: 3,
+        allMounted: true,
+      });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
       await app.close();
       await rm(projectDir, { recursive: true, force: true });
       await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves project-local plugin skillsSource against selected project for capability health', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+
+    const rawProjectDir = join('/tmp', `cap-route-test-plugin-source-${Date.now()}`);
+    await mkdir(rawProjectDir, { recursive: true });
+    const projectDir = await realpath(rawProjectDir);
+    const pluginId = 'test-project-local-source-plugin';
+    const skillName = 'project-local-source-skill';
+    const skillsSource = join(projectDir, 'plugins', pluginId, 'skills');
+    const skillSourceDir = join(skillsSource, skillName);
+
+    await mkdir(skillSourceDir, { recursive: true });
+    await writeFile(join(skillSourceDir, 'SKILL.md'), '# Project Local Source Skill\n');
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const skillsDir = join(projectDir, `.${provider}`, 'skills');
+      const linkPath = join(skillsDir, skillName);
+      await mkdir(skillsDir, { recursive: true });
+      await symlink(relative(dirname(linkPath), skillSourceDir), linkPath);
+    }
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+          skillsSource: relative(projectDir, skillsSource),
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(capabilitiesRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/capabilities?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200);
+      const body = res.json();
+      const target = (body.items ?? []).find((item) => item.type === 'skill' && item.id === skillName);
+      assert.ok(target, 'project-local plugin skill should be listed');
+      assert.equal(target.pluginId, pluginId);
+      assert.deepEqual(target.mounts, { claude: true, codex: true, gemini: true, kimi: true });
+      assert.deepEqual(target.mountHealth, {
+        enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
+        mountedCount: 4,
+        requiredCount: 4,
+        allMounted: true,
+      });
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
@@ -1947,7 +2017,7 @@ describe('GET /api/capabilities (Fastify)', () => {
 
     const pluginId = `cap-prune-${Date.now()}`;
     const repoRoot = findRepoRoot();
-    const pluginDir = join(repoRoot, 'plugins', pluginId);
+    const pluginDir = join(repoRoot, 'packages', 'api', 'src', 'plugins', pluginId);
     await mkdir(join(pluginDir, 'skills', 'current'), { recursive: true });
     await writeFile(
       join(pluginDir, 'plugin.yaml'),
@@ -3199,11 +3269,11 @@ describe('PATCH /api/capabilities write auth (Fastify)', () => {
     process.env.DEFAULT_OWNER_USER_ID = 'you';
     const projectDir = await makeTmpDir('patch-preserve-user-skill-on-enable');
     const mainProjectRoot = findRepoRoot();
-    const mainConfig = await readCapabilitiesConfig(mainProjectRoot);
-    const skillName = mainConfig?.capabilities.find(
-      (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && cap.enabled,
-    )?.id;
-    assert.ok(skillName, 'expected at least one globally enabled cat-cafe skill in the main config');
+    const skillName = 'debugging';
+    assert.ok(
+      existsSync(join(mainProjectRoot, 'cat-cafe-skills', skillName, 'SKILL.md')),
+      'expected debugging to exist as a first-party Clowder AI skill',
+    );
     const localSkillDir = join(projectDir, `.claude/skills/${skillName}`);
     await mkdir(localSkillDir, { recursive: true });
     await writeFile(join(localSkillDir, 'SKILL.md'), `# user ${skillName}\n`);

@@ -8,11 +8,12 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import YAML from 'yaml';
+import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { getDefaultRootsForPlatform, isPathUnderRoots, validateProjectPath } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -267,6 +268,28 @@ async function findSkillPath(root: string, name: string, projectPath?: string): 
   for (const dir of candidateDirs) {
     const candidate = join(dir, name, 'SKILL.md');
     if (existsSync(candidate)) return candidate;
+  }
+  // Fallback: check plugin skill source directories from capabilities config.
+  // Plugin skillsSource is relative to the Cat Café instance root (where plugin
+  // code lives). For preview, try instance root first, then project root as
+  // fallback (for project-local plugins in non-startup projects).
+  try {
+    const config = await readCapabilitiesConfig(projectRoot);
+    if (config) {
+      for (const cap of config.capabilities) {
+        if (cap.type === 'skill' && cap.pluginId && cap.id === name && cap.skillsSource) {
+          const roots = isAbsolute(cap.skillsSource)
+            ? [cap.skillsSource]
+            : [join(root, cap.skillsSource), join(projectRoot, cap.skillsSource)];
+          for (const resolvedSource of roots) {
+            const pluginCandidate = join(resolvedSource, name, 'SKILL.md');
+            if (existsSync(pluginCandidate)) return pluginCandidate;
+          }
+        }
+      }
+    }
+  } catch {
+    // capabilities read failure is non-critical for preview
   }
   return null;
 }

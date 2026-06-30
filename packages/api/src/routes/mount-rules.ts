@@ -13,7 +13,7 @@
 
 import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
@@ -158,18 +158,28 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
       // Extract global disabled policy for external projects
       let globalDisabledSkills: Set<string> | undefined;
       let globalMountPathsBySkill: Map<string, readonly string[]> | undefined;
+      let globalCustomSourceSkills: Map<string, { skillsSource: string; pluginId?: string }> | undefined;
       if (projectRoot !== globalRoot) {
         const globalConfig = await readCapabilitiesConfig(globalRoot);
         const globalManagedCaps =
-          globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe' && !c.pluginId) ?? [];
+          globalConfig?.capabilities.filter((c) => c.type === 'skill' && c.source === 'cat-cafe') ?? [];
         const disabled = new Set<string>();
         const mountMap = new Map<string, readonly string[]>();
+        const customSources = new Map<string, { skillsSource: string; pluginId?: string }>();
         for (const cap of globalManagedCaps) {
           if (!(cap.globalEnabled ?? cap.enabled)) disabled.add(cap.id);
           if (Array.isArray(cap.mountPaths)) mountMap.set(cap.id, cap.mountPaths);
+          // F228: collect plugin-provided custom-source skills
+          if (cap.skillsSource) {
+            customSources.set(cap.id, {
+              skillsSource: isAbsolute(cap.skillsSource) ? cap.skillsSource : resolve(globalRoot, cap.skillsSource),
+              ...(cap.pluginId ? { pluginId: cap.pluginId } : {}),
+            });
+          }
         }
         if (disabled.size > 0) globalDisabledSkills = disabled;
         if (mountMap.size > 0) globalMountPathsBySkill = mountMap;
+        if (customSources.size > 0) globalCustomSourceSkills = customSources;
       }
 
       await writeMountRules(projectRoot, validated);
@@ -180,6 +190,8 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
           pruneMountPaths: true,
           disabledSkills: globalDisabledSkills,
           globalMountPathsBySkill,
+          globalCustomSourceSkills,
+          mainProjectRoot: globalRoot,
         });
         await reconcilePluginMounts(projectRoot, skillsSrc, validated, previousRules);
       } catch (err) {
@@ -194,6 +206,8 @@ export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = asyn
           pruneMountPaths: true,
           disabledSkills: globalDisabledSkills,
           globalMountPathsBySkill,
+          globalCustomSourceSkills,
+          mainProjectRoot: globalRoot,
         }).catch((re) => {
           console.warn(`[F228] Rollback mount-rules reconciliation failed: ${(re as Error).message}`);
         });
@@ -212,7 +226,7 @@ async function reconcilePluginMounts(
   mountRules: MountRules,
   previousRules?: MountRules,
 ): Promise<void> {
-  const pluginsDir = join(dirname(skillsSrc), 'plugins');
+  const pluginsDir = join(dirname(skillsSrc), 'packages', 'api', 'src', 'plugins');
   const config = await readCapabilitiesConfig(projectRoot);
   const pluginSkills = resolvePluginSkillSourcesForProject(config, pluginsDir, projectRoot);
   if (pluginSkills.length === 0) return;

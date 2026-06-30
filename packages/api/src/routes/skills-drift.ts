@@ -10,7 +10,7 @@
  * so the client doesn't have to send (and can't lie about) mount policy.
  */
 
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { type CapabilitiesConfig, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { readCapabilitiesConfig, withCapabilityLock } from '../config/capabilities/capability-orchestrator.js';
@@ -73,6 +73,9 @@ interface ProjectSkillMountPolicy {
   /** F228: Set of skill IDs that appear in this config (enabled or disabled).
    *  Used to distinguish "project has no opinion" from "project explicitly enabled." */
   configuredSkills: Set<string>;
+  /** Skills with custom skillsSource (e.g. plugin-provided). Excluded from
+   *  phantom detection in checkGlobal — they aren't in the default source dir. */
+  customSourceSkills: Set<string>;
 }
 
 interface SkillsDriftRouteOptions {
@@ -95,14 +98,20 @@ export function readCatCafeSkillMountPolicy(
   config: CapabilitiesConfig | null | undefined,
   opts?: { useGlobalEnabledForDisabled?: boolean },
 ): ProjectSkillMountPolicy {
-  if (!config) return { disabledSkills: [], skillMountPaths: {}, configuredSkills: new Set() };
+  if (!config)
+    return { disabledSkills: [], skillMountPaths: {}, configuredSkills: new Set(), customSourceSkills: new Set() };
 
   const useGlobalEnabled = opts?.useGlobalEnabledForDisabled ?? false;
   const disabledSkills: string[] = [];
   const skillMountPaths: Record<string, string[]> = {};
   const configuredSkills = new Set<string>();
+  const customSourceSkills = new Set<string>();
   for (const cap of config.capabilities) {
-    if (cap.type !== 'skill' || cap.source !== 'cat-cafe' || cap.pluginId) continue;
+    if (cap.type !== 'skill' || cap.source !== 'cat-cafe') continue;
+    // Skills with custom skillsSource (e.g. plugin-provided) are tracked
+    // for phantom exclusion in checkGlobal — they aren't in the default
+    // source dir, so they shouldn't be flagged as phantom.
+    if (cap.skillsSource) customSourceSkills.add(cap.id);
     configuredSkills.add(cap.id);
     if (useGlobalEnabled) {
       // Global policy mode: use globalEnabled for cascade decisions.
@@ -129,7 +138,7 @@ export function readCatCafeSkillMountPolicy(
       }
     }
   }
-  return { disabledSkills, skillMountPaths, configuredSkills };
+  return { disabledSkills, skillMountPaths, configuredSkills, customSourceSkills };
 }
 
 /** @internal Exported for unit testing only.
@@ -164,10 +173,14 @@ export function mergeSkillMountPolicies(
     );
     if (effective) skillMountPaths[skillName] = effective;
   }
+  // Merge customSourceSkills from both — a skill with custom source in either
+  // policy should be excluded from phantom detection.
+  const customSourceSkills = new Set([...projectPolicy.customSourceSkills, ...globalPolicy.customSourceSkills]);
   return {
     disabledSkills,
     skillMountPaths,
     configuredSkills: projectPolicy.configuredSkills,
+    customSourceSkills,
   };
 }
 
@@ -183,9 +196,28 @@ async function loadDriftPolicies(projectRoot: string, globalProjectRoot: string)
   // represents the local mount state, while globalEnabled represents the global
   // enable/disable policy. Without this, a project-scope enable on the main
   // project makes external projects incorrectly see the skill as globally enabled.
-  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig, { useGlobalEnabledForDisabled: true });
+  const globalPolicy = readCatCafeSkillMountPolicy(globalConfig, {
+    useGlobalEnabledForDisabled: true,
+  });
   const mergedPolicy = mergeSkillMountPolicies(projectPolicy, globalPolicy);
-  return { projectPolicy, globalPolicy, mergedPolicy };
+  // Collect custom-source skills from global config for syncProject.
+  // These skills have skillsSource pointing to a non-default directory
+  // and may not be in the project config yet.
+  // IMPORTANT: resolve skillsSource against globalProjectRoot NOW so
+  // downstream consumers (syncProject, drift-detector) get absolute paths.
+  // Plugin skillsSource paths are relative to the Cat Café instance root —
+  // resolving them later against the target project root would be wrong
+  // for external projects.
+  const globalCustomSourceSkills = new Map<string, { skillsSource: string; pluginId?: string }>();
+  for (const cap of globalConfig?.capabilities ?? []) {
+    if (cap.type === 'skill' && cap.source === 'cat-cafe' && cap.skillsSource) {
+      globalCustomSourceSkills.set(cap.id, {
+        skillsSource: resolve(globalProjectRoot, cap.skillsSource),
+        ...(cap.pluginId ? { pluginId: cap.pluginId } : {}),
+      });
+    }
+  }
+  return { projectPolicy, globalPolicy, mergedPolicy, globalCustomSourceSkills };
 }
 
 /**
@@ -205,10 +237,20 @@ export async function computeSkillDrift(projectPath?: string, mainProjectRoot?: 
     const globalPolicy = readCatCafeSkillMountPolicy(globalConfig);
     const mountRules = await readMountRules(globalProjectRoot, globalProjectRoot);
     fillDefaultMountPaths(globalPolicy, mountRules);
+    // Build effective source map for custom-source skills (plugins) so
+    // mount drift detection compares against the correct expected path.
+    const globalEffSourceMap = new Map<string, string>();
+    for (const cap of globalConfig?.capabilities ?? []) {
+      if (cap.type === 'skill' && cap.source === 'cat-cafe' && cap.skillsSource) {
+        globalEffSourceMap.set(cap.id, resolve(globalProjectRoot, cap.skillsSource));
+      }
+    }
     const drift = await checkGlobal(globalProjectRoot, skillsSource, mountRules, {
       globalConfigSkills: globalPolicy.configuredSkills,
+      customSourceSkills: globalPolicy.customSourceSkills,
       disabledSkills: globalPolicy.disabledSkills,
       skillMountPaths: globalPolicy.skillMountPaths,
+      effectiveSourceMap: globalEffSourceMap.size > 0 ? globalEffSourceMap : undefined,
     });
     return {
       drift,
@@ -222,14 +264,26 @@ export async function computeSkillDrift(projectPath?: string, mainProjectRoot?: 
     };
   }
 
-  const { projectPolicy, globalPolicy, mergedPolicy } = await loadDriftPolicies(projectRoot, globalProjectRoot);
+  const { projectPolicy, globalPolicy, mergedPolicy, globalCustomSourceSkills } = await loadDriftPolicies(
+    projectRoot,
+    globalProjectRoot,
+  );
   const mountRules = await readMountRules(projectRoot, globalProjectRoot);
   fillDefaultMountPaths(mergedPolicy, mountRules);
+  // Build effective source map for drift detection: plugin skills have
+  // custom source directories that differ from the default cat-cafe-skills/.
+  // globalCustomSourceSkills paths are already resolved (absolute).
+  const effectiveSourceMap = new Map<string, string>();
+  for (const [name, meta] of globalCustomSourceSkills) {
+    effectiveSourceMap.set(name, meta.skillsSource);
+  }
+
   const drift = await checkProject(projectRoot, skillsSource, mountRules, {
     globalConfigSkills: globalPolicy.configuredSkills,
     projectConfigSkills: projectPolicy.configuredSkills,
     disabledSkills: mergedPolicy.disabledSkills,
     skillMountPaths: mergedPolicy.skillMountPaths,
+    effectiveSourceMap: effectiveSourceMap.size > 0 ? effectiveSourceMap : undefined,
   });
   // Config orphans: skills in project config but not global config.
   // Must be cleaned from project capabilities.json on drift-resolve sync.
@@ -244,6 +298,8 @@ export async function computeSkillDrift(projectPath?: string, mainProjectRoot?: 
       skillMountPaths: projectPolicy.skillMountPaths,
       globalSkillMountPaths: globalPolicy.skillMountPaths,
       configOrphans,
+      globalCustomSourceSkills: globalCustomSourceSkills.size > 0 ? globalCustomSourceSkills : undefined,
+      mainProjectRoot: globalProjectRoot,
     },
   };
 }

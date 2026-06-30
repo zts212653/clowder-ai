@@ -195,7 +195,7 @@ describe('GovernanceBootstrapService', () => {
     );
   });
 
-  it('ignores same-id plugin skill disables when bootstrapping project mounts', async () => {
+  it('ignores same-id custom-source skill disables when bootstrapping project mounts', async () => {
     await writeCapabilitiesConfig(catCafeRoot, {
       version: 2,
       capabilities: [
@@ -205,6 +205,7 @@ describe('GovernanceBootstrapService', () => {
           enabled: false,
           source: 'cat-cafe',
           pluginId: 'same-id-plugin',
+          skillsSource: 'plugins/same-id-plugin/skills',
           mountPaths: [],
         },
       ],
@@ -218,8 +219,13 @@ describe('GovernanceBootstrapService', () => {
     }
 
     const config = await readCapabilitiesConfig(targetProject);
-    const worktree = config.capabilities.find((cap) => cap.type === 'skill' && cap.id === 'worktree' && !cap.pluginId);
-    assert.ok(worktree, 'source Clowder AI skill should be bootstrapped independently from same-id plugin policy');
+    const worktree = config.capabilities.find(
+      (cap) => cap.type === 'skill' && cap.id === 'worktree' && !cap.skillsSource,
+    );
+    assert.ok(
+      worktree,
+      'source Clowder AI skill should be bootstrapped independently from same-id custom-source policy',
+    );
     assert.equal(worktree.enabled, true);
     assert.deepStrictEqual(worktree.mountPaths, ['claude', 'codex', 'gemini', 'kimi']);
   });

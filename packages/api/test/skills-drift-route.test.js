@@ -48,11 +48,24 @@ function expectedSymlinkTarget(linkPath, sourcePath) {
 
 describe('Skills Drift Route (F228)', () => {
   it('POST /api/skills/drift-check respects per-skill mountPaths provider exclusions', async () => {
+    const mainRoot = await mkdtemp(join(tmpdir(), 'skills-drift-route-mount-paths-main-'));
     const projectDir = await mkdtemp(join(tmpdir(), 'skills-drift-route-mount-paths-'));
     const canonicalProjectDir = await realpath(projectDir);
     const skillsSource = resolveRepoSkillsDir();
     const skillName = 'debugging';
     const claudeLink = join(canonicalProjectDir, '.claude/skills', skillName);
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
     await writeCapabilitiesConfig(canonicalProjectDir, {
       version: 2,
       capabilities: [
@@ -68,7 +81,7 @@ describe('Skills Drift Route (F228)', () => {
     await mkdir(dirname(claudeLink), { recursive: true });
     await symlink(expectedSymlinkTarget(claudeLink, join(skillsSource, skillName)), claudeLink);
 
-    const app = await buildSkillsDriftApp();
+    const app = await buildSkillsDriftApp({ mainProjectRoot: mainRoot });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -86,6 +99,7 @@ describe('Skills Drift Route (F228)', () => {
       );
     } finally {
       await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
     }
   });

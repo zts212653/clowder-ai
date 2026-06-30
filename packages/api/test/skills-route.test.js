@@ -832,14 +832,32 @@ describe('Skills Route', () => {
   });
 
   it('GET /api/skills ignores same-id plugin capabilities for Clowder AI source skill policy', async () => {
-    // Use 'feat-lifecycle' — confirmed globally enabled in real config.
-    // Avoids test env pollution from disabled skills in .cat-cafe/capabilities.json.
-    const skillName = 'feat-lifecycle';
+    const sourceSkillsDir = resolveRepoSkillsDir();
+    const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
+    const skillName = sourceSkillNames[0];
+    assert.ok(skillName, 'expected at least one source skill for same-id plugin policy regression');
+    const mainRoot = join('/tmp', `skills-route-test-plugin-same-id-policy-main-${Date.now()}`);
     const projectDir = join('/tmp', `skills-route-test-plugin-same-id-policy-${Date.now()}`);
     const homeDir = join('/tmp', `skills-route-test-plugin-same-id-policy-home-${Date.now()}`);
     const prevHome = process.env.HOME;
 
-    await Promise.all([mkdir(projectDir, { recursive: true }), mkdir(homeDir, { recursive: true })]);
+    await Promise.all([
+      mkdir(mainRoot, { recursive: true }),
+      mkdir(projectDir, { recursive: true }),
+      mkdir(homeDir, { recursive: true }),
+    ]);
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
     // Seed project config with a disabled same-id plugin entry.
     // The test verifies the plugin disable doesn't leak into the Clowder AI source skill.
     await writeCapabilitiesConfig(projectDir, {
@@ -858,7 +876,7 @@ describe('Skills Route', () => {
     process.env.HOME = homeDir;
 
     const app = Fastify();
-    await app.register(skillsRoutes);
+    await app.register(skillsRoutes, { mainProjectRoot: mainRoot });
     await app.ready();
 
     try {
@@ -885,8 +903,70 @@ describe('Skills Route', () => {
       if (prevHome === undefined) delete process.env.HOME;
       else process.env.HOME = prevHome;
       await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
       await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('GET /api/skills resolves project-local plugin skillsSource against selected project', async () => {
+    const rawProjectDir = join('/tmp', `skills-route-test-project-plugin-source-${Date.now()}`);
+    await mkdir(rawProjectDir, { recursive: true });
+    const projectDir = await realpath(rawProjectDir);
+    const pluginId = 'test-project-local-source-plugin';
+    const skillName = 'project-local-source-skill';
+    const skillsSource = join(projectDir, 'plugins', pluginId, 'skills');
+    const skillSourceDir = join(skillsSource, skillName);
+
+    await mkdir(skillSourceDir, { recursive: true });
+    await writeFile(join(skillSourceDir, 'SKILL.md'), '# Project Local Source Skill\n');
+    for (const provider of ['claude', 'codex', 'gemini', 'kimi']) {
+      const skillsDir = join(projectDir, `.${provider}`, 'skills');
+      const linkPath = join(skillsDir, skillName);
+      await mkdir(skillsDir, { recursive: true });
+      await symlink(relative(dirname(linkPath), skillSourceDir), linkPath);
+    }
+    await writeCapabilitiesConfig(projectDir, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          pluginId,
+          skillsSource: relative(projectDir, skillsSource),
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
+
+    const app = Fastify();
+    await app.register(skillsRoutes);
+    await app.ready();
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(projectDir)}`,
+        headers: AUTH_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      const body = JSON.parse(res.body);
+      const target = body.skills.find((skill) => skill.name === skillName);
+      assert.ok(target, 'project-local plugin skill should be listed');
+      assert.equal(target.pluginId, pluginId);
+      assert.deepEqual(target.mounts, { claude: true, codex: true, gemini: true, kimi: true });
+      assert.deepEqual(target.mountHealth, {
+        enabledMountPoints: ['claude', 'codex', 'gemini', 'kimi'],
+        mountedCount: 4,
+        requiredCount: 4,
+        allMounted: true,
+      });
+    } finally {
+      await app.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
@@ -1077,19 +1157,27 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill ignores same-id disabled plugin skill in global guard', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = join('/tmp', `skills-route-test-sync-skill-plugin-same-id-main-${Date.now()}`);
     const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-plugin-same-id-${Date.now()}`);
+    await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
-    const globalConfig = await readCapabilitiesConfig(dirname(sourceSkillsDir));
-    const globallyDisabled = new Set(
-      globalConfig?.capabilities
-        .filter((cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && cap.enabled === false)
-        .map((cap) => cap.id) ?? [],
-    );
-    const skillName = sourceSkillNames.find((name) => !globallyDisabled.has(name));
+    const skillName = sourceSkillNames[0];
     assert.ok(skillName, 'expected at least one globally enabled source skill for sync-skill regression');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
     await writeCapabilitiesConfig(projectDir, {
       version: 2,
       capabilities: [
@@ -1104,7 +1192,7 @@ describe('Skills Route', () => {
       ],
     });
 
-    const app = await buildSessionSkillsApp();
+    const app = await buildSessionSkillsApp({ mainProjectRoot: mainRoot });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1121,6 +1209,7 @@ describe('Skills Route', () => {
       assert.equal(pluginCap.enabled, false);
     } finally {
       await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
@@ -1130,19 +1219,27 @@ describe('Skills Route', () => {
   it('POST /api/skills/sync-skill preserves narrowed mountPaths policy', async () => {
     const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
     process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const mainRoot = join('/tmp', `skills-route-test-sync-skill-mountpaths-main-${Date.now()}`);
     const rawProjectDir = join('/tmp', `skills-route-test-sync-skill-mountpaths-${Date.now()}`);
+    await mkdir(mainRoot, { recursive: true });
     await mkdir(rawProjectDir, { recursive: true });
     const projectDir = await realpath(rawProjectDir);
     const sourceSkillsDir = resolveRepoSkillsDir();
     const sourceSkillNames = await listSourceSkillNames(sourceSkillsDir);
-    const globalConfig = await readCapabilitiesConfig(dirname(sourceSkillsDir));
-    const globallyDisabled = new Set(
-      globalConfig?.capabilities
-        .filter((cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && cap.enabled === false)
-        .map((cap) => cap.id) ?? [],
-    );
-    const skillName = sourceSkillNames.find((name) => !globallyDisabled.has(name));
+    const skillName = sourceSkillNames[0];
     assert.ok(skillName, 'expected at least one globally enabled source skill for sync-skill regression');
+    await writeCapabilitiesConfig(mainRoot, {
+      version: 2,
+      capabilities: [
+        {
+          id: skillName,
+          type: 'skill',
+          enabled: true,
+          source: 'cat-cafe',
+          mountPaths: ['claude', 'codex', 'gemini', 'kimi'],
+        },
+      ],
+    });
     await writeCapabilitiesConfig(projectDir, {
       version: 2,
       capabilities: [
@@ -1156,7 +1253,7 @@ describe('Skills Route', () => {
       ],
     });
 
-    const app = await buildSessionSkillsApp();
+    const app = await buildSessionSkillsApp({ mainProjectRoot: mainRoot });
     try {
       const res = await app.inject({
         method: 'POST',
@@ -1184,6 +1281,7 @@ describe('Skills Route', () => {
       assert.equal(cap?.enabled, true);
     } finally {
       await app.close();
+      await rm(mainRoot, { recursive: true, force: true });
       await rm(projectDir, { recursive: true, force: true });
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = previousOwner;

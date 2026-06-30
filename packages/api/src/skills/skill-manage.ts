@@ -6,14 +6,22 @@
  * call these functions. Config writes + symlink operations are handled internally.
  */
 
+import { existsSync } from 'node:fs';
 import { lstat, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
-import { type CapabilityEntry, type MountRules, STANDARD_MOUNT_POINT_IDS } from '@cat-cafe/shared';
+import {
+  type CapabilitiesConfig,
+  type CapabilityEntry,
+  type MountRules,
+  STANDARD_MOUNT_POINT_IDS,
+} from '@cat-cafe/shared';
 import { readCapabilitiesConfig, writeCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
+import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { buildSkillMountTargets, createSkillSymlink } from '../utils/skill-mount.js';
 import { parseManifestSkillMeta, readSkillMeta } from './skill-meta.js';
+import { syncAll } from './skill-sync-all.js';
 import { classifyMountPath, type MountConflict } from './skill-sync-engine.js';
 
 // ────────── Types ──────────
@@ -21,6 +29,14 @@ import { classifyMountPath, type MountConflict } from './skill-sync-engine.js';
 interface MountTarget {
   id: string;
   dirs: string[];
+}
+
+/** F228: Cascade skill changes to all governance-registered projects via syncAll.
+ *  Caller provides the cat-cafe skills source dir; addSkill/removeSkill handles the rest.
+ *  Non-critical — cascade failure logs a warning; user can sync manually via UI. */
+export interface SkillCascadeOptions {
+  /** Absolute path to cat-cafe-skills source dir (e.g. `resolveSkillsSourceDir()`). */
+  catCafeSkillsSource: string;
 }
 
 export interface AddSkillOptions {
@@ -34,6 +50,12 @@ export interface AddSkillOptions {
   mountPaths?: readonly string[];
   /** Default: true. Set false to register the skill as disabled. */
   enabled?: boolean;
+  /** Source directory persisted for plugin-provided skills. */
+  skillsSource?: string;
+  /** Optional config store override for consumers that already own locking/injection. */
+  configStore?: SkillConfigStore;
+  /** When provided, cascade to governance-registered projects after adding. */
+  cascade?: SkillCascadeOptions;
 }
 
 export interface SkillOperationResult {
@@ -49,9 +71,38 @@ export interface RemoveSkillOptions {
   capabilityId?: string;
   /** Needed to identify managed symlinks for cleanup. */
   skillsSource?: string;
+  /** Optional config store override for consumers that already own locking/injection. */
+  configStore?: SkillConfigStore;
+  /** When provided, cascade removal to governance-registered projects. */
+  cascade?: SkillCascadeOptions;
+}
+
+export interface SkillConfigStore {
+  readCapabilities: () => Promise<CapabilitiesConfig | null>;
+  writeCapabilities: (config: CapabilitiesConfig) => Promise<void>;
 }
 
 // ────────── Internals ──────────
+
+/**
+ * F228: Cascade skill changes to all governance-registered projects.
+ *
+ * After addSkill/removeSkill updates the main project, syncAll propagates
+ * the change (config entry + symlinks) to every external project in the
+ * governance registry. syncAll internally builds globalCustomSourceSkills
+ * from the main config, so plugin skill sources resolve correctly.
+ */
+async function cascadeToProjects(mainProjectRoot: string, catCafeSkillsSource: string): Promise<void> {
+  try {
+    const cascadeMountRules = await readMountRules(mainProjectRoot, mainProjectRoot);
+    await syncAll(mainProjectRoot, catCafeSkillsSource, {
+      mountRules: cascadeMountRules,
+      force: false,
+    });
+  } catch (err) {
+    console.warn(`[F228] Skill cascade to projects failed (non-critical): ${(err as Error).message}`);
+  }
+}
 
 function symlinkTargetFor(linkPath: string, sourcePath: string): string {
   return process.platform === 'win32' ? sourcePath : relative(dirname(linkPath), sourcePath);
@@ -88,6 +139,24 @@ function findSkillEntry(
       c.source === 'cat-cafe' &&
       (pluginId ? c.pluginId === pluginId : !c.pluginId),
   );
+}
+
+async function writeCapabilitiesWithRollback(
+  store: SkillConfigStore,
+  previous: CapabilitiesConfig | null,
+  next: CapabilitiesConfig,
+): Promise<void> {
+  try {
+    await store.writeCapabilities(next);
+  } catch (err) {
+    const rollback = previous ?? { version: 1, capabilities: [] };
+    try {
+      await store.writeCapabilities(structuredClone(rollback));
+    } catch {
+      /* best-effort: original write error is the one callers need */
+    }
+    throw err;
+  }
 }
 
 // ────────── Symlink helpers (shared by addSkill and PluginResourceActivator) ──────────
@@ -225,17 +294,57 @@ export async function addSkill(
 ): Promise<SkillOperationResult> {
   const { mountRules, enabled = true, pluginId } = opts;
   const capId = opts.capabilityId ?? skillName;
+  const store = opts.configStore ?? {
+    readCapabilities: () => readCapabilitiesConfig(projectRoot),
+    writeCapabilities: (config: CapabilitiesConfig) => writeCapabilitiesConfig(projectRoot, config),
+  };
 
   // 1. Config: upsert capability entry
-  const config = (await readCapabilitiesConfig(projectRoot)) ?? {
-    version: 2 as const,
-    capabilities: [] as CapabilityEntry[],
-  };
+  const previous = await store.readCapabilities();
+  const config = previous
+    ? structuredClone(previous)
+    : {
+        version: 2 as const,
+        capabilities: [] as CapabilityEntry[],
+      };
+  // Guard: reject plugin skills whose capId collides with a built-in skill.
+  // The sync pipeline (syncProject / updateSkillMountPaths) uses bare cap.id
+  // as map key, so same-id entries from different sources would pollute each
+  // other's mountPaths and enabled state. Rather than rewriting the entire
+  // sync pipeline to use composite keys, prevent the collision at the gate.
+  // Two checks: (1) config already has a first-party entry, (2) built-in
+  // source directory exists on disk (covers clean-config / first-install).
+  if (pluginId) {
+    const builtInConfigCollision = config.capabilities.find(
+      (c) => c.type === 'skill' && c.id === capId && c.source === 'cat-cafe' && !c.pluginId,
+    );
+    const builtInSkillsRoot = opts.cascade?.catCafeSkillsSource ?? join(projectRoot, 'cat-cafe-skills');
+    const builtInDirExists = existsSync(join(builtInSkillsRoot, capId));
+    if (builtInConfigCollision || builtInDirExists) {
+      throw new Error(
+        `Plugin skill "${capId}" (plugin: ${pluginId}) conflicts with built-in skill "${capId}". ` +
+          'Plugin skills must use a unique name that does not match any built-in skill.',
+      );
+    }
+  }
+
+  // Compute effective mountPaths: caller-specified > project's active mount targets.
+  // Same contract as updateSkillMountPaths in skill-sync-config — always explicit,
+  // never undefined. Each project (main or external) gets mountPaths derived from
+  // its own mount rules; the caller (e.g. PluginResourceActivator) shouldn't need
+  // to know per-project mount topology.
+  const effectiveMountPaths = opts.mountPaths
+    ? [...opts.mountPaths]
+    : enabled
+      ? activeMountTargets(projectRoot, mountRules).map((t) => t.id)
+      : [];
+
   const existing = findSkillEntry(config.capabilities, capId, pluginId);
   if (existing) {
     existing.enabled = enabled;
     existing.globalEnabled = enabled;
-    if (opts.mountPaths) existing.mountPaths = [...opts.mountPaths];
+    existing.mountPaths = effectiveMountPaths;
+    if (opts.skillsSource) existing.skillsSource = opts.skillsSource;
   } else {
     config.capabilities.push({
       id: capId,
@@ -243,14 +352,23 @@ export async function addSkill(
       enabled,
       source: 'cat-cafe',
       ...(pluginId ? { pluginId } : {}),
-      ...(opts.mountPaths ? { mountPaths: [...opts.mountPaths] } : {}),
+      mountPaths: effectiveMountPaths,
+      ...(opts.skillsSource ? { skillsSource: opts.skillsSource } : {}),
     });
   }
-  await writeCapabilitiesConfig(projectRoot, config);
+  await writeCapabilitiesWithRollback(store, previous, config);
 
   // 2. Mount symlinks
-  if (!enabled) return { mounted: [], unmounted: [], conflicts: [] };
-  return mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, opts.mountPaths);
+  const result: SkillOperationResult = enabled
+    ? await mountSkillSymlinks(projectRoot, skillName, skillsSource, mountRules, opts.mountPaths)
+    : { mounted: [], unmounted: [], conflicts: [] };
+
+  // 3. Cascade to governance-registered projects (non-critical)
+  if (opts.cascade) {
+    await cascadeToProjects(projectRoot, opts.cascade.catCafeSkillsSource);
+  }
+
+  return result;
 }
 
 /**
@@ -266,22 +384,73 @@ export async function removeSkill(
 ): Promise<SkillOperationResult> {
   const { mountRules, pluginId } = opts;
   const capId = opts.capabilityId ?? skillName;
+  const store = opts.configStore ?? {
+    readCapabilities: () => readCapabilitiesConfig(projectRoot),
+    writeCapabilities: (config: CapabilitiesConfig) => writeCapabilitiesConfig(projectRoot, config),
+  };
 
-  // 1. Config: disable capability entry
-  const config = await readCapabilitiesConfig(projectRoot);
+  // Design note: removeSkill order differs for plugin vs built-in skills.
+  //
+  // Built-in (toggle off):
+  //   disable main config → cascade (propagates disable) → unmount
+  //   Entry stays in config with mountPaths:[] for re-enable later.
+  //
+  // Plugin (permanent removal):
+  //   save entry info → purge from main config → unmount → cascade
+  //   Cascade runs AFTER purge so orphan detection in syncProject fires:
+  //   globalCustomSourceSkills won't contain the skill → orphan check
+  //   removes the entry from external projects via removedNames path.
+  //   If cascade ran before purge, the entry would still be in
+  //   globalCustomSourceSkills and orphan detection wouldn't trigger,
+  //   leaving stale entries in external projects.
+
+  // 1. Read entry info before modifying config
+  const previous = await store.readCapabilities();
+  const config = previous ? structuredClone(previous) : null;
+  let storedSkillsSource: string | undefined;
   if (config) {
     const existing = findSkillEntry(config.capabilities, capId, pluginId);
     if (existing) {
-      existing.enabled = false;
-      existing.globalEnabled = false;
-      existing.mountPaths = [];
-      await writeCapabilitiesConfig(projectRoot, config);
+      storedSkillsSource = existing.skillsSource;
     }
   }
 
-  // 2. Remove managed symlinks from ALL mount point dirs
-  if (!opts.skillsSource) return { mounted: [], unmounted: [], conflicts: [] };
-  return unmountSkillSymlinks(projectRoot, skillName, opts.skillsSource, mountRules);
+  // 2. Update main config: purge for plugin skills, disable for built-in
+  if (config) {
+    if (pluginId) {
+      // Plugin: purge the entry entirely so cascade triggers orphan detection
+      config.capabilities = config.capabilities.filter(
+        (c) => !(c.type === 'skill' && c.id === capId && c.pluginId === pluginId),
+      );
+    } else {
+      // Built-in: disable (keep entry for re-enable)
+      const existing = findSkillEntry(config.capabilities, capId, pluginId);
+      if (existing) {
+        existing.enabled = false;
+        existing.globalEnabled = false;
+        existing.mountPaths = [];
+      }
+    }
+    await writeCapabilitiesWithRollback(store, previous, config);
+  }
+
+  // 3. Remove managed symlinks from ALL mount point dirs
+  const resolvedSource = opts.skillsSource ?? (storedSkillsSource ? join(projectRoot, storedSkillsSource) : undefined);
+  const result: SkillOperationResult = resolvedSource
+    ? await unmountSkillSymlinks(projectRoot, skillName, resolvedSource, mountRules)
+    : { mounted: [], unmounted: [], conflicts: [] };
+
+  // 4. Cascade to governance-registered projects (non-critical).
+  // For plugin skills: entry is already purged, so syncAll's
+  //   globalCustomSourceSkills won't contain it → orphan detection fires
+  //   → entry removed from external projects.
+  // For built-in skills: entry is disabled, so cascade propagates
+  //   the disable state to external projects.
+  if (opts.cascade) {
+    await cascadeToProjects(projectRoot, opts.cascade.catCafeSkillsSource);
+  }
+
+  return result;
 }
 
 // ────────── Query ──────────

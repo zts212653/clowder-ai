@@ -24,9 +24,25 @@ export interface PluginSkillInfo {
 }
 
 export function pluginSkillSourceDirsForProject(canonicalPluginsDir: string, projectRoot: string): string[] {
-  const dirs = [canonicalPluginsDir];
+  const dirs: string[] = [];
+  const pushUnique = (dir: string): void => {
+    const resolved = resolve(dir);
+    if (!dirs.some((existing) => resolve(existing) === resolved)) dirs.push(dir);
+  };
+
+  pushUnique(canonicalPluginsDir);
+
+  // F204: built-in plugins moved from repo-root `plugins/` to
+  // `packages/api/src/plugins/`. Keep the old root as a read-only fallback for
+  // legacy capabilities/test fixtures that have not yet persisted skillsSource.
+  const maybeRepoRoot = resolve(canonicalPluginsDir, '..', '..', '..', '..');
+  const expectedCanonical = resolve(maybeRepoRoot, 'packages', 'api', 'src', 'plugins');
+  if (resolve(canonicalPluginsDir) === expectedCanonical) {
+    pushUnique(join(maybeRepoRoot, 'plugins'));
+  }
+
   const projectPluginsDir = join(projectRoot, 'plugins');
-  if (resolve(projectPluginsDir) !== resolve(canonicalPluginsDir)) dirs.push(projectPluginsDir);
+  pushUnique(projectPluginsDir);
   return dirs;
 }
 
@@ -107,17 +123,6 @@ export function resolvePluginSkillSourcesFromDirs(
   }
 
   return results;
-}
-
-/**
- * Resolve plugin skill source paths from a capabilities config.
- *
- * For each plugin skill capability entry, parses the corresponding plugin
- * manifest to find the actual filesystem path. Returns only entries whose
- * source directories exist on disk. Parses each manifest at most once.
- */
-export function resolvePluginSkillSources(config: CapabilitiesConfig | null, pluginsDir: string): PluginSkillInfo[] {
-  return resolvePluginSkillSourcesFromDirs(config, [pluginsDir]);
 }
 
 export function resolvePluginSkillSourcesForProject(
