@@ -110,6 +110,11 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
     regex: /Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i,
   },
   { code: 'missing_rollout', regex: /no rollout found/i },
+  // clowder-ai#1038: opencode resumed a stale --session after its session DB was
+  // recreated/cleared (Redis still holds the old cliSessionId). stderr is the literal
+  // `Error: Session not found`. Distinct from missing_rollout (Codex "no rollout found")
+  // — routes to the session self-heal retry path (Path A) in invoke-single-cat.
+  { code: 'session_not_found', regex: /Session not found/i },
   // New 7 (AC-A4) — ordered most-specific first to avoid mis-classification
   {
     code: 'model_not_found',

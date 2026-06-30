@@ -13,6 +13,11 @@
 export type CliErrorReasonCode =
   | 'invalid_thinking_signature'
   | 'missing_rollout'
+  /** opencode (and similar) reports the resumed session no longer exists — stderr
+   *  `Error: Session not found` — e.g. the CLI session DB was recreated/cleared while
+   *  Redis still held the old cliSessionId. Self-heals by dropping the sessionId and
+   *  retrying fresh (invoke-single-cat Path A). clowder-ai#1038 */
+  | 'session_not_found'
   | 'model_not_found'
   | 'auth_failed'
   | 'quota_exceeded'

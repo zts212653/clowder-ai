@@ -2715,6 +2715,80 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(optionsSeen[1].cliSessionId, undefined, 'retry should clear cliSessionId');
   });
 
+  it('clowder-ai#1038: opencode "Session not found" (in cliDiagnostics) self-heals to fresh session', async () => {
+    // opencode's stale-session signal surfaces in metadata.cliDiagnostics.reasonCode, NOT in
+    // msg.error (which is the generic exit-1 string with a [session_not_found] suffix). Without
+    // the reasonCode route, isMissingClaudeSessionError(msg.error) misses it and the error would
+    // fall into transient retry (Path B), re-running the same stale --session forever.
+    let invokeCount = 0;
+    const sessionDeletes = [];
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push({ ...options });
+        invokeCount++;
+        if (invokeCount === 1) {
+          yield {
+            type: 'error',
+            catId: 'opus',
+            error: 'opencode CLI: CLI 异常退出 (code: 1, signal: none) [session_not_found]',
+            metadata: {
+              cliDiagnostics: {
+                reasonCode: 'session_not_found',
+                publicSummary: 'CLI session 找不到',
+                publicHint: '已自动新建会话重试本轮',
+                debugRef: { command: 'opencode', exitCode: 1, signal: null },
+              },
+            },
+            timestamp: Date.now(),
+          };
+          yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          return;
+        }
+        yield { type: 'session_init', catId: 'opus', sessionId: 'new-sess', timestamp: Date.now() };
+        yield { type: 'text', catId: 'opus', content: 'recovered', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+
+    const deps = makeDeps();
+    deps.sessionManager = {
+      get: async () => 'stale-sess',
+      store: async () => {},
+      delete: async (u, c, t) => {
+        sessionDeletes.push(`${u}:${c}:${t}`);
+      },
+    };
+
+    const msgs = await collect(
+      invokeSingleCat(deps, {
+        catId: 'opus',
+        service,
+        prompt: 'test',
+        userId: 'user-1038',
+        threadId: 'thread-1038',
+        isLastCat: true,
+      }),
+    );
+
+    assert.equal(invokeCount, 2, 'should re-invoke once after stale-session diagnostic');
+    assert.equal(optionsSeen[0].sessionId, 'stale-sess', 'first attempt should resume stale session');
+    assert.equal(optionsSeen[1].sessionId, undefined, 'retry should drop --session (fresh)');
+    assert.equal(optionsSeen[0].cliSessionId, 'stale-sess', 'first attempt carries cliSessionId');
+    assert.equal(optionsSeen[1].cliSessionId, undefined, 'retry clears cliSessionId');
+    assert.deepEqual(sessionDeletes, ['user-1038:opus:thread-1038'], 'should delete stale session before retry');
+    assert.ok(
+      msgs.some((m) => m.type === 'text' && m.content === 'recovered'),
+      'should recover and stream retry result',
+    );
+    assert.equal(
+      msgs.some((m) => m.type === 'error' && m.metadata?.cliDiagnostics?.reasonCode === 'session_not_found'),
+      false,
+      'stale-session error should be suppressed when retry succeeds',
+    );
+  });
+
   it('F-BLOAT cloud P1: self-heal retry re-injects systemPrompt when session drops', async () => {
     const optionsSeen = [];
     let invokeCount = 0;
