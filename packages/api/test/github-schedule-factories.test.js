@@ -238,7 +238,7 @@ describe('schedule name validation (P2-2)', () => {
 
 describe('plugins/github/plugin.yaml (AC-B1)', () => {
   test('parses as valid PluginManifest with 3 config + 7 schedule resources', () => {
-    const yamlPath = join(__dirname, '../../../plugins/github/plugin.yaml');
+    const yamlPath = join(__dirname, '../src/plugins/github/plugin.yaml');
     assert.ok(existsSync(yamlPath), `plugin.yaml must exist at ${yamlPath}`);
 
     const manifest = parsePluginManifest(yamlPath);
@@ -634,7 +634,7 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
         scheduleFactoryDeps: makeGitHubDeps(),
       });
 
-      const manifest = parsePluginManifest(join(__dirname, '../../../plugins/github/plugin.yaml'));
+      const manifest = parsePluginManifest(join(__dirname, '../src/plugins/github/plugin.yaml'));
       const result = await activator.enablePlugin(manifest);
 
       // All 7 schedule resources should succeed
@@ -688,7 +688,7 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
         scheduleFactoryDeps: makeGitHubDeps(),
       });
 
-      const manifest = parsePluginManifest(join(__dirname, '../../../plugins/github/plugin.yaml'));
+      const manifest = parsePluginManifest(join(__dirname, '../src/plugins/github/plugin.yaml'));
 
       // Simulate first-startup migration: write entries + marker (as index.ts does)
       const { shouldRunGitHubScheduleMigration, markGitHubScheduleMigrationDone } = await import(
@@ -782,7 +782,7 @@ describe('GitHub plugin lifecycle (AC-B4)', () => {
         scheduleFactoryDeps: deps,
       });
 
-      const manifest = parsePluginManifest(join(__dirname, '../../../plugins/github/plugin.yaml'));
+      const manifest = parsePluginManifest(join(__dirname, '../src/plugins/github/plugin.yaml'));
       const result = await activator.enablePlugin(manifest);
 
       // 4 succeed, 3 fail (repo-scan + repo-comment-poll + community-reconciler — all optional), overall status = success

@@ -1114,7 +1114,7 @@ excluded:
     it('sync-manifest exports the GitHub plugin manifest used by public schedule factories', () => {
       const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
       const targetOwnedFiles = readYamlTopLevelList('sync-manifest.yaml', 'target_owned_files');
-      const pluginManifest = 'plugins/github/plugin.yaml';
+      const pluginManifest = 'packages/api/src/plugins/github/plugin.yaml';
 
       assert.ok(
         existsSync(resolve(ROOT, pluginManifest)),
