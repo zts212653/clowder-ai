@@ -1,16 +1,29 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { fetchLatestIssueCommentCursor } = await import('../dist/infrastructure/github/comment-cursors.js');
+const { fetchLatestIssueCommentCursor, maxGithubId } = await import('../dist/infrastructure/github/comment-cursors.js');
 
 describe('GitHub comment cursor helpers', () => {
-  it('#1053: fetchLatestIssueCommentCursor always returns 0 for new registrations', async () => {
-    // New registrations have processed nothing yet — cursor starts at 0
-    // so the first poll picks up all existing comments.
+  it('maxGithubId ignores non-numeric ids and returns the highest numeric id', () => {
+    assert.equal(maxGithubId([{ id: 10 }, { id: '11' }, { id: 42 }, { id: Number.NaN }, {}]), 42);
+  });
+
+  it('fetchLatestIssueCommentCursor seeds mature issue tracking from existing comments', async () => {
+    const calls = [];
     const cursor = await fetchLatestIssueCommentCursor('owner/repo', 123, {
       ghToken: 'gh-token',
+      fetcher: async (endpoint, options) => {
+        calls.push({ endpoint, options });
+        return [{ id: 10 }, { id: 42 }, { id: 7 }];
+      },
     });
 
-    assert.equal(cursor, 0);
+    assert.equal(cursor, 42);
+    assert.deepEqual(calls, [
+      {
+        endpoint: '/repos/owner/repo/issues/123/comments',
+        options: { ghToken: 'gh-token' },
+      },
+    ]);
   });
 });

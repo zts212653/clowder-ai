@@ -156,7 +156,7 @@ import {
   fetchPrCiStatus,
   ReviewFeedbackRouter,
 } from './infrastructure/email/index.js';
-import { fetchLatestIssueCommentCursor } from './infrastructure/github/comment-cursors.js';
+import { fetchLatestIssueCommentCursor, maxGithubId } from './infrastructure/github/comment-cursors.js';
 import { buildGhCliEnv, resolveGhCliToken } from './infrastructure/github/gh-cli-env.js';
 import type { EvalDomainId } from './infrastructure/harness-eval/domain/eval-domain-registry.js';
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
@@ -2245,12 +2245,26 @@ async function main(): Promise<void> {
   const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
   templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
   const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
-    // #1053: cursors seed at 0 (nothing processed yet) — only CI status needs fetching.
-    const ciStatus = await fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() });
+    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
+    const [reviewComments, issueComments, reviews, ciStatus] = await Promise.all([
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/issues/${prNumber}/comments`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
+        ghToken: getGitHubToken(),
+      }),
+      fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() }),
+    ]);
     return {
       review: {
-        lastCommentCursor: 0,
-        lastDecisionCursor: 0,
+        lastCommentCursor: maxGithubId([
+          ...(reviewComments as { id?: unknown }[]),
+          ...(issueComments as { id?: unknown }[]),
+        ]),
+        lastDecisionCursor: maxGithubId(reviews as { id?: unknown }[]),
       },
       ...(ciStatus
         ? {

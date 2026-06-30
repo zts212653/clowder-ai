@@ -1,21 +1,32 @@
-/**
- * #1053: Cursor seeding returns 0 — new registrations have processed nothing yet.
- * The old maxGithubId() approach seeded at the latest comment ID, causing the first
- * poll to miss all existing comments.
- */
+import { fetchPaginated } from './fetch-paginated.js';
+
+export interface GithubItemWithId {
+  id?: unknown;
+}
 
 export interface FetchLatestIssueCommentCursorOptions {
   ghToken?: string;
+  fetcher?: (endpoint: string, options: { ghToken?: string }) => Promise<readonly GithubItemWithId[]>;
 }
 
-/**
- * Return the initial comment cursor for a newly registered issue.
- * Always 0 — nothing has been processed yet (#1053).
- */
+export function maxGithubId(items: readonly GithubItemWithId[]): number {
+  let cursor = 0;
+  for (const item of items) {
+    if (typeof item.id === 'number' && Number.isFinite(item.id) && item.id > cursor) {
+      cursor = item.id;
+    }
+  }
+  return cursor;
+}
+
 export async function fetchLatestIssueCommentCursor(
-  _repoFullName: string,
-  _issueNumber: number,
-  _opts: FetchLatestIssueCommentCursorOptions = {},
+  repoFullName: string,
+  issueNumber: number,
+  opts: FetchLatestIssueCommentCursorOptions = {},
 ): Promise<number> {
-  return 0;
+  const fetcher = opts.fetcher ?? fetchPaginated;
+  const comments = await fetcher(`/repos/${repoFullName}/issues/${issueNumber}/comments`, {
+    ghToken: opts.ghToken,
+  });
+  return maxGithubId(comments);
 }
