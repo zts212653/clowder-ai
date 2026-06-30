@@ -58,7 +58,7 @@ export class PluginRestExecutor {
   private injectToken(url: string, token: string): string {
     if (this.tokenPlacement === 'header') return url;
     const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}${this.tokenParamName}=${token}`;
+    return `${url}${sep}${this.tokenParamName}=${encodeURIComponent(token)}`;
   }
 
   private buildHeaders(token: string): Record<string, string> {
