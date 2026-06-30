@@ -72,9 +72,19 @@ describe('InjectionTraceStore', () => {
       threadId: 'thread-1',
       catId: 'ragdoll',
       timestamp: Date.now(),
-      segments: [{ segmentId: 'S1', stage: 'session-init', status: 'observed', contentHash: 'abc123', charCount: 100 }],
+      segments: [
+        {
+          segmentId: 'S1',
+          stage: 'session-init',
+          status: 'observed',
+          contentHash: 'abc123',
+          charCount: 100,
+          tokenEstimate: 25,
+        },
+      ],
       delivery: [{ stage: 'session-init', contentAssembled: true, channel: 'message-prepend', reason: 'test' }],
       totalCharCount: 100,
+      totalTokenEstimate: 25,
       totalSegmentsObserved: 1,
       totalSegmentsAbsent: 0,
       durationMs: 5,
@@ -87,7 +97,9 @@ describe('InjectionTraceStore', () => {
       sessionContentHash: 'abc123',
       turnContentHash: 'def456',
       sessionCharCount: 100,
+      sessionTokenEstimate: 25,
       turnCharCount: 50,
+      turnTokenEstimate: 12,
       segments: summary.segments,
     };
 
@@ -114,6 +126,7 @@ describe('InjectionTraceStore', () => {
       segments: [],
       delivery: [],
       totalCharCount: 0,
+      totalTokenEstimate: 0,
       totalSegmentsObserved: 0,
       totalSegmentsAbsent: 0,
       durationMs: 0,
@@ -126,7 +139,9 @@ describe('InjectionTraceStore', () => {
       sessionContentHash: null,
       turnContentHash: null,
       sessionCharCount: 0,
+      sessionTokenEstimate: 0,
       turnCharCount: 0,
+      turnTokenEstimate: 0,
       segments: [],
     };
 
@@ -148,6 +163,7 @@ describe('InjectionTraceStore', () => {
       segments: [],
       delivery: [],
       totalCharCount: 0,
+      totalTokenEstimate: 0,
       totalSegmentsObserved: 0,
       totalSegmentsAbsent: 0,
       durationMs: 0,
@@ -158,7 +174,9 @@ describe('InjectionTraceStore', () => {
       sessionContentHash: null,
       turnContentHash: null,
       sessionCharCount: 0,
+      sessionTokenEstimate: 0,
       turnCharCount: 0,
+      turnTokenEstimate: 0,
       segments: [],
     };
 
@@ -190,6 +208,7 @@ describe('InjectionTraceStore', () => {
       segments: [],
       delivery: [],
       totalCharCount: 0,
+      totalTokenEstimate: 0,
       totalSegmentsObserved: 0,
       totalSegmentsAbsent: 0,
       durationMs: 0,
@@ -202,7 +221,9 @@ describe('InjectionTraceStore', () => {
       sessionContentHash: null,
       turnContentHash: null,
       sessionCharCount: 0,
+      sessionTokenEstimate: 0,
       turnCharCount: 0,
+      turnTokenEstimate: 0,
       segments: [],
     };
 
@@ -227,6 +248,7 @@ describe('InjectionTraceStore', () => {
       segments: [],
       delivery: [],
       totalCharCount: 0,
+      totalTokenEstimate: 0,
       totalSegmentsObserved: 0,
       totalSegmentsAbsent: 0,
       durationMs: 0,
@@ -239,7 +261,9 @@ describe('InjectionTraceStore', () => {
       sessionContentHash: null,
       turnContentHash: null,
       sessionCharCount: 0,
+      sessionTokenEstimate: 0,
       turnCharCount: 0,
+      turnTokenEstimate: 0,
       segments: [],
     };
 
@@ -295,15 +319,19 @@ describe('TraceCollector', () => {
     assert.equal(segments[0].status, 'observed');
     assert.ok(segments[0].charCount > 0);
     assert.ok(segments[0].contentHash !== null);
+    assert.ok(typeof segments[0].tokenEstimate === 'number');
+    assert.ok(segments[0].tokenEstimate > 0, 'observed segment should have token estimate > 0');
 
     assert.equal(segments[1].segmentId, 'S2');
     assert.equal(segments[1].status, 'observed');
+    assert.ok(segments[1].tokenEstimate > 0, 'observed segment should have token estimate > 0');
 
     // S3 has no content after marker (end of string)
     assert.equal(segments[2].segmentId, 'S3');
     assert.equal(segments[2].status, 'absent');
     assert.equal(segments[2].contentHash, null);
     assert.equal(segments[2].charCount, 0);
+    assert.equal(segments[2].tokenEstimate, 0, 'absent segment should have token estimate = 0');
   });
 
   test('parseAnnotatedSegments returns empty for no markers', async () => {
@@ -326,21 +354,38 @@ describe('TraceCollector', () => {
 
     const trace = {
       segments: [
-        { segmentId: 'S1', stage: 'session-init', status: 'observed', contentHash: 'a', charCount: 100 },
-        { segmentId: 'S2', stage: 'session-init', status: 'absent', contentHash: null, charCount: 0 },
-        { segmentId: 'per-turn', stage: 'per-turn', status: 'observed', contentHash: 'b', charCount: 50 },
+        {
+          segmentId: 'S1',
+          stage: 'session-init',
+          status: 'observed',
+          contentHash: 'a',
+          charCount: 100,
+          tokenEstimate: 25,
+        },
+        { segmentId: 'S2', stage: 'session-init', status: 'absent', contentHash: null, charCount: 0, tokenEstimate: 0 },
+        {
+          segmentId: 'per-turn',
+          stage: 'per-turn',
+          status: 'observed',
+          contentHash: 'b',
+          charCount: 50,
+          tokenEstimate: 12,
+        },
       ],
       delivery: [],
       sessionContentHash: 'a',
       turnContentHash: 'b',
       sessionCharCount: 100,
+      sessionTokenEstimate: 25,
       turnCharCount: 50,
+      turnTokenEstimate: 12,
       durationMs: 3,
     };
     const meta = { turnId: 't1', sessionId: 's1', threadId: 'th1', catId: 'ragdoll' };
 
     const summary = buildTraceSummary(trace, meta);
     assert.equal(summary.totalCharCount, 150);
+    assert.equal(summary.totalTokenEstimate, 37);
     assert.equal(summary.totalSegmentsObserved, 2);
     assert.equal(summary.totalSegmentsAbsent, 1);
     assert.equal(summary.durationMs, 3);
@@ -358,7 +403,9 @@ describe('TraceCollector', () => {
       sessionContentHash: null,
       turnContentHash: null,
       sessionCharCount: 0,
+      sessionTokenEstimate: 0,
       turnCharCount: 0,
+      turnTokenEstimate: 0,
       durationMs: 1,
     };
     const meta = { turnId: 't2', threadId: 'th2', catId: 'bengal' };
@@ -368,7 +415,7 @@ describe('TraceCollector', () => {
     assert.equal(summary.threadId, 'th2');
   });
 
-  test('buildTraceDetail captures content hashes and char counts', async () => {
+  test('buildTraceDetail captures content hashes, char counts and token estimates', async () => {
     const { buildTraceDetail } = await import('../dist/domains/prompt-hooks/trace-collector.js');
 
     const trace = {
@@ -377,7 +424,9 @@ describe('TraceCollector', () => {
       sessionContentHash: 'sess-hash',
       turnContentHash: 'turn-hash',
       sessionCharCount: 200,
+      sessionTokenEstimate: 50,
       turnCharCount: 80,
+      turnTokenEstimate: 20,
       durationMs: 1,
     };
     const meta = { turnId: 't2', threadId: 'th2', catId: 'bengal' };
@@ -386,7 +435,9 @@ describe('TraceCollector', () => {
     assert.equal(detail.sessionContentHash, 'sess-hash');
     assert.equal(detail.turnContentHash, 'turn-hash');
     assert.equal(detail.sessionCharCount, 200);
+    assert.equal(detail.sessionTokenEstimate, 50);
     assert.equal(detail.turnCharCount, 80);
+    assert.equal(detail.turnTokenEstimate, 20);
     assert.equal(detail.catId, 'bengal');
   });
 });

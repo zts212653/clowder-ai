@@ -19,6 +19,7 @@ import type {
   ObservedSegment,
   StageDeliveryDecision,
 } from '@cat-cafe/shared';
+import { estimateTokens } from '../../utils/token-counter.js';
 import { buildStaticIdentity, type StaticIdentityOptions } from '../cats/services/context/SystemPromptBuilder.js';
 
 export function hashContent(content: string): string {
@@ -53,6 +54,7 @@ export function parseAnnotatedSegments(annotated: string, stage: InjectionStage)
       status: content.length > 0 ? 'observed' : 'absent',
       contentHash: content.length > 0 ? hashContent(content) : null,
       charCount: content.length,
+      tokenEstimate: content.length > 0 ? estimateTokens(content) : 0,
     });
   }
 
@@ -65,7 +67,9 @@ export interface CollectedTrace {
   sessionContentHash: string | null;
   turnContentHash: string | null;
   sessionCharCount: number;
+  sessionTokenEstimate: number;
   turnCharCount: number;
+  turnTokenEstimate: number;
   durationMs: number;
 }
 
@@ -105,6 +109,7 @@ export function collectTrace(
           status: 'observed',
           contentHash: hashContent(sessionContent),
           charCount: sessionContent.length,
+          tokenEstimate: estimateTokens(sessionContent),
         },
       ];
     }
@@ -120,6 +125,7 @@ export function collectTrace(
             status: 'observed',
             contentHash: hashContent(turnContent),
             charCount: turnContent.length,
+            tokenEstimate: estimateTokens(turnContent),
           },
         ]
       : [];
@@ -154,7 +160,9 @@ export function collectTrace(
     sessionContentHash: sessionContent.length > 0 ? hashContent(sessionContent) : null,
     turnContentHash: turnContent.length > 0 ? hashContent(turnContent) : null,
     sessionCharCount: sessionContent.length,
+    sessionTokenEstimate: sessionContent.length > 0 ? estimateTokens(sessionContent) : 0,
     turnCharCount: turnContent.length,
+    turnTokenEstimate: turnContent.length > 0 ? estimateTokens(turnContent) : 0,
     durationMs,
   };
 }
@@ -176,6 +184,7 @@ export function buildTraceSummary(
     segments: trace.segments,
     delivery: trace.delivery,
     totalCharCount: trace.sessionCharCount + trace.turnCharCount,
+    totalTokenEstimate: trace.sessionTokenEstimate + trace.turnTokenEstimate,
     totalSegmentsObserved: observed.length,
     totalSegmentsAbsent: absent.length,
     durationMs: trace.durationMs,
@@ -195,7 +204,9 @@ export function buildTraceDetail(
     sessionContentHash: trace.sessionContentHash,
     turnContentHash: trace.turnContentHash,
     sessionCharCount: trace.sessionCharCount,
+    sessionTokenEstimate: trace.sessionTokenEstimate,
     turnCharCount: trace.turnCharCount,
+    turnTokenEstimate: trace.turnTokenEstimate,
     segments: trace.segments,
   };
 }

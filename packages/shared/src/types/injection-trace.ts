@@ -19,6 +19,8 @@ export interface ObservedSegment {
   status: 'observed' | 'absent';
   contentHash: string | null;
   charCount: number;
+  /** Approximate token count (tiktoken cl100k_base). */
+  tokenEstimate: number;
 }
 
 /**
@@ -48,6 +50,8 @@ export interface InjectionTraceSummary {
   segments: ObservedSegment[];
   delivery: StageDeliveryDecision[];
   totalCharCount: number;
+  /** Approximate total token count across all assembled content. */
+  totalTokenEstimate: number;
   totalSegmentsObserved: number;
   totalSegmentsAbsent: number;
   durationMs: number;
@@ -62,6 +66,8 @@ export interface InjectionTraceDetail {
   sessionContentHash: string | null;
   turnContentHash: string | null;
   sessionCharCount: number;
+  sessionTokenEstimate: number;
   turnCharCount: number;
+  turnTokenEstimate: number;
   segments: ObservedSegment[];
 }
