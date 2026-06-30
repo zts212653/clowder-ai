@@ -2245,19 +2245,8 @@ async function main(): Promise<void> {
   const { createRepoActivityTemplate } = await import('./infrastructure/scheduler/templates/repo-activity.js');
   templateRegistry.register(createRepoActivityTemplate({ getGitHubToken }));
   const fetchPrTrackingBoundary = async (repoFullName: string, prNumber: number) => {
-    const { fetchPaginated } = await import('./infrastructure/github/fetch-paginated.js');
-    const [reviewComments, issueComments, reviews, ciStatus] = await Promise.all([
-      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/comments`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPaginated(`/repos/${repoFullName}/issues/${prNumber}/comments`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPaginated(`/repos/${repoFullName}/pulls/${prNumber}/reviews`, {
-        ghToken: getGitHubToken(),
-      }),
-      fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() }),
-    ]);
+    // #1053: cursors seed at 0 (nothing processed yet) — only CI status needs fetching.
+    const ciStatus = await fetchPrCiStatus(repoFullName, prNumber, app.log, { ghToken: getGitHubToken() });
     return {
       review: {
         lastCommentCursor: 0,
