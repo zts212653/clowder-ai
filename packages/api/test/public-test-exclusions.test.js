@@ -98,7 +98,7 @@ test('registry preserves metadata for active legacy exclusions and drops stale o
       category: 'source_only',
       owner: '@zts212653',
       introducedBy: '069d0f0fb',
-      expiresOn: '2026-06-30',
+      expiresOn: '2026-07-31',
     },
   );
 });
