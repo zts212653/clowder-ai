@@ -112,7 +112,10 @@ export class CiCdRouter {
             threadId: task.threadId,
           });
         } catch (err) {
-          log.warn({ err }, '[CiCdRouter] onPrLifecycle callback failed (best-effort)');
+          log.warn(
+            { err, repoFullName: poll.repoFullName, prNumber: poll.prNumber, threadId: task.threadId },
+            '[CiCdRouter] onPrLifecycle callback failed (best-effort)',
+          );
         }
       }
 
@@ -167,7 +170,10 @@ export class CiCdRouter {
             await this.opts.projector.apply(communityEvent);
           }
         } catch (err) {
-          log.warn({ err }, '[CiCdRouter] event log append failed (best-effort, spec §Task6)');
+          log.warn(
+            { err, repoFullName: poll.repoFullName, prNumber: poll.prNumber, subjectKey: sk },
+            '[CiCdRouter] event log append failed (best-effort, spec §Task6)',
+          );
         }
       }
 
