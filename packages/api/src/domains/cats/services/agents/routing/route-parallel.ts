@@ -372,9 +372,11 @@ export async function* routeParallel(
       // F237: fire-and-forget injection trace persist (v0 — observability only)
       // Placed after bootstrapCtx so per-turn trace covers ALL route-level
       // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
+      const preTraceSignal = signalForCat?.(catId) ?? signal;
       try {
         const traceStore = getTraceStore();
-        if (traceStore) {
+        if (traceStore && !preTraceSignal?.aborted) {
           const traceTurnId = crypto.randomUUID();
           const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
           const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
