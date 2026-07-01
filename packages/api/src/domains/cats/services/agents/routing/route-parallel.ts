@@ -314,26 +314,6 @@ export async function* routeParallel(
         ...guideContextForCat(guideCtx, catId, targetCatIds, threadId),
         ...conciergeContextForCat(conciergeCtx, catId as string),
       });
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      try {
-        const traceStore = getTraceStore();
-        if (traceStore) {
-          const traceTurnId = crypto.randomUUID();
-          const collected = collectTrace(catId as string, staticIdentity, invocationContext, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
-          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
-          const summary = buildTraceSummary(collected, traceMeta);
-          const detail = buildTraceDetail(collected, traceMeta);
-          traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
-          });
-        }
-      } catch {
-        /* F237: trace collection must never break invocation */
-      }
-
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -387,6 +367,32 @@ export async function* routeParallel(
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
         }
+      }
+
+      // F237: fire-and-forget injection trace persist (v0 — observability only)
+      // Placed after bootstrapCtx so per-turn trace covers ALL route-level
+      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      try {
+        const traceStore = getTraceStore();
+        if (traceStore) {
+          const traceTurnId = crypto.randomUUID();
+          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
+          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
+            .filter(Boolean)
+            .join('\n\n---\n\n');
+          const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
+            mcpAvailable,
+            packBlocks,
+          });
+          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
+          const summary = buildTraceSummary(collected, traceMeta);
+          const detail = buildTraceDetail(collected, traceMeta);
+          traceStore.persist(summary, detail).catch((err) => {
+            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
+          });
+        }
+      } catch {
+        /* F237: trace collection must never break invocation */
       }
 
       let prompt: string;
