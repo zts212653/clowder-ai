@@ -8,7 +8,7 @@
       "reason": "Redis isolation and persistence tests are internal harness coverage, not part of the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "concurrent-fault-drill",
@@ -17,7 +17,7 @@
       "reason": "Fault-drill stress coverage is too heavy for the public gate and stays in internal validation.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "task-progress-store",
@@ -26,7 +26,7 @@
       "reason": "Task progress store behavior depends on internal persistence surfaces not exported to the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "session-strategy-phase3",
@@ -35,7 +35,7 @@
       "reason": "Phase 3 session strategy assertions cover internal rollout behavior outside the public gate contract.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "signal-article-store",
@@ -44,7 +44,7 @@
       "reason": "Signal article store cases exercise source-only data plumbing not guaranteed in the public export.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "persistence-fault-drill",
@@ -53,7 +53,7 @@
       "reason": "Persistence fault drills are heavyweight stress scenarios reserved for internal validation.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "cursor-store-atomicity",
@@ -62,7 +62,7 @@
       "reason": "Atomic cursor store checks cover internal durability mechanics not enforced by the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "workflow-sop-store",
@@ -71,7 +71,7 @@
       "reason": "Workflow SOP store tests rely on internal governance persistence surfaces excluded from the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "codex-agent-service",
@@ -80,7 +80,7 @@
       "reason": "Codex agent runtime service tests depend on internal carrier/harness wiring outside the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "kimi-agent-service",
@@ -89,7 +89,7 @@
       "reason": "Kimi agent service coverage is internal runtime behavior, not public gate contract.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "claude-settings-hooks",
@@ -98,7 +98,7 @@
       "reason": "Claude settings hook assertions depend on private runtime fixtures unavailable in public export.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "game-store",
@@ -107,7 +107,7 @@
       "reason": "Game store tests rely on non-exported local fixtures and are kept out of the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "memory-tests",
@@ -116,7 +116,7 @@
       "reason": "Memory package tests cover internal recall/index behavior outside the public gate promise.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "cross-cat-context",
@@ -125,7 +125,7 @@
       "reason": "Cross-cat context routing is internal collaboration harness behavior, not public gate surface.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "thread-wiring",
@@ -134,7 +134,7 @@
       "reason": "Thread wiring assertions cover internal callback plumbing outside the public gate contract.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "integration-wiring",
@@ -143,7 +143,7 @@
       "reason": "Integration wiring checks depend on internal connection topology not exported to public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "shared-state-wiring",
@@ -152,7 +152,7 @@
       "reason": "Shared-state wiring is internal runtime glue not part of the public gate guarantee.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "signal-fetcher-launchd",
@@ -161,7 +161,7 @@
       "reason": "launchd-specific signal fetcher coverage depends on private macOS fixtures and stays internal.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "reflection-capsule-m3",
@@ -170,7 +170,7 @@
       "reason": "Reflection capsule M3 tests cover internal memory/harness behavior outside the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "workspace-project-context",
@@ -179,7 +179,7 @@
       "reason": "Workspace project context assertions depend on source-only repo structure and local project wiring.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "projects-setup",
@@ -188,7 +188,7 @@
       "reason": "Project setup tests cover internal bootstrap flows not guaranteed in the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "projects-mkdir",
@@ -197,7 +197,7 @@
       "reason": "Project directory creation coverage depends on source-only filesystem conventions.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "governance-status",
@@ -206,7 +206,7 @@
       "reason": "Governance status assertions are source-owned workflow coverage, not public gate behavior.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "governance-pack",
@@ -215,7 +215,7 @@
       "reason": "Governance pack assertions validate source-only sync content and are intentionally excluded from public gate.",
       "owner": "@zts212653",
       "introducedBy": "069d0f0fb",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "pack-integration",
@@ -224,7 +224,7 @@
       "reason": "Pack integration coverage exercises internal source packaging rules outside the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "project-setup-flow",
@@ -233,7 +233,7 @@
       "reason": "Project setup flow behavior is internal bootstrap coverage, not public gate contract.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "process-liveness-probe",
@@ -242,7 +242,7 @@
       "reason": "Process liveness probe timing is too contention-sensitive for the public gate.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "expedition-bootstrap",
@@ -251,7 +251,7 @@
       "reason": "Expedition bootstrap coverage depends on source-owned harness flows not exported publicly.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "rules-route",
@@ -260,7 +260,7 @@
       "reason": "Rules route assertions depend on source-only rule artifacts stripped from public export.",
       "owner": "@zts212653",
       "introducedBy": "4243948da",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "root-md-slim",
@@ -269,7 +269,7 @@
       "reason": "Root markdown slim tests rely on source-specific Chinese anchors not preserved in public export.",
       "owner": "@zts212653",
       "introducedBy": "7a300704a",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "audit-cc-system-prompt",
@@ -278,7 +278,7 @@
       "reason": "System prompt audit depends on internal L0 prompt assets not shipped in public export.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "f188-cold-start-fixtures",
@@ -287,7 +287,7 @@
       "reason": "F188 cold-start fixture coverage depends on internal fixture files absent from public export.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "f188-harness-consistency",
@@ -296,7 +296,7 @@
       "reason": "F188 harness consistency checks rely on internal fixtures and remain source-only.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "orphan-chrome-cleaner",
@@ -305,7 +305,7 @@
       "reason": "Orphan Chrome cleaner assertions are sensitive to local path sanitization and private fixtures.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "capabilities-route",
@@ -314,7 +314,7 @@
       "reason": "Managed MCP path realignment currently fails in public gate and must be tracked as a real product regression.",
       "owner": "@zts212653",
       "introducedBy": "e9bb56052",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "antigravity-run-command-executor",
@@ -323,7 +323,7 @@
       "reason": "Antigravity run-command executor timing is unstable on CI and remains out of the public gate until hardened.",
       "owner": "@zts212653",
       "introducedBy": "0340783c6",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "f203-phase-i-opencode-l0",
@@ -332,7 +332,7 @@
       "reason": "F203 opencode L0 coverage depends on internal runtime files not exported publicly.",
       "owner": "@zts212653",
       "introducedBy": "9c4f26fde",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "f236-cc-anchor-hook",
@@ -350,7 +350,7 @@
       "reason": "GitHub schedule factory assertions are source-owned public-sync governance coverage, not runtime gate behavior.",
       "owner": "@zts212653",
       "introducedBy": "bd8823b99",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "harness-eval-hub-read-model",
@@ -359,7 +359,7 @@
       "reason": "Eval hub read-model coverage exercises source-owned harness governance surfaces outside the public gate.",
       "owner": "@zts212653",
       "introducedBy": "bd8823b99",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "harness-eval-merge-gate-provenance-contract",
@@ -368,7 +368,7 @@
       "reason": "Merge-gate provenance contract tests are source-owned governance coverage, not public runtime behavior.",
       "owner": "@zts212653",
       "introducedBy": "bd8823b99",
-      "expiresOn": "2026-06-30"
+      "expiresOn": "2026-07-31"
     }
   ]
 }
