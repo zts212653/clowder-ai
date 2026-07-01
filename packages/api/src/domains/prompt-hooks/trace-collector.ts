@@ -151,9 +151,9 @@ export function collectTrace(
     {
       stage: 'session-init',
       contentAssembled: sessionContent.length > 0,
-      channel: hasNativeL0 ? 'native-l0' : 'message-prepend',
+      channel: hasNativeL0 ? 'pack-only' : 'message-prepend',
       reason: hasNativeL0
-        ? 'Route-level: pack-only content assembled for native L0 provider; actual delivery by provider'
+        ? 'Route-level: pack-only content assembled via message-prepend for native L0 cat; non-pack identity handled natively by provider'
         : 'Route-level: content assembled for message-prepend; actual delivery depends on session-chain resume state',
     },
     {
