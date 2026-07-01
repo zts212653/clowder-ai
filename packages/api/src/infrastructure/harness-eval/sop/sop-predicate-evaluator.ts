@@ -6,6 +6,9 @@
  * Returns per-rule pass / violation / skipped results.
  */
 
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import process from 'node:process';
 import type { SopTrace } from './sop-trace-adapter.js';
 
 // ---- Predicate type definitions (mirrors sop-definition.generated.ts shapes) ----
@@ -54,6 +57,12 @@ interface PredicateHandleCheck {
   readonly constraint: string;
 }
 
+interface PredicateInvaluableConsensus {
+  readonly type: 'invaluable_consensus';
+  readonly minScore?: number;
+  readonly allowUnresolvedRisks?: boolean;
+}
+
 export type SopPredicate =
   | PredicateManualOnly
   | PredicateCommandPattern
@@ -61,7 +70,8 @@ export type SopPredicate =
   | PredicateShaDedup
   | PredicateEnvCheck
   | PredicateGitState
-  | PredicateHandleCheck;
+  | PredicateHandleCheck
+  | PredicateInvaluableConsensus;
 
 // ---- Rule owner ----
 
@@ -144,6 +154,9 @@ export function evaluatePredicate(
       break;
     case 'handle_check':
       result = evaluateHandleCheck(ruleId, stageId, kind, severity, predicate, trace);
+      break;
+    case 'invaluable_consensus':
+      result = evaluateInvaluableConsensus(ruleId, stageId, kind, severity, predicate, trace);
       break;
     default:
       return { ruleId, status: 'skipped', reason: `unknown predicate type: ${(predicate as { type: string }).type}` };
@@ -548,6 +561,170 @@ function evaluateHandleCheck(
     default:
       // Unknown constraint — pass (forward-compatible)
       break;
+  }
+
+  return { ruleId, status: 'pass' };
+}
+
+function evaluateInvaluableConsensus(
+  ruleId: string,
+  stageId: string,
+  kind: 'hard_rule' | 'pitfall',
+  severity: 'blocker' | 'warn' | 'info',
+  predicate: PredicateInvaluableConsensus,
+  trace: SopTrace,
+): SopEvalResult {
+  const root = trace.gitState.worktreeRoot || process.cwd();
+  const sessionsDir = join(root, '.invaluable-team', 'sessions');
+
+  if (!existsSync(sessionsDir)) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Invaluable sessions directory "${sessionsDir}" does not exist`,
+      'invaluable:no_sessions_dir',
+    );
+  }
+
+  let files: string[];
+  try {
+    files = readdirSync(sessionsDir).filter((f) => f.endsWith('.json'));
+  } catch (err) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Failed to read Invaluable sessions directory: ${(err as Error).message}`,
+      'invaluable:read_dir_failed',
+    );
+  }
+
+  if (files.length === 0) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      'No Invaluable session brief files found in the sessions directory',
+      'invaluable:empty_sessions',
+    );
+  }
+
+  let latestFile = '';
+  let latestMtime = 0;
+  for (const file of files) {
+    const filePath = join(sessionsDir, file);
+    try {
+      const stat = statSync(filePath);
+      if (stat.mtimeMs > latestMtime) {
+        latestMtime = stat.mtimeMs;
+        latestFile = filePath;
+      }
+    } catch (err) {
+      // Ignore stat read errors
+    }
+  }
+
+  if (!latestFile) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      'Could not determine the latest Invaluable session file',
+      'invaluable:no_latest_session',
+    );
+  }
+
+  let content: string;
+  try {
+    content = readFileSync(latestFile, 'utf8');
+  } catch (err) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Failed to read the latest Invaluable session file "${latestFile}": ${(err as Error).message}`,
+      `invaluable:read_failed:${latestFile}`,
+    );
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(content);
+  } catch (err) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Failed to parse the latest Invaluable session file "${latestFile}": ${(err as Error).message}`,
+      `invaluable:parse_failed:${latestFile}`,
+    );
+  }
+
+  const brief = parsed?.brief;
+  if (!brief) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Session file "${latestFile}" is missing the "brief" object`,
+      `invaluable:missing_brief:${latestFile}`,
+    );
+  }
+
+  const selectedPlan = brief.selectedPlan;
+  if (!selectedPlan) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Session brief in "${latestFile}" is missing the "selectedPlan" object`,
+      `invaluable:missing_selected_plan:${latestFile}`,
+    );
+  }
+
+  const minScore = predicate.minScore ?? 80;
+  if (selectedPlan.score < minScore) {
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Selected plan "${selectedPlan.title}" score is ${selectedPlan.score.toFixed(2)}, which is below the required minimum score of ${minScore}`,
+      `invaluable:low_score:${selectedPlan.score.toFixed(2)}`,
+    );
+  }
+
+  const allowUnresolvedRisks = predicate.allowUnresolvedRisks ?? false;
+  const unresolvedRisks = brief.unresolvedRisks || [];
+  if (!allowUnresolvedRisks && unresolvedRisks.length > 0) {
+    const riskSummary = unresolvedRisks.map((r: any) => `${r.severity}:${r.title}`).join(', ');
+    return violation(
+      ruleId,
+      stageId,
+      kind,
+      severity,
+      'invaluable_consensus',
+      `Selected plan has ${unresolvedRisks.length} unresolved risks: ${riskSummary}`,
+      `invaluable:unresolved_risks:${unresolvedRisks.length}`,
+    );
   }
 
   return { ruleId, status: 'pass' };

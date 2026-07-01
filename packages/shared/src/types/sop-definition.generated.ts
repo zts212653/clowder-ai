@@ -60,6 +60,14 @@ export const DEVELOPMENT_SOP_DEFINITION = {
       suggestedSkill: 'writing-plans',
       hardRules: [
         {
+          id: 'impl-invaluable-consensus',
+          kind: 'hard_rule',
+          text: '提案未通过 Invaluable 经济共识（得分低于 80 或存在未消解的 objection）',
+          severity: 'blocker',
+          owner: { type: 'stage_suggested_skill', skill: 'writing-plans' },
+          predicate: { type: 'invaluable_consensus', minScore: 80, allowUnresolvedRisks: false },
+        },
+        {
           id: 'impl-main-sync-before-worktree',
           kind: 'hard_rule',
           text: 'worktree 开之前必须 main 双向同步 (ahead=0 behind=0)',

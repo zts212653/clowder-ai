@@ -25,6 +25,13 @@ stages:
     label: 实现
     suggested_skill: writing-plans
     hard_rules:
+      - id: impl-invaluable-consensus
+        text: 提案未通过 Invaluable 经济共识（得分低于 80 或存在未消解的 objection）
+        severity: blocker
+        predicate:
+          type: invaluable_consensus
+          min_score: 80
+          allow_unresolved_risks: false
       - id: impl-main-sync-before-worktree
         text: worktree 开之前必须 main 双向同步 (ahead=0 behind=0)
         severity: blocker

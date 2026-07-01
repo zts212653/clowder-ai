@@ -22,6 +22,7 @@ const VALID_PREDICATE_TYPES = new Set([
   'git_state_predicate',
   'handle_check',
   'manual_only',
+  'invaluable_consensus',
 ]);
 
 function toCamelRule(raw, kind, stageSuggestedSkill) {
@@ -57,6 +58,14 @@ function toCamelRule(raw, kind, stageSuggestedSkill) {
   if (predicate && Object.hasOwn(predicate, 'before_command')) {
     predicate.beforeCommand = predicate.before_command;
     delete predicate.before_command;
+  }
+  if (predicate && Object.hasOwn(predicate, 'min_score')) {
+    predicate.minScore = predicate.min_score;
+    delete predicate.min_score;
+  }
+  if (predicate && Object.hasOwn(predicate, 'allow_unresolved_risks')) {
+    predicate.allowUnresolvedRisks = predicate.allow_unresolved_risks;
+    delete predicate.allow_unresolved_risks;
   }
 
   return {

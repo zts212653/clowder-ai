@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, describe, it } from 'node:test';
 import {
   evaluatePredicate,
   evaluateSopDefinition,
@@ -19,10 +22,39 @@ const baseTrace = {
   envSnapshot: {
     REDIS_URL: 'redis://localhost:6398',
   },
-  gitState: { branch: 'main', ahead: 0, behind: 0, clean: true },
+  gitState: { branch: 'main', ahead: 0, behind: 0, clean: true, worktreeRoot: '' },
   handles: { author: 'opus', reviewer: 'gpt52', guardian: 'opus47' },
   shaContext: { cloud_review: 'abc123' },
 };
+
+let tmpWorkspace;
+
+before(() => {
+  tmpWorkspace = mkdtempSync(join(tmpdir(), 'cat-cafe-test-sop-'));
+  baseTrace.gitState.worktreeRoot = tmpWorkspace;
+
+  const sessionsDir = join(tmpWorkspace, '.invaluable-team', 'sessions');
+  mkdirSync(sessionsDir, { recursive: true });
+
+  const mockSession = {
+    brief: {
+      selectedPlan: {
+        title: 'Mock plan',
+        score: 95.0,
+      },
+      unresolvedRisks: [],
+    },
+  };
+  writeFileSync(join(sessionsDir, '123456.json'), JSON.stringify(mockSession));
+});
+
+after(() => {
+  if (tmpWorkspace) {
+    try {
+      rmSync(tmpWorkspace, { recursive: true, force: true });
+    } catch (err) {}
+  }
+});
 
 function evalP(predicate, trace = baseTrace) {
   return evaluatePredicate('test-rule', 'test-stage', 'hard_rule', 'blocker', predicate, trace);
@@ -510,6 +542,86 @@ describe('Predicate: handle_check', () => {
   });
 });
 
+// ---- Predicate: invaluable_consensus ----
+
+describe('Predicate: invaluable_consensus', () => {
+  it('passes when a compliant session exists', () => {
+    const result = evalP({ type: 'invaluable_consensus', minScore: 80, allowUnresolvedRisks: false });
+    assert.equal(result.status, 'pass');
+  });
+
+  it('violates when the sessions directory does not exist', () => {
+    const trace = {
+      ...baseTrace,
+      gitState: { ...baseTrace.gitState, worktreeRoot: join(tmpWorkspace, 'nonexistent') },
+    };
+    const result = evalP({ type: 'invaluable_consensus' }, trace);
+    assert.equal(result.status, 'violation');
+    assert.ok(result.violation?.message.includes('does not exist'));
+  });
+
+  it('violates when no session files are found', () => {
+    const emptyWorkspace = mkdtempSync(join(tmpdir(), 'cat-cafe-test-empty-'));
+    mkdirSync(join(emptyWorkspace, '.invaluable-team', 'sessions'), { recursive: true });
+    const trace = {
+      ...baseTrace,
+      gitState: { ...baseTrace.gitState, worktreeRoot: emptyWorkspace },
+    };
+    const result = evalP({ type: 'invaluable_consensus' }, trace);
+    rmSync(emptyWorkspace, { recursive: true, force: true });
+    assert.equal(result.status, 'violation');
+    assert.ok(result.violation?.message.includes('No Invaluable session brief files found'));
+  });
+
+  it('violates when the selected plan score is below minScore', () => {
+    const badScoreWorkspace = mkdtempSync(join(tmpdir(), 'cat-cafe-test-bad-score-'));
+    const sessionsDir = join(badScoreWorkspace, '.invaluable-team', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    const mockSession = {
+      brief: {
+        selectedPlan: {
+          title: 'Low score plan',
+          score: 75.0,
+        },
+        unresolvedRisks: [],
+      },
+    };
+    writeFileSync(join(sessionsDir, '123456.json'), JSON.stringify(mockSession));
+    const trace = {
+      ...baseTrace,
+      gitState: { ...baseTrace.gitState, worktreeRoot: badScoreWorkspace },
+    };
+    const result = evalP({ type: 'invaluable_consensus', minScore: 80 }, trace);
+    rmSync(badScoreWorkspace, { recursive: true, force: true });
+    assert.equal(result.status, 'violation');
+    assert.ok(result.violation?.message.includes('below the required minimum score'));
+  });
+
+  it('violates when unresolved risks exist and allowUnresolvedRisks is false', () => {
+    const badRisksWorkspace = mkdtempSync(join(tmpdir(), 'cat-cafe-test-bad-risks-'));
+    const sessionsDir = join(badRisksWorkspace, '.invaluable-team', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    const mockSession = {
+      brief: {
+        selectedPlan: {
+          title: 'Good score plan with risks',
+          score: 90.0,
+        },
+        unresolvedRisks: [{ severity: 'high', title: 'Security issue', ref: 'p1', reason: 'leak' }],
+      },
+    };
+    writeFileSync(join(sessionsDir, '123456.json'), JSON.stringify(mockSession));
+    const trace = {
+      ...baseTrace,
+      gitState: { ...baseTrace.gitState, worktreeRoot: badRisksWorkspace },
+    };
+    const result = evalP({ type: 'invaluable_consensus', minScore: 80, allowUnresolvedRisks: false }, trace);
+    rmSync(badRisksWorkspace, { recursive: true, force: true });
+    assert.equal(result.status, 'violation');
+    assert.ok(result.violation?.message.includes('unresolved risks'));
+  });
+});
+
 // ---- P1-2: rule owner propagation (AC-E21) ----
 
 describe('Rule owner propagation (AC-E21)', () => {
@@ -582,7 +694,7 @@ describe('evaluateSopDefinition (AC-E22)', () => {
         { command: 'pnpm check:features', exitCode: 0 },
       ],
       envSnapshot: { REDIS_URL: 'redis://localhost:6398' },
-      gitState: { branch: 'main', ahead: 0, behind: 0, clean: true },
+      gitState: { branch: 'main', ahead: 0, behind: 0, clean: true, worktreeRoot: tmpWorkspace },
       handles: { author: 'opus', reviewer: 'gpt52', guardian: 'opus47' },
       shaContext: {},
     };
@@ -594,8 +706,8 @@ describe('evaluateSopDefinition (AC-E22)', () => {
     const skipped = results.filter((r) => r.status === 'skipped');
     const violations = results.filter((r) => r.status === 'violation');
 
-    // 22 total rules in development.yaml (21 from main + impl-user-journey-missing)
-    assert.equal(results.length, 22, `expected 22 rules, got ${results.length}`);
+    // 23 total rules in development.yaml (22 from main + impl-invaluable-consensus)
+    assert.equal(results.length, 23, `expected 23 rules, got ${results.length}`);
 
     // 10 manual_only rules -> skipped (fresh-context-not-approval is manual_only)
     assert.equal(skipped.length, 10, `expected 10 skipped (manual_only), got ${skipped.length}`);

@@ -17,6 +17,7 @@ const EXPECTED_DEVELOPMENT_STAGES = [
 const EXPECTED_PORTED_RULE_TEXTS = [
   'Feature spec 必须有 AC + 需求点 checklist',
   '没有co-creator确认就直接开始实现',
+  '提案未通过 Invaluable 经济共识（得分低于 80 或存在未消解的 objection）',
   'worktree 开之前必须 main 双向同步 (ahead=0 behind=0)',
   'Redis 只用 6398，禁碰 6399',
   '跳过 Design Gate（含 User Journey 落盘）直接写代码',
@@ -47,6 +48,7 @@ const EXPECTED_PREDICATE_TYPES = new Set([
   'git_state_predicate',
   'handle_check',
   'manual_only',
+  'invaluable_consensus',
 ]);
 
 describe('SOP definition catalog', () => {
@@ -76,7 +78,7 @@ describe('SOP definition catalog', () => {
     assert.equal(development.stages.find((stage) => stage.id === 'impl')?.suggestedSkill, 'writing-plans');
 
     const rules = development.stages.flatMap((stage) => [...stage.hardRules, ...stage.pitfalls]);
-    assert.equal(rules.length, 22);
+    assert.equal(rules.length, 23);
     assert.deepEqual(
       rules.map((rule) => rule.text),
       EXPECTED_PORTED_RULE_TEXTS,
