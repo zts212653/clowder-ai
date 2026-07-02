@@ -1314,6 +1314,17 @@ async function main(): Promise<void> {
             service = new A2AAgentService({ catId, config: { url: a2aUrl } });
             break;
           }
+          case 'invaluable': {
+            const { InvaluableAgentService } = await import(
+              './domains/cats/services/agents/providers/InvaluableAgentService.js'
+            );
+            service = new InvaluableAgentService({
+              catId,
+              dataDir: `.loop/${id}`,
+              name: id,
+            });
+            break;
+          }
           default:
             app.log.warn(`[api] Unknown client "${config.clientId}" for cat "${id}". It will not be routable.`);
             continue;
@@ -3582,6 +3593,11 @@ async function main(): Promise<void> {
       await pool.closeAll();
     }
     acpPoolRegistry.clear();
+  });
+
+  app.addHook('onClose', async () => {
+    const { InvaluableNodeManager } = await import('./domains/cats/services/agents/providers/InvaluableNodeManager.js');
+    InvaluableNodeManager.getInstance().stopAll();
   });
 
   // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
