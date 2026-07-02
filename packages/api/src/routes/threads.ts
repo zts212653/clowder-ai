@@ -237,8 +237,11 @@ export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thre
   //   hash storage (not hydrated by `.get()`); this strip protects the in-memory path.
   const hasPendingContinuation = !!thread.pendingContinuation;
   const hasCloudCatBindings = !!thread.cloudCatBindings;
-  if (!hasPendingContinuation && !hasCloudCatBindings) return thread;
-  const { pendingContinuation: _pc, cloudCatBindings: _ccb, ...sanitized } = thread;
+  // #872: threadMetadata is accessed via dedicated MCP tools only — strip from general APIs
+  // to avoid bloating thread list responses with worktree paths and notes.
+  const hasThreadMetadata = !!thread.threadMetadata;
+  if (!hasPendingContinuation && !hasCloudCatBindings && !hasThreadMetadata) return thread;
+  const { pendingContinuation: _pc, cloudCatBindings: _ccb, threadMetadata: _tm, ...sanitized } = thread;
   return sanitized as Thread;
 }
 

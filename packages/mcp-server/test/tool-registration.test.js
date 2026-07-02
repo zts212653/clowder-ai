@@ -125,6 +125,9 @@ const EXPECTED_TOOLS = [
   'cat_cafe_shell_exec',
   // F236 Phase C: cc native Read/Grep/Glob anchor mode control
   'cat_cafe_set_read_mode',
+  // #872: Thread Metadata MCP
+  'cat_cafe_get_thread_metadata',
+  'cat_cafe_set_thread_metadata',
   // F195 Phase B: Audio capture + transcription tools
   'cat_cafe_audio_list_sources',
   'cat_cafe_audio_capture_start',
@@ -204,6 +207,9 @@ const EXPECTED_COLLAB_TOOLS = [
   'cat_cafe_shell_exec',
   // F236 Phase C: cc native Read/Grep/Glob anchor mode control
   'cat_cafe_set_read_mode',
+  // #872: Thread Metadata MCP
+  'cat_cafe_get_thread_metadata',
+  'cat_cafe_set_thread_metadata',
   // F168 Phase B Task 6: declare awaiting_external state for a community case
   'cat_cafe_community_await_external',
 ];
@@ -515,6 +521,8 @@ const KNOWN_WRITE_TOOLS = [
   'cat_cafe_feat_index', // requires callback credentials unavailable in readonly
   // F236 Phase C: set_read_mode writes mode file via callbackPost
   'cat_cafe_set_read_mode',
+  // #872: set_thread_metadata writes via callbackPost
+  'cat_cafe_set_thread_metadata',
   'signal_mark_read',
   'signal_summarize',
   'signal_start_study',

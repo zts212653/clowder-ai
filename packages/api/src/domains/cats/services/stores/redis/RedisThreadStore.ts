@@ -22,11 +22,19 @@ import type {
   Thread,
   ThreadMemoryV1,
   ThreadMentionRoutingFeedback,
+  ThreadMetadataPatch,
+  ThreadMetadataV1,
   ThreadParticipantActivity,
   ThreadRoutingPolicyV1,
   VotingStateV1,
 } from '../ports/ThreadStore.js';
-import { buildExternalRuntimeAnchorThreadId, DEFAULT_THREAD_ID } from '../ports/ThreadStore.js';
+import {
+  buildExternalRuntimeAnchorThreadId,
+  DEFAULT_THREAD_ID,
+  mergeThreadMetadata,
+  parseThreadMetadataJson,
+  validateMergedTotals,
+} from '../ports/ThreadStore.js';
 import { MessageKeys } from '../redis-keys/message-keys.js';
 import { ThreadKeys } from '../redis-keys/thread-keys.js';
 
@@ -43,6 +51,25 @@ if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
 end
 redis.call('HSET', KEYS[1], unpack(ARGV))
 return 1
+`;
+
+/**
+ * #872 P2: Compare-And-Swap guard for thread metadata merge atomicity.
+ * Only writes if (a) thread exists (has `id`) AND (b) current field value
+ * matches the snapshot the caller read. Returns 1 on success, 0 on conflict.
+ * KEYS[1] = detail key, ARGV[1] = field, ARGV[2] = expected, ARGV[3] = new.
+ */
+const CAS_HSET_IF_HAS_ID_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
+  return 0
+end
+local cur = redis.call('HGET', KEYS[1], ARGV[1])
+if cur == false then cur = '' end
+if cur == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
+return 0
 `;
 
 /**
@@ -1065,6 +1092,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.labels && thread.labels.length > 0) {
       result.labels = JSON.stringify(thread.labels);
     }
+    if (thread.threadMetadata) {
+      result.threadMetadata = JSON.stringify(thread.threadMetadata);
+    }
     // F229: Concierge thread marker (set separately via updateThreadKind; also persisted here for
     // cold-create paths where the full thread object is serialized before updateThreadKind is called)
     if (thread.threadKind) {
@@ -1231,6 +1261,11 @@ export class RedisThreadStore implements IThreadStore {
         /* ignore malformed JSON */
       }
     }
+    // #872: Thread metadata anchor
+    if (data.threadMetadata) {
+      const meta = parseThreadMetadataJson(data.threadMetadata);
+      if (meta) result.threadMetadata = meta;
+    }
     // F229 / F167: Restore thread kind marker (written by updateThreadKind; validate value)
     if (data.threadKind === 'concierge' || data.threadKind === 'gate-keeping') {
       result.threadKind = data.threadKind;
@@ -1241,6 +1276,63 @@ export class RedisThreadStore implements IThreadStore {
   async updateLabels(threadId: string, labelIds: string[]): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.redis.hset(key, { labels: JSON.stringify(labelIds) });
+  }
+
+  async getThreadMetadata(threadId: string): Promise<ThreadMetadataV1 | null> {
+    const key = ThreadKeys.detail(threadId);
+    const raw = await this.redis.hget(key, 'threadMetadata');
+    if (!raw) return null;
+    return parseThreadMetadataJson(raw);
+  }
+
+  async updateThreadMetadata(threadId: string, metadata: ThreadMetadataV1 | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (metadata === null) {
+      await this.deleteDetailFields(key, 'threadMetadata');
+    } else {
+      await this.setDetailFields(key, 'threadMetadata', JSON.stringify(metadata));
+    }
+  }
+
+  /**
+   * #872 P2: Atomically read-merge-write thread metadata using CAS.
+   * Prevents concurrent callers from losing each other's appends.
+   * Retries up to 5 times on CAS conflict; throws on exhaustion (no fallback).
+   */
+  async atomicMergeThreadMetadata(threadId: string, patch: ThreadMetadataPatch): Promise<ThreadMetadataV1> {
+    const key = ThreadKeys.detail(threadId);
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const raw = await this.redis.hget(key, 'threadMetadata');
+      const existing = raw != null ? parseThreadMetadataJson(raw) : null;
+      // P1-2: if stored data exists but cannot be parsed (malformed / future version / empty string),
+      // refuse to merge rather than silently overwriting it with a fresh v:1 object.
+      // Uses `raw != null` (not truthy) so empty-string fields are correctly rejected.
+      if (raw != null && !existing) {
+        throw new Error(
+          `Thread ${threadId} has unparseable metadata (${raw.length} bytes); refusing merge to prevent data loss`,
+        );
+      }
+      const merged = mergeThreadMetadata(existing ?? undefined, patch);
+      validateMergedTotals(merged);
+      const newJson = JSON.stringify(merged);
+      const ok = (await this.redis.eval(
+        CAS_HSET_IF_HAS_ID_LUA,
+        1,
+        key,
+        'threadMetadata',
+        raw ?? '',
+        newJson,
+      )) as number;
+      if (ok === 1) {
+        // #872 cloud-review P2: CAS bypasses setDetailFields, so refresh retention
+        // explicitly — otherwise metadata-only writes leave TTL stale when THREAD_TTL_SECONDS is set.
+        await this.applyKeyRetention([key]);
+        return merged;
+      }
+    }
+    // P1-1: No fallback write — throwing preserves the concurrent-safety guarantee.
+    throw new Error(`Thread metadata CAS conflict after ${maxRetries} retries for thread ${threadId}`);
   }
 
   async updateMemberSessionStrategy(

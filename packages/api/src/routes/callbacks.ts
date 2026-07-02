@@ -521,6 +521,8 @@ export interface CallbackRoutesOptions {
   featIndexProvider?: () => Promise<FeatIndexEntry[]>;
   /** F073 P1: workflow SOP store for bulletin board */
   workflowSopStore?: import('../domains/cats/services/stores/ports/WorkflowSopStore.js').IWorkflowSopStore;
+  /** #872 P2: keep evidence index in sync when set-thread-metadata changes title. */
+  indexBuilder?: { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> };
   /** F102: DI memory services — SQLite-backed evidence store */
   evidenceStore: IEvidenceStore;
   markerQueue: IMarkerQueue;
@@ -602,6 +604,27 @@ const listThreadsQuerySchema = z.object({
 
 const listLabelsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).optional(),
+});
+
+const refItemSchema = z.object({ repo: z.string().min(1).max(200), number: z.number().int().positive() });
+const setThreadMetadataSchema = z.object({
+  // P2: match PATCH /api/threads/:id invariants — trim + min(1) + max
+  title: z.string().trim().min(1).max(200).optional(),
+  labels: z.array(z.string().trim().min(1).max(50)).max(20).optional(),
+  // #872 cloud-review P2 (R4): cap per-request payload sizes to prevent unbounded growth.
+  // These are low-frequency anchors; generous caps that no real usage should hit.
+  worktrees: z.array(z.string().max(500)).max(20).optional(),
+  prs: z.array(refItemSchema).max(50).optional(),
+  issues: z.array(refItemSchema).max(50).optional(),
+  features: z.array(z.string().max(50)).max(50).optional(),
+  notes: z
+    .record(z.string().max(100), z.string().max(2000).nullable())
+    .refine((r) => Object.keys(r).length <= 50, { message: 'Too many notes (max 50)' })
+    .optional(),
+  removeWorktrees: z.array(z.string().max(500)).max(20).optional(),
+  removePrs: z.array(refItemSchema).max(50).optional(),
+  removeIssues: z.array(refItemSchema).max(50).optional(),
+  removeFeatures: z.array(z.string().max(50)).max(50).optional(),
 });
 
 const featIndexQuerySchema = z.object({
@@ -2688,6 +2711,138 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }));
 
     return { labels: result };
+  });
+
+  // #872: Thread Metadata MCP — read
+  app.get('/api/callbacks/thread-metadata', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    if (!threadStore) {
+      reply.status(503);
+      return { error: 'Thread store not configured' };
+    }
+
+    const effectiveThreadId = principal.kind === 'invocation' ? principal.threadId : undefined;
+    if (!effectiveThreadId) {
+      reply.status(400);
+      return { error: 'Agent-key callers must use invocation auth for thread metadata' };
+    }
+
+    const thread = await threadStore.get(effectiveThreadId);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+
+    const meta = thread.threadMetadata;
+    return {
+      threadId: effectiveThreadId,
+      title: thread.title,
+      labels: thread.labels ?? [],
+      ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
+      ...(meta?.prs ? { prs: meta.prs } : {}),
+      ...(meta?.issues ? { issues: meta.issues } : {}),
+      ...(meta?.features ? { features: meta.features } : {}),
+      ...(meta?.notes ? { notes: meta.notes } : {}),
+    };
+  });
+
+  // #872: Thread Metadata MCP — write (merge semantics)
+  app.post('/api/callbacks/set-thread-metadata', async (request, reply) => {
+    const principal = requireCallbackPrincipal(request, reply);
+    if (!principal) return;
+
+    const parsed = setThreadMetadataSchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.status(400);
+      return { error: 'Invalid request body', details: parsed.error.issues };
+    }
+
+    if (!threadStore) {
+      reply.status(503);
+      return { error: 'Thread store not configured' };
+    }
+
+    const effectiveThreadId = principal.kind === 'invocation' ? principal.threadId : undefined;
+    if (!effectiveThreadId) {
+      reply.status(400);
+      return { error: 'Agent-key callers must use invocation auth for thread metadata' };
+    }
+
+    const thread = await threadStore.get(effectiveThreadId);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+
+    const { title, labels, ...metadataFields } = parsed.data;
+
+    // #872 cloud-review P2: validate all rejectable inputs BEFORE applying any mutations.
+    // Without this gate, a request with valid title + invalid labels would commit the title
+    // change and then return 400, leaving the thread in a partially-mutated state.
+    if (labels !== undefined) {
+      if (labels.length > 20) {
+        reply.status(400);
+        return { error: 'Too many labels (max 20)' };
+      }
+      if (labels.length > 0 && opts.labelStore) {
+        const userLabels = await opts.labelStore.list(principal.userId);
+        const validIds = new Set(userLabels.map((l) => l.id));
+        const invalid = labels.filter((lid: string) => !validIds.has(lid));
+        if (invalid.length > 0) {
+          reply.status(400);
+          return { error: 'Invalid label IDs', invalidIds: invalid };
+        }
+      }
+    }
+
+    // All validation passed — apply mutations.
+    // #872 cloud-review P2 (R3): failable operations first. atomicMergeThreadMetadata can
+    // throw on CAS exhaustion or unparseable stored data; run it before title/labels so
+    // a throw doesn't leave visible fields partially committed.
+    const hasMetadataUpdate = Object.keys(metadataFields).length > 0;
+    if (hasMetadataUpdate) {
+      try {
+        await threadStore.atomicMergeThreadMetadata(effectiveThreadId, metadataFields);
+      } catch (err) {
+        // #872: total-limits rejection is a client error (deterministic, not retryable).
+        // Surface as 422 so MCP retry helpers don't retry a request that can never succeed.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes('total limits exceeded')) {
+          reply.code(422);
+          return { error: msg };
+        }
+        throw err; // CAS exhaustion / unparseable data → still 500
+      }
+    }
+    if (title !== undefined) {
+      await threadStore.updateTitle(effectiveThreadId, title);
+      // #872 P2: refresh evidence index after title change (same as PATCH /api/threads/:id)
+      try {
+        opts.indexBuilder?.markThreadDirty(effectiveThreadId);
+        await opts.indexBuilder?.flushDirtyThreads?.();
+      } catch {
+        // Best-effort: evidence index refresh must not block metadata write
+      }
+    }
+    if (labels !== undefined) {
+      await threadStore.updateLabels(effectiveThreadId, labels);
+    }
+
+    // Return the updated state
+    const updated = await threadStore.get(effectiveThreadId);
+    const meta = updated?.threadMetadata;
+    return {
+      threadId: effectiveThreadId,
+      title: updated?.title ?? thread.title,
+      labels: updated?.labels ?? thread.labels ?? [],
+      ...(meta?.worktrees ? { worktrees: meta.worktrees } : {}),
+      ...(meta?.prs ? { prs: meta.prs } : {}),
+      ...(meta?.issues ? { issues: meta.issues } : {}),
+      ...(meta?.features ? { features: meta.features } : {}),
+      ...(meta?.notes ? { notes: meta.notes } : {}),
+    };
   });
 
   app.get('/api/callbacks/feat-index', async (request, reply) => {

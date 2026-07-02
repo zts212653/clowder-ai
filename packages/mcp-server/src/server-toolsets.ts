@@ -375,6 +375,8 @@ export const EXPLICIT_TOOL_ANNOTATIONS: Record<string, Annotation> = {
   cat_cafe_publish_verdict: A_WRITE_SAFE,
   cat_cafe_register_pr_tracking: A_WRITE_SAFE,
   cat_cafe_register_issue_tracking: A_WRITE_SAFE,
+  cat_cafe_get_thread_metadata: A_READ_LOCAL,
+  cat_cafe_set_thread_metadata: A_WRITE_SAFE,
   cat_cafe_register_scheduled_task: A_WRITE_SAFE,
   cat_cafe_remove_scheduled_task: A_DESTRUCTIVE, // R8.2: "stops the task and deletes it permanently" (schedule-tools.ts:217)
   cat_cafe_register_external_runtime_session: A_WRITE_SAFE,

@@ -2510,6 +2510,9 @@ async function main(): Promise<void> {
     ...(workflowSopStore ? { workflowSopStore } : {}),
     queueProcessor,
     invocationQueue,
+    indexBuilder: memoryServices.indexBuilder as
+      | { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> }
+      | undefined,
     evidenceStore: memoryServices.evidenceStore,
     markerQueue: memoryServices.markerQueue,
     reflectionService: memoryServices.reflectionService,
