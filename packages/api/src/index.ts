@@ -3600,6 +3600,19 @@ async function main(): Promise<void> {
     InvaluableNodeManager.getInstance().stopAll();
   });
 
+  // Invaluable P2P inference gateway — bridges AgentBrain model requests to Clowder's providers
+  const { invaluableInferenceGateway } = await import('./routes/invaluable-inference-gateway.js');
+  await app.register(invaluableInferenceGateway, {
+    resolveApiKey: (provider: string) => {
+      switch (provider) {
+        case 'anthropic': return process.env.ANTHROPIC_API_KEY;
+        case 'openai': return process.env.OPENAI_API_KEY;
+        case 'google': return process.env.GOOGLE_API_KEY;
+        default: return undefined;
+      }
+    },
+  });
+
   // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).
   // The actual recovery player is assigned post-listen; stopAllLoops is a no-op if null.
   let f101RecoveryPlayer: { stopAllLoops(): void } | null = null;
