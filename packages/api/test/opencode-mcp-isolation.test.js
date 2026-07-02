@@ -23,6 +23,28 @@ const STEP_FINISH = {
   part: { type: 'step-finish', reason: 'stop', cost: 0.01, tokens: { total: 5000 } },
 };
 
+async function invokeOpenCode(invokeOptions = {}, serviceOptions = {}) {
+  const proc = createMockProcess();
+  const spawnFn = mock.fn(() => proc);
+  const service = new OpenCodeAgentService({
+    catId: 'opencode',
+    spawnFn,
+    model: 'claude-haiku-4-5',
+    ...serviceOptions,
+  });
+
+  const promise = collect(service.invoke('Test', invokeOptions));
+  emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+  const messages = await promise;
+
+  return { messages, spawnFn };
+}
+
+async function invokeOpenCodeAndCaptureArgs(invokeOptions = {}, serviceOptions = {}) {
+  const { spawnFn } = await invokeOpenCode(invokeOptions, serviceOptions);
+  return spawnFn.mock.calls[0].arguments[1];
+}
+
 // Clowder AI MCP env var names used in assertions below
 
 describe('MCP Tool Namespace Isolation (AC-10)', () => {
@@ -179,5 +201,67 @@ describe('MCP Tool Namespace Isolation (AC-10)', () => {
     for (const tool of opencodeTools) {
       assert.ok(!tool.startsWith('cat_cafe_'), `opencode tool "${tool}" collides with Clowder AI MCP namespace`);
     }
+  });
+});
+
+describe('OpenCode headless permission mode', () => {
+  test('opencode CLI args auto-approve permissions in headless JSON mode', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs();
+
+    assert.ok(args.includes('--format'), 'must run in JSON event stream mode');
+    assert.ok(args.includes('--auto'), 'must auto-approve permissions for headless runs');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject auto-approval flag exactly once');
+  });
+
+  test('opencode CLI args do not duplicate user-provided --auto', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs({ cliConfigArgs: ['--auto'] });
+
+    assert.ok(args.includes('--auto'), 'must preserve user-provided public auto-approval flag');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must not duplicate auto-approval aliases');
+  });
+
+  test('opencode CLI args let user-provided legacy alias replace default --auto', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs({ cliConfigArgs: ['--dangerously-skip-permissions'] });
+
+    assert.ok(args.includes('--dangerously-skip-permissions'), 'must preserve user-provided legacy alias');
+    assert.equal(
+      args.filter((arg) => arg === '--auto').length,
+      0,
+      'must not inject --auto when user controls approval',
+    );
+  });
+
+  test('opencode auto-approval probe rejects CLIs without --auto support', async () => {
+    const { messages, spawnFn } = await invokeOpenCode(
+      {},
+      {
+        autoApproveProbeFn: async () => ({
+          supported: false,
+          message: 'OpenCode 版本过低，不支持 --auto 自动审批；请升级 opencode-ai 到 >= 1.17.12 后重试。',
+        }),
+      },
+    );
+
+    assert.equal(spawnFn.mock.calls.length, 0, 'must not launch opencode run when --auto is unsupported');
+    const error = messages.find((message) => message.type === 'error');
+    assert.ok(error, 'must yield an error message');
+    assert.match(error.error, /升级 opencode-ai 到 >= 1\.17\.12/);
+  });
+
+  test('opencode auto-approval probe failure surfaces upgrade guidance', async () => {
+    const { messages, spawnFn } = await invokeOpenCode(
+      {},
+      {
+        autoApproveProbeFn: async () => ({
+          supported: false,
+          message: '无法确认 OpenCode 是否支持 --auto 自动审批；请升级 opencode-ai 到 >= 1.17.12 后重试。',
+        }),
+      },
+    );
+
+    assert.equal(spawnFn.mock.calls.length, 0, 'must not launch opencode run when --auto support is unknown');
+    const error = messages.find((message) => message.type === 'error');
+    assert.ok(error, 'must yield an error message');
+    assert.match(error.error, /无法确认 OpenCode 是否支持 --auto/);
   });
 });
