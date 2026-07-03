@@ -3,6 +3,7 @@
  * All cats respond independently to the same message.
  */
 
+import crypto from 'node:crypto';
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
 import { getCatContextBudget } from '../../../../../config/cat-budgets.js';
@@ -28,6 +29,9 @@ import {
   prepareGuideContext,
 } from '../../../../guides/GuideRoutingInterceptor.js';
 import { triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
+import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+// F237: Injection trace (v0 — fire-and-forget observability)
+import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -363,6 +367,34 @@ export async function* routeParallel(
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
         }
+      }
+
+      // F237: fire-and-forget injection trace persist (v0 — observability only)
+      // Placed after bootstrapCtx so per-turn trace covers ALL route-level
+      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
+      const preTraceSignal = signalForCat?.(catId) ?? signal;
+      try {
+        const traceStore = getTraceStore();
+        if (traceStore && !preTraceSignal?.aborted) {
+          const traceTurnId = crypto.randomUUID();
+          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
+          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
+            .filter(Boolean)
+            .join('\n\n---\n\n');
+          const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
+            mcpAvailable,
+            packBlocks,
+          });
+          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
+          const summary = buildTraceSummary(collected, traceMeta);
+          const detail = buildTraceDetail(collected, traceMeta);
+          traceStore.persist(summary, detail).catch((err) => {
+            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
+          });
+        }
+      } catch {
+        /* F237: trace collection must never break invocation */
       }
 
       let prompt: string;

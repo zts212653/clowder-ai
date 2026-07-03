@@ -491,6 +491,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S2', '硬限制');
     const s2 = renderSegment('S2', { RESTRICTIONS_TEXT: config.restrictions.join('、') });
     if (s2) lines.push(s2, '');
+  } else {
+    mark('S2', '硬限制');
   }
 
   /* @segment S3 — Pack Masks (template: s3-pack-masks.md) */
@@ -498,6 +500,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S3', 'Pack Masks');
     const s3 = renderSegment('S3', { PACK_MASKS_BLOCK: options.packBlocks.masksBlock });
     if (s3) lines.push(s3, '');
+  } else {
+    mark('S3', 'Pack Masks');
   }
 
   /* @segment S4 — 协作格式 (template: s4-collaboration.md) */
@@ -516,6 +520,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
       DUPLICATE_NAMES_HINT: dupHint,
     });
     if (s4) lines.push(s4, '');
+  } else {
+    mark('S4', '协作格式');
   }
 
   /* @segment S5 — 队友名册 (template: s5-teammate-roster.md) */
@@ -524,6 +530,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S5', '队友名册');
     const s5 = renderSegment('S5', { ROSTER_CONTENT: rosterLines });
     if (s5) lines.push(s5, '');
+  } else {
+    mark('S5', '队友名册');
   }
 
   /* @segment S6 — 工作流触发点 */
@@ -532,6 +540,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
   if (triggers) {
     mark('S6', '工作流触发点');
     lines.push(triggers, '');
+  } else {
+    mark('S6', '工作流触发点');
   }
 
   /* @segment S7 — Pack Workflows (template: s7-pack-workflows.md) */
@@ -540,6 +550,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S7', 'Pack Workflows');
     const s7 = renderSegment('S7', { PACK_WORKFLOWS_BLOCK: packBlocks.workflowsBlock });
     if (s7) lines.push(s7, '');
+  } else {
+    mark('S7', 'Pack Workflows');
   }
 
   /* @segment S8 — co-creator引用 (template: s8-cvo-reference.md) */
@@ -560,6 +572,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S10', 'Pack Guardrails');
     const s10 = renderSegment('S10', { PACK_GUARDRAILS_BLOCK: packBlocks.guardrailBlock });
     if (s10) lines.push('', s10);
+  } else {
+    mark('S10', 'Pack Guardrails');
   }
 
   /* @segment S11 — Pack Defaults (template: s11-pack-defaults.md) */
@@ -567,6 +581,8 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S11', 'Pack Defaults');
     const s11 = renderSegment('S11', { PACK_DEFAULTS_BLOCK: packBlocks.defaultsBlock });
     if (s11) lines.push('', s11);
+  } else {
+    mark('S11', 'Pack Defaults');
   }
 
   /* @segment S12 — World Driver (template: s12-world-driver.md) */
@@ -574,12 +590,16 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
     mark('S12', 'World Driver');
     const s12 = renderSegment('S12', { WORLD_DRIVER_SUMMARY: packBlocks.worldDriverSummary });
     if (s12) lines.push('', s12);
+  } else {
+    mark('S12', 'World Driver');
   }
 
   /* @segment S13 — MCP 工具文档 */
   if (options?.mcpAvailable) {
     mark('S13', 'MCP 工具文档');
     lines.push('', getMcpToolsSection().trim());
+  } else {
+    mark('S13', 'MCP 工具文档');
   }
 
   return lines.join('\n');

@@ -485,6 +485,12 @@ async function main(): Promise<void> {
     wireRedisGroundingSampleStore(redis);
   }
 
+  // F237: bootstrap injection trace store (fail-open — no Redis → no traces)
+  if (redis) {
+    const { bootstrapTraceStore } = await import('./domains/prompt-hooks/trace-bootstrap.js');
+    bootstrapTraceStore(redis);
+  }
+
   // F174 Phase B: select InvocationRegistry backend.
   // - 'redis' (default when Redis available): API restart no longer drops tokens
   // - 'memory' (fallback / opt-out): pre-Phase-B in-memory behavior
