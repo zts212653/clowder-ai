@@ -434,14 +434,27 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
         if (!s.enabled) {
           disabledServers.push(s.name);
           const dummyToml = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
-          args.push(
-            '--config',
-            `mcp_servers.${dummyToml}.command="echo"`,
-            '--config',
-            `mcp_servers.${dummyToml}.args=[${toTomlString('disabled-shim')}]`,
-            '--config',
-            `mcp_servers.${dummyToml}.enabled=false`,
-          );
+          if (s.transport === 'streamableHttp' && s.url) {
+            // URL-based disabled: emit url + enabled=false to avoid transport
+            // conflict with stale config.toml URL entries — overlaying stdio
+            // fields (command/args) on an existing URL TOML table causes Codex
+            // CLI error "url is not supported for stdio".
+            args.push(
+              '--config',
+              `mcp_servers.${dummyToml}.url=${toTomlString(s.url)}`,
+              '--config',
+              `mcp_servers.${dummyToml}.enabled=false`,
+            );
+          } else {
+            args.push(
+              '--config',
+              `mcp_servers.${dummyToml}.command="echo"`,
+              '--config',
+              `mcp_servers.${dummyToml}.args=[${toTomlString('disabled-shim')}]`,
+              '--config',
+              `mcp_servers.${dummyToml}.enabled=false`,
+            );
+          }
           continue;
         }
         // Pencil: resolver-backed entry — resolve the binary at invoke time

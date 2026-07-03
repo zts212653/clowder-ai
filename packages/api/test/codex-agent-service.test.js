@@ -842,6 +842,86 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('Codex MCP config emits URL-based disabled override for streamableHttp entries', async () => {
+    // When a streamableHttp entry from .codex/config.toml is disabled, we must
+    // emit url + enabled=false (not command/args stdio dummy). Overlaying stdio
+    // fields on a TOML table that already has `url` causes Codex CLI error
+    // "url is not supported for stdio" — transport conflict.
+    const runtimeRoot = makeTempDir('.tmp-codex-disabled-streamable-');
+    const projectDir = makeTempDir('.tmp-codex-disabled-streamable-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      // Disabled streamableHttp entry — globalEnabled=false with a URL
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'disabled-remote',
+          type: 'mcp',
+          globalEnabled: false,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.disabled.example.com/v1',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello disabled streamable http', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-disabled-streamable',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-disabled-streamable',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-disabled-streamable' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Must use url + enabled=false (not stdio dummy)
+          assert.ok(
+            args.includes('mcp_servers.disabled-remote.url="https://mcp.disabled.example.com/v1"'),
+            'disabled streamableHttp must emit url (not command/args) to avoid transport conflict',
+          );
+          assert.ok(
+            args.includes('mcp_servers.disabled-remote.enabled=false'),
+            'disabled streamableHttp must emit enabled=false',
+          );
+          // Must NOT have command/args (would cause transport conflict)
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.disabled-remote.command=')),
+            'disabled streamableHttp must not inject command (transport conflict)',
+          );
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.disabled-remote.args=')),
+            'disabled streamableHttp must not inject args (transport conflict)',
+          );
+        });
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   test('Codex MCP config resolves pencil binary at invoke time', async () => {
     // Pencil entries have resolver='pencil' with empty command/args.
     // CodexAgentService must resolve the pencil binary at invoke time
