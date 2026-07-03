@@ -421,15 +421,22 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         source: string;
         workingDir?: string;
       }>) {
-        // Skip disabled servers entirely. L5 writeCodexMcpConfig already
-        // deletes disabled managed entries from .codex/config.toml, so there's
-        // nothing to override at L4. Injecting a bare `enabled=false` (or even
-        // a dummy command + enabled=false) adds CLI noise and risks Codex CLI
-        // validation errors (≥0.142 requires valid transport on all entries).
-        // The legacy `cat-cafe` shim above is the only exception — user-level
-        // ~/.codex/config.toml may have old entries that L5 cannot reach.
+        // Suppress disabled servers with a complete dummy shape so any stale
+        // .codex/config.toml entries cannot revive. Bare `enabled=false` fails
+        // Codex ≥0.142 schema validation (requires transport fields); including
+        // command+args satisfies the schema — same principle as the legacy
+        // `cat-cafe` shim above (L371-379).
         if (!s.enabled) {
           disabledServers.push(s.name);
+          const dummyToml = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+          args.push(
+            '--config',
+            `mcp_servers.${dummyToml}.command="echo"`,
+            '--config',
+            `mcp_servers.${dummyToml}.args=[${toTomlString('disabled-shim')}]`,
+            '--config',
+            `mcp_servers.${dummyToml}.enabled=false`,
+          );
           continue;
         }
         // Codex only supports stdio — skip streamableHttp and pencil (async resolver)
@@ -438,10 +445,21 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
-        const isCatCafe = s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name);
+        // Managed split: source='cat-cafe' + name in entrypoint map → resolve
+        // binary from mcpDistDir. Same-repo external migration shapes (F193:
+        // source='external' but binary points to our own split entrypoint) use
+        // the entry's own command/args but still need managed env injection.
+        const isManagedCatCafe = s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name);
+        const isSameRepoSplit =
+          !isManagedCatCafe &&
+          s.source === 'external' &&
+          CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name) &&
+          typeof s.args?.[0] === 'string' &&
+          s.args[0].replace(/\\/g, '/').endsWith(`packages/mcp-server/dist/${CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)}`);
+        const isCatCafe = isManagedCatCafe || isSameRepoSplit;
         const workingDir = resolveCodexMcpWorkingDir(s.workingDir, configSourceRoot);
 
-        if (isCatCafe) {
+        if (isManagedCatCafe) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
           const epPath = resolve(mcpDistDir!, ep);
           if (!existsSync(epPath)) continue;

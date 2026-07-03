@@ -533,14 +533,23 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       await promise;
 
       const args = spawnFn.mock.calls[0].arguments[1];
-      // #713 fix: disabled servers are skipped entirely — no enabled=false
-      // injection, no command fields. L5 writeCodexMcpConfig already deletes
-      // disabled managed entries from .codex/config.toml, and injecting a bare
-      // enabled=false risks Codex CLI validation errors (≥0.142 requires valid
-      // transport on all entries).
+      // #1072 fix: disabled servers emit a complete dummy shape (command +
+      // args + enabled=false) to suppress any stale .codex/config.toml entries.
+      // Bare `enabled=false` fails Codex ≥0.142 schema validation; including
+      // command+args satisfies the schema (same principle as legacy cat-cafe shim).
       assert.ok(
-        !args.some((a) => a.includes('mcp_servers.cat-cafe-collab.')),
-        'disabled runtime capability must not appear in CLI args at all',
+        args.includes('mcp_servers.cat-cafe-collab.command="echo"'),
+        'disabled entry must emit dummy command to suppress stale config.toml',
+      );
+      assert.ok(
+        args.some((a) => a.includes('mcp_servers.cat-cafe-collab.args=') && a.includes('disabled-shim')),
+        'disabled entry must emit dummy args for schema compliance',
+      );
+      assert.ok(args.includes('mcp_servers.cat-cafe-collab.enabled=false'), 'disabled entry must emit enabled=false');
+      // No callback env or workspace injection for disabled entries
+      assert.ok(
+        !args.some((a) => a.includes('mcp_servers.cat-cafe-collab.env.')),
+        'disabled entry must not receive env injection',
       );
       assert.ok(
         args.includes(`mcp_servers.cat-cafe-memory.command=${JSON.stringify(process.execPath)}`),
@@ -572,11 +581,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Codex MCP config skips same-name external entry with unsupported transport', async () => {
-    // #713 fix: isCatCafe requires both source === 'cat-cafe' AND name in
-    // CAT_CAFE_SPLIT_ENTRYPOINTS. An external entry with a managed name but
-    // unsupported transport (streamableHttp) is correctly skipped by the
-    // transport filter — no stale user paths or secrets leak into CLI args.
+  test('Codex MCP config suppresses external entry with unsupported transport as disabled dummy', async () => {
+    // #1072 fix: external entry with managed name but unsupported transport
+    // resolves as disabled (transport unsupported for this provider). The
+    // disabled handler emits a complete dummy shape (command + args +
+    // enabled=false) to suppress any stale config.toml entries — stale user
+    // paths and secrets must never leak into CLI args.
     const runtimeRoot = makeTempDir('.tmp-codex-managed-shadow-root-');
     const projectDir = makeTempDir('.tmp-codex-managed-shadow-project-');
     const proc = createMockProcess();
@@ -626,16 +636,96 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           await promise;
 
           const args = spawnFn.mock.calls[0].arguments[1];
-          // External entry with streamableHttp transport is skipped entirely
+          // Entry is disabled (transport unsupported) → emits dummy suppression shape
           assert.ok(
-            !args.some((a) => a.includes('mcp_servers.cat-cafe-limb.')),
-            'external entry with unsupported transport must not appear in CLI args',
+            args.includes('mcp_servers.cat-cafe-limb.command="echo"'),
+            'disabled entry must emit dummy command to suppress stale config.toml',
           );
+          assert.ok(args.includes('mcp_servers.cat-cafe-limb.enabled=false'), 'disabled entry must emit enabled=false');
           // Stale user paths and secrets must never leak
           assert.ok(
             !args.some(
               (arg) => arg.includes('/stale/user') || arg.includes('STALE_SECRET') || arg.includes('must-not-leak'),
             ),
+            'stale user paths and secrets must never leak into CLI args',
+          );
+        });
+      });
+    } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config injects managed env for same-repo external split entries', async () => {
+    // #1072 regression test: ensureCatCafeMainServer migration can leave a
+    // split entry with source='external' but binary pointing to our own repo
+    // dist (isSameRepoExternalSplit). These entries must receive managed env
+    // injection (callback env, workspace dirs, approval mode) even though
+    // they use the external binary path.
+    const runtimeRoot = makeTempDir('.tmp-codex-same-repo-ext-');
+    const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      // Same-repo external shape: source='external', args[0] ends with
+      // packages/mcp-server/dist/limb.js (matching the managed entrypoint).
+      const limbBinaryPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'cat-cafe-limb',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: { command: 'node', args: [limbBinaryPath] },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello same-repo external', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-same-repo',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-same-repo',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-same-repo' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Same-repo external split should be injected (enabled, stdio transport)
+          assert.ok(
+            args.includes('mcp_servers.cat-cafe-limb.enabled=true'),
+            'same-repo external split must be injected as enabled',
+          );
+          // Must receive managed approval mode and callback env injection
+          assert.ok(
+            args.some((a) => a.includes('mcp_servers.cat-cafe-limb.default_tools_approval_mode=')),
+            'same-repo external split must receive approval mode injection',
+          );
+          assert.ok(
+            args.some((a) => a.includes('mcp_servers.cat-cafe-limb.env.ALLOWED_WORKSPACE_DIRS=')),
+            'same-repo external split must receive workspace dir injection',
+          );
+          assert.ok(
+            args.some((a) => a.includes('mcp_servers.cat-cafe-limb.env.CAT_CAFE_API_URL=')),
+            'same-repo external split must receive callback env injection',
           );
         });
       });
