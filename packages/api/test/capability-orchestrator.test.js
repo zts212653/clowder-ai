@@ -2323,13 +2323,15 @@ describe('resolveServersForCat', () => {
     assert.equal(opencodeServers[0].transport, 'streamableHttp');
     assert.equal(opencodeServers[0].url, 'https://mcp.example.com/sse');
 
-    // codex is openai → streamableHttp should be disabled
+    // codex is openai → streamableHttp should be enabled (added in #1072 hotfix)
     const codexServers = resolveServersForCat(config, 'codex');
     assert.equal(codexServers.length, 1);
     assert.equal(codexServers[0].name, 'remote-tool');
-    assert.equal(codexServers[0].enabled, false);
+    assert.equal(codexServers[0].enabled, true);
+    assert.equal(codexServers[0].transport, 'streamableHttp');
+    assert.equal(codexServers[0].url, 'https://mcp.example.com/sse');
 
-    // gemini is google → streamableHttp should also be disabled
+    // gemini is google → streamableHttp should be disabled
     const geminiServers = resolveServersForCat(config, 'gemini');
     assert.equal(geminiServers.length, 1);
     assert.equal(geminiServers[0].name, 'remote-tool');
