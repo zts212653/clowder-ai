@@ -421,26 +421,24 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         source: string;
         workingDir?: string;
       }>) {
-        const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
-        // Same-name external/user entries for managed split servers can exist
-        // in local capabilities from older topology migrations. At invocation
-        // time the split server id itself is managed authority: keep callback
-        // env/workspace injection and runtime-owned binaries intact.
-        const isCatCafe = CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name);
-        // Codex layers user/project config.toml entries under CLI overrides.
-        // A disabled capability therefore needs an explicit per-invocation
-        // override; skipping it lets stale persistent MCP entries revive.
-        if (!s.enabled && (!isCatCafe || s.source === 'cat-cafe')) {
+        // Skip disabled servers entirely. L5 writeCodexMcpConfig already
+        // deletes disabled managed entries from .codex/config.toml, so there's
+        // nothing to override at L4. Injecting a bare `enabled=false` (or even
+        // a dummy command + enabled=false) adds CLI noise and risks Codex CLI
+        // validation errors (≥0.142 requires valid transport on all entries).
+        // The legacy `cat-cafe` shim above is the only exception — user-level
+        // ~/.codex/config.toml may have old entries that L5 cannot reach.
+        if (!s.enabled) {
           disabledServers.push(s.name);
-          args.push('--config', `mcp_servers.${tomlName}.enabled=false`);
           continue;
         }
         // Codex only supports stdio — skip streamableHttp and pencil (async resolver)
-        if (!isCatCafe && (s.transport === 'streamableHttp' || s.resolver === 'pencil')) continue;
+        if (s.transport === 'streamableHttp' || s.resolver === 'pencil') continue;
 
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
+        const isCatCafe = s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name);
         const workingDir = resolveCodexMcpWorkingDir(s.workingDir, configSourceRoot);
 
         if (isCatCafe) {
@@ -467,6 +465,7 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         }
         enabledServers.push(s.name);
 
+        const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
         args.push(
           '--config',
           `mcp_servers.${tomlName}.command=${toTomlString(cmd)}`,

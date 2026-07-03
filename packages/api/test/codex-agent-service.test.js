@@ -533,15 +533,14 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       await promise;
 
       const args = spawnFn.mock.calls[0].arguments[1];
-      // Disabled capabilities still need a per-invocation override because
-      // Codex layers project/user config.toml entries after persistent cleanup.
+      // #713 fix: disabled servers are skipped entirely — no enabled=false
+      // injection, no command fields. L5 writeCodexMcpConfig already deletes
+      // disabled managed entries from .codex/config.toml, and injecting a bare
+      // enabled=false risks Codex CLI validation errors (≥0.142 requires valid
+      // transport on all entries).
       assert.ok(
-        args.includes('mcp_servers.cat-cafe-collab.enabled=false'),
-        'disabled runtime capability must emit enabled=false so layered config.toml entries cannot revive it',
-      );
-      assert.ok(
-        !args.some((a) => a.startsWith('mcp_servers.cat-cafe-collab.command=')),
-        'disabled runtime capability should not emit launch fields',
+        !args.some((a) => a.includes('mcp_servers.cat-cafe-collab.')),
+        'disabled runtime capability must not appear in CLI args at all',
       );
       assert.ok(
         args.includes(`mcp_servers.cat-cafe-memory.command=${JSON.stringify(process.execPath)}`),
@@ -573,7 +572,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Codex MCP config keeps managed split authority when same-name external entry has unsupported transport', async () => {
+  test('Codex MCP config skips same-name external entry with unsupported transport', async () => {
+    // #713 fix: isCatCafe requires both source === 'cat-cafe' AND name in
+    // CAT_CAFE_SPLIT_ENTRYPOINTS. An external entry with a managed name but
+    // unsupported transport (streamableHttp) is correctly skipped by the
+    // transport filter — no stale user paths or secrets leak into CLI args.
     const runtimeRoot = makeTempDir('.tmp-codex-managed-shadow-root-');
     const projectDir = makeTempDir('.tmp-codex-managed-shadow-project-');
     const proc = createMockProcess();
@@ -623,11 +626,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           await promise;
 
           const args = spawnFn.mock.calls[0].arguments[1];
-          const limbArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe-limb.args=['));
-          assert.ok(args.includes(`mcp_servers.cat-cafe-limb.command=${JSON.stringify(process.execPath)}`));
-          assert.ok(limbArgsConfig?.includes('packages/mcp-server/dist/limb.js'));
-          assert.ok(args.includes(`mcp_servers.cat-cafe-limb.env.ALLOWED_WORKSPACE_DIRS="${projectDir}"`));
-          assert.ok(args.includes('mcp_servers.cat-cafe-limb.env.CAT_CAFE_INVOCATION_ID="inv-managed-shadow"'));
+          // External entry with streamableHttp transport is skipped entirely
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.cat-cafe-limb.')),
+            'external entry with unsupported transport must not appear in CLI args',
+          );
+          // Stale user paths and secrets must never leak
           assert.ok(
             !args.some(
               (arg) => arg.includes('/stale/user') || arg.includes('STALE_SECRET') || arg.includes('must-not-leak'),

@@ -62,19 +62,13 @@ function computeDriftHash(globalEntries: CapabilityEntry[], projectEntries: Capa
   return hash.digest('hex').slice(0, 16);
 }
 
-function normalizedBlockedCats(entry: CapabilityEntry): string[] {
-  return [...(entry.blockedCats ?? [])].sort();
-}
-
 function mcpDriftSnapshot(entry: CapabilityEntry): {
   mcpServer: CapabilityEntry['mcpServer'];
   globalEnabled: boolean;
-  blockedCats: string[];
 } {
   return {
     mcpServer: entry.mcpServer,
     globalEnabled: entry.globalEnabled ?? entry.enabled ?? true,
-    blockedCats: normalizedBlockedCats(entry),
   };
 }
 
