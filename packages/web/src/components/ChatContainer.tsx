@@ -581,7 +581,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   const currentProjectPath = useChatStore((s) => s.currentProjectPath);
   const { status: govStatus, refetch: govRefetch } = useGovernanceStatus(currentProjectPath);
   const isProjectThread = !!currentProjectPath && currentProjectPath !== 'default' && currentProjectPath !== 'lobby';
-  const agentHookHealth = useAgentHookHealth({ enabled: isProjectThread });
+  const agentHookHealth = useAgentHookHealth({ enabled: isProjectThread, projectPath: currentProjectPath });
   const [setupDone, setSetupDone] = useState(false);
   // Show card when: needs setup (idle) OR just completed setup (done) — only in empty threads
   const showSetupCard = !!(

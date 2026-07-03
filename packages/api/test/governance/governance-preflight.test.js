@@ -71,16 +71,16 @@ describe('governance-preflight', () => {
     assert.ok(result.reason?.includes('CLAUDE.md'));
   });
 
-  it('fails when registry confirmed but skills symlinks removed', async () => {
+  it('passes when skills symlinks removed (skills are not governance)', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
     await service.bootstrap(externalProject, { dryRun: false });
     for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
       await rm(join(externalProject, dir), { recursive: true, force: true }).catch(() => {});
     }
 
+    // Skills deployment is handled by drift detection (F228), not governance preflight.
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('skills'));
+    assert.equal(result.ready, true);
   });
 
   it('provides actionable bootstrapCommand for new projects', async () => {
@@ -99,13 +99,13 @@ describe('governance-preflight', () => {
     assert.ok(result.reason?.includes('KIMI.md'));
   });
 
-  it('requires .kimi/skills when preflighting a kimi project', async () => {
+  it('passes when .kimi/skills removed for kimi project (skills are not governance)', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
     await service.bootstrap(externalProject, { dryRun: false });
     await rm(join(externalProject, '.kimi/skills'), { recursive: true, force: true });
 
+    // Skills deployment is handled by drift detection (F228), not governance preflight.
     const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('.kimi/skills'));
+    assert.equal(result.ready, true);
   });
 });

@@ -25,6 +25,8 @@ export interface McpIssue {
   message: string;
   /** Whether the project entry has an override (relevant for config-mismatch) */
   hasOverride?: boolean;
+  /** Plugin that owns this entry (present for project-orphan issues from plugin MCPs) */
+  pluginId?: string;
 }
 
 export interface McpDriftResult {
@@ -128,6 +130,7 @@ export async function checkMcpProject(
         type: 'project-orphan',
         mcpId,
         message: `MCP「${mcpId}」在全局已不存在，疑似残留配置`,
+        ...(projectEntry.pluginId ? { pluginId: projectEntry.pluginId } : {}),
       });
     }
   }

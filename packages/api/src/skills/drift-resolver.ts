@@ -24,6 +24,8 @@ export interface DriftSyncReport {
   mounted: string[];
   unmounted: string[];
   overridden: string[];
+  /** Conflicts skipped due to keep-project policy (user content preserved). */
+  skipped: string[];
   resolvedFrom: DriftResult;
 }
 
@@ -47,8 +49,11 @@ export function syncDrift(
   mountRules: MountRules,
   drift: DriftResult,
   opts?: SyncDriftOptions,
+  conflictPolicy?: 'use-global' | 'keep-project',
 ): Promise<DriftSyncReport> {
-  return withCapabilityLock(projectRoot, () => syncDriftUnlocked(projectRoot, skillsSource, mountRules, drift, opts));
+  return withCapabilityLock(projectRoot, () =>
+    syncDriftUnlocked(projectRoot, skillsSource, mountRules, drift, opts, conflictPolicy),
+  );
 }
 
 async function syncDriftUnlocked(
@@ -57,18 +62,31 @@ async function syncDriftUnlocked(
   mountRules: MountRules,
   drift: DriftResult,
   opts?: SyncDriftOptions,
+  conflictPolicy?: 'use-global' | 'keep-project',
 ): Promise<DriftSyncReport> {
   // Pre-delete conflict blockers so syncProject sees clean paths.
   // Scope to the specific mount point where the conflict was detected.
   // Blockers are renamed to a backup dir (same filesystem for atomicity)
   // and restored if syncProject fails, preventing user data loss.
+  //
+  // #1049 Phase D: when conflictPolicy='keep-project', skip all conflict
+  // blockers — user-customized skill symlinks/directories are preserved,
+  // and only non-conflicting drift items are synced.
   const targets = buildSkillMountTargets(projectRoot, homedir(), mountRules);
   const overriddenSkills = new Set<string>();
+  const skippedSkills = new Set<string>();
   const backups: BlockerBackup[] = [];
   const backupDir = join(projectRoot, '.cat-cafe', '.drift-backup');
 
   for (const conflict of drift.conflicts ?? []) {
     if (!isValidSkillName(conflict.skill)) continue;
+
+    // keep-project: preserve user's custom skill content, skip the conflict
+    if (conflictPolicy === 'keep-project') {
+      skippedSkills.add(conflict.skill);
+      continue;
+    }
+
     overriddenSkills.add(conflict.skill);
     const target = targets.find((t) => t.id === conflict.mountPointId);
     if (!target) continue;
@@ -121,6 +139,7 @@ async function syncDriftUnlocked(
       mounted: [...new Set(syncResult.mounted.map((m) => m.skillName))].sort(),
       unmounted: [...new Set(syncResult.unmounted.map((u) => u.skillName))].sort(),
       overridden: [...overriddenSkills].sort(),
+      skipped: [...skippedSkills].sort(),
       resolvedFrom: drift,
     };
   } catch (syncErr) {

@@ -134,6 +134,23 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
 
     const projectPath = typeof body.projectPath === 'string' ? body.projectPath : undefined;
 
+    // #1049 Phase D: validate conflictPolicy — unified default decision for conflict
+    // resolution across both MCP and skill resolvers.
+    //   'use-global': overwrite with managed config (Console manual sync default)
+    //   'keep-project': skip user-customized content (health-check auto-sync default)
+    // Applies to: MCP config-mismatch issues and skill symlink/directory conflicts.
+    type ConflictPolicy = 'use-global' | 'keep-project';
+    let conflictPolicy: ConflictPolicy | undefined;
+    if (typeof body.conflictPolicy === 'string') {
+      if (body.conflictPolicy !== 'use-global' && body.conflictPolicy !== 'keep-project') {
+        reply.status(400);
+        return {
+          error: `Invalid conflictPolicy "${body.conflictPolicy}"; must be one of: ${[...VALID_MCP_DRIFT_DECISIONS].join(', ')}`,
+        };
+      }
+      conflictPolicy = body.conflictPolicy;
+    }
+
     if (type === 'skill') {
       const targetRoot = projectPath ? await validateProjectPath(projectPath) : STARTUP_REPO_ROOT;
       if (!targetRoot) {
@@ -146,16 +163,22 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
           reply.status(400);
           return { error: 'Invalid project path' };
         }
-        const report = await syncDrift(ctx.effectiveRoot, ctx.skillsSource, ctx.mountRules, ctx.drift, ctx.syncOpts);
+        const report = await syncDrift(
+          ctx.effectiveRoot,
+          ctx.skillsSource,
+          ctx.mountRules,
+          ctx.drift,
+          ctx.syncOpts,
+          conflictPolicy,
+        );
         return { action: 'sync', report, projectRoot: ctx.effectiveRoot };
       });
     }
 
     // type === 'mcp'
-    if (!projectPath) {
-      reply.status(400);
-      return { error: 'Required: projectPath for MCP resolve' };
-    }
+    // #1050: MCP resolve accepts undefined projectPath (global scope).
+    // Consistent with /api/drift/check and skill resolve which both
+    // fall back to STARTUP_REPO_ROOT when projectPath is absent.
 
     // #712 review: validate resolutions early (before drift check) to fail fast on malformed input
     const MAX_RESOLUTIONS = 200;
@@ -184,19 +207,20 @@ export const unifiedDriftRoutes: FastifyPluginAsync = async (app) => {
       resolutions = body.resolutions as McpDriftResolution[];
     }
 
-    const projectRoot = await validateProjectPath(projectPath);
-    if (!projectRoot) {
+    const projectRoot = projectPath ? await validateProjectPath(projectPath) : null;
+    if (projectPath && !projectRoot) {
       reply.status(400);
       return { error: 'Invalid project path' };
     }
-    const drift = await checkMcpProject(projectRoot, STARTUP_REPO_ROOT);
+    const effectiveRoot = projectRoot ?? STARTUP_REPO_ROOT;
+    const drift = await checkMcpProject(effectiveRoot, STARTUP_REPO_ROOT);
     if (drift.issues.length === 0) {
       return {
         action: 'sync',
         report: { added: [], removed: [], updated: [], skipped: [], syncedHash: drift.driftHash },
       };
     }
-    const report = await syncMcpDrift(projectRoot, STARTUP_REPO_ROOT, drift, resolutions);
-    return { action: 'sync', report, projectRoot };
+    const report = await syncMcpDrift(effectiveRoot, STARTUP_REPO_ROOT, drift, resolutions, conflictPolicy);
+    return { action: 'sync', report, projectRoot: effectiveRoot };
   });
 };

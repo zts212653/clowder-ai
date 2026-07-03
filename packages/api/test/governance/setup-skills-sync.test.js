@@ -172,9 +172,12 @@ describe('runtime governance creates project-level skill links (ADR-025)', () =>
     assert.ok(mountRulesContent.includes("kimi: { enabled: true, path: '.kimi/skills' }"));
   });
 
-  it('governance preflight checks skill symlinks are present', async () => {
+  it('governance preflight does NOT gate on skill symlinks (F228 drift handles that)', async () => {
     const content = await readFile(PREFLIGHT_SRC, 'utf-8');
-    assert.ok(content.includes('skills'), 'governance-preflight must reference skills');
+    // After F228, skill deployment is handled by drift detection, not governance.
+    // Preflight should NOT contain lstat/readdir calls on skills directories.
+    assert.ok(!content.includes('PROVIDER_SKILLS_DIR'), 'governance-preflight must not reference PROVIDER_SKILLS_DIR');
+    assert.ok(!content.includes('hasSkillsSetup'), 'governance-preflight must not check hasSkillsSetup');
   });
 });
 

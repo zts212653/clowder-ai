@@ -1056,6 +1056,55 @@ describe('DriftResolver (F228 Phase 2B)', () => {
     assert.equal(restored, 'user content that must survive', 'restored content must match original');
   });
 
+  test('syncDrift keep-project preserves user-owned conflict blocker and returns skipped', async () => {
+    await makeSkill('tdd');
+    // Create user-owned directory blocking the managed mount
+    const userDir = join(projectRoot, '.claude/skills/tdd');
+    await mkdir(userDir, { recursive: true });
+    await writeFile(join(userDir, 'user.md'), 'user version must survive');
+
+    const drift = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    assert.ok(
+      drift.conflicts.some((c) => c.skill === 'tdd'),
+      'fixture must create a tdd conflict',
+    );
+
+    // keep-project: skip conflict, preserve user content
+    const report = await syncDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, drift, {}, 'keep-project');
+
+    assert.deepEqual(report.skipped, ['tdd'], 'conflict should be in skipped');
+    assert.deepEqual(report.overridden, [], 'nothing should be overridden');
+    // User directory must still be there
+    const stat = await lstat(userDir);
+    assert.equal(stat.isDirectory(), true, 'user-owned dir must be preserved under keep-project');
+    assert.equal(stat.isSymbolicLink(), false, 'user-owned dir must not become a symlink');
+    const content = await readFile(join(userDir, 'user.md'), 'utf8');
+    assert.equal(content, 'user version must survive', 'user content must be intact');
+  });
+
+  test('syncDrift use-global overrides conflict blocker (explicit policy)', async () => {
+    await makeSkill('tdd');
+    // Same setup: user-owned blocker
+    const userDir = join(projectRoot, '.claude/skills/tdd');
+    await mkdir(userDir, { recursive: true });
+    await writeFile(join(userDir, 'user.md'), 'user version will be replaced');
+
+    const drift = await checkMount(projectRoot, skillsSource, DEFAULT_MOUNT_RULES);
+    assert.ok(
+      drift.conflicts.some((c) => c.skill === 'tdd'),
+      'fixture must create conflict',
+    );
+
+    // use-global: override user content with managed symlink
+    const report = await syncDrift(projectRoot, skillsSource, DEFAULT_MOUNT_RULES, drift, {}, 'use-global');
+
+    assert.deepEqual(report.overridden, ['tdd'], 'conflict should be overridden');
+    assert.deepEqual(report.skipped, [], 'nothing should be skipped');
+    const linkPath = join(projectRoot, '.claude/skills/tdd');
+    const stat = await lstat(linkPath);
+    assert.equal(stat.isSymbolicLink(), true, 'user dir should be replaced by managed symlink');
+  });
+
   test('syncDrift waits for capability lock before moving conflict blockers', async () => {
     await makeSkill('tdd');
 

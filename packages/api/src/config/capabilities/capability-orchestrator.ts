@@ -10,6 +10,7 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat as statPath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -633,7 +634,9 @@ export async function writeCapabilitiesConfig(projectRoot: string, config: Capab
   await mkdir(dir, { recursive: true });
   const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
   // #712 review P1-2: atomic write — temp file + rename prevents TOCTOU / partial-write corruption
-  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  // Use PID + UUID to ensure uniqueness across concurrent async writes within the same process.
+  // PID-only caused ENOENT when multiple @mentions triggered parallel capability writes (#1049).
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
   await rename(tmpPath, filePath);
 }
@@ -1343,6 +1346,151 @@ export async function bootstrapCapabilities(
 }
 
 /**
+ * #1049: Ensure all managed Clowder AI split MCP servers exist in capabilities.json.
+ *
+ * Catches the gap where capabilities.json exists but managed MCPs are partially
+ * or entirely missing (e.g., manual deletion, corrupt bootstrap, or migration
+ * from an older version that didn't create all splits).
+ *
+ * Unlike `migrateLegacyCatCafeCapability` (requires legacy `cat-cafe` entry) or
+ * `ensureCatCafeMainServer` (requires core 3 splits to already exist), this
+ * function unconditionally ensures ALL 6 managed split servers are present.
+ *
+ * Newly added entries inherit enabled/blockedCats from the first existing
+ * managed split (if any), maintaining user intent for the managed MCP surface.
+ */
+export function ensureCoreManagedMcps(
+  config: CapabilitiesConfig,
+  opts?: { catCafeRepoRoot?: string },
+): { migrated: boolean; config: CapabilitiesConfig } {
+  const binaryRoot = resolveBinaryRoot(opts?.catCafeRepoRoot);
+  const descriptors = buildCatCafeSplitMcpDescriptors(binaryRoot);
+
+  // #1049 partial-legacy: detect legacy `cat-cafe` entry with `overrides`.
+  // When migrateLegacyCatCafeCapability bails (because hasManagedSplit=true),
+  // legacy `cat-cafe` with overrides coexists with partial managed splits.
+  // ensureCatCafeMainServer (step 3) will remove the legacy entry later —
+  // we must propagate its overrides→blockedCats to splits HERE to preserve them.
+  const legacyMain = config.capabilities.find(
+    (cap) => cap.type === 'mcp' && cap.source === 'cat-cafe' && cap.id === 'cat-cafe',
+  );
+  const legacyBlockedCats = legacyMain?.overrides
+    ? legacyMain.overrides.filter((o) => !o.enabled).map((o) => o.catId)
+    : [];
+
+  // Check which managed splits already exist (by source + id).
+  // Exclude plugin MCPs (source='cat-cafe' + pluginId) — they are user-installed
+  // extensions, not built-in splits (codex upstream review P2).
+  const isBuiltinManaged = (cap: CapabilityEntry): boolean =>
+    cap.type === 'mcp' && cap.source === 'cat-cafe' && !cap.pluginId;
+  const existingManagedIds = new Set(config.capabilities.filter(isBuiltinManaged).map((cap) => cap.id));
+
+  // Find missing managed splits
+  const missingDescriptors = descriptors.filter((d) => !existingManagedIds.has(d.name));
+
+  // Nothing to add AND no legacy overrides to propagate → no-op
+  if (missingDescriptors.length === 0 && legacyBlockedCats.length === 0) {
+    return { migrated: false, config };
+  }
+
+  // Collision guard: skip any managed split whose id is already taken by
+  // a non-managed entry (same logic as migrateLegacyCatCafeCapability).
+  const allMcpIds = new Set(config.capabilities.filter((cap) => cap.type === 'mcp').map((cap) => cap.id));
+  const safeToAdd = missingDescriptors.filter((d) => !allMcpIds.has(d.name));
+
+  // #1049 upstream P2: all-or-nothing when legacy is active.
+  // If legacy main exists and some splits are collision-blocked by non-managed
+  // MCPs, adding only the non-colliding splits would create duplicate tool
+  // exposure: legacy registerFullToolset + partial split servers.
+  // ensureCatCafeMainServer (step 3) can't remove legacy without the full set.
+  // Clear the add set; legacy overrides propagation below still runs if needed.
+  if (legacyMain && missingDescriptors.length > 0 && safeToAdd.length < missingDescriptors.length) {
+    safeToAdd.splice(0);
+  }
+
+  // No splits to add AND no legacy overrides to propagate → no-op
+  if (safeToAdd.length === 0 && legacyBlockedCats.length === 0) {
+    return { migrated: false, config };
+  }
+
+  let migrated = false;
+  const capabilities = [...config.capabilities];
+
+  // P1 inheritance priority (matches ensureCatCafeMainServer line 1149):
+  //   1. Legacy main (if exists) — it hosted these split tools, so its
+  //      enabled/env/workingDir represent user intent for the split surface
+  //   2. First existing managed split (fallback for installs with no legacy main)
+  // Note: legacy `cat-cafe` has `overrides` not `blockedCats` — that conversion
+  // is handled separately via legacyBlockedCats below.
+  const inheritFrom = legacyMain ?? capabilities.find((cap) => isBuiltinManaged(cap) && cap.id !== 'cat-cafe');
+
+  for (const descriptor of safeToAdd) {
+    const entry = toCapabilityEntry(descriptor);
+    if (inheritFrom) {
+      const inheritedEnabled = inheritFrom.globalEnabled ?? inheritFrom.enabled ?? true;
+      entry.enabled = inheritedEnabled;
+      entry.globalEnabled = inheritedEnabled;
+      if (inheritFrom.blockedCats && inheritFrom.blockedCats.length > 0) {
+        entry.blockedCats = [...inheritFrom.blockedCats];
+      }
+      if (inheritFrom.mcpServer?.env) {
+        entry.mcpServer!.env = { ...inheritFrom.mcpServer.env };
+      }
+      if (inheritFrom.mcpServer?.workingDir) {
+        entry.mcpServer!.workingDir = inheritFrom.mcpServer.workingDir;
+      }
+    }
+
+    // Legacy overrides→blockedCats take precedence over inherited blockedCats
+    if (legacyBlockedCats.length > 0) {
+      entry.blockedCats = [...legacyBlockedCats];
+    }
+
+    // Insert near other managed splits for readability
+    const lastManagedIdx = (() => {
+      let lastIdx = -1;
+      for (let i = 0; i < capabilities.length; i++) {
+        const cap = capabilities[i];
+        if (cap && cap.type === 'mcp' && cap.source === 'cat-cafe') lastIdx = i;
+      }
+      return lastIdx;
+    })();
+
+    if (lastManagedIdx >= 0) {
+      capabilities.splice(lastManagedIdx + 1, 0, entry);
+    } else {
+      // No managed MCPs at all — prepend (managed MCPs conventionally come first)
+      capabilities.unshift(entry);
+    }
+    migrated = true;
+  }
+
+  // Propagate legacy overrides→blockedCats to existing managed splits.
+  // Union with any existing blockedCats so pre-existing per-cat restrictions
+  // are preserved AND legacy-blocked cats are not silently unblocked when
+  // ensureCatCafeMainServer removes the legacy entry.
+  if (legacyBlockedCats.length > 0) {
+    for (let i = 0; i < capabilities.length; i++) {
+      const cap = capabilities[i]!;
+      if (isBuiltinManaged(cap) && cap.id !== 'cat-cafe') {
+        const existing = cap.blockedCats ?? [];
+        const merged = [...new Set([...existing, ...legacyBlockedCats])];
+        if (merged.length !== existing.length) {
+          capabilities[i] = { ...cap, blockedCats: merged };
+          migrated = true;
+        }
+      }
+    }
+  }
+
+  if (!migrated) {
+    return { migrated: false, config };
+  }
+
+  return { migrated: true, config: { ...config, capabilities } };
+}
+
+/**
  * F193 Phase C: shared migration chain for any code path that mutates
  * capabilities.json or generates CLI configs from it.
  *
@@ -1356,6 +1504,9 @@ export async function bootstrapCapabilities(
  * Single source of truth: every config read → full chain → write/CLI-gen.
  * Order matters:
  *   1. migrateLegacyCatCafeCapability — legacy 1-server → 5 split servers
+ *   1.5 ensureCoreManagedMcps — restore any missing managed splits (#1049)
+ *       (AFTER legacy migration so overrides→blockedCats conversion happens first;
+ *        codex review on PR #13: step 0 placement skipped overrides inheritance)
  *   2. migrateResolverBackedCapabilities — pencil resolver-backed paths
  *   3. ensureCatCafeMainServer — split topology (remove legacy, add supplemental splits)
  *   4. realignManagedCatCafeServerPaths — stable binary path realignment
@@ -1365,11 +1516,15 @@ export function healCatCafeMcpTopology(
   opts?: { catCafeRepoRoot?: string; projectRoot?: string },
 ): { migrated: boolean; config: CapabilitiesConfig } {
   const a = migrateLegacyCatCafeCapability(config, opts);
-  const b = migrateResolverBackedCapabilities(a.config);
+  // #1049: ensure managed splits AFTER legacy migration (codex review PR #13 P1).
+  // Legacy migration converts overrides→blockedCats; running ensureCoreManagedMcps
+  // first would skip that conversion, silently re-enabling blocked cats.
+  const z = ensureCoreManagedMcps(a.config, opts);
+  const b = migrateResolverBackedCapabilities(z.config);
   const c = ensureCatCafeMainServer(b.config, opts);
   const d = realignManagedCatCafeServerPaths(c.config, opts);
   return {
-    migrated: a.migrated || b.migrated || c.migrated || d.migrated,
+    migrated: a.migrated || z.migrated || b.migrated || c.migrated || d.migrated,
     config: d.config,
   };
 }
@@ -1628,37 +1783,5 @@ export async function orchestrate(
   }
   await generateCliConfigs(config, cliConfigPaths, projectRoot);
 
-  // F070: Governance bootstrap for external projects
-  if (opts?.catCafeRepoRoot && projectRoot !== opts.catCafeRepoRoot) {
-    await tryGovernanceBootstrap(projectRoot, opts.catCafeRepoRoot);
-  }
-
   return config;
-}
-
-/**
- * F070: Check governance state and auto-bootstrap for confirmed external projects.
- * Returns the governance health summary (for inclusion in API responses).
- */
-export async function tryGovernanceBootstrap(
-  projectRoot: string,
-  catCafeRoot: string,
-): Promise<{ bootstrapped: boolean; needsConfirmation: boolean }> {
-  const { GovernanceBootstrapService } = await import('../governance/governance-bootstrap.js');
-  const service = new GovernanceBootstrapService(catCafeRoot);
-  const registry = service.getRegistry();
-  const existing = await registry.get(projectRoot);
-
-  if (!existing) {
-    // Never bootstrapped — needs first-time user confirmation
-    return { bootstrapped: false, needsConfirmation: true };
-  }
-
-  if (existing.confirmedByUser) {
-    // Already confirmed — auto-sync (idempotent)
-    await service.bootstrap(projectRoot, { dryRun: false });
-    return { bootstrapped: true, needsConfirmation: false };
-  }
-
-  return { bootstrapped: false, needsConfirmation: true };
 }

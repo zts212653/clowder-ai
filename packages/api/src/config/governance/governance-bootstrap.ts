@@ -15,6 +15,8 @@ import {
   type MountRules,
   STANDARD_MOUNT_POINT_IDS,
 } from '@cat-cafe/shared';
+import { checkMcpProject } from '../../mcp/mcp-drift-detector.js';
+import { syncMcpDrift } from '../../mcp/mcp-drift-resolver.js';
 import { updateSkillMountPaths, writeSkillsSyncState } from '../../skills/skill-sync-config.js';
 import { pathsEqual } from '../../utils/project-path.js';
 import { computeSourceManifestHash } from '../../utils/skill-source.js';
@@ -218,7 +220,25 @@ export class GovernanceBootstrapService {
       await writeDisabledSkillPolicies(targetProject, disabledSkillNames);
     }
 
-    // 2b. Hooks symlinks for providers that have source hooks
+    // 2b. MCP entries from global config (#1049 Step 2)
+    // New projects start with skill-only capabilities; seed MCP entries
+    // from the root config so MCP management works from first use.
+    // Only sync global-new issues — project-orphan/config-mismatch could
+    // remove plugin MCPs or overwrite user customizations on re-bootstrap.
+    if (!opts.dryRun && globalConfig) {
+      try {
+        const drift = await checkMcpProject(targetProject, this.catCafeRoot, globalConfig);
+        const seedIssues = drift.issues.filter((i) => i.type === 'global-new');
+        if (seedIssues.length > 0) {
+          const seedDrift = { ...drift, issues: seedIssues };
+          await syncMcpDrift(targetProject, this.catCafeRoot, seedDrift, undefined, 'use-global');
+        }
+      } catch {
+        /* MCP sync failure should not block bootstrap */
+      }
+    }
+
+    // 2c. Hooks symlinks for providers that have source hooks
     for (const [provider, hooksDir] of Object.entries(PROVIDER_HOOKS_DIRS) as [Provider, string][]) {
       const action = await this.symlinkHooks(targetProject, provider, hooksDir, opts.dryRun);
       if (action) actions.push(action);

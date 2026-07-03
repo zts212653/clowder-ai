@@ -2986,9 +2986,15 @@ describe('orchestrate', () => {
       },
     );
 
-    // Should use pre-seeded config, not bootstrap fresh
-    assert.equal(config.capabilities.length, 1);
-    assert.equal(config.capabilities[0].id, 'custom');
+    // Should use pre-seeded config, not bootstrap fresh.
+    // #1049: healCatCafeMcpTopology now restores missing managed MCPs,
+    // so the config will contain the original custom entry PLUS 6 managed splits.
+    const customEntry = config.capabilities.find((c) => c.id === 'custom');
+    assert.ok(customEntry, 'pre-seeded custom entry should be preserved');
+    assert.equal(customEntry.source, 'external');
+    // Managed splits are self-healed into the config
+    const managedIds = config.capabilities.filter((c) => c.source === 'cat-cafe').map((c) => c.id);
+    assert.ok(managedIds.length >= 6, 'managed splits should be restored');
   });
 
   it('migrates existing pencil paths to resolver-backed capabilities on subsequent runs', async () => {

@@ -1,0 +1,20 @@
+{
+  "verdictId": "2026-06-30-eval-a2a-no-data-telemetry-gap-build",
+  "evalSnapshotId": "eval-F167-2026-06-17",
+  "featureId": "F167",
+  "generatedAt": "2026-06-17T03:00:00.229Z",
+  "window": {
+    "startMs": 1781665200229,
+    "endMs": 1781665200229,
+    "durationHours": 0
+  },
+  "components": [
+    {
+      "id": "L1",
+      "name": "WorklistRegistry (ping-pong breaker)",
+      "confidence": "no-data",
+      "activationCounts": {},
+      "frictionCounts": {}
+    }
+  ]
+}

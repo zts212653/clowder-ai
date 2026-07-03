@@ -49,19 +49,22 @@ function targetsFor(health: AgentHookStatusResponse | null): AgentHookTargetHeal
   return Array.isArray(health?.targets) ? health.targets : [];
 }
 
-function groupStatus(
-  health: AgentHookStatusResponse | null,
-  group: 'claude' | 'codex' | 'gemini',
-): AgentHookHealthDisplayStatus {
+type HealthGroup = 'claude' | 'codex' | 'gemini' | 'skills' | 'mcp';
+
+function groupStatus(health: AgentHookStatusResponse | null, group: HealthGroup): AgentHookHealthDisplayStatus {
   const allTargets = targetsFor(health);
   if (allTargets.length === 0) return 'unknown';
-  const peerNames = new Set(['codex-hooks', 'gemini-hooks']);
+  const peerNames = new Set(['codex-hooks', 'gemini-hooks', 'skills', 'mcp']);
   const targets =
     group === 'codex'
       ? allTargets.filter((target) => target.name === 'codex-hooks')
       : group === 'gemini'
         ? allTargets.filter((target) => target.name === 'gemini-hooks')
-        : allTargets.filter((target) => !peerNames.has(target.name));
+        : group === 'skills'
+          ? allTargets.filter((target) => target.name === 'skills')
+          : group === 'mcp'
+            ? allTargets.filter((target) => target.name === 'mcp')
+            : allTargets.filter((target) => !peerNames.has(target.name));
   if (targets.length === 0) return 'unsupported';
   return aggregateStatus(targets);
 }
@@ -79,39 +82,39 @@ function toneFor(status: AgentHookHealthStatus | 'syncing' | 'synced' | 'error')
   if (['synced', 'configured'].includes(status)) {
     return {
       icon: 'check',
-      title: 'Agent 运行 Hook 已同步',
-      body: 'Claude/Codex/Gemini 的开工与收尾 Hook 已就绪，猫猫可以按纪律开工。',
+      title: 'Agent 运行环境已同步',
+      body: 'Hook、Skills、MCP 配置已就绪，猫猫可以按纪律开工。',
       classes: 'border-conn-green-ring bg-conn-green-bg text-conn-green-text',
     };
   }
   if (status === 'error') {
     return {
       icon: 'alert-triangle',
-      title: 'Agent 运行 Hook 检测失败',
-      body: '暂时无法确认 Hook 状态。可以稍后重试，或进入 Hub 继续诊断。',
+      title: 'Agent 运行环境检测失败',
+      body: '暂时无法确认运行环境状态。可以稍后重试，或进入 Hub 继续诊断。',
       classes: 'border-conn-red-ring bg-conn-red-bg text-conn-red-text',
     };
   }
   if (status === 'syncing') {
     return {
       icon: 'wrench',
-      title: '正在同步 Agent 运行 Hook',
-      body: '正在写入 Clowder AI 管理的 Hook 脚本和 settings 挂载项。',
+      title: '正在同步 Agent 运行环境',
+      body: '正在同步 Hook、Skills 和 MCP 配置。用户自定义内容不会被覆盖。',
       classes: 'border-conn-blue-ring bg-conn-blue-bg text-conn-blue-text',
     };
   }
   if (status === 'unsupported') {
     return {
       icon: 'info',
-      title: 'Agent 运行 Hook 支持待确认',
-      body: '当前环境有一部分 Hook 目录尚未启用；同步会尽量补齐，失败不影响项目治理初始化。',
+      title: 'Agent 运行环境支持待确认',
+      body: '当前环境有一部分配置目录尚未启用；同步会尽量补齐，失败不影响项目治理初始化。',
       classes: 'border-conn-slate-ring bg-conn-slate-bg text-conn-slate-text',
     };
   }
   return {
     icon: 'alert-triangle',
-    title: 'Agent 运行 Hook 需要同步',
-    body: 'Hook 缺失或过期时，猫猫开工前的 recall 与收尾检查可能不会自动执行。',
+    title: 'Agent 运行环境需要同步',
+    body: 'Hook、Skills 或 MCP 配置缺失或过期。同步会保留用户自定义内容。',
     classes: 'border-conn-amber-ring bg-conn-amber-bg text-conn-amber-text',
   };
 }
@@ -168,6 +171,12 @@ export function AgentHookHealthNotice({
             </span>
             <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
               Gemini：{statusText(groupStatus(health, 'gemini'))}
+            </span>
+            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+              Skills：{statusText(groupStatus(health, 'skills'))}
+            </span>
+            <span className="rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-2 py-0.5 text-cafe-secondary">
+              MCP：{statusText(groupStatus(health, 'mcp'))}
             </span>
           </div>
 

@@ -1364,10 +1364,10 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     // F070: Governance gate for external project dispatch
+    // Bootstrap is handled by Console's explicit init button (projects-setup.ts).
+    // invokeCat only gates — checkGovernancePreflight is the real guard.
     if (workingDirectory && !isSameProject(workingDirectory, hostProjectRoot)) {
       const catCafeRoot = hostProjectRoot;
-      const { tryGovernanceBootstrap } = await import('../../../../../config/capabilities/capability-orchestrator.js');
-      await tryGovernanceBootstrap(workingDirectory, catCafeRoot);
       const { checkGovernancePreflight } = await import('../../../../../config/governance/governance-preflight.js');
       const catEntry = catRegistry.tryGet(catId as string);
       const preflight = await checkGovernancePreflight(workingDirectory, catCafeRoot, catEntry?.config.clientId);

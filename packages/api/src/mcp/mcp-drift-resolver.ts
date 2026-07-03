@@ -49,15 +49,22 @@ export interface McpDriftSyncReport {
  * @param projectRoot - project directory
  * @param catCafeRoot - main project (global config) directory
  * @param drift - drift result from checkMcpProject
- * @param resolutions - per-issue decisions (for config-mismatch); defaults to use-global
+ * @param resolutions - per-issue decisions (for config-mismatch); defaults to conflictPolicy
+ * @param conflictPolicy - default decision for config-mismatch issues without explicit resolution.
+ *   'use-global' (default): overwrite project config with global.
+ *   'keep-project': keep project config as-is.
+ *   Per-issue resolutions always take precedence over conflictPolicy.
  */
 export function syncMcpDrift(
   projectRoot: string,
   catCafeRoot: string,
   drift: McpDriftResult,
   resolutions?: McpDriftResolution[],
+  conflictPolicy?: 'use-global' | 'keep-project',
 ): Promise<McpDriftSyncReport> {
-  return withCapabilityLock(projectRoot, () => syncMcpDriftUnlocked(projectRoot, catCafeRoot, drift, resolutions));
+  return withCapabilityLock(projectRoot, () =>
+    syncMcpDriftUnlocked(projectRoot, catCafeRoot, drift, resolutions, conflictPolicy),
+  );
 }
 
 async function syncMcpDriftUnlocked(
@@ -65,6 +72,7 @@ async function syncMcpDriftUnlocked(
   catCafeRoot: string,
   drift: McpDriftResult,
   resolutions?: McpDriftResolution[],
+  conflictPolicy?: 'use-global' | 'keep-project',
 ): Promise<McpDriftSyncReport> {
   const added: string[] = [];
   const removed: string[] = [];
@@ -92,7 +100,7 @@ async function syncMcpDriftUnlocked(
         resolveProjectOrphan(issue, projectConfig, removed);
         break;
       case 'config-mismatch':
-        resolveConfigMismatch(issue, globalMcpMap, projectConfig, resolutionMap, updated, skipped);
+        resolveConfigMismatch(issue, globalMcpMap, projectConfig, resolutionMap, updated, skipped, conflictPolicy);
         break;
     }
   }
@@ -153,7 +161,7 @@ function resolveProjectOrphan(issue: McpIssue, projectConfig: CapabilitiesConfig
 
 /**
  * config-mismatch → use global or keep project based on resolution.
- * Default: use-global (overwrite + clear override).
+ * Priority: per-issue resolution > conflictPolicy > 'use-global' (hardcoded default).
  */
 function resolveConfigMismatch(
   issue: McpIssue,
@@ -162,8 +170,9 @@ function resolveConfigMismatch(
   resolutionMap: Map<string, 'use-global' | 'keep-project'>,
   updatedList: string[],
   skippedList: string[],
+  conflictPolicy?: 'use-global' | 'keep-project',
 ): void {
-  const decision = resolutionMap.get(issue.mcpId) ?? 'use-global';
+  const decision = resolutionMap.get(issue.mcpId) ?? conflictPolicy ?? 'use-global';
 
   if (decision === 'keep-project') {
     skippedList.push(issue.mcpId);

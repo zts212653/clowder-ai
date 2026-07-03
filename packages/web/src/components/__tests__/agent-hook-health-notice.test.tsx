@@ -62,9 +62,11 @@ describe('AgentHookHealthNotice', () => {
   it('renders a repair affordance with Claude/Codex sub-status and preview summary', () => {
     const html = renderToStaticMarkup(<AgentHookHealthNotice health={missingHealth} onSync={() => {}} />);
 
-    expect(html).toContain('Agent 运行 Hook 需要同步');
+    expect(html).toContain('Agent 运行环境需要同步');
     expect(html).toContain('Claude');
     expect(html).toContain('Codex');
+    expect(html).toContain('Skills');
+    expect(html).toContain('MCP');
     expect(html).toContain('一键同步');
     expect(html).toContain('预览将修复的改动');
     expect(html).toContain('claude-settings');
@@ -92,9 +94,11 @@ describe('AgentHookHealthNotice', () => {
       <AgentHookHealthNotice health={null} error="status request failed" onSync={() => {}} />,
     );
 
-    expect(html).toContain('Agent 运行 Hook 检测失败');
+    expect(html).toContain('Agent 运行环境检测失败');
     expect(html).toContain('Claude：未知');
     expect(html).toContain('Codex：未知');
+    expect(html).toContain('Skills：未知');
+    expect(html).toContain('MCP：未知');
     expect(html).not.toContain('Claude：正常');
     expect(html).not.toContain('Codex：正常');
   });
@@ -115,7 +119,7 @@ describe('ProjectSetupCard agent hook entry', () => {
     );
 
     expect(html).toContain('发现了一片新大陆');
-    expect(html).toContain('Agent 运行 Hook 需要同步');
+    expect(html).toContain('Agent 运行环境需要同步');
     expect(html).toContain('初始化全新项目');
   });
 });
