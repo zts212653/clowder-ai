@@ -20,7 +20,11 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, createCatId } from '@cat-cafe/shared';
-import { resolveBinaryRoot, resolveServersForCat } from '../../../../../config/capabilities/capability-orchestrator.js';
+import {
+  resolveBinaryRoot,
+  resolvePencilCommand,
+  resolveServersForCat,
+} from '../../../../../config/capabilities/capability-orchestrator.js';
 import {
   CAT_CAFE_SPLIT_ENTRYPOINTS,
   MCP_CALLBACK_ENV_KEYS,
@@ -329,13 +333,11 @@ function writeCodexMcpEnvWrapper(spec: {
  * and explicitly disables off-capabilities servers so stale .codex/config.toml
  * entries don't leak through.
  *
- * This function is intentionally SYNC — Codex test harness uses setImmediate
- * for mock process exit, and async operations between collect() and spawnCli
- * would cause the exit event to fire before process listeners attach.
- * Pencil (async resolver) is skipped — Codex has no pencil resolution code.
- * streamableHttp is supported via --config mcp_servers.X.url=... injection.
+ * Pencil resolver entries are resolved at invoke time via resolvePencilCommand
+ * (same pattern as ClaudeAgentService). streamableHttp is supported via
+ * --config mcp_servers.X.url=... injection.
  */
-function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirectory?: string): string[] {
+async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirectory?: string): Promise<string[]> {
   if (!callbackEnv) return [];
 
   const runtimeRoot = resolveBinaryRoot();
@@ -442,8 +444,24 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
           );
           continue;
         }
-        // Skip pencil (async resolver) — Codex has no pencil resolution code
-        if (s.resolver === 'pencil') continue;
+        // Pencil: resolver-backed entry — resolve the binary at invoke time
+        // (same pattern as ClaudeAgentService). The resolver scans the local
+        // machine for the latest Pencil MCP binary and returns {command, args}.
+        if (s.resolver === 'pencil') {
+          const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
+          if (pencil) {
+            enabledServers.push(s.name);
+            const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+            const argsToml = pencil.args.map(toTomlString).join(', ');
+            args.push(
+              '--config',
+              `mcp_servers.${tomlName}.command=${toTomlString(pencil.command)}`,
+              '--config',
+              `mcp_servers.${tomlName}.args=[${argsToml}]`,
+            );
+          }
+          continue;
+        }
 
         // streamableHttp: inject URL directly (Codex CLI supports `--url` / `mcp_servers.X.url`)
         // Note: Codex uses bearer_token_env_var for auth, not arbitrary headers.
@@ -686,7 +704,7 @@ export class CodexAgentService implements AgentService {
         ]
       : [];
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
-    const catCafeMcpArgs = buildCatCafeMcpArgs(options?.callbackEnv, options?.workingDirectory);
+    const catCafeMcpArgs = await buildCatCafeMcpArgs(options?.callbackEnv, options?.workingDirectory);
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").

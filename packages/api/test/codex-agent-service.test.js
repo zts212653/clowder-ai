@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
@@ -836,6 +836,98 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         for (const [id, config] of Object.entries(savedConfigs)) {
           catRegistry.register(id, config);
         }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config resolves pencil binary at invoke time', async () => {
+    // Pencil entries have resolver='pencil' with empty command/args.
+    // CodexAgentService must resolve the pencil binary at invoke time
+    // (same pattern as ClaudeAgentService) and inject via --config.
+    const runtimeRoot = makeTempDir('.tmp-codex-pencil-');
+    const projectDir = makeTempDir('.tmp-codex-pencil-project-');
+
+    // Create a mock pencil binary (must be executable for isExecutableCommandPath)
+    const pencilBin = join(projectDir, 'mock-pencil-mcp-server');
+    writeFileSync(pencilBin, '#!/bin/sh\necho "mock pencil"', 'utf8');
+    chmodSync(pencilBin, 0o755);
+
+    const previousPencilBin = process.env.PENCIL_MCP_BIN;
+    const previousPencilApp = process.env.PENCIL_MCP_APP;
+    try {
+      // Use PENCIL_MCP_BIN env override so resolvePencilCommand finds our mock
+      process.env.PENCIL_MCP_BIN = pencilBin;
+      process.env.PENCIL_MCP_APP = 'vscode';
+
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'pencil',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mcpServer: {
+            resolver: 'pencil',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello pencil', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-pencil',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-pencil',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-pencil' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Pencil entry must be resolved and injected with command + args
+          const pencilCommandArg = args.find((a) => a.includes('mcp_servers.pencil.command='));
+          assert.ok(pencilCommandArg, 'pencil entry must inject resolved command');
+          assert.ok(
+            pencilCommandArg.includes('mock-pencil-mcp-server'),
+            `pencil command must contain resolved binary path, got: ${pencilCommandArg}`,
+          );
+          const pencilArgsArg = args.find((a) => a.includes('mcp_servers.pencil.args='));
+          assert.ok(pencilArgsArg, 'pencil entry must inject args');
+          assert.ok(pencilArgsArg.includes('--app'), 'pencil args must include --app');
+          assert.ok(pencilArgsArg.includes('vscode'), 'pencil args must include app name');
+        });
+      });
+    } finally {
+      if (previousPencilBin === undefined) {
+        delete process.env.PENCIL_MCP_BIN;
+      } else {
+        process.env.PENCIL_MCP_BIN = previousPencilBin;
+      }
+      if (previousPencilApp === undefined) {
+        delete process.env.PENCIL_MCP_APP;
+      } else {
+        process.env.PENCIL_MCP_APP = previousPencilApp;
       }
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
