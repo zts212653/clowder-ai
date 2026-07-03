@@ -448,16 +448,30 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
         // (same pattern as ClaudeAgentService). The resolver scans the local
         // machine for the latest Pencil MCP binary and returns {command, args}.
         if (s.resolver === 'pencil') {
+          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
           const pencil = await resolvePencilCommand({ projectRoot: configSourceRoot });
           if (pencil) {
             enabledServers.push(s.name);
-            const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
             const argsToml = pencil.args.map(toTomlString).join(', ');
             args.push(
               '--config',
               `mcp_servers.${tomlName}.command=${toTomlString(pencil.command)}`,
               '--config',
               `mcp_servers.${tomlName}.args=[${argsToml}]`,
+              '--config',
+              `mcp_servers.${tomlName}.enabled=true`,
+            );
+          } else {
+            // No pencil installation found — emit disabled dummy to prevent
+            // stale .codex/config.toml entries from reviving an old binary.
+            disabledServers.push(s.name);
+            args.push(
+              '--config',
+              `mcp_servers.${tomlName}.command="echo"`,
+              '--config',
+              `mcp_servers.${tomlName}.args=[${toTomlString('disabled-shim')}]`,
+              '--config',
+              `mcp_servers.${tomlName}.enabled=false`,
             );
           }
           continue;

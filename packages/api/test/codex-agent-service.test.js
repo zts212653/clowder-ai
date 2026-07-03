@@ -905,7 +905,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           await promise;
 
           const args = spawnFn.mock.calls[0].arguments[1];
-          // Pencil entry must be resolved and injected with command + args
+          // Pencil entry must be resolved and injected with command + args + enabled
           const pencilCommandArg = args.find((a) => a.includes('mcp_servers.pencil.command='));
           assert.ok(pencilCommandArg, 'pencil entry must inject resolved command');
           assert.ok(
@@ -916,6 +916,11 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           assert.ok(pencilArgsArg, 'pencil entry must inject args');
           assert.ok(pencilArgsArg.includes('--app'), 'pencil args must include --app');
           assert.ok(pencilArgsArg.includes('vscode'), 'pencil args must include app name');
+          // Must explicitly enable to override any stale config.toml disabled state
+          assert.ok(
+            args.includes('mcp_servers.pencil.enabled=true'),
+            'pencil entry must inject enabled=true to override stale config',
+          );
         });
       });
     } finally {
@@ -928,6 +933,82 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         delete process.env.PENCIL_MCP_APP;
       } else {
         process.env.PENCIL_MCP_APP = previousPencilApp;
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config emits disabled dummy when pencil binary is not found', async () => {
+    // When resolvePencilCommand returns null (no pencil installation),
+    // CodexAgentService must emit a disabled dummy shape to prevent
+    // stale .codex/config.toml entries from reviving an old binary.
+    const runtimeRoot = makeTempDir('.tmp-codex-pencil-null-');
+    const projectDir = makeTempDir('.tmp-codex-pencil-null-project-');
+
+    const previousPencilBin = process.env.PENCIL_MCP_BIN;
+    try {
+      // Point PENCIL_MCP_BIN at a non-existent path so resolution returns null
+      process.env.PENCIL_MCP_BIN = '/nonexistent/path/pencil-mcp-server';
+
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'pencil',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'cat-cafe',
+          mcpServer: {
+            resolver: 'pencil',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      const proc = createMockProcess();
+      const spawnFn = createMockSpawnFn(proc);
+      const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello pencil null', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-pencil-null',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-pencil-null',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-pencil-null' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // Unresolved pencil must emit disabled dummy to suppress stale config.toml
+          assert.ok(args.includes('mcp_servers.pencil.command="echo"'), 'unresolved pencil must emit dummy command');
+          assert.ok(
+            args.some((a) => a.includes('mcp_servers.pencil.args=') && a.includes('disabled-shim')),
+            'unresolved pencil must emit disabled-shim args',
+          );
+          assert.ok(args.includes('mcp_servers.pencil.enabled=false'), 'unresolved pencil must be explicitly disabled');
+        });
+      });
+    } finally {
+      if (previousPencilBin === undefined) {
+        delete process.env.PENCIL_MCP_BIN;
+      } else {
+        process.env.PENCIL_MCP_BIN = previousPencilBin;
       }
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
