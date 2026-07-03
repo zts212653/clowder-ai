@@ -202,3 +202,10 @@ export {
   signalSummarizeInputSchema,
   signalsTools,
 } from './signals-tools.js';
+export {
+  handleWebFetch,
+  handleWebSearch,
+  webFetchInputSchema,
+  webSearchInputSchema,
+  webSearchTools,
+} from './web-search-tools.js';
