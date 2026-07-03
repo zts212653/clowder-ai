@@ -337,8 +337,14 @@ function writeCodexMcpEnvWrapper(spec: {
  * (same pattern as ClaudeAgentService). streamableHttp is supported via
  * --config mcp_servers.X.url=... injection.
  */
-async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirectory?: string): Promise<string[]> {
-  if (!callbackEnv) return [];
+async function buildCatCafeMcpArgs(
+  callbackEnv?: Record<string, string>,
+  workingDirectory?: string,
+): Promise<{ args: string[]; bearerEnv: Record<string, string> }> {
+  if (!callbackEnv) return { args: [], bearerEnv: {} };
+
+  /** Bearer tokens extracted from headers — keyed by env var name, valued by token. */
+  const bearerEnv: Record<string, string> = {};
 
   const runtimeRoot = resolveBinaryRoot();
   const fileDir = dirname(fileURLToPath(import.meta.url));
@@ -363,7 +369,7 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
       break;
     }
   }
-  if (!mcpDistDir) return [];
+  if (!mcpDistDir) return { args: [], bearerEnv: {} };
 
   const binaryProjectRoot = resolve(mcpDistDir, '../../..');
   const capabilitiesProjectRoot = binaryProjectRoot;
@@ -490,9 +496,10 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
           continue;
         }
 
-        // streamableHttp: inject URL directly (Codex CLI supports `--url` / `mcp_servers.X.url`)
-        // Note: Codex uses bearer_token_env_var for auth, not arbitrary headers.
-        // Header-based auth mapping is left for a follow-up if needed.
+        // streamableHttp: inject URL directly (Codex CLI supports `--url` / `mcp_servers.X.url`).
+        // Auth: Codex uses `bearer_token_env_var` (not arbitrary headers). If the
+        // descriptor has an `Authorization: Bearer <token>` header, we extract
+        // the token into an env var and point `bearer_token_env_var` at it.
         if (s.transport === 'streamableHttp' && s.url) {
           enabledServers.push(s.name);
           const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
@@ -502,6 +509,16 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
             '--config',
             `mcp_servers.${tomlName}.enabled=true`,
           );
+          // Map Authorization: Bearer <token> → bearer_token_env_var (#1074)
+          const authHeader = s.headers?.Authorization ?? s.headers?.authorization;
+          if (authHeader) {
+            const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+            if (bearerMatch) {
+              const envVarName = `CLOWDER_MCP_BEARER_${s.name.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`;
+              bearerEnv[envVarName] = bearerMatch[1];
+              args.push('--config', `mcp_servers.${tomlName}.bearer_token_env_var=${toTomlString(envVarName)}`);
+            }
+          }
           continue;
         }
 
@@ -612,7 +629,7 @@ async function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, working
     },
     '#712: MCP invoke-time injection',
   );
-  return args;
+  return { args, bearerEnv };
 }
 
 export function isGitRepositoryPath(workingDirectory: string): boolean {
@@ -731,7 +748,10 @@ export class CodexAgentService implements AgentService {
         ]
       : [];
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
-    const catCafeMcpArgs = await buildCatCafeMcpArgs(options?.callbackEnv, options?.workingDirectory);
+    const { args: catCafeMcpArgs, bearerEnv: mcpBearerEnv } = await buildCatCafeMcpArgs(
+      options?.callbackEnv,
+      options?.workingDirectory,
+    );
     const gitRepoArgs = buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
@@ -941,6 +961,12 @@ export class CodexAgentService implements AgentService {
           if (customBaseUrl && (k === 'OPENAI_BASE_URL' || k === 'OPENAI_API_BASE')) continue;
           codexEnv[k] = v;
         }
+      }
+
+      // #1074: Inject bearer token env vars extracted from streamableHttp headers.
+      // Codex CLI reads bearer_token_env_var from process env at connect time.
+      for (const [k, v] of Object.entries(mcpBearerEnv)) {
+        codexEnv[k] = v;
       }
 
       const semanticCompletionController = new AbortController();

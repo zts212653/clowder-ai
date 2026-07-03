@@ -842,6 +842,118 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('Codex MCP config maps Authorization Bearer header to bearer_token_env_var', async () => {
+    // #1074: When a streamableHttp entry has an Authorization: Bearer header,
+    // CodexAgentService must extract the token into a process env var and
+    // inject bearer_token_env_var pointing at it — Codex CLI does not accept
+    // arbitrary headers, only bearer_token_env_var.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'authed-remote',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.secure.example.com/v1',
+            command: '',
+            args: [],
+            headers: { Authorization: 'Bearer sk-test-secret-token-123' },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello authed streamable', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-bearer',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-bearer',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-bearer' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+          // URL must still be injected
+          assert.ok(
+            args.includes('mcp_servers.authed-remote.url="https://mcp.secure.example.com/v1"'),
+            'authed streamableHttp must inject url',
+          );
+          assert.ok(args.includes('mcp_servers.authed-remote.enabled=true'), 'authed streamableHttp must be enabled');
+          // bearer_token_env_var must reference the generated env var
+          const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
+          assert.ok(bearerArg, 'must inject bearer_token_env_var config');
+          assert.ok(
+            bearerArg.includes('CLOWDER_MCP_BEARER_AUTHED_REMOTE'),
+            'bearer_token_env_var must reference CLOWDER_MCP_BEARER_AUTHED_REMOTE',
+          );
+          // Token must be in process env (Codex reads bearer_token_env_var from process env)
+          assert.ok(spawnOpts?.env, 'spawn options must include env');
+          assert.strictEqual(
+            spawnOpts.env.CLOWDER_MCP_BEARER_AUTHED_REMOTE,
+            'sk-test-secret-token-123',
+            'bearer token must be in child process env',
+          );
+          // Must NOT have command/args
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.authed-remote.command=')),
+            'authed streamableHttp must not inject command',
+          );
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   test('Codex MCP config emits URL-based disabled override for streamableHttp entries', async () => {
     // When a streamableHttp entry from .codex/config.toml is disabled, we must
     // emit url + enabled=false (not command/args stdio dummy). Overlaying stdio
