@@ -25,6 +25,7 @@ import {
   shellTools,
   signalStudyTools,
   signalsTools,
+  webSearchTools,
 } from './tools/index.js';
 
 type ToolDef = {
@@ -67,6 +68,9 @@ export const READONLY_ALLOWED_TOOLS = new Set([
   'cat_cafe_shell_exec',
   // F207 Phase B0: finance fact queries are read-only and credential-safe at wrapper boundary.
   'cat_cafe_finance_query',
+  // Web search/fetch — local, replaces Anthropic server-side tools
+  'cat_cafe_web_search',
+  'cat_cafe_web_fetch',
 ]);
 
 /**
@@ -198,6 +202,7 @@ const COLLAB_TOOL_SOURCES: readonly ToolDef[] = [
   ...gameActionTools,
   ...scheduleTools,
   ...shellTools,
+  ...webSearchTools,
 ];
 
 const MEMORY_TOOL_SOURCES: readonly ToolDef[] = [
