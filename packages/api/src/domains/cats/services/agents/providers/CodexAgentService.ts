@@ -512,10 +512,13 @@ async function buildCatCafeMcpArgs(
           );
           // Map Authorization: Bearer <token> → bearer_token_env_var (#1074)
           // Header lookup is case-insensitive (HTTP headers are case-insensitive per RFC 7230).
-          const authHeader = s.headers
+          const rawAuthHeader = s.headers
             ? Object.entries(s.headers).find(([k]) => k.toLowerCase() === 'authorization')?.[1]
             : undefined;
-          if (authHeader) {
+          if (rawAuthHeader) {
+            // Resolve ${ENV_VAR} placeholders before extraction — same semantics as
+            // mcp-probe.ts resolveEnvVarsInRecord (supports `Bearer ${TOKEN}` patterns).
+            const authHeader = rawAuthHeader.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '');
             const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
             if (bearerMatch) {
               // Env var name must be collision-proof: distinct MCP names that differ

@@ -1181,6 +1181,116 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
+  test('Bearer auth resolves ${ENV_VAR} placeholders in Authorization header', async () => {
+    // Regression: mcp-probe.ts resolves ${ENV} in headers before connecting.
+    // Codex invoke must do the same — otherwise probe succeeds but Codex sends
+    // the literal placeholder string as the bearer token.
+    const runtimeRoot = makeTempDir('.tmp-codex-bearer-envref-');
+    const projectDir = makeTempDir('.tmp-codex-bearer-envref-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    // Set a real env var for the placeholder to resolve against
+    const envKey = 'TEST_MCP_BEARER_PLACEHOLDER_TOKEN';
+    const originalEnv = process.env[envKey];
+    process.env[envKey] = 'resolved-secret-token-456';
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'env-backed-remote',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.envbacked.example.com',
+            command: '',
+            args: [],
+            headers: { Authorization: `Bearer \${${envKey}}` },
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('test env-backed bearer', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-envref',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-envref',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-envref' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          const spawnOpts = spawnFn.mock.calls[0].arguments[2];
+
+          const bearerArg = args.find((a) => a.includes('bearer_token_env_var'));
+          assert.ok(bearerArg, 'env-backed header must still map to bearer_token_env_var');
+
+          const envVarMatch = bearerArg.match(/CLOWDER_MCP_BEARER_[A-Za-z0-9_]+/);
+          assert.ok(envVarMatch, 'env var name must be extractable');
+
+          // The child env var must contain the RESOLVED token, not the placeholder
+          assert.strictEqual(
+            spawnOpts.env[envVarMatch[0]],
+            'resolved-secret-token-456',
+            'bearer token must be the resolved value, not the ${} placeholder',
+          );
+        });
+      });
+    } finally {
+      // Restore original env
+      if (originalEnv === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = originalEnv;
+      }
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
   test('Codex MCP config emits URL-based disabled override for streamableHttp entries', async () => {
     // When a streamableHttp entry from .codex/config.toml is disabled, we must
     // emit url + enabled=false (not command/args stdio dummy). Overlaying stdio
