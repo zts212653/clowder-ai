@@ -445,10 +445,13 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;
         let envEntries: Record<string, string> | undefined;
-        // Managed split: source='cat-cafe' + name in entrypoint map → resolve
-        // binary from mcpDistDir. Same-repo external migration shapes (F193:
-        // source='external' but binary points to our own split entrypoint) use
-        // the entry's own command/args but still need managed env injection.
+        // Managed split: source='cat-cafe' + name in entrypoint map.
+        // Same-repo external migration shapes (F193): source='external' but
+        // binary suffix matches our own split entrypoint — these arise from
+        // ensureCatCafeMainServer when hasAnyId prevents managed entry creation.
+        // Both MUST resolve binary from current mcpDistDir (not the entry's
+        // args[0], which may hold a stale worktree absolute path) and receive
+        // managed env injection (callback env, workspace dirs, approval mode).
         const isManagedCatCafe = s.source === 'cat-cafe' && CAT_CAFE_SPLIT_ENTRYPOINTS.has(s.name);
         const isSameRepoSplit =
           !isManagedCatCafe &&
@@ -459,7 +462,7 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         const isCatCafe = isManagedCatCafe || isSameRepoSplit;
         const workingDir = resolveCodexMcpWorkingDir(s.workingDir, configSourceRoot);
 
-        if (isManagedCatCafe) {
+        if (isCatCafe) {
           const ep = CAT_CAFE_SPLIT_ENTRYPOINTS.get(s.name)!;
           const epPath = resolve(mcpDistDir!, ep);
           if (!existsSync(epPath)) continue;

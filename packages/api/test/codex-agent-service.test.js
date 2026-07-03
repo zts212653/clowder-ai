@@ -657,12 +657,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     }
   });
 
-  test('Codex MCP config injects managed env for same-repo external split entries', async () => {
+  test('Codex MCP config resolves runtime binary + managed env for same-repo external split', async () => {
     // #1072 regression test: ensureCatCafeMainServer migration can leave a
     // split entry with source='external' but binary pointing to our own repo
-    // dist (isSameRepoExternalSplit). These entries must receive managed env
-    // injection (callback env, workspace dirs, approval mode) even though
-    // they use the external binary path.
+    // dist (isSameRepoExternalSplit). These entries must:
+    //   1. Resolve binary from current mcpDistDir (not the entry's stale args[0])
+    //   2. Receive managed env injection (callback env, workspace dirs, approval mode)
     const runtimeRoot = makeTempDir('.tmp-codex-same-repo-ext-');
     const projectDir = makeTempDir('.tmp-codex-same-repo-ext-project-');
     const proc = createMockProcess();
@@ -680,18 +680,21 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         'finance.js',
       ]);
       // Same-repo external shape: source='external', args[0] ends with
-      // packages/mcp-server/dist/limb.js (matching the managed entrypoint).
-      const limbBinaryPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
+      // packages/mcp-server/dist/limb.js but uses a STALE worktree path
+      // (different from current runtimeRoot). The code must resolve from
+      // current mcpDistDir, not trust the stale absolute path.
+      const staleLimbPath = '/old/worktree/packages/mcp-server/dist/limb.js';
       writeCapabilitiesConfig(runtimeRoot, [
         {
           id: 'cat-cafe-limb',
           type: 'mcp',
           globalEnabled: true,
           source: 'external',
-          mcpServer: { command: 'node', args: [limbBinaryPath] },
+          mcpServer: { command: 'node', args: [staleLimbPath] },
         },
       ]);
 
+      const currentLimbPath = join(runtimeRoot, 'packages', 'mcp-server', 'dist', 'limb.js');
       await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
         await withRuntimeRootEnv(runtimeRoot, async () => {
           const promise = collect(
@@ -714,6 +717,12 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
             args.includes('mcp_servers.cat-cafe-limb.enabled=true'),
             'same-repo external split must be injected as enabled',
           );
+          // Must use current runtime binary, not stale worktree path
+          assert.ok(
+            args.some((a) => a.includes(`mcp_servers.cat-cafe-limb.args=`) && a.includes(currentLimbPath)),
+            'same-repo external split must resolve binary from current mcpDistDir, not stale args[0]',
+          );
+          assert.ok(!args.some((a) => a.includes('/old/worktree/')), 'stale worktree path must not appear in CLI args');
           // Must receive managed approval mode and callback env injection
           assert.ok(
             args.some((a) => a.includes('mcp_servers.cat-cafe-limb.default_tools_approval_mode=')),
