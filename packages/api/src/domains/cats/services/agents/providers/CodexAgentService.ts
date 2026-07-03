@@ -15,6 +15,7 @@
  *   turn.started / turn.completed / 其余 item 事件 → 跳过
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
@@ -510,11 +511,20 @@ async function buildCatCafeMcpArgs(
             `mcp_servers.${tomlName}.enabled=true`,
           );
           // Map Authorization: Bearer <token> → bearer_token_env_var (#1074)
-          const authHeader = s.headers?.Authorization ?? s.headers?.authorization;
+          // Header lookup is case-insensitive (HTTP headers are case-insensitive per RFC 7230).
+          const authHeader = s.headers
+            ? Object.entries(s.headers).find(([k]) => k.toLowerCase() === 'authorization')?.[1]
+            : undefined;
           if (authHeader) {
             const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
             if (bearerMatch) {
-              const envVarName = `CLOWDER_MCP_BEARER_${s.name.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`;
+              // Env var name must be collision-proof: distinct MCP names that differ
+              // only by punctuation (e.g. `foo-bar` vs `foo_bar`) would otherwise
+              // map to the same env var, routing one server's token to another.
+              // Append a short stable hash of the raw name for uniqueness.
+              const sanitized = s.name.replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
+              const hash = createHash('sha256').update(s.name).digest('hex').slice(0, 8);
+              const envVarName = `CLOWDER_MCP_BEARER_${sanitized}_${hash}`;
               bearerEnv[envVarName] = bearerMatch[1];
               args.push('--config', `mcp_servers.${tomlName}.bearer_token_env_var=${toTomlString(envVarName)}`);
             }
