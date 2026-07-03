@@ -1544,7 +1544,7 @@ export interface CliConfigPaths {
 }
 
 /** Providers that support streamableHttp transport (URL-based MCP). */
-const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic', 'kimi', 'opencode']);
+const STREAMABLE_HTTP_PROVIDERS = new Set(['anthropic', 'openai', 'kimi', 'opencode']);
 
 interface ResolveServersForCatOptions {
   /** global = globalEnabled is the master switch; project = blockedCats is the project access source. */

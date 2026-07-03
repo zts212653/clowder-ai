@@ -332,7 +332,8 @@ function writeCodexMcpEnvWrapper(spec: {
  * This function is intentionally SYNC — Codex test harness uses setImmediate
  * for mock process exit, and async operations between collect() and spawnCli
  * would cause the exit event to fire before process listeners attach.
- * Pencil and streamableHttp are skipped (Codex only supports stdio).
+ * Pencil (async resolver) is skipped — Codex has no pencil resolution code.
+ * streamableHttp is supported via --config mcp_servers.X.url=... injection.
  */
 function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirectory?: string): string[] {
   if (!callbackEnv) return [];
@@ -418,6 +419,8 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
         env?: Record<string, string>;
         resolver?: string;
         transport?: string;
+        url?: string;
+        headers?: Record<string, string>;
         source: string;
         workingDir?: string;
       }>) {
@@ -439,8 +442,23 @@ function buildCatCafeMcpArgs(callbackEnv?: Record<string, string>, workingDirect
           );
           continue;
         }
-        // Codex only supports stdio — skip streamableHttp and pencil (async resolver)
-        if (s.transport === 'streamableHttp' || s.resolver === 'pencil') continue;
+        // Skip pencil (async resolver) — Codex has no pencil resolution code
+        if (s.resolver === 'pencil') continue;
+
+        // streamableHttp: inject URL directly (Codex CLI supports `--url` / `mcp_servers.X.url`)
+        // Note: Codex uses bearer_token_env_var for auth, not arbitrary headers.
+        // Header-based auth mapping is left for a follow-up if needed.
+        if (s.transport === 'streamableHttp' && s.url) {
+          enabledServers.push(s.name);
+          const tomlName = /^[A-Za-z0-9_-]+$/.test(s.name) ? s.name : `"${s.name}"`;
+          args.push(
+            '--config',
+            `mcp_servers.${tomlName}.url=${toTomlString(s.url)}`,
+            '--config',
+            `mcp_servers.${tomlName}.enabled=true`,
+          );
+          continue;
+        }
 
         let cmd: string | undefined;
         let cmdArgs: string[] | undefined;

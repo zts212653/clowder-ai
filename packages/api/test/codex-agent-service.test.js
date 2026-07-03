@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
+import { catRegistry } from '@cat-cafe/shared';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 const { CodexAgentService, isGitRepositoryPath } = await import(
@@ -739,6 +740,103 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
         });
       });
     } finally {
+      rmSync(runtimeRoot, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  test('Codex MCP config injects streamableHttp URL for enabled entries', async () => {
+    // Codex CLI supports URL-based MCP servers (codex mcp add --url).
+    // Verify that streamableHttp entries with a valid URL are injected
+    // via --config mcp_servers.X.url=... instead of command/args.
+    // resolveServersForCat requires the cat to be registered with a provider
+    // in STREAMABLE_HTTP_PROVIDERS for streamableHttp to be enabled.
+    const runtimeRoot = makeTempDir('.tmp-codex-streamable-http-');
+    const projectDir = makeTempDir('.tmp-codex-streamable-http-project-');
+    const savedConfigs = catRegistry.getAllConfigs();
+    const hadCodex = catRegistry.has('codex');
+
+    if (!hadCodex) {
+      catRegistry.register('codex', {
+        id: 'codex',
+        name: 'codex',
+        displayName: 'Codex',
+        avatar: '',
+        color: 'blue',
+        mentionPatterns: ['@codex'],
+        clientId: 'openai',
+        defaultModel: 'gpt-5.3-codex',
+        mcpSupport: true,
+        roleDescription: 'test',
+        personality: 'test',
+      });
+    }
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
+
+    try {
+      writeMcpDistStubs(runtimeRoot, [
+        'index.js',
+        'collab.js',
+        'memory.js',
+        'signals.js',
+        'limb.js',
+        'audio.js',
+        'finance.js',
+      ]);
+      writeCapabilitiesConfig(runtimeRoot, [
+        {
+          id: 'remote-mcp',
+          type: 'mcp',
+          globalEnabled: true,
+          source: 'external',
+          mcpServer: {
+            transport: 'streamableHttp',
+            url: 'https://mcp.example.com/v1',
+            command: '',
+            args: [],
+          },
+        },
+      ]);
+
+      await withWorkspaceEnv({ ALLOWED_WORKSPACE_DIRS: undefined, CAT_CAFE_WORKSPACE_ROOT: undefined }, async () => {
+        await withRuntimeRootEnv(runtimeRoot, async () => {
+          const promise = collect(
+            service.invoke('hello streamable http', {
+              workingDirectory: projectDir,
+              callbackEnv: {
+                CAT_CAFE_API_URL: 'http://127.0.0.1:3004',
+                CAT_CAFE_INVOCATION_ID: 'inv-streamable',
+                CAT_CAFE_CALLBACK_TOKEN: 'tok-streamable',
+                CAT_CAFE_CAT_ID: 'codex',
+              },
+            }),
+          );
+          emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 't-streamable' }]);
+          await promise;
+
+          const args = spawnFn.mock.calls[0].arguments[1];
+          // streamableHttp entry should be injected with url, not command/args
+          assert.ok(
+            args.includes('mcp_servers.remote-mcp.url="https://mcp.example.com/v1"'),
+            'streamableHttp entry must inject url',
+          );
+          assert.ok(args.includes('mcp_servers.remote-mcp.enabled=true'), 'streamableHttp entry must be enabled');
+          // Must NOT have command/args (URL-based transport)
+          assert.ok(
+            !args.some((a) => a.includes('mcp_servers.remote-mcp.command=')),
+            'streamableHttp entry must not inject command',
+          );
+        });
+      });
+    } finally {
+      if (!hadCodex) {
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(savedConfigs)) {
+          catRegistry.register(id, config);
+        }
+      }
       rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
     }
