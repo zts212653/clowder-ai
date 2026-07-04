@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/zts212653-clowder-ai-badge.png)](https://mseep.ai/app/zts212653-clowder-ai)
+
 <div align="center">
 
 <!-- TODO: replace with actual logo once synced from assets/icons/clowder-ai-logo-v2-clean.svg -->
