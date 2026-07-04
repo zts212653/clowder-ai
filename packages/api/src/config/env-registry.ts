@@ -1779,7 +1779,24 @@ export const ENV_VARS: EnvDefinition[] = [
     description: 'F195 Phase D 转写持久化目录（Python 写 MD + meta.json，Node 读 meta 做路径注入）',
     category: 'audio',
     sensitive: false,
+  },  // --- web search tools (PR #1078) ---
+  {
+    name: 'TAVILY_API_KEY',
+    defaultValue: '(未设置 → Tavily 搜索禁用)',
+    description: 'Tavily API Key — cat_cafe_web_search 工具的搜索 provider 之一（PR #1078）',
+    category: 'server',
+    sensitive: true,
+    hubVisible: false,
   },
+  {
+    name: 'EXA_API_KEY',
+    defaultValue: '(未设置 → Exa 搜索禁用)',
+    description: 'Exa API Key — cat_cafe_web_search 工具的搜索 provider 之一（PR #1078）',
+    category: 'server',
+    sensitive: true,
+    hubVisible: false,
+  },
+
 ];
 
 /** Mask credentials in a URL while preserving host/port/db for debugging. */
