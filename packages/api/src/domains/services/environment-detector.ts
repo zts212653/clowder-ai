@@ -14,14 +14,19 @@ function resolveOs(): EnvOs {
   throw new Error(`Unsupported OS: ${p}`);
 }
 
-function resolveArch(): EnvArch {
+/** @internal Exported for Rosetta regression testing (#1061). */
+export function resolveArch(
+  platform: string = process.platform,
+  arch: string = process.arch,
+  sysctlProbe: (key: string) => string | null = (key) => runQuiet('sysctl', ['-n', key]),
+): EnvArch {
   // On macOS, `process.arch` reflects the Node.js binary architecture, not
   // the hardware. Under Rosetta 2, an x64 Node binary reports 'x64' on
   // Apple Silicon hardware. Use `sysctl hw.optional.arm64` to detect the
   // true hardware — it returns '1' on all Apple Silicon Macs regardless of
   // Rosetta context. Fixes #1061.
-  if (process.platform === 'darwin') {
-    const hwArm64 = runQuiet('sysctl', ['-n', 'hw.optional.arm64']);
+  if (platform === 'darwin') {
+    const hwArm64 = sysctlProbe('hw.optional.arm64');
     if (hwArm64 === '1') return 'arm64';
     // Real Intel Mac — sysctl returns null (key absent) or '0'
     return 'x64';
@@ -34,8 +39,8 @@ function resolveArch(): EnvArch {
   // confusing wheel-resolution errors. Codex P2 3252087645 — return an
   // explicit 'unsupported' so buildRecommendation can fail fast with a
   // CPU-aware message.
-  if (process.arch === 'arm64') return 'arm64';
-  if (process.arch === 'x64') return 'x64';
+  if (arch === 'arm64') return 'arm64';
+  if (arch === 'x64') return 'x64';
   return 'unsupported';
 }
 
