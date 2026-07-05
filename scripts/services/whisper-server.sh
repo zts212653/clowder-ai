@@ -2,8 +2,8 @@
 # scripts/services/whisper-server.sh
 # Start local ASR server for Clowder AI voice input.
 # Dispatches to the correct Python API based on the selected model:
-#   - Qwen3-ASR models → qwen3-asr-api.py (mlx-audio backend)
-#   - Whisper models   → whisper-api.py (mlx-whisper / faster-whisper)
+#   - Qwen3-ASR models -> qwen3-asr-api.py (mlx-audio backend)
+#   - Whisper models   -> whisper-api.py (mlx-whisper / faster-whisper)
 #
 # Usage:
 #   WHISPER_MODEL=mlx-community/Qwen3-ASR-1.7B-8bit ./scripts/services/whisper-server.sh

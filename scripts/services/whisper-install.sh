@@ -2,8 +2,8 @@
 # scripts/services/whisper-install.sh
 # Install dependencies for ASR service (Qwen3-ASR or Whisper backend).
 # Detects the selected model and installs the appropriate ML framework:
-#   - Qwen3-ASR models → mlx-audio (Apple Silicon only)
-#   - Whisper models   → mlx-whisper (arm64) / faster-whisper (other)
+#   - Qwen3-ASR models -> mlx-audio (Apple Silicon only)
+#   - Whisper models   -> mlx-whisper (arm64) / faster-whisper (other)
 # Pure declarative -- install-template.sh handles the actual pipeline.
 set -euo pipefail
 
