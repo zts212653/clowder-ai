@@ -219,6 +219,8 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.templates[0].id, 'template-cat-breed');
     // The legacy breeds path does not include source or roster in the response.
     assert.equal(body.templates[0].name, '模板猫');
+    // #768 P2: the breed's client binding is projected so the picker can recommend a client.
+    assert.equal(body.templates[0].defaultClient, 'anthropic');
 
     await app.close();
   });

@@ -17,9 +17,11 @@ export interface DetectedClient {
 
 interface ClientStepProps {
   onSelect: (client: DetectedClient) => void;
+  /** #768: ClientId the chosen role template recommends (`roleTemplates[].defaultClient`). */
+  recommendedClient?: string;
 }
 
-export function ClientStep({ onSelect }: ClientStepProps) {
+export function ClientStep({ onSelect, recommendedClient }: ClientStepProps) {
   const [clients, setClients] = useState<DetectedClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
@@ -49,13 +51,25 @@ export function ClientStep({ onSelect }: ClientStepProps) {
     return <p className="py-8 text-center text-sm text-cafe-muted">检测已安装的客户端...</p>;
   }
 
-  const installed = clients.filter((c) => c.installed);
-  const notInstalled = clients.filter((c) => !c.installed);
+  // #768: the template's recommended client leads its group; binding still needs an
+  // installed CLI, so recommendation ranks and labels the list instead of forcing it.
+  const recommendedFirst = (a: DetectedClient, b: DetectedClient) =>
+    Number(b.provider === recommendedClient) - Number(a.provider === recommendedClient);
+  const installed = clients.filter((c) => c.installed).sort(recommendedFirst);
+  const notInstalled = clients.filter((c) => !c.installed).sort(recommendedFirst);
+  const recommendationDetectable = !recommendedClient || clients.some((c) => c.provider === recommendedClient);
 
   return (
     <div>
       <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">选择客户端</h4>
       <p className="mb-4 text-xs text-cafe-muted">猫猫需要一个 CLI 客户端来工作。我们检测到以下已安装的客户端：</p>
+
+      {recommendationDetectable ? null : (
+        <p className="mb-3 text-xs text-conn-amber-text">
+          这个角色模板推荐 {recommendedClient}{' '}
+          客户端，但本机检测不到它；先选一个已安装的客户端，创建成员后可在成员设置里切换。
+        </p>
+      )}
 
       {installed.length === 0 ? (
         <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg p-4 text-sm text-conn-amber-text">
@@ -82,6 +96,11 @@ export function ClientStep({ onSelect }: ClientStepProps) {
               </div>
               <div>
                 <span className="font-semibold text-cafe">{c.label}</span>
+                {c.provider === recommendedClient && (
+                  <span className="ml-2 rounded-md bg-conn-amber-bg px-1.5 py-0.5 text-xs font-semibold text-conn-amber-text">
+                    模板推荐
+                  </span>
+                )}
                 {c.version && <span className="ml-2 text-xs text-cafe-muted">{c.version}</span>}
               </div>
             </button>

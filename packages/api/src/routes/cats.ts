@@ -9,6 +9,7 @@ import {
   type CatConfig,
   type CatId,
   type CliConfig,
+  type ClientDefaultsEntry,
   type ClientId,
   catRegistry,
   getCliEffortOptionsForProvider,
@@ -690,8 +691,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           roleDescription: string;
           personality: string;
           teamStrengths?: string;
+          defaultClient?: string;
         }[];
-        clientDefaults?: Record<string, { defaultModel: string; models: string[] }>;
+        clientDefaults?: Record<string, ClientDefaultsEntry>;
       };
       if (raw.roleTemplates && raw.roleTemplates.length > 0) {
         return { templates: raw.roleTemplates, clientDefaults: raw.clientDefaults ?? {} };
@@ -710,6 +712,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           roleDescription: cat.roleDescription,
           personality: cat.personality,
           teamStrengths: cat.teamStrengths,
+          // #768 P2: legacy projects have no roleTemplates, so project the breed's own
+          // client binding — otherwise the picker cannot tell which client fits the role.
+          defaultClient: cat.clientId,
         })),
         clientDefaults: {},
       };

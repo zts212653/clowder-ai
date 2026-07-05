@@ -1,0 +1,224 @@
+/**
+ * clowder-ai#768 P2/P3: picking a role template must bind the client that template
+ * recommends, and that client's template defaults must supply the model — otherwise
+ * a template-bound member is created against the wrong client or with no model at all.
+ */
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { apiFetch } from '@/utils/api-client';
+
+vi.mock('@/utils/api-client', () => ({
+  apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
+}));
+
+vi.mock('@/components/useConfirm', () => ({
+  useConfirm: () => vi.fn(() => Promise.resolve(true)),
+}));
+
+import { ClientStep, type DetectedClient } from '@/components/first-run-quest/ClientStep';
+import type { TemplateCard } from '@/components/first-run-quest/TemplateStep';
+import { HubCatEditor } from '@/components/HubCatEditor';
+
+const mockApiFetch = vi.mocked(apiFetch);
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+async function flushEffects() {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+function queryField<T extends HTMLElement>(selector: string): T {
+  const element = document.body.querySelector(selector);
+  if (!element) throw new Error(`Missing element: ${selector}`);
+  return element as T;
+}
+
+const BENGAL: TemplateCard = {
+  id: 'bengal',
+  name: '孟加拉猫',
+  nickname: '斑斑',
+  avatar: '/avatars/antigravity.png',
+  color: { primary: '#D4853A', secondary: '#FAEBDB' },
+  roleDescription: '混血多模型 agent',
+  personality: '精力旺盛',
+  defaultClient: 'antigravity',
+};
+
+const RAGDOLL: TemplateCard = {
+  id: 'ragdoll',
+  name: '布偶猫',
+  nickname: '宪宪',
+  avatar: '/avatars/opus.png',
+  color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+  roleDescription: '主架构师',
+  personality: '温柔但有主见',
+  defaultClient: 'anthropic',
+};
+
+function mockTemplatesEndpoint(templates: TemplateCard[], clientDefaults: Record<string, unknown>) {
+  mockApiFetch.mockImplementation((path: string) => {
+    if (path === '/api/accounts') {
+      return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+    }
+    if (path === '/api/cat-templates') {
+      return Promise.resolve(jsonResponse({ templates, clientDefaults }));
+    }
+    throw new Error(`Unexpected apiFetch path: ${path}`);
+  });
+}
+
+async function clickTemplate(nickname: string) {
+  const button = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent === nickname);
+  if (!button) throw new Error(`Missing template button: ${nickname}`);
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await flushEffects();
+}
+
+describe('#768: template selection binds the recommended client', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeAll(() => {
+    (globalThis as { React?: typeof React }).React = React;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { React?: typeof React }).React;
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    mockApiFetch.mockReset();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+  });
+
+  async function openEditor() {
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved: vi.fn() }));
+    });
+    await flushEffects();
+  }
+
+  it('binds the template client and fills that client default model (Antigravity has no account model list)', async () => {
+    mockTemplatesEndpoint([BENGAL], {
+      antigravity: { defaultModel: 'gemini-3.1-pro', models: ['gemini-3.1-pro', 'claude-opus-4-6'] },
+    });
+    await openEditor();
+    await clickTemplate('斑斑');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('antigravity');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('gemini-3.1-pro');
+  });
+
+  it('reads legacy product-name clientDefaults keys from pre-#768 project templates', async () => {
+    mockTemplatesEndpoint([RAGDOLL], {
+      claude: { defaultModel: 'claude-sonnet-4-6', models: ['claude-sonnet-4-6'] },
+    });
+    await openEditor();
+    await clickTemplate('宪宪');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
+  });
+
+  it('keeps the current client when a template recommends one this editor cannot bind', async () => {
+    mockTemplatesEndpoint([{ ...RAGDOLL, defaultClient: 'a2a' }], {
+      anthropic: { defaultModel: 'claude-sonnet-4-6', models: ['claude-sonnet-4-6'] },
+    });
+    await openEditor();
+    const clientBefore = queryField<HTMLSelectElement>('select[aria-label="Client"]').value;
+    await clickTemplate('宪宪');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe(clientBefore);
+    // Persona fields still applied — an unbindable recommendation must not block template use.
+    expect(queryField<HTMLInputElement>('input[aria-label="Name"]').value).toBe('布偶猫');
+  });
+});
+
+describe('#768: first-run client step surfaces the template recommendation', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  const detected = (provider: string, label: string, installed = true): DetectedClient => ({
+    client: label.toLowerCase(),
+    provider,
+    label,
+    cli: label.toLowerCase(),
+    installed,
+    hasApiKey: false,
+  });
+
+  beforeAll(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterAll(() => {
+    delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  beforeEach(() => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    mockApiFetch.mockReset();
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.clearAllMocks();
+  });
+
+  async function renderClientStep(recommendedClient?: string, clients: DetectedClient[] = []) {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/first-run/available-clients') return Promise.resolve(jsonResponse({ clients }));
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+    await act(async () => {
+      root.render(React.createElement(ClientStep, { onSelect: vi.fn(), recommendedClient }));
+    });
+    await flushEffects();
+  }
+
+  it('labels the recommended client and lists it first', async () => {
+    await renderClientStep('opencode', [
+      detected('anthropic', 'Claude'),
+      detected('opencode', 'OpenCode'),
+      detected('openai', 'Codex'),
+    ]);
+
+    const labels = Array.from(container.querySelectorAll('button')).map((b) => b.textContent ?? '');
+    expect(labels[0]).toContain('OpenCode');
+    expect(labels[0]).toContain('模板推荐');
+    expect(labels[1]).not.toContain('模板推荐');
+  });
+
+  it('says so when the recommended client is not detectable on this machine', async () => {
+    await renderClientStep('antigravity', [detected('anthropic', 'Claude')]);
+
+    expect(container.textContent).toContain('antigravity');
+    expect(container.textContent).toContain('创建成员后可在成员设置里切换');
+  });
+
+  it('stays quiet when no template recommendation is available', async () => {
+    await renderClientStep(undefined, [detected('anthropic', 'Claude')]);
+
+    expect(container.textContent).not.toContain('模板推荐');
+  });
+});

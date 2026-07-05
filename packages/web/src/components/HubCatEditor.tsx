@@ -1,6 +1,6 @@
 'use client';
 
-import { supportsCodexFastModel } from '@cat-cafe/shared';
+import { type ClientDefaultsEntry, resolveClientDefaults, supportsCodexFastModel } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CatData } from '@/hooks/useCatData';
@@ -16,6 +16,7 @@ import {
   buildCodexConfigPatches,
   buildStrategyPayload,
   builtinAccountIdForClient,
+  CLIENT_OPTIONS,
   type CodexRuntimeSettings,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterAccounts,
@@ -69,6 +70,8 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
+  /** #768: cat-template.json clientDefaults — per-client default model menu, keyed by ClientId. */
+  const [clientDefaults, setClientDefaults] = useState<Record<string, ClientDefaultsEntry>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingProfileIdRef = useRef<string | null>(null);
@@ -127,19 +130,27 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   useEffect(() => {
     if (!open || cat) {
       setTemplates([]);
+      setClientDefaults({});
       return;
     }
     let cancelled = false;
     apiFetch('/api/cat-templates')
       .then(async (res) => {
         if (!res.ok) throw new Error('load failed');
-        return (await res.json()) as { templates?: TemplateCard[] };
+        return (await res.json()) as {
+          templates?: TemplateCard[];
+          clientDefaults?: Record<string, ClientDefaultsEntry>;
+        };
       })
       .then((body) => {
-        if (!cancelled) setTemplates(body.templates ?? []);
+        if (cancelled) return;
+        setTemplates(body.templates ?? []);
+        setClientDefaults(body.clientDefaults ?? {});
       })
       .catch(() => {
-        if (!cancelled) setTemplates([]);
+        if (cancelled) return;
+        setTemplates([]);
+        setClientDefaults({});
       });
     return () => {
       cancelled = true;
@@ -280,15 +291,20 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   // the user clears the field. Previous code had form.defaultModel in deps,
   // which re-filled immediately after the user cleared the input (#802).
   useEffect(() => {
-    if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
+    // #768: clients whose accounts expose no model list (Antigravity always, an
+    // account without models otherwise) fall back to the template's clientDefaults
+    // model, so a template-bound client never saves a model-less member.
+    const nextModel = modelOptions[0] ?? resolveClientDefaults(clientDefaults, form.clientId)?.defaultModel ?? '';
+    if (!nextModel) return;
     setForm((prev) => {
-      if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
-      return { ...prev, defaultModel: modelOptions[0] ?? '' };
+      // Guard against a value computed for a client the form has since left.
+      if (prev.clientId !== form.clientId || prev.defaultModel.trim().length > 0) return prev;
+      return { ...prev, defaultModel: nextModel };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
     // excludes form.defaultModel: auto-fill runs on profile change, not on
     // user clearing the model input.
-  }, [form.clientId, modelOptions]);
+  }, [clientDefaults, form.clientId, modelOptions]);
 
   useEffect(() => {
     if (form.clientId !== 'antigravity') return;
@@ -354,7 +370,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       }
       return normalized; // fallback — backend will catch it
     });
-    patchForm({
+    const patch: Parameters<typeof patchForm>[0] = {
       name,
       displayName: name,
       nickname: t.nickname ?? '',
@@ -366,7 +382,18 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       teamStrengths: t.teamStrengths ?? '',
       catId,
       mentionPatterns: joinTags(deduped),
-    });
+    };
+    // #768: template selection binds the client the template recommends, plus that
+    // client's default model from clientDefaults. Only clients this editor can render
+    // and save are accepted, so an unknown recommendation leaves the current client be.
+    // The model is applied here rather than left to the auto-fill effect: selecting a
+    // template must not depend on an effect dependency happening to change.
+    const recommendedClient = CLIENT_OPTIONS.find((option) => option.value === t.defaultClient)?.value;
+    if (recommendedClient) {
+      patch.clientId = recommendedClient;
+      patch.defaultModel = resolveClientDefaults(clientDefaults, recommendedClient)?.defaultModel ?? '';
+    }
+    patchForm(patch);
   };
 
   const requestClose = async () => {

@@ -45,7 +45,8 @@ describe('UnifiedAuthModal env-var layout (#862)', () => {
   });
 
   it('keeps OAuth Google model suggestions synchronized with cat-template Gemini defaults', () => {
-    const templateModels = catTemplate.clientDefaults.gemini.models;
+    // #768: clientDefaults is keyed by ClientId (google), not by CLI/product name (gemini).
+    const templateModels = catTemplate.clientDefaults.google.models;
     expect(templateModels).toContain('Gemini 3.6 Flash (High)');
     expect(extractGoogleModelSuggestions()).toEqual(templateModels);
   });
