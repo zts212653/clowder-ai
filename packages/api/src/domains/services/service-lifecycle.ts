@@ -11,6 +11,10 @@ export interface ServiceLifecycleManifest {
     install?: string;
     start?: string;
     uninstall?: string;
+    /** Additional Python scripts this service may launch at runtime.
+     *  Used for multi-backend services where the start script dispatches
+     *  to different API scripts based on the selected model (#863). */
+    additionalRuntimeScripts?: string[];
   };
 }
 
@@ -90,6 +94,10 @@ function resolveServiceRuntimeScriptPaths(
   }
   if (manifest.id === 'audio-capture') {
     runtimeScripts.push(resolve(REPO_ROOT, 'scripts/meeting-copilot/audio-service.py'));
+  }
+  // Multi-backend services may dispatch to additional Python scripts (#863).
+  for (const extra of manifest.scripts?.additionalRuntimeScripts ?? []) {
+    runtimeScripts.push(resolveServiceScriptPath(extra, platform));
   }
   return runtimeScripts.filter((scriptPath) => isPathInside(REPO_ROOT, scriptPath));
 }

@@ -55,6 +55,10 @@ export interface ServiceManifest {
     install?: string;
     start?: string;
     uninstall?: string;
+    /** Additional Python scripts this service may launch at runtime.
+     *  Used for multi-backend services where the start script dispatches
+     *  to different API scripts based on the selected model (#863). */
+    additionalRuntimeScripts?: string[];
   };
 }
 
@@ -160,9 +164,12 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       venvPath: '~/.cat-cafe/whisper-venv',
       packages: ['mlx-whisper', 'fastapi', 'uvicorn'],
       models: [
-        serviceModel('mlx-community/Qwen3-ASR-1.7B-8bit', '~2.5GB', 'Qwen3 ASR (MLX, recommended)', true),
+        serviceModel('mlx-community/Qwen3-ASR-1.7B-8bit', '~2.5GB', 'Qwen3 ASR (MLX, recommended)'),
         serviceModel('mlx-community/Qwen3-ASR-1.7B-4bit', '~1.5GB', 'Qwen3 ASR 4bit (lower memory)'),
-        serviceModel('mlx-community/whisper-large-v3-turbo', '~1.5GB', 'Whisper turbo (MLX, fast)'),
+        // Manifest default must be cross-platform for deriveLegacyServiceConfig
+        // fallback; Qwen3-ASR is MLX-only.  YAML matrix recommends Qwen3 on
+        // macOS arm64; this static default only matters for legacy env bridge.
+        serviceModel('mlx-community/whisper-large-v3-turbo', '~1.5GB', 'Whisper turbo (MLX, fast)', true),
         serviceModel('mlx-community/whisper-large-v3-mlx', '~3GB', 'Whisper highest quality'),
         serviceModel('mlx-community/whisper-small-mlx', '~500MB', 'Whisper small (low memory)'),
       ],
@@ -172,6 +179,9 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       install: 'scripts/services/whisper-install.sh',
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
+      // whisper-server.sh dispatches to qwen3-asr-api.py for Qwen3-ASR
+      // models; lifecycle must recognize it as an owned process (#863).
+      additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
     },
   },
   {

@@ -94,9 +94,16 @@ install_service_main() {
   check_network
 
   # 3. Platform detection -- picks the deps + model loader.
+  # On macOS, uname -m under Rosetta 2 can report x86_64 even on Apple
+  # Silicon.  Use sysctl for true hardware detection (#1061), matching
+  # the TypeScript environment-detector fix.
   local platform arch
   platform="$(uname -s)"
-  arch="$(uname -m)"
+  if [ "$platform" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+    arch="arm64"
+  else
+    arch="$(uname -m)"
+  fi
   local is_darwin_arm64=0
   [ "$platform" = "Darwin" ] && [ "$arch" = "arm64" ] && is_darwin_arm64=1
 

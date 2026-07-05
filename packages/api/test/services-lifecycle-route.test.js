@@ -2514,6 +2514,27 @@ describe('service lifecycle write routes', () => {
     );
   });
 
+  it('recognizes Qwen3-ASR API as owned whisper-stt process (#863)', () => {
+    const manifest = {
+      id: 'whisper-stt',
+      scripts: {
+        start: 'scripts/services/whisper-server.sh',
+        additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
+      },
+    };
+    const whisperApi = resolveServiceScriptPath('scripts/services/whisper-server.sh').replace(
+      /whisper-server\.sh$/,
+      'whisper-api.py',
+    );
+    const qwenApi = resolveServiceScriptPath('scripts/services/qwen3-asr-api.py');
+
+    // Both API scripts must be recognized as owned
+    assert.equal(isServiceProcessCommand(`python3 ${whisperApi} --model whisper-large-v3 --port 9876`, manifest), true);
+    assert.equal(isServiceProcessCommand(`python3 ${qwenApi} --model Qwen3-ASR-1.7B-8bit --port 9876`, manifest), true);
+    // Foreign script must NOT be recognized
+    assert.equal(isServiceProcessCommand('python3 /tmp/random-api.py --port 9876', manifest), false);
+  });
+
   it('matches Windows PowerShell service processes by exact script identity', () => {
     const manifest = {
       id: 'whisper-stt',
