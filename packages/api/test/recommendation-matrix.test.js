@@ -21,11 +21,11 @@ function makeProfile(overrides = {}) {
 }
 
 describe('recommendation matrix — service coverage', () => {
-  test('matrix covers all 5 core services', () => {
+  test('matrix covers all 5 core services (qwen3-asr merged into whisper-stt)', () => {
     const ids = getMatrixServiceIds();
     assert.deepEqual(
       ids.sort(),
-      ['whisper-stt', 'qwen3-asr', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
+      ['whisper-stt', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
     );
   });
 
@@ -56,11 +56,13 @@ describe('recommendation matrix — service coverage', () => {
 describe('recommendation matrix — macOS arm64', () => {
   const profile = makeProfile();
 
-  test('whisper-stt → MLX turbo as default (models[0])', () => {
+  test('whisper-stt → Qwen3-ASR 8bit as default on macOS arm64 (#863)', () => {
     const rec = buildRecommendation('whisper-stt', profile);
-    assert.equal(rec.models[0]?.name, 'mlx-community/whisper-large-v3-turbo');
+    assert.equal(rec.models[0]?.name, 'mlx-community/Qwen3-ASR-1.7B-8bit');
     assert.equal(rec.unsupported, undefined);
-    assert.ok(rec.models.length >= 2);
+    // Both Qwen3-ASR and Whisper models should be available
+    assert.ok(rec.models.length >= 4);
+    assert.ok(rec.models.some((m) => m.name.includes('whisper')));
   });
 
   test('embedding-model → Qwen3 MLX as default', () => {

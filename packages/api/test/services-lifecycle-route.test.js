@@ -2393,6 +2393,9 @@ describe('service lifecycle write routes', () => {
   });
 
   it('keeps shell service scripts on Windows when no PowerShell counterpart exists', () => {
+    // qwen3-asr-server.sh has no .ps1 counterpart — use it to test the
+    // keep-.sh fallback path (the script file still exists on disk, it was
+    // just removed from the service manifest as part of #863 unification).
     assert.match(
       resolveServiceScriptPath('scripts/services/qwen3-asr-server.sh', 'win32'),
       /scripts\/services\/qwen3-asr-server\.sh$/,

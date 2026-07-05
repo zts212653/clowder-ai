@@ -50,24 +50,38 @@ services:
   whisper-stt:
     - match: { os: darwin, arch: arm64 }
       models:
+        - name: mlx-community/Qwen3-ASR-1.7B-8bit
+          size: ~2.5GB
+          description: Qwen3 ASR 8bit（MLX，高质量，推荐）
+          requirements: { ramGb: 4, diskGb: 3 }
+          performance: 实时 5x+
+        - name: mlx-community/Qwen3-ASR-1.7B-4bit
+          size: ~1.5GB
+          description: Qwen3 ASR 4bit（MLX，低内存友好）
+          requirements: { ramGb: 2, diskGb: 2 }
+          performance: 实时 5x+
         - name: mlx-community/whisper-large-v3-turbo
           size: ~1.5GB
-          description: 速度快、质量高（MLX 加速，推荐）
+          description: Whisper turbo（MLX 加速，备选）
           requirements: { ramGb: 4, diskGb: 2 }
           performance: 实时 10x+
         - name: mlx-community/whisper-large-v3-mlx
           size: ~3GB
-          description: 最高质量，速度较慢
+          description: Whisper 最高质量，速度较慢
           requirements: { ramGb: 6, diskGb: 3.5 }
         - name: mlx-community/whisper-small-mlx
           size: ~500MB
-          description: 轻量版，低配机器可用
+          description: Whisper 轻量版，低配机器可用
           requirements: { ramGb: 2, diskGb: 1 }
+      notes:
+        - Qwen3-ASR 和 Whisper 都走 MLX 后端，共享同一 ASR 服务端口（9876）
+        - 选择 Qwen3-ASR 模型时使用 mlx-audio 包；选择 Whisper 模型时使用 mlx-whisper 包
       customModelHint:
-        requirement: 'mlx-community 命名空间下的 whisper MLX 量化模型（Apple Silicon GPU 加速）'
-        example: 'mlx-community/whisper-large-v3-turbo、mlx-community/whisper-medium-mlx'
+        requirement: 'mlx-community 命名空间下的 ASR/whisper MLX 量化模型（Apple Silicon GPU 加速）'
+        example: 'mlx-community/Qwen3-ASR-1.7B-8bit、mlx-community/whisper-large-v3-turbo'
         unsupported: 'faster-whisper 短名（base / large-v3-turbo）、HF 上 CTranslate2 转换的 whisper'
         links:
+          - { label: 'mlx-community / Qwen3-ASR', url: 'https://huggingface.co/mlx-community?search_models=Qwen3-ASR' }
           - { label: 'mlx-community / whisper 列表', url: 'https://huggingface.co/mlx-community?search_models=whisper' }
 
     - match: { os: darwin, arch: x64 }
@@ -192,42 +206,6 @@ services:
         unsupported: 'MLX 张量格式'
         links:
           - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
-
-  # ------------------------------------------------------------
-  # Qwen3 ASR (语音转写, MLX backend, Apple Silicon only)
-  # Drop-in replacement for Whisper STT on the same port (9876).
-  # ------------------------------------------------------------
-  qwen3-asr:
-    - match: { os: darwin, arch: arm64 }
-      models:
-        - name: mlx-community/Qwen3-ASR-1.7B-8bit
-          size: ~2.5GB
-          description: Qwen3 ASR 8bit (MLX, recommended)
-          requirements: { ramGb: 4, diskGb: 3 }
-          performance: realtime 5x+
-        - name: mlx-community/Qwen3-ASR-1.7B-4bit
-          size: ~1.5GB
-          description: Qwen3 ASR 4bit (lower memory)
-          requirements: { ramGb: 2, diskGb: 2 }
-          performance: realtime 5x+
-      customModelHint:
-        requirement: 'mlx-community Qwen3-ASR MLX quantized model (Apple Silicon GPU accelerated)'
-        example: 'mlx-community/Qwen3-ASR-1.7B-8bit, mlx-community/Qwen3-ASR-1.7B-4bit'
-        unsupported: 'Whisper models, faster-whisper short names'
-        links:
-          - { label: 'mlx-community / Qwen3-ASR', url: 'https://huggingface.co/mlx-community?search_models=Qwen3-ASR' }
-
-    - match: { os: darwin, arch: x64 }
-      unsupported:
-        reason: Qwen3-ASR requires MLX (Apple Silicon only). Intel Mac not supported.
-        userAction: Use Whisper STT instead (supports Intel Mac via faster-whisper backend).
-        retryHint: Switch to an Apple Silicon Mac to use Qwen3-ASR.
-
-    - match: {}
-      unsupported:
-        reason: Qwen3-ASR requires MLX which only runs on Apple Silicon (macOS ARM64).
-        userAction: Use Whisper STT instead (supports Windows/Linux via faster-whisper).
-        retryHint: N/A -- MLX is Apple Silicon exclusive.
 
   # ------------------------------------------------------------
   # MLX TTS (语音合成)

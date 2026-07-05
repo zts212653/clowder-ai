@@ -15,6 +15,19 @@ function resolveOs(): EnvOs {
 }
 
 function resolveArch(): EnvArch {
+  // On macOS, `process.arch` reflects the Node.js binary architecture, not
+  // the hardware. Under Rosetta 2, an x64 Node binary reports 'x64' on
+  // Apple Silicon hardware. Use `sysctl hw.optional.arm64` to detect the
+  // true hardware — it returns '1' on all Apple Silicon Macs regardless of
+  // Rosetta context. Fixes #1061.
+  if (process.platform === 'darwin') {
+    const hwArm64 = runQuiet('sysctl', ['-n', 'hw.optional.arm64']);
+    if (hwArm64 === '1') return 'arm64';
+    // Real Intel Mac — sysctl returns null (key absent) or '0'
+    return 'x64';
+  }
+
+  // Non-macOS: trust process.arch (no Rosetta-like translation layer).
   // Previously coerced everything-not-arm64 to 'x64', so 32-bit hosts
   // (ia32, arm) and exotic arches (mips, ppc64, riscv64, s390x) passed
   // install gating and only failed deep inside the install scripts with
@@ -38,7 +51,10 @@ function runQuiet(command: string, args: string[] = [], timeout = 3000): string 
 function detectGpu(): { gpu: EnvGpu; gpuDetail?: string } {
   const os = resolveOs();
   if (os === 'darwin') {
-    if (process.arch === 'arm64') {
+    // Use resolveArch() instead of process.arch — Rosetta x64 Node on
+    // Apple Silicon must still report 'apple' GPU. Fixes #1061.
+    const arch = resolveArch();
+    if (arch === 'arm64') {
       return { gpu: 'apple', gpuDetail: 'Apple Silicon GPU (Metal)' };
     }
     return { gpu: 'none', gpuDetail: 'Intel Mac (no MLX support)' };
