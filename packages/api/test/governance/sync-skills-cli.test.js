@@ -169,6 +169,15 @@ describe('sync-skills.sh --user opt-in (F239 Phase A, ADR-025)', () => {
    * runs and works under any worktree fs state.
    */
   describe('project-level coverage (F239 AC-A1)', () => {
+    it('does not pipe git worktree list into early-exit consumers under pipefail', async () => {
+      const content = await readFile(SCRIPT, 'utf-8');
+      assert.doesNotMatch(
+        content,
+        /git\s+worktree\s+list[^\n|]*\|\s*(head|grep)\b/,
+        'sync-skills.sh must not pipe git worktree list into head/grep under `set -o pipefail`; CI can surface SIGPIPE as exit 141',
+      );
+    });
+
     it('Part 1 worktree loop iterates over all 4 providers', async () => {
       const content = await readFile(SCRIPT, 'utf-8');
       // Extract Part 1 block between section delimiters.

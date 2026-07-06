@@ -19,7 +19,20 @@
 
 set -euo pipefail
 
-MAIN_REPO="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
+WORKTREE_LIST="$(git worktree list --porcelain)"
+MAIN_REPO=""
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *)
+      MAIN_REPO="${line#worktree }"
+      break
+      ;;
+  esac
+done <<< "$WORKTREE_LIST"
+if [ -z "$MAIN_REPO" ]; then
+  printf "ERROR: failed to resolve main worktree from git worktree list\n" >&2
+  exit 1
+fi
 SKILLS_SRC="$MAIN_REPO/cat-cafe-skills"
 
 # HOME-level uses absolute symlinks (check-skills-mount.sh expects this)
@@ -186,9 +199,13 @@ $DRY_RUN && printf "${YELLOW}[DRY RUN MODE]${NC}\n"
 # Collect worktree paths
 worktree_paths=()
 while IFS= read -r line; do
-  wt_path="${line#worktree }"
-  worktree_paths+=("$wt_path")
-done < <(git worktree list --porcelain | grep '^worktree ')
+  case "$line" in
+    worktree\ *)
+      wt_path="${line#worktree }"
+      worktree_paths+=("$wt_path")
+      ;;
+  esac
+done <<< "$WORKTREE_LIST"
 
 printf "\n${BOLD}[Worktrees]${NC} %d 个 × 4 providers (claude/codex/gemini/kimi)\n" "${#worktree_paths[@]}"
 for wt in "${worktree_paths[@]}"; do
