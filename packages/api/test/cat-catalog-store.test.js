@@ -719,6 +719,235 @@ describe('cat-catalog-store', () => {
     assert.equal(catalog.coCreator?.mentionPatterns[0], '@co-worker');
   });
 
+  it('keeps identity updates scoped to the edited default variant', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].nickname = '宪宪';
+    template.breeds[0].variants.push({
+      id: 'opus-sonnet',
+      catId: 'opus-sonnet',
+      provider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-5-20250929',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    const before = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(before.opus.name, '布偶猫');
+    assert.equal(before.opus.displayName, '布偶猫');
+    assert.equal(before.opus.nickname, '宪宪');
+    assert.equal(before['opus-sonnet'].name, '布偶猫');
+    assert.equal(before['opus-sonnet'].displayName, '布偶猫');
+    assert.equal(before['opus-sonnet'].nickname, '宪宪');
+
+    await updateRuntimeCat(projectRoot, 'opus', {
+      name: '默认布偶名',
+      displayName: '默认布偶显示名',
+      nickname: '默认布偶昵称',
+    });
+
+    const after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '默认布偶名');
+    assert.equal(after.opus.displayName, '默认布偶显示名');
+    assert.equal(after.opus.nickname, '默认布偶昵称');
+    assert.equal(after['opus-sonnet'].name, '布偶猫');
+    assert.equal(after['opus-sonnet'].displayName, '布偶猫');
+    assert.equal(after['opus-sonnet'].nickname, '宪宪');
+
+    const catalog = readRuntimeCatCatalog(projectRoot);
+    const breed = catalog.breeds.find((item) => item.id === 'ragdoll');
+    assert.ok(breed, 'ragdoll breed should still exist');
+    assert.equal(breed.name, '布偶猫');
+    assert.equal(breed.displayName, '布偶猫');
+    assert.equal(breed.nickname, '宪宪');
+    const defaultVariant = breed.variants.find((variant) => variant.id === 'opus-default');
+    assert.ok(defaultVariant, 'opus-default variant should still exist');
+    assert.equal(defaultVariant.name, '默认布偶名');
+    assert.equal(defaultVariant.displayName, '默认布偶显示名');
+    assert.equal(defaultVariant.nickname, '默认布偶昵称');
+  });
+
+  it('preserves displayName when only name changes on a member variant', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].displayName = '布偶显示名';
+    template.breeds[0].variants.push({
+      id: 'opus-sonnet',
+      catId: 'opus-sonnet',
+      provider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-5-20250929',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    await updateRuntimeCat(projectRoot, 'opus', {
+      name: '默认布偶名',
+    });
+
+    let after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '默认布偶名');
+    assert.equal(after.opus.displayName, '布偶显示名');
+    assert.equal(after['opus-sonnet'].name, '布偶猫');
+    assert.equal(after['opus-sonnet'].displayName, '布偶显示名');
+
+    await updateRuntimeCat(projectRoot, 'opus-sonnet', {
+      name: 'Sonnet 布偶名',
+    });
+
+    after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '默认布偶名');
+    assert.equal(after.opus.displayName, '布偶显示名');
+    assert.equal(after['opus-sonnet'].name, 'Sonnet 布偶名');
+    assert.equal(after['opus-sonnet'].displayName, '布偶显示名');
+
+    const catalog = readRuntimeCatCatalog(projectRoot);
+    const breed = catalog.breeds.find((item) => item.id === 'ragdoll');
+    assert.ok(breed, 'ragdoll breed should still exist');
+    assert.equal(breed.name, '布偶猫');
+    assert.equal(breed.displayName, '布偶显示名');
+    const defaultVariant = breed.variants.find((variant) => variant.id === 'opus-default');
+    assert.ok(defaultVariant, 'opus-default variant should still exist');
+    assert.equal(defaultVariant.name, '默认布偶名');
+    assert.equal(defaultVariant.displayName, undefined);
+    const sonnetVariant = breed.variants.find((variant) => variant.id === 'opus-sonnet');
+    assert.ok(sonnetVariant, 'opus-sonnet variant should still exist');
+    assert.equal(sonnetVariant.name, 'Sonnet 布偶名');
+    assert.equal(sonnetVariant.displayName, undefined);
+  });
+
+  it('preserves name when only displayName changes on a member variant', async () => {
+    // Fresh-catalog symmetric of P1 (name-only vs displayName-only):
+    // patching displayName alone on a multi-variant breed member must NOT flip the
+    // resolved `name` to the new displayName via the `variant.name ?? variant.displayName`
+    // fallback chain in toAllCatConfigs.
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].displayName = '布偶显示名';
+    template.breeds[0].variants.push({
+      id: 'opus-sonnet',
+      catId: 'opus-sonnet',
+      provider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-5-20250929',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    // (a) Default variant, no prior override: patch displayName only
+    await updateRuntimeCat(projectRoot, 'opus', {
+      displayName: '新布偶显示名',
+    });
+
+    let after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '布偶猫', 'opus resolved name must stay breed.name');
+    assert.equal(after.opus.displayName, '新布偶显示名');
+    assert.equal(after['opus-sonnet'].name, '布偶猫');
+    assert.equal(after['opus-sonnet'].displayName, '布偶显示名');
+
+    // (b) Non-default variant, no prior override: patch displayName only
+    await updateRuntimeCat(projectRoot, 'opus-sonnet', {
+      displayName: 'Sonnet 新显示名',
+    });
+
+    after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '布偶猫');
+    assert.equal(after.opus.displayName, '新布偶显示名');
+    assert.equal(after['opus-sonnet'].name, '布偶猫', 'opus-sonnet resolved name must stay breed.name');
+    assert.equal(after['opus-sonnet'].displayName, 'Sonnet 新显示名');
+  });
+
+  it('preserves legacy variant.displayName-derived name when patching displayName only', async () => {
+    // Legacy-catalog case: variant.displayName is set as an F32-b override but
+    // variant.name (the field added in this PR) is unset. Pre-fix resolved name
+    // comes from the `variant.name ?? variant.displayName ?? breed.name` fallback
+    // chain and equals variant.displayName. A displayName-only patch on such a
+    // legacy variant must snapshot the previously resolved name so partial edits
+    // don't silently rename the member.
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].displayName = '布偶显示名';
+    template.breeds[0].variants.push({
+      id: 'opus-sonnet',
+      catId: 'opus-sonnet',
+      // Legacy override: displayName only, no name field.
+      displayName: 'Sonnet 独立显示名',
+      provider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-5-20250929',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    // Baseline: legacy fallback resolves name from variant.displayName.
+    const before = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(before['opus-sonnet'].name, 'Sonnet 独立显示名', 'legacy fallback baseline');
+
+    await updateRuntimeCat(projectRoot, 'opus-sonnet', {
+      displayName: 'Sonnet 新显示名',
+    });
+
+    const after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(
+      after['opus-sonnet'].name,
+      'Sonnet 独立显示名',
+      'legacy displayName-derived name must persist across displayName-only patch',
+    );
+    assert.equal(after['opus-sonnet'].displayName, 'Sonnet 新显示名');
+  });
+
+  it('keeps identity updates scoped to the edited non-default variant', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
+    const templatePath = join(projectRoot, 'cat-template.json');
+    const template = validConfig();
+    template.breeds[0].nickname = '宪宪';
+    template.breeds[0].variants.push({
+      id: 'opus-sonnet',
+      catId: 'opus-sonnet',
+      provider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-5-20250929',
+      mcpSupport: true,
+      cli: { command: 'claude', outputFormat: 'stream-json' },
+    });
+    writeFileSync(templatePath, JSON.stringify(template, null, 2));
+    writeCatCatalog(projectRoot, template);
+
+    await updateRuntimeCat(projectRoot, 'opus-sonnet', {
+      name: 'Sonnet 布偶名',
+      displayName: 'Sonnet 布偶显示名',
+      nickname: 'Sonnet 布偶昵称',
+    });
+
+    const after = toAllCatConfigs(readRuntimeCatCatalog(projectRoot));
+    assert.equal(after.opus.name, '布偶猫');
+    assert.equal(after.opus.displayName, '布偶猫');
+    assert.equal(after.opus.nickname, '宪宪');
+    assert.equal(after['opus-sonnet'].name, 'Sonnet 布偶名');
+    assert.equal(after['opus-sonnet'].displayName, 'Sonnet 布偶显示名');
+    assert.equal(after['opus-sonnet'].nickname, 'Sonnet 布偶昵称');
+
+    const catalog = readRuntimeCatCatalog(projectRoot);
+    const breed = catalog.breeds.find((item) => item.id === 'ragdoll');
+    assert.ok(breed, 'ragdoll breed should still exist');
+    assert.equal(breed.name, '布偶猫');
+    assert.equal(breed.displayName, '布偶猫');
+    assert.equal(breed.nickname, '宪宪');
+    const sonnetVariant = breed.variants.find((variant) => variant.id === 'opus-sonnet');
+    assert.ok(sonnetVariant, 'opus-sonnet variant should still exist');
+    assert.equal(sonnetVariant.name, 'Sonnet 布偶名');
+    assert.equal(sonnetVariant.displayName, 'Sonnet 布偶显示名');
+    assert.equal(sonnetVariant.nickname, 'Sonnet 布偶昵称');
+  });
+
   it('persists and clears voiceConfig when updating a runtime member', async () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'cat-catalog-store-'));
     const templatePath = join(projectRoot, 'cat-template.json');

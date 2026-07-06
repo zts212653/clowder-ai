@@ -590,6 +590,140 @@ describe('sanitizeStoryExport', () => {
     assert.ok(sonnetAliases.includes('布偶猫 Sonnet'), 'sonnet aliases should include variant displayName');
   });
 
+  test('buildCatIdentityAliases includes variant.name and variant.nickname (clowder-ai#1090)', async () => {
+    // clowder-ai#1090 introduced variant-scoped name / nickname persistence
+    // for multi-variant breed members. Story export redaction must pick these
+    // up — otherwise a renamed member's identity leaks into public exports.
+    const { buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
+    const breeds = [
+      {
+        catId: 'opus',
+        name: '布偶猫',
+        displayName: '布偶猫',
+        nickname: '宪宪',
+        mentionPatterns: ['@opus', '@布偶猫', '@宪宪'],
+        variants: [
+          {
+            catId: 'sonnet',
+            // Simulate clowder-ai#1090: multi-variant member rename
+            name: '斯奈特秘名',
+            nickname: '斯奈特昵称',
+            displayName: '布偶猫 Sonnet',
+            variantLabel: 'Sonnet',
+            mentionPatterns: ['@sonnet'],
+          },
+          {
+            catId: 'opus-47',
+            displayName: '布偶猫 Opus 4.7',
+            variantLabel: 'Opus 4.7',
+            mentionPatterns: ['@opus-47'],
+          },
+        ],
+      },
+    ];
+    const aliases = buildCatIdentityAliases(breeds);
+
+    const sonnetAliases = aliases.get('sonnet');
+    assert.ok(sonnetAliases, 'sonnet should have aliases');
+    assert.ok(
+      sonnetAliases.includes('斯奈特秘名'),
+      `sonnet aliases must include variant.name (redaction gap): ${JSON.stringify(sonnetAliases)}`,
+    );
+    assert.ok(
+      sonnetAliases.includes('斯奈特昵称'),
+      `sonnet aliases must include variant.nickname (redaction gap): ${JSON.stringify(sonnetAliases)}`,
+    );
+    // Existing variant aliases still populated
+    assert.ok(sonnetAliases.includes('布偶猫 Sonnet'), 'sonnet aliases should still include displayName');
+    assert.ok(sonnetAliases.includes('Sonnet'), 'sonnet aliases should still include variantLabel');
+  });
+
+  test('buildCatIdentityAliases merges default-variant identity overrides into breed entry (clowder-ai#1090)', async () => {
+    // Multi-variant breed default variants typically have no explicit
+    // variant.catId (they inherit breed.catId, e.g. `opus-default`).
+    // updateRuntimeCat now writes name / nickname onto that variant when the
+    // breed has multiple variants — so those overrides must still be
+    // discoverable by the sanitizer even though the variant has no v.catId.
+    // Since default variants share the breed's catId at runtime, their
+    // identity overrides get merged into the breed alias entry.
+    const { buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
+    const breeds = [
+      {
+        catId: 'opus',
+        name: '布偶猫',
+        displayName: '布偶显示名',
+        nickname: '宪宪',
+        mentionPatterns: ['@opus'],
+        variants: [
+          {
+            // Default variant: no catId (inherits breed.catId = 'opus')
+            // Persisted identity overrides written by updateRuntimeCat:
+            name: '默认新名字',
+            nickname: '默认新昵称',
+          },
+          {
+            catId: 'opus-sonnet',
+            displayName: '布偶猫 Sonnet',
+            mentionPatterns: ['@opus-sonnet'],
+          },
+        ],
+      },
+    ];
+    const aliases = buildCatIdentityAliases(breeds);
+
+    const opusAliases = aliases.get('opus');
+    assert.ok(opusAliases, 'opus breed catId must have aliases');
+    assert.ok(opusAliases.includes('布偶猫'), 'opus aliases retain breed.name');
+    assert.ok(opusAliases.includes('布偶显示名'), 'opus aliases retain breed.displayName');
+    assert.ok(opusAliases.includes('宪宪'), 'opus aliases retain breed.nickname');
+    assert.ok(
+      opusAliases.includes('默认新名字'),
+      `opus aliases must include default variant name override: ${JSON.stringify(opusAliases)}`,
+    );
+    assert.ok(
+      opusAliases.includes('默认新昵称'),
+      `opus aliases must include default variant nickname override: ${JSON.stringify(opusAliases)}`,
+    );
+
+    // Non-default variant still gets independent alias entry
+    const sonnetAliases = aliases.get('opus-sonnet');
+    assert.ok(sonnetAliases, 'opus-sonnet aliases still populated');
+    assert.ok(sonnetAliases.includes('布偶猫 Sonnet'), 'opus-sonnet displayName preserved');
+  });
+
+  test('buildCatIdentityAliases skips variant.name that collides with breed identity (clowder-ai#1090)', async () => {
+    // Breed-level identity is shared: variant.name equal to breed.name/displayName
+    // must NOT be attached to a variant catId, else first-wins collision maps
+    // the breed's canonical name to a single variant.
+    const { buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
+    const breeds = [
+      {
+        catId: 'opus',
+        name: '布偶猫',
+        displayName: '布偶显示名',
+        mentionPatterns: ['@opus'],
+        variants: [
+          // variant.name collides with breed.name — should not be added to variant aliases
+          { catId: 'sonnet', name: '布偶猫', displayName: '布偶显示名', mentionPatterns: ['@sonnet'] },
+        ],
+      },
+    ];
+    const aliases = buildCatIdentityAliases(breeds);
+
+    const sonnetAliases = aliases.get('sonnet');
+    // sonnet aliases may be empty or only contain non-colliding items, but
+    // must NOT rebind the shared breed name to the variant.
+    assert.ok(
+      !sonnetAliases || !sonnetAliases.includes('布偶猫'),
+      `variant.name collision with breed.name must not be added to variant aliases: ${JSON.stringify(sonnetAliases)}`,
+    );
+    // Existing displayName collision guard unchanged
+    assert.ok(
+      !sonnetAliases || !sonnetAliases.includes('布偶显示名'),
+      'variant.displayName collision with breed.displayName must not be added',
+    );
+  });
+
   test('non-participating roster catIds mentioned in content are also redacted', async () => {
     const { sanitizeStoryExport, buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
     const breeds = [

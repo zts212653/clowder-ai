@@ -344,13 +344,29 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
 
   const breed = catalog.breeds[located.breedIndex] as Record<string, any>;
   const variant = breed.variants[located.variantIndex] as Record<string, any>;
+  const shouldWriteBreedIdentity = located.isDefaultVariant && breed.variants.length === 1;
 
-  if (patch.name !== undefined) breed.name = patch.name;
-  if (patch.nickname !== undefined) {
-    if (patch.nickname && patch.nickname.trim().length > 0) {
-      breed.nickname = patch.nickname.trim();
+  if (patch.name !== undefined) {
+    if (shouldWriteBreedIdentity) {
+      breed.name = patch.name;
+      delete variant.name;
     } else {
-      delete breed.nickname;
+      variant.name = patch.name;
+    }
+  }
+  if (patch.nickname !== undefined) {
+    const nickname = patch.nickname.trim();
+    if (shouldWriteBreedIdentity) {
+      if (nickname.length > 0) {
+        breed.nickname = nickname;
+      } else {
+        delete breed.nickname;
+      }
+      delete variant.nickname;
+    } else if (nickname.length > 0) {
+      variant.nickname = nickname;
+    } else {
+      variant.nickname = null;
     }
   }
   if (patch.roleDescription !== undefined) {
@@ -362,10 +378,21 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
   }
 
   if (patch.displayName !== undefined) {
-    if (located.isDefaultVariant) {
+    if (shouldWriteBreedIdentity) {
       breed.displayName = patch.displayName;
       delete variant.displayName;
     } else {
+      // Multi-variant breed: keep name/displayName editing independent.
+      // toAllCatConfigs resolves `name` as `variant.name ?? variant.displayName ?? breed.name`;
+      // if we overwrite variant.displayName without a variant.name override,
+      // the resolved name silently follows the new displayName (P2 finding on
+      // clowder-ai#1090). Snapshot the currently-resolved name into variant.name
+      // so a displayName-only patch cannot alter this member's resolved name.
+      // Legacy variants that inherited name via variant.displayName fallback
+      // keep that name explicitly on their first displayName edit.
+      if (variant.name === undefined) {
+        variant.name = variant.displayName ?? breed.name;
+      }
       variant.displayName = patch.displayName;
     }
   }

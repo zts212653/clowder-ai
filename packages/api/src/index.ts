@@ -3068,6 +3068,12 @@ async function main(): Promise<void> {
       mentionPatterns: [...b.mentionPatterns],
       variants: b.variants.map((v) => ({
         catId: v.catId,
+        // clowder-ai#1090: forward variant-scoped identity so the sanitizer
+        // redacts renamed members (multi-variant breeds now persist
+        // per-member name / nickname; without these fields the sanitizer
+        // would rebuild the redaction set from breed identity only).
+        name: v.name,
+        nickname: v.nickname,
         displayName: v.displayName,
         variantLabel: v.variantLabel,
         mentionPatterns: v.mentionPatterns ? [...v.mentionPatterns] : undefined,

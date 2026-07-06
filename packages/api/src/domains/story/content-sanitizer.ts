@@ -165,6 +165,10 @@ export function buildCatIdentityAliases(
     mentionPatterns?: string[];
     variants?: Array<{
       catId?: string;
+      // clowder-ai#1090: variant-scoped identity overrides — must feed redaction
+      // set so a renamed multi-variant member doesn't leak in public story exports.
+      name?: string;
+      nickname?: string | null;
       displayName?: string;
       variantLabel?: string;
       mentionPatterns?: string[];
@@ -187,24 +191,49 @@ export function buildCatIdentityAliases(
       const clean = p.replace(/^@/, '');
       if (clean !== breed.catId) set.add(clean);
     }
-    if (set.size > 0) aliases.set(breed.catId, [...set]);
+    // Breed aliases finalized AFTER variant loop so default-variant identity
+    // overrides (clowder-ai#1090) can be merged into the breed alias set —
+    // default variants inherit breed.catId at runtime, so their persisted
+    // name / nickname belong to the same alias entry.
 
-    // Variant aliases: skip displayName that matches breed name/displayName —
+    // Variant aliases: skip identity that matches breed name/displayName —
     // the breed catId owns the shared breed name (e.g. '布偶猫' belongs to
     // opus, not sonnet/opus-47/fable-5). Prevents first-wins collision where
     // the breed name gets bound to whichever variant appears first in events.
+    // Applies to variant.name (clowder-ai#1090) and variant.displayName alike.
     const breedNames = new Set([breed.name, breed.displayName].filter(Boolean));
     for (const v of breed.variants ?? []) {
-      if (!v.catId) continue;
-      const vset = new Set<string>();
-      if (v.displayName && !breedNames.has(v.displayName)) vset.add(v.displayName);
-      if (v.variantLabel) vset.add(v.variantLabel);
+      // clowder-ai#1090: default variants typically have no explicit v.catId
+      // (they inherit breed.catId, e.g. `opus-default` id). Resolve variant
+      // catId with the same `variant.catId ?? breed.catId` rule the runtime
+      // uses, so default-variant identity overrides written by
+      // `updateRuntimeCat` are still folded into the redaction map.
+      const variantCatId = v.catId ?? breed.catId;
+      const isDefaultVariant = variantCatId === breed.catId;
+      // Default variant overrides merge into the breed alias set (shared catId).
+      // Non-default variants get an independent alias entry.
+      const target = isDefaultVariant ? set : new Set<string>();
+
+      // clowder-ai#1090: include variant-scoped identity so renamed members
+      // don't leak into public story exports.
+      if (v.name && !breedNames.has(v.name)) target.add(v.name);
+      if (v.nickname) target.add(v.nickname);
+      if (v.displayName && !breedNames.has(v.displayName)) target.add(v.displayName);
+      if (v.variantLabel) target.add(v.variantLabel);
       for (const p of v.mentionPatterns ?? []) {
         const clean = p.replace(/^@/, '');
-        if (clean !== v.catId) vset.add(clean);
+        if (clean !== variantCatId) target.add(clean);
       }
-      if (vset.size > 0) aliases.set(v.catId, [...vset]);
+
+      if (!isDefaultVariant && target.size > 0) {
+        aliases.set(variantCatId, [...target]);
+      }
+      // Default variant path: mutations already flowed into `set` and are
+      // finalized in the breed-level `aliases.set` below.
     }
+
+    // Finalize breed aliases after default-variant merge.
+    if (set.size > 0) aliases.set(breed.catId, [...set]);
   }
 
   // coCreator identity (You / L.S. / Lysander etc.)

@@ -85,7 +85,9 @@ const timeZoneSchema = z
 const catVariantSchema = z.object({
   id: z.string().min(1),
   catId: z.string().min(1).optional(), // F32-b: variant-level catId
+  name: z.string().min(1).optional(), // clowder-ai#1090: variant-level editable member name
   displayName: z.string().min(1).optional(), // F32-b: variant-level displayName
+  nickname: z.string().nullable().optional(), // clowder-ai#1090: null = explicit no nickname
   variantLabel: z.string().min(1).optional(), // F32-b P4: disambiguation label
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
@@ -585,6 +587,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // R1 fix: null = "explicitly no caution" (don't inherit breed).
       // undefined (omitted) = inherit from breed. ?? treats null as nullish, so use !== undefined.
       const caution = variant.caution !== undefined ? variant.caution : breed.caution;
+      const nickname = variant.nickname !== undefined ? variant.nickname : breed.nickname;
       // F167 Phase E (KD-20): variant restrictions override breed (no merge);
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
@@ -596,9 +599,19 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
 
       result[catId] = {
         id: createCatId(catId),
-        name: variant.displayName ?? breed.name,
+        // Identity fields normally follow a clean `variant.<field> ?? breed.<field>` chain.
+        // The `variant.displayName` middle step in `name` is a LEGACY-COMPAT exception:
+        // pre-clowder-ai#1090 catalogs shipped variants with `displayName` overrides but
+        // no `name` field (that field was introduced by this PR), so their resolved name
+        // came from `variant.displayName`. Keep this legacy branch here for read-time
+        // continuity ONLY — write-time coupling is broken in `updateRuntimeCat` (which
+        // snapshots the resolved name into `variant.name` before overwriting
+        // `variant.displayName`). Do NOT extend this cross-field fallback to other
+        // identity fields (nickname / avatar / color / role): they must stay
+        // variant→breed same-field chains to prevent similar leaks.
+        name: variant.name ?? variant.displayName ?? breed.name,
         displayName: variant.displayName ?? breed.displayName,
-        ...(breed.nickname != null ? { nickname: breed.nickname } : {}),
+        ...(nickname != null ? { nickname } : {}),
         avatar: variant.avatar ?? breed.avatar, // F32-b P4c: variant can override
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,

@@ -57,8 +57,12 @@ export interface CatVariant {
   readonly id: string; // 'opus-4.6', 'codex-default'
   /** Override breed-level catId to register as an independent cat (F32-b) */
   readonly catId?: string;
+  /** Override breed-level name for this independent member */
+  readonly name?: string;
   /** Override breed-level displayName (F32-b) */
   readonly displayName?: string;
+  /** Override breed-level nickname. null means explicitly no nickname. */
+  readonly nickname?: string | null;
   /** F32-b P4: Human-readable label for disambiguation (e.g. "4.5", "Sonnet") */
   readonly variantLabel?: string;
   /** Independent mention patterns for this variant (F32-b).
