@@ -42,7 +42,10 @@ function collectNvmBinDirs(): string[] {
 const resolvedCache = new Map<string, string>();
 
 function normalizeWindowsDir(path: string): string {
-  return win32.dirname(path).replace(/[\\/]+$/, '').toLowerCase();
+  return win32
+    .dirname(path)
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
 }
 
 /**
@@ -57,7 +60,11 @@ export function selectWindowsPathEntry(lines: readonly string[]): string | null 
   if (lines.length === 0) return null;
   const firstDir = normalizeWindowsDir(lines[0]);
   const firstDirHits = lines.filter((line) => normalizeWindowsDir(line) === firstDir);
-  return firstDirHits.find((line) => /\.cmd$/i.test(line)) || firstDirHits.find((line) => /\.exe$/i.test(line)) || firstDirHits[0];
+  return (
+    firstDirHits.find((line) => /\.cmd$/i.test(line)) ||
+    firstDirHits.find((line) => /\.exe$/i.test(line)) ||
+    firstDirHits[0]
+  );
 }
 
 /**

@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const { resolveCliCommand, resolveCliCommandOrBare, formatCliNotFoundError, invalidateCliCommand, selectWindowsPathEntry } =
-  await import('../dist/utils/cli-resolve.js');
+const {
+  resolveCliCommand,
+  resolveCliCommandOrBare,
+  formatCliNotFoundError,
+  invalidateCliCommand,
+  selectWindowsPathEntry,
+} = await import('../dist/utils/cli-resolve.js');
 
 // --- formatCliNotFoundError ---
 
