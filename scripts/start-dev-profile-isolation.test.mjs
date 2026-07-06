@@ -722,14 +722,23 @@ describe('Whisper sidecar startup guards', () => {
     const installTemplate = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.sh'), 'utf8');
     const prereqPs1 = readFileSync(resolve(ROOT, 'scripts/services/prereq-check.ps1'), 'utf8');
 
-    assert.match(installTemplate, /hf_probe_url="https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/);
+    assert.match(
+      installTemplate,
+      /hf_probe_url="https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
+    );
     assert.match(installTemplate, /_test_source_mode "\$hf_probe_url"/);
     assert.doesNotMatch(installTemplate, /_test_source_mode "https:\/\/huggingface\.co"/);
     assert.doesNotMatch(installTemplate, /_add_no_proxy_host "huggingface\.co"/);
     assert.doesNotMatch(installTemplate, /_add_no_proxy_host "hf-mirror\.com"/);
 
-    assert.match(prereqPs1, /\$hfProbeUrl = "https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/);
-    assert.match(prereqPs1, /Test-SourceMode -Url \$hfProbeUrl -TimeoutSec 10 -CandidateProxy \$candidate -Method "GET"/);
+    assert.match(
+      prereqPs1,
+      /\$hfProbeUrl = "https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
+    );
+    assert.match(
+      prereqPs1,
+      /Test-SourceMode -Url \$hfProbeUrl -TimeoutSec 10 -CandidateProxy \$candidate -Method "GET"/,
+    );
     assert.doesNotMatch(prereqPs1, /Test-SourceMode -Url "https:\/\/huggingface\.co"/);
     assert.doesNotMatch(prereqPs1, /Add-NoProxyHost "huggingface\.co"/);
     assert.doesNotMatch(prereqPs1, /Add-NoProxyHost "hf-mirror\.com"/);
