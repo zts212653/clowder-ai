@@ -2,13 +2,12 @@
 domainId: eval:friction
 displayName: Friction Signal Eval
 systemThreadId: thread_eval_friction
-# evalCat: F245 owner default — gpt52 (Maine Coon GPT-5.4) for cost (codex is ~2x) +
-# cross-family separation (Ragdoll authors/owns F245 → Maine Coon evaluates the friction
-# its own family reports). Adjustable config — flagged for review/operator.
+# evalCat: current opus runtime member. The local catalog no longer exposes
+# legacy eval runner ids, so scheduled invocations must use opus.
 evalCat:
-  catId: gpt52
-  handle: "@gpt52"
-  model: gpt-5.4
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 # F245 PR2: 本家 3-day cadence — N-day infra landed.
 # Community default remains `weekly` in community eval-domains/ copies.
 frequency: every-3d
@@ -24,13 +23,10 @@ threadPolicy:
 legacyScheduledTaskIds: []
 # Actionable friction findings route to the harness-eval owner (Phase D wires
 # per-finding propose_thread; until then the owner triages from here).
-# ownerCatId must be a REGISTERED catId in cat-config.json (cloud R2 P2): opus-48
-# (F245 author) is an invocation identity but NOT in the routing catalog, so it
-# would be an unwakeable handoff. Use opus-47 — registered + the harness-eval cell
-# owner (same target eval:a2a / eval:memory / eval:capability-wakeup hand off to).
+# ownerCatId must be a REGISTERED catId in the runtime catalog.
 handoffTargetResolver:
   featureId: F245
-  ownerCatId: opus-47
+  ownerCatId: opus
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 48

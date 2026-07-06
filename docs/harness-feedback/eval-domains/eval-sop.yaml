@@ -17,9 +17,9 @@ domainId: eval:sop
 displayName: SOP Compliance Eval
 systemThreadId: thread_eval_sop
 evalCat:
-  catId: opus-47
-  handle: "@opus47"
-  model: claude-opus-4-7
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 frequency: weekly
 sourceAdapter: sop-trace-eval
 sourceRefsKind: sop-trace-eval

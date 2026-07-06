@@ -3,9 +3,9 @@ domainId: eval:capability-wakeup
 displayName: Capability Wakeup Eval
 systemThreadId: thread_eval_capability_wakeup
 evalCat:
-  catId: opus-47
-  handle: "@opus47"
-  model: claude-opus-4-7
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 frequency: weekly
 sourceAdapter: capability-wakeup-eval
 sourceRefsKind: capability-wakeup-trial-window
@@ -19,7 +19,7 @@ threadPolicy:
 legacyScheduledTaskIds: []
 handoffTargetResolver:
   featureId: F203
-  ownerCatId: opus-47
+  ownerCatId: opus
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 48

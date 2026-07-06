@@ -3,9 +3,9 @@ domainId: eval:task-outcome
 displayName: Task Outcome Eval
 systemThreadId: thread_eval_task_outcome
 evalCat:
-  catId: opus-47
-  handle: "@opus47"
-  model: claude-opus-4-7
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 frequency: daily
 sourceAdapter: task-outcome-eval
 sourceRefsKind: task-outcome-snapshot

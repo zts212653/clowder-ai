@@ -3,9 +3,9 @@ domainId: eval:a2a
 displayName: A2A Harness Eval
 systemThreadId: thread_eval_a2a
 evalCat:
-  catId: codex
-  handle: "@codex"
-  model: gpt-5.5
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 frequency: daily
 sourceAdapter: f167-runtime-eval
 sourceRefsKind: a2a-snapshot-attribution
@@ -19,7 +19,7 @@ threadPolicy:
 legacyScheduledTaskIds: [] # Cleaned 2026-06-01 — see migrations/2026-06-01-eval-a2a-legacy-task-cleanup.md
 handoffTargetResolver:
   featureId: F167
-  ownerCatId: opus-47
+  ownerCatId: opus
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 24

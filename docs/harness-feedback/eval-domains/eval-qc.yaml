@@ -5,7 +5,7 @@ systemThreadId: thread_eval_qc
 evalCat:
   catId: opus
   handle: "@opus"
-  model: claude-opus-4-6
+  model: claude-sonnet-5
 frequency: weekly
 sourceAdapter: qc-metrics-eval
 sourceRefsKind: qc-metrics-rollup

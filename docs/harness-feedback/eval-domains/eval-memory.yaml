@@ -3,9 +3,9 @@ domainId: eval:memory
 displayName: Memory Recall & Library Health Eval
 systemThreadId: thread_eval_memory
 evalCat:
-  catId: opus-47
-  handle: "@opus47"
-  model: claude-opus-4-7
+  catId: opus
+  handle: "@opus"
+  model: claude-sonnet-5
 frequency: daily
 sourceAdapter: f200-f188-memory-eval
 sourceRefsKind: memory-recall-snapshot
@@ -20,7 +20,7 @@ legacyScheduledTaskIds:
   - memory-recall-digest
 handoffTargetResolver:
   featureId: F200
-  ownerCatId: opus-47
+  ownerCatId: opus
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 48

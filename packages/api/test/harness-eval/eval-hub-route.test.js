@@ -93,7 +93,7 @@ describe('Eval Hub API route', () => {
             ok: true,
             record: {
               agentKeyId: 'ak-test-001',
-              catId: 'codex',
+              catId: 'opus',
               userId: 'you',
               secretHash: 'unused',
               salt: 'unused',
@@ -179,7 +179,7 @@ describe('Eval Hub API route', () => {
       });
 
       // Generator not invoked (stage skipped in mock), so we just verify route
-      // got past auth + cat allowlist (registry codex == derivedPrincipal.catId).
+      // got past auth + cat allowlist (registry opus == derivedPrincipal.catId).
       // Mock publisher returns success → 200.
       assert.equal(response.statusCode, 200, `expected 200, got ${response.statusCode}: ${response.body}`);
       const body = response.json();
@@ -243,7 +243,7 @@ describe('Eval Hub API route', () => {
     // 砚砚 R18/R19 P2 newline-injection lock extracted to eval-hub-route-newline.test.js
     // per AGENTS.md 350-line limit (砚砚 R20 P1)
 
-    it('rejects wrong cat under agent-key (registry codex vs principal opus-47 → 403)', async () => {
+    it('rejects wrong cat under agent-key (registry opus vs principal opus-47 -> 403)', async () => {
       // Override mock to return a different catId
       const app = Fastify({ logger: false });
       const agentKeyRegistry = {
