@@ -155,17 +155,44 @@ function Test-SourceMode {
     # "corp-proxy reaches Tsinghua even though it can't reach pypi" case:
     # Sync-SystemProxy no longer gates the candidate on a single pypi probe,
     # so per-source decisions in Assert-Network always see the candidate.
-    param([string]$Url, [int]$TimeoutSec = 5, [string]$CandidateProxy = $null)
+    param(
+        [string]$Url,
+        [int]$TimeoutSec = 5,
+        [string]$CandidateProxy = $null,
+        [ValidateSet("HEAD", "GET")][string]$Method = "HEAD"
+    )
+
+    $probe = {
+        param($Proxy)
+        $resp = $null
+        $stream = $null
+        try {
+            $req = [System.Net.HttpWebRequest]::Create($Url)
+            $req.Proxy = $Proxy
+            $req.Method = $Method
+            $req.Timeout = $TimeoutSec * 1000
+            $req.ReadWriteTimeout = $TimeoutSec * 1000
+            $req.AllowAutoRedirect = $true
+            $req.UserAgent = "cat-cafe-prereq-check"
+            $resp = $req.GetResponse()
+            if ($Method -eq "GET") {
+                $stream = $resp.GetResponseStream()
+                $buffer = New-Object byte[] 8192
+                while ($stream -and $stream.Read($buffer, 0, $buffer.Length) -gt 0) {}
+            }
+            return $true
+        } catch {
+            return $false
+        } finally {
+            if ($stream) { $stream.Dispose() }
+            if ($resp) { $resp.Close() }
+        }
+    }
+
     # 1. Try without any proxy at all.
-    try {
-        $req = [System.Net.HttpWebRequest]::Create($Url)
-        $req.Proxy = $null
-        $req.Method = 'HEAD'
-        $req.Timeout = $TimeoutSec * 1000
-        $resp = $req.GetResponse()
-        $resp.Close()
+    if (& $probe $null) {
         return 'direct'
-    } catch {}
+    }
     # 2. Try via candidate proxy (anonymous -- DON'T let .NET auto-fill the
     #    SSPI token, that would mask auth-required corp proxies as reachable).
     $proxyUrl = $CandidateProxy
@@ -175,18 +202,12 @@ function Test-SourceMode {
         if (-not $proxyUrl) { $proxyUrl = $env:HTTP_PROXY }
     }
     if ($proxyUrl) {
-        try {
-            $webProxy = New-Object System.Net.WebProxy($proxyUrl)
-            $webProxy.UseDefaultCredentials = $false
-            $webProxy.Credentials = $null
-            $req = [System.Net.HttpWebRequest]::Create($Url)
-            $req.Proxy = $webProxy
-            $req.Method = 'HEAD'
-            $req.Timeout = $TimeoutSec * 1000
-            $resp = $req.GetResponse()
-            $resp.Close()
+        $webProxy = New-Object System.Net.WebProxy($proxyUrl)
+        $webProxy.UseDefaultCredentials = $false
+        $webProxy.Credentials = $null
+        if (& $probe $webProxy) {
             return 'proxy'
-        } catch {}
+        }
     }
     return 'unreachable'
 }
@@ -241,6 +262,11 @@ function Invoke-ModelDownloadWithRetry {
         # "fastembed"         = fastembed.TextEmbedding
         [string]$Loader = "snapshot"
     )
+
+    if ($env:OS -eq "Windows_NT") {
+        $env:HF_HUB_DISABLE_SYMLINKS = if ($env:HF_HUB_DISABLE_SYMLINKS) { $env:HF_HUB_DISABLE_SYMLINKS } else { "1" }
+        $env:HF_HUB_DISABLE_SYMLINKS_WARNING = if ($env:HF_HUB_DISABLE_SYMLINKS_WARNING) { $env:HF_HUB_DISABLE_SYMLINKS_WARNING } else { "1" }
+    }
 
     $script = switch ($Loader) {
         "snapshot" { @"
@@ -455,26 +481,31 @@ function Assert-Network {
         Write-Host "  Auto-set PIP_INDEX_URL = Tsinghua mirror (primary)"
     }
 
-    # Same two-mode probe for HuggingFace.
-    $hfMode = Test-SourceMode -Url "https://huggingface.co" -TimeoutSec 5 -CandidateProxy $candidate
+    # Same two-mode probe for HuggingFace. Probe a real model artifact rather
+    # than the homepage: some networks allow API/root requests but break TLS on
+    # /resolve artifact downloads, which is the path snapshot_download needs.
+    $hfProbeUrl = "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+    $hfMode = Test-SourceMode -Url $hfProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
     if ($hfMode -eq 'direct') {
-        Write-Host "  HuggingFace connectivity [OK] (direct)"
-        Add-NoProxyHost "huggingface.co"
+        Write-Host "  HuggingFace artifact download [OK] (direct)"
+        # Do not add huggingface.co to NO_PROXY. The actual download happens in
+        # Python/huggingface_hub, whose TLS/proxy behavior can differ from this
+        # .NET probe; preserving the user's proxy avoids false direct bypasses.
     } elseif ($hfMode -eq 'proxy') {
-        Write-Host "  HuggingFace connectivity [OK] (via proxy: $candidate)"
+        Write-Host "  HuggingFace artifact download [OK] (via proxy: $candidate)"
         $needProxyInjection = $true
     } else {
-        $hfMirrorMode = Test-SourceMode -Url "https://hf-mirror.com" -TimeoutSec 5 -CandidateProxy $candidate
+        $hfMirrorProbeUrl = "https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+        $hfMirrorMode = Test-SourceMode -Url $hfMirrorProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
         if ($hfMirrorMode -eq 'direct') {
-            Write-Host "  HuggingFace unreachable, switching to hf-mirror.com (direct)"
+            Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (direct)"
             $env:HF_ENDPOINT = "https://hf-mirror.com"
-            Add-NoProxyHost "hf-mirror.com"
         } elseif ($hfMirrorMode -eq 'proxy') {
-            Write-Host "  HuggingFace unreachable, switching to hf-mirror.com (via proxy: $candidate)"
+            Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (via proxy: $candidate)"
             $env:HF_ENDPOINT = "https://hf-mirror.com"
             $needProxyInjection = $true
         } else {
-            Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com are unreachable in both direct and via-proxy modes; model download will definitely fail."
+            Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
         }
     }
 

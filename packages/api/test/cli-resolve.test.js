@@ -200,6 +200,36 @@ test(
   },
 );
 
+test(
+  'resolveCliCommand finds codex in LOCALAPPDATA/OpenAI/Codex/bin on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (Codex native desktop app fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-codex-localappdata-'));
+    const codexDir = join(tempRoot, 'local', 'OpenAI', 'Codex', 'bin');
+    mkdirSync(codexDir, { recursive: true });
+
+    const fakeCodex = join(codexDir, 'codex.exe');
+    writeFileSync(fakeCodex, 'MZ', 'utf8');
+
+    const originalAppData = process.env.APPDATA;
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    try {
+      process.env.APPDATA = join(tempRoot, 'roaming');
+      process.env.LOCALAPPDATA = join(tempRoot, 'local');
+      invalidateCliCommand('codex');
+      const result = resolveCliCommand('codex');
+      assert.equal(result, fakeCodex, 'should find official Windows Codex native desktop app binary path');
+    } finally {
+      invalidateCliCommand('codex');
+      if (originalAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = originalAppData;
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 // --- Unix HOME fallback ---
 
 test(

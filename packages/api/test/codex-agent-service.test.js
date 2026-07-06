@@ -264,6 +264,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     ]);
 
     const msgs = await promise;
+    const args = spawnFn.mock.calls[0].arguments[1];
 
     assert.equal(msgs.length, 3);
     assert.equal(msgs[0].type, 'session_init');
@@ -272,6 +273,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.equal(msgs[1].type, 'text');
     assert.equal(msgs[1].content, 'Hello from Codex!');
     assert.equal(msgs[2].type, 'done');
+    assert.ok(args.includes('--ignore-user-config'), 'codex invocations must ignore stale user config.toml');
   });
 
   test('uses exec resume when sessionId is provided', async () => {
@@ -299,6 +301,7 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     // resume 子命令不接受 --sandbox；sandbox mode is replayed through --config.
     assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
     assert.ok(args.includes('--json'), 'resume args must include --json');
+    assert.ok(args.includes('--ignore-user-config'), 'resume args must ignore stale user config.toml');
     const modelFlagIndex = args.indexOf('--model');
     assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
     assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
