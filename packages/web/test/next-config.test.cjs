@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const Module = require('node:module');
 const path = require('node:path');
 const { describe, it } = require('node:test');
 
@@ -24,6 +25,31 @@ function withEnv(overrides, run) {
         process.env[key] = value;
       }
     }
+  }
+}
+
+function loadConfigWithPwaCapture() {
+  let capturedPwaOptions;
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === '@ducanh2912/next-pwa') {
+      return {
+        default: (pwaOptions) => {
+          capturedPwaOptions = pwaOptions;
+          return (config) => config;
+        },
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    delete require.cache[configPath];
+    require(configPath);
+    return capturedPwaOptions;
+  } finally {
+    delete require.cache[configPath];
+    Module._load = originalLoad;
   }
 }
 
@@ -70,5 +96,15 @@ describe('next.config rewrites', () => {
       'next.config.js requires @ducanh2912/next-pwa during next build, so it cannot live in devDependencies',
     );
     assert.equal(packageJson.devDependencies?.['@ducanh2912/next-pwa'], undefined);
+  });
+
+  it('does not hard reload the PWA when network connectivity returns', () => {
+    const pwaOptions = loadConfigWithPwaCapture();
+
+    assert.equal(
+      pwaOptions?.reloadOnOnline,
+      false,
+      'Realtime chat must reconnect without next-pwa injecting location.reload() on the online event',
+    );
   });
 });

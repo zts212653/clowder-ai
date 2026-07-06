@@ -85,7 +85,7 @@ const nextConfig = {
 module.exports = withPWA({
   dest: 'public',
   disable: process.env.NODE_ENV === 'development' && !enablePwaInDev,
-  reloadOnOnline: true,
+  reloadOnOnline: false,
   // Start URL is a static shell; precache it so PWA cold-open does not block on network.
   dynamicStartUrl: false,
   // Keep default page/document runtime caching and only override what we need.
