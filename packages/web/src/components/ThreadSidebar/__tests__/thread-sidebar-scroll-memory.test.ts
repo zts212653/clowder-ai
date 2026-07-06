@@ -82,7 +82,9 @@ function jsonOk(data: unknown) {
 
 function findScrollContainer(root: HTMLElement): HTMLDivElement {
   const scroller = Array.from(root.querySelectorAll('div')).find(
-    (el): el is HTMLDivElement => el.className.includes('overflow-y-auto') && !!el.querySelector('[data-thread-id]'),
+    (el): el is HTMLDivElement =>
+      (el.className.includes('overflow-y-auto') || el.className.includes('overflow-y:overlay')) &&
+      !!el.querySelector('[data-thread-id]'),
   );
   if (!scroller) throw new Error('scroll container not found');
   return scroller;
@@ -158,8 +160,24 @@ describe('ThreadSidebar scroll memory', () => {
   }
 
   function expandAll(rootEl: HTMLElement) {
+    // v12: variable toggle button only renders on the project tab. Switch there first.
+    const projectTab = rootEl.querySelector('[data-testid="sidebar-tab-project"]') as HTMLButtonElement | null;
+    if (projectTab) {
+      act(() => {
+        projectTab.click();
+      });
+    }
+    // Variable button: allCollapsed → "expand-all-btn", else → "collapse-all-btn".
+    // To guarantee all-expanded end state regardless of initial state: first collapse all
+    // (so we reach a known allCollapsed=true), then click expand-all.
+    const collapseBtn = rootEl.querySelector('[data-testid="collapse-all-btn"]') as HTMLButtonElement | null;
+    if (collapseBtn) {
+      act(() => {
+        collapseBtn.click();
+      });
+    }
     const expandBtn = rootEl.querySelector('[data-testid="expand-all-btn"]') as HTMLButtonElement | null;
-    if (!expandBtn) throw new Error('expand-all button not found');
+    if (!expandBtn) throw new Error('expand-all button not found after collapse');
     act(() => {
       expandBtn.click();
     });

@@ -183,17 +183,30 @@ export function ThreadItem({
     void onToggleFavorite(id, !isFavorited);
   }, [id, isFavorited, onToggleFavorite]);
 
+  const togglePin = useCallback(() => {
+    if (!onTogglePin) return;
+    setIsMoreOpen(false);
+    void onTogglePin(id, !isPinned);
+  }, [id, isPinned, onTogglePin]);
+
+  const deleteThread = useCallback(() => {
+    if (!onDelete) return;
+    setIsMoreOpen(false);
+    onDelete(id);
+  }, [id, onDelete]);
+
   return (
     <div
       data-thread-id={id}
-      className={`group relative mx-2 rounded-xl ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
+      aria-current={isActive ? 'page' : undefined}
+      className={`group relative mx-2 rounded-xl ${indented ? 'pl-5 pr-3' : 'px-3'} py-2 transition-colors cursor-pointer ${
         isActive ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
       onClick={() => onSelect(id)}
       title={tooltip}
     >
       {/* Title row */}
-      <div className="flex items-start justify-between gap-1 mb-1">
+      <div className="mb-1 flex items-center justify-between gap-1">
         {isEditing ? (
           <input
             ref={inputRef}
@@ -221,43 +234,31 @@ export function ThreadItem({
             className="text-sm px-1.5 py-0.5 rounded border border-cafe-subtle focus:outline-none focus:border-cafe-accent w-full mr-2 disabled:opacity-70"
           />
         ) : (
-          <span
-            className={`text-sm leading-snug line-clamp-2 flex-1 min-w-0 ${isActive ? 'font-semibold text-cafe-black' : 'text-cafe-secondary'}`}
-          >
+          <span className="flex min-w-0 flex-1 items-center gap-1">
+            {isPinned && (
+              <span className="inline-flex flex-shrink-0 text-cafe-accent" role="img" aria-label="已置顶">
+                <PinIcon />
+              </span>
+            )}
+            {isFavorited && (
+              <span
+                className="inline-flex flex-shrink-0 text-conn-amber-text"
+                role="img"
+                aria-label="已收藏"
+                data-testid="thread-favorite-mark"
+              >
+                <StarIcon filled />
+              </span>
+            )}
             {isHubThread && <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-cafe-accent align-text-bottom" />}
-            {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+            <span
+              className={`min-w-0 flex-1 truncate text-xs leading-5 ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
+            >
+              {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+            </span>
           </span>
         )}
         <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
-          {/* Fixed thread actions: pin, delete, more. */}
-          {canPin && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                void onTogglePin(id, !isPinned);
-              }}
-              className={`p-0.5 rounded transition-all ${
-                isPinned
-                  ? 'text-cafe-accent'
-                  : 'opacity-0 group-hover:opacity-100 text-cafe-muted hover:text-cafe-accent'
-              }`}
-              title={isPinned ? '取消置顶' : '置顶'}
-            >
-              <PinIcon />
-            </button>
-          )}
-          {canDelete && !isEditing && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(id);
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-cafe-muted hover:bg-conn-red-bg hover:text-conn-red-text transition-all"
-              title="删除对话"
-            >
-              <DeleteIcon />
-            </button>
-          )}
           {hasMoreActions && (
             <div className="relative">
               <button
@@ -285,6 +286,11 @@ export function ThreadItem({
                   className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
+                  {canPin && (
+                    <ThreadActionMenuItem icon={<PinIcon />} onClick={togglePin}>
+                      {isPinned ? '取消置顶' : '置顶'}
+                    </ThreadActionMenuItem>
+                  )}
                   {onUpdatePreferredCats && (
                     <ThreadCatSettings
                       threadId={id}
@@ -324,6 +330,14 @@ export function ThreadItem({
                     <ThreadActionMenuItem icon={<StarIcon filled={isFavorited} />} onClick={toggleFavorite}>
                       {isFavorited ? '取消收藏' : '收藏'}
                     </ThreadActionMenuItem>
+                  )}
+                  {canDelete && (
+                    <>
+                      <div className="my-1 h-px bg-cafe-subtle" />
+                      <ThreadActionMenuItem icon={<DeleteIcon />} onClick={deleteThread} danger>
+                        删除对话
+                      </ThreadActionMenuItem>
+                    </>
                   )}
                 </div>
               )}
@@ -388,16 +402,27 @@ export function ThreadItem({
 // ─── Small icon components ───
 
 function PinIcon() {
+  // demo sidebar-proposals.html line 205 — pushpin (stroke style, 24x24)
   return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4.456 2.013a.75.75 0 011.06-.034l6.5 6a.75.75 0 01-.034 1.06l-1.99 1.838.637 3.22a.75.75 0 01-1.196.693L6.5 12.526l-2.933 2.264a.75.75 0 01-1.196-.693l.637-3.22-1.99-1.838a.75.75 0 01-.034-1.06l5.472-5.966z" />
+    <svg
+      className="w-3 h-3"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
     </svg>
   );
 }
 
 function DeleteIcon() {
   return (
-    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+    <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path
         fillRule="evenodd"
         d="M5 3.25V4H2.75a.75.75 0 000 1.5h.3l.815 8.15A1.5 1.5 0 005.357 15h5.285a1.5 1.5 0 001.493-1.35l.815-8.15h.3a.75.75 0 000-1.5H11v-.75A2.25 2.25 0 008.75 1h-1.5A2.25 2.25 0 005 3.25zm2.25-.75a.75.75 0 00-.75.75V4h3v-.75a.75.75 0 00-.75-.75h-1.5z"
@@ -480,10 +505,12 @@ function StarIcon({ filled }: { filled?: boolean }) {
 function ThreadActionMenuItem({
   icon,
   onClick,
+  danger,
   children,
 }: {
   icon: ReactNode;
   onClick: () => void;
+  danger?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -491,7 +518,9 @@ function ThreadActionMenuItem({
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated"
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+        danger ? 'text-conn-red-text hover:bg-conn-red-bg' : 'text-cafe-secondary hover:bg-cafe-surface-elevated'
+      }`}
     >
       <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center text-cafe-muted">{icon}</span>
       <span>{children}</span>
@@ -506,19 +535,21 @@ function LabelDots({ labels }: { labels?: string[] }) {
     .map((id) => allLabels.find((l) => l.id === id))
     .filter((l): l is NonNullable<typeof l> => l !== undefined);
   if (resolved.length === 0) return null;
-  const shown = resolved.slice(0, 2);
+  const shown = resolved.slice(0, 3);
   const overflow = resolved.length - shown.length;
   return (
-    <div className="flex items-center gap-0.5 ml-1" title={resolved.map((l) => l.name).join(', ')}>
+    <div
+      className="ml-1 inline-flex h-4 items-center gap-1 rounded-full bg-[var(--console-card-soft-bg)] px-1.5 text-cafe-muted"
+      title={resolved.map((l) => l.name).join(', ')}
+      data-testid="thread-label-dots"
+    >
+      <LabelIcon />
       {shown.map((l) => (
         <span
           key={l.id}
-          className="inline-flex items-center gap-0.5 rounded-full px-1 py-px text-micro leading-tight text-cafe-secondary"
-          style={{ backgroundColor: `${l.color}18` }}
-        >
-          <span className="inline-block w-1 h-1 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
-          <span className="max-w-[32px] truncate">{l.name}</span>
-        </span>
+          className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full"
+          style={{ backgroundColor: l.color }}
+        />
       ))}
       {overflow > 0 && <span className="text-micro text-cafe-muted">+{overflow}</span>}
     </div>

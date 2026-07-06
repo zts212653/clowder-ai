@@ -6,7 +6,7 @@ import { ThreadItem } from '@/components/ThreadSidebar/ThreadItem';
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     cats: [],
-    getCatById: () => undefined,
+    getCatById: (catId: string) => ({ displayName: catId === 'cat-a' ? '猫甲' : catId }),
     getCatsByBreed: () => new Map(),
   }),
 }));
@@ -67,6 +67,17 @@ vi.mock('@/components/ThreadSidebar/thread-utils', () => ({
   formatRelativeTime: () => '1分',
 }));
 
+vi.mock('@/stores/label-store', () => ({
+  useLabelStore: () => ({
+    labels: [
+      { id: 'product', name: '产品体验', color: '#3b82f6' },
+      { id: 'architecture', name: '架构规划', color: '#8b5cf6' },
+      { id: 'bug', name: '缺陷排查', color: '#ef4444' },
+      { id: 'quality', name: '评测质控', color: '#10b981' },
+    ],
+  }),
+}));
+
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://example.test',
   apiFetch: vi.fn(),
@@ -92,13 +103,13 @@ describe('ThreadItem actions', () => {
     vi.restoreAllMocks();
   });
 
-  function renderThread() {
+  function renderThread(overrides: Partial<React.ComponentProps<typeof ThreadItem>> = {}) {
     act(() => {
       root.render(
         React.createElement(ThreadItem, {
           id: 'thread-1',
           title: 'Thread 1',
-          participants: [],
+          participants: ['cat-a'],
           lastActiveAt: 1,
           isActive: false,
           onSelect: vi.fn(),
@@ -111,6 +122,8 @@ describe('ThreadItem actions', () => {
           projectPath: '/projects/cat-cafe',
           isPinned: false,
           isFavorited: false,
+          threadLabels: [],
+          ...overrides,
         }),
       );
     });
@@ -120,11 +133,11 @@ describe('ThreadItem actions', () => {
     return container.querySelector(`button[title="${title}"]`);
   }
 
-  it('keeps direct thread actions to pin, delete, and more', () => {
+  it('keeps pin and delete inside the more menu instead of fixed row buttons', () => {
     renderThread();
 
-    expect(buttonByTitle('置顶')).not.toBeNull();
-    expect(buttonByTitle('删除对话')).not.toBeNull();
+    expect(buttonByTitle('置顶')).toBeNull();
+    expect(buttonByTitle('删除对话')).toBeNull();
     expect(buttonByTitle('更多操作')).not.toBeNull();
     expect(buttonByTitle('更多操作')?.className).not.toContain('opacity-0');
 
@@ -150,6 +163,8 @@ describe('ThreadItem actions', () => {
     });
 
     const menu = container.querySelector('[role="menu"]');
+    expect(menu?.textContent).toContain('置顶');
+    expect(menu?.textContent).toContain('删除对话');
     expect(menu?.textContent).toContain('设置默认猫猫');
     expect(menu?.textContent).toContain('重命名对话');
     expect(menu?.textContent).toContain('导出对话');
@@ -167,7 +182,7 @@ describe('ThreadItem actions', () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
 
-    for (const label of ['设置默认猫猫', '重命名对话', '导出对话', '标签管理', '收藏']) {
+    for (const label of ['置顶', '设置默认猫猫', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
       const item = Array.from(menu!.querySelectorAll('[role="menuitem"]')).find((el) =>
         el.textContent?.includes(label),
       );
@@ -176,5 +191,33 @@ describe('ThreadItem actions', () => {
       expect(first?.querySelector('svg[aria-hidden="true"]') ?? first?.matches('svg[aria-hidden="true"]')).toBeTruthy();
       expect(item!.textContent).toContain(label);
     }
+  });
+
+  it('shows a filled favorite mark next to favorited thread titles', () => {
+    renderThread({ isFavorited: true });
+
+    const mark = container.querySelector('[data-testid="thread-favorite-mark"]');
+    expect(mark).not.toBeNull();
+    expect(mark?.getAttribute('aria-label')).toBe('已收藏');
+  });
+
+  it('renders labels as one 16px compact tag button with overflow dots', () => {
+    renderThread({ threadLabels: ['product', 'architecture', 'bug', 'quality'] });
+
+    const labelButton = container.querySelector('[data-testid="thread-label-dots"]');
+    expect(labelButton).not.toBeNull();
+    expect(labelButton?.className).toContain('h-4');
+    expect(labelButton?.getAttribute('title')).toBe('产品体验, 架构规划, 缺陷排查, 评测质控');
+    expect(labelButton?.textContent).toContain('+1');
+  });
+
+  it('keeps the full code-compatible tooltip format on the thread item', () => {
+    renderThread({ participants: ['cat-a'], projectPath: '/projects/cat-cafe' });
+
+    const item = container.querySelector('[data-thread-id="thread-1"]');
+    expect(item?.getAttribute('title')).toContain('Thread 1');
+    expect(item?.getAttribute('title')).toContain('参与: 猫甲');
+    expect(item?.getAttribute('title')).toContain('路径: /projects/cat-cafe');
+    expect(item?.getAttribute('title')).toContain('1分');
   });
 });

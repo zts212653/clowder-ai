@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
 import {
+  buildSidebarTabContent,
+  buildSidebarTabs,
   formatRelativeTime,
   getProjectPaths,
   mergeLiveActivityIntoThreads,
   projectDisplayName,
+  type SidebarTabId,
   sortAndGroupThreads,
   sortAndGroupThreadsWithWorkspace,
 } from '../ThreadSidebar/thread-utils';
@@ -505,5 +508,58 @@ describe('sortAndGroupThreadsWithWorkspace', () => {
     const system = groups.find((g) => g.type === 'system');
     expect(system).toBeDefined();
     expect(system?.threads).toHaveLength(2);
+  });
+});
+
+// ── sidebar tab selectors ─────────────────────────────
+
+describe('sidebar tab selectors', () => {
+  const tabThreads = [
+    makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
+    makeThread({ id: 'regular-new', title: 'Zoo', projectPath: '/proj/beta', lastActiveAt: NOW - 1_000 }),
+    makeThread({ id: 'regular-old', title: 'Alpha', projectPath: '/proj/alpha', lastActiveAt: NOW - DAY }),
+    makeThread({ id: 'pinned', title: 'Pinned', pinned: true, projectPath: '/proj/beta', lastActiveAt: NOW - 2 * DAY }),
+    makeThread({
+      id: 'fav',
+      title: 'Favorite',
+      favorited: true,
+      projectPath: '/proj/alpha',
+      lastActiveAt: NOW - 3 * DAY,
+    }),
+    makeThread({ id: 'system', title: 'System', systemKind: 'eval_domain', lastActiveAt: NOW - 4 * DAY }),
+  ];
+
+  it('builds tabs in the v9 order with non-default counts', () => {
+    const tabs = buildSidebarTabs(tabThreads);
+    const tabIds: SidebarTabId[] = tabs.map((tab) => tab.id);
+    expect(tabIds).toEqual(['recent', 'project', 'system', 'favorites']);
+    expect(tabs.map((tab) => tab.label)).toEqual(['最近', '项目', '系统', '收藏']);
+    expect(tabs.map((tab) => tab.count)).toEqual([4, 4, 1, 1]);
+  });
+
+  it('recent tab excludes lobby and system threads, then sorts pinned first and activity desc', () => {
+    const content = buildSidebarTabContent('recent', tabThreads, new Set(['/proj/alpha']));
+
+    expect(content.kind).toBe('flat');
+    expect(content.threads.map((thread) => thread.id)).toEqual(['pinned', 'regular-new', 'regular-old', 'fav']);
+  });
+
+  it('system and favorites tabs are flat isolated views', () => {
+    const system = buildSidebarTabContent('system', tabThreads, new Set());
+    const favorites = buildSidebarTabContent('favorites', tabThreads, new Set());
+
+    expect(system.kind).toBe('flat');
+    expect(system.threads.map((thread) => thread.id)).toEqual(['system']);
+    expect(favorites.kind).toBe('flat');
+    expect(favorites.threads.map((thread) => thread.id)).toEqual(['fav']);
+  });
+
+  it('project tab groups non-system threads by path with pinned projects first and item titles alphabetical', () => {
+    const content = buildSidebarTabContent('project', tabThreads, new Set(['/proj/beta']));
+
+    expect(content.kind).toBe('project');
+    expect(content.projectGroups?.map((group) => group.projectPath)).toEqual(['/proj/beta', '/proj/alpha']);
+    expect(content.projectGroups?.[0].threads.map((thread) => thread.id)).toEqual(['pinned', 'regular-new']);
+    expect(content.projectGroups?.[1].threads.map((thread) => thread.id)).toEqual(['regular-old', 'fav']);
   });
 });
