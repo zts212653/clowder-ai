@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-rem Cat Cafe Portable — launch script
+rem Clowder AI Portable — launch script
 rem Detects first run, auto-configures, then starts the Electron app.
 rem Equivalent to Inno Setup [Run] section but without admin requirement.
 
@@ -13,7 +13,7 @@ rem ── First-run configuration ───────────────
 if not exist "%APPDIR%\.env" (
     echo.
     echo  ============================================
-    echo   Cat Cafe — First Run Configuration
+    echo   Clowder AI — First Run Configuration
     echo  ============================================
     echo.
 
@@ -24,7 +24,7 @@ if not exist "%APPDIR%\.env" (
     echo.
 
     rem Step 2: Sync Agent CLI hooks to user profile (~/.claude, ~/.codex)
-    rem so any existing CLI installations can connect to this Cat Cafe instance.
+    rem so any existing CLI installations can connect to this Clowder AI instance.
     powershell -NoProfile -ExecutionPolicy Bypass -File "%APPDIR%\scripts\post-install-offline.ps1" -AppDir "%APPDIR%" -AgentHooksOnly
     echo.
 
@@ -35,7 +35,7 @@ if not exist "%APPDIR%\.env" (
 
     if errorlevel 1 (
         echo  [!!] Configuration encountered issues. See above for details.
-        echo       Cat Cafe will still attempt to start.
+        echo       Clowder AI will still attempt to start.
         echo.
     ) else (
         echo  [OK] Configuration complete.
@@ -54,6 +54,6 @@ if errorlevel 1 (
     )
 )
 
-rem ── Launch Cat Cafe ──────────────────────────────────────────────────
-echo  Starting Cat Cafe...
-start "" "%APPDIR%\desktop-dist\Cat Cafe.exe"
+rem ── Launch Clowder AI ──────────────────────────────────────────────────
+echo  Starting Clowder AI...
+start "" "%APPDIR%\desktop-dist\Clowder AI.exe"

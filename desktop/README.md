@@ -1,6 +1,6 @@
-# Cat Cafe Desktop
+# Clowder AI Desktop
 
-基于 Electron 的桌面应用壳层，为 Cat Cafe 提供一键启动、系统托盘和独立窗口体验。
+基于 Electron 的桌面应用壳层，为 Clowder AI 提供一键启动、系统托盘和独立窗口体验。
 当前支持 **Windows 安装器** 和 **macOS DMG 安装器**。
 
 ## 设计哲学
@@ -141,16 +141,16 @@ pnpm desktop:pack
 | 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
 | 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
 | 5/6 | 跳过（macOS DMG 无 post-install 阶段，不捆绑 CLI 工具；用户自行安装） | — |
-| 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/CatCafe-{version}-{arch}.dmg` |
+| 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/ClowderAI-{version}-{arch}.dmg` |
 
 #### 已知注意事项
 
 - **node_modules 补拷**：electron-builder 从 v20.15.2 起不再将 `node_modules` 目录包含在 `extraResources` 中（[electron-builder#3104](https://github.com/electron-userland/electron-builder/issues/3104)）。项目通过 `desktop/afterPack.js` hook 在打包后手动拷贝 `node_modules` 解决此问题。
 - **未签名应用**：代码签名已禁用（`identity=null`）。首次启动需右键 → 打开，或执行：
   ```bash
-  xattr -cr "/Applications/Cat Cafe.app"
+  xattr -cr "/Applications/Clowder AI.app"
   ```
-- **支持的安装位置（macOS）**：packaged 版本仅支持从 `/Applications/Cat Cafe.app` 启动。
+- **支持的安装位置（macOS）**：packaged 版本仅支持从 `/Applications/Clowder AI.app` 启动。
   - 启动时 `desktop/main.js` 的 `ensureValidMacInstallLocation()` guard 会拒绝从 DMG 卷
     （`/Volumes/...`）直接运行，并弹出"必须先安装"对话框。
   - **范围外**：`~/Applications`（用户级 Applications）、外部卷（USB / 网络盘）、企业
@@ -163,8 +163,8 @@ pnpm desktop:pack
 #### 产物位置
 
 ```
-dist/CatCafe-{version}-arm64.dmg   # Apple Silicon
-dist/CatCafe-{version}-x64.dmg     # Intel Mac
+dist/ClowderAI-{version}-arm64.dmg   # Apple Silicon
+dist/ClowderAI-{version}-x64.dmg     # Intel Mac
 ```
 
 ---
@@ -187,7 +187,7 @@ pnpm desktop:installer
 3. 下载 Node.js 便携版（ABI 版本与构建机一致，确保 native 模块兼容）
 4. 下载/复制 Windows 便携版 Redis
 5. 构建 Electron 壳（`electron-builder --win --dir`）
-6. 编译 Inno Setup 安装包（`dist/CatCafe-Setup-x.x.x.exe`）
+6. 编译 Inno Setup 安装包（`dist/ClowderAI-Setup-x.x.x.exe`）
 
 安装包在目标机器上执行：
 - 复制运行时包 + 构建产物 + Electron 壳 + 便携 Node.js + 便携 Redis
@@ -213,9 +213,9 @@ pnpm desktop:installer
 
 ### 步骤
 
-1. **运行安装包** — 双击 `CatCafe-Setup-x.x.x.exe`，选择 `Full`（全部 CLI 工具）或 `Minimal`（仅核心）
+1. **运行安装包** — 双击 `ClowderAI-Setup-x.x.x.exe`，选择 `Full`（全部 CLI 工具）或 `Minimal`（仅核心）
 2. **等待安装完成** — 安装器自动完成：解包应用 + 便携 Node.js + 便携 Redis → 生成 `.env` → 挂载 skills → 安装所选 CLI 工具
-3. **启动 Cat Cafe** — 安装结束后勾选"Launch Cat Cafe"，或从桌面快捷方式启动
+3. **启动 Clowder AI** — 安装结束后勾选"Launch Clowder AI"，或从桌面快捷方式启动
 4. **配置 Provider** — 打开 Hub → 账号配置，为你要使用的 AI 服务完成认证：
    - **Claude** — 运行 `claude` 命令完成 Anthropic 登录
    - **Codex** — 运行 `codex` 命令完成 OpenAI 登录
@@ -236,8 +236,8 @@ pnpm desktop:installer
 
 桌面应用的运行日志集中在用户数据目录：
 
-- **Windows**：`%LOCALAPPDATA%\Cat Cafe\data\logs\` (`main.log` / `desktop.log` / `api\api.log`)
-- **macOS**：`~/Library/Application Support/Cat Cafe/data/logs/` (`main.log` / `desktop.log` / `api/api.log`)
+- **Windows**：`%LOCALAPPDATA%\Clowder AI\data\logs\` (`main.log` / `desktop.log` / `api\api.log`)
+- **macOS**：`~/Library/Application Support/Clowder AI/data/logs/` (`main.log` / `desktop.log` / `api/api.log`)
 
 ## 故障排查
 
@@ -253,8 +253,8 @@ pnpm desktop:installer
 
 | 平台 | 状态 | 说明 |
 |------|------|------|
-| Windows | ✅ 已验证 | Inno Setup 安装器（`dist/CatCafe-Setup-x.x.x.exe`） |
-| macOS | ✅ 已验证 | DMG 安装器（`dist/CatCafe-{version}-{arch}.dmg`），2026-04-23 已补齐 clean macOS build/首启证据 |
+| Windows | ✅ 已验证 | Inno Setup 安装器（`dist/ClowderAI-Setup-x.x.x.exe`） |
+| macOS | ✅ 已验证 | DMG 安装器（`dist/ClowderAI-{version}-{arch}.dmg`），2026-04-23 已补齐 clean macOS build/首启证据 |
 | Linux | ❌ 暂不支持 | 尚无 Linux 安装包 |
 
 ## 相关文档

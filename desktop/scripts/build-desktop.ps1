@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds the Cat Cafe Windows installer package.
+  Builds the Clowder AI Windows installer package.
 
 .DESCRIPTION
   Full pipeline:
@@ -9,7 +9,7 @@
        with flat hoisted node_modules (real files, no junctions)
     3. Bundle Redis portable for offline install
     4. Build the Electron shell (via desktop/ npm install + electron-builder)
-    5. Compile Inno Setup installer -> dist/CatCafe-Setup-x.x.x.exe
+    5. Compile Inno Setup installer -> dist/ClowderAI-Setup-x.x.x.exe
 
   Why pnpm deploy (not tar of root node_modules): pnpm on Windows uses
   junctions, which require absolute paths. A tarball of node_modules bakes in
@@ -229,7 +229,7 @@ if (Test-Path (Join-Path $bundledRedis "redis-server.exe")) {
 } else {
     New-Item -ItemType Directory -Path $bundledRedis -Force | Out-Null
     Write-Host "  Downloading Redis for Windows..."
-    $headers = @{ "User-Agent" = "CatCafe-Build" }
+    $headers = @{ "User-Agent" = "ClowderAI-Build" }
     $releaseApi = "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
     try {
         $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers -TimeoutSec 30
@@ -266,7 +266,7 @@ Install it with the official bootstrapper:
 
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -Uri https://antigravity.google/cli/install.cmd -OutFile `$env:TEMP\antigravity-cli-install.cmd; & `$env:TEMP\antigravity-cli-install.cmd"
 
-Offline Cat Cafe packages intentionally do not vendor agy until Google
+Offline Clowder AI packages intentionally do not vendor agy until Google
 publishes a redistributable native binary contract.
 "@ | Set-Content -Path $agyInstructionsPath -Encoding ascii
 Write-Ok "agy-install-instructions.txt written"
@@ -406,7 +406,7 @@ if (-not $SkipInstaller) {
     if ($LASTEXITCODE -ne 0) { Write-Err "Inno Setup compilation failed"; exit 1 }
     Write-Ok "Installer built"
 
-    $outputExe = Get-ChildItem -Path $distDir -Filter "CatCafe-Setup-*.exe" | Select-Object -First 1
+    $outputExe = Get-ChildItem -Path $distDir -Filter "ClowderAI-Setup-*.exe" | Select-Object -First 1
     Write-Host ""
     Write-Host "  ========================================" -ForegroundColor Green
     Write-Host "  Installer ready!" -ForegroundColor Green
@@ -428,7 +428,7 @@ if (-not $SkipPortableZip) {
     $desktopPkgJson = Get-Content $desktopPkgPath -Raw | ConvertFrom-Json
     $zipVersion = if ($env:CATCAFE_VERSION) { $env:CATCAFE_VERSION } else { $desktopPkgJson.version }
 
-    $stagingName = "CatCafe-$zipVersion"
+    $stagingName = "ClowderAI-$zipVersion"
     $staging = Join-Path $distDir $stagingName
     if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
     New-Item -ItemType Directory -Path $staging -Force | Out-Null

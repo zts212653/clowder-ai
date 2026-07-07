@@ -1,4 +1,4 @@
-; Cat Cafe — Inno Setup Installer Script
+; Clowder AI — Inno Setup Installer Script
 ; Builds an offline Windows .exe installer that bundles source + deps + Electron shell.
 ;
 ; Prerequisites: Inno Setup 6.x (https://jrsoftware.org/isinfo.php)
@@ -14,29 +14,29 @@
 ;   5. Runs user-level Agent CLI hook sync under the invoking user profile
 ;   6. Creates desktop shortcut to the Electron app
 
-#define MyAppName      "Cat Cafe"
+#define MyAppName      "Clowder AI"
 ; MyAppVersion can be overridden by iscc /DMyAppVersion=X.Y.Z (CI release pipeline).
 ; Default kept for local manual builds.
 #ifndef MyAppVersion
   #define MyAppVersion "0.10.1"
 #endif
-#define MyAppPublisher "Cat Cafe"
-#define MyAppURL       "https://github.com/zts212653/cat-cafe"
-#define MyAppExeName   "Cat Cafe.exe"
+#define MyAppPublisher "Clowder AI"
+#define MyAppURL       "https://github.com/zts212653/clowder-ai"
+#define MyAppExeName   "Clowder AI.exe"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-; Show just "Cat Cafe" in Add/Remove Programs, not "Cat Cafe 版本 X.Y.Z".
+; Show just "Clowder AI" in Add/Remove Programs, not "Clowder AI 版本 X.Y.Z".
 ; The version is still available in the detail pane via AppVersion.
 AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-DefaultDirName={autopf}\CatCafe
+DefaultDirName={autopf}\ClowderAI
 DefaultGroupName={#MyAppName}
 OutputDir=..\..\dist
-OutputBaseFilename=CatCafe-Setup-{#MyAppVersion}
+OutputBaseFilename=ClowderAI-Setup-{#MyAppVersion}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -179,7 +179,7 @@ Filename: "reg.exe"; \
 ; `npm install -g` fails on clean machines. Users install CLIs separately.
 Filename: "powershell.exe"; \
   Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\post-install-offline.ps1"" -AppDir ""{app}"""; \
-  StatusMsg: "Configuring Cat Cafe..."; \
+  StatusMsg: "Configuring Clowder AI..."; \
   Flags: runhidden waituntilterminated
 ; User-level Agent CLI hook sync writes to ~/.claude and ~/.codex, so it must
 ; run as the invoking user rather than the elevated installer account.
@@ -201,7 +201,7 @@ Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
 
 [UninstallRun]
 Filename: "powershell.exe"; \
-  Parameters: "-ExecutionPolicy Bypass -Command ""Stop-Process -Name 'Cat Cafe' -Force -ErrorAction SilentlyContinue"""; \
+  Parameters: "-ExecutionPolicy Bypass -Command ""Stop-Process -Name 'Clowder AI' -Force -ErrorAction SilentlyContinue"""; \
   Flags: runhidden
 
 [UninstallDelete]

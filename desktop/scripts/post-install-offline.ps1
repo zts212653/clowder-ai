@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Post-install for the offline Cat Cafe installer.
+  Post-install for the offline Clowder AI installer.
 
 .DESCRIPTION
   Called by Inno Setup after file extraction.
@@ -190,11 +190,11 @@ if (Test-Path $redisExe) {
 Write-Host ""
 if ($allGood) {
     Write-Host "  ========================================" -ForegroundColor Green
-    Write-Host "  Cat Cafe configured!" -ForegroundColor Green
+    Write-Host "  Clowder AI configured!" -ForegroundColor Green
     Write-Host "  ========================================" -ForegroundColor Green
 } else {
     Write-Host "  ========================================" -ForegroundColor Yellow
-    Write-Host "  Cat Cafe installed with warnings" -ForegroundColor Yellow
+    Write-Host "  Clowder AI installed with warnings" -ForegroundColor Yellow
     Write-Host "  ========================================" -ForegroundColor Yellow
 }
 

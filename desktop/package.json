@@ -16,9 +16,9 @@
     "electron-builder": "26.8.1"
   },
   "build": {
-    "appId": "ai.catcafe.desktop",
+    "appId": "ai.clowderai.desktop",
     "productName": "Clowder AI",
-    "artifactName": "CatCafe-${version}-${arch}.${ext}",
+    "artifactName": "ClowderAI-${version}-${arch}.${ext}",
     "win": {
       "target": "dir",
       "icon": "assets/icon.ico"
