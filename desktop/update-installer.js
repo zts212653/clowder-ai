@@ -108,14 +108,22 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         existingSize = 0;
       }
       // Validate Content-Range on 206: server must resume from our byte offset.
-      // Mismatch → discard partial and restart full download (spec §2).
+      // Mismatch → discard partial + meta so next attempt starts clean (spec §2).
+      // We must NOT consume the truncated 206 body — it's only a suffix.
       if (isResume) {
         const cr = response.headers['content-range'];
         const m = cr?.match(/bytes (\d+)-/);
         if (!m || Number(m[1]) !== existingSize) {
-          dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — restarting`);
-          existingSize = 0;
-          isResume = false;
+          dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — discarding partial`);
+          try {
+            fs.unlinkSync(destPath);
+          } catch {}
+          try {
+            fs.unlinkSync(metaPath);
+          } catch {}
+          response.destroy();
+          reject(new Error(`Content-Range mismatch: expected start=${existingSize}, got "${cr}"`));
+          return;
         }
       }
 
