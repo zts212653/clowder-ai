@@ -97,7 +97,7 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
     }
 
     request.on('response', (response) => {
-      const isResume = response.statusCode === 206;
+      let isResume = response.statusCode === 206;
       if (response.statusCode !== 200 && !isResume) {
         reject(new Error(`HTTP ${response.statusCode}`));
         return;
@@ -107,13 +107,15 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         dbg('Resume rejected — restarting download');
         existingSize = 0;
       }
-      // Validate Content-Range on 206: server must resume from our byte offset
+      // Validate Content-Range on 206: server must resume from our byte offset.
+      // Mismatch → discard partial and restart full download (spec §2).
       if (isResume) {
         const cr = response.headers['content-range'];
         const m = cr?.match(/bytes (\d+)-/);
         if (!m || Number(m[1]) !== existingSize) {
           dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — restarting`);
           existingSize = 0;
+          isResume = false;
         }
       }
 

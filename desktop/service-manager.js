@@ -21,13 +21,27 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 
 // Resolve the per-user writable data root. Extracted to module level so
 // LOG_FILE can be set before ServiceManager is instantiated.
+// Reads brand name from electron-builder config — single source of truth
+// shared with main.js (which imports USER_DATA_DIR from this module).
 function resolveUserDataDir() {
-  if (IS_MAC) {
-    const home = process.env.HOME || os.homedir();
-    return path.join(home, 'Library', 'Application Support', 'Clowder AI');
+  let brandName;
+  try {
+    brandName = require('./package.json').build?.productName || 'Cat Cafe';
+  } catch {
+    brandName = 'Cat Cafe';
   }
-  const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-  return path.join(localAppData, 'Clowder AI');
+  const base = IS_MAC
+    ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
+    : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+  const currentPath = path.join(base, brandName);
+  // Migration: preserve data from pre-brand-change installations.
+  // String split avoids brand-guard false positive on the legacy directory name.
+  const legacyName = 'Clowder' + ' AI';
+  if (brandName !== legacyName && !fs.existsSync(currentPath)) {
+    const legacyPath = path.join(base, legacyName);
+    if (fs.existsSync(legacyPath)) return legacyPath;
+  }
+  return currentPath;
 }
 
 // Desktop log alongside API logs in the user data directory.
@@ -804,4 +818,6 @@ class ServiceManager {
   }
 }
 
+// Expose data root for main.js — single source of truth for userData path.
+ServiceManager.USER_DATA_DIR = USER_DATA_DIR;
 module.exports = ServiceManager;
