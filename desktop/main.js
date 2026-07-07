@@ -1,18 +1,19 @@
-// Clowder AI Desktop — Electron main process
+// Cat Cafe Desktop — Electron main process
 // Launches backend services (Redis, API, Web) then shows the web UI.
 
-const { app, BrowserWindow, Menu, Tray, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, net, shell, Notification } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const { resolveProjectRootFromDir } = require('./project-root');
 const ServiceManager = require('./service-manager');
+const UpdateManager = require('./update-manager');
 
 // macOS install-location guard.
 //
-// When the user double-clicks Clowder AI.app from the mounted DMG without
+// When the user double-clicks Cat Cafe.app from the mounted DMG without
 // dragging it to /Applications first, every backend subprocess (Redis, API,
-// Web) ends up with a cwd / loaded-module path under /Volumes/Clowder AI/...,
+// Web) ends up with a cwd / loaded-module path under /Volumes/Cat Cafe/...,
 // which holds the DMG volume open. The user then cannot eject the DMG until
 // the app is fully quit (and even then, lingering file handles or zombie
 // processes can keep it locked).
@@ -52,10 +53,10 @@ function ensureValidMacInstallLocation() {
     buttons: ['OK'],
     defaultId: 0,
     cancelId: 0,
-    title: 'Clowder AI',
-    message: 'Clowder AI must be installed before it can open',
+    title: 'Cat Cafe',
+    message: 'Cat Cafe must be installed before it can open',
     detail:
-      'Running directly from the install disk image is not supported. Drag Clowder AI.app to the Applications folder, then open it from Applications.',
+      'Running directly from the install disk image is not supported. Drag Cat Cafe.app to the Applications folder, then open it from Applications.',
   });
 
   app.quit();
@@ -70,8 +71,8 @@ const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 // Main process log in the user data directory alongside API + desktop logs.
 const IS_MAC_MAIN = process.platform === 'darwin';
 const userDataRoot = IS_MAC_MAIN
-  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', 'Clowder AI')
-  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Clowder AI');
+  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', 'Cat Cafe')
+  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Cat Cafe');
 const mainLogDir = path.join(userDataRoot, 'data', 'logs');
 try {
   fs.mkdirSync(mainLogDir, { recursive: true });
@@ -92,6 +93,7 @@ let mainWindow = null;
 let splashWindow = null;
 let tray = null;
 let services = null;
+let updater = null;
 let isQuitting = false;
 
 function createSplashWindow() {
@@ -117,7 +119,7 @@ function createMainWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Clowder AI',
+    title: 'Cat Cafe',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     show: false,
     webPreferences: {
@@ -160,11 +162,13 @@ function createTray() {
     return; // icon missing — skip tray
   }
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Clowder AI', click: () => mainWindow?.show() },
+    { label: 'Show Cat Cafe', click: () => mainWindow?.show() },
+    { type: 'separator' },
+    { label: 'Check for Updates', click: () => updater?.checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
   ]);
-  tray.setToolTip('Clowder AI');
+  tray.setToolTip('Cat Cafe');
   tray.setContextMenu(contextMenu);
   tray.on('double-click', () => mainWindow?.show());
 }
@@ -202,7 +206,7 @@ app.on('ready', async () => {
     return;
   }
 
-  // Single instance lock — prevent multiple Clowder AI processes.
+  // Single instance lock — prevent multiple Cat Cafe processes.
   // This runs AFTER the install-location guard so that launching from a DMG
   // always shows the warning dialog, even if another instance is already
   // running from /Applications.
@@ -221,15 +225,43 @@ app.on('ready', async () => {
     onStatus: sendSplashStatus,
   });
 
+  // F257: Initialize updater — check pending upgrade result BEFORE services
+  // (spec §3.2: "main.js 早期、服务启动前检测")
+  updater = new UpdateManager({
+    app,
+    net,
+    showDialog: (opts) => dialog.showMessageBox(opts).then((r) => r.response),
+    showNotification: (title, body) => {
+      try {
+        new Notification({ title, body }).show();
+      } catch {}
+    },
+    setProgressBar: (p) => {
+      try {
+        mainWindow?.setProgressBar(p);
+      } catch {}
+    },
+    openExternal: (url) => shell.openExternal(url),
+    openPath: (p) => shell.openPath(p),
+    quitApp,
+    dbg,
+    userDataRoot,
+    platform: process.platform,
+    arch: process.arch,
+  });
+  await updater.checkPendingUpgrade();
+
   try {
     dbg('startAll() called');
     await services.startAll();
     dbg('startAll() done — creating main window');
     createMainWindow();
+    // F257: Start periodic update checks after services are up
+    updater.startSchedule();
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);
     dialog.showErrorBox(
-      'Clowder AI - Startup Error',
+      'Cat Cafe - Startup Error',
       `Failed to start services:\n${err.message}\n\nCheck logs in .cat-cafe/logs/`,
     );
     app.quit();

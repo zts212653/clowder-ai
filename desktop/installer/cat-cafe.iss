@@ -195,9 +195,26 @@ Filename: "powershell.exe"; \
   StatusMsg: "Generating desktop configuration..."; \
   Flags: runhidden waituntilterminated
 
-; Offer to launch after install
+; Offer to launch after interactive install
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
   Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
+; F257: Auto-restart after silent upgrade (in-app updater uses /SILENT).
+; runasoriginaluser is critical — without it, the app + Redis + API all run
+; as elevated admin, which breaks user-data paths and is a security concern.
+Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
+  Flags: nowait runasoriginaluser; Check: WizardSilent
+
+; ── F257: Clean previous version's tar-extracted dirs before upgrade ───
+; These are NOT tracked by Inno's file registry (created by tar.exe in [Run]).
+; Without this, old module files / deleted packages persist across upgrades —
+; an extremely hard-to-debug class of staleness bugs.
+; The junction must be removed first (rmdir only deletes the link, not target).
+; Recovery: if install fails after delete, rerunning the installer restores everything.
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\scripts\node_modules"
+Type: filesandordirs; Name: "{app}\packages"
+Type: filesandordirs; Name: "{app}\desktop-dist"
+Type: filesandordirs; Name: "{app}\node"
 
 [UninstallRun]
 Filename: "powershell.exe"; \
@@ -213,3 +230,25 @@ Type: filesandordirs; Name: "{app}\node"
 Type: filesandordirs; Name: "{app}\bundled"
 ; scripts/node_modules junction created by mklink /J in [Run]
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
+
+; ── F257: Defensive process cleanup before upgrade ────────────────────
+; The in-app updater calls quitApp() → stopAll() before spawning the installer,
+; but if stopAll() times out or the user manually reruns Setup.exe, child
+; processes (node, redis-server) may still hold file locks in {app}\.
+; PrepareToInstall kills ONLY processes whose executable path is under {app} —
+; no risk of killing the user's own node/redis instances running elsewhere.
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+  Cmd: String;
+begin
+  Result := '';
+  NeedsRestart := False;
+  Cmd := 'Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+         ExpandConstant('{app}') +
+         ''') } | Stop-Process -Force -ErrorAction SilentlyContinue';
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "' + Cmd + '"',
+       '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+end;
