@@ -26,22 +26,14 @@ const ARCH_SEG = process.arch === 'arm64' ? 'arm64' : 'x64';
 function resolveUserDataDir() {
   let brandName;
   try {
-    brandName = require('./package.json').build?.productName || 'Cat Cafe';
+    brandName = require('./package.json').build?.productName || 'Clowder AI';
   } catch {
-    brandName = 'Cat Cafe';
+    brandName = 'Clowder AI';
   }
   const base = IS_MAC
     ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support')
     : process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
-  const currentPath = path.join(base, brandName);
-  // Migration: preserve data from pre-brand-change installations.
-  // String split avoids brand-guard false positive on the legacy directory name.
-  const legacyName = 'Clowder' + ' AI';
-  if (brandName !== legacyName && !fs.existsSync(currentPath)) {
-    const legacyPath = path.join(base, legacyName);
-    if (fs.existsSync(legacyPath)) return legacyPath;
-  }
-  return currentPath;
+  return path.join(base, brandName);
 }
 
 // Desktop log alongside API logs in the user data directory.

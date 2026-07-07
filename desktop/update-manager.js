@@ -51,7 +51,7 @@ class UpdateManager {
       dbg(`Upgrade to ${currentVersion} succeeded`);
       dl.clearJournal(this._updatesDir);
       this._cleanOldFiles();
-      showNotification('Cat Cafe Updated', `Updated to v${currentVersion}`);
+      showNotification('Clowder AI Updated', `Updated to v${currentVersion}`);
       return;
     }
 
@@ -64,7 +64,7 @@ class UpdateManager {
       buttons: ['Retry Install', 'Open Installer Location', 'View Log', 'Ignore'],
       defaultId: 0,
       cancelId: 3,
-      title: 'Cat Cafe — Update Failed',
+      title: 'Clowder AI — Update Failed',
       message: `Update to v${journal?.targetVersion} did not complete`,
       detail: 'The update was interrupted. You can retry or dismiss this.',
     });
@@ -142,7 +142,7 @@ class UpdateManager {
       defaultId: 0,
       cancelId: 1,
       title: 'Update Available',
-      message: `Cat Cafe v${target.version} is available`,
+      message: `Clowder AI v${target.version} is available`,
       detail,
     });
 
@@ -237,7 +237,7 @@ class UpdateManager {
         cancelId: 1,
         title: 'Ready to Install',
         message: `v${target.version} downloaded`,
-        detail: 'Drag Cat Cafe into Applications to replace the old version.\nYour data will not be affected.',
+        detail: 'Drag Clowder AI into Applications to replace the old version.\nYour data will not be affected.',
       });
       if (btn !== 0) return;
       dl.writeJournal(this._updatesDir, {

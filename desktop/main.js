@@ -1,4 +1,4 @@
-// Cat Cafe Desktop — Electron main process
+// Clowder AI Desktop — Electron main process
 // Launches backend services (Redis, API, Web) then shows the web UI.
 
 const { app, BrowserWindow, Menu, Tray, dialog, net, shell, Notification } = require('electron');
@@ -11,9 +11,9 @@ const UpdateManager = require('./update-manager');
 
 // macOS install-location guard.
 //
-// When the user double-clicks Cat Cafe.app from the mounted DMG without
+// When the user double-clicks Clowder AI.app from the mounted DMG without
 // dragging it to /Applications first, every backend subprocess (Redis, API,
-// Web) ends up with a cwd / loaded-module path under /Volumes/Cat Cafe/...,
+// Web) ends up with a cwd / loaded-module path under /Volumes/Clowder AI/...,
 // which holds the DMG volume open. The user then cannot eject the DMG until
 // the app is fully quit (and even then, lingering file handles or zombie
 // processes can keep it locked).
@@ -53,10 +53,10 @@ function ensureValidMacInstallLocation() {
     buttons: ['OK'],
     defaultId: 0,
     cancelId: 0,
-    title: 'Cat Cafe',
-    message: 'Cat Cafe must be installed before it can open',
+    title: 'Clowder AI',
+    message: 'Clowder AI must be installed before it can open',
     detail:
-      'Running directly from the install disk image is not supported. Drag Cat Cafe.app to the Applications folder, then open it from Applications.',
+      'Running directly from the install disk image is not supported. Drag Clowder AI.app to the Applications folder, then open it from Applications.',
   });
 
   app.quit();
@@ -118,7 +118,7 @@ function createMainWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'Cat Cafe',
+    title: 'Clowder AI',
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     show: false,
     webPreferences: {
@@ -161,13 +161,13 @@ function createTray() {
     return; // icon missing — skip tray
   }
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Cat Cafe', click: () => mainWindow?.show() },
+    { label: 'Show Clowder AI', click: () => mainWindow?.show() },
     { type: 'separator' },
     { label: 'Check for Updates', click: () => updater?.checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
   ]);
-  tray.setToolTip('Cat Cafe');
+  tray.setToolTip('Clowder AI');
   tray.setContextMenu(contextMenu);
   tray.on('double-click', () => mainWindow?.show());
 }
@@ -205,7 +205,7 @@ app.on('ready', async () => {
     return;
   }
 
-  // Single instance lock — prevent multiple Cat Cafe processes.
+  // Single instance lock — prevent multiple Clowder AI processes.
   // This runs AFTER the install-location guard so that launching from a DMG
   // always shows the warning dialog, even if another instance is already
   // running from /Applications.
@@ -260,7 +260,7 @@ app.on('ready', async () => {
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);
     dialog.showErrorBox(
-      'Cat Cafe - Startup Error',
+      'Clowder AI - Startup Error',
       `Failed to start services:\n${err.message}\n\nCheck logs in .cat-cafe/logs/`,
     );
     app.quit();
