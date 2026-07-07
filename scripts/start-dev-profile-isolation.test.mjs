@@ -731,9 +731,12 @@ describe('Whisper sidecar startup guards', () => {
     assert.doesNotMatch(installTemplate, /_add_no_proxy_host "huggingface\.co"/);
     assert.doesNotMatch(installTemplate, /_add_no_proxy_host "hf-mirror\.com"/);
 
+    assert.match(prereqPs1, /\$env:HF_ENDPOINT/);
+    assert.match(prereqPs1, /\$env:HF_HUB_ENDPOINT/);
+    assert.match(prereqPs1, /\$hfEndpointBase = "https:\/\/huggingface\.co"/);
     assert.match(
       prereqPs1,
-      /\$hfProbeUrl = "https:\/\/huggingface\.co\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
+      /\$hfProbeUrl = "\$hfEndpointBase\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
     );
     assert.match(
       prereqPs1,

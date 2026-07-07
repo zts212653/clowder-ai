@@ -25,8 +25,14 @@ $names = @(
     "HTTP_PROXY",
     "HTTPS_PROXY",
     "ALL_PROXY",
+    "NO_PROXY",
+    "HF_ENDPOINT",
+    "HF_HUB_ENDPOINT",
     "HF_HUB_DISABLE_SYMLINKS",
-    "HF_HUB_DISABLE_SYMLINKS_WARNING"
+    "HF_HUB_DISABLE_SYMLINKS_WARNING",
+    "PIP_EXTRA_INDEX_URL",
+    "PIP_INDEX_URL",
+    "PIP_TRUSTED_HOST"
 )
 $saved = Save-EnvVars -Names $names
 $savedTransportMode = $script:CatCafeHfDownloadTransportMode
@@ -71,6 +77,52 @@ exit /b 0
     }
     if ($env:HTTP_PROXY -ne "http://127.0.0.1:9") {
         throw "Expected parent HTTP_PROXY to be restored after child invocation."
+    }
+
+    try {
+        $mode = Test-SourceMode `
+            -Url "https://127.0.0.1:1/" `
+            -TimeoutSec 1 `
+            -CandidateProxy "http://http=127.0.0.1:7897;https=127.0.0.1:7897" `
+            -Method "GET"
+    } catch {
+        throw "Expected malformed proxy candidate to be classified as unreachable, not thrown: $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+    }
+    if ($mode -ne "unreachable") {
+        throw "Expected malformed proxy candidate to return unreachable, got '$mode'."
+    }
+
+    $script:CapturedProbeUrls = @()
+    function Sync-SystemProxy {}
+    function Get-SystemProxyCandidate { "http://127.0.0.1:7897" }
+    function Test-SourceMode {
+        param(
+            [string]$Url,
+            [int]$TimeoutSec = 5,
+            [string]$CandidateProxy = $null,
+            [ValidateSet("HEAD", "GET")][string]$Method = "HEAD"
+        )
+        $script:CapturedProbeUrls += $Url
+        if ($Url -eq "https://internal-hf.example/hub/BAAI/bge-small-zh-v1.5/resolve/main/config.json") {
+            return "direct"
+        }
+        return "unreachable"
+    }
+
+    $env:HF_ENDPOINT = "https://internal-hf.example/hub"
+    Remove-Item Env:HF_HUB_ENDPOINT,Env:PIP_EXTRA_INDEX_URL,Env:PIP_INDEX_URL,Env:PIP_TRUSTED_HOST,Env:NO_PROXY -ErrorAction SilentlyContinue
+    Assert-Network
+
+    $expectedProbeUrl = "https://internal-hf.example/hub/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+    if ($script:CapturedProbeUrls -notcontains $expectedProbeUrl) {
+        throw "Expected Assert-Network to probe configured HF_ENDPOINT '$expectedProbeUrl'. Captured: $($script:CapturedProbeUrls -join '; ')"
+    }
+    $defaultProbeUrl = "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+    if ($script:CapturedProbeUrls -contains $defaultProbeUrl) {
+        throw "Expected Assert-Network not to probe default HuggingFace endpoint when HF_ENDPOINT is configured."
+    }
+    if ($script:CatCafeHfDownloadTransportMode -ne "direct") {
+        throw "Expected configured HF_ENDPOINT direct probe to set transport mode to direct, got '$script:CatCafeHfDownloadTransportMode'."
     }
 
     Write-Host "prereq-check.proxy-env.test.ps1: PASS"

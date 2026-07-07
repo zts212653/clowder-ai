@@ -202,11 +202,15 @@ function Test-SourceMode {
         if (-not $proxyUrl) { $proxyUrl = $env:HTTP_PROXY }
     }
     if ($proxyUrl) {
-        $webProxy = New-Object System.Net.WebProxy($proxyUrl)
-        $webProxy.UseDefaultCredentials = $false
-        $webProxy.Credentials = $null
-        if (& $probe $webProxy) {
-            return 'proxy'
+        try {
+            $webProxy = New-Object System.Net.WebProxy($proxyUrl)
+            $webProxy.UseDefaultCredentials = $false
+            $webProxy.Credentials = $null
+            if (& $probe $webProxy) {
+                return 'proxy'
+            }
+        } catch {
+            return 'unreachable'
         }
     }
     return 'unreachable'
@@ -511,7 +515,20 @@ function Assert-Network {
     # Same two-mode probe for HuggingFace. Probe a real model artifact rather
     # than the homepage: some networks allow API/root requests but break TLS on
     # /resolve artifact downloads, which is the path snapshot_download needs.
-    $hfProbeUrl = "https://huggingface.co/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+    # If the user configured a custom HF endpoint, probe that same endpoint;
+    # otherwise the transport decision can clear a proxy that the actual
+    # snapshot_download target still needs.
+    $configuredHfEndpoint = $false
+    if ($env:HF_ENDPOINT) {
+        $hfEndpointBase = $env:HF_ENDPOINT.TrimEnd('/')
+        $configuredHfEndpoint = $true
+    } elseif ($env:HF_HUB_ENDPOINT) {
+        $hfEndpointBase = $env:HF_HUB_ENDPOINT.TrimEnd('/')
+        $configuredHfEndpoint = $true
+    } else {
+        $hfEndpointBase = "https://huggingface.co"
+    }
+    $hfProbeUrl = "$hfEndpointBase/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
     $hfMode = Test-SourceMode -Url $hfProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
     if ($hfMode -eq 'direct') {
         Write-Host "  HuggingFace artifact download [OK] (direct)"
@@ -521,19 +538,23 @@ function Assert-Network {
         $script:CatCafeHfDownloadTransportMode = "proxy"
         $needProxyInjection = $true
     } else {
-        $hfMirrorProbeUrl = "https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
-        $hfMirrorMode = Test-SourceMode -Url $hfMirrorProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
-        if ($hfMirrorMode -eq 'direct') {
-            Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (direct)"
-            $env:HF_ENDPOINT = "https://hf-mirror.com"
-            $script:CatCafeHfDownloadTransportMode = "direct"
-        } elseif ($hfMirrorMode -eq 'proxy') {
-            Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (via proxy: $candidate)"
-            $env:HF_ENDPOINT = "https://hf-mirror.com"
-            $script:CatCafeHfDownloadTransportMode = "proxy"
-            $needProxyInjection = $true
+        if ($configuredHfEndpoint) {
+            Write-ProxyGuidance -Context "configured HuggingFace endpoint artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
         } else {
-            Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
+            $hfMirrorProbeUrl = "https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
+            $hfMirrorMode = Test-SourceMode -Url $hfMirrorProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
+            if ($hfMirrorMode -eq 'direct') {
+                Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (direct)"
+                $env:HF_ENDPOINT = "https://hf-mirror.com"
+                $script:CatCafeHfDownloadTransportMode = "direct"
+            } elseif ($hfMirrorMode -eq 'proxy') {
+                Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (via proxy: $candidate)"
+                $env:HF_ENDPOINT = "https://hf-mirror.com"
+                $script:CatCafeHfDownloadTransportMode = "proxy"
+                $needProxyInjection = $true
+            } else {
+                Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
+            }
         }
     }
 
