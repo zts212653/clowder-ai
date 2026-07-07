@@ -70,9 +70,12 @@ const API_PORT = 3004;
 const APP_URL = `http://localhost:${FRONTEND_PORT}`;
 // Main process log in the user data directory alongside API + desktop logs.
 const IS_MAC_MAIN = process.platform === 'darwin';
+// Data directory name derived from electron-builder productName in package.json.
+// Must match service-manager.js resolveUserDataDir() — both read the same product name.
+const DATA_DIR_NAME = require('./package.json').build?.productName || 'Cat Cafe';
 const userDataRoot = IS_MAC_MAIN
-  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', 'Cat Cafe')
-  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), 'Cat Cafe');
+  ? path.join(process.env.HOME || os.homedir(), 'Library', 'Application Support', DATA_DIR_NAME)
+  : path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local'), DATA_DIR_NAME);
 const mainLogDir = path.join(userDataRoot, 'data', 'logs');
 try {
   fs.mkdirSync(mainLogDir, { recursive: true });

@@ -84,11 +84,12 @@ function resolveAssetName(version, platform, arch) {
 // ── Asset four-tuple extraction ────────────────────────────────────────
 
 /**
- * Extract the four-tuple {id, name, size, digest} from a GitHub API asset.
+ * Extract asset metadata from a GitHub API asset object.
  * Returns null if digest is missing or falsy (integrity cannot be verified).
+ * Preserves browser_download_url for the download transport layer.
  *
- * @param {{ id: number, name: string, size: number, digest?: string }} apiAsset
- * @returns {{ id: number, name: string, size: number, digest: string } | null}
+ * @param {{ id: number, name: string, size: number, digest?: string, browser_download_url?: string }} apiAsset
+ * @returns {{ id: number, name: string, size: number, digest: string, browser_download_url: string | null } | null}
  */
 function extractAssetQuad(apiAsset) {
   if (!apiAsset || !apiAsset.digest) return null;
@@ -97,6 +98,7 @@ function extractAssetQuad(apiAsset) {
     name: apiAsset.name,
     size: apiAsset.size,
     digest: apiAsset.digest,
+    browser_download_url: apiAsset.browser_download_url || null,
   };
 }
 

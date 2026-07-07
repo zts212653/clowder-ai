@@ -177,7 +177,11 @@ class UpdateManager {
           message: 'Integrity verification failed',
           detail: 'The file may be corrupted.',
         });
-        if (r === 0) await this.downloadAndInstall(target);
+        if (r === 0) {
+          // Reset guard before retry — recursive call checks _downloading
+          this._downloading = false;
+          await this.downloadAndInstall(target);
+        }
         return;
       }
       setProgressBar(-1);
@@ -281,9 +285,12 @@ class UpdateManager {
   }
 
   _getInstallType() {
+    // app.getAppPath() → {installDir}/desktop-dist/resources/app.asar
+    // dirname → {installDir}/desktop-dist/resources
+    // ../.. → {installDir}  (where .cat-cafe/desktop-config.json lives)
     const appPath = this._d.app.getAppPath();
     const candidates = [
-      path.join(path.dirname(appPath), '..', '.cat-cafe', 'desktop-config.json'),
+      path.join(path.dirname(appPath), '..', '..', '.cat-cafe', 'desktop-config.json'),
       path.join(this._d.userDataRoot, '.cat-cafe', 'desktop-config.json'),
     ];
     for (const p of candidates) {

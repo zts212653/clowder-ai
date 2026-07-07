@@ -160,14 +160,14 @@ describe('resolveAssetName', () => {
 });
 
 describe('extractAssetQuad', () => {
-  test('extracts four-tuple from valid asset', () => {
+  test('extracts asset info including browser_download_url', () => {
     const asset = makeAsset('CatCafe-Setup-0.12.0.exe', 201, 802000000, 'sha256:aaa111');
-    assert.deepEqual(extractAssetQuad(asset), {
-      id: 201,
-      name: 'CatCafe-Setup-0.12.0.exe',
-      size: 802000000,
-      digest: 'sha256:aaa111',
-    });
+    const result = extractAssetQuad(asset);
+    assert.equal(result.id, 201);
+    assert.equal(result.name, 'CatCafe-Setup-0.12.0.exe');
+    assert.equal(result.size, 802000000);
+    assert.equal(result.digest, 'sha256:aaa111');
+    assert.equal(result.browser_download_url, 'https://github.com/download/CatCafe-Setup-0.12.0.exe');
   });
 
   test('returns null when digest is missing', () => {
@@ -190,6 +190,8 @@ describe('selectUpdateTarget', () => {
     assert.equal(result.asset.id, 201);
     assert.equal(result.asset.digest, 'sha256:aaa111');
     assert.equal(result.releaseNotes, 'New features in 0.12.0');
+    // P1-2: browser_download_url must survive through selectUpdateTarget
+    assert.equal(result.asset.browser_download_url, 'https://github.com/download/CatCafe-Setup-0.12.0.exe');
   });
 
   test('selects highest for mac arm64', () => {

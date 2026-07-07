@@ -107,6 +107,15 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         dbg('Resume rejected — restarting download');
         existingSize = 0;
       }
+      // Validate Content-Range on 206: server must resume from our byte offset
+      if (isResume) {
+        const cr = response.headers['content-range'];
+        const m = cr?.match(/bytes (\d+)-/);
+        if (!m || Number(m[1]) !== existingSize) {
+          dbg(`Content-Range mismatch (expected start=${existingSize}, got "${cr}") — restarting`);
+          existingSize = 0;
+        }
+      }
 
       const serverEtag = response.headers.etag || null;
       if (serverEtag) {
