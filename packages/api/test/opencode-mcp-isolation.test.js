@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, mock, test } from 'node:test';
 import { OpenCodeAgentService } from '../dist/domains/cats/services/agents/providers/OpenCodeAgentService.js';
+import { probeOpenCodeAutoApproveSupport } from '../dist/domains/cats/services/agents/providers/opencode-auto-approval.js';
 import { generateOpenCodeConfig } from '../dist/domains/cats/services/agents/providers/opencode-config-template.js';
 import { collect, createMockProcess, emitOpenCodeEvents } from './helpers/opencode-test-helpers.js';
 
@@ -22,6 +26,28 @@ const STEP_FINISH = {
   sessionID: 'ses_mcp_test',
   part: { type: 'step-finish', reason: 'stop', cost: 0.01, tokens: { total: 5000 } },
 };
+
+function createHiddenAliasOpenCodeCli() {
+  const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-hidden-opencode-cli-'));
+  const file = join(dir, 'opencode');
+  writeFileSync(
+    file,
+    `#!/bin/sh
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  echo "opencode run [message..]"
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$2" = "--dangerously-skip-permissions" ] && [ "$3" = "--help" ]; then
+  echo "opencode run [message..]"
+  exit 0
+fi
+echo "unknown option" >&2
+exit 1
+`,
+  );
+  chmodSync(file, 0o755);
+  return file;
+}
 
 async function invokeOpenCode(invokeOptions = {}, serviceOptions = {}) {
   const proc = createMockProcess();
@@ -231,37 +257,91 @@ describe('OpenCode headless permission mode', () => {
     );
   });
 
-  test('opencode auto-approval probe rejects CLIs without --auto support', async () => {
+  test('opencode auto-approval probe continues without default flag when no known flag is available', async () => {
     const { messages, spawnFn } = await invokeOpenCode(
       {},
       {
-        autoApproveProbeFn: async () => ({
-          supported: false,
-          message: 'OpenCode 版本过低，不支持 --auto 自动审批；请升级 opencode-ai 到 >= 1.17.12 后重试。',
-        }),
+        autoApproveProbeFn: async () => ({}),
       },
     );
 
-    assert.equal(spawnFn.mock.calls.length, 0, 'must not launch opencode run when --auto is unsupported');
-    const error = messages.find((message) => message.type === 'error');
-    assert.ok(error, 'must yield an error message');
-    assert.match(error.error, /升级 opencode-ai 到 >= 1\.17\.12/);
+    assert.equal(spawnFn.mock.calls.length, 1, 'must launch opencode run even when no auto flag is available');
+    assert.ok(
+      messages.some((message) => message.type === 'text'),
+      'must stream the opencode result',
+    );
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args.filter((arg) => arg === '--auto').length, 0, 'must not inject unsupported --auto');
+    assert.equal(
+      args.filter((arg) => arg === '--dangerously-skip-permissions' || arg === '--yolo').length,
+      0,
+      'must not inject a legacy alias unless the probe selected one',
+    );
   });
 
-  test('opencode auto-approval probe failure surfaces upgrade guidance', async () => {
-    const { messages, spawnFn } = await invokeOpenCode(
+  test('opencode auto-approval probe injects selected legacy alias', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
       {},
       {
         autoApproveProbeFn: async () => ({
-          supported: false,
-          message: '无法确认 OpenCode 是否支持 --auto 自动审批；请升级 opencode-ai 到 >= 1.17.12 后重试。',
+          approvalFlag: '--dangerously-skip-permissions',
         }),
       },
     );
 
-    assert.equal(spawnFn.mock.calls.length, 0, 'must not launch opencode run when --auto support is unknown');
-    const error = messages.find((message) => message.type === 'error');
-    assert.ok(error, 'must yield an error message');
-    assert.match(error.error, /无法确认 OpenCode 是否支持 --auto/);
+    assert.ok(args.includes('--dangerously-skip-permissions'), 'must inject the selected legacy alias');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 0, 'must not inject --auto when legacy alias wins');
+  });
+
+  test('opencode auto-approval probe injects --auto when selected', async () => {
+    const args = await invokeOpenCodeAndCaptureArgs(
+      {},
+      {
+        autoApproveProbeFn: async () => ({
+          approvalFlag: '--auto',
+        }),
+      },
+    );
+
+    assert.ok(args.includes('--auto'), 'must inject --auto when the probe selects it');
+    assert.equal(args.filter((arg) => arg === '--auto').length, 1, 'must inject --auto exactly once');
+  });
+
+  test('opencode auto-approval probe detects hidden legacy aliases', async () => {
+    const command = createHiddenAliasOpenCodeCli();
+
+    const result = await probeOpenCodeAutoApproveSupport(command);
+
+    assert.equal(result.approvalFlag, '--dangerously-skip-permissions');
+  });
+
+  test('opencode auto-approval probe retries after transient warning result', async () => {
+    const procs = [createMockProcess(), createMockProcess()];
+    let spawnIndex = 0;
+    const spawnFn = mock.fn(() => procs[spawnIndex++]);
+    let probeAttempts = 0;
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      autoApproveProbeFn: async () => {
+        probeAttempts++;
+        return probeAttempts === 1 ? { warning: 'transient probe failure' } : { approvalFlag: '--auto' };
+      },
+    });
+
+    const firstInvocation = collect(service.invoke('Test'));
+    emitOpenCodeEvents(procs[0], [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await firstInvocation;
+
+    const secondInvocation = collect(service.invoke('Test'));
+    emitOpenCodeEvents(procs[1], [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
+    await secondInvocation;
+
+    const firstArgs = spawnFn.mock.calls[0].arguments[1];
+    const secondArgs = spawnFn.mock.calls[1].arguments[1];
+    assert.equal(firstArgs.filter((arg) => arg === '--auto').length, 0, 'first transient warning omits default flag');
+    assert.equal(probeAttempts, 2, 'transient warning results must not be cached');
+    assert.ok(secondArgs.includes('--auto'), 'second invocation must retry and inject --auto when probe succeeds');
   });
 });

@@ -20,18 +20,22 @@ import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { buildCliDiagnostics, buildSilentCompletionDiagnostic } from '../../../../../utils/cli-diagnostics.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
-import {
-  isCliError,
-  isCliPlainTextResult,
-  isCliTimeout,
-  isLivenessWarning,
-  spawnCli,
-} from '../../../../../utils/cli-spawn.js';
+import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type { AgentMessage, AgentServiceOptions, L0InjectableAgentService, MessageMetadata } from '../../types.js';
 import type { RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
+import {
+  cacheOpenCodeAutoApproveProbe,
+  getCliFlagName,
+  OPENCODE_AUTO_APPROVE_FLAG,
+  type OpenCodeAutoApproveProbeFn,
+  type OpenCodeAutoApproveProbeResult,
+  parseOpenCodeCliConfigArgs,
+  probeOpenCodeAutoApproveSupport,
+  userControlsOpenCodeAutoApprove,
+} from './opencode-auto-approval.js';
 import { transformOpenCodeEvent } from './opencode-event-transform.js';
 
 const log = createModuleLogger('opencode-agent');
@@ -57,27 +61,6 @@ interface OpenCodeAgentServiceOptions {
 const OPENCODE_API_KEY_ENV = 'OPENCODE_API_KEY';
 const ANTHROPIC_API_KEY_ENV = 'ANTHROPIC_API_KEY';
 const ANTHROPIC_BASE_URL_ENV = 'ANTHROPIC_BASE_URL';
-const OPENCODE_AUTO_APPROVE_FLAG = '--auto';
-const OPENCODE_AUTO_APPROVE_FLAG_ALIASES = new Set([
-  OPENCODE_AUTO_APPROVE_FLAG,
-  '--yolo',
-  '--dangerously-skip-permissions',
-  '--no-auto',
-  '--no-yolo',
-  '--no-dangerously-skip-permissions',
-]);
-const OPENCODE_AUTO_APPROVE_MIN_VERSION = '1.17.12';
-const OPENCODE_AUTO_APPROVE_PROBE_TIMEOUT_MS = 10_000;
-const OPENCODE_AUTO_APPROVE_UNSUPPORTED_MESSAGE = `OpenCode 版本过低，不支持 --auto 自动审批；请升级 opencode-ai 到 >= ${OPENCODE_AUTO_APPROVE_MIN_VERSION} 后重试。`;
-const OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE = `无法确认 OpenCode 是否支持 --auto 自动审批；请升级 opencode-ai 到 >= ${OPENCODE_AUTO_APPROVE_MIN_VERSION} 后重试。`;
-
-type OpenCodeAutoApproveProbeResult = { supported: true } | { supported: false; message: string };
-type OpenCodeAutoApproveProbeFn = (options: {
-  command: string;
-  cwd?: string;
-  env?: Record<string, string | null>;
-}) => Promise<OpenCodeAutoApproveProbeResult>;
-
 // Process-wide cache: --auto support is a property of the installed opencode binary.
 // Restart the API process after upgrading opencode so this capability is re-probed.
 let sharedOpenCodeAutoApproveProbe: Promise<OpenCodeAutoApproveProbeResult> | undefined;
@@ -103,49 +86,6 @@ function summarizeDebugSecret(value: string | null | undefined): string {
   if (value === null) return '(cleared)';
   if (!value) return '(unset)';
   return `${value.slice(0, 6)}***`;
-}
-
-function getCliFlagName(part: string): string | null {
-  if (!part.startsWith('-')) return null;
-  const equalsIndex = part.indexOf('=');
-  return equalsIndex > 0 ? part.slice(0, equalsIndex) : part;
-}
-
-async function probeOpenCodeAutoApproveSupport(
-  command: string,
-  cwd?: string,
-  env?: Record<string, string | null>,
-): Promise<OpenCodeAutoApproveProbeResult> {
-  let helpText = '';
-  try {
-    for await (const event of spawnCli({
-      command,
-      args: ['run', '--help'],
-      outputMode: 'plainText',
-      ...(cwd ? { cwd } : {}),
-      ...(env ? { env } : {}),
-      timeoutMs: OPENCODE_AUTO_APPROVE_PROBE_TIMEOUT_MS,
-    })) {
-      if (isCliPlainTextResult(event)) {
-        helpText = `${event.stdout}\n${event.stderr}`;
-        continue;
-      }
-      if (isCliTimeout(event)) {
-        log.warn({ command, timeoutMs: OPENCODE_AUTO_APPROVE_PROBE_TIMEOUT_MS }, 'OpenCode --auto probe timed out');
-        return { supported: false, message: OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE };
-      }
-      if (isCliError(event)) {
-        log.warn({ command, exitCode: event.exitCode, signal: event.signal }, 'OpenCode --auto probe failed');
-        return { supported: false, message: OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE };
-      }
-    }
-  } catch (err) {
-    log.warn({ command, err }, 'OpenCode --auto probe threw');
-    return { supported: false, message: OPENCODE_AUTO_APPROVE_PROBE_FAILED_MESSAGE };
-  }
-
-  if (helpText.includes('--auto')) return { supported: true };
-  return { supported: false, message: OPENCODE_AUTO_APPROVE_UNSUPPORTED_MESSAGE };
 }
 
 export function summarizeOpenCodeEnvForDebug(env: Record<string, string | null> | undefined): OpenCodeEnvDebugSummary {
@@ -243,8 +183,19 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         return;
       }
 
-      await this.ensureAutoApproveSupported(opencodeCommand, cwd, childEnv);
-      const args = this.buildArgs(prompt, options?.sessionId, effectiveModel, options?.cliConfigArgs);
+      const defaultAutoApproveFlag = await this.resolveDefaultAutoApproveFlag(
+        opencodeCommand,
+        cwd,
+        childEnv,
+        options?.cliConfigArgs,
+      );
+      const args = this.buildArgs(
+        prompt,
+        options?.sessionId,
+        effectiveModel,
+        options?.cliConfigArgs,
+        defaultAutoApproveFlag,
+      );
 
       log.debug(
         {
@@ -479,7 +430,13 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     }
   }
 
-  private buildArgs(prompt: string, sessionId?: string, model?: string, cliConfigArgs?: readonly string[]): string[] {
+  private buildArgs(
+    prompt: string,
+    sessionId?: string,
+    model?: string,
+    cliConfigArgs?: readonly string[],
+    defaultAutoApproveFlag?: string,
+  ): string[] {
     const args = ['run'];
 
     // Session resume
@@ -495,18 +452,16 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
 
     // JSON event stream output
     args.push('--format', 'json');
-    // Headless OpenCode has no human approval bridge. --auto is the public
-    // opencode flag since 1.17.12; ensureAutoApproveSupported gates older CLIs.
-    args.push(OPENCODE_AUTO_APPROVE_FLAG);
+    // Headless OpenCode has no human approval bridge. Use the best approval
+    // flag advertised by this installed CLI; older compatible builds may have
+    // no supported flag, in which case we preserve the pre-#1065 behavior.
+    if (defaultAutoApproveFlag) args.push(defaultAutoApproveFlag);
 
     // User-defined CLI args from the member editor (#567).
     // User args win when they overlap with system-injected flags.
-    const userParts: string[] = [];
-    for (const arg of cliConfigArgs ?? []) {
-      userParts.push(...arg.trim().split(/\s+/));
-    }
+    const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
     const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
-    const userControlsAutoApprove = Array.from(OPENCODE_AUTO_APPROVE_FLAG_ALIASES).some((flag) => userFlags.has(flag));
+    const userControlsAutoApprove = userControlsOpenCodeAutoApprove(userFlags);
     const deduped: string[] = [];
     for (let i = 0; i < args.length; i++) {
       const flagName = getCliFlagName(args[i]);
@@ -524,15 +479,24 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     return deduped;
   }
 
-  private async ensureAutoApproveSupported(
+  private async resolveDefaultAutoApproveFlag(
     command: string,
     cwd?: string,
     env?: Record<string, string | null>,
-  ): Promise<void> {
+    cliConfigArgs?: readonly string[],
+  ): Promise<string | undefined> {
+    const userParts = parseOpenCodeCliConfigArgs(cliConfigArgs);
+    const userFlags = new Set(userParts.map(getCliFlagName).filter((flag): flag is string => flag !== null));
+    if (userControlsOpenCodeAutoApprove(userFlags)) return undefined;
+
     const result = await this.getAutoApproveProbe(command, cwd, env);
-    // Reject before launching the real headless run. invoke() surfaces this as
-    // error + done with upgrade guidance instead of continuing without approvals.
-    if (!result.supported) throw new Error(result.message);
+    if (result.warning) {
+      log.warn(
+        { catId: this.catId, command, warning: result.warning },
+        'OpenCode auto-approval flag unavailable; continuing without default flag',
+      );
+    }
+    return result.approvalFlag;
   }
 
   private getAutoApproveProbe(
@@ -541,15 +505,25 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     env?: Record<string, string | null>,
   ): Promise<OpenCodeAutoApproveProbeResult> {
     if (this.autoApproveProbeFn) {
-      this.autoApproveProbe ??= this.autoApproveProbeFn({ command, ...(cwd ? { cwd } : {}), ...(env ? { env } : {}) });
+      this.autoApproveProbe ??= cacheOpenCodeAutoApproveProbe(
+        this.autoApproveProbeFn({ command, ...(cwd ? { cwd } : {}), ...(env ? { env } : {}) }),
+        (promise) => {
+          if (this.autoApproveProbe === promise) this.autoApproveProbe = undefined;
+        },
+      );
       return this.autoApproveProbe;
     }
     // Unit tests inject spawnFn to own the primary CLI process lifecycle. Do not
     // consume that mock for the preflight probe unless the test provides an
     // explicit autoApproveProbeFn.
-    if (this.spawnFn) return Promise.resolve({ supported: true });
+    if (this.spawnFn) return Promise.resolve({ approvalFlag: OPENCODE_AUTO_APPROVE_FLAG });
 
-    sharedOpenCodeAutoApproveProbe ??= probeOpenCodeAutoApproveSupport(command, cwd, env);
+    sharedOpenCodeAutoApproveProbe ??= cacheOpenCodeAutoApproveProbe(
+      probeOpenCodeAutoApproveSupport(command, cwd, env),
+      (promise) => {
+        if (sharedOpenCodeAutoApproveProbe === promise) sharedOpenCodeAutoApproveProbe = undefined;
+      },
+    );
     return sharedOpenCodeAutoApproveProbe;
   }
 
