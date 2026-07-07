@@ -127,7 +127,22 @@ function downloadAsset(net, asset, destPath, appVersion, setProgressBar, dbg) {
         }
       }
 
+      // Validate ETag consistency on 206 resume (spec §2 / AC-4).
+      // If the server returns a different ETag, the resource changed — the
+      // existing partial is stale and appending would produce a mixed file.
       const serverEtag = response.headers.etag || null;
+      if (isResume && savedEtag && serverEtag && serverEtag !== savedEtag) {
+        dbg(`ETag mismatch on 206 (saved="${savedEtag}", got="${serverEtag}") — discarding partial`);
+        try {
+          fs.unlinkSync(destPath);
+        } catch {}
+        try {
+          fs.unlinkSync(metaPath);
+        } catch {}
+        response.destroy();
+        reject(new Error(`ETag mismatch on resume: saved="${savedEtag}", got="${serverEtag}"`));
+        return;
+      }
       if (serverEtag) {
         try {
           fs.writeFileSync(metaPath, JSON.stringify({ etag: serverEtag }), 'utf-8');

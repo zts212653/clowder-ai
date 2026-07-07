@@ -161,6 +161,36 @@ describe('downloadAsset', () => {
     );
   });
 
+  test('206 with correct Content-Range but changed ETag rejects (AC-4)', async () => {
+    const dest = path.join(tempDir, 'app.dmg');
+    const partial = 'PARTIAL_';
+
+    writeFileSync(dest, partial);
+    writeFileSync(`${dest}.meta`, JSON.stringify({ etag: '"old-etag"' }));
+
+    // Server returns 206 with correct byte range but different ETag
+    const net = mockNet({
+      statusCode: 206,
+      headers: {
+        'content-range': `bytes ${partial.length}-15/16`,
+        etag: '"new-etag"',
+      },
+      body: 'REST_NEW',
+    });
+
+    await assert.rejects(
+      () => downloadAsset(net, { name: 'app.dmg', size: 16 }, dest, '0.10.0', noop, noop),
+      (err) => {
+        assert.match(err.message, /ETag mismatch/);
+        return true;
+      },
+    );
+
+    // Stale partial and meta must be deleted for clean retry
+    assert.equal(existsSync(dest), false, 'stale partial should be deleted');
+    assert.equal(existsSync(`${dest}.meta`), false, 'meta should be deleted');
+  });
+
   test('200 with existing partial overwrites (resume rejected by server)', async () => {
     const dest = path.join(tempDir, 'app.dmg');
     writeFileSync(dest, 'OLD_PARTIAL');
