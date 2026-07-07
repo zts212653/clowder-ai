@@ -388,8 +388,34 @@ sys.exit(1)
         default { throw "Invoke-ModelDownloadWithRetry: unknown loader '$Loader'" }
     }
 
-    & $VenvPython -c $script $ModelId
-    if ($LASTEXITCODE -ne 0) { throw "Failed to download model: $ModelId" }
+    $proxyVarNames = if ($env:OS -eq "Windows_NT") {
+        @("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+    } else {
+        @("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy")
+    }
+    $savedProxyEnv = @{}
+    $clearProxyForDownload = ($script:CatCafeHfDownloadTransportMode -eq "direct")
+    $exitCode = $null
+    try {
+        if ($clearProxyForDownload) {
+            # HuggingFace artifacts can redirect to CDN/CAS hosts that are
+            # not covered by NO_PROXY. When Assert-Network proved artifact
+            # downloads work direct, keep this Python child direct-only.
+            foreach ($name in $proxyVarNames) {
+                $savedProxyEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+                [Environment]::SetEnvironmentVariable($name, $null, "Process")
+            }
+        }
+        & $VenvPython -c $script $ModelId
+        $exitCode = $LASTEXITCODE
+    } finally {
+        if ($clearProxyForDownload) {
+            foreach ($name in $proxyVarNames) {
+                [Environment]::SetEnvironmentVariable($name, $savedProxyEnv[$name], "Process")
+            }
+        }
+    }
+    if ($exitCode -ne 0) { throw "Failed to download model: $ModelId" }
 }
 
 function Assert-Network {
@@ -400,6 +426,7 @@ function Assert-Network {
     # decisions don't depend on whether env was already set.
     $candidate = Get-SystemProxyCandidate
     $needProxyInjection = $false
+    $script:CatCafeHfDownloadTransportMode = $null
 
     # FIRST: classify the user's PIP_INDEX_URL (if set) the same way we
     # classify public mirrors. Internal corporate mirrors typically
@@ -488,11 +515,10 @@ function Assert-Network {
     $hfMode = Test-SourceMode -Url $hfProbeUrl -TimeoutSec 10 -CandidateProxy $candidate -Method "GET"
     if ($hfMode -eq 'direct') {
         Write-Host "  HuggingFace artifact download [OK] (direct)"
-        # Do not add huggingface.co to NO_PROXY. The actual download happens in
-        # Python/huggingface_hub, whose TLS/proxy behavior can differ from this
-        # .NET probe; preserving the user's proxy avoids false direct bypasses.
+        $script:CatCafeHfDownloadTransportMode = "direct"
     } elseif ($hfMode -eq 'proxy') {
         Write-Host "  HuggingFace artifact download [OK] (via proxy: $candidate)"
+        $script:CatCafeHfDownloadTransportMode = "proxy"
         $needProxyInjection = $true
     } else {
         $hfMirrorProbeUrl = "https://hf-mirror.com/BAAI/bge-small-zh-v1.5/resolve/main/config.json"
@@ -500,9 +526,11 @@ function Assert-Network {
         if ($hfMirrorMode -eq 'direct') {
             Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (direct)"
             $env:HF_ENDPOINT = "https://hf-mirror.com"
+            $script:CatCafeHfDownloadTransportMode = "direct"
         } elseif ($hfMirrorMode -eq 'proxy') {
             Write-Host "  HuggingFace artifact download unreachable, switching to hf-mirror.com (via proxy: $candidate)"
             $env:HF_ENDPOINT = "https://hf-mirror.com"
+            $script:CatCafeHfDownloadTransportMode = "proxy"
             $needProxyInjection = $true
         } else {
             Write-ProxyGuidance -Context "huggingface.co and hf-mirror.com artifact downloads are unreachable in both direct and via-proxy modes; model download will definitely fail."
