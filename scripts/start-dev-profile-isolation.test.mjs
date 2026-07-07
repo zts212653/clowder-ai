@@ -734,10 +734,7 @@ describe('Whisper sidecar startup guards', () => {
     assert.match(prereqPs1, /\$env:HF_ENDPOINT/);
     assert.match(prereqPs1, /\$env:HF_HUB_ENDPOINT/);
     assert.match(prereqPs1, /\$hfEndpointBase = "https:\/\/huggingface\.co"/);
-    assert.match(
-      prereqPs1,
-      /\$hfProbeUrl = "\$hfEndpointBase\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/,
-    );
+    assert.match(prereqPs1, /\$hfProbeUrl = "\$hfEndpointBase\/BAAI\/bge-small-zh-v1\.5\/resolve\/main\/config\.json"/);
     assert.match(
       prereqPs1,
       /Test-SourceMode -Url \$hfProbeUrl -TimeoutSec 10 -CandidateProxy \$candidate -Method "GET"/,
