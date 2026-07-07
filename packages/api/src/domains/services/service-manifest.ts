@@ -179,9 +179,6 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       install: 'scripts/services/whisper-install.sh',
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
-      // whisper-server.sh dispatches to qwen3-asr-api.py for Qwen3-ASR
-      // models; lifecycle must recognize it as an owned process (#863).
-      additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
     },
   },
   {

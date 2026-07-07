@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Whisper ASR server for Cat Cafe voice input.
-Backends: mlx-whisper (macOS GPU) -> faster-whisper (CPU/CUDA).
+Unified ASR server for Cat Cafe voice input (#863).
+Backends (selected by model name):
+  - mlx-audio    (Qwen3-ASR models, Apple Silicon)
+  - mlx-whisper  (Whisper models, Apple Silicon)
+  - faster-whisper (Whisper models, CPU/CUDA fallback)
+
 OpenAI-compatible endpoint: POST /v1/audio/transcriptions
 """
 
@@ -9,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -46,7 +52,13 @@ _backend: str = "unknown"
 _transcribe_lock = threading.Lock()
 
 # ─── Backend state ────────────────────────────────────────────────
-_fw_model = None  # faster-whisper WhisperModel instance
+_fw_model = None   # faster-whisper WhisperModel instance
+_qwen_model = None  # mlx-audio loaded Qwen3-ASR model
+
+
+def _is_qwen3_model(name: str) -> bool:
+    """True when the model name indicates a Qwen3-ASR variant."""
+    return "Qwen3-ASR" in name
 
 
 def _resolve_fw_model_size(name: str) -> str:
@@ -55,6 +67,49 @@ def _resolve_fw_model_size(name: str) -> str:
         return name.split("whisper-", 1)[1].removesuffix("-mlx")
     return name
 
+
+# ─── Qwen3-ASR (mlx-audio) ───────────────────────────────────────
+
+def _convert_to_wav(src_path: str) -> str:
+    """Convert any audio format to 16kHz mono WAV via ffmpeg (Qwen3-ASR requires WAV)."""
+    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", wav_path],
+        capture_output=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
+        raise RuntimeError(f"ffmpeg conversion failed (exit {result.returncode}): {stderr}")
+    if not Path(wav_path).exists() or Path(wav_path).stat().st_size == 0:
+        raise RuntimeError(f"ffmpeg produced empty or missing output: {wav_path}")
+    return wav_path
+
+
+def _transcribe_qwen3(tmp_path: str, language: str | None, initial_prompt: str | None) -> str:
+    from mlx_audio.stt.generate import generate_transcription
+
+    wav_path = tmp_path
+    if not tmp_path.endswith(".wav"):
+        wav_path = _convert_to_wav(tmp_path)
+
+    fd, output_file = tempfile.mkstemp(suffix="_asr")
+    os.close(fd)
+    try:
+        kwargs = dict(model=_qwen_model, audio=wav_path, output_path=output_file, verbose=False)
+        if initial_prompt:
+            kwargs["context"] = initial_prompt
+        result = generate_transcription(**kwargs)
+        return result.text.strip() if hasattr(result, "text") else str(result).strip()
+    finally:
+        if wav_path != tmp_path:
+            Path(wav_path).unlink(missing_ok=True)
+        Path(output_file).unlink(missing_ok=True)
+        Path(f"{output_file}.txt").unlink(missing_ok=True)
+
+
+# ─── Whisper (mlx-whisper / faster-whisper) ───────────────────────
 
 def _transcribe_mlx(tmp_path: str, language: str | None, initial_prompt: str | None) -> str:
     import mlx_whisper
@@ -104,7 +159,9 @@ async def transcribe(
 
     try:
         with _transcribe_lock:
-            if _backend == "mlx-whisper":
+            if _backend == "mlx-audio":
+                text = _transcribe_qwen3(tmp_path, lang, prompt)
+            elif _backend == "mlx-whisper":
                 text = _transcribe_mlx(tmp_path, lang, prompt)
             else:
                 text = _transcribe_fw(tmp_path, lang, prompt)
@@ -127,6 +184,26 @@ async def health():
 
 
 # ─── Startup ─────────────────────────────────────────────────────
+
+def _try_qwen3() -> bool:
+    """Load Qwen3-ASR model via mlx-audio. Only called when model is Qwen3-ASR."""
+    global model_loaded, _backend, _qwen_model
+    try:
+        from mlx_audio.stt.utils import load_model
+    except ImportError:
+        log.warning("mlx-audio not installed")
+        return False
+    try:
+        log.info("Loading Qwen3-ASR model via mlx-audio: %s", model_path)
+        _qwen_model = load_model(model_path)
+        _backend = "mlx-audio"
+        model_loaded = True
+        log.info("Model loaded via mlx-audio (Qwen3-ASR, Apple Silicon)")
+        return True
+    except Exception:
+        log.exception("mlx-audio load failed for %s", model_path)
+        return False
+
 
 def _try_mlx() -> bool:
     global model_loaded, _backend
@@ -203,10 +280,14 @@ def main():
     signal.signal(signal.SIGTERM, handle_sigterm)
 
     model_path = args.model
-    log.info("=== Cat Cafe Whisper Server ===")
+    log.info("=== Cat Cafe ASR Server ===")
     log.info("Model: %s | Port: %d", model_path, args.port)
 
-    if not _try_mlx():
+    if _is_qwen3_model(model_path):
+        if not _try_qwen3():
+            log.error("Qwen3-ASR backend failed (install mlx-audio)")
+            sys.exit(1)
+    elif not _try_mlx():
         if not _try_faster_whisper():
             log.error("All backends failed (install mlx-whisper or faster-whisper)")
             sys.exit(1)

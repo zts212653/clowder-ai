@@ -2,15 +2,12 @@
 /**
  * Regression tests for whisper-stt model dispatch (#863).
  *
- * The unified ASR service (`whisper-stt`) uses a single install script
- * (whisper-install.sh) and server script (whisper-server.sh) that must
- * dispatch to the correct ML backend based on the selected model:
+ * The unified ASR service (`whisper-stt`) uses:
+ *   - whisper-install.sh: dispatches pip deps by model (mlx-audio vs mlx-whisper)
+ *   - whisper-server.sh:  always launches whisper-api.py (no shell dispatch)
+ *   - whisper-api.py:     selects backend at runtime by model name
  *
- *   Qwen3-ASR models -> mlx-audio  + qwen3-asr-api.py
- *   Whisper models   -> mlx-whisper + whisper-api.py
- *
- * These tests verify the dispatch logic by running bash snippets that
- * reproduce the branching from the actual scripts.
+ * These tests verify the install dispatch and static script content.
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -47,22 +44,6 @@ function getInstallDispatch(model) {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: run the server-script dispatch in an isolated bash subshell.
-// Mirrors whisper-server.sh lines 40-44.
-// ---------------------------------------------------------------------------
-function getServerDispatch(model) {
-  const script = [
-    `MODEL="${model}"`,
-    'if [[ "$MODEL" == *"Qwen3-ASR"* ]]; then',
-    '  echo "qwen3-asr-api.py"',
-    'else',
-    '  echo "whisper-api.py"',
-    'fi',
-  ].join('\n');
-  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
-}
-
-// ---------------------------------------------------------------------------
 // Static guard: the actual script files must contain the dispatch patterns.
 // If someone refactors the scripts and breaks the branching, this catches it.
 // ---------------------------------------------------------------------------
@@ -74,16 +55,25 @@ describe('whisper-dispatch — static guard (script content)', () => {
     assert.match(src, /mlx-whisper/, 'must use mlx-whisper for Whisper');
   });
 
-  test('whisper-server.sh contains Qwen3-ASR dispatch', () => {
-    const src = readFileSync(join(SERVICES_DIR, 'whisper-server.sh'), 'utf8');
+  test('whisper-api.py contains all ASR backends', () => {
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
     assert.match(src, /Qwen3-ASR/, 'must detect Qwen3-ASR model name');
-    assert.match(src, /qwen3-asr-api\.py/, 'must dispatch to qwen3-asr-api.py');
-    assert.match(src, /whisper-api\.py/, 'must dispatch to whisper-api.py');
+    assert.match(src, /mlx_audio/, 'must support mlx-audio backend');
+    assert.match(src, /mlx_whisper/, 'must support mlx-whisper backend');
+    assert.match(src, /faster_whisper/, 'must support faster-whisper backend');
+  });
+
+  test('whisper-server.sh launches whisper-api.py (no shell dispatch)', () => {
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-server.sh'), 'utf8');
+    assert.match(src, /whisper-api\.py/, 'must reference whisper-api.py');
+    assert.doesNotMatch(src, /qwen3-asr-api\.py/, 'must NOT dispatch to separate qwen3 script');
   });
 });
 
 // ---------------------------------------------------------------------------
-// Behavioral tests: verify the dispatch produces correct outputs.
+// Behavioral tests: verify the install dispatch produces correct outputs.
+// (Server dispatch is internal to whisper-api.py — tested via TypeScript unit
+// tests in services-lifecycle-route.test.js.)
 // ---------------------------------------------------------------------------
 describe('whisper-dispatch — install backend selection', () => {
   test('Qwen3-ASR-1.7B-8bit -> mlx-audio + Qwen3 ASR label', () => {
@@ -111,23 +101,5 @@ describe('whisper-dispatch — install backend selection', () => {
   test('empty model -> mlx-whisper (fallback)', () => {
     const r = getInstallDispatch('');
     assert.equal(r.deps, 'mlx-whisper');
-  });
-});
-
-describe('whisper-dispatch — server API script selection', () => {
-  test('Qwen3-ASR-1.7B-8bit -> qwen3-asr-api.py', () => {
-    assert.equal(getServerDispatch('mlx-community/Qwen3-ASR-1.7B-8bit'), 'qwen3-asr-api.py');
-  });
-
-  test('Qwen3-ASR-1.7B-4bit -> qwen3-asr-api.py', () => {
-    assert.equal(getServerDispatch('mlx-community/Qwen3-ASR-1.7B-4bit'), 'qwen3-asr-api.py');
-  });
-
-  test('whisper-large-v3-turbo -> whisper-api.py', () => {
-    assert.equal(getServerDispatch('mlx-community/whisper-large-v3-turbo'), 'whisper-api.py');
-  });
-
-  test('base (faster-whisper short name) -> whisper-api.py', () => {
-    assert.equal(getServerDispatch('base'), 'whisper-api.py');
   });
 });
