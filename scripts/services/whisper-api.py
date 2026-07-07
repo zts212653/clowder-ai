@@ -12,13 +12,13 @@ OpenAI-compatible endpoint: POST /v1/audio/transcriptions
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import signal
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 import uvicorn
@@ -49,7 +49,7 @@ model_path: str = ""
 model_loaded: bool = False
 _backend: str = "unknown"
 
-_transcribe_lock = threading.Lock()
+_transcribe_lock = asyncio.Lock()
 
 # ─── Backend state ────────────────────────────────────────────────
 _fw_model = None   # faster-whisper WhisperModel instance
@@ -74,17 +74,21 @@ def _convert_to_wav(src_path: str) -> str:
     """Convert any audio format to 16kHz mono WAV via ffmpeg (Qwen3-ASR requires WAV)."""
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", wav_path],
-        capture_output=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
-        raise RuntimeError(f"ffmpeg conversion failed (exit {result.returncode}): {stderr}")
-    if not Path(wav_path).exists() or Path(wav_path).stat().st_size == 0:
-        raise RuntimeError(f"ffmpeg produced empty or missing output: {wav_path}")
-    return wav_path
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", wav_path],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")[-500:]
+            raise RuntimeError(f"ffmpeg conversion failed (exit {result.returncode}): {stderr}")
+        if not Path(wav_path).exists() or Path(wav_path).stat().st_size == 0:
+            raise RuntimeError(f"ffmpeg produced empty or missing output: {wav_path}")
+        return wav_path
+    except BaseException:
+        Path(wav_path).unlink(missing_ok=True)
+        raise
 
 
 def _transcribe_qwen3(tmp_path: str, language: str | None, initial_prompt: str | None) -> str:
@@ -158,13 +162,13 @@ async def transcribe(
     prompt = initial_prompt if initial_prompt else None
 
     try:
-        with _transcribe_lock:
+        async with _transcribe_lock:
             if _backend == "mlx-audio":
-                text = _transcribe_qwen3(tmp_path, lang, prompt)
+                text = await asyncio.to_thread(_transcribe_qwen3, tmp_path, lang, prompt)
             elif _backend == "mlx-whisper":
-                text = _transcribe_mlx(tmp_path, lang, prompt)
+                text = await asyncio.to_thread(_transcribe_mlx, tmp_path, lang, prompt)
             else:
-                text = _transcribe_fw(tmp_path, lang, prompt)
+                text = await asyncio.to_thread(_transcribe_fw, tmp_path, lang, prompt)
         log.info("Transcribed %d bytes -> %d chars (lang=%s)", len(content), len(text), language)
         return {"text": text}
     except Exception as exc:
