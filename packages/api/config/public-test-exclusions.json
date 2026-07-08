@@ -341,7 +341,7 @@
       "reason": "F236 cc anchor hook coverage imports the source-only root .claude hook implementation that is not part of the public export.",
       "owner": "@zts212653",
       "introducedBy": "68dd499d9",
-      "expiresOn": "2026-07-07"
+      "expiresOn": "2026-07-31"
     },
     {
       "id": "github-schedule-factories",

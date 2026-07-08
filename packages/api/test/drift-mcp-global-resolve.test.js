@@ -23,12 +23,14 @@ const AUTH_HEADERS = {
   host: 'localhost:3004',
   origin: 'http://localhost:3003',
 };
+const ORIGINAL_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID;
 
 describe('#1050 — MCP drift resolve without projectPath', () => {
   /** @type {import('fastify').FastifyInstance} */
   let app;
 
   beforeEach(async () => {
+    process.env.DEFAULT_OWNER_USER_ID = AUTH_HEADERS['x-test-session-user'];
     app = Fastify({ logger: false });
     app.addHook('preHandler', async (request) => {
       const raw = request.headers['x-test-session-user'];
@@ -42,6 +44,8 @@ describe('#1050 — MCP drift resolve without projectPath', () => {
 
   afterEach(async () => {
     await app?.close();
+    if (ORIGINAL_OWNER_USER_ID === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_USER_ID;
   });
 
   it('does not reject MCP resolve when projectPath is absent', async () => {
@@ -88,6 +92,7 @@ describe('#1049 Phase D — conflictPolicy parameter validation', () => {
   let app;
 
   beforeEach(async () => {
+    process.env.DEFAULT_OWNER_USER_ID = AUTH_HEADERS['x-test-session-user'];
     app = Fastify({ logger: false });
     app.addHook('preHandler', async (request) => {
       const raw = request.headers['x-test-session-user'];
@@ -101,6 +106,8 @@ describe('#1049 Phase D — conflictPolicy parameter validation', () => {
 
   afterEach(async () => {
     await app?.close();
+    if (ORIGINAL_OWNER_USER_ID === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = ORIGINAL_OWNER_USER_ID;
   });
 
   it('accepts conflictPolicy use-global without error', async () => {
