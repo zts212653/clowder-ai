@@ -250,6 +250,8 @@ export const KNOWN_OC_PROVIDERS = [
   'google',
   'azure',
   'deepseek',
+  'zhipu',
+  'glm',
 ];
 
 /** Merge well-known providers with any prefixes extracted from model strings like "openai/gpt-5.4". */

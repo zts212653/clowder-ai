@@ -5527,6 +5527,92 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     await assert.rejects(readFile(seenConfigPath, 'utf-8'));
   });
 
+  for (const { label, baseUrl } of [
+    { label: 'GLM v4', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
+    { label: 'GLM Coding Plan v4', baseUrl: 'https://api.z.ai/api/coding/paas/v4' },
+  ]) {
+    it(`clowder-ai#1113: ${label} OpenCode binding preserves versioned baseUrl`, async () => {
+      const { createProviderProfile } = await import('./helpers/create-test-account.js');
+      const root = await mkdtemp(join(tmpdir(), 'clowder1113-opencode-glm-v4-'));
+      process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+      const apiDir = join(root, 'packages', 'api');
+      await mkdir(apiDir, { recursive: true });
+      await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+
+      const customProfile = await createProviderProfile(root, {
+        provider: 'openai',
+        name: 'zhipu-api',
+        mode: 'api_key',
+        authType: 'api_key',
+        protocol: 'openai',
+        baseUrl,
+        apiKey: 'sk-zhipu-key',
+        models: ['zhipu/glm-4.6v'],
+        setActive: false,
+      });
+
+      const registrySnapshot = catRegistry.getAllConfigs();
+      const originalConfig = catRegistry.tryGet('opencode')?.config;
+      assert.ok(originalConfig, 'opencode config should exist in registry');
+      const boundCatId = `opencode-zhipu-${label.toLowerCase().replace(/\W+/g, '-')}`;
+      catRegistry.register(boundCatId, {
+        ...originalConfig,
+        id: boundCatId,
+        mentionPatterns: [`@${boundCatId}`],
+        clientId: 'opencode',
+        accountRef: customProfile.id,
+        defaultModel: 'zhipu/glm-4.6v',
+        provider: 'zhipu',
+      });
+
+      const optionsSeen = [];
+      let seenConfigPath;
+      let seenRuntimeConfig;
+      const service = {
+        l0CompilerFn: dummyL0CompilerFn,
+        async *invoke(_prompt, options) {
+          optionsSeen.push(options ?? {});
+          seenConfigPath = options?.callbackEnv?.OPENCODE_CONFIG;
+          assert.ok(seenConfigPath, 'GLM OpenCode binding should receive OPENCODE_CONFIG');
+          seenRuntimeConfig = JSON.parse(await readFile(seenConfigPath, 'utf-8'));
+          yield { type: 'done', catId: 'opencode', timestamp: Date.now() };
+        },
+      };
+
+      const deps = makeDeps();
+      const previousCwd = process.cwd();
+      try {
+        process.chdir(apiDir);
+        const messages = await collect(
+          invokeSingleCat(deps, {
+            catId: boundCatId,
+            service,
+            prompt: 'test GLM v4 routing',
+            userId: 'user-clowder1113-opencode-glm-v4',
+            threadId: 'thread-clowder1113-opencode-glm-v4',
+            isLastCat: true,
+          }),
+        );
+        assert.ok(messages.some((m) => m.type === 'done'));
+      } finally {
+        process.chdir(previousCwd);
+        catRegistry.reset();
+        for (const [id, config] of Object.entries(registrySnapshot)) {
+          catRegistry.register(id, config);
+        }
+        await rmWithRetry(root);
+      }
+
+      const callbackEnv = optionsSeen[0]?.callbackEnv ?? {};
+      assert.equal(callbackEnv.CAT_CAFE_OC_API_KEY, 'sk-zhipu-key');
+      assert.equal(callbackEnv.CAT_CAFE_OC_BASE_URL, baseUrl);
+      assert.equal(seenRuntimeConfig?.model, 'zhipu/glm-4.6v');
+      assert.equal(seenRuntimeConfig?.provider?.zhipu?.npm, '@ai-sdk/openai-compatible');
+      assert.deepStrictEqual(seenRuntimeConfig?.provider?.zhipu?.models, { 'glm-4.6v': { name: 'glm-4.6v' } });
+      await assert.rejects(readFile(seenConfigPath, 'utf-8'));
+    });
+  }
+
   it('clowder-ai#223: bare model + provider assembles composite model for custom provider routing', async () => {
     const { createProviderProfile } = await import('./helpers/create-test-account.js');
     const root = await mkdtemp(join(tmpdir(), 'f189-oc-bare-model-'));

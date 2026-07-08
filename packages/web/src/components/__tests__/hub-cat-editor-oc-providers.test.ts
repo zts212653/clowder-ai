@@ -26,7 +26,7 @@ describe('KNOWN_OC_PROVIDERS datalist suggestions', () => {
   });
 
   it('includes core provider names', () => {
-    for (const name of ['anthropic', 'openai', 'google', 'openrouter']) {
+    for (const name of ['anthropic', 'openai', 'google', 'openrouter', 'zhipu', 'glm']) {
       expect(KNOWN_OC_PROVIDERS).toContain(name);
     }
   });
@@ -36,6 +36,7 @@ describe('KNOWN_OC_PROVIDERS datalist suggestions', () => {
     expect(resolveOpenCodeEndpoint('anthropic')).toBe('/v1/messages');
     expect(resolveOpenCodeEndpoint('google')).toBe('/models/{model}:generateContent');
     expect(resolveOpenCodeEndpoint('maas')).toBe('/v1/chat/completions');
+    expect(resolveOpenCodeEndpoint('zhipu')).toBe('/v1/chat/completions');
   });
 });
 
@@ -48,6 +49,16 @@ describe('buildCallHint — API version URL display (#886)', () => {
   it('base ending /v2 produces /v2/chat/completions, not /v2/v1/chat/completions', () => {
     const hint = buildCallHint('opencode', mkProfile('https://maas-api.cn-huabei-1.xf-yun.com/v2'), 'spark', 'maas');
     expect(hint?.url).toBe('https://maas-api.cn-huabei-1.xf-yun.com/v2/chat/completions');
+  });
+
+  it('clowder-ai#1113: GLM v4 endpoint produces /v4/chat/completions, not /v4/v1/chat/completions', () => {
+    const hint = buildCallHint('opencode', mkProfile('https://open.bigmodel.cn/api/paas/v4'), 'glm-4.6v', 'zhipu');
+    expect(hint?.url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
+  });
+
+  it('clowder-ai#1113: GLM Coding Plan v4 endpoint preserves the coding prefix', () => {
+    const hint = buildCallHint('opencode', mkProfile('https://api.z.ai/api/coding/paas/v4'), 'glm-4.6v', 'zhipu');
+    expect(hint?.url).toBe('https://api.z.ai/api/coding/paas/v4/chat/completions');
   });
 
   it('base without version appends full /v1 suffix', () => {
