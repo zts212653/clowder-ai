@@ -32,10 +32,7 @@ import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { buildCatGitIdentityEnv } from '../../../../../config/cat-git-identity.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
-import {
-  getContextWindowFallback,
-  OPENCODE_DEFAULT_CONTEXT_WINDOW,
-} from '../../../../../config/context-window-sizes.js';
+import { OPENCODE_DEFAULT_CONTEXT_WINDOW, resolveContextWindow } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
@@ -2141,9 +2138,13 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           //    actually targets). Crucially this is LAST so known opencode
           //    models like the default claude-opus-4-6 get their precise 200k
           //    from the table, NOT the 128k conservative default.
+          // F24 known-min floor: tiers 1-2 are additionally raised to
+          // max(value, known floor) inside resolveContextWindow — a stale
+          // CLI (≤2.1.177) reports 200K for claude-fable-5 (native 1M),
+          // and tier 1 outranking tier 2 meant the wrong value always won:
+          // sessions sealed budget_exhausted with 80% of the window unused.
           const windowSize =
-            msg.metadata.usage.contextWindowSize ??
-            getContextWindowFallback(msg.metadata.model ?? '') ??
+            resolveContextWindow(msg.metadata.usage.contextWindowSize, msg.metadata.model ?? '') ??
             (msg.metadata.provider === 'opencode' ? OPENCODE_DEFAULT_CONTEXT_WINDOW : undefined);
           const usedFrom =
             msg.metadata.usage.lastTurnInputTokens != null
