@@ -155,26 +155,28 @@ function createMainWindow() {
 
 function showAboutDialog() {
   const version = app.getVersion();
-  dialog.showMessageBox({
-    type: 'info',
-    buttons: ['Check for Updates', 'OK'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'About Clowder AI',
-    message: `Clowder AI v${version}`,
-    detail: [
-      'Multi-Agent Collaboration Platform',
-      '',
-      `Version: ${version}`,
-      `Electron: ${process.versions.electron}`,
-      `Node: ${process.versions.node}`,
-      '',
-      'License: AGPL-3.0',
-      'https://github.com/zts212653/clowder-ai',
-    ].join('\n'),
-  }).then((result) => {
-    if (result.response === 0) updater?.checkForUpdates();
-  });
+  dialog
+    .showMessageBox({
+      type: 'info',
+      buttons: ['Check for Updates', 'OK'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'About Clowder AI',
+      message: `Clowder AI v${version}`,
+      detail: [
+        'Multi-Agent Collaboration Platform',
+        '',
+        `Version: ${version}`,
+        `Electron: ${process.versions.electron}`,
+        `Node: ${process.versions.node}`,
+        '',
+        'License: AGPL-3.0',
+        'https://github.com/zts212653/clowder-ai',
+      ].join('\n'),
+    })
+    .then((result) => {
+      if (result.response === 0) updater?.checkForUpdates();
+    });
 }
 
 function createTray() {
