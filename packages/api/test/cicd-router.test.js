@@ -2,7 +2,11 @@
 
 import assert from 'node:assert';
 import { beforeEach, describe, it } from 'node:test';
-import { buildCiMessageContent, CiCdRouter } from '../dist/infrastructure/email/CiCdRouter.js';
+import {
+  buildCiMessageContent,
+  buildLifecycleMessageContent,
+  CiCdRouter,
+} from '../dist/infrastructure/email/CiCdRouter.js';
 import { createPrTrackingTaskStore } from './helpers/pr-tracking-test-helper.js';
 
 // ─── Lightweight mocks ─────────────────────────────────────────────
@@ -133,7 +137,32 @@ describe('CiCdRouter', () => {
       assert.strictEqual(messageMock.messages[0].source.connector, 'github-ci');
     });
 
-    it('delivers CI success message to tracked thread (AC-A3)', async () => {
+    it('suppresses CI success delivery for review intent while preserving CI state', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, { intent: 'review' });
+
+      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
+
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('review intent'));
+      assert.strictEqual(messageMock.messages.length, 0);
+
+      const updated = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
+      assert.ok(updated, 'entry should still exist after silent CI pass');
+      assert.strictEqual(updated.automationState?.ci?.headSha, 'abc1234567890');
+      assert.strictEqual(updated.automationState?.ci?.lastFingerprint, 'abc1234567890:pass');
+      assert.strictEqual(updated.automationState?.ci?.lastBucket, 'pass');
+      assert.strictEqual(updated.automationState?.ci?.lastNotifiedAt, undefined);
+    });
+
+    it('suppresses CI success delivery when intent is absent (defaults to review)', async () => {
       const router = createRouter();
       prTracking.register({
         repoFullName: 'zts212653/cat-cafe',
@@ -142,6 +171,24 @@ describe('CiCdRouter', () => {
         threadId: 'thread-abc',
         userId: 'user-1',
       });
+
+      const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
+
+      assert.strictEqual(result.kind, 'skipped');
+      assert.ok(result.reason.includes('review intent'));
+      assert.strictEqual(messageMock.messages.length, 0);
+    });
+
+    it('delivers CI success message to tracked thread for merge intent (AC-A3)', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge' });
 
       const result = await router.route(makePollResult({ aggregateBucket: 'pass', checks: [] }));
 
@@ -221,13 +268,14 @@ describe('CiCdRouter', () => {
 
     it('fail then success on same SHA notifies both (AC-A5)', async () => {
       const router = createRouter();
-      prTracking.register({
+      const task = prTracking.register({
         repoFullName: 'zts212653/cat-cafe',
         prNumber: 42,
         catId: 'opus',
         threadId: 'thread-abc',
         userId: 'user-1',
       });
+      prTracking.taskStore.patchAutomationState(task.id, { intent: 'merge' });
 
       const failPoll = makePollResult({ headSha: 'sha-fixed', aggregateBucket: 'fail' });
       const passPoll = makePollResult({ headSha: 'sha-fixed', aggregateBucket: 'pass', checks: [] });
@@ -271,22 +319,19 @@ describe('CiCdRouter', () => {
   });
 
   // ── T3: Merged/closed lifecycle close (AC-A8 + terminal notification) ──
-  // Observed gap (PR #1120): merged was detected and persisted, but the owner was
-  // never notified — trackingInstructions promising "on merge, do X" never delivered.
-  // Terminal state now delivers a final lifecycle message and returns kind='lifecycle'.
 
   describe('T3: merged/closed lifecycle close', () => {
     it('merged PR marks task done AND delivers terminal lifecycle notification', async () => {
       const router = createRouter();
       prTracking.register({
-        repoFullName: 'zts212653/cat-cafe',
+        repoFullName: 'zts212653/clowder-ai',
         prNumber: 42,
         catId: 'opus',
         threadId: 'thread-abc',
         userId: 'user-1',
       });
 
-      const result = await router.route(makePollResult({ prState: 'merged' }));
+      const result = await router.route(makePollResult({ repoFullName: 'zts212653/clowder-ai', prState: 'merged' }));
 
       assert.strictEqual(result.kind, 'lifecycle');
       if (result.kind === 'lifecycle') {
@@ -297,17 +342,17 @@ describe('CiCdRouter', () => {
       }
 
       // #320: merged/closed sets status=done (not delete)
-      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
+      const entry = prTracking.taskStore.getBySubject('pr:zts212653/clowder-ai#42');
       assert.ok(entry, 'task should still exist');
       assert.strictEqual(entry.status, 'done');
 
-      // Terminal notification delivered to the tracked thread, mentioning the owner
       assert.strictEqual(messageMock.messages.length, 1);
       const msg = messageMock.messages[0];
       assert.strictEqual(msg.threadId, 'thread-abc');
       assert.ok(msg.mentions.includes('opus'));
       assert.ok(msg.content.includes('merge'), 'content should state the PR merged');
       assert.ok(msg.content.includes('#42'));
+      assert.strictEqual(msg.source.url, 'https://github.com/zts212653/clowder-ai/pull/42');
     });
 
     it('closed PR marks task done AND delivers closed (unmerged) notification', async () => {
@@ -338,6 +383,54 @@ describe('CiCdRouter', () => {
       );
     });
 
+    it('skips terminal lifecycle delivery when the same terminal state was already processed', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.update(task.id, { status: 'done' });
+      prTracking.taskStore.patchAutomationState(task.id, { ci: { prState: 'merged' } });
+
+      const result = await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(result.kind, 'skipped');
+      if (result.kind === 'skipped') {
+        assert.ok(result.reason.includes('already processed'));
+      }
+      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
+      assert.strictEqual(entry?.status, 'done');
+      assert.strictEqual(messageMock.messages.length, 0);
+    });
+
+    it('still delivers terminal lifecycle when review feedback marked the task done first', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      prTracking.taskStore.update(task.id, { status: 'done' });
+
+      const result = await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(result.kind, 'lifecycle');
+      if (result.kind === 'lifecycle') {
+        assert.strictEqual(result.prState, 'merged');
+        assert.strictEqual(result.threadId, 'thread-abc');
+        assert.strictEqual(result.catId, 'opus');
+      }
+      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
+      assert.strictEqual(entry?.status, 'done');
+      assert.strictEqual(entry?.automationState?.ci?.prState, 'merged');
+      assert.strictEqual(messageMock.messages.length, 1);
+    });
+
     it('appends trackingInstructions to the terminal notification (post-merge checklist)', async () => {
       const router = createRouter();
       const task = prTracking.register({
@@ -347,7 +440,7 @@ describe('CiCdRouter', () => {
         threadId: 'thread-abc',
         userId: 'user-1',
       });
-      await prTracking.taskStore.patchAutomationState(task.id, {
+      prTracking.taskStore.patchAutomationState(task.id, {
         trackingInstructions: 'merge 后：验证 main 生效 + 标任务 done',
       });
 
@@ -877,5 +970,35 @@ describe('buildCiMessageContent', () => {
     assert.ok(content.includes('CI 通过'));
     assert.ok(content.includes('def7890'));
     assert.ok(!content.includes('失败的检查'));
+  });
+});
+
+describe('buildLifecycleMessageContent', () => {
+  it('formats merged lifecycle message with tracking instructions', () => {
+    const content = buildLifecycleMessageContent(
+      {
+        repoFullName: 'org/repo',
+        prNumber: 10,
+        prState: 'merged',
+      },
+      'verify main and close task',
+    );
+
+    assert.ok(content.includes('PR 已 merge'));
+    assert.ok(content.includes('PR #10'));
+    assert.ok(content.includes('Tracking Instructions'));
+    assert.ok(content.includes('verify main and close task'));
+  });
+
+  it('formats closed lifecycle message as unmerged', () => {
+    const content = buildLifecycleMessageContent({
+      repoFullName: 'org/repo',
+      prNumber: 11,
+      prState: 'closed',
+    });
+
+    assert.ok(content.includes('PR 已关闭'));
+    assert.ok(content.includes('未合并'));
+    assert.ok(content.includes('PR #11'));
   });
 });

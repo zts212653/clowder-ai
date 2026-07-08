@@ -83,6 +83,16 @@ export interface ReviewFeedbackTaskSpecOptions {
   readonly projector?: { apply(event: CommunityEvent): Promise<void> };
   // F208 Phase E AC-E2: distillation checkpoint (best-effort, optional)
   readonly distillationCheckpoint?: DistillationCheckpoint;
+  /** F167 Phase Q: retire matching hold_ball timers once structured review feedback is delivered. */
+  readonly holdLifecycle?: {
+    retireSatisfiedWait(event: {
+      threadId: string;
+      subjectKey: string;
+      expectedSignalKey: 'review_posted';
+      sourceKind: 'review_feedback';
+      sourceMessageId?: string;
+    }): void | Promise<unknown>;
+  };
 }
 
 function resolveCursor(memoryCursor: number | undefined, persistedCursor: number | undefined): number {
@@ -300,6 +310,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
 
             const prMetadata = opts.fetchPrMetadata ? await opts.fetchPrMetadata(repoFullName, prNumber) : null;
             if (prMetadata?.prState === 'merged' || prMetadata?.prState === 'closed') {
+              await opts.taskStore.patchAutomationState(trackingTask.id, { review: { prState: prMetadata.prState } });
               await opts.taskStore.update(trackingTask.id, { status: 'done' });
               opts.log.info(`[review-feedback] PR ${prKey} ${prMetadata.prState} — task marked done`);
 
@@ -615,6 +626,20 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
         const repairCommitted = await signal.commitRoutingRepair?.();
         if (repairCommitted === false) return;
         await signal.commitCursor();
+
+        if (opts.holdLifecycle) {
+          try {
+            await opts.holdLifecycle.retireSatisfiedWait({
+              threadId: routeResult.threadId,
+              subjectKey,
+              expectedSignalKey: 'review_posted',
+              sourceKind: 'review_feedback',
+              sourceMessageId: routeResult.messageId,
+            });
+          } catch (err) {
+            opts.log.warn({ err, subjectKey }, '[review-feedback] hold lifecycle retirement failed (best-effort)');
+          }
+        }
 
         if (opts.invokeTrigger) {
           try {

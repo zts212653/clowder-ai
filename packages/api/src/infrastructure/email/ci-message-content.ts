@@ -1,7 +1,6 @@
 /**
  * Message content builders for CI/CD tracking notifications.
- * Extracted from CiCdRouter.ts (file size + complexity limits); re-exported there
- * so existing import paths stay valid.
+ * Extracted from CiCdRouter.ts so lifecycle delivery can stay small and reusable.
  */
 import type { CiPollResult } from './CiCdRouter.js';
 
@@ -38,7 +37,7 @@ export function buildCiMessageContent(poll: CiPollResult, trackingInstructions?:
   return lines.join('\n');
 }
 
-/** Terminal lifecycle (merged/closed) notification — mirrors buildCiMessageContent conventions. */
+/** Terminal lifecycle (merged/closed) notification. */
 export function buildLifecycleMessageContent(
   poll: Pick<CiPollResult, 'repoFullName' | 'prNumber' | 'prState'>,
   trackingInstructions?: string,

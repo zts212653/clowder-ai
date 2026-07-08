@@ -12,7 +12,7 @@ import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-messag
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 import { deliverConnectorMessage } from './deliver-connector-message.js';
 
-// Re-export for existing import sites (index.ts, tests) — builders moved to ci-message-content.ts.
+// Re-export for existing import sites (index.ts, tests).
 export { buildCiMessageContent, buildLifecycleMessageContent };
 
 /** Minimal projector interface for optional DI — avoids importing concrete class. */
@@ -41,11 +41,6 @@ export interface CiPollResult {
 
 export type CiRouteResult =
   | { kind: 'notified'; threadId: string; catId: string; messageId: string; bucket: CiBucket; content: string }
-  /**
-   * PR reached terminal state (merged/closed): task marked done + final lifecycle
-   * notification delivered. Fires exactly once — done tasks are filtered by the
-   * poller gate, so this branch is never re-entered for the same PR.
-   */
   | {
       kind: 'lifecycle';
       threadId: string;
@@ -64,7 +59,22 @@ interface TrackedTaskLike {
   readonly ownerCatId: string | null;
   readonly userId?: string;
   readonly title?: string;
-  readonly automationState?: { readonly trackingInstructions?: string };
+  readonly automationState?: {
+    readonly ci?: { readonly prState?: 'merged' | 'closed' };
+    readonly trackingInstructions?: string;
+  };
+}
+
+function getConnectorDeliveryTarget(task: Pick<TrackedTaskLike, 'threadId' | 'userId' | 'ownerCatId'>): {
+  threadId: string;
+  userId: string;
+  catId: string;
+} {
+  return {
+    threadId: task.threadId,
+    userId: task.userId ?? '',
+    catId: task.ownerCatId ?? '',
+  };
 }
 
 export interface CiCdRouterOptions {
@@ -104,12 +114,23 @@ export class CiCdRouter {
   }
 
   async route(poll: CiPollResult): Promise<CiRouteResult> {
-    const { taskStore } = this.opts;
+    const { taskStore, log } = this.opts;
     const sk = prSubjectKey(poll.repoFullName, poll.prNumber);
 
     const task = await taskStore.getBySubject(sk);
     if (!task) {
       return { kind: 'skipped', reason: `No tracking task for ${poll.repoFullName}#${poll.prNumber}` };
+    }
+
+    const terminalPrState = poll.prState === 'merged' || poll.prState === 'closed' ? poll.prState : null;
+    if (task.status === 'done') {
+      if (terminalPrState && !task.automationState?.ci?.prState) {
+        return this.closeLifecycle(poll, task, sk);
+      }
+      return {
+        kind: 'skipped',
+        reason: `Tracking task already processed for ${poll.repoFullName}#${poll.prNumber}`,
+      };
     }
 
     if (task.automationState?.ci?.enabled === false) {
@@ -120,7 +141,7 @@ export class CiCdRouter {
       return { kind: 'skipped', reason: `CI tracking disabled for ${poll.repoFullName}#${poll.prNumber}` };
     }
 
-    if (poll.prState === 'merged' || poll.prState === 'closed') {
+    if (terminalPrState) {
       return this.closeLifecycle(poll, task, sk);
     }
 
@@ -136,24 +157,32 @@ export class CiCdRouter {
       return { kind: 'deduped', reason: `Already notified for ${fingerprint}` };
     }
 
+    const intent = task.automationState?.intent ?? 'review';
+    if (poll.aggregateBucket === 'pass' && intent !== 'merge') {
+      await taskStore.patchAutomationState(task.id, {
+        ci: {
+          headSha: poll.headSha,
+          lastFingerprint: fingerprint,
+          lastBucket: poll.aggregateBucket,
+        },
+      });
+      log.info(`[CiCdRouter] CI pass for ${poll.repoFullName}#${poll.prNumber} recorded silently (intent=${intent})`);
+      return { kind: 'skipped', reason: `CI pass silent for review intent (${poll.repoFullName}#${poll.prNumber})` };
+    }
+
     return this.deliver(poll, task, fingerprint);
   }
 
   /**
    * PR reached terminal state (merged/closed).
-   * #320 KD-17: lifecycle close = mark task done (not delete).
-   * Then: best-effort side effects + a final lifecycle notification to the owner.
-   * The notification is the outcome the owner is tracking for (intent=merge waits for
-   * exactly this; trackingInstructions routinely say "on merge, do X") — without it the
-   * owner never learns the PR closed (observed: PR #1120 merged 12:25 UTC, owner
-   * discovered at 14:21 via a human query). Delivered AFTER done-marking so a delivery
-   * failure can never wedge the task in tracking; failure degrades to the previous
-   * silent behavior.
+   * Mark done first, then emit best-effort side effects and final owner-visible
+   * lifecycle notification. Delivery failure degrades to the previous silent close.
    */
   private async closeLifecycle(poll: CiPollResult, task: TrackedTaskLike, sk: string): Promise<CiRouteResult> {
     const { taskStore, log } = this.opts;
     const prState = poll.prState as 'merged' | 'closed';
 
+    // #320 KD-17: lifecycle close = mark task done (not delete)
     // F200 AC-D2.3: persist prState so signal detection can distinguish merged vs closed
     await taskStore.update(task.id, { status: 'done' });
     await taskStore.patchAutomationState(task.id, { ci: { prState } });
@@ -163,6 +192,7 @@ export class CiCdRouter {
 
     try {
       const content = buildLifecycleMessageContent(poll, task.automationState?.trackingInstructions);
+      const deliveryTarget = getConnectorDeliveryTarget(task);
       const source: ConnectorSource = {
         connector: 'github-ci',
         label: 'GitHub CI/CD',
@@ -170,17 +200,17 @@ export class CiCdRouter {
         url: `https://github.com/${poll.repoFullName}/pull/${poll.prNumber}`,
       };
       const delivered = await deliverConnectorMessage(this.opts.deliveryDeps, {
-        threadId: task.threadId,
-        userId: task.userId ?? '',
-        catId: task.ownerCatId ?? '',
+        ...deliveryTarget,
         content,
         source,
       });
-      log.info(`[CiCdRouter] PR ${prState} → lifecycle notification to ${task.ownerCatId} in thread ${task.threadId}`);
+      log.info(
+        `[CiCdRouter] PR ${prState} -> lifecycle notification to ${deliveryTarget.catId} in thread ${deliveryTarget.threadId}`,
+      );
       return {
         kind: 'lifecycle',
-        threadId: task.threadId,
-        catId: task.ownerCatId ?? '',
+        threadId: deliveryTarget.threadId,
+        catId: deliveryTarget.catId,
         messageId: delivered.messageId,
         prState,
         content,
@@ -289,6 +319,7 @@ export class CiCdRouter {
   ): Promise<CiRouteResult> {
     const { taskStore, log } = this.opts;
     const content = buildCiMessageContent(poll, task.automationState?.trackingInstructions);
+    const deliveryTarget = getConnectorDeliveryTarget(task);
 
     const source: ConnectorSource = {
       connector: 'github-ci',
@@ -298,9 +329,7 @@ export class CiCdRouter {
     };
 
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
-      threadId: task.threadId,
-      userId: task.userId ?? '',
-      catId: task.ownerCatId ?? '',
+      ...deliveryTarget,
       content,
       source,
     });
@@ -322,7 +351,7 @@ export class CiCdRouter {
     return {
       kind: 'notified',
       threadId: task.threadId,
-      catId: task.ownerCatId ?? '',
+      catId: deliveryTarget.catId,
       messageId: result.messageId,
       bucket: poll.aggregateBucket,
       content,

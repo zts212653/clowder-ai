@@ -58,13 +58,15 @@ export interface ReviewAutomationState {
   readonly lastCommentCursor?: number;
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
+  /** Terminal PR state observed by ReviewFeedbackTaskSpec before CI lifecycle delivery. */
+  readonly prState?: 'merged' | 'closed';
 }
 
 /**
  * F140: what the cat is currently waiting on for this tracked PR — the wake intent, NOT the repo
  * type (a private PR can be 'merge'; an open-source PR can be 'review'). Decides whether a CI-pass
  * is noise (review-wait) or an action signal (merge-wait). Cats re-register to flip it.
- *   - review (default): waiting on review feedback → CI-pass stays silent (thread message only).
+ *   - review (default): waiting on review feedback → CI-pass is recorded state-only, with no connector message.
  *   - merge: waiting on CI-green to merge (own approved PR / outbound PR / owner-merge of another's
  *     PR) → CI-pass wakes (→ merge-gate).
  * CI fail / review feedback / conflict always wake under both intents.

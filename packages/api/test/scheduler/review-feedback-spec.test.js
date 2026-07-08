@@ -897,9 +897,17 @@ describe('ReviewFeedbackTaskSpec', () => {
 
     assert.equal(result.run, false);
     assert.equal(fetchCalled, false, 'merged PRs must not fetch review feedback');
+    assert.equal(store._patchCalls.length, 1);
+    assert.equal(store._patchCalls[0].taskId, mockTaskItem.id);
+    assert.deepEqual(store._patchCalls[0].patch.review, { prState: 'merged' });
     assert.equal(store._updateCalls.length, 1);
     assert.equal(store._updateCalls[0].taskId, mockTaskItem.id);
     assert.equal(store._updateCalls[0].input.status, 'done');
+    assert.equal(
+      store._updateCalls[0].input.automationState,
+      undefined,
+      'marking done must not replace existing automationState',
+    );
   });
 
   it('gate continues with fresh feedback when PR metadata lookup is unavailable', async () => {
