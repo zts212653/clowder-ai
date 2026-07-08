@@ -153,6 +153,30 @@ function createMainWindow() {
   });
 }
 
+function showAboutDialog() {
+  const version = app.getVersion();
+  dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Check for Updates', 'OK'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'About Clowder AI',
+    message: `Clowder AI v${version}`,
+    detail: [
+      'Multi-Agent Collaboration Platform',
+      '',
+      `Version: ${version}`,
+      `Electron: ${process.versions.electron}`,
+      `Node: ${process.versions.node}`,
+      '',
+      'License: AGPL-3.0',
+      'https://github.com/zts212653/clowder-ai',
+    ].join('\n'),
+  }).then((result) => {
+    if (result.response === 0) updater?.checkForUpdates();
+  });
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'icon.ico');
   try {
@@ -163,6 +187,7 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show Clowder AI', click: () => mainWindow?.show() },
     { type: 'separator' },
+    { label: 'About', click: () => showAboutDialog() },
     { label: 'Check for Updates', click: () => updater?.checkForUpdates() },
     { type: 'separator' },
     { label: 'Quit', click: () => quitApp() },
@@ -217,6 +242,22 @@ app.on('ready', async () => {
 
   createSplashWindow();
   createTray();
+
+  // macOS: set application menu with About entry (standard mac UX)
+  if (process.platform === 'darwin') {
+    const appMenu = Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { label: 'About Clowder AI', click: () => showAboutDialog() },
+          { label: 'Check for Updates…', click: () => updater?.checkForUpdates() },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+    ]);
+    Menu.setApplicationMenu(appMenu);
+  }
 
   services = new ServiceManager(PROJECT_ROOT, {
     frontendPort: FRONTEND_PORT,

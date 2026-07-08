@@ -13,7 +13,6 @@ const dl = require('./update-downloader');
 const { fetchReleases, downloadAsset } = require('./update-installer');
 
 const CHECK_DELAY_MS = 3 * 60 * 1000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const GITHUB_OWNER = 'zts212653';
 const GITHUB_REPO = 'clowder-ai';
 
@@ -78,22 +77,22 @@ class UpdateManager {
     }
   }
 
-  /** Start periodic update check (3min delay, then every 6h). */
+  /** Run a single startup update check after a short delay (3min). */
   startSchedule() {
     const settings = checker.loadSettings(this._settingsPath);
     if (!settings.autoCheck) {
       this._d.dbg('Auto-check disabled');
       return;
     }
-    setTimeout(() => {
+    this._checkTimer = setTimeout(() => {
+      this._checkTimer = null;
       this.checkForUpdates();
-      this._checkTimer = setInterval(() => this.checkForUpdates(), CHECK_INTERVAL_MS);
     }, CHECK_DELAY_MS);
   }
 
   stopSchedule() {
     if (this._checkTimer) {
-      clearInterval(this._checkTimer);
+      clearTimeout(this._checkTimer);
       this._checkTimer = null;
     }
   }
