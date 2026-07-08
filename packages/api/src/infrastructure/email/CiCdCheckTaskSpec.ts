@@ -17,7 +17,7 @@ import type { CatId, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
-import type { CiCdRouter, CiPollResult } from './CiCdRouter.js';
+import type { CiCdRouter, CiPollResult, CiRouteResult } from './CiCdRouter.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import { fetchPrCiStatus } from './ci-status-fetcher.js';
 
@@ -41,6 +41,37 @@ export interface CiCdCheckTaskSpecOptions {
   readonly pollIntervalMs?: number;
   /** F202-2B: Override task ID for plugin-scoped schedule instances */
   readonly id?: string;
+}
+
+/**
+ * PR terminal state (merged/closed) → wake the owner for follow-up, both intents.
+ * intent=merge: the merge IS the awaited outcome (post-merge checklist lives in
+ * trackingInstructions). intent=review: the PR is gone — stop waiting either way.
+ * Fires exactly once: CiCdRouter marks the task done and the gate filters done tasks.
+ */
+function triggerLifecycleWake(
+  opts: CiCdCheckTaskSpecOptions,
+  invokeTrigger: ConnectorInvokeTrigger,
+  signal: CiCdCheckSignal,
+  routeResult: Extract<CiRouteResult, { kind: 'lifecycle' }>,
+): void {
+  const policy: ConnectorTriggerPolicy = {
+    priority: 'normal',
+    reason: routeResult.prState === 'merged' ? 'github_pr_merged' : 'github_pr_closed',
+    sourceCategory: 'ci',
+  };
+  void invokeTrigger
+    .trigger(
+      routeResult.threadId,
+      routeResult.catId as CatId,
+      signal.task.userId ?? '',
+      routeResult.content,
+      routeResult.messageId,
+      undefined,
+      policy,
+    )
+    .catch((err) => opts.log.warn({ err }, '[cicd-check] lifecycle trigger failed (best-effort)'));
+  opts.log.info(`[cicd-check] PR ${routeResult.prState} → wake ${routeResult.catId} (terminal lifecycle)`);
 }
 
 export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpec_P1<CiCdCheckSignal> {
@@ -85,7 +116,14 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
         if (!pollResult) return;
 
         const routeResult = await opts.cicdRouter.route(pollResult);
-        if (routeResult.kind !== 'notified' || !opts.invokeTrigger) return;
+        if (!opts.invokeTrigger) return;
+
+        if (routeResult.kind === 'lifecycle') {
+          triggerLifecycleWake(opts, opts.invokeTrigger, signal, routeResult);
+          return;
+        }
+
+        if (routeResult.kind !== 'notified') return;
 
         // CI fail → always wake (urgent, must fix) — independent of intent.
         if (routeResult.bucket === 'fail') {

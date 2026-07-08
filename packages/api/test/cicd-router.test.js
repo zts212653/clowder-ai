@@ -270,10 +270,13 @@ describe('CiCdRouter', () => {
     });
   });
 
-  // ── T3: Merged/closed auto remove (AC-A8) ──────────────────────
+  // ── T3: Merged/closed lifecycle close (AC-A8 + terminal notification) ──
+  // Observed gap (PR #1120): merged was detected and persisted, but the owner was
+  // never notified — trackingInstructions promising "on merge, do X" never delivered.
+  // Terminal state now delivers a final lifecycle message and returns kind='lifecycle'.
 
-  describe('T3: merged/closed auto remove', () => {
-    it('merged PR is removed from tracking store (AC-A8)', async () => {
+  describe('T3: merged/closed lifecycle close', () => {
+    it('merged PR marks task done AND delivers terminal lifecycle notification', async () => {
       const router = createRouter();
       prTracking.register({
         repoFullName: 'zts212653/cat-cafe',
@@ -285,16 +288,29 @@ describe('CiCdRouter', () => {
 
       const result = await router.route(makePollResult({ prState: 'merged' }));
 
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('merged'));
+      assert.strictEqual(result.kind, 'lifecycle');
+      if (result.kind === 'lifecycle') {
+        assert.strictEqual(result.prState, 'merged');
+        assert.strictEqual(result.threadId, 'thread-abc');
+        assert.strictEqual(result.catId, 'opus');
+        assert.ok(result.messageId, 'delivered message id must be returned');
+      }
 
       // #320: merged/closed sets status=done (not delete)
       const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
       assert.ok(entry, 'task should still exist');
       assert.strictEqual(entry.status, 'done');
+
+      // Terminal notification delivered to the tracked thread, mentioning the owner
+      assert.strictEqual(messageMock.messages.length, 1);
+      const msg = messageMock.messages[0];
+      assert.strictEqual(msg.threadId, 'thread-abc');
+      assert.ok(msg.mentions.includes('opus'));
+      assert.ok(msg.content.includes('merge'), 'content should state the PR merged');
+      assert.ok(msg.content.includes('#42'));
     });
 
-    it('closed PR is marked done in task store', async () => {
+    it('closed PR marks task done AND delivers closed (unmerged) notification', async () => {
       const router = createRouter();
       prTracking.register({
         repoFullName: 'zts212653/cat-cafe',
@@ -306,12 +322,70 @@ describe('CiCdRouter', () => {
 
       const result = await router.route(makePollResult({ prState: 'closed' }));
 
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('closed'));
+      assert.strictEqual(result.kind, 'lifecycle');
+      if (result.kind === 'lifecycle') {
+        assert.strictEqual(result.prState, 'closed');
+      }
 
       const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
       assert.ok(entry, 'task should still exist');
       assert.strictEqual(entry.status, 'done');
+
+      assert.strictEqual(messageMock.messages.length, 1);
+      assert.ok(
+        messageMock.messages[0].content.includes('未合并'),
+        'closed wording must distinguish unmerged closure from merge',
+      );
+    });
+
+    it('appends trackingInstructions to the terminal notification (post-merge checklist)', async () => {
+      const router = createRouter();
+      const task = prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+      await prTracking.taskStore.patchAutomationState(task.id, {
+        trackingInstructions: 'merge 后：验证 main 生效 + 标任务 done',
+      });
+
+      await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(messageMock.messages.length, 1);
+      const content = messageMock.messages[0].content;
+      assert.ok(content.includes('Tracking Instructions'));
+      assert.ok(content.includes('merge 后：验证 main 生效 + 标任务 done'));
+    });
+
+    it('delivery failure degrades to skipped but still marks task done (no poller crash)', async () => {
+      const failingStore = /** @type {any} */ ({
+        append() {
+          throw new Error('message store down');
+        },
+      });
+      const router = new CiCdRouter({
+        taskStore: prTracking.taskStore,
+        deliveryDeps: { messageStore: failingStore },
+        log: noopLog(),
+      });
+      prTracking.register({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 42,
+        catId: 'opus',
+        threadId: 'thread-abc',
+        userId: 'user-1',
+      });
+
+      const result = await router.route(makePollResult({ prState: 'merged' }));
+
+      assert.strictEqual(result.kind, 'skipped');
+      if (result.kind === 'skipped') {
+        assert.ok(result.reason.includes('merged'));
+      }
+      const entry = prTracking.taskStore.getBySubject('pr:zts212653/cat-cafe#42');
+      assert.strictEqual(entry?.status, 'done', 'done-marking must survive delivery failure');
     });
   });
 
@@ -463,7 +537,7 @@ describe('CiCdRouter', () => {
         userId: 'user-1',
       });
       const result = await router.route(makePollResult({ prState: 'merged' }));
-      assert.strictEqual(result.kind, 'skipped');
+      assert.strictEqual(result.kind, 'lifecycle');
     });
 
     it('continues routing even if eventLog.append throws (best-effort)', async () => {
@@ -487,7 +561,7 @@ describe('CiCdRouter', () => {
 
       // Must not throw
       const result = await router.route(makePollResult({ prState: 'merged' }));
-      assert.strictEqual(result.kind, 'skipped');
+      assert.strictEqual(result.kind, 'lifecycle');
     });
   });
 
@@ -758,8 +832,10 @@ describe('CiCdRouter', () => {
       const result = await router.route(
         makePollResult({ repoFullName: 'zts212653/cat-cafe', prNumber: 77, prState: 'merged' }),
       );
-      assert.strictEqual(result.kind, 'skipped');
-      assert.ok(result.reason.includes('merged'));
+      assert.strictEqual(result.kind, 'lifecycle');
+      if (result.kind === 'lifecycle') {
+        assert.strictEqual(result.prState, 'merged');
+      }
     });
   });
 });

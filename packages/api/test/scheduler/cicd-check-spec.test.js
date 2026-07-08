@@ -167,6 +167,68 @@ describe('CiCdCheckTaskSpec', () => {
     assert.equal(policy.reason, 'github_ci_failure');
   });
 
+  // ── PR terminal state (merged/closed) → wake owner for follow-up ──
+  // Gap observed on PR #1120: merged was detected + persisted, but no wake — the owner
+  // learned about the merge hours later via a human query. Terminal events fire exactly
+  // once (CiCdRouter marks the task done, gate filters done tasks), so wake unconditionally.
+
+  /** Build a spec whose router reports a terminal lifecycle result. */
+  function lifecycleSpec(createCiCdCheckTaskSpec, triggered, prState) {
+    const tasks = [mockTask({ repoFullName: 'a/b', prNumber: 1, userId: 'u1' })];
+    return createCiCdCheckTaskSpec({
+      taskStore: mockTaskStore(tasks),
+      cicdRouter: {
+        route: async () => ({
+          kind: 'lifecycle',
+          prState,
+          threadId: 't1',
+          catId: 'opus',
+          messageId: 'm1',
+          content: `PR ${prState}`,
+        }),
+      },
+      fetchPrStatus: async () => ({
+        checks: [],
+        headSha: 'sha1',
+        prNumber: 1,
+        repoFullName: 'a/b',
+        aggregateBucket: 'pass',
+      }),
+      invokeTrigger: {
+        trigger: (...args) => {
+          triggered.push(args);
+          return Promise.resolve();
+        },
+      },
+      log: { info: () => {}, error: () => {}, warn: () => {} },
+    });
+  }
+
+  it('execute WAKES owner when PR merges (terminal lifecycle event)', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = lifecycleSpec(createCiCdCheckTaskSpec, triggered, 'merged');
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+    assert.equal(triggered.length, 1, 'merged → owner must be woken for post-merge follow-up');
+    assert.equal(triggered[0][0], 't1');
+    assert.equal(triggered[0][1], 'opus');
+    const policy = triggered[0][6];
+    assert.equal(policy.priority, 'normal');
+    assert.equal(policy.reason, 'github_pr_merged');
+    assert.equal(policy.sourceCategory, 'ci');
+  });
+
+  it('execute WAKES owner when PR is closed without merge', async () => {
+    const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
+    const triggered = [];
+    const spec = lifecycleSpec(createCiCdCheckTaskSpec, triggered, 'closed');
+    const gateResult = await spec.admission.gate({ taskId: 'cicd-check', lastRunAt: null, tickCount: 1 });
+    await spec.run.execute(gateResult.workItems[0].signal, 'pr:a/b#1', {});
+    assert.equal(triggered.length, 1, 'closed → owner must know the PR is gone');
+    assert.equal(triggered[0][6].reason, 'github_pr_closed');
+  });
+
   it('gate filters out ci.enabled=false', async () => {
     const { createCiCdCheckTaskSpec } = await import('../../dist/infrastructure/email/CiCdCheckTaskSpec.js');
     const tasks = [
