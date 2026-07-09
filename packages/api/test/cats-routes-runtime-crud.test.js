@@ -3231,7 +3231,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(patchRes.statusCode, 200, `PATCH catAgentProtocol failed: ${patchRes.body}`);
     const patchedBody = JSON.parse(patchRes.body);
-    assert.equal(patchedBody.cat.catAgentProtocol, 'anthropic-messages', 'PATCH response should reflect updated protocol');
+    assert.equal(
+      patchedBody.cat.catAgentProtocol,
+      'anthropic-messages',
+      'PATCH response should reflect updated protocol',
+    );
 
     // 4. GET confirms the update
     const listAfterPatchRes = await app.inject({ method: 'GET', url: '/api/cats' });
@@ -3256,7 +3260,11 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     // 6. GET confirms catAgentProtocol is gone
     const listAfterSwitchRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const listedAfterSwitch = JSON.parse(listAfterSwitchRes.body).cats.find((cat) => cat.id === 'runtime-catagent');
-    assert.equal(listedAfterSwitch.catAgentProtocol, undefined, 'GET should confirm catAgentProtocol cleaned up after client switch');
+    assert.equal(
+      listedAfterSwitch.catAgentProtocol,
+      undefined,
+      'GET should confirm catAgentProtocol cleaned up after client switch',
+    );
 
     // 7. Also verify on-disk catalog: catAgentProtocol must not linger
     const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
@@ -3301,6 +3309,10 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     // GET confirms no leakage
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const listed = JSON.parse(listRes.body).cats.find((cat) => cat.id === 'runtime-non-catagent');
-    assert.equal(listed.catAgentProtocol, undefined, 'GET should confirm catAgentProtocol not persisted for non-catagent');
+    assert.equal(
+      listed.catAgentProtocol,
+      undefined,
+      'GET should confirm catAgentProtocol not persisted for non-catagent',
+    );
   });
 });
