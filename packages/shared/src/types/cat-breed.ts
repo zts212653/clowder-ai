@@ -247,7 +247,7 @@ export interface AccountConfig {
    *  family fail-closed guard in `catagent-credentials.ts` (AC-G22).
    *  Optional: existing api_key accounts without `clientFamily` continue to
    *  resolve best-effort (no `profile.client` set → guard falls through). */
-  readonly clientFamily?: 'anthropic' | 'openai' | 'google' | 'kimi' | 'dare' | 'opencode';
+  readonly clientFamily?: 'anthropic' | 'openai' | 'google' | 'kimi' | 'opencode';
   readonly baseUrl?: string;
   readonly models?: readonly string[];
   readonly displayName?: string;

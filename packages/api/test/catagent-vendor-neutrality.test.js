@@ -17,7 +17,18 @@ function stripCommentsAndStrings(source) {
 
 test('AC-G12/AC-G27: CatAgentService stays vendor-neutral in code identifiers', () => {
   const source = readFileSync(
-    join(__dirname, '..', 'src', 'domains', 'cats', 'services', 'agents', 'providers', 'catagent', 'CatAgentService.ts'),
+    join(
+      __dirname,
+      '..',
+      'src',
+      'domains',
+      'cats',
+      'services',
+      'agents',
+      'providers',
+      'catagent',
+      'CatAgentService.ts',
+    ),
     'utf-8',
   );
   const stripped = stripCommentsAndStrings(source);

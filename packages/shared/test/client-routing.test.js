@@ -53,10 +53,7 @@ test('effectiveProtocolForCat: non-catagent ignores catAgentProtocol (only meani
   // Even if catAgentProtocol leaks onto a non-catagent CatConfig (it shouldn't
   // per truth-source gating, but defense-in-depth at the routing helper), it
   // does NOT change the protocol — that's strictly a catagent-only switch.
-  assert.equal(
-    effectiveProtocolForCat({ id: 'codex', clientId: 'openai', catAgentProtocol: 'openai-chat' }),
-    'openai',
-  );
+  assert.equal(effectiveProtocolForCat({ id: 'codex', clientId: 'openai', catAgentProtocol: 'openai-chat' }), 'openai');
   assert.equal(
     effectiveProtocolForCat({ id: 'opus', clientId: 'anthropic', catAgentProtocol: 'openai-chat' }),
     'anthropic',

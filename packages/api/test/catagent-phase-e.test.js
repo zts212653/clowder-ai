@@ -106,7 +106,11 @@ function openAITextTurnEvents(text, finishReason = 'stop', promptTokens = 10, co
       id: `chatcmpl-${Date.now()}`,
       choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: finishReason }],
     },
-    { id: `chatcmpl-${Date.now()}`, choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens } },
+    {
+      id: `chatcmpl-${Date.now()}`,
+      choices: [],
+      usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens },
+    },
     '[DONE]',
   ];
 }
@@ -487,7 +491,10 @@ describe('G2 Axis 5: OpenAI Chat protocol e2e', () => {
     });
     const msgs = await collect(svc.invoke('hi'));
 
-    const text = msgs.filter((msg) => msg.type === 'text').map((msg) => msg.content).join('');
+    const text = msgs
+      .filter((msg) => msg.type === 'text')
+      .map((msg) => msg.content)
+      .join('');
     assert.equal(text, 'Hello from OpenAI');
     assert.ok(msgs.some((msg) => msg.type === 'done'));
     assert.equal(captures[0].url, 'https://proxy.example/v1/chat/completions');

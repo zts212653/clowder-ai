@@ -9,7 +9,9 @@ import type {
   CliConfig,
   ClientId,
   CoCreatorConfig,
+  CommandPolicyEntry,
   ContextBudget,
+  NativeToolLevel,
   VoiceConfig,
 } from '@cat-cafe/shared';
 import { createCatId } from '@cat-cafe/shared';
@@ -526,6 +528,7 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       delete variant.cliConfigArgs;
     }
   }
+  const nextClientId = patch.clientId ?? variant.clientId;
   if (nextClientId === 'catagent') {
     if (patch.nativeToolLevel !== undefined) {
       if (patch.nativeToolLevel) {

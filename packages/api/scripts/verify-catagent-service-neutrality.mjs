@@ -42,8 +42,8 @@ function stripComments(s) {
 const code = stripComments(src);
 
 // Match identifier-shaped tokens beginning with Anthropic
-const anthropicHits = [...new Set((code.match(/\bAnthropic[A-Za-z0-9_]*/g) || []))];
-const lowerHits = [...new Set((code.match(/\banthropic[A-Za-z0-9_]*/g) || []))];
+const anthropicHits = [...new Set(code.match(/\bAnthropic[A-Za-z0-9_]*/g) || [])];
+const lowerHits = [...new Set(code.match(/\banthropic[A-Za-z0-9_]*/g) || [])];
 const opaqueLeak = code.includes('__adapterMessage');
 
 let failed = false;

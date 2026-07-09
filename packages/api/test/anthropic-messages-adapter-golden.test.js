@@ -99,10 +99,7 @@ describe('AnthropicMessagesAdapter: buildRequestUrl', () => {
   });
 
   test('custom proxy without /v1 keeps full path', () => {
-    assert.equal(
-      a.buildRequestUrl('https://api.mycorp.com/anthropic'),
-      'https://api.mycorp.com/anthropic/v1/messages',
-    );
+    assert.equal(a.buildRequestUrl('https://api.mycorp.com/anthropic'), 'https://api.mycorp.com/anthropic/v1/messages');
   });
 });
 
@@ -146,9 +143,7 @@ describe('AnthropicMessagesAdapter: buildRequestBody', () => {
       tools: [{ name: 'read_file', description: 'reads a file', inputSchema: { type: 'object' } }],
     });
     const j = JSON.parse(JSON.stringify(body));
-    assert.deepEqual(j.tools, [
-      { name: 'read_file', description: 'reads a file', input_schema: { type: 'object' } },
-    ]);
+    assert.deepEqual(j.tools, [{ name: 'read_file', description: 'reads a file', input_schema: { type: 'object' } }]);
   });
 
   test('body with systemPrompt — placed as top-level "system" field', () => {
@@ -227,7 +222,13 @@ describe('AnthropicMessagesAdapter: parseStreamEvents — text + usage + stop', 
   test('message_start usage → neutral CatAgentUsageDelta with cache normalisation', async () => {
     const a = new AnthropicMessagesAdapter();
     const stream =
-      sse({ type: 'message_start', message: { id: 'm1', usage: { input_tokens: 100, cache_read_input_tokens: 50, cache_creation_input_tokens: 10 } } }) +
+      sse({
+        type: 'message_start',
+        message: {
+          id: 'm1',
+          usage: { input_tokens: 100, cache_read_input_tokens: 50, cache_creation_input_tokens: 10 },
+        },
+      }) +
       sse({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }) +
       sse({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hi' } }) +
       sse({ type: 'content_block_stop', index: 0 }) +
@@ -288,8 +289,16 @@ describe('AnthropicMessagesAdapter: parseStreamEvents — tool_call mapping', ()
     const a = new AnthropicMessagesAdapter();
     const stream =
       sse({ type: 'message_start', message: { id: 'm', usage: { input_tokens: 1 } } }) +
-      sse({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu1', name: 'read_file' } }) +
-      sse({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"x.txt"}' } }) +
+      sse({
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'tu1', name: 'read_file' },
+      }) +
+      sse({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"path":"x.txt"}' },
+      }) +
       sse({ type: 'content_block_stop', index: 0 }) +
       sse({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 1 } }) +
       sse({ type: 'message_stop' });
@@ -335,18 +344,9 @@ describe('AnthropicMessagesAdapter: parseStreamEvents — boundary cases', () =>
 describe('AnthropicMessagesAdapter: mapError', () => {
   test('byte-stable error text matches pre-G1 mapAnthropicError format', () => {
     const a = new AnthropicMessagesAdapter();
-    assert.equal(
-      a.mapError({ status: 404, message: 'Not Found' }).errorText,
-      'Anthropic API error (404): Not Found',
-    );
-    assert.equal(
-      a.mapError({ status: 500 }).errorText,
-      'Anthropic API error (500): Unknown API error',
-    );
-    assert.equal(
-      a.mapError({ message: 'Network failed' }).errorText,
-      'Anthropic API error (0): Network failed',
-    );
+    assert.equal(a.mapError({ status: 404, message: 'Not Found' }).errorText, 'Anthropic API error (404): Not Found');
+    assert.equal(a.mapError({ status: 500 }).errorText, 'Anthropic API error (500): Unknown API error');
+    assert.equal(a.mapError({ message: 'Network failed' }).errorText, 'Anthropic API error (0): Network failed');
   });
 });
 

@@ -11,13 +11,16 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { createCatAgentProtocolAdapter, CatAgentProtocolUnknownError } =
-  await import('../dist/domains/cats/services/agents/providers/catagent/catagent-protocol-factory.js');
+const { createCatAgentProtocolAdapter, CatAgentProtocolUnknownError } = await import(
+  '../dist/domains/cats/services/agents/providers/catagent/catagent-protocol-factory.js'
+);
 
 const { AnthropicMessagesAdapter } = await import(
   '../dist/domains/cats/services/agents/providers/catagent/anthropic-messages-adapter.js'
 );
-const { OpenAIChatAdapter } = await import('../dist/domains/cats/services/agents/providers/catagent/openai-chat-adapter.js');
+const { OpenAIChatAdapter } = await import(
+  '../dist/domains/cats/services/agents/providers/catagent/openai-chat-adapter.js'
+);
 
 describe('createCatAgentProtocolAdapter dispatch (AC-G17 / KD-20 fail-closed)', () => {
   test('null catConfig → AnthropicMessagesAdapter (legacy/test path)', () => {
