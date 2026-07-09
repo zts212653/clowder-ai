@@ -11,11 +11,11 @@
  */
 
 import type { CatConfig } from '@cat-cafe/shared';
-import { resolveForClient } from '../../../../../../config/account-resolver.js';
 // `BuiltinAccountClient` is the resolver's narrow union (subset of ClientId).
 // Imported as a type-only re-export from account-resolver to avoid importing
 // from @cat-cafe/shared twice in this file.
 import type { BuiltinAccountClient } from '../../../../../../config/account-resolver.js';
+import { resolveForClient } from '../../../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-account-binding.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 
@@ -71,18 +71,15 @@ export function resolveApiCredentials(
   // `clientFamily='openai'` silently, making AC-G5 cosmetic and exposing
   // G2 to silent family routing failures when OpenAIChatAdapter lands.
   //
-  // Post-check: if the profile carries a builtin client identity
-  // (`profile.client` is set only for OAuth/builtin accounts per
-  // `accountToRuntimeProfile`), it MUST match the requested clientFamily.
-  // Mismatch → fail closed.
+  // Post-check: if the profile carries a client identity (`profile.client`),
+  // it MUST match the requested clientFamily. Mismatch → fail closed.
   //
-  // Scope note (deferred to G2 spec): api_key accounts today have no
-  // explicit family on schema (`accountToRuntimeProfile` only sets
-  // `profile.client` for OAuth builtins). The G2 spec must define how
-  // api_key accounts declare family so this guard becomes complete
-  // (not just OAuth/builtin half). For now api_key + missing family is
-  // best-effort and falls through — the runtime API call will fail if
-  // the proxy doesn't speak the requested protocol, surfacing the
+  // F159 G2 AC-G21/G22 (KD-22 resolved): `profile.client` is now set for both
+  // OAuth builtin accounts (via BUILTIN_ACCOUNT_MAP) AND api_key accounts that
+  // declare `account.clientFamily` in their schema. This guard fires on both
+  // paths — closing the half-coverage left by G1. Legacy api_key accounts
+  // without `clientFamily` still fall through with `profile.client=undefined`
+  // (best-effort backward compat); runtime API call surfaces protocol
   // mismatch at first invocation rather than silently routing.
   if (profile.client !== undefined && profile.client !== clientFamily) {
     log.warn(

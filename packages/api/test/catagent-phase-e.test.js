@@ -49,6 +49,34 @@ function mockStreamingApi(responses) {
   };
 }
 
+function openAISseEvent(data) {
+  return `data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`;
+}
+
+function openAIStream(events) {
+  const text = events.map(openAISseEvent).join('');
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(text));
+      controller.close();
+    },
+  });
+}
+
+function mockOpenAIStreamingApi(responses, captures) {
+  let callIndex = 0;
+  return async (url, init) => {
+    if (captures) captures.push({ url: String(url), body: JSON.parse(init.body) });
+    const events = responses[callIndex] ?? responses[responses.length - 1];
+    callIndex++;
+    return {
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: openAIStream(events),
+    };
+  };
+}
+
 function textTurnEvents(text, stopReason = 'end_turn', inputTokens = 10, outputTokens = 5) {
   return [
     { type: 'message_start', message: { id: `msg${Date.now()}`, usage: { input_tokens: inputTokens } } },
@@ -69,6 +97,37 @@ function toolTurnEvents(toolName, toolInput, toolId = 'tu1') {
     { type: 'content_block_stop', index: 0 },
     { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 15 } },
     { type: 'message_stop' },
+  ];
+}
+
+function openAITextTurnEvents(text, finishReason = 'stop', promptTokens = 10, completionTokens = 5) {
+  return [
+    {
+      id: `chatcmpl-${Date.now()}`,
+      choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: finishReason }],
+    },
+    { id: `chatcmpl-${Date.now()}`, choices: [], usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens } },
+    '[DONE]',
+  ];
+}
+
+function openAIToolTurnEvents(toolName, toolInput, toolId = 'call_1') {
+  const args = JSON.stringify(toolInput);
+  return [
+    {
+      id: `chatcmpl-${Date.now()}`,
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: [{ index: 0, id: toolId, function: { name: toolName, arguments: args } }],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    },
+    '[DONE]',
   ];
 }
 
@@ -380,5 +439,95 @@ describe('E4: stream error handling', () => {
     await collect(svc.invoke('test'));
 
     assert.equal(capturedUrl, 'https://proxy.example/v1/messages');
+  });
+});
+
+describe('G2 Axis 5: OpenAI Chat protocol e2e', () => {
+  let prevFetch;
+  let prevEnv;
+
+  before(() => {
+    prevFetch = globalThis.fetch;
+    prevEnv = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = tmpDir;
+    resetMigrationState();
+    writeFileSync(
+      join(tmpDir, '.cat-cafe', 'accounts.json'),
+      JSON.stringify({
+        'test-ant': { authType: 'api_key' },
+        'test-ant-v1': { authType: 'api_key', baseUrl: 'https://proxy.example/v1' },
+        'test-openai': { authType: 'api_key', clientFamily: 'openai', baseUrl: 'https://proxy.example/v1' },
+      }),
+    );
+    writeFileSync(
+      join(tmpDir, '.cat-cafe', 'credentials.json'),
+      JSON.stringify({
+        'test-ant': { apiKey: 'sk-test-e' },
+        'test-ant-v1': { apiKey: 'sk-test-v1' },
+        'test-openai': { apiKey: 'sk-openai-e' },
+      }),
+    );
+  });
+
+  after(() => {
+    globalThis.fetch = prevFetch;
+    if (prevEnv !== undefined) process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevEnv;
+    else delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    resetMigrationState();
+  });
+
+  test('single-turn text path uses OpenAI URL/headers/body and ends cleanly', async () => {
+    const captures = [];
+    globalThis.fetch = mockOpenAIStreamingApi([openAITextTurnEvents('Hello from OpenAI')], captures);
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-openai', clientId: 'catagent', catAgentProtocol: 'openai-chat' },
+    });
+    const msgs = await collect(svc.invoke('hi'));
+
+    const text = msgs.filter((msg) => msg.type === 'text').map((msg) => msg.content).join('');
+    assert.equal(text, 'Hello from OpenAI');
+    assert.ok(msgs.some((msg) => msg.type === 'done'));
+    assert.equal(captures[0].url, 'https://proxy.example/v1/chat/completions');
+    assert.equal(captures[0].body.messages[0].role, 'user');
+    assert.equal(captures[0].body.stream_options.include_usage, true);
+  });
+
+  test('tool_call multi-turn path is lossless across assistant history + tool results', async () => {
+    const captures = [];
+    globalThis.fetch = mockOpenAIStreamingApi(
+      [
+        openAIToolTurnEvents('read_file', { path: 'hello.txt' }, 'call_read_1'),
+        openAITextTurnEvents('The file has 3 lines', 'stop', 50, 9),
+      ],
+      captures,
+    );
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-openai', clientId: 'catagent', catAgentProtocol: 'openai-chat' },
+    });
+    const msgs = await collect(svc.invoke('read hello.txt', { workingDirectory: tmpDir }));
+
+    assert.ok(msgs.some((msg) => msg.type === 'tool_use' && msg.toolName === 'read_file'));
+    assert.ok(msgs.some((msg) => msg.type === 'tool_result' && msg.toolUseId === 'call_read_1'));
+    assert.ok(msgs.some((msg) => msg.type === 'text' && msg.content.includes('3 lines')));
+
+    assert.ok(captures.length >= 2, 'must issue second turn');
+    const secondMessages = captures[1].body.messages;
+    const assistant = secondMessages.find((message) => message.role === 'assistant');
+    assert.deepEqual(assistant.tool_calls, [
+      {
+        id: 'call_read_1',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"hello.txt"}' },
+      },
+    ]);
+    const toolMessage = secondMessages.find((message) => message.role === 'tool');
+    assert.equal(toolMessage.tool_call_id, 'call_read_1');
+    assert.match(toolMessage.content, /line1/);
   });
 });

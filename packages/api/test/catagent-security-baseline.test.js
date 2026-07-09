@@ -54,11 +54,9 @@ test('resolveApiCredentials fail-closes when OAuth builtin family mismatches req
   mkdirSync(configDir, { recursive: true });
   // `claude` is the Anthropic OAuth builtin per BUILTIN_ACCOUNT_MAP.
   writeFileSync(join(configDir, 'accounts.json'), JSON.stringify({ claude: { authType: 'oauth' } }));
-  writeFileSync(
-    join(configDir, 'credentials.json'),
-    JSON.stringify({ claude: { apiKey: 'sk-ant-test' } }),
-    { mode: 0o600 },
-  );
+  writeFileSync(join(configDir, 'credentials.json'), JSON.stringify({ claude: { apiKey: 'sk-ant-test' } }), {
+    mode: 0o600,
+  });
   try {
     // Sanity: same family resolves (anthropic adapter binding to claude).
     const ok = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'claude' }, 'anthropic');
@@ -67,6 +65,75 @@ test('resolveApiCredentials fail-closes when OAuth builtin family mismatches req
     // Mismatch: anthropic builtin must not satisfy openai adapter.
     const mismatch = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'claude' }, 'openai');
     assert.equal(mismatch, null, 'mismatched clientFamily must fail closed (anthropic builtin under openai adapter)');
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// F159 Phase G G2 AC-G20/G21/G22 (KD-22): completes G1 P2 fix's half coverage.
+// api_key accounts can now declare `clientFamily` in their schema. When set,
+// `accountToRuntimeProfile` propagates it to `profile.client`, which the G1
+// narrow guard already enforces — so api_key family mismatches now fail closed
+// the same way OAuth builtin mismatches do. Without `clientFamily` set, legacy
+// api_key accounts continue best-effort (backward compat preserved).
+test('resolveApiCredentials fail-closes when api_key clientFamily mismatches requested clientFamily', () => {
+  const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'catagent-cred-apikey-fam-')));
+  const configDir = join(tmpDir, '.cat-cafe');
+  mkdirSync(configDir, { recursive: true });
+  // Custom api_key account explicitly declared as OpenAI family.
+  writeFileSync(
+    join(configDir, 'accounts.json'),
+    JSON.stringify({ 'my-openai-proxy': { authType: 'api_key', clientFamily: 'openai' } }),
+  );
+  writeFileSync(
+    join(configDir, 'credentials.json'),
+    JSON.stringify({ 'my-openai-proxy': { apiKey: 'sk-openai-proxy-test' } }),
+    { mode: 0o600 },
+  );
+  try {
+    // Sanity: matching family resolves.
+    const ok = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'my-openai-proxy' }, 'openai');
+    assert.ok(ok && ok.apiKey === 'sk-openai-proxy-test', 'matching api_key clientFamily must resolve');
+
+    // Mismatch: openai api_key account must not satisfy anthropic adapter.
+    const mismatch = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'my-openai-proxy' }, 'anthropic');
+    assert.equal(
+      mismatch,
+      null,
+      'mismatched api_key clientFamily must fail closed (openai api_key under anthropic adapter)',
+    );
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+// F159 Phase G G2 backward-compat (KD-22): existing api_key accounts without
+// `clientFamily` continue to resolve best-effort. profile.client remains
+// undefined, so the family guard falls through and the bound credential is
+// returned regardless of requested clientFamily — runtime API call surfaces
+// any protocol mismatch at first invocation rather than silently routing.
+test('resolveApiCredentials resolves api_key account without clientFamily for any requested family (backward compat)', () => {
+  const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'catagent-cred-apikey-legacy-')));
+  const configDir = join(tmpDir, '.cat-cafe');
+  mkdirSync(configDir, { recursive: true });
+  // Legacy api_key account without explicit clientFamily — pre-F159 G2 state.
+  writeFileSync(join(configDir, 'accounts.json'), JSON.stringify({ 'legacy-account': { authType: 'api_key' } }));
+  writeFileSync(
+    join(configDir, 'credentials.json'),
+    JSON.stringify({ 'legacy-account': { apiKey: 'sk-legacy-test' } }),
+    { mode: 0o600 },
+  );
+  try {
+    // Both adapter families resolve — guard falls through because
+    // profile.client is undefined for legacy api_key.
+    const asAnthropic = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'legacy-account' }, 'anthropic');
+    assert.ok(
+      asAnthropic && asAnthropic.apiKey === 'sk-legacy-test',
+      'legacy api_key resolves under anthropic adapter',
+    );
+
+    const asOpenai = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'legacy-account' }, 'openai');
+    assert.ok(asOpenai && asOpenai.apiKey === 'sk-legacy-test', 'legacy api_key resolves under openai adapter');
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

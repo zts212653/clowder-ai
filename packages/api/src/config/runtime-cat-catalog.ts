@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type {
+  CatAgentProtocol,
   CatBreed,
   CatCafeConfig,
   CatColor,
@@ -45,6 +46,10 @@ export interface RuntimeCatInput {
   cli?: CliConfig;
   commandArgs?: string[];
   cliConfigArgs?: string[];
+  nativeToolLevel?: NativeToolLevel;
+  commandPolicy?: CommandPolicyEntry[];
+  /** CatAgent wire protocol; only persisted when clientId === 'catagent'. */
+  catAgentProtocol?: CatAgentProtocol;
   contextBudget?: ContextBudget;
   voiceConfig?: VoiceConfig;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
@@ -75,6 +80,10 @@ export interface RuntimeCatUpdate {
   cli?: CliConfig | null;
   commandArgs?: string[];
   cliConfigArgs?: string[];
+  nativeToolLevel?: NativeToolLevel | null;
+  commandPolicy?: CommandPolicyEntry[] | null;
+  /** CatAgent wire protocol; null to clear, undefined to skip. */
+  catAgentProtocol?: CatAgentProtocol | null;
   contextBudget?: ContextBudget | null;
   voiceConfig?: VoiceConfig | null;
   /** clowder-ai#340 P5: Model provider name (renamed from ocProviderName). */
@@ -274,6 +283,13 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
           : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
+        ...(input.clientId === 'catagent' && input.nativeToolLevel ? { nativeToolLevel: input.nativeToolLevel } : {}),
+        ...(input.clientId === 'catagent' && input.commandPolicy && input.commandPolicy.length > 0
+          ? { commandPolicy: input.commandPolicy }
+          : {}),
+        ...(input.clientId === 'catagent' && input.catAgentProtocol
+          ? { catAgentProtocol: input.catAgentProtocol }
+          : {}),
         ...(input.provider ? { provider: input.provider } : {}),
         ...(input.contextBudget ? { contextBudget: input.contextBudget } : {}),
         ...(input.voiceConfig !== undefined ? { voiceConfig: input.voiceConfig } : {}),
@@ -509,6 +525,35 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
     } else {
       delete variant.cliConfigArgs;
     }
+  }
+  if (nextClientId === 'catagent') {
+    if (patch.nativeToolLevel !== undefined) {
+      if (patch.nativeToolLevel) {
+        variant.nativeToolLevel = patch.nativeToolLevel;
+      } else {
+        delete variant.nativeToolLevel;
+      }
+    }
+    if (patch.commandPolicy !== undefined) {
+      if (patch.commandPolicy && patch.commandPolicy.length > 0) {
+        variant.commandPolicy = patch.commandPolicy;
+      } else {
+        delete variant.commandPolicy;
+      }
+    }
+    // catAgentProtocol persisted only when clientId === 'catagent';
+    // null clears, undefined skips. Switching away from catagent below also clears it.
+    if (patch.catAgentProtocol !== undefined) {
+      if (patch.catAgentProtocol) {
+        variant.catAgentProtocol = patch.catAgentProtocol;
+      } else {
+        delete variant.catAgentProtocol;
+      }
+    }
+  } else {
+    delete variant.nativeToolLevel;
+    delete variant.commandPolicy;
+    delete variant.catAgentProtocol;
   }
   if (patch.provider !== undefined) {
     if (patch.provider) {

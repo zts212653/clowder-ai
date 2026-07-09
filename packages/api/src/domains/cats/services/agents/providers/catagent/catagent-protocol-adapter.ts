@@ -20,11 +20,7 @@
  * - Protocol id (used for audit + Hub UI label)
  */
 
-import type {
-  AdapterMessage,
-  CatAgentNeutralBlock,
-  CatAgentStreamEvent,
-} from './catagent-protocol-types.js';
+import type { AdapterMessage, CatAgentNeutralBlock, CatAgentStreamEvent } from './catagent-protocol-types.js';
 
 /** Credentials passed into the adapter at request build time (per-invocation). */
 export interface AdapterCredentials {
@@ -123,10 +119,7 @@ export interface CatAgentProtocolAdapter {
    * mapping (input usage, content block deltas, stop_reason) all stay inside
    * the adapter.
    */
-  parseStreamEvents(
-    body: ReadableStream<Uint8Array>,
-    signal?: AbortSignal,
-  ): AsyncIterable<CatAgentStreamEvent>;
+  parseStreamEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncIterable<CatAgentStreamEvent>;
 
   // ── Transcript codec (KD-17 core: the half that was missing pre-iteration) ──
 

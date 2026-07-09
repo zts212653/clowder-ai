@@ -254,11 +254,21 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
   const isOAuth = account.authType === 'oauth';
   const isBuiltin = !!builtinClient && isOAuth;
+  // F159 G2 AC-G21: api_key accounts with explicit `account.clientFamily` set
+  // `profile.client` to that family — enables the fail-closed family guard in
+  // catagent-credentials.ts (AC-G22) so that e.g. an api_key account marked
+  // `clientFamily='openai'` cannot satisfy an Anthropic adapter request.
+  // Strictly read from `clientFamily` only — never from legacy F171 `clientId`
+  // (which is freeform display, not authoritative routing/security identity).
+  // Legacy api_key accounts without `clientFamily` fall through with
+  // `profile.client=undefined`, preserving pre-G2 best-effort resolution.
+  const apiKeyClient = !isOAuth ? account.clientFamily : undefined;
+  const resolvedClient = isBuiltin ? builtinClient : apiKeyClient;
   return {
     id: ref,
     authType: account.authType,
     kind: isBuiltin ? 'builtin' : 'api_key',
-    ...(isBuiltin && builtinClient ? { client: builtinClient } : {}),
+    ...(resolvedClient ? { client: resolvedClient } : {}),
     ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),

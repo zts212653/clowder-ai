@@ -297,6 +297,12 @@ function isAllowedGoogleGatewayProfile(profile: ProfileItem): boolean {
   return hostname !== null && !isOfficialGoogleHostname(hostname);
 }
 
+// F159 Phase G G2 AC-G19 audit (see @cat-cafe/shared client-routing.ts audit
+// table): DEFERRED to Axis 6 cross-cutting UX polish. Hub UI account-picker
+// filter for catagent + 'openai-chat' should arguably show OpenAI accounts;
+// migration requires threading form.catAgentProtocol through filterAccounts.
+// Does NOT block G2 merge gate (credentials path still fails-closed at adapter
+// level via Axis 2 factory dispatch).
 function resolveBuiltinClientFamily(client: ClientId): BuiltinAccountClient | null {
   if (typeof builtinAccountFamilyForClient === 'function') {
     const family = builtinAccountFamilyForClient(client);

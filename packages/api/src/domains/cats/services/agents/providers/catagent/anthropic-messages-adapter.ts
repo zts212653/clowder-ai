@@ -20,19 +20,15 @@
  * never construct `{ __adapterMessage: true, payload: ... }` directly.
  */
 
+import type { AnthropicContentBlock } from './catagent-event-bridge.js';
+import { TERMINAL_STOP_REASONS } from './catagent-event-bridge.js';
 import type {
   AdapterCredentials,
   AdapterRequestInput,
   AdapterToolResult,
   CatAgentProtocolAdapter,
 } from './catagent-protocol-adapter.js';
-import type { AnthropicContentBlock } from './catagent-event-bridge.js';
-import type {
-  AdapterMessage,
-  CatAgentNeutralBlock,
-  CatAgentStreamEvent,
-} from './catagent-protocol-types.js';
-import { TERMINAL_STOP_REASONS } from './catagent-event-bridge.js';
+import type { AdapterMessage, CatAgentNeutralBlock, CatAgentStreamEvent } from './catagent-protocol-types.js';
 import { parseAnthropicSSE } from './catagent-stream-parser.js';
 
 // ── Anthropic protocol constants (adapter-owned, not service-owned) ──
@@ -132,10 +128,7 @@ export class AnthropicMessagesAdapter implements CatAgentProtocolAdapter {
     return body;
   }
 
-  parseStreamEvents(
-    body: ReadableStream<Uint8Array>,
-    signal?: AbortSignal,
-  ): AsyncIterable<CatAgentStreamEvent> {
+  parseStreamEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncIterable<CatAgentStreamEvent> {
     // Parser already yields neutral CatAgentStreamEvent post-G1 step 4.
     return parseAnthropicSSE(body, signal);
   }

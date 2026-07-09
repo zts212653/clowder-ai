@@ -31,8 +31,11 @@ async function collect(iter) {
 
 let tmpDir;
 let catCafeDir;
+let prevCatOpusModel;
 
 before(() => {
+  prevCatOpusModel = process.env.CAT_OPUS_MODEL;
+  process.env.CAT_OPUS_MODEL = 'claude-opus-4-6';
   tmpDir = join(tmpdir(), `catagent-d-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
 
@@ -66,6 +69,8 @@ before(() => {
 });
 
 after(() => {
+  if (prevCatOpusModel !== undefined) process.env.CAT_OPUS_MODEL = prevCatOpusModel;
+  else delete process.env.CAT_OPUS_MODEL;
   try {
     rmSync(tmpDir, { recursive: true, force: true });
   } catch {
