@@ -97,7 +97,7 @@ describe('SSE parser: tool_use streaming', () => {
       sseEvent({ type: 'message_stop' });
 
     const events = await collect(parseAnthropicSSE(toStream([sse])));
-    const complete = events.find((e) => e.type === 'content_block_complete' && e.block.type === 'tool_use');
+    const complete = events.find((e) => e.type === 'content_block_complete' && e.block.type === 'tool_call');
     assert.ok(complete);
     assert.equal(complete.block.name, 'read_file');
     assert.deepEqual(complete.block.input, { path: 'hello.txt' });
@@ -121,7 +121,7 @@ describe('SSE parser: tool_use streaming', () => {
       sseEvent({ type: 'message_stop' });
 
     const events = await collect(parseAnthropicSSE(toStream([sse])));
-    const complete = events.find((e) => e.type === 'content_block_complete' && e.block.type === 'tool_use');
+    const complete = events.find((e) => e.type === 'content_block_complete' && e.block.type === 'tool_call');
     assert.ok(complete);
     assert.ok(complete.block.input._error, 'has error marker');
   });
@@ -142,12 +142,17 @@ describe('SSE parser: usage and stop', () => {
     const events = await collect(parseAnthropicSSE(toStream([sse])));
     const usageEvents = events.filter((e) => e.type === 'usage_update');
     assert.ok(usageEvents.length >= 1, 'has usage events');
-    const inputEvt = usageEvents.find((e) => e.inputUsage);
+    // G1: parser now yields neutral CatAgentUsageDelta (`usage.inputTokens` /
+    // `usage.outputTokens` / `usage.cacheReadTokens` / `usage.cacheCreationTokens`),
+    // and `mapAnthropicUsage` is applied internally so `inputTokens` already
+    // includes the cache normalisation (raw + cache_read + cache_creation).
+    const inputEvt = usageEvents.find((e) => e.usage?.inputTokens !== undefined);
     assert.ok(inputEvt);
-    assert.equal(inputEvt.inputUsage.input_tokens, 100);
-    const outputEvt = usageEvents.find((e) => e.outputTokens !== undefined);
+    assert.equal(inputEvt.usage.inputTokens, 150); // 100 + 50 cache_read
+    assert.equal(inputEvt.usage.cacheReadTokens, 50);
+    const outputEvt = usageEvents.find((e) => e.usage?.outputTokens !== undefined);
     assert.ok(outputEvt);
-    assert.equal(outputEvt.outputTokens, 25);
+    assert.equal(outputEvt.usage.outputTokens, 25);
   });
 
   test('yields stop event with stop_reason', async () => {
@@ -294,6 +299,6 @@ describe('SSE parser: multi-block ordering', () => {
     assert.equal(completes[0].blockIndex, 0);
     assert.equal(completes[0].block.type, 'text');
     assert.equal(completes[1].blockIndex, 1);
-    assert.equal(completes[1].block.type, 'tool_use');
+    assert.equal(completes[1].block.type, 'tool_call');
   });
 });

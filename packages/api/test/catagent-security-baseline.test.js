@@ -45,6 +45,33 @@ test('resolveApiCredentials ignores env var — only bound account is authoritat
   }
 });
 
+// F159 Phase G G1 AC-G5 P2 fix (@gpt555 review on PR #23):
+// `clientFamily` must actually guard the resolved profile — an OAuth Anthropic
+// builtin must NOT silently resolve under `clientFamily='openai'`.
+test('resolveApiCredentials fail-closes when OAuth builtin family mismatches requested clientFamily', () => {
+  const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'catagent-cred-fam-')));
+  const configDir = join(tmpDir, '.cat-cafe');
+  mkdirSync(configDir, { recursive: true });
+  // `claude` is the Anthropic OAuth builtin per BUILTIN_ACCOUNT_MAP.
+  writeFileSync(join(configDir, 'accounts.json'), JSON.stringify({ claude: { authType: 'oauth' } }));
+  writeFileSync(
+    join(configDir, 'credentials.json'),
+    JSON.stringify({ claude: { apiKey: 'sk-ant-test' } }),
+    { mode: 0o600 },
+  );
+  try {
+    // Sanity: same family resolves (anthropic adapter binding to claude).
+    const ok = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'claude' }, 'anthropic');
+    assert.ok(ok && ok.apiKey === 'sk-ant-test', 'matching clientFamily must resolve');
+
+    // Mismatch: anthropic builtin must not satisfy openai adapter.
+    const mismatch = resolveApiCredentials(tmpDir, 'opus', { accountRef: 'claude' }, 'openai');
+    assert.equal(mismatch, null, 'mismatched clientFamily must fail closed (anthropic builtin under openai adapter)');
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('resolveApiCredentials does not scan credentials.json even when key exists nearby', () => {
   // Seed a real credential file so a wildcard scanner would find it
   const tmpDir = realpathSync(mkdtempSync(join(tmpdir(), 'catagent-cred-')));
