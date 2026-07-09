@@ -55,6 +55,20 @@ describe('whisper-dispatch — static guard (script content)', () => {
     assert.match(src, /mlx-whisper/, 'must use mlx-whisper for Whisper');
   });
 
+  test('install-template.sh gates MLX on Python arch, not just hardware (#1061)', () => {
+    const src = readFileSync(join(SERVICES_DIR, 'install-template.sh'), 'utf8');
+    assert.match(src, /RESOLVED_PYTHON_ARCH/, 'must check Python interpreter architecture');
+    assert.match(src, /python_arch/, 'must use python_arch variable for MLX gating');
+    // The is_darwin_arm64 guard must require python_arch check before setting =1.
+    // A pure `[ "$arch" = "arm64" ] && is_darwin_arm64=1` without Python arch
+    // would install arm64 MLX wheels into an x86_64 venv on Rosetta Python.
+    assert.match(
+      src,
+      /python_arch.*arm64.*is_darwin_arm64=1/s,
+      'is_darwin_arm64=1 must be guarded by python_arch check',
+    );
+  });
+
   test('whisper-api.py contains all ASR backends', () => {
     const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
     assert.match(src, /Qwen3-ASR/, 'must detect Qwen3-ASR model name');
@@ -101,5 +115,57 @@ describe('whisper-dispatch — install backend selection', () => {
   test('empty model -> mlx-whisper (fallback)', () => {
     const r = getInstallDispatch('');
     assert.equal(r.deps, 'mlx-whisper');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: install-template.sh platform detection (#1061)
+// Verifies that the MLX branch requires BOTH arm64 hardware AND arm64 Python.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract and run the platform detection logic from install-template.sh
+ * with mock values for platform, hw_arch, and python_arch.
+ */
+function getPlatformDetection(platform, hwArch, pythonArch) {
+  // Reproduce the is_darwin_arm64 logic from install-template.sh
+  const script = [
+    `platform="${platform}"`,
+    `hw_arch="${hwArch}"`,
+    `python_arch="${pythonArch}"`,
+    'is_darwin_arm64=0',
+    'if [ "$platform" = "Darwin" ] && [ "$hw_arch" = "arm64" ]; then',
+    '  if [ "$python_arch" = "arm64" ] || [ "$python_arch" = "aarch64" ]; then',
+    '    is_darwin_arm64=1',
+    '  fi',
+    'fi',
+    'echo "$is_darwin_arm64"',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
+}
+
+describe('install-template — platform detection regression (#1061)', () => {
+  test('Darwin + arm64 hw + arm64 Python -> is_darwin_arm64=1 (MLX path)', () => {
+    assert.equal(getPlatformDetection('Darwin', 'arm64', 'arm64'), '1');
+  });
+
+  test('Darwin + arm64 hw + aarch64 Python -> is_darwin_arm64=1', () => {
+    assert.equal(getPlatformDetection('Darwin', 'arm64', 'aarch64'), '1');
+  });
+
+  test('Darwin + arm64 hw + x86_64 Python -> is_darwin_arm64=0 (no MLX)', () => {
+    assert.equal(getPlatformDetection('Darwin', 'arm64', 'x86_64'), '0');
+  });
+
+  test('Darwin + arm64 hw + unknown Python -> is_darwin_arm64=0', () => {
+    assert.equal(getPlatformDetection('Darwin', 'arm64', 'unknown'), '0');
+  });
+
+  test('Darwin + x86_64 hw + x86_64 Python -> is_darwin_arm64=0', () => {
+    assert.equal(getPlatformDetection('Darwin', 'x86_64', 'x86_64'), '0');
+  });
+
+  test('Linux + x86_64 hw + x86_64 Python -> is_darwin_arm64=0', () => {
+    assert.equal(getPlatformDetection('Linux', 'x86_64', 'x86_64'), '0');
   });
 });

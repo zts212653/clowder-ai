@@ -94,18 +94,32 @@ install_service_main() {
   check_network
 
   # 3. Platform detection -- picks the deps + model loader.
-  # On macOS, uname -m under Rosetta 2 can report x86_64 even on Apple
-  # Silicon.  Use sysctl for true hardware detection (#1061), matching
-  # the TypeScript environment-detector fix.
-  local platform arch
+  # Two separate arch signals (#1061):
+  #   - Hardware arch: sysctl on macOS for true Silicon detection even
+  #     under Rosetta (matches TypeScript environment-detector fix).
+  #   - Python interpreter arch: from python-resolve.sh (RESOLVED_PYTHON_ARCH,
+  #     set by check_python3 above).
+  # MLX packages require BOTH arm64 hardware AND an arm64 Python interpreter.
+  # An x86_64 Python on arm64 hardware would get arm64-only wheels that
+  # fail to load -- fall back to non-MLX deps and tell the user how to fix.
+  local platform hw_arch python_arch
   platform="$(uname -s)"
+  python_arch="${RESOLVED_PYTHON_ARCH:-unknown}"
   if [ "$platform" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
-    arch="arm64"
+    hw_arch="arm64"
   else
-    arch="$(uname -m)"
+    hw_arch="$(uname -m)"
   fi
   local is_darwin_arm64=0
-  [ "$platform" = "Darwin" ] && [ "$arch" = "arm64" ] && is_darwin_arm64=1
+  if [ "$platform" = "Darwin" ] && [ "$hw_arch" = "arm64" ]; then
+    if [ "$python_arch" = "arm64" ] || [ "$python_arch" = "aarch64" ]; then
+      is_darwin_arm64=1
+    else
+      echo "  WARNING: Apple Silicon hardware but Python interpreter is ${python_arch}." >&2
+      echo "  MLX packages require native arm64 Python. Using non-MLX dependencies." >&2
+      echo "  To fix: install arm64 Python (e.g. 'brew install python@3.12' in a native terminal)." >&2
+    fi
+  fi
 
   # 4. Pre-checks (optional binary requirements).
   if [ "${PRE_CHECK_FFMPEG:-0}" = "1" ]; then
