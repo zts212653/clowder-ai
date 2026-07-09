@@ -1,12 +1,12 @@
 ---
-feature_ids: [F257]
+feature_ids: [F258]
 related_features: [F179, F180]
 topics: [desktop, electron, auto-update, inno-setup, dmg, github-releases, installer, opensource-ops]
 doc_kind: spec
 created: 2026-07-07
 ---
 
-# F257: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
+# F258: Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）
 
 > **Status**: approved — ready for dev（r2 经 Codex 复核放行 2026-07-07） | **方案设计**: 宪宪（Fable/Ragdoll） | **开发 Owner**: 布偶猫（Opus） | **Reviewer**: 缅因猫（Codex：r1 REQUEST CHANGES → r2 放行） | **Priority**: P1
 

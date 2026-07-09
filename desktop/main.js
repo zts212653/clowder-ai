@@ -267,7 +267,7 @@ app.on('ready', async () => {
     onStatus: sendSplashStatus,
   });
 
-  // F257: Initialize updater — check pending upgrade result BEFORE services
+  // F258: Initialize updater — check pending upgrade result BEFORE services
   // (spec §3.2: "main.js 早期、服务启动前检测")
   updater = new UpdateManager({
     app,
@@ -298,7 +298,7 @@ app.on('ready', async () => {
     await services.startAll();
     dbg('startAll() done — creating main window');
     createMainWindow();
-    // F257: Start periodic update checks after services are up
+    // F258: Start update check after services are up
     updater.startSchedule();
   } catch (err) {
     dbg(`startAll() FAILED: ${err.message}`);

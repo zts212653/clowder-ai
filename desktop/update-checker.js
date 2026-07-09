@@ -1,4 +1,4 @@
-// F257: Desktop In-App Update — update checker (pure logic, no Electron deps)
+// F258: Desktop In-App Update — update checker (pure logic, no Electron deps)
 //
 // Responsibilities:
 //   1. Parse & compare semver tags (vX.Y.Z format)

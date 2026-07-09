@@ -1,4 +1,4 @@
-// F257: Desktop In-App Update — HTTP transport layer
+// F258: Desktop In-App Update — HTTP transport layer
 //
 // Separated from update-manager.js for file-size compliance (350 line limit).
 // Uses Electron's `net` module for system proxy support.

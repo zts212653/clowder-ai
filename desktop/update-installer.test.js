@@ -1,4 +1,4 @@
-// F257 — update-installer unit tests
+// F258 — update-installer unit tests
 // Tests: HTTP transport (downloadAsset) with mock net module.
 // Covers: full download, resume, Content-Range mismatch rejection.
 

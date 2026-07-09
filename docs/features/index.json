@@ -1525,10 +1525,10 @@
       "file": "F256-memory-search-strategy-evolution.md"
     },
     {
-      "id": "F257",
+      "id": "F258",
       "name": "Desktop In-App Update — 应用内检查更新 + 原地升级（无签名约束版）",
       "status": "approved — ready for dev | **Owner**: Ragdoll (Opus) | **Priority**: P1",
-      "file": "F257-desktop-in-app-update.md"
+      "file": "F258-desktop-in-app-update.md"
     }
   ]
 }

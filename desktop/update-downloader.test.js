@@ -1,4 +1,4 @@
-// F257 Phase B — update-downloader unit tests (TDD)
+// F258 Phase B — update-downloader unit tests (TDD)
 // Tests: download state machine, journal persistence, digest verification,
 //        resume logic, disk space check, cleanup.
 // Note: actual HTTP is NOT tested here — net.request is injected/mocked.

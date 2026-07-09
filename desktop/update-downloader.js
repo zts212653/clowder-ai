@@ -1,4 +1,4 @@
-// F257: Desktop In-App Update — download & journal layer
+// F258: Desktop In-App Update — download & journal layer
 //
 // This module handles:
 //   1. pendingUpdate journal — crash-safe state machine for upgrade tracking

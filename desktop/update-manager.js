@@ -1,4 +1,4 @@
-// F257: Desktop In-App Update — orchestrator (Electron main process)
+// F258: Desktop In-App Update — orchestrator (Electron main process)
 //
 // Lifecycle: startup check → scheduled checks → download → install
 // Pure logic: update-checker.js | Journal/verify: update-downloader.js

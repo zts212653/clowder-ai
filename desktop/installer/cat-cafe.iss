@@ -198,13 +198,13 @@ Filename: "powershell.exe"; \
 ; Offer to launch after interactive install
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
   Description: "Launch {#MyAppName}"; Flags: postinstall nowait skipifsilent
-; F257: Auto-restart after silent upgrade (in-app updater uses /SILENT).
+; F258: Auto-restart after silent upgrade (in-app updater uses /SILENT).
 ; runasoriginaluser is critical — without it, the app + Redis + API all run
 ; as elevated admin, which breaks user-data paths and is a security concern.
 Filename: "{app}\desktop-dist\{#MyAppExeName}"; \
   Flags: nowait runasoriginaluser; Check: WizardSilent
 
-; ── F257: Clean previous version's tar-extracted dirs before upgrade ───
+; ── F258: Clean previous version's tar-extracted dirs before upgrade ───
 ; These are NOT tracked by Inno's file registry (created by tar.exe in [Run]).
 ; Without this, old module files / deleted packages persist across upgrades —
 ; an extremely hard-to-debug class of staleness bugs.
@@ -231,7 +231,7 @@ Type: filesandordirs; Name: "{app}\bundled"
 ; scripts/node_modules junction created by mklink /J in [Run]
 Type: filesandordirs; Name: "{app}\scripts\node_modules"
 
-; ── F257: Defensive process cleanup before upgrade ────────────────────
+; ── F258: Defensive process cleanup before upgrade ────────────────────
 ; The in-app updater calls quitApp() → stopAll() before spawning the installer,
 ; but if stopAll() times out or the user manually reruns Setup.exe, child
 ; processes (node, redis-server) may still hold file locks in {app}\.
