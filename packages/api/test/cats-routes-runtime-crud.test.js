@@ -3192,7 +3192,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const app = Fastify();
     await app.register(catsRoutes);
 
-    // 1. POST catagent with catAgentProtocol: 'openai-chat' → field persisted
+    // 1. POST catagent with openai-chat protocol — must use codex (openai family) account
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/cats',
@@ -3206,8 +3206,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         mentionPatterns: ['@runtime-catagent'],
         roleDescription: 'CatAgent 协议验证',
         clientId: 'catagent',
-        accountRef: 'claude',
-        defaultModel: 'claude-sonnet-4-6',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
         catAgentProtocol: 'openai-chat',
       }),
     });
@@ -3222,12 +3222,16 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.ok(listed, 'runtime-catagent should appear in GET /api/cats');
     assert.equal(listed.catAgentProtocol, 'openai-chat', 'GET should return persisted catAgentProtocol');
 
-    // 3. PATCH to change catAgentProtocol to 'anthropic-messages'
+    // 3. PATCH to change catAgentProtocol to 'anthropic-messages' + switch account to claude
     const patchRes = await app.inject({
       method: 'PATCH',
       url: '/api/cats/runtime-catagent',
       headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
-      body: JSON.stringify({ catAgentProtocol: 'anthropic-messages' }),
+      body: JSON.stringify({
+        catAgentProtocol: 'anthropic-messages',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+      }),
     });
     assert.equal(patchRes.statusCode, 200, `PATCH catAgentProtocol failed: ${patchRes.body}`);
     const patchedBody = JSON.parse(patchRes.body);
@@ -3271,6 +3275,81 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const persisted = JSON.parse(readFileSync(catalogPath, 'utf-8'));
     const variant = persisted.breeds.find((breed) => breed.catId === 'runtime-catagent')?.variants?.[0];
     assert.equal(variant?.catAgentProtocol, undefined, 'on-disk catalog must not retain stale catAgentProtocol');
+  });
+
+  it('F159 G2: POST catagent rejects protocol-account family mismatch', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // openai-chat + claude (anthropic) → must reject (family mismatch)
+    const rejectRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-mismatch',
+        name: 'Mismatched CatAgent',
+        displayName: 'Mismatched CatAgent',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-mismatch'],
+        roleDescription: 'Family mismatch test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(rejectRes.statusCode, 400, 'openai-chat + claude should be rejected (family mismatch)');
+    assert.match(JSON.parse(rejectRes.body).error, /incompatible/i);
+
+    // anthropic-messages + codex (openai) → must reject (family mismatch)
+    const rejectRes2 = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-mismatch2',
+        name: 'Mismatched CatAgent 2',
+        displayName: 'Mismatched CatAgent 2',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-mismatch2'],
+        roleDescription: 'Family mismatch test 2',
+        clientId: 'catagent',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(rejectRes2.statusCode, 400, 'anthropic-messages + codex should be rejected (family mismatch)');
+
+    // anthropic-messages + claude → must pass (correct family)
+    const acceptRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-catagent-correct',
+        name: 'Correct CatAgent',
+        displayName: 'Correct CatAgent',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-catagent-correct'],
+        roleDescription: 'Correct family test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(acceptRes.statusCode, 201, `anthropic-messages + claude should pass: ${acceptRes.body}`);
   });
 
   it('F159 G2: POST non-catagent with catAgentProtocol silently ignores the field', async () => {

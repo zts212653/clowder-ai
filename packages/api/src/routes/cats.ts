@@ -321,6 +321,20 @@ function resolveAccountRef(body: { accountRef?: string | null }): string | undef
 }
 
 /**
+ * F159 G2: CatAgent's account validation must use the protocol-specific family,
+ * not the raw clientId. `catagent + openai-chat` validates against the `openai`
+ * family (codex account); `catagent + anthropic-messages` (or default) validates
+ * against `anthropic` (claude account). Non-catagent clients pass through unchanged.
+ *
+ * Without this, the route accepts `catagent + openai-chat + claude` which passes
+ * validation but fail-closes at runtime credential resolution (AC-G5 family guard).
+ */
+function effectiveValidationClient(clientId: ClientId, catAgentProtocol?: string): ClientId {
+  if (clientId !== 'catagent') return clientId;
+  return catAgentProtocol === 'openai-chat' ? 'openai' : 'anthropic';
+}
+
+/**
  * Resolve the target CLI config when patching a cat.
  *
  * Rules:
@@ -667,9 +681,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         (body.clientId === 'opencode' && body.defaultModel && !body.defaultModel.includes('/')
           ? inferProviderFromModelName(body.defaultModel)
           : undefined);
+      // F159 G2: catagent validates against protocol-specific family
+      const validationClient = effectiveValidationClient(
+        body.clientId,
+        'catAgentProtocol' in body ? (body as { catAgentProtocol?: string }).catAgentProtocol : undefined,
+      );
       await validateAccountBindingOrThrow(
         projectRoot,
-        body.clientId,
+        validationClient,
         accountRef,
         body.defaultModel,
         providerNameForValidation,
@@ -893,9 +912,12 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           !isBindingChange &&
           !isClientSwitch &&
           isExistingOpencode;
+        // F159 G2: catagent validates against protocol-specific family
+        const effectiveCatAgentProtocol = body.catAgentProtocol ?? currentCat.catAgentProtocol;
+        const patchValidationClient = effectiveValidationClient(effectiveClient, effectiveCatAgentProtocol);
         await validateAccountBindingOrThrow(
           projectRoot,
-          effectiveClient,
+          patchValidationClient,
           effectiveAccountRef,
           effectiveDefaultModel,
           effectiveProviderName,
