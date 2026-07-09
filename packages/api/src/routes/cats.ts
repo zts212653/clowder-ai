@@ -6,6 +6,7 @@
 
 import { resolve } from 'node:path';
 import {
+  type CatAgentProtocol,
   type CatConfig,
   type CliConfig,
   type ClientId,
@@ -163,6 +164,8 @@ const baseCatSchema = z.object({
  *  runtime in validateAccountBindingOrThrow where authType is available. */
 const modelSchema = z.string().transform((v) => v.replace(/\/+$/, ''));
 
+const catAgentProtocolSchema = z.enum(['anthropic-messages', 'openai-chat']).optional();
+
 const createNormalCatSchema = baseCatSchema.extend({
   clientId: clientSchema.exclude(['antigravity', 'acp']),
   defaultModel: modelSchema,
@@ -171,6 +174,7 @@ const createNormalCatSchema = baseCatSchema.extend({
   cliConfigArgs: z.array(z.string().min(1)).optional(),
   provider: z.string().min(1).optional(),
   acp: acpConfigSchema.optional(), // F161: optional ACP transport for any client
+  catAgentProtocol: catAgentProtocolSchema, // F159 G2: only meaningful when clientId === 'catagent'
 });
 
 const createAntigravityCatSchema = baseCatSchema.extend({
@@ -224,6 +228,7 @@ const updateCatSchema = z.object({
   provider: z.string().min(1).nullable().optional(),
   voiceConfig: voiceConfigSchema.nullable().optional(),
   acp: acpConfigSchema.nullable().optional(), // F161: nullable to allow removing ACP transport
+  catAgentProtocol: catAgentProtocolSchema, // F159 G2: only meaningful when clientId === 'catagent'
 });
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
@@ -463,6 +468,7 @@ async function toCatResponse(
     isDefaultVariant: cat.isDefaultVariant ?? undefined,
     breedDisplayName: cat.breedDisplayName ?? undefined,
     mcpSupport: cat.mcpSupport,
+    ...(cat.catAgentProtocol ? { catAgentProtocol: cat.catAgentProtocol } : {}),
     ...(acpConfig ? { acp: acpConfig } : {}),
     roster: metadata.roster
       ? {
@@ -766,6 +772,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             : {}),
           ...(body.voiceConfig ? { voiceConfig: body.voiceConfig } : {}),
           ...(body.acp ? { acp: body.acp } : {}),
+          // F159 G2: only persist catAgentProtocol for catagent members
+          ...(body.clientId === 'catagent' && body.catAgentProtocol
+            ? { catAgentProtocol: body.catAgentProtocol as CatAgentProtocol }
+            : {}),
         });
       }
     } catch (err) {
@@ -976,6 +986,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           : shouldClearAcpOnClientSwitch
             ? { acp: null }
             : {}),
+        // F159 G2: catAgentProtocol persisted only when effective client is catagent
+        ...(body.catAgentProtocol !== undefined ? { catAgentProtocol: body.catAgentProtocol as CatAgentProtocol } : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
       await configEventBus.emitChangeAsync({
