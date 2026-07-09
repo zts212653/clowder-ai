@@ -138,6 +138,26 @@ export const API_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
   'audio-capture': 'CAT_CAFE_SERVICE_AUDIO_ENABLED',
 };
 
+/**
+ * Env var fallbacks for merged services (#863). When checking whether a
+ * service should auto-start via legacy env bridge, also check the old
+ * service's env vars. Keys are current service IDs.
+ */
+const LEGACY_ENV_FALLBACKS: Record<
+  string,
+  {
+    enabled?: string[];
+    apiEnabled?: string[];
+    model?: string[];
+  }
+> = {
+  'whisper-stt': {
+    enabled: ['QWEN3_ASR_ENABLED'],
+    apiEnabled: ['CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED'],
+    model: ['QWEN3_ASR_MODEL'],
+  },
+};
+
 type ServiceModel = NonNullable<NonNullable<ServiceManifest['prerequisites']>['models']>[number];
 
 function serviceModel(name: string, size: string, description: string, isDefault = false): ServiceModel {
@@ -179,6 +199,10 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       install: 'scripts/services/whisper-install.sh',
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
+      // Legacy process recognition (#863): old qwen3-asr sidecar ran
+      // qwen3-asr-api.py on the same port.  Including it here lets
+      // lifecycle management detect and stop the old process after upgrade.
+      additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
     },
   },
   {
@@ -338,11 +362,36 @@ export function deriveLegacyServiceConfig(
   // profile defaults do not unexpectedly auto-start ML sidecars.
   const legacyEnabled =
     apiEnabled ?? (env.CAT_CAFE_PROFILE ? null : parseEnabledEnv(legacyKey ? env[legacyKey] : undefined));
-  if (legacyEnabled !== true) return undefined;
+
+  // Check fallback env vars from merged services (#863).  A user who had
+  // QWEN3_ASR_ENABLED=true should auto-start whisper-stt after upgrade.
+  const fallbacks = LEGACY_ENV_FALLBACKS[service.id];
+  let fallbackEnabled: boolean | null = null;
+  if (legacyEnabled !== true && fallbacks) {
+    for (const key of fallbacks.apiEnabled ?? []) {
+      fallbackEnabled = parseEnabledEnv(env[key]);
+      if (fallbackEnabled != null) break;
+    }
+    if (fallbackEnabled == null && !env.CAT_CAFE_PROFILE) {
+      for (const key of fallbacks.enabled ?? []) {
+        fallbackEnabled = parseEnabledEnv(env[key]);
+        if (fallbackEnabled != null) break;
+      }
+    }
+  }
+
+  if (legacyEnabled !== true && fallbackEnabled !== true) return undefined;
 
   const config: ServiceConfig = { installed: true, enabled: true };
   const modelKey = MODEL_ENV_VARS[service.id];
-  const model = modelKey ? env[modelKey]?.trim() : undefined;
+  let model = modelKey ? env[modelKey]?.trim() : undefined;
+  // If primary model env is unset, check legacy fallback model env vars.
+  if (!model && fallbacks) {
+    for (const key of fallbacks.model ?? []) {
+      model = env[key]?.trim();
+      if (model) break;
+    }
+  }
   if (model) {
     config.selectedModel = model;
   } else {

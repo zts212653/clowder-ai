@@ -25,6 +25,29 @@ function resolveConfigPath(): string {
 
 type ServiceConfigMap = Record<string, ServiceConfig>;
 
+/**
+ * Legacy service IDs that were merged into a current service (#863).
+ * On first load, any persisted config under the old key is migrated to the
+ * new key so that existing users don't lose their installed/enabled state.
+ */
+const LEGACY_SERVICE_ALIASES: Record<string, string> = {
+  'qwen3-asr': 'whisper-stt',
+};
+
+function migrateServiceConfig(data: ServiceConfigMap): boolean {
+  let changed = false;
+  for (const [oldId, newId] of Object.entries(LEGACY_SERVICE_ALIASES)) {
+    if (data[oldId] != null) {
+      if (data[newId] == null) {
+        data[newId] = data[oldId];
+      }
+      delete data[oldId];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 let cachePath: string | null = null;
 let cache: ServiceConfigMap | null = null;
 
@@ -37,7 +60,11 @@ function load(): ServiceConfigMap {
     return cache;
   }
   try {
-    cache = JSON.parse(readFileSync(configPath, 'utf-8')) as ServiceConfigMap;
+    const data = JSON.parse(readFileSync(configPath, 'utf-8')) as ServiceConfigMap;
+    if (migrateServiceConfig(data)) {
+      save(data);
+    }
+    cache = data;
     return cache;
   } catch {
     cache = {};
