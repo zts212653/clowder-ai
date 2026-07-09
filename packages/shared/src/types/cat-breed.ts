@@ -7,7 +7,7 @@
  * Phase 4-F: 支持多 Variant（多版本猫召唤）
  */
 
-import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
+import type { AgyProfileConfig, CatColor, ClientId, CommandPolicyEntry, NativeToolLevel } from './cat.js';
 import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -90,6 +90,10 @@ export interface CatVariant {
   readonly color?: CatColor;
   /** Per-cat context budget (optional, falls back to defaults) */
   readonly contextBudget?: ContextBudget;
+  /** F159 Phase F: CatAgent native tool level. Omitted = L0. */
+  readonly nativeToolLevel?: NativeToolLevel;
+  /** F159 Phase F: allowlist-first command policy for L2 run_command. */
+  readonly commandPolicy?: readonly CommandPolicyEntry[];
   /** Optional per-variant override for sessionChain; falls back to breed.features.sessionChain. */
   readonly sessionChain?: boolean;
   /** F34: Per-cat TTS voice (optional, falls back to defaults in cat-voices.ts) */

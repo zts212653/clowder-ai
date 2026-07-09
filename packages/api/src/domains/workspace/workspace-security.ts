@@ -10,6 +10,69 @@ const DENYLIST_PATTERNS = [/^\.env/, /\.pem$/, /\.key$/, /^id_rsa/];
 
 const DENYLIST_DIRS = new Set(['.git', 'secrets']);
 
+function assertDenylistAllowed(relPath: string): void {
+  for (const seg of relPath.split(sep)) {
+    if (!seg) continue;
+    if (DENYLIST_DIRS.has(seg)) {
+      throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+    }
+    for (const pat of DENYLIST_PATTERNS) {
+      if (pat.test(seg)) {
+        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
+      }
+    }
+  }
+}
+
+function assertInsideRoot(root: string, resolved: string): string {
+  const relFromRoot = relative(root, resolved);
+  if (relFromRoot.startsWith('..') || resolve(root, relFromRoot) !== resolved) {
+    throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
+  }
+  return relFromRoot;
+}
+
+function assertRealPathInside(realRoot: string, real: string): void {
+  if (!real.startsWith(realRoot + sep) && real !== realRoot) {
+    throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
+  }
+}
+
+async function isExistingDirectory(path: string): Promise<boolean> {
+  try {
+    const pathStat = await stat(path);
+    if (!pathStat.isDirectory()) {
+      throw new WorkspaceSecurityError('Parent path is not a directory', 'TRAVERSAL');
+    }
+    return true;
+  } catch (err) {
+    if (err instanceof WorkspaceSecurityError) throw err;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+async function findExistingDirectoryAncestor(resolvedRoot: string, initialAncestor: string): Promise<string> {
+  let ancestor = initialAncestor;
+  for (;;) {
+    const relAncestor = assertInsideRoot(resolvedRoot, ancestor);
+    assertDenylistAllowed(relAncestor);
+
+    if (await isExistingDirectory(ancestor)) {
+      return ancestor;
+    }
+
+    if (ancestor === resolvedRoot) {
+      throw new WorkspaceSecurityError('Workspace root does not exist', 'NOT_FOUND');
+    }
+    const parent = dirname(ancestor);
+    if (parent === ancestor) {
+      throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
+    }
+    ancestor = parent;
+  }
+}
+
 /**
  * In-memory registry: worktreeId → absolute root path.
  * Populated when /api/workspace/worktrees lists foreign repos.
@@ -39,23 +102,8 @@ export class WorkspaceSecurityError extends Error {
 export async function resolveWorkspacePath(root: string, userPath: string): Promise<string> {
   const decoded = decodeURIComponent(userPath);
   const resolved = resolve(root, decoded);
-  const relFromRoot = relative(root, resolved);
-
-  if (relFromRoot.startsWith('..') || resolve(root, relFromRoot) !== resolved) {
-    throw new WorkspaceSecurityError('Path outside workspace root', 'TRAVERSAL');
-  }
-
-  const segments = relFromRoot.split(sep);
-  for (const seg of segments) {
-    if (DENYLIST_DIRS.has(seg)) {
-      throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-    }
-    for (const pat of DENYLIST_PATTERNS) {
-      if (pat.test(seg)) {
-        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-      }
-    }
-  }
+  const relFromRoot = assertInsideRoot(root, resolved);
+  assertDenylistAllowed(relFromRoot);
 
   // Symlink escape check: resolve the FULL real path (follows all symlinks
   // in every segment, not just the final one). This catches both
@@ -64,23 +112,12 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
   // symlinks (e.g. macOS /tmp → /private/tmp).
   try {
     const [real, realRoot] = await Promise.all([realpath(resolved), realpath(root)]);
-    if (!real.startsWith(realRoot + sep) && real !== realRoot) {
-      throw new WorkspaceSecurityError('Symlink escapes workspace root', 'TRAVERSAL');
-    }
+    assertRealPathInside(realRoot, real);
     // Re-check denylist on the realpath result — a symlink named "safe"
     // pointing to ".env" would pass the pre-realpath check above but the
     // resolved target must still be denied.
     const realRel = relative(realRoot, real);
-    for (const seg of realRel.split(sep)) {
-      if (DENYLIST_DIRS.has(seg)) {
-        throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-      }
-      for (const pat of DENYLIST_PATTERNS) {
-        if (pat.test(seg)) {
-          throw new WorkspaceSecurityError(`Access denied: ${seg}`, 'DENIED');
-        }
-      }
-    }
+    assertDenylistAllowed(realRel);
   } catch (e) {
     if (e instanceof WorkspaceSecurityError) throw e;
     // ENOENT = file doesn't exist yet; traversal check above covers it
@@ -89,6 +126,29 @@ export async function resolveWorkspacePath(root: string, userPath: string): Prom
     }
   }
 
+  return resolved;
+}
+
+/**
+ * Resolve a path that may be created by a write operation.
+ *
+ * Unlike resolveWorkspacePath(), this validates the nearest existing ancestor
+ * instead of accepting ENOENT after only lexical traversal checks. That closes
+ * the "workspace/safe-link/new.txt" case where "safe-link" is a symlink to a
+ * directory outside the workspace.
+ */
+export async function resolveWorkspaceCreatePath(root: string, userPath: string): Promise<string> {
+  const decoded = decodeURIComponent(userPath);
+  const resolvedRoot = resolve(root);
+  const resolved = resolve(resolvedRoot, decoded);
+  const relFromRoot = assertInsideRoot(resolvedRoot, resolved);
+  assertDenylistAllowed(relFromRoot);
+
+  const realRoot = await realpath(resolvedRoot);
+  const ancestor = await findExistingDirectoryAncestor(resolvedRoot, dirname(resolved));
+  const realAncestor = await realpath(ancestor);
+  assertRealPathInside(realRoot, realAncestor);
+  assertDenylistAllowed(relative(realRoot, realAncestor));
   return resolved;
 }
 

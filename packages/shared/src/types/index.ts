@@ -186,6 +186,8 @@ export type {
   CatState,
   CatStatus,
   ClientId,
+  CommandPolicyEntry,
+  NativeToolLevel,
 } from './cat.js';
 // Cat breed/variant types (Breed+Variant two-layer schema)
 export type {

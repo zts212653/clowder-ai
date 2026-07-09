@@ -20,6 +20,8 @@ import {
   type MessageContent,
   type SealReason,
   type SessionRecord,
+  type TaskItem,
+  type TaskStatus,
 } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -165,7 +167,7 @@ import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
 import type { ISessionChainStore } from '../../stores/ports/SessionChainStore.js';
-import type { IThreadStore } from '../../stores/ports/ThreadStore.js';
+import type { IThreadStore, Thread } from '../../stores/ports/ThreadStore.js';
 import type { AgentMessage, AgentService, AgentServiceOptions } from '../../types.js';
 import { hasL0CompilerSeam } from '../../types.js';
 import type { InvocationRegistry } from '../invocation/InvocationRegistry.js';
@@ -676,6 +678,137 @@ export interface InvocationParams {
   readonly continuityCapsule?: RouteStateContinuityCapsule;
 }
 
+function getSelectedTaskId(thread: Thread | null | undefined): string | undefined {
+  return thread?.bootcampState?.selectedTaskId ?? thread?.firstRunQuestState?.selectedTaskId;
+}
+
+function toTaskProgressStatus(status: TaskStatus): string {
+  if (status === 'done') return 'completed';
+  if (status === 'todo') return 'pending';
+  return 'in_progress';
+}
+
+function describeCurrentTaskActivity(patch: { progress?: number; summary?: string }): string | undefined {
+  if (patch.summary) return patch.summary;
+  if (patch.progress !== undefined) return `progress ${Math.round(patch.progress)}%`;
+  return undefined;
+}
+
+function upsertTaskProgressItem(items: TaskProgressItem[], item: TaskProgressItem): TaskProgressItem[] {
+  const next = items.filter((existing) => existing.id !== item.id);
+  next.push(item);
+  return next;
+}
+
+type CurrentTaskStatusPatch = {
+  status?: TaskStatus;
+  progress?: number;
+  summary?: string;
+};
+
+type ScopedTaskStore = NonNullable<InvocationDeps['taskStore']>;
+
+async function getScopedCurrentTask(input: {
+  readonly taskStore: ScopedTaskStore;
+  readonly currentTaskId: string;
+  readonly threadId: string;
+  readonly catId: CatId;
+}): Promise<TaskItem> {
+  const currentTask = await input.taskStore.get(input.currentTaskId);
+  if (!currentTask) throw new Error('Current task is no longer available');
+  if (currentTask.threadId !== input.threadId) throw new Error('Current task belongs to a different thread');
+  if (currentTask.ownerCatId && currentTask.ownerCatId !== input.catId) {
+    throw new Error('Current task is owned by another cat');
+  }
+  return currentTask;
+}
+
+function buildCurrentTaskUpdateData(patch: CurrentTaskStatusPatch): { status?: TaskStatus; why?: string } {
+  const updateData: { status?: TaskStatus; why?: string } = {};
+  if (patch.status !== undefined) updateData.status = patch.status;
+  if (patch.summary !== undefined) updateData.why = patch.summary;
+  return updateData;
+}
+
+async function persistCurrentTaskProgress(input: {
+  readonly taskProgressStore?: TaskProgressStore;
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly invocationId: string;
+  readonly task: TaskItem;
+  readonly patch: CurrentTaskStatusPatch;
+}): Promise<void> {
+  if (!input.taskProgressStore) return;
+  const activeForm = describeCurrentTaskActivity(input.patch);
+  const progressItem: TaskProgressItem = {
+    id: input.task.id,
+    subject: input.task.title,
+    status: toTaskProgressStatus(input.task.status),
+    ...(activeForm ? { activeForm } : {}),
+  };
+  const existingSnapshot = await input.taskProgressStore.getSnapshot(input.threadId, input.catId);
+  await input.taskProgressStore.setSnapshot({
+    threadId: input.threadId,
+    catId: input.catId,
+    tasks: upsertTaskProgressItem(existingSnapshot?.tasks ?? [], progressItem),
+    status: input.task.status === 'done' ? 'completed' : 'running',
+    updatedAt: Date.now(),
+    lastInvocationId: input.invocationId,
+  });
+}
+
+async function updateScopedCurrentTaskStatus(input: {
+  readonly taskStore: ScopedTaskStore;
+  readonly taskProgressStore?: TaskProgressStore;
+  readonly currentTaskId: string;
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly invocationId: string;
+  readonly patch: CurrentTaskStatusPatch;
+}): Promise<void> {
+  const currentTask = await getScopedCurrentTask(input);
+  const updateData = buildCurrentTaskUpdateData(input.patch);
+  const updatedTask =
+    Object.keys(updateData).length > 0 ? await input.taskStore.update(currentTask.id, updateData) : currentTask;
+  if (!updatedTask) throw new Error('Current task update failed');
+  await persistCurrentTaskProgress({ ...input, task: updatedTask });
+}
+
+async function resolveCatAgentScopedCallbacks(input: {
+  readonly taskStore?: InvocationDeps['taskStore'];
+  readonly taskProgressStore?: TaskProgressStore;
+  readonly thread: Thread | null;
+  readonly threadId: string;
+  readonly catId: CatId;
+  readonly invocationId: string;
+}): Promise<AgentServiceOptions['catAgentScopedCallbacks'] | undefined> {
+  const selectedTaskId = getSelectedTaskId(input.thread);
+  const taskStore = input.taskStore;
+  if (!selectedTaskId || !taskStore) return undefined;
+
+  const selectedTask = await taskStore.get(selectedTaskId);
+  if (!selectedTask) return undefined;
+  if (selectedTask.threadId !== input.threadId) return undefined;
+  if (selectedTask.ownerCatId && selectedTask.ownerCatId !== input.catId) return undefined;
+
+  return {
+    currentTask: {
+      invocationId: input.invocationId,
+      currentTaskId: selectedTask.id,
+      updateCurrentTaskStatus: (patch) =>
+        updateScopedCurrentTaskStatus({
+          taskStore,
+          taskProgressStore: input.taskProgressStore,
+          currentTaskId: selectedTask.id,
+          threadId: input.threadId,
+          catId: input.catId,
+          invocationId: input.invocationId,
+          patch,
+        }),
+    },
+  };
+}
+
 /**
  * Invoke a single cat agent and yield messages.
  *
@@ -1178,6 +1311,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     const requiresThreadWorkspace = providerRequiresThreadWorkspace(provider);
 
     // Resolve workingDirectory from thread's projectPath
+    let invocationThread: Thread | null = null;
     let workingDirectory: string | undefined;
     let threadProjectPath: string | undefined;
     let bootcampWorkspaceError: Error | undefined;
@@ -1195,6 +1329,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         );
       }
       if (thread) {
+        invocationThread = thread;
         if (thread.createdAt) threadCreatedAt = thread.createdAt;
         if (thread.projectPath) threadProjectPath = thread.projectPath;
         // #836: Reborn session strategy — force new session every invocation.
@@ -2009,6 +2144,20 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    let catAgentScopedCallbacks: AgentServiceOptions['catAgentScopedCallbacks'] | undefined;
+    try {
+      catAgentScopedCallbacks = await resolveCatAgentScopedCallbacks({
+        taskStore: deps.taskStore,
+        taskProgressStore: deps.taskProgressStore,
+        thread: invocationThread,
+        threadId,
+        catId,
+        invocationId,
+      });
+    } catch (err) {
+      log.warn({ threadId, catId, invocationId, err }, 'CatAgent scoped callback resolution failed');
+    }
+
     const baseOptions: AgentServiceOptions = {
       callbackEnv,
       ...(accountEnv ? { accountEnv } : {}),
@@ -2023,6 +2172,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(params.uploadDir ? { uploadDir: params.uploadDir } : {}),
       ...(signal ? { signal } : {}),
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
+      ...(catAgentScopedCallbacks ? { catAgentScopedCallbacks } : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       ...(isResume && !injectSystemPrompt && params.systemPrompt

@@ -9,6 +9,7 @@
 import type { CatConfig, CatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { AuditEventTypes, getEventAuditLog } from '../../../orchestration/EventAuditLog.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata, TokenUsage } from '../../../types.js';
 import { mergeTokenUsage } from '../../../types.js';
 import { resolveApiCredentials } from './catagent-credentials.js';
@@ -18,7 +19,12 @@ import { buildToolRegistry, findTool, getToolSchemas } from './catagent-read-too
 import type { CatAgentStreamEvent } from './catagent-stream-parser.js';
 import { parseAnthropicSSE } from './catagent-stream-parser.js';
 import { validateToolInput } from './catagent-tool-guard.js';
-import type { CatAgentTool } from './catagent-tools.js';
+import type {
+  CatAgentTool,
+  CatAgentToolAuditEvent,
+  CatAgentToolAuditSink,
+  CatAgentToolRegistryOptions,
+} from './catagent-tools.js';
 
 const log = createModuleLogger('catagent');
 
@@ -140,7 +146,7 @@ export class CatAgentService implements AgentService {
     options?: AgentServiceOptions,
   ): AsyncIterable<AgentMessage> {
     const workDir = options?.workingDirectory;
-    const tools = workDir ? await buildToolRegistry(workDir) : [];
+    const tools = await buildToolRegistry(workDir, this.createToolRegistryOptions(options));
     const toolSchemas = getToolSchemas(tools);
     const messages: Array<{ role: string; content: unknown }> = [{ role: 'user', content: prompt }];
     let totalUsage: TokenUsage | undefined;
@@ -265,7 +271,10 @@ export class CatAgentService implements AgentService {
 
     // Rebuild content blocks sorted by index (P1: preserve full assistant content)
     const sortedIndices = [...blocksByIndex.keys()].sort((a, b) => a - b);
-    for (const idx of sortedIndices) contentBlocks.push(blocksByIndex.get(idx)!);
+    for (const idx of sortedIndices) {
+      const block = blocksByIndex.get(idx);
+      if (block) contentBlocks.push(block);
+    }
 
     const turnUsage: TokenUsage = { ...inputUsage, outputTokens };
     return { contentBlocks, stopReason, turnUsage, hadStreamError };
@@ -334,6 +343,34 @@ export class CatAgentService implements AgentService {
     _metadata: MessageMetadata,
   ): Promise<CatAgentToolExecResult[]> {
     return executeCatAgentTools(blocks, tools);
+  }
+
+  private createToolRegistryOptions(options?: AgentServiceOptions): CatAgentToolRegistryOptions {
+    return {
+      nativeToolLevel: this.catConfig?.nativeToolLevel,
+      commandPolicy: this.catConfig?.commandPolicy,
+      audit: this.createToolAuditSink(options),
+      scopedCallbacks: options?.catAgentScopedCallbacks,
+    };
+  }
+
+  private createToolAuditSink(options?: AgentServiceOptions): CatAgentToolAuditSink | undefined {
+    const ctx = options?.auditContext;
+    if (!ctx) return undefined;
+    return async (event: CatAgentToolAuditEvent) => {
+      await getEventAuditLog().append({
+        type: AuditEventTypes.CATAGENT_SIDE_EFFECT,
+        threadId: ctx.threadId,
+        data: {
+          invocationId: ctx.invocationId,
+          threadId: ctx.threadId,
+          userId: ctx.userId,
+          catId: ctx.catId,
+          provider: 'catagent',
+          ...event,
+        },
+      });
+    };
   }
 
   private *handleFetchError(

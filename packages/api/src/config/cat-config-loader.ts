@@ -60,6 +60,14 @@ const contextBudgetSchema = z.object({
   maxContentLengthPerMsg: z.number().positive(),
 });
 
+const commandPolicyEntrySchema = z.object({
+  binary: z.string().min(1),
+  allowedSubcommands: z.array(z.string().min(1)).optional(),
+  allowedFlags: z.array(z.string().min(1)).optional(),
+  allowedArgPatterns: z.array(z.string().min(1)).optional(),
+  deniedFlags: z.array(z.string().min(1)).optional(),
+});
+
 const agyProfileSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -114,6 +122,8 @@ const catVariantSchema = z.object({
   avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
   color: colorSchema.optional(), // F32-b P4c: override breed color
   contextBudget: contextBudgetSchema.optional(),
+  nativeToolLevel: z.enum(['L0', 'L1', 'L2']).optional(), // F159 Phase F
+  commandPolicy: z.array(commandPolicyEntrySchema).optional(), // F159 Phase F
   voiceConfig: z // F103: per-cat TTS voice configuration
     .object({
       voice: z.string().min(1),
@@ -477,7 +487,31 @@ function mergeTemplateWithCatalog(templatePath: string): string | null {
   return JSON.stringify(merged);
 }
 
-function parseCatConfig(raw: string): CatCafeConfig {
+/**
+ * Load and validate the resolved cat config source.
+ * Explicit filePath reads that file directly.
+ * Default resolution: cat-template.json is the base, .cat-cafe/cat-catalog.json is a delta overlay.
+ * Catalog fields override config fields (deep merge); config fields absent from catalog are preserved.
+ */
+export function loadCatConfig(filePath?: string): CatCafeConfig {
+  let raw: string;
+  if (filePath) {
+    try {
+      raw = readFileSync(filePath, 'utf-8');
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      throw new Error(`Failed to read cat config at ${filePath}: ${code ?? 'unknown error'}`);
+    }
+  } else {
+    const templatePath = process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
+    const merged = mergeTemplateWithCatalog(templatePath);
+    if (merged !== null) {
+      raw = merged;
+    } else {
+      raw = readTemplate(templatePath);
+    }
+  }
+
   const json: unknown = JSON.parse(raw);
   const result = catCafeConfigSchema.safeParse(json);
   if (!result.success) {
@@ -627,6 +661,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         ...(variant.cli != null ? { cli: variant.cli } : {}),
         ...(variant.provider != null ? { provider: variant.provider } : {}),
         ...(variant.contextBudget != null ? { contextBudget: variant.contextBudget } : {}),
+        ...(variant.nativeToolLevel != null ? { nativeToolLevel: variant.nativeToolLevel } : {}),
+        ...(variant.commandPolicy != null ? { commandPolicy: variant.commandPolicy } : {}),
         ...(variant.voiceConfig != null ? { voiceConfig: variant.voiceConfig } : {}),
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',

@@ -216,6 +216,8 @@ export const AuditEventTypes = {
   CLI_TOOL_STARTED: 'cli_tool_started',
   /** CLI 工具执行完成（command_execution completed） */
   CLI_TOOL_COMPLETED: 'cli_tool_completed',
+  /** CatAgent native side-effect tool execution/rejection (F159 Phase F) */
+  CATAGENT_SIDE_EFFECT: 'catagent_side_effect',
 
   // === 记忆治理 (Phase 5.0 Step 2a) ===
 

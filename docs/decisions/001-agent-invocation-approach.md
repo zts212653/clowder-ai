@@ -8,10 +8,10 @@ created: 2026-02-26
 # ADR-001: Agent 调用方式选择
 
 ## 状态
-已更新（2026-04-11 修订）
+已更新（2026-06-16 修订）
 
 ## 日期
-2026-02-04（初始）/ 2026-02-06（修订）/ 2026-04-11（F159 修订）
+2026-02-04（初始）/ 2026-02-06（修订）/ 2026-04-11（F159 修订）/ 2026-06-16（F159 Phase F 修订）
 
 ## 背景
 
@@ -54,7 +54,12 @@ Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并�
 - ❌ 不绕过现有安全基线（account-binding / workspace-security）
 - ❌ 不绕过 governance preflight（F070 fail-closed 治理门禁）
 - ❌ 不覆写 home 目录配置文件（ADR-017 铁律：`~/.codex/AGENTS.md` 等）
-- ❌ F159 scope 内不开放 write/edit/delete、shell/command execution、outbound network side-effect 工具（仅 read-only 工具集）
+- ❌ Phase A-E 不开放 write/edit/delete、shell/command execution、outbound network side-effect 工具（仅 read-only 工具集）
+- ✅ Phase F 可在显式 `nativeToolLevel` 分级授权下开放受控 side-effect 工具：
+  - `L0`：read-only（默认）
+  - `L1`：`write_file` / `patch_file`，必须通过 create-safe path resolver、CAS hash、结构化审计
+  - `L2`：`run_command`，必须使用结构化 `{ binary, args }`、allowlist-first `commandPolicy`、`execFile`、受限 env、timeout/buffer cap、结构化审计
+- ❌ Phase F 仍不开放任意 shell、任意网络、任意 `HOME` 透传、raw callback 写口、cross-thread/A2A 路由副作用
 
 **成本模型：**
 - Native provider 使用 API key 付费，不消耗订阅额度
@@ -68,6 +73,7 @@ Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并�
 4. **F050 Safety Contract**：满足 External Agent Contract v1 的 Section D（Capability）和 Section F（Safety）
 5. **F149 Failure taxonomy**：按三层分类（process-poison / session-poison / turn-transient）处理故障
 6. **Governance fail-closed**：调用前必须通过 governance preflight（F070），不可跳过或降级
+7. **Phase F side-effect audit**：write/patch/exec/callback side-effect 必须写入独立结构化审计，不能依赖 transcript 的 `tool_result` 截断摘要
 
 **与相关 Feature 的边界：**
 - **F143**：native provider 实现 F143 的 provider 契约，不绕过宿主抽象
@@ -146,3 +152,4 @@ Cat Café 需要程序化调用三只 AI 猫猫（Claude/Codex/Gemini），并�
 | 2026-02-04 | 初始决策：选择方案 C (SDK) | 完整 agent 能力 + 低延迟 |
 | 2026-02-06 | 修订为方案 B (CLI 子进程) | SDK 只能用 API key，无法用订阅额度；Gemini API 模式无文件操作能力 |
 | 2026-04-11 | F159：新增方案 E (Opt-in Native Provider) | 轻量任务 CLI 启动开销不划算；RFC #434 + maintainer review 确认方向；安全硬 gate 作为准入门槛 |
+| 2026-06-16 | F159 Phase F：在分级授权下有条件开放 write/exec | 将 CatAgent 从 read-only 扩展为轻量内置可工作 provider，同时保留 CLI 默认主路径和 fail-closed 安全边界 |
