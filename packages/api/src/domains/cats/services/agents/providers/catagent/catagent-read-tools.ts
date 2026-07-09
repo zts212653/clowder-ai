@@ -379,6 +379,14 @@ async function executePatchFile(
   }
 
   const after = replaceTextSpan(before, span, newText);
+  const afterBytes = Buffer.byteLength(after, 'utf-8');
+  if (afterBytes > MAX_WRITE_BYTES) {
+    await rejectWithAudit(
+      options,
+      { tool: 'patch_file', path: relPath, bytes: afterBytes },
+      `patch result (${afterBytes} bytes) exceeds write cap (${MAX_WRITE_BYTES} bytes)`,
+    );
+  }
   const hashAfter = hashContent(after);
   await writeAtomicUtf8(resolved, after);
   await emitAudit(options, {
