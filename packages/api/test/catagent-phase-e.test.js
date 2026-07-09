@@ -75,17 +75,34 @@ function toolTurnEvents(toolName, toolInput, toolId = 'tu1') {
 // ── Temp workspace ──
 
 let tmpDir;
+let prevCatOpusModel;
 
 before(() => {
+  prevCatOpusModel = process.env.CAT_OPUS_MODEL;
+  process.env.CAT_OPUS_MODEL = 'claude-opus-4-6';
   tmpDir = join(tmpdir(), `catagent-e-${Date.now()}`);
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(join(tmpDir, 'hello.txt'), 'line1\nline2\nline3\n');
   mkdirSync(join(tmpDir, '.cat-cafe'), { recursive: true });
-  writeFileSync(join(tmpDir, '.cat-cafe', 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
-  writeFileSync(join(tmpDir, '.cat-cafe', 'credentials.json'), JSON.stringify({ 'test-ant': { apiKey: 'sk-test-e' } }));
+  writeFileSync(
+    join(tmpDir, '.cat-cafe', 'accounts.json'),
+    JSON.stringify({
+      'test-ant': { authType: 'api_key' },
+      'test-ant-v1': { authType: 'api_key', baseUrl: 'https://proxy.example/v1' },
+    }),
+  );
+  writeFileSync(
+    join(tmpDir, '.cat-cafe', 'credentials.json'),
+    JSON.stringify({
+      'test-ant': { apiKey: 'sk-test-e' },
+      'test-ant-v1': { apiKey: 'sk-test-v1' },
+    }),
+  );
 });
 
 after(() => {
+  if (prevCatOpusModel !== undefined) process.env.CAT_OPUS_MODEL = prevCatOpusModel;
+  else delete process.env.CAT_OPUS_MODEL;
   try {
     rmSync(tmpDir, { recursive: true, force: true });
   } catch {
@@ -342,5 +359,26 @@ describe('E4: stream error handling', () => {
 
     assert.ok(capturedBody);
     assert.equal(capturedBody.stream, true, 'stream: true in body');
+  });
+
+  test('baseUrl ending in /v1 is not double-prefixed', async () => {
+    let capturedUrl = null;
+    globalThis.fetch = async (url) => {
+      capturedUrl = String(url);
+      return {
+        ok: true,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: sseStream(textTurnEvents('hi')),
+      };
+    };
+
+    const svc = new CatAgentService({
+      catId: 'opus',
+      projectRoot: tmpDir,
+      catConfig: { accountRef: 'test-ant-v1' },
+    });
+    await collect(svc.invoke('test'));
+
+    assert.equal(capturedUrl, 'https://proxy.example/v1/messages');
   });
 });

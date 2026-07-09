@@ -34,6 +34,12 @@ const DEFAULT_MAX_TOKENS = 4096;
 const MAX_TOOL_TURNS = 15;
 const TOOL_RESULT_DIGEST_LIMIT = 500;
 
+function buildAnthropicMessagesUrl(baseURL?: string): string {
+  const rawBaseUrl = baseURL?.trim() || DEFAULT_BASE_URL;
+  const root = rawBaseUrl.replace(/\/+$/, '').replace(/\/v1$/i, '');
+  return `${root}/v1/messages`;
+}
+
 interface CatAgentServiceOptions {
   catId: CatId;
   projectRoot: string;
@@ -314,7 +320,7 @@ export class CatAgentService implements AgentService {
     credentials: { apiKey: string; baseURL?: string },
     options?: AgentServiceOptions,
   ): Promise<Response> {
-    const url = `${(credentials.baseURL ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/v1/messages`;
+    const url = buildAnthropicMessagesUrl(credentials.baseURL);
     const body: Record<string, unknown> = { model, max_tokens: DEFAULT_MAX_TOKENS, messages, stream: true };
     if (tools.length > 0) body.tools = tools;
     if (options?.systemPrompt) body.system = options.systemPrompt;
