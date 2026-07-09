@@ -3352,6 +3352,91 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(acceptRes.statusCode, 201, `anthropic-messages + claude should pass: ${acceptRes.body}`);
   });
 
+  it('F159 G2: PATCH-only catAgentProtocol rejects family mismatch', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Setup: create catagent with openai-chat + codex (valid combo)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-patch-proto',
+        name: 'Patch Protocol Test',
+        displayName: 'Patch Protocol Test',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-patch-proto'],
+        roleDescription: 'PATCH protocol-only mismatch test',
+        clientId: 'catagent',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+        catAgentProtocol: 'openai-chat',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `setup POST failed: ${createRes.body}`);
+
+    // PATCH only catAgentProtocol to anthropic-messages — codex is OpenAI family → must 400
+    const mismatchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ catAgentProtocol: 'anthropic-messages' }),
+    });
+    assert.equal(mismatchRes.statusCode, 400, 'PATCH-only protocol to anthropic with codex account must reject');
+    assert.match(JSON.parse(mismatchRes.body).error, /incompatible/i);
+
+    // Reverse: create catagent with anthropic-messages + claude (valid combo)
+    const createRes2 = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-patch-proto2',
+        name: 'Patch Protocol Test 2',
+        displayName: 'Patch Protocol Test 2',
+        avatar: '/avatars/catagent.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@runtime-patch-proto2'],
+        roleDescription: 'PATCH protocol-only mismatch test 2',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        catAgentProtocol: 'anthropic-messages',
+      }),
+    });
+    assert.equal(createRes2.statusCode, 201, `setup POST 2 failed: ${createRes2.body}`);
+
+    // PATCH only catAgentProtocol to openai-chat — claude is Anthropic family → must 400
+    const mismatchRes2 = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto2',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ catAgentProtocol: 'openai-chat' }),
+    });
+    assert.equal(mismatchRes2.statusCode, 400, 'PATCH-only protocol to openai with claude account must reject');
+
+    // Sanity: PATCH protocol + account together (valid switch) → must pass
+    const validRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-patch-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catAgentProtocol: 'anthropic-messages',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+      }),
+    });
+    assert.equal(validRes.statusCode, 200, `PATCH protocol + account together should pass: ${validRes.body}`);
+  });
+
   it('F159 G2: POST non-catagent with catAgentProtocol silently ignores the field', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');

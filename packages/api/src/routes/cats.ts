@@ -890,7 +890,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       body.clientId !== undefined ||
       body.defaultModel !== undefined ||
       targetAccountRef !== undefined ||
-      body.provider !== undefined;
+      body.provider !== undefined ||
+      body.catAgentProtocol !== undefined;
 
     if (providerConfigTouched) {
       try {
