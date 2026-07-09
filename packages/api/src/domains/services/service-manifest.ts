@@ -149,12 +149,17 @@ const LEGACY_ENV_FALLBACKS: Record<
     enabled?: string[];
     apiEnabled?: string[];
     model?: string[];
+    /** Default model when activation came from this legacy service's env vars
+     *  but no model env was set.  Without this the manifest default (which may
+     *  be a different backend) would silently replace the old service's model. */
+    defaultModel?: string;
   }
 > = {
   'whisper-stt': {
     enabled: ['QWEN3_ASR_ENABLED'],
     apiEnabled: ['CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED'],
     model: ['QWEN3_ASR_MODEL'],
+    defaultModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
   },
 };
 
@@ -365,9 +370,12 @@ export function deriveLegacyServiceConfig(
 
   // Check fallback env vars from merged services (#863).  A user who had
   // QWEN3_ASR_ENABLED=true should auto-start whisper-stt after upgrade.
+  // Only consult fallbacks when the primary flag is *unset* (null).  An
+  // explicit disable (ASR_ENABLED=0) must not be overridden by a stale
+  // legacy enable flag.
   const fallbacks = LEGACY_ENV_FALLBACKS[service.id];
   let fallbackEnabled: boolean | null = null;
-  if (legacyEnabled !== true && fallbacks) {
+  if (legacyEnabled == null && fallbacks) {
     for (const key of fallbacks.apiEnabled ?? []) {
       fallbackEnabled = parseEnabledEnv(env[key]);
       if (fallbackEnabled != null) break;
@@ -394,6 +402,11 @@ export function deriveLegacyServiceConfig(
   }
   if (model) {
     config.selectedModel = model;
+  } else if (fallbackEnabled === true && fallbacks?.defaultModel) {
+    // Activation came from legacy merged-service env vars (e.g. QWEN3_ASR_ENABLED)
+    // but no model env was set.  Use the old service's implicit default so users
+    // aren't silently migrated to a different backend.
+    config.selectedModel = fallbacks.defaultModel;
   } else {
     // Fall back to manifest's recommended default model so that legacy
     // env bridge users (ENABLED=1 without MODEL) get a working service

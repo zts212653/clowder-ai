@@ -118,4 +118,27 @@ describe('legacy env bridge fallback (#863)', () => {
     const config = deriveLegacyServiceConfig(whisperManifest, {});
     assert.equal(config, undefined);
   });
+
+  it('explicit ASR_ENABLED=0 is not overridden by stale QWEN3_ASR_ENABLED=1', () => {
+    const env = { ASR_ENABLED: '0', QWEN3_ASR_ENABLED: '1' };
+    const config = deriveLegacyServiceConfig(whisperManifest, env);
+    assert.equal(config, undefined, 'explicit disable must win over legacy fallback enable');
+  });
+
+  it('explicit CAT_CAFE_SERVICE_ASR_ENABLED=0 is not overridden by legacy Qwen flag', () => {
+    const env = { CAT_CAFE_SERVICE_ASR_ENABLED: '0', CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED: 'true' };
+    const config = deriveLegacyServiceConfig(whisperManifest, env);
+    assert.equal(config, undefined, 'API-level disable must win over legacy fallback');
+  });
+
+  it('uses Qwen default model when activation came from QWEN3_ASR_ENABLED without model env', () => {
+    const env = { QWEN3_ASR_ENABLED: '1' };
+    const config = deriveLegacyServiceConfig(whisperManifest, env);
+    assert.ok(config, 'should derive config from legacy enable');
+    assert.equal(
+      config.selectedModel,
+      'mlx-community/Qwen3-ASR-1.7B-8bit',
+      'should use Qwen default, not whisper manifest default',
+    );
+  });
 });
