@@ -62,6 +62,28 @@ if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
   fi
 fi
 
+# Backend dependency check (#863): same-arch venv may still lack deps
+# for the current model after a model switch (e.g. existing mlx-whisper
+# venv reused after env bridge migrates to Qwen which needs mlx-audio).
+# Probe the model's primary import; mirrors whisper-api.py startup chain.
+if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
+  _dep_ok=1
+  case "$MODEL" in
+    *Qwen3-ASR*)
+      # Qwen requires mlx-audio, no fallback in whisper-api.py
+      "$VENV_DIR/bin/python3" -c "import mlx_audio" 2>/dev/null || _dep_ok=0 ;;
+    *)
+      # Non-Qwen: mlx_whisper or faster_whisper (fallback chain)
+      "$VENV_DIR/bin/python3" -c "import mlx_whisper" 2>/dev/null \
+        || "$VENV_DIR/bin/python3" -c "import faster_whisper" 2>/dev/null \
+        || _dep_ok=0 ;;
+  esac
+  if [ "$_dep_ok" = "0" ]; then
+    echo "[start] venv missing backend deps for $MODEL -- reinstalling..." >&2
+    rm -rf "$VENV_DIR"
+  fi
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
   echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
   INSTALL_SCRIPT="$SCRIPT_DIR/whisper-install.sh"

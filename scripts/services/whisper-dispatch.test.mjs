@@ -123,6 +123,17 @@ describe('whisper-dispatch — static guard (script content)', () => {
     assert.match(src, /rm -rf.*VENV_DIR/, 'must remove stale venv on mismatch');
   });
 
+  test('whisper-server.sh checks backend deps before activating (#863)', () => {
+    // Same-arch venv may lack deps after model switch: arm64 venv with
+    // mlx-whisper reused for Qwen (needs mlx-audio) or vice versa.
+    // Server must probe the model's primary import before activating.
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-server.sh'), 'utf8');
+    assert.match(src, /import mlx_audio/, 'must probe mlx_audio for Qwen3-ASR');
+    assert.match(src, /import mlx_whisper/, 'must probe mlx_whisper for Whisper');
+    assert.match(src, /import faster_whisper/, 'must probe faster_whisper fallback');
+    assert.match(src, /Qwen3-ASR/, 'must dispatch by model name');
+  });
+
   test('setup.sh delegates ASR install to whisper-install.sh (#863 unified)', () => {
     // setup.sh --install-missing must use the unified installer instead of
     // maintaining a separate hardcoded venv/deps path. The old code created
@@ -548,9 +559,11 @@ function getServerVenvCheck(resolvedArch, venvArch) {
   const serverPath = join(SERVICES_DIR, 'whisper-server.sh');
   // Extract the compat check block, stripping comments and the source line
   // (we provide mocked probe functions instead of sourcing python-resolve.sh).
+  // Stop at the backend dep check (not the auto-install block) so this
+  // test isolates the arch check from the backend dep check.
   const sedExpr =
-    '/^# Venv architecture compatibility/,/^if \\[ ! -d/{' +
-    '/^if \\[ ! -d/d; /^#/d; /shellcheck/d; /source.*python-resolve/d; p;}';
+    '/^# Venv architecture compatibility/,/^# Backend dependency/{' +
+    '/^# Backend/d; /^#/d; /shellcheck/d; /source.*python-resolve/d; p;}';
   const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
   const resolverFail = 'return 1';
   const probeStub = resolvedArch !== 'none' ? resolverOk : resolverFail;
@@ -601,5 +614,93 @@ describe('whisper-server — startup path venv compat (#1061)', () => {
   test('all probes fail + venv=x86_64 -> keep (no resolver = safe)', () => {
     // If no Python is found by the resolver, don't destroy existing venv.
     assert.equal(getServerVenvCheck('none', 'x86_64'), 'keep');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: whisper-server.sh backend dependency check (#863)
+//
+// Extended state transition table (arch + backend/dependency dimensions):
+//
+//   State                          | Event        | Owner            | Post-condition
+//   -------------------------------|--------------|------------------|---------------------------
+//   venv(arm64,mlx-whisper)+Qwen   | server start | whisper-server   | dep check: rm + reinstall
+//   venv(arm64,mlx-audio)+Whisper  | server start | whisper-server   | dep check: rm + reinstall
+//   venv(arm64,mlx-audio)+Qwen     | server start | whisper-server   | OK, dep present
+//   venv(arm64,mlx-whisper)+Whisper | server start | whisper-server  | OK, dep present
+//
+// The backend dependency check is independent of the arch check: even if
+// arch matches, a model switch may require different pip packages.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the PRODUCTION backend dependency check from whisper-server.sh.
+ * Creates a mock venv whose python3 selectively succeeds/fails imports
+ * based on the `available` set. The MODEL env var drives the case dispatch.
+ *
+ * @param model     - WHISPER_MODEL value (e.g. Qwen3-ASR, whisper-large)
+ * @param available - Set of importable module names (e.g. ['mlx_whisper'])
+ * @returns 'rebuild' if the venv was removed, 'keep' if it survived
+ */
+function getServerBackendCheck(model, available) {
+  const serverPath = join(SERVICES_DIR, 'whisper-server.sh');
+  // Extract the backend dep check block from production code.
+  const sedExpr = '/^# Backend dependency check/,/^fi$/{p;}';
+  // Build a mock python3 that succeeds for listed modules, fails for others.
+  // $2 is the `-c` arg; we check if it contains "import <mod>".
+  const importCases = [
+    ['mlx_audio', available.includes('mlx_audio') ? '0' : '1'],
+    ['mlx_whisper', available.includes('mlx_whisper') ? '0' : '1'],
+    ['faster_whisper', available.includes('faster_whisper') ? '0' : '1'],
+  ]
+    .map(([mod, code]) => `*"import ${mod}"*) exit ${code} ;;`)
+    .join(' ');
+  const script = [
+    'set -euo pipefail',
+    'TMPVENV=$(mktemp -d)',
+    'trap "rm -rf $TMPVENV" EXIT',
+    'mkdir -p "$TMPVENV/whisper-venv/bin"',
+    // Mock python3 with selective import support
+    `cat > "$TMPVENV/whisper-venv/bin/python3" <<'PYEOF'\n#!/bin/bash\ncase "$2" in\n  ${importCases}\n  *) exit 0 ;;\nesac\nPYEOF`,
+    'chmod +x "$TMPVENV/whisper-venv/bin/python3"',
+    'VENV_DIR="$TMPVENV/whisper-venv"',
+    `MODEL="${model}"`,
+    `eval "$(sed -n '${sedExpr}' '${serverPath}')" 2>/dev/null`,
+    'if [ -d "$TMPVENV/whisper-venv" ]; then echo "keep"; else echo "rebuild"; fi',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+describe('whisper-server — backend dependency check (#863)', () => {
+  test('Qwen model + venv has mlx_whisper only -> rebuild', () => {
+    // Critical #863 path: existing arm64 venv built for standard Whisper,
+    // env bridge migrates to Qwen. mlx-audio is missing.
+    assert.equal(getServerBackendCheck('mlx-community/Qwen3-ASR-1.7B-8bit', ['mlx_whisper']), 'rebuild');
+  });
+
+  test('Whisper model + venv has mlx_audio only -> rebuild', () => {
+    // Reverse switch: Qwen venv reused for standard Whisper model.
+    // Neither mlx_whisper nor faster_whisper available.
+    assert.equal(getServerBackendCheck('mlx-community/whisper-large-v3-turbo', ['mlx_audio']), 'rebuild');
+  });
+
+  test('Qwen model + venv has mlx_audio -> keep', () => {
+    assert.equal(getServerBackendCheck('mlx-community/Qwen3-ASR-1.7B-8bit', ['mlx_audio']), 'keep');
+  });
+
+  test('Whisper model + venv has mlx_whisper -> keep', () => {
+    assert.equal(getServerBackendCheck('mlx-community/whisper-large-v3-turbo', ['mlx_whisper']), 'keep');
+  });
+
+  test('non-MLX model + venv has faster_whisper -> keep', () => {
+    assert.equal(getServerBackendCheck('large-v3-turbo', ['faster_whisper']), 'keep');
+  });
+
+  test('non-MLX model + venv has mlx_whisper -> keep (fallback chain)', () => {
+    // whisper-api.py tries mlx_whisper first for non-Qwen models
+    assert.equal(getServerBackendCheck('large-v3-turbo', ['mlx_whisper']), 'keep');
   });
 });
