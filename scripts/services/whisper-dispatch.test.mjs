@@ -124,14 +124,18 @@ describe('whisper-dispatch — static guard (script content)', () => {
     );
   });
 
-  test('setup.sh model selection checks Python arch, not just hardware (#1061)', () => {
-    // setup.sh must gate MLX model (Qwen) on both hardware AND Python arch,
-    // mirroring install-template.sh. Hardware-only check causes a mismatch
-    // when Apple Silicon runs Rosetta (x86_64) Python.
+  test('setup.sh model selection uses canonical Python resolver (#1061)', () => {
+    // setup.sh must use python-resolve.sh (the same resolver the installer
+    // uses) to determine Python architecture, not a standalone python3 probe.
+    // This ensures setup and installer agree on which Python determines MLX.
     const src = readFileSync(join(SERVICES_DIR, '../setup.sh'), 'utf8');
-    // Must probe Python interpreter architecture
-    assert.match(src, /platform\.machine/, 'model selection must check Python platform.machine()');
-    // The Qwen model must only be selected inside a Python arch guard
+    // Must source the canonical resolver
+    assert.match(src, /source.*python-resolve\.sh/, 'must source python-resolve.sh');
+    // Must use resolver's probe functions (not raw python3 call)
+    assert.match(src, /_try_system_pythons/, 'must use resolver system probe');
+    // Must read RESOLVED_PYTHON_ARCH from resolver
+    assert.match(src, /RESOLVED_PYTHON_ARCH/, 'must use RESOLVED_PYTHON_ARCH');
+    // Qwen model must be guarded by _py_arch check
     assert.match(src, /_py_arch.*arm64.*Qwen3-ASR/s, 'Qwen model must be guarded by Python arch check');
   });
 });
@@ -184,20 +188,34 @@ describe('whisper-dispatch — install backend selection', () => {
 
 /**
  * Extract the PRODUCTION model selection block from setup.sh and evaluate
- * with mocked system commands (uname, sysctl, python3). Returns the model
- * that setup.sh would write to .env.
+ * with mocked system commands and resolver functions. The production code
+ * sources python-resolve.sh and calls _try_system_pythons (etc.) to find
+ * the same Python the installer will use.
+ *
+ * @param hwArch       - simulated uname -m / sysctl result
+ * @param resolvedArch - arch the resolver would report (RESOLVED_PYTHON_ARCH)
+ * @param resolverFinds - whether the resolver finds a Python 3.12+
  */
-function getSetupModelSelection(hwArch, pythonArch) {
+function getSetupModelSelection(hwArch, resolvedArch, resolverFinds = true) {
   const setupPath = join(SERVICES_DIR, '../setup.sh');
   const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
-  // sed extracts from the model selection comment to just before INSTALL_MISSING check.
-  const sedExpr =
-    '/# Select platform-appropriate default model/,/if \\[ "\\$INSTALL_MISSING"/{' +
-    '/if \\[ "\\$INSTALL_MISSING"/d; p;}';
+  // Mock resolver: _try_system_pythons sets RESOLVED_PYTHON_ARCH on success.
+  const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
+  const resolverFail = 'return 1';
+  const sysStub = resolverFinds ? resolverOk : resolverFail;
+  // Extract the model resolution block (after interactive prompts, before
+  // Step 4). Anchored on the section comment.
+  const sedExpr = '/^# .* Resolve ASR default model/,/^# .* Step 4: Generate/{' + '/^# .* Step 4: Generate/d; p;}';
   const script = [
+    'ENABLE_ASR=true',
     `uname() { case "$1" in -s) echo "Darwin";; -m) echo "${hwArch}";; esac; }`,
     `sysctl() { ${sysctlStub}; }`,
-    `python3() { echo "${pythonArch}"; }`,
+    // Override source to no-op (we provide resolver stubs directly)
+    'source() { :; }',
+    `_try_system_pythons() { ${sysStub}; }`,
+    `_try_uv() { ${resolverFail}; }`,
+    `_try_pyenv() { ${resolverFail}; }`,
+    `_try_brew() { ${resolverFail}; }`,
     `eval "$(sed -n '${sedExpr}' '${setupPath}')"`,
     'echo "$ASR_DEFAULT_MODEL"',
   ].join('\n');
@@ -208,22 +226,46 @@ function getSetupModelSelection(hwArch, pythonArch) {
 }
 
 describe('setup.sh — model selection consistency (#863 #1061)', () => {
-  test('Apple Silicon + arm64 Python -> Qwen3-ASR (MLX path)', () => {
+  test('Apple Silicon + resolver finds arm64 Python -> Qwen3-ASR (MLX)', () => {
     assert.equal(getSetupModelSelection('arm64', 'arm64'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
   });
 
-  test('Apple Silicon + x86_64 Python (Rosetta) -> large-v3-turbo (no MLX)', () => {
-    // Key regression case: hardware is arm64 but Python is Rosetta x86_64.
-    // Installer won't use MLX → model must not be Qwen.
+  test('Apple Silicon + resolver finds x86_64 Python (Rosetta) -> large-v3-turbo', () => {
+    // Key regression: python3 might be arm64 but resolver finds python3.12
+    // which is x86_64 (Rosetta). Setup must use resolver's answer.
     assert.equal(getSetupModelSelection('arm64', 'x86_64'), 'large-v3-turbo');
   });
 
-  test('Apple Silicon + unknown Python -> large-v3-turbo (safe fallback)', () => {
-    assert.equal(getSetupModelSelection('arm64', 'unknown'), 'large-v3-turbo');
+  test('Apple Silicon + no Python 3.12+ found -> Qwen (bootstrap installs arm64)', () => {
+    // When no Python 3.12+ exists, installer will bootstrap via
+    // _pbs_target_triple (sysctl-based) which installs arm64 on Apple Silicon.
+    assert.equal(getSetupModelSelection('arm64', 'irrelevant', false), 'mlx-community/Qwen3-ASR-1.7B-8bit');
   });
 
   test('Intel Mac -> large-v3-turbo', () => {
     assert.equal(getSetupModelSelection('x86_64', 'x86_64'), 'large-v3-turbo');
+  });
+
+  test('setup model agrees with installer platform detection', () => {
+    // Invariant: when setup selects Qwen, installer must use MLX (is_darwin_arm64=1).
+    // When setup selects large-v3-turbo, installer must use non-MLX.
+    // This cross-validates the two detection paths share the same truth source.
+    const cases = [
+      { hw: 'arm64', pyArch: 'arm64', expectMLX: true },
+      { hw: 'arm64', pyArch: 'x86_64', expectMLX: false },
+      { hw: 'x86_64', pyArch: 'x86_64', expectMLX: false },
+    ];
+    for (const c of cases) {
+      const model = getSetupModelSelection(c.hw, c.pyArch);
+      const isMLX = getPlatformDetection('Darwin', c.hw, c.pyArch);
+      const setupWantsMLX = model.includes('Qwen3-ASR');
+      const installerUsesMLX = isMLX === '1';
+      assert.equal(
+        setupWantsMLX,
+        installerUsesMLX,
+        `hw=${c.hw} py=${c.pyArch}: setup=${model} but installer is_darwin_arm64=${isMLX}`,
+      );
+    }
   });
 });
 

@@ -154,22 +154,6 @@ if [ "$HAS_PYTHON" = true ]; then
     echo "        - 4GB+ RAM recommended / 建议 4GB+ 内存"
     echo "        - GPU optional but faster / GPU 可选但更快"
     echo ""
-    # Select platform-appropriate default model (#863).
-    # MLX requires BOTH arm64 hardware AND arm64 Python interpreter (#1061).
-    # Mirrors the dual-signal check in install-template.sh (line 108-122).
-    # We query python3's platform.machine() directly rather than calling
-    # resolve_python_312 (which may download Python -- too heavy for the
-    # interactive feature-selection stage where the user hasn't said yes yet).
-    if [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
-        _py_arch="$(python3 -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
-        if [ "$_py_arch" = "arm64" ] || [ "$_py_arch" = "aarch64" ]; then
-            ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
-        else
-            ASR_DEFAULT_MODEL="large-v3-turbo"
-        fi
-    else
-        ASR_DEFAULT_MODEL="large-v3-turbo"
-    fi
     if [ "$INSTALL_MISSING" = true ]; then
         ENABLE_ASR=true
         echo -e "      ${GREEN}✓${NC} Voice input enabled (--install-missing)"
@@ -298,6 +282,39 @@ else
     fi
 fi
 echo ""
+
+# ── Resolve ASR default model (after all interactive prompts) ──
+# MLX requires BOTH arm64 hardware AND arm64 Python (#1061).
+# We source the CANONICAL Python resolver (python-resolve.sh) and probe
+# system Pythons -- the same truth source the installer uses. This runs
+# after the user committed to features, so no wasted work; and before
+# .env generation, so the model is determined when we write it.
+#
+# Only the system probe runs here (no downloads). If no Python 3.12+ is
+# found yet, installer will bootstrap one later via _pbs_target_triple
+# which always selects arm64 on Apple Silicon -- so Qwen is safe in that
+# case too.
+if [ "$ENABLE_ASR" = true ]; then
+    _setup_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ASR_DEFAULT_MODEL="large-v3-turbo"  # safe default
+    if [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+        # Apple Silicon -- resolve Python to match installer's truth source.
+        source "$_setup_script_dir/services/python-resolve.sh"
+        if _try_system_pythons 2>/dev/null; then
+            # Resolver found a system Python 3.12+ -- use its arch.
+            _py_arch="$RESOLVED_PYTHON_ARCH"
+        elif _try_uv 2>/dev/null || _try_pyenv 2>/dev/null || _try_brew 2>/dev/null; then
+            _py_arch="$RESOLVED_PYTHON_ARCH"
+        else
+            # No Python 3.12+ found yet. Installer will bootstrap arm64
+            # Python via _pbs_target_triple (sysctl-based), so MLX is safe.
+            _py_arch="arm64"
+        fi
+        if [ "$_py_arch" = "arm64" ] || [ "$_py_arch" = "aarch64" ]; then
+            ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
+        fi
+    fi
+fi
 
 # ── Step 4: Generate .env ───────────────────────────────────
 
