@@ -7,14 +7,11 @@
 import { resolve } from 'node:path';
 import {
   type CatConfig,
-  CLI_EFFORT_VALUES,
   type CliConfig,
   type ClientId,
   type ContextBudget,
   catRegistry,
-  getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
-  isValidCliEffortForProvider,
   type RosterEntry,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -59,7 +56,7 @@ const contextBudgetSchema = z.object({
   maxContentLengthPerMsg: z.number().int().positive(),
 });
 
-const cliEffortSchema = z.enum(CLI_EFFORT_VALUES);
+const cliEffortSchema = z.string().trim().min(1);
 const cliSchema = z.object({
   command: z.string().min(1).optional(),
   outputFormat: z.string().min(1).optional(),
@@ -295,13 +292,6 @@ function buildResolvedCliConfig(client: ClientId, baseCli: CliConfig, patch?: Cl
 
   const effortTouched = patch ? Object.hasOwn(patch, 'effort') : false;
   const nextEffort = effortTouched ? patch?.effort : baseCli.effort;
-  if (nextEffort !== undefined && nextEffort !== null && !isValidCliEffortForProvider(client, nextEffort)) {
-    const options = getCliEffortOptionsForProvider(client);
-    if (!options) {
-      throw new Error(`client "${client}" does not support cli.effort`);
-    }
-    throw new Error(`client "${client}" only supports cli.effort ${options.join(' / ')}`);
-  }
 
   return {
     command: patch?.command ?? baseCli.command,

@@ -71,6 +71,7 @@ export function TextField({
   onChange,
   inputMode,
   placeholder,
+  suggestions,
   required = false,
   tone = 'neutral',
 }: {
@@ -80,9 +81,13 @@ export function TextField({
   onChange: (value: string) => void;
   inputMode?: HTMLAttributes<HTMLInputElement>['inputMode'];
   placeholder?: string;
+  suggestions?: readonly string[];
   required?: boolean;
   tone?: 'neutral' | 'success';
 }) {
+  const listId = suggestions?.length
+    ? `input-suggestions-${(ariaLabel ?? label).replace(/\s+/g, '-').toLowerCase()}`
+    : undefined;
   const inputColors =
     tone === 'success'
       ? 'border-transparent bg-[var(--console-runtime-field-bg)] focus:border-[var(--console-runtime-label)] focus:ring-[var(--console-runtime-label)]/30'
@@ -96,8 +101,16 @@ export function TextField({
         className={`w-full rounded-[10px] border px-3 py-1.5 text-compact leading-5 text-cafe-black placeholder:text-cafe-muted outline-none transition focus:ring-1 ${inputColors}`}
         inputMode={inputMode}
         placeholder={placeholder}
+        list={listId}
         required={required}
       />
+      {listId ? (
+        <datalist id={listId}>
+          {suggestions?.map((suggestion) => (
+            <option key={suggestion} value={suggestion} />
+          ))}
+        </datalist>
+      ) : null}
     </FieldShell>
   );
 }

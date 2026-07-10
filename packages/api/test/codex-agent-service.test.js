@@ -12,7 +12,7 @@ import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-const { CodexAgentService, isGitRepositoryPath } = await import(
+const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
   '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
 );
 
@@ -1790,6 +1790,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       args.includes('model_reasoning_effort="xhigh"'),
       `expected xhigh fallback for unknown Codex cat, got argv: ${JSON.stringify(args)}`,
     );
+  });
+
+  test('passes a native Codex effort through as one safely serialized TOML value', () => {
+    assert.deepEqual(buildCodexReasoningArgs('ultra"native'), ['--config', 'model_reasoning_effort="ultra\\"native"']);
   });
 
   test('adds --skip-git-repo-check when workingDirectory is not a git repository', async () => {

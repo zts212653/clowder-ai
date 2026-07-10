@@ -936,20 +936,32 @@ describe('getCatEffort', () => {
     assert.ok(result, 'should return a truthy default effort');
   });
 
-  it('rejects stale cross-provider effort from historical data (defense-in-depth)', () => {
-    // Simulates a catalog written before the PATCH write-time cleanup was added:
-    // an openai cat still carrying anthropic-only effort 'max'.
+  it('preserves a Codex native effort that is outside the maintained preset vocabulary', () => {
+    // `max` is not a maintained Codex preset, but newer Codex CLIs may accept it
+    // natively. The runtime catalog must retain the operator's exact choice.
     const cfg = validConfig();
     cfg.breeds[0].variants[0].clientId = 'openai';
     cfg.breeds[0].variants[0].cli = {
       command: 'codex',
       outputFormat: 'json',
-      effort: 'max', // invalid for openai — only anthropic supports 'max'
+      effort: 'max',
     };
     const config = loadCatConfig(writeTempConfig(cfg));
 
-    // Should fall back to openai default ('xhigh'), not return 'max'
-    assert.equal(getCatEffort('opus', config), 'xhigh');
+    assert.equal(getCatEffort('opus', config), 'max');
+  });
+
+  it('preserves an unfamiliar native effort value for a Codex member', () => {
+    const cfg = validConfig();
+    cfg.breeds[0].variants[0].clientId = 'openai';
+    cfg.breeds[0].variants[0].cli = {
+      command: 'codex',
+      outputFormat: 'json',
+      effort: 'ultra',
+    };
+    const config = loadCatConfig(writeTempConfig(cfg));
+
+    assert.equal(getCatEffort('opus', config), 'ultra');
   });
 });
 describe('F32-b P4c: Sonnet variant in project config', () => {

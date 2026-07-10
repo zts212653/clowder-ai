@@ -24,6 +24,7 @@ import {
   getAcpWarning,
   getCliEffortOptionsForClient,
   type HubCatEditorFormState,
+  initialState,
   isAcpOnlyClient,
   showTransportSelector,
   splitCommandArgs,
@@ -154,6 +155,7 @@ describe('HubCatEditor', () => {
       ...emptyVoiceFields,
     };
 
+    const onChange = vi.fn();
     await act(async () => {
       root.render(
         React.createElement(AdvancedRuntimeSection, {
@@ -167,12 +169,13 @@ describe('HubCatEditor', () => {
           codexSettingsError: null,
           codexSettingsEditable: false,
           showCodexSettings: false,
-          onChange: vi.fn(),
+          onChange,
           onStrategyChange: vi.fn(),
           onCodexChange: vi.fn(),
         }),
       );
     });
+    return onChange;
   }
 
   it('shows extra CLI args editor for CLI clients and hides it for API-only clients', async () => {
@@ -336,6 +339,37 @@ describe('HubCatEditor', () => {
     expect(getCliEffortOptionsForClient('anthropic')).toEqual(['low', 'medium', 'high', 'max']);
     expect(getCliEffortOptionsForClient('openai')).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(getCliEffortOptionsForClient('opencode')).toBeNull();
+  });
+
+  it('hydrates a native effort value that is outside the maintained presets', () => {
+    const form = initialState({
+      id: 'runtime-codex-ultra',
+      displayName: 'Runtime Codex',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex-ultra'],
+      clientId: 'openai',
+      defaultModel: 'gpt-5.4',
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+      personality: '严谨',
+      cli: { effort: 'ultra' },
+    });
+
+    expect(form.cliEffort).toBe('ultra');
+  });
+
+  it('provides editable native effort input with client presets as suggestions', async () => {
+    const onChange = await renderAdvancedRuntimeSection('openai');
+    const input = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Effort"]');
+
+    expect(input.list).toBeTruthy();
+    const options = Array.from(document.getElementById(input.list?.id ?? '')?.querySelectorAll('option') ?? []).map(
+      (option) => (option as HTMLOptionElement).value,
+    );
+    expect(options).toEqual(['low', 'medium', 'high', 'xhigh']);
+
+    await changeField(input, 'ultra');
+    expect(onChange).toHaveBeenCalledWith({ cliEffort: 'ultra' });
   });
 
   it('buildCatPayload keeps structured cli.effort separate from raw cliConfigArgs', () => {

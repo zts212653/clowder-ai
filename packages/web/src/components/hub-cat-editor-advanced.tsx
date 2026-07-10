@@ -105,16 +105,20 @@ export function AdvancedRuntimeSection({
           tone="success"
         />
         {cliEffortOptions ? (
-          <SelectField
-            label="CLI Effort"
-            value={form.cliEffort}
-            options={[
-              { value: '', label: '默认（按 Client）' },
-              ...cliEffortOptions.map((value) => ({ value, label: value })),
-            ]}
-            onChange={(value) => onChange({ cliEffort: value as HubCatEditorFormState['cliEffort'] })}
-            tone="success"
-          />
+          <>
+            <TextField
+              label="CLI Effort"
+              value={form.cliEffort}
+              onChange={(value) => onChange({ cliEffort: value })}
+              placeholder="留空使用 Client 默认值；也可输入原生值，例如 ultra"
+              suggestions={cliEffortOptions}
+              tone="success"
+            />
+            <p className="-mt-1 text-label leading-4 text-cafe-muted">
+              维护 preset：{cliEffortOptions.join(' / ')}。也可直接输入所选 CLI 支持的原生值；CLI
+              会返回其自身的校验错误。
+            </p>
+          </>
         ) : null}
         {form.clientId !== 'antigravity' && form.clientId !== 'catagent' ? (
           <div className="space-y-1">

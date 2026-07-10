@@ -763,6 +763,22 @@
     "owner": "opus-48"
   },
   {
+    "id": "feature-f127-native-cli-effort",
+    "kind": "feature",
+    "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "structureSource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "遗留项" },
+    "bodySource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "在 Hub 成员的「高级运行时参数」里，CLI Effort 可选 preset，也可输入 Codex 等 CLI 的原生值（如 ultra）；保存后从下一次调用生效。",
+    "action": {
+      "type": "open_source",
+      "label": "查看成员配置说明",
+      "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" }
+    },
+    "owner": "codex"
+  },
+  {
     "id": "feature-f245-friction-eval-rollup",
     "kind": "feature",
     "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" },

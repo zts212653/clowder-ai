@@ -185,6 +185,11 @@ function toTomlString(value: string): string {
   return `"${escaped}"`;
 }
 
+/** Build the structured Codex reasoning-effort config argument. */
+export function buildCodexReasoningArgs(effortLevel: string): string[] {
+  return ['--config', `model_reasoning_effort=${toTomlString(effortLevel)}`];
+}
+
 /**
  * F203 Phase C — `--config` keys the system controls. User cliConfigArgs
  * cannot override these. Currently `developer_instructions` carries the
@@ -748,7 +753,7 @@ export class CodexAgentService implements AgentService {
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
     const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
-    const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
+    const reasoningArgs = buildCodexReasoningArgs(effortLevel);
     const sandboxConfigArgs = ['--config', `sandbox_mode=${toTomlString(sandboxMode)}`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
     const ctxConfig = getCatContextWindowConfig(this.catId as string);

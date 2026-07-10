@@ -36,10 +36,11 @@ export interface CliConfig {
   readonly outputFormat: string; // 'stream-json' | 'json' | 'plainText'
   readonly defaultArgs?: readonly string[];
   /**
-   * Reasoning effort level — each CLI maps to its own flag:
-   *   claude: --effort low|medium|high|max
-   *   codex:  --config model_reasoning_effort="low|medium|high|xhigh"
-   * Default: 'max' (claude) / 'xhigh' (codex)
+   * Reasoning effort value — each CLI adapter maps this value to its native
+   * flag. Maintained presets are offered by the Hub, while non-empty native
+   * values (for example a newly introduced Codex level) are retained and
+   * validated by the selected CLI at invocation time.
+   * Defaults: 'max' (claude) / 'xhigh' (codex).
    */
   readonly effort?: CliEffortValue;
   readonly contextWindow?: number;

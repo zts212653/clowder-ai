@@ -48,7 +48,7 @@ const cliConfigSchema = z.object({
   command: z.string().min(1),
   outputFormat: z.string().min(1),
   defaultArgs: z.array(z.string()).optional(),
-  effort: z.enum(['low', 'medium', 'high', 'max', 'xhigh']).optional(),
+  effort: z.string().trim().min(1).optional(),
   contextWindow: z.number().positive().int().optional(),
   autoCompactTokenLimit: z.number().positive().int().optional(),
 });
@@ -921,8 +921,8 @@ function buildCatIdToVariantIndex(config: CatCafeConfig): Map<string, CatVariant
   return index;
 }
 
-/** Effort level union across all CLI providers */
-export type CliEffortLevel = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+/** Canonical effort string resolved from the catalog or a client default. */
+export type CliEffortLevel = string;
 
 /**
  * Get CLI effort level for a cat from the resolved cat config.
@@ -945,17 +945,11 @@ export function getCatEffort(catId: string, config?: CatCafeConfig, fallbackProv
 
   const variant = _catIdToVariant.get(catId);
   if (variant?.cli?.effort) {
-    // Defense-in-depth: validate persisted effort against current provider.
-    // Stale cross-provider values (e.g. 'max' on openai) are cleaned at write
-    // time, but historical data may still contain them.
-    const provider = variant.clientId ?? fallbackProvider;
-    if (provider) {
-      const validated = normalizeCliEffortForProvider(provider, variant.cli.effort);
-      if (validated) return validated;
-      // Invalid for this provider — fall through to provider default below
-    } else {
-      return variant.cli.effort;
-    }
+    // Provider CLIs can introduce native effort values faster than our preset
+    // vocabulary evolves. Preserve a saved non-empty value exactly; the
+    // selected provider adapter owns native validation at invocation time.
+    const nativeValue = variant.cli.effort.trim();
+    if (nativeValue) return nativeValue;
   }
 
   // Client-aware defaults: use variant's clientId if found, otherwise fallbackProvider
