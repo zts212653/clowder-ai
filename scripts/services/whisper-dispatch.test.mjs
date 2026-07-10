@@ -123,6 +123,17 @@ describe('whisper-dispatch — static guard (script content)', () => {
       'setup.sh must not reference old asr-venv path (use whisper-install.sh instead)',
     );
   });
+
+  test('setup.sh model selection checks Python arch, not just hardware (#1061)', () => {
+    // setup.sh must gate MLX model (Qwen) on both hardware AND Python arch,
+    // mirroring install-template.sh. Hardware-only check causes a mismatch
+    // when Apple Silicon runs Rosetta (x86_64) Python.
+    const src = readFileSync(join(SERVICES_DIR, '../setup.sh'), 'utf8');
+    // Must probe Python interpreter architecture
+    assert.match(src, /platform\.machine/, 'model selection must check Python platform.machine()');
+    // The Qwen model must only be selected inside a Python arch guard
+    assert.match(src, /_py_arch.*arm64.*Qwen3-ASR/s, 'Qwen model must be guarded by Python arch check');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -162,6 +173,57 @@ describe('whisper-dispatch — install backend selection', () => {
   test('empty model -> mlx-whisper (fallback)', () => {
     const r = getInstallDispatch('');
     assert.equal(primaryDep(r.deps), 'mlx-whisper');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: setup.sh model selection must match installer (#863 #1061)
+// Verifies that the model written to .env matches what the installer expects.
+// The key invariant: setup selects Qwen IFF the installer will use MLX.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the PRODUCTION model selection block from setup.sh and evaluate
+ * with mocked system commands (uname, sysctl, python3). Returns the model
+ * that setup.sh would write to .env.
+ */
+function getSetupModelSelection(hwArch, pythonArch) {
+  const setupPath = join(SERVICES_DIR, '../setup.sh');
+  const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
+  // sed extracts from the model selection comment to just before INSTALL_MISSING check.
+  const sedExpr =
+    '/# Select platform-appropriate default model/,/if \\[ "\\$INSTALL_MISSING"/{' +
+    '/if \\[ "\\$INSTALL_MISSING"/d; p;}';
+  const script = [
+    `uname() { case "$1" in -s) echo "Darwin";; -m) echo "${hwArch}";; esac; }`,
+    `sysctl() { ${sysctlStub}; }`,
+    `python3() { echo "${pythonArch}"; }`,
+    `eval "$(sed -n '${sedExpr}' '${setupPath}')"`,
+    'echo "$ASR_DEFAULT_MODEL"',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+describe('setup.sh — model selection consistency (#863 #1061)', () => {
+  test('Apple Silicon + arm64 Python -> Qwen3-ASR (MLX path)', () => {
+    assert.equal(getSetupModelSelection('arm64', 'arm64'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
+  });
+
+  test('Apple Silicon + x86_64 Python (Rosetta) -> large-v3-turbo (no MLX)', () => {
+    // Key regression case: hardware is arm64 but Python is Rosetta x86_64.
+    // Installer won't use MLX → model must not be Qwen.
+    assert.equal(getSetupModelSelection('arm64', 'x86_64'), 'large-v3-turbo');
+  });
+
+  test('Apple Silicon + unknown Python -> large-v3-turbo (safe fallback)', () => {
+    assert.equal(getSetupModelSelection('arm64', 'unknown'), 'large-v3-turbo');
+  });
+
+  test('Intel Mac -> large-v3-turbo', () => {
+    assert.equal(getSetupModelSelection('x86_64', 'x86_64'), 'large-v3-turbo');
   });
 });
 

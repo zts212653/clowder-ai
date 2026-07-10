@@ -155,10 +155,18 @@ if [ "$HAS_PYTHON" = true ]; then
     echo "        - GPU optional but faster / GPU 可选但更快"
     echo ""
     # Select platform-appropriate default model (#863).
-    # Apple Silicon → Qwen3-ASR (MLX); all others → faster-whisper turbo.
-    # This value is written to .env AND passed to the installer so they match.
+    # MLX requires BOTH arm64 hardware AND arm64 Python interpreter (#1061).
+    # Mirrors the dual-signal check in install-template.sh (line 108-122).
+    # We query python3's platform.machine() directly rather than calling
+    # resolve_python_312 (which may download Python -- too heavy for the
+    # interactive feature-selection stage where the user hasn't said yes yet).
     if [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
-        ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
+        _py_arch="$(python3 -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+        if [ "$_py_arch" = "arm64" ] || [ "$_py_arch" = "aarch64" ]; then
+            ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
+        else
+            ASR_DEFAULT_MODEL="large-v3-turbo"
+        fi
     else
         ASR_DEFAULT_MODEL="large-v3-turbo"
     fi
