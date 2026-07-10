@@ -59,6 +59,11 @@ import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
+import {
+  createPerCatSignalProvider,
+  getMaxParallelToolCalls,
+  ParallelToolBudgetTracker,
+} from './parallel-tool-budget.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -115,7 +120,6 @@ export async function* routeParallel(
     contentBlocks,
     uploadDir,
     signal,
-    signalForCat,
     promptTags,
     contextHistory,
     history,
@@ -127,6 +131,10 @@ export async function* routeParallel(
   // P2-3 fix: also consider default MCP server path (ClaudeAgentService has fallback resolution)
   const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
+  // F203 Phase E: per-cat parallel tool budget — stops runaway Explore loops.
+  const maxParallelToolCalls = getMaxParallelToolCalls();
+  const toolBudget = new ParallelToolBudgetTracker(maxParallelToolCalls);
+  const catSignalProvider = createPerCatSignalProvider(targetCats, signal, options.signalForCat);
 
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
@@ -384,7 +392,7 @@ export async function* routeParallel(
       // Placed after bootstrapCtx so per-turn trace covers ALL route-level
       // injected system/control content (invocation + mode prompt + bootstrap + MCP).
       // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
-      const preTraceSignal = signalForCat?.(catId) ?? signal;
+      const preTraceSignal = catSignalProvider.signalForCat(catId);
       try {
         const traceStore = getTraceStore();
         if (traceStore && !preTraceSignal?.aborted) {
@@ -553,7 +561,7 @@ export async function* routeParallel(
 
       // F-parallel-cancel: each concurrent cat listens to ITS OWN slot signal, not the
       // shared primaryController.signal — canceling one cat must not abort its siblings.
-      const catSignal = signalForCat?.(catId) ?? signal;
+      const catSignal = catSignalProvider.signalForCat(catId);
       // F-parallel-cancel (cloud P2): skip invoke for a cat already cancelled BEFORE this route
       // started it (tombstone aborted signal — e.g. user clicked Stop on this cat pre-invoke).
       // Otherwise invokeSingleCat turns the aborted iterator into error+done, broadcasting /
@@ -750,7 +758,7 @@ export async function* routeParallel(
       if (
         effectiveMsg.type === 'error' &&
         effectiveMsg.catId &&
-        (signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted
+        catSignalProvider.signalForCat(effectiveMsg.catId)?.aborted
       ) {
         continue;
       }
@@ -759,7 +767,7 @@ export async function* routeParallel(
         // #267: errors before abort are real provider failures; errors after abort are cleanup
         // F-parallel-cancel: judge abort with THIS cat's own signal, not the shared one —
         // else canceling one concurrent cat mislabels a sibling's real error as cleanup.
-        if (!(signalForCat?.(effectiveMsg.catId) ?? signal)?.aborted) catHadProviderError.add(effectiveMsg.catId);
+        if (!catSignalProvider.signalForCat(effectiveMsg.catId)?.aborted) catHadProviderError.add(effectiveMsg.catId);
         if (effectiveMsg.error) {
           const prev = catErrorText.get(effectiveMsg.catId) ?? '';
           catErrorText.set(effectiveMsg.catId, `${prev}${prev ? '\n' : ''}${effectiveMsg.error}`);
@@ -795,6 +803,33 @@ export async function* routeParallel(
           effectiveMsg.toolInput as Record<string, unknown> | undefined,
         );
       }
+
+      // F203 Phase E: enforce per-cat parallel tool budget to stop runaway loops.
+      if (effectiveMsg.type === 'tool_use' && effectiveMsg.catId) {
+        if (toolBudget.recordToolUse(effectiveMsg.catId as string)) {
+          const reason = `Parallel tool call budget exceeded (${maxParallelToolCalls})`;
+          log.warn(
+            {
+              catId: effectiveMsg.catId,
+              threadId,
+              toolCount: toolBudget.getCount(effectiveMsg.catId as string),
+            },
+            reason,
+          );
+          catSignalProvider.abortCat(effectiveMsg.catId, reason);
+          yield {
+            type: 'system_info' as AgentMessageType,
+            catId: effectiveMsg.catId,
+            content: JSON.stringify({
+              type: 'tool_call_budget_exceeded',
+              limit: maxParallelToolCalls,
+              toolCount: toolBudget.getCount(effectiveMsg.catId as string),
+            }),
+            timestamp: Date.now(),
+          } as AgentMessage;
+        }
+      }
+
       // F188 Phase F AC-F10: append-only tool event log (砚砚 三审 P1 wiring)
       if (effectiveMsg.type === 'tool_use' && deps.toolEventLog && effectiveMsg.catId) {
         const msg = effectiveMsg as {

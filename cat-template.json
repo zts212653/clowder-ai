@@ -537,7 +537,10 @@
       "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
       "teamStrengths": "审美、前端设计风格、打破常规",
       "caution": "禁止写代码！幻觉多，不遵守 SOP",
-      "restrictions": ["禁止写代码"],
+      "restrictions": [
+        "禁止写代码",
+        "整体架构/项目概览类问题禁止调用 Agent(Explore) 子代理或进行长篇 Bash/Read 探索；技术实现细节请 @布偶猫 或 @缅因猫"
+      ],
       "features": {
         "sessionChain": true
       },
