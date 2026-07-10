@@ -121,6 +121,12 @@ describe('recommendation matrix — macOS arm64', () => {
     assert.equal(rec.models[0]?.name, 'edge-tts');
     assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
     assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
+    // Hint examples must be dispatch-valid install tokens, not synthesis-time voice names.
+    // tts-server.sh only recognizes 'edge-tts', 'piper', 'zh_CN-*' etc. as install tokens.
+    assert.ok(
+      !rec.customModelHint.example.includes('Neural'),
+      'hint must not show edge-tts voice names (zh-CN-*Neural) as install-model examples',
+    );
   });
 
   test('embedding-model + x86-emulated Python → sentence-transformers, not MLX (#1061)', () => {

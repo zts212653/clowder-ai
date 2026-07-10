@@ -272,11 +272,12 @@ services:
         - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
         - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
       customModelHint:
-        requirement: 'edge-tts voice 名（云端推理，无本地模型下载）'
-        example: 'zh-CN-XiaoxiaoNeural、en-US-AvaMultilingualNeural'
-        unsupported: 'HuggingFace 模型 ID、MLX 张量格式（需要 arm64 Python）'
+        requirement: 'edge-tts（安装时填 provider token；voice 在合成请求中选）或 piper voice ID（离线）'
+        example: 'edge-tts、zh_CN-huayan-medium'
+        unsupported: 'MLX 张量格式（需要 arm64 Python）、edge-tts voice 名如 zh-CN-XiaoxiaoNeural（那是请求参数，不是安装 token）'
         links:
           - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
+          - { label: 'piper voice 全列表', url: 'https://github.com/rhasspy/piper/blob/master/VOICES.md' }
 
     - match: { os: darwin, arch: x64 }
       models:
