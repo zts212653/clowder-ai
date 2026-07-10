@@ -95,11 +95,17 @@ describe('recommendation matrix — macOS arm64', () => {
     assert.equal(rec.models[0]?.name, 'large-v3-turbo', 'should default to faster-whisper turbo');
   });
 
-  test('whisper-stt + missing Python → faster-whisper fallback (#1061)', () => {
+  test('whisper-stt + missing Python on arm64 → MLX models (bootstrap installs arm64 Python)', () => {
     const missingProfile = makeProfile({ pythonArch: 'missing' });
     const rec = buildRecommendation('whisper-stt', missingProfile);
     assert.equal(rec.unsupported, undefined);
-    assert.ok(!rec.models.some((m) => m.name.includes('mlx-community')));
+    // On native Apple Silicon, python-build-standalone bootstraps arm64 Python,
+    // so the installer takes the MLX path. Must recommend MLX models, not
+    // faster-whisper short names which would fail with snapshot_download.
+    assert.ok(
+      rec.models.some((m) => m.name.includes('mlx-community')),
+      'missing Python on arm64 must get MLX models (bootstrap provides arm64 Python)',
+    );
   });
 });
 

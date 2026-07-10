@@ -39,7 +39,11 @@ function migrateServiceConfig(data: ServiceConfigMap): boolean {
   for (const [oldId, newId] of Object.entries(LEGACY_SERVICE_ALIASES)) {
     if (data[oldId] != null) {
       if (data[newId] == null) {
-        data[newId] = data[oldId];
+        // Preserve enabled/model/port but force reinstall — the old
+        // service used a different venv path (e.g. asr-venv vs whisper-venv)
+        // so the installed state is stale (#863).
+        const { installed: _, ...migrated } = data[oldId];
+        data[newId] = migrated;
       }
       delete data[oldId];
       changed = true;

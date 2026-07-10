@@ -52,11 +52,15 @@ describe('legacy service config migration (#863)', () => {
       assert.ok(config, 'whisper-stt config should exist after migration');
       assert.equal(config.enabled, true);
       assert.equal(config.selectedModel, 'mlx-community/Qwen3-ASR-1.7B-8bit');
+      // installed/installStatus must be stripped — old venv (asr-venv)
+      // does not match new service (whisper-venv), forcing reinstall.
+      assert.equal(config.installed, undefined, 'installed must be stripped during migration');
 
       // Old key should be removed from disk
       const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
       assert.equal(persisted['qwen3-asr'], undefined, 'old qwen3-asr key should be removed');
       assert.ok(persisted['whisper-stt'], 'whisper-stt key should exist on disk');
+      assert.equal(persisted['whisper-stt'].installed, undefined, 'installed must not persist');
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

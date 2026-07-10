@@ -48,8 +48,10 @@ services:
   # Whisper STT (语音转写)
   # ------------------------------------------------------------
   whisper-stt:
-    # Apple Silicon with native arm64 Python -- MLX models available.
-    - match: { os: darwin, arch: arm64, pythonArch: native }
+    # Apple Silicon with native arm64 Python (or no Python yet — the
+    # installer bootstraps a native arm64 Python via python-build-standalone,
+    # so by install time RESOLVED_PYTHON_ARCH will be arm64).
+    - match: { os: darwin, arch: arm64, pythonArch: [native, missing] }
       models:
         - name: mlx-community/Qwen3-ASR-1.7B-8bit
           size: ~2.5GB
@@ -88,7 +90,9 @@ services:
     # Apple Silicon with x86_64/Rosetta Python -- MLX unavailable, fall back
     # to faster-whisper (same as Intel Mac). The installer also gates on
     # RESOLVED_PYTHON_ARCH so models and deps stay consistent (#1061).
-    - match: { os: darwin, arch: arm64, pythonArch: [x86-emulated, missing] }
+    # Note: pythonArch=missing is NOT here — on native Apple Silicon the
+    # bootstrapper installs arm64 Python, so missing → MLX path at install time.
+    - match: { os: darwin, arch: arm64, pythonArch: x86-emulated }
       models:
         - name: large-v3-turbo
           size: ~1.5GB
