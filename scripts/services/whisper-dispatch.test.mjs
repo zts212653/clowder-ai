@@ -20,20 +20,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVICES_DIR = __dirname;
 
 // ---------------------------------------------------------------------------
-// Helper: run the install-script dispatch in an isolated bash subshell.
-// We source only the top of whisper-install.sh (up to "source install-template")
-// to capture SERVICE_LABEL and PIP_DEPS_ARM64 without triggering the actual
+// Helper: extract the PRODUCTION dispatch logic from whisper-install.sh and
+// evaluate it with a controlled WHISPER_MODEL. We use sed to extract lines
+// from the model detection block up to the "source install-template" line,
+// so we get the real SERVICE_LABEL / PIP_DEPS_* without triggering the
 // install pipeline.
 // ---------------------------------------------------------------------------
 function getInstallDispatch(model) {
+  const installPath = join(SERVICES_DIR, 'whisper-install.sh');
+  // Extract lines 12-30 (variable declarations + model dispatch) from the
+  // production script, stopping before the `source` and `install_service_main`
+  // lines. This runs the REAL dispatch logic, not a hand-written copy.
+  // Extract from MODEL_ENV_VAR= through PIP_DEPS_OTHER= / MODEL_LOADER_OTHER=
+  // (stops before `source install-template.sh`). Pattern-anchored, not line-numbered.
   const script = [
-    `WHISPER_MODEL="${model}"`,
-    '_model="${WHISPER_MODEL:-}"',
-    'if [[ "$_model" == *"Qwen3-ASR"* ]]; then',
-    '  echo "label=Qwen3 ASR"; echo "deps=mlx-audio"',
-    'else',
-    '  echo "label=Whisper ASR"; echo "deps=mlx-whisper"',
-    'fi',
+    `export WHISPER_MODEL="${model}"`,
+    `eval "$(sed -n '/^MODEL_ENV_VAR=/,/^MODEL_LOADER_OTHER=/p' '${installPath}')"`,
+    'echo "label=$SERVICE_LABEL"',
+    'echo "deps=$PIP_DEPS_ARM64"',
   ].join('\n');
   const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
   const lines = out.split('\n');
@@ -127,31 +131,37 @@ describe('whisper-dispatch — static guard (script content)', () => {
 // tests in services-lifecycle-route.test.js.)
 // ---------------------------------------------------------------------------
 describe('whisper-dispatch — install backend selection', () => {
+  // Production PIP_DEPS_ARM64 contains the full pip install list
+  // (e.g. "mlx-audio fastapi uvicorn ..."). We verify the primary package
+  // (first token) to test model→backend dispatch without coupling to the
+  // exact set of shared deps that may change independently.
+  const primaryDep = (deps) => deps?.split(' ')[0];
+
   test('Qwen3-ASR-1.7B-8bit -> mlx-audio + Qwen3 ASR label', () => {
     const r = getInstallDispatch('mlx-community/Qwen3-ASR-1.7B-8bit');
-    assert.equal(r.deps, 'mlx-audio');
+    assert.equal(primaryDep(r.deps), 'mlx-audio');
     assert.equal(r.label, 'Qwen3 ASR');
   });
 
   test('Qwen3-ASR-1.7B-4bit -> mlx-audio', () => {
     const r = getInstallDispatch('mlx-community/Qwen3-ASR-1.7B-4bit');
-    assert.equal(r.deps, 'mlx-audio');
+    assert.equal(primaryDep(r.deps), 'mlx-audio');
   });
 
   test('whisper-large-v3-turbo -> mlx-whisper + Whisper ASR label', () => {
     const r = getInstallDispatch('mlx-community/whisper-large-v3-turbo');
-    assert.equal(r.deps, 'mlx-whisper');
+    assert.equal(primaryDep(r.deps), 'mlx-whisper');
     assert.equal(r.label, 'Whisper ASR');
   });
 
   test('whisper-small-mlx -> mlx-whisper', () => {
     const r = getInstallDispatch('mlx-community/whisper-small-mlx');
-    assert.equal(r.deps, 'mlx-whisper');
+    assert.equal(primaryDep(r.deps), 'mlx-whisper');
   });
 
   test('empty model -> mlx-whisper (fallback)', () => {
     const r = getInstallDispatch('');
-    assert.equal(r.deps, 'mlx-whisper');
+    assert.equal(primaryDep(r.deps), 'mlx-whisper');
   });
 });
 
@@ -161,24 +171,33 @@ describe('whisper-dispatch — install backend selection', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract and run the platform detection logic from install-template.sh
- * with mock values for platform, hw_arch, and python_arch.
+ * Run the PRODUCTION platform detection from install-template.sh by
+ * extracting the detection block with sed and executing it with mocked
+ * system commands. Tests the real script content, not a hand-written copy.
  */
 function getPlatformDetection(platform, hwArch, pythonArch) {
-  // Reproduce the is_darwin_arm64 logic from install-template.sh
+  const templatePath = join(SERVICES_DIR, 'install-template.sh');
+  // Override uname/sysctl so the extracted production code sees controlled
+  // values. sysctl returns '1' iff hwArch=arm64 (simulates Apple Silicon).
+  const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
+  // Extract the detection block from production install-template.sh with sed:
+  //   - Range: from `local platform hw_arch` to `# 4.` (next section header)
+  //   - Delete the section header line and pure declarations (no `=`)
+  //   - Strip `local ` prefix from assignment lines (local is function-scoped)
+  // Single-line sed avoids BSD sed treating multi-arg strings as filenames.
+  const sedExpr =
+    '/^  local platform hw_arch python_arch/,/^  # 4\\./{' + '/^  # 4\\./d; /^  local [^=]*$/d; s/^  local //; p;}';
   const script = [
-    `platform="${platform}"`,
-    `hw_arch="${hwArch}"`,
-    `python_arch="${pythonArch}"`,
-    'is_darwin_arm64=0',
-    'if [ "$platform" = "Darwin" ] && [ "$hw_arch" = "arm64" ]; then',
-    '  if [ "$python_arch" = "arm64" ] || [ "$python_arch" = "aarch64" ]; then',
-    '    is_darwin_arm64=1',
-    '  fi',
-    'fi',
+    `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
+    `sysctl() { ${sysctlStub}; }`,
+    `export RESOLVED_PYTHON_ARCH="${pythonArch}"`,
+    `eval "$(sed -n '${sedExpr}' '${templatePath}')"`,
     'echo "$is_darwin_arm64"',
   ].join('\n');
-  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
 }
 
 describe('install-template — platform detection regression (#1061)', () => {
@@ -204,5 +223,66 @@ describe('install-template — platform detection regression (#1061)', () => {
 
   test('Linux + x86_64 hw + x86_64 Python -> is_darwin_arm64=0', () => {
     assert.equal(getPlatformDetection('Linux', 'x86_64', 'x86_64'), '0');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: python-resolve.sh bootstrap target triple (#1061)
+// Sources the PRODUCTION _pbs_target_triple() with mocked system commands.
+// ---------------------------------------------------------------------------
+
+/**
+ * Source python-resolve.sh and call _pbs_target_triple() with mocked
+ * uname/sysctl. Tests the real function, not a hand-written copy.
+ */
+function getBootstrapTriple(os, unameM, sysctlArm64) {
+  const resolvePath = join(SERVICES_DIR, 'python-resolve.sh');
+  const sysctlBody = sysctlArm64 === '1' ? 'echo 1' : sysctlArm64 === 'fail' ? 'return 1' : 'echo 0';
+  const script = [
+    // Mock system commands before sourcing
+    `uname() { case "$1" in -s) echo "${os}";; -m) echo "${unameM}";; esac; }`,
+    `sysctl() { ${sysctlBody}; }`,
+    'export -f uname sysctl',
+    // Source production code (only defines functions, no side effects)
+    `source "${resolvePath}"`,
+    // Call the real function
+    '_pbs_target_triple',
+  ].join('\n');
+  try {
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return 'unsupported';
+  }
+}
+
+describe('python-resolve — bootstrap target triple regression (#1061)', () => {
+  test('Darwin + sysctl arm64=1 -> aarch64-apple-darwin (normal Apple Silicon)', () => {
+    assert.equal(getBootstrapTriple('Darwin', 'arm64', '1'), 'aarch64-apple-darwin');
+  });
+
+  test('Darwin + Rosetta (uname x86_64) + sysctl arm64=1 -> aarch64-apple-darwin', () => {
+    // Key Rosetta regression: uname -m says x86_64 but sysctl detects arm64 hardware.
+    // Bootstrap must install arm64 Python, not x86_64.
+    assert.equal(getBootstrapTriple('Darwin', 'x86_64', '1'), 'aarch64-apple-darwin');
+  });
+
+  test('Darwin + native arm64 + sysctl failure -> aarch64-apple-darwin (fallback)', () => {
+    // sysctl fails but uname -m=arm64 is a reliable one-direction signal.
+    assert.equal(getBootstrapTriple('Darwin', 'arm64', 'fail'), 'aarch64-apple-darwin');
+  });
+
+  test('Darwin + Intel (uname x86_64) + sysctl absent -> x86_64-apple-darwin', () => {
+    assert.equal(getBootstrapTriple('Darwin', 'x86_64', '0'), 'x86_64-apple-darwin');
+  });
+
+  test('Linux + x86_64 -> x86_64-unknown-linux-gnu', () => {
+    assert.equal(getBootstrapTriple('Linux', 'x86_64', 'fail'), 'x86_64-unknown-linux-gnu');
+  });
+
+  test('Linux + aarch64 -> aarch64-unknown-linux-gnu', () => {
+    assert.equal(getBootstrapTriple('Linux', 'aarch64', 'fail'), 'aarch64-unknown-linux-gnu');
   });
 });

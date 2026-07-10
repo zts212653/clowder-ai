@@ -212,6 +212,11 @@ _pbs_target_triple() {
       # Matches the TypeScript environment-detector sysctl approach.
       if sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
         echo "aarch64-apple-darwin"
+      elif [ "$(uname -m)" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then
+        # One-direction fallback: uname -m=arm64 is reliable (an x64
+        # process can't report arm64). Covers sysctl failure on native
+        # Apple Silicon. Mirrors TypeScript resolveArch P2-2 fix.
+        echo "aarch64-apple-darwin"
       else
         echo "x86_64-apple-darwin"
       fi

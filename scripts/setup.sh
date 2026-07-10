@@ -154,6 +154,14 @@ if [ "$HAS_PYTHON" = true ]; then
     echo "        - 4GB+ RAM recommended / 建议 4GB+ 内存"
     echo "        - GPU optional but faster / GPU 可选但更快"
     echo ""
+    # Select platform-appropriate default model (#863).
+    # Apple Silicon → Qwen3-ASR (MLX); all others → faster-whisper turbo.
+    # This value is written to .env AND passed to the installer so they match.
+    if [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+        ASR_DEFAULT_MODEL="mlx-community/Qwen3-ASR-1.7B-8bit"
+    else
+        ASR_DEFAULT_MODEL="large-v3-turbo"
+    fi
     if [ "$INSTALL_MISSING" = true ]; then
         ENABLE_ASR=true
         echo -e "      ${GREEN}✓${NC} Voice input enabled (--install-missing)"
@@ -317,6 +325,7 @@ if [ "$ENABLE_ASR" = true ]; then
 
 # ── Voice Input (ASR) 语音输入 ───────────────────────────────
 ASR_ENABLED=1
+WHISPER_MODEL=${ASR_DEFAULT_MODEL}
 WHISPER_URL=http://localhost:9876
 NEXT_PUBLIC_WHISPER_URL=http://localhost:9876
 ENVEOF
@@ -389,10 +398,12 @@ install_sidecar_venvs() {
     # ASR venv — unified whisper-stt service (#863).
     # Delegates to whisper-install.sh so deps, venv path, and model preload
     # all go through the same pipeline as the UI-triggered install.
+    # Uses ASR_DEFAULT_MODEL (set during feature selection) so the installer
+    # and the generated .env use the exact same model value.
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     echo "  Installing ASR service (whisper-stt) via unified installer..."
-    WHISPER_MODEL="${WHISPER_MODEL:-mlx-community/Qwen3-ASR-1.7B-8bit}" \
+    WHISPER_MODEL="${ASR_DEFAULT_MODEL}" \
       bash "$script_dir/services/whisper-install.sh"
 
     # TTS venv
