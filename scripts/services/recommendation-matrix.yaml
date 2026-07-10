@@ -246,7 +246,7 @@ services:
   # MLX TTS (语音合成)
   # ------------------------------------------------------------
   mlx-tts:
-    - match: { os: darwin, arch: arm64 }
+    - match: { os: darwin, arch: arm64, pythonArch: [native, missing] }
       models:
         - name: mlx-community/Kokoro-82M-bf16
           size: ~160MB
@@ -259,6 +259,18 @@ services:
         unsupported: 'edge-tts voice 名（本环境跑本地 MLX 推理，不调云端）'
         links:
           - { label: 'mlx-community / TTS 模型', url: 'https://huggingface.co/mlx-community?search_models=tts' }
+
+    # Apple Silicon with x86_64/Rosetta Python -- MLX unavailable (#1061).
+    - match: { os: darwin, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: edge-tts
+          size: ~20MB
+          description: 微软云端语音，高质量、需联网（推荐）
+          requirements: { ramGb: 1, diskGb: 0.1 }
+          performance: 取决于网络
+      notes:
+        - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
+        - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
 
     - match: { os: darwin, arch: x64 }
       models:
@@ -390,7 +402,7 @@ services:
   # Embedding (语义向量)
   # ------------------------------------------------------------
   embedding-model:
-    - match: { os: darwin, arch: arm64 }
+    - match: { os: darwin, arch: arm64, pythonArch: [native, missing] }
       models:
         - name: mlx-community/Qwen3-Embedding-0.6B-4bit-DWQ
           size: ~400MB
@@ -413,6 +425,23 @@ services:
         unsupported: '生成式 LLM（CausalLM）模型、纯解码器模型'
         links:
           - { label: 'mlx-community / embedding 模型', url: 'https://huggingface.co/mlx-community?search_models=embedding' }
+
+    # Apple Silicon with x86_64/Rosetta Python -- MLX unavailable (#1061).
+    - match: { os: darwin, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: jinaai/jina-embeddings-v2-base-zh
+          size: ~640MB
+          description: Jina 中英双语向量 base（768 dim，sentence-transformers，推荐）
+          requirements: { ramGb: 2, diskGb: 1 }
+          performance: CPU 实时
+        - name: intfloat/multilingual-e5-large
+          size: ~2.3GB
+          description: 多语言向量 large（1024 dim，更高质量）
+          requirements: { ramGb: 4, diskGb: 3 }
+          performance: CPU 偏慢
+      notes:
+        - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
+        - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
 
     # Verified against fastembed 0.8 TextEmbedding.list_supported_models():
     # jinaai/jina-embeddings-v2-base-zh is in the catalog (768 dim, 640MB) and
@@ -539,7 +568,7 @@ services:
   # LLM Postprocess (转写纠正)
   # ------------------------------------------------------------
   llm-postprocess:
-    - match: { os: darwin, arch: arm64 }
+    - match: { os: darwin, arch: arm64, pythonArch: [native, missing] }
       models:
         - name: mlx-community/Qwen3.5-35B-A3B-4bit
           size: ~20GB
@@ -562,6 +591,22 @@ services:
         unsupported: 'Embedding 类模型（BERT-family encoder）、纯 transformers 格式'
         links:
           - { label: 'mlx-community / text-generation 模型', url: 'https://huggingface.co/mlx-community?pipeline_tag=text-generation&sort=likes' }
+
+    # Apple Silicon with x86_64/Rosetta Python -- MLX unavailable (#1061).
+    - match: { os: darwin, arch: arm64, pythonArch: x86-emulated }
+      models:
+        - name: Qwen/Qwen2.5-3B-Instruct
+          size: ~6GB
+          description: transformers 后端，CPU/GPU 都能跑（推荐）
+          requirements: { ramGb: 8, diskGb: 7 }
+          performance: CPU 偏慢，GPU 流畅
+        - name: Qwen/Qwen2.5-7B-Instruct
+          size: ~14GB
+          description: 更高质量，GPU 推荐
+          requirements: { ramGb: 16, diskGb: 15, gpu: recommended }
+      notes:
+        - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
+        - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
 
     - match: { os: darwin, arch: x64 }
       models:

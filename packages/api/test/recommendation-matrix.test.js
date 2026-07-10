@@ -107,6 +107,53 @@ describe('recommendation matrix — macOS arm64', () => {
       'missing Python on arm64 must get MLX models (bootstrap provides arm64 Python)',
     );
   });
+
+  // #1061 regression guard: resolveArch() now reports arm64 under Rosetta,
+  // so ALL darwin/arm64 services must gate MLX on pythonArch, not just whisper-stt.
+  test('mlx-tts + x86-emulated Python → edge-tts, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('mlx-tts', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'edge-tts');
+  });
+
+  test('embedding-model + x86-emulated Python → sentence-transformers, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('embedding-model', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'jinaai/jina-embeddings-v2-base-zh');
+  });
+
+  test('llm-postprocess + x86-emulated Python → transformers, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('llm-postprocess', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'Qwen/Qwen2.5-3B-Instruct');
+  });
+
+  test('missing Python on arm64 → MLX path for all services (bootstrap)', () => {
+    const missingProfile = makeProfile({ pythonArch: 'missing' });
+    for (const svc of ['mlx-tts', 'embedding-model', 'llm-postprocess']) {
+      const rec = buildRecommendation(svc, missingProfile);
+      assert.equal(rec.unsupported, undefined, `${svc} should not be unsupported`);
+      assert.ok(
+        rec.models.some((m) => m.name.includes('mlx-community')),
+        `${svc}: missing Python on arm64 must get MLX models (bootstrap provides arm64 Python)`,
+      );
+    }
+  });
 });
 
 describe('recommendation matrix — Windows ARM64', () => {
