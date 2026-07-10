@@ -48,7 +48,8 @@ services:
   # Whisper STT (语音转写)
   # ------------------------------------------------------------
   whisper-stt:
-    - match: { os: darwin, arch: arm64 }
+    # Apple Silicon with native arm64 Python -- MLX models available.
+    - match: { os: darwin, arch: arm64, pythonArch: native }
       models:
         - name: mlx-community/Qwen3-ASR-1.7B-8bit
           size: ~2.5GB
@@ -83,6 +84,36 @@ services:
         links:
           - { label: 'mlx-community / Qwen3-ASR', url: 'https://huggingface.co/mlx-community?search_models=Qwen3-ASR' }
           - { label: 'mlx-community / whisper 列表', url: 'https://huggingface.co/mlx-community?search_models=whisper' }
+
+    # Apple Silicon with x86_64/Rosetta Python -- MLX unavailable, fall back
+    # to faster-whisper (same as Intel Mac). The installer also gates on
+    # RESOLVED_PYTHON_ARCH so models and deps stay consistent (#1061).
+    - match: { os: darwin, arch: arm64, pythonArch: [x86-emulated, missing] }
+      models:
+        - name: large-v3-turbo
+          size: ~1.5GB
+          description: faster-whisper turbo（CTranslate2，推荐）
+          requirements: { ramGb: 4, diskGb: 2 }
+          performance: CPU 实时 2-3x
+        - name: large-v3
+          size: ~3GB
+          description: 最高质量
+          requirements: { ramGb: 6, diskGb: 3.5 }
+        - name: base
+          size: ~150MB
+          description: 轻量版，低配机器可用
+          requirements: { ramGb: 2, diskGb: 0.5 }
+          performance: CPU 实时 1-2x
+      notes:
+        - Python 解释器不是 arm64（Rosetta x86_64 或未安装），MLX 不可用
+        - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
+      customModelHint:
+        requirement: 'faster-whisper 内置短名 或 HuggingFace 上 CTranslate2 库标注的 whisper 模型'
+        example: 'base、large-v3-turbo、distil-large-v3、Systran/faster-whisper-large-v3'
+        unsupported: 'MLX 张量格式（mlx-community/whisper-*）— 需要 arm64 Python'
+        links:
+          - { label: 'faster-whisper 内置模型列表', url: 'https://github.com/SYSTRAN/faster-whisper#available-models' }
+          - { label: 'HF CTranslate2 whisper 模型', url: 'https://huggingface.co/models?library=ctranslate2&search=whisper' }
 
     - match: { os: darwin, arch: x64 }
       models:

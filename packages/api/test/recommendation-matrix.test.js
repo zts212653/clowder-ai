@@ -81,6 +81,26 @@ describe('recommendation matrix — macOS arm64', () => {
     const rec = buildRecommendation('mlx-tts', profile);
     assert.match(rec.models[0]?.name ?? '', /Kokoro/);
   });
+
+  test('whisper-stt + x86-emulated Python → faster-whisper, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('whisper-stt', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(rec.models.length >= 2, 'should have faster-whisper models');
+    // Must NOT recommend MLX models on x86-emulated Python
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'large-v3-turbo', 'should default to faster-whisper turbo');
+  });
+
+  test('whisper-stt + missing Python → faster-whisper fallback (#1061)', () => {
+    const missingProfile = makeProfile({ pythonArch: 'missing' });
+    const rec = buildRecommendation('whisper-stt', missingProfile);
+    assert.equal(rec.unsupported, undefined);
+    assert.ok(!rec.models.some((m) => m.name.includes('mlx-community')));
+  });
 });
 
 describe('recommendation matrix — Windows ARM64', () => {
