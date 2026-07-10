@@ -298,8 +298,9 @@ async function assertWithinWriteCap(
   let size: number;
   try {
     const st = await lstat(resolvedPath);
-    // Non-regular files (symlink/dir) are rejected downstream by existingFileHash /
-    // secure-path resolution; only regular files get read for hashing.
+    // Non-regular files (symlink/dir): write_file rejects symlinks downstream
+    // via existingFileHash; patch_file rejects them inline before readFile.
+    // Only regular files get read for hashing.
     if (!st.isFile()) return;
     size = st.size;
   } catch (err) {
@@ -411,6 +412,21 @@ async function executePatchFile(
   }
 
   await assertWithinWriteCap(resolved, relPath, 'patch_file', options);
+
+  // patch_file does not go through existingFileHash (which rejects symlinks
+  // for write_file); reject explicitly to prevent the byte-cap bypass and
+  // symlink replacement that writeAtomicUtf8's temp+rename would cause.
+  try {
+    const pathStat = await lstat(resolved);
+    if (pathStat.isSymbolicLink()) {
+      await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'patch_file refuses to follow symlinks');
+    }
+  } catch (err) {
+    // ENOENT means the file doesn't exist; readFile below will throw a clear
+    // error. Everything else (including rejectWithAudit's throw) must propagate.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+
   const before = await readFile(resolved, 'utf-8');
   const hashBefore = hashContent(before);
   if (!hashBefore.startsWith(expectedHash)) {

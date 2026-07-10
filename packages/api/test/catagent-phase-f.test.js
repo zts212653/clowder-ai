@@ -317,6 +317,32 @@ describe('F1: create-safe write and patch tools', () => {
       assert.equal(statSync(scriptPath).mode & 0o777, 0o750, 'mode bits must survive the overwrite');
     },
   );
+
+  test('patch_file rejects symlink targets', { skip: process.platform === 'win32' }, async () => {
+    const audit = [];
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1', audit: (event) => audit.push(event) });
+    const patch = findTool(tools, 'patch_file');
+
+    // Create a regular file and a symlink pointing to it.
+    const realFile = join(tmpDir, 'real-target.txt');
+    const linkPath = join(tmpDir, 'link-to-real.txt');
+    writeFileSync(realFile, 'hello world');
+    if (existsSync(linkPath)) rmSync(linkPath);
+    symlinkSync(realFile, linkPath);
+
+    await assert.rejects(
+      () =>
+        patch.execute({
+          path: 'link-to-real.txt',
+          old_text: 'hello',
+          new_text: 'goodbye',
+          expected_hash: sha256('hello world').slice(0, 12),
+        }),
+      /symlink/i,
+    );
+    assert.equal(audit.at(-1).outcome, 'rejected');
+    assert.equal(audit.at(-1).tool, 'patch_file');
+  });
 });
 
 describe('F2: run_command policy', () => {
