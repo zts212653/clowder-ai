@@ -110,6 +110,19 @@ describe('whisper-dispatch — static guard (script content)', () => {
     assert.doesNotMatch(src, /qwen3-asr-api\.py/, 'must NOT dispatch to separate qwen3 script');
   });
 
+  test('whisper-server.sh checks venv arch before activating (#1061)', () => {
+    // State transition gap: env bridge -> installed:true -> startup reconciler
+    // -> server start bypasses installer entirely. Server must independently
+    // verify venv Python arch against the canonical resolver to catch stale
+    // Rosetta venvs before activating wrong-arch MLX runtime.
+    const src = readFileSync(join(SERVICES_DIR, 'whisper-server.sh'), 'utf8');
+    assert.match(src, /python-resolve\.sh/, 'must source canonical resolver');
+    assert.match(src, /_try_system_pythons/, 'must use resolver probe chain');
+    assert.match(src, /RESOLVED_PYTHON_ARCH/, 'must read resolver arch');
+    assert.match(src, /platform\.machine/, 'must probe venv Python arch');
+    assert.match(src, /rm -rf.*VENV_DIR/, 'must remove stale venv on mismatch');
+  });
+
   test('setup.sh delegates ASR install to whisper-install.sh (#863 unified)', () => {
     // setup.sh --install-missing must use the unified installer instead of
     // maintaining a separate hardcoded venv/deps path. The old code created
@@ -498,5 +511,95 @@ describe('install-template — venv architecture reconciliation (#1061)', () => 
   test('resolved=unknown + venv=x86_64 -> keep (no resolver result is safe)', () => {
     // If resolver didn't set RESOLVED_PYTHON_ARCH, don't destroy venv.
     assert.equal(getVenvReconciliation('unknown', 'x86_64'), 'keep');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: whisper-server.sh startup path venv compat (#1061)
+//
+// State transition table (the invariant Sol R6/R7 identified):
+//
+//   State              | Event          | Owner             | Post-condition
+//   -------------------|----------------|-------------------|-------------------------------
+//   no venv            | setup          | installer         | venv created, correct arch
+//   no venv            | server start   | server auto-inst  | installer called -> correct venv
+//   venv(x86)+Qwen     | install/reconf | install-template  | reconcile: rm + rebuild arm64
+//   venv(x86)+Qwen     | server start   | whisper-server.sh | compat check: rm + auto-install
+//   venv(x86)+Qwen     | API startup    | startup-reconciler| delegates to server start (above)
+//   venv(arm64)+Qwen   | any start      | any               | OK, compatible
+//   venv(any)+non-MLX  | any start      | any               | OK, no MLX dependency
+//
+// The server startup path (env bridge -> installed:true -> startup reconciler
+// -> whisper-server.sh) previously skipped the installer when the venv
+// directory existed. Now whisper-server.sh independently verifies venv arch
+// using the canonical resolver before activating.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the PRODUCTION venv compat check from whisper-server.sh by extracting
+ * the block with sed, providing mocked resolver probes, and checking whether
+ * the mock venv survives.
+ *
+ * @param resolvedArch - arch the resolver probe would report
+ * @param venvArch     - arch the existing venv's python3 reports
+ * @returns 'rebuild' if the venv was removed, 'keep' if it survived
+ */
+function getServerVenvCheck(resolvedArch, venvArch) {
+  const serverPath = join(SERVICES_DIR, 'whisper-server.sh');
+  // Extract the compat check block, stripping comments and the source line
+  // (we provide mocked probe functions instead of sourcing python-resolve.sh).
+  const sedExpr =
+    '/^# Venv architecture compatibility/,/^if \\[ ! -d/{' +
+    '/^if \\[ ! -d/d; /^#/d; /shellcheck/d; /source.*python-resolve/d; p;}';
+  const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
+  const resolverFail = 'return 1';
+  const probeStub = resolvedArch !== 'none' ? resolverOk : resolverFail;
+  const script = [
+    'set -euo pipefail',
+    'TMPVENV=$(mktemp -d)',
+    'trap "rm -rf $TMPVENV" EXIT',
+    'mkdir -p "$TMPVENV/whisper-venv/bin"',
+    `printf '#!/bin/bash\\necho "${venvArch}"\\n' > "$TMPVENV/whisper-venv/bin/python3"`,
+    'chmod +x "$TMPVENV/whisper-venv/bin/python3"',
+    'VENV_DIR="$TMPVENV/whisper-venv"',
+    // Mock all resolver probes — only system probe succeeds (or all fail)
+    `_try_system_pythons() { ${probeStub}; }`,
+    `_try_uv() { ${resolverFail}; }`,
+    `_try_pyenv() { ${resolverFail}; }`,
+    `_try_brew() { ${resolverFail}; }`,
+    `_try_project_python() { ${resolverFail}; }`,
+    `_try_legacy_project_python() { ${resolverFail}; }`,
+    `eval "$(sed -n '${sedExpr}' '${serverPath}')" 2>/dev/null`,
+    'if [ -d "$TMPVENV/whisper-venv" ]; then echo "keep"; else echo "rebuild"; fi',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+describe('whisper-server — startup path venv compat (#1061)', () => {
+  test('resolved=arm64 + venv=x86_64 -> rebuild (stale Rosetta venv)', () => {
+    // The critical production path: user fixes Rosetta, restarts Cat Cafe,
+    // startup reconciler calls whisper-server.sh directly (not installer).
+    // Server must detect stale x86_64 venv and trigger reinstall.
+    assert.equal(getServerVenvCheck('arm64', 'x86_64'), 'rebuild');
+  });
+
+  test('resolved=x86_64 + venv=arm64 -> rebuild (reverse mismatch)', () => {
+    assert.equal(getServerVenvCheck('x86_64', 'arm64'), 'rebuild');
+  });
+
+  test('resolved=arm64 + venv=arm64 -> keep (matching arch)', () => {
+    assert.equal(getServerVenvCheck('arm64', 'arm64'), 'keep');
+  });
+
+  test('resolved=x86_64 + venv=x86_64 -> keep (matching arch)', () => {
+    assert.equal(getServerVenvCheck('x86_64', 'x86_64'), 'keep');
+  });
+
+  test('all probes fail + venv=x86_64 -> keep (no resolver = safe)', () => {
+    // If no Python is found by the resolver, don't destroy existing venv.
+    assert.equal(getServerVenvCheck('none', 'x86_64'), 'keep');
   });
 });

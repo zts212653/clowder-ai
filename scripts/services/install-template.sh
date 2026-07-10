@@ -134,14 +134,14 @@ install_service_main() {
   fi
 
   # 5. Venv create (idempotent) with architecture reconciliation (#1061).
-  # Stale venv may have wrong-arch Python (Rosetta→native); detect + rebuild.
+  # Stale venv may have wrong-arch Python (Rosetta->native); detect + rebuild.
   local venv_dir="${CAT_CAFE_HOME}/${VENV_NAME}"
   if [ -d "$venv_dir" ] && [ -x "$venv_dir/bin/python3" ]; then
     local venv_arch
     venv_arch="$("$venv_dir/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
     if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \
        && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then
-      echo "  Venv arch ($venv_arch) ≠ resolved ($RESOLVED_PYTHON_ARCH); rebuilding venv..." >&2
+      echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding venv..." >&2
       rm -rf "$venv_dir"
     fi
   fi

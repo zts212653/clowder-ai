@@ -38,6 +38,30 @@ API_SCRIPT="$SCRIPT_DIR/whisper-api.py"
 PORT="${WHISPER_PORT:-9876}"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$API_SCRIPT; port=$PORT"
 
+# Venv architecture compatibility check (#1061).
+# Normal startup (env bridge -> installed:true -> server) skips the
+# installer. A stale Rosetta venv (x86_64 Python) with an arm64
+# resolver means wrong-arch MLX wheels at runtime. Detect and remove
+# so the auto-install block below rebuilds with the correct Python.
+if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
+  # shellcheck source=./python-resolve.sh
+  source "$SCRIPT_DIR/python-resolve.sh"
+  _current_arch="unknown"
+  if _try_system_pythons 2>/dev/null \
+     || _try_uv 2>/dev/null || _try_pyenv 2>/dev/null || _try_brew 2>/dev/null \
+     || _try_project_python 2>/dev/null || _try_legacy_project_python 2>/dev/null; then
+    _current_arch="$RESOLVED_PYTHON_ARCH"
+  fi
+  if [ "$_current_arch" != "unknown" ]; then
+    _venv_arch="$("$VENV_DIR/bin/python3" -c \
+      'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+    if [ "$_venv_arch" != "unknown" ] && [ "$_venv_arch" != "$_current_arch" ]; then
+      echo "[start] venv arch ($_venv_arch) != resolver arch ($_current_arch) -- reinstalling..." >&2
+      rm -rf "$VENV_DIR"
+    fi
+  fi
+fi
+
 if [ ! -d "$VENV_DIR" ]; then
   echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
   INSTALL_SCRIPT="$SCRIPT_DIR/whisper-install.sh"
