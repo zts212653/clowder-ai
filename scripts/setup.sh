@@ -285,15 +285,22 @@ echo ""
 
 # ── Resolve ASR default model (after all interactive prompts) ──
 # MLX requires BOTH arm64 hardware AND arm64 Python (#1061).
-# We source the CANONICAL Python resolver (python-resolve.sh) and probe
-# system Pythons -- the same truth source the installer uses. This runs
-# after the user committed to features, so no wasted work; and before
-# .env generation, so the model is determined when we write it.
+# We source the CANONICAL Python resolver (python-resolve.sh) and run the
+# complete no-download probe chain -- the same resolution order the
+# installer uses. This runs after the user committed to features, so no
+# wasted work; and before .env generation, so the model is determined
+# when we write it.
 #
-# Only the system probe runs here (no downloads). If no Python 3.12+ is
-# found yet, installer will bootstrap one later via _pbs_target_triple
-# which always selects arm64 on Apple Silicon -- so Qwen is safe in that
-# case too.
+# Probe order mirrors resolve_python_312 exactly (minus _install_project_python
+# which downloads):
+#   1. _try_system_pythons  (python3.13, python3.12, python3, ...)
+#   2. _try_uv              (if user has uv)
+#   3. _try_pyenv           (if user has pyenv)
+#   4. _try_brew            (macOS Homebrew)
+#   5. _try_project_python  (cached ~/.cat-cafe/python/)
+#   6. _try_legacy_project_python (pre-move cache at ~/.cat-cafe/python)
+# If none finds 3.12+, installer will download via _pbs_target_triple
+# (sysctl-based → arm64 on Apple Silicon).
 if [ "$ENABLE_ASR" = true ]; then
     _setup_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     ASR_DEFAULT_MODEL="large-v3-turbo"  # safe default
@@ -301,13 +308,16 @@ if [ "$ENABLE_ASR" = true ]; then
         # Apple Silicon -- resolve Python to match installer's truth source.
         source "$_setup_script_dir/services/python-resolve.sh"
         if _try_system_pythons 2>/dev/null; then
-            # Resolver found a system Python 3.12+ -- use its arch.
             _py_arch="$RESOLVED_PYTHON_ARCH"
         elif _try_uv 2>/dev/null || _try_pyenv 2>/dev/null || _try_brew 2>/dev/null; then
             _py_arch="$RESOLVED_PYTHON_ARCH"
+        elif _try_project_python 2>/dev/null || _try_legacy_project_python 2>/dev/null; then
+            # Cached project-local Python (may be x86_64 from a prior
+            # Rosetta install). Installer will reuse this, not bootstrap.
+            _py_arch="$RESOLVED_PYTHON_ARCH"
         else
-            # No Python 3.12+ found yet. Installer will bootstrap arm64
-            # Python via _pbs_target_triple (sysctl-based), so MLX is safe.
+            # No Python 3.12+ anywhere. Installer will download via
+            # _pbs_target_triple (sysctl-based → arm64 on Apple Silicon).
             _py_arch="arm64"
         fi
         if [ "$_py_arch" = "arm64" ] || [ "$_py_arch" = "aarch64" ]; then

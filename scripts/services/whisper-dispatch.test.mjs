@@ -133,6 +133,9 @@ describe('whisper-dispatch — static guard (script content)', () => {
     assert.match(src, /source.*python-resolve\.sh/, 'must source python-resolve.sh');
     // Must use resolver's probe functions (not raw python3 call)
     assert.match(src, /_try_system_pythons/, 'must use resolver system probe');
+    // Must also probe project-local/legacy cache (not skip to bootstrap)
+    assert.match(src, /_try_project_python/, 'must probe project-local Python cache');
+    assert.match(src, /_try_legacy_project_python/, 'must probe legacy Python cache');
     // Must read RESOLVED_PYTHON_ARCH from resolver
     assert.match(src, /RESOLVED_PYTHON_ARCH/, 'must use RESOLVED_PYTHON_ARCH');
     // Qwen model must be guarded by _py_arch check
@@ -189,33 +192,35 @@ describe('whisper-dispatch — install backend selection', () => {
 /**
  * Extract the PRODUCTION model selection block from setup.sh and evaluate
  * with mocked system commands and resolver functions. The production code
- * sources python-resolve.sh and calls _try_system_pythons (etc.) to find
- * the same Python the installer will use.
+ * sources python-resolve.sh and calls the complete no-download probe chain
+ * (system → uv → pyenv → brew → project-local → legacy) to find the same
+ * Python the installer will use.
  *
  * @param hwArch       - simulated uname -m / sysctl result
- * @param resolvedArch - arch the resolver would report (RESOLVED_PYTHON_ARCH)
- * @param resolverFinds - whether the resolver finds a Python 3.12+
+ * @param opts.resolvedArch - arch the resolver would report
+ * @param opts.source  - which probe tier finds it ('system'|'project'|'legacy'|'none')
  */
-function getSetupModelSelection(hwArch, resolvedArch, resolverFinds = true) {
+function getSetupModelSelection(hwArch, resolvedArch, source = 'system') {
   const setupPath = join(SERVICES_DIR, '../setup.sh');
   const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
-  // Mock resolver: _try_system_pythons sets RESOLVED_PYTHON_ARCH on success.
   const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
   const resolverFail = 'return 1';
-  const sysStub = resolverFinds ? resolverOk : resolverFail;
-  // Extract the model resolution block (after interactive prompts, before
-  // Step 4). Anchored on the section comment.
+  // Each probe tier succeeds only if source matches that tier.
+  const sysStub = source === 'system' ? resolverOk : resolverFail;
+  const projStub = source === 'project' ? resolverOk : resolverFail;
+  const legacyStub = source === 'legacy' ? resolverOk : resolverFail;
   const sedExpr = '/^# .* Resolve ASR default model/,/^# .* Step 4: Generate/{' + '/^# .* Step 4: Generate/d; p;}';
   const script = [
     'ENABLE_ASR=true',
     `uname() { case "$1" in -s) echo "Darwin";; -m) echo "${hwArch}";; esac; }`,
     `sysctl() { ${sysctlStub}; }`,
-    // Override source to no-op (we provide resolver stubs directly)
     'source() { :; }',
     `_try_system_pythons() { ${sysStub}; }`,
     `_try_uv() { ${resolverFail}; }`,
     `_try_pyenv() { ${resolverFail}; }`,
     `_try_brew() { ${resolverFail}; }`,
+    `_try_project_python() { ${projStub}; }`,
+    `_try_legacy_project_python() { ${legacyStub}; }`,
     `eval "$(sed -n '${sedExpr}' '${setupPath}')"`,
     'echo "$ASR_DEFAULT_MODEL"',
   ].join('\n');
@@ -226,24 +231,36 @@ function getSetupModelSelection(hwArch, resolvedArch, resolverFinds = true) {
 }
 
 describe('setup.sh — model selection consistency (#863 #1061)', () => {
-  test('Apple Silicon + resolver finds arm64 Python -> Qwen3-ASR (MLX)', () => {
-    assert.equal(getSetupModelSelection('arm64', 'arm64'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
+  test('Apple Silicon + system arm64 Python -> Qwen3-ASR (MLX)', () => {
+    assert.equal(getSetupModelSelection('arm64', 'arm64', 'system'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
   });
 
-  test('Apple Silicon + resolver finds x86_64 Python (Rosetta) -> large-v3-turbo', () => {
-    // Key regression: python3 might be arm64 but resolver finds python3.12
-    // which is x86_64 (Rosetta). Setup must use resolver's answer.
-    assert.equal(getSetupModelSelection('arm64', 'x86_64'), 'large-v3-turbo');
+  test('Apple Silicon + system x86_64 Python (Rosetta) -> large-v3-turbo', () => {
+    assert.equal(getSetupModelSelection('arm64', 'x86_64', 'system'), 'large-v3-turbo');
   });
 
-  test('Apple Silicon + no Python 3.12+ found -> Qwen (bootstrap installs arm64)', () => {
-    // When no Python 3.12+ exists, installer will bootstrap via
-    // _pbs_target_triple (sysctl-based) which installs arm64 on Apple Silicon.
-    assert.equal(getSetupModelSelection('arm64', 'irrelevant', false), 'mlx-community/Qwen3-ASR-1.7B-8bit');
+  test('Apple Silicon + cached project x86_64 Python -> large-v3-turbo', () => {
+    // Regression: old Rosetta install cached x86_64 project Python.
+    // Setup must detect this via _try_project_python, not skip to bootstrap.
+    assert.equal(getSetupModelSelection('arm64', 'x86_64', 'project'), 'large-v3-turbo');
+  });
+
+  test('Apple Silicon + cached project arm64 Python -> Qwen3-ASR', () => {
+    assert.equal(getSetupModelSelection('arm64', 'arm64', 'project'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
+  });
+
+  test('Apple Silicon + legacy cached x86_64 Python -> large-v3-turbo', () => {
+    // Legacy cache from pre-move path — installer will reuse, not bootstrap.
+    assert.equal(getSetupModelSelection('arm64', 'x86_64', 'legacy'), 'large-v3-turbo');
+  });
+
+  test('Apple Silicon + no Python 3.12+ anywhere -> Qwen (bootstrap arm64)', () => {
+    // All probes fail → installer downloads via _pbs_target_triple (sysctl).
+    assert.equal(getSetupModelSelection('arm64', 'irrelevant', 'none'), 'mlx-community/Qwen3-ASR-1.7B-8bit');
   });
 
   test('Intel Mac -> large-v3-turbo', () => {
-    assert.equal(getSetupModelSelection('x86_64', 'x86_64'), 'large-v3-turbo');
+    assert.equal(getSetupModelSelection('x86_64', 'x86_64', 'system'), 'large-v3-turbo');
   });
 
   test('setup model agrees with installer platform detection', () => {
