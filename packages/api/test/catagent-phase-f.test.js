@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -245,6 +245,78 @@ describe('F1: create-safe write and patch tools', () => {
 
     assert.equal(readFileSync(join(tmpDir, 'dollar.txt'), 'utf-8'), replacement);
   });
+
+  test('write_file rejects overwriting an existing file larger than the write cap', async () => {
+    const audit = [];
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1', audit: (event) => audit.push(event) });
+    const write = findTool(tools, 'write_file');
+    // Existing target is huge; the *new* content is tiny (so it clears the new-content cap)
+    // — the guard must reject before hashing the multi-hundred-KiB old file.
+    writeFileSync(join(tmpDir, 'huge-existing.txt'), 'x'.repeat(256 * 1024 + 10));
+
+    await assert.rejects(
+      () => write.execute({ path: 'huge-existing.txt', content: 'small' }),
+      /existing file \(\d+ bytes\) exceeds write cap/,
+    );
+    assert.equal(audit.at(-1).outcome, 'rejected');
+    assert.equal(audit.at(-1).tool, 'write_file');
+  });
+
+  test('patch_file rejects patching an existing file larger than the write cap', async () => {
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    const patch = findTool(tools, 'patch_file');
+    writeFileSync(join(tmpDir, 'huge-patch.txt'), 'x'.repeat(256 * 1024 + 10));
+
+    await assert.rejects(
+      () =>
+        patch.execute({
+          path: 'huge-patch.txt',
+          old_text: 'x',
+          new_text: 'y',
+          expected_hash: 'deadbeef',
+        }),
+      /existing file \(\d+ bytes\) exceeds write cap/,
+    );
+  });
+
+  test(
+    'patch_file preserves the existing file mode across the atomic replace',
+    { skip: process.platform === 'win32' },
+    async () => {
+      const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+      const patch = findTool(tools, 'patch_file');
+      const scriptPath = join(tmpDir, 'run.sh');
+      const before = '#!/bin/sh\necho hi\n';
+      writeFileSync(scriptPath, before);
+      chmodSync(scriptPath, 0o755);
+
+      await patch.execute({
+        path: 'run.sh',
+        old_text: 'hi',
+        new_text: 'bye',
+        expected_hash: sha256(before).slice(0, 12),
+      });
+
+      assert.equal(readFileSync(scriptPath, 'utf-8'), '#!/bin/sh\necho bye\n');
+      assert.equal(statSync(scriptPath).mode & 0o777, 0o755, 'executable bit must survive the patch');
+    },
+  );
+
+  test(
+    'write_file preserves the existing file mode when overwriting',
+    { skip: process.platform === 'win32' },
+    async () => {
+      const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+      const write = findTool(tools, 'write_file');
+      const scriptPath = join(tmpDir, 'overwrite.sh');
+      writeFileSync(scriptPath, 'old\n');
+      chmodSync(scriptPath, 0o750);
+
+      await write.execute({ path: 'overwrite.sh', content: '#!/bin/sh\necho new\n' });
+
+      assert.equal(statSync(scriptPath).mode & 0o777, 0o750, 'mode bits must survive the overwrite');
+    },
+  );
 });
 
 describe('F2: run_command policy', () => {

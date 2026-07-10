@@ -57,6 +57,8 @@ interface OpenAIStreamContext {
   toolCalls: Map<number, OpenAIToolCallAccumulator>;
   sawAnyEvent: boolean;
   sawDone: boolean;
+  /** Set when a data frame fails to parse — terminates the stream fail-closed. */
+  parseError?: string;
 }
 
 interface OpenAIToolCallAccumulator {
@@ -144,15 +146,23 @@ async function* parseOpenAIChatStream(
         const maybeEvent = flushDataLine(line, dataLines);
         if (maybeEvent !== undefined) {
           yield* handleOpenAIDataEvent(maybeEvent, ctx);
+          // A malformed frame is terminal — do not emit accumulated tool_call blocks.
+          if (ctx.parseError) return;
         }
       }
     }
 
     if (buffer.trim()) {
       const maybeEvent = flushDataLine(buffer, dataLines);
-      if (maybeEvent !== undefined) yield* handleOpenAIDataEvent(maybeEvent, ctx);
+      if (maybeEvent !== undefined) {
+        yield* handleOpenAIDataEvent(maybeEvent, ctx);
+        if (ctx.parseError) return;
+      }
     }
-    if (dataLines.length > 0) yield* handleOpenAIDataEvent(dataLines.join('\n'), ctx);
+    if (dataLines.length > 0) {
+      yield* handleOpenAIDataEvent(dataLines.join('\n'), ctx);
+      if (ctx.parseError) return;
+    }
 
     yield* emitOpenAIContentBlocks(ctx);
 
@@ -191,7 +201,12 @@ function* handleOpenAIDataEvent(eventData: string, ctx: OpenAIStreamContext): It
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(eventData);
-  } catch {
+  } catch (err) {
+    // Fail closed: a malformed frame must not be silently dropped. If it were,
+    // a later [DONE] would end the stream "cleanly" and any tool_call accumulated
+    // from earlier deltas would be emitted and executed with stopReason === null.
+    ctx.parseError = err instanceof Error ? err.message : String(err);
+    yield { type: 'stream_error', error: `Malformed OpenAI data frame: ${ctx.parseError}` };
     return;
   }
 

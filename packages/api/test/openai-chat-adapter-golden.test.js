@@ -268,6 +268,41 @@ describe('OpenAIChatAdapter: parseStreamEvents', () => {
     const error = events.find((event) => event.type === 'stream_error');
     assert.match(error?.error ?? '', /\[DONE\]/);
   });
+
+  test('malformed data frame after tool-call deltas fails closed (no tool_call executed)', async () => {
+    const adapter = new OpenAIChatAdapter();
+    const stream = [
+      // Valid partial tool_call delta — accumulates a pending tool call.
+      sse({
+        id: 'chatcmpl-bad',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_x', function: { name: 'run_command', arguments: '{"binary":"rm"' } }],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
+      // Malformed JSON where the finish frame should be — must not be swallowed.
+      sse('{"choices":[{"index":0,'),
+      // A trailing [DONE] must NOT be able to "cleanly" close the corrupt turn.
+      sse('[DONE]'),
+    ].join('');
+    const events = await collect(adapter.parseStreamEvents(toStream([stream])));
+
+    const error = events.find((event) => event.type === 'stream_error');
+    assert.ok(error, 'malformed frame must surface a stream_error');
+    assert.match(error.error, /malformed/i);
+
+    const toolBlock = events.find(
+      (event) => event.type === 'content_block_complete' && event.block?.type === 'tool_call',
+    );
+    assert.equal(toolBlock, undefined, 'accumulated tool_call must not be emitted after a parse error');
+    const stop = events.find((event) => event.type === 'stop');
+    assert.equal(stop, undefined, 'no normal stop should follow a malformed frame');
+  });
 });
 
 describe('OpenAIChatAdapter: mapError + terminal stop reasons', () => {

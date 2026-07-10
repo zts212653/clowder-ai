@@ -14,7 +14,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -281,12 +281,57 @@ async function existingFileHash(resolvedPath: string): Promise<string | null> {
   }
 }
 
+/**
+ * Reject before an unbounded read of a large pre-existing file.
+ *
+ * Both write_file and patch_file hash the *current* file contents (whole-file
+ * read) before writing. Without this guard an L1 CatAgent could point a tiny
+ * write/patch at a multi-GB workspace file and exhaust the API process, since
+ * the 256 KiB cap only bounds the *new* content, not the old-file read.
+ */
+async function assertWithinWriteCap(
+  resolvedPath: string,
+  relPath: string,
+  tool: CatAgentToolAuditEvent['tool'],
+  options: CatAgentToolRegistryOptions,
+): Promise<void> {
+  let size: number;
+  try {
+    const st = await lstat(resolvedPath);
+    // Non-regular files (symlink/dir) are rejected downstream by existingFileHash /
+    // secure-path resolution; only regular files get read for hashing.
+    if (!st.isFile()) return;
+    size = st.size;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  if (size > MAX_WRITE_BYTES) {
+    await rejectWithAudit(
+      options,
+      { tool, path: relPath, bytes: size },
+      `existing file (${size} bytes) exceeds write cap (${MAX_WRITE_BYTES} bytes); refusing to read for hashing`,
+    );
+  }
+}
+
 async function writeAtomicUtf8(resolvedPath: string, content: string): Promise<void> {
   const parent = dirname(resolvedPath);
   await mkdir(parent, { recursive: true });
+  // Preserve an existing regular file's permission bits across the temp+rename.
+  // A fresh temp file is created with default perms, so without this an
+  // executable script (e.g. scripts/*.sh) silently loses its +x bit after a patch.
+  let existingMode: number | undefined;
+  try {
+    const st = await lstat(resolvedPath);
+    if (st.isFile()) existingMode = st.mode & 0o777;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
   const tmpPath = join(parent, `.catagent-${process.pid}-${randomUUID()}.tmp`);
   try {
     await writeFile(tmpPath, content, { encoding: 'utf-8', flag: 'wx' });
+    if (existingMode !== undefined) await chmod(tmpPath, existingMode);
     await rename(tmpPath, resolvedPath);
   } catch (err) {
     await unlink(tmpPath).catch(() => undefined);
@@ -311,6 +356,7 @@ async function executeWriteFile(
 
   const resolved = await resolveCreatePath(workDir, input.path as string);
   const relPath = normalizedRel(workDir, resolved);
+  await assertWithinWriteCap(resolved, relPath, 'write_file', options);
   const hashBefore = await existingFileHash(resolved);
   await writeAtomicUtf8(resolved, content);
   const hashAfter = hashContent(content);
@@ -364,6 +410,7 @@ async function executePatchFile(
     await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'expected_hash must be at least 8 hex chars');
   }
 
+  await assertWithinWriteCap(resolved, relPath, 'patch_file', options);
   const before = await readFile(resolved, 'utf-8');
   const hashBefore = hashContent(before);
   if (!hashBefore.startsWith(expectedHash)) {
