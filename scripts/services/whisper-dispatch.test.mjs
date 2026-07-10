@@ -69,6 +69,29 @@ describe('whisper-dispatch — static guard (script content)', () => {
     );
   });
 
+  test('python-resolve.sh bootstrap uses sysctl, not uname -m, on Darwin (#1061)', () => {
+    // _pbs_target_triple() determines which python-build-standalone tarball
+    // to download. Under Rosetta, uname -m returns x86_64, which would
+    // bootstrap an x86_64 Python → MLX models fail. Must use sysctl to
+    // detect true hardware and always bootstrap arm64 Python on Apple Silicon.
+    const src = readFileSync(join(SERVICES_DIR, 'python-resolve.sh'), 'utf8');
+    // Extract _pbs_target_triple function body
+    const fnMatch = src.match(/_pbs_target_triple\(\)\s*\{([\s\S]*?)\n\}/);
+    assert.ok(fnMatch, '_pbs_target_triple function must exist');
+    const fnBody = fnMatch[1];
+    assert.match(fnBody, /sysctl/, '_pbs_target_triple must use sysctl on Darwin');
+    assert.match(fnBody, /hw\.optional\.arm64/, 'must probe hw.optional.arm64');
+    // The Darwin case must NOT use `uname -m` for arm64 detection — that
+    // breaks under Rosetta. uname -m is acceptable for the non-arm64 fallback.
+    const darwinCase = fnBody.match(/Darwin\)([\s\S]*?);;/);
+    assert.ok(darwinCase, 'Darwin case must exist in _pbs_target_triple');
+    assert.doesNotMatch(
+      darwinCase[1],
+      /case.*uname -m/,
+      'Darwin case must not use case $(uname -m) for arch detection',
+    );
+  });
+
   test('whisper-api.py contains all ASR backends', () => {
     const src = readFileSync(join(SERVICES_DIR, 'whisper-api.py'), 'utf8');
     assert.match(src, /Qwen3-ASR/, 'must detect Qwen3-ASR model name');
@@ -81,6 +104,20 @@ describe('whisper-dispatch — static guard (script content)', () => {
     const src = readFileSync(join(SERVICES_DIR, 'whisper-server.sh'), 'utf8');
     assert.match(src, /whisper-api\.py/, 'must reference whisper-api.py');
     assert.doesNotMatch(src, /qwen3-asr-api\.py/, 'must NOT dispatch to separate qwen3 script');
+  });
+
+  test('setup.sh delegates ASR install to whisper-install.sh (#863 unified)', () => {
+    // setup.sh --install-missing must use the unified installer instead of
+    // maintaining a separate hardcoded venv/deps path. The old code created
+    // $HOME/.cat-cafe/asr-venv with mlx-audio; the new service uses
+    // whisper-venv via whisper-install.sh. Divergent paths = runtime failure.
+    const src = readFileSync(join(SERVICES_DIR, '../setup.sh'), 'utf8');
+    assert.match(src, /whisper-install\.sh/, 'setup.sh must delegate to whisper-install.sh');
+    assert.doesNotMatch(
+      src,
+      /asr-venv/,
+      'setup.sh must not reference old asr-venv path (use whisper-install.sh instead)',
+    );
   });
 });
 

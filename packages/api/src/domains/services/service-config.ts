@@ -28,21 +28,38 @@ type ServiceConfigMap = Record<string, ServiceConfig>;
 /**
  * Legacy service IDs that were merged into a current service (#863).
  * On first load, any persisted config under the old key is migrated to the
- * new key so that existing users don't lose their installed/enabled state.
+ * new key so that existing users don't lose their enabled/model state.
+ *
+ * `defaultModel` is the old service's implicit default — when the persisted
+ * config has no selectedModel, the migration fills it so the start script
+ * (which has no fallback default) doesn't exit with "MODEL required".
  */
-const LEGACY_SERVICE_ALIASES: Record<string, string> = {
-  'qwen3-asr': 'whisper-stt',
+const LEGACY_SERVICE_ALIASES: Record<string, { newId: string; defaultModel: string }> = {
+  'qwen3-asr': {
+    newId: 'whisper-stt',
+    defaultModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+  },
 };
 
 function migrateServiceConfig(data: ServiceConfigMap): boolean {
   let changed = false;
-  for (const [oldId, newId] of Object.entries(LEGACY_SERVICE_ALIASES)) {
+  for (const [oldId, { newId, defaultModel }] of Object.entries(LEGACY_SERVICE_ALIASES)) {
     if (data[oldId] != null) {
       if (data[newId] == null) {
-        // Preserve enabled/model/port but force reinstall — the old
-        // service used a different venv path (e.g. asr-venv vs whisper-venv)
-        // so the installed state is stale (#863).
-        const { installed: _, ...migrated } = data[oldId];
+        // Force reinstall — old venv path (asr-venv) doesn't match new
+        // service (whisper-venv). Must set installed: false explicitly;
+        // stripping the key makes the reconciler infer installed=true
+        // from enabled=true, skipping the necessary venv rebuild (#863).
+        const migrated: ServiceConfig = {
+          ...data[oldId],
+          installed: false,
+        };
+
+        // Backfill model default — old service allowed starting without
+        // an explicit model selection; the new start script requires one.
+        if (!migrated.selectedModel) {
+          migrated.selectedModel = defaultModel;
+        }
         data[newId] = migrated;
       }
       delete data[oldId];

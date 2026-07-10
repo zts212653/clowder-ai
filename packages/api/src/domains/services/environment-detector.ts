@@ -28,6 +28,10 @@ export function resolveArch(
   if (platform === 'darwin') {
     const hwArm64 = sysctlProbe('hw.optional.arm64');
     if (hwArm64 === '1') return 'arm64';
+    // process.arch is a reliable single-direction fallback: if it reports
+    // 'arm64', the hardware IS arm64 (an x64 binary can't report arm64).
+    // Covers the unlikely case where sysctl fails on native Apple Silicon.
+    if (arch === 'arm64') return 'arm64';
     // Real Intel Mac — sysctl returns null (key absent) or '0'
     return 'x64';
   }

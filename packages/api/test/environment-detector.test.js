@@ -66,6 +66,14 @@ describe('environment detector — Rosetta regression (#1061)', () => {
     assert.equal(arch, 'x64');
   });
 
+  test('macOS + arm64 Node + sysctl null → arch=arm64 (sysctl failure fallback)', () => {
+    // On native Apple Silicon, if sysctl transiently fails (returns null),
+    // process.arch='arm64' is a reliable one-direction signal (an x64
+    // binary can never report arm64). Must not misdetect as x64.
+    const arch = resolveArch('darwin', 'arm64', () => null);
+    assert.equal(arch, 'arm64');
+  });
+
   test('Linux uses process.arch, not sysctl', () => {
     const sysctlSpy = () => {
       throw new Error('sysctl should not be called on Linux');

@@ -52,15 +52,45 @@ describe('legacy service config migration (#863)', () => {
       assert.ok(config, 'whisper-stt config should exist after migration');
       assert.equal(config.enabled, true);
       assert.equal(config.selectedModel, 'mlx-community/Qwen3-ASR-1.7B-8bit');
-      // installed/installStatus must be stripped — old venv (asr-venv)
-      // does not match new service (whisper-venv), forcing reinstall.
-      assert.equal(config.installed, undefined, 'installed must be stripped during migration');
+      // installed must be explicitly false — old venv (asr-venv) doesn't
+      // match new service (whisper-venv). Stripping (undefined) makes the
+      // reconciler infer installed=true from enabled=true, which skips
+      // the necessary venv rebuild.
+      assert.equal(config.installed, false, 'installed must be false to force reinstall');
 
       // Old key should be removed from disk
       const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
       assert.equal(persisted['qwen3-asr'], undefined, 'old qwen3-asr key should be removed');
       assert.ok(persisted['whisper-stt'], 'whisper-stt key should exist on disk');
-      assert.equal(persisted['whisper-stt'].installed, undefined, 'installed must not persist');
+      assert.equal(persisted['whisper-stt'].installed, false, 'installed must be false on disk');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('backfills default model when old config has no selectedModel', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'cat-cafe-migration-nomodel-'));
+    const configPath = join(tmpDir, 'services.json');
+    // Old Qwen service allowed running without explicit model selection —
+    // the start script had a hardcoded default. The new whisper-server.sh
+    // requires WHISPER_MODEL, so migration must backfill the Qwen default.
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        'qwen3-asr': { enabled: true, installed: true },
+      }),
+    );
+    process.env.CAT_CAFE_SERVICES_CONFIG = configPath;
+    try {
+      const config = getServiceConfig('whisper-stt');
+      assert.ok(config, 'whisper-stt config should exist after migration');
+      assert.equal(config.enabled, true);
+      assert.equal(config.installed, false, 'installed must be false to force reinstall');
+      assert.equal(
+        config.selectedModel,
+        'mlx-community/Qwen3-ASR-1.7B-8bit',
+        'must backfill Qwen default model when old config had none',
+      );
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
