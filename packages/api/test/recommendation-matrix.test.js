@@ -119,6 +119,8 @@ describe('recommendation matrix — macOS arm64', () => {
       'must not recommend mlx-community models when Python is x86-emulated',
     );
     assert.equal(rec.models[0]?.name, 'edge-tts');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
   });
 
   test('embedding-model + x86-emulated Python → sentence-transformers, not MLX (#1061)', () => {
@@ -130,6 +132,8 @@ describe('recommendation matrix — macOS arm64', () => {
       'must not recommend mlx-community models when Python is x86-emulated',
     );
     assert.equal(rec.models[0]?.name, 'jinaai/jina-embeddings-v2-base-zh');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
   });
 
   test('llm-postprocess + x86-emulated Python → transformers, not MLX (#1061)', () => {
@@ -141,6 +145,8 @@ describe('recommendation matrix — macOS arm64', () => {
       'must not recommend mlx-community models when Python is x86-emulated',
     );
     assert.equal(rec.models[0]?.name, 'Qwen/Qwen2.5-3B-Instruct');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
   });
 
   test('missing Python on arm64 → MLX path for all services (bootstrap)', () => {

@@ -271,6 +271,12 @@ services:
       notes:
         - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
         - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
+      customModelHint:
+        requirement: 'edge-tts voice 名（云端推理，无本地模型下载）'
+        example: 'zh-CN-XiaoxiaoNeural、en-US-AvaMultilingualNeural'
+        unsupported: 'HuggingFace 模型 ID、MLX 张量格式（需要 arm64 Python）'
+        links:
+          - { label: 'edge-tts voice 列表', url: 'https://github.com/rany2/edge-tts#changing-voices' }
 
     - match: { os: darwin, arch: x64 }
       models:
@@ -442,6 +448,12 @@ services:
       notes:
         - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
         - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
+      customModelHint:
+        requirement: 'HuggingFace 上任意 sentence-transformers 兼容的 embedding 模型（BERT-family encoder，CPU/MPS 推理）'
+        example: 'BAAI/bge-large-zh-v1.5、jinaai/jina-embeddings-v2-base-zh、intfloat/multilingual-e5-large'
+        unsupported: '生成式 LLM（CausalLM）模型、MLX 张量格式（需要 arm64 Python）'
+        links:
+          - { label: 'HF sentence-transformers 模型', url: 'https://huggingface.co/models?library=sentence-transformers&sort=likes' }
 
     # Verified against fastembed 0.8 TextEmbedding.list_supported_models():
     # jinaai/jina-embeddings-v2-base-zh is in the catalog (768 dim, 640MB) and
@@ -607,6 +619,12 @@ services:
       notes:
         - Python 解释器不是 arm64（Rosetta x86_64），MLX 不可用
         - 安装 arm64 Python 后可使用 MLX 加速（brew install python@3.12）
+      customModelHint:
+        requirement: 'HuggingFace 上的 CausalLM 因果语言模型（pipeline_tag=text-generation，CPU 推理）'
+        example: 'Qwen/Qwen2.5-3B-Instruct、meta-llama/Llama-3.2-3B-Instruct'
+        unsupported: 'Embedding 模型、MLX 张量格式（需要 arm64 Python）；CPU 建议 ≤3B'
+        links:
+          - { label: 'HF text-generation 模型', url: 'https://huggingface.co/models?pipeline_tag=text-generation&sort=likes' }
 
     - match: { os: darwin, arch: x64 }
       models:
