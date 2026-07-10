@@ -133,8 +133,18 @@ install_service_main() {
     fi
   fi
 
-  # 5. Venv create (idempotent).
+  # 5. Venv create (idempotent) with architecture reconciliation (#1061).
+  # Stale venv may have wrong-arch Python (Rosetta→native); detect + rebuild.
   local venv_dir="${CAT_CAFE_HOME}/${VENV_NAME}"
+  if [ -d "$venv_dir" ] && [ -x "$venv_dir/bin/python3" ]; then
+    local venv_arch
+    venv_arch="$("$venv_dir/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+    if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \
+       && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then
+      echo "  Venv arch ($venv_arch) ≠ resolved ($RESOLVED_PYTHON_ARCH); rebuilding venv..." >&2
+      rm -rf "$venv_dir"
+    fi
+  fi
   if [ ! -d "$venv_dir" ]; then
     echo "  Creating venv: $venv_dir ..."
     "$PYTHON3" -m venv "$venv_dir" || { echo "ERROR: venv creation failed" >&2; exit 1; }
@@ -190,18 +200,10 @@ install_service_main() {
 
 _install_template_load_model() {
   # Args: venv_dir, loader, model_id
-  # Runs the venv Python with explicit retry + HF_HUB_DOWNLOAD_TIMEOUT=60.
-  # Single inline Python script per loader because we want both retry +
-  # loader-specific entry point (snapshot_download vs WhisperModel)
-  # without spawning multiple processes.
-  #
-  # Proxy: prereq-check.sh already decided whether HuggingFace needs
-  # the system proxy (HF probe via candidate -> exports
-  # _CATCAFE_HF_PROXY_FOR_DOWNLOAD). We just consume that decision
-  # here, per-call, so pip install (earlier step) goes direct via the
-  # NO_PROXY classification and only HF model download gets the
-  # proxy. No second detection inside Python -- single source of
-  # truth lives in prereq-check.
+  # Runs venv Python with retry + HF_HUB_DOWNLOAD_TIMEOUT=60.
+  # Inline Python per loader for retry + loader-specific entry point.
+  # Proxy: prereq-check.sh exports _CATCAFE_HF_PROXY_FOR_DOWNLOAD;
+  # we consume it per-call so only HF download gets the proxy.
   local venv_dir="$1"
   local loader="$2"
   local model_id="$3"

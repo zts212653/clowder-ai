@@ -124,6 +124,22 @@ describe('whisper-dispatch — static guard (script content)', () => {
     );
   });
 
+  test('install-template.sh reconciles stale venv architecture (#1061)', () => {
+    // PR #863 unifies Qwen→whisper-venv. A prior Rosetta install may leave
+    // an x86_64 venv that the resolver now replaces with arm64 Python.
+    // install-template.sh must detect the mismatch and rebuild, not silently
+    // reuse the stale venv (which would install wrong-arch wheels).
+    const src = readFileSync(join(SERVICES_DIR, 'install-template.sh'), 'utf8');
+    assert.match(src, /venv_arch/, 'must probe existing venv Python architecture');
+    assert.match(src, /platform\.machine/, 'must use platform.machine() to detect venv Python arch');
+    assert.match(
+      src,
+      /venv_arch.*RESOLVED_PYTHON_ARCH/s,
+      'must compare venv arch against resolver RESOLVED_PYTHON_ARCH',
+    );
+    assert.match(src, /rm -rf.*venv_dir/, 'must remove stale venv on arch mismatch');
+  });
+
   test('setup.sh model selection uses canonical Python resolver (#1061)', () => {
     // setup.sh must use python-resolve.sh (the same resolver the installer
     // uses) to determine Python architecture, not a standalone python3 probe.
@@ -405,5 +421,82 @@ describe('python-resolve — bootstrap target triple regression (#1061)', () => 
 
   test('Linux + aarch64 -> aarch64-unknown-linux-gnu', () => {
     assert.equal(getBootstrapTriple('Linux', 'aarch64', 'fail'), 'aarch64-unknown-linux-gnu');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: install-template.sh venv architecture reconciliation (#1061)
+// Verifies that a stale venv from a prior Rosetta install is detected and
+// rebuilt when the resolver now picks a different-arch Python.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the PRODUCTION venv reconciliation block from install-template.sh by
+ * extracting section 5 with sed, creating a mock venv whose python3 reports
+ * `venvArch`, and checking whether the block removes it.
+ *
+ * @param resolvedArch - RESOLVED_PYTHON_ARCH from the resolver
+ * @param venvArch     - arch the existing venv's python3 reports
+ * @returns 'rebuild' if the venv was removed, 'keep' if it survived
+ */
+function getVenvReconciliation(resolvedArch, venvArch) {
+  const templatePath = join(SERVICES_DIR, 'install-template.sh');
+  // Extract the reconciliation block (section 5 comment to outer fi).
+  // Strip `local` keyword (function-scoped, meaningless outside function).
+  const sedExpr =
+    '/^  # 5\\. Venv create/,/^  fi$/{' + '/^  #/d; /^[[:space:]]*local [^=]*$/d; s/[[:space:]]*local //; p;}';
+  const script = [
+    'set -euo pipefail',
+    'TMPVENV=$(mktemp -d)',
+    'trap "rm -rf $TMPVENV" EXIT',
+    // Create a fake venv with a mock python3 that reports venvArch
+    'mkdir -p "$TMPVENV/whisper-venv/bin"',
+    `printf '#!/bin/bash\\necho "${venvArch}"\\n' > "$TMPVENV/whisper-venv/bin/python3"`,
+    'chmod +x "$TMPVENV/whisper-venv/bin/python3"',
+    // Environment matching install_service_main context
+    'CAT_CAFE_HOME="$TMPVENV"',
+    'VENV_NAME="whisper-venv"',
+    `RESOLVED_PYTHON_ARCH="${resolvedArch}"`,
+    // Run the PRODUCTION reconciliation block
+    `eval "$(sed -n '${sedExpr}' '${templatePath}')" 2>/dev/null`,
+    // Report outcome
+    'if [ -d "$TMPVENV/whisper-venv" ]; then echo "keep"; else echo "rebuild"; fi',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+}
+
+describe('install-template — venv architecture reconciliation (#1061)', () => {
+  test('resolved=arm64 + venv=x86_64 -> rebuild (Rosetta→native transition)', () => {
+    // The primary Rosetta regression: user had x86_64 Python → venv is x86_64.
+    // After fixing Rosetta, resolver picks arm64 Python. Must rebuild venv
+    // so arm64 MLX wheels are installed into an arm64 runtime.
+    assert.equal(getVenvReconciliation('arm64', 'x86_64'), 'rebuild');
+  });
+
+  test('resolved=x86_64 + venv=arm64 -> rebuild (reverse mismatch)', () => {
+    // Unlikely but possible: user switches to Rosetta Python intentionally.
+    // Venv must still match resolved Python to avoid wrong-arch wheels.
+    assert.equal(getVenvReconciliation('x86_64', 'arm64'), 'rebuild');
+  });
+
+  test('resolved=arm64 + venv=arm64 -> keep (matching arch)', () => {
+    assert.equal(getVenvReconciliation('arm64', 'arm64'), 'keep');
+  });
+
+  test('resolved=x86_64 + venv=x86_64 -> keep (matching arch)', () => {
+    assert.equal(getVenvReconciliation('x86_64', 'x86_64'), 'keep');
+  });
+
+  test('resolved=arm64 + venv=unknown -> keep (probe failure is safe)', () => {
+    // If venv python3 fails to report arch, don't destroy a possibly-valid venv.
+    assert.equal(getVenvReconciliation('arm64', 'unknown'), 'keep');
+  });
+
+  test('resolved=unknown + venv=x86_64 -> keep (no resolver result is safe)', () => {
+    // If resolver didn't set RESOLVED_PYTHON_ARCH, don't destroy venv.
+    assert.equal(getVenvReconciliation('unknown', 'x86_64'), 'keep');
   });
 });
