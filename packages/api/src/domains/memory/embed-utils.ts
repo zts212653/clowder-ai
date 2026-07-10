@@ -3,7 +3,9 @@ import { type PassageVectorStore, passageVectorKey } from './PassageVectorStore.
 import type { VectorStore } from './VectorStore.js';
 
 const EMBED_BATCH_SIZE = 64;
-// Passage contents are much longer than doc summaries; keep warmup calls below the 3s client timeout.
+const BACKGROUND_EMBED_TIMEOUT_MS = 120_000;
+// Passage contents are much longer than doc summaries; keep warmup calls small
+// enough to avoid one slow passage stalling a large batch.
 const PASSAGE_EMBED_BATCH_SIZE = 8;
 
 export interface EmbedPipelineContext {
@@ -33,7 +35,7 @@ export async function embedIndexedItems(ctx: EmbedPipelineContext): Promise<void
   for (let offset = 0; offset < toEmbed.length; offset += EMBED_BATCH_SIZE) {
     const batch = toEmbed.slice(offset, offset + EMBED_BATCH_SIZE);
     const texts = batch.map((i) => `${i.title} ${i.summary ?? ''}`);
-    const vectors = await ctx.embedding.embed(texts);
+    const vectors = await ctx.embedding.embed(texts, { timeoutMs: BACKGROUND_EMBED_TIMEOUT_MS });
     for (let i = 0; i < batch.length; i++) {
       ctx.vectorStore.upsert(batch[i].anchor, vectors[i]);
     }
@@ -61,7 +63,9 @@ export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<v
 
   for (let offset = 0; offset < ctx.passages.length; offset += PASSAGE_EMBED_BATCH_SIZE) {
     const batch = ctx.passages.slice(offset, offset + PASSAGE_EMBED_BATCH_SIZE);
-    const vectors = await ctx.embedding.embed(batch.map((p) => p.content));
+    const vectors = await ctx.embedding.embed(batch.map((p) => p.content), {
+      timeoutMs: BACKGROUND_EMBED_TIMEOUT_MS,
+    });
     for (let i = 0; i < batch.length; i++) {
       const passage = batch[i];
       ctx.passageVectorStore.upsert(passageVectorKey(passage.docAnchor, passage.passageId), vectors[i]);

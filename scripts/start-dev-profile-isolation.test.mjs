@@ -936,6 +936,17 @@ describe('Whisper sidecar startup guards', () => {
   });
 });
 
+describe('POSIX Python resolver guards', () => {
+  it('does not expand empty curl proxy arrays under nounset', () => {
+    const resolver = readFileSync(resolve(ROOT, 'scripts/services/python-resolve.sh'), 'utf8');
+
+    assert.doesNotMatch(resolver, /curl_proxy_args/);
+    assert.match(resolver, /local curl_status=0/);
+    assert.match(resolver, /\|\| curl_status=\$\?/);
+    assert.match(resolver, /\[ "\$curl_status" -ne 0 \]/);
+  });
+});
+
 describe('Windows Python resolver guards', () => {
   it('does not block behind a Python install lock after another installer has finished', () => {
     const resolver = readFileSync(resolve(ROOT, 'scripts/services/python-resolve.ps1'), 'utf8');
