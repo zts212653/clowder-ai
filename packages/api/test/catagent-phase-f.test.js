@@ -430,6 +430,67 @@ describe('F2: run_command policy', () => {
       /timed out/,
     );
   });
+
+  test(
+    'timeout returns promptly even when grandchild holds inherited pipes',
+    { skip: process.platform === 'win32' },
+    async () => {
+      const tools = await buildToolRegistry(tmpDir, {
+        nativeToolLevel: 'L2',
+        commandTimeoutMs: 50,
+        commandKillGraceMs: 50,
+        commandPolicy: [
+          {
+            binary: process.execPath,
+            allowedFlags: ['-e'],
+            allowedArgPatterns: ['^const'],
+          },
+        ],
+      });
+      const run = findTool(tools, 'run_command');
+      // The parent node process spawns a detached grandchild that inherits
+      // stdio and sleeps for 5 seconds. Without pipe cleanup, the execFile
+      // callback would hang until the grandchild exits (5s), violating the
+      // 50ms timeout contract.
+      const script = [
+        'const{execFile}=require("child_process");',
+        'execFile(process.execPath,["-e","setInterval(()=>{},100)"],{stdio:"inherit"});',
+        'setInterval(()=>{},100);',
+      ].join('');
+      const start = Date.now();
+      await assert.rejects(() => run.execute({ binary: process.execPath, args: ['-e', script] }), /timed out/);
+      const elapsed = Date.now() - start;
+      // Should settle within ~500ms (timeout + grace + OS overhead), not 5+ seconds.
+      assert.ok(elapsed < 1000, `Elapsed ${elapsed}ms — expected < 1000ms; pipe cleanup may have failed`);
+    },
+  );
+});
+
+describe('F1: CAS atomicity', () => {
+  test('concurrent patches on the same path are serialized by the path lock', async () => {
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    const patch = findTool(tools, 'patch_file');
+    const target = join(tmpDir, 'cas-test.txt');
+    writeFileSync(target, 'alpha beta gamma');
+    const initialHash = sha256('alpha beta gamma').slice(0, 12);
+
+    // Launch two concurrent patches that both target the same text.
+    // Without the lock, both would read the same content and the second
+    // rename would silently overwrite the first. With the lock, the second
+    // patch should fail with expected_hash mismatch because the first patch
+    // changed the file.
+    const results = await Promise.allSettled([
+      patch.execute({ path: 'cas-test.txt', old_text: 'alpha', new_text: 'ALPHA', expected_hash: initialHash }),
+      patch.execute({ path: 'cas-test.txt', old_text: 'beta', new_text: 'BETA', expected_hash: initialHash }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    // Exactly one should succeed, the other should fail with hash mismatch.
+    assert.equal(fulfilled.length, 1, `Expected 1 fulfilled, got ${fulfilled.length}`);
+    assert.equal(rejected.length, 1, `Expected 1 rejected, got ${rejected.length}`);
+    assert.ok(rejected[0].reason.message.includes('expected_hash mismatch'));
+  });
 });
 
 describe('F3-min: host-native scoped callback tool', () => {

@@ -44,6 +44,34 @@ const COMMAND_MAX_BUFFER = 512 * 1024;
 const LEVEL_RANK = { L0: 0, L1: 1, L2: 2 } as const;
 const TASK_STATUSES = new Set<TaskStatus>(['todo', 'doing', 'blocked', 'done']);
 
+/**
+ * Per-path async mutex for write_file / patch_file.
+ *
+ * Ensures that the read → hash-check → rename sequence for a given resolved
+ * path is serialized, preventing the concurrent-CAS TOCTOU where two patches
+ * with the same expected_hash both pass and the later rename silently
+ * overwrites the earlier edit.
+ */
+const pathLocks = new Map<string, Promise<void>>();
+
+async function withPathLock<T>(resolvedPath: string, fn: () => Promise<T>): Promise<T> {
+  // Wait for any in-flight operation on this path to finish.
+  while (pathLocks.has(resolvedPath)) {
+    await pathLocks.get(resolvedPath);
+  }
+  let releaseLock!: () => void;
+  const lock = new Promise<void>((r) => {
+    releaseLock = r;
+  });
+  pathLocks.set(resolvedPath, lock);
+  try {
+    return await fn();
+  } finally {
+    pathLocks.delete(resolvedPath);
+    releaseLock();
+  }
+}
+
 /** Denylist globs for rg pre-filtering (isDenylisted is the authoritative filter) */
 const RG_DENYLIST_GLOBS = ['!.env*', '!*.pem', '!*.key', '!id_rsa*', '!.git', '!secrets'];
 
@@ -357,20 +385,23 @@ async function executeWriteFile(
 
   const resolved = await resolveCreatePath(workDir, input.path as string);
   const relPath = normalizedRel(workDir, resolved);
-  await assertWithinWriteCap(resolved, relPath, 'write_file', options);
-  const hashBefore = await existingFileHash(resolved);
-  await writeAtomicUtf8(resolved, content);
-  const hashAfter = hashContent(content);
-  await emitAudit(options, {
-    tool: 'write_file',
-    outcome: 'ok',
-    timestamp: Date.now(),
-    path: relPath,
-    bytes,
-    hashBefore,
-    hashAfter,
+
+  return withPathLock(resolved, async () => {
+    await assertWithinWriteCap(resolved, relPath, 'write_file', options);
+    const hashBefore = await existingFileHash(resolved);
+    await writeAtomicUtf8(resolved, content);
+    const hashAfter = hashContent(content);
+    await emitAudit(options, {
+      tool: 'write_file',
+      outcome: 'ok',
+      timestamp: Date.now(),
+      path: relPath,
+      bytes,
+      hashBefore,
+      hashAfter,
+    });
+    return `Wrote ${bytes} bytes to ${relPath} (sha256:${hashAfter.slice(0, 12)})`;
   });
-  return `Wrote ${bytes} bytes to ${relPath} (sha256:${hashAfter.slice(0, 12)})`;
 }
 
 interface TextSpanMatch {
@@ -411,57 +442,59 @@ async function executePatchFile(
     await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'expected_hash must be at least 8 hex chars');
   }
 
-  await assertWithinWriteCap(resolved, relPath, 'patch_file', options);
+  return withPathLock(resolved, async () => {
+    await assertWithinWriteCap(resolved, relPath, 'patch_file', options);
 
-  // patch_file does not go through existingFileHash (which rejects symlinks
-  // for write_file); reject explicitly to prevent the byte-cap bypass and
-  // symlink replacement that writeAtomicUtf8's temp+rename would cause.
-  try {
-    const pathStat = await lstat(resolved);
-    if (pathStat.isSymbolicLink()) {
-      await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'patch_file refuses to follow symlinks');
+    // patch_file does not go through existingFileHash (which rejects symlinks
+    // for write_file); reject explicitly to prevent the byte-cap bypass and
+    // symlink replacement that writeAtomicUtf8's temp+rename would cause.
+    try {
+      const pathStat = await lstat(resolved);
+      if (pathStat.isSymbolicLink()) {
+        await rejectWithAudit(options, { tool: 'patch_file', path: relPath }, 'patch_file refuses to follow symlinks');
+      }
+    } catch (err) {
+      // ENOENT means the file doesn't exist; readFile below will throw a clear
+      // error. Everything else (including rejectWithAudit's throw) must propagate.
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
-  } catch (err) {
-    // ENOENT means the file doesn't exist; readFile below will throw a clear
-    // error. Everything else (including rejectWithAudit's throw) must propagate.
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-  }
 
-  const before = await readFile(resolved, 'utf-8');
-  const hashBefore = hashContent(before);
-  if (!hashBefore.startsWith(expectedHash)) {
-    await rejectWithAudit(options, { tool: 'patch_file', path: relPath, hashBefore }, 'expected_hash mismatch');
-  }
-  const span = findUniqueTextSpan(before, oldText);
-  if (span.matches !== 1) {
-    await rejectWithAudit(
-      options,
-      { tool: 'patch_file', path: relPath, hashBefore },
-      `old_text must match exactly once (found ${span.matches})`,
-    );
-  }
+    const before = await readFile(resolved, 'utf-8');
+    const hashBefore = hashContent(before);
+    if (!hashBefore.startsWith(expectedHash)) {
+      await rejectWithAudit(options, { tool: 'patch_file', path: relPath, hashBefore }, 'expected_hash mismatch');
+    }
+    const span = findUniqueTextSpan(before, oldText);
+    if (span.matches !== 1) {
+      await rejectWithAudit(
+        options,
+        { tool: 'patch_file', path: relPath, hashBefore },
+        `old_text must match exactly once (found ${span.matches})`,
+      );
+    }
 
-  const after = replaceTextSpan(before, span, newText);
-  const afterBytes = Buffer.byteLength(after, 'utf-8');
-  if (afterBytes > MAX_WRITE_BYTES) {
-    await rejectWithAudit(
-      options,
-      { tool: 'patch_file', path: relPath, bytes: afterBytes },
-      `patch result (${afterBytes} bytes) exceeds write cap (${MAX_WRITE_BYTES} bytes)`,
-    );
-  }
-  const hashAfter = hashContent(after);
-  await writeAtomicUtf8(resolved, after);
-  await emitAudit(options, {
-    tool: 'patch_file',
-    outcome: 'ok',
-    timestamp: Date.now(),
-    path: relPath,
-    bytes: Buffer.byteLength(after, 'utf-8'),
-    hashBefore,
-    hashAfter,
+    const after = replaceTextSpan(before, span, newText);
+    const afterBytes = Buffer.byteLength(after, 'utf-8');
+    if (afterBytes > MAX_WRITE_BYTES) {
+      await rejectWithAudit(
+        options,
+        { tool: 'patch_file', path: relPath, bytes: afterBytes },
+        `patch result (${afterBytes} bytes) exceeds write cap (${MAX_WRITE_BYTES} bytes)`,
+      );
+    }
+    const hashAfter = hashContent(after);
+    await writeAtomicUtf8(resolved, after);
+    await emitAudit(options, {
+      tool: 'patch_file',
+      outcome: 'ok',
+      timestamp: Date.now(),
+      path: relPath,
+      bytes: Buffer.byteLength(after, 'utf-8'),
+      hashBefore,
+      hashAfter,
+    });
+    return `Patched ${relPath} (sha256:${hashBefore.slice(0, 12)} -> ${hashAfter.slice(0, 12)})`;
   });
-  return `Patched ${relPath} (sha256:${hashBefore.slice(0, 12)} -> ${hashAfter.slice(0, 12)})`;
 }
 
 // ── run_command ──
@@ -569,6 +602,18 @@ interface ExecFileStrictError extends Error {
   timedOut?: boolean;
 }
 
+/**
+ * Destroy a child's stdio pipes so the execFile callback fires promptly
+ * even if grandchild processes inherited and still hold those pipes open.
+ * Without this, a timed-out command whose child spawns long-lived
+ * descendants can hang the tool call indefinitely.
+ */
+function destroyChildPipes(child: ReturnType<typeof execFile>): void {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.stdin?.destroy();
+}
+
 function execFileWithStrictTimeout(
   binary: string,
   args: readonly string[],
@@ -620,6 +665,9 @@ function execFileWithStrictTimeout(
       child.kill('SIGTERM');
       killHandle = setTimeout(() => {
         child.kill('SIGKILL');
+        // Destroy pipes so the callback fires even if grandchild processes
+        // inherited them. Without this, execFile hangs until all pipe holders exit.
+        destroyChildPipes(child);
       }, options.killGraceMs);
       killHandle.unref?.();
     }, options.timeoutMs);
