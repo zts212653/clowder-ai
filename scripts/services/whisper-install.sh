@@ -29,7 +29,7 @@ fi
 PIP_DEPS_OTHER="faster-whisper fastapi uvicorn python-multipart httpx[socks] huggingface_hub[hf_xet]"
 MODEL_LOADER_OTHER="faster_whisper"
 
-# MLX models require arm64 Python — declare contract for install-template.
+# MLX models require arm64 Python -- declare contract for install-template.
 # install-template.sh rejects incompatible interpreters before touching venv.
 if [[ "$_model" == mlx-community/* ]]; then
   REQUIRED_PYTHON_ARCH="arm64"

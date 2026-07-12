@@ -109,7 +109,7 @@ install_service_main() {
   # 3.5. Model-arch compatibility gate (#1061). Callers set
   # REQUIRED_PYTHON_ARCH="arm64" for MLX-only models. Reject before
   # touching venv/network/deps. Allow bootstrap on Apple Silicon (no
-  # Python yet → sysctl proves arm64 → bootstrap downloads arm64).
+  # Python yet -> sysctl proves arm64 -> bootstrap downloads arm64).
   if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && [ "$is_darwin_arm64" != "1" ]; then
     if [ "$python_arch" = "unknown" ] && [ "$hw_arch" = "arm64" ] && [ "$platform" = "Darwin" ]; then
       echo "  No Python found on Apple Silicon; bootstrap will install arm64 Python." >&2
