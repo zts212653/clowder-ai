@@ -39,10 +39,10 @@ PORT="${WHISPER_PORT:-9876}"
 echo "[start] resolved runtime: CAT_CAFE_HOME=$CAT_CAFE_HOME; venv=$VENV_DIR; python=python3; api=$API_SCRIPT; port=$PORT"
 
 # Venv architecture compatibility check (#1061).
-# Normal startup (env bridge -> installed:true -> server) skips the
-# installer. A stale Rosetta venv (x86_64 Python) with an arm64
-# resolver means wrong-arch MLX wheels at runtime. Detect and remove
-# so the auto-install block below rebuilds with the correct Python.
+# Model-aware: MLX models (Qwen3-ASR) require arm64 Python/venv.
+# A working arm64 MLX venv must NOT be deleted just because the
+# resolver found x86_64 Python on PATH -- the venv's own python3
+# symlink is arm64 and works independently (maintainer P1 review).
 if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
   # shellcheck source=./python-resolve.sh
   source "$SCRIPT_DIR/python-resolve.sh"
@@ -56,8 +56,22 @@ if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
     _venv_arch="$("$VENV_DIR/bin/python3" -c \
       'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
     if [ "$_venv_arch" != "unknown" ] && [ "$_venv_arch" != "$_current_arch" ]; then
-      echo "[start] venv arch ($_venv_arch) != resolver arch ($_current_arch) -- reinstalling..." >&2
-      rm -rf "$VENV_DIR"
+      _delete_venv=1
+      case "$MODEL" in
+        *Qwen3-ASR*|mlx-community/*)
+          # MLX model + arm64 venv: verify deps still work before keeping
+          if { [ "$_venv_arch" = "arm64" ] || [ "$_venv_arch" = "aarch64" ]; } \
+             && { "$VENV_DIR/bin/python3" -c "import mlx_audio" 2>/dev/null \
+                  || "$VENV_DIR/bin/python3" -c "import mlx_whisper" 2>/dev/null; }; then
+            _delete_venv=0
+            echo "[start] keeping arm64 venv for MLX model $MODEL (PATH Python is $_current_arch)." >&2
+          fi
+          ;;
+      esac
+      if [ "$_delete_venv" = "1" ]; then
+        echo "[start] venv arch ($_venv_arch) != resolver arch ($_current_arch) -- reinstalling..." >&2
+        rm -rf "$VENV_DIR"
+      fi
     fi
   fi
 fi
@@ -85,6 +99,28 @@ if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python3" ]; then
 fi
 
 if [ ! -d "$VENV_DIR" ]; then
+  # Model-arch gate: MLX models require arm64 Python. Fail fast before
+  # creating a venv with incompatible deps (#1061 maintainer P1).
+  case "$MODEL" in
+    *Qwen3-ASR*|mlx-community/*)
+      if [ -z "${RESOLVED_PYTHON_ARCH:-}" ]; then
+        # No venv existed -> resolver wasn't called yet; resolve now.
+        # shellcheck source=./python-resolve.sh
+        source "$SCRIPT_DIR/python-resolve.sh"
+        _try_system_pythons 2>/dev/null \
+          || _try_uv 2>/dev/null || _try_pyenv 2>/dev/null || _try_brew 2>/dev/null \
+          || _try_project_python 2>/dev/null || _try_legacy_project_python 2>/dev/null \
+          || true
+      fi
+      _pa="${RESOLVED_PYTHON_ARCH:-unknown}"
+      if [ "$_pa" != "unknown" ] && [ "$_pa" != "arm64" ] && [ "$_pa" != "aarch64" ]; then
+        echo "ERROR: $MODEL requires arm64 Python (MLX), but resolved Python is $_pa." >&2
+        echo "  To fix: install arm64 Python ('brew install python@3.12' in a native terminal)" >&2
+        echo "  Or switch model: WHISPER_MODEL=large-v3-turbo" >&2
+        exit 1
+      fi
+      ;;
+  esac
   echo "[start] venv not found: $VENV_DIR -- auto-installing..." >&2
   INSTALL_SCRIPT="$SCRIPT_DIR/whisper-install.sh"
   if [ ! -f "$INSTALL_SCRIPT" ]; then

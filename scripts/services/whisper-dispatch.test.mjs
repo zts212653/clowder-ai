@@ -553,29 +553,39 @@ describe('install-template — venv architecture reconciliation (#1061)', () => 
  *
  * @param resolvedArch - arch the resolver probe would report
  * @param venvArch     - arch the existing venv's python3 reports
+ * @param model        - WHISPER_MODEL value (model-aware arch decision)
+ * @param available    - modules the mock venv python3 can import
  * @returns 'rebuild' if the venv was removed, 'keep' if it survived
  */
-function getServerVenvCheck(resolvedArch, venvArch) {
+function getServerVenvCheck(resolvedArch, venvArch, model = 'large-v3-turbo', available = []) {
   const serverPath = join(SERVICES_DIR, 'whisper-server.sh');
-  // Extract the compat check block, stripping comments and the source line
-  // (we provide mocked probe functions instead of sourcing python-resolve.sh).
-  // Stop at the backend dep check (not the auto-install block) so this
-  // test isolates the arch check from the backend dep check.
   const sedExpr =
     '/^# Venv architecture compatibility/,/^# Backend dependency/{' +
     '/^# Backend/d; /^#/d; /shellcheck/d; /source.*python-resolve/d; p;}';
   const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
   const resolverFail = 'return 1';
   const probeStub = resolvedArch !== 'none' ? resolverOk : resolverFail;
+  // Mock python3: handles arch probe AND selective import checks.
+  const importCases = ['mlx_audio', 'mlx_whisper', 'faster_whisper']
+    .map((mod) => `*"import ${mod}"*) exit ${available.includes(mod) ? '0' : '1'} ;;`)
+    .join(' ');
+  const mockPython = [
+    '#!/bin/bash',
+    'case "$2" in',
+    `  *"platform.machine"*) echo "${venvArch}" ;;`,
+    `  ${importCases}`,
+    '  *) exit 0 ;;',
+    'esac',
+  ].join('\n');
   const script = [
     'set -euo pipefail',
     'TMPVENV=$(mktemp -d)',
     'trap "rm -rf $TMPVENV" EXIT',
     'mkdir -p "$TMPVENV/whisper-venv/bin"',
-    `printf '#!/bin/bash\\necho "${venvArch}"\\n' > "$TMPVENV/whisper-venv/bin/python3"`,
+    `cat > "$TMPVENV/whisper-venv/bin/python3" <<'PYEOF'\n${mockPython}\nPYEOF`,
     'chmod +x "$TMPVENV/whisper-venv/bin/python3"',
     'VENV_DIR="$TMPVENV/whisper-venv"',
-    // Mock all resolver probes — only system probe succeeds (or all fail)
+    `MODEL="${model}"`,
     `_try_system_pythons() { ${probeStub}; }`,
     `_try_uv() { ${resolverFail}; }`,
     `_try_pyenv() { ${resolverFail}; }`,
@@ -614,6 +624,26 @@ describe('whisper-server — startup path venv compat (#1061)', () => {
   test('all probes fail + venv=x86_64 -> keep (no resolver = safe)', () => {
     // If no Python is found by the resolver, don't destroy existing venv.
     assert.equal(getServerVenvCheck('none', 'x86_64'), 'keep');
+  });
+
+  // Maintainer P1 regression: model-aware venv arch decision.
+  // MLX models require arm64 venv — don't delete a working arm64 MLX venv
+  // just because the resolver found x86_64 Python on PATH.
+  test('Qwen + arm64 venv with mlx_audio + x86 resolver -> keep (maintainer P1)', () => {
+    const result = getServerVenvCheck('x86_64', 'arm64', 'mlx-community/Qwen3-ASR-1.7B-8bit', ['mlx_audio']);
+    assert.equal(result, 'keep', 'must NOT delete arm64 venv with MLX deps for Qwen model');
+  });
+
+  test('Qwen + arm64 venv WITHOUT mlx deps + x86 resolver -> rebuild', () => {
+    // arm64 venv exists but has no MLX deps (e.g. from a different service) — rebuild.
+    const result = getServerVenvCheck('x86_64', 'arm64', 'mlx-community/Qwen3-ASR-1.7B-8bit', []);
+    assert.equal(result, 'rebuild', 'arm64 venv without MLX deps should rebuild');
+  });
+
+  test('non-MLX model + arm64 venv + x86 resolver -> rebuild (no model protection)', () => {
+    // faster-whisper model does not get the MLX venv protection.
+    const result = getServerVenvCheck('x86_64', 'arm64', 'large-v3-turbo', ['faster_whisper']);
+    assert.equal(result, 'rebuild', 'non-MLX model should rebuild on arch mismatch');
   });
 });
 
@@ -702,5 +732,73 @@ describe('whisper-server — backend dependency check (#863)', () => {
   test('non-MLX model + venv has mlx_whisper -> keep (fallback chain)', () => {
     // whisper-api.py tries mlx_whisper first for non-Qwen models
     assert.equal(getServerBackendCheck('large-v3-turbo', ['mlx_whisper']), 'keep');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: model-arch compatibility gate (maintainer P1 #1061)
+//
+// MLX models (Qwen3-ASR) require arm64 Python. When no venv exists and the
+// resolver finds only x86_64 Python, whisper-server.sh must fail fast with
+// explicit remediation instead of silently installing wrong deps.
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if the model-arch gate in whisper-server.sh fires correctly.
+ * Simulates: no existing venv + MODEL + resolver arch → exit 0 or exit 1.
+ *
+ * @param model - WHISPER_MODEL value
+ * @param resolvedArch - arch the resolver reports ('arm64'|'x86_64'|'none')
+ * @returns 'blocked' if the gate rejected, 'passed' if it continued
+ */
+function getModelArchGate(model, resolvedArch) {
+  const serverPath = join(SERVICES_DIR, 'whisper-server.sh');
+  // Extract the model-arch gate block from the auto-install section.
+  const sedExpr =
+    '/^  # Model-arch gate/,/^  echo.*auto-installing/{' +
+    '/auto-installing/d; /^  #/d; /shellcheck/d; /source.*python-resolve/d; p;}';
+  const resolverOk = `RESOLVED_PYTHON_ARCH="${resolvedArch}"; return 0`;
+  const resolverFail = 'return 1';
+  const probeStub = resolvedArch !== 'none' ? resolverOk : resolverFail;
+  const script = [
+    '#!/bin/bash',
+    `MODEL="${model}"`,
+    'SCRIPT_DIR="."',
+    'RESOLVED_PYTHON_ARCH=""',
+    `_try_system_pythons() { ${probeStub}; }`,
+    `_try_uv() { ${resolverFail}; }`,
+    `_try_pyenv() { ${resolverFail}; }`,
+    `_try_brew() { ${resolverFail}; }`,
+    `_try_project_python() { ${probeStub}; }`,
+    `_try_legacy_project_python() { ${resolverFail}; }`,
+    // Run gate block; exit 0 = passed, exit 1 = blocked
+    `eval "$(sed -n '${sedExpr}' '${serverPath}')" 2>/dev/null`,
+    'echo "passed"',
+  ].join('\n');
+  try {
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return 'blocked';
+  }
+}
+
+describe('whisper-server — model-arch compatibility gate (#1061 maintainer P1)', () => {
+  test('Qwen + x86_64 resolver -> blocked (fail fast before wrong deps)', () => {
+    assert.equal(getModelArchGate('mlx-community/Qwen3-ASR-1.7B-8bit', 'x86_64'), 'blocked');
+  });
+
+  test('Qwen + arm64 resolver -> passed (MLX compatible)', () => {
+    assert.equal(getModelArchGate('mlx-community/Qwen3-ASR-1.7B-8bit', 'arm64'), 'passed');
+  });
+
+  test('non-MLX + x86_64 resolver -> passed (faster-whisper works on x86)', () => {
+    assert.equal(getModelArchGate('large-v3-turbo', 'x86_64'), 'passed');
+  });
+
+  test('Qwen + no resolver result -> passed (bootstrap will provide arm64)', () => {
+    assert.equal(getModelArchGate('mlx-community/Qwen3-ASR-1.7B-8bit', 'none'), 'passed');
   });
 });
