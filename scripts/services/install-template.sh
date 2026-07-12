@@ -33,28 +33,13 @@
 #   PIP_DEPS_OTHER         (required) -- pip deps for non-arm64 path.
 #
 # OPTIONAL inputs:
-#
-#   PRE_CHECK_FFMPEG=1            -- require ffmpeg on PATH before
-#                                   touching venv (whisper).
-#
-#   MODEL_LOADER_ARM64="snapshot"    -- model loader strategy for arm64;
-#   MODEL_LOADER_OTHER="snapshot"      one of:
-#                                       "snapshot"        snapshot_download
-#                                       "faster_whisper"  snapshot_download
-#                                                         with faster-whisper
-#                                                         alias resolution,
-#                                                         then WhisperModel
-#                                                         runtime load
-#                                       "skip"            don't preload --
-#                                                         caller hook
-#                                                         handles it (tts
-#                                                         piper voice).
-#                                     Defaults to "snapshot" each.
-#
-#   POST_INSTALL_HOOK_ARM64=fn    -- bash function (in caller scope) to
-#   POST_INSTALL_HOOK_OTHER=fn      call after the chosen model loader
-#                                   completes. Used for tts piper voice
-#                                   file download on non-arm64.
+#   PRE_CHECK_FFMPEG=1            -- require ffmpeg on PATH.
+#   REQUIRED_PYTHON_ARCH="arm64"  -- reject non-matching interpreters
+#                                   before touching venv (#1061).
+#   MODEL_LOADER_ARM64="snapshot" -- model loader (snapshot|faster_whisper|skip).
+#   MODEL_LOADER_OTHER="snapshot"    Defaults to "snapshot" each.
+#   POST_INSTALL_HOOK_ARM64=fn    -- hook after model load (tts piper voice).
+#   POST_INSTALL_HOOK_OTHER=fn
 #
 # After sourcing, caller MUST call `install_service_main`.
 
@@ -118,6 +103,21 @@ install_service_main() {
       echo "  WARNING: Apple Silicon hardware but Python interpreter is ${python_arch}." >&2
       echo "  MLX packages require native arm64 Python. Using non-MLX dependencies." >&2
       echo "  To fix: install arm64 Python (e.g. 'brew install python@3.12' in a native terminal)." >&2
+    fi
+  fi
+
+  # 3.5. Model-arch compatibility gate (#1061). Callers set
+  # REQUIRED_PYTHON_ARCH="arm64" for MLX-only models. Reject before
+  # touching venv/network/deps. Allow bootstrap on Apple Silicon (no
+  # Python yet → sysctl proves arm64 → bootstrap downloads arm64).
+  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && [ "$is_darwin_arm64" != "1" ]; then
+    if [ "$python_arch" = "unknown" ] && [ "$hw_arch" = "arm64" ] && [ "$platform" = "Darwin" ]; then
+      echo "  No Python found on Apple Silicon; bootstrap will install arm64 Python." >&2
+    else
+      echo "ERROR: $SERVICE_LABEL requires arm64 Python (MLX), resolved=${python_arch}." >&2
+      [ "$platform" = "Darwin" ] && echo "  Fix: install arm64 Python ('brew install python@3.12' in native terminal)" >&2
+      echo "  Or choose a non-MLX model (e.g. faster-whisper large-v3-turbo)" >&2
+      exit 1
     fi
   fi
 

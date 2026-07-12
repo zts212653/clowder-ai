@@ -388,6 +388,84 @@ describe('install-template — platform detection regression (#1061)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Regression: install-template.sh model-arch compatibility gate (#1061
+// maintainer P1). The direct install path (POST /api/services/:id/install)
+// calls whisper-install.sh → install-template.sh without whisper-server.sh.
+// REQUIRED_PYTHON_ARCH contract must reject incompatible interpreters
+// before touching venv/network/deps.
+// ---------------------------------------------------------------------------
+
+/**
+ * Exercise the PRODUCTION platform detection + model-arch gate from
+ * install-template.sh. Returns 'blocked' if the gate rejected (exit 1),
+ * 'passed' if it continued.
+ *
+ * @param platform   - 'Darwin' | 'Linux'
+ * @param hwArch     - hardware arch ('arm64' | 'x86_64')
+ * @param pythonArch - resolved Python arch ('arm64' | 'x86_64' | 'unknown')
+ * @param requiredArch - REQUIRED_PYTHON_ARCH value ('' = no constraint)
+ */
+function getInstallArchGate(platform, hwArch, pythonArch, requiredArch) {
+  const templatePath = join(SERVICES_DIR, 'install-template.sh');
+  const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
+  // Extract platform detection (step 3) + model-arch gate (step 3.5).
+  // Range: from `local platform hw_arch` to `# 4.` (pre-checks).
+  const sedExpr =
+    '/^  local platform hw_arch python_arch/,/^  # 4\\./{' + '/^  # 4\\./d; /^  local [^=]*$/d; s/^  local //; p;}';
+  const script = [
+    `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
+    `sysctl() { ${sysctlStub}; }`,
+    `export RESOLVED_PYTHON_ARCH="${pythonArch}"`,
+    `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
+    'SERVICE_LABEL="test-service"',
+    `eval "$(sed -n '${sedExpr}' '${templatePath}')" 2>/dev/null`,
+    'echo "passed"',
+  ].join('\n');
+  try {
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return 'blocked';
+  }
+}
+
+describe('install-template — model-arch gate via direct install (#1061 maintainer P1)', () => {
+  test('Qwen + cached x86 Python on Apple Silicon -> blocked', () => {
+    // Scenario 1: user has cached x86_64 project/legacy Python,
+    // calls install directly (not via whisper-server.sh gate).
+    assert.equal(getInstallArchGate('Darwin', 'arm64', 'x86_64', 'arm64'), 'blocked');
+  });
+
+  test('Qwen + no Python on Apple Silicon -> passed (bootstrap)', () => {
+    // Scenario 2: no Python found but Apple Silicon hardware.
+    // Bootstrap will download arm64 Python via sysctl detection.
+    assert.equal(getInstallArchGate('Darwin', 'arm64', 'unknown', 'arm64'), 'passed');
+  });
+
+  test('Qwen + no Python on Intel/Linux -> blocked', () => {
+    // Scenario 3: no Python on non-arm64 hardware.
+    // Bootstrap would download x86_64 Python → MLX fails.
+    assert.equal(getInstallArchGate('Linux', 'x86_64', 'unknown', 'arm64'), 'blocked');
+  });
+
+  test('faster-whisper + x86 Python -> passed (no arch constraint)', () => {
+    // Scenario 4: non-MLX model has no REQUIRED_PYTHON_ARCH.
+    assert.equal(getInstallArchGate('Darwin', 'arm64', 'x86_64', ''), 'passed');
+  });
+
+  test('Qwen + arm64 Python on Apple Silicon -> passed', () => {
+    assert.equal(getInstallArchGate('Darwin', 'arm64', 'arm64', 'arm64'), 'passed');
+  });
+
+  test('Qwen + no Python on Intel macOS -> blocked', () => {
+    // Intel Mac with no Python → bootstrap gets x86_64 → MLX fails.
+    assert.equal(getInstallArchGate('Darwin', 'x86_64', 'unknown', 'arm64'), 'blocked');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Regression: python-resolve.sh bootstrap target triple (#1061)
 // Sources the PRODUCTION _pbs_target_triple() with mocked system commands.
 // ---------------------------------------------------------------------------
