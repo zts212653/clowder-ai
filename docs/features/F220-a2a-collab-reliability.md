@@ -1,6 +1,6 @@
 ---
 feature_ids: [F220]
-related_features: [F216, F175, F153, F118, F215]
+related_features: [F216, F175, F153, F118, F215, F048]
 topics: [a2a, observability, liveness, invocation, queue, interrupt, recovery, ux]
 doc_kind: spec
 created: 2026-06-02
@@ -98,6 +98,7 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - force-reset 端点（`queue.ts`，已存在）。
 - #2053 steer 修复（已 merge）——本 feat 是其完整产品故事的延续。
 - Phase 间无硬依赖，可独立推进；建议序：可观测(1) → 可恢复(3) → 可靠(2)（1/3 直接缓解体感，2 是根因攻坚）。
+- **Cross-ref**: F048 Phase B（队列 + Worklist 持久化）— runtime 重启导致 A2A 串行 worklist 蒸发（WorklistRegistry 内存 Map）属 F048 Phase B scope，不在 F220 内重复覆盖。2026-07-13 实际案例（04:58 UTC graceful shutdown 杀死 opus in-flight turn + @sol dispatch 蒸发，静默 2h24m）已记入 F048。
 
 ## Risk
 - Phase 1 改前端 liveness 写入时机，可能影响 human 路径占位——回归测守住。

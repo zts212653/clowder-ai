@@ -1,7 +1,7 @@
 ---
 feature_ids: [F048]
-related_features: [F039, F194]
-topics: [restart, recovery, invocation, queue, redis]
+related_features: [F039, F194, F220]
+topics: [restart, recovery, invocation, queue, redis, worklist, a2a]
 doc_kind: note
 created: 2026-02-28
 ---
@@ -39,11 +39,27 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 
 **来源**：开源社区 clowder-ai PR #78 / Issue #77（bouillipx 提交）。手动 port 含两处修正。
 
-### Phase B — 队列持久化（重型，后做）
+### Phase B — 队列 + Worklist 持久化（重型，后做）
 
+**InvocationQueue 持久化**（原有 scope）：
 - `InvocationQueue` 迁到 Redis
 - 重启后恢复排队条目并继续消费
 - `processing` 条目回滚语义
+
+**WorklistRegistry 持久化**（2026-07-13 scope 扩展，intake 自 F220 evidence handoff）：
+- `WorklistRegistry`（`WorklistRegistry.ts:194`，module-level `new Map()`）迁到 Redis——与 InvocationQueue 同构问题，同构修法
+- WorklistRegistry 管 A2A 串行 dispatch 的"下一棒是谁"，重启蒸发 = 静默丢弃已解析的 @mention target
+- Boot reconcile：启动时检查 Redis 中残留的 worklist 条目，对未完成的串行链做 requeue 或 fail+通知
+- `threadIndex`（`WorklistRegistry.ts:197`，reverse index `new Map()`）同步持久化
+
+**Phase A+ 双重启边界 case**（2026-07-13 补充）：
+- 快速连续重启（stop→start→stop→start）可能导致中间实例的 sweep 通知丢失——第一次 sweep 标 `failed` + 发通知，中间实例被杀，最终实例启动时 record 已是 `failed` 不再通知
+- 需要验证 Phase A+ 通知的幂等性/持久性：sweep 后的通知是否一定落盘，还是可能随中间实例一起丢失
+
+**实际案例**（2026-07-13 04:58 UTC）：
+- Ragdoll opus turn `a272cb69` 在执行 `git commit && push` 的 tool_call 中被 graceful shutdown 杀死（Redis log 04:58:19 "bye bye"与 CLI transcript 04:58:15 最后事件对齐）
+- 串行 worklist 中排队的 @sol dispatch 蒸发——sol 从未被触发，thread 静默 2h24m 无任何可见通知
+- Fable 完整调查证据：thread `thread_mriwjlo1955spve4` 消息 `000096` + `000124`（Redis log + process table + transcript + git log 四方对齐）
 
 ## Acceptance Criteria — Phase A
 
@@ -66,9 +82,11 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 
 ## Acceptance Criteria — Phase B（后续）
 
-- [ ] 重启后：队列不丢（queued 条目可恢复）
-- [ ] 不出现”双执行”（at-least-once + 去重）
-- [ ] 前端清晰可见：哪些因重启被中断、哪些仍在队列
+- [ ] AC-B1: 重启后：InvocationQueue 不丢（queued 条目可恢复）
+- [ ] AC-B2: 不出现”双执行”（at-least-once + 去重）
+- [ ] AC-B3: 前端清晰可见：哪些因重启被中断、哪些仍在队列
+- [ ] AC-B4: 重启后：WorklistRegistry 串行链不丢——已解析的 @mention target 列表可恢复，未执行的 target 被 requeue 或 fail+通知（2026-07-13 新增）
+- [ ] AC-B5: Phase A+ 双重启幂等性——快速连续重启后，受影响 thread 仍收到可见中断通知（2026-07-13 新增）
 
 ## Key Decisions
 
@@ -87,6 +105,8 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 | retry 拒绝 `running` | `invocations.ts:76` | 只允许 `failed\|queued`，running → 409 |
 | TaskProgress 也持久化 | `RedisTaskProgressStore.ts` | 前端恢复时会显示”幽灵进度” |
 | InvocationQueue 是内存态 | `InvocationQueue.ts:38` | `private queues = new Map()`，重启丢失 |
+| WorklistRegistry 是内存态 | `WorklistRegistry.ts:194` | module-level `new Map()`，A2A 串行 dispatch worklist，重启丢失（2026-07-13 补充） |
+| threadIndex 是内存态 | `WorklistRegistry.ts:197` | reverse index `new Map()`，随 WorklistRegistry 一起丢失 |
 
 ## Ghost Branch Audit（2026-02-28 幽灵分支盘点）
 
@@ -106,6 +126,7 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 ## Dependencies
 
 - **Related**: F039（消息排队投递）
+- **Cross-ref**: F220（A2A 可观测·可靠·可恢复）— WorklistRegistry 蒸发是 F220 "A2A 静默掉球" 的 infra 根因之一；Phase B 修复后 F220 的 restart 维度自动收口
 - Redis（持久化、CAS、启动 reconcile）
 
 ## Review Gate
