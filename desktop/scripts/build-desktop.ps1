@@ -513,6 +513,20 @@ if (-not $SkipPortableZip) {
     # Desktop assets
     Copy-ToStaging (Join-Path (Join-Path $ProjectRoot "desktop") "assets") "desktop\assets"
 
+    # Desktop package.json — version source for generate-desktop-config.ps1.
+    # Bake the resolved $zipVersion (which honours CATCAFE_VERSION override)
+    # into the staged copy so portable first-run config always matches the
+    # archive name. Without this, a manual CATCAFE_VERSION override would
+    # produce a zip named X but a desktop-config.json recording Y. (#1107)
+    $desktopPkg = Join-Path (Join-Path $ProjectRoot "desktop") "package.json"
+    if (Test-Path $desktopPkg) {
+        $desktopDir = Join-Path $staging "desktop"
+        if (-not (Test-Path $desktopDir)) { New-Item -ItemType Directory -Path $desktopDir -Force | Out-Null }
+        $pkgContent = Get-Content $desktopPkg -Raw | ConvertFrom-Json
+        $pkgContent.version = $zipVersion
+        $pkgContent | ConvertTo-Json -Depth 10 | Out-File (Join-Path $desktopDir "package.json") -Encoding utf8
+    }
+
     # CLI tool tarballs
     Copy-ToStaging (Join-Path $ProjectRoot "bundled\cli-tools") "bundled\cli-tools"
 

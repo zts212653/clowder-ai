@@ -684,9 +684,12 @@ export function WorkspacePanel() {
             <div className="px-3 py-2 border-b border-cafe-subtle/60 bg-cafe-surface/30">
               <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-[var(--semantic-success)] flex-shrink-0" />
-                <span className="text-xs font-medium text-cafe-black truncate">{currentWorktree.branch}</span>
+                <span className="text-xs font-medium text-cafe-black truncate" title={currentWorktree.root}>
+                  {currentWorktree.root.split(/[\\/]/).pop()}
+                </span>
                 <span className="text-micro font-mono text-cafe-interactive/50">{currentWorktree.head}</span>
               </div>
+              <div className="ml-4 text-micro text-cafe-interactive/60 truncate">🌿 {currentWorktree.branch}</div>
               {worktrees.length > 1 && (
                 <div className="flex items-center gap-1 mt-1.5">
                   <select
@@ -695,8 +698,10 @@ export function WorkspacePanel() {
                     className="flex-1 text-micro border border-cafe-subtle rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
                   >
                     {worktrees.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.head === 'linked' ? `📂 ${w.branch}` : `🌿 ${w.branch} (${w.head})`}
+                      <option key={w.id} value={w.id} title={w.root}>
+                        {w.head === 'linked'
+                          ? `📂 ${w.root.split(/[\\/]/).pop()}`
+                          : `${w.root.split(/[\\/]/).pop()} — ${w.branch} (${w.head})`}
                       </option>
                     ))}
                   </select>
