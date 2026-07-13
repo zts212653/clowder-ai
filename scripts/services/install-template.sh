@@ -60,6 +60,14 @@ install_service_main() {
   : "${PIP_DEPS_ARM64:?install-template: PIP_DEPS_ARM64 is required (empty string OK if unused)}"
   : "${PIP_DEPS_OTHER:?install-template: PIP_DEPS_OTHER is required (empty string OK if unused)}"
 
+  # 0.5. Early hardware reject for REQUIRED_PYTHON_ARCH (#1061).
+  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ]; then
+    local _hw_pre; _hw_pre="$(uname -m)"
+    [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$' && _hw_pre="arm64"
+    [ "$REQUIRED_PYTHON_ARCH" = "arm64" ] && [ "$_hw_pre" != "arm64" ] \
+      && { echo "ERROR: $SERVICE_LABEL requires arm64 hardware (MLX)." >&2; exit 1; }
+  fi
+
   # 1. Prereqs: python + disk. Network checks run after manual
   # download-source overrides so offline/mirror installs can preflight
   # against the operator-selected endpoint.
@@ -106,19 +114,11 @@ install_service_main() {
     fi
   fi
 
-  # 3.5. Model-arch compatibility gate (#1061). Callers set
-  # REQUIRED_PYTHON_ARCH="arm64" for MLX-only models. Reject before
-  # touching venv/network/deps. Allow bootstrap on Apple Silicon (no
-  # Python yet -> sysctl proves arm64 -> bootstrap downloads arm64).
+  # 3.5. Model-arch gate (#1061): Rosetta x86 Python on Apple Silicon.
+  # Step 0.5 already rejected non-arm64 hw; unknown = probe failure, fail-closed.
   if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && [ "$is_darwin_arm64" != "1" ]; then
-    if [ "$python_arch" = "unknown" ] && [ "$hw_arch" = "arm64" ] && [ "$platform" = "Darwin" ]; then
-      echo "  No Python found on Apple Silicon; bootstrap will install arm64 Python." >&2
-    else
-      echo "ERROR: $SERVICE_LABEL requires arm64 Python (MLX), resolved=${python_arch}." >&2
-      [ "$platform" = "Darwin" ] && echo "  Fix: install arm64 Python ('brew install python@3.12' in native terminal)" >&2
-      echo "  Or choose a non-MLX model (e.g. faster-whisper large-v3-turbo)" >&2
-      exit 1
-    fi
+    echo "ERROR: $SERVICE_LABEL needs arm64 Python (MLX), resolved=${python_arch}. Fix: brew install python@3.12" >&2
+    exit 1
   fi
 
   # 4. Pre-checks (optional binary requirements).
@@ -141,8 +141,13 @@ install_service_main() {
     venv_arch="$("$venv_dir/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
     if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \
        && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then
-      echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding venv..." >&2
-      rm -rf "$venv_dir"
+      if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && { [ "$venv_arch" = "arm64" ] || [ "$venv_arch" = "aarch64" ]; } \
+         && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then
+        echo "  Venv ($venv_arch) matches required arch; keeping." >&2
+      else
+        echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding..." >&2
+        rm -rf "$venv_dir"
+      fi
     fi
   fi
   if [ ! -d "$venv_dir" ]; then

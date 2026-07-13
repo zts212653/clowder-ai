@@ -438,10 +438,10 @@ describe('install-template — model-arch gate via direct install (#1061 maintai
     assert.equal(getInstallArchGate('Darwin', 'arm64', 'x86_64', 'arm64'), 'blocked');
   });
 
-  test('Qwen + no Python on Apple Silicon -> passed (bootstrap)', () => {
-    // Scenario 2: no Python found but Apple Silicon hardware.
-    // Bootstrap will download arm64 Python via sysctl detection.
-    assert.equal(getInstallArchGate('Darwin', 'arm64', 'unknown', 'arm64'), 'passed');
+  test('Qwen + unknown arch on Apple Silicon -> blocked (fail-closed P1-2)', () => {
+    // After check_python3, unknown = arch probe failure, not "no Python".
+    // Bootstrap would have resolved arch; unknown is unsafe → fail-closed.
+    assert.equal(getInstallArchGate('Darwin', 'arm64', 'unknown', 'arm64'), 'blocked');
   });
 
   test('Qwen + no Python on Intel/Linux -> blocked', () => {
@@ -462,6 +462,81 @@ describe('install-template — model-arch gate via direct install (#1061 maintai
   test('Qwen + no Python on Intel macOS -> blocked', () => {
     // Intel Mac with no Python → bootstrap gets x86_64 → MLX fails.
     assert.equal(getInstallArchGate('Darwin', 'x86_64', 'unknown', 'arm64'), 'blocked');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R13 sol review: classifier consistency + venv preservation (#1061)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verify whisper-install.sh REQUIRED_PYTHON_ARCH classifier matches all
+ * MLX model patterns (#1061 P1-1: classifier inconsistency).
+ */
+function getInstallerRequiredArch(model) {
+  const installPath = join(SERVICES_DIR, 'whisper-install.sh');
+  const script = [
+    `_model="${model}"`,
+    'REQUIRED_PYTHON_ARCH=""',
+    `eval "$(sed -n '/^# MLX models/,/^fi$/p' '${installPath}')"`,
+    'echo "$REQUIRED_PYTHON_ARCH"',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
+}
+
+/**
+ * Simulate install-template.sh step 5 venv arch reconciliation.
+ * Returns 'keep' or 'rebuild' (#1061 P2-4: venv preservation).
+ */
+function getVenvArchDecision(venvArch, resolvedArch, requiredArch) {
+  const script = [
+    `venv_arch="${venvArch}"`,
+    `RESOLVED_PYTHON_ARCH="${resolvedArch}"`,
+    `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
+    'if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \\',
+    '   && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then',
+    '  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && { [ "$venv_arch" = "arm64" ] || [ "$venv_arch" = "aarch64" ]; } \\',
+    '     && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then',
+    '    echo "keep"',
+    '  else',
+    '    echo "rebuild"',
+    '  fi',
+    'else',
+    '  echo "keep"',
+    'fi',
+  ].join('\n');
+  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
+}
+
+describe('whisper-install.sh — REQUIRED_PYTHON_ARCH classifier (#1061 P1-1)', () => {
+  test('mlx-community/* sets REQUIRED_PYTHON_ARCH', () => {
+    assert.equal(getInstallerRequiredArch('mlx-community/whisper-large-v3-turbo'), 'arm64');
+  });
+
+  test('*Qwen3-ASR* sets REQUIRED_PYTHON_ARCH (custom org)', () => {
+    assert.equal(getInstallerRequiredArch('acme/Qwen3-ASR-1.7B-8bit'), 'arm64');
+  });
+
+  test('standard whisper model has no arch constraint', () => {
+    assert.equal(getInstallerRequiredArch('large-v3-turbo'), '');
+  });
+});
+
+describe('install-template — venv arch preservation (#1061 P2-4)', () => {
+  test('arm64 venv + x86 resolver + REQUIRED=arm64 -> keep', () => {
+    assert.equal(getVenvArchDecision('arm64', 'x86_64', 'arm64'), 'keep');
+  });
+
+  test('arm64 venv + x86 resolver + no requirement -> rebuild', () => {
+    assert.equal(getVenvArchDecision('arm64', 'x86_64', ''), 'rebuild');
+  });
+
+  test('x86 venv + arm64 resolver + REQUIRED=arm64 -> rebuild', () => {
+    assert.equal(getVenvArchDecision('x86_64', 'arm64', 'arm64'), 'rebuild');
+  });
+
+  test('matching arch -> keep (no reconciliation needed)', () => {
+    assert.equal(getVenvArchDecision('arm64', 'arm64', 'arm64'), 'keep');
   });
 });
 

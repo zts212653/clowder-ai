@@ -31,7 +31,7 @@ MODEL_LOADER_OTHER="faster_whisper"
 
 # MLX models require arm64 Python -- declare contract for install-template.
 # install-template.sh rejects incompatible interpreters before touching venv.
-if [[ "$_model" == mlx-community/* ]]; then
+if [[ "$_model" == *"Qwen3-ASR"* ]] || [[ "$_model" == mlx-community/* ]]; then
   REQUIRED_PYTHON_ARCH="arm64"
 fi
 
