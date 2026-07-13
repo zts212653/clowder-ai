@@ -511,8 +511,7 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
     `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
     `sysctl() { ${sysctlStub}; }`,
     'pip() { :; }',
-    '_network_checked=0',
-    'check_network() { _network_checked=1; }',
+    'check_network() { echo "NETWORK_RAN"; }',
     `RESOLVED_PYTHON_ARCH="${pythonArch}"`,
     `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
     'CAT_CAFE_HOME="$TMPD"',
@@ -524,7 +523,6 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
     'PYTHON3=/usr/bin/true',
     `_run() { eval "$(sed -n '${sedExpr}' '${templatePath}')"; }`,
     '_run',
-    'echo "network=$_network_checked"',
     'echo "deps=$pip_deps"',
   );
   try {
@@ -533,11 +531,10 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     const deps = out.match(/deps=(.+)/)?.[1] || 'unknown';
-    const networkCalled = out.includes('network=1');
-    return { status: 'passed', deps, networkCalled };
+    return { status: 'passed', deps, networkCalled: out.includes('NETWORK_RAN') };
   } catch (e) {
     const stdout = e.stdout || '';
-    return { status: 'blocked', deps: 'none', networkCalled: stdout.includes('network=1') };
+    return { status: 'blocked', deps: 'none', networkCalled: stdout.includes('NETWORK_RAN') };
   }
 }
 
