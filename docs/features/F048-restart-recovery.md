@@ -59,7 +59,7 @@ Phase A 只做了后台清理（用户不可见），Phase A+ 补上用户可见
 **实际案例**（2026-07-13 04:58 UTC）：
 - Ragdoll opus turn `a272cb69` 在执行 `git commit && push` 的 tool_call 中被 graceful shutdown 杀死（Redis log 04:58:19 "bye bye"与 CLI transcript 04:58:15 最后事件对齐）
 - 串行 worklist 中排队的 @sol dispatch 蒸发——sol 从未被触发，thread 静默 2h24m 无任何可见通知
-- Fable 完整调查证据：thread `thread_mriwjlo1955spve4` 消息 `000096` + `000124`（Redis log + process table + transcript + git log 四方对齐）
+- Fable 完整调查证据：`[thread-id]`（Redis log + process table + transcript + git log 四方对齐）
 
 ## Acceptance Criteria — Phase A
 
