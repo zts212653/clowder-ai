@@ -64,6 +64,16 @@ export function classifyResumeFailure(message: string | undefined): ResumeFailur
   ) {
     return 'missing_session';
   }
+  // Codex/other providers: daemon marks session as "interrupted" after our stall auto-kill
+  // (SIGTERM via ProcessLivenessProbe idle-silent detection) or CLI timeout. Subsequent resume
+  // attempts fail with messages like "interrupted", "already interrupted", "session was
+  // interrupted", or "session terminated". Without this classifier, the error falls through
+  // to null → no self-heal → SessionChainStore retains the stale sessionId → every subsequent
+  // invocation attempts to resume the interrupted session → cascading failure.
+  // Route to 'missing_session' → self-heal drops stale sessionId and retries fresh.
+  if (/\b(session[- _]*(was[- _]*)?interrupted|already[- _]*interrupted|session[- _]*terminated)\b/i.test(message)) {
+    return 'missing_session';
+  }
   if (/CLI 异常退出 \(code:\s*(?:\d+|null)(?:,\s*signal:\s*[^)]+)?\)/i.test(message)) {
     return 'cli_exit';
   }

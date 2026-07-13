@@ -2578,6 +2578,15 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'missing_session',
     );
     assert.equal(classifyResumeFailure('ACP error -32603: os.getcwd() failed'), 'missing_session');
+    // Session interrupt: our stall auto-kill (SIGTERM) causes the daemon to mark the session
+    // as "interrupted". Without this classifier, resume fails cascade (no self-heal, no retry).
+    assert.equal(classifyResumeFailure('session was interrupted'), 'missing_session');
+    assert.equal(classifyResumeFailure('already interrupted'), 'missing_session');
+    assert.equal(classifyResumeFailure('session interrupted'), 'missing_session');
+    assert.equal(classifyResumeFailure('session-interrupted'), 'missing_session');
+    assert.equal(classifyResumeFailure('session terminated'), 'missing_session');
+    // Must NOT match generic messages that happen to contain "interrupt" as a substring
+    // in non-session context (e.g. developer instructions mentioning keyboard interrupts)
     assert.equal(classifyResumeFailure('upstream timeout'), null);
   });
 
