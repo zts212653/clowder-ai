@@ -578,12 +578,6 @@ export async function readCapabilitiesConfig(projectRoot: string): Promise<Capab
       if (cap.globalEnabled === undefined && cap.enabled !== undefined) {
         cap.globalEnabled = cap.enabled;
       }
-      // F205 source migration: plugin-activated capabilities now use
-      // source='cat-cafe' + pluginId (same management model as built-in).
-      // Convert persisted 'plugin' entries written by earlier code.
-      if ((cap.source as string) === 'plugin' && cap.pluginId) {
-        cap.source = 'cat-cafe';
-      }
     }
     return config;
   } catch {

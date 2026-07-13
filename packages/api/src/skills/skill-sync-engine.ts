@@ -175,13 +175,10 @@ async function syncProjectUnlocked(
   const allCatCafeCaps = config.capabilities.filter(
     (cap) => cap.type === 'skill' && cap.source === 'cat-cafe' && isValidSkillName(cap.id),
   );
-  // F205: Plugin-owned entries (pluginId set) are excluded from sync.
-  // Their mount paths are managed by PluginResourceActivator, not the
-  // sync engine.  Including them causes same-id collisions when a
-  // built-in skill and a plugin skill share the same id — the Map-based
-  // configMountPaths / configDisabledSet deduplicates by id and the
-  // wrong entry wins.
-  const managedCaps = allCatCafeCaps.filter((cap) => !cap.pluginId);
+  // pluginId is an identity label, not a filter criterion. All cat-cafe
+  // skills are managed uniformly — source resolution uses skillsSource
+  // (custom) or the default source dir (built-in).
+  const managedCaps = allCatCafeCaps;
   const previousNames = managedCaps.map((cap) => cap.id);
 
   // Per-skill effective source: resolve(instanceRoot, cap.skillsSource ?? defaultSkillsDir).
