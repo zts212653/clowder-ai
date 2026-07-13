@@ -67,9 +67,7 @@ install_service_main() {
       && { echo "ERROR: $SERVICE_LABEL requires arm64 hardware (MLX)." >&2; exit 1; }
   fi
 
-  # 1. Prereqs: python + disk. Network checks run after manual
-  # download-source overrides so offline/mirror installs can preflight
-  # against the operator-selected endpoint.
+  # 1. Prereqs: python + disk.
   # shellcheck source=./prereq-check.sh
   source "$script_dir/prereq-check.sh"
   check_python3
@@ -83,7 +81,6 @@ install_service_main() {
     source "$script_dir/../download-source-overrides.sh"
     apply_manual_download_source_overrides
   fi
-  check_network
 
   # 3. Platform detection -- picks the deps + model loader.
   # Two separate arch signals (#1061):
@@ -125,6 +122,9 @@ install_service_main() {
       exit 1
     fi
   fi
+
+  # 3.7. Network prereq -- after arch gate; sets PIP_INDEX_URL etc. (#1061).
+  check_network
 
   # 4. Pre-checks (optional binary requirements).
   if [ "${PRE_CHECK_FFMPEG:-0}" = "1" ]; then

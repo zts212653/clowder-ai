@@ -409,14 +409,17 @@ function getInstallArchGate(platform, hwArch, pythonArch, requiredArch) {
   const templatePath = join(SERVICES_DIR, 'install-template.sh');
   const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
   // Extract platform detection (step 3) + model-arch gate (step 3.5).
-  // Range: from `local platform hw_arch` to `# 4.` (pre-checks).
+  // Range: from `local platform hw_arch` to `# 3.7.` (network prereq).
   const sedExpr =
-    '/^  local platform hw_arch python_arch/,/^  # 4\\./{' + '/^  # 4\\./d; /^  local [^=]*$/d; s/^  local //; p;}';
+    '/^  local platform hw_arch python_arch/,/^  # 3\\.7\\./{' +
+    '/^  # 3\\.7\\./d; /^  local [^=]*$/d; s/^  local //; p;}';
   const script = [
     `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
     `sysctl() { ${sysctlStub}; }`,
     `export RESOLVED_PYTHON_ARCH="${pythonArch}"`,
     `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
+    'CAT_CAFE_HOME="/tmp/nonexistent-gate-test"',
+    'VENV_NAME="test-venv"',
     'SERVICE_LABEL="test-service"',
     `eval "$(sed -n '${sedExpr}' '${templatePath}')" 2>/dev/null`,
     'echo "passed"',
@@ -508,6 +511,8 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
     `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
     `sysctl() { ${sysctlStub}; }`,
     'pip() { :; }',
+    '_network_checked=0',
+    'check_network() { _network_checked=1; }',
     `RESOLVED_PYTHON_ARCH="${pythonArch}"`,
     `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
     'CAT_CAFE_HOME="$TMPD"',
@@ -519,6 +524,7 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
     'PYTHON3=/usr/bin/true',
     `_run() { eval "$(sed -n '${sedExpr}' '${templatePath}')"; }`,
     '_run',
+    'echo "network=$_network_checked"',
     'echo "deps=$pip_deps"',
   );
   try {
@@ -527,9 +533,11 @@ function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     const deps = out.match(/deps=(.+)/)?.[1] || 'unknown';
-    return { status: 'passed', deps };
-  } catch {
-    return { status: 'blocked', deps: 'none' };
+    const networkCalled = out.includes('network=1');
+    return { status: 'passed', deps, networkCalled };
+  } catch (e) {
+    const stdout = e.stdout || '';
+    return { status: 'blocked', deps: 'none', networkCalled: stdout.includes('network=1') };
   }
 }
 
@@ -596,6 +604,50 @@ describe('install-template — end-to-end pipeline: gate + venv + deps (#1061 R1
     });
     assert.equal(r.status, 'passed');
     assert.equal(r.deps, 'mlx-deps');
+  });
+});
+
+describe('install-template — check_network ordering (#1061 R15)', () => {
+  test('blocked: no venv + x86 + MLX -> rejected AND check_network NOT called', () => {
+    // Gate at step 3.5 rejects before step 3.7 (check_network).
+    // Incompatible interpreter must never trigger network operations.
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'x86_64',
+      requiredArch: 'arm64',
+      venvArch: null,
+    });
+    assert.equal(r.status, 'blocked');
+    assert.equal(r.networkCalled, false);
+  });
+
+  test('passed: arm64 venv + x86 resolver -> check_network called + mlx-deps', () => {
+    // Gate at step 3.5 overrides arch signals, then step 3.7 runs
+    // check_network (sets PIP_INDEX_URL etc.) before deps selection.
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'x86_64',
+      requiredArch: 'arm64',
+      venvArch: 'arm64',
+    });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.networkCalled, true);
+    assert.equal(r.deps, 'mlx-deps');
+  });
+
+  test('passed: native arm64 + no constraint -> check_network called', () => {
+    // Standard path: no REQUIRED_PYTHON_ARCH, gate skipped, network runs.
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'arm64',
+      requiredArch: '',
+      venvArch: null,
+    });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.networkCalled, true);
   });
 });
 
