@@ -62,9 +62,8 @@ install_service_main() {
 
   # 0.5. Early hardware reject for REQUIRED_PYTHON_ARCH (#1061).
   if [ -n "${REQUIRED_PYTHON_ARCH:-}" ]; then
-    local _hw_pre; _hw_pre="$(uname -m)"
-    [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$' && _hw_pre="arm64"
-    [ "$REQUIRED_PYTHON_ARCH" = "arm64" ] && [ "$_hw_pre" != "arm64" ] \
+    local _hw="$(uname -m)"; [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$' && _hw="arm64"
+    [ "$REQUIRED_PYTHON_ARCH" = "arm64" ] && [ "$_hw" != "arm64" ] \
       && { echo "ERROR: $SERVICE_LABEL requires arm64 hardware (MLX)." >&2; exit 1; }
   fi
 
@@ -114,11 +113,17 @@ install_service_main() {
     fi
   fi
 
-  # 3.5. Model-arch gate (#1061): Rosetta x86 Python on Apple Silicon.
-  # Step 0.5 already rejected non-arm64 hw; unknown = probe failure, fail-closed.
+  # 3.5. Model-arch gate (#1061): override arch if existing venv matches.
   if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && [ "$is_darwin_arm64" != "1" ]; then
-    echo "ERROR: $SERVICE_LABEL needs arm64 Python (MLX), resolved=${python_arch}. Fix: brew install python@3.12" >&2
-    exit 1
+    local _vd="${CAT_CAFE_HOME}/${VENV_NAME}" _va="unknown"
+    [ -x "$_vd/bin/python3" ] && _va="$("$_vd/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+    if { [ "$_va" = "arm64" ] || [ "$_va" = "aarch64" ]; } && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then
+      is_darwin_arm64=1; python_arch="$_va"; RESOLVED_PYTHON_ARCH="$_va"
+      echo "  Existing venv ($VENV_NAME) is arm64; using for MLX model." >&2
+    else
+      echo "ERROR: $SERVICE_LABEL needs arm64 Python (MLX), resolved=${python_arch}. Fix: brew install python@3.12" >&2
+      exit 1
+    fi
   fi
 
   # 4. Pre-checks (optional binary requirements).
@@ -141,13 +146,8 @@ install_service_main() {
     venv_arch="$("$venv_dir/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
     if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \
        && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then
-      if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && { [ "$venv_arch" = "arm64" ] || [ "$venv_arch" = "aarch64" ]; } \
-         && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then
-        echo "  Venv ($venv_arch) matches required arch; keeping." >&2
-      else
-        echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding..." >&2
-        rm -rf "$venv_dir"
-      fi
+      echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding..." >&2
+      rm -rf "$venv_dir"
     fi
   fi
   if [ ! -d "$venv_dir" ]; then

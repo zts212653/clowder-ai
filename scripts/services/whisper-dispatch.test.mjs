@@ -485,27 +485,52 @@ function getInstallerRequiredArch(model) {
 }
 
 /**
- * Simulate install-template.sh step 5 venv arch reconciliation.
- * Returns 'keep' or 'rebuild' (#1061 P2-4: venv preservation).
+ * End-to-end install pipeline test: exercises the PRODUCTION template
+ * steps 3 (platform detect) -> 3.5 (gate + venv check) -> 5 (venv
+ * reconciliation) -> 6 (dep selection) as one unit.
+ * Returns { status: 'passed'|'blocked', deps: string }.
  */
-function getVenvArchDecision(venvArch, resolvedArch, requiredArch) {
-  const script = [
-    `venv_arch="${venvArch}"`,
-    `RESOLVED_PYTHON_ARCH="${resolvedArch}"`,
+function getInstallPipelineDecision({ platform, hwArch, pythonArch, requiredArch, venvArch }) {
+  const templatePath = join(SERVICES_DIR, 'install-template.sh');
+  const sysctlStub = hwArch === 'arm64' ? 'echo 1' : 'return 1';
+  // Extract steps 3-6 from production template (platform detect through dep selection)
+  const sedExpr = '/^  local platform hw_arch/,/^  # 7\\./{/^  # 7\\./d; /^  local [^=]*$/d; s/^  local //; p;}';
+  const lines = ['TMPD=$(mktemp -d); trap "rm -rf $TMPD" EXIT'];
+  if (venvArch) {
+    lines.push(
+      'mkdir -p "$TMPD/test-venv/bin"',
+      `printf '#!/bin/bash\\necho "${venvArch}"\\n' > "$TMPD/test-venv/bin/python3"`,
+      'chmod +x "$TMPD/test-venv/bin/python3"',
+      'echo ":" > "$TMPD/test-venv/bin/activate"',
+    );
+  }
+  lines.push(
+    `uname() { case "$1" in -s) echo "${platform}";; -m) echo "${hwArch}";; esac; }`,
+    `sysctl() { ${sysctlStub}; }`,
+    'pip() { :; }',
+    `RESOLVED_PYTHON_ARCH="${pythonArch}"`,
     `REQUIRED_PYTHON_ARCH="${requiredArch}"`,
-    'if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \\',
-    '   && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then',
-    '  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && { [ "$venv_arch" = "arm64" ] || [ "$venv_arch" = "aarch64" ]; } \\',
-    '     && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then',
-    '    echo "keep"',
-    '  else',
-    '    echo "rebuild"',
-    '  fi',
-    'else',
-    '  echo "keep"',
-    'fi',
-  ].join('\n');
-  return execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim();
+    'CAT_CAFE_HOME="$TMPD"',
+    'VENV_NAME="test-venv"',
+    'SERVICE_LABEL="test-service"',
+    'PIP_DEPS_ARM64="mlx-deps"',
+    'PIP_DEPS_OTHER="non-mlx-deps"',
+    'PRE_CHECK_FFMPEG=0',
+    'PYTHON3=/usr/bin/true',
+    `_run() { eval "$(sed -n '${sedExpr}' '${templatePath}')"; }`,
+    '_run',
+    'echo "deps=$pip_deps"',
+  );
+  try {
+    const out = execFileSync('bash', ['-c', lines.join('\n')], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const deps = out.match(/deps=(.+)/)?.[1] || 'unknown';
+    return { status: 'passed', deps };
+  } catch {
+    return { status: 'blocked', deps: 'none' };
+  }
 }
 
 describe('whisper-install.sh — REQUIRED_PYTHON_ARCH classifier (#1061 P1-1)', () => {
@@ -522,21 +547,55 @@ describe('whisper-install.sh — REQUIRED_PYTHON_ARCH classifier (#1061 P1-1)', 
   });
 });
 
-describe('install-template — venv arch preservation (#1061 P2-4)', () => {
-  test('arm64 venv + x86 resolver + REQUIRED=arm64 -> keep', () => {
-    assert.equal(getVenvArchDecision('arm64', 'x86_64', 'arm64'), 'keep');
+describe('install-template — end-to-end pipeline: gate + venv + deps (#1061 R14)', () => {
+  test('reconfigure: arm64 venv + x86 resolver + MLX model -> passed + mlx-deps', () => {
+    // Core R14 scenario: existing healthy arm64 MLX venv, PATH resolver
+    // reports x86 (Rosetta). Gate must detect venv, override arch signals,
+    // and select arm64 deps — NOT reject or fall to non-MLX deps.
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'x86_64',
+      requiredArch: 'arm64',
+      venvArch: 'arm64',
+    });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.deps, 'mlx-deps');
   });
 
-  test('arm64 venv + x86 resolver + no requirement -> rebuild', () => {
-    assert.equal(getVenvArchDecision('arm64', 'x86_64', ''), 'rebuild');
+  test('fresh install: no venv + x86 resolver + MLX model -> blocked', () => {
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'x86_64',
+      requiredArch: 'arm64',
+      venvArch: null,
+    });
+    assert.equal(r.status, 'blocked');
   });
 
-  test('x86 venv + arm64 resolver + REQUIRED=arm64 -> rebuild', () => {
-    assert.equal(getVenvArchDecision('x86_64', 'arm64', 'arm64'), 'rebuild');
+  test('non-MLX: x86 resolver -> passed + non-mlx-deps', () => {
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'x86_64',
+      requiredArch: '',
+      venvArch: null,
+    });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.deps, 'non-mlx-deps');
   });
 
-  test('matching arch -> keep (no reconciliation needed)', () => {
-    assert.equal(getVenvArchDecision('arm64', 'arm64', 'arm64'), 'keep');
+  test('native arm64: arm64 resolver + MLX model -> passed + mlx-deps', () => {
+    const r = getInstallPipelineDecision({
+      platform: 'Darwin',
+      hwArch: 'arm64',
+      pythonArch: 'arm64',
+      requiredArch: 'arm64',
+      venvArch: null,
+    });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.deps, 'mlx-deps');
   });
 });
 
