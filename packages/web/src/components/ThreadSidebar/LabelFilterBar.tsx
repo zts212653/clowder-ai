@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type ThreadLabel } from '@/stores/label-store';
 
 const MAX_INLINE = 5;
@@ -10,22 +10,17 @@ interface LabelFilterBarProps {
   selectedFilter: string | null;
   onSelect: (filter: string | null) => void;
   uncategorizedCount: number;
-  onOrganize?: () => void;
-  onManualOrganize?: () => void;
 }
 
-export function LabelFilterBar({
-  labels,
-  selectedFilter,
-  onSelect,
-  uncategorizedCount,
-  onOrganize,
-  onManualOrganize,
-}: LabelFilterBarProps) {
+export function LabelFilterBar({ labels, selectedFilter, onSelect, uncategorizedCount }: LabelFilterBarProps) {
   const [showOverflow, setShowOverflow] = useState(false);
   const overflowRef = useRef<HTMLDivElement>(null);
-  const inlineLabels = labels.slice(0, MAX_INLINE);
+  const visibleLabels = labels.slice(0, MAX_INLINE);
   const overflowLabels = labels.slice(MAX_INLINE);
+  const selectedLabel =
+    selectedFilter === '__uncategorized__'
+      ? '未分类'
+      : (labels.find((label) => label.id === selectedFilter)?.name ?? null);
 
   useEffect(() => {
     if (!showOverflow) return;
@@ -40,129 +35,113 @@ export function LabelFilterBar({
 
   const handleClick = (filter: string | null) => {
     onSelect(selectedFilter === filter ? null : filter);
+    setShowOverflow(false);
   };
 
-  if (labels.length === 0 && uncategorizedCount === 0) return null;
-
   return (
-    <div className="px-3 pb-2 flex items-center gap-1 flex-wrap">
-      {uncategorizedCount > 0 && (
-        <button
-          type="button"
-          onClick={() => handleClick('__uncategorized__')}
-          className={`text-micro px-1.5 py-0.5 rounded-full border transition-colors ${
-            selectedFilter === '__uncategorized__'
-              ? 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-black'
-              : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
-          }`}
+    <div className="relative flex-shrink-0" ref={overflowRef}>
+      <button
+        type="button"
+        onClick={() => setShowOverflow((open) => !open)}
+        className={`flex h-full items-center gap-1 rounded-t-md border-b-2 px-1.5 py-1.5 text-micro font-medium transition-colors ${
+          selectedFilter
+            ? 'border-cafe-accent text-cafe-accent'
+            : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
+        }`}
+        data-testid="sidebar-label-filter-trigger"
+        aria-haspopup="menu"
+        aria-expanded={showOverflow}
+      >
+        <TagIcon />
+        {selectedLabel ? <span className="max-w-[72px] truncate">{selectedLabel}</span> : <span>标签</span>}
+      </button>
+
+      {showOverflow && (
+        <div
+          className="absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-[var(--console-border-soft)] bg-[var(--console-card-bg)] py-1 shadow-lg"
+          data-testid="sidebar-label-filter-menu"
+          role="menu"
         >
-          未分类 ({uncategorizedCount})
-        </button>
-      )}
-      {uncategorizedCount > 0 && onOrganize && (
-        <button
-          type="button"
-          onClick={onOrganize}
-          className="rounded-full px-1 py-0.5 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-conn-amber-text"
-          title="猫猫帮你分类"
-        >
-          <svg
-            aria-hidden="true"
-            className="w-3 h-3"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <FilterMenuItem selected={!selectedFilter} onClick={() => handleClick(null)}>
+            全部对话
+          </FilterMenuItem>
+          <FilterMenuItem
+            selected={selectedFilter === '__uncategorized__'}
+            onClick={() => handleClick('__uncategorized__')}
           >
-            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.064 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-            <path d="M20 3v4M22 5h-4" />
-          </svg>
-        </button>
-      )}
-      {uncategorizedCount > 0 && onManualOrganize && (
-        <button
-          type="button"
-          onClick={onManualOrganize}
-          className="rounded-full px-1 py-0.5 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary"
-          title="手动批量分类"
-        >
-          <svg
-            aria-hidden="true"
-            className="w-3 h-3"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="3" width="7" height="7" />
-            <rect x="14" y="3" width="7" height="7" />
-            <rect x="3" y="14" width="7" height="7" />
-            <rect x="14" y="14" width="7" height="7" />
-          </svg>
-        </button>
-      )}
-      {inlineLabels.map((label) => (
-        <button
-          key={label.id}
-          type="button"
-          onClick={() => handleClick(label.id)}
-          className={`text-micro px-1.5 py-0.5 rounded-full border transition-colors flex items-center gap-1 ${
-            selectedFilter === label.id
-              ? 'border-[var(--console-border-soft)] bg-[var(--console-field-bg)] text-cafe-black'
-              : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
-          }`}
-          title={label.name}
-        >
-          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: label.color }} />
-          <span className="truncate max-w-[60px]">{label.name}</span>
-        </button>
-      ))}
-      {overflowLabels.length > 0 && (
-        <div className="relative" ref={overflowRef}>
-          <button
-            type="button"
-            onClick={() => setShowOverflow(!showOverflow)}
-            className="rounded-full px-1 py-0.5 text-micro text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary"
-          >
-            ...
-          </button>
-          {showOverflow && (
-            <div className="absolute top-full left-0 mt-1 bg-[var(--console-card-bg)] rounded-lg shadow-lg border border-[var(--console-border-soft)] z-50 py-1 min-w-[120px]">
-              {overflowLabels.map((label) => (
-                <button
-                  key={label.id}
-                  type="button"
-                  onClick={() => {
-                    handleClick(label.id);
-                    setShowOverflow(false);
-                  }}
-                  className={`w-full text-left text-micro px-2 py-1 flex items-center gap-1.5 hover:bg-[var(--console-hover-bg)] ${
-                    selectedFilter === label.id ? 'text-cafe-black font-medium' : 'text-cafe-muted'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: label.color }} />
-                  <span className="truncate">{label.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
+            未分类{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ''}
+          </FilterMenuItem>
+          {visibleLabels.map((label) => (
+            <FilterMenuItem
+              key={label.id}
+              selected={selectedFilter === label.id}
+              onClick={() => handleClick(label.id)}
+              color={label.color}
+            >
+              {label.name}
+            </FilterMenuItem>
+          ))}
+          {overflowLabels.length > 0 && <div className="my-1 h-px bg-cafe-subtle" />}
+          {overflowLabels.map((label) => (
+            <FilterMenuItem
+              key={label.id}
+              selected={selectedFilter === label.id}
+              onClick={() => handleClick(label.id)}
+              color={label.color}
+            >
+              {label.name}
+            </FilterMenuItem>
+          ))}
         </div>
       )}
-      {selectedFilter && (
-        <button
-          type="button"
-          onClick={() => onSelect(null)}
-          className="ml-auto rounded-full px-1 py-0.5 text-conn-red-text hover:bg-conn-red-bg hover:text-conn-red-text"
-        >
-          <svg aria-hidden="true" className="w-2.5 h-2.5" viewBox="0 0 20 20" fill="currentColor">
-            <path d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" />
-          </svg>
-        </button>
-      )}
     </div>
+  );
+}
+
+function FilterMenuItem({
+  children,
+  selected,
+  onClick,
+  color,
+}: {
+  children: ReactNode;
+  selected: boolean;
+  onClick: () => void;
+  color?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className={`flex w-full items-center gap-1.5 px-2 py-1 text-left text-micro transition-colors hover:bg-[var(--console-hover-bg)] ${
+        selected ? 'font-medium text-cafe-black' : 'text-cafe-muted'
+      }`}
+    >
+      {color ? (
+        <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      ) : (
+        <span className="h-2 w-2 flex-shrink-0 rounded-full border border-cafe-subtle" />
+      )}
+      <span className="min-w-0 flex-1 truncate">{children}</span>
+    </button>
+  );
+}
+
+function TagIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z" />
+      <path d="M7.5 7.5h.01" />
+    </svg>
   );
 }

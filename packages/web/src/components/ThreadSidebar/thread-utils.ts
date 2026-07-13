@@ -94,7 +94,7 @@ function sortByUnreadThenActive(a: Thread, b: Thread, unreadIds?: Set<string>): 
 }
 
 function isSystemThread(thread: Thread): boolean {
-  return !!thread.systemKind || !!thread.connectorHubState;
+  return thread.id === 'default' || !!thread.systemKind || !!thread.connectorHubState;
 }
 
 function titleForSort(thread: Thread): string {
@@ -153,9 +153,7 @@ function tabRecentThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
 }
 
 function tabSystemThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
-  return nonDefaultThreads(threads)
-    .filter(isSystemThread)
-    .sort((a, b) => sortPinnedUnreadTitle(a, b, unreadIds));
+  return threads.filter(isSystemThread).sort((a, b) => sortPinnedUnreadTitle(a, b, unreadIds));
 }
 
 function tabFavoriteThreads(threads: Thread[], unreadIds: Set<string>): Thread[] {
@@ -232,7 +230,7 @@ export function buildSidebarTabContent(
 
 /**
  * Sort and group threads into: pinned → project groups → favorites.
- * Excludes the "default" thread (lobby) which is rendered separately.
+ * The "default" thread (lobby) is included in the system group.
  * Within each group: unread threads first, then by lastActiveAt descending.
  */
 export function sortAndGroupThreads(threads: Thread[], unreadIds?: Set<string>): ThreadGroup[] {
@@ -304,9 +302,7 @@ export function sortAndGroupThreadsWithWorkspace(
 
   // F095 Phase G + F192 livefix: System threads (IM Hub + eval domains) — dedicated section
   // Pinned system threads still appear here — pinned is additive, not exclusive
-  const systemThreads = threads
-    .filter((t) => (!!t.systemKind || !!t.connectorHubState) && t.id !== 'default')
-    .sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
+  const systemThreads = threads.filter(isSystemThread).sort((a, b) => sortByUnreadThenActive(a, b, unreadIds));
   if (systemThreads.length > 0) {
     groups.push({ type: 'system', label: '系统', threads: systemThreads });
   }

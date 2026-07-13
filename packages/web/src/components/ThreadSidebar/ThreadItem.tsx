@@ -235,7 +235,26 @@ export function ThreadItem({
           />
         ) : (
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {isPinned && (
+            {canPin && (
+              <button
+                type="button"
+                className={`inline-flex flex-shrink-0 rounded transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
+                  isPinned
+                    ? 'text-cafe-accent'
+                    : 'text-cafe-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100'
+                }`}
+                aria-label={isPinned ? `取消置顶 ${displayTitle}` : `置顶 ${displayTitle}`}
+                title={isPinned ? '取消置顶' : '置顶'}
+                data-testid={`thread-pin-toggle-${id}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  togglePin();
+                }}
+              >
+                <PinIcon />
+              </button>
+            )}
+            {isPinned && !canPin && (
               <span className="inline-flex flex-shrink-0 text-cafe-accent" role="img" aria-label="已置顶">
                 <PinIcon />
               </span>
@@ -252,7 +271,7 @@ export function ThreadItem({
             )}
             {isHubThread && <HubIcon className="w-3.5 h-3.5 inline-block mr-1 text-cafe-accent align-text-bottom" />}
             <span
-              className={`min-w-0 flex-1 truncate text-xs leading-5 ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
+              className={`min-w-0 flex-1 line-clamp-2 text-xs leading-5 ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
             >
               {title ?? (id === 'default' ? '大厅' : '未命名对话')}
             </span>
@@ -286,11 +305,6 @@ export function ThreadItem({
                   className="absolute right-0 top-5 z-50 min-w-[144px] rounded-lg border border-cafe bg-cafe-surface py-1 shadow-lg"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {canPin && (
-                    <ThreadActionMenuItem icon={<PinIcon />} onClick={togglePin}>
-                      {isPinned ? '取消置顶' : '置顶'}
-                    </ThreadActionMenuItem>
-                  )}
                   {onUpdatePreferredCats && (
                     <ThreadCatSettings
                       threadId={id}

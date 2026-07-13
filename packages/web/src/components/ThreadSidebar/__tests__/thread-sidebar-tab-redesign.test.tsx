@@ -1,9 +1,14 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Thread } from '@/stores/chat-types';
+import { useLabelStore } from '@/stores/label-store';
 import {
   createThreadSidebarHarness,
+  defaultSidebarApiMock,
   installThreadSidebarGlobals,
+  jsonOk,
+  mockApiFetch,
+  mockPush,
   mockStore,
   resetThreadSidebarGlobals,
   resetThreadSidebarMocks,
@@ -68,6 +73,12 @@ describe('ThreadSidebar v9 tab redesign', () => {
       threadStates: {},
       isLoadingThreads: false,
     });
+    const labels = [{ id: 'lbl-a', name: '开源', color: '#5B8C5A', sortOrder: 0, createdBy: 'u1', createdAt: 1 }];
+    useLabelStore.setState({ labels, isLoading: false });
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/labels') return jsonOk(labels);
+      return defaultSidebarApiMock(path);
+    });
     harness = createThreadSidebarHarness();
   });
 
@@ -81,26 +92,69 @@ describe('ThreadSidebar v9 tab redesign', () => {
     await harness.render();
 
     const lobby = harness.container.querySelector('[data-thread-id="default"]');
+    expect(lobby).toBeNull();
+
     const tabsRow = harness.container.querySelector('[data-testid="sidebar-tabs-row"]');
-    expect(lobby).not.toBeNull();
     expect(tabsRow).not.toBeNull();
-    const position = lobby!.compareDocumentPosition(tabsRow!);
-    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     const tabs = Array.from(harness.container.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim());
     expect(tabs).toEqual(['置顶', '最近', '项目', '系统', '收藏']);
   });
 
+  it('keeps label filtering in the same row as sidebar tabs', async () => {
+    mockStore.threads = [
+      makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
+      makeThread({ id: 'unlabeled', title: 'Unlabeled Thread', projectPath: '/proj/a', lastActiveAt: NOW - 1_000 }),
+      makeThread({
+        id: 'labeled',
+        title: 'Labeled Thread',
+        projectPath: '/proj/a',
+        labels: ['lbl-a'],
+        lastActiveAt: NOW - 2_000,
+      }),
+    ];
+    await harness.render();
+
+    const tabsRow = harness.container.querySelector('[data-testid="sidebar-tabs-row"]');
+    expect(tabsRow).not.toBeNull();
+    if (!tabsRow) throw new Error('sidebar tabs row not found');
+    expect(tabsRow?.textContent).toContain('标签');
+    expect(harness.container.querySelector('[data-testid="sidebar-label-filter-bar"]')).toBeNull();
+
+    const trigger = tabsRow.querySelector('[data-testid="sidebar-label-filter-trigger"]') as HTMLButtonElement | null;
+    expect(trigger).toBeTruthy();
+    if (!trigger) throw new Error('label filter trigger not found');
+    await act(async () => {
+      trigger.click();
+    });
+    await harness.flush();
+
+    const filterButton = Array.from(
+      harness.container.querySelectorAll('[data-testid="sidebar-label-filter-menu"] button'),
+    ).find((button): button is HTMLButtonElement => button.textContent?.includes('未分类') ?? false);
+    expect(filterButton).toBeTruthy();
+    if (!filterButton) throw new Error('uncategorized filter button not found');
+    expect(filterButton.textContent).toContain('未分类 (1)');
+
+    await act(async () => {
+      filterButton.click();
+    });
+    await harness.flush();
+
+    expect(visibleThreadIds(harness.container)).toEqual(['unlabeled']);
+  });
+
   it('switches isolated tab content without mixing system/project/favorite views', async () => {
     await harness.render();
 
-    expect(visibleThreadIds(harness.container)).toEqual(['default', 'recent', 'project', 'favorite']);
+    expect(visibleThreadIds(harness.container)).toEqual(['recent', 'project', 'favorite']);
 
     await clickTab(harness.container, 'system', harness.flush);
+    // default (大厅) is a system thread — it appears alongside explicit system threads
     expect(visibleThreadIds(harness.container)).toEqual(['default', 'system']);
 
     await clickTab(harness.container, 'favorites', harness.flush);
-    expect(visibleThreadIds(harness.container)).toEqual(['default', 'favorite']);
+    expect(visibleThreadIds(harness.container)).toEqual(['favorite']);
   });
 
   it('shows pinned threads in an isolated pinned tab while recent stays additive', async () => {
@@ -127,11 +181,49 @@ describe('ThreadSidebar v9 tab redesign', () => {
     await harness.render();
 
     // Recent tab is additive — pinned threads still appear (sorted first by activity desc)
-    expect(visibleThreadIds(harness.container)).toEqual(['default', 'pinned-a', 'pinned-b', 'regular']);
+    expect(visibleThreadIds(harness.container)).toEqual(['pinned-a', 'pinned-b', 'regular']);
 
     // Pinned tab shows only pinned threads
     await clickTab(harness.container, 'pinned', harness.flush);
-    expect(visibleThreadIds(harness.container)).toEqual(['default', 'pinned-a', 'pinned-b']);
+    expect(visibleThreadIds(harness.container)).toEqual(['pinned-a', 'pinned-b']);
+  });
+
+  it('lets the visible pin mark unpin the current thread without navigating', async () => {
+    Object.assign(mockStore, {
+      threads: [
+        makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),
+        makeThread({
+          id: 'pinned-a',
+          title: 'Pinned A',
+          pinned: true,
+          projectPath: '/proj/a',
+          lastActiveAt: NOW - 1_000,
+        }),
+      ],
+      currentThreadId: 'pinned-a',
+    });
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/threads/pinned-a' && init?.method === 'PATCH') {
+        return jsonOk({ id: 'pinned-a', pinned: false });
+      }
+      if (path === '/api/labels') return jsonOk([]);
+      return defaultSidebarApiMock(path);
+    });
+    await harness.render();
+
+    const pinButton = harness.container.querySelector(
+      '[data-testid="thread-pin-toggle-pinned-a"]',
+    ) as HTMLButtonElement | null;
+    expect(pinButton).toBeTruthy();
+    if (!pinButton) throw new Error('pin toggle not found');
+
+    await act(async () => {
+      pinButton.click();
+    });
+    await harness.flush();
+
+    expect(mockStore.updateThreadPin).toHaveBeenCalledWith('pinned-a', false);
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('shows separate expand/collapse buttons in a project toolbar below the tabs', async () => {

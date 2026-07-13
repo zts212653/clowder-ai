@@ -230,7 +230,9 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' }));
       });
 
-      const projectChip = container.querySelector('[role="button"]') as HTMLElement | null;
+      // The title span also has role="button" now (double-click to edit),
+      // so grab the project chip specifically via aria-label
+      const projectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
       expect(projectChip?.getAttribute('title')).toBe('点击复制: /projects/cat-cafe');
 
       await act(async () => {
@@ -273,7 +275,7 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_xyz' }));
       });
 
-      const projectChip = container.querySelector('[role="button"]') as HTMLElement | null;
+      const projectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
       await act(async () => {
         projectChip?.click();
         await Promise.resolve();
@@ -285,7 +287,7 @@ describe('ChatContainerHeader thread indicator', () => {
         root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_next' }));
       });
 
-      const nextProjectChip = container.querySelector('[role="button"]') as HTMLElement | null;
+      const nextProjectChip = container.querySelector('[role="button"][aria-label*="项目路径"]') as HTMLElement | null;
       expect(nextProjectChip?.textContent).toContain('next-app');
       expect(nextProjectChip?.textContent).not.toContain('copied!');
       expect(nextProjectChip?.getAttribute('title')).toBe('点击复制: /projects/next-app');
