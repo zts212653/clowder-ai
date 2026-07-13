@@ -436,12 +436,10 @@ describe('ThreadSidebar ✨ organize flow', () => {
     }
     expect(harness.container.textContent).toContain('已选 2 个 thread');
 
-    // Find t1's thread row and click the "开发" label to deselect it
-    const threadRows = Array.from(harness.container.querySelectorAll('.border.rounded-lg'));
-    const t1Row = threadRows.find((row) => {
-      const title = row.querySelector('p');
-      return title?.textContent === 'Thread t1';
-    });
+    // Find t1's organizer row and click the "开发" label to deselect it
+    const modal = harness.container.querySelector('[data-testid="thread-organizer-modal"]') as HTMLElement | null;
+    expect(modal).toBeTruthy();
+    const t1Row = modal!.querySelector('[data-thread-id="t1"]');
     expect(t1Row).toBeTruthy();
     const devBtnInT1 = Array.from(t1Row!.querySelectorAll('button')).find((b) => b.textContent?.includes('开发'));
     expect(devBtnInT1).toBeTruthy();

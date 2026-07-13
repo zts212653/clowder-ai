@@ -466,9 +466,11 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     return filteredThreads.filter((t) => t.labels?.includes(labelFilter));
   }, [filteredThreads, labelFilter]);
 
+  const labelAssignableThreads = useMemo(() => liveThreads.filter((t) => t.id !== 'default'), [liveThreads]);
+
   const uncategorizedCount = useMemo(
-    () => liveThreads.filter((t) => !t.labels || t.labels.length === 0).length,
-    [liveThreads],
+    () => labelAssignableThreads.filter((t) => !t.labels || t.labels.length === 0).length,
+    [labelAssignableThreads],
   );
 
   const [showOrganizer, setShowOrganizer] = useState(false);
@@ -478,8 +480,8 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const pendingNameAssignmentsRef = useRef<Map<string, string[]>>(new Map());
 
   const uncategorizedThreads = useMemo(
-    () => liveThreads.filter((t) => !t.labels || t.labels.length === 0),
-    [liveThreads],
+    () => labelAssignableThreads.filter((t) => !t.labels || t.labels.length === 0),
+    [labelAssignableThreads],
   );
 
   const ORGANIZER_TITLE = 'Thread 整理助手';
@@ -761,11 +763,23 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   useEffect(() => {
     window.addEventListener('resize', updateTabScrollState);
-    return () => window.removeEventListener('resize', updateTabScrollState);
+    const el = tabScrollRef.current;
+    let observer: ResizeObserver | undefined;
+    if (el) {
+      observer = new ResizeObserver(() => updateTabScrollState());
+      observer.observe(el);
+    }
+    return () => {
+      window.removeEventListener('resize', updateTabScrollState);
+      observer?.disconnect();
+    };
   }, [updateTabScrollState]);
 
   const existingProjects = useMemo(() => getProjectPaths(liveThreads), [liveThreads]);
-  const showDefaultThread = (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery)) && !labelFilter;
+  const hasLabelFilters = labels.length > 0 || uncategorizedCount > 0;
+  const showTabRow = tabs.length > 0 || hasLabelFilters;
+  const activeTabIsEmpty =
+    activeTabContent.kind === 'project' ? threadGroups.length === 0 : activeTabContent.threads.length === 0;
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
   const { onScroll: handleScrollAnchor } = useScrollAnchor(scrollContainerRef, projectThreadGroups);
@@ -777,6 +791,78 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     currentThreadId,
   });
   const sidebarWidthClass = className === undefined ? 'w-60' : className;
+
+  // Select Open Session: scroll to & highlight the active thread in the sidebar.
+  // In project tab, auto-expand the collapsed group containing the thread first.
+  const scrollToActiveThread = useCallback(() => {
+    if (!currentThreadId || !scrollContainerRef.current) return;
+
+    const needsFilterClear = searchQuery.trim() !== '' || labelFilter !== null;
+
+    // Clear any active filters so the thread is guaranteed visible
+    if (searchQuery.trim()) setSearchQuery('');
+    if (labelFilter) setLabelFilter(null);
+
+    // If the thread is in a collapsed project group, expand it first
+    const ownerGroup = projectThreadGroups.find((g) => g.threads.some((t) => t.id === currentThreadId));
+    const ownerKey = ownerGroup ? (ownerGroup.projectPath ?? ownerGroup.type) : undefined;
+    if (ownerKey && isCollapsed(ownerKey)) {
+      toggleGroup(ownerKey);
+    }
+
+    // Derive the tab that actually contains the active thread by checking
+    // unfiltered membership across all tabs (avoids hardcoding 'recent').
+    const findTabForThread = (): SidebarTabId => {
+      const tabOrder: SidebarTabId[] = ['recent', 'system', 'project', 'pinned', 'favorites'];
+      for (const tabId of tabOrder) {
+        const bucket = buildSidebarTabContent(tabId, threads, pinnedProjects, unreadIds);
+        if (bucket.threads.some((t) => t.id === currentThreadId)) return tabId;
+      }
+      return 'recent';
+    };
+
+    // Helper: scroll to the active thread and apply a brief highlight ring.
+    // If the thread isn't in the current tab's DOM, switch to the tab that
+    // actually contains it before retrying.
+    const scrollAndHighlight = (retried = false) => {
+      const el = scrollContainerRef.current?.querySelector<HTMLElement>(`[data-thread-id="${currentThreadId}"]`);
+      if (!el) {
+        if (!retried) {
+          const targetTab = findTabForThread();
+          if (activeTab !== targetTab) {
+            setActiveTab(targetTab);
+          }
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => scrollAndHighlight(true));
+          });
+        }
+        return;
+      }
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('ring-2', 'ring-cafe-accent', 'ring-opacity-60');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-cafe-accent', 'ring-opacity-60'), 1200);
+    };
+
+    // Defer DOM lookup when state updates (filter clear / group expand) need a re-render first
+    if (needsFilterClear || (ownerKey && isCollapsed(ownerKey))) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => scrollAndHighlight());
+      });
+    } else {
+      scrollAndHighlight();
+    }
+  }, [
+    currentThreadId,
+    threads,
+    projectThreadGroups,
+    isCollapsed,
+    toggleGroup,
+    searchQuery,
+    labelFilter,
+    activeTab,
+    pinnedProjects,
+    unreadIds,
+  ]);
 
   const renderThreadItem = useCallback(
     (thread: Thread, indented = false) => (
@@ -825,6 +911,26 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         <div className="px-3 pt-3 pb-2 flex items-center justify-between">
           <span className="text-sm font-semibold text-cafe-black">对话</span>
           <div className="flex items-center gap-1.5">
+            {uncategorizedCount > 0 && (
+              <button
+                type="button"
+                onClick={handleOrganizeWithCat}
+                className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-conn-amber-text transition-colors"
+                title={`猫猫帮你分类 (${uncategorizedCount} 未分类)`}
+              >
+                <SparkleIcon />
+              </button>
+            )}
+            {uncategorizedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowOrganizer(true)}
+                className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary transition-colors"
+                title={`手动批量分类 (${uncategorizedCount} 未分类)`}
+              >
+                <GridIcon />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowBootcampList(true)}
@@ -875,126 +981,139 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </div>
         </div>
 
-        <LabelFilterBar
-          labels={labels}
-          selectedFilter={labelFilter}
-          onSelect={setLabelFilter}
-          uncategorizedCount={uncategorizedCount}
-          onOrganize={handleOrganizeWithCat}
-          onManualOrganize={() => setShowOrganizer(true)}
-        />
-
         <div
           ref={scrollContainerRef}
           onScroll={handleScrollAnchor}
-          className="flex-1 overflow-y-auto [scrollbar-gutter:stable] [scrollbar-width:thin] [scrollbar-color:transparent_var(--console-panel-bg)] hover:[scrollbar-color:var(--cafe-muted)_var(--console-panel-bg)] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-[var(--console-panel-bg)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-cafe-muted [&::-webkit-scrollbar-corner]:bg-[var(--console-panel-bg)]"
+          className="flex-1 overflow-y-auto [scrollbar-width:thin] [scrollbar-color:color-mix(in_srgb,var(--cafe-text-muted)_72%,transparent)_transparent] [&::-webkit-scrollbar]:w-2.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-solid [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb]:[background-color:color-mix(in_srgb,var(--cafe-text-muted)_72%,transparent)]"
         >
           {isLoadingThreads && threads.length === 0 && (
             <div className="text-center py-4 text-xs text-cafe-muted">加载中...</div>
           )}
 
-          {showDefaultThread && (
-            <ThreadItem
-              id="default"
-              title="大厅"
-              participants={[]}
-              lastActiveAt={Date.now()}
-              isActive={currentThreadId === 'default'}
-              onSelect={handleSelect}
-              threadState={getThreadState('default')}
-            />
-          )}
-
-          {tabs.length > 0 && (
+          {showTabRow && (
             <div
-              className="sticky top-0 z-10 flex items-stretch gap-1 border-b border-cafe-subtle bg-[var(--console-panel-bg)] pt-2 pl-1 pr-1"
+              className="sticky top-0 z-10 flex items-stretch border-b border-cafe-subtle bg-[var(--console-panel-bg)] pt-2 px-2"
               data-testid="sidebar-tabs-row"
             >
-              <button
-                type="button"
-                onClick={() => scrollTabs('left')}
-                disabled={!canScrollLeft}
-                className={`flex flex-shrink-0 items-center justify-center w-5 rounded-t-md text-cafe-muted transition-all ${
-                  canScrollLeft
-                    ? 'hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
-                    : 'pointer-events-none opacity-0'
-                }`}
-                aria-label="向左滚动"
-                data-testid="sidebar-tab-scroll-left"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-3.5 w-3.5"
-                  aria-hidden="true"
+              {canScrollLeft && (
+                <button
+                  type="button"
+                  onClick={() => scrollTabs('left')}
+                  className="flex flex-shrink-0 items-center justify-center w-5 rounded-t-md text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                  aria-label="向左滚动"
+                  data-testid="sidebar-tab-scroll-left"
                 >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                </button>
+              )}
               <div
                 ref={tabScrollRef}
                 onScroll={updateTabScrollState}
-                className="flex min-w-0 flex-1 gap-0 overflow-x-auto overflow-y-hidden px-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                role="tablist"
-                aria-label="对话分类"
+                className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 data-testid="sidebar-tabs-scroll"
               >
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    ref={(node) => {
-                      tabRefs.current[tab.id] = node;
-                    }}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`flex flex-shrink-0 items-center gap-1 rounded-t-md border-b-2 px-1 py-1.5 text-micro font-medium transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-cafe-accent text-cafe-accent'
-                        : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
-                    }`}
-                    data-testid={`sidebar-tab-${tab.id}`}
-                  >
-                    <SidebarTabIcon id={tab.id} className="h-3.5 w-3.5 shrink-0" />
-                    <span>{tab.label}</span>
-                  </button>
-                ))}
+                <div className="flex w-max mx-auto" role="tablist" aria-label="对话分类">
+                  {tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      ref={(node) => {
+                        tabRefs.current[tab.id] = node;
+                      }}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeTab === tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex flex-shrink-0 items-center gap-1 rounded-t-md border-b-2 px-1.5 py-1.5 text-micro font-medium transition-colors ${
+                        activeTab === tab.id
+                          ? 'border-cafe-accent text-cafe-accent'
+                          : 'border-transparent text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary'
+                      }`}
+                      data-testid={`sidebar-tab-${tab.id}`}
+                    >
+                      <SidebarTabIcon id={tab.id} className="h-3.5 w-3.5 shrink-0" />
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => scrollTabs('right')}
-                disabled={!canScrollRight}
-                className={`flex flex-shrink-0 items-center justify-center w-5 rounded-t-md text-cafe-muted transition-all ${
-                  canScrollRight
-                    ? 'hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
-                    : 'pointer-events-none opacity-0'
-                }`}
-                aria-label="向右滚动"
-                data-testid="sidebar-tab-scroll-right"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-3.5 w-3.5"
-                  aria-hidden="true"
+              <LabelFilterBar
+                labels={labels}
+                selectedFilter={labelFilter}
+                onSelect={setLabelFilter}
+                uncategorizedCount={uncategorizedCount}
+              />
+              {canScrollRight && (
+                <button
+                  type="button"
+                  onClick={() => scrollTabs('right')}
+                  className="flex flex-shrink-0 items-center justify-center w-5 rounded-t-md text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                  aria-label="向右滚动"
+                  data-testid="sidebar-tab-scroll-right"
                 >
-                  <path d="M9 6l6 6-6 6" />
-                </svg>
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M9 6l6 6-6 6" />
+                  </svg>
+                </button>
+              )}
             </div>
           )}
 
           <div className="space-y-1 pt-1.5" data-testid="sidebar-tab-content">
-            {activeTabContent.kind === 'flat' && activeTabContent.threads.map((t) => renderThreadItem(t))}
+            {activeTabContent.kind === 'flat' && (
+              <>
+                <div
+                  className="flex items-center justify-between px-3 py-1 text-micro text-cafe-muted"
+                  data-testid="flat-toolbar"
+                >
+                  <span>{activeTabContent.threads.length} 个对话</span>
+                  <button
+                    type="button"
+                    onClick={scrollToActiveThread}
+                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                    data-testid="select-open-session-btn"
+                    aria-label="定位当前对话"
+                    title="定位当前对话"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.4}
+                    >
+                      {/* PyCharm "Select Opened File" — circle with inward crosshair, center gap */}
+                      <circle cx="8" cy="8" r="5.5" />
+                      <line x1="8" y1="2.5" x2="8" y2="6" />
+                      <line x1="8" y1="10" x2="8" y2="13.5" />
+                      <line x1="2.5" y1="8" x2="6" y2="8" />
+                      <line x1="10" y1="8" x2="13.5" y2="8" />
+                    </svg>
+                  </button>
+                </div>
+                {activeTabContent.threads.map((t) => renderThreadItem(t))}
+              </>
+            )}
 
             {activeTabContent.kind === 'project' && threadGroups.length > 0 && (
               <div
@@ -1003,6 +1122,30 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
               >
                 <span>{threadGroups.length} 个项目</span>
                 <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={scrollToActiveThread}
+                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                    data-testid="project-select-open-session-btn"
+                    aria-label="定位当前对话"
+                    title="定位当前对话"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      className="h-3.5 w-3.5"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.4}
+                    >
+                      {/* PyCharm "Select Opened File" — circle with inward crosshair, center gap */}
+                      <circle cx="8" cy="8" r="5.5" />
+                      <line x1="8" y1="2.5" x2="8" y2="6" />
+                      <line x1="8" y1="10" x2="8" y2="13.5" />
+                      <line x1="2.5" y1="8" x2="6" y2="8" />
+                      <line x1="10" y1="8" x2="13.5" y2="8" />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     onClick={expandAll}
@@ -1014,14 +1157,14 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     <svg
                       aria-hidden="true"
                       className="h-3.5 w-3.5"
-                      viewBox="0 0 24 24"
+                      viewBox="0 0 16 16"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                      strokeWidth={1.4}
                     >
-                      <path d="M6 9l6 6 6-6" />
+                      {/* PyCharm-style expand all — diverging chevrons ∧∨ */}
+                      <path d="M5 7l3-3 3 3" />
+                      <path d="M5 9l3 3 3-3" />
                     </svg>
                   </button>
                   <button
@@ -1035,14 +1178,14 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                     <svg
                       aria-hidden="true"
                       className="h-3.5 w-3.5"
-                      viewBox="0 0 24 24"
+                      viewBox="0 0 16 16"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth={2}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
+                      strokeWidth={1.4}
                     >
-                      <path d="M18 15l-6-6-6 6" />
+                      {/* PyCharm-style collapse all — converging chevrons ∨∧ */}
+                      <path d="M5 4l3 3 3-3" />
+                      <path d="M5 12l3-3 3 3" />
                     </svg>
                   </button>
                 </div>
@@ -1077,7 +1220,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                 );
               })}
 
-            {normalizedQuery.length > 0 && activeTabContent.threads.length === 0 && !showDefaultThread && (
+            {(normalizedQuery.length > 0 || labelFilter) && activeTabIsEmpty && (
               <div className="px-3 py-4 text-xs text-cafe-muted">没有匹配的对话</div>
             )}
           </div>
@@ -1204,6 +1347,44 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         </TheaterOverlay>
       )}
     </>
+  );
+}
+
+function SparkleIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z" />
+      <path d="M20 3v4M22 5h-4" />
+    </svg>
+  );
+}
+
+function GridIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </svg>
   );
 }
 

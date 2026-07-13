@@ -133,19 +133,40 @@ describe('ThreadItem actions', () => {
     return container.querySelector(`button[title="${title}"]`);
   }
 
-  it('keeps pin and delete inside the more menu instead of fixed row buttons', () => {
+  it('shows one inline pin button and keeps delete inside the more menu', () => {
     renderThread();
 
-    expect(buttonByTitle('置顶')).toBeNull();
-    expect(buttonByTitle('删除对话')).toBeNull();
+    // Pin is inline (hover-revealed for unpinned), not in the menu
+    const pinBtn = container.querySelector('[data-testid="thread-pin-toggle-thread-1"]');
+    expect(pinBtn).not.toBeNull();
+    expect(pinBtn?.className).toContain('opacity-0'); // hidden until hover
+    // a11y: keyboard and touch fallbacks for unpinned state
+    expect(pinBtn?.className).toContain('focus-visible:opacity-100');
+    expect(pinBtn?.className).toContain('[@media(hover:none)]:opacity-100');
+
+    expect(buttonByTitle('删除对话')).toBeNull(); // delete stays in menu
     expect(buttonByTitle('更多操作')).not.toBeNull();
-    expect(buttonByTitle('更多操作')?.className).not.toContain('opacity-0');
 
     expect(buttonByTitle('设置默认猫猫')).toBeNull();
     expect(buttonByTitle('重命名对话')).toBeNull();
     expect(buttonByTitle('导出对话')).toBeNull();
     expect(buttonByTitle('标签管理')).toBeNull();
     expect(buttonByTitle('收藏')).toBeNull();
+  });
+
+  it('shows inline pin button always visible when pinned', () => {
+    renderThread({ isPinned: true });
+
+    const pinBtn = container.querySelector('[data-testid="thread-pin-toggle-thread-1"]');
+    expect(pinBtn).not.toBeNull();
+    expect(pinBtn?.className).not.toContain('opacity-0'); // always visible when pinned
+  });
+
+  it('renders title with two-line clamp', () => {
+    renderThread({ title: 'A very long thread title that should wrap to two lines' });
+
+    const titleEl = container.querySelector('[data-thread-id="thread-1"] .line-clamp-2');
+    expect(titleEl).not.toBeNull();
   });
 
   it('keeps the project path in the thread hover tooltip', () => {
@@ -163,7 +184,8 @@ describe('ThreadItem actions', () => {
     });
 
     const menu = container.querySelector('[role="menu"]');
-    expect(menu?.textContent).toContain('置顶');
+    // Pin is inline now, NOT in menu
+    expect(menu?.textContent).not.toContain('置顶');
     expect(menu?.textContent).toContain('删除对话');
     expect(menu?.textContent).toContain('设置默认猫猫');
     expect(menu?.textContent).toContain('重命名对话');
@@ -182,7 +204,7 @@ describe('ThreadItem actions', () => {
     const menu = container.querySelector('[role="menu"]');
     expect(menu).not.toBeNull();
 
-    for (const label of ['置顶', '设置默认猫猫', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
+    for (const label of ['设置默认猫猫', '重命名对话', '导出对话', '标签管理', '收藏', '删除对话']) {
       const item = Array.from(menu!.querySelectorAll('[role="menuitem"]')).find((el) =>
         el.textContent?.includes(label),
       );
