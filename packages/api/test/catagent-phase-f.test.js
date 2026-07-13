@@ -29,6 +29,34 @@ function sha256(text) {
   return createHash('sha256').update(text).digest('hex');
 }
 
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitFor(predicate, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return predicate();
+}
+
+function processTreeScript(markerPath) {
+  return [
+    'const{spawn}=require("node:child_process");',
+    'const{writeFileSync}=require("node:fs");',
+    'const child=spawn(process.execPath,["-e","setInterval(()=>{},100)"],{stdio:"inherit"});',
+    `writeFileSync(${JSON.stringify(markerPath)},String(child.pid));`,
+    'setInterval(()=>{},100);',
+  ].join('');
+}
+
 async function collect(iter) {
   const msgs = [];
   for await (const msg of iter) msgs.push(msg);
@@ -386,6 +414,29 @@ describe('F2: run_command policy', () => {
     assert.ok(!result.includes('HOME='), 'HOME must not be present');
   });
 
+  test('rejects command output above the 512 KiB buffer cap', async () => {
+    const audit = [];
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L2',
+      commandKillGraceMs: 50,
+      commandPolicy: [
+        {
+          binary: process.execPath,
+          allowedFlags: ['-e'],
+          allowedArgPatterns: ['^process\\.stdout\\.write'],
+        },
+      ],
+      audit: (event) => audit.push(event),
+    });
+    const run = findTool(tools, 'run_command');
+
+    await assert.rejects(() =>
+      run.execute({ binary: process.execPath, args: ['-e', 'process.stdout.write("x".repeat(512*1024+1))'] }),
+    );
+    assert.equal(audit.at(-1).outcome, 'error');
+    assert.match(audit.at(-1).rejectReason, /maxBuffer length exceeded/);
+  });
+
   test('kills commands that exceed timeout', async () => {
     const tools = await buildToolRegistry(tmpDir, {
       nativeToolLevel: 'L2',
@@ -448,22 +499,77 @@ describe('F2: run_command policy', () => {
         ],
       });
       const run = findTool(tools, 'run_command');
-      // The parent node process spawns a detached grandchild that inherits
-      // stdio and sleeps for 5 seconds. Without pipe cleanup, the execFile
-      // callback would hang until the grandchild exits (5s), violating the
-      // 50ms timeout contract.
-      const script = [
-        'const{execFile}=require("child_process");',
-        'execFile(process.execPath,["-e","setInterval(()=>{},100)"],{stdio:"inherit"});',
-        'setInterval(()=>{},100);',
-      ].join('');
+      // The parent process spawns a long-lived grandchild that inherits its
+      // stdio. The timeout must terminate the whole process tree, not merely
+      // close the direct child's pipes and orphan the grandchild.
+      const marker = join(tmpDir, 'timeout-grandchild.pid');
+      rmSync(marker, { force: true });
+      let grandchildPid;
       const start = Date.now();
-      await assert.rejects(() => run.execute({ binary: process.execPath, args: ['-e', script] }), /timed out/);
-      const elapsed = Date.now() - start;
-      // Should settle within ~500ms (timeout + grace + OS overhead), not 5+ seconds.
-      assert.ok(elapsed < 1000, `Elapsed ${elapsed}ms — expected < 1000ms; pipe cleanup may have failed`);
+      try {
+        await assert.rejects(
+          () => run.execute({ binary: process.execPath, args: ['-e', processTreeScript(marker)] }),
+          /timed out/,
+        );
+        const elapsed = Date.now() - start;
+        assert.ok(elapsed < 1_000, `Elapsed ${elapsed}ms — expected < 1000ms`);
+        assert.ok(await waitFor(() => existsSync(marker)), 'grandchild PID marker was not created');
+        grandchildPid = Number.parseInt(readFileSync(marker, 'utf-8'), 10);
+        assert.ok(Number.isSafeInteger(grandchildPid) && grandchildPid > 0, 'invalid grandchild PID');
+        assert.ok(
+          await waitFor(() => !isPidAlive(grandchildPid)),
+          `grandchild ${grandchildPid} survived command timeout`,
+        );
+      } finally {
+        if (grandchildPid && isPidAlive(grandchildPid)) {
+          process.kill(grandchildPid, 'SIGKILL');
+        }
+      }
     },
   );
+
+  test('invocation abort terminates an active run_command process tree promptly', async () => {
+    const controller = new AbortController();
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L2',
+      signal: controller.signal,
+      commandTimeoutMs: 1_000,
+      commandKillGraceMs: 50,
+      commandPolicy: [
+        {
+          binary: process.execPath,
+          allowedFlags: ['-e'],
+          allowedArgPatterns: ['^const'],
+        },
+      ],
+    });
+    const run = findTool(tools, 'run_command');
+    const marker = join(tmpDir, 'abort-grandchild.pid');
+    rmSync(marker, { force: true });
+    let grandchildPid;
+    const runPromise = run.execute({ binary: process.execPath, args: ['-e', processTreeScript(marker)] });
+
+    try {
+      assert.ok(await waitFor(() => existsSync(marker)), 'grandchild PID marker was not created');
+      grandchildPid = Number.parseInt(readFileSync(marker, 'utf-8'), 10);
+      assert.ok(Number.isSafeInteger(grandchildPid) && grandchildPid > 0, 'invalid grandchild PID');
+
+      const abortStarted = Date.now();
+      controller.abort();
+      await assert.rejects(runPromise, (err) => err?.name === 'AbortError');
+      assert.ok(Date.now() - abortStarted < 500, 'aborted run_command did not settle promptly');
+      assert.ok(
+        await waitFor(() => !isPidAlive(grandchildPid)),
+        `grandchild ${grandchildPid} survived invocation abort`,
+      );
+    } finally {
+      controller.abort();
+      await runPromise.catch(() => undefined);
+      if (grandchildPid && isPidAlive(grandchildPid)) {
+        process.kill(grandchildPid, 'SIGKILL');
+      }
+    }
+  });
 });
 
 describe('F1: CAS atomicity', () => {
@@ -490,6 +596,122 @@ describe('F1: CAS atomicity', () => {
     assert.equal(fulfilled.length, 1, `Expected 1 fulfilled, got ${fulfilled.length}`);
     assert.equal(rejected.length, 1, `Expected 1 rejected, got ${rejected.length}`);
     assert.ok(rejected[0].reason.message.includes('expected_hash mismatch'));
+  });
+
+  test('symlinked parent aliases share the same CAS lock', { skip: process.platform === 'win32' }, async () => {
+    const tools = await buildToolRegistry(tmpDir, { nativeToolLevel: 'L1' });
+    const patch = findTool(tools, 'patch_file');
+    const realDir = join(tmpDir, 'cas-real');
+    const linkDir = join(tmpDir, 'cas-link');
+    mkdirSync(realDir, { recursive: true });
+    rmSync(linkDir, { force: true });
+    symlinkSync(realDir, linkDir, 'dir');
+    writeFileSync(join(realDir, 'shared.txt'), 'alpha beta gamma');
+    const initialHash = sha256('alpha beta gamma').slice(0, 12);
+
+    const results = await Promise.allSettled([
+      patch.execute({ path: 'cas-real/shared.txt', old_text: 'alpha', new_text: 'ALPHA', expected_hash: initialHash }),
+      patch.execute({ path: 'cas-link/shared.txt', old_text: 'beta', new_text: 'BETA', expected_hash: initialHash }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(fulfilled.length, 1, `Expected 1 fulfilled, got ${fulfilled.length}`);
+    assert.equal(rejected.length, 1, `Expected 1 rejected, got ${rejected.length}`);
+    assert.match(rejected[0].reason.message, /expected_hash mismatch/);
+  });
+});
+
+describe('tool dispatch cancellation and rejection audit', () => {
+  const noInputSchema = {
+    name: 'first_tool',
+    description: 'test tool',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  };
+
+  test('aborting between tool calls prevents subsequent tool execution', async () => {
+    const controller = new AbortController();
+    let secondExecutions = 0;
+    const tools = [
+      {
+        schema: noInputSchema,
+        permission: 'allow',
+        execute: async () => {
+          controller.abort();
+          return 'first completed';
+        },
+      },
+      {
+        schema: { ...noInputSchema, name: 'second_tool' },
+        permission: 'allow',
+        execute: async () => {
+          secondExecutions++;
+          return 'second completed';
+        },
+      },
+    ];
+
+    await assert.rejects(
+      () =>
+        executeCatAgentTools(
+          [
+            { id: 'first', type: 'tool_call', name: 'first_tool', input: {} },
+            { id: 'second', type: 'tool_call', name: 'second_tool', input: {} },
+          ],
+          tools,
+          { signal: controller.signal },
+        ),
+      (err) => err?.name === 'AbortError',
+    );
+    assert.equal(secondExecutions, 0);
+  });
+
+  test('unknown tools and schema-invalid inputs emit rejected audit events', async () => {
+    const audit = [];
+    let executions = 0;
+    const tools = [
+      {
+        schema: {
+          name: 'write_file',
+          description: 'test tool',
+          input_schema: {
+            type: 'object',
+            properties: { path: { type: 'string' }, content: { type: 'string' } },
+            required: ['path', 'content'],
+          },
+        },
+        permission: 'allow',
+        execute: async () => {
+          executions++;
+          return 'unexpected';
+        },
+      },
+    ];
+
+    const results = await executeCatAgentTools(
+      [
+        { id: 'unknown', type: 'tool_call', name: 'unknown_tool', input: {} },
+        { id: 'invalid', type: 'tool_call', name: 'write_file', input: { path: 'x.txt' } },
+      ],
+      tools,
+      { audit: (event) => audit.push(event) },
+    );
+
+    assert.deepEqual(
+      results.map((result) => result.status),
+      ['error', 'error'],
+    );
+    assert.equal(executions, 0);
+    assert.equal(audit.length, 2);
+    assert.deepEqual(
+      audit.map((event) => [event.tool, event.outcome]),
+      [
+        ['unknown_tool', 'rejected'],
+        ['write_file', 'rejected'],
+      ],
+    );
+    assert.match(audit[0].rejectReason, /unknown tool/);
+    assert.match(audit[1].rejectReason, /required field "content" is missing/);
   });
 });
 

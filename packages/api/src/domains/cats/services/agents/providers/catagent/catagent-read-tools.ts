@@ -12,10 +12,10 @@
  * - F3-min: update_current_task_status host-native scoped callback
  */
 
-import { execFile } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, open, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { CommandPolicyEntry, TaskStatus } from '@cat-cafe/shared';
@@ -41,6 +41,7 @@ const MAX_WRITE_BYTES = 256 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_COMMAND_KILL_GRACE_MS = 3_000;
 const COMMAND_MAX_BUFFER = 512 * 1024;
+const IS_WINDOWS = process.platform === 'win32';
 const LEVEL_RANK = { L0: 0, L1: 1, L2: 2 } as const;
 const TASK_STATUSES = new Set<TaskStatus>(['todo', 'doing', 'blocked', 'done']);
 
@@ -54,20 +55,42 @@ const TASK_STATUSES = new Set<TaskStatus>(['todo', 'doing', 'blocked', 'done']);
  */
 const pathLocks = new Map<string, Promise<void>>();
 
+async function canonicalPathLockKey(resolvedPath: string): Promise<string> {
+  let ancestor = resolvedPath;
+  const missingSegments: string[] = [];
+
+  for (;;) {
+    try {
+      const canonicalAncestor = await realpath(ancestor);
+      return join(canonicalAncestor, ...missingSegments.reverse());
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) throw err;
+      missingSegments.push(basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
 async function withPathLock<T>(resolvedPath: string, fn: () => Promise<T>): Promise<T> {
+  // Canonicalize the target (or its nearest existing ancestor for new files)
+  // so in-workspace symlink aliases cannot acquire independent CAS locks for
+  // the same underlying file.
+  const lockKey = await canonicalPathLockKey(resolvedPath);
   // Wait for any in-flight operation on this path to finish.
-  while (pathLocks.has(resolvedPath)) {
-    await pathLocks.get(resolvedPath);
+  while (pathLocks.has(lockKey)) {
+    await pathLocks.get(lockKey);
   }
   let releaseLock!: () => void;
   const lock = new Promise<void>((r) => {
     releaseLock = r;
   });
-  pathLocks.set(resolvedPath, lock);
+  pathLocks.set(lockKey, lock);
   try {
     return await fn();
   } finally {
-    pathLocks.delete(resolvedPath);
+    pathLocks.delete(lockKey);
     releaseLock();
   }
 }
@@ -589,12 +612,12 @@ function formatCommandOutput(exitCode: number | null, stdout: string, stderr: st
   return parts.join('\n');
 }
 
-interface ExecFileStrictResult {
+interface StrictCommandResult {
   stdout: string;
   stderr: string;
 }
 
-interface ExecFileStrictError extends Error {
+interface StrictCommandError extends Error {
   code?: number | string | null;
   signal?: NodeJS.Signals | null;
   stdout?: string;
@@ -602,19 +625,71 @@ interface ExecFileStrictError extends Error {
   timedOut?: boolean;
 }
 
+function createAbortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
 /**
- * Destroy a child's stdio pipes so the execFile callback fires promptly
+ * Destroy a child's stdio pipes so the close event fires promptly
  * even if grandchild processes inherited and still hold those pipes open.
  * Without this, a timed-out command whose child spawns long-lived
  * descendants can hang the tool call indefinitely.
  */
-function destroyChildPipes(child: ReturnType<typeof execFile>): void {
+function destroyChildPipes(child: ChildProcess): void {
   child.stdout?.destroy();
   child.stderr?.destroy();
   child.stdin?.destroy();
 }
 
-function execFileWithStrictTimeout(
+/**
+ * Terminate the whole command tree.
+ *
+ * POSIX commands are process-group leaders (`detached: true`), so a negative
+ * PID reaches every descendant in that group. Windows uses taskkill /T, with
+ * /F for the SIGKILL escalation. A direct-child signal is only a fallback
+ * when group/tree termination cannot be started.
+ */
+function signalProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (!pid) return;
+
+  if (IS_WINDOWS) {
+    try {
+      const args = ['/T', ...(signal === 'SIGKILL' ? ['/F'] : []), '/PID', String(pid)];
+      const taskkill = execFile('taskkill', args, { windowsHide: true }, (err) => {
+        if (!err) return;
+        try {
+          child.kill(signal);
+        } catch {
+          // The direct child already exited.
+        }
+      });
+      taskkill.unref();
+      return;
+    } catch {
+      // Fall through to direct-child signaling.
+    }
+  } else {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // The group may already be gone; direct-child signaling is a fallback.
+    }
+  }
+
+  try {
+    child.kill(signal);
+  } catch {
+    // The child already exited.
+  }
+}
+
+function spawnFileWithStrictTermination(
   binary: string,
   args: readonly string[],
   options: {
@@ -623,53 +698,123 @@ function execFileWithStrictTimeout(
     killGraceMs: number;
     maxBuffer: number;
     env: NodeJS.ProcessEnv;
+    signal?: AbortSignal;
   },
-): Promise<ExecFileStrictResult> {
+): Promise<StrictCommandResult> {
+  if (options.signal?.aborted) return Promise.reject(createAbortError());
+
   return new Promise((resolve, reject) => {
-    let timedOut = false;
+    let termination: 'timeout' | 'abort' | 'maxBuffer' | undefined;
     let timeoutHandle: NodeJS.Timeout | undefined;
     let killHandle: NodeJS.Timeout | undefined;
-    const child = execFile(
-      binary,
-      [...args],
-      {
-        cwd: options.cwd,
-        maxBuffer: options.maxBuffer,
-        env: options.env,
-      },
-      (err, stdout, stderr) => {
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        if (killHandle) clearTimeout(killHandle);
-        if (err) {
-          const error = err as ExecFileStrictError;
-          error.stdout = String(stdout ?? '');
-          error.stderr = String(stderr ?? '');
-          if (timedOut) error.timedOut = true;
-          reject(error);
-          return;
-        }
-        if (timedOut) {
-          const error = new Error(`Command timed out after ${options.timeoutMs}ms`) as ExecFileStrictError;
-          error.stdout = String(stdout ?? '');
-          error.stderr = String(stderr ?? '');
-          error.timedOut = true;
-          reject(error);
-          return;
-        }
-        resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
-      },
-    );
+    let spawnError: Error | undefined;
+    let bufferError: StrictCommandError | undefined;
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
 
-    timeoutHandle = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
+    const child = spawn(binary, [...args], {
+      cwd: options.cwd,
+      env: options.env,
+      detached: !IS_WINDOWS,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    const beginTermination = (reason: 'timeout' | 'abort' | 'maxBuffer'): void => {
+      if (termination !== undefined) return;
+      termination = reason;
+      signalProcessTree(child, 'SIGTERM');
       killHandle = setTimeout(() => {
-        child.kill('SIGKILL');
-        // Destroy pipes so the callback fires even if grandchild processes
-        // inherited them. Without this, execFile hangs until all pipe holders exit.
+        signalProcessTree(child, 'SIGKILL');
+        // Close inherited pipes after escalation so execFile settles even if
+        // a descendant escaped the tree-kill mechanism.
         destroyChildPipes(child);
+        killHandle = undefined;
       }, options.killGraceMs);
       killHandle.unref?.();
+    };
+
+    const onAbort = (): void => beginTermination('abort');
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+
+    const capture = (stream: 'stdout' | 'stderr', chunk: Buffer | string): void => {
+      if (bufferError) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const nextBytes = (stream === 'stdout' ? stdoutBytes : stderrBytes) + buffer.length;
+      if (nextBytes > options.maxBuffer) {
+        bufferError = Object.assign(new Error(`${stream} maxBuffer length exceeded`), {
+          code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+        }) as StrictCommandError;
+        beginTermination('maxBuffer');
+        return;
+      }
+      if (stream === 'stdout') {
+        stdoutBytes = nextBytes;
+        stdoutChunks.push(buffer);
+      } else {
+        stderrBytes = nextBytes;
+        stderrChunks.push(buffer);
+      }
+    };
+
+    child.stdout?.on('data', (chunk: Buffer | string) => capture('stdout', chunk));
+    child.stderr?.on('data', (chunk: Buffer | string) => capture('stderr', chunk));
+    child.once('error', (err) => {
+      spawnError = err;
+    });
+    child.once('close', (code, signal) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      options.signal?.removeEventListener('abort', onAbort);
+      // Keep the escalation timer alive after forced termination even if the
+      // direct child exits first: descendants may still ignore SIGTERM.
+      if (killHandle && termination === undefined) clearTimeout(killHandle);
+
+      const stdout = Buffer.concat(stdoutChunks).toString('utf-8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf-8');
+      if (termination === 'abort') {
+        reject(createAbortError());
+        return;
+      }
+      if (termination === 'timeout') {
+        const error = new Error(`Command timed out after ${options.timeoutMs}ms`) as StrictCommandError;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        error.timedOut = true;
+        reject(error);
+        return;
+      }
+      if (bufferError) {
+        bufferError.stdout = stdout;
+        bufferError.stderr = stderr;
+        reject(bufferError);
+        return;
+      }
+      if (spawnError) {
+        const error = spawnError as StrictCommandError;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      if (code !== 0) {
+        const error = new Error(
+          signal ? `Command terminated by ${signal}` : `Command exited with code ${code ?? 'unknown'}`,
+        ) as StrictCommandError;
+        error.code = code;
+        error.signal = signal;
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+
+    timeoutHandle = setTimeout(() => {
+      beginTermination('timeout');
     }, options.timeoutMs);
     timeoutHandle.unref?.();
   });
@@ -705,12 +850,13 @@ async function executeRunCommand(
   const timeout = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
   const killGrace = options.commandKillGraceMs ?? DEFAULT_COMMAND_KILL_GRACE_MS;
   try {
-    const { stdout, stderr } = await execFileWithStrictTimeout(binary, args, {
+    const { stdout, stderr } = await spawnFileWithStrictTermination(binary, args, {
       cwd: workDir,
       timeoutMs: timeout,
       killGraceMs: killGrace,
       maxBuffer: COMMAND_MAX_BUFFER,
       env: constrainedCommandEnv(),
+      signal: options.signal,
     });
     await emitAudit(options, {
       tool: 'run_command',
@@ -726,7 +872,21 @@ async function executeRunCommand(
     });
     return formatCommandOutput(0, stdout, stderr);
   } catch (err) {
-    const e = err as ExecFileStrictError;
+    if (isAbortError(err)) {
+      await emitAudit(options, {
+        tool: 'run_command',
+        outcome: 'error',
+        timestamp: Date.now(),
+        binary,
+        args,
+        exitCode: null,
+        durationMs: Date.now() - startedAt,
+        policyEntry: policyEntry.binary,
+        rejectReason: 'invocation aborted; terminated command process tree',
+      });
+      throw err;
+    }
+    const e = err as StrictCommandError;
     const stdout = e.stdout ?? '';
     const stderr = e.stderr ?? '';
     const timedOut = e.timedOut === true;

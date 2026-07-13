@@ -30,7 +30,7 @@ import type {
   CatAgentToolCallBlock,
 } from './catagent-protocol-types.js';
 import { buildToolRegistry, findTool, getToolSchemas } from './catagent-read-tools.js';
-import { validateToolInput } from './catagent-tool-guard.js';
+import { ToolInputValidationError, validateToolInput } from './catagent-tool-guard.js';
 import type {
   CatAgentTool,
   CatAgentToolAuditEvent,
@@ -71,6 +71,45 @@ export interface CatAgentToolExecResult {
   status: 'ok' | 'error';
 }
 
+interface ExecuteCatAgentToolsOptions {
+  signal?: AbortSignal;
+  audit?: CatAgentToolAuditSink;
+}
+
+function createAbortError(): DOMException {
+  return new DOMException('The operation was aborted.', 'AbortError');
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw createAbortError();
+}
+
+function dispatchAuditFields(input: Record<string, unknown>): Pick<CatAgentToolAuditEvent, 'path' | 'binary' | 'args'> {
+  return {
+    ...(typeof input.path === 'string' ? { path: input.path } : {}),
+    ...(typeof input.binary === 'string' ? { binary: input.binary } : {}),
+    ...(Array.isArray(input.args) && input.args.every((arg) => typeof arg === 'string') ? { args: input.args } : {}),
+  };
+}
+
+async function emitDispatchRejectionAudit(
+  block: CatAgentToolCallBlock,
+  reason: string,
+  audit: CatAgentToolAuditSink | undefined,
+): Promise<void> {
+  await audit?.({
+    tool: block.name,
+    outcome: 'rejected',
+    timestamp: Date.now(),
+    rejectReason: reason,
+    ...dispatchAuditFields(block.input),
+  });
+}
+
 /**
  * Execute neutral tool_call blocks against the local tool registry.
  * (G1: signature changed from `AnthropicToolUseBlock[]` to neutral
@@ -88,27 +127,45 @@ export interface CatAgentToolExecResult {
 export async function executeCatAgentTools(
   blocks: ReadonlyArray<CatAgentToolCallBlock>,
   tools: CatAgentTool[],
+  options: ExecuteCatAgentToolsOptions = {},
 ): Promise<CatAgentToolExecResult[]> {
   const results: CatAgentToolExecResult[] = [];
   for (const block of blocks) {
+    throwIfAborted(options.signal);
     const tool = findTool(tools, block.name);
     if (!tool) {
+      const message = `unknown tool "${block.name}"`;
+      await emitDispatchRejectionAudit(block, message, options.audit);
       results.push({
         id: block.id,
         name: block.name,
-        content: `Error: unknown tool "${block.name}"`,
+        content: `Error: ${message}`,
         status: 'error',
       });
       continue;
     }
     try {
       validateToolInput(tool.schema, block.input);
+    } catch (err: unknown) {
+      if (!(err instanceof ToolInputValidationError)) throw err;
+      await emitDispatchRejectionAudit(block, err.message, options.audit);
+      results.push({
+        id: block.id,
+        name: block.name,
+        content: `Error: ${err.message}`,
+        status: 'error',
+      });
+      continue;
+    }
+    try {
       const output = await tool.execute(block.input);
+      throwIfAborted(options.signal);
       // Status comes from the execution edge (no exception thrown), not from
       // content inspection — a tool may legitimately return text starting
       // with "Error:" (e.g. log/file content).
       results.push({ id: block.id, name: block.name, content: output, status: 'ok' });
     } catch (err: unknown) {
+      if (isAbortError(err) || options.signal?.aborted) throw createAbortError();
       results.push({
         id: block.id,
         name: block.name,
@@ -173,7 +230,8 @@ export class CatAgentService implements AgentService {
     options?: AgentServiceOptions,
   ): AsyncIterable<AgentMessage> {
     const workDir = options?.workingDirectory;
-    const tools = await buildToolRegistry(workDir, this.createToolRegistryOptions(options));
+    const toolRegistryOptions = this.createToolRegistryOptions(options);
+    const tools = await buildToolRegistry(workDir, toolRegistryOptions);
     const toolSchemas = getToolSchemas(tools);
     // G1: messages held as opaque AdapterMessage; service never destructures.
     // Initial user prompt + per-turn assistant blocks + per-turn tool results
@@ -234,7 +292,15 @@ export class CatAgentService implements AgentService {
       }
 
       // Execute tools and build next turn
-      const toolResults = await this.executeTools(toolBlocks, tools, metadata);
+      let toolResults: CatAgentToolExecResult[];
+      try {
+        toolResults = await this.executeTools(toolBlocks, tools, toolRegistryOptions);
+      } catch (err: unknown) {
+        if (!isAbortError(err)) throw err;
+        yield { type: 'error', catId: this.catId, error: 'Request aborted', metadata, timestamp: Date.now() };
+        yield* emitDone(this.catId, metadata, totalUsage);
+        return;
+      }
       for (const r of toolResults) {
         // F153 Phase J AC-J2 (R1 P2 fix): status comes from executeTools execution
         // edge — not from content inspection. A tool legitimately returning text
@@ -386,15 +452,16 @@ export class CatAgentService implements AgentService {
   private executeTools(
     blocks: ReadonlyArray<CatAgentToolCallBlock>,
     tools: CatAgentTool[],
-    _metadata: MessageMetadata,
+    options: ExecuteCatAgentToolsOptions,
   ): Promise<CatAgentToolExecResult[]> {
-    return executeCatAgentTools(blocks, tools);
+    return executeCatAgentTools(blocks, tools, options);
   }
 
   private createToolRegistryOptions(options?: AgentServiceOptions): CatAgentToolRegistryOptions {
     return {
       nativeToolLevel: this.catConfig?.nativeToolLevel,
       commandPolicy: this.catConfig?.commandPolicy,
+      signal: options?.signal,
       audit: this.createToolAuditSink(options),
       scopedCallbacks: options?.catAgentScopedCallbacks,
     };
