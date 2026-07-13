@@ -251,14 +251,6 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
       const existingIdx = config.capabilities.findIndex((c) => c.id === body.id && c.type === 'mcp');
       const before = existingIdx >= 0 ? structuredClone(config.capabilities[existingIdx]) : null;
 
-      // F249 Phase D: Plugin MCPs cannot have project-level override
-      if (body.projectPath && existingIdx >= 0 && config.capabilities[existingIdx].pluginId) {
-        reply.status(403);
-        return {
-          error: `MCP "${body.id}" is managed by plugin "${config.capabilities[existingIdx].pluginId}". Plugin MCPs cannot have project-level overrides.`,
-        };
-      }
-
       let preview: ReturnType<typeof buildInstallPreview>;
       try {
         preview = buildInstallPreview(body, config.capabilities);

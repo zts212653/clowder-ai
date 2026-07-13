@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   type CapabilitiesConfig,
   type CapabilityEntry,
@@ -807,11 +807,21 @@ export class PluginResourceActivator {
       };
     }
 
+    const projectRoot = this.deps.resolveProjectRoot();
+    const resolvedArgs = (resource.args ?? []).map((arg) => {
+      // Skip flags and already-absolute paths
+      if (arg.startsWith('-') || isAbsolute(arg)) return arg;
+      // Resolve relative path-like args against project root (consistent with
+      // built-in cat-cafe MCPs that use resolve(binaryRoot, ...))
+      const abs = resolve(projectRoot, arg);
+      return existsSync(abs) ? abs : arg;
+    });
+
     return {
       command: resource.command!,
-      args: resource.args ?? [],
+      args: resolvedArgs,
       transport: (resource.transport as 'stdio' | 'streamableHttp') ?? 'stdio',
-      workingDir: join(this.deps.pluginsDir, manifest.id),
+      workingDir: projectRoot,
       ...this.buildMcpEnv(manifest),
     };
   }

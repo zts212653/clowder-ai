@@ -323,8 +323,9 @@ describe('capabilities MCP write routes', () => {
     });
 
     assert.equal(res.statusCode, 200, res.payload);
-    assert.equal(res.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
-    assert.equal(res.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
+    // Client-side app: response contains real values (frontend handles visual masking)
+    assert.equal(res.json().capability.mcpServer.env.API_KEY, 'new-secret');
+    assert.equal(res.json().capability.mcpServer.headers.Authorization, 'Bearer new-secret');
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
     assert.equal(cap?.mcpServer?.env?.API_KEY, 'new-secret');
@@ -531,13 +532,13 @@ describe('capabilities MCP write routes', () => {
     });
 
     assert.equal(res.statusCode, 200, res.payload);
-    assert.doesNotMatch(res.payload, /override-secret|Bearer override-secret/);
+    // Client-side app: response contains real values (frontend handles visual masking)
     const responseCapability = JSON.parse(res.payload).capability;
     assert.deepEqual(responseCapability.mcpServerOverride.env, {
-      API_KEY: REDACTED_SECRET,
-      KEEP: REDACTED_SECRET,
+      API_KEY: 'override-secret',
+      KEEP: 'yes',
     });
-    assert.deepEqual(responseCapability.mcpServerOverride.headers, { Authorization: REDACTED_SECRET });
+    assert.deepEqual(responseCapability.mcpServerOverride.headers, { Authorization: 'Bearer override-secret' });
 
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'project-secret-mcp');
@@ -596,7 +597,7 @@ describe('capabilities MCP write routes', () => {
     assert.deepEqual(res.json().capability.mcpServer.args, ['stdio-server', '--flag']);
   });
 
-  it('redacts MCP preview and install response secrets without changing persisted config', async () => {
+  it('returns real secrets in MCP preview and install responses (client-side app)', async () => {
     setEnv('DEFAULT_OWNER_USER_ID', 'you');
     const payload = {
       id: 'secret-mcp',
@@ -613,8 +614,9 @@ describe('capabilities MCP write routes', () => {
       payload,
     });
     assert.equal(preview.statusCode, 200, preview.payload);
-    assert.equal(preview.json().entry.mcpServer.headers.Authorization, REDACTED_SECRET);
-    assert.equal(preview.json().entry.mcpServer.env.API_KEY, REDACTED_SECRET);
+    // Client-side app: preview and install responses contain real values
+    assert.equal(preview.json().entry.mcpServer.headers.Authorization, 'Bearer install-secret');
+    assert.equal(preview.json().entry.mcpServer.env.API_KEY, 'install-secret');
 
     const install = await app.inject({
       method: 'POST',
@@ -623,8 +625,8 @@ describe('capabilities MCP write routes', () => {
       payload,
     });
     assert.equal(install.statusCode, 200, install.payload);
-    assert.equal(install.json().capability.mcpServer.headers.Authorization, REDACTED_SECRET);
-    assert.equal(install.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
+    assert.equal(install.json().capability.mcpServer.headers.Authorization, 'Bearer install-secret');
+    assert.equal(install.json().capability.mcpServer.env.API_KEY, 'install-secret');
 
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
@@ -658,8 +660,8 @@ describe('capabilities MCP write routes', () => {
     });
 
     assert.equal(res.statusCode, 200, res.payload);
-    assert.doesNotMatch(res.payload, /new-secret/);
-    assert.equal(res.json().capability.mcpServer.env.API_KEY, REDACTED_SECRET);
+    // Client-side app: response contains real values
+    assert.equal(res.json().capability.mcpServer.env.API_KEY, 'new-secret');
     const config = await readCapabilitiesConfig(projectRoot);
     const cap = config?.capabilities.find((entry) => entry.id === 'secret-mcp');
     assert.deepEqual(cap?.mcpServer?.env, { API_KEY: 'new-secret', KEEP: 'yes' });

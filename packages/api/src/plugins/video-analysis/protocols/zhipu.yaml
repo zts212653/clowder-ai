@@ -1,0 +1,25 @@
+name: zhipu
+version: 1
+mode: sync
+baseUrl: https://open.bigmodel.cn
+
+capabilities:
+  analyze:
+    request:
+      method: POST
+      path: /api/paas/v4/chat/completions
+      body:
+        model: "{{model | default:glm-4.6v-flash}}"
+        messages:
+          - role: user
+            content:
+              - type: text
+                text: "{{prompt}}"
+              - type: video_url
+                video_url:
+                  url: "{{videoUrl}}"
+        temperature: 0.2
+        response_format:
+          type: json_object
+      response:
+        result: $.choices[0].message.content

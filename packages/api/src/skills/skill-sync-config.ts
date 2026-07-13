@@ -73,10 +73,12 @@ export async function updateSkillMountPaths(
   // should not leak into the global enabled state.
   const hasForce = opts?.forceDisabled === true || opts?.forceEnabled === true;
   const resolvedEnabled = opts?.forceDisabled === true ? false : opts?.forceEnabled === true ? true : undefined;
-  // pluginId is an identity label, not a filter. All cat-cafe skills
-  // are managed uniformly by syncProject.
+  // F205: Exclude plugin-owned entries — their mount paths are managed by
+  // PluginResourceActivator, not the sync engine.  Without this filter,
+  // same-id entries (built-in + plugin) collide: the first array match
+  // gets overwritten, then nameSet.delete(cap.id) skips the intended target.
   const isCatCafeSkill = (cap: (typeof config.capabilities)[number]) =>
-    cap.type === 'skill' && cap.source === 'cat-cafe';
+    cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId;
   const existingIds = new Set(config.capabilities.filter(isCatCafeSkill).map((c) => c.id));
 
   for (const cap of config.capabilities) {
@@ -124,8 +126,10 @@ export async function removeCatCafeSkillCapabilities(projectRoot: string, skillN
 
   const nameSet = new Set(skillNames);
   const before = config.capabilities.length;
+  // F205: Preserve plugin-owned entries — they are managed by
+  // PluginResourceActivator, not the sync engine.
   config.capabilities = config.capabilities.filter(
-    (cap) => !(cap.type === 'skill' && cap.source === 'cat-cafe' && nameSet.has(cap.id)),
+    (cap) => !(cap.type === 'skill' && cap.source === 'cat-cafe' && !cap.pluginId && nameSet.has(cap.id)),
   );
   if (config.capabilities.length !== before) {
     await writeCapabilitiesConfig(projectRoot, config);

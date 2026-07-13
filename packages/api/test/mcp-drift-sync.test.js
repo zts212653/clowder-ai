@@ -104,14 +104,20 @@ describe('mcp-drift-detector: checkMcpProject', () => {
     assert.equal(result.summary.orphan, 1);
   });
 
-  it('does NOT flag external-source MCP as orphan', async () => {
+  it('flags external-source MCP as orphan (no project-level install path exists)', async () => {
+    // F249 spec review: there is NO project-level MCP install path.
+    // All project entries come from global cascade/sync. An external MCP
+    // present in project but absent in global is a stale cascaded entry
+    // that should be detected as orphan.
     const global = capConfig([]);
     const project = capConfig([mcpEntry('ext-mcp', { source: 'external' })]);
 
     const result = await checkMcpProject('/fake/project', '/fake/global', global, project);
 
-    assert.equal(result.issues.length, 0);
-    assert.equal(result.summary.orphan, 0);
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0].type, 'project-orphan');
+    assert.equal(result.issues[0].mcpId, 'ext-mcp');
+    assert.equal(result.summary.orphan, 1);
   });
 
   it('detects config-mismatch when mcpServer differs', async () => {
@@ -450,7 +456,7 @@ describe('mcp-sync-engine: syncMcpProject', () => {
     assert.equal(entry.mcpServerOverride.command, 'ruby');
   });
 
-  it('removes non-external orphans from project', async () => {
+  it('removes orphan MCP entries from project regardless of source', async () => {
     writeCapConfig(globalRoot, capConfig([]));
     writeCapConfig(projectRoot, capConfig([mcpEntry('stale-mcp', { source: 'cat-cafe' })]));
 
@@ -463,19 +469,19 @@ describe('mcp-sync-engine: syncMcpProject', () => {
     assert.equal(mcpEntries.length, 0);
   });
 
-  it('preserves external-source entries even when absent from global', async () => {
+  it('removes external-source orphan entries from project (no project-level install path)', async () => {
+    // F249 spec review: all project MCP entries come from global cascade.
+    // External entries absent from global are stale and must be cleaned up.
     writeCapConfig(globalRoot, capConfig([]));
     writeCapConfig(projectRoot, capConfig([mcpEntry('ext-mcp', { source: 'external' })]));
 
     const result = await syncMcpProject(projectRoot, globalRoot, { globalMcpEntries: [] });
 
-    // External entries should NOT be removed
-    assert.ok(!result.removed.includes('ext-mcp'));
+    assert.deepEqual(result.removed, ['ext-mcp']);
 
     const written = readCapConfig(projectRoot);
     const mcpEntries = written.capabilities.filter((c) => c.type === 'mcp');
-    assert.equal(mcpEntries.length, 1);
-    assert.equal(mcpEntries[0].id, 'ext-mcp');
+    assert.equal(mcpEntries.length, 0);
   });
 });
 

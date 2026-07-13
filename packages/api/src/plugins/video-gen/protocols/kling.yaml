@@ -1,0 +1,69 @@
+name: kling
+version: 1
+mode: async
+baseUrl: https://api.klingai.com
+
+capabilities:
+  text2video:
+    submit:
+      method: POST
+      path: /v1/videos/text2video
+      body:
+        model_name: "{{model | default:kling-v2.6-pro}}"
+        prompt: "{{prompt}}"
+        duration: "{{duration}}"
+        aspect_ratio: "{{aspectRatio}}"
+        negative_prompt: "{{negativePrompt}}"
+      response:
+        taskId: $.data.task_id
+        status: $.data.task_status
+        statusMap:
+          queued: [submitted]
+          running: [processing]
+          succeeded: [succeed]
+          failed: [failed]
+    poll:
+      method: GET
+      path: /v1/videos/text2video/{{taskId}}
+      interval: 10000
+      maxAttempts: 60
+      response:
+        status: $.data.task_status
+        statusMap:
+          queued: [submitted]
+          running: [processing]
+          succeeded: [succeed]
+          failed: [failed]
+        resultUrl: $.data.task_result.videos[0].url
+        error: $.data.task_status_msg
+
+  image2video:
+    submit:
+      method: POST
+      path: /v1/videos/image2video
+      body:
+        model_name: "{{model | default:kling-v2.6-pro}}"
+        prompt: "{{prompt}}"
+        image_url: "{{imageUrl}}"
+      response:
+        taskId: $.data.task_id
+        status: $.data.task_status
+        statusMap:
+          queued: [submitted]
+          running: [processing]
+          succeeded: [succeed]
+          failed: [failed]
+    poll:
+      method: GET
+      path: /v1/videos/image2video/{{taskId}}
+      interval: 10000
+      maxAttempts: 60
+      response:
+        status: $.data.task_status
+        statusMap:
+          queued: [submitted]
+          running: [processing]
+          succeeded: [succeed]
+          failed: [failed]
+        resultUrl: $.data.task_result.videos[0].url
+        error: $.data.task_status_msg

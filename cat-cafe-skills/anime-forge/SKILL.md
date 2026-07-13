@@ -1,5 +1,6 @@
 ---
 name: anime-forge
+tips_exempt: delivery error row only — no new user-facing capability; continuity commit will reference video-forge SOT
 description: >
   AI 生成动画短片生产线：图（关键帧锁确定性）→ 视频（i2v 给活气）→ 后期（剪辑做节奏）。
   Use when: 做动画短剧/角色 IP 短片、猫咖日记系列新集、图生视频管线、剧情类 AI 视频。
@@ -36,6 +37,7 @@ description: >
 5. **素材账本**：入库即登记 md5/时长/状态；视频 gitignored 账本作存在证明 → 范例 `assets/README.md`
 6. **Animatic 检查点（行为刹车）**：烧贵素材前先用静帧+占位拼粗剪验证节奏；剧本结构问题（见下）必须在这层抓
 7. **EDL 渲染**：`animatic/edl-v1.mjs`（时长/字幕/段序真相源）+ `build-animatic.mjs`（零 npm 依赖：Chrome 当字幕/字卡渲染器 + ffmpeg）——改数字重渲，画幅参数化
+8. **交付/预览**：最终成片必须在 Console 里内联可看，不要只丢工作区路径。外部直链可直接发 rich block；本地 mp4 先变成 `/uploads/...` 再发 `kind:"file"` + `mimeType:"video/mp4"`。只有你明确需要 `autoplay muted` 且拿到的是外部直链时，才退回 `html_widget` + `<video>`
 
 ## 实测分工路由（硬约束，不是偏好）
 
@@ -56,6 +58,7 @@ description: >
 
 | 错误 | 后果 | 修复 |
 |---|---|---|
+| 异源/异锚图片段硬拼成伪一镜到底 | 三段像三个世界，`xfade` 遮 cut 遮不住画风漂移 | 连续性合约 SOT 在 `video-forge/SKILL.md` → "多段拼接连续性合约"；AI 域的额外约束：共享锚图、同路由、同调色 |
 | i2v prompt 写风格描述词 | 邀请重采样→第二帧跳变 | 风格 100% 来自首帧，prompt 零风格词（配方 §0.6） |
 | 正面段写 "the man/adult human" | 往写实拉 | 角色用名字；反幼态只进末尾负面清单 |
 | 动作太稀（10s 只给 2 动作） | 模型自己编戏 | 3-4 个 Then 串联填满时间线 |
@@ -66,6 +69,7 @@ description: >
 | 不先问素材画幅就定输出画幅 | 横竖分裂，pad 兜底但割裂 | 开抽前统一画幅；混了用 blur-pad 过渡，终态重抽 |
 | 静态 PNG overlay 长片尾段 | ~66s 后 framesync 失效字幕全挂 | PNG 输入加 `-loop 1`（builder 已内置） |
 | 字幕长句贴 max-width | 折行被渲染窗裁掉 | 字号留安全区；改完必抽帧亲眼验 |
+| 最终只产出工作区 mp4，不把成片挂回对话 | operator 看不到片，只能点文件路径，验收断层 | 终稿交付时把视频变成可访问 URL；`/uploads/...` 用 `file` rich block，外部直链才考虑 `html_widget` |
 
 ## 和其他 skill 的区别（GOTCHA）
 

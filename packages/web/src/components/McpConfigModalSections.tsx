@@ -50,14 +50,12 @@ export function McpModalHeader({ title, subtitle, onClose }: { title: string; su
 export function McpIdentitySection({
   id,
   isEdit,
-  readOnly,
   transport,
   onIdChange,
   onTransportChange,
 }: {
   id: string;
   isEdit: boolean;
-  readOnly: boolean;
   transport: McpTransport;
   onIdChange: (value: string) => void;
   onTransportChange: (value: McpTransport) => void;
@@ -71,10 +69,10 @@ export function McpIdentitySection({
           onChange={(event) => onIdChange(event.target.value)}
           placeholder="MCP 服务名称"
           className={`${formInputClass} disabled:opacity-60`}
-          disabled={isEdit || readOnly}
+          disabled={isEdit}
         />
       </FormItem>
-      {!isEdit && !readOnly ? (
+      {!isEdit ? (
         <EditableTransportSelector value={transport} onChange={onTransportChange} />
       ) : (
         <ReadonlyTransport transport={transport} />
@@ -141,7 +139,6 @@ export function McpResolverSection({ resolver }: { resolver?: string }) {
 
 export function McpTransportFields(props: {
   transport: McpTransport;
-  readOnly: boolean;
   isEdit: boolean;
   command: string;
   args: string[];
@@ -160,12 +157,10 @@ export function McpTransportFields(props: {
 }
 
 function McpStdioFields({
-  readOnly,
   isEdit,
   command,
   args,
   envPairs,
-  editData,
   onCommandChange,
   onArgsChange,
   onEnvPairsChange,
@@ -177,87 +172,59 @@ function McpStdioFields({
           type="text"
           value={command}
           onChange={(event) => onCommandChange(event.target.value)}
-          placeholder={isEdit && !readOnly ? '留空保留现有命令' : '例如 npx'}
-          className={`${formInputClass} disabled:opacity-60`}
-          disabled={readOnly}
+          placeholder={isEdit ? '留空保留现有命令' : '例如 npx'}
+          className={formInputClass}
         />
       </FormItem>
       <FormItem label="参数">
-        {readOnly ? (
-          <CodeValue>{args.filter((value) => value.trim()).join(' ') || '—'}</CodeValue>
-        ) : (
-          <DynamicList
-            values={args}
-            placeholder={isEdit ? '留空保留现有参数' : ''}
-            onChange={onArgsChange}
-            addLabel="参数"
-          />
-        )}
+        <DynamicList
+          values={args}
+          placeholder={isEdit ? '留空保留现有参数' : ''}
+          onChange={onArgsChange}
+          addLabel="参数"
+        />
       </FormItem>
-      {!readOnly && (
-        <FormItem label="环境变量">
-          <DynamicKVList
-            pairs={envPairs}
-            onChange={onEnvPairsChange}
-            addLabel="环境变量"
-            valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
-            sensitive
-          />
-        </FormItem>
-      )}
-      {readOnly && editData?.envKeys && editData.envKeys.length > 0 && (
-        <FormItem label="环境变量">
-          <SecretKeyChips keys={editData.envKeys} />
-        </FormItem>
-      )}
+      <FormItem label="环境变量">
+        <DynamicKVList
+          pairs={envPairs}
+          onChange={onEnvPairsChange}
+          addLabel="环境变量"
+          valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
+          sensitive
+        />
+      </FormItem>
     </FormSection>
   );
 }
 
 function McpHttpFields({
-  readOnly,
   isEdit,
   url,
   headers,
-  editData,
   onUrlChange,
   onHeadersChange,
 }: Parameters<typeof McpTransportFields>[0]) {
   return (
     <FormSection>
       <FormItem label="URL">
-        {readOnly ? (
-          <CodeValue>{editData?.url || '—'}</CodeValue>
-        ) : (
-          <input
-            type="text"
-            value={url}
-            onChange={(event) => onUrlChange(event.target.value)}
-            placeholder={isEdit ? '留空保留现有 URL' : 'https://mcp.example.com/mcp'}
-            className={formInputClass}
-          />
-        )}
+        <input
+          type="text"
+          value={url}
+          onChange={(event) => onUrlChange(event.target.value)}
+          placeholder={isEdit ? '留空保留现有 URL' : 'https://mcp.example.com/mcp'}
+          className={formInputClass}
+        />
       </FormItem>
-      {!readOnly && (
-        <FormItem label="标头">
-          <DynamicKVList
-            pairs={headers}
-            onChange={onHeadersChange}
-            addLabel="标头"
-            valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
-            sensitive
-          />
-        </FormItem>
-      )}
+      <FormItem label="标头">
+        <DynamicKVList
+          pairs={headers}
+          onChange={onHeadersChange}
+          addLabel="标头"
+          valuePlaceholder={isEdit ? '留空保留，填写则覆盖' : '值'}
+          sensitive
+        />
+      </FormItem>
     </FormSection>
-  );
-}
-
-function CodeValue({ children }: { children: string }) {
-  return (
-    <div className="rounded-lg bg-[var(--console-code-bg)] px-3 py-2 font-mono text-xs text-cafe-secondary">
-      {children}
-    </div>
   );
 }
 
@@ -267,17 +234,5 @@ export function MaskedSecretNote({ keys }: { keys: string[] }) {
     <p className="px-3 text-label text-cafe-muted">
       已遮罩字段 {keys.join(', ')} 保存时会省略；只会写入你本次填写的新值。
     </p>
-  );
-}
-
-function SecretKeyChips({ keys }: { keys: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {keys.map((key) => (
-        <span key={key} className="console-pill px-2 py-0.5 text-xs">
-          {key}
-        </span>
-      ))}
-    </div>
   );
 }

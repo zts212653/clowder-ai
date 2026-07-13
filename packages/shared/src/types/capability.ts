@@ -63,8 +63,8 @@ export interface McpServerDescriptor {
   enabled: boolean;
   /** Optional working directory */
   workingDir?: string;
-  /** Origin: Clowder AI's own MCP or user-configured external */
-  source: 'cat-cafe' | 'external';
+  /** Origin: Clowder AI's own MCP, plugin-provided, or user-configured external */
+  source: 'cat-cafe' | 'external' | 'plugin';
 }
 
 /** Per-cat override for a capability */
@@ -97,8 +97,8 @@ export interface CapabilityEntry {
   overrides?: CatCapabilityOverride[];
   /** MCP server descriptor (only for type: 'mcp') */
   mcpServer?: Omit<McpServerDescriptor, 'name' | 'enabled' | 'source'>;
-  /** Source origin */
-  source: 'cat-cafe' | 'external';
+  /** Source origin: cat-cafe = built-in managed, external = user-installed, plugin = plugin-installed */
+  source: 'cat-cafe' | 'external' | 'plugin';
   /**
    * F228: Mount point IDs where this skill is actually mounted in the current project.
    * Only for type: 'skill'. Values are mount point IDs from mountRules (e.g. 'claude', 'codex').
@@ -215,7 +215,7 @@ export interface CapabilitySkillMountHealth {
 export interface CapabilityBoardItem {
   id: string;
   type: 'mcp' | 'skill' | 'limb';
-  source: 'cat-cafe' | 'external';
+  source: 'cat-cafe' | 'external' | 'plugin';
   enabled: boolean;
   /** F228: Global enabled for skills (mirrors CapabilityEntry.globalEnabled in board response) */
   globalEnabled?: boolean;
@@ -480,7 +480,7 @@ export interface CapabilityPatchRequest {
   /** Capability type — required to disambiguate same-name MCP/skill entries */
   capabilityType: 'mcp' | 'skill' | 'limb';
   /** Optional source discriminator for same-name capability rows returned by GET. */
-  source?: 'cat-cafe' | 'external';
+  source?: 'cat-cafe' | 'external' | 'plugin';
   /** Optional plugin discriminator for plugin-owned same-name rows returned by GET. */
   pluginId?: string;
   /**

@@ -45,6 +45,16 @@ Expected scope:
 - Do not bundle F202 framework Phase 1 implementation.
 - Do not introduce provider SDK code paths that bypass the declared protocol engine unless explicitly reviewed as an extension point.
 
+## User Journey
+
+**Scope unit**: Plugin settings → MCP tool invocation
+
+1. User enables the `video-gen` or `video-analysis` plugin in the Plugin settings tab.
+2. User configures provider credentials (API key, base URL, model) via the plugin config form.
+3. Plugin activates its MCP resource — the protocol-server registers provider-specific tools (e.g. `video_generate`, `video_analyze_url`).
+4. Cats invoke the registered MCP tools during conversations to generate videos or analyze video content.
+5. User can view MCP connection status in the MCP management page (the plugin MCP appears with a "由插件管理" badge, toggle/per-cat controls available, delete blocked).
+
 ## Acceptance Criteria
 
 - [ ] AC-A1: PR #689 title/body/branch use `F205` as the primary feature anchor.

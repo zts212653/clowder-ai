@@ -1,0 +1,45 @@
+name: zhipu
+version: 1
+mode: async
+baseUrl: https://open.bigmodel.cn
+
+capabilities:
+  text2video:
+    submit:
+      method: POST
+      path: /api/paas/v4/videos/generations
+      body:
+        model: "{{model | default:cogvideox-flash}}"
+        prompt: "{{prompt}}"
+      response:
+        taskId: $.id
+        status: $.task_status
+        statusMap:
+          running: [PROCESSING]
+          succeeded: [SUCCESS]
+          failed: [FAIL]
+    poll:
+      method: GET
+      path: /api/paas/v4/async-result/{{taskId}}
+      interval: 5000
+      maxAttempts: 120
+      response:
+        status: $.task_status
+        statusMap:
+          running: [PROCESSING]
+          succeeded: [SUCCESS]
+          failed: [FAIL]
+        resultUrl: $.video_result[0].url
+        coverUrl: $.video_result[0].cover_image_url
+
+  image2video:
+    inherit: text2video
+    submit:
+      method: POST
+      path: /api/paas/v4/videos/generations
+      body:
+        model: "{{model | default:cogvideox-flash}}"
+        prompt: "{{prompt}}"
+        image_url: "{{imageUrl}}"
+      response:
+        taskId: $.id

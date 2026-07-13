@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { CapabilityBoardItem } from '../capability-board-ui';
 import { HubIcon } from '../hub-icons';
@@ -8,14 +9,7 @@ import { McpConfigModal, type McpConfigModalProps } from '../McpConfigModal';
 import { SettingsResourceIconButton } from '../SettingsResourceCard';
 import { useConfirm } from '../useConfirm';
 import { AllProjectsSyncBanner } from './AllProjectsSyncBanner';
-import {
-  CapabilityRow,
-  PerCatToggles,
-  PluginManagedLink,
-  ProjectSelector,
-  ScopeTabs,
-  ToggleSwitch,
-} from './capability-settings-ui';
+import { CapabilityRow, PerCatToggles, ProjectSelector, ScopeTabs, ToggleSwitch } from './capability-settings-ui';
 import { DriftBanner } from './DriftBanner';
 import {
   SettingsBadge,
@@ -71,6 +65,36 @@ function mcpSubInfo(item: CapabilityBoardItem): string | undefined {
   return `stdio · ${server.command}${server.args?.length ? ` ${server.args.join(' ')}` : ''}`;
 }
 
+/**
+ * Resolve the project path from a `from=thread_xxx` URL parameter.
+ * When navigating to Settings from a thread, the thread's project context
+ * should carry over so "项目 MCP" tab defaults to the right project.
+ */
+function useThreadProjectPath(): string | null {
+  const searchParams = useSearchParams();
+  const [projectPath, setProjectPath] = useState<string | null>(null);
+  const fromParam = searchParams.get('from');
+
+  useEffect(() => {
+    if (!fromParam?.startsWith('thread_')) return;
+    let cancelled = false;
+    void apiFetch(`/api/threads/${encodeURIComponent(fromParam)}`)
+      .then(async (res) => {
+        if (cancelled || !res.ok) return;
+        const data = (await res.json()) as { projectPath?: string };
+        if (cancelled) return;
+        const pp = data.projectPath;
+        if (pp && pp !== 'default') setProjectPath(pp);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [fromParam]);
+
+  return projectPath;
+}
+
 export function McpManageContent() {
   const cap = useCapabilityState('mcp');
   const confirm = useConfirm();
@@ -78,6 +102,7 @@ export function McpManageContent() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<McpTab>('global');
   const [refreshToken, setRefreshToken] = useState(0);
+  const threadProjectPath = useThreadProjectPath();
 
   // F249: Unified drift sync — same hook/endpoint as Skills, type='mcp'.
   const driftSync = useDriftSync({
@@ -163,7 +188,11 @@ export function McpManageContent() {
           } else {
             // F249: Mirror Skills pattern — switch to project scope so the
             // MCP list reflects the selected project's capabilities.json.
-            cap.switchProject(cap.projectPath ?? cap.resolvedProjectPath ?? null);
+            // Prefer thread's project (from URL `from=thread_*`) over the
+            // server's default resolved project — ensures navigating to
+            // Settings from a thread shows that thread's project MCP entries.
+            const initialProject = cap.projectPath ?? threadProjectPath ?? cap.resolvedProjectPath ?? null;
+            cap.switchProject(initialProject);
           }
         }}
         actions={
@@ -250,8 +279,7 @@ export function McpManageContent() {
       <div className="space-y-2">
         {cap.items.map((item) => {
           const pluginId = item.pluginId;
-          const pluginManaged = !!pluginId;
-          const editable = item.source === 'external' && !pluginManaged;
+          const editable = item.source === 'external';
           const busy = cap.toggling === item.id;
           const removing = cap.disabling === item.id;
           const expanded = expandedId === item.id;
@@ -267,7 +295,7 @@ export function McpManageContent() {
               onClick={() => handleCardClick(item)}
               badges={
                 <>
-                  {pluginManaged && (
+                  {!!pluginId && (
                     <SettingsBadge
                       tone="blue"
                       size="xxs"
@@ -288,15 +316,14 @@ export function McpManageContent() {
                   <ToggleSwitch
                     enabled={effectiveEnabled}
                     busy={busy}
-                    disabled={pluginManaged}
-                    title={pluginManaged ? `由插件 ${pluginId} 管理` : effectiveEnabled ? '禁用' : '启用'}
+                    disabled={false}
+                    title={effectiveEnabled ? '禁用' : '启用'}
                     onClick={(event) => {
                       event.stopPropagation();
                       cap.handleToggle(item, !effectiveEnabled);
                     }}
                   />
-                  {pluginId && <PluginManagedLink pluginId={pluginId} />}
-                  {!pluginManaged && cap.catFamilies.length > 0 && (
+                  {cap.catFamilies.length > 0 && (
                     <SettingsResourceIconButton
                       onClick={() => setExpandedId(expanded ? null : item.id)}
                       title="按猫开关"
@@ -329,7 +356,7 @@ export function McpManageContent() {
                 </>
               }
               expandedContent={
-                expanded && !pluginManaged ? (
+                expanded ? (
                   <PerCatToggles
                     item={item}
                     catFamilies={cap.catFamilies}

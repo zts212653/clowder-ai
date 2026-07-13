@@ -1420,7 +1420,7 @@ describe('PluginResourceActivator skill safety', () => {
       });
 
       assert.equal(result.status, 'success');
-      assert.equal(persisted.capabilities[0].mcpServer.workingDir, join(pluginsDir, 'test-plugin'));
+      assert.equal(persisted.capabilities[0].mcpServer.workingDir, projectRoot);
       assert.deepEqual(persisted.capabilities[0].mcpServer.env, { TEST_PLUGIN_TOKEN: 'from-env' });
     } finally {
       delete process.env.TEST_PLUGIN_TOKEN;

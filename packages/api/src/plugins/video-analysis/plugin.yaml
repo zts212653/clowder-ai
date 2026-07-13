@@ -1,0 +1,53 @@
+id: video-analysis
+name: 视频分析
+version: "1.0.0"
+description: 声明式视频理解与分析 — 通过视频协议模板适配 Gemini、智谱等
+icon: monitor-wave
+iconBg: "#0ea5e9"
+
+config:
+  - envName: VIDEO_ANALYSIS_PROVIDER
+    label: 视频协议
+    type: select
+    sensitive: false
+    required: true
+    options:
+      - value: gemini
+        label: Gemini
+        hint: 在 Google AI Studio 获取 API Key
+        docsUrl: https://ai.google.dev/gemini-api/docs
+      - value: zhipu
+        label: 智谱
+        hint: 在智谱开放平台注册，获取 API Key
+        docsUrl: https://docs.bigmodel.cn/cn/guide/models/vlm
+
+  - envName: VIDEO_ANALYSIS_AUTH_TYPE
+    label: 认证方式
+    type: select
+    sensitive: false
+    required: true
+    options:
+      - value: apikey
+        label: API Key
+      - value: query-param
+        label: Query Parameter
+
+  # Credentials — API_KEY used by both apikey and query-param auth types
+  - envName: VIDEO_ANALYSIS_API_KEY
+    label: API Key
+    sensitive: true
+    required: false
+  - envName: VIDEO_ANALYSIS_BASE_URL
+    label: Base URL
+    sensitive: false
+    required: false
+  - envName: VIDEO_ANALYSIS_MODEL
+    label: 模型名称
+    sensitive: false
+    required: false
+
+resources:
+  - type: mcp
+    name: video-analysis-toolset
+    command: node
+    args: ["packages/mcp-server/dist/protocol-server.js", "--prefix", "VIDEO_ANALYSIS", "--protocols-dir", "packages/api/src/plugins/video-analysis/protocols"]

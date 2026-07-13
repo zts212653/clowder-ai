@@ -201,9 +201,12 @@ async function syncMcpProjectUnlocked(
     }
   }
 
-  // 5. Process: remove orphans (in project but not global, unless external)
-  for (const [mcpId, projectEntry] of projectMcpMap) {
-    if (!globalMcpMap.has(mcpId) && projectEntry.source !== 'external') {
+  // 5. Process: remove orphans (in project but not global).
+  // All sources are checked — there is no project-level MCP install path,
+  // so every project entry came from global cascade. If it's absent in global,
+  // it's stale. (See mcp-drift-detector.ts for the same reasoning.)
+  for (const [mcpId] of projectMcpMap) {
+    if (!globalMcpMap.has(mcpId)) {
       removed.push(mcpId);
       projectConfig.capabilities = projectConfig.capabilities.filter(
         (cap) => !(cap.type === 'mcp' && cap.id === mcpId),

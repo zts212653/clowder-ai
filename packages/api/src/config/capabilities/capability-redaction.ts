@@ -32,8 +32,16 @@ export function sanitizeCapabilityForAudit(entry: CapabilityEntry | null): Capab
   return sanitized;
 }
 
+/**
+ * For API responses to the local frontend.
+ * Env/headers are NOT redacted here — redaction is done at the board
+ * response layer via buildBoardMcpServer's includeSecrets flag, gated
+ * by canReadMcpSecrets(). This keeps the raw entry available
+ * for internal server-side use while the board endpoint controls what
+ * reaches the wire.
+ */
 export function sanitizeCapabilityForResponse(entry: CapabilityEntry | null): CapabilityEntry | null {
-  return sanitizeCapabilityForAudit(entry);
+  return entry;
 }
 
 export function sanitizeCapabilityAuditEntry(entry: CapabilityAuditEntry): CapabilityAuditEntry {
