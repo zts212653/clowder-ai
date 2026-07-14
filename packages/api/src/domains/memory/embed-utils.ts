@@ -63,9 +63,12 @@ export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<v
 
   for (let offset = 0; offset < ctx.passages.length; offset += PASSAGE_EMBED_BATCH_SIZE) {
     const batch = ctx.passages.slice(offset, offset + PASSAGE_EMBED_BATCH_SIZE);
-    const vectors = await ctx.embedding.embed(batch.map((p) => p.content), {
-      timeoutMs: BACKGROUND_EMBED_TIMEOUT_MS,
-    });
+    const vectors = await ctx.embedding.embed(
+      batch.map((p) => p.content),
+      {
+        timeoutMs: BACKGROUND_EMBED_TIMEOUT_MS,
+      },
+    );
     for (let i = 0; i < batch.length; i++) {
       const passage = batch[i];
       ctx.passageVectorStore.upsert(passageVectorKey(passage.docAnchor, passage.passageId), vectors[i]);
