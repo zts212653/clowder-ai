@@ -10,10 +10,13 @@ import {
   type CatConfig,
   type CliConfig,
   type ClientId,
+  type CommandPolicyEntry,
   type ContextBudget,
   catRegistry,
   getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
+  isValidCliEffortForProvider,
+  type NativeToolLevel,
   type RosterEntry,
 } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -166,6 +169,18 @@ const modelSchema = z.string().transform((v) => v.replace(/\/+$/, ''));
 
 const catAgentProtocolSchema = z.enum(['anthropic-messages', 'openai-chat']).optional();
 
+/** F159 Phase F: CatAgent native tool level — privilege escalation ladder (L0→L1→L2). */
+const nativeToolLevelSchema = z.enum(['L0', 'L1', 'L2']).optional();
+
+/** F159 Phase F: allowlist-first command policy for L2 run_command. */
+const commandPolicyEntrySchema = z.object({
+  binary: z.string().min(1),
+  allowedSubcommands: z.array(z.string().min(1)).optional(),
+  allowedFlags: z.array(z.string().min(1)).optional(),
+  allowedArgPatterns: z.array(z.string().min(1)).optional(),
+  deniedFlags: z.array(z.string().min(1)).optional(),
+});
+
 const createNormalCatSchema = baseCatSchema.extend({
   clientId: clientSchema.exclude(['antigravity', 'acp']),
   defaultModel: modelSchema,
@@ -175,6 +190,8 @@ const createNormalCatSchema = baseCatSchema.extend({
   provider: z.string().min(1).optional(),
   acp: acpConfigSchema.optional(), // F161: optional ACP transport for any client
   catAgentProtocol: catAgentProtocolSchema, // F159 G2: only meaningful when clientId === 'catagent'
+  nativeToolLevel: nativeToolLevelSchema, // F159 Phase F: only meaningful when clientId === 'catagent'
+  commandPolicy: z.array(commandPolicyEntrySchema).optional(), // F159 Phase F: L2 command allowlist
 });
 
 const createAntigravityCatSchema = baseCatSchema.extend({
@@ -229,6 +246,8 @@ const updateCatSchema = z.object({
   voiceConfig: voiceConfigSchema.nullable().optional(),
   acp: acpConfigSchema.nullable().optional(), // F161: nullable to allow removing ACP transport
   catAgentProtocol: catAgentProtocolSchema, // F159 G2: only meaningful when clientId === 'catagent'
+  nativeToolLevel: nativeToolLevelSchema, // F159 Phase F: only meaningful when clientId === 'catagent'
+  commandPolicy: z.array(commandPolicyEntrySchema).nullable().optional(), // F159 Phase F: nullable to clear
 });
 
 type UpdateCatRequestBody = z.infer<typeof updateCatSchema>;
@@ -483,6 +502,8 @@ async function toCatResponse(
     breedDisplayName: cat.breedDisplayName ?? undefined,
     mcpSupport: cat.mcpSupport,
     ...(cat.catAgentProtocol ? { catAgentProtocol: cat.catAgentProtocol } : {}),
+    ...(cat.nativeToolLevel ? { nativeToolLevel: cat.nativeToolLevel } : {}),
+    ...(cat.commandPolicy ? { commandPolicy: cat.commandPolicy } : {}),
     ...(acpConfig ? { acp: acpConfig } : {}),
     roster: metadata.roster
       ? {
@@ -795,6 +816,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           ...(body.clientId === 'catagent' && body.catAgentProtocol
             ? { catAgentProtocol: body.catAgentProtocol as CatAgentProtocol }
             : {}),
+          // F159 Phase F: nativeToolLevel + commandPolicy for catagent members
+          ...(body.clientId === 'catagent' && body.nativeToolLevel
+            ? { nativeToolLevel: body.nativeToolLevel as NativeToolLevel }
+            : {}),
+          ...(body.clientId === 'catagent' && body.commandPolicy
+            ? { commandPolicy: body.commandPolicy as CommandPolicyEntry[] }
+            : {}),
         });
       }
     } catch (err) {
@@ -877,9 +905,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
     const currentAcpConfig = getAcpConfig(request.params.id as string, projectRoot);
     if (isClientSwitch && effectiveAccountRef) {
-      const oldBuiltin = resolveBuiltinClientForProvider(currentCat.clientId);
+      // F159 G2: use protocol-aware family so catagent+openai-chat rebases
+      // to the openai builtin, not the raw 'catagent' → anthropic mapping.
+      const effectiveOldClient = effectiveValidationClient(currentCat.clientId, currentCat.catAgentProtocol);
+      const effectiveNewClient = effectiveValidationClient(effectiveClient, body.catAgentProtocol);
+      const oldBuiltin = resolveBuiltinClientForProvider(effectiveOldClient);
       if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {
-        const newBuiltin = resolveBuiltinClientForProvider(effectiveClient);
+        const newBuiltin = resolveBuiltinClientForProvider(effectiveNewClient);
         if (newBuiltin) {
           effectiveAccountRef = builtinAccountIdForClient(newBuiltin) ?? undefined;
           targetAccountRef = effectiveAccountRef;
@@ -1011,6 +1043,13 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
             : {}),
         // F159 G2: catAgentProtocol persisted only when effective client is catagent
         ...(body.catAgentProtocol !== undefined ? { catAgentProtocol: body.catAgentProtocol as CatAgentProtocol } : {}),
+        // F159 Phase F: nativeToolLevel + commandPolicy for catagent members
+        ...(body.nativeToolLevel !== undefined ? { nativeToolLevel: body.nativeToolLevel as NativeToolLevel } : {}),
+        ...(body.commandPolicy !== undefined
+          ? body.commandPolicy === null
+            ? { commandPolicy: null }
+            : { commandPolicy: body.commandPolicy as CommandPolicyEntry[] }
+          : {}),
       });
       const resolved = await reconcileCatRegistry(projectRoot, managedIdsBefore);
       await configEventBus.emitChangeAsync({

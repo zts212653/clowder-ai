@@ -3479,4 +3479,150 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       'GET should confirm catAgentProtocol not persisted for non-catagent',
     );
   });
+
+  // ── F159 G2 Fix 1: nativeToolLevel + commandPolicy plumbed through API ──
+
+  it('F159 Phase F: POST catagent persists nativeToolLevel + commandPolicy, GET returns them', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'catagent-l2',
+        name: 'L2 Agent',
+        displayName: 'L2 Agent',
+        avatar: '/avatars/l2.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@l2'],
+        roleDescription: 'L2 catagent with command policy',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        nativeToolLevel: 'L2',
+        commandPolicy: [
+          { binary: 'pnpm', allowedSubcommands: ['test', 'lint'], allowedFlags: ['--reporter'] },
+        ],
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST failed: ${createRes.body}`);
+    const body = JSON.parse(createRes.body);
+    assert.equal(body.cat.nativeToolLevel, 'L2', 'POST response includes nativeToolLevel');
+    assert.ok(Array.isArray(body.cat.commandPolicy), 'POST response includes commandPolicy array');
+    assert.equal(body.cat.commandPolicy[0].binary, 'pnpm');
+
+    const getRes = await app.inject({ method: 'GET', url: '/api/cats' });
+    const listed = JSON.parse(getRes.body).cats.find((c) => c.id === 'catagent-l2');
+    assert.equal(listed.nativeToolLevel, 'L2', 'GET returns persisted nativeToolLevel');
+    assert.equal(listed.commandPolicy[0].binary, 'pnpm', 'GET returns persisted commandPolicy');
+  });
+
+  it('F159 Phase F: PATCH updates nativeToolLevel, nullable commandPolicy clears it', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Create L1 catagent
+    await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'catagent-patch-level',
+        name: 'Patch Level',
+        displayName: 'Patch Level',
+        avatar: '/avatars/p.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@pl'],
+        roleDescription: 'Level patch test',
+        clientId: 'catagent',
+        accountRef: 'claude',
+        defaultModel: 'claude-sonnet-4-6',
+        nativeToolLevel: 'L1',
+        commandPolicy: [{ binary: 'git', allowedSubcommands: ['status'] }],
+      }),
+    });
+
+    // PATCH nativeToolLevel to L2
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/catagent-patch-level',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({ nativeToolLevel: 'L2' }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH nativeToolLevel failed: ${patchRes.body}`);
+    assert.equal(JSON.parse(patchRes.body).cat.nativeToolLevel, 'L2');
+
+    // PATCH commandPolicy to null → clears it
+    const clearRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/catagent-patch-level',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({ commandPolicy: null }),
+    });
+    assert.equal(clearRes.statusCode, 200, `PATCH commandPolicy null failed: ${clearRes.body}`);
+    const cleared = JSON.parse(clearRes.body).cat;
+    assert.ok(!cleared.commandPolicy || cleared.commandPolicy === null, 'commandPolicy cleared');
+  });
+
+  // ── F159 G2 Fix 4: PATCH rebase builtins is protocol-aware ──
+
+  it('F159 G2: PATCH openai→catagent+openai-chat keeps codex builtin (no rebase to claude)', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    // Create an openai member bound to codex builtin
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        catId: 'rebase-proto',
+        name: 'Rebase Proto',
+        displayName: 'Rebase Proto',
+        avatar: '/avatars/rp.png',
+        color: { primary: '#6366f1', secondary: '#e0e7ff' },
+        mentionPatterns: ['@rp'],
+        roleDescription: 'Protocol-aware rebase test',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, `POST openai member failed: ${createRes.body}`);
+
+    // PATCH to catagent + openai-chat — accountRef still codex
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/rebase-proto',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'test' },
+      body: JSON.stringify({
+        clientId: 'catagent',
+        catAgentProtocol: 'openai-chat',
+        accountRef: 'codex',
+      }),
+    });
+    assert.equal(patchRes.statusCode, 200, `PATCH to catagent+openai-chat failed: ${patchRes.body}`);
+    const patched = JSON.parse(patchRes.body).cat;
+    assert.equal(patched.clientId, 'catagent', 'clientId should be catagent');
+    assert.equal(patched.catAgentProtocol, 'openai-chat', 'catAgentProtocol should be openai-chat');
+    // The critical assertion: accountRef must NOT be rebased from codex → claude
+    // (would happen without protocol-aware rebase and then fail validation)
+  });
 });

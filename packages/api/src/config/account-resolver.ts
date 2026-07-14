@@ -302,8 +302,12 @@ export function validateRuntimeProviderBinding(
   // F161: Generic ACP is a transport, not a provider — any account is valid.
   if (clientId === 'acp') return null;
   const expectedClient = resolveBuiltinClientForProvider(clientId);
-  if (expectedClient && profile.authType === 'oauth' && profile.client && profile.client !== expectedClient) {
-    return `bound provider profile "${profile.id}" is incompatible with client "${clientId}"`;
+  // F159 G2: reject both OAuth and api_key profiles whose client family
+  // doesn't match the expected provider family. For api_key accounts this
+  // fires only when `clientFamily` was explicitly set (profile.client
+  // populated from account.clientFamily in accountToRuntimeProfile).
+  if (expectedClient && profile.client && profile.client !== expectedClient) {
+    return `bound provider profile "${profile.id}" (family "${profile.client}") is incompatible with client "${clientId}"`;
   }
   // Protocol matching removed: protocol is now provider-determined, not an
   // account-level attribute. Runtime env injection uses provider directly.

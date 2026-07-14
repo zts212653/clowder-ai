@@ -157,6 +157,8 @@ const createBodySchema = z
       .optional(),
     /** F171: User-defined env vars injected into agent subprocess. */
     envVars: envVarsSchema,
+    /** F159 G2 (AC-G20): typed client family for api_key accounts — drives adapter routing. */
+    clientFamily: z.enum(['anthropic', 'openai', 'google', 'kimi', 'opencode']).optional(),
   })
   .superRefine((value, ctx) => {
     if (!value.name && !value.displayName) {
@@ -191,6 +193,8 @@ const updateBodySchema = z.object({
     .optional(),
   /** F171: User-defined env vars injected into agent subprocess. */
   envVars: envVarsSchema,
+  /** F159 G2 (AC-G20): typed client family for api_key accounts — drives adapter routing. */
+  clientFamily: z.enum(['anthropic', 'openai', 'google', 'kimi', 'opencode']).optional(),
 });
 
 const deleteBodySchema = z.object({
@@ -281,6 +285,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
         ...(body.models ? { models: body.models } : {}),
         ...((body.displayName ?? body.name) ? { displayName: body.displayName ?? body.name } : {}),
         ...(body.envVars && Object.keys(body.envVars).length > 0 ? { envVars: body.envVars } : {}),
+        ...(body.clientFamily ? { clientFamily: body.clientFamily } : {}),
       };
       const existingAccounts = readCatalogAccounts(projectRoot);
       const profileId = deriveAccountId(
@@ -357,6 +362,11 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
             ? { envVars: { ...existing.envVars } }
             : {}),
         displayName: parsed.data.displayName ?? parsed.data.name ?? existing.displayName ?? params.profileId,
+        ...(parsed.data.clientFamily
+          ? { clientFamily: parsed.data.clientFamily }
+          : existing.clientFamily
+            ? { clientFamily: existing.clientFamily }
+            : {}),
       };
       writeCatalogAccount(projectRoot, params.profileId, account);
       if (parsed.data.apiKey != null) {
