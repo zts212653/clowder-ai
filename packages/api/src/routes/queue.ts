@@ -238,8 +238,9 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       opts.taskProgressStore,
       opts.ballCustody,
       opts.invocationRegistry,
-      // F220 Phase 2a (#972): pass queue convergence so zombie cleanup converges queue state
-      queueProcessor.buildQueueConvergence(),
+      // F220 Phase 2a (#972): pass queue convergence so zombie cleanup converges queue state.
+      // Guard: legacy/test stubs may not have buildQueueConvergence (codex R5 P2).
+      queueProcessor.buildQueueConvergence?.(),
     );
     const enrichedQueue = await enrichQueueEntries(invocationQueue.list(threadId, guard.userId), messageStore);
     return {
