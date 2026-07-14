@@ -1,19 +1,11 @@
 /**
  * Regression test for #1117 — worktree selector labels.
  *
- * Verifies that linked roots with the same directory basename but
- * different user-supplied aliases produce distinguishable labels.
+ * Imports the production worktreeLabel() from utils/worktree-label.ts
+ * so that mutations to the production code are caught by these tests.
  */
 import { describe, expect, it } from 'vitest';
-
-/**
- * Mirror of the label logic in WorkspacePanel.tsx selector.
- * Kept as a pure function here so we can test it without React rendering.
- */
-function worktreeLabel(w: { head: string; root: string; branch: string }): string {
-  const basename = w.root.split(/[\\/]/).pop();
-  return w.head === 'linked' ? `📂 ${basename} — ${w.branch}` : `${basename} — ${w.branch} (${w.head})`;
-}
+import { worktreeLabel } from '@/utils/worktree-label';
 
 describe('#1117: worktree selector labels', () => {
   it('linked roots with same basename but different aliases produce different labels', () => {

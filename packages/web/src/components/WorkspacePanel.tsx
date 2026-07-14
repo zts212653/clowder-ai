@@ -9,6 +9,7 @@ import type { TreeNode } from '@/hooks/useWorkspace';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
+import { worktreeLabel } from '@/utils/worktree-label';
 import { ApprovalPanel } from './ApprovalPanel';
 import { ArtifactsPanel } from './ArtifactsPanel';
 import { CommunityPanel } from './CommunityPanel';
@@ -697,16 +698,11 @@ export function WorkspacePanel() {
                     onChange={(e) => setWorktreeId(e.target.value || null)}
                     className="flex-1 text-micro border border-cafe-subtle rounded-md px-2 py-1 bg-cafe-surface/80 text-cafe-black focus:outline-none focus:border-cafe-accent"
                   >
-                    {worktrees.map((w) => {
-                      const basename = w.root.split(/[\\/]/).pop();
-                      return (
-                        <option key={w.id} value={w.id} title={w.root}>
-                          {w.head === 'linked'
-                            ? `📂 ${basename} — ${w.branch}`
-                            : `${basename} — ${w.branch} (${w.head})`}
-                        </option>
-                      );
-                    })}
+                    {worktrees.map((w) => (
+                      <option key={w.id} value={w.id} title={w.root}>
+                        {worktreeLabel(w)}
+                      </option>
+                    ))}
                   </select>
                   {worktreeId && <LinkedRootRemoveButton id={worktreeId} onRemoved={fetchWorktrees} />}
                 </div>
