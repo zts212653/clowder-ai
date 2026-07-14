@@ -371,9 +371,8 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 // ── F220 Phase 2a: queue convergence — mock-based interface tests ──
 
 describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', () => {
-  it('#972: reconcileZombies calls queueConvergence with precise entry identity (Sol R2 P1-1)', async () => {
+  it('#972: reconcileZombies passes raw idempotencyKey to queueConvergence (Sol R3)', async () => {
     const store = new InvocationRecordStore();
-    // idempotencyKey follows real pattern: queue-${entry.id}
     const created = store.create({
       threadId: 't1',
       userId: 'u1',
@@ -386,8 +385,8 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     // Track queueConvergence calls
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
+      removeStaleProcessing: (threadId, catId, userId, idempotencyKey) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, idempotencyKey });
         return { removed: true, entryId: 'stale-entry-1', primaryCatId: 'opus' };
       },
       releaseSlot: (threadId, catId) => {
@@ -408,25 +407,22 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
     assert.equal(result.reconciled, 1);
     assert.equal(result.errors, 0);
-    // Queue convergence must be called with the correct args
     assert.equal(convergenceCalls.length, 3, 'removeStaleProcessing + releaseSlot + tryDispatchNext');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.threadId, 't1');
     assert.equal(removeCall.catId, 'opus');
     assert.equal(removeCall.userId, 'u1', 'must pass userId for user-scoped lookup');
-    // Sol R2 P1-1: precise entry identity extracted from idempotencyKey
-    assert.equal(removeCall.zombieEntryId, 'stale-entry-1', 'must extract entry ID from idempotencyKey queue-${id}');
-    // P1-2: tryDispatchNext receives catId for cross-user fair drain
+    // Sol R3: raw idempotencyKey passed directly — adapter parses it
+    assert.equal(removeCall.idempotencyKey, 'queue-stale-entry-1', 'must pass raw idempotencyKey');
     const dispatchCall = convergenceCalls.find((c) => c.op === 'tryDispatchNext');
     assert.ok(dispatchCall, 'must kick queue after slot release');
     assert.equal(dispatchCall.catId, 'opus', 'tryDispatchNext must receive catId for fair drain');
   });
 
-  it('#972: connector-sourced zombie has no entryId → convergence skips gracefully', async () => {
-    // Connector-sourced invocations use idempotencyKey = connector-${messageId},
-    // not queue-${entry.id}. Without a zombieEntryId, removeStaleProcessing should
-    // return {removed: false} to avoid false-positive deletion.
+  it('#972: connector-sourced zombie passes connector idempotencyKey (Sol R3 P2)', async () => {
+    // Connector-sourced invocations use idempotencyKey = connector-${messageId}.
+    // The raw key is passed to the adapter which parses it for connector matching.
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -439,12 +435,12 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', zombieEntryId });
-        return { removed: false }; // adapter returns false when no entryId
+      removeStaleProcessing: (threadId, catId, userId, idempotencyKey) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', idempotencyKey });
+        return { removed: true, entryId: 'conn-entry-1', primaryCatId: 'opus' };
       },
-      releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
-      tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
+      releaseSlot: (threadId, catId) => convergenceCalls.push({ op: 'releaseSlot', threadId, catId }),
+      tryDispatchNext: (threadId, catId) => convergenceCalls.push({ op: 'tryDispatchNext', threadId, catId }),
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId });
@@ -457,18 +453,16 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
     assert.equal(result.reconciled, 1);
     assert.equal(result.errors, 0);
-    // removeStaleProcessing called with undefined zombieEntryId
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall);
-    assert.equal(removeCall.zombieEntryId, undefined, 'connector-sourced zombie has no entryId');
-    // No releaseSlot/dispatch because removed=false
-    assert.equal(convergenceCalls.filter((c) => c.op === 'releaseSlot').length, 0);
-    assert.equal(convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length, 0);
+    // Sol R3 P2: connector key now passed through for adapter-side matching
+    assert.equal(removeCall.idempotencyKey, 'connector-msg-123', 'connector idempotencyKey passed to adapter');
+    // Since mock returns removed=true, releaseSlot + dispatch should fire
+    assert.equal(convergenceCalls.filter((c) => c.op === 'releaseSlot').length, 1);
+    assert.equal(convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length, 1);
   });
 
-  it('#972: terminal-path convergence retry uses precise entry identity (P2-1)', async () => {
-    // Sol P2-1: terminal path retries convergence with precise entry identity.
-    // Previously blocked by codex R6 P1 (cat-only matching unsafe).
+  it('#972: terminal-path convergence passes raw idempotencyKey (P2-1)', async () => {
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -482,8 +476,8 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
+      removeStaleProcessing: (threadId, catId, userId, idempotencyKey) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, idempotencyKey });
         return { removed: true, entryId: 'stale-from-terminal', primaryCatId: 'codex' };
       },
       releaseSlot: (threadId, catId) => {
@@ -503,32 +497,34 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     });
 
     assert.equal(result.alreadyTerminal, 1);
-    // P2-1: convergence IS retried for terminal zombies (precise identity makes it safe)
     assert.ok(convergenceCalls.length > 0, 'convergence must be attempted for terminal zombie');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.catId, 'codex');
-    // Precise entry identity
-    assert.equal(removeCall.zombieEntryId, 'stale-from-terminal', 'must extract entry ID from idempotencyKey');
+    assert.equal(removeCall.idempotencyKey, 'queue-stale-from-terminal', 'raw idempotencyKey passed');
   });
 
-  it('#972: convergence failure counted as error (P2-1)', async () => {
+  it('#972: convergence failure counted as error + scheduleRetry called (Sol R3 P2)', async () => {
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
       userId: 'u1',
       targetCats: ['opus'],
       intent: 'execute',
-      idempotencyKey: 'q-conv-fail',
+      idempotencyKey: 'queue-conv-fail-entry',
     });
     store.update(created.invocationId, { status: 'running' });
 
+    const retryCalls = [];
     const queueConvergence = {
       removeStaleProcessing: () => {
         throw new Error('queue store unavailable');
       },
       releaseSlot: () => {},
       tryDispatchNext: () => {},
+      scheduleRetry: (threadId, catId, userId, idempotencyKey) => {
+        retryCalls.push({ threadId, catId, userId, idempotencyKey });
+      },
     };
 
     const logger = makeRecordingLogger();
@@ -545,6 +541,11 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     assert.equal(store.get(created.invocationId).status, 'failed');
     // P2-1: convergence failure COUNTED in errors (not silently swallowed)
     assert.equal(result.errors, 1, 'convergence failure must increment errors');
+    // Sol R3 P2: scheduleRetry called with the idempotencyKey
+    assert.equal(retryCalls.length, 1, 'scheduleRetry must be called on convergence failure');
+    assert.equal(retryCalls[0].threadId, 't1');
+    assert.equal(retryCalls[0].catId, 'opus');
+    assert.equal(retryCalls[0].idempotencyKey, 'queue-conv-fail-entry');
     // Error logged
     const warnLog = logger.records.warn.find((args) => args[1]?.includes?.('queue convergence'));
     assert.ok(warnLog, 'must log queue convergence failure');
@@ -563,8 +564,8 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
+      removeStaleProcessing: (threadId, catId, userId, idempotencyKey) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, idempotencyKey });
         return { removed: false }; // no stale entry found
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
@@ -643,9 +644,9 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     const processingBefore = beforeList.filter((e) => e.status === 'processing');
     assert.equal(processingBefore.length, 2, 'two processing entries before');
 
-    // Call adapter with precise entry ID
+    // Call adapter with idempotencyKey format
     const adapter = qp.buildQueueConvergence();
-    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', zombieEntryId);
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', `queue-${zombieEntryId}`);
 
     assert.equal(result.removed, true, 'zombie entry must be removed');
     assert.equal(result.entryId, zombieEntryId, 'must remove the zombie entry specifically');
@@ -657,9 +658,7 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     assert.equal(processingAfter[0].id, liveEntryId, 'surviving entry must be the live one');
   });
 
-  it('P1-1: no zombieEntryId → removed=false (non-queue-sourced invocation safe default)', async () => {
-    // When zombieEntryId is undefined (e.g. connector-sourced), the adapter must
-    // return {removed: false} to avoid false-positive deletion.
+  it('P1-1: no idempotencyKey → removed=false (safe default)', async () => {
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);
 
@@ -676,17 +675,15 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     queue.markProcessingById('t1', enqResult.entry.id);
 
     const adapter = qp.buildQueueConvergence();
-    // No zombieEntryId passed (undefined)
     const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', undefined);
 
-    assert.equal(result.removed, false, 'must not remove anything without precise identity');
+    assert.equal(result.removed, false, 'must not remove anything without idempotencyKey');
     const entries = queue.list('t1', 'u1');
     assert.equal(entries.length, 1, 'entry must survive');
     assert.equal(entries[0].status, 'processing');
   });
 
-  it('P1-1: wrong zombieEntryId → removed=false (entry ID mismatch)', async () => {
-    // If the zombie's entry ID doesn't match any processing entry, nothing is removed.
+  it('P1-1: wrong entry ID in idempotencyKey → removed=false', async () => {
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);
 
@@ -703,11 +700,40 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     queue.markProcessingById('t1', enqResult.entry.id);
 
     const adapter = qp.buildQueueConvergence();
-    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', 'nonexistent-entry-id');
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', 'queue-nonexistent-id');
 
     assert.equal(result.removed, false, 'must not remove when entry ID does not match');
     const entries = queue.list('t1', 'u1');
     assert.equal(entries.length, 1, 'entry must survive');
+  });
+
+  it('Sol R3 P2 connector: adapter matches connector-${messageId} by entry.messageId', async () => {
+    // Connector-sourced entries use idempotencyKey = connector-${messageId}.
+    // The adapter must parse this and match by entry.messageId.
+    const queue = new InvocationQueue();
+    const { qp } = buildQueueProcessorWithQueue(queue);
+
+    const connResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'connector message',
+      source: 'connector',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+      messageId: 'msg-abc-123',
+    });
+    assert.equal(connResult.outcome, 'enqueued');
+    queue.markProcessingById('t1', connResult.entry.id);
+
+    const adapter = qp.buildQueueConvergence();
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', 'connector-msg-abc-123');
+
+    assert.equal(result.removed, true, 'connector entry must be removed via messageId match');
+    assert.equal(result.entryId, connResult.entry.id);
+    const entries = queue.list('t1', 'u1');
+    assert.equal(entries.length, 0, 'connector entry removed');
   });
 
   it('P1-2: tryDispatchNext calls cross-user fair drain (not just autoExecute)', async () => {
@@ -717,7 +743,6 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     const log = makeRecordingLogger();
     const methodsCalled = [];
 
-    // Create a QueueProcessor with intercepted dispatch methods
     const qp = new QueueProcessor({
       queue,
       invocationTracker: {
@@ -749,33 +774,24 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
       log,
     });
 
-    // Monkey-patch the private methods to track calls
-    // (QueueProcessor methods are on the prototype; need to intercept on the instance)
-    const origTryExec = Object.getPrototypeOf(qp).tryExecuteNextAcrossUsers;
-    const origTryAuto = qp.tryAutoExecute.bind(qp);
-
-    // Use a wrapper that records the call
-    qp.tryAutoExecute = async (...args) => {
-      methodsCalled.push('tryAutoExecute');
-      // Don't actually execute (would need full setup)
+    // Intercept both dispatch methods to track calls (Sol P3: actually assert the call)
+    qp.tryExecuteNextAcrossUsers = async (...args) => {
+      methodsCalled.push({ method: 'tryExecuteNextAcrossUsers', args });
     };
-    // tryExecuteNextAcrossUsers is private — access via adapter's closure
-    // The adapter calls this.tryExecuteNextAcrossUsers internally.
-    // We can verify by checking that the adapter doesn't throw and logs appropriately.
+    qp.tryAutoExecute = async (...args) => {
+      methodsCalled.push({ method: 'tryAutoExecute', args });
+    };
 
     const adapter = qp.buildQueueConvergence();
-    // Call tryDispatchNext and wait for the async chain
     adapter.tryDispatchNext('t1', 'codex');
-    // Give the promise chain time to resolve
     await new Promise((r) => setTimeout(r, 50));
 
-    // The adapter should have attempted dispatch (no throw = it ran the chain).
-    // We can verify tryAutoExecute was called after tryExecuteNextAcrossUsers.
-    // Since tryExecuteNextAcrossUsers is private and we can't directly intercept it,
-    // we verify the method chain completed without error by checking no error was logged.
-    const errorLogs = log.records.warn.filter((args) => args[1]?.includes?.('dispatch after zombie convergence'));
-    // If tryExecuteNextAcrossUsers threw, we'd see the error log. It should succeed (empty queue).
-    assert.equal(errorLogs.length, 0, 'dispatch chain must complete without error');
+    // Sol P3: both dispatch methods must be called in order
+    assert.equal(methodsCalled.length, 2, 'both tryExecuteNextAcrossUsers and tryAutoExecute must be called');
+    assert.equal(methodsCalled[0].method, 'tryExecuteNextAcrossUsers', 'fair drain called first');
+    assert.deepEqual(methodsCalled[0].args, ['t1', 'codex'], 'fair drain receives threadId + catId');
+    assert.equal(methodsCalled[1].method, 'tryAutoExecute', 'autoExecute scan called second');
+    assert.deepEqual(methodsCalled[1].args, ['t1'], 'autoExecute receives threadId');
   });
 
   it('P2-1: full convergence pipeline — zombie reconcile removes stale + kicks dispatch', async () => {
@@ -911,12 +927,13 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);
 
-    // Step 1: Create the zombie's queue entry
+    // Step 1: Create the zombie's queue entry (pinned continuation)
     const zombieQueueResult = queue.enqueue({
       threadId: 't1',
       userId: 'u1',
       content: 'pinned continuation @codex',
       source: 'agent',
+      sourceCategory: 'continuation',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: true,

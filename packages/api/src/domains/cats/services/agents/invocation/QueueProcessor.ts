@@ -360,21 +360,27 @@ export class QueueProcessor {
    */
   buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
     return {
-      removeStaleProcessing: (threadId: string, catId: string, userId: string, zombieEntryId?: string) => {
-        // Sol R2 P1-1: precise entry identity — match by exact queue entry ID, not
-        // time-based approximation. The zombie's invocation was created with
-        // idempotencyKey = queue-${entry.id}, giving us the exact entry to remove.
-        // When zombieEntryId is absent (non-queue-sourced invocations), skip entirely
-        // to avoid false-positive deletion of legitimate entries.
-        if (!zombieEntryId) return { removed: false };
+      removeStaleProcessing: (threadId: string, catId: string, userId: string, idempotencyKey?: string) => {
+        // Sol R2 P1-1 + R3 P2: precise entry identity from raw idempotencyKey.
+        // Parse two formats:
+        //   "queue-${entry.id}"       → match by entry.id (user/agent entries)
+        //   "connector-${messageId}"  → match by entry.messageId (connector entries)
+        if (!idempotencyKey) return { removed: false };
         const entries = this.deps.queue.list(threadId, userId);
-        const entry = entries.find((e) => e.status === 'processing' && e.id === zombieEntryId);
+        let entry: (typeof entries)[number] | undefined;
+        if (idempotencyKey.startsWith('queue-')) {
+          const entryId = idempotencyKey.slice(6);
+          entry = entries.find((e) => e.status === 'processing' && e.id === entryId);
+        } else if (idempotencyKey.startsWith('connector-')) {
+          const messageId = idempotencyKey.slice(10);
+          entry = entries.find((e) => e.status === 'processing' && e.messageId === messageId);
+        }
         if (!entry) return { removed: false };
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
         const primaryCatId = entry.targetCats[0];
         this.deps.log.info(
-          { threadId, catId, userId, entryId: entry.id, primaryCatId, zombieEntryId },
+          { threadId, catId, userId, entryId: entry.id, primaryCatId, idempotencyKey },
           '[F220 2a] removed stale processing queue entry (precise entry identity)',
         );
         // Emit per-user queue_updated so the frontend reflects the removal.
@@ -406,6 +412,48 @@ export class QueueProcessor {
           .catch((err) =>
             this.deps.log.warn({ threadId, catId, err }, '[F220 2a] dispatch after zombie convergence failed'),
           );
+      },
+      // Sol R3 P2 durable retry: one-shot delayed retry so transient convergence
+      // failure doesn't leave stale processing entries permanently. Record is already
+      // terminal → no future zombie sweep will produce this zombie again.
+      scheduleRetry: (threadId: string, catId: string, userId: string, idempotencyKey: string) => {
+        const RETRY_DELAY_MS = 30_000;
+        setTimeout(() => {
+          try {
+            const entries = this.deps.queue.list(threadId, userId);
+            let entry: (typeof entries)[number] | undefined;
+            if (idempotencyKey.startsWith('queue-')) {
+              entry = entries.find((e) => e.status === 'processing' && e.id === idempotencyKey.slice(6));
+            } else if (idempotencyKey.startsWith('connector-')) {
+              entry = entries.find((e) => e.status === 'processing' && e.messageId === idempotencyKey.slice(10));
+            }
+            if (!entry) return; // already cleaned up by another path
+            const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
+            if (!removed) return;
+            const slotCat = entry.targetCats[0] ?? catId;
+            this.processingSlots.delete(QueueProcessor.slotKey(threadId, slotCat));
+            this.deps.log.info(
+              { threadId, catId, userId, entryId: entry.id, idempotencyKey },
+              '[F220 2a] durable retry: removed stale processing entry + released slot',
+            );
+            emitQueueUpdated(
+              this.deps.socketManager,
+              userId,
+              threadId,
+              this.deps.queue.list(threadId, userId),
+              this.deps.messageStore,
+              'zombie_convergence_retry',
+            ).catch(() => {});
+            this.tryExecuteNextAcrossUsers(threadId, slotCat)
+              .then(() => this.tryAutoExecute(threadId))
+              .catch(() => {});
+          } catch (err) {
+            this.deps.log.warn(
+              { threadId, catId, userId, idempotencyKey, err },
+              '[F220 2a] durable retry failed — stale entry persists until restart',
+            );
+          }
+        }, RETRY_DELAY_MS);
       },
     };
   }

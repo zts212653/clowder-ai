@@ -31,36 +31,34 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  * block subsequent dispatches.
  *
  * Design notes:
- * - removeStaleProcessing accepts userId to scope the queue lookup to the
- *   zombie owner's entries, preventing cross-user entry deletion in shared threads.
- * - zombieEntryId provides precise entry identity (Sol review R2 P1-1):
- *   extracted from the zombie invocation's `idempotencyKey = queue-${entry.id}`.
- *   Only the EXACT queue entry that created this zombie is eligible for removal.
- *   This prevents the false-positive deletion proven by Sol: a legitimate older
- *   user follow-up dispatched by the winner's fair-drain would satisfy a time-based
- *   guard (createdAt <= zombieCreatedAt) but is a DIFFERENT entry.
- * - When zombieEntryId is absent (non-queue-sourced invocations, e.g. connector),
- *   removeStaleProcessing returns {removed: false} — safe default, no false positives.
+ * - removeStaleProcessing accepts the zombie invocation's raw idempotencyKey
+ *   (Sol R2 P1-1 + R3 P2 connector). The adapter parses two formats:
+ *     "queue-${entry.id}"       → match by entry.id (user/agent entries)
+ *     "connector-${messageId}"  → match by entry.messageId (connector entries)
+ *   Both provide precise entry identity — no time-based approximation.
+ * - userId scopes the queue lookup to prevent cross-user entry deletion.
  * - No bulk emitQueueUpdated broadcast: that would wipe other users' queue state
  *   (frontend blindly replaces). The adapter emits per-user queue_updated after
  *   removal; dispatch emits its own events via the normal execution path.
  * - tryDispatchNext mirrors the normal completion path: cross-user fair drain
  *   (tryExecuteNextAcrossUsers) + auto-execute scan, so both user/connector
  *   entries and agent entries get dispatched (Sol review P1-2).
+ * - scheduleRetry provides durable recovery (Sol R3 P2): when convergence fails
+ *   transiently, a one-shot delayed retry runs independently of future zombie
+ *   sweeps (which won't re-surface an already-terminal record).
  */
 export interface QueueConvergence {
   /** Find and remove the exact stale processing entry that produced this zombie.
-   *  @param zombieEntryId — the queue entry ID extracted from the zombie invocation's
-   *    idempotencyKey (format: `queue-${entry.id}`). When provided, matches ONLY this
-   *    specific entry by ID. When absent (non-queue-sourced invocations), returns
-   *    {removed: false} to avoid false-positive deletion.
+   *  @param idempotencyKey — the zombie invocation's raw idempotencyKey. Adapter parses:
+   *    "queue-${entry.id}" → match by entry.id; "connector-${messageId}" → match by
+   *    entry.messageId; undefined/unknown → {removed: false}.
    *  Returns primaryCatId (targetCats[0]) so the caller can release the correct slot —
    *  processingSlots are keyed by primary target, not necessarily the zombie catId. */
   removeStaleProcessing(
     threadId: string,
     catId: string,
     userId: string,
-    zombieEntryId?: string,
+    idempotencyKey?: string,
   ): { removed: boolean; entryId?: string; primaryCatId?: string };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
@@ -68,6 +66,11 @@ export interface QueueConvergence {
    *  Uses the normal completion path (cross-user fair drain + auto-execute scan)
    *  so both user/connector and agent entries get dispatched. */
   tryDispatchNext(threadId: string, catId: string): void;
+  /** Schedule a one-shot delayed retry of queue convergence (Sol R3 P2 durable retry).
+   *  Called when removeStaleProcessing fails transiently. Ensures recovery doesn't
+   *  depend on a concurrent loser or future zombie sweep (which won't re-surface
+   *  already-terminal records). Optional — callers degrade gracefully if absent. */
+  scheduleRetry?(threadId: string, catId: string, userId: string, idempotencyKey: string): void;
 }
 
 export interface ReconcileZombieDeps {
@@ -178,14 +181,11 @@ async function processZombie(
         let convergenceErrors = 0;
         if (deps.queueConvergence && zombie.catId) {
           try {
-            const zombieEntryId = current.idempotencyKey?.startsWith('queue-')
-              ? current.idempotencyKey.slice(6)
-              : undefined;
             const qr = deps.queueConvergence.removeStaleProcessing(
               current.threadId,
               zombie.catId,
               current.userId,
-              zombieEntryId,
+              current.idempotencyKey,
             );
             if (qr.removed) {
               const slotCat = qr.primaryCatId ?? zombie.catId;
@@ -206,6 +206,14 @@ async function processZombie(
               },
               '[reconcile-zombies] terminal-path queue convergence failed',
             );
+            if (current.idempotencyKey) {
+              deps.queueConvergence.scheduleRetry?.(
+                current.threadId,
+                zombie.catId,
+                current.userId,
+                current.idempotencyKey,
+              );
+            }
           }
         }
         log.info(
@@ -253,25 +261,21 @@ async function processZombie(
       );
     const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
     // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot.
-    // - zombieEntryId provides precise identity (Sol R2 P1-1): extract from the
-    //   invocation's idempotencyKey (format: "queue-${entry.id}") to match the EXACT
-    //   queue entry, not time-based approximation that can delete legitimate older entries.
+    // - Raw idempotencyKey passed to adapter for precise identity (Sol R2 P1-1 + R3 P2):
+    //   "queue-${entry.id}" → match by entry.id; "connector-${messageId}" → match by
+    //   entry.messageId. No time-based approximation.
     // - userId-scoped to prevent cross-user entry deletion (codex review R1 P2).
     // - tryDispatchNext uses cross-user fair drain so user/connector entries (like
     //   the original #972 @codex message) also get dispatched (Sol review P1-2).
+    // - On failure, scheduleRetry provides durable recovery (Sol R3 P2 durable retry).
     let convergenceErrors = 0;
     if (deps.queueConvergence && zombie.catId) {
       try {
-        // Extract exact queue entry ID from idempotencyKey (queue-${entry.id}).
-        // Connector-sourced invocations use "connector-${messageId}" → no match → safe skip.
-        const zombieEntryId = updated.idempotencyKey?.startsWith('queue-')
-          ? updated.idempotencyKey.slice(6)
-          : undefined;
         const qr = deps.queueConvergence.removeStaleProcessing(
           updated.threadId,
           zombie.catId,
           updated.userId,
-          zombieEntryId,
+          updated.idempotencyKey,
         );
         if (qr.removed) {
           // Release by primaryCatId — processingSlots are keyed by targetCats[0],
@@ -293,6 +297,11 @@ async function processZombie(
           { threadId: updated.threadId, catId: zombie.catId, err: qErr instanceof Error ? qErr.message : String(qErr) },
           '[reconcile-zombies] #972 queue convergence failed',
         );
+        // Sol R3 P2 durable retry: schedule one-shot retry so recovery doesn't
+        // depend on a concurrent loser (record is now terminal → no future zombie sweep).
+        if (updated.idempotencyKey) {
+          deps.queueConvergence.scheduleRetry?.(updated.threadId, zombie.catId, updated.userId, updated.idempotencyKey);
+        }
       }
     }
     return {
