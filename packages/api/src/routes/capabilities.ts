@@ -335,8 +335,15 @@ function canReadMcpSecrets(request: FastifyRequest): boolean {
   const sessionUserId = resolveCapabilityWriteSessionUserId(request);
   if (sessionUserId) {
     // Has session identity → check owner match.
-    // allowMissingOwner: single-user mode falls through (show secrets).
-    return !requireCapabilityWriteOwner(sessionUserId, { allowMissingOwner: true });
+    const ownerError = requireCapabilityWriteOwner(sessionUserId, { allowMissingOwner: true });
+    if (ownerError) return false;
+    // Owner matched, or single-user mode (no configured owner).
+    // In single-user mode, also require localhost — the user owns the machine
+    // but non-local network access must not expose secrets.
+    if (!process.env.DEFAULT_OWNER_USER_ID?.trim()) {
+      return isLocalCapabilityWriteRequest(request);
+    }
+    return true;
   }
   // No session identity. In single-user mode on localhost, fall through.
   return isLocalCapabilityWriteRequest(request) && !process.env.DEFAULT_OWNER_USER_ID?.trim();
