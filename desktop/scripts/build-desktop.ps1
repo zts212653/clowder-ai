@@ -524,7 +524,10 @@ if (-not $SkipPortableZip) {
         if (-not (Test-Path $desktopDir)) { New-Item -ItemType Directory -Path $desktopDir -Force | Out-Null }
         $pkgContent = Get-Content $desktopPkg -Raw | ConvertFrom-Json
         $pkgContent.version = $zipVersion
-        $pkgContent | ConvertTo-Json -Depth 10 | Out-File (Join-Path $desktopDir "package.json") -Encoding utf8
+        # Write UTF-8 without BOM — same fix as generate-desktop-config.ps1.
+        # Windows PowerShell 5.1's -Encoding utf8 emits a BOM that breaks JSON.parse.
+        $json = $pkgContent | ConvertTo-Json -Depth 10
+        [System.IO.File]::WriteAllText((Join-Path $desktopDir "package.json"), $json, (New-Object System.Text.UTF8Encoding $false))
     }
 
     # CLI tool tarballs

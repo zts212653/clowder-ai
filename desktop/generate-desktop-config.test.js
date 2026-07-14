@@ -87,23 +87,40 @@ test('#1107: build script bakes resolved version into staged desktop/package.jso
     'build-desktop.ps1 must bake $zipVersion into staged desktop/package.json',
   );
 
-  // Must serialize the modified content back to the staging directory
+  // Must serialize the modified content back to the staging directory using
+  // BOM-less UTF-8 (WriteAllText + UTF8Encoding($false)), not Out-File.
   assert.match(
     buildScript,
-    /ConvertTo-Json.*Out-File.*package\.json/,
-    'build-desktop.ps1 must write modified package.json to staging',
+    /WriteAllText.*package\.json/,
+    'build-desktop.ps1 must write modified package.json to staging via WriteAllText',
   );
 
   // Execution order: version assignment MUST precede serialization.
-  // If Out-File runs before $pkgContent.version = $zipVersion, the
+  // If WriteAllText runs before $pkgContent.version = $zipVersion, the
   // written JSON still carries the old version — a silent data bug.
   const assignIdx = buildScript.search(/\$pkgContent\.version\s*=\s*\$zipVersion/);
-  const writeIdx = buildScript.search(/ConvertTo-Json.*Out-File/);
+  const writeIdx = buildScript.search(/WriteAllText.*package\.json/);
   assert.ok(assignIdx >= 0 && writeIdx >= 0, 'Both version-bake and serialization lines must exist');
   assert.ok(
     assignIdx < writeIdx,
     `Version assignment (pos ${assignIdx}) must appear before serialization (pos ${writeIdx})`,
   );
+});
+
+test('#1107: no JSON file is written with BOM-emitting Out-File -Encoding utf8', () => {
+  // Guard: Windows PowerShell 5.1's Out-File -Encoding utf8 emits a UTF-8 BOM
+  // (ef bb bf) that breaks JSON.parse. All JSON writes in desktop scripts must
+  // use [System.IO.File]::WriteAllText with UTF8Encoding($false) instead.
+  const scripts = ['generate-desktop-config.ps1', 'build-desktop.ps1'];
+  for (const name of scripts) {
+    const content = readFileSync(path.join(SCRIPTS_DIR, name), 'utf8');
+    // Match Out-File writing a .json path with -Encoding utf8
+    assert.doesNotMatch(
+      content,
+      /Out-File.*\.json.*-Encoding\s+utf8/,
+      `${name} must not use Out-File -Encoding utf8 for JSON files (emits BOM on PS 5.1)`,
+    );
+  }
 });
 
 test('#1107: desktop/package.json version differs from root', () => {
