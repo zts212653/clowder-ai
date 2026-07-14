@@ -1,11 +1,10 @@
 /**
- * Regression tests for #1107 — desktop-config.json generation.
+ * Structural regression tests for #1107 — desktop-config.json generation.
  *
- * Since the config generation scripts are PowerShell/Batch (not directly
- * runnable in CI), these tests validate the script content structurally.
- * Tests match actual PowerShell commands and logic constructs, not just
- * comments or string occurrences, so that deleting functional lines
- * causes test failures.
+ * These tests validate the PowerShell/Batch script content structurally
+ * (source patterns, execution order) and run on all platforms.
+ * Behavioral tests that execute the script on Windows are in
+ * generate-desktop-config-behavior.test.js (Windows Smoke CI).
  */
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
