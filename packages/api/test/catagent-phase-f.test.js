@@ -762,7 +762,9 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
     const target = join(tmpDir, 'audit-degraded-write.txt');
     const tools = await buildToolRegistry(tmpDir, {
       nativeToolLevel: 'L1',
-      audit: () => { throw new Error('audit down'); },
+      audit: () => {
+        throw new Error('audit down');
+      },
     });
     const write = findTool(tools, 'write_file');
     assert.ok(write);
@@ -781,7 +783,9 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
     const hash = sha256('original');
     const tools = await buildToolRegistry(tmpDir, {
       nativeToolLevel: 'L1',
-      audit: () => { throw new Error('audit down'); },
+      audit: () => {
+        throw new Error('audit down');
+      },
     });
     const patch = findTool(tools, 'patch_file');
     assert.ok(patch);
@@ -801,12 +805,16 @@ describe('audit-after-mutation honesty (commitThenAudit)', () => {
     const updates = [];
     const tools = await buildToolRegistry(undefined, {
       nativeToolLevel: 'L1',
-      audit: () => { throw new Error('audit down'); },
+      audit: () => {
+        throw new Error('audit down');
+      },
       scopedCallbacks: {
         currentTask: {
           invocationId: 'inv-1',
           currentTaskId: 'task-1',
-          updateCurrentTaskStatus: async (patch) => { updates.push(patch); },
+          updateCurrentTaskStatus: async (patch) => {
+            updates.push(patch);
+          },
         },
       },
     });
