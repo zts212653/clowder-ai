@@ -323,7 +323,7 @@ describe('service lifecycle failure handling', () => {
       assert.equal(didRun, false);
       assert.deepEqual(JSON.parse(res.payload), {
         ok: true,
-        message: 'Whisper STT is already running',
+        message: 'Speech Recognition is already running',
         pids: [5151],
       });
       assert.deepEqual(
@@ -465,7 +465,7 @@ describe('service lifecycle failure handling', () => {
       assert.deepEqual(killed, [{ pid: 5151, signal: 'SIGTERM' }]);
       assert.deepEqual(JSON.parse(res.payload), {
         ok: false,
-        error: 'Whisper STT stop failed for 1 process(es)',
+        error: 'Speech Recognition stop failed for 1 process(es)',
         stopped: [],
         failed: [5151],
       });
@@ -502,7 +502,7 @@ describe('service lifecycle failure handling', () => {
       assert.equal(res.statusCode, 200, res.payload);
       assert.deepEqual(JSON.parse(res.payload), {
         ok: true,
-        message: 'Whisper STT stopped (0 process(es))',
+        message: 'Speech Recognition stopped (0 process(es))',
         stopped: [],
       });
       assert.equal(events.at(-1).data.status, 'completed');

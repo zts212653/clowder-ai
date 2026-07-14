@@ -5,9 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-const { detectEnvironmentSync, getEnvironmentProfile, clearEnvironmentCache, resolveDiskProbePath } = await import(
-  '../dist/domains/services/environment-detector.js'
-);
+const { detectEnvironmentSync, getEnvironmentProfile, clearEnvironmentCache, resolveDiskProbePath, resolveArch } =
+  await import('../dist/domains/services/environment-detector.js');
 
 describe('environment detector — shape & sanity', () => {
   test('detectEnvironmentSync returns well-formed profile', () => {
@@ -39,6 +38,48 @@ describe('environment detector — shape & sanity', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('environment detector — Rosetta regression (#1061)', () => {
+  test('macOS + x64 Node + sysctl arm64=1 → arch=arm64 (Rosetta scenario)', () => {
+    // Simulates Rosetta 2: process.platform='darwin', process.arch='x64',
+    // but true hardware is Apple Silicon (sysctl hw.optional.arm64 → '1').
+    // If resolveArch ever reverts to using process.arch, this test fails.
+    const arch = resolveArch('darwin', 'x64', () => '1');
+    assert.equal(arch, 'arm64');
+  });
+
+  test('macOS + arm64 Node + sysctl arm64=1 → arch=arm64 (native scenario)', () => {
+    const arch = resolveArch('darwin', 'arm64', () => '1');
+    assert.equal(arch, 'arm64');
+  });
+
+  test('macOS + x64 Node + sysctl null → arch=x64 (real Intel Mac)', () => {
+    // On a real Intel Mac, sysctl key is absent → runQuiet returns null.
+    const arch = resolveArch('darwin', 'x64', () => null);
+    assert.equal(arch, 'x64');
+  });
+
+  test('macOS + x64 Node + sysctl 0 → arch=x64 (Intel fallback)', () => {
+    const arch = resolveArch('darwin', 'x64', () => '0');
+    assert.equal(arch, 'x64');
+  });
+
+  test('macOS + arm64 Node + sysctl null → arch=arm64 (sysctl failure fallback)', () => {
+    // On native Apple Silicon, if sysctl transiently fails (returns null),
+    // process.arch='arm64' is a reliable one-direction signal (an x64
+    // binary can never report arm64). Must not misdetect as x64.
+    const arch = resolveArch('darwin', 'arm64', () => null);
+    assert.equal(arch, 'arm64');
+  });
+
+  test('Linux uses process.arch, not sysctl', () => {
+    const sysctlSpy = () => {
+      throw new Error('sysctl should not be called on Linux');
+    };
+    assert.equal(resolveArch('linux', 'arm64', sysctlSpy), 'arm64');
+    assert.equal(resolveArch('linux', 'x64', sysctlSpy), 'x64');
   });
 });
 

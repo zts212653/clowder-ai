@@ -55,6 +55,10 @@ export interface ServiceManifest {
     install?: string;
     start?: string;
     uninstall?: string;
+    /** Additional Python scripts this service may launch at runtime.
+     *  Used for multi-backend services where the start script dispatches
+     *  to different API scripts based on the selected model (#863). */
+    additionalRuntimeScripts?: string[];
   };
 }
 
@@ -104,7 +108,6 @@ export interface ServiceState {
 
 export const MODEL_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_MODEL',
-  'qwen3-asr': 'QWEN3_ASR_MODEL',
   'mlx-tts': 'TTS_MODEL',
   'embedding-model': 'EMBED_MODEL',
   'llm-postprocess': 'LLM_POSTPROCESS_MODEL',
@@ -113,7 +116,6 @@ export const MODEL_ENV_VARS: Record<string, string> = {
 /** Env var each server script reads to bind its listening port. */
 export const PORT_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'WHISPER_PORT',
-  'qwen3-asr': 'WHISPER_PORT',
   'mlx-tts': 'TTS_PORT',
   'embedding-model': 'EMBED_PORT',
   'llm-postprocess': 'LLM_POSTPROCESS_PORT',
@@ -122,7 +124,6 @@ export const PORT_ENV_VARS: Record<string, string> = {
 
 export const LEGACY_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'ASR_ENABLED',
-  'qwen3-asr': 'QWEN3_ASR_ENABLED',
   'mlx-tts': 'TTS_ENABLED',
   'embedding-model': 'EMBED_ENABLED',
   'llm-postprocess': 'LLM_POSTPROCESS_ENABLED',
@@ -131,11 +132,35 @@ export const LEGACY_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
 
 export const API_SERVICE_ENABLED_ENV_VARS: Record<string, string> = {
   'whisper-stt': 'CAT_CAFE_SERVICE_ASR_ENABLED',
-  'qwen3-asr': 'CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED',
   'mlx-tts': 'CAT_CAFE_SERVICE_TTS_ENABLED',
   'embedding-model': 'CAT_CAFE_SERVICE_EMBED_ENABLED',
   'llm-postprocess': 'CAT_CAFE_SERVICE_LLM_POSTPROCESS_ENABLED',
   'audio-capture': 'CAT_CAFE_SERVICE_AUDIO_ENABLED',
+};
+
+/**
+ * Env var fallbacks for merged services (#863). When checking whether a
+ * service should auto-start via legacy env bridge, also check the old
+ * service's env vars. Keys are current service IDs.
+ */
+const LEGACY_ENV_FALLBACKS: Record<
+  string,
+  {
+    enabled?: string[];
+    apiEnabled?: string[];
+    model?: string[];
+    /** Default model when activation came from this legacy service's env vars
+     *  but no model env was set.  Without this the manifest default (which may
+     *  be a different backend) would silently replace the old service's model. */
+    defaultModel?: string;
+  }
+> = {
+  'whisper-stt': {
+    enabled: ['QWEN3_ASR_ENABLED'],
+    apiEnabled: ['CAT_CAFE_SERVICE_QWEN3_ASR_ENABLED'],
+    model: ['QWEN3_ASR_MODEL'],
+    defaultModel: 'mlx-community/Qwen3-ASR-1.7B-8bit',
+  },
 };
 
 type ServiceModel = NonNullable<NonNullable<ServiceManifest['prerequisites']>['models']>[number];
@@ -149,8 +174,8 @@ function serviceModel(name: string, size: string, description: string, isDefault
 export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
   {
     id: 'whisper-stt',
-    name: 'Whisper STT',
-    description: 'Local speech-to-text endpoint',
+    name: 'Speech Recognition',
+    description: 'Local speech-to-text endpoint (Qwen3-ASR / Whisper)',
     category: 'voice',
     type: 'python',
     port: 9876,
@@ -164,9 +189,14 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       venvPath: '~/.cat-cafe/whisper-venv',
       packages: ['mlx-whisper', 'fastapi', 'uvicorn'],
       models: [
-        serviceModel('mlx-community/whisper-large-v3-turbo', '~1.5GB', 'Fast, high-quality local transcription', true),
-        serviceModel('mlx-community/whisper-large-v3-mlx', '~3GB', 'Highest quality, slower startup'),
-        serviceModel('mlx-community/whisper-small-mlx', '~500MB', 'Smaller local model for lower-memory machines'),
+        serviceModel('mlx-community/Qwen3-ASR-1.7B-8bit', '~2.5GB', 'Qwen3 ASR (MLX, recommended)'),
+        serviceModel('mlx-community/Qwen3-ASR-1.7B-4bit', '~1.5GB', 'Qwen3 ASR 4bit (lower memory)'),
+        // Manifest default must be cross-platform for deriveLegacyServiceConfig
+        // fallback; Qwen3-ASR is MLX-only.  YAML matrix recommends Qwen3 on
+        // macOS arm64; this static default only matters for legacy env bridge.
+        serviceModel('mlx-community/whisper-large-v3-turbo', '~1.5GB', 'Whisper turbo (MLX, fast)', true),
+        serviceModel('mlx-community/whisper-large-v3-mlx', '~3GB', 'Whisper highest quality'),
+        serviceModel('mlx-community/whisper-small-mlx', '~500MB', 'Whisper small (low memory)'),
       ],
       estimatedMinutes: 5,
     },
@@ -174,34 +204,10 @@ export const SERVICE_MANIFESTS: readonly ServiceManifest[] = [
       install: 'scripts/services/whisper-install.sh',
       start: 'scripts/services/whisper-server.sh',
       uninstall: 'scripts/services/whisper-uninstall.sh',
-    },
-  },
-  {
-    id: 'qwen3-asr',
-    name: 'Qwen3 ASR',
-    description: 'Local speech-to-text endpoint (Qwen3-ASR, drop-in whisper replacement)',
-    category: 'voice',
-    type: 'python',
-    port: 9876,
-    features: ['voice-input', 'connector-stt'],
-    envVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
-    endpointEnvVars: ['WHISPER_URL', 'NEXT_PUBLIC_WHISPER_URL'],
-    defaultEndpoint: 'http://localhost:9876',
-    healthPath: '/health',
-    prerequisites: {
-      runtime: 'python3.10+',
-      venvPath: '~/.cat-cafe/asr-venv',
-      packages: ['mlx-audio', 'fastapi', 'uvicorn', 'python-multipart'],
-      models: [
-        serviceModel('mlx-community/Qwen3-ASR-1.7B-8bit', '~2.5GB', 'High-quality Qwen3 ASR (default)', true),
-        serviceModel('mlx-community/Qwen3-ASR-1.7B-4bit', '~1.5GB', 'Smaller quantization, lower memory'),
-      ],
-      estimatedMinutes: 5,
-    },
-    scripts: {
-      install: 'scripts/services/qwen3-asr-install.sh',
-      start: 'scripts/services/qwen3-asr-server.sh',
-      uninstall: 'scripts/services/qwen3-asr-uninstall.sh',
+      // Legacy process recognition (#863): old qwen3-asr sidecar ran
+      // qwen3-asr-api.py on the same port.  Including it here lets
+      // lifecycle management detect and stop the old process after upgrade.
+      additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
     },
   },
   {
@@ -361,13 +367,46 @@ export function deriveLegacyServiceConfig(
   // profile defaults do not unexpectedly auto-start ML sidecars.
   const legacyEnabled =
     apiEnabled ?? (env.CAT_CAFE_PROFILE ? null : parseEnabledEnv(legacyKey ? env[legacyKey] : undefined));
-  if (legacyEnabled !== true) return undefined;
+
+  // Check fallback env vars from merged services (#863).  A user who had
+  // QWEN3_ASR_ENABLED=true should auto-start whisper-stt after upgrade.
+  // Only consult fallbacks when the primary flag is *unset* (null).  An
+  // explicit disable (ASR_ENABLED=0) must not be overridden by a stale
+  // legacy enable flag.
+  const fallbacks = LEGACY_ENV_FALLBACKS[service.id];
+  let fallbackEnabled: boolean | null = null;
+  if (legacyEnabled == null && fallbacks) {
+    for (const key of fallbacks.apiEnabled ?? []) {
+      fallbackEnabled = parseEnabledEnv(env[key]);
+      if (fallbackEnabled != null) break;
+    }
+    if (fallbackEnabled == null && !env.CAT_CAFE_PROFILE) {
+      for (const key of fallbacks.enabled ?? []) {
+        fallbackEnabled = parseEnabledEnv(env[key]);
+        if (fallbackEnabled != null) break;
+      }
+    }
+  }
+
+  if (legacyEnabled !== true && fallbackEnabled !== true) return undefined;
 
   const config: ServiceConfig = { installed: true, enabled: true };
   const modelKey = MODEL_ENV_VARS[service.id];
-  const model = modelKey ? env[modelKey]?.trim() : undefined;
+  let model = modelKey ? env[modelKey]?.trim() : undefined;
+  // If primary model env is unset, check legacy fallback model env vars.
+  if (!model && fallbacks) {
+    for (const key of fallbacks.model ?? []) {
+      model = env[key]?.trim();
+      if (model) break;
+    }
+  }
   if (model) {
     config.selectedModel = model;
+  } else if (fallbackEnabled === true && fallbacks?.defaultModel) {
+    // Activation came from legacy merged-service env vars (e.g. QWEN3_ASR_ENABLED)
+    // but no model env was set.  Use the old service's implicit default so users
+    // aren't silently migrated to a different backend.
+    config.selectedModel = fallbacks.defaultModel;
   } else {
     // Fall back to manifest's recommended default model so that legacy
     // env bridge users (ENABLED=1 without MODEL) get a working service

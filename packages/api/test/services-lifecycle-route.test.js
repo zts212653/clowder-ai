@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import {
   findPidsByPort,
+  isPrimaryServiceProcess,
   isServiceProcessCommand,
   readProcessCommand,
   readServiceLogTail,
@@ -2393,9 +2394,11 @@ describe('service lifecycle write routes', () => {
   });
 
   it('keeps shell service scripts on Windows when no PowerShell counterpart exists', () => {
+    // install-template.sh has no .ps1 counterpart — use it to test the
+    // keep-.sh fallback path on Windows.
     assert.match(
-      resolveServiceScriptPath('scripts/services/qwen3-asr-server.sh', 'win32'),
-      /scripts\/services\/qwen3-asr-server\.sh$/,
+      resolveServiceScriptPath('scripts/services/install-template.sh', 'win32'),
+      /scripts\/services\/install-template\.sh$/,
     );
   });
 
@@ -2509,6 +2512,54 @@ describe('service lifecycle write routes', () => {
       isServiceProcessCommand(`${pythonAppExecutable} /tmp/scripts/services/embed-api.py --port 9880`, manifest),
       false,
     );
+  });
+
+  it('recognizes unified whisper-api.py for both Whisper and Qwen3-ASR models (#863)', () => {
+    const manifest = {
+      id: 'whisper-stt',
+      scripts: {
+        start: 'scripts/services/whisper-server.sh',
+      },
+    };
+    const whisperApi = resolveServiceScriptPath('scripts/services/whisper-server.sh').replace(
+      /whisper-server\.sh$/,
+      'whisper-api.py',
+    );
+
+    // whisper-api.py handles all ASR models — both must be recognized
+    assert.equal(isServiceProcessCommand(`python3 ${whisperApi} --model whisper-large-v3 --port 9876`, manifest), true);
+    assert.equal(
+      isServiceProcessCommand(`python3 ${whisperApi} --model Qwen3-ASR-1.7B-8bit --port 9876`, manifest),
+      true,
+    );
+    // Foreign script must NOT be recognized
+    assert.equal(isServiceProcessCommand('python3 /tmp/random-api.py --port 9876', manifest), false);
+  });
+
+  it('distinguishes primary vs legacy additionalRuntimeScripts (#863)', () => {
+    const manifest = {
+      id: 'whisper-stt',
+      scripts: {
+        start: 'scripts/services/whisper-server.sh',
+        additionalRuntimeScripts: ['scripts/services/qwen3-asr-api.py'],
+      },
+    };
+    const whisperApi = resolveServiceScriptPath('scripts/services/whisper-server.sh').replace(
+      /whisper-server\.sh$/,
+      'whisper-api.py',
+    );
+    const qwen3Api = resolveServiceScriptPath('scripts/services/qwen3-asr-api.py');
+    const whisperServer = resolveServiceScriptPath('scripts/services/whisper-server.sh');
+
+    // isServiceProcessCommand matches ALL scripts (for cleanup)
+    assert.equal(isServiceProcessCommand(`python3 ${qwen3Api} --port 9876`, manifest), true);
+    assert.equal(isServiceProcessCommand(`python3 ${whisperApi} --port 9876`, manifest), true);
+    assert.equal(isServiceProcessCommand(`/bin/bash ${whisperServer}`, manifest), true);
+
+    // isPrimaryServiceProcess excludes additionalRuntimeScripts (legacy)
+    assert.equal(isPrimaryServiceProcess(`python3 ${qwen3Api} --port 9876`, manifest), false);
+    assert.equal(isPrimaryServiceProcess(`python3 ${whisperApi} --port 9876`, manifest), true);
+    assert.equal(isPrimaryServiceProcess(`/bin/bash ${whisperServer}`, manifest), true);
   });
 
   it('matches Windows PowerShell service processes by exact script identity', () => {
@@ -2717,6 +2768,60 @@ describe('deep health probe (zombie detection)', () => {
       assert.equal(body.ok, true);
       assert.match(body.message, /already running/i);
       assert.deepEqual(killed, [], 'should NOT kill healthy process');
+    } finally {
+      await app.close();
+      restoreOwner(previousOwner);
+    }
+  });
+
+  it('terminates legacy additionalRuntimeScript listener and launches current start script (#863)', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const killed = [];
+    let scriptRan = false;
+    // Legacy qwen3-asr-api.py is running on the whisper-stt port.
+    // It's an additionalRuntimeScript — owned for cleanup, but NOT primary.
+    const qwen3Api = resolveServiceScriptPath('scripts/services/qwen3-asr-api.py');
+    const killedPids = new Set();
+    const configs = new Map([
+      ['whisper-stt', { installed: true, enabled: true, selectedModel: 'mlx-community/Qwen3-ASR-1.7B-8bit' }],
+    ]);
+    const app = await buildApp({
+      // Legacy listener responds healthy to /health
+      fetchHealth: async () => ({ ok: true, status: 200, error: null }),
+      lifecycle: {
+        serviceConfig: {
+          get: (id) => configs.get(id) ?? { enabled: false },
+          set: (id, patch) => {
+            const updated = { ...(configs.get(id) ?? { enabled: false }), ...patch };
+            configs.set(id, updated);
+            return updated;
+          },
+        },
+        // After kill, the process disappears from port probe
+        findPidsByPort: async (port) => (port === 9876 && !killedPids.has(44001) ? [44001] : []),
+        // PID 44001 is running the LEGACY script (not the current whisper-server.sh)
+        readProcessCommand: async (pid) => (pid === 44001 ? `python3 ${qwen3Api} --port 9876` : ''),
+        killPid: (pid, signal) => {
+          killed.push({ pid, signal });
+          killedPids.add(pid);
+        },
+        runScript: async () => {
+          scriptRan = true;
+          return { code: 0, output: 'started' };
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/services/whisper-stt/start',
+        headers: SESSION_HEADERS,
+      });
+
+      assert.equal(res.statusCode, 200, `expected 200, got ${res.statusCode}: ${res.payload}`);
+      assert.deepEqual(killed, [{ pid: 44001, signal: 'SIGTERM' }], 'legacy process should be terminated');
+      assert.equal(scriptRan, true, 'current start script should launch after terminating legacy');
     } finally {
       await app.close();
       restoreOwner(previousOwner);

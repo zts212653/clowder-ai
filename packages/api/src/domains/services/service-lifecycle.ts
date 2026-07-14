@@ -11,6 +11,10 @@ export interface ServiceLifecycleManifest {
     install?: string;
     start?: string;
     uninstall?: string;
+    /** Additional Python scripts this service may launch at runtime.
+     *  Used for multi-backend services where the start script dispatches
+     *  to different API scripts based on the selected model (#863). */
+    additionalRuntimeScripts?: string[];
   };
 }
 
@@ -75,23 +79,37 @@ export function shouldDetachServiceRunner(platform: NodeJS.Platform = process.pl
   return platform !== 'win32';
 }
 
-function resolveServiceRuntimeScriptPaths(
+/** Primary runtime scripts auto-derived from the start script name.
+ *  Does NOT include additionalRuntimeScripts (legacy/auxiliary). */
+function resolvePrimaryRuntimeScriptPaths(
   manifest: ServiceLifecycleManifest,
   platform: NodeJS.Platform = process.platform,
 ): string[] {
   const startScript = manifest.scripts?.start;
   if (!startScript) return [];
-
   const resolvedStartScript = resolveServiceScriptPath(startScript, platform);
-  const runtimeScripts: string[] = [];
+  const scripts: string[] = [];
   const serverMatch = basename(resolvedStartScript).match(/^(.+)-server\.(?:sh|ps1)$/i);
   if (serverMatch) {
-    runtimeScripts.push(resolve(dirname(resolvedStartScript), `${serverMatch[1]}-api.py`));
+    scripts.push(resolve(dirname(resolvedStartScript), `${serverMatch[1]}-api.py`));
   }
   if (manifest.id === 'audio-capture') {
-    runtimeScripts.push(resolve(REPO_ROOT, 'scripts/meeting-copilot/audio-service.py'));
+    scripts.push(resolve(REPO_ROOT, 'scripts/meeting-copilot/audio-service.py'));
   }
-  return runtimeScripts.filter((scriptPath) => isPathInside(REPO_ROOT, scriptPath));
+  return scripts.filter((sp) => isPathInside(REPO_ROOT, sp));
+}
+
+/** All runtime scripts: primary + additionalRuntimeScripts from manifest.
+ *  Used by isServiceProcessCommand for kill/cleanup. */
+function resolveServiceRuntimeScriptPaths(
+  manifest: ServiceLifecycleManifest,
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  const scripts = [...resolvePrimaryRuntimeScriptPaths(manifest, platform)];
+  for (const extra of manifest.scripts?.additionalRuntimeScripts ?? []) {
+    scripts.push(resolveServiceScriptPath(extra, platform));
+  }
+  return scripts.filter((sp) => isPathInside(REPO_ROOT, sp));
 }
 
 export function isValidModelId(model: string): boolean {
@@ -124,10 +142,23 @@ export function resolveServiceScriptPath(script: string, platform: NodeJS.Platfo
   return resolved;
 }
 
-export function isServiceProcessCommand(
+/** Skip `env FOO=bar ...` prefix in a tokenised command line. */
+function skipEnvPrefix(tokens: string[]): number {
+  let idx = 0;
+  if (basename(tokens[idx] ?? '') === 'env') {
+    idx += 1;
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx] ?? '')) idx += 1;
+  }
+  return idx;
+}
+
+/** Shared command-matching: checks if `command` runs the start script
+ *  directly or one of the given `runtimeScripts` via a Python executable. */
+function matchCommandAgainstScripts(
   command: string,
   manifest: ServiceLifecycleManifest,
-  platform: NodeJS.Platform = process.platform,
+  runtimeScripts: string[],
+  platform: NodeJS.Platform,
 ): boolean {
   const startScript = manifest.scripts?.start;
   if (!startScript) return false;
@@ -140,33 +171,45 @@ export function isServiceProcessCommand(
   const tokens = Array.from(normalizedCommand.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g), (match) => {
     return match[1] ?? match[2] ?? match[3] ?? '';
   });
-  let commandIndex = 0;
-  if (basename(tokens[commandIndex] ?? '') === 'env') {
-    commandIndex += 1;
-    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[commandIndex] ?? '')) commandIndex += 1;
-  }
-  const isScriptToken = (token: string | undefined): boolean => {
-    if (!token) return false;
-    return token === resolvedScript;
-  };
+  const commandIndex = skipEnvPrefix(tokens);
   const executable = tokens[commandIndex];
-  if (isScriptToken(executable)) return true;
+  if (executable === resolvedScript) return true;
   if (['bash', 'sh', 'zsh'].includes(basename(executable ?? ''))) {
-    return isScriptToken(tokens[commandIndex + 1]);
+    return tokens[commandIndex + 1] === resolvedScript;
   }
   if (['powershell.exe', 'powershell', 'pwsh.exe', 'pwsh'].includes(basename(executable ?? ''))) {
     const fileFlagIndex = tokens.findIndex((token, index) => index > commandIndex && token.toLowerCase() === '-file');
-    return fileFlagIndex >= 0 && isScriptToken(tokens[fileFlagIndex + 1]);
+    return fileFlagIndex >= 0 && tokens[fileFlagIndex + 1] === resolvedScript;
   }
-  const runtimeScripts = resolveServiceRuntimeScriptPaths(manifest, platform).map((scriptPath) =>
-    normalizePath(scriptPath),
-  );
+  const normalizedRuntimeScripts = runtimeScripts.map((sp) => normalizePath(sp));
   const executableName = basename(executable ?? '').toLowerCase();
   const isPythonExecutable = /^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$/.test(executableName);
-  if (isPythonExecutable && runtimeScripts.includes(tokens[commandIndex + 1] ?? '')) {
+  if (isPythonExecutable && normalizedRuntimeScripts.includes(tokens[commandIndex + 1] ?? '')) {
     return true;
   }
   return false;
+}
+
+/** Matches a process command against ANY script this service owns (start +
+ *  primary runtime + additionalRuntimeScripts). Used for cleanup/kill. */
+export function isServiceProcessCommand(
+  command: string,
+  manifest: ServiceLifecycleManifest,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return matchCommandAgainstScripts(command, manifest, resolveServiceRuntimeScriptPaths(manifest, platform), platform);
+}
+
+/** Matches a process command against only the PRIMARY scripts (start script
+ *  + auto-derived runtime), excluding additionalRuntimeScripts (legacy).
+ *  Used for readiness: legacy processes must not satisfy the "already-running"
+ *  path — they should be terminated and replaced (#863). */
+export function isPrimaryServiceProcess(
+  command: string,
+  manifest: ServiceLifecycleManifest,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return matchCommandAgainstScripts(command, manifest, resolvePrimaryRuntimeScriptPaths(manifest, platform), platform);
 }
 
 function parsePidLines(stdout: string): number[] {

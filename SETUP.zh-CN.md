@@ -314,8 +314,9 @@ NEXT_PUBLIC_LLM_POSTPROCESS_URL=http://localhost:9878
 ./scripts/tts-server.sh                    # 默认: Qwen3-TTS（三猫声线）
 TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts 备选（无需 GPU）
 
-# ASR（语音转文字）— 需要 Python 3 + ffmpeg
-./scripts/qwen3-asr-server.sh             # Qwen3-ASR 服务器
+# ASR（语音转文字）— 需要 Python 3 + ffmpeg，统一 whisper-stt 服务
+WHISPER_MODEL=mlx-community/Qwen3-ASR-1.7B-8bit ./scripts/services/whisper-server.sh  # Qwen3-ASR
+WHISPER_MODEL=mlx-community/whisper-large-v3-turbo ./scripts/services/whisper-server.sh # Whisper
 ```
 
 > **系统依赖**：音频处理需要 `ffmpeg`。安装方式：`brew install ffmpeg`（macOS）或 `apt install ffmpeg`（Linux）。

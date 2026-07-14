@@ -5,6 +5,7 @@ import { getServiceConfig, setServiceConfig } from '../domains/services/service-
 import {
   appendServiceLog,
   findPidsByPort,
+  isPrimaryServiceProcess,
   isServiceProcessCommand,
   listProcesses,
   type ProcessSnapshot,
@@ -779,16 +780,35 @@ export async function registerServiceLifecycleRoutes(
             }
 
             if (deepHealthPassed) {
-              serviceConfigStore.set(service.id, { installed: true, enabled: true });
-              await audit({
-                serviceId: service.id,
-                action: 'start',
-                operator,
-                status: 'completed',
-                reason: 'already-running',
-              });
-              notifyServiceReady(service, operator, 'already-running');
-              return { ok: true, message: `${service.name} is already running`, pids: portProbe.owned };
+              // Verify at least one owned process is the current start
+              // script, not a legacy additionalRuntimeScript (#863).
+              // Legacy processes should be terminated and replaced.
+              let hasPrimaryProcess = false;
+              for (const pid of portProbe.owned) {
+                const cmd = await lookupProcessCommand(pid);
+                if (cmd && isPrimaryServiceProcess(cmd, service)) {
+                  hasPrimaryProcess = true;
+                  break;
+                }
+              }
+              if (hasPrimaryProcess) {
+                serviceConfigStore.set(service.id, { installed: true, enabled: true });
+                await audit({
+                  serviceId: service.id,
+                  action: 'start',
+                  operator,
+                  status: 'completed',
+                  reason: 'already-running',
+                });
+                notifyServiceReady(service, operator, 'already-running');
+                return { ok: true, message: `${service.name} is already running`, pids: portProbe.owned };
+              }
+              // Legacy-only listener: log and fall through to terminate
+              app.log.info(
+                { serviceId: service.id, pids: portProbe.owned },
+                'owned listener is legacy — terminating for current start script',
+              );
+              appendServiceLog(service.id, `[start] legacy process on port — replacing with current start script\n`);
             }
           }
 

@@ -21,11 +21,11 @@ function makeProfile(overrides = {}) {
 }
 
 describe('recommendation matrix — service coverage', () => {
-  test('matrix covers all 5 core services', () => {
+  test('matrix covers all 5 core services (qwen3-asr merged into whisper-stt)', () => {
     const ids = getMatrixServiceIds();
     assert.deepEqual(
       ids.sort(),
-      ['whisper-stt', 'qwen3-asr', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
+      ['whisper-stt', 'mlx-tts', 'embedding-model', 'llm-postprocess', 'audio-capture'].sort(),
     );
   });
 
@@ -56,11 +56,13 @@ describe('recommendation matrix — service coverage', () => {
 describe('recommendation matrix — macOS arm64', () => {
   const profile = makeProfile();
 
-  test('whisper-stt → MLX turbo as default (models[0])', () => {
+  test('whisper-stt → Qwen3-ASR 8bit as default on macOS arm64 (#863)', () => {
     const rec = buildRecommendation('whisper-stt', profile);
-    assert.equal(rec.models[0]?.name, 'mlx-community/whisper-large-v3-turbo');
+    assert.equal(rec.models[0]?.name, 'mlx-community/Qwen3-ASR-1.7B-8bit');
     assert.equal(rec.unsupported, undefined);
-    assert.ok(rec.models.length >= 2);
+    // Both Qwen3-ASR and Whisper models should be available
+    assert.ok(rec.models.length >= 4);
+    assert.ok(rec.models.some((m) => m.name.includes('whisper')));
   });
 
   test('embedding-model → Qwen3 MLX as default', () => {
@@ -78,6 +80,91 @@ describe('recommendation matrix — macOS arm64', () => {
   test('mlx-tts → Kokoro as default', () => {
     const rec = buildRecommendation('mlx-tts', profile);
     assert.match(rec.models[0]?.name ?? '', /Kokoro/);
+  });
+
+  test('whisper-stt + x86-emulated Python → faster-whisper, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('whisper-stt', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(rec.models.length >= 2, 'should have faster-whisper models');
+    // Must NOT recommend MLX models on x86-emulated Python
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'large-v3-turbo', 'should default to faster-whisper turbo');
+  });
+
+  test('whisper-stt + missing Python on arm64 → MLX models (bootstrap installs arm64 Python)', () => {
+    const missingProfile = makeProfile({ pythonArch: 'missing' });
+    const rec = buildRecommendation('whisper-stt', missingProfile);
+    assert.equal(rec.unsupported, undefined);
+    // On native Apple Silicon, python-build-standalone bootstraps arm64 Python,
+    // so the installer takes the MLX path. Must recommend MLX models, not
+    // faster-whisper short names which would fail with snapshot_download.
+    assert.ok(
+      rec.models.some((m) => m.name.includes('mlx-community')),
+      'missing Python on arm64 must get MLX models (bootstrap provides arm64 Python)',
+    );
+  });
+
+  // #1061 regression guard: resolveArch() now reports arm64 under Rosetta,
+  // so ALL darwin/arm64 services must gate MLX on pythonArch, not just whisper-stt.
+  test('mlx-tts + x86-emulated Python → edge-tts, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('mlx-tts', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'edge-tts');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
+    // Hint examples must be dispatch-valid install tokens, not synthesis-time voice names.
+    // tts-server.sh only recognizes 'edge-tts', 'piper', 'zh_CN-*' etc. as install tokens.
+    assert.ok(
+      !rec.customModelHint.example.includes('Neural'),
+      'hint must not show edge-tts voice names (zh-CN-*Neural) as install-model examples',
+    );
+  });
+
+  test('embedding-model + x86-emulated Python → sentence-transformers, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('embedding-model', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'jinaai/jina-embeddings-v2-base-zh');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
+  });
+
+  test('llm-postprocess + x86-emulated Python → transformers, not MLX (#1061)', () => {
+    const rosettaProfile = makeProfile({ pythonArch: 'x86-emulated' });
+    const rec = buildRecommendation('llm-postprocess', rosettaProfile);
+    assert.equal(rec.unsupported, undefined, 'should not be unsupported, just non-MLX');
+    assert.ok(
+      !rec.models.some((m) => m.name.includes('mlx-community')),
+      'must not recommend mlx-community models when Python is x86-emulated',
+    );
+    assert.equal(rec.models[0]?.name, 'Qwen/Qwen2.5-3B-Instruct');
+    assert.ok(rec.customModelHint, 'Rosetta fallback must have customModelHint');
+    assert.match(rec.customModelHint.unsupported, /MLX/i, 'hint must warn about MLX incompatibility');
+  });
+
+  test('missing Python on arm64 → MLX path for all services (bootstrap)', () => {
+    const missingProfile = makeProfile({ pythonArch: 'missing' });
+    for (const svc of ['mlx-tts', 'embedding-model', 'llm-postprocess']) {
+      const rec = buildRecommendation(svc, missingProfile);
+      assert.equal(rec.unsupported, undefined, `${svc} should not be unsupported`);
+      assert.ok(
+        rec.models.some((m) => m.name.includes('mlx-community')),
+        `${svc}: missing Python on arm64 must get MLX models (bootstrap provides arm64 Python)`,
+      );
+    }
   });
 });
 

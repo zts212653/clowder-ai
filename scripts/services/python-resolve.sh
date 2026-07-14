@@ -206,11 +206,20 @@ _pbs_target_triple() {
   # Determine which python-build-standalone target tarball matches this host.
   case "$(uname -s)" in
     Darwin)
-      case "$(uname -m)" in
-        arm64|aarch64) echo "aarch64-apple-darwin" ;;
-        x86_64) echo "x86_64-apple-darwin" ;;
-        *) return 1 ;;
-      esac
+      # Use sysctl to detect true hardware architecture -- uname -m returns
+      # x86_64 under Rosetta 2, which would bootstrap an x86_64 Python that
+      # can't use MLX packages on Apple Silicon hardware (#1061).
+      # Matches the TypeScript environment-detector sysctl approach.
+      if sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+        echo "aarch64-apple-darwin"
+      elif [ "$(uname -m)" = "arm64" ] || [ "$(uname -m)" = "aarch64" ]; then
+        # One-direction fallback: uname -m=arm64 is reliable (an x64
+        # process can't report arm64). Covers sysctl failure on native
+        # Apple Silicon. Mirrors TypeScript resolveArch P2-2 fix.
+        echo "aarch64-apple-darwin"
+      else
+        echo "x86_64-apple-darwin"
+      fi
       ;;
     Linux)
       case "$(uname -m)" in

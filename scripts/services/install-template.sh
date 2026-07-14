@@ -33,28 +33,13 @@
 #   PIP_DEPS_OTHER         (required) -- pip deps for non-arm64 path.
 #
 # OPTIONAL inputs:
-#
-#   PRE_CHECK_FFMPEG=1            -- require ffmpeg on PATH before
-#                                   touching venv (whisper).
-#
-#   MODEL_LOADER_ARM64="snapshot"    -- model loader strategy for arm64;
-#   MODEL_LOADER_OTHER="snapshot"      one of:
-#                                       "snapshot"        snapshot_download
-#                                       "faster_whisper"  snapshot_download
-#                                                         with faster-whisper
-#                                                         alias resolution,
-#                                                         then WhisperModel
-#                                                         runtime load
-#                                       "skip"            don't preload --
-#                                                         caller hook
-#                                                         handles it (tts
-#                                                         piper voice).
-#                                     Defaults to "snapshot" each.
-#
-#   POST_INSTALL_HOOK_ARM64=fn    -- bash function (in caller scope) to
-#   POST_INSTALL_HOOK_OTHER=fn      call after the chosen model loader
-#                                   completes. Used for tts piper voice
-#                                   file download on non-arm64.
+#   PRE_CHECK_FFMPEG=1            -- require ffmpeg on PATH.
+#   REQUIRED_PYTHON_ARCH="arm64"  -- reject non-matching interpreters
+#                                   before touching venv (#1061).
+#   MODEL_LOADER_ARM64="snapshot" -- model loader (snapshot|faster_whisper|skip).
+#   MODEL_LOADER_OTHER="snapshot"    Defaults to "snapshot" each.
+#   POST_INSTALL_HOOK_ARM64=fn    -- hook after model load (tts piper voice).
+#   POST_INSTALL_HOOK_OTHER=fn
 #
 # After sourcing, caller MUST call `install_service_main`.
 
@@ -75,9 +60,14 @@ install_service_main() {
   : "${PIP_DEPS_ARM64:?install-template: PIP_DEPS_ARM64 is required (empty string OK if unused)}"
   : "${PIP_DEPS_OTHER:?install-template: PIP_DEPS_OTHER is required (empty string OK if unused)}"
 
-  # 1. Prereqs: python + disk. Network checks run after manual
-  # download-source overrides so offline/mirror installs can preflight
-  # against the operator-selected endpoint.
+  # 0.5. Early hardware reject for REQUIRED_PYTHON_ARCH (#1061).
+  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ]; then
+    local _hw="$(uname -m)"; [ "$(uname -s)" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$' && _hw="arm64"
+    [ "$REQUIRED_PYTHON_ARCH" = "arm64" ] && [ "$_hw" != "arm64" ] \
+      && { echo "ERROR: $SERVICE_LABEL requires arm64 hardware (MLX)." >&2; exit 1; }
+  fi
+
+  # 1. Prereqs: python + disk.
   # shellcheck source=./prereq-check.sh
   source "$script_dir/prereq-check.sh"
   check_python3
@@ -91,14 +81,50 @@ install_service_main() {
     source "$script_dir/../download-source-overrides.sh"
     apply_manual_download_source_overrides
   fi
-  check_network
 
   # 3. Platform detection -- picks the deps + model loader.
-  local platform arch
+  # Two separate arch signals (#1061):
+  #   - Hardware arch: sysctl on macOS for true Silicon detection even
+  #     under Rosetta (matches TypeScript environment-detector fix).
+  #   - Python interpreter arch: from python-resolve.sh (RESOLVED_PYTHON_ARCH,
+  #     set by check_python3 above).
+  # MLX packages require BOTH arm64 hardware AND an arm64 Python interpreter.
+  # An x86_64 Python on arm64 hardware would get arm64-only wheels that
+  # fail to load -- fall back to non-MLX deps and tell the user how to fix.
+  local platform hw_arch python_arch
   platform="$(uname -s)"
-  arch="$(uname -m)"
+  python_arch="${RESOLVED_PYTHON_ARCH:-unknown}"
+  if [ "$platform" = "Darwin" ] && sysctl -n hw.optional.arm64 2>/dev/null | grep -q '^1$'; then
+    hw_arch="arm64"
+  else
+    hw_arch="$(uname -m)"
+  fi
   local is_darwin_arm64=0
-  [ "$platform" = "Darwin" ] && [ "$arch" = "arm64" ] && is_darwin_arm64=1
+  if [ "$platform" = "Darwin" ] && [ "$hw_arch" = "arm64" ]; then
+    if [ "$python_arch" = "arm64" ] || [ "$python_arch" = "aarch64" ]; then
+      is_darwin_arm64=1
+    else
+      echo "  WARNING: Apple Silicon hardware but Python interpreter is ${python_arch}." >&2
+      echo "  MLX packages require native arm64 Python. Using non-MLX dependencies." >&2
+      echo "  To fix: install arm64 Python (e.g. 'brew install python@3.12' in a native terminal)." >&2
+    fi
+  fi
+
+  # 3.5. Model-arch gate (#1061): override arch if existing venv matches.
+  if [ -n "${REQUIRED_PYTHON_ARCH:-}" ] && [ "$is_darwin_arm64" != "1" ]; then
+    local _vd="${CAT_CAFE_HOME}/${VENV_NAME}" _va="unknown"
+    [ -x "$_vd/bin/python3" ] && _va="$("$_vd/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+    if { [ "$_va" = "arm64" ] || [ "$_va" = "aarch64" ]; } && [ "$REQUIRED_PYTHON_ARCH" = "arm64" ]; then
+      is_darwin_arm64=1; python_arch="$_va"; RESOLVED_PYTHON_ARCH="$_va"
+      echo "  Existing venv ($VENV_NAME) is arm64; using for MLX model." >&2
+    else
+      echo "ERROR: $SERVICE_LABEL needs arm64 Python (MLX), resolved=${python_arch}. Fix: brew install python@3.12" >&2
+      exit 1
+    fi
+  fi
+
+  # 3.7. Network prereq -- after arch gate; sets PIP_INDEX_URL etc. (#1061).
+  check_network
 
   # 4. Pre-checks (optional binary requirements).
   if [ "${PRE_CHECK_FFMPEG:-0}" = "1" ]; then
@@ -112,8 +138,18 @@ install_service_main() {
     fi
   fi
 
-  # 5. Venv create (idempotent).
+  # 5. Venv create (idempotent) with architecture reconciliation (#1061).
+  # Stale venv may have wrong-arch Python (Rosetta->native); detect + rebuild.
   local venv_dir="${CAT_CAFE_HOME}/${VENV_NAME}"
+  if [ -d "$venv_dir" ] && [ -x "$venv_dir/bin/python3" ]; then
+    local venv_arch
+    venv_arch="$("$venv_dir/bin/python3" -c 'import platform; print(platform.machine().lower())' 2>/dev/null || echo unknown)"
+    if [ "$venv_arch" != "unknown" ] && [ "$RESOLVED_PYTHON_ARCH" != "unknown" ] \
+       && [ "$venv_arch" != "$RESOLVED_PYTHON_ARCH" ]; then
+      echo "  Venv arch ($venv_arch) != resolved ($RESOLVED_PYTHON_ARCH); rebuilding..." >&2
+      rm -rf "$venv_dir"
+    fi
+  fi
   if [ ! -d "$venv_dir" ]; then
     echo "  Creating venv: $venv_dir ..."
     "$PYTHON3" -m venv "$venv_dir" || { echo "ERROR: venv creation failed" >&2; exit 1; }
@@ -169,18 +205,10 @@ install_service_main() {
 
 _install_template_load_model() {
   # Args: venv_dir, loader, model_id
-  # Runs the venv Python with explicit retry + HF_HUB_DOWNLOAD_TIMEOUT=60.
-  # Single inline Python script per loader because we want both retry +
-  # loader-specific entry point (snapshot_download vs WhisperModel)
-  # without spawning multiple processes.
-  #
-  # Proxy: prereq-check.sh already decided whether HuggingFace needs
-  # the system proxy (HF probe via candidate -> exports
-  # _CATCAFE_HF_PROXY_FOR_DOWNLOAD). We just consume that decision
-  # here, per-call, so pip install (earlier step) goes direct via the
-  # NO_PROXY classification and only HF model download gets the
-  # proxy. No second detection inside Python -- single source of
-  # truth lives in prereq-check.
+  # Runs venv Python with retry + HF_HUB_DOWNLOAD_TIMEOUT=60.
+  # Inline Python per loader for retry + loader-specific entry point.
+  # Proxy: prereq-check.sh exports _CATCAFE_HF_PROXY_FOR_DOWNLOAD;
+  # we consume it per-call so only HF download gets the proxy.
   local venv_dir="$1"
   local loader="$2"
   local model_id="$3"

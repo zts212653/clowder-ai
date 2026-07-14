@@ -314,8 +314,9 @@ These services are disabled by default. Set the corresponding `*_ENABLED=1` flag
 ./scripts/tts-server.sh                    # default: Qwen3-TTS (三猫声线)
 TTS_PROVIDER=edge-tts ./scripts/tts-server.sh  # edge-tts fallback (no GPU needed)
 
-# ASR (Speech-to-Text) — requires Python 3 + ffmpeg
-./scripts/qwen3-asr-server.sh             # Qwen3-ASR server
+# ASR (Speech-to-Text) — requires Python 3 + ffmpeg, unified whisper-stt service
+WHISPER_MODEL=mlx-community/Qwen3-ASR-1.7B-8bit ./scripts/services/whisper-server.sh  # Qwen3-ASR
+WHISPER_MODEL=mlx-community/whisper-large-v3-turbo ./scripts/services/whisper-server.sh # Whisper
 ```
 
 > **System dependency**: `ffmpeg` is required for audio processing. Install with `brew install ffmpeg` (macOS) or `apt install ffmpeg` (Linux).
