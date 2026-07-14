@@ -1609,6 +1609,57 @@ describe('QueueProcessor', () => {
     assert.ok(failedUpdate.arguments[1].error, 'should include error message');
   });
 
+  it('#1145: ensureTerminalStatus backstop writes failed when catch-block update throws', async () => {
+    let updateCallCount = 0;
+    const failDeps = stubDeps({
+      router: {
+        routeExecution: mock.fn(async function* () {
+          throw new Error('route boom');
+        }),
+        ackCollectedCursors: mock.fn(async () => {}),
+      },
+      invocationRecordStore: {
+        create: mock.fn(async () => ({ outcome: 'created', invocationId: 'inv-backstop' })),
+        update: mock.fn(async (_id, patch) => {
+          updateCallCount++;
+          // First update (catch block status=failed) throws → backstop should fire
+          if (updateCallCount === 1 && patch?.status === 'failed') {
+            throw new Error('Redis blip');
+          }
+          // Second update (ensureTerminalStatus CAS) succeeds
+        }),
+        get: mock.fn(async (id) => {
+          // Return a record still in 'running' so ensureTerminalStatus CAS fires
+          if (id === 'inv-backstop') return { invocationId: id, status: 'running' };
+          return null;
+        }),
+      },
+    });
+    const failProcessor = new QueueProcessor(failDeps);
+
+    const entry = enqueueEntry(failDeps.queue);
+    failDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-1');
+
+    await failProcessor.processNext('t1', 'u1');
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The first update (catch block) should have thrown
+    const updateCalls = failDeps.invocationRecordStore.update.mock.calls;
+    assert.ok(updateCalls.length >= 2, `expected ≥2 update calls, got ${updateCalls.length}`);
+
+    // The second update should be the CAS backstop from ensureTerminalStatus
+    const casUpdate = updateCalls.find(
+      (c) => c.arguments[1]?.expectedStatus === 'running' && c.arguments[1]?.status === 'failed',
+    );
+    assert.ok(casUpdate, 'ensureTerminalStatus CAS backstop should write failed with expectedStatus=running');
+
+    // get() should have been called by ensureTerminalStatus
+    assert.ok(
+      failDeps.invocationRecordStore.get.mock.calls.length > 0,
+      'ensureTerminalStatus should read the record via get()',
+    );
+  });
+
   // ── F039 remaining bugfix: queue execution should include contentBlocks ──
 
   it('executeEntry passes contentBlocks from messageId to routeExecution', async () => {
