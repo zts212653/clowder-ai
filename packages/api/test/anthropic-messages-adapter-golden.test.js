@@ -371,9 +371,7 @@ describe('AnthropicMessagesAdapter: malformed frame fails closed', () => {
     assert.ok(error, 'must emit stream_error on malformed frame');
     assert.match(error.error, /malformed/i);
 
-    const toolBlock = events.find(
-      (e) => e.type === 'content_block_complete' && e.block?.type === 'tool_call',
-    );
+    const toolBlock = events.find((e) => e.type === 'content_block_complete' && e.block?.type === 'tool_call');
     assert.equal(toolBlock, undefined, 'tool_call must not be emitted after parse error');
   });
 });

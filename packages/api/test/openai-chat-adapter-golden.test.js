@@ -309,7 +309,18 @@ describe('OpenAIChatAdapter: missing finish_reason suppresses tool calls', () =>
   test('tool-call deltas + [DONE] without finish_reason emits stream_error, no tool_call', async () => {
     const adapter = new OpenAIChatAdapter();
     const stream = [
-      sse({ id: '1', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'write_file', arguments: '{"path":"a.txt"}' } }] }, finish_reason: null }] }),
+      sse({
+        id: '1',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_1', function: { name: 'write_file', arguments: '{"path":"a.txt"}' } }],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
       // [DONE] without any chunk carrying finish_reason
       sse('[DONE]'),
     ].join('');
@@ -328,7 +339,18 @@ describe('OpenAIChatAdapter: missing finish_reason suppresses tool calls', () =>
   test('tool-call deltas with finish_reason emits tool_call normally', async () => {
     const adapter = new OpenAIChatAdapter();
     const stream = [
-      sse({ id: '1', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }] }, finish_reason: null }] }),
+      sse({
+        id: '1',
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }],
+            },
+            finish_reason: null,
+          },
+        ],
+      }),
       sse({ id: '1', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
       sse('[DONE]'),
     ].join('');
