@@ -310,20 +310,12 @@ describe('Thread API', () => {
     assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
   });
 
-  it('GET /api/threads remaps a legacy runtime projectPath filter after migration', async () => {
+  it('GET /api/threads migrates a legacy runtime thread on the first filtered request', async () => {
     const runtimeRoot = await createTempWorkspace();
     const workspaceRoot = await createTempWorkspace();
     process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
     process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
     const legacyThread = threadStore.create('alice', 'Filtered legacy runtime thread', runtimeRoot);
-
-    const migrateRes = await app.inject({
-      method: 'GET',
-      url: '/api/threads',
-      headers: { 'x-cat-cafe-user': 'alice' },
-    });
-    assert.equal(migrateRes.statusCode, 200);
-    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
 
     const filteredRes = await app.inject({
       method: 'GET',
@@ -334,6 +326,7 @@ describe('Thread API', () => {
     assert.equal(filteredRes.statusCode, 200);
     const filteredIds = JSON.parse(filteredRes.body).threads.map((thread) => thread.id);
     assert.ok(filteredIds.includes(legacyThread.id));
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
   });
 
   it('GET /api/threads resets a stale runtime descendant to the safe default project', async () => {

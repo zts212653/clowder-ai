@@ -70,15 +70,14 @@ export async function resolvePersistentProjectPathDetailed(
   rawPath: string,
   options: PersistentProjectPathOptions = {},
 ): Promise<PersistentProjectPathResult> {
-  const target = await validateProjectPathDetailed(rawPath, options);
-  if (!target.ok) return target;
-
   const runtimeRootRaw = options.runtimeRoot ?? process.env.CAT_CAFE_RUNTIME_ROOT;
-  if (!runtimeRootRaw) return target;
+  if (!runtimeRootRaw) return validateProjectPathDetailed(rawPath, options);
 
   // Runtime is an internal disposable checkout, not a user-selectable project.
-  // Canonicalize it without applying PROJECT_ALLOWED_ROOTS, then apply project
-  // policy only to the requested target and persistent workspace destination.
+  // Canonicalize both sides without applying PROJECT_ALLOWED_ROOTS so a runtime
+  // input can be identified before project policy is applied to its destination.
+  const target = await resolveInternalDirectoryPath(rawPath, options);
+  if (!target.ok) return target;
   const runtimeRoot = await resolveInternalDirectoryPath(runtimeRootRaw, options);
   if (!runtimeRoot.ok) {
     return {
@@ -87,7 +86,9 @@ export async function resolvePersistentProjectPathDetailed(
       message: `CAT_CAFE_RUNTIME_ROOT is invalid: ${runtimeRoot.message ?? runtimeRoot.reason}`,
     };
   }
-  if (!isPathUnderRoots(target.path, [runtimeRoot.path])) return target;
+  if (!isPathUnderRoots(target.path, [runtimeRoot.path])) {
+    return validateProjectPathDetailed(target.path, options);
+  }
 
   const workspaceRootRaw = options.workspaceRoot ?? process.env.CAT_CAFE_WORKSPACE_ROOT;
   if (!workspaceRootRaw) {
@@ -106,7 +107,9 @@ export async function resolvePersistentProjectPathDetailed(
       message: `CAT_CAFE_WORKSPACE_ROOT is invalid: ${workspaceRoot.message ?? workspaceRoot.reason}`,
     };
   }
-  if (pathsEqual(runtimeRoot.path, workspaceRoot.path)) return target;
+  if (pathsEqual(runtimeRoot.path, workspaceRoot.path)) {
+    return validateProjectPathDetailed(target.path, options);
+  }
 
   return mapRuntimeTarget(target.path, runtimeRoot.path, workspaceRoot.path, options);
 }
@@ -193,7 +196,7 @@ export async function validateExternalProjectPathDetailed(
   ].filter((root): root is string => Boolean(root));
   const ownedRoots: string[] = [];
   for (const rootInput of rootInputs) {
-    const root = await validateProjectPathDetailed(rootInput, options);
+    const root = await resolveInternalDirectoryPath(rootInput, options);
     if (!root.ok) {
       return {
         ok: false,

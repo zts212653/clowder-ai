@@ -297,6 +297,24 @@ describe('resolvePersistentProjectPathDetailed', () => {
     }
   });
 
+  it('remaps a runtime target before applying the project allowlist to the workspace', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(workspaceRoot);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(runtimePackage, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, {
+        ok: true,
+        path: realpathSync(workspacePackage),
+        remappedFrom: realpathSync(runtimePackage),
+      });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+
   it('fails closed for a missing stored path lexically inside runtime', async () => {
     assert.equal(await migrateStoredProjectPath(join(runtimeRoot, 'missing'), { runtimeRoot, workspaceRoot }), null);
   });
@@ -335,6 +353,23 @@ describe('resolvePersistentProjectPathDetailed', () => {
     });
 
     assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+  });
+
+  it('does not apply the project allowlist to internal governance exclusion roots', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
+        runtimeRoot,
+        workspaceRoot,
+      });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
   });
 });
 

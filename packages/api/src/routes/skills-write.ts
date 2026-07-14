@@ -21,7 +21,7 @@ import { resolveOwnerGate } from '../utils/owner-gate.js';
 import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
 import { resolveSessionUserId } from '../utils/request-identity.js';
-import { buildSkillMountTargets, createSkillSymlink, resolveMainRepoPath } from '../utils/skill-mount.js';
+import { buildSkillMountTargets, createSkillSymlink } from '../utils/skill-mount.js';
 import { listSourceSkillNames } from '../utils/skill-source.js';
 import { resolveSkillsSourceDir } from './skills.js';
 
@@ -71,9 +71,8 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
     }
 
     return withCapabilityLock(projectRoot, async () => {
-      const mainRoot = opts.mainProjectRoot ?? (await resolveMainRepoPath());
       const [mountRules, globalConfig] = await Promise.all([
-        readMountRules(projectRoot, mainRoot),
+        readMountRules(projectRoot, globalProjectRoot),
         readCapabilitiesConfig(globalProjectRoot),
       ]);
 
@@ -200,8 +199,7 @@ export const skillsWriteRoutes: FastifyPluginAsync<SkillsWriteRouteOptions> = as
     }
 
     return withCapabilityLock(projectRoot, async () => {
-      const mainRoot = opts.mainProjectRoot ?? (await resolveMainRepoPath());
-      const mountRules = await readMountRules(projectRoot, mainRoot);
+      const mountRules = await readMountRules(projectRoot, globalProjectRoot);
       const globalConfig = await readCapabilitiesConfig(globalProjectRoot);
       const globalDisabledSkills = new Set<string>();
       const globalMountPaths = new Map<string, readonly string[]>();

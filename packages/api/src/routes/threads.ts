@@ -458,8 +458,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     const migratedProjectPath = projectPath ? await migrateStoredProjectPath(projectPath) : undefined;
     if (projectPath && migratedProjectPath === null) return { threads: [] };
-    let threads = migratedProjectPath
-      ? await threadStore.listByProject(userId, migratedProjectPath)
+    const projectPathMatches =
+      projectPath && migratedProjectPath
+        ? await Promise.all(
+            [...new Set([projectPath, migratedProjectPath])].map((path) => threadStore.listByProject(userId, path)),
+          )
+        : null;
+    let threads = projectPathMatches
+      ? [...new Map(projectPathMatches.flat().map((thread) => [thread.id, thread] as const)).values()]
       : await threadStore.list(userId);
     threads = await Promise.all(
       threads.map(async (thread) =>
