@@ -117,15 +117,9 @@ export async function checkMcpProject(
     }
   }
 
-  // 2. project-orphan: in project but not in global → stale cascaded entry.
-  // Note: the original filter excluded source='external' assuming project-local
-  // MCP installs were possible. Per F249 spec review, there is NO project-level
-  // MCP install path — all project entries come from global cascade or sync.
-  // Therefore ALL orphans (including external) must be detected. When project-
-  // level install is added in the future, a dedicated `scope` field should
-  // distinguish locally-installed entries from cascaded ones.
+  // 2. project-orphan: in project (non-external) but not in global
   for (const [mcpId, projectEntry] of projectMcpMap) {
-    if (!globalMcpMap.has(mcpId)) {
+    if (!globalMcpMap.has(mcpId) && projectEntry.source !== 'external') {
       issues.push({
         type: 'project-orphan',
         mcpId,

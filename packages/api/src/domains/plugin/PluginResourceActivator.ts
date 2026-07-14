@@ -824,7 +824,7 @@ export class PluginResourceActivator {
       command: resource.command!,
       args: resolvedArgs,
       transport: (resource.transport as 'stdio' | 'streamableHttp') ?? 'stdio',
-      workingDir: runtimeRoot,
+      workingDir: join(this.deps.pluginsDir, manifest.id),
       ...this.buildMcpEnv(manifest),
     };
   }

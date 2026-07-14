@@ -469,19 +469,20 @@ describe('mcp-sync-engine: syncMcpProject', () => {
     assert.equal(mcpEntries.length, 0);
   });
 
-  it('removes external-source orphan entries from project (no project-level install path)', async () => {
-    // F249 spec review: all project MCP entries come from global cascade.
-    // External entries absent from global are stale and must be cleaned up.
+  it('preserves external-source entries during orphan cleanup (project-local installs)', async () => {
+    // External MCPs can be installed project-locally via POST /api/capabilities/mcp/install
+    // with projectPath — these are legitimate and must not be treated as orphans.
     writeCapConfig(globalRoot, capConfig([]));
     writeCapConfig(projectRoot, capConfig([mcpEntry('ext-mcp', { source: 'external' })]));
 
     const result = await syncMcpProject(projectRoot, globalRoot, { globalMcpEntries: [] });
 
-    assert.deepEqual(result.removed, ['ext-mcp']);
+    assert.deepEqual(result.removed, []);
 
     const written = readCapConfig(projectRoot);
     const mcpEntries = written.capabilities.filter((c) => c.type === 'mcp');
-    assert.equal(mcpEntries.length, 0);
+    assert.equal(mcpEntries.length, 1);
+    assert.equal(mcpEntries[0].id, 'ext-mcp');
   });
 });
 
