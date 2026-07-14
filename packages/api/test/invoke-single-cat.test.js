@@ -2588,6 +2588,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     // Must NOT match generic messages that happen to contain "interrupt" as a substring
     // in non-session context (e.g. developer instructions mentioning keyboard interrupts)
     assert.equal(classifyResumeFailure('upstream timeout'), null);
+    assert.equal(classifyResumeFailure('keyboard interrupt'), null);
+    assert.equal(classifyResumeFailure('process was interrupted by user'), null);
+    assert.equal(classifyResumeFailure('interrupted system call'), null);
   });
 
   it('isTransientCliExitCode1: context-overflow messages must NOT be treated as transient (bug: Codex duplicate user turn in rollout)', async () => {
@@ -6933,14 +6936,38 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       msgs.some((m) => m.type === 'done'),
       'service should be invoked',
     );
-    assert.equal(optionsSeen[0]?.livenessProbe?.stallAutoKill, true, 'cat invocations still opt into stall cleanup');
-    // #1145: Aligned to CLI_TIMEOUT_MS (30 min) — probe can't distinguish "waiting for API"
-    // from "truly stuck", so stall auto-kill should not fire before the CLI hard timeout.
+    assert.equal(
+      optionsSeen[0]?.livenessProbe?.stallAutoKill,
+      true,
+      'cat invocations still opt into stall cleanup (default CLI_TIMEOUT_MS)',
+    );
+    // #1145: stallWarningMs tracks resolved CLI_TIMEOUT_MS (default 30 min).
+    // buildStallAutoKillConfig(cliTimeoutMs) uses resolved value, not a hardcoded constant.
     assert.equal(
       optionsSeen[0]?.livenessProbe?.stallWarningMs,
       30 * 60_000,
-      'stall auto-kill threshold must equal CLI_TIMEOUT_MS (30 min) — no early false kills',
+      'default: stall threshold must equal DEFAULT_CLI_TIMEOUT_MS (30 min)',
     );
+  });
+
+  it('#1145: buildStallAutoKillConfig tracks custom CLI_TIMEOUT_MS and disables on 0', async () => {
+    const { buildStallAutoKillConfig } = await import(
+      '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js'
+    );
+    // Custom CLI_TIMEOUT_MS (e.g. 60 min)
+    const custom = buildStallAutoKillConfig(60 * 60_000);
+    assert.equal(custom.stallAutoKill, true, 'custom: stallAutoKill enabled');
+    assert.equal(custom.stallWarningMs, 60 * 60_000, 'custom: threshold tracks custom value');
+
+    // CLI_TIMEOUT_MS=0 (disabled) → stallAutoKill off
+    const disabled = buildStallAutoKillConfig(0);
+    assert.equal(disabled.stallAutoKill, false, 'disabled: stallAutoKill off when CLI_TIMEOUT_MS=0');
+    assert.equal(disabled.stallWarningMs, undefined, 'disabled: no stallWarningMs when off');
+
+    // Default fallback (negative → uses DEFAULT_CLI_TIMEOUT_MS internally)
+    const fallback = buildStallAutoKillConfig(-1);
+    assert.equal(fallback.stallAutoKill, true, 'fallback: stallAutoKill enabled');
+    assert.equal(fallback.stallWarningMs, 30 * 60_000, 'fallback: uses DEFAULT_CLI_TIMEOUT_MS');
   });
 
   it('F101: game thread projectPath (games/*) does not trigger governance gate', async () => {

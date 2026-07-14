@@ -1588,9 +1588,12 @@ export class QueueProcessor {
             { err: termErr, invocationId, feature: 'F194' },
             'F194 Z3 ensureTerminalStatus failed in QueueProcessor',
           );
-        } finally {
-          this.chainTracker.release(invocationId);
         }
+      }
+      // Always release tracker — must not depend on .get() guard above, otherwise
+      // every invocation leaks a Map entry when store lacks .get() (#1145 review P2).
+      if (invocationId) {
+        this.chainTracker.release(invocationId);
       }
 
       queue.removeProcessedAcrossUsers(threadId, entry.id);
