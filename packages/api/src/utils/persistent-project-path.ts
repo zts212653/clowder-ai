@@ -40,6 +40,31 @@ export interface PersistentProjectPathOptions {
   stat?: typeof stat;
 }
 
+type DirectoryPathResult =
+  | { ok: true; path: string }
+  | { ok: false; reason: Exclude<ProjectPathValidationFailureReason, 'denied_root'>; message?: string };
+
+function isStoredProjectPathSentinel(rawPath: string): boolean {
+  return rawPath === 'default' || rawPath.startsWith('games/');
+}
+
+async function resolveInternalDirectoryPath(
+  rawPath: string,
+  options: PersistentProjectPathOptions,
+): Promise<DirectoryPathResult> {
+  try {
+    const path = await (options.realpath ?? realpath)(resolve(rawPath));
+    const info = await (options.stat ?? stat)(path);
+    if (!info.isDirectory()) return { ok: false, reason: 'not_directory' };
+    return { ok: true, path };
+  } catch (err) {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : undefined;
+    const message = err instanceof Error ? err.message : undefined;
+    return { ok: false, reason: ['ENOENT', 'ENOTDIR'].includes(code ?? '') ? 'not_found' : 'io_error', message };
+  }
+}
+
 /** Map a runtime-root path to the same relative path in the workspace. */
 export async function resolvePersistentProjectPathDetailed(
   rawPath: string,
@@ -51,7 +76,10 @@ export async function resolvePersistentProjectPathDetailed(
   const runtimeRootRaw = options.runtimeRoot ?? process.env.CAT_CAFE_RUNTIME_ROOT;
   if (!runtimeRootRaw) return target;
 
-  const runtimeRoot = await validateProjectPathDetailed(runtimeRootRaw, options);
+  // Runtime is an internal disposable checkout, not a user-selectable project.
+  // Canonicalize it without applying PROJECT_ALLOWED_ROOTS, then apply project
+  // policy only to the requested target and persistent workspace destination.
+  const runtimeRoot = await resolveInternalDirectoryPath(runtimeRootRaw, options);
   if (!runtimeRoot.ok) {
     return {
       ok: false,
@@ -128,6 +156,8 @@ export async function migrateStoredProjectPath(
   rawPath: string,
   options: PersistentProjectPathOptions = {},
 ): Promise<string | null> {
+  if (isStoredProjectPathSentinel(rawPath)) return rawPath;
+
   const result = await resolvePersistentProjectPathDetailed(rawPath, options);
   if (result.ok) return result.remappedFrom ? result.path : rawPath;
 

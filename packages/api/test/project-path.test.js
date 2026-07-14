@@ -271,6 +271,32 @@ describe('resolvePersistentProjectPathDetailed', () => {
     assert.equal(await migrateStoredProjectPath(raw, { runtimeRoot, workspaceRoot }), raw);
   });
 
+  it('preserves virtual game project paths during stored ownership migration', async () => {
+    const virtualProjectPath = 'games/werewolf';
+
+    assert.equal(
+      await migrateStoredProjectPath(virtualProjectPath, {
+        runtimeRoot: process.cwd(),
+        workspaceRoot,
+      }),
+      virtualProjectPath,
+    );
+  });
+
+  it('does not require the internal runtime root to be project-allowlisted for an external target', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(externalProject, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+
   it('fails closed for a missing stored path lexically inside runtime', async () => {
     assert.equal(await migrateStoredProjectPath(join(runtimeRoot, 'missing'), { runtimeRoot, workspaceRoot }), null);
   });
