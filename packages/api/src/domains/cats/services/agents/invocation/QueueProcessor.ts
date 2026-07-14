@@ -215,6 +215,10 @@ export class QueueProcessor {
   /** F118 D4: max age before a processingSlot is considered zombie (default 2.5× CLI timeout = 75min) */
   private processingSlotTtlMs: number;
   private readonly sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
+  /** F220 2a (Sol R4): pending convergence retries, deduped by (threadId:userId:idempotencyKey).
+   *  Entries persist in memory until success or process restart (StartupReconciler covers that).
+   *  Exponential backoff: 30s → 60s → 120s (cap). Timers use unref(). */
+  private convergenceRetryRegistry = new Map<string, { attempt: number; timerId: ReturnType<typeof setTimeout> }>();
   /** #502 PR2: bounded auto-continuation guard, in-memory per process. */
   private continuationWindows = new Map<string, number[]>();
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
@@ -413,47 +417,76 @@ export class QueueProcessor {
             this.deps.log.warn({ threadId, catId, err }, '[F220 2a] dispatch after zombie convergence failed'),
           );
       },
-      // Sol R3 P2 durable retry: one-shot delayed retry so transient convergence
-      // failure doesn't leave stale processing entries permanently. Record is already
-      // terminal → no future zombie sweep will produce this zombie again.
+      // Sol R4 P2 durable retry: exponential backoff with dedup registry.
+      // Record is already terminal → no future zombie sweep; retries must be self-sustaining.
+      // Backoff: 30s → 60s → 120s (cap). Retries continue until entry cleaned or process restart.
       scheduleRetry: (threadId: string, catId: string, userId: string, idempotencyKey: string) => {
-        const RETRY_DELAY_MS = 30_000;
-        setTimeout(() => {
-          try {
-            const entries = this.deps.queue.list(threadId, userId);
-            let entry: (typeof entries)[number] | undefined;
-            if (idempotencyKey.startsWith('queue-')) {
-              entry = entries.find((e) => e.status === 'processing' && e.id === idempotencyKey.slice(6));
-            } else if (idempotencyKey.startsWith('connector-')) {
-              entry = entries.find((e) => e.status === 'processing' && e.messageId === idempotencyKey.slice(10));
+        const registryKey = `${threadId}:${userId}:${idempotencyKey}`;
+        // Dedup: skip if already registered (existing backoff chain handles it)
+        if (this.convergenceRetryRegistry.has(registryKey)) return;
+
+        const attemptRetry = (attempt: number) => {
+          const BASE_DELAY_MS = 30_000;
+          const MAX_DELAY_MS = 120_000;
+          const delay = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+          const timerId = setTimeout(() => {
+            try {
+              const entries = this.deps.queue.list(threadId, userId);
+              let entry: (typeof entries)[number] | undefined;
+              if (idempotencyKey.startsWith('queue-')) {
+                entry = entries.find((e) => e.status === 'processing' && e.id === idempotencyKey.slice(6));
+              } else if (idempotencyKey.startsWith('connector-')) {
+                entry = entries.find((e) => e.status === 'processing' && e.messageId === idempotencyKey.slice(10));
+              }
+              if (!entry) {
+                this.convergenceRetryRegistry.delete(registryKey);
+                return; // already cleaned up by another path
+              }
+              const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
+              if (!removed) {
+                this.convergenceRetryRegistry.delete(registryKey);
+                return;
+              }
+              const slotCat = entry.targetCats[0] ?? catId;
+              this.processingSlots.delete(QueueProcessor.slotKey(threadId, slotCat));
+              this.deps.log.info(
+                { threadId, catId, userId, entryId: entry.id, idempotencyKey, attempt },
+                '[F220 2a] durable retry: removed stale processing entry + released slot',
+              );
+              emitQueueUpdated(
+                this.deps.socketManager,
+                userId,
+                threadId,
+                this.deps.queue.list(threadId, userId),
+                this.deps.messageStore,
+                'zombie_convergence_retry',
+              ).catch(() => {});
+              this.tryExecuteNextAcrossUsers(threadId, slotCat)
+                .then(() => this.tryAutoExecute(threadId))
+                .catch(() => {});
+              this.convergenceRetryRegistry.delete(registryKey);
+            } catch (err) {
+              this.deps.log.warn(
+                {
+                  threadId,
+                  catId,
+                  userId,
+                  idempotencyKey,
+                  attempt,
+                  err: err instanceof Error ? err.message : String(err),
+                },
+                '[F220 2a] durable retry attempt failed — rescheduling with backoff',
+              );
+              // Re-schedule with incremented attempt (backoff increases)
+              attemptRetry(attempt + 1);
             }
-            if (!entry) return; // already cleaned up by another path
-            const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
-            if (!removed) return;
-            const slotCat = entry.targetCats[0] ?? catId;
-            this.processingSlots.delete(QueueProcessor.slotKey(threadId, slotCat));
-            this.deps.log.info(
-              { threadId, catId, userId, entryId: entry.id, idempotencyKey },
-              '[F220 2a] durable retry: removed stale processing entry + released slot',
-            );
-            emitQueueUpdated(
-              this.deps.socketManager,
-              userId,
-              threadId,
-              this.deps.queue.list(threadId, userId),
-              this.deps.messageStore,
-              'zombie_convergence_retry',
-            ).catch(() => {});
-            this.tryExecuteNextAcrossUsers(threadId, slotCat)
-              .then(() => this.tryAutoExecute(threadId))
-              .catch(() => {});
-          } catch (err) {
-            this.deps.log.warn(
-              { threadId, catId, userId, idempotencyKey, err },
-              '[F220 2a] durable retry failed — stale entry persists until restart',
-            );
-          }
-        }, RETRY_DELAY_MS);
+          }, delay);
+          // unref() so timer doesn't prevent Node.js process exit (Sol R4)
+          if (typeof timerId === 'object' && typeof timerId.unref === 'function') timerId.unref();
+          this.convergenceRetryRegistry.set(registryKey, { attempt, timerId });
+        };
+
+        attemptRetry(0);
       },
     };
   }

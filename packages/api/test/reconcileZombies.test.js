@@ -914,6 +914,174 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     assert.equal(result.errors, 1, 'convergence failure in terminal path must count as error');
   });
 
+  it('Sol R4 P2: durable retry with backoff — failure → retry failure → later success removes entry', async (t) => {
+    // Sol R4 requirement: retry that fails again must be re-discoverable (not fire-and-forget).
+    // Verify: exponential backoff (30s → 60s → 120s), dedup, and eventual convergence.
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const queue = new InvocationQueue();
+    const log = makeRecordingLogger();
+
+    const qp = new QueueProcessor({
+      queue,
+      invocationTracker: {
+        start: () => ({}),
+        startAll: () => ({}),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: 'test-inv' }),
+        update: async () => {},
+      },
+      router: {
+        routeExecution: async () => ({ status: 'succeeded', response: '' }),
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        list: () => [],
+        get: () => null,
+        create: async () => ({ id: 'm1' }),
+        update: async () => {},
+        delete: async () => {},
+      },
+      log,
+    });
+
+    // Set up a stale processing entry
+    const staleResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'stale @codex',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    queue.markProcessingById('t1', staleResult.entry.id);
+    assert.equal(
+      queue.list('t1', 'u1').filter((e) => e.status === 'processing').length,
+      1,
+      'precondition: 1 processing',
+    );
+
+    // Patch removeProcessed to fail on first 2 attempts, succeed on 3rd
+    let attempt = 0;
+    const origRemoveProcessed = queue.removeProcessed.bind(queue);
+    queue.removeProcessed = (...args) => {
+      attempt++;
+      if (attempt <= 2) throw new Error(`transient failure #${attempt}`);
+      return origRemoveProcessed(...args);
+    };
+
+    const adapter = qp.buildQueueConvergence();
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${staleResult.entry.id}`);
+
+    // Dedup: second call with same key must not create a new timer
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${staleResult.entry.id}`);
+
+    // Attempt 0 at 30s (30_000 * 2^0) — fails
+    t.mock.timers.tick(30_000);
+    assert.equal(attempt, 1, '1st retry attempted at 30s');
+    assert.equal(queue.list('t1', 'u1').length, 1, 'entry survives 1st failure');
+    const warn1 = log.records.warn.find((a) => a[1]?.includes?.('rescheduling with backoff'));
+    assert.ok(warn1, 'backoff warning logged on 1st failure');
+    assert.equal(warn1[0].attempt, 0, 'attempt 0 logged');
+
+    // Attempt 1 at 60s (30_000 * 2^1) — fails
+    t.mock.timers.tick(60_000);
+    assert.equal(attempt, 2, '2nd retry attempted at 60s');
+    assert.equal(queue.list('t1', 'u1').length, 1, 'entry survives 2nd failure');
+
+    // Attempt 2 at 120s (30_000 * 2^2, capped at 120s) — succeeds
+    t.mock.timers.tick(120_000);
+    assert.equal(attempt, 3, '3rd retry succeeds at 120s');
+    assert.equal(queue.list('t1', 'u1').length, 0, 'stale entry finally removed on 3rd attempt');
+
+    // Success logged with attempt number
+    const successLog = log.records.info.find((a) => a[1]?.includes?.('durable retry: removed stale'));
+    assert.ok(successLog, 'success logged');
+    assert.equal(successLog[0].attempt, 2, 'attempt 2 (0-indexed) logged on success');
+  });
+
+  it('Sol R4 P2: durable retry dedup — concurrent scheduleRetry for different keys both run', async (t) => {
+    // Two different idempotencyKeys must both schedule independently (no cross-key dedup).
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+
+    const queue = new InvocationQueue();
+    const log = makeRecordingLogger();
+
+    const qp = new QueueProcessor({
+      queue,
+      invocationTracker: {
+        start: () => ({}),
+        startAll: () => ({}),
+        complete: () => {},
+        completeAll: () => {},
+        has: () => false,
+      },
+      invocationRecordStore: {
+        create: async () => ({ outcome: 'created', invocationId: 'test-inv' }),
+        update: async () => {},
+      },
+      router: {
+        routeExecution: async () => ({ status: 'succeeded', response: '' }),
+      },
+      socketManager: {
+        broadcastAgentMessage: () => {},
+        broadcastToRoom: () => {},
+        emitToUser: () => {},
+      },
+      messageStore: {
+        list: () => [],
+        get: () => null,
+        create: async () => ({ id: 'm1' }),
+        update: async () => {},
+        delete: async () => {},
+      },
+      log,
+    });
+
+    // Set up two stale processing entries
+    const entry1 = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'stale1 @codex',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const entry2 = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'stale2 @codex',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    queue.markProcessingById('t1', entry1.entry.id);
+    queue.markProcessingById('t1', entry2.entry.id);
+    assert.equal(queue.list('t1', 'u1').filter((e) => e.status === 'processing').length, 2);
+
+    const adapter = qp.buildQueueConvergence();
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${entry1.entry.id}`);
+    adapter.scheduleRetry('t1', 'codex', 'u1', `queue-${entry2.entry.id}`);
+
+    // Both fire at 30s
+    t.mock.timers.tick(30_000);
+    assert.equal(queue.list('t1', 'u1').length, 0, 'both stale entries removed');
+  });
+
   it('Sol R2 regression: pinned-continuation zombie cleanup must not delete older follow-up dispatched by winner', async () => {
     // Sol's exact reproduction scenario (R2 P1-1):
     // 1. Pinned continuation zombie is cleaned → winner's fair-drain dispatches

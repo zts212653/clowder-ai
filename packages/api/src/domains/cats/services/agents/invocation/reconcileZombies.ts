@@ -43,9 +43,10 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  * - tryDispatchNext mirrors the normal completion path: cross-user fair drain
  *   (tryExecuteNextAcrossUsers) + auto-execute scan, so both user/connector
  *   entries and agent entries get dispatched (Sol review P1-2).
- * - scheduleRetry provides durable recovery (Sol R3 P2): when convergence fails
- *   transiently, a one-shot delayed retry runs independently of future zombie
- *   sweeps (which won't re-surface an already-terminal record).
+ * - scheduleRetry provides durable recovery with exponential backoff (Sol R4 P2):
+ *   when convergence fails transiently, retries are scheduled with backoff
+ *   (30s → 60s → 120s cap), deduped by (threadId, userId, idempotencyKey).
+ *   Retries continue until entry removed or process restart. Timers use unref().
  */
 export interface QueueConvergence {
   /** Find and remove the exact stale processing entry that produced this zombie.
@@ -66,10 +67,13 @@ export interface QueueConvergence {
    *  Uses the normal completion path (cross-user fair drain + auto-execute scan)
    *  so both user/connector and agent entries get dispatched. */
   tryDispatchNext(threadId: string, catId: string): void;
-  /** Schedule a one-shot delayed retry of queue convergence (Sol R3 P2 durable retry).
-   *  Called when removeStaleProcessing fails transiently. Ensures recovery doesn't
-   *  depend on a concurrent loser or future zombie sweep (which won't re-surface
-   *  already-terminal records). Optional — callers degrade gracefully if absent. */
+  /** Schedule durable retry of queue convergence with exponential backoff (Sol R4 P2).
+   *  Called when removeStaleProcessing fails transiently. The adapter implements:
+   *  - Dedup registry keyed by (threadId, userId, idempotencyKey) — no double-scheduling
+   *  - Exponential backoff: 30s → 60s → 120s (cap) — retries continue until the stale
+   *    entry is removed or the process restarts (StartupReconciler covers that case)
+   *  - Timer unref() — won't prevent Node.js process exit
+   *  Optional — callers degrade gracefully if absent. */
   scheduleRetry?(threadId: string, catId: string, userId: string, idempotencyKey: string): void;
 }
 
