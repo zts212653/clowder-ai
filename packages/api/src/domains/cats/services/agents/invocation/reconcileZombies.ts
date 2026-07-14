@@ -33,10 +33,14 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  * Design notes:
  * - removeStaleProcessing accepts userId to scope the queue lookup to the
  *   zombie owner's entries, preventing cross-user entry deletion in shared threads.
- * - zombieCreatedAt provides a generation identity guard (Sol review P1-1):
- *   only entries created at or before the zombie's invocation creation time
- *   are eligible for removal. This prevents deleting a NEW live processing
- *   entry when old and new same-cat generations coexist (F194 Phase Z).
+ * - zombieEntryId provides precise entry identity (Sol review R2 P1-1):
+ *   extracted from the zombie invocation's `idempotencyKey = queue-${entry.id}`.
+ *   Only the EXACT queue entry that created this zombie is eligible for removal.
+ *   This prevents the false-positive deletion proven by Sol: a legitimate older
+ *   user follow-up dispatched by the winner's fair-drain would satisfy a time-based
+ *   guard (createdAt <= zombieCreatedAt) but is a DIFFERENT entry.
+ * - When zombieEntryId is absent (non-queue-sourced invocations, e.g. connector),
+ *   removeStaleProcessing returns {removed: false} — safe default, no false positives.
  * - No bulk emitQueueUpdated broadcast: that would wipe other users' queue state
  *   (frontend blindly replaces). The adapter emits per-user queue_updated after
  *   removal; dispatch emits its own events via the normal execution path.
@@ -45,17 +49,18 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  *   entries and agent entries get dispatched (Sol review P1-2).
  */
 export interface QueueConvergence {
-  /** Find and remove stale processing entry for this thread+cat, scoped to userId.
-   *  @param zombieCreatedAt — the zombie invocation's createdAt timestamp.
-   *    Only entries with createdAt <= this value are eligible for removal,
-   *    preventing deletion of newer live entries for the same cat.
+  /** Find and remove the exact stale processing entry that produced this zombie.
+   *  @param zombieEntryId — the queue entry ID extracted from the zombie invocation's
+   *    idempotencyKey (format: `queue-${entry.id}`). When provided, matches ONLY this
+   *    specific entry by ID. When absent (non-queue-sourced invocations), returns
+   *    {removed: false} to avoid false-positive deletion.
    *  Returns primaryCatId (targetCats[0]) so the caller can release the correct slot —
    *  processingSlots are keyed by primary target, not necessarily the zombie catId. */
   removeStaleProcessing(
     threadId: string,
     catId: string,
     userId: string,
-    zombieCreatedAt: number,
+    zombieEntryId?: string,
   ): { removed: boolean; entryId?: string; primaryCatId?: string };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
@@ -166,18 +171,21 @@ async function processZombie(
         const tp = await clearTaskProgress(deps.taskProgressStore, current.threadId, zombie, log);
         // P2-1 (Sol review): retry queue convergence in the terminal path.
         // Previously blocked (codex R6 P1) because cat-only matching could delete
-        // a NEW live entry. Now safe: P1-1's zombieCreatedAt age guard ensures
-        // only entries from the zombie's own generation match. If the CAS winner
-        // already cleaned the stale entry, removeStaleProcessing returns
-        // {removed: false} (idempotent).
+        // a NEW live entry. Now safe: P1-1's precise entry identity via
+        // idempotencyKey ensures only the zombie's own queue entry is removed.
+        // If the CAS winner already cleaned the stale entry,
+        // removeStaleProcessing returns {removed: false} (idempotent).
         let convergenceErrors = 0;
         if (deps.queueConvergence && zombie.catId) {
           try {
+            const zombieEntryId = current.idempotencyKey?.startsWith('queue-')
+              ? current.idempotencyKey.slice(6)
+              : undefined;
             const qr = deps.queueConvergence.removeStaleProcessing(
               current.threadId,
               zombie.catId,
               current.userId,
-              current.createdAt,
+              zombieEntryId,
             );
             if (qr.removed) {
               const slotCat = qr.primaryCatId ?? zombie.catId;
@@ -245,19 +253,25 @@ async function processZombie(
       );
     const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
     // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot.
+    // - zombieEntryId provides precise identity (Sol R2 P1-1): extract from the
+    //   invocation's idempotencyKey (format: "queue-${entry.id}") to match the EXACT
+    //   queue entry, not time-based approximation that can delete legitimate older entries.
     // - userId-scoped to prevent cross-user entry deletion (codex review R1 P2).
-    // - zombieCreatedAt age guard ensures only the zombie's own generation entry is
-    //   removed, not a newer live entry for the same cat (Sol review P1-1).
     // - tryDispatchNext uses cross-user fair drain so user/connector entries (like
     //   the original #972 @codex message) also get dispatched (Sol review P1-2).
     let convergenceErrors = 0;
     if (deps.queueConvergence && zombie.catId) {
       try {
+        // Extract exact queue entry ID from idempotencyKey (queue-${entry.id}).
+        // Connector-sourced invocations use "connector-${messageId}" → no match → safe skip.
+        const zombieEntryId = updated.idempotencyKey?.startsWith('queue-')
+          ? updated.idempotencyKey.slice(6)
+          : undefined;
         const qr = deps.queueConvergence.removeStaleProcessing(
           updated.threadId,
           zombie.catId,
           updated.userId,
-          updated.createdAt,
+          zombieEntryId,
         );
         if (qr.removed) {
           // Release by primaryCatId — processingSlots are keyed by targetCats[0],

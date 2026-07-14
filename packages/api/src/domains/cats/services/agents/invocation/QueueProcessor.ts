@@ -360,23 +360,22 @@ export class QueueProcessor {
    */
   buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
     return {
-      removeStaleProcessing: (threadId: string, catId: string, userId: string, zombieCreatedAt: number) => {
-        // User-scoped lookup: only find processing entries owned by the zombie's user.
-        // Prevents cross-user entry deletion when multiple users share a thread.
+      removeStaleProcessing: (threadId: string, catId: string, userId: string, zombieEntryId?: string) => {
+        // Sol R2 P1-1: precise entry identity — match by exact queue entry ID, not
+        // time-based approximation. The zombie's invocation was created with
+        // idempotencyKey = queue-${entry.id}, giving us the exact entry to remove.
+        // When zombieEntryId is absent (non-queue-sourced invocations), skip entirely
+        // to avoid false-positive deletion of legitimate entries.
+        if (!zombieEntryId) return { removed: false };
         const entries = this.deps.queue.list(threadId, userId);
-        // Sol P1-1: age guard — only match entries created at or before the zombie's
-        // invocation was created. A new live entry for the same cat would have
-        // createdAt > zombieCreatedAt and is thus protected from accidental deletion.
-        const entry = entries.find(
-          (e) => e.status === 'processing' && e.targetCats.includes(catId) && e.createdAt <= zombieCreatedAt,
-        );
+        const entry = entries.find((e) => e.status === 'processing' && e.id === zombieEntryId);
         if (!entry) return { removed: false };
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
         const primaryCatId = entry.targetCats[0];
         this.deps.log.info(
-          { threadId, catId, userId, entryId: entry.id, primaryCatId, zombieCreatedAt },
-          '[F220 2a] removed stale processing queue entry (user-scoped, age-guarded)',
+          { threadId, catId, userId, entryId: entry.id, primaryCatId, zombieEntryId },
+          '[F220 2a] removed stale processing queue entry (precise entry identity)',
         );
         // Emit per-user queue_updated so the frontend reflects the removal.
         // Fire-and-forget — best-effort UI consistency.

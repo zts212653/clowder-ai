@@ -8,10 +8,13 @@
  * - AC-B10: idempotent — second call on same zombie is a no-op (state machine guard)
  *
  * F220 Phase 2a (#972) — queue convergence regression tests:
- * - P1-1 (Sol review): age guard — only remove entries from zombie's generation
+ * - P1-1 (Sol R2): precise entry identity via idempotencyKey — only the zombie's own
+ *   queue entry is removed; older user follow-ups dispatched by the winner survive
  * - P1-2 (Sol review): fair dispatch — tryDispatchNext calls cross-user drain
  * - P2-1 (Sol review): convergence failure counted in errors; terminal-path retry safe
  * - P2-3 (Sol review): real adapter tests (InvocationQueue + buildQueueConvergence)
+ * - Sol R2 regression: pinned-continuation/older-follow-up scenario cannot delete
+ *   legitimate entries dispatched by the winner's fair-drain
  */
 
 import assert from 'node:assert/strict';
@@ -368,23 +371,23 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 // ── F220 Phase 2a: queue convergence — mock-based interface tests ──
 
 describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', () => {
-  it('#972: reconcileZombies calls queueConvergence with zombieCreatedAt age guard', async () => {
+  it('#972: reconcileZombies calls queueConvergence with precise entry identity (Sol R2 P1-1)', async () => {
     const store = new InvocationRecordStore();
+    // idempotencyKey follows real pattern: queue-${entry.id}
     const created = store.create({
       threadId: 't1',
       userId: 'u1',
       targetCats: ['opus'],
       intent: 'execute',
-      idempotencyKey: 'q-conv-1',
+      idempotencyKey: 'queue-stale-entry-1',
     });
     store.update(created.invocationId, { status: 'running' });
-    const invCreatedAt = store.get(created.invocationId).createdAt;
 
     // Track queueConvergence calls
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieCreatedAt) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieCreatedAt });
+      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
         return { removed: true, entryId: 'stale-entry-1', primaryCatId: 'opus' };
       },
       releaseSlot: (threadId, catId) => {
@@ -412,32 +415,75 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     assert.equal(removeCall.threadId, 't1');
     assert.equal(removeCall.catId, 'opus');
     assert.equal(removeCall.userId, 'u1', 'must pass userId for user-scoped lookup');
-    // P1-1: zombieCreatedAt must be the invocation record's createdAt
-    assert.equal(removeCall.zombieCreatedAt, invCreatedAt, 'must pass invocation createdAt as age guard');
+    // Sol R2 P1-1: precise entry identity extracted from idempotencyKey
+    assert.equal(removeCall.zombieEntryId, 'stale-entry-1', 'must extract entry ID from idempotencyKey queue-${id}');
     // P1-2: tryDispatchNext receives catId for cross-user fair drain
     const dispatchCall = convergenceCalls.find((c) => c.op === 'tryDispatchNext');
     assert.ok(dispatchCall, 'must kick queue after slot release');
     assert.equal(dispatchCall.catId, 'opus', 'tryDispatchNext must receive catId for fair drain');
   });
 
-  it('#972: terminal-path convergence retry is safe with age guard (P2-1)', async () => {
-    // Sol P2-1: terminal path now retries convergence because P1-1's age guard
-    // prevents matching new live entries. Previously blocked by codex R6 P1.
+  it('#972: connector-sourced zombie has no entryId → convergence skips gracefully', async () => {
+    // Connector-sourced invocations use idempotencyKey = connector-${messageId},
+    // not queue-${entry.id}. Without a zombieEntryId, removeStaleProcessing should
+    // return {removed: false} to avoid false-positive deletion.
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'connector-msg-123',
+    });
+    store.update(created.invocationId, { status: 'running' });
+
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', zombieEntryId });
+        return { removed: false }; // adapter returns false when no entryId
+      },
+      releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      tryDispatchNext: () => convergenceCalls.push({ op: 'tryDispatchNext' }),
+    };
+
+    const zombie = makeZombie({ invocationId: created.invocationId });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence,
+    });
+
+    assert.equal(result.reconciled, 1);
+    assert.equal(result.errors, 0);
+    // removeStaleProcessing called with undefined zombieEntryId
+    const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
+    assert.ok(removeCall);
+    assert.equal(removeCall.zombieEntryId, undefined, 'connector-sourced zombie has no entryId');
+    // No releaseSlot/dispatch because removed=false
+    assert.equal(convergenceCalls.filter((c) => c.op === 'releaseSlot').length, 0);
+    assert.equal(convergenceCalls.filter((c) => c.op === 'tryDispatchNext').length, 0);
+  });
+
+  it('#972: terminal-path convergence retry uses precise entry identity (P2-1)', async () => {
+    // Sol P2-1: terminal path retries convergence with precise entry identity.
+    // Previously blocked by codex R6 P1 (cat-only matching unsafe).
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
       userId: 'u1',
       targetCats: ['codex'],
       intent: 'execute',
-      idempotencyKey: 'q-conv-terminal-retry',
+      idempotencyKey: 'queue-stale-from-terminal',
     });
     store.update(created.invocationId, { status: 'running' });
     store.update(created.invocationId, { status: 'succeeded' }); // already terminal
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieCreatedAt) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieCreatedAt });
+      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
         return { removed: true, entryId: 'stale-from-terminal', primaryCatId: 'codex' };
       },
       releaseSlot: (threadId, catId) => {
@@ -457,13 +503,13 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
     });
 
     assert.equal(result.alreadyTerminal, 1);
-    // P2-1: convergence IS now retried for terminal zombies (age guard makes it safe)
+    // P2-1: convergence IS retried for terminal zombies (precise identity makes it safe)
     assert.ok(convergenceCalls.length > 0, 'convergence must be attempted for terminal zombie');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.catId, 'codex');
-    // Age guard present
-    assert.ok(typeof removeCall.zombieCreatedAt === 'number', 'must pass zombieCreatedAt');
+    // Precise entry identity
+    assert.equal(removeCall.zombieEntryId, 'stale-from-terminal', 'must extract entry ID from idempotencyKey');
   });
 
   it('#972: convergence failure counted as error (P2-1)', async () => {
@@ -511,14 +557,14 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
       userId: 'u1',
       targetCats: ['opus'],
       intent: 'execute',
-      idempotencyKey: 'q-conv-noop',
+      idempotencyKey: 'queue-noop-entry',
     });
     store.update(created.invocationId, { status: 'running' });
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId, userId, zombieCreatedAt) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieCreatedAt });
+      removeStaleProcessing: (threadId, catId, userId, zombieEntryId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId, zombieEntryId });
         return { removed: false }; // no stale entry found
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
@@ -552,84 +598,70 @@ describe('F220 Phase 2a: reconcileZombies + QueueConvergence (mock interface)', 
 
 // ── F220 Phase 2a: real adapter tests (P2-3 Sol review) ──
 // These exercise the actual buildQueueConvergence() adapter against a real InvocationQueue,
-// verifying entry identity, age guard, and dispatch semantics — not just mock callback invocation.
+// verifying precise entry identity and dispatch semantics — not just mock callback invocation.
 
 describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
-  it('P1-1: age guard protects newer live entry from deletion', async () => {
-    // Scenario: old zombie (createdAt=T1) + new live entry for same cat (createdAt=T2>T1).
-    // removeStaleProcessing(zombieCreatedAt=T1) must only remove the old entry, not the new one.
+  it("P1-1 (Sol R2): precise entry identity — only removes the zombie's own entry, not same-cat entries", async () => {
+    // Scenario: two processing entries for the same cat. removeStaleProcessing with
+    // zombieEntryId must only remove the EXACT entry by ID, not the other one.
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);
 
-    const T_OLD = Date.now() - 600_000; // 10 min ago
-    const T_NEW = Date.now() - 10_000; // 10 sec ago
-
-    // Enqueue old entry (from zombie's generation)
-    const oldResult = queue.enqueue({
+    // Enqueue zombie's entry
+    const zombieResult = queue.enqueue({
       threadId: 't1',
       userId: 'u1',
-      content: 'old @codex message',
+      content: 'zombie @codex message',
       source: 'user',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: false,
       priority: 'normal',
     });
-    assert.equal(oldResult.outcome, 'enqueued');
-    const oldEntryId = oldResult.entry.id;
+    assert.equal(zombieResult.outcome, 'enqueued');
+    const zombieEntryId = zombieResult.entry.id;
 
-    // Enqueue new live entry (same cat, different generation)
-    const newResult = queue.enqueue({
+    // Enqueue a live entry for the same cat (legitimate, dispatched by winner)
+    const liveResult = queue.enqueue({
       threadId: 't1',
       userId: 'u1',
-      content: 'new @codex message',
+      content: 'live @codex follow-up',
       source: 'user',
       targetCats: ['codex'],
       intent: 'execute',
       autoExecute: false,
       priority: 'normal',
     });
-    assert.equal(newResult.outcome, 'enqueued');
-    const newEntryId = newResult.entry.id;
+    assert.equal(liveResult.outcome, 'enqueued');
+    const liveEntryId = liveResult.entry.id;
 
-    // Modify internal entries' createdAt via list() references (enqueue returns shallow copies)
-    const entries = queue.list('t1', 'u1');
-    const oldInternal = entries.find((e) => e.id === oldEntryId);
-    const newInternal = entries.find((e) => e.id === newEntryId);
-    assert.ok(oldInternal && newInternal, 'both entries must exist');
-    oldInternal.createdAt = T_OLD;
-    newInternal.createdAt = T_NEW;
+    // Mark both as processing
+    queue.markProcessingById('t1', zombieEntryId);
+    queue.markProcessingById('t1', liveEntryId);
 
-    // Mark both as processing (simulating real lifecycle)
-    queue.markProcessingById('t1', oldEntryId);
-    queue.markProcessingById('t1', newEntryId);
-
-    // Both entries are now 'processing' for codex
     const beforeList = queue.list('t1', 'u1');
-    const processingBefore = beforeList.filter((e) => e.status === 'processing' && e.targetCats.includes('codex'));
-    assert.equal(processingBefore.length, 2, 'two processing codex entries before');
+    const processingBefore = beforeList.filter((e) => e.status === 'processing');
+    assert.equal(processingBefore.length, 2, 'two processing entries before');
 
-    // Call adapter with zombie's createdAt = T_OLD
+    // Call adapter with precise entry ID
     const adapter = qp.buildQueueConvergence();
-    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', T_OLD);
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', zombieEntryId);
 
-    assert.equal(result.removed, true, 'old entry must be removed');
-    assert.equal(result.entryId, oldEntryId, 'must remove the old entry specifically');
+    assert.equal(result.removed, true, 'zombie entry must be removed');
+    assert.equal(result.entryId, zombieEntryId, 'must remove the zombie entry specifically');
 
-    // New live entry must survive
+    // Live entry must survive — this is the core Sol R2 P1-1 requirement
     const afterList = queue.list('t1', 'u1');
-    const processingAfter = afterList.filter((e) => e.status === 'processing' && e.targetCats.includes('codex'));
+    const processingAfter = afterList.filter((e) => e.status === 'processing');
     assert.equal(processingAfter.length, 1, 'only one processing entry remains');
-    assert.equal(processingAfter[0].id, newEntryId, 'surviving entry must be the new live one');
+    assert.equal(processingAfter[0].id, liveEntryId, 'surviving entry must be the live one');
   });
 
-  it('P1-1: no matching entry when all entries are newer than zombie → removed=false', async () => {
-    // Scenario: zombie is very old, but only recent entries exist. None should be removed.
+  it('P1-1: no zombieEntryId → removed=false (non-queue-sourced invocation safe default)', async () => {
+    // When zombieEntryId is undefined (e.g. connector-sourced), the adapter must
+    // return {removed: false} to avoid false-positive deletion.
     const queue = new InvocationQueue();
     const { qp } = buildQueueProcessorWithQueue(queue);
-
-    const T_ZOMBIE = Date.now() - 600_000; // zombie created 10 min ago
-    const T_ENTRY = Date.now() - 5_000; // entry created 5 sec ago
 
     const enqResult = queue.enqueue({
       threadId: 't1',
@@ -641,20 +673,41 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
       autoExecute: false,
       priority: 'normal',
     });
-    const entryId = enqResult.entry.id;
-    // Set createdAt on internal entry (enqueue returns shallow copy)
-    const internal = queue.list('t1', 'u1').find((e) => e.id === entryId);
-    internal.createdAt = T_ENTRY;
-    queue.markProcessingById('t1', entryId);
+    queue.markProcessingById('t1', enqResult.entry.id);
 
     const adapter = qp.buildQueueConvergence();
-    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', T_ZOMBIE);
+    // No zombieEntryId passed (undefined)
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', undefined);
 
-    assert.equal(result.removed, false, 'must not remove entry newer than zombie');
-    // Entry still present
+    assert.equal(result.removed, false, 'must not remove anything without precise identity');
     const entries = queue.list('t1', 'u1');
     assert.equal(entries.length, 1, 'entry must survive');
     assert.equal(entries[0].status, 'processing');
+  });
+
+  it('P1-1: wrong zombieEntryId → removed=false (entry ID mismatch)', async () => {
+    // If the zombie's entry ID doesn't match any processing entry, nothing is removed.
+    const queue = new InvocationQueue();
+    const { qp } = buildQueueProcessorWithQueue(queue);
+
+    const enqResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: '@codex',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    queue.markProcessingById('t1', enqResult.entry.id);
+
+    const adapter = qp.buildQueueConvergence();
+    const result = adapter.removeStaleProcessing('t1', 'codex', 'u1', 'nonexistent-entry-id');
+
+    assert.equal(result.removed, false, 'must not remove when entry ID does not match');
+    const entries = queue.list('t1', 'u1');
+    assert.equal(entries.length, 1, 'entry must survive');
   });
 
   it('P1-2: tryDispatchNext calls cross-user fair drain (not just autoExecute)', async () => {
@@ -729,22 +782,14 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
     // End-to-end: create zombie invocation record, stale queue entry, and queued user entry.
     // After reconcileZombies, the stale entry is removed and the queued entry becomes
     // eligible for dispatch. This is the core #972 AC regression.
+    //
+    // Key: the invocation record's idempotencyKey = queue-${staleEntryId} provides
+    // the precise identity link back to the queue entry.
     const invRecordStore = new InvocationRecordStore();
     const queue = new InvocationQueue();
     const { qp, log } = buildQueueProcessorWithQueue(queue);
 
-    // 1. Create the zombie's invocation record (running state)
-    const zombieInv = invRecordStore.create({
-      threadId: 't1',
-      userId: 'u1',
-      targetCats: ['codex'],
-      intent: 'execute',
-      idempotencyKey: 'zombie-inv-1',
-    });
-    invRecordStore.update(zombieInv.invocationId, { status: 'running' });
-    const zombieCreatedAt = invRecordStore.get(zombieInv.invocationId).createdAt;
-
-    // 2. Enqueue the zombie's queue entry (stale processing)
+    // 1. Enqueue the zombie's queue entry FIRST (to get the entry ID)
     const staleResult = queue.enqueue({
       threadId: 't1',
       userId: 'u1',
@@ -757,10 +802,18 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
       priority: 'normal',
     });
     const staleEntryId = staleResult.entry.id;
-    // Set createdAt on internal entry via list() reference (enqueue returns shallow copy)
-    const staleInternal = queue.list('t1', 'u1').find((e) => e.id === staleEntryId);
-    staleInternal.createdAt = zombieCreatedAt - 100; // created just before invocation
     queue.markProcessingById('t1', staleEntryId);
+
+    // 2. Create the zombie's invocation record with queue-${entry.id} idempotencyKey
+    // (this mirrors what QueueProcessor.executeEntry does at line 961)
+    const zombieInv = invRecordStore.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: `queue-${staleEntryId}`,
+    });
+    invRecordStore.update(zombieInv.invocationId, { status: 'running' });
 
     // 3. Enqueue the user's @codex message (blocked behind stale slot)
     const userResult = queue.enqueue({
@@ -843,5 +896,94 @@ describe('F220 Phase 2a: buildQueueConvergence real adapter (Sol P2-3)', () => {
 
     assert.equal(result.alreadyTerminal, 1);
     assert.equal(result.errors, 1, 'convergence failure in terminal path must count as error');
+  });
+
+  it('Sol R2 regression: pinned-continuation zombie cleanup must not delete older follow-up dispatched by winner', async () => {
+    // Sol's exact reproduction scenario (R2 P1-1):
+    // 1. Pinned continuation zombie is cleaned → winner's fair-drain dispatches
+    //    an OLDER user follow-up message (createdAt < zombie's createdAt)
+    // 2. Terminal loser runs removeStaleProcessing for the same cat
+    // 3. With time-based matching (createdAt <= zombieCreatedAt), the loser would
+    //    delete the legitimate older follow-up → afterLoser=[] → messages lost!
+    // 4. With precise entry identity, the loser's entry ID doesn't match →
+    //    the follow-up SURVIVES
+    const invRecordStore = new InvocationRecordStore();
+    const queue = new InvocationQueue();
+    const { qp } = buildQueueProcessorWithQueue(queue);
+
+    // Step 1: Create the zombie's queue entry
+    const zombieQueueResult = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'pinned continuation @codex',
+      source: 'agent',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: 'opus',
+      priority: 'normal',
+    });
+    const zombieEntryId = zombieQueueResult.entry.id;
+
+    // Step 2: Create an OLDER user follow-up (queued before the zombie was created)
+    const olderFollowup = queue.enqueue({
+      threadId: 't1',
+      userId: 'u1',
+      content: 'older user @codex follow-up',
+      source: 'user',
+      targetCats: ['codex'],
+      intent: 'execute',
+      autoExecute: false,
+      priority: 'normal',
+    });
+    const olderEntryId = olderFollowup.entry.id;
+
+    // Make the follow-up OLDER than the zombie entry (createdAt < zombie's createdAt)
+    const olderInternal = queue.list('t1', 'u1').find((e) => e.id === olderEntryId);
+    olderInternal.createdAt = Date.now() - 1_000_000; // much older
+
+    // Step 3: Winner already cleaned the zombie entry; fair-drain dispatched
+    // the older follow-up to processing. Simulate this state:
+    // - Zombie entry: already removed by winner (not in queue)
+    queue.markProcessingById('t1', zombieEntryId);
+    queue.removeProcessed('t1', 'u1', zombieEntryId);
+    // - Older follow-up: now in processing (dispatched by winner's fair-drain)
+    queue.markProcessingById('t1', olderEntryId);
+
+    const entriesBefore = queue.list('t1', 'u1');
+    assert.equal(entriesBefore.length, 1, 'only older follow-up remains');
+    assert.equal(entriesBefore[0].id, olderEntryId);
+    assert.equal(entriesBefore[0].status, 'processing');
+
+    // Step 4: Create the LOSER's invocation record (concurrent terminal retry)
+    // Its idempotencyKey = queue-${zombieEntryId} — the ZOMBIE's entry, not the follow-up
+    const loserInv = invRecordStore.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: `queue-${zombieEntryId}`,
+    });
+    invRecordStore.update(loserInv.invocationId, { status: 'running' });
+    invRecordStore.update(loserInv.invocationId, { status: 'failed', error: 'concurrent' });
+
+    // Step 5: Terminal loser runs convergence retry
+    const adapter = qp.buildQueueConvergence();
+    const zombie = makeZombie({ invocationId: loserInv.invocationId, catId: 'codex' });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: invRecordStore,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence: adapter,
+    });
+
+    assert.equal(result.alreadyTerminal, 1, 'loser sees terminal record');
+
+    // CRITICAL ASSERTION: the older follow-up MUST survive
+    const entriesAfter = queue.list('t1', 'u1');
+    assert.equal(entriesAfter.length, 1, 'older follow-up must survive loser convergence');
+    assert.equal(entriesAfter[0].id, olderEntryId, 'surviving entry must be the older follow-up');
+    assert.equal(entriesAfter[0].status, 'processing', 'follow-up status unchanged');
+    assert.equal(entriesAfter[0].content, 'older user @codex follow-up', 'follow-up content preserved');
   });
 });
