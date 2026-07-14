@@ -52,8 +52,12 @@ export function DirectoryPickerModal({
   // F068-R7: Two-step flow — select project first, then confirm
   // 'lobby' sentinel means user explicitly chose "大厅 (无项目)"
   const [selectedPath, setSelectedPath] = useState<string | 'lobby' | null>(null);
+  // Null can mean "no concrete directory is selectable right now" (virtual root),
+  // so async default initializers need a separate guard for explicit selection.
+  const selectionTouchedRef = useRef(false);
   // P2 fix: clear stale pathError whenever user selects a project
   const handleSelectPath = useCallback((path: string | 'lobby') => {
+    selectionTouchedRef.current = true;
     setPathError(null);
     setSelectedPath(path);
   }, []);
@@ -122,6 +126,7 @@ export function DirectoryPickerModal({
   );
 
   const handleBrowserVirtualLocationChange = useCallback(() => {
+    selectionTouchedRef.current = true;
     setPathError(null);
     setSelectedPath(null);
   }, []);
@@ -156,13 +161,17 @@ export function DirectoryPickerModal({
         if (res.ok) {
           const data = await res.json();
           setCwdPath(data.path);
-          setSelectedPath((prev) => prev ?? data.path);
+          if (!selectionTouchedRef.current) {
+            setSelectedPath(data.path);
+          }
           return;
         }
       } catch {
         // cwd unavailable — fall through to existingProjects fallback
       }
-      setSelectedPath((prev) => prev ?? (existingProjects.length > 0 ? existingProjects[0] : null));
+      if (!selectionTouchedRef.current) {
+        setSelectedPath(existingProjects.length > 0 ? existingProjects[0] : null);
+      }
     })();
   }, [existingProjects]);
 
