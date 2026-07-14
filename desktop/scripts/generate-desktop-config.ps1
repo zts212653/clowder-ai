@@ -29,7 +29,7 @@ if (-not $Version) {
             $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
             $Version = $pkg.version
         } catch {
-            Write-Warning "Could not read version from $pkgPath — using 'unknown'"
+            Write-Warning "Could not read version from $pkgPath -- using 'unknown'"
         }
     }
     if (-not $Version) { $Version = "unknown" }
