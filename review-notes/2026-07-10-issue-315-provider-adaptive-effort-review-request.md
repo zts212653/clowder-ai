@@ -2,7 +2,10 @@
 
 Review-Target-ID: issue-315-provider-adaptive-effort
 Branch: fix/issue-315-provider-adaptive-effort
-SHA: 318d3e6ce7584ef0c4fb258a88ae166c19cb2cfd
+Implementation-SHA: 318d3e6ce7584ef0c4fb258a88ae166c19cb2cfd
+Note: This SHA identifies the original implementation commit. The current PR HEAD
+may differ due to main-sync merges and review-round fixes. Always verify against
+the actual PR HEAD for approval evidence.
 
 ## What
 

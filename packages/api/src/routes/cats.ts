@@ -11,6 +11,7 @@ import {
   type ClientId,
   type ContextBudget,
   catRegistry,
+  getCliEffortOptionsForProvider,
   getDefaultCliEffortForProvider,
   type RosterEntry,
 } from '@cat-cafe/shared';
@@ -292,6 +293,14 @@ function buildResolvedCliConfig(client: ClientId, baseCli: CliConfig, patch?: Cl
 
   const effortTouched = patch ? Object.hasOwn(patch, 'effort') : false;
   const nextEffort = effortTouched ? patch?.effort : baseCli.effort;
+
+  // Gate: only effort-aware clients (those with a real adapter that consumes
+  // getCatEffort()) may persist an effort value.  Non-effort clients would
+  // silently ignore the setting and the provider would never perform the
+  // promised native validation.
+  if (nextEffort !== undefined && nextEffort !== null && !getCliEffortOptionsForProvider(client)) {
+    throw new Error(`client "${client}" does not support cli.effort`);
+  }
 
   return {
     command: patch?.command ?? baseCli.command,

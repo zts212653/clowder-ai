@@ -448,6 +448,47 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 400);
   });
 
+  it('POST /api/cats rejects cli.effort for clients without an effort adapter', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    try {
+      // kimi has no effort adapter — getCatEffort() is not consumed by its adapter
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-kimi-effort',
+          name: 'Kimi 猫',
+          displayName: 'Kimi 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi-effort'],
+          roleDescription: '中文代码助手',
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+          cli: { command: 'kimi', outputFormat: 'stream-json', effort: 'high' },
+        }),
+      });
+
+      assert.equal(createRes.statusCode, 400);
+      assert.match(JSON.parse(createRes.body).error, /effort/i);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('POST /api/cats accepts kimi client with first-class default CLI commands', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
