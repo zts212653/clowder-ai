@@ -24,7 +24,7 @@ capabilities:
       interval: 8000
       maxAttempts: 75
       body:
-        req_key: "{{model}}"
+        req_key: "{{model | default:jimeng_t2v_v30}}"
         task_id: "{{taskId}}"
       response:
         status: $.data.status
@@ -55,7 +55,7 @@ capabilities:
       interval: 8000
       maxAttempts: 75
       body:
-        req_key: "{{model}}"
+        req_key: "{{model | default:jimeng_i2v_v20}}"
         task_id: "{{taskId}}"
       response:
         status: $.data.status
@@ -86,7 +86,7 @@ capabilities:
       interval: 5000
       maxAttempts: 60
       body:
-        req_key: "{{model}}"
+        req_key: "{{model | default:jimeng_high_aes_general_v21}}"
         task_id: "{{taskId}}"
       response:
         status: $.data.status

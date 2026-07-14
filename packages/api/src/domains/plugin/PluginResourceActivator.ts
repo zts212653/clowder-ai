@@ -807,13 +807,16 @@ export class PluginResourceActivator {
       };
     }
 
-    const projectRoot = this.deps.resolveProjectRoot();
+    // Plugin MCP entrypoints (e.g. packages/mcp-server/dist/protocol-server.js)
+    // are repo-relative.  resolveMainProjectRoot returns the monorepo/runtime
+    // root even when the active project is a separate config workspace.
+    const runtimeRoot = this.deps.resolveMainProjectRoot?.() ?? this.deps.resolveProjectRoot();
     const resolvedArgs = (resource.args ?? []).map((arg) => {
       // Skip flags and already-absolute paths
       if (arg.startsWith('-') || isAbsolute(arg)) return arg;
-      // Resolve relative path-like args against project root (consistent with
-      // built-in cat-cafe MCPs that use resolve(binaryRoot, ...))
-      const abs = resolve(projectRoot, arg);
+      // Resolve relative path-like args against the runtime root (where the
+      // built MCP server binary lives), consistent with built-in cat-cafe MCPs.
+      const abs = resolve(runtimeRoot, arg);
       return existsSync(abs) ? abs : arg;
     });
 
@@ -821,7 +824,7 @@ export class PluginResourceActivator {
       command: resource.command!,
       args: resolvedArgs,
       transport: (resource.transport as 'stdio' | 'streamableHttp') ?? 'stdio',
-      workingDir: projectRoot,
+      workingDir: runtimeRoot,
       ...this.buildMcpEnv(manifest),
     };
   }
