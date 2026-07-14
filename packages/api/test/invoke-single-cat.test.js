@@ -6934,12 +6934,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       'service should be invoked',
     );
     assert.equal(optionsSeen[0]?.livenessProbe?.stallAutoKill, true, 'cat invocations still opt into stall cleanup');
-    // #1145: Raised from 7 to 15 min — 7 min caused false kills during long LLM inference.
-    // 15 min is well under CLI_TIMEOUT_MS (30 min) and gives ample room for slow API responses.
+    // #1145: Aligned to CLI_TIMEOUT_MS (30 min) — probe can't distinguish "waiting for API"
+    // from "truly stuck", so stall auto-kill should not fire before the CLI hard timeout.
     assert.equal(
       optionsSeen[0]?.livenessProbe?.stallWarningMs,
-      15 * 60_000,
-      'stall auto-kill threshold must accommodate long LLM inference (15 min) while staying under CLI_TIMEOUT_MS (30 min)',
+      30 * 60_000,
+      'stall auto-kill threshold must equal CLI_TIMEOUT_MS (30 min) — no early false kills',
     );
   });
 

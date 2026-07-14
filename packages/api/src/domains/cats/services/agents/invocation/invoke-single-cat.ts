@@ -102,14 +102,12 @@ const log = createModuleLogger('invoke');
 const tracer = trace.getTracer('cat-cafe-api', '0.1.0');
 const TRANSCRIPT_DIR =
   process.env.TRANSCRIPT_DIR ?? resolve(findMonorepoRoot(), 'scripts', 'meeting-copilot', 'transcripts');
-// #1145: 7 min was too aggressive — LLM inference with large context can exceed
-// 7 min while waiting for the API response (CLI is legitimately idle: no CPU
-// growth, no NDJSON output, but an active network request is in flight).
-// 15 min gives ample room for long inference while still catching truly stuck
-// CLIs well before CLI_TIMEOUT_MS (30 min).  F194 zombie detection won't
-// false-fire during this window because InvocationTracker slot is held by
-// the live generator, satisfying the "has tracker slot" guard.
-const CAT_INVOCATION_STALL_AUTO_KILL_MS = 15 * 60_000;
+// #1145: Align stall auto-kill with CLI_TIMEOUT_MS (30 min).
+// The probe cannot distinguish "CLI waiting for LLM API response" from "CLI
+// truly stuck" — both appear as idle-silent (no CPU growth, no NDJSON output).
+// Any threshold shorter than CLI_TIMEOUT_MS causes false kills during normal
+// LLM inference.  Let CLI_TIMEOUT_MS be the single binding idle constraint.
+const CAT_INVOCATION_STALL_AUTO_KILL_MS = 30 * 60_000;
 const ANTIGRAVITY_AUTOMATIC_RETRY_FRAGMENT_REASONS = new Set([
   'model_capacity',
   'empty_response',
@@ -1995,8 +1993,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         ? { resumeFallbackSystemPrompt: params.systemPrompt }
         : {}),
       // F118 Phase B: Enable liveness probe for all CLI providers.
-      // #774: stallAutoKill clears truly stuck idle-silent CLIs well before CLI_TIMEOUT_MS (30 min).
-      // #1145: Raised to 15 min — 7 min caused false kills during long LLM inference.
+      // F118 Phase B: Enable liveness probe for all CLI providers.
+      // #1145: stallAutoKill aligned to CLI_TIMEOUT_MS (30 min) — probe can't distinguish
+      // "waiting for API" from "truly stuck", so let CLI_TIMEOUT_MS be the binding constraint.
       // #854: Windows cannot sample CPU; suppress suspected_stall there so CLI_TIMEOUT_MS stays binding.
       livenessProbe: { stallAutoKill: true, stallWarningMs: CAT_INVOCATION_STALL_AUTO_KILL_MS },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
