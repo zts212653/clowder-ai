@@ -541,6 +541,37 @@ describe('DirectoryBrowser', () => {
     expect(findButtonByText('此电脑')).toBeTruthy();
   });
 
+  it('shows a discoverable 此电脑 row in the directory list on Windows', async () => {
+    const winHome = 'C:\\Users\\test';
+    const driveRoot = 'D:\\';
+    mockApiFetch.mockReturnValueOnce(
+      jsonOk({
+        current: 'D:\\Projects',
+        name: 'Projects',
+        parent: driveRoot,
+        homePath: winHome,
+        entries: [{ name: 'src', path: 'D:\\Projects\\src', isDirectory: true }],
+        isWindows: true,
+      }),
+    );
+    mockApiFetch.mockReturnValueOnce(jsonOk({ drives: [{ letter: 'D', path: driveRoot, label: '本地磁盘 (D:)' }] }));
+
+    render({ initialPath: 'D:\\Projects' });
+    await flush();
+
+    const thisPcButtons = getAllButtons().filter((button) => button.textContent?.includes('此电脑'));
+    expect(thisPcButtons).toHaveLength(2);
+    const listEntry = thisPcButtons.find((button) => button.textContent?.includes('切换磁盘'));
+    expect(listEntry).toBeTruthy();
+
+    await act(async () => {
+      listEntry!.click();
+    });
+    await flush();
+
+    expect(container.textContent).toContain('本地磁盘 (D:)');
+  });
+
   it('shows loading state then drives when entering drives view', async () => {
     // R4 P1#2 regression: pending -> loading -> ready state machine.
     const winHome = 'C:\\Users\\test';
