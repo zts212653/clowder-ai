@@ -66,6 +66,12 @@ function checkFieldTypes(name: string, input: Record<string, unknown>, propertie
  * Intentionally strict: unknown fields are rejected, not silently dropped.
  */
 export function validateToolInput(schema: ToolSchema, input: Record<string, unknown>): void {
+  if (input == null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new ToolInputValidationError(
+      schema.name,
+      `expected object input, got ${input === null ? 'null' : Array.isArray(input) ? 'array' : typeof input}`,
+    );
+  }
   const { properties, required = [] } = schema.input_schema;
   rejectUndeclaredFields(schema.name, input, new Set(Object.keys(properties)));
   checkRequiredFields(schema.name, input, required);

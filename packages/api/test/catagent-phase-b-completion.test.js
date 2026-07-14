@@ -89,6 +89,27 @@ test('B3: validateToolInput skips type check for absent optional fields', () => 
   assert.doesNotThrow(() => validateToolInput(READ_FILE_SCHEMA, { path: 'src/index.ts' }));
 });
 
+test('B3: validateToolInput rejects null input without throwing TypeError', () => {
+  assert.throws(
+    () => validateToolInput(READ_FILE_SCHEMA, null),
+    (err) => err instanceof ToolInputValidationError && err.reason.includes('expected object input, got null'),
+  );
+});
+
+test('B3: validateToolInput rejects array input', () => {
+  assert.throws(
+    () => validateToolInput(READ_FILE_SCHEMA, ['path']),
+    (err) => err instanceof ToolInputValidationError && err.reason.includes('expected object input, got array'),
+  );
+});
+
+test('B3: validateToolInput rejects string input', () => {
+  assert.throws(
+    () => validateToolInput(READ_FILE_SCHEMA, 'not an object'),
+    (err) => err instanceof ToolInputValidationError && err.reason.includes('expected object input, got string'),
+  );
+});
+
 // ── B3: Shell-safe command building ──
 
 test('B3: buildSafeCommand produces correct array with -- separator', () => {
