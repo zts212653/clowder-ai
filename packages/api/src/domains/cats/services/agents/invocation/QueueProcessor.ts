@@ -351,30 +351,43 @@ export class QueueProcessor {
    * This method returns a minimal interface that reconcileZombies can call to
    * converge queue state after marking a zombie failed:
    *  1. removeStaleProcessing — find + remove the stale processing queue entry,
-   *     scoped to the zombie owner's userId (codex R1 P2: prevents cross-user deletion)
+   *     scoped to userId (prevents cross-user deletion) and filtered by
+   *     zombieCreatedAt age guard (Sol P1-1: prevents deleting newer live entries)
    *  2. releaseSlot — delete the in-memory processingSlot
-   *  3. tryDispatchNext — kick tryAutoExecute so queued entries behind the stale
-   *     slot get dispatched (codex R2 P2: without this, unblocked entries idle)
-   *
-   * No broadcastToRoom with queue:[]: that would wipe other users' legitimate
-   * queue state in the frontend (codex R1 P2). tryAutoExecute's normal dispatch
-   * path emits proper per-user queue_updated events.
+   *  3. tryDispatchNext — mirrors normal onInvocationComplete: cross-user fair drain
+   *     (tryExecuteNextAcrossUsers) + auto-execute scan, so BOTH user/connector and
+   *     agent entries get dispatched (Sol P1-2: #972's blocked @codex is a user entry)
    */
   buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
     return {
-      removeStaleProcessing: (threadId: string, catId: string, userId: string) => {
+      removeStaleProcessing: (threadId: string, catId: string, userId: string, zombieCreatedAt: number) => {
         // User-scoped lookup: only find processing entries owned by the zombie's user.
         // Prevents cross-user entry deletion when multiple users share a thread.
         const entries = this.deps.queue.list(threadId, userId);
-        const entry = entries.find((e) => e.status === 'processing' && e.targetCats.includes(catId));
+        // Sol P1-1: age guard — only match entries created at or before the zombie's
+        // invocation was created. A new live entry for the same cat would have
+        // createdAt > zombieCreatedAt and is thus protected from accidental deletion.
+        const entry = entries.find(
+          (e) => e.status === 'processing' && e.targetCats.includes(catId) && e.createdAt <= zombieCreatedAt,
+        );
         if (!entry) return { removed: false };
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
         const primaryCatId = entry.targetCats[0];
         this.deps.log.info(
-          { threadId, catId, userId, entryId: entry.id, primaryCatId },
-          '[F220 2a] removed stale processing queue entry (user-scoped)',
+          { threadId, catId, userId, entryId: entry.id, primaryCatId, zombieCreatedAt },
+          '[F220 2a] removed stale processing queue entry (user-scoped, age-guarded)',
         );
+        // Emit per-user queue_updated so the frontend reflects the removal.
+        // Fire-and-forget — best-effort UI consistency.
+        emitQueueUpdated(
+          this.deps.socketManager,
+          userId,
+          threadId,
+          this.deps.queue.list(threadId, userId),
+          this.deps.messageStore,
+          'zombie_convergence',
+        ).catch(() => {});
         return { removed: true, entryId: entry.id, primaryCatId };
       },
       releaseSlot: (threadId: string, catId: string) => {
@@ -384,12 +397,16 @@ export class QueueProcessor {
           this.deps.log.info({ threadId, catId }, '[F220 2a] released stale processingSlot');
         }
       },
-      tryDispatchNext: (threadId: string) => {
-        // Fire-and-forget: kick tryAutoExecute so entries waiting behind the
-        // now-freed slot get dispatched. Errors are logged but non-fatal.
-        this.tryAutoExecute(threadId).catch((err) =>
-          this.deps.log.warn({ threadId, err }, '[F220 2a] tryAutoExecute after zombie convergence failed'),
-        );
+      tryDispatchNext: (threadId: string, catId: string) => {
+        // Sol P1-2: mirror normal onInvocationComplete path — cross-user fair drain
+        // for ALL entry types (user/connector/agent), then auto-execute scan.
+        // Without tryExecuteNextAcrossUsers, the original #972 user @codex message
+        // (autoExecute=false) would remain idle after cleanup.
+        this.tryExecuteNextAcrossUsers(threadId, catId)
+          .then(() => this.tryAutoExecute(threadId))
+          .catch((err) =>
+            this.deps.log.warn({ threadId, catId, err }, '[F220 2a] dispatch after zombie convergence failed'),
+          );
       },
     };
   }
