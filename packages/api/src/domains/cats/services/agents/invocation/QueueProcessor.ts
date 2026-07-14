@@ -366,7 +366,7 @@ export class QueueProcessor {
         // User-scoped lookup: only find processing entries owned by the zombie's user.
         // Prevents cross-user entry deletion when multiple users share a thread.
         const entries = this.deps.queue.list(threadId, userId);
-        const entry = entries.find((e) => e.status === 'processing' && e.targetCats[0] === catId);
+        const entry = entries.find((e) => e.status === 'processing' && e.targetCats.includes(catId));
         if (!entry) return { removed: false };
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
