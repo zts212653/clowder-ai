@@ -10,6 +10,8 @@ import { TagEditor } from './hub-tag-editor';
 import { formInputClass } from './mcp-form-helpers';
 
 const CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode', 'acp'];
+/** Client options for API-key mode — acp is OAuth-only (callback auth protocol). */
+const API_KEY_CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode'];
 
 /** Suggested models per client — kept in sync with cat-template.json clientDefaults. */
 const MODEL_SUGGESTIONS: Partial<Record<BuiltinAccountClient, string[]>> = {
@@ -136,9 +138,9 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           models,
           envVars: envVars ?? {},
         };
-        if (editProfile?.clientId) {
-          patch.clientId = clientId;
-          // F159 G2: keep clientFamily in sync — it's the authoritative routing identity
+        // F159 G2: always send clientId + clientFamily — UI now shows client selector in both modes
+        patch.clientId = clientId;
+        if (API_KEY_CLIENT_OPTIONS.includes(clientId)) {
           patch.clientFamily = clientId;
         }
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
@@ -184,7 +186,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           body: JSON.stringify({
             displayName: displayName.trim(),
             authType: 'api_key',
-            ...(initialClientId ? { clientId: initialClientId, clientFamily: initialClientId } : {}),
+            clientId: initialClientId ?? clientId,
+            clientFamily: initialClientId ?? clientId,
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             models,
@@ -273,27 +276,27 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             />
           </div>
 
-          {/* OAuth mode: Client dropdown */}
-          {isOAuth && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-cafe-secondary">Client</label>
-              {initialClientId ? (
-                <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
-              ) : (
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
-                  className={formInputClass}
-                >
-                  {CLIENT_OPTIONS.map((c) => (
-                    <option key={c} value={c}>
-                      {builtinClientLabel(c)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+          {/* Client selector — shown in both OAuth and API-key modes */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-cafe-secondary">
+              {isOAuth ? 'Client' : 'Client Family'}
+            </label>
+            {initialClientId ? (
+              <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
+            ) : (
+              <select
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
+                className={formInputClass}
+              >
+                {(isOAuth ? CLIENT_OPTIONS : API_KEY_CLIENT_OPTIONS).map((c) => (
+                  <option key={c} value={c}>
+                    {builtinClientLabel(c)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
           {/* API Key mode: Base URL + API Key */}
           {!isOAuth && (
