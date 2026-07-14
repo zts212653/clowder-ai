@@ -328,4 +328,171 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     const summary = logger.records.info.find((args) => args[1]?.includes?.('sweep complete'));
     assert.equal(summary, undefined, 'no summary for empty input');
   });
+
+  // ── F220 Phase 2a: queue convergence tests ──
+
+  it('#972: reconcileZombies calls queueConvergence to remove stale processing entry', async () => {
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'q-conv-1',
+    });
+    store.update(created.invocationId, { status: 'running' });
+
+    // Track queueConvergence calls
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (threadId, catId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+        return { removed: true, entryId: 'stale-entry-1' };
+      },
+      releaseSlot: (threadId, catId) => {
+        convergenceCalls.push({ op: 'releaseSlot', threadId, catId });
+      },
+      emitQueueUpdated: (threadId) => {
+        convergenceCalls.push({ op: 'emitQueueUpdated', threadId });
+      },
+    };
+
+    const zombie = makeZombie({ invocationId: created.invocationId });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence,
+    });
+
+    assert.equal(result.reconciled, 1);
+    // Queue convergence must be called for the reconciled zombie
+    assert.ok(convergenceCalls.length >= 2, `expected >=2 convergence calls, got ${convergenceCalls.length}`);
+    const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
+    assert.ok(removeCall, 'must call removeStaleProcessing');
+    assert.equal(removeCall.threadId, 't1');
+    assert.equal(removeCall.catId, 'opus');
+    // Slot released after stale entry removed
+    const slotCall = convergenceCalls.find((c) => c.op === 'releaseSlot');
+    assert.ok(slotCall, 'must call releaseSlot');
+    // queue_updated emitted
+    const emitCall = convergenceCalls.find((c) => c.op === 'emitQueueUpdated');
+    assert.ok(emitCall, 'must emit queue_updated');
+  });
+
+  it('#972: queueConvergence not called when zombie is already terminal', async () => {
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['codex'],
+      intent: 'execute',
+      idempotencyKey: 'q-conv-skip',
+    });
+    store.update(created.invocationId, { status: 'running' });
+    store.update(created.invocationId, { status: 'succeeded' }); // already terminal
+
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (threadId, catId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+        return { removed: false };
+      },
+      releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      emitQueueUpdated: () => convergenceCalls.push({ op: 'emitQueueUpdated' }),
+    };
+
+    const zombie = makeZombie({ invocationId: created.invocationId, catId: 'codex' });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence,
+    });
+
+    assert.equal(result.alreadyTerminal, 1);
+    // Queue convergence should NOT be called for already-terminal zombies
+    const removeCalls = convergenceCalls.filter((c) => c.op === 'removeStaleProcessing');
+    assert.equal(removeCalls.length, 0, 'must not call removeStaleProcessing for already-terminal');
+  });
+
+  it('#972: queueConvergence failure is best-effort (does not prevent zombie reconciliation)', async () => {
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'q-conv-fail',
+    });
+    store.update(created.invocationId, { status: 'running' });
+
+    const queueConvergence = {
+      removeStaleProcessing: () => {
+        throw new Error('queue store unavailable');
+      },
+      releaseSlot: () => {},
+      emitQueueUpdated: () => {},
+    };
+
+    const logger = makeRecordingLogger();
+    const zombie = makeZombie({ invocationId: created.invocationId });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: logger,
+      queueConvergence,
+    });
+
+    // Zombie still reconciled despite queue convergence failure
+    assert.equal(result.reconciled, 1);
+    assert.equal(store.get(created.invocationId).status, 'failed');
+    // Error logged
+    const warnLog = logger.records.warn.find((args) => args[1]?.includes?.('queue convergence'));
+    assert.ok(warnLog, 'must log queue convergence failure');
+  });
+
+  it('#972: removeStaleProcessing returns removed=false → no releaseSlot/emitQueueUpdated', async () => {
+    const store = new InvocationRecordStore();
+    const created = store.create({
+      threadId: 't1',
+      userId: 'u1',
+      targetCats: ['opus'],
+      intent: 'execute',
+      idempotencyKey: 'q-conv-noop',
+    });
+    store.update(created.invocationId, { status: 'running' });
+
+    const convergenceCalls = [];
+    const queueConvergence = {
+      removeStaleProcessing: (threadId, catId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+        return { removed: false }; // no stale entry found
+      },
+      releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
+      emitQueueUpdated: () => convergenceCalls.push({ op: 'emitQueueUpdated' }),
+    };
+
+    const zombie = makeZombie({ invocationId: created.invocationId });
+    const result = await reconcileZombies([zombie], {
+      invocationRecordStore: store,
+      taskProgressStore: makeTaskProgressStore(),
+      log: makeRecordingLogger(),
+      queueConvergence,
+    });
+
+    assert.equal(result.reconciled, 1);
+    // removeStaleProcessing called but returned false → no further actions
+    assert.equal(convergenceCalls.filter((c) => c.op === 'removeStaleProcessing').length, 1);
+    assert.equal(
+      convergenceCalls.filter((c) => c.op === 'releaseSlot').length,
+      0,
+      'no releaseSlot when nothing removed',
+    );
+    assert.equal(
+      convergenceCalls.filter((c) => c.op === 'emitQueueUpdated').length,
+      0,
+      'no emitQueueUpdated when nothing removed',
+    );
+  });
 });

@@ -341,6 +341,48 @@ export class QueueProcessor {
     }
   }
 
+  /**
+   * F220 Phase 2a (#972): Build a QueueConvergence adapter for reconcileZombies.
+   *
+   * reconcileZombies marks zombie InvocationRecords as `failed`, but previously
+   * did NOT touch the InvocationQueue entries or processingSlots. This left stale
+   * `processing` entries blocking subsequent dispatch — the #972 split-brain bug.
+   *
+   * This method returns a minimal interface that reconcileZombies can call to
+   * converge queue state after marking a zombie failed:
+   *  1. removeStaleProcessing — find + remove the stale processing queue entry
+   *  2. releaseSlot — delete the in-memory processingSlot
+   *  3. emitQueueUpdated — broadcast so frontend refreshes
+   */
+  buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
+    return {
+      removeStaleProcessing: (threadId: string, catId: string) => {
+        const entry = this.deps.queue.findProcessingByCat(threadId, catId);
+        if (!entry) return { removed: false };
+        const removed = this.deps.queue.removeProcessedAcrossUsers(threadId, entry.id);
+        if (!removed) return { removed: false };
+        this.deps.log.info({ threadId, catId, entryId: entry.id }, '[F220 2a] removed stale processing queue entry');
+        return { removed: true, entryId: entry.id };
+      },
+      releaseSlot: (threadId: string, catId: string) => {
+        const key = QueueProcessor.slotKey(threadId, catId);
+        if (this.processingSlots.has(key)) {
+          this.processingSlots.delete(key);
+          this.deps.log.info({ threadId, catId }, '[F220 2a] released stale processingSlot');
+        }
+      },
+      emitQueueUpdated: (threadId: string) => {
+        // Broadcast to all users in the thread room — zombie convergence
+        // doesn't have the original userId, and all users should see the update.
+        this.deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'queue_updated', {
+          threadId,
+          queue: [],
+          action: 'zombie_convergence',
+        });
+      },
+    };
+  }
+
   /** Check if a slot's queue is paused (canceled/failed AND has queued entries). */
   isPaused(threadId: string, catId?: string): boolean {
     if (catId) {

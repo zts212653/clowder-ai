@@ -75,6 +75,16 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 ### Phase 3 — 可恢复：force-reset 逃生口 UI（Layer 3）
 把已有的 `force-reset` 端点接到一个**情境化、带确认弹窗**的 UI 入口。**设计稿见下方 §设计稿（operator 2026-06-02 已审过概念 + 确认要弹窗确认）**。
 
+## User Journey
+
+**Scope unit**: Thread with A2A (cat-to-cat) collaboration in progress.
+
+1. **User sends message mentioning a cat** → cat starts working → "启动中" placeholder appears immediately (Phase 1).
+2. **Cat A finishes and @mentions Cat B** → Cat B triggered via InvocationQueue → user sees "Cat B 启动中" just as quickly as a direct message (Phase 1).
+3. **Cat A's invocation is zombie-swept while Cat B is still running** → `reconcileZombies` converges queue state (removes stale processing entry, releases slot) → subsequent `@Cat B` messages are not blocked by phantom queue entries (Phase 2a).
+4. **Serial continuation child (e.g., codex spawned by opus A2A) is alive but not registered as bgCarrier** → `/active-pane` falls back to canonical invocationTracker → frontend correctly shows "cat is active" instead of false-negative silence (Phase 2a).
+5. **All liveness sources stuck / cat truly hung** → user sees "Force Reset" entry in thread execution bar → clicks → confirmation dialog explains consequences → confirms → thread freed, messages/history preserved (Phase 3).
+
 ## Acceptance Criteria
 
 > 每条 AC 指得回 Why；非作者可复核（命令/截图/复现）。

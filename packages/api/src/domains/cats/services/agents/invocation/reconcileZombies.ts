@@ -24,6 +24,21 @@ import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecord
 import type { ZombieRecord } from './getThreadLiveInvocations.js';
 import type { TaskProgressStore } from './TaskProgressStore.js';
 
+/**
+ * F220 Phase 2a (#972): Queue convergence interface.
+ * When reconcileZombies marks a zombie failed, it calls this to clean up
+ * matching stale `processing` queue entries and slots that would otherwise
+ * block subsequent dispatches.
+ */
+export interface QueueConvergence {
+  /** Find and remove stale processing entry for this thread+cat. */
+  removeStaleProcessing(threadId: string, catId: string): { removed: boolean; entryId?: string };
+  /** Release the in-memory processing slot for this thread+cat. */
+  releaseSlot(threadId: string, catId: string): void;
+  /** Emit queue_updated event to frontend so UI reflects the change. */
+  emitQueueUpdated(threadId: string): void;
+}
+
 export interface ReconcileZombieDeps {
   invocationRecordStore: IInvocationRecordStore;
   /** Optional — if absent, TaskProgress is not cleared (test or embedded mode). */
@@ -35,6 +50,10 @@ export interface ReconcileZombieDeps {
     warn: (obj: unknown, msg?: string) => void;
   };
   ballCustody?: IBallCustodyIngest;
+  /** F220 Phase 2a (#972): optional queue convergence — clean up stale processing
+   *  entries after zombie reconciliation. If absent, queue entries are not touched
+   *  (backward-compatible with existing callers). */
+  queueConvergence?: QueueConvergence;
 }
 
 export interface ReconcileZombieResult {
@@ -163,6 +182,25 @@ async function processZombie(
         log.warn({ invocationId: zombie.invocationId, err }, '[reconcile-zombies] failed to record invocation.died'),
       );
     const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
+    // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot
+    if (deps.queueConvergence && zombie.catId) {
+      try {
+        const qr = deps.queueConvergence.removeStaleProcessing(updated.threadId, zombie.catId);
+        if (qr.removed) {
+          deps.queueConvergence.releaseSlot(updated.threadId, zombie.catId);
+          deps.queueConvergence.emitQueueUpdated(updated.threadId);
+          log.info(
+            { threadId: updated.threadId, catId: zombie.catId, entryId: qr.entryId },
+            '[reconcile-zombies] #972 queue convergence: removed stale processing entry + released slot',
+          );
+        }
+      } catch (qErr) {
+        log.warn(
+          { threadId: updated.threadId, catId: zombie.catId, err: qErr instanceof Error ? qErr.message : String(qErr) },
+          '[reconcile-zombies] #972 queue convergence failed (best-effort)',
+        );
+      }
+    }
     return { reconciled: true, alreadyTerminal: false, taskProgressCleared: tp.cleared, errors: tp.errors };
   } catch (err) {
     log.warn(

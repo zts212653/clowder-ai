@@ -9,17 +9,25 @@ import type { TmuxGateway } from '../domains/terminal/tmux-gateway.js';
 import { getWorktreeRoot } from '../domains/workspace/workspace-security.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
+/** F220 Phase 2a (#972): Minimal invocation tracker for active-pane fallback. */
+interface InvocationTrackerLike {
+  has(threadId: string, catId?: string): boolean;
+  getActiveSlots?(threadId: string): Array<{ catId: string; startedAt: number }>;
+}
+
 interface TerminalRouteOpts {
   tmuxGateway?: TmuxGateway;
   agentPaneRegistry?: AgentPaneRegistry;
   portDiscovery?: PortDiscoveryService;
+  /** F220 Phase 2a (#972): invocation tracker for active-pane canonical liveness fallback. */
+  invocationTracker?: InvocationTrackerLike;
 }
 interface PtyBinding {
   pty: pty.IPty;
 }
 
 export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app, opts) => {
-  const { tmuxGateway, agentPaneRegistry, portDiscovery } = opts;
+  const { tmuxGateway, agentPaneRegistry, portDiscovery, invocationTracker } = opts;
   const store = new TerminalSessionStore();
   const ptys = new Map<string, PtyBinding>();
   const corsOrigins = resolveFrontendCorsOrigins(process.env, console);
@@ -314,18 +322,35 @@ export const terminalRoutes: FastifyPluginAsync<TerminalRouteOpts> = async (app,
   });
 
   // F198 Phase C AC-C1: GET /api/threads/:id/active-pane — resolves bg carrier session for a thread
+  // F220 Phase 2a (#972): fallback to invocationTracker when agentPaneRegistry misses serial
+  // continuation children (they are alive but not registered as bg carriers).
   app.get<{ Params: { id: string } }>('/api/threads/:id/active-pane', async (req, reply) => {
     if (!agentPaneRegistry) return reply.status(501).send({ error: 'Agent pane tracking not enabled' });
     const session = agentPaneRegistry.getBgCarrierByThread(req.params.id);
-    if (!session) return { active: false };
-    return {
-      active: true,
-      invocationId: session.invocationId,
-      daemonShortId: session.daemonShortId,
-      catId: session.catId,
-      threadId: session.threadId,
-      status: session.status,
-      startedAt: session.startedAt,
-    };
+    if (session) {
+      return {
+        active: true,
+        invocationId: session.invocationId,
+        daemonShortId: session.daemonShortId,
+        catId: session.catId,
+        threadId: session.threadId,
+        status: session.status,
+        startedAt: session.startedAt,
+      };
+    }
+    // F220 Phase 2a (#972): bgCarrier miss — check canonical liveness via invocationTracker.
+    // Serial continuation children (e.g., codex spawned by opus A2A) hold a tracker slot
+    // but may not register as bg carriers. Without this fallback, /active-pane returns
+    // {active: false} while the cat is actively running.
+    if (invocationTracker?.has(req.params.id)) {
+      const slots = invocationTracker.getActiveSlots?.(req.params.id) ?? [];
+      return {
+        active: true,
+        catId: slots[0]?.catId ?? undefined,
+        threadId: req.params.id,
+        source: 'tracker-fallback',
+      };
+    }
+    return { active: false };
   });
 };
