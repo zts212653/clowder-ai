@@ -3507,9 +3507,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         accountRef: 'claude',
         defaultModel: 'claude-sonnet-4-6',
         nativeToolLevel: 'L2',
-        commandPolicy: [
-          { binary: 'pnpm', allowedSubcommands: ['test', 'lint'], allowedFlags: ['--reporter'] },
-        ],
+        commandPolicy: [{ binary: 'pnpm', allowedSubcommands: ['test', 'lint'], allowedFlags: ['--reporter'] }],
       }),
     });
     assert.equal(createRes.statusCode, 201, `POST failed: ${createRes.body}`);
