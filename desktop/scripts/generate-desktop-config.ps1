@@ -47,5 +47,8 @@ if (-not (Test-Path $configDir)) {
     New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 }
 
-$config | ConvertTo-Json -Depth 3 | Out-File -FilePath $configPath -Encoding utf8
+# Write UTF-8 without BOM. Windows PowerShell 5.1's -Encoding utf8
+# emits a BOM (ef bb bf) that breaks JSON.parse in Node.js consumers.
+$json = $config | ConvertTo-Json -Depth 3
+[System.IO.File]::WriteAllText($configPath, $json, (New-Object System.Text.UTF8Encoding $false))
 Write-Host "Desktop config written to $configPath"
