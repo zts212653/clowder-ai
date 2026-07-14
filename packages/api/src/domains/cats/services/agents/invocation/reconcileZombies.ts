@@ -39,8 +39,14 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  *   per-user queue_updated events.
  */
 export interface QueueConvergence {
-  /** Find and remove stale processing entry for this thread+cat, scoped to userId. */
-  removeStaleProcessing(threadId: string, catId: string, userId: string): { removed: boolean; entryId?: string };
+  /** Find and remove stale processing entry for this thread+cat, scoped to userId.
+   *  Returns primaryCatId (targetCats[0]) so the caller can release the correct slot —
+   *  processingSlots are keyed by primary target, not necessarily the zombie catId. */
+  removeStaleProcessing(
+    threadId: string,
+    catId: string,
+    userId: string,
+  ): { removed: boolean; entryId?: string; primaryCatId?: string };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
   /** Kick the queue: try to dispatch any waiting entries now that the slot is free.
@@ -199,12 +205,15 @@ async function processZombie(
       try {
         const qr = deps.queueConvergence.removeStaleProcessing(updated.threadId, zombie.catId, updated.userId);
         if (qr.removed) {
-          deps.queueConvergence.releaseSlot(updated.threadId, zombie.catId);
+          // Release by primaryCatId — processingSlots are keyed by targetCats[0],
+          // which may differ from zombie.catId for multi-cat entries (codex R4 P2).
+          const slotCat = qr.primaryCatId ?? zombie.catId;
+          deps.queueConvergence.releaseSlot(updated.threadId, slotCat);
           // Kick the queue so any entry waiting behind the stale slot gets dispatched.
           // Fire-and-forget: tryDispatchNext is async but convergence is best-effort.
           deps.queueConvergence.tryDispatchNext(updated.threadId);
           log.info(
-            { threadId: updated.threadId, catId: zombie.catId, userId: updated.userId, entryId: qr.entryId },
+            { threadId: updated.threadId, catId: zombie.catId, slotCat, userId: updated.userId, entryId: qr.entryId },
             '[reconcile-zombies] #972 queue convergence: removed stale entry + released slot + kicked queue',
           );
         }

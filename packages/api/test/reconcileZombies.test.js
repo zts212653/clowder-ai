@@ -347,7 +347,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     const queueConvergence = {
       removeStaleProcessing: (threadId, catId, userId) => {
         convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId });
-        return { removed: true, entryId: 'stale-entry-1' };
+        return { removed: true, entryId: 'stale-entry-1', primaryCatId: 'opus' };
       },
       releaseSlot: (threadId, catId) => {
         convergenceCalls.push({ op: 'releaseSlot', threadId, catId });
@@ -373,9 +373,10 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     assert.equal(removeCall.threadId, 't1');
     assert.equal(removeCall.catId, 'opus');
     assert.equal(removeCall.userId, 'u1', 'must pass userId for user-scoped lookup');
-    // Slot released after stale entry removed
+    // Slot released using primaryCatId from the matched entry (not zombie.catId)
     const slotCall = convergenceCalls.find((c) => c.op === 'releaseSlot');
     assert.ok(slotCall, 'must call releaseSlot');
+    assert.equal(slotCall.catId, 'opus', 'releaseSlot must use primaryCatId from matched entry');
     // Queue kicked to dispatch waiting entries
     const dispatchCall = convergenceCalls.find((c) => c.op === 'tryDispatchNext');
     assert.ok(dispatchCall, 'must kick queue after slot release');

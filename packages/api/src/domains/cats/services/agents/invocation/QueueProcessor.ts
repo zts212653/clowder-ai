@@ -370,11 +370,12 @@ export class QueueProcessor {
         if (!entry) return { removed: false };
         const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
+        const primaryCatId = entry.targetCats[0];
         this.deps.log.info(
-          { threadId, catId, userId, entryId: entry.id },
+          { threadId, catId, userId, entryId: entry.id, primaryCatId },
           '[F220 2a] removed stale processing queue entry (user-scoped)',
         );
-        return { removed: true, entryId: entry.id };
+        return { removed: true, entryId: entry.id, primaryCatId };
       },
       releaseSlot: (threadId: string, catId: string) => {
         const key = QueueProcessor.slotKey(threadId, catId);
