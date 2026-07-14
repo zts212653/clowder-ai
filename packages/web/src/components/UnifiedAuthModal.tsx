@@ -138,6 +138,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
         };
         if (editProfile?.clientId) {
           patch.clientId = clientId;
+          // F159 G2: keep clientFamily in sync — it's the authoritative routing identity
+          patch.clientFamily = clientId;
         }
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
@@ -182,7 +184,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           body: JSON.stringify({
             displayName: displayName.trim(),
             authType: 'api_key',
-            ...(initialClientId ? { clientId: initialClientId } : {}),
+            ...(initialClientId ? { clientId: initialClientId, clientFamily: initialClientId } : {}),
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             models,

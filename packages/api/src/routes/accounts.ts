@@ -57,6 +57,7 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
     hasApiKey: apiKeyPresent,
     mode: account.authType === 'api_key' ? ('api_key' as const) : ('subscription' as const),
     ...(account.envVars && Object.keys(account.envVars).length > 0 ? { envVars: { ...account.envVars } } : {}),
+    ...(account.clientFamily ? { clientFamily: account.clientFamily } : {}),
     createdAt: '',
     updatedAt: '',
   };
