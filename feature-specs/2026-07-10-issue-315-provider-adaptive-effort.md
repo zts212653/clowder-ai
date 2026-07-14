@@ -27,7 +27,7 @@ The Hub member editor can select a maintained preset or enter `max`, `ultra`, or
 ## Terminal contract
 
 ```ts
-type CliEffortPreset = 'low' | 'medium' | 'high' | 'max' | 'xhigh';
+type CliEffortPreset = 'low' | 'medium' | 'high' | 'max' | 'xhigh' | 'ultra';
 type CliEffortValue = string; // validated at API/schema boundary: trimmed and non-empty
 
 interface CliConfig {
@@ -35,7 +35,12 @@ interface CliConfig {
 }
 ```
 
-`getCliEffortOptionsForProvider()` remains the maintained-preset source. Runtime resolution returns a stored non-empty value unchanged, otherwise the selected client's default; it must never coerce a native value to a different preset.
+`getCliEffortOptionsForProvider(provider, model?)` is the maintained-preset source. It returns
+model-aware suggestions when applicable (GPT-5.6 OpenAI models include `max` and `ultra`),
+falling back to the base provider list otherwise. Runtime resolution returns a stored non-empty
+value unchanged, otherwise the selected client's default; it must never coerce a native value
+to a different preset. Effort is only accepted for effort-aware clients (anthropic, openai);
+other clients receive HTTP 400 if `cli.effort` is supplied.
 
 ## Persistent-state census
 
