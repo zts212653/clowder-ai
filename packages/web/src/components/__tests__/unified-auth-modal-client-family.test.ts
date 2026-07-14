@@ -71,7 +71,9 @@ describe('UnifiedAuthModal clientFamily payload (F159 G2)', () => {
   });
 
   it('API-key mode Client dropdown excludes acp (OAuth-only protocol)', () => {
-    expect(source).toContain("const API_KEY_CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode']");
+    expect(source).toContain(
+      "const API_KEY_CLIENT_OPTIONS: BuiltinAccountClient[] = ['anthropic', 'openai', 'google', 'kimi', 'opencode']",
+    );
     // acp must NOT be in the API_KEY_CLIENT_OPTIONS array
     const apiKeyOptionsLine = source.match(/const API_KEY_CLIENT_OPTIONS.*?;/s)?.[0] ?? '';
     expect(apiKeyOptionsLine).not.toContain('acp');
