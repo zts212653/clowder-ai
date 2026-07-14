@@ -29,14 +29,20 @@ import type { TaskProgressStore } from './TaskProgressStore.js';
  * When reconcileZombies marks a zombie failed, it calls this to clean up
  * matching stale `processing` queue entries and slots that would otherwise
  * block subsequent dispatches.
+ *
+ * Design notes (codex review R1 P2s):
+ * - removeStaleProcessing accepts userId to scope the queue lookup to the
+ *   zombie owner's entries, preventing cross-user entry deletion in shared threads.
+ * - No emitQueueUpdated: broadcasting `queue: []` to the thread room would wipe
+ *   other users' legitimate queue state (frontend blindly replaces). The slot
+ *   release lets QueueProcessor dispatch the next entry, which emits proper
+ *   per-user queue_updated events.
  */
 export interface QueueConvergence {
-  /** Find and remove stale processing entry for this thread+cat. */
-  removeStaleProcessing(threadId: string, catId: string): { removed: boolean; entryId?: string };
+  /** Find and remove stale processing entry for this thread+cat, scoped to userId. */
+  removeStaleProcessing(threadId: string, catId: string, userId: string): { removed: boolean; entryId?: string };
   /** Release the in-memory processing slot for this thread+cat. */
   releaseSlot(threadId: string, catId: string): void;
-  /** Emit queue_updated event to frontend so UI reflects the change. */
-  emitQueueUpdated(threadId: string): void;
 }
 
 export interface ReconcileZombieDeps {
@@ -182,15 +188,17 @@ async function processZombie(
         log.warn({ invocationId: zombie.invocationId, err }, '[reconcile-zombies] failed to record invocation.died'),
       );
     const tp = await clearTaskProgress(deps.taskProgressStore, updated.threadId, zombie, log);
-    // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot
+    // F220 Phase 2a (#972): converge queue state — remove stale processing entry + slot.
+    // userId-scoped to prevent cross-user entry deletion (codex review R1 P2).
+    // No emitQueueUpdated: slot release lets QueueProcessor dispatch next entry,
+    // which emits proper per-user queue_updated events (codex review R1 P2).
     if (deps.queueConvergence && zombie.catId) {
       try {
-        const qr = deps.queueConvergence.removeStaleProcessing(updated.threadId, zombie.catId);
+        const qr = deps.queueConvergence.removeStaleProcessing(updated.threadId, zombie.catId, updated.userId);
         if (qr.removed) {
           deps.queueConvergence.releaseSlot(updated.threadId, zombie.catId);
-          deps.queueConvergence.emitQueueUpdated(updated.threadId);
           log.info(
-            { threadId: updated.threadId, catId: zombie.catId, entryId: qr.entryId },
+            { threadId: updated.threadId, catId: zombie.catId, userId: updated.userId, entryId: qr.entryId },
             '[reconcile-zombies] #972 queue convergence: removed stale processing entry + released slot',
           );
         }

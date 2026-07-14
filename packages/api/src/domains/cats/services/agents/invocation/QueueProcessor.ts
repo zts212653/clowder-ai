@@ -350,18 +350,29 @@ export class QueueProcessor {
    *
    * This method returns a minimal interface that reconcileZombies can call to
    * converge queue state after marking a zombie failed:
-   *  1. removeStaleProcessing — find + remove the stale processing queue entry
+   *  1. removeStaleProcessing — find + remove the stale processing queue entry,
+   *     scoped to the zombie owner's userId (codex R1 P2: prevents cross-user deletion)
    *  2. releaseSlot — delete the in-memory processingSlot
-   *  3. emitQueueUpdated — broadcast so frontend refreshes
+   *
+   * No emitQueueUpdated: broadcasting `queue: []` to the thread room would wipe
+   * other users' legitimate queue state in the frontend (codex R1 P2). The slot
+   * release lets QueueProcessor dispatch the next queued entry, which emits proper
+   * per-user queue_updated events through the normal path.
    */
   buildQueueConvergence(): import('./reconcileZombies.js').QueueConvergence {
     return {
-      removeStaleProcessing: (threadId: string, catId: string) => {
-        const entry = this.deps.queue.findProcessingByCat(threadId, catId);
+      removeStaleProcessing: (threadId: string, catId: string, userId: string) => {
+        // User-scoped lookup: only find processing entries owned by the zombie's user.
+        // Prevents cross-user entry deletion when multiple users share a thread.
+        const entries = this.deps.queue.list(threadId, userId);
+        const entry = entries.find((e) => e.status === 'processing' && e.targetCats[0] === catId);
         if (!entry) return { removed: false };
-        const removed = this.deps.queue.removeProcessedAcrossUsers(threadId, entry.id);
+        const removed = this.deps.queue.removeProcessed(threadId, userId, entry.id);
         if (!removed) return { removed: false };
-        this.deps.log.info({ threadId, catId, entryId: entry.id }, '[F220 2a] removed stale processing queue entry');
+        this.deps.log.info(
+          { threadId, catId, userId, entryId: entry.id },
+          '[F220 2a] removed stale processing queue entry (user-scoped)',
+        );
         return { removed: true, entryId: entry.id };
       },
       releaseSlot: (threadId: string, catId: string) => {
@@ -370,15 +381,6 @@ export class QueueProcessor {
           this.processingSlots.delete(key);
           this.deps.log.info({ threadId, catId }, '[F220 2a] released stale processingSlot');
         }
-      },
-      emitQueueUpdated: (threadId: string) => {
-        // Broadcast to all users in the thread room — zombie convergence
-        // doesn't have the original userId, and all users should see the update.
-        this.deps.socketManager.broadcastToRoom(`thread:${threadId}`, 'queue_updated', {
-          threadId,
-          queue: [],
-          action: 'zombie_convergence',
-        });
       },
     };
   }

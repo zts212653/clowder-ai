@@ -4,6 +4,7 @@ related_features: [F216, F175, F153, F118, F215]
 topics: [a2a, observability, liveness, invocation, queue, interrupt, recovery, ux]
 doc_kind: spec
 created: 2026-06-02
+tips_exempt: "Internal reliability/convergence — no user-facing capability tip"
 ---
 
 # F220: A2A 协作的可观测 · 可靠 · 可恢复

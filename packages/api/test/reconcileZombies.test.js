@@ -331,7 +331,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
   // ── F220 Phase 2a: queue convergence tests ──
 
-  it('#972: reconcileZombies calls queueConvergence to remove stale processing entry', async () => {
+  it('#972: reconcileZombies calls queueConvergence to remove stale processing entry (user-scoped)', async () => {
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -345,15 +345,12 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     // Track queueConvergence calls
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+      removeStaleProcessing: (threadId, catId, userId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId });
         return { removed: true, entryId: 'stale-entry-1' };
       },
       releaseSlot: (threadId, catId) => {
         convergenceCalls.push({ op: 'releaseSlot', threadId, catId });
-      },
-      emitQueueUpdated: (threadId) => {
-        convergenceCalls.push({ op: 'emitQueueUpdated', threadId });
       },
     };
 
@@ -367,17 +364,15 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
     assert.equal(result.reconciled, 1);
     // Queue convergence must be called for the reconciled zombie
-    assert.ok(convergenceCalls.length >= 2, `expected >=2 convergence calls, got ${convergenceCalls.length}`);
+    assert.equal(convergenceCalls.length, 2, 'removeStaleProcessing + releaseSlot');
     const removeCall = convergenceCalls.find((c) => c.op === 'removeStaleProcessing');
     assert.ok(removeCall, 'must call removeStaleProcessing');
     assert.equal(removeCall.threadId, 't1');
     assert.equal(removeCall.catId, 'opus');
+    assert.equal(removeCall.userId, 'u1', 'must pass userId for user-scoped lookup');
     // Slot released after stale entry removed
     const slotCall = convergenceCalls.find((c) => c.op === 'releaseSlot');
     assert.ok(slotCall, 'must call releaseSlot');
-    // queue_updated emitted
-    const emitCall = convergenceCalls.find((c) => c.op === 'emitQueueUpdated');
-    assert.ok(emitCall, 'must emit queue_updated');
   });
 
   it('#972: queueConvergence not called when zombie is already terminal', async () => {
@@ -394,12 +389,11 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+      removeStaleProcessing: (threadId, catId, userId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId });
         return { removed: false };
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
-      emitQueueUpdated: () => convergenceCalls.push({ op: 'emitQueueUpdated' }),
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId, catId: 'codex' });
@@ -432,7 +426,6 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
         throw new Error('queue store unavailable');
       },
       releaseSlot: () => {},
-      emitQueueUpdated: () => {},
     };
 
     const logger = makeRecordingLogger();
@@ -452,7 +445,7 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
     assert.ok(warnLog, 'must log queue convergence failure');
   });
 
-  it('#972: removeStaleProcessing returns removed=false → no releaseSlot/emitQueueUpdated', async () => {
+  it('#972: removeStaleProcessing returns removed=false → no releaseSlot', async () => {
     const store = new InvocationRecordStore();
     const created = store.create({
       threadId: 't1',
@@ -465,12 +458,11 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
 
     const convergenceCalls = [];
     const queueConvergence = {
-      removeStaleProcessing: (threadId, catId) => {
-        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId });
+      removeStaleProcessing: (threadId, catId, userId) => {
+        convergenceCalls.push({ op: 'removeStaleProcessing', threadId, catId, userId });
         return { removed: false }; // no stale entry found
       },
       releaseSlot: () => convergenceCalls.push({ op: 'releaseSlot' }),
-      emitQueueUpdated: () => convergenceCalls.push({ op: 'emitQueueUpdated' }),
     };
 
     const zombie = makeZombie({ invocationId: created.invocationId });
@@ -488,11 +480,6 @@ describe('F194 reconcileZombies — cleanup pathway', () => {
       convergenceCalls.filter((c) => c.op === 'releaseSlot').length,
       0,
       'no releaseSlot when nothing removed',
-    );
-    assert.equal(
-      convergenceCalls.filter((c) => c.op === 'emitQueueUpdated').length,
-      0,
-      'no emitQueueUpdated when nothing removed',
     );
   });
 });
