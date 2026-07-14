@@ -104,20 +104,16 @@ describe('mcp-drift-detector: checkMcpProject', () => {
     assert.equal(result.summary.orphan, 1);
   });
 
-  it('flags external-source MCP as orphan (no project-level install path exists)', async () => {
-    // F249 spec review: there is NO project-level MCP install path.
-    // All project entries come from global cascade/sync. An external MCP
-    // present in project but absent in global is a stale cascaded entry
-    // that should be detected as orphan.
+  it('preserves external-source MCP during orphan detection (project-local installs)', async () => {
+    // External MCPs can be installed project-locally via POST /api/capabilities/mcp/install
+    // with projectPath — these are legitimate and must not be flagged as orphans.
     const global = capConfig([]);
     const project = capConfig([mcpEntry('ext-mcp', { source: 'external' })]);
 
     const result = await checkMcpProject('/fake/project', '/fake/global', global, project);
 
-    assert.equal(result.issues.length, 1);
-    assert.equal(result.issues[0].type, 'project-orphan');
-    assert.equal(result.issues[0].mcpId, 'ext-mcp');
-    assert.equal(result.summary.orphan, 1);
+    assert.equal(result.issues.length, 0);
+    assert.equal(result.summary.orphan, 0);
   });
 
   it('detects config-mismatch when mcpServer differs', async () => {
