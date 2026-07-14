@@ -756,3 +756,66 @@ describe('F3-min: host-native scoped callback tool', () => {
     assert.ok(forbidden[0].content.includes('undeclared field "taskId"'));
   });
 });
+
+describe('audit-after-mutation honesty (commitThenAudit)', () => {
+  test('write_file returns success with audit-degraded annotation when audit sink throws', async () => {
+    const target = join(tmpDir, 'audit-degraded-write.txt');
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L1',
+      audit: () => { throw new Error('audit down'); },
+    });
+    const write = findTool(tools, 'write_file');
+    assert.ok(write);
+    const result = await write.execute({ path: 'audit-degraded-write.txt', content: 'hello' });
+    // Mutation committed — result must be success, not an error
+    assert.ok(result.includes('Wrote'));
+    assert.ok(result.includes('[audit-degraded'));
+    // File must exist — the mutation really committed
+    const content = readFileSync(target, 'utf-8');
+    assert.equal(content, 'hello');
+  });
+
+  test('patch_file returns success with audit-degraded annotation when audit sink throws', async () => {
+    const target = join(tmpDir, 'audit-degraded-patch.txt');
+    writeFileSync(target, 'original', 'utf-8');
+    const hash = sha256('original');
+    const tools = await buildToolRegistry(tmpDir, {
+      nativeToolLevel: 'L1',
+      audit: () => { throw new Error('audit down'); },
+    });
+    const patch = findTool(tools, 'patch_file');
+    assert.ok(patch);
+    const result = await patch.execute({
+      path: 'audit-degraded-patch.txt',
+      old_text: 'original',
+      new_text: 'patched',
+      expected_hash: hash.slice(0, 12),
+    });
+    assert.ok(result.includes('Patched'));
+    assert.ok(result.includes('[audit-degraded'));
+    const content = readFileSync(target, 'utf-8');
+    assert.equal(content, 'patched');
+  });
+
+  test('update_current_task_status returns success with audit-degraded when audit throws', async () => {
+    const updates = [];
+    const tools = await buildToolRegistry(undefined, {
+      nativeToolLevel: 'L1',
+      audit: () => { throw new Error('audit down'); },
+      scopedCallbacks: {
+        currentTask: {
+          invocationId: 'inv-1',
+          currentTaskId: 'task-1',
+          updateCurrentTaskStatus: async (patch) => { updates.push(patch); },
+        },
+      },
+    });
+    const update = findTool(tools, 'update_current_task_status');
+    assert.ok(update);
+    const result = await update.execute({ status: 'done' });
+    assert.ok(result.includes('Updated current task'));
+    assert.ok(result.includes('[audit-degraded'));
+    // Mutation committed
+    assert.deepEqual(updates, [{ status: 'done' }]);
+  });
+});

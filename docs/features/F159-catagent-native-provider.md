@@ -116,7 +116,7 @@ Phase F 采用分级工具面和分 slice 推进，而不是一次性开放所�
    - flags / args 必须匹配该命令的 allowlist policy；未声明即拒绝
    - `node`、`pnpm install/publish`、`git push/fetch/config` 等高风险形态默认不进入 MVP policy
 4. **执行约束**：
-   - `execFile`，不经 shell
+   - `spawn`（`detached` process-group for tree-kill），不经 shell
    - `cwd` 锁定 workspace
    - `timeout = 30s`
    - `maxBuffer = 512 KiB`
@@ -185,7 +185,7 @@ Phase F 采用分级工具面和分 slice 推进，而不是一次性开放所�
 - [x] AC-F7: `CatConfig` 支持 `commandPolicy`，默认空（fail-closed）
 - [x] AC-F8: `run_command` 只接受结构化 `{ binary, args }` 输入，不接受字符串命令
 - [x] AC-F9: 命令策略矩阵按 allowlist-first 的 `binary -> subcommand -> flags/arg patterns` 校验，任一未声明立即拒绝
-- [x] AC-F10: `run_command` 通过 `execFile` 执行，`cwd` 锁定 workspace，超时 30s，`maxBuffer` 512 KiB
+- [x] AC-F10: `run_command` 通过 `spawn` (detached process-group) 执行，`cwd` 锁定 workspace，超时 30s，`maxBuffer` 512 KiB
 - [x] AC-F11: env 仅透传 `PATH` + `NODE_ENV`，不透传 `HOME`
 - [x] AC-F12: run_command 的执行/拒绝均产出结构化审计，并遵循 F149 failure taxonomy
 - [x] AC-F13a: mandatory host-native scoped callback tool 仅为 `update_current_task_status`，且只能作用于 current invocation / current task

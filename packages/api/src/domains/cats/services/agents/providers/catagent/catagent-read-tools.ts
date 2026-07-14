@@ -311,6 +311,37 @@ async function emitAudit(options: CatAgentToolRegistryOptions, event: CatAgentTo
   await options.audit?.(event);
 }
 
+/**
+ * Run a mutation, then emit audit.  If the mutation succeeds but audit fails,
+ * log the audit failure and return a success result annotated with
+ * "[audit-degraded]" — because the side-effect already committed and returning
+ * an error would be a false failure that invites unsafe retries.
+ *
+ * Callers pass:
+ *   mutate()  → performs the irreversible side-effect
+ *   auditEvent → the structured audit record (outcome will be forced to 'ok')
+ *   successMessage → the tool output returned to the model on happy path
+ */
+async function commitThenAudit(
+  options: CatAgentToolRegistryOptions,
+  mutate: () => void | Promise<void>,
+  auditEvent: Omit<CatAgentToolAuditEvent, 'outcome' | 'timestamp'>,
+  successMessage: string,
+): Promise<string> {
+  await mutate();
+  try {
+    await emitAudit(options, { ...auditEvent, outcome: 'ok', timestamp: Date.now() });
+  } catch (auditErr) {
+    // Mutation committed — returning an error here would be a lie.
+    // Log so ops can reconcile, return success with degradation note.
+    // No structured logger in this module — stderr is the best-effort durable channel.
+    // eslint-disable-next-line no-console
+    console.error('[catagent-read-tools] audit emit failed after committed mutation', auditEvent.tool, auditErr);
+    return `${successMessage} [audit-degraded: audit sink unavailable]`;
+  }
+  return successMessage;
+}
+
 async function rejectWithAudit(
   options: CatAgentToolRegistryOptions,
   event: Omit<CatAgentToolAuditEvent, 'outcome' | 'timestamp'>,
@@ -412,18 +443,13 @@ async function executeWriteFile(
   return withPathLock(resolved, async () => {
     await assertWithinWriteCap(resolved, relPath, 'write_file', options);
     const hashBefore = await existingFileHash(resolved);
-    await writeAtomicUtf8(resolved, content);
     const hashAfter = hashContent(content);
-    await emitAudit(options, {
-      tool: 'write_file',
-      outcome: 'ok',
-      timestamp: Date.now(),
-      path: relPath,
-      bytes,
-      hashBefore,
-      hashAfter,
-    });
-    return `Wrote ${bytes} bytes to ${relPath} (sha256:${hashAfter.slice(0, 12)})`;
+    return commitThenAudit(
+      options,
+      () => writeAtomicUtf8(resolved, content),
+      { tool: 'write_file', path: relPath, bytes, hashBefore, hashAfter },
+      `Wrote ${bytes} bytes to ${relPath} (sha256:${hashAfter.slice(0, 12)})`,
+    );
   });
 }
 
@@ -506,17 +532,12 @@ async function executePatchFile(
       );
     }
     const hashAfter = hashContent(after);
-    await writeAtomicUtf8(resolved, after);
-    await emitAudit(options, {
-      tool: 'patch_file',
-      outcome: 'ok',
-      timestamp: Date.now(),
-      path: relPath,
-      bytes: Buffer.byteLength(after, 'utf-8'),
-      hashBefore,
-      hashAfter,
-    });
-    return `Patched ${relPath} (sha256:${hashBefore.slice(0, 12)} -> ${hashAfter.slice(0, 12)})`;
+    return commitThenAudit(
+      options,
+      () => writeAtomicUtf8(resolved, after),
+      { tool: 'patch_file', path: relPath, bytes: Buffer.byteLength(after, 'utf-8'), hashBefore, hashAfter },
+      `Patched ${relPath} (sha256:${hashBefore.slice(0, 12)} -> ${hashAfter.slice(0, 12)})`,
+    );
   });
 }
 
@@ -728,7 +749,7 @@ function spawnFileWithStrictTermination(
       signalProcessTree(child, 'SIGTERM');
       killHandle = setTimeout(() => {
         signalProcessTree(child, 'SIGKILL');
-        // Close inherited pipes after escalation so execFile settles even if
+        // Close inherited pipes after escalation so spawn settles even if
         // a descendant escaped the tree-kill mechanism.
         destroyChildPipes(child);
         killHandle = undefined;
@@ -951,16 +972,17 @@ async function executeUpdateCurrentTaskStatus(
   const changedFields = Object.keys(patch);
   if (changedFields.length === 0) throw new Error('At least one of status, progress, or summary is required');
 
-  await currentTask.updateCurrentTaskStatus(patch);
-  await emitAudit(options, {
-    tool: 'update_current_task_status',
-    outcome: 'ok',
-    timestamp: Date.now(),
-    invocationId: currentTask.invocationId,
-    currentTaskId: currentTask.currentTaskId,
-    changedFields,
-  });
-  return `Updated current task ${currentTask.currentTaskId}: ${changedFields.join(', ')}`;
+  return commitThenAudit(
+    options,
+    () => currentTask.updateCurrentTaskStatus(patch),
+    {
+      tool: 'update_current_task_status',
+      invocationId: currentTask.invocationId,
+      currentTaskId: currentTask.currentTaskId,
+      changedFields,
+    },
+    `Updated current task ${currentTask.currentTaskId}: ${changedFields.join(', ')}`,
+  );
 }
 
 // ── Registry ──

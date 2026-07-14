@@ -2144,18 +2144,24 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       }
     }
 
+    // Only resolve CatAgent-scoped mutation callbacks for the CatAgent native
+    // provider. Other AgentService implementations (CLI-based codex, opencode,
+    // openai-chatgpt-pro, etc.) must NOT receive these — leaking them widens
+    // the mutation surface from "CatAgent tool only" to "any service."
     let catAgentScopedCallbacks: AgentServiceOptions['catAgentScopedCallbacks'] | undefined;
-    try {
-      catAgentScopedCallbacks = await resolveCatAgentScopedCallbacks({
-        taskStore: deps.taskStore,
-        taskProgressStore: deps.taskProgressStore,
-        thread: invocationThread,
-        threadId,
-        catId,
-        invocationId,
-      });
-    } catch (err) {
-      log.warn({ threadId, catId, invocationId, err }, 'CatAgent scoped callback resolution failed');
+    if (provider === 'catagent') {
+      try {
+        catAgentScopedCallbacks = await resolveCatAgentScopedCallbacks({
+          taskStore: deps.taskStore,
+          taskProgressStore: deps.taskProgressStore,
+          thread: invocationThread,
+          threadId,
+          catId,
+          invocationId,
+        });
+      } catch (err) {
+        log.warn({ threadId, catId, invocationId, err }, 'CatAgent scoped callback resolution failed');
+      }
     }
 
     const baseOptions: AgentServiceOptions = {
