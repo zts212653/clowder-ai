@@ -14,7 +14,8 @@ import type { CatCafeConfig } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { getDefaultRootsForPlatform, isPathUnderRoots, validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { getDefaultRootsForPlatform, isPathUnderRoots } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 function findProjectRoot(): string {
@@ -251,7 +252,7 @@ export function isLegacySkillProjectPath(absPath: string, roots: string[] = getD
 
 async function findSkillPath(root: string, name: string, projectPath?: string): Promise<string | null> {
   const home = homedir();
-  const validatedProject = projectPath ? await validateProjectPath(projectPath) : null;
+  const validatedProject = projectPath ? await resolvePersistentProjectPath(projectPath) : null;
   const projectRoot = validatedProject && isLegacySkillProjectPath(validatedProject) ? validatedProject : root;
   const candidateDirs = [
     join(root, 'cat-cafe-skills'),

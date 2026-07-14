@@ -16,7 +16,8 @@
 
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-
+import { resolvePersistentProjectPathDetailed } from '../../utils/persistent-project-path.js';
+import { pathsEqual } from '../../utils/project-path.js';
 import { GovernanceRegistry } from './governance-registry.js';
 
 /**
@@ -84,7 +85,19 @@ export async function listAllProjectPaths(catCafeRoot: string, opts?: { maxScanD
   const visitedDirs = new Set<string>();
   await scanNestedProjects(catCafeRoot, maxDepth, seen, result, visitedDirs);
 
-  return result;
+  const rootResolution = await resolvePersistentProjectPathDetailed(catCafeRoot);
+  const persistentRoot = rootResolution.ok ? rootResolution.path : resolvedRoot;
+  const canonicalResult: string[] = [];
+  for (const projectPath of result) {
+    const resolution = await resolvePersistentProjectPathDetailed(projectPath);
+    if (!resolution.ok) continue;
+    const persistentPath = resolution.remappedFrom ? resolution.path : projectPath;
+    if (pathsEqual(resolution.path, persistentRoot)) continue;
+    if (!canonicalResult.some((existing) => pathsEqual(existing, persistentPath))) {
+      canonicalResult.push(persistentPath);
+    }
+  }
+  return canonicalResult;
 }
 
 async function scanNestedProjects(

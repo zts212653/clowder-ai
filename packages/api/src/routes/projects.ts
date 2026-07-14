@@ -11,7 +11,8 @@ import { homedir } from 'node:os';
 import { basename, posix, resolve, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot, validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
+import { getAllowedRoots, isDenylistMode, isUnderAllowedRoot } from '../utils/project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const execFileAsync = promisify(execFile);
@@ -156,7 +157,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
       reply.status(500);
       return { error: result.message };
     }
-    const validated = await validateProjectPath(result.path);
+    const validated = await resolvePersistentProjectPath(result.path);
     if (!validated) {
       reply.status(403);
       return {
@@ -188,7 +189,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const { parentDir, fragment } = splitProjectCompletePrefix(prefix, cwd);
 
     // Validate parent directory
-    const validatedParent = await validateProjectPath(parentDir);
+    const validatedParent = await resolvePersistentProjectPath(parentDir);
     if (!validatedParent) {
       reply.status(403);
       return {
@@ -241,7 +242,7 @@ export const projectsRoutes: FastifyPluginAsync = async (app) => {
     const targetPath = query.path || homedir();
 
     // Validate path: realpath() resolves symlinks, then boundary check
-    const validatedPath = await validateProjectPath(targetPath);
+    const validatedPath = await resolvePersistentProjectPath(targetPath);
     if (!validatedPath) {
       reply.status(403);
       return {

@@ -47,6 +47,37 @@ function expectedSymlinkTarget(linkPath, sourcePath) {
 }
 
 describe('Skills Drift Route (F228)', () => {
+  it('POST /api/skills/drift-check reads runtime selections from the persistent workspace', async () => {
+    const prevRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const prevWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'skills-drift-runtime-root-'));
+    const workspaceRoot = await realpath(await mkdtemp(join(tmpdir(), 'skills-drift-workspace-root-')));
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    await writeCapabilitiesConfig(workspaceRoot, { version: 2, capabilities: [] });
+    const app = await buildSkillsDriftApp({ mainProjectRoot: workspaceRoot });
+
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/skills/drift-check',
+        headers: { 'x-cat-cafe-user': 'default-user' },
+        payload: { projectPath: runtimeRoot },
+      });
+
+      assert.equal(res.statusCode, 200, res.body);
+      assert.equal(JSON.parse(res.body).projectRoot, workspaceRoot);
+    } finally {
+      if (prevRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = prevRuntimeRoot;
+      if (prevWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = prevWorkspaceRoot;
+      await app.close();
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('POST /api/skills/drift-check respects per-skill mountPaths provider exclusions', async () => {
     const mainRoot = await mkdtemp(join(tmpdir(), 'skills-drift-route-mount-paths-main-'));
     const projectDir = await mkdtemp(join(tmpdir(), 'skills-drift-route-mount-paths-'));

@@ -142,6 +142,58 @@ describe('POST /api/projects/setup', () => {
     assert.equal(res.statusCode, 400);
   });
 
+  it('default registration writes the governance registry to the persistent workspace', async () => {
+    const previousCwd = process.cwd();
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = join(tmpdir(), `catcafe-runtime-${randomUUID()}`);
+    const workspaceRoot = join(tmpdir(), `catcafe-workspace-${randomUUID()}`);
+    await Promise.all([mkdir(runtimeRoot, { recursive: true }), mkdir(workspaceRoot, { recursive: true })]);
+    await writeFile(join(runtimeRoot, 'pnpm-workspace.yaml'), 'packages: []\n');
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    process.chdir(runtimeRoot);
+    const defaultApp = buildApp(undefined);
+
+    try {
+      const res = await defaultApp.inject({
+        method: 'POST',
+        url: '/api/projects/setup',
+        headers: HEADERS,
+        payload: { projectPath: testRoot, mode: 'skip' },
+      });
+
+      assert.equal(res.statusCode, 200, res.payload);
+      await assert.rejects(() => stat(join(runtimeRoot, '.cat-cafe', 'governance-registry.json')), /ENOENT/);
+      assert.equal((await stat(join(workspaceRoot, '.cat-cafe', 'governance-registry.json'))).isFile(), true);
+    } finally {
+      await defaultApp.close();
+      process.chdir(previousCwd);
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects Cat Cafe descendants as external governance targets', async () => {
+    const internalPackage = join(fakeCatCafeRoot, 'packages', 'api');
+    await mkdir(internalPackage, { recursive: true });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/projects/setup',
+      headers: HEADERS,
+      payload: { projectPath: internalPackage, mode: 'skip' },
+    });
+
+    assert.equal(res.statusCode, 400);
+    assert.match(JSON.parse(res.payload).error, /external project/i);
+    assert.deepEqual(await readdir(internalPackage), [], 'rejected self-bootstrap must leave the directory untouched');
+  });
+
   it('rejects requests without identity header', async () => {
     const res = await app.inject({
       method: 'POST',

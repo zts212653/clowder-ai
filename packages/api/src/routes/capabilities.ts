@@ -68,7 +68,12 @@ import {
 } from '../skills/skill-meta.js';
 import { syncAll } from '../skills/skill-sync-all.js';
 import { type MountConflict, syncProject } from '../skills/skill-sync-engine.js';
-import { pathsEqual, validateProjectPath } from '../utils/project-path.js';
+import {
+  redirectRuntimeProjectPath,
+  resolvePersistentProjectPath,
+  validateExternalProjectPathDetailed,
+} from '../utils/persistent-project-path.js';
+import { pathsEqual } from '../utils/project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   buildMountPointDirCandidates,
@@ -280,10 +285,6 @@ function findMonorepoRoot(): string {
 
 const PROJECT_ROOT = findMonorepoRoot();
 
-function getProjectRoot(): string {
-  return PROJECT_ROOT;
-}
-
 export async function buildKnownProjectPaths(
   catCafeRoot: string,
   projectRoot: string,
@@ -376,7 +377,7 @@ function resolveCatCafeSkillsSourceDir(): string {
     if (existsSync(candidate)) return join(dir, 'cat-cafe-skills');
     dir = dirname(dir);
   }
-  return join(getProjectRoot(), 'cat-cafe-skills');
+  return join(PROJECT_ROOT, 'cat-cafe-skills');
 }
 
 const CAT_CAFE_SKILLS_SRC = resolveCatCafeSkillsSourceDir();
@@ -531,6 +532,10 @@ function buildCatFamilies(): CatFamily[] {
 // ────────── Route Plugin ──────────
 
 export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
+  const persistentProjectRoot = await redirectRuntimeProjectPath(PROJECT_ROOT);
+  if (!persistentProjectRoot) throw new Error('Unable to resolve persistent global capabilities root');
+  const getProjectRoot = (): string => persistentProjectRoot;
+
   // ── GET /api/capabilities ──
   app.get('/api/capabilities', async (request, reply) => {
     const userId = resolveUserId(request);
@@ -545,7 +550,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const includeMcpLaunchFields = canReadSensitiveMcpConfig(request);
     let projectRoot = getProjectRoot();
     if (query.projectPath) {
-      const validated = await validateProjectPath(query.projectPath);
+      const validated = await resolvePersistentProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
@@ -1155,7 +1160,7 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
     const mainProjectRoot = getProjectRoot();
     let selectedProjectRoot = mainProjectRoot;
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
@@ -1511,17 +1516,18 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Required: projectPath' };
     }
 
-    const validated = await validateProjectPath(body.projectPath);
-    if (!validated) {
-      reply.status(400);
-      return { error: 'Invalid project path' };
-    }
-
     const catCafeRoot = getProjectRoot();
-    if (validated === catCafeRoot) {
+    const validatedResult = await validateExternalProjectPathDetailed(body.projectPath, catCafeRoot);
+    if (!validatedResult.ok) {
       reply.status(400);
-      return { error: 'Cannot confirm governance for Clowder AI itself' };
+      return {
+        error:
+          validatedResult.reason === 'cat_cafe_owned_path'
+            ? 'Cannot confirm governance inside Clowder AI; choose an external project'
+            : 'Invalid project path',
+      };
     }
+    const validated = validatedResult.path;
 
     const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
     const service = new GovernanceBootstrapService(catCafeRoot);

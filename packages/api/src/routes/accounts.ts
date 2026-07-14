@@ -18,7 +18,7 @@ import { deleteCredential, hasCredential, writeCredential } from '../config/cred
 
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
@@ -199,9 +199,12 @@ const deleteBodySchema = z.object({
 });
 
 async function resolveProjectRoot(projectPath?: string): Promise<string | null> {
-  if (!projectPath) return resolveActiveProjectRoot();
-  const validated = await validateProjectPath(projectPath);
-  if (validated) return validated;
+  if (!projectPath) return redirectRuntimeProjectPath(resolveActiveProjectRoot());
+  const persistent = await resolvePersistentProjectPathDetailed(projectPath);
+  if (persistent.ok) return persistent.path;
+  if (['runtime_root_invalid', 'runtime_workspace_missing', 'runtime_target_unmappable'].includes(persistent.reason)) {
+    return null;
+  }
 
   // Workspace project switcher can provide sibling repo paths (outside homedir/tmp allowlist).
   // Allow paths under current workspace root while keeping realpath boundary checks.

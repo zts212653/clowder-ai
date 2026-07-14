@@ -19,7 +19,7 @@ import type { IProposalStore } from '../domains/cats/services/stores/ports/Propo
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeCatIdMentionsInText } from '../utils/cat-mention-handle.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { migrateStoredProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { buildProposalCardBlock } from './proposal-card-block.js';
 
@@ -31,7 +31,7 @@ const proposeThreadCallbackSchema = z.object({
   // F128 Phase AA (AC-AA1): reporting contract. Omitted → default final-only (supersedes Phase Y AC-Y6 none).
   reportingMode: z.enum(['none', 'final-only', 'state-transitions', 'blocking-ack']).optional(),
   // F128: explicit project ownership for the child thread. Validated against allowed roots
-  // (validateProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
+  // (resolvePersistentProjectPath) — NOT hardcoded. Omitted → inherit source thread's projectPath;
   // supplied-but-invalid → 400 (fail loud, never silently fall back to default).
   projectPath: z.string().min(1).max(500).optional(),
   parentThreadId: z.string().min(1).optional(),
@@ -148,12 +148,19 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
     // thinks it pinned `clowder-ai` would land in `default` (砚砚 review push-back #1).
     let resolvedProjectPath = parentThread.projectPath; // omitted → inherit effective parent thread
     if (explicitProjectPath !== undefined) {
-      const validatedProjectPath = await validateProjectPath(explicitProjectPath);
+      const validatedProjectPath = await resolvePersistentProjectPath(explicitProjectPath);
       if (!validatedProjectPath) {
         reply.status(400);
         return { error: 'Invalid projectPath: must be an existing directory under allowed roots' };
       }
       resolvedProjectPath = validatedProjectPath; // supplied & valid → canonical real path
+    } else if (resolvedProjectPath && resolvedProjectPath !== 'default') {
+      const inheritedProjectPath = await migrateStoredProjectPath(resolvedProjectPath);
+      if (!inheritedProjectPath) {
+        reply.status(400);
+        return { error: 'Inherited projectPath no longer resolves to a persistent workspace' };
+      }
+      resolvedProjectPath = inheritedProjectPath;
     }
 
     // P2: Reserve dedup BEFORE create. Pre-generate a candidate proposalId, then atomically

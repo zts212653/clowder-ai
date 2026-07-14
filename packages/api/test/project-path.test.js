@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 const {
@@ -14,6 +14,12 @@ const {
   isPathUnderRoots,
   isDenylistMode,
 } = await import('../dist/utils/project-path.js');
+const {
+  migrateStoredProjectPath,
+  redirectRuntimeProjectPath,
+  resolvePersistentProjectPathDetailed,
+  validateExternalProjectPathDetailed,
+} = await import('../dist/utils/persistent-project-path.js');
 
 describe('denylist mode (default)', () => {
   let savedAllowedRoots;
@@ -177,6 +183,192 @@ describe('validateProjectPath', () => {
       assert.strictEqual(result, null);
     } catch {
       // symlink creation may fail in sandboxed environments
+    }
+  });
+});
+
+describe('resolvePersistentProjectPathDetailed', () => {
+  let testDir;
+  let runtimeRoot;
+  let workspaceRoot;
+  let runtimePackage;
+  let workspacePackage;
+  let externalProject;
+
+  before(() => {
+    testDir = mkdtempSync('/tmp/cat-cafe-persistent-project-path-');
+    runtimeRoot = join(testDir, 'cat-cafe-runtime');
+    workspaceRoot = join(testDir, 'cat-cafe');
+    runtimePackage = join(runtimeRoot, 'packages', 'api');
+    workspacePackage = join(workspaceRoot, 'packages', 'api');
+    externalProject = join(testDir, 'external-project');
+    mkdirSync(runtimePackage, { recursive: true });
+    mkdirSync(workspacePackage, { recursive: true });
+    mkdirSync(externalProject, { recursive: true });
+  });
+
+  after(() => {
+    rmSync(testDir, { recursive: true, force: true });
+  });
+
+  it('remaps the runtime root to the persistent workspace root', async () => {
+    const result = await resolvePersistentProjectPathDetailed(runtimeRoot, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, {
+      ok: true,
+      path: realpathSync(workspaceRoot),
+      remappedFrom: realpathSync(runtimeRoot),
+    });
+    assert.equal(
+      await redirectRuntimeProjectPath(runtimeRoot, { runtimeRoot, workspaceRoot }),
+      realpathSync(workspaceRoot),
+    );
+  });
+
+  it('preserves a runtime descendant relative path when remapping to the workspace', async () => {
+    const result = await resolvePersistentProjectPathDetailed(runtimePackage, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, {
+      ok: true,
+      path: realpathSync(workspacePackage),
+      remappedFrom: realpathSync(runtimePackage),
+    });
+  });
+
+  it('leaves an external project unchanged', async () => {
+    const result = await resolvePersistentProjectPathDetailed(externalProject, { runtimeRoot, workspaceRoot });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    assert.equal(
+      await redirectRuntimeProjectPath(externalProject, { runtimeRoot, workspaceRoot }),
+      externalProject,
+      'configured roots outside runtime retain the caller path spelling',
+    );
+  });
+
+  it('leaves an in-place deployment root unchanged', async () => {
+    const result = await resolvePersistentProjectPathDetailed(workspacePackage, {
+      runtimeRoot: workspaceRoot,
+      workspaceRoot,
+    });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(workspacePackage) });
+  });
+
+  it('fails closed when the matching workspace descendant does not exist', async () => {
+    const runtimeOnly = join(runtimeRoot, 'runtime-only');
+    mkdirSync(runtimeOnly);
+
+    const result = await resolvePersistentProjectPathDetailed(runtimeOnly, { runtimeRoot, workspaceRoot });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'runtime_target_unmappable');
+  });
+
+  it('preserves a missing external legacy path when migrating stored ownership', async () => {
+    const raw = join(testDir, 'missing-external');
+
+    assert.equal(await migrateStoredProjectPath(raw, { runtimeRoot, workspaceRoot }), raw);
+  });
+
+  it('preserves virtual game project paths during stored ownership migration', async () => {
+    const virtualProjectPath = 'games/werewolf';
+
+    assert.equal(
+      await migrateStoredProjectPath(virtualProjectPath, {
+        runtimeRoot: process.cwd(),
+        workspaceRoot,
+      }),
+      virtualProjectPath,
+    );
+  });
+
+  it('does not require the internal runtime root to be project-allowlisted for an external target', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(externalProject, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+
+  it('remaps a runtime target before applying the project allowlist to the workspace', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(workspaceRoot);
+
+    try {
+      const result = await resolvePersistentProjectPathDetailed(runtimePackage, { runtimeRoot, workspaceRoot });
+
+      assert.deepStrictEqual(result, {
+        ok: true,
+        path: realpathSync(workspacePackage),
+        remappedFrom: realpathSync(runtimePackage),
+      });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
+    }
+  });
+
+  it('fails closed for a missing stored path lexically inside runtime', async () => {
+    assert.equal(await migrateStoredProjectPath(join(runtimeRoot, 'missing'), { runtimeRoot, workspaceRoot }), null);
+  });
+
+  it('fails closed for a missing stored runtime path across a canonical root alias', async () => {
+    const runtimeAlias = join(testDir, 'runtime-alias');
+    const canonicalRuntimeRoot = realpathSync(runtimeRoot);
+    const canonicalMissingPath = join(canonicalRuntimeRoot, 'missing-through-alias');
+    const realpathWithAlias = async (path) => {
+      if (resolve(path) === resolve(runtimeAlias)) return canonicalRuntimeRoot;
+      return realpath(path);
+    };
+
+    assert.equal(
+      await migrateStoredProjectPath(canonicalMissingPath, {
+        runtimeRoot: runtimeAlias,
+        workspaceRoot,
+        realpath: realpathWithAlias,
+      }),
+      null,
+    );
+  });
+
+  it('rejects Cat Cafe runtime and workspace descendants as external governance targets', async () => {
+    for (const target of [runtimeRoot, runtimePackage, workspaceRoot, workspacePackage]) {
+      const result = await validateExternalProjectPathDetailed(target, runtimeRoot, { runtimeRoot, workspaceRoot });
+      assert.equal(result.ok, false, `${target} must not be treated as an external project`);
+      assert.equal(result.reason, 'cat_cafe_owned_path');
+    }
+  });
+
+  it('accepts a project outside both Cat Cafe checkouts as an external governance target', async () => {
+    const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
+      runtimeRoot,
+      workspaceRoot,
+    });
+
+    assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+  });
+
+  it('does not apply the project allowlist to internal governance exclusion roots', async () => {
+    const previousAllowedRoots = process.env.PROJECT_ALLOWED_ROOTS;
+    process.env.PROJECT_ALLOWED_ROOTS = realpathSync(externalProject);
+
+    try {
+      const result = await validateExternalProjectPathDetailed(externalProject, runtimeRoot, {
+        runtimeRoot,
+        workspaceRoot,
+      });
+
+      assert.deepStrictEqual(result, { ok: true, path: realpathSync(externalProject) });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.PROJECT_ALLOWED_ROOTS;
+      else process.env.PROJECT_ALLOWED_ROOTS = previousAllowedRoots;
     }
   });
 });

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { BootstrapProgress, ExpeditionBootstrapService } from '../domains/memory/ExpeditionBootstrapService.js';
 import type { IndexStateManager } from '../domains/memory/IndexStateManager.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 interface SocketManagerLike {
@@ -33,7 +33,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
         return { error: 'projectPath query parameter is required' };
       }
 
-      const validated = await validateProjectPath(projectPath);
+      const validated = await resolvePersistentProjectPath(projectPath);
       if (!validated) {
         reply.status(403);
         return { error: 'Project path not allowed' };
@@ -57,7 +57,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       return { error: 'projectPath is required' };
     }
 
-    const validated = await validateProjectPath(projectPath);
+    const validated = await resolvePersistentProjectPath(projectPath);
     if (!validated) {
       reply.status(403);
       return { error: 'Project path not allowed' };
@@ -105,7 +105,7 @@ export const projectsBootstrapRoutes: FastifyPluginAsync<BootstrapRoutesOptions>
       return { error: 'projectPath is required' };
     }
 
-    const validated = await validateProjectPath(projectPath);
+    const validated = await resolvePersistentProjectPath(projectPath);
     if (!validated) {
       reply.status(403);
       return { error: 'Project path not allowed' };

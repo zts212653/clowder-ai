@@ -14,7 +14,7 @@ import {
   readCapabilitiesConfig,
   writeCapabilitiesConfig,
 } from '../dist/config/capabilities/capability-orchestrator.js';
-import { writeMountRules } from '../dist/config/mount/mount-rules-store.js';
+import { writeDefaultMountRules, writeMountRules } from '../dist/config/mount/mount-rules-store.js';
 import { skillsRoutes } from '../dist/routes/skills.js';
 import { skillsWriteRoutes } from '../dist/routes/skills-write.js';
 import { resolveStartupProjectRoot } from '../dist/utils/startup-root.js';
@@ -1027,6 +1027,80 @@ describe('Skills Route', () => {
       await rm(projectDir, { recursive: true, force: true });
       if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
       else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    }
+  });
+
+  it('skill sync routes inherit default mount rules from the remapped persistent root', async () => {
+    const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.DEFAULT_OWNER_USER_ID = 'you';
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'skills-route-runtime-defaults-'));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'skills-route-workspace-defaults-'));
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    await writeCapabilitiesConfig(workspaceRoot, { version: 2, capabilities: [] });
+    await writeDefaultMountRules(workspaceRoot, {
+      ...DEFAULT_MOUNT_RULES,
+      mountPoints: {
+        claude: { enabled: true, path: '.persistent-claude/skills' },
+        codex: { enabled: false, path: '.codex/skills' },
+        gemini: { enabled: false, path: '.gemini/skills' },
+        kimi: { enabled: false, path: '.kimi/skills' },
+      },
+    });
+    const sourceSkillsDir = resolveRepoSkillsDir();
+    const skillName = (await listSourceSkillNames(sourceSkillsDir))[0];
+    assert.ok(skillName, 'expected at least one source skill');
+
+    const app = await buildSessionSkillsApp({ mainProjectRoot: runtimeRoot });
+    const projectRoots = [];
+    try {
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/api/skills?projectPath=${encodeURIComponent(workspaceRoot)}`,
+        headers: AUTH_HEADERS,
+      });
+      assert.equal(getRes.statusCode, 200, getRes.payload);
+      const listedSkill = JSON.parse(getRes.body).skills.find((skill) => skill.name === skillName);
+      assert.deepEqual(
+        listedSkill.mountHealth.enabledMountPoints,
+        ['claude'],
+        'GET /api/skills must read defaultMountRules from the persistent workspace',
+      );
+
+      for (const route of ['/api/skills/sync', '/api/skills/sync-skill']) {
+        const projectRoot = await mkdtemp(join(tmpdir(), 'skills-route-persistent-default-project-'));
+        projectRoots.push(projectRoot);
+        const payload = route.endsWith('sync-skill')
+          ? { projectPath: projectRoot, skillName }
+          : { projectPath: projectRoot };
+        const res = await app.inject({
+          method: 'POST',
+          url: route,
+          headers: OWNER_SESSION_HEADERS,
+          payload,
+        });
+
+        assert.equal(res.statusCode, 200, res.payload);
+        assert.equal(
+          (await lstat(join(projectRoot, '.persistent-claude/skills', skillName))).isSymbolicLink(),
+          true,
+          `${route} must read defaultMountRules from the persistent workspace`,
+        );
+        await assert.rejects(() => lstat(join(projectRoot, '.claude/skills', skillName)), /ENOENT/);
+      }
+    } finally {
+      await app.close();
+      await Promise.all(projectRoots.map((root) => rm(root, { recursive: true, force: true })));
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+      if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+      else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
     }
   });
 

@@ -5,6 +5,8 @@
  */
 
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -108,6 +110,41 @@ describe('Thread API', () => {
     assert.equal(res.statusCode, 500);
     const body = JSON.parse(res.body);
     assert.match(body.error, /Bootcamp workspace root/);
+  });
+
+  it('POST /api/threads migrates an explicit runtime path to the persistent workspace', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    for (const root of [runtimeRoot, workspaceRoot]) {
+      mkdirSync(join(root, 'cat-cafe-skills'), { recursive: true });
+      writeFileSync(join(root, 'cat-cafe-skills', 'manifest.yaml'), 'skills: []\n');
+      execFileSync('git', ['init', '-b', 'main'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['add', '.'], { cwd: root, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', 'baseline'], { cwd: root, stdio: 'ignore' });
+    }
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/threads',
+      payload: { userId: 'alice', title: 'Persistent workspace', projectPath: runtimeRoot },
+    });
+
+    assert.equal(res.statusCode, 201, res.body);
+    const targetRoot = JSON.parse(res.body).projectPath;
+    assert.equal(targetRoot, workspaceRoot);
+
+    // Simulate a page-triggered agent/governance write to a tracked file. The exact
+    // runtime restart predicate (`git status --short -uno`) must remain clean.
+    writeFileSync(join(targetRoot, 'cat-cafe-skills', 'manifest.yaml'), 'skills:\n  - generated\n');
+    assert.equal(execFileSync('git', ['status', '--short', '-uno'], { cwd: runtimeRoot, encoding: 'utf8' }).trim(), '');
+    assert.match(
+      execFileSync('git', ['status', '--short', '-uno'], { cwd: workspaceRoot, encoding: 'utf8' }),
+      /cat-cafe-skills\/manifest\.yaml/,
+    );
   });
 
   it('POST /api/threads with pinned=true creates a pinned thread', async () => {
@@ -252,6 +289,64 @@ describe('Thread API', () => {
     assert.ok(titles.includes('Thread A'));
     assert.ok(titles.includes('Thread B'));
     assert.ok(!titles.includes('Thread C'));
+  });
+
+  it('GET /api/threads migrates legacy runtime paths before exposing project selectors', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Legacy runtime thread', runtimeRoot);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+    assert.equal(listed.projectPath, workspaceRoot);
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+  });
+
+  it('GET /api/threads migrates a legacy runtime thread on the first filtered request', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Filtered legacy runtime thread', runtimeRoot);
+
+    const filteredRes = await app.inject({
+      method: 'GET',
+      url: `/api/threads?projectPath=${encodeURIComponent(runtimeRoot)}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(filteredRes.statusCode, 200);
+    const filteredIds = JSON.parse(filteredRes.body).threads.map((thread) => thread.id);
+    assert.ok(filteredIds.includes(legacyThread.id));
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+  });
+
+  it('GET /api/threads resets a stale runtime descendant to the safe default project', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const staleRuntimePath = join(runtimeRoot, 'deleted-project');
+    const legacyThread = threadStore.create('alice', 'Stale runtime thread', staleRuntimePath);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/threads',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+    assert.equal(listed.projectPath, 'default');
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, 'default');
   });
 
   it('GET /api/threads trusts localhost origin fallback and lists default-user threads', async () => {
@@ -465,6 +560,20 @@ describe('Thread API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.id, thread.id);
     assert.equal(body.title, 'Details Test');
+  });
+
+  it('GET /api/threads/:id migrates and persists a legacy runtime projectPath', async () => {
+    const runtimeRoot = await createTempWorkspace();
+    const workspaceRoot = await createTempWorkspace();
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const legacyThread = threadStore.create('alice', 'Legacy runtime details', runtimeRoot);
+
+    const res = await app.inject({ method: 'GET', url: `/api/threads/${legacyThread.id}` });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).projectPath, workspaceRoot);
+    assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
   });
 
   // [F155 Phase B] guideState removed from Thread — redaction test no longer applicable
@@ -1200,6 +1309,39 @@ describe('F095 Phase D: Soft delete + trash bin', () => {
     const titles = body.threads.map((t) => t.title);
     assert.ok(titles.includes('Trashed 1'));
     assert.ok(titles.includes('Trashed 2'));
+  });
+
+  it('GET /api/threads?deleted=true migrates and persists legacy runtime projectPaths', async () => {
+    const runtimeDir = await mkdtemp(join(process.cwd(), '.tmp-deleted-runtime-'));
+    const workspaceDir = await mkdtemp(join(process.cwd(), '.tmp-deleted-workspace-'));
+    const runtimeRoot = await realpath(runtimeDir);
+    const workspaceRoot = await realpath(workspaceDir);
+    const savedRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const savedWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    try {
+      const legacyThread = threadStore.create('alice', 'Legacy runtime trash', runtimeRoot);
+      threadStore.softDelete(legacyThread.id);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/threads?deleted=true',
+        headers: { 'x-cat-cafe-user': 'alice' },
+      });
+
+      assert.equal(res.statusCode, 200);
+      const listed = JSON.parse(res.body).threads.find((thread) => thread.id === legacyThread.id);
+      assert.equal(listed.projectPath, workspaceRoot);
+      assert.equal((await threadStore.get(legacyThread.id)).projectPath, workspaceRoot);
+    } finally {
+      if (savedRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = savedRuntimeRoot;
+      if (savedWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = savedWorkspaceRoot;
+      await rm(runtimeRoot, { recursive: true, force: true });
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it('GET /api/threads?deleted=true excludes soft-deleted concierge thread by default (R17 P2)', async () => {

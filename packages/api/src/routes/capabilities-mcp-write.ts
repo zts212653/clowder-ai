@@ -34,7 +34,7 @@ import {
   resolveCapabilityWriteSessionUserId,
 } from '../config/capabilities/capability-write-guards.js';
 import { syncMcpAll } from '../mcp/mcp-sync-all.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { resolveMainRepoPath } from '../utils/skill-mount.js';
 import { type McpProbeResult, probeMcpCapability } from './mcp-probe.js';
@@ -178,7 +178,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
     let projectRoot = getProjectRoot();
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -228,7 +228,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
     let projectRoot = getProjectRoot();
     if (body.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -378,7 +378,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
     let projectRoot = getProjectRoot();
     if (query.projectPath) {
-      const validated = await validateProjectPath(query.projectPath);
+      const validated = await resolvePersistentProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -515,7 +515,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
 
     let projectRoot = getProjectRoot();
     if (body?.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -588,7 +588,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     let projectRoot = getProjectRoot();
     const body = request.body as { projectPath?: string } | undefined;
     if (body?.projectPath) {
-      const validated = await validateProjectPath(body.projectPath);
+      const validated = await resolvePersistentProjectPath(body.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };
@@ -662,7 +662,7 @@ export const capabilitiesMcpWriteRoutes: FastifyPluginAsync<{
     let projectRoot = getProjectRoot();
     const query = request.query as { projectPath?: string; limit?: string };
     if (query.projectPath) {
-      const validated = await validateProjectPath(query.projectPath);
+      const validated = await resolvePersistentProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path' };

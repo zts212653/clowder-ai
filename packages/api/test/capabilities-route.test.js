@@ -1539,6 +1539,47 @@ describe('GET /api/capabilities (Fastify)', () => {
     await app.close();
   });
 
+  it('keeps global capability writes persistent and rejects governance under Cat Cafe descendants', async () => {
+    const Fastify = (await import('fastify')).default;
+    const { capabilitiesRoutes } = await import('../dist/routes/capabilities.js');
+    const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
+    const previousWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const runtimeRoot = findRepoRoot();
+    const workspaceRoot = await makeTmpDir('persistent-global-root');
+    const internalPackage = join(workspaceRoot, 'packages', 'api');
+    await mkdir(internalPackage, { recursive: true });
+    process.env.CAT_CAFE_RUNTIME_ROOT = runtimeRoot;
+    process.env.CAT_CAFE_WORKSPACE_ROOT = workspaceRoot;
+    const app = Fastify();
+
+    try {
+      await app.register(capabilitiesRoutes);
+      await app.ready();
+
+      const getRes = await app.inject({ method: 'GET', url: '/api/capabilities', headers: AUTH_HEADERS });
+      assert.equal(getRes.statusCode, 200, getRes.body);
+      assert.equal(getRes.json().projectPath, await realpath(workspaceRoot));
+      assert.ok(await readCapabilitiesConfig(workspaceRoot), 'global config must be written to the workspace');
+
+      const confirmRes = await app.inject({
+        method: 'POST',
+        url: '/api/governance/confirm',
+        headers: AUTH_HEADERS,
+        payload: { projectPath: internalPackage },
+      });
+      assert.equal(confirmRes.statusCode, 400, confirmRes.body);
+      assert.match(confirmRes.json().error, /external project/i);
+      assert.deepEqual(await readdir(internalPackage), []);
+    } finally {
+      if (previousRuntimeRoot === undefined) delete process.env.CAT_CAFE_RUNTIME_ROOT;
+      else process.env.CAT_CAFE_RUNTIME_ROOT = previousRuntimeRoot;
+      if (previousWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = previousWorkspaceRoot;
+      await app.close();
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns only catCafeRoot and projectRoot (not governance registry)', async () => {
     const { buildKnownProjectPaths } = await import('../dist/routes/capabilities.js');
 

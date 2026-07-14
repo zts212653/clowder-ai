@@ -30,8 +30,8 @@ import {
 import { syncAll } from '../skills/skill-sync-all.js';
 import { classifyMountPath, syncProject } from '../skills/skill-sync-engine.js';
 import { resolveOwnerGate } from '../utils/owner-gate.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolvePluginSkillSourcesForProject } from '../utils/plugin-skill-source.js';
-import { validateProjectPath } from '../utils/project-path.js';
 import { resolveSessionUserId, resolveUserId } from '../utils/request-identity.js';
 import { buildSkillMountTargets, createSkillSymlink, type MountTarget } from '../utils/skill-mount.js';
 import { resolveStartupProjectRoot } from '../utils/startup-root.js';
@@ -66,11 +66,12 @@ interface MountRulesRouteOptions {
 }
 
 export const mountRulesRoutes: FastifyPluginAsync<MountRulesRouteOptions> = async (app, opts) => {
-  const globalRoot = opts.mainProjectRoot ?? STARTUP_PROJECT_ROOT;
+  const globalRoot = await redirectRuntimeProjectPath(opts.mainProjectRoot ?? STARTUP_PROJECT_ROOT);
+  if (!globalRoot) throw new Error('Unable to resolve persistent global project root for mount rules');
 
   async function resolveTargetProjectRoot(projectPath?: string): Promise<string | null> {
     if (!projectPath) return globalRoot;
-    return validateProjectPath(projectPath);
+    return resolvePersistentProjectPath(projectPath);
   }
   app.get('/api/mount-rules', async (request, reply) => {
     const userId = resolveUserId(request);

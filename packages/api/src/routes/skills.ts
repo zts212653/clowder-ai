@@ -15,7 +15,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { readCapabilitiesConfig } from '../config/capabilities/capability-orchestrator.js';
 import { readMountRules } from '../config/mount/mount-rules-store.js';
 import { parseManifestSkillMeta, resolveSkillMcpStatuses, type SkillMcpDependency } from '../skills/skill-meta.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { redirectRuntimeProjectPath, resolvePersistentProjectPath } from '../utils/persistent-project-path.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import {
   buildMountPointDirCandidates,
@@ -120,6 +120,14 @@ function collectCatCafeSkillPolicy(
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: GET /api/skills builds full skill inventory
 export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, opts) => {
   const CAT_CAFE_SKILLS_SRC = opts.skillsSourceDir ?? resolveSkillsSourceDir();
+  const sourceRepoRoot = dirname(CAT_CAFE_SKILLS_SRC);
+  const [defaultProjectRoot, mainProjectRoot] = await Promise.all([
+    redirectRuntimeProjectPath(sourceRepoRoot),
+    redirectRuntimeProjectPath(opts.mainProjectRoot ?? (await resolveMainRepoPath())),
+  ]);
+  if (!defaultProjectRoot || !mainProjectRoot) {
+    throw new Error('Unable to resolve persistent project roots for skills');
+  }
 
   app.get('/api/skills', async (request, reply) => {
     const userId = resolveUserId(request);
@@ -128,11 +136,11 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
     const skillsSrc = CAT_CAFE_SKILLS_SRC;
-    const repoRoot = dirname(skillsSrc);
+    const repoRoot = defaultProjectRoot;
     const query = request.query as { projectPath?: string };
     let projectRoot = repoRoot;
     if (query.projectPath) {
-      const validated = await validateProjectPath(query.projectPath);
+      const validated = await resolvePersistentProjectPath(query.projectPath);
       if (!validated) {
         reply.status(400);
         return { error: 'Invalid project path: must be an existing directory under allowed roots' };
@@ -140,7 +148,7 @@ export const skillsRoutes: FastifyPluginAsync<SkillsRouteOptions> = async (app, 
       projectRoot = validated;
     }
     const home = homedir();
-    const mainRepo = opts.mainProjectRoot ?? (await resolveMainRepoPath());
+    const mainRepo = mainProjectRoot;
     const mountRules = await readMountRules(projectRoot, mainRepo);
     const enabledMountPoints = STANDARD_MOUNT_POINT_IDS.filter((id) => mountRules.mountPoints[id].enabled);
     const mountPointDirCandidates = buildMountPointDirCandidates(projectRoot, home, mountRules);

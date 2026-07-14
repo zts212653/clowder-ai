@@ -38,7 +38,7 @@ import type {
 import { SYSTEM_USER_IDS } from '../domains/cats/services/stores/visibility.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { CHATGPT_CHAT_URL_REGEX } from '../utils/chatgpt-chat-url.js';
-import { validateProjectPath } from '../utils/project-path.js';
+import { migrateStoredProjectPath, resolvePersistentProjectPathDetailed } from '../utils/persistent-project-path.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
 
@@ -205,15 +205,18 @@ async function resolveCreateThreadProjectPath(
   }
 
   if (projectPath && projectPath !== 'default') {
-    const validated = await validateProjectPath(projectPath);
-    if (!validated) {
+    const resolved = await resolvePersistentProjectPathDetailed(projectPath);
+    if (!resolved.ok) {
+      const runtimeConfigError = ['runtime_root_invalid', 'runtime_workspace_missing'].includes(resolved.reason);
       return {
         ok: false,
-        statusCode: 400,
-        error: 'Invalid projectPath: must be an existing directory under allowed roots',
+        statusCode: runtimeConfigError ? 500 : 400,
+        error: runtimeConfigError
+          ? `Unable to resolve persistent workspace: ${resolved.message ?? resolved.reason}`
+          : 'Invalid projectPath: must be an existing directory under allowed roots',
       };
     }
-    return { ok: true, projectPath: validated };
+    return { ok: true, projectPath: resolved.path };
   }
 
   return { ok: true, projectPath };
@@ -243,6 +246,26 @@ export function sanitizeThreadForResponse(thread: Thread, _userId: string): Thre
   if (!hasPendingContinuation && !hasCloudCatBindings && !hasThreadMetadata) return thread;
   const { pendingContinuation: _pc, cloudCatBindings: _ccb, threadMetadata: _tm, ...sanitized } = thread;
   return sanitized as Thread;
+}
+
+async function migrateRuntimeProjectPath(thread: Thread, threadStore: IThreadStore): Promise<Thread> {
+  if (!thread.projectPath || thread.projectPath === 'default' || thread.projectPath.startsWith('games/')) {
+    return thread;
+  }
+  const previousProjectPath = thread.projectPath;
+  const migratedProjectPath = await migrateStoredProjectPath(previousProjectPath);
+  if (migratedProjectPath === previousProjectPath) return thread;
+  const projectPath = migratedProjectPath ?? 'default';
+
+  try {
+    await threadStore.updateProjectPath(thread.id, projectPath);
+  } catch (err) {
+    log.warn(
+      { err, threadId: thread.id, previousProjectPath, projectPath },
+      'failed to persist runtime projectPath migration during thread read',
+    );
+  }
+  return { ...thread, projectPath };
 }
 
 function isConciergeThread(thread: Thread): boolean {
@@ -391,7 +414,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
 
     reply.status(201);
-    return sanitizeThreadForResponse(thread, userId);
+    return sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId);
   });
 
   // GET /api/threads - 列出用户的对话
@@ -418,8 +441,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
 
     // F095 Phase D: Return soft-deleted threads when deleted=true
     if (showDeleted) {
-      let deletedThreads = (await threadStore.listDeleted(userId)).map((thread) =>
-        sanitizeThreadForResponse(thread, userId),
+      let deletedThreads = await Promise.all(
+        (await threadStore.listDeleted(userId)).map(async (thread) =>
+          sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId),
+        ),
       );
       // F229: Apply the same concierge exclusion to the trash view.
       // Without this, a soft-deleted concierge thread appears in the default trash list;
@@ -431,8 +456,22 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { threads: deletedThreads };
     }
 
-    let threads = projectPath ? await threadStore.listByProject(userId, projectPath) : await threadStore.list(userId);
-    threads = threads.map((thread) => sanitizeThreadForResponse(thread, userId));
+    const migratedProjectPath = projectPath ? await migrateStoredProjectPath(projectPath) : undefined;
+    if (projectPath && migratedProjectPath === null) return { threads: [] };
+    const projectPathMatches =
+      projectPath && migratedProjectPath
+        ? await Promise.all(
+            [...new Set([projectPath, migratedProjectPath])].map((path) => threadStore.listByProject(userId, path)),
+          )
+        : null;
+    let threads = projectPathMatches
+      ? [...new Map(projectPathMatches.flat().map((thread) => [thread.id, thread] as const)).values()]
+      : await threadStore.list(userId);
+    threads = await Promise.all(
+      threads.map(async (thread) =>
+        sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId),
+      ),
+    );
 
     // F229: Exclude concierge threads from default sidebar listing.
     // createdBy=userId (P1 fix) means threadStore.list(userId) includes concierge threads;
@@ -548,7 +587,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
     const userId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
-    return sanitizeThreadForResponse(thread, userId);
+    return sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId);
   });
 
   // PATCH /api/threads/:id - 更新标题/置顶/收藏
