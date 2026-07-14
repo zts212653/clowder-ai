@@ -51,7 +51,7 @@ export function AdvancedRuntimeSection({
     approvalPolicy: 'on-request' as const,
     authMode: 'oauth' as const,
   };
-  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId);
+  const cliEffortOptions = getCliEffortOptionsForClient(form.clientId, form.defaultModel);
   const sessionChainEnabled = form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true);
 
   return (

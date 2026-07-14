@@ -47,9 +47,9 @@ Please verify that the diff matches `Map delta: none` and does not introduce a p
 
 Scope verdict: required.
 
-- Isolated preview: `WORKTREE_PORT_OFFSET=-10 pnpm dev:direct` started Redis `6388`, API `3112`, and Web `5112`; both Web `/` and API `/health` returned HTTP 200. The Hub preview was opened at `5112`, then the service and ports were stopped cleanly.
-- The in-app browser control surface was unavailable in this environment, so no persistent catalog mutation was made in an already-populated dev Redis. The direct-entry rendering and state serialization are covered by `hub-cat-editor.test.tsx` (60 passing tests); POST/PATCH persistence is covered in the isolated API test-home suite (269 passing tests).
-- The feature plan explicitly marks manual browser rendering as not required for this initial semantic change. Reviewer should still inspect the input/datalist UX and save-path coverage.
+- Latest isolated author preview: `WORKTREE_PORT_OFFSET=-30 pnpm dev:direct -- --memory` used memory-only storage, API `3132`, and Web `5132`; both Web `/` and API `/health` returned HTTP 200. `cat_cafe_preview_open` opened the Hub preview at `5132`, then the service was stopped and both ports were confirmed free.
+- Dogfood path: a temporary `gpt-5.6-terra` Codex member accepted structured `cli.effort="ultra"` through `POST /api/cats`, and `GET /api/cats` returned the exact model and effort. The memory-only server discarded that temporary state when it stopped.
+- The in-app browser interaction controller is unavailable in this invocation, so this record does **not** claim visual approval. `hub-cat-editor.test.tsx` covers the direct-entry field and GPT-5.6 `max / ultra` suggestions; the formal reviewer must interact with the member editor in an isolated preview before approving.
 
 ## Open Questions
 

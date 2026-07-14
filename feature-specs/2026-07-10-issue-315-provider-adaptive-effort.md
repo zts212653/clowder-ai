@@ -16,7 +16,7 @@
 **Map delta why:** This changes the existing cat-instance configuration contract and its adapters; it introduces no new owner or cross-cell boundary.
 **Architecture:** Preserve a single `variant.cli.effort` string in the runtime catalog. The shared module continues to expose the maintained preset vocabulary for UI suggestions and default selection, while the route and loader accept any non-empty string. Claude and Codex retain adapter-owned argv construction; Codex serializes the TOML value rather than interpolating untrusted text.
 **Tech Stack:** TypeScript, Zod, Fastify route tests, Vitest component tests, Node test runner.
-**前端验证:** Yes — Hub Cat Editor test coverage; manual browser rendering is not required for the initial semantic change.
+**前端验证:** Yes — Hub Cat Editor coverage plus an isolated browser preview; formal approval requires interactive verification of the member-editor input and suggestions.
 
 ---
 

@@ -448,7 +448,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(createRes.statusCode, 400);
   });
 
-  it('POST /api/cats rejects cli.effort for clients without an effort adapter', async () => {
+  it('POST and PATCH /api/cats reject cli.effort for clients without an effort adapter', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -484,6 +484,40 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
       assert.equal(createRes.statusCode, 400);
       assert.match(JSON.parse(createRes.body).error, /effort/i);
+
+      const validCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({
+          catId: 'runtime-kimi-no-effort',
+          name: 'Kimi 猫',
+          displayName: 'Kimi 猫',
+          avatar: '/avatars/kimi.png',
+          color: { primary: '#7c3aed', secondary: '#ede9fe' },
+          mentionPatterns: ['@runtime-kimi-no-effort'],
+          roleDescription: '中文代码助手',
+          clientId: 'kimi',
+          accountRef: 'kimi',
+          defaultModel: 'kimi-k2.5',
+        }),
+      });
+      assert.equal(validCreateRes.statusCode, 201);
+
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/runtime-kimi-no-effort',
+        headers: {
+          'content-type': 'application/json',
+          'x-cat-cafe-user': 'codex',
+        },
+        body: JSON.stringify({ cli: { effort: 'high' } }),
+      });
+      assert.equal(patchRes.statusCode, 400);
+      assert.match(JSON.parse(patchRes.body).error, /effort/i);
     } finally {
       await app.close();
     }

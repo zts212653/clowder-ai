@@ -123,7 +123,10 @@ describe('HubCatEditor', () => {
     vi.clearAllMocks();
   });
 
-  async function renderAdvancedRuntimeSection(clientId: HubCatEditorFormState['clientId']) {
+  async function renderAdvancedRuntimeSection(
+    clientId: HubCatEditorFormState['clientId'],
+    defaultModel = 'test-model',
+  ) {
     const form: HubCatEditorFormState = {
       catId: `runtime-${clientId}`,
       name: `runtime-${clientId}`,
@@ -141,7 +144,7 @@ describe('HubCatEditor', () => {
       strengths: '',
       clientId,
       accountRef: '',
-      defaultModel: 'test-model',
+      defaultModel,
       commandArgs: '',
       cliConfigArgs: [],
       cliEffort: '',
@@ -335,9 +338,17 @@ describe('HubCatEditor', () => {
     expect(payload.commandArgs).toEqual(splitCommandArgs(DEFAULT_ANTIGRAVITY_COMMAND_ARGS));
   });
 
-  it('exposes provider-aware effort options for Claude and Codex only', () => {
+  it('exposes model-aware effort options for Claude and Codex only', () => {
     expect(getCliEffortOptionsForClient('anthropic')).toEqual(['low', 'medium', 'high', 'max']);
-    expect(getCliEffortOptionsForClient('openai')).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(getCliEffortOptionsForClient('openai', 'gpt-5.6-terra')).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      'ultra',
+    ]);
     expect(getCliEffortOptionsForClient('opencode')).toBeNull();
   });
 
@@ -359,14 +370,14 @@ describe('HubCatEditor', () => {
   });
 
   it('provides editable native effort input with client presets as suggestions', async () => {
-    const onChange = await renderAdvancedRuntimeSection('openai');
+    const onChange = await renderAdvancedRuntimeSection('openai', 'gpt-5.6-terra');
     const input = queryField<HTMLInputElement>(container, 'input[aria-label="CLI Effort"]');
 
     expect(input.list).toBeTruthy();
     const options = Array.from(document.getElementById(input.list?.id ?? '')?.querySelectorAll('option') ?? []).map(
       (option) => (option as HTMLOptionElement).value,
     );
-    expect(options).toEqual(['low', 'medium', 'high', 'xhigh']);
+    expect(options).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
     await changeField(input, 'ultra');
     expect(onChange).toHaveBeenCalledWith({ cliEffort: 'ultra' });

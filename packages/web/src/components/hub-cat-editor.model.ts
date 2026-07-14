@@ -152,8 +152,11 @@ function voiceStr(value: string | number | undefined): string {
   return value == null ? '' : String(value);
 }
 
-export function getCliEffortOptionsForClient(client: ClientValue): readonly CliEffortValue[] | null {
-  return getCliEffortOptionsForProvider(client);
+export function getCliEffortOptionsForClient(
+  client: ClientValue,
+  defaultModel?: string | null,
+): readonly CliEffortValue[] | null {
+  return getCliEffortOptionsForProvider(client, defaultModel);
 }
 
 export function splitMentionPatterns(raw: string): string[] {
